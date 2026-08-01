@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/parallel/Jobs.hpp>
 
@@ -108,62 +109,101 @@ namespace client {
 
 			auto *drawList = store.ResourceMutable<DrawList>();
 
-			// Sized once from the store's own count, then written by index. The
-			// vector is not cleared first, so on a steady scene this resize is a
-			// no-op: the buffer is the size it already was, and no element is
-			// value-initialised only to be overwritten a moment later.
+			// Split into spans that cost nothing to separate.
 			//
-			// The count is a floor rather than a contract — it comes from a
-			// different query than the one EachBatch walks, and this system does
-			// not get to assume the two agree. The batches decide the real size,
-			// and the shrink below settles it.
-			drawList->Instances.resize(store.CountMatching<Transform, PreviousTransform, Visual>());
+			// The counting, the sizing and the arithmetic are three different
+			// answers to "why is this system slow" — a cached query that is not
+			// as cached as it looks, a vector reallocating every frame, or the
+			// interpolation itself. One number covering all three cannot tell
+			// them apart.
+			//
+			// It stops here. Going finer means a scope *inside* the row loop,
+			// and a scope costs a clock read and a push — several times what a
+			// quaternion multiply costs. That measurement would be mostly of
+			// itself.
+			size_t matching = 0;
+			{
+				ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
+				matching = store.CountMatching<Transform, PreviousTransform, Visual>();
+			}
+
+			{
+				// Sized once, then written by index. The vector is not cleared
+				// first, so on a steady scene this is a no-op: the buffer is the
+				// size it already was, and no element is value-initialised only
+				// to be overwritten a moment later. A reading above zero here
+				// means the scene changed size or the capacity is being lost.
+				//
+				// The count is a floor rather than a contract — it comes from a
+				// different query than the one EachBatch walks, and this system
+				// does not get to assume the two agree. The batches decide the
+				// real size, and the shrink below settles it.
+				ENGINE_PROFILE_CAT("size draw list", engine::core::ProfileCategory::Simulation);
+				drawList->Instances.resize(matching);
+			}
 
 			size_t written = 0;
-			store.EachBatch<const Transform, const PreviousTransform, const Visual>(
-				[drawList, alpha, &written](
-					size_t rows,
-					const Transform *transforms,
-					const PreviousTransform *previous,
-					const Visual *visuals
-				) {
-					if (written + rows > drawList->Instances.size()) {
-						drawList->Instances.resize(written + rows);
+			{
+				ENGINE_PROFILE_CAT("interpolate", engine::core::ProfileCategory::Simulation);
+				store.EachBatch<const Transform, const PreviousTransform, const Visual>(
+					[drawList, alpha, &written](
+						size_t rows,
+						const Transform *transforms,
+						const PreviousTransform *previous,
+						const Visual *visuals
+					) {
+						if (written + rows > drawList->Instances.size()) {
+							drawList->Instances.resize(written + rows);
+						}
+
+						// Taken after the resize above, which may have moved it.
+						engine::render::Instance *out = drawList->Instances.data() + written;
+
+						for (size_t row = 0; row < rows; row++) {
+							// Interpolated, not the tick position. At 300 fps against
+							// a 60 Hz tick, drawing tick positions shows each one five
+							// times and then jumps — which reads as a frame-rate
+							// problem rather than as a tick-rate one.
+							//
+							// NLerp, not Lerp. The endpoints are one simulation tick
+							// apart — a few degrees at most — and over an arc that
+							// short the two agree to well inside a pixel. Lerp's
+							// constant angular speed costs an acos and three sin
+							// calls per entity, which on this loop was the single
+							// most expensive thing in the frame.
+							glm::mat4 model =
+								previous[row].Frame.NLerp(transforms[row].Frame, alpha).ToMatrix();
+							// Scale on the right, so it applies before the rotation
+							// and stays a scale rather than a shear.
+							model[0] *= visuals[row].Size;
+							model[1] *= visuals[row].Size;
+							model[2] *= visuals[row].Size;
+
+							out[row] = engine::render::Instance{
+								model,
+								glm::vec4{
+									visuals[row].Colour.R, visuals[row].Colour.G, visuals[row].Colour.B, 1.0f
+								},
+							};
+						}
+
+						written += rows;
 					}
+				);
+			}
 
-					// Taken after the resize above, which may have moved it.
-					engine::render::Instance *out = drawList->Instances.data() + written;
+			{
+				ENGINE_PROFILE_CAT("publish draw list", engine::core::ProfileCategory::Simulation);
 
-					for (size_t row = 0; row < rows; row++) {
-						// Interpolated, not the tick position. At 300 fps against
-						// a 60 Hz tick, drawing tick positions shows each one five
-						// times and then jumps — which reads as a frame-rate
-						// problem rather than as a tick-rate one.
-						glm::mat4 model = previous[row].Frame.Lerp(transforms[row].Frame, alpha).ToMatrix();
-						// Scale on the right, so it applies before the rotation
-						// and stays a scale rather than a shear.
-						model[0] *= visuals[row].Size;
-						model[1] *= visuals[row].Size;
-						model[2] *= visuals[row].Size;
+				// Whatever the count said, this is how many there are. Shrinking
+				// a vector writes nothing and keeps the capacity, so the frame
+				// after an entity is destroyed still does not allocate.
+				drawList->Instances.resize(written);
 
-						out[row] = engine::render::Instance{
-							model,
-							glm::vec4{
-								visuals[row].Colour.R, visuals[row].Colour.G, visuals[row].Colour.B, 1.0f
-							},
-						};
-					}
-
-					written += rows;
-				}
-			);
-
-			// Whatever the count said, this is how many there are. Shrinking a
-			// vector writes nothing and keeps the capacity, so the frame after a
-			// entity is destroyed still does not allocate.
-			drawList->Instances.resize(written);
-
-			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
+				engine::core::Metrics::Count(
+					"render.instances", static_cast<double>(drawList->Instances.size())
+				);
+			}
 		}
 	}
 

@@ -105,7 +105,38 @@ namespace engine::core {
 		//
 		// `alpha` 0 and 1 select the endpoint poses. No clamping is performed, and
 		// both endpoint rotations must be unit quaternions.
+		//
+		// Costs an `acos` and three `sin` calls. When the two orientations are
+		// close together — which is what interpolating between consecutive ticks
+		// means — NLerp is the same answer for a fraction of the price. Reach for
+		// this one when the endpoints are far apart and the *rate* has to be
+		// uniform, such as an animation blend over a whole second.
 		CFrame Lerp(const CFrame &target, float alpha) const;
+
+		// Interpolates position linearly and orientation by normalised linear
+		// interpolation, taking the shortest arc.
+		//
+		// The same endpoints as Lerp and the same path through space, but not at
+		// the same speed: the angular rate eases toward the midpoint instead of
+		// holding constant. The error is bounded by the angle between the
+		// endpoints and vanishes with it — under about 30 degrees it is well
+		// below what a pixel can show, and two consecutive simulation ticks are
+		// nowhere near that far apart.
+		//
+		// What it buys is the transcendentals. Lerp is an `acos` and three `sin`
+		// calls per call; this is a multiply-add, a reciprocal square root and a
+		// sign test. On a frame interpolating thousands of transforms that is the
+		// difference between the interpolation being the most expensive thing in
+		// the frame and it not appearing on the list.
+		//
+		// The shortest-arc flip is the part Lerp does not do and this one must:
+		// without it, two orientations more than 180 degrees apart interpolate
+		// the long way round, and a cube spinning gently appears to snap
+		// backwards once per revolution.
+		//
+		// `alpha` 0 and 1 select the endpoint poses. No clamping is performed, and
+		// both endpoint rotations must be unit quaternions.
+		CFrame NLerp(const CFrame &target, float alpha) const;
 
 		// Returns the local-to-world transform as a column-major matrix.
 		//

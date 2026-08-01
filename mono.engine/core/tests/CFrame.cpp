@@ -113,6 +113,87 @@ TEST_CASE("lerp slerps the rotation rather than the components", "[cframe]") {
 	REQUIRE(from.Lerp(to, 1.0f).QuaternionY == Approx(to.QuaternionY));
 }
 
+TEST_CASE("NLerp selects the endpoints exactly", "[cframe]") {
+	const CFrame from{Vector3{1.0f, 0.0f, 0.0f}};
+	const CFrame to = CFrame::Angles(0.0f, 1.0f, 0.0f);
+
+	REQUIRE(from.NLerp(to, 0.0f).QuaternionW == Approx(from.QuaternionW));
+	REQUIRE(from.NLerp(to, 1.0f).QuaternionY == Approx(to.QuaternionY));
+	REQUIRE(from.NLerp(to, 0.0f).Position.X == Approx(from.Position.X));
+}
+
+TEST_CASE("NLerp stays on the unit sphere", "[cframe]") {
+	const CFrame from;
+	const CFrame to = CFrame::Angles(0.4f, 0.9f, -0.3f);
+
+	// A component lerp without the renormalise leaves the unit sphere, and a
+	// non-unit quaternion is a rotation with a scale baked into it — every cube
+	// drawn through one comes out the wrong size.
+	for (float alpha = 0.0f; alpha <= 1.0f; alpha += 0.125f) {
+		const CFrame middle = from.NLerp(to, alpha);
+		const float length = std::sqrt(
+			middle.QuaternionX * middle.QuaternionX + middle.QuaternionY * middle.QuaternionY +
+			middle.QuaternionZ * middle.QuaternionZ + middle.QuaternionW * middle.QuaternionW
+		);
+		REQUIRE(length == Approx(1.0f));
+	}
+}
+
+TEST_CASE("NLerp agrees with Lerp over a tick-sized arc", "[cframe]") {
+	const CFrame from;
+	// Six degrees: a full turn every second at a 60 Hz tick, which is faster
+	// than anything in the demo scene actually spins.
+	const CFrame to = CFrame::Angles(0.0f, 0.105f, 0.0f);
+
+	// The claim the substitution rests on. Over an arc this short the two
+	// agree far inside what a pixel can show, so the cheap one is not an
+	// approximation anybody can see — it is the same picture.
+	for (float alpha = 0.0f; alpha <= 1.0f; alpha += 0.125f) {
+		const CFrame fast = from.NLerp(to, alpha);
+		const CFrame exact = from.Lerp(to, alpha);
+
+		REQUIRE(fast.QuaternionW == Approx(exact.QuaternionW).margin(0.001f));
+		REQUIRE(fast.QuaternionX == Approx(exact.QuaternionX).margin(0.001f));
+		REQUIRE(fast.QuaternionY == Approx(exact.QuaternionY).margin(0.001f));
+		REQUIRE(fast.QuaternionZ == Approx(exact.QuaternionZ).margin(0.001f));
+	}
+}
+
+TEST_CASE("NLerp takes the shortest arc", "[cframe]") {
+	const CFrame from;
+
+	// A quaternion and its negation are the same orientation. Interpolating
+	// toward the negated one without the sign flip goes the long way round —
+	// which on a spinning object is a visible backwards snap once a revolution,
+	// and the reason Lerp's behaviour cannot simply be assumed here.
+	CFrame negated;
+	negated.QuaternionW = -from.QuaternionW;
+	negated.QuaternionX = -from.QuaternionX;
+	negated.QuaternionY = -from.QuaternionY;
+	negated.QuaternionZ = -from.QuaternionZ;
+
+	// Same orientation at both ends, so every point on the shortest path
+	// between them is that orientation too.
+	const CFrame middle = from.NLerp(negated, 0.5f);
+	REQUIRE(std::abs(middle.QuaternionW) == Approx(1.0f));
+	REQUIRE(middle.QuaternionX == Approx(0.0f).margin(1e-5f));
+	REQUIRE(middle.QuaternionY == Approx(0.0f).margin(1e-5f));
+	REQUIRE(middle.QuaternionZ == Approx(0.0f).margin(1e-5f));
+}
+
+TEST_CASE("NLerp moves the position linearly", "[cframe]") {
+	const CFrame from{Vector3{0.0f, 0.0f, 0.0f}};
+	const CFrame to{Vector3{10.0f, -4.0f, 2.0f}};
+
+	// Only the rotation is approximated. Position is the same straight line
+	// Lerp draws, and a renderer interpolating one but not the other would
+	// separate an object from its own orientation.
+	const CFrame middle = from.NLerp(to, 0.25f);
+	REQUIRE(middle.Position.X == Approx(2.5f));
+	REQUIRE(middle.Position.Y == Approx(-1.0f));
+	REQUIRE(middle.Position.Z == Approx(0.5f));
+}
+
 TEST_CASE("ToMatrix puts the position in the fourth column", "[cframe]") {
 	const glm::mat4 matrix = CFrame{Vector3{1.0f, 2.0f, 3.0f}}.ToMatrix();
 

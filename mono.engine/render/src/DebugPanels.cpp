@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace engine::render {
 
@@ -250,11 +251,23 @@ namespace engine::render {
 		};
 
 		void DrawPanelBackground(OverlayImage &image, int x, int y, int width, int height) {
-			image.Blend(
+			// Fill, not Blend. DrawDebugPanels clears the overlay before either
+			// panel is drawn and this is the first thing either one puts down, so
+			// every pixel under it is transparent — which makes the read half of
+			// the read-modify-write a read of zero, several hundred thousand
+			// times, to combine with nothing.
+			//
+			// The two panels cannot overlap: the profiler is top-anchored beneath
+			// the statistics panel's full height. If that ever stops being true
+			// this has to go back to Blend, and it will look like one panel
+			// punching a hole in the other.
+			image.Fill(
 				x, y, width, height, PANEL_BACKGROUND.R, PANEL_BACKGROUND.G, PANEL_BACKGROUND.B, PANEL_ALPHA
 			);
 			// A one-pixel top edge, so the panel reads as a surface rather than
-			// as a dark patch of the scene.
+			// as a dark patch of the scene. Blended, because it lands on the fill
+			// above rather than on a cleared image — though at full alpha it
+			// takes Blend's opaque path and is a store either way.
 			image.Blend(x, y, width, 1, 90, 100, 120, 255);
 		}
 
@@ -277,7 +290,16 @@ namespace engine::render {
 			const int width = DebugText::Measure("MIN 000.0  AVG 000.0  MAX 000.0", scale) + padding * 2;
 			const int height = StatisticsHeight(data);
 
-			DrawPanelBackground(image, 0, 0, width, height);
+			{
+				// The whole panel rectangle, at 208 alpha — so every pixel of it
+				// is a read, four multiplies, four divides and a write. Seven
+				// lines of text sit on top of it, and until this span existed the
+				// two were one number.
+				ENGINE_PROFILE_CAT("statistics background", core::ProfileCategory::Render);
+				DrawPanelBackground(image, 0, 0, width, height);
+			}
+
+			ENGINE_PROFILE_CAT("statistics text", core::ProfileCategory::Render);
 
 			Writer writer{image, padding, padding, scale};
 
@@ -421,79 +443,155 @@ namespace engine::render {
 				cursor += rowHeight;
 			}
 
-			int skipped = 0;
+			// Four passes over the visible rows rather than one pass doing
+			// everything to each.
+			//
+			// The passes exist to be *measured*. Interleaved, the cost of a row
+			// is one number covering a history scan, a handful of string
+			// allocations, a few hundred glyph blends and two rectangle fills —
+			// and "the panel costs 0.7 ms" is not something anybody can act on.
+			// Split, each one is a span of its own in the very graph being drawn.
+			//
+			// Nothing is done twice: the passes divide the work, they do not
+			// repeat it. Drawing order changes, and cannot matter — the chips,
+			// the text and the timeline occupy disjoint columns.
+			struct PlannedRow {
+				size_t Index = 0;
+				int Y = 0;
+				bool Collapsed = false;
+				float RecentMaximum = 0.0f;
+			};
 
-			for (size_t index = 0; index < data.Spans.size(); index++) {
-				const auto &span = data.Spans[index];
+			std::vector<PlannedRow> rows;
+			std::vector<std::string> text;
 
-				// Below the depth budget the row is not drawn at all, and its
-				// parent is marked instead. A hidden subtree that leaves no
-				// trace makes a parent look like a leaf, and "physics.step
-				// 8 ms" with nothing under it means two different things
-				// depending on whether that is all of it.
-				if (span.Depth > data.DepthLimit) {
-					continue;
+			{
+				ENGINE_PROFILE_CAT("flame select", core::ProfileCategory::Render);
+				rows.reserve(data.Spans.size());
+
+				int skipped = 0;
+				for (size_t index = 0; index < data.Spans.size(); index++) {
+					const auto &span = data.Spans[index];
+
+					// Below the depth budget the row is not drawn at all, and
+					// its parent is marked instead. A hidden subtree that leaves
+					// no trace makes a parent look like a leaf, and "physics.step
+					// 8 ms" with nothing under it means two different things
+					// depending on whether that is all of it.
+					if (span.Depth > data.DepthLimit) {
+						continue;
+					}
+
+					// Spans are in open order, so the next entry with a greater
+					// depth is a direct child of this one.
+					const bool collapsed = span.Depth == data.DepthLimit && index + 1 < data.Spans.size() &&
+										   data.Spans[index + 1].Depth > span.Depth;
+
+					if (skipped < data.Scroll) {
+						skipped++;
+						continue;
+					}
+					if (cursor + rowHeight > y + available) {
+						break;
+					}
+
+					rows.push_back(PlannedRow{index, cursor, collapsed, 0.0f});
+					cursor += rowHeight;
 				}
-
-				// Spans are in open order, so the next entry with a greater
-				// depth is a direct child of this one.
-				const bool collapsed = span.Depth == data.DepthLimit && index + 1 < data.Spans.size() &&
-									   data.Spans[index + 1].Depth > span.Depth;
-
-				if (skipped < data.Scroll) {
-					skipped++;
-					continue;
-				}
-				if (cursor + rowHeight > y + available) {
-					break;
-				}
-
-				// Deeper is dimmer, so a subtree reads as one thing shading away
-				// from its root rather than as unrelated adjacent rows.
-				const auto colour = Shade(CATEGORY_COLOURS[static_cast<size_t>(span.Category)], span.Depth);
-				image.Blend(x, cursor, chipWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
-
-				// Two spaces a level, and no deeper: past this a row is more
-				// indent than name, and the nesting is legible from the timeline
-				// anyway.
-				std::string name(std::min(span.Depth, MAXIMUM_INDENT) * 2, ' ');
-				name.append(span.Name);
-				if (collapsed) {
-					name += " +";
-				}
-
-				const float share = span.Milliseconds / frameMilliseconds;
-				const float recentMaximum = core::FrameGraph::RecentMaximum(span.Name);
-
-				const std::string row =
-					PadRight(std::move(name), NAME_FIELD) + " " +
-					PadLeft(Format("%.2f", static_cast<double>(span.Milliseconds)), VALUE_FIELD) + " " +
-					PadLeft(Format("%.2f", static_cast<double>(recentMaximum)), RMAX_FIELD) + " " +
-					PadLeft(Format("%.1f%%", static_cast<double>(share) * 100.0), SHARE_FIELD);
-
-				const auto textColour = ColourForShare(share);
-				DebugText::Draw(
-					image, textLeft, cursor, row, textColour.R, textColour.G, textColour.B, scale
-				);
-
-				// Where in the frame it ran.
-				if (timelineWidth > 0) {
-					const int left = timelineLeft + static_cast<int>(span.StartMilliseconds * timelineScale);
-					// One pixel minimum, so a span too short to see is still
-					// visibly there rather than silently absent.
-					const int barWidth = std::max(1, static_cast<int>(span.Milliseconds * timelineScale));
-					image.Blend(left, cursor, barWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
-				}
-
-				cursor += rowHeight;
 			}
 
-			// The frame-budget line across the timeline. 16.7 ms, so a frame
-			// going long is visible without reading a number.
-			constexpr float BUDGET_MILLISECONDS = 1000.0f / 60.0f;
-			if (timelineWidth > 0 && data.FrameMilliseconds > BUDGET_MILLISECONDS) {
-				const int budgetX = timelineLeft + static_cast<int>(BUDGET_MILLISECONDS * timelineScale);
-				image.Blend(budgetX, y, scale, cursor - y, TEXT_BAD.R, TEXT_BAD.G, TEXT_BAD.B, 180);
+			{
+				// One lookup and one window scan per visible row. Separated
+				// because it is the only part of drawing a row that is not
+				// drawing — it reads several hundred frames of history per
+				// name, and it is the first thing to suspect when this panel
+				// costs more than what it is reporting on.
+				ENGINE_PROFILE_CAT("flame history", core::ProfileCategory::Render);
+				for (auto &row : rows) {
+					row.RecentMaximum = core::FrameGraph::RecentMaximum(data.Spans[row.Index].Name);
+				}
+			}
+
+			{
+				// Padding, formatting and the allocations they carry. Nothing
+				// reaches the image in this pass.
+				ENGINE_PROFILE_CAT("flame format", core::ProfileCategory::Render);
+				text.reserve(rows.size());
+
+				for (const auto &row : rows) {
+					const auto &span = data.Spans[row.Index];
+
+					// Two spaces a level, and no deeper: past this a row is more
+					// indent than name, and the nesting is legible from the
+					// timeline anyway.
+					std::string name(std::min(span.Depth, MAXIMUM_INDENT) * 2, ' ');
+					name.append(span.Name);
+					if (row.Collapsed) {
+						name += " +";
+					}
+
+					const float share = span.Milliseconds / frameMilliseconds;
+					text.push_back(
+						PadRight(std::move(name), NAME_FIELD) + " " +
+						PadLeft(Format("%.2f", static_cast<double>(span.Milliseconds)), VALUE_FIELD) + " " +
+						PadLeft(Format("%.2f", static_cast<double>(row.RecentMaximum)), RMAX_FIELD) + " " +
+						PadLeft(Format("%.1f%%", static_cast<double>(share) * 100.0), SHARE_FIELD)
+					);
+				}
+			}
+
+			{
+				// The rasteriser. Every glyph is a blend per lit pixel, so this
+				// is the pass that scales with the font scale squared.
+				ENGINE_PROFILE_CAT("flame glyphs", core::ProfileCategory::Render);
+				for (size_t index = 0; index < rows.size(); index++) {
+					const float share = data.Spans[rows[index].Index].Milliseconds / frameMilliseconds;
+					const auto textColour = ColourForShare(share);
+					DebugText::Draw(
+						image,
+						textLeft,
+						rows[index].Y,
+						text[index],
+						textColour.R,
+						textColour.G,
+						textColour.B,
+						scale
+					);
+				}
+			}
+
+			{
+				// Rectangle fills: the category chip on the left and the
+				// timeline bar on the right. Far fewer pixels than the glyphs,
+				// and worth knowing that rather than assuming it.
+				ENGINE_PROFILE_CAT("flame bars", core::ProfileCategory::Render);
+				for (const auto &row : rows) {
+					const auto &span = data.Spans[row.Index];
+
+					// Deeper is dimmer, so a subtree reads as one thing shading
+					// away from its root rather than as unrelated adjacent rows.
+					const auto colour =
+						Shade(CATEGORY_COLOURS[static_cast<size_t>(span.Category)], span.Depth);
+					image.Blend(x, row.Y, chipWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
+
+					// Where in the frame it ran.
+					if (timelineWidth > 0) {
+						const int left =
+							timelineLeft + static_cast<int>(span.StartMilliseconds * timelineScale);
+						// One pixel minimum, so a span too short to see is still
+						// visibly there rather than silently absent.
+						const int barWidth = std::max(1, static_cast<int>(span.Milliseconds * timelineScale));
+						image.Blend(left, row.Y, barWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
+					}
+				}
+
+				// The frame-budget line across the timeline. 16.7 ms, so a frame
+				// going long is visible without reading a number.
+				constexpr float BUDGET_MILLISECONDS = 1000.0f / 60.0f;
+				if (timelineWidth > 0 && data.FrameMilliseconds > BUDGET_MILLISECONDS) {
+					const int budgetX = timelineLeft + static_cast<int>(BUDGET_MILLISECONDS * timelineScale);
+					image.Blend(budgetX, y, scale, cursor - y, TEXT_BAD.R, TEXT_BAD.G, TEXT_BAD.B, 180);
+				}
 			}
 		}
 
@@ -734,38 +832,49 @@ namespace engine::render {
 			// Two header lines, a blank, then the body.
 			const int height = std::min(room, (3 + bodyRows) * lineHeight + padding * 2);
 
-			DrawPanelBackground(image, 0, top, width, height);
+			{
+				// The largest single rectangle either panel draws, and the only
+				// one that scales with how many rows are on screen. If opening
+				// the profiler costs more the more it has to report, this is
+				// where that comes from.
+				ENGINE_PROFILE_CAT("panel background", core::ProfileCategory::Render);
+				DrawPanelBackground(image, 0, top, width, height);
+			}
 
 			Writer writer{image, padding, top + padding, scale};
 
-			// The header says which view is open, how to change it, and whether
-			// Tracy is attached — because "the graph is empty" and "nothing is
-			// collecting" look identical otherwise.
-			const std::string_view tabName = GetProfilerTabName(data.Tab);
-			writer.Line(
-				Format(
-					"FRAME GRAPH  [%.*s]  F6/F7 TAB  PGUP/PGDN SCROLL  -/= DEPTH %u  F8 SNAPSHOT",
-					static_cast<int>(tabName.size()),
-					tabName.data(),
-					data.DepthLimit
-				),
-				TEXT_DIM
-			);
+			{
+				ENGINE_PROFILE_CAT("panel chrome", core::ProfileCategory::Render);
 
-			// RMAX is only meaningful against a window, so the window says how
-			// much of itself it has: a reading over 0.2 s of history and one
-			// over the full five seconds are not the same claim.
-			writer.Line(
-				Format(
-					"%.2f MS   TRACY %s   RMAX OVER %.1fS%s",
-					static_cast<double>(data.FrameMilliseconds),
-					data.TracyAttached ? "ATTACHED" : "OFF",
-					data.HistorySeconds,
-					data.DroppedSpans > 0 ? "   SPANS DROPPED!" : ""
-				),
-				data.DroppedSpans > 0 ? TEXT_WARN : ColourForMilliseconds(data.FrameMilliseconds)
-			);
-			writer.Skip();
+				// The header says which view is open, how to change it, and
+				// whether Tracy is attached — because "the graph is empty" and
+				// "nothing is collecting" look identical otherwise.
+				const std::string_view tabName = GetProfilerTabName(data.Tab);
+				writer.Line(
+					Format(
+						"FRAME GRAPH  [%.*s]  F6/F7 TAB  PGUP/PGDN SCROLL  -/= DEPTH %u  F8 SNAPSHOT",
+						static_cast<int>(tabName.size()),
+						tabName.data(),
+						data.DepthLimit
+					),
+					TEXT_DIM
+				);
+
+				// RMAX is only meaningful against a window, so the window says how
+				// much of itself it has: a reading over 0.2 s of history and one
+				// over the full five seconds are not the same claim.
+				writer.Line(
+					Format(
+						"%.2f MS   TRACY %s   RMAX OVER %.1fS%s",
+						static_cast<double>(data.FrameMilliseconds),
+						data.TracyAttached ? "ATTACHED" : "OFF",
+						data.HistorySeconds,
+						data.DroppedSpans > 0 ? "   SPANS DROPPED!" : ""
+					),
+					data.DroppedSpans > 0 ? TEXT_WARN : ColourForMilliseconds(data.FrameMilliseconds)
+				);
+				writer.Skip();
+			}
 
 			const int bodyTop = writer.Y;
 			const int available = top + height - padding - bodyTop;

@@ -61,6 +61,35 @@ namespace engine::render {
 		void
 		Blend(int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha);
 
+		// Writes a rectangle without reading what is under it.
+		//
+		// The same bytes Blend would produce over a *transparent* destination,
+		// and different bytes over any other. It exists because a large
+		// translucent rectangle drawn onto a cleared image is the one case where
+		// the read is provably pointless: every destination pixel is zero, so
+		// every result is the same constant, and the blend is a fill wearing a
+		// read-modify-write's clothing.
+		//
+		// That is not a micro-optimisation at the size this is used. A debug
+		// panel is hundreds of pixels square, and reading it back to combine it
+		// with zero was, measured, over a third of a frame.
+		//
+		// **Only correct on a region known to be transparent.** Anywhere else it
+		// erases rather than composites — which is why it is a separate name and
+		// not a flag on Blend. Clipped and marks the image dirty exactly as Blend
+		// does.
+		//
+		// @param x      Left edge in pixels.
+		// @param y      Top edge in pixels.
+		// @param width  Rectangle width in pixels.
+		// @param height Rectangle height in pixels.
+		// @param red    Source red channel.
+		// @param green  Source green channel.
+		// @param blue   Source blue channel.
+		// @param alpha  Source alpha channel.
+		void
+		Fill(int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha);
+
 		// Returns the image width in pixels.
 		int GetWidth() const {
 			return Width;

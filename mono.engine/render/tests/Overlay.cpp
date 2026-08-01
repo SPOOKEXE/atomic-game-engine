@@ -56,6 +56,121 @@ TEST_CASE("an opaque blend writes the colour exactly", "[overlay]") {
 	REQUIRE(At(image, 5, 8, 3) == 0);
 }
 
+TEST_CASE("Fill matches Blend over a transparent destination", "[overlay]") {
+	// The entire justification for Fill existing. If these two ever disagree,
+	// every debug panel changes colour and the fast path is a bug rather than
+	// an optimisation — so it is checked across the alpha range rather than at
+	// the one value the panels happen to use.
+	for (int alpha = 1; alpha <= 255; alpha++) {
+		OverlayImage blended;
+		OverlayImage filled;
+		blended.Resize(4, 4);
+		filled.Resize(4, 4);
+
+		const auto value = static_cast<uint8_t>(alpha);
+		blended.Blend(0, 0, 4, 4, 8, 10, 16, value);
+		filled.Fill(0, 0, 4, 4, 8, 10, 16, value);
+
+		for (int channel = 0; channel < 4; channel++) {
+			REQUIRE(At(filled, 2, 2, channel) == At(blended, 2, 2, channel));
+		}
+	}
+}
+
+TEST_CASE("Fill clips and marks dirty exactly as Blend does", "[overlay]") {
+	OverlayImage image;
+	image.Resize(8, 8);
+
+	REQUIRE_FALSE(image.IsDirty());
+	image.Fill(-4, -4, 6, 6, 200, 100, 50, 208);
+	REQUIRE(image.IsDirty());
+
+	// Off every edge, and past them entirely.
+	image.Fill(6, 6, 10, 10, 200, 100, 50, 208);
+	image.Fill(100, 100, 4, 4, 200, 100, 50, 208);
+	image.Fill(0, 0, 0, 4, 200, 100, 50, 208);
+
+	REQUIRE(At(image, 0, 0, 3) == 208);
+	REQUIRE(At(image, 1, 1, 3) == 208);
+	REQUIRE(At(image, 3, 3, 3) == 0);
+	REQUIRE(At(image, 7, 7, 3) == 208);
+}
+
+TEST_CASE("Fill covers every row of the rectangle", "[overlay]") {
+	OverlayImage image;
+	image.Resize(8, 8);
+
+	// The first row is written pixel by pixel and the rest are copies of it.
+	// A row count off by one leaves the last row of every debug panel
+	// transparent, which reads as the panel being one pixel short rather than
+	// as a bug in a memcpy.
+	image.Fill(1, 1, 5, 5, 200, 100, 50, 255);
+
+	for (int y = 1; y < 6; y++) {
+		for (int x = 1; x < 6; x++) {
+			REQUIRE(At(image, x, y, 0) == 200);
+			REQUIRE(At(image, x, y, 3) == 255);
+		}
+	}
+
+	// And nothing outside it.
+	REQUIRE(At(image, 0, 1, 3) == 0);
+	REQUIRE(At(image, 6, 1, 3) == 0);
+	REQUIRE(At(image, 1, 0, 3) == 0);
+	REQUIRE(At(image, 1, 6, 3) == 0);
+}
+
+TEST_CASE("a zero-alpha fill changes nothing", "[overlay]") {
+	OverlayImage image;
+	image.Resize(4, 4);
+
+	image.Fill(0, 0, 4, 4, 255, 255, 255, 0);
+
+	REQUIRE_FALSE(image.IsDirty());
+	REQUIRE(At(image, 1, 1, 3) == 0);
+}
+
+TEST_CASE("an opaque blend replaces whatever was under it", "[overlay]") {
+	OverlayImage image;
+	image.Resize(8, 8);
+
+	image.Blend(0, 0, 8, 8, 200, 100, 50, 255);
+	image.Blend(1, 1, 2, 2, 10, 20, 30, 255);
+
+	// Opaque takes a short path that stores the source instead of computing
+	// `(c * 255 + under * 0 + 127) / 255`. Those are the same byte for every c,
+	// but only over a *non-empty* destination does the test say so — over a
+	// fresh image every wrong answer that ignores the destination still passes.
+	REQUIRE(At(image, 1, 1, 0) == 10);
+	REQUIRE(At(image, 1, 1, 1) == 20);
+	REQUIRE(At(image, 1, 1, 2) == 30);
+	REQUIRE(At(image, 1, 1, 3) == 255);
+
+	// And the pixel beside it is untouched.
+	REQUIRE(At(image, 3, 1, 0) == 200);
+}
+
+TEST_CASE("every lit pixel of a glyph row is drawn", "[overlay]") {
+	OverlayImage image;
+	image.Resize(16, 16);
+
+	// '0' is 111 / 101 / 101 / 101 / 111, so its top row is three lit pixels
+	// side by side. They are emitted as one run rather than three calls, and a
+	// run built with the wrong end index loses the last pixel of it — which at
+	// scale 1 is one dot nobody would notice until every glyph looked thin.
+	DebugText::Draw(image, 0, 0, "0", 255, 255, 255, 1);
+
+	REQUIRE(At(image, 0, 0, 3) == 255);
+	REQUIRE(At(image, 1, 0, 3) == 255);
+	REQUIRE(At(image, 2, 0, 3) == 255);
+
+	// The middle rows are 101: lit, gap, lit. A run that swallowed the gap
+	// would fill the middle of the zero in.
+	REQUIRE(At(image, 0, 1, 3) == 255);
+	REQUIRE(At(image, 1, 1, 3) == 0);
+	REQUIRE(At(image, 2, 1, 3) == 255);
+}
+
 TEST_CASE("drawing off the edge is clipped rather than corrupting memory", "[overlay]") {
 	OverlayImage image;
 	image.Resize(8, 8);

@@ -70,6 +70,32 @@ namespace engine::core {
 		);
 	}
 
+	CFrame CFrame::NLerp(const CFrame &target, float alpha) const {
+		const glm::quat from = Rotation();
+		glm::quat to = target.Rotation();
+
+		// Shortest arc. A quaternion and its negation are the same orientation,
+		// so when the two point away from each other the straight line between
+		// them passes through the long way round — 359 degrees of rotation to
+		// express one degree of difference.
+		if (glm::dot(from, to) < 0.0f) {
+			to = -to;
+		}
+
+		// Componentwise, then renormalised. That is the whole of it: the
+		// straight line between two unit quaternions leaves the unit sphere, and
+		// pushing it back on is one reciprocal square root rather than the
+		// inverse trigonometry slerp needs to stay on it all the way.
+		const glm::quat blended{
+			from.w + (to.w - from.w) * alpha,
+			from.x + (to.x - from.x) * alpha,
+			from.y + (to.y - from.y) * alpha,
+			from.z + (to.z - from.z) * alpha,
+		};
+
+		return CFrame(Position.Lerp(target.Position, alpha), glm::normalize(blended));
+	}
+
 	glm::mat4 CFrame::ToMatrix() const {
 		glm::mat4 matrix = glm::toMat4(Rotation());
 		matrix[3] = glm::vec4(ToGlm(Position), 1.0f);

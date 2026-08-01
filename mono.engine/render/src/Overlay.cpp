@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 
 namespace engine::render {
 
@@ -24,6 +25,53 @@ namespace engine::render {
 		Dirty = false;
 	}
 
+	void OverlayImage::Fill(
+		int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha
+	) {
+		if (IsEmpty() || alpha == 0 || width <= 0 || height <= 0) {
+			return;
+		}
+
+		const int left = std::max(x, 0);
+		const int top = std::max(y, 0);
+		const int right = std::min(x + width, Width);
+		const int bottom = std::min(y + height, Height);
+		if (left >= right || top >= bottom) {
+			return;
+		}
+
+		Dirty = true;
+
+		// What Blend arrives at over a transparent destination: the source
+		// channels premultiplied by the source alpha, and the alpha kept.
+		const uint32_t source = alpha;
+		const uint8_t pattern[BYTES_PER_PIXEL] = {
+			static_cast<uint8_t>((red * source + 127) / 255),
+			static_cast<uint8_t>((green * source + 127) / 255),
+			static_cast<uint8_t>((blue * source + 127) / 255),
+			alpha,
+		};
+
+		const auto span = static_cast<size_t>(right - left) * BYTES_PER_PIXEL;
+		uint8_t *first = Pixels.data() +
+						 (static_cast<size_t>(top) * static_cast<size_t>(Width) + static_cast<size_t>(left)) *
+							 BYTES_PER_PIXEL;
+
+		// The first row the slow way, then every other row is a copy of it. One
+		// pass over the rectangle at memcpy speed, rather than a four-byte
+		// read-modify-write per pixel.
+		for (size_t offset = 0; offset < span; offset += BYTES_PER_PIXEL) {
+			std::memcpy(first + offset, pattern, BYTES_PER_PIXEL);
+		}
+
+		for (int row = top + 1; row < bottom; row++) {
+			uint8_t *destination = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
+													static_cast<size_t>(left)) *
+													   BYTES_PER_PIXEL;
+			std::memcpy(destination, first, span);
+		}
+	}
+
 	void OverlayImage::Blend(
 		int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha
 	) {
@@ -44,6 +92,28 @@ namespace engine::render {
 
 		const uint32_t source = alpha;
 		const uint32_t inverse = 255u - source;
+
+		// An opaque source is a store, not a blend. Every glyph in the debug
+		// panels is drawn at full alpha, and the general path below spends four
+		// multiplies and four divides per pixel arriving at the source colour it
+		// started with — `(c * 255 + 0 + 127) / 255` is `c` for every c in 0..255,
+		// exactly, so this is the same bytes by a shorter route.
+		if (alpha == 255) {
+			for (int row = top; row < bottom; row++) {
+				uint8_t *pixel = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
+												  static_cast<size_t>(left)) *
+													 BYTES_PER_PIXEL;
+
+				for (int column = left; column < right; column++) {
+					pixel[0] = red;
+					pixel[1] = green;
+					pixel[2] = blue;
+					pixel[3] = 255;
+					pixel += BYTES_PER_PIXEL;
+				}
+			}
+			return;
+		}
 
 		for (int row = top; row < bottom; row++) {
 			uint8_t *pixel = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
@@ -186,17 +256,45 @@ namespace engine::render {
 				const uint16_t bits = Lookup(character);
 
 				for (int row = 0; row < GLYPH_HEIGHT; row++) {
-					for (int column = 0; column < GLYPH_WIDTH; column++) {
+					// Runs of lit pixels, not pixels.
+					//
+					// A glyph row is three bits, so it is one run about as often
+					// as it is three separate ones — and a call per pixel means
+					// paying the clip, the bounds arithmetic and the dirty flag
+					// once for every scale-by-scale block. Coalescing first turns
+					// "111" from three calls into one and leaves everything else
+					// alone.
+					int column = 0;
+					while (column < GLYPH_WIDTH) {
 						// Column 0 is the leftmost, so it is the high bit of
 						// the three.
-						const int bit = row * GLYPH_WIDTH + (GLYPH_WIDTH - 1 - column);
-						if ((bits & (1u << bit)) == 0) {
+						const auto lit = [bits, row](int at) {
+							const int bit = row * GLYPH_WIDTH + (GLYPH_WIDTH - 1 - at);
+							return (bits & (1u << bit)) != 0;
+						};
+
+						if (!lit(column)) {
+							column++;
 							continue;
 						}
 
+						int end = column + 1;
+						while (end < GLYPH_WIDTH && lit(end)) {
+							end++;
+						}
+
 						image.Blend(
-							cursor + column * scale, y + row * scale, scale, scale, red, green, blue, 255
+							cursor + column * scale,
+							y + row * scale,
+							(end - column) * scale,
+							scale,
+							red,
+							green,
+							blue,
+							255
 						);
+
+						column = end;
 					}
 				}
 
