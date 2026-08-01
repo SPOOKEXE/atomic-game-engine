@@ -22,6 +22,8 @@ namespace engine::render {
 		// survives a resize, so there is no vacated region to account for.
 		DirtyLeft = DirtyRight = DirtyTop = DirtyBottom = 0;
 		PreviousLeft = PreviousRight = PreviousTop = PreviousBottom = 0;
+		Painted = false;
+		ClearedSinceUpload = false;
 	}
 
 	void OverlayImage::Clear() {
@@ -34,21 +36,21 @@ namespace engine::render {
 		// the region on the *second* such frame: the pixels the panels used to
 		// occupy are still on the texture, and reopening a smaller panel would
 		// leave the old one's edges on screen around it.
-		if (!IsDirty()) {
+		if (!Painted) {
 			return;
 		}
 
 		std::fill(Pixels.begin(), Pixels.end(), static_cast<uint8_t>(0));
 
-		// This frame's region becomes last frame's. The GPU still holds those
-		// pixels, so they have to be uploaded again — as transparent — or
-		// whatever was drawn there stays on screen after it stops being drawn.
-		PreviousLeft = DirtyLeft;
-		PreviousRight = DirtyRight;
-		PreviousTop = DirtyTop;
-		PreviousBottom = DirtyBottom;
-
+		// The uploaded region is left exactly as it was. It records what the GPU
+		// is *showing*, and clearing this image does not change that — the
+		// texture goes on holding the last picture sent to it until an upload
+		// covering those pixels says otherwise, which is what UploadRegion is
+		// for. Anything this image had painted and not yet sent never reached
+		// the texture at all, so there is nothing there to correct.
 		DirtyLeft = DirtyRight = DirtyTop = DirtyBottom = 0;
+		Painted = false;
+		ClearedSinceUpload = true;
 	}
 
 	void OverlayImage::MarkRegion(int x, int y, int width, int height) {
@@ -69,8 +71,11 @@ namespace engine::render {
 			DirtyTop = top;
 			DirtyRight = right;
 			DirtyBottom = bottom;
+			Painted = true;
 			return;
 		}
+
+		Painted = true;
 
 		DirtyLeft = std::min(DirtyLeft, left);
 		DirtyTop = std::min(DirtyTop, top);
@@ -80,7 +85,12 @@ namespace engine::render {
 
 	OverlayImage::Region OverlayImage::UploadRegion() const {
 		const bool now = DirtyLeft < DirtyRight && DirtyTop < DirtyBottom;
-		const bool before = PreviousLeft < PreviousRight && PreviousTop < PreviousBottom;
+
+		// The showing region only needs sending again once this image has been
+		// wiped underneath it. Until then the texture is right, and a frame that
+		// redraws nothing has nothing to say.
+		const bool before =
+			ClearedSinceUpload && PreviousLeft < PreviousRight && PreviousTop < PreviousBottom;
 
 		if (!now && !before) {
 			return Region{};

@@ -530,7 +530,7 @@ namespace engine::render {
 	}
 
 	FrameResult
-	Renderer::Render(const Camera &camera, std::span<const Instance> instances, const OverlayImage &overlay) {
+	Renderer::Render(const Camera &camera, std::span<const Instance> instances, OverlayImage &overlay) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
 		FrameResult result;
@@ -596,8 +596,12 @@ namespace engine::render {
 			// Allocation, on the frame an overlay first appears or changes size.
 			// Zero on every other frame, which is what makes a reading here
 			// worth looking at rather than background noise.
+			// HasContent, not IsDirty. The texture keeps the last thing uploaded
+			// to it, so a frame that redraws nothing still has a panel to show —
+			// which is the whole point of the image living on the GPU rather
+			// than being pushed there again every frame.
 			ENGINE_PROFILE_CAT("ensure overlay", core::ProfileCategory::Render);
-			haveOverlay = overlay.IsDirty() && !overlay.IsEmpty() &&
+			haveOverlay = overlay.HasContent() && !overlay.IsEmpty() &&
 						  State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
 		}
 
@@ -633,7 +637,13 @@ namespace engine::render {
 			}
 		}
 
-		if (haveInstances || haveOverlay) {
+		// Only when something is actually waiting to go across. A panel redrawn
+		// ten times a second and presented a thousand times has nothing to
+		// upload on nine hundred and ninety of those frames.
+		const bool uploadOverlay =
+			haveOverlay && (State->OverlayUninitialised || overlay.UploadRegion().Width > 0);
+
+		if (haveInstances || uploadOverlay) {
 			ENGINE_PROFILE_CAT("copy pass", core::ProfileCategory::Render);
 
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
@@ -650,7 +660,7 @@ namespace engine::render {
 				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
 			}
 
-			if (haveOverlay) {
+			if (uploadOverlay) {
 				// Only the part of the overlay that anything has drawn on.
 				//
 				// The image is the size of the window and the panels are a
@@ -717,6 +727,10 @@ namespace engine::render {
 				// fresh texture is uninitialised everywhere this upload does not
 				// reach — which is now everywhere outside the panels.
 				SDL_UploadToGPUTexture(copy, &source, &destination, false);
+
+				// The GPU matches the image now, so nothing is pending until
+				// something draws again.
+				overlay.MarkUploaded();
 			}
 
 			SDL_EndGPUCopyPass(copy);

@@ -158,10 +158,43 @@ namespace engine::render {
 			return Pixels.size();
 		}
 
-		// True if anything was drawn since the last Clear. The renderer skips
-		// the upload and the pass entirely when nothing was.
+		// True if anything is waiting to be sent to the GPU.
+		//
+		// Distinct from HasContent below, and the distinction is the point of
+		// keeping the image at all: a panel redrawn ten times a second and
+		// presented a thousand times has content on all thousand frames and
+		// something to upload on ten of them.
 		bool IsDirty() const {
 			return DirtyLeft < DirtyRight && DirtyTop < DirtyBottom;
+		}
+
+		// True if anything has been drawn since the last Clear that emptied the
+		// image, whether or not it has been uploaded since.
+		//
+		// What the renderer asks before running the overlay pass. The texture
+		// holds the last thing uploaded to it and goes on holding it, so a frame
+		// that draws nothing new still has something to show.
+		bool HasContent() const {
+			return Painted;
+		}
+
+		// Declares that the GPU now matches this image.
+		//
+		// Called by the renderer once it has recorded the upload. Until it is,
+		// UploadRegion keeps reporting the pending area — including the part a
+		// shrinking panel vacated, which nothing else would remember.
+		void MarkUploaded() {
+			// What was pending is now what the texture is showing. The upload
+			// covered the old showing region too — that is how UploadRegion is
+			// built — so everything outside this rectangle is transparent on the
+			// GPU as well as here.
+			PreviousLeft = DirtyLeft;
+			PreviousRight = DirtyRight;
+			PreviousTop = DirtyTop;
+			PreviousBottom = DirtyBottom;
+
+			DirtyLeft = DirtyRight = DirtyTop = DirtyBottom = 0;
+			ClearedSinceUpload = false;
 		}
 
 		// A rectangle of the image, in pixels from the top-left.
@@ -221,12 +254,26 @@ namespace engine::render {
 		int DirtyTop = 0;
 		int DirtyBottom = 0;
 
-		// The same, as it stood before the last Clear. Kept because the GPU
-		// still holds those pixels and nothing else will tell it they are gone.
+		// The region the GPU is currently showing, as of the last upload. Kept
+		// because the texture goes on holding those pixels after this image
+		// stops drawing them, and nothing else will tell it they are gone.
 		int PreviousLeft = 0;
 		int PreviousRight = 0;
 		int PreviousTop = 0;
 		int PreviousBottom = 0;
+
+		// Whether the image holds a picture, as opposed to whether that picture
+		// has reached the GPU yet. See HasContent.
+		bool Painted = false;
+
+		// Whether the image has been wiped since the last upload.
+		//
+		// This is what separates "the texture is showing this" from "the texture
+		// is wrong about this". Without it the showing region would look pending
+		// forever, every frame would re-upload the same unchanged pixels, and
+		// redrawing the panels less often than presenting them would save
+		// nothing at all.
+		bool ClearedSinceUpload = false;
 
 		std::vector<uint8_t> Pixels;
 	};

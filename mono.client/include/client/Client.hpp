@@ -157,6 +157,26 @@ namespace client {
 		// that was recorded; a deep tree is unreadable and a shallow one hides
 		// the answer, so which it is has to be adjustable while looking at it.
 		uint32_t ProfilerDepth = engine::core::FrameGraph::MAXIMUM_DEPTH;
+
+		// When the panels were last drawn, and what they were showing at the
+		// time.
+		//
+		// The overlay texture holds the last image drawn into it and is
+		// presented from there every frame, so the panels are regenerated on a
+		// clock rather than per frame — a person cannot read a number that
+		// changes a thousand times a second, and rasterising one costs the same
+		// whether they can or not.
+		//
+		// The rest is what forces an early redraw. A tab change or a scroll that
+		// waited for the next tick would read as a dropped key press.
+		double PanelsDrawn = 0.0;
+		bool PanelsShown = false;
+		engine::render::ProfilerTab PanelTab = engine::render::ProfilerTab::Frame;
+		int PanelScroll = 0;
+		uint32_t PanelDepth = engine::core::FrameGraph::MAXIMUM_DEPTH;
+		int PanelWidth = 0;
+		int PanelHeight = 0;
+
 		engine::render::FrameResult LastFrame;
 	};
 }

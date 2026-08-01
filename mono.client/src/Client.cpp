@@ -258,7 +258,47 @@ namespace client {
 
 			Overlay.Resize(pixelWidth, pixelHeight);
 
-			if (Settings.ShowStatistics || Settings.ShowFrameGraph) {
+			// The panels are redrawn on a clock of their own, and presented on
+			// every frame from the texture they were last drawn into.
+			//
+			// They are read by a person, and a person cannot read a number that
+			// changes a thousand times a second — past about twenty updates a
+			// second the extra work buys a blur. Rasterising the glyphs and
+			// pushing the image across were together the largest thing in the
+			// frame, and at 1000 fps this is fifty times less of both.
+			//
+			// The *collection* is untouched: FrameGraph and Metrics still record
+			// every frame, so nothing is missed. Only the drawing is throttled,
+			// and RMAX still reports the worst frame in the window rather than
+			// the worst frame that happened to be drawn.
+			constexpr double PANEL_UPDATE_SECONDS = 1.0 / 20.0;
+
+			// Anything a key press changed has to appear at once, or the panel
+			// feels broken: pressing F6 and waiting fifty milliseconds for the
+			// tab to change reads as a dropped input.
+			const bool settingsChanged =
+				PanelsShown != (Settings.ShowStatistics || Settings.ShowFrameGraph) ||
+				PanelTab != Settings.Tab || PanelScroll != ProfilerScroll || PanelDepth != ProfilerDepth ||
+				PanelWidth != pixelWidth || PanelHeight != pixelHeight;
+
+			const bool redraw = settingsChanged || Clock.Now() - PanelsDrawn >= PANEL_UPDATE_SECONDS;
+
+			if (redraw) {
+				PanelsDrawn = Clock.Now();
+				PanelsShown = Settings.ShowStatistics || Settings.ShowFrameGraph;
+				PanelTab = Settings.Tab;
+				PanelScroll = ProfilerScroll;
+				PanelDepth = ProfilerDepth;
+				PanelWidth = pixelWidth;
+				PanelHeight = pixelHeight;
+			}
+
+			if (!redraw) {
+				// Counters accumulate whether or not anyone is looking, and a
+				// frame that does not draw them still has to drain them or the
+				// next panel shows several frames added together.
+				Metrics::Clear();
+			} else if (Settings.ShowStatistics || Settings.ShowFrameGraph) {
 				SystemTimings.clear();
 				for (const auto &timing : Scheduler.Timings()) {
 					SystemTimings.push_back(engine::render::SystemTiming{timing.Name, timing.Milliseconds});

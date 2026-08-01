@@ -186,9 +186,11 @@ TEST_CASE("the upload region covers what a shrinking panel vacated", "[overlay]"
 	OverlayImage image;
 	image.Resize(400, 300);
 
-	// A large panel, then a small one in its corner. The GPU still holds the
-	// large one's pixels, and only an upload covering them says they are gone.
+	// A large panel, uploaded, then a small one in its corner. The GPU still
+	// holds the large one's pixels, and only an upload covering them says they
+	// are gone.
 	image.Fill(0, 0, 200, 200, 8, 10, 16, 208);
+	image.MarkUploaded();
 	image.Clear();
 	image.Fill(0, 0, 50, 50, 8, 10, 16, 208);
 
@@ -204,6 +206,7 @@ TEST_CASE("a region survives frames in which nothing is drawn", "[overlay]") {
 	image.Resize(400, 300);
 
 	image.Fill(0, 0, 200, 200, 8, 10, 16, 208);
+	image.MarkUploaded();
 
 	// The panels close. Nothing is uploaded on these frames, so the texture
 	// keeps the large panel — and a Clear that forgot it on the second frame
@@ -219,6 +222,57 @@ TEST_CASE("a region survives frames in which nothing is drawn", "[overlay]") {
 	REQUIRE(region.Height == 200);
 }
 
+TEST_CASE("content outlives the upload that carried it", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+	image.Fill(0, 0, 100, 100, 8, 10, 16, 208);
+
+	REQUIRE(image.IsDirty());
+	REQUIRE(image.HasContent());
+
+	// The renderer takes the region and says so. The texture now holds the
+	// picture, so there is nothing to send — but there is still something to
+	// draw, which is what lets the panels be redrawn far less often than they
+	// are presented.
+	image.MarkUploaded();
+
+	REQUIRE_FALSE(image.IsDirty());
+	REQUIRE(image.HasContent());
+	REQUIRE(image.UploadRegion().Width == 0);
+}
+
+TEST_CASE("an uploaded image redrawn in place asks for only the new region", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+
+	image.Fill(0, 0, 100, 100, 8, 10, 16, 208);
+	image.MarkUploaded();
+
+	// A later frame redraws the same panel. The GPU already matches everywhere
+	// else, so only what moved needs to travel.
+	image.Clear();
+	image.Fill(0, 0, 100, 100, 8, 10, 16, 208);
+
+	const auto region = image.UploadRegion();
+	REQUIRE(region.Width == 100);
+	REQUIRE(region.Height == 100);
+}
+
+TEST_CASE("clearing an uploaded image still asks for the erase", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+
+	image.Fill(0, 0, 100, 100, 8, 10, 16, 208);
+	image.MarkUploaded();
+	image.Clear();
+
+	// Nothing is drawn any more, but the texture does not know that. Whether
+	// the erase is worth sending is the renderer's call — it skips the pass
+	// entirely — and the region has to be there for it either way.
+	REQUIRE_FALSE(image.HasContent());
+	REQUIRE(image.UploadRegion().Width == 100);
+}
+
 TEST_CASE("an untouched image asks for no upload", "[overlay]") {
 	OverlayImage image;
 	image.Resize(400, 300);
@@ -232,6 +286,7 @@ TEST_CASE("resizing forgets the region with the texture", "[overlay]") {
 	OverlayImage image;
 	image.Resize(400, 300);
 	image.Fill(0, 0, 200, 200, 8, 10, 16, 208);
+	image.MarkUploaded();
 	image.Clear();
 
 	// A resize means a new texture, and nothing on it to correct.

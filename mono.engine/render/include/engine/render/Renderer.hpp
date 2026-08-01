@@ -141,16 +141,22 @@ namespace engine::render {
 		// error and not a reason to stop ticking. It is also false if SDL rejects
 		// command submission.
 		//
-		// `overlay` is uploaded only when it has something in it.
-		// The inputs are copied during the call and are not retained by the renderer.
+		// `overlay` is uploaded only when it has something pending, and drawn
+		// whenever it has content — the texture holds the last thing sent to it,
+		// so a caller may redraw the overlay far less often than it presents.
+		// The renderer marks the overlay uploaded once it has recorded the copy,
+		// which is the only reason it is not a const reference; nothing else
+		// about it is retained past the call.
+		//
+		// The camera and instances are copied during the call and not retained.
 		//
 		// @param camera    World-space camera and perspective clipping settings.
 		// @param instances Object-to-world transforms and colours to draw as cubes.
-		// @param overlay   CPU premultiplied RGBA8 overlay; uploaded only when dirty
-		//                   and non-empty.
+		// @param overlay   CPU premultiplied RGBA8 overlay. Uploaded only when it
+		//                   has a pending region, drawn whenever it has content,
+		//                   and marked uploaded on the way out.
 		// @return Submitted draw counts and whether the frame was presented.
-		FrameResult
-		Render(const Camera &camera, std::span<const Instance> instances, const OverlayImage &overlay);
+		FrameResult Render(const Camera &camera, std::span<const Instance> instances, OverlayImage &overlay);
 
 	  private:
 		struct Impl;
