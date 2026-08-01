@@ -15,12 +15,24 @@
 
 namespace testrunner {
 
+	// What a finished program left behind.
+	//
+	// Read Started first. The other two describe a program that ran, and say
+	// nothing at all about one that never did.
 	struct ProcessResult {
 		// False when the program could not be started at all — missing,
 		// not executable, fork failed. Distinct from a non-zero exit, which is
 		// the program running and disagreeing with you.
 		bool Started = false;
+
+		// The program's own exit status, and meaningless unless Started.
 		int ExitCode = -1;
+
+		// stdout and stderr together, in the order the program wrote them.
+		//
+		// Merged rather than kept apart because the point of capturing it is to
+		// show somebody what happened, and a failure whose error line has been
+		// sorted away from the output it followed is harder to read, not easier.
 		std::string Output;
 	};
 

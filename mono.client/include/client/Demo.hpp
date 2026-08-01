@@ -32,6 +32,8 @@ namespace client {
 	// Where a thing is. One CFrame, no scale — scale belongs to what is being
 	// drawn, not to where it is.
 	struct Transform {
+		// Position and orientation together. No scale — scale belongs to what is
+		// being drawn, not to where it is.
 		engine::core::CFrame Frame;
 	};
 
@@ -46,11 +48,14 @@ namespace client {
 	// that reuse as coupling two features that are independent, and it is
 	// cheaper to keep them apart now than to untangle them later.
 	struct PreviousTransform {
+		// Where Transform::Frame was when the current tick began. The render
+		// interpolates from here to there by the clock's alpha.
 		engine::core::CFrame Frame;
 	};
 
 	// Radians per second about each local axis.
 	struct Spin {
+		// Radians per second about each local axis.
 		engine::core::Vector3 Rate;
 	};
 
@@ -59,15 +64,35 @@ namespace client {
 	// different frame rates put the cube in the same place, which is what makes
 	// a frame-time comparison mean anything.
 	struct Orbit {
+		// The point the path goes around, in world space.
 		engine::core::Vector3 Centre;
+
+		// Distance from Centre, in metres.
 		float Radius = 1.0f;
+
+		// Angular speed. Negative runs the other way round.
 		float RadiansPerSecond = 1.0f;
+
+		// Where on the ring this entity starts, in radians.
+		//
+		// The only thing separating entities that share a ring: they are
+		// otherwise identical, so without it the whole ring occupies one point.
 		float Phase = 0.0f;
+
+		// Offset above Centre, in metres, held for the life of the orbit. What
+		// makes a set of rings a volume rather than a disc.
 		float Height = 0.0f;
 	};
 
+	// What an entity looks like: the two things the instanced pass needs per
+	// cube, and nothing else. A material is a v0.2 concern.
 	struct Visual {
+		// Flat albedo. There is no lighting model at v0.1, so this is the colour
+		// that reaches the screen rather than an input to one.
 		engine::core::Color3 Colour;
+
+		// Edge length of the cube, in metres. Here rather than on Transform
+		// because scale describes the thing being drawn, not where it is.
 		float Size = 1.0f;
 	};
 
@@ -76,6 +101,9 @@ namespace client {
 	// How far the scene reaches from the origin. Written once while building,
 	// read by the camera system.
 	struct SceneBounds {
+		// Metres from the origin to the furthest thing in the scene. The camera
+		// system frames the world from it, so a larger scene pulls the camera
+		// back without anybody choosing a distance.
 		float Extent = 1.0f;
 	};
 
@@ -86,6 +114,8 @@ namespace client {
 	// and a loop that runs once, and would turn "where is the camera" from a
 	// lookup into a search. GARG_ECS_Layout.md §5.
 	struct ActiveCamera {
+		// The camera the next frame is drawn from. One per world, replaced
+		// wholesale rather than edited in place.
 		engine::render::Camera Value;
 	};
 
@@ -96,6 +126,10 @@ namespace client {
 	// data another module reads. The vector's capacity survives from frame to
 	// frame, so a steady scene stops allocating after the first one.
 	struct DrawList {
+		// One entry per visible cube, rebuilt every frame.
+		//
+		// Cleared rather than reallocated, so the capacity survives from frame
+		// to frame and a steady scene stops allocating after the first one.
 		std::vector<engine::render::Instance> Instances;
 	};
 

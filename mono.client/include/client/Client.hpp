@@ -25,8 +25,17 @@ struct SDL_Window;
 
 namespace client {
 
+	// Everything the command line decides, in one place.
+	//
+	// Parsed once and copied into the Client by Initialise, so nothing reads the
+	// argument list again after start-up and there is one answer to "what is
+	// this process configured to do".
 	struct Options {
+		// Window width in logical pixels, before any display scaling.
 		int Width = 1280;
+
+		// Window height in logical pixels. The window is resizable, so this is
+		// where it starts and not where it stays.
 		int Height = 720;
 
 		// How many cubes the demo scene builds.
@@ -41,8 +50,20 @@ namespace client {
 		// client usable from a test or a CI job.
 		int64_t MaximumFrames = -1;
 
+		// Open the F3 statistics panel at startup, rather than waiting for
+		// somebody to press F3.
 		bool ShowStatistics = false;
+
+		// Open the F5 frame graph at startup.
+		//
+		// Worth setting deliberately: collection only runs while the panel is
+		// open, so a run that meant to record a graph and never opened one has
+		// nothing to show for it afterwards.
 		bool ShowFrameGraph = false;
+
+		// Which frame-graph view the panel opens on. Naming one opens the panel,
+		// because asking to see something is not a separate request from showing
+		// it.
 		engine::render::ProfilerTab Tab = engine::render::ProfilerTab::Frame;
 
 		// Present without waiting for vblank, to measure the frame rather than
@@ -68,6 +89,11 @@ namespace client {
 		std::string ScriptPath;
 	};
 
+	// The window, the renderer and the frame loop over one world.
+	//
+	// Initialise, then Run until it returns, then Shutdown. Non-copyable because
+	// it owns an SDL window and a graphics device, and there is no sensible
+	// meaning for a second object holding the same two.
 	class Client {
 	  public:
 		Client() = default;
@@ -76,7 +102,18 @@ namespace client {
 		Client(const Client &) = delete;
 		Client &operator=(const Client &) = delete;
 
+		// Applies `options`, opens the window, starts the renderer and builds
+		// the demo world.
+		//
+		// @param options Parsed command line. Copied, not referenced.
+		// @return False if SDL, the window or the renderer would not start. The
+		//         reason is logged before returning, because the caller has no
+		//         way to say anything more useful about it than that.
 		bool Initialise(const Options &options);
+
+		// Tears the window and renderer down, in that order for a reason the
+		// implementation explains, and stops the job system. Safe to call
+		// whether or not Initialise got as far as opening anything.
 		void Shutdown();
 
 		// Runs until the window is closed, the frame budget is spent, or the

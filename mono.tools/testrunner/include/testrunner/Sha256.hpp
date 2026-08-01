@@ -31,17 +31,38 @@
 
 namespace testrunner {
 
+	// A SHA-256 digest, accumulated in pieces.
+	//
+	// Feed it with Update as many times as there are pieces and read it once
+	// with Hex. Streaming rather than one call over a buffer because a suite's
+	// signature is its source plus every header it includes, and concatenating
+	// all of that into one string first would allocate the whole translation
+	// unit to hash it.
+	//
+	// Move-only: the state is a Crypto++ object behind a unique_ptr, and copying
+	// a half-finished digest is not something any caller here wants.
 	class Sha256 {
 	  public:
+		// Bytes in a raw digest. Hex returns twice this many characters.
 		static constexpr size_t DIGEST_BYTES = 32;
 
 		Sha256();
 		~Sha256();
 
+		// Moves the accumulated state. The source is left usable only for
+		// assignment and destruction, as usual.
 		Sha256(Sha256 &&) noexcept;
+
+		// Moves the accumulated state, discarding whatever this one had.
 		Sha256 &operator=(Sha256 &&) noexcept;
 
+		// Adds bytes to the digest.
+		//
+		// @param data  Start of the block. Not kept — it is hashed and forgotten.
+		// @param bytes How many to read.
 		void Update(const void *data, size_t bytes);
+
+		// Adds text to the digest, without copying it.
 		void Update(std::string_view text) {
 			Update(text.data(), text.size());
 		}
@@ -49,6 +70,10 @@ namespace testrunner {
 		// Lowercase hex. Finalises; do not Update afterwards.
 		std::string Hex();
 
+		// The digest of one string, for callers with nothing to stream.
+		//
+		// @param text The whole input.
+		// @return Lowercase hex, the same as Update then Hex.
 		static std::string Of(std::string_view text);
 
 	  private:

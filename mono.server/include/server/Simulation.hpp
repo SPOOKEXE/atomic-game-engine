@@ -21,11 +21,22 @@
 
 namespace server {
 
+	// Where an entity is.
+	//
+	// Not the client's Transform, and not a copy of it that drifted. The two
+	// programs each own their placeholder components until `scene` at L7 owns
+	// both — see this module's AGENTS.md on why that is the design and not
+	// duplication waiting to be factored out.
 	struct Position {
+		// Metres from the origin, in world space.
 		engine::core::Vector3 Value;
 	};
 
+	// How fast an entity is going, and which way.
 	struct Velocity {
+		// Metres per second. Integrated once per tick against the fixed delta,
+		// never against measured elapsed time — a tick is a function of its
+		// state, so a recorded run replays.
 		engine::core::Vector3 Value;
 	};
 
@@ -39,6 +50,10 @@ namespace server {
 	// inner body, and it makes "the world is 128 wide" a property of the world
 	// rather than something 4096 entities happen to agree on.
 	struct WorldBounds {
+		// Half the cube's width, in metres, so the world spans twice this on
+		// each axis. Stored as the half because that is the form the bounce
+		// check wants, and deriving it per entity per tick is arithmetic nobody
+		// needs to repeat.
 		float HalfExtent = 64.0f;
 	};
 

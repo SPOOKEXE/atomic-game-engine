@@ -21,9 +21,26 @@
 
 namespace testrunner {
 
+	// One test suite, as the binary holding it describes itself.
+	//
+	// Built by asking a binary what it contains rather than by scanning sources,
+	// so this is a report rather than a guess. See ReadSuites.
 	struct Suite {
+		// The identifier `TEST_SUITE_ID` declares, such as `engine.ecs.store`.
+		//
+		// Hand-written, and the only hand-written thing here — a name survives a
+		// file being renamed or moved, which is exactly what the cache needs it
+		// to do. AGENTS.md rule 4.
 		std::string Id;
+
+		// The .cpp the suite was compiled from. The root of its dependency
+		// closure, and therefore of its signature.
 		std::filesystem::path Source;
+
+		// Suite ids this one is declared to depend on.
+		//
+		// The cascade walks these, so a signature covers everything below it and
+		// a change at the bottom of the stack re-runs everything above it.
 		std::vector<std::string> Depends;
 
 		// The binary that contains it, and the file-stem filter that selects
@@ -54,8 +71,19 @@ namespace testrunner {
 		std::vector<std::string> &warnings
 	);
 
+	// What the last run knew about one suite.
+	//
+	// Both halves are needed to decide whether to skip. A matching signature
+	// says the suite is unchanged; it does not say the suite was passing.
 	struct CacheEntry {
+		// The suite's cascading signature the last time it ran.
 		std::string Signature;
+
+		// Whether it passed then.
+		//
+		// A suite that failed is re-run even when its signature still matches,
+		// because the alternative is a red suite going quiet on the next
+		// invocation and staying quiet until something below it happens to move.
 		bool Passed = false;
 	};
 
@@ -63,5 +91,16 @@ namespace testrunner {
 	// line per suite, so that a diff of it is readable and a human can delete a
 	// line by hand.
 	std::map<std::string, CacheEntry> LoadCache(const std::filesystem::path &path);
+
+	// Writes the cache back, replacing whatever was there.
+	//
+	// Ordered by suite id, because the map is, so two runs that learned the same
+	// thing produce the same file and a diff shows only what moved.
+	//
+	// @param path  File to write. Parent directories are created.
+	// @param cache Every suite worth remembering, not only the ones that ran.
+	// @return False if the file could not be written. The caller decides what
+	//         that is worth — a cache that failed to save costs time on the next
+	//         run and nothing else, so it is not a reason to fail the tests.
 	bool SaveCache(const std::filesystem::path &path, const std::map<std::string, CacheEntry> &cache);
 }
