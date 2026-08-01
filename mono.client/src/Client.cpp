@@ -318,6 +318,8 @@ namespace client {
 				panels.Spans = FrameGraph::Spans();
 				panels.FrameMilliseconds = FrameGraph::FrameMilliseconds();
 				panels.UnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
+				panels.IdleMilliseconds =
+					FrameGraph::CategoryMilliseconds(engine::core::ProfileCategory::Idle);
 				panels.DroppedSpans = FrameGraph::Dropped();
 				panels.Systems = SystemTimings;
 				panels.Counters = counters;

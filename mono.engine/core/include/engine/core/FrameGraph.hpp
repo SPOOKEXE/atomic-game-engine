@@ -37,6 +37,18 @@ namespace engine::core {
 		Simulation, // Simulation work.
 		Script,		// Script runtime work.
 
+		// Time the frame spent waiting rather than working — the wait for the
+		// display, above all.
+		//
+		// It is a category rather than something excluded from the graph because
+		// it is real time and a frame that spends it is really that long. But it
+		// is not *work*, and mixing the two makes a profiler lie by arithmetic:
+		// with vertical sync on, fifteen of a sixteen millisecond frame are a
+		// sleep, and every span that actually did something reads as one per
+		// cent of the frame. The panel subtracts this to get a busy figure, and
+		// shares that mean something.
+		Idle,
+
 		Count, // Number of categories; not a span category.
 	};
 

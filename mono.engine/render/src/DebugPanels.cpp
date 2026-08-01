@@ -223,6 +223,9 @@ namespace engine::render {
 			Colour{96, 190, 130},  // render
 			Colour{222, 158, 70},  // simulation
 			Colour{190, 120, 210}, // script
+			// Grey, and deliberately the dullest thing on the panel. Idle is the
+			// largest bar on a vsynced frame and the least interesting.
+			Colour{96, 104, 118}, // idle
 		};
 
 		std::string Format(const char *format, ...) {
@@ -487,7 +490,13 @@ namespace engine::render {
 			const int timelineLeft = textLeft + columnsWidth + TIMELINE_GAP * scale;
 			const int timelineWidth = std::max(0, x + width - timelineLeft);
 
+			// The timeline is laid out against the whole frame, because that is
+			// what a span's start offset is measured from — but the SHARE column
+			// is a share of the *busy* part. On a vsynced frame the two differ by
+			// an order of magnitude, and a share of the whole frame would report
+			// everything that did work as one per cent of it.
 			const float frameMilliseconds = std::max(data.FrameMilliseconds, 0.0001f);
+			const float busyMilliseconds = std::max(data.BusyMilliseconds(), 0.0001f);
 			const float timelineScale = static_cast<float>(timelineWidth) / frameMilliseconds;
 
 			// The column header, so the numbers are readable without knowing the
@@ -515,7 +524,7 @@ namespace engine::render {
 			// gap between the ones that are marked, and drawing it as a block
 			// would put it somewhere it did not happen.
 			{
-				const float share = data.UnmarkedMilliseconds / frameMilliseconds;
+				const float share = data.UnmarkedMilliseconds / busyMilliseconds;
 				const std::string row =
 					PadRight("(unmarked)", NAME_FIELD) + " " +
 					PadLeft(Format("%.2f", static_cast<double>(data.UnmarkedMilliseconds)), VALUE_FIELD) +
@@ -620,7 +629,7 @@ namespace engine::render {
 						name += " +";
 					}
 
-					const float share = span.Milliseconds / frameMilliseconds;
+					const float share = span.Milliseconds / busyMilliseconds;
 					text.push_back(
 						PadRight(std::move(name), NAME_FIELD) + " " +
 						PadLeft(Format("%.2f", static_cast<double>(span.Milliseconds)), VALUE_FIELD) + " " +
@@ -635,7 +644,7 @@ namespace engine::render {
 				// is the pass that scales with the font scale squared.
 				ENGINE_PROFILE_CAT("flame glyphs", core::ProfileCategory::Render);
 				for (size_t index = 0; index < rows.size(); index++) {
-					const float share = data.Spans[rows[index].Index].Milliseconds / frameMilliseconds;
+					const float share = data.Spans[rows[index].Index].Milliseconds / busyMilliseconds;
 					const auto textColour = ColourForShare(share);
 					DebugText::Draw(
 						image,
@@ -713,6 +722,15 @@ namespace engine::render {
 			int cursor = y;
 			for (size_t index = 0; index < static_cast<size_t>(core::ProfileCategory::Count); index++) {
 				const auto category = static_cast<core::ProfileCategory>(index);
+
+				// Idle is not part of the busy total these bars are drawn
+				// against, so a bar for it would run off the end of the panel.
+				// The header reports it as a number instead, which is the only
+				// place it means anything.
+				if (category == core::ProfileCategory::Idle) {
+					continue;
+				}
+
 				const std::string_view name = core::GetCategoryName(category);
 
 				const float milliseconds = totals[index];
@@ -1026,15 +1044,20 @@ namespace engine::render {
 				// RMAX is only meaningful against a window, so the window says how
 				// much of itself it has: a reading over 0.2 s of history and one
 				// over the full five seconds are not the same claim.
+				// Frame, then busy, then what the difference was spent on. A
+				// vsynced frame is mostly a sleep, and a panel that reports only
+				// the total makes a fast engine look like a slow one.
 				writer.Line(
 					Format(
-						"%.2f MS   TRACY %s   RMAX OVER %.1fS%s",
+						"%.2f MS   BUSY %.2f   IDLE %.2f   TRACY %s   RMAX OVER %.1fS%s",
 						static_cast<double>(data.FrameMilliseconds),
+						static_cast<double>(data.BusyMilliseconds()),
+						static_cast<double>(data.IdleMilliseconds),
 						data.TracyAttached ? "ATTACHED" : "OFF",
 						data.HistorySeconds,
 						data.DroppedSpans > 0 ? "   SPANS DROPPED!" : ""
 					),
-					data.DroppedSpans > 0 ? TEXT_WARN : ColourForMilliseconds(data.FrameMilliseconds)
+					data.DroppedSpans > 0 ? TEXT_WARN : ColourForMilliseconds(data.BusyMilliseconds())
 				);
 				writer.Skip();
 			}

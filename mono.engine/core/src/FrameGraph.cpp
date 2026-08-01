@@ -232,6 +232,8 @@ namespace engine::core {
 			return "render";
 		case ProfileCategory::Simulation:
 			return "sim";
+		case ProfileCategory::Idle:
+			return "IDLE";
 		case ProfileCategory::Script:
 			return "script";
 		case ProfileCategory::Count:

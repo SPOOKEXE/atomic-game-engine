@@ -495,6 +495,63 @@ TEST_CASE("the unmarked row is drawn even when there is nothing unmarked", "[pan
 	REQUIRE(heightOf(0.0f) == heightOf(4.0f));
 }
 
+TEST_CASE("a share is a share of the work, not of the waiting", "[panels]") {
+	// A frame of 16.7 ms that spent 15 waiting for the display did 1.7 ms of
+	// work. A span costing 0.85 of that is half the work and five per cent of
+	// the frame, and only one of those numbers is worth putting on a panel —
+	// otherwise nothing is ever worth optimising on a vsynced build.
+	DebugPanelData data;
+	data.FrameMilliseconds = 16.7f;
+	data.IdleMilliseconds = 15.0f;
+
+	REQUIRE(data.BusyMilliseconds() == Approx(1.7f).margin(0.01));
+}
+
+TEST_CASE("idle larger than the frame does not invert the busy time", "[panels]") {
+	// The two come from different places — the frame from one clock reading,
+	// the idle total from summing span self time — and a negative busy figure
+	// would divide every share the wrong way round.
+	DebugPanelData data;
+	data.FrameMilliseconds = 4.0f;
+	data.IdleMilliseconds = 9.0f;
+
+	REQUIRE(data.BusyMilliseconds() == Approx(4.0f));
+}
+
+TEST_CASE("a frame that waited for nothing is all busy", "[panels]") {
+	DebugPanelData data;
+	data.FrameMilliseconds = 2.5f;
+
+	REQUIRE(data.BusyMilliseconds() == Approx(2.5f));
+}
+
+TEST_CASE("the categories tab draws without running off the panel", "[panels]") {
+	const std::vector<FrameSpan> spans{
+		{.Name = "acquire swapchain",
+		 .Depth = 0,
+		 .Parent = engine::core::FrameGraph::NO_PARENT,
+		 .StartMilliseconds = 0.0f,
+		 .Milliseconds = 15.0f,
+		 .SelfMilliseconds = 15.0f,
+		 .Category = ProfileCategory::Idle},
+	};
+
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Categories;
+	data.Spans = spans;
+	data.FrameMilliseconds = 16.7f;
+	data.IdleMilliseconds = 15.0f;
+
+	// The bars are drawn against busy time, and idle is not part of it — a bar
+	// for it would be nine times the panel width.
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
 TEST_CASE("the categories tab has room for the unmarked bar", "[panels]") {
 	OverlayImage image;
 	image.Resize(640, 480);

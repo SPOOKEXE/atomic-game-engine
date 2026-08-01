@@ -262,6 +262,21 @@ namespace engine::render {
 		// heading above them — see core::FrameGraph::UnmarkedMilliseconds.
 		float UnmarkedMilliseconds = 0.0f;
 
+		// How much of that frame was spent waiting rather than working.
+		//
+		// Subtracted from the frame to get the figure the SHARE column is a
+		// share of. With vertical sync on, fifteen of a sixteen millisecond
+		// frame are a sleep, and a share of the whole frame would report every
+		// span that did something as one per cent of it — a panel on which
+		// nothing is ever worth optimising.
+		float IdleMilliseconds = 0.0f;
+
+		// The frame less the waiting: what there is to make faster.
+		float BusyMilliseconds() const {
+			return FrameMilliseconds > IdleMilliseconds ? FrameMilliseconds - IdleMilliseconds
+														: FrameMilliseconds;
+		}
+
 		// Number of spans omitted while the published frame was collected.
 		size_t DroppedSpans = 0;
 

@@ -563,7 +563,11 @@ namespace engine::render {
 			// A frame that looks slow with everything else on the panel adding
 			// up to nothing is a frame that is waiting here — which means the
 			// GPU is the limit, not the code above it.
-			ENGINE_PROFILE_CAT("acquire swapchain", core::ProfileCategory::Render);
+			// Idle, not Render. Nothing is being rendered here — the thread is
+			// asleep until the display is ready for another image, and counting
+			// that as rendering work makes the renderer look like the most
+			// expensive thing in a frame it spent waiting.
+			ENGINE_PROFILE_CAT("acquire swapchain", core::ProfileCategory::Idle);
 			acquired =
 				SDL_WaitAndAcquireGPUSwapchainTexture(command, State->Window, &swapchain, &width, &height);
 		}
