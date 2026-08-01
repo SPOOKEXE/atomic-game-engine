@@ -113,6 +113,93 @@ TEST_CASE("jitter is the mean change between frames", "[panels]") {
 	REQUIRE(statistics.Jitter() == Approx(10.0f).margin(0.01));
 }
 
+TEST_CASE("the window survives the ring growing and wrapping", "[panels]") {
+	FrameStatistics statistics;
+
+	// Far past the initial capacity, so the storage doubles several times and
+	// then the live range wraps the end of it repeatedly. Both are where a ring
+	// goes wrong, and both are silent when they do — the numbers stay plausible
+	// and stop being right.
+	constexpr int COUNT = 5000;
+	for (int index = 0; index < COUNT; index++) {
+		statistics.Record(static_cast<double>(index) * 0.001, 0.010f);
+	}
+
+	REQUIRE(statistics.SampleCount() == COUNT);
+	REQUIRE(statistics.Average() == Approx(100.0f).margin(0.1));
+	REQUIRE(statistics.Minimum() == Approx(100.0f).margin(0.1));
+	REQUIRE(statistics.Maximum() == Approx(100.0f).margin(0.1));
+	REQUIRE(statistics.Jitter() == Approx(0.0f).margin(0.001));
+
+	// Now slide the window across the buffer with a different value, so the
+	// answer changes only if the old samples really did leave.
+	for (int index = 0; index < COUNT; index++) {
+		const double now = FrameStatistics::WINDOW_SECONDS + static_cast<double>(index) * 0.001;
+		statistics.Record(now, 0.020f);
+	}
+
+	REQUIRE(statistics.Average() == Approx(50.0f).margin(0.1));
+	REQUIRE(statistics.Minimum() == Approx(50.0f).margin(0.1));
+}
+
+TEST_CASE("a wrapped window reads its samples in order", "[panels]") {
+	FrameStatistics statistics;
+
+	// Enough to wrap, then one distinctly slow frame last. Current() reads the
+	// newest sample, which after a wrap is not the highest index — taking the
+	// back of the storage instead of the newest sample is the classic ring bug
+	// and it reports a frame from twenty seconds ago as the current one.
+	for (int index = 0; index < 600; index++) {
+		statistics.Record(static_cast<double>(index) * 0.001, 0.010f);
+	}
+	statistics.Record(0.601, 0.040f);
+
+	REQUIRE(statistics.Current() == Approx(25.0f).margin(0.1));
+	REQUIRE(statistics.CurrentMilliseconds() == Approx(40.0f).margin(0.1));
+
+	// And the worst frame is that one, not an average of everything.
+	REQUIRE(statistics.Minimum() == Approx(25.0f).margin(0.1));
+}
+
+TEST_CASE("Summarise agrees with asking one number at a time", "[panels]") {
+	FrameStatistics statistics;
+
+	statistics.Record(0.000, 0.010f);
+	statistics.Record(0.010, 0.025f);
+	statistics.Record(0.035, 0.012f);
+	statistics.Record(0.047, 0.008f);
+
+	// The panel reads the summary and the tests read the accessors, so the two
+	// have to be the same numbers or the panel is showing something nothing
+	// checks.
+	const auto summary = statistics.Summarise();
+	REQUIRE(summary.Current == Approx(statistics.Current()));
+	REQUIRE(summary.CurrentMilliseconds == Approx(statistics.CurrentMilliseconds()));
+	REQUIRE(summary.Minimum == Approx(statistics.Minimum()));
+	REQUIRE(summary.Average == Approx(statistics.Average()));
+	REQUIRE(summary.Maximum == Approx(statistics.Maximum()));
+	REQUIRE(summary.Jitter == Approx(statistics.Jitter()));
+}
+
+TEST_CASE("clearing empties the window without losing the storage", "[panels]") {
+	FrameStatistics statistics;
+
+	for (int index = 0; index < 500; index++) {
+		statistics.Record(static_cast<double>(index) * 0.001, 0.010f);
+	}
+	statistics.Clear();
+
+	REQUIRE_FALSE(statistics.HasSamples());
+	REQUIRE(statistics.SampleCount() == 0);
+	REQUIRE(statistics.Current() == Approx(0.0f));
+
+	// And it still records afterwards. A Clear that left the head and the count
+	// disagreeing would read the wrong slot on the next sample.
+	statistics.Record(1.0, 0.020f);
+	REQUIRE(statistics.SampleCount() == 1);
+	REQUIRE(statistics.Current() == Approx(50.0f).margin(0.1));
+}
+
 TEST_CASE("both panels off draws nothing at all", "[panels]") {
 	OverlayImage image;
 	image.Resize(320, 240);

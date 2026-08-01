@@ -144,20 +144,42 @@ namespace client {
 
 			size_t written = 0;
 			{
+				// Parallel, and this is the loop that earns it. The arithmetic
+				// stopped being the cost once the interpolation lost its
+				// transcendentals; what is left is a hundred and fifty bytes of
+				// traffic per entity, over half of it the instance being written.
+				// A memory-bound loop is the case where more threads means more
+				// loads in flight, so it is the one that crosses over soonest.
+				//
+				// Each slice is told where its rows land in the output, so the
+				// workers never touch the same bytes and the array comes out in
+				// the same order every frame. No atomic, no locking, no
+				// frame-to-frame reshuffling of the draw list.
 				ENGINE_PROFILE_CAT("interpolate", engine::core::ProfileCategory::Simulation);
-				store.EachBatch<const Transform, const PreviousTransform, const Visual>(
-					[drawList, alpha, &written](
+
+				// Taken once, outside. A worker cannot grow the vector — that is
+				// a reallocation under every other worker's feet — so the buffer
+				// is sized before the loop starts and the body writes into it.
+				engine::render::Instance *const out = drawList->Instances.data();
+				const size_t capacity = drawList->Instances.size();
+
+				written = store.EachBatchParallel<const Transform, const PreviousTransform, const Visual>(
+					[out, capacity, alpha](
+						size_t first,
 						size_t rows,
 						const Transform *transforms,
 						const PreviousTransform *previous,
 						const Visual *visuals
 					) {
-						if (written + rows > drawList->Instances.size()) {
-							drawList->Instances.resize(written + rows);
+						// The count came from a different query than the one
+						// being walked. They agree, and this is what happens if
+						// they ever stop: instances go missing and the number on
+						// the panel drops, rather than a worker writing past the
+						// end of the buffer.
+						if (first >= capacity) {
+							return;
 						}
-
-						// Taken after the resize above, which may have moved it.
-						engine::render::Instance *out = drawList->Instances.data() + written;
+						rows = std::min(rows, capacity - first);
 
 						for (size_t row = 0; row < rows; row++) {
 							// Interpolated, not the tick position. At 300 fps against
@@ -179,15 +201,13 @@ namespace client {
 							model[1] *= visuals[row].Size;
 							model[2] *= visuals[row].Size;
 
-							out[row] = engine::render::Instance{
+							out[first + row] = engine::render::Instance{
 								model,
 								glm::vec4{
 									visuals[row].Colour.R, visuals[row].Colour.G, visuals[row].Colour.B, 1.0f
 								},
 							};
 						}
-
-						written += rows;
 					}
 				);
 			}
@@ -198,7 +218,7 @@ namespace client {
 				// Whatever the count said, this is how many there are. Shrinking
 				// a vector writes nothing and keeps the capacity, so the frame
 				// after an entity is destroyed still does not allocate.
-				drawList->Instances.resize(written);
+				drawList->Instances.resize(std::min(written, drawList->Instances.size()));
 
 				engine::core::Metrics::Count(
 					"render.instances", static_cast<double>(drawList->Instances.size())

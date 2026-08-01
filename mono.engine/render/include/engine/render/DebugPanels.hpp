@@ -18,11 +18,40 @@
 #include <engine/render/Overlay.hpp>
 
 #include <cstdint>
-#include <deque>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace engine::render {
+
+	// Everything the statistics panel shows, from one walk of the window.
+	//
+	// The panel used to ask for these one at a time, and each question walked
+	// the whole window to answer it. At a few hundred frames a second a twenty
+	// second window is tens of thousands of samples, so four questions was four
+	// passes over a quarter of a megabyte, every frame, to draw seven lines of
+	// text — and it cost more than the scene did.
+	//
+	// @client
+	struct FrameSummary {
+		// Frames per second, from the most recent sample.
+		float Current = 0.0f;
+
+		// Duration of the most recent frame, in milliseconds.
+		float CurrentMilliseconds = 0.0f;
+
+		// Frames per second of the *worst* frame in the window.
+		float Minimum = 0.0f;
+
+		// Frames per second from the mean frame duration over the window.
+		float Average = 0.0f;
+
+		// Frames per second of the best frame in the window.
+		float Maximum = 0.0f;
+
+		// Mean absolute change between consecutive frames, in milliseconds.
+		float Jitter = 0.0f;
+	};
 
 	// A rolling window of frame times. Twenty seconds, because a hitch every
 	// ten is a thing you have to be able to sit and watch for.
@@ -45,6 +74,14 @@ namespace engine::render {
 
 		// Reports whether the window contains at least one sample.
 		bool HasSamples() const;
+
+		// Every figure below, from a single pass over the window.
+		//
+		// What anything drawing the panel should call. The individual accessors
+		// are each a walk of the whole window and are kept for callers that want
+		// exactly one number; asking for several of them in a row is asking for
+		// the same walk several times.
+		FrameSummary Summarise() const;
 
 		// Frames per second, from the most recent sample.
 		float Current() const;
@@ -70,7 +107,7 @@ namespace engine::render {
 
 		// Number of frame samples currently inside the rolling window.
 		size_t SampleCount() const {
-			return Samples.size();
+			return Count;
 		}
 
 	  private:
@@ -79,7 +116,30 @@ namespace engine::render {
 			float Delta = 0.0f;
 		};
 
-		std::deque<Sample> Samples;
+		// A ring over a flat vector, not a deque.
+		//
+		// The access pattern is one push and a few pops from the front per
+		// frame, which is what a deque is for — but the *reads* are full walks
+		// of tens of thousands of samples, and a deque walks them through a
+		// table of chunk pointers. A ring over contiguous storage is the same
+		// O(1) at both ends and a straight line to read, which is the operation
+		// that was actually costing something.
+		//
+		// It also stops allocating once the window has filled, where the deque
+		// released and reacquired a chunk every time the window slid across a
+		// boundary.
+		std::vector<Sample> Ring;
+
+		// Index of the oldest sample. Ring is empty until the first Record.
+		size_t Head = 0;
+
+		// Live samples, which is not Ring.size() — that is the capacity.
+		size_t Count = 0;
+
+		// Ring index of the nth-oldest sample.
+		size_t IndexOf(size_t offset) const {
+			return (Head + offset) % Ring.size();
+		}
 	};
 
 	// A view available in the F5 profiler panel.

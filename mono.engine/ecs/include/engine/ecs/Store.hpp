@@ -345,6 +345,50 @@ namespace engine::ecs {
 			});
 		}
 
+		// EachBatch, spread across the job system's workers.
+		//
+		// The body is handed the index its first row occupies *in the iteration
+		// as a whole*, so a caller filling a packed output array writes to
+		// `output[first + row]` and nothing else. That is what makes this safe
+		// to parallelise where EachBatch's running cursor is not: the slices are
+		// disjoint by construction rather than by an atomic, and two runs of the
+		// same world produce the same array in the same order.
+		//
+		// Rows are partitioned within a table and tables are walked in order, so
+		// `first` is deterministic even though the work is not ordered.
+		//
+		// Every restriction EachBatch and EachParallel carry applies here, and
+		// one is worth repeating because the pointers make it easy to break:
+		// **no writes outside the rows the body was given.** Two workers hold
+		// neighbouring slices of the same array, and reaching sideways is a race
+		// the affinity check cannot see.
+		//
+		// Reach for it when the body is memory-bound over a large scene — that
+		// is the case where more threads means more outstanding loads and the
+		// crossover arrives soonest. Below it EachBatch wins; see the table on
+		// EachParallel below, and measure rather than assume.
+		//
+		// @param body  Called concurrently as `body(size_t first, size_t rows,
+		//              Ts *...columns)`, with `rows` always non-zero.
+		// @param grain The minimum run of rows worth handing to a worker.
+		// @return Rows visited in total, which is what the caller should size
+		//         its output down to afterwards.
+		// @tick
+		template <class... Ts, class Body>
+		size_t EachBatchParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
+			RequireOwningThread("EachBatchParallel");
+
+			size_t visited = 0;
+			Native().template query<Ts...>().run([&](flecs::iter &iterator) {
+				while (iterator.next()) {
+					visited += VisitTableInParallelBatches<Ts...>(
+						iterator, body, grain, visited, std::index_sequence_for<Ts...>{}
+					);
+				}
+			});
+			return visited;
+		}
+
 		// Each, spread across the job system's workers.
 		//
 		// Parallel *within* a tick, not asynchronous across ticks: this blocks
@@ -469,6 +513,32 @@ namespace engine::ecs {
 			}
 
 			body(count, ColumnData(iterator.field<Ts>(static_cast<int8_t>(Indices)))...);
+		}
+
+		// One table, split across workers and handed over in slices.
+		//
+		// @param base The number of rows already visited in earlier tables, so
+		//             that a slice can name its own place in the whole.
+		// @return This table's row count, for the caller to add to `base`.
+		template <class... Ts, class Body, size_t... Indices>
+		size_t VisitTableInParallelBatches(
+			flecs::iter &iterator, Body &body, size_t grain, size_t base, std::index_sequence<Indices...>
+		) {
+			const auto count = static_cast<size_t>(iterator.count());
+			if (count == 0) {
+				return 0;
+			}
+
+			// Captured by value, for the same reason VisitTableInParallel does
+			// it: each field is a {pointer, count, is_shared} triple, so every
+			// worker gets its own copy and no shared iterator state is touched.
+			auto columns = std::make_tuple(iterator.field<Ts>(static_cast<int8_t>(Indices))...);
+
+			parallel::Jobs::For(count, grain, [&](size_t begin, size_t end) {
+				body(base + begin, end - begin, (ColumnData(std::get<Indices>(columns)) + begin)...);
+			});
+
+			return count;
 		}
 
 		// One table's rows, split across workers.

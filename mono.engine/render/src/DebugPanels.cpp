@@ -22,83 +22,105 @@ namespace engine::render {
 			return;
 		}
 
-		Samples.push_back(Sample{now, deltaSeconds});
-		while (!Samples.empty() && now - Samples.front().Time > WINDOW_SECONDS) {
-			Samples.pop_front();
+		if (Count == Ring.size()) {
+			// Full. Doubling and re-linearising, so the oldest sample is at
+			// index zero again and the wrap arithmetic stays simple. How many
+			// samples twenty seconds holds depends on the frame rate, so the
+			// size cannot be picked up front — but it settles after a second or
+			// two and never grows again.
+			std::vector<Sample> grown(Ring.empty() ? 256 : Ring.size() * 2);
+			for (size_t offset = 0; offset < Count; offset++) {
+				grown[offset] = Ring[IndexOf(offset)];
+			}
+			Ring.swap(grown);
+			Head = 0;
+		}
+
+		Ring[(Head + Count) % Ring.size()] = Sample{now, deltaSeconds};
+		Count++;
+
+		while (Count > 0 && now - Ring[Head].Time > WINDOW_SECONDS) {
+			Head = (Head + 1) % Ring.size();
+			Count--;
 		}
 	}
 
 	void FrameStatistics::Clear() {
-		Samples.clear();
+		// The storage is kept. It is the size the frame rate needs it to be, and
+		// closing and reopening the panel should not pay to learn that again.
+		Head = 0;
+		Count = 0;
 	}
 
 	bool FrameStatistics::HasSamples() const {
-		return !Samples.empty();
+		return Count > 0;
 	}
 
-	float FrameStatistics::Current() const {
-		if (Samples.empty()) {
-			return 0.0f;
+	FrameSummary FrameStatistics::Summarise() const {
+		FrameSummary summary;
+		if (Count == 0) {
+			return summary;
 		}
-		return 1.0f / Samples.back().Delta;
+
+		const float latest = Ring[IndexOf(Count - 1)].Delta;
+		summary.Current = 1.0f / latest;
+		summary.CurrentMilliseconds = latest * 1000.0f;
+
+		// The slowest frame is the lowest FPS, so Minimum tracks the *largest*
+		// delta. Getting these the wrong way round makes the panel say the
+		// opposite of the truth, which is worse than not having it.
+		float worst = Ring[Head].Delta;
+		float best = Ring[Head].Delta;
+		double total = 0.0;
+		double change = 0.0;
+
+		float previous = Ring[Head].Delta;
+		for (size_t offset = 0; offset < Count; offset++) {
+			const float delta = Ring[IndexOf(offset)].Delta;
+			worst = std::max(worst, delta);
+			best = std::min(best, delta);
+			total += delta;
+			if (offset > 0) {
+				change += std::abs(delta - previous);
+			}
+			previous = delta;
+		}
+
+		summary.Minimum = 1.0f / worst;
+		summary.Maximum = 1.0f / best;
+		// The mean of the deltas, then inverted. Averaging the per-frame FPS
+		// values instead would weight the fast frames far too heavily.
+		summary.Average = static_cast<float>(static_cast<double>(Count) / total);
+		summary.Jitter =
+			Count < 2 ? 0.0f : static_cast<float>(change / static_cast<double>(Count - 1)) * 1000.0f;
+
+		return summary;
+	}
+
+	// Each of these is the whole window for one number. They are here for a
+	// caller that wants exactly one; anything wanting several wants Summarise.
+	float FrameStatistics::Current() const {
+		return Summarise().Current;
 	}
 
 	float FrameStatistics::CurrentMilliseconds() const {
-		if (Samples.empty()) {
-			return 0.0f;
-		}
-		return Samples.back().Delta * 1000.0f;
+		return Summarise().CurrentMilliseconds;
 	}
 
-	// The slowest frame is the lowest FPS, so Minimum walks for the largest
-	// delta. Getting these the wrong way round makes the panel say the opposite
-	// of the truth, which is worse than not having it.
 	float FrameStatistics::Minimum() const {
-		if (Samples.empty()) {
-			return 0.0f;
-		}
-		float worst = Samples.front().Delta;
-		for (const auto &sample : Samples) {
-			worst = std::max(worst, sample.Delta);
-		}
-		return 1.0f / worst;
+		return Summarise().Minimum;
 	}
 
 	float FrameStatistics::Maximum() const {
-		if (Samples.empty()) {
-			return 0.0f;
-		}
-		float best = Samples.front().Delta;
-		for (const auto &sample : Samples) {
-			best = std::min(best, sample.Delta);
-		}
-		return 1.0f / best;
+		return Summarise().Maximum;
 	}
 
 	float FrameStatistics::Average() const {
-		if (Samples.empty()) {
-			return 0.0f;
-		}
-
-		// The mean of the deltas, then inverted. Averaging the per-frame FPS
-		// values instead would weight the fast frames far too heavily.
-		double total = 0.0;
-		for (const auto &sample : Samples) {
-			total += sample.Delta;
-		}
-		return static_cast<float>(static_cast<double>(Samples.size()) / total);
+		return Summarise().Average;
 	}
 
 	float FrameStatistics::Jitter() const {
-		if (Samples.size() < 2) {
-			return 0.0f;
-		}
-
-		double total = 0.0;
-		for (size_t index = 1; index < Samples.size(); index++) {
-			total += std::abs(Samples[index].Delta - Samples[index - 1].Delta);
-		}
-		return static_cast<float>(total / static_cast<double>(Samples.size() - 1)) * 1000.0f;
+		return Summarise().Jitter;
 	}
 
 	// ---------------------------------------------------------------------
@@ -308,27 +330,29 @@ namespace engine::render {
 				return;
 			}
 
-			const auto &statistics = *data.Statistics;
-			const float milliseconds = statistics.CurrentMilliseconds();
+			// One walk of the window for all six numbers. Asked one at a time
+			// this was six walks of tens of thousands of samples to draw three
+			// lines of text, and it cost more than the scene being measured.
+			const FrameSummary summary = data.Statistics->Summarise();
 
 			writer.Line(
 				Format(
 					"%.0f FPS   %.2f MS",
-					static_cast<double>(statistics.Current()),
-					static_cast<double>(milliseconds)
+					static_cast<double>(summary.Current),
+					static_cast<double>(summary.CurrentMilliseconds)
 				),
-				ColourForMilliseconds(milliseconds)
+				ColourForMilliseconds(summary.CurrentMilliseconds)
 			);
 			writer.Line(
 				Format(
 					"MIN %.1f  AVG %.1f  MAX %.1f",
-					static_cast<double>(statistics.Minimum()),
-					static_cast<double>(statistics.Average()),
-					static_cast<double>(statistics.Maximum())
+					static_cast<double>(summary.Minimum),
+					static_cast<double>(summary.Average),
+					static_cast<double>(summary.Maximum)
 				),
 				TEXT_DIM
 			);
-			writer.Line(Format("JITTER %.2f MS", static_cast<double>(statistics.Jitter())), TEXT_DIM);
+			writer.Line(Format("JITTER %.2f MS", static_cast<double>(summary.Jitter)), TEXT_DIM);
 
 			if (data.TickRate > 0.0) {
 				// Measured against configured. They diverge when the machine

@@ -15,6 +15,10 @@ TEST_SUITE_ID("engine.ecs.parallel")
 TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.parallel.jobs")
 
+// EachBatchParallel hands every slice the index its rows occupy in the whole
+// iteration, which is the only thing that makes a packed output array safe to
+// fill from several threads at once. These cases are about that index.
+
 using Catch::Approx;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -249,4 +253,149 @@ TEST_CASE("the entity handed to the body is the right one", "[parallel]") {
 	for (const auto &[entity, value] : seen) {
 		REQUIRE(created[static_cast<size_t>(value)] == entity);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// EachBatchParallel
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a batched parallel slice knows where its rows land", "[parallel]") {
+	Pool pool{4};
+	Store store("test");
+	constexpr size_t COUNT = 10'000;
+	Fill(store, COUNT);
+
+	// The whole contract, exercised the way a caller uses it: every slice
+	// writes into its own range of one packed array, with no atomic and no
+	// locking, and every slot is filled exactly once.
+	std::vector<float> output(COUNT, -1.0f);
+	const size_t visited = store.EachBatchParallel<const Velocity>(
+		[&output](size_t first, size_t rows, const Velocity *velocities) {
+			for (size_t row = 0; row < rows; row++) {
+				output[first + row] = velocities[row].X;
+			}
+		}
+	);
+
+	REQUIRE(visited == COUNT);
+	for (const float value : output) {
+		REQUIRE(value >= 0.0f);
+	}
+}
+
+TEST_CASE("the slices cover the output exactly once between them", "[parallel]") {
+	Pool pool{4};
+	Store store("test");
+	constexpr size_t COUNT = 10'000;
+	Fill(store, COUNT);
+
+	// Two slices overlapping is a race that shows up as a torn draw list once
+	// in a thousand frames. Counting writes per slot catches it deterministically.
+	std::vector<std::atomic<int>> writes(COUNT);
+	for (auto &slot : writes) {
+		slot.store(0, std::memory_order_relaxed);
+	}
+
+	store.EachBatchParallel<const Velocity>([&writes](size_t first, size_t rows, const Velocity *) {
+		for (size_t row = 0; row < rows; row++) {
+			writes[first + row].fetch_add(1, std::memory_order_relaxed);
+		}
+	});
+
+	for (const auto &slot : writes) {
+		REQUIRE(slot.load(std::memory_order_relaxed) == 1);
+	}
+}
+
+TEST_CASE("the batched parallel order is the batched serial order", "[parallel]") {
+	Pool pool{4};
+	Store store("test");
+	constexpr size_t COUNT = 5'000;
+	Fill(store, COUNT);
+
+	// Determinism is the reason `first` exists rather than an atomic cursor. A
+	// draw list that reshuffles between frames is one that cannot be compared
+	// between frames, and a recorded run stops replaying.
+	std::vector<float> serial;
+	serial.reserve(COUNT);
+	store.EachBatch<const Velocity>([&serial](size_t rows, const Velocity *velocities) {
+		for (size_t row = 0; row < rows; row++) {
+			serial.push_back(velocities[row].X);
+		}
+	});
+
+	std::vector<float> parallel(COUNT, -1.0f);
+	store.EachBatchParallel<const Velocity>(
+		[&parallel](size_t first, size_t rows, const Velocity *velocities) {
+			for (size_t row = 0; row < rows; row++) {
+				parallel[first + row] = velocities[row].X;
+			}
+		}
+	);
+
+	REQUIRE(serial == parallel);
+}
+
+TEST_CASE("batched parallel spans archetypes without colliding", "[parallel]") {
+	Pool pool{4};
+	Store store("test");
+
+	// Two tables, so `first` has to carry across the boundary rather than
+	// restarting — the bug that silently overwrites the first table's output
+	// with the second table's.
+	constexpr size_t WITH_MARKER = 3'000;
+	constexpr size_t WITHOUT = 4'000;
+	for (size_t index = 0; index < WITH_MARKER + WITHOUT; index++) {
+		const Entity entity = store.Create();
+		store.Set<Velocity>(entity, Velocity{1.0f});
+		if (index < WITH_MARKER) {
+			store.Set<Marker>(entity, Marker{1});
+		}
+	}
+
+	std::vector<int> writes(WITH_MARKER + WITHOUT, 0);
+	const size_t visited =
+		store.EachBatchParallel<const Velocity>([&writes](size_t first, size_t rows, const Velocity *) {
+			for (size_t row = 0; row < rows; row++) {
+				writes[first + row]++;
+			}
+		});
+
+	REQUIRE(visited == WITH_MARKER + WITHOUT);
+	for (const int count : writes) {
+		REQUIRE(count == 1);
+	}
+}
+
+TEST_CASE("batched parallel visits nothing when nothing matches", "[parallel]") {
+	Pool pool{4};
+	Store store("test");
+
+	size_t calls = 0;
+	const size_t visited =
+		store.EachBatchParallel<const Marker>([&calls](size_t, size_t, const Marker *) { calls++; });
+
+	REQUIRE(visited == 0);
+	REQUIRE(calls == 0);
+}
+
+TEST_CASE("batched parallel works with no job pool at all", "[parallel]") {
+	Store store("test");
+	constexpr size_t COUNT = 1'000;
+	Fill(store, COUNT);
+
+	// Jobs::For runs inline when there is nobody to hand work to. A headless
+	// test run and a server that never started the pool are the same case.
+	std::vector<float> output(COUNT, -1.0f);
+	const size_t visited = store.EachBatchParallel<const Velocity>(
+		[&output](size_t first, size_t rows, const Velocity *velocities) {
+			for (size_t row = 0; row < rows; row++) {
+				output[first + row] = velocities[row].X;
+			}
+		}
+	);
+
+	REQUIRE(visited == COUNT);
+	REQUIRE(output.front() >= 0.0f);
+	REQUIRE(output.back() >= 0.0f);
 }
