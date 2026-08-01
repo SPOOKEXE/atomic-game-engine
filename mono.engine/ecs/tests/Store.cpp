@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <thread>
 #include <vector>
 
@@ -143,6 +144,139 @@ TEST_CASE("Each writes through to the store", "[ecs]") {
 	});
 
 	REQUIRE(moved == 100);
+}
+
+TEST_CASE("EachBatch visits the same entities Each does", "[ecs]") {
+	Store store("test");
+
+	const Entity both = store.Create();
+	store.Set<Position>(both, Position{1.0f, 2.0f});
+	store.Set<Velocity>(both, Velocity{3.0f, 4.0f});
+
+	const Entity positionOnly = store.Create();
+	store.Set<Position>(positionOnly, Position{5.0f, 5.0f});
+
+	// The batched form is an iteration strategy, not a different query. Anything
+	// it matches differently from Each is a bug in one of the two.
+	size_t seen = 0;
+	store.EachBatch<Position, Velocity>([&](size_t rows, Position *positions, Velocity *velocities) {
+		for (size_t row = 0; row < rows; row++) {
+			REQUIRE(positions[row].X == Approx(1.0f));
+			REQUIRE(velocities[row].Y == Approx(4.0f));
+		}
+		seen += rows;
+	});
+
+	REQUIRE(seen == store.CountMatching<Position, Velocity>());
+	REQUIRE(seen == 1);
+}
+
+TEST_CASE("EachBatch covers every row exactly once", "[ecs]") {
+	Store store("test");
+
+	constexpr int COUNT = 500;
+	for (int index = 0; index < COUNT; index++) {
+		const Entity entity = store.Create();
+		store.Set<Tag>(entity, Tag{index});
+	}
+
+	// Batches may divide any way the storage likes. What must hold is that
+	// their concatenation is the whole set, with nothing seen twice — which is
+	// the only promise a caller writing into a packed array can rely on.
+	std::vector<int> found;
+	store.EachBatch<Tag>([&](size_t rows, Tag *tags) {
+		REQUIRE(rows > 0);
+		for (size_t row = 0; row < rows; row++) {
+			found.push_back(tags[row].Value);
+		}
+	});
+
+	std::sort(found.begin(), found.end());
+	REQUIRE(found.size() == COUNT);
+	REQUIRE(std::adjacent_find(found.begin(), found.end()) == found.end());
+	REQUIRE(found.front() == 0);
+	REQUIRE(found.back() == COUNT - 1);
+}
+
+TEST_CASE("EachBatch writes through to the store", "[ecs]") {
+	Store store("test");
+
+	for (int index = 0; index < 100; index++) {
+		const Entity entity = store.Create();
+		store.Set<Position>(entity, Position{0.0f, 0.0f});
+		store.Set<Velocity>(entity, Velocity{1.0f, 0.0f});
+	}
+
+	// The pointers are into the live tables, so a write through one is a write
+	// to the store. That is the point of handing them out.
+	constexpr float STEP = 0.5f;
+	store.EachBatch<Position, Velocity>([&](size_t rows, Position *positions, Velocity *velocities) {
+		for (size_t row = 0; row < rows; row++) {
+			positions[row].X += velocities[row].X * STEP;
+		}
+	});
+
+	size_t moved = 0;
+	store.Each<Position>([&](Entity, Position &position) {
+		if (position.X == Approx(0.5f)) {
+			moved++;
+		}
+	});
+
+	REQUIRE(moved == 100);
+}
+
+TEST_CASE("EachBatch spans more than one table", "[ecs]") {
+	Store store("test");
+
+	// Two archetypes: Tag alone, and Tag with Position. A batch is a run of
+	// rows in one table, so this cannot be delivered as a single call — and a
+	// caller must not assume it was.
+	for (int index = 0; index < 10; index++) {
+		const Entity entity = store.Create();
+		store.Set<Tag>(entity, Tag{index});
+		if (index % 2 == 0) {
+			store.Set<Position>(entity, Position{});
+		}
+	}
+
+	size_t batches = 0;
+	size_t rowsSeen = 0;
+	store.EachBatch<Tag>([&](size_t rows, Tag *) {
+		batches++;
+		rowsSeen += rows;
+	});
+
+	REQUIRE(rowsSeen == 10);
+	REQUIRE(batches > 1);
+}
+
+TEST_CASE("EachBatch on nothing calls nothing", "[ecs]") {
+	Store store("test");
+
+	// Not one call with a zero row count. A body handed a count is entitled to
+	// assume there is something at the pointer it came with.
+	size_t calls = 0;
+	store.EachBatch<Position>([&](size_t, Position *) { calls++; });
+
+	REQUIRE(calls == 0);
+}
+
+TEST_CASE("EachBatch hands out the store's own arrays", "[ecs]") {
+	Store store("test");
+
+	for (int index = 0; index < 16; index++) {
+		const Entity entity = store.Create();
+		store.Set<Tag>(entity, Tag{index});
+	}
+
+	// Contiguity is the whole reason this exists: the body is meant to be a
+	// loop over an array, not a walk of something that only looks like one.
+	store.EachBatch<Tag>([&](size_t rows, Tag *tags) {
+		for (size_t row = 1; row < rows; row++) {
+			REQUIRE(&tags[row] == &tags[row - 1] + 1);
+		}
+	});
 }
 
 TEST_CASE("destroying during iteration is deferred, not a crash", "[ecs]") {

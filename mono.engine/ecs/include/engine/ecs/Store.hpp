@@ -302,6 +302,49 @@ namespace engine::ecs {
 			Native().defer_end();
 		}
 
+		// Each, one call per contiguous run of rows instead of one per entity.
+		//
+		// The body is handed a row count and one array pointer per component,
+		// which is what the storage already holds — a table is columns of
+		// contiguous rows, and Each spends its time turning that back into one
+		// call per row. A system that writes a packed output array wants the
+		// columns, not the rows: the loop is then something the compiler can
+		// unroll and vectorise, and the per-entity call disappears.
+		//
+		// Use it when the body is uniform across rows and the output is an
+		// array. Use Each when the body branches per entity, needs the Entity,
+		// or is doing something structural — this one hands out raw pointers
+		// into live tables and gives up all three:
+		//
+		//   - **No structural changes.** Not deferred, for the same reason
+		//     EachParallel is not: deferring exists to make a Create or Destroy
+		//     inside the loop safe, and one here would move the very arrays the
+		//     body is holding. Writes *through* the pointers are ordinary
+		//     memory writes and are fine.
+		//   - **No Entity.** Adding one would mean either a parallel array of a
+		//     type this header would have to promise is layout-compatible with
+		//     the backing store's, or a per-row conversion — which is the cost
+		//     this exists to remove. A body that needs entities wants Each.
+		//
+		// Batches arrive in table order, and a table is not a unit anybody
+		// declared: adding a component to one entity moves it to another table
+		// and changes how the rows divide. So the *number* of batches and their
+		// sizes are not stable across frames, and only the concatenation of them
+		// is meaningful. Nothing may depend on where one batch ends.
+		//
+		// @param body Called as `body(size_t rows, Ts *...columns)` once per
+		//             table run, with `rows` always non-zero.
+		// @tick
+		template <class... Ts, class Body> void EachBatch(Body &&body) {
+			RequireOwningThread("EachBatch");
+
+			Native().template query<Ts...>().run([&](flecs::iter &iterator) {
+				while (iterator.next()) {
+					VisitTable<Ts...>(iterator, body, std::index_sequence_for<Ts...>{});
+				}
+			});
+		}
+
 		// Each, spread across the job system's workers.
 		//
 		// Parallel *within* a tick, not asynchronous across ticks: this blocks
@@ -406,6 +449,28 @@ namespace engine::ecs {
 		}
 
 	  private:
+		// The array behind one field.
+		//
+		// `flecs::field` exposes it only through `operator->`, which reads as an
+		// accessor for the shared-field case and is in fact the pointer either
+		// way. Naming it once here keeps `.operator->()` out of the call site.
+		template <class T> static T *ColumnData(const flecs::field<T> &column) {
+			return column.operator->();
+		}
+
+		// One table, handed over whole.
+		template <class... Ts, class Body, size_t... Indices>
+		void VisitTable(flecs::iter &iterator, Body &body, std::index_sequence<Indices...>) {
+			const auto count = static_cast<size_t>(iterator.count());
+			// An empty table is a table, and a body promised a non-zero row
+			// count should not have to check for one.
+			if (count == 0) {
+				return;
+			}
+
+			body(count, ColumnData(iterator.field<Ts>(static_cast<int8_t>(Indices)))...);
+		}
+
 		// One table's rows, split across workers.
 		//
 		// The field objects are captured by value on purpose. Each is a

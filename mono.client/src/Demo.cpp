@@ -108,36 +108,64 @@ namespace client {
 
 			auto *drawList = store.ResourceMutable<DrawList>();
 
-			// Cleared and refilled rather than rebuilt: the capacity survives,
-			// so a steady scene stops allocating after the first frame.
-			drawList->Instances.clear();
+			// Sized once from the store's own count, then written by index. The
+			// vector is not cleared first, so on a steady scene this resize is a
+			// no-op: the buffer is the size it already was, and no element is
+			// value-initialised only to be overwritten a moment later.
+			//
+			// The count is a floor rather than a contract — it comes from a
+			// different query than the one EachBatch walks, and this system does
+			// not get to assume the two agree. The batches decide the real size,
+			// and the shrink below settles it.
+			drawList->Instances.resize(store.CountMatching<Transform, PreviousTransform, Visual>());
 
-			store.Each<const Transform, const PreviousTransform, const Visual>(
-				[drawList, alpha](
-					Entity,
-					const Transform &transform,
-					const PreviousTransform &previous,
-					const Visual &visual
+			size_t written = 0;
+			store.EachBatch<const Transform, const PreviousTransform, const Visual>(
+				[drawList, alpha, &written](
+					size_t rows,
+					const Transform *transforms,
+					const PreviousTransform *previous,
+					const Visual *visuals
 				) {
-					// Interpolated, not the tick position. At 300 fps against a
-					// 60 Hz tick, drawing tick positions shows each one five
-					// times and then jumps — which reads as a frame-rate
-					// problem rather than as a tick-rate one.
-					glm::mat4 model = previous.Frame.Lerp(transform.Frame, alpha).ToMatrix();
-					// Scale on the right, so it applies before the rotation and
-					// stays a scale rather than a shear.
-					model[0] *= visual.Size;
-					model[1] *= visual.Size;
-					model[2] *= visual.Size;
+					if (written + rows > drawList->Instances.size()) {
+						drawList->Instances.resize(written + rows);
+					}
 
-					drawList->Instances.push_back(
-						engine::render::Instance{
+					// Taken after the resize above, which may have moved it.
+					engine::render::Instance *out = drawList->Instances.data() + written;
+
+					for (size_t row = 0; row < rows; row++) {
+						// Interpolated, not the tick position. At 300 fps against
+						// a 60 Hz tick, drawing tick positions shows each one five
+						// times and then jumps — which reads as a frame-rate
+						// problem rather than as a tick-rate one.
+						glm::mat4 model =
+							previous[row].Frame.Lerp(transforms[row].Frame, alpha).ToMatrix();
+						// Scale on the right, so it applies before the rotation
+						// and stays a scale rather than a shear.
+						model[0] *= visuals[row].Size;
+						model[1] *= visuals[row].Size;
+						model[2] *= visuals[row].Size;
+
+						out[row] = engine::render::Instance{
 							model,
-							glm::vec4{visual.Colour.R, visual.Colour.G, visual.Colour.B, 1.0f},
-						}
-					);
+							glm::vec4{
+								visuals[row].Colour.R,
+								visuals[row].Colour.G,
+								visuals[row].Colour.B,
+								1.0f
+							},
+						};
+					}
+
+					written += rows;
 				}
 			);
+
+			// Whatever the count said, this is how many there are. Shrinking a
+			// vector writes nothing and keeps the capacity, so the frame after a
+			// entity is destroyed still does not allocate.
+			drawList->Instances.resize(written);
 
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 		}
