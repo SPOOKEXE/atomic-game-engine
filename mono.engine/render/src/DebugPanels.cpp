@@ -627,17 +627,29 @@ namespace engine::render {
 
 			const float total = std::max(data.FrameMilliseconds, 0.0001f);
 
+			// One pass over the spans for every category, not one pass per
+			// category. The old shape read the whole frame four times to
+			// produce four numbers, and would have read it once more for every
+			// category anybody added.
+			std::array<float, static_cast<size_t>(core::ProfileCategory::Count)> totals{};
+			{
+				ENGINE_PROFILE_CAT("category totals", core::ProfileCategory::Render);
+				for (const auto &span : data.Spans) {
+					const auto index = static_cast<size_t>(span.Category);
+					if (index < totals.size()) {
+						totals[index] += span.SelfMilliseconds;
+					}
+				}
+			}
+
+			ENGINE_PROFILE_CAT("category glyphs", core::ProfileCategory::Render);
+
 			int cursor = y;
 			for (size_t index = 0; index < static_cast<size_t>(core::ProfileCategory::Count); index++) {
 				const auto category = static_cast<core::ProfileCategory>(index);
 				const std::string_view name = core::GetCategoryName(category);
 
-				float milliseconds = 0.0f;
-				for (const auto &span : data.Spans) {
-					if (span.Category == category) {
-						milliseconds += span.SelfMilliseconds;
-					}
-				}
+				const float milliseconds = totals[index];
 
 				DebugText::Draw(
 					image,
@@ -812,39 +824,47 @@ namespace engine::render {
 			// most of its life as a large dark rectangle over the game, which
 			// makes the tool something you close rather than something you
 			// leave open.
+			//
+			// Measured because it is a pass over every span before a single
+			// pixel is drawn, and because it decides how large the background
+			// fill below is going to be — so it is upstream of the panel's
+			// biggest cost as well as being a cost itself.
 			int bodyRows = 1;
-			switch (data.Tab) {
-			case ProfilerTab::Frame: {
-				// A row per visible span now, not a row per depth. The two
-				// were the same only while every level was one bar.
-				int visible = 0;
-				for (const auto &span : data.Spans) {
-					if (span.Depth <= data.DepthLimit) {
-						visible++;
+			{
+				ENGINE_PROFILE_CAT("panel layout", core::ProfileCategory::Render);
+				switch (data.Tab) {
+				case ProfilerTab::Frame: {
+					// A row per visible span now, not a row per depth. The two
+					// were the same only while every level was one bar.
+					int visible = 0;
+					for (const auto &span : data.Spans) {
+						if (span.Depth <= data.DepthLimit) {
+							visible++;
+						}
 					}
+					// Plus the column header, plus the pinned (unmarked) row. Both
+					// are drawn before the scrollable body and neither scrolls, so
+					// leaving them out of the budget does not move the panel — it
+					// clips the last span off the bottom of it.
+					bodyRows = visible + 2 - std::max(data.Scroll, 0);
+					break;
 				}
-				// Plus the column header, plus the pinned (unmarked) row. Both
-				// are drawn before the scrollable body and neither scrolls, so
-				// leaving them out of the budget does not move the panel — it
-				// clips the last span off the bottom of it.
-				bodyRows = visible + 2 - std::max(data.Scroll, 0);
-				break;
+				case ProfilerTab::Categories:
+					// Plus the unmarked bar, which is drawn after the categories so
+					// that the bars sum to the frame rather than to less than it.
+					bodyRows = static_cast<int>(core::ProfileCategory::Count) + 1;
+					break;
+				case ProfilerTab::Systems:
+					bodyRows = static_cast<int>(data.Systems.size()) - std::max(data.Scroll, 0);
+					break;
+				case ProfilerTab::Counters:
+					bodyRows = static_cast<int>(data.Counters.size()) - std::max(data.Scroll, 0);
+					break;
+				case ProfilerTab::Count:
+					break;
+				}
+				bodyRows = std::clamp(bodyRows, 1, 40);
 			}
-			case ProfilerTab::Categories:
-				// Plus the unmarked bar, which is drawn after the categories so
-				// that the bars sum to the frame rather than to less than it.
-				bodyRows = static_cast<int>(core::ProfileCategory::Count) + 1;
-				break;
-			case ProfilerTab::Systems:
-				bodyRows = static_cast<int>(data.Systems.size()) - std::max(data.Scroll, 0);
-				break;
-			case ProfilerTab::Counters:
-				bodyRows = static_cast<int>(data.Counters.size()) - std::max(data.Scroll, 0);
-				break;
-			case ProfilerTab::Count:
-				break;
-			}
-			bodyRows = std::clamp(bodyRows, 1, 40);
 
 			// Top-anchored, stacked under the statistics panel when that is
 			// open. Anchored to the bottom, the rows grew upwards — so the

@@ -526,7 +526,11 @@ namespace engine::render {
 			return result;
 		}
 
-		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(State->Device);
+		SDL_GPUCommandBuffer *command = nullptr;
+		{
+			ENGINE_PROFILE_CAT("acquire command buffer", core::ProfileCategory::Render);
+			command = SDL_AcquireGPUCommandBuffer(State->Device);
+		}
 		if (!command) {
 			ENGINE_ERROR("SDL_AcquireGPUCommandBuffer: {}", SDL_GetError());
 			return result;
@@ -535,37 +539,91 @@ namespace engine::render {
 		SDL_GPUTexture *swapchain = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;
-		if (!SDL_WaitAndAcquireGPUSwapchainTexture(command, State->Window, &swapchain, &width, &height) ||
-			!swapchain) {
+		bool acquired = false;
+		{
+			// Where the frame waits, and the reason this one has a span of its
+			// own before anything else does. "WaitAnd" is not decoration: with
+			// vertical sync on this blocks until the display is ready, and with
+			// it off it blocks until the GPU has finished with a swapchain image
+			// to hand back. Either way the time is real, the CPU is idle for it,
+			// and it is not a cost anything above this can do anything about.
+			//
+			// A frame that looks slow with everything else on the panel adding
+			// up to nothing is a frame that is waiting here — which means the
+			// GPU is the limit, not the code above it.
+			ENGINE_PROFILE_CAT("acquire swapchain", core::ProfileCategory::Render);
+			acquired =
+				SDL_WaitAndAcquireGPUSwapchainTexture(command, State->Window, &swapchain, &width, &height);
+		}
+
+		if (!acquired || !swapchain) {
 			// Minimised, or mid-resize. Not an error, and not a reason to stop
 			// ticking — the simulation carries on and the next frame presents.
 			SDL_SubmitGPUCommandBuffer(command);
 			return result;
 		}
 
-		if (!State->EnsureDepth(width, height)) {
-			SDL_SubmitGPUCommandBuffer(command);
-			return result;
+		{
+			// Nothing at all on a steady window, and a texture allocation on the
+			// frame after a resize. Worth telling apart from the pass that uses
+			// it, because one is every frame and the other is one frame.
+			ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
+			if (!State->EnsureDepth(width, height)) {
+				SDL_SubmitGPUCommandBuffer(command);
+				return result;
+			}
 		}
 
 		// --- uploads --------------------------------------------------------
 
 		const auto instanceCount = static_cast<uint32_t>(instances.size());
 		bool haveInstances = false;
+		bool haveOverlay = false;
 
-		const bool haveOverlay = overlay.IsDirty() && !overlay.IsEmpty() &&
-								 State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
+		{
+			// Allocation, on the frame an overlay first appears or changes size.
+			// Zero on every other frame, which is what makes a reading here
+			// worth looking at rather than background noise.
+			ENGINE_PROFILE_CAT("ensure overlay", core::ProfileCategory::Render);
+			haveOverlay = overlay.IsDirty() && !overlay.IsEmpty() &&
+						  State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
+		}
 
-		if (instanceCount > 0 && State->EnsureInstanceCapacity(instanceCount)) {
-			ENGINE_PROFILE_CAT("upload instances", core::ProfileCategory::Render);
+		if (instanceCount > 0) {
+			bool capacity = false;
+			{
+				// Grows the device buffer when the scene does. Separate from the
+				// copy below because one is a GPU allocation and the other is a
+				// memcpy, and a spike in either means something different.
+				ENGINE_PROFILE_CAT("ensure instance capacity", core::ProfileCategory::Render);
+				capacity = State->EnsureInstanceCapacity(instanceCount);
+			}
 
-			void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
-			std::memcpy(mapped, instances.data(), instances.size() * sizeof(Instance));
-			SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
-			haveInstances = true;
+			if (capacity) {
+				ENGINE_PROFILE_CAT("upload instances", core::ProfileCategory::Render);
+
+				void *mapped = nullptr;
+				{
+					// Mapping can stall: the driver hands back memory the GPU may
+					// still be reading unless it cycles, and this asks it to.
+					ENGINE_PROFILE_CAT("map instances", core::ProfileCategory::Render);
+					mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
+				}
+				{
+					// Eighty bytes an entity, straight into write-combined
+					// memory. This is the other half of the traffic that made
+					// collect-instances memory-bound, paid a second time.
+					ENGINE_PROFILE_CAT("copy instances", core::ProfileCategory::Render);
+					std::memcpy(mapped, instances.data(), instances.size() * sizeof(Instance));
+				}
+				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
+				haveInstances = true;
+			}
 		}
 
 		if (haveInstances || haveOverlay) {
+			ENGINE_PROFILE_CAT("copy pass", core::ProfileCategory::Render);
+
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
 			if (haveInstances) {
@@ -581,6 +639,13 @@ namespace engine::render {
 			}
 
 			if (haveOverlay) {
+				// The whole overlay image, every frame it changes — and it
+				// changes every frame the panels are open, because they redraw
+				// every frame. At 1080p that is eight megabytes of memcpy to
+				// show a few hundred glyphs, and it is the price of the debug
+				// panels that nothing in the panels themselves can show.
+				ENGINE_PROFILE_CAT("upload overlay", core::ProfileCategory::Render);
+
 				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
 				std::memcpy(mapped, overlay.GetPixels(), overlay.GetByteCount());
 				SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
@@ -699,9 +764,16 @@ namespace engine::render {
 			result.DrawCalls++;
 		}
 
-		if (!SDL_SubmitGPUCommandBuffer(command)) {
-			ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
-			return result;
+		{
+			// Hands the whole buffer over and queues the present. The passes
+			// above only *record* commands, so almost nothing that happens in
+			// them is measured by their spans — this is where the driver gets
+			// the work, and where any cost of building it lands.
+			ENGINE_PROFILE_CAT("submit", core::ProfileCategory::Render);
+			if (!SDL_SubmitGPUCommandBuffer(command)) {
+				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
+				return result;
+			}
 		}
 
 		result.Presented = true;
