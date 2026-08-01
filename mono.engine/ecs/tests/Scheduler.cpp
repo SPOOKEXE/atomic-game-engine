@@ -38,17 +38,15 @@ TEST_CASE("phases run in order regardless of registration order", "[scheduler]")
 
 	scheduler.Tick(store, 0.016f);
 
-	REQUIRE(order == std::vector<std::string> { "a", "b", "c", "d" });
+	REQUIRE(order == std::vector<std::string>{"a", "b", "c", "d"});
 }
 
-TEST_CASE("the delta reaches every system through the world's clock",
-	"[scheduler]") {
+TEST_CASE("the delta reaches every system through the world's clock", "[scheduler]") {
 	Store store("test");
 	Scheduler scheduler;
 
 	float seen = 0.0f;
-	scheduler.Add("read-delta", Phase::Simulation,
-		[&](Store &tickStore) { seen = tickStore.Time().Delta; });
+	scheduler.Add("read-delta", Phase::Simulation, [&](Store &tickStore) { seen = tickStore.Time().Delta; });
 
 	scheduler.Tick(store, 0.25f);
 	REQUIRE(seen == Approx(0.25f));
@@ -67,16 +65,15 @@ TEST_CASE("RunPhases runs a range and leaves the clock alone", "[scheduler]") {
 	scheduler.ClearTimings();
 	scheduler.RunPhases(store, Phase::PreSimulation, Phase::PostSimulation);
 
-	REQUIRE(order == std::vector<std::string> { "sim" });
+	REQUIRE(order == std::vector<std::string>{"sim"});
 	REQUIRE(store.Time().Tick == 0);
 
 	scheduler.RunPhases(store, Phase::PreRender, Phase::PreRender);
-	REQUIRE(order == std::vector<std::string> { "sim", "draw" });
+	REQUIRE(order == std::vector<std::string>{"sim", "draw"});
 	REQUIRE(store.Time().Tick == 0);
 }
 
-TEST_CASE("timings accumulate across the calls that make up one frame",
-	"[scheduler]") {
+TEST_CASE("timings accumulate across the calls that make up one frame", "[scheduler]") {
 	Store store("test");
 	Scheduler scheduler;
 	scheduler.Add("stepped", Phase::Simulation, [](Store &) {});
@@ -97,7 +94,7 @@ TEST_CASE("a system mutates the store it is handed", "[scheduler]") {
 	Scheduler scheduler;
 
 	const Entity entity = store.Create();
-	store.Set<Health>(entity, Health { 100 });
+	store.Set<Health>(entity, Health{100});
 
 	scheduler.Add("decay", Phase::Simulation, [](Store &tickStore) {
 		tickStore.Each<Health>([](Entity, Health &health) { health.Value -= 10; });
@@ -137,8 +134,7 @@ TEST_CASE("timings are this run's, not every run's", "[scheduler]") {
 	REQUIRE(scheduler.Timings().size() == 1);
 }
 
-TEST_CASE("systems appear in the frame graph without their own instrumentation",
-	"[scheduler]") {
+TEST_CASE("systems appear in the frame graph without their own instrumentation", "[scheduler]") {
 	Store store("test");
 	Scheduler scheduler;
 	scheduler.Add("uninstrumented", Phase::Simulation, [](Store &) {});

@@ -106,7 +106,7 @@ TEST_CASE("Exists does not intern", "[name]") {
 	REQUIRE(Name::Count() == before);
 
 	// Braces, not parentheses: `Name(text);` declares a variable called text.
-	Name { text };
+	Name{text};
 	REQUIRE(Name::Exists(text));
 }
 

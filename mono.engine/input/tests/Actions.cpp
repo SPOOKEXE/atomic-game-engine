@@ -11,7 +11,7 @@ using engine::input::Actions;
 
 namespace {
 	SDL_Event KeyEvent(SDL_Keycode key, bool down, bool repeat = false) {
-		SDL_Event event {};
+		SDL_Event event{};
 		event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
 		event.key.key = key;
 		event.key.repeat = repeat;
@@ -89,7 +89,7 @@ TEST_CASE("a window close request is the quit action", "[input]") {
 	Actions actions;
 	actions.BeginFrame();
 
-	SDL_Event event {};
+	SDL_Event event{};
 	event.type = SDL_EVENT_QUIT;
 
 	REQUIRE(actions.HandleEvent(event));

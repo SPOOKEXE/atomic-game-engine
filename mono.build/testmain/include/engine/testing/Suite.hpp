@@ -62,16 +62,14 @@ namespace engine::testing {
 
 // The identifier is stashed in a file-local constant so that TEST_DEPENDS below
 // does not have to repeat it, which is the version that drifts.
-#define TEST_SUITE_ID(id)                                                             \
-	namespace {                                                                       \
-		constexpr std::string_view MonoTestSuiteId = id;                              \
-		const ::engine::testing::SuiteDeclaration MonoTestSuiteDeclaration { id, __FILE__ }; \
+#define TEST_SUITE_ID(id)                                                                                    \
+	namespace {                                                                                              \
+		constexpr std::string_view MonoTestSuiteId = id;                                                     \
+		const ::engine::testing::SuiteDeclaration MonoTestSuiteDeclaration{id, __FILE__};                    \
 	}
 
-#define TEST_DEPENDS(dependency)                                                      \
-	namespace {                                                                       \
-		const ::engine::testing::SuiteDependency ENGINE_TESTING_CONCAT(               \
-			MonoTestSuiteDependency,                                                  \
-			__LINE__                                                                  \
-		) { MonoTestSuiteId, dependency };                                            \
+#define TEST_DEPENDS(dependency)                                                                             \
+	namespace {                                                                                              \
+		const ::engine::testing::SuiteDependency                                                             \
+			ENGINE_TESTING_CONCAT(MonoTestSuiteDependency, __LINE__){MonoTestSuiteId, dependency};           \
 	}

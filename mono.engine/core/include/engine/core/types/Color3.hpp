@@ -32,11 +32,7 @@ namespace engine::core {
 		// @param r The linear red channel.
 		// @param g The linear green channel.
 		// @param b The linear blue channel.
-		constexpr Color3(float r, float g, float b)
-			: R(r)
-			, G(g)
-			, B(b) {
-		}
+		constexpr Color3(float r, float g, float b) : R(r), G(g), B(b) {}
 
 		// Converts 8-bit sRGB channels to linear light with the standard piecewise curve.
 		//
@@ -44,7 +40,7 @@ namespace engine::core {
 		// @param g The green sRGB channel in `[0, 255]`.
 		// @param b The blue sRGB channel in `[0, 255]`.
 		static Color3 FromRGB(uint8_t r, uint8_t g, uint8_t b) {
-			return { ToLinear(r / 255.0f), ToLinear(g / 255.0f), ToLinear(b / 255.0f) };
+			return {ToLinear(r / 255.0f), ToLinear(g / 255.0f), ToLinear(b / 255.0f)};
 		}
 
 		// Constructs a colour from linear channels without conversion or clamping.
@@ -53,20 +49,20 @@ namespace engine::core {
 		// @param g The linear green channel.
 		// @param b The linear blue channel.
 		static constexpr Color3 FromLinear(float r, float g, float b) {
-			return { r, g, b };
+			return {r, g, b};
 		}
 
 		// Scales every linear channel without clamping.
 		constexpr Color3 operator*(float scalar) const {
-			return { R * scalar, G * scalar, B * scalar };
+			return {R * scalar, G * scalar, B * scalar};
 		}
 		// Multiplies corresponding linear channels, as used for tinting.
 		constexpr Color3 operator*(const Color3 &other) const {
-			return { R * other.R, G * other.G, B * other.B };
+			return {R * other.R, G * other.G, B * other.B};
 		}
 		// Adds corresponding linear channels without clamping.
 		constexpr Color3 operator+(const Color3 &other) const {
-			return { R + other.R, G + other.G, B + other.B };
+			return {R + other.R, G + other.G, B + other.B};
 		}
 
 		// Reports whether all linear channels are exactly equal.

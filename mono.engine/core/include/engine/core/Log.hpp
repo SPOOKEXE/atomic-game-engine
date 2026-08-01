@@ -14,10 +14,10 @@ namespace engine::core {
 
 	// The severity threshold understood by the engine logging facade.
 	enum class LogLevel : uint8_t {
-		Trace,   // Diagnostic details, including all higher severities.
-		Info,    // Normal runtime events and higher severities.
+		Trace,	 // Diagnostic details, including all higher severities.
+		Info,	 // Normal runtime events and higher severities.
 		Warning, // Recoverable problems and errors.
-		Error,   // Failures only.
+		Error,	 // Failures only.
 	};
 
 	// Owns the process-wide spdlog logger used by engine programs and scripts.

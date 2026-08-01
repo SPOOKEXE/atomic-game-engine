@@ -58,7 +58,7 @@ TEST_CASE("a component round-trips", "[ecs]") {
 	Store store("test");
 
 	const Entity entity = store.Create();
-	store.Set<Position>(entity, Position { 3.0f, 4.0f });
+	store.Set<Position>(entity, Position{3.0f, 4.0f});
 
 	REQUIRE(store.Has<Position>(entity));
 
@@ -80,7 +80,7 @@ TEST_CASE("a mutable component can be written through", "[ecs]") {
 	Store store("test");
 
 	const Entity entity = store.Create();
-	store.Set<Position>(entity, Position { 1.0f, 1.0f });
+	store.Set<Position>(entity, Position{1.0f, 1.0f});
 
 	store.GetMutable<Position>(entity)->X = 9.0f;
 
@@ -91,8 +91,8 @@ TEST_CASE("removing a component leaves the entity", "[ecs]") {
 	Store store("test");
 
 	const Entity entity = store.Create();
-	store.Set<Position>(entity, Position {});
-	store.Set<Tag>(entity, Tag { 7 });
+	store.Set<Position>(entity, Position{});
+	store.Set<Tag>(entity, Tag{7});
 
 	store.Remove<Position>(entity);
 
@@ -105,19 +105,17 @@ TEST_CASE("Each visits only entities carrying every component named", "[ecs]") {
 	Store store("test");
 
 	const Entity both = store.Create();
-	store.Set<Position>(both, Position { 0.0f, 0.0f });
-	store.Set<Velocity>(both, Velocity { 1.0f, 2.0f });
+	store.Set<Position>(both, Position{0.0f, 0.0f});
+	store.Set<Velocity>(both, Velocity{1.0f, 2.0f});
 
 	const Entity positionOnly = store.Create();
-	store.Set<Position>(positionOnly, Position { 5.0f, 5.0f });
+	store.Set<Position>(positionOnly, Position{5.0f, 5.0f});
 
 	const Entity velocityOnly = store.Create();
-	store.Set<Velocity>(velocityOnly, Velocity { 9.0f, 9.0f });
+	store.Set<Velocity>(velocityOnly, Velocity{9.0f, 9.0f});
 
 	std::vector<Entity> visited;
-	store.Each<Position, Velocity>([&](Entity entity, Position &, Velocity &) {
-		visited.push_back(entity);
-	});
+	store.Each<Position, Velocity>([&](Entity entity, Position &, Velocity &) { visited.push_back(entity); });
 
 	REQUIRE(visited.size() == 1);
 	REQUIRE(visited[0] == both);
@@ -128,8 +126,8 @@ TEST_CASE("Each writes through to the store", "[ecs]") {
 
 	for (int index = 0; index < 100; index++) {
 		const Entity entity = store.Create();
-		store.Set<Position>(entity, Position { 0.0f, 0.0f });
-		store.Set<Velocity>(entity, Velocity { 1.0f, 0.0f });
+		store.Set<Position>(entity, Position{0.0f, 0.0f});
+		store.Set<Velocity>(entity, Velocity{1.0f, 0.0f});
 	}
 
 	constexpr float STEP = 0.5f;
@@ -153,7 +151,7 @@ TEST_CASE("destroying during iteration is deferred, not a crash", "[ecs]") {
 	std::vector<Entity> created;
 	for (int index = 0; index < 50; index++) {
 		const Entity entity = store.Create();
-		store.Set<Tag>(entity, Tag { index });
+		store.Set<Tag>(entity, Tag{index});
 		created.push_back(entity);
 	}
 
@@ -180,9 +178,9 @@ TEST_CASE("CountMatching counts the entities a query would visit", "[ecs]") {
 
 	for (int index = 0; index < 8; index++) {
 		const Entity entity = store.Create();
-		store.Set<Position>(entity, Position {});
+		store.Set<Position>(entity, Position{});
 		if (index < 3) {
-			store.Set<Velocity>(entity, Velocity {});
+			store.Set<Velocity>(entity, Velocity{});
 		}
 	}
 
@@ -207,7 +205,7 @@ TEST_CASE("a store rebound to another thread accepts that thread", "[ecs]") {
 	std::thread worker([&] {
 		store.BindToCallingThread();
 		const Entity entity = store.Create();
-		store.Set<Tag>(entity, Tag { 1 });
+		store.Set<Tag>(entity, Tag{1});
 		succeeded = store.Has<Tag>(entity);
 	});
 	worker.join();

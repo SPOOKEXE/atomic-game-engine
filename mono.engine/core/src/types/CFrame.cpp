@@ -7,11 +7,11 @@ namespace engine::core {
 
 	namespace {
 		glm::vec3 ToGlm(const Vector3 &vector) {
-			return { vector.X, vector.Y, vector.Z };
+			return {vector.X, vector.Y, vector.Z};
 		}
 
 		Vector3 FromGlm(const glm::vec3 &vector) {
-			return { vector.x, vector.y, vector.z };
+			return {vector.x, vector.y, vector.z};
 		}
 	}
 
@@ -19,9 +19,9 @@ namespace engine::core {
 		// Y, then X, then Z, applied intrinsically — the order Roblox's
 		// CFrame.Angles uses. Quaternion multiplication is not commutative, so
 		// this order is the definition rather than a detail.
-		const glm::quat aroundY = glm::angleAxis(yaw, glm::vec3 { 0.0f, 1.0f, 0.0f });
-		const glm::quat aroundX = glm::angleAxis(pitch, glm::vec3 { 1.0f, 0.0f, 0.0f });
-		const glm::quat aroundZ = glm::angleAxis(roll, glm::vec3 { 0.0f, 0.0f, 1.0f });
+		const glm::quat aroundY = glm::angleAxis(yaw, glm::vec3{0.0f, 1.0f, 0.0f});
+		const glm::quat aroundX = glm::angleAxis(pitch, glm::vec3{1.0f, 0.0f, 0.0f});
+		const glm::quat aroundZ = glm::angleAxis(roll, glm::vec3{0.0f, 0.0f, 1.0f});
 
 		return CFrame(Vector3::Zero, glm::normalize(aroundY * aroundX * aroundZ));
 	}

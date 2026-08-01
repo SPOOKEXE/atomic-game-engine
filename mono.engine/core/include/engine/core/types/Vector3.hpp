@@ -31,11 +31,7 @@ namespace engine::core {
 		// @param x The X component.
 		// @param y The Y component.
 		// @param z The Z component.
-		constexpr Vector3(float x, float y, float z)
-			: X(x)
-			, Y(y)
-			, Z(z) {
-		}
+		constexpr Vector3(float x, float y, float z) : X(x), Y(y), Z(z) {}
 
 		// The vector `(0, 0, 0)`.
 		static const Vector3 Zero;
@@ -50,30 +46,30 @@ namespace engine::core {
 
 		// Adds corresponding components.
 		constexpr Vector3 operator+(const Vector3 &other) const {
-			return { X + other.X, Y + other.Y, Z + other.Z };
+			return {X + other.X, Y + other.Y, Z + other.Z};
 		}
 		// Subtracts corresponding components.
 		constexpr Vector3 operator-(const Vector3 &other) const {
-			return { X - other.X, Y - other.Y, Z - other.Z };
+			return {X - other.X, Y - other.Y, Z - other.Z};
 		}
 		// Negates every component.
 		constexpr Vector3 operator-() const {
-			return { -X, -Y, -Z };
+			return {-X, -Y, -Z};
 		}
 		// Multiplies every component by a scalar.
 		constexpr Vector3 operator*(float scalar) const {
-			return { X * scalar, Y * scalar, Z * scalar };
+			return {X * scalar, Y * scalar, Z * scalar};
 		}
 		// Divides every component by a scalar without checking for zero.
 		constexpr Vector3 operator/(float scalar) const {
-			return { X / scalar, Y / scalar, Z / scalar };
+			return {X / scalar, Y / scalar, Z / scalar};
 		}
 
 		// Multiplies corresponding components, matching Roblox.
 		//
 		// This is not a dot product; use Dot() for that operation.
 		constexpr Vector3 operator*(const Vector3 &other) const {
-			return { X * other.X, Y * other.Y, Z * other.Z };
+			return {X * other.X, Y * other.Y, Z * other.Z};
 		}
 
 		// Reports whether all components are exactly equal.
@@ -133,9 +129,9 @@ namespace engine::core {
 	// Defined out of class, and `const` rather than `constexpr`: a constexpr
 	// static member of the class's own type cannot be declared inside it, and
 	// the declaration and the definition have to agree.
-	inline const Vector3 Vector3::Zero { 0.0f, 0.0f, 0.0f };
-	inline const Vector3 Vector3::One { 1.0f, 1.0f, 1.0f };
-	inline const Vector3 Vector3::XAxis { 1.0f, 0.0f, 0.0f };
-	inline const Vector3 Vector3::YAxis { 0.0f, 1.0f, 0.0f };
-	inline const Vector3 Vector3::ZAxis { 0.0f, 0.0f, 1.0f };
+	inline const Vector3 Vector3::Zero{0.0f, 0.0f, 0.0f};
+	inline const Vector3 Vector3::One{1.0f, 1.0f, 1.0f};
+	inline const Vector3 Vector3::XAxis{1.0f, 0.0f, 0.0f};
+	inline const Vector3 Vector3::YAxis{0.0f, 1.0f, 0.0f};
+	inline const Vector3 Vector3::ZAxis{0.0f, 0.0f, 1.0f};
 }

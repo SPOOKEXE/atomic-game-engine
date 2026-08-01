@@ -3,8 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <atomic>
 #include <algorithm>
+#include <atomic>
 #include <numeric>
 #include <set>
 #include <stdexcept>
@@ -27,7 +27,7 @@ namespace {
 }
 
 TEST_CASE("every index is visited exactly once", "[jobs]") {
-	Pool pool { 4 };
+	Pool pool{4};
 
 	constexpr size_t COUNT = 10'000;
 	std::vector<std::atomic<int>> visits(COUNT);
@@ -44,7 +44,7 @@ TEST_CASE("every index is visited exactly once", "[jobs]") {
 }
 
 TEST_CASE("ranges never overlap", "[jobs]") {
-	Pool pool { 4 };
+	Pool pool{4};
 
 	std::mutex guard;
 	std::vector<std::pair<size_t, size_t>> ranges;
@@ -63,7 +63,7 @@ TEST_CASE("ranges never overlap", "[jobs]") {
 }
 
 TEST_CASE("a small span runs inline rather than paying for a handover", "[jobs]") {
-	Pool pool { 4 };
+	Pool pool{4};
 
 	std::set<std::thread::id> threads;
 	std::mutex guard;
@@ -78,7 +78,7 @@ TEST_CASE("a small span runs inline rather than paying for a handover", "[jobs]"
 }
 
 TEST_CASE("work actually reaches more than one thread", "[jobs]") {
-	Pool pool { 4 };
+	Pool pool{4};
 
 	// Retried, because one dispatch is legitimately allowed to stay on one
 	// thread: the calling thread drains ranges too, and on a loaded machine it
@@ -113,7 +113,7 @@ TEST_CASE("work actually reaches more than one thread", "[jobs]") {
 TEST_CASE("For with no pool still runs everything", "[jobs]") {
 	// No Start(). Every engine path has to work single-threaded, because a
 	// unit test and the asset cooker both run without a pool.
-	std::atomic<size_t> total { 0 };
+	std::atomic<size_t> total{0};
 
 	Jobs::For(500, 16, [&](size_t begin, size_t end) {
 		total.fetch_add(end - begin, std::memory_order_relaxed);
@@ -123,18 +123,16 @@ TEST_CASE("For with no pool still runs everything", "[jobs]") {
 }
 
 TEST_CASE("a count of zero does nothing", "[jobs]") {
-	Pool pool { 2 };
+	Pool pool{2};
 
 	bool called = false;
-	Jobs::For(0, 8, [&](size_t, size_t) {
-		called = true;
-	});
+	Jobs::For(0, 8, [&](size_t, size_t) { called = true; });
 
 	REQUIRE_FALSE(called);
 }
 
 TEST_CASE("an exception in a range reaches the caller", "[jobs]") {
-	Pool pool { 4 };
+	Pool pool{4};
 
 	// An exception escaping a worker would terminate the process. It has to
 	// come back out of For on the calling thread instead.

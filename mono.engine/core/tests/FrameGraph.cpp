@@ -32,9 +32,7 @@ TEST_CASE("nothing is recorded while collection is off", "[framegraph]") {
 	FrameGraph::SetEnabled(false);
 
 	FrameGraph::BeginFrame();
-	{
-		ENGINE_PROFILE("off");
-	}
+	{ ENGINE_PROFILE("off"); }
 	FrameGraph::EndFrame();
 
 	REQUIRE(FrameGraph::Spans().empty());
@@ -44,9 +42,7 @@ TEST_CASE("a scope becomes a span", "[framegraph]") {
 	Collecting collecting;
 
 	FrameGraph::BeginFrame();
-	{
-		ENGINE_PROFILE("outer");
-	}
+	{ ENGINE_PROFILE("outer"); }
 	FrameGraph::EndFrame();
 
 	const auto &spans = FrameGraph::Spans();
@@ -63,13 +59,9 @@ TEST_CASE("nesting becomes depth", "[framegraph]") {
 		ENGINE_PROFILE("outer");
 		{
 			ENGINE_PROFILE_CAT("inner", ProfileCategory::Render);
-			{
-				ENGINE_PROFILE("innermost");
-			}
+			{ ENGINE_PROFILE("innermost"); }
 		}
-		{
-			ENGINE_PROFILE("sibling");
-		}
+		{ ENGINE_PROFILE("sibling"); }
 	}
 	FrameGraph::EndFrame();
 
@@ -135,9 +127,7 @@ TEST_CASE("the published frame survives the next one being built", "[framegraph]
 	Collecting collecting;
 
 	FrameGraph::BeginFrame();
-	{
-		ENGINE_PROFILE("first");
-	}
+	{ ENGINE_PROFILE("first"); }
 	FrameGraph::EndFrame();
 
 	// The overlay reads last frame's spans while this frame is in flight.
@@ -153,9 +143,7 @@ TEST_CASE("a scope on another thread is dropped and counted", "[framegraph]") {
 	FrameGraph::BeginFrame();
 	{
 		ENGINE_PROFILE("main");
-		std::thread worker([] {
-			ENGINE_PROFILE("worker");
-		});
+		std::thread worker([] { ENGINE_PROFILE("worker"); });
 		worker.join();
 	}
 	FrameGraph::EndFrame();
@@ -175,13 +163,9 @@ TEST_CASE("a span records which span it opened inside", "[framegraph]") {
 		ENGINE_PROFILE("root");
 		{
 			ENGINE_PROFILE("first");
-			{
-				ENGINE_PROFILE("grandchild");
-			}
+			{ ENGINE_PROFILE("grandchild"); }
 		}
-		{
-			ENGINE_PROFILE("second");
-		}
+		{ ENGINE_PROFILE("second"); }
 	}
 	FrameGraph::EndFrame();
 
@@ -214,8 +198,7 @@ namespace {
 	}
 }
 
-TEST_CASE("nesting past the depth budget is dropped and counted",
-	"[framegraph]") {
+TEST_CASE("nesting past the depth budget is dropped and counted", "[framegraph]") {
 	Collecting collecting;
 
 	constexpr uint32_t OVERSHOOT = 5;
@@ -232,8 +215,7 @@ TEST_CASE("nesting past the depth budget is dropped and counted",
 	}
 }
 
-TEST_CASE("a sibling after a too-deep subtree is at the right depth",
-	"[framegraph]") {
+TEST_CASE("a sibling after a too-deep subtree is at the right depth", "[framegraph]") {
 	Collecting collecting;
 
 	FrameGraph::BeginFrame();
@@ -251,8 +233,8 @@ TEST_CASE("a sibling after a too-deep subtree is at the right depth",
 	FrameGraph::EndFrame();
 
 	const auto &spans = FrameGraph::Spans();
-	const auto sibling = std::find_if(spans.begin(), spans.end(),
-		[](const auto &span) { return span.Name == "sibling"; });
+	const auto sibling =
+		std::find_if(spans.begin(), spans.end(), [](const auto &span) { return span.Name == "sibling"; });
 
 	REQUIRE(sibling != spans.end());
 	REQUIRE(sibling->Depth == 1);
@@ -269,8 +251,7 @@ TEST_CASE("a copied name outlives the string it came from", "[framegraph]") {
 		// Destroyed before the frame ends, and long before the overlay would
 		// read the published span. The whole reason the copying form exists.
 		const std::string built = std::string("chunk.") + std::to_string(42);
-		ENGINE_PROFILE_DYNAMIC("script", std::string_view(built),
-			ProfileCategory::Script);
+		ENGINE_PROFILE_DYNAMIC("script", std::string_view(built), ProfileCategory::Script);
 	}
 	FrameGraph::EndFrame();
 
@@ -280,14 +261,11 @@ TEST_CASE("a copied name outlives the string it came from", "[framegraph]") {
 	REQUIRE(spans[0].Category == ProfileCategory::Script);
 }
 
-TEST_CASE("a copied name falls back when the caller had nothing to say",
-	"[framegraph]") {
+TEST_CASE("a copied name falls back when the caller had nothing to say", "[framegraph]") {
 	Collecting collecting;
 
 	FrameGraph::BeginFrame();
-	{
-		ENGINE_PROFILE_DYNAMIC("script", std::string_view(), ProfileCategory::Script);
-	}
+	{ ENGINE_PROFILE_DYNAMIC("script", std::string_view(), ProfileCategory::Script); }
 	FrameGraph::EndFrame();
 
 	REQUIRE(FrameGraph::Spans().size() == 1);
@@ -301,8 +279,7 @@ TEST_CASE("copied names do not collide across frames", "[framegraph]") {
 		FrameGraph::BeginFrame();
 		{
 			const std::string built = "frame." + std::to_string(frame);
-			ENGINE_PROFILE_DYNAMIC("script", std::string_view(built),
-				ProfileCategory::Script);
+			ENGINE_PROFILE_DYNAMIC("script", std::string_view(built), ProfileCategory::Script);
 		}
 		FrameGraph::EndFrame();
 
@@ -319,15 +296,13 @@ namespace {
 	// A span that costs a measurable amount, so a spike is distinguishable
 	// from an ordinary frame rather than being lost in clock noise.
 	void BurnMilliseconds(double milliseconds) {
-		const uint64_t until = engine::core::Clock::Nanoseconds()
-			+ static_cast<uint64_t>(milliseconds * 1'000'000.0);
-		while (engine::core::Clock::Nanoseconds() < until) {
-		}
+		const uint64_t until =
+			engine::core::Clock::Nanoseconds() + static_cast<uint64_t>(milliseconds * 1'000'000.0);
+		while (engine::core::Clock::Nanoseconds() < until) {}
 	}
 }
 
-TEST_CASE("the recent maximum keeps a spike an ordinary frame would hide",
-	"[framegraph]") {
+TEST_CASE("the recent maximum keeps a spike an ordinary frame would hide", "[framegraph]") {
 	Collecting collecting;
 
 	// Thirty cheap frames and one expensive one, which is the shape the column
@@ -353,8 +328,7 @@ TEST_CASE("the recent maximum keeps a spike an ordinary frame would hide",
 	REQUIRE(FrameGraph::RecentMaximum("occasionally-slow") >= 3.5f);
 }
 
-TEST_CASE("the recent maximum is a single reading, not a total",
-	"[framegraph]") {
+TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]") {
 	Collecting collecting;
 
 	FrameGraph::BeginFrame();
@@ -372,8 +346,7 @@ TEST_CASE("the recent maximum is a single reading, not a total",
 	REQUIRE(worst < 3.0f);
 }
 
-TEST_CASE("a span that stops running decays out of the window",
-	"[framegraph]") {
+TEST_CASE("a span that stops running decays out of the window", "[framegraph]") {
 	Collecting collecting;
 
 	FrameGraph::BeginFrame();
@@ -390,9 +363,7 @@ TEST_CASE("a span that stops running decays out of the window",
 	// reading on the panel forever.
 	for (size_t frame = 0; frame < FrameGraph::RECENT_FRAMES; frame++) {
 		FrameGraph::BeginFrame();
-		{
-			ENGINE_PROFILE("something-else");
-		}
+		{ ENGINE_PROFILE("something-else"); }
 		FrameGraph::EndFrame();
 	}
 
@@ -451,8 +422,7 @@ TEST_CASE("a snapshot names the spans and the worst frames", "[framegraph]") {
 
 	std::ifstream in(path);
 	REQUIRE(in);
-	const std::string text { std::istreambuf_iterator<char>(in),
-		std::istreambuf_iterator<char>() };
+	const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 	in.close();
 	std::filesystem::remove(path);
 
@@ -464,8 +434,11 @@ TEST_CASE("a snapshot names the spans and the worst frames", "[framegraph]") {
 	REQUIRE(text.find("p99") != std::string::npos);
 }
 
-TEST_CASE("a snapshot with nothing retained refuses rather than writing an "
-	"empty file", "[framegraph]") {
+TEST_CASE(
+	"a snapshot with nothing retained refuses rather than writing an "
+	"empty file",
+	"[framegraph]"
+) {
 	FrameGraph::SetEnabled(false);
 
 	const auto path = std::filesystem::temp_directory_path() / "atomic-framegraph-empty.txt";

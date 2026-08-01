@@ -20,11 +20,10 @@ namespace {
 		float X, Y, Z;
 
 		Vec operator-(const Vec &other) const {
-			return { X - other.X, Y - other.Y, Z - other.Z };
+			return {X - other.X, Y - other.Y, Z - other.Z};
 		}
 		Vec Cross(const Vec &other) const {
-			return { Y * other.Z - Z * other.Y, Z * other.X - X * other.Z,
-				X * other.Y - Y * other.X };
+			return {Y * other.Z - Z * other.Y, Z * other.X - X * other.Z, X * other.Y - Y * other.X};
 		}
 		float Dot(const Vec &other) const {
 			return X * other.X + Y * other.Y + Z * other.Z;
@@ -35,15 +34,14 @@ namespace {
 	};
 
 	Vec PositionOf(const MeshVertex &vertex) {
-		return { vertex.Position[0], vertex.Position[1], vertex.Position[2] };
+		return {vertex.Position[0], vertex.Position[1], vertex.Position[2]};
 	}
 	Vec NormalOf(const MeshVertex &vertex) {
-		return { vertex.Normal[0], vertex.Normal[1], vertex.Normal[2] };
+		return {vertex.Normal[0], vertex.Normal[1], vertex.Normal[2]};
 	}
 }
 
-TEST_CASE("every triangle winds counter-clockwise seen from outside",
-	"[primitives]") {
+TEST_CASE("every triangle winds counter-clockwise seen from outside", "[primitives]") {
 	// The test that matters, and the one whose absence let a fully inverted
 	// cube ship. A face wound the wrong way is culled when you look at it and
 	// drawn when you cannot — so the cube renders as an open box showing its
@@ -86,13 +84,16 @@ TEST_CASE("all three vertices of a triangle share one normal", "[primitives]") {
 TEST_CASE("the six faces cover the six axes exactly once", "[primitives]") {
 	std::set<std::array<int, 3>> normals;
 	for (const auto &vertex : CUBE_VERTICES) {
-		normals.insert({ static_cast<int>(vertex.Normal[0]), static_cast<int>(vertex.Normal[1]),
-			static_cast<int>(vertex.Normal[2]) });
+		normals.insert(
+			{static_cast<int>(vertex.Normal[0]),
+			 static_cast<int>(vertex.Normal[1]),
+			 static_cast<int>(vertex.Normal[2])}
+		);
 	}
 
 	REQUIRE(normals.size() == 6);
-	for (const auto &axis : { std::array<int, 3> { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 },
-			 { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }) {
+	for (const auto &axis :
+		 {std::array<int, 3>{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}) {
 		REQUIRE(normals.count(axis) == 1);
 	}
 }
@@ -116,8 +117,7 @@ TEST_CASE("every vertex sits on the cube's surface", "[primitives]") {
 	}
 }
 
-TEST_CASE("a face's four vertices are distinct and its quad is planar",
-	"[primitives]") {
+TEST_CASE("a face's four vertices are distinct and its quad is planar", "[primitives]") {
 	for (size_t face = 0; face < 6; face++) {
 		const size_t base = face * 4;
 		for (size_t a = 0; a < 4; a++) {
@@ -132,11 +132,9 @@ TEST_CASE("a face's four vertices are distinct and its quad is planar",
 		// 0-1-2/0-2-3 with the corners in the wrong order gives a bowtie, and
 		// half of it disappears.
 		const Vec first = (PositionOf(CUBE_VERTICES[base + 1]) - PositionOf(CUBE_VERTICES[base]))
-							  .Cross(PositionOf(CUBE_VERTICES[base + 2])
-								  - PositionOf(CUBE_VERTICES[base]));
+							  .Cross(PositionOf(CUBE_VERTICES[base + 2]) - PositionOf(CUBE_VERTICES[base]));
 		const Vec second = (PositionOf(CUBE_VERTICES[base + 2]) - PositionOf(CUBE_VERTICES[base]))
-							   .Cross(PositionOf(CUBE_VERTICES[base + 3])
-								   - PositionOf(CUBE_VERTICES[base]));
+							   .Cross(PositionOf(CUBE_VERTICES[base + 3]) - PositionOf(CUBE_VERTICES[base]));
 		REQUIRE(first.Dot(second) > 0.0f);
 	}
 }
@@ -146,7 +144,7 @@ TEST_CASE("the index buffer is a closed solid", "[primitives]") {
 
 	// Every vertex used exactly once per triangle it belongs to, and every one
 	// of the 24 used at all — an unused vertex means a face was mis-indexed.
-	std::array<int, 24> uses {};
+	std::array<int, 24> uses{};
 	for (const auto index : CUBE_INDICES) {
 		REQUIRE(index < CUBE_VERTICES.size());
 		uses[index]++;

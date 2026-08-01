@@ -50,25 +50,24 @@ TEST_CASE("a resource is null until it is set", "[resources]") {
 	REQUIRE_FALSE(store.HasResource<Gravity>());
 	REQUIRE(store.Resource<Gravity>() == nullptr);
 
-	store.SetResource(Gravity { 1.62f });
+	store.SetResource(Gravity{1.62f});
 
 	REQUIRE(store.HasResource<Gravity>());
 	REQUIRE(store.Resource<Gravity>()->Metres == Approx(1.62f));
 }
 
-TEST_CASE("setting a resource twice replaces it rather than adding one",
-	"[resources]") {
+TEST_CASE("setting a resource twice replaces it rather than adding one", "[resources]") {
 	Store store("test");
 
-	store.SetResource(Score { 1 });
-	store.SetResource(Score { 2 });
+	store.SetResource(Score{1});
+	store.SetResource(Score{2});
 
 	REQUIRE(store.Resource<Score>()->Points == 2);
 }
 
 TEST_CASE("a resource is mutable in place", "[resources]") {
 	Store store("test");
-	store.SetResource(Score { 10 });
+	store.SetResource(Score{10});
 
 	store.ResourceMutable<Score>()->Points += 5;
 
@@ -77,7 +76,7 @@ TEST_CASE("a resource is mutable in place", "[resources]") {
 
 TEST_CASE("a removed resource is gone", "[resources]") {
 	Store store("test");
-	store.SetResource(Gravity {});
+	store.SetResource(Gravity{});
 	store.RemoveResource<Gravity>();
 
 	REQUIRE_FALSE(store.HasResource<Gravity>());
@@ -86,7 +85,7 @@ TEST_CASE("a removed resource is gone", "[resources]") {
 
 TEST_CASE("a resource holding a container keeps its capacity", "[resources]") {
 	Store store("test");
-	store.SetResource(DrawList {});
+	store.SetResource(DrawList{});
 
 	auto *list = store.ResourceMutable<DrawList>();
 	list->Items.reserve(256);
@@ -103,13 +102,12 @@ TEST_CASE("a resource holding a container keeps its capacity", "[resources]") {
 
 // --- the separation from components ---------------------------------------
 
-TEST_CASE("a resource is not visited by a query for the same type",
-	"[resources]") {
+TEST_CASE("a resource is not visited by a query for the same type", "[resources]") {
 	Store store("test");
 
 	const Entity entity = store.Create();
-	store.Set<Position>(entity, Position { 1.0f });
-	store.SetResource(Position { 99.0f });
+	store.Set<Position>(entity, Position{1.0f});
+	store.SetResource(Position{99.0f});
 
 	int visited = 0;
 	float sum = 0.0f;
@@ -128,10 +126,10 @@ TEST_CASE("a resource is not counted as an entity", "[resources]") {
 	Store store("test");
 
 	for (int index = 0; index < 5; index++) {
-		store.Set<Position>(store.Create(), Position {});
+		store.Set<Position>(store.Create(), Position{});
 	}
-	store.SetResource(Position {});
-	store.SetResource(Gravity {});
+	store.SetResource(Position{});
+	store.SetResource(Gravity{});
 
 	REQUIRE(store.CountMatching<Position>() == 5);
 }
@@ -142,7 +140,7 @@ TEST_CASE("a cached count query is a live view, not a snapshot", "[resources]") 
 	REQUIRE(store.CountMatching<Position>() == 0);
 
 	for (int index = 0; index < 3; index++) {
-		store.Set<Position>(store.Create(), Position {});
+		store.Set<Position>(store.Create(), Position{});
 	}
 
 	// The query is built on the first call and kept. Entities created after it
@@ -151,13 +149,12 @@ TEST_CASE("a cached count query is a live view, not a snapshot", "[resources]") 
 	REQUIRE(store.CountMatching<Position>() == 3);
 }
 
-TEST_CASE("a resource survives entities being created around it",
-	"[resources]") {
+TEST_CASE("a resource survives entities being created around it", "[resources]") {
 	Store store("test");
-	store.SetResource(Score { 7 });
+	store.SetResource(Score{7});
 
 	for (int index = 0; index < 64; index++) {
-		store.Set<Position>(store.Create(), Position {});
+		store.Set<Position>(store.Create(), Position{});
 	}
 
 	REQUIRE(store.Resource<Score>()->Points == 7);
@@ -173,8 +170,7 @@ TEST_CASE("a new world has a clock at zero", "[resources][time]") {
 	REQUIRE(store.Time().Alpha == Approx(0.0f));
 }
 
-TEST_CASE("advancing a tick moves elapsed and the tick count",
-	"[resources][time]") {
+TEST_CASE("advancing a tick moves elapsed and the tick count", "[resources][time]") {
 	Store store("test");
 
 	store.AdvanceTick(0.25f);
@@ -185,8 +181,7 @@ TEST_CASE("advancing a tick moves elapsed and the tick count",
 	REQUIRE(store.Time().Delta == Approx(0.25f));
 }
 
-TEST_CASE("the frame delta and the tick delta are separate fields",
-	"[resources][time]") {
+TEST_CASE("the frame delta and the tick delta are separate fields", "[resources][time]") {
 	Store store("test");
 
 	store.AdvanceTick(1.0f / 60.0f);
@@ -200,8 +195,7 @@ TEST_CASE("the frame delta and the tick delta are separate fields",
 	REQUIRE(store.Time().Alpha == Approx(0.5f));
 }
 
-TEST_CASE("setting a frame does not advance the simulation",
-	"[resources][time]") {
+TEST_CASE("setting a frame does not advance the simulation", "[resources][time]") {
 	Store store("test");
 	store.AdvanceTick(0.1f);
 
@@ -212,8 +206,7 @@ TEST_CASE("setting a frame does not advance the simulation",
 	REQUIRE(store.Time().Elapsed == Approx(0.1));
 }
 
-TEST_CASE("a system reads the clock out of the world it is handed",
-	"[resources][time]") {
+TEST_CASE("a system reads the clock out of the world it is handed", "[resources][time]") {
 	Store store("test");
 	Scheduler scheduler;
 

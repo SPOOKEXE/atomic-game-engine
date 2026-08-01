@@ -62,7 +62,7 @@ TEST_CASE("a slow frame runs several ticks", "[timestep]") {
 TEST_CASE("the tick rate holds across render rates", "[timestep]") {
 	// RENDER_PIPELINE.md §14's measurement, as a test rather than a note:
 	// ticks per second must hold at 60 whatever the frame rate is.
-	for (const double fps : { 30.0, 60.0, 144.0, 300.0, 600.0 }) {
+	for (const double fps : {30.0, 60.0, 144.0, 300.0, 600.0}) {
 		FixedTimestep timestep(60.0);
 		const auto frame = static_cast<float>(1.0 / fps);
 
@@ -106,7 +106,7 @@ TEST_CASE("alpha is where the render sits between ticks", "[timestep]") {
 TEST_CASE("alpha stays in range", "[timestep]") {
 	FixedTimestep timestep(60.0);
 
-	for (const float frame : { 0.0f, 0.001f, 0.016f, 0.5f, 2.0f }) {
+	for (const float frame : {0.0f, 0.001f, 0.016f, 0.5f, 2.0f}) {
 		timestep.Advance(frame);
 		REQUIRE(timestep.Alpha() >= 0.0f);
 		REQUIRE(timestep.Alpha() <= 1.0f);

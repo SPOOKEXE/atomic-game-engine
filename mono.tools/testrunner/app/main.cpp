@@ -1,10 +1,9 @@
-#include <testrunner/Process.hpp>
-#include <testrunner/Runner.hpp>
-
 #include <engine/core/Arguments.hpp>
 
 #include <cstdio>
 #include <iostream>
+#include <testrunner/Process.hpp>
+#include <testrunner/Runner.hpp>
 
 namespace fs = std::filesystem;
 using namespace testrunner;
@@ -16,7 +15,7 @@ namespace {
 	// granularity the identifiers promise.
 	bool RunSuite(const Suite &suite, std::string &output) {
 		const std::string filter = "[#" + suite.Source.stem().string() + "]";
-		const auto result = Run({ suite.Binary.string(), "-#", filter });
+		const auto result = Run({suite.Binary.string(), "-#", filter});
 
 		output = result.Output;
 		if (!result.Started) {
@@ -28,8 +27,7 @@ namespace {
 }
 
 int main(int argc, char **argv) {
-	engine::core::Arguments arguments("testrunner",
-		"Runs the test suites a change could have affected.");
+	engine::core::Arguments arguments("testrunner", "Runs the test suites a change could have affected.");
 
 	arguments.Value("build", "DIR", "A configured build directory");
 	arguments.Value("cache", "PATH", "Cache file (default .cache/smart-tests.txt)");
@@ -59,9 +57,8 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 
-	const fs::path cachePath = arguments.Get("cache")
-		? fs::path(std::string(*arguments.Get("cache")))
-		: fs::path(".cache/smart-tests.txt");
+	const fs::path cachePath = arguments.Get("cache") ? fs::path(std::string(*arguments.Get("cache")))
+													  : fs::path(".cache/smart-tests.txt");
 
 	std::vector<Suite> suites;
 	for (const auto &binary : FindTestBinaries(buildDirectory)) {
@@ -71,10 +68,12 @@ int main(int argc, char **argv) {
 	}
 
 	if (suites.empty()) {
-		std::fprintf(stderr,
+		std::fprintf(
+			stderr,
 			"no suites found under %s/tests.\n"
 			"Build first, and check every test file has a TEST_SUITE_ID.\n",
-			buildDirectory.string().c_str());
+			buildDirectory.string().c_str()
+		);
 		return 1;
 	}
 
@@ -133,7 +132,7 @@ int main(int argc, char **argv) {
 			std::cout << output << '\n';
 		}
 
-		cache[suite->Id] = CacheEntry { signatures.at(suite->Id), ok };
+		cache[suite->Id] = CacheEntry{signatures.at(suite->Id), ok};
 	}
 
 	// A suite that no longer exists must not linger, or reintroducing one later

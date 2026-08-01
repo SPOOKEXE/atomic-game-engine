@@ -44,20 +44,20 @@ namespace {
 	void Fill(Store &store, size_t count) {
 		for (size_t index = 0; index < count; index++) {
 			const Entity entity = store.Create();
-			store.Set<Position>(entity, Position { 0.0f });
-			store.Set<Velocity>(entity, Velocity { static_cast<float>(index) });
+			store.Set<Position>(entity, Position{0.0f});
+			store.Set<Velocity>(entity, Velocity{static_cast<float>(index)});
 		}
 	}
 }
 
 TEST_CASE("every entity is visited exactly once", "[parallel]") {
-	Pool pool { 4 };
+	Pool pool{4};
 	Store store("test");
 	constexpr size_t COUNT = 10'000;
 	Fill(store, COUNT);
 
 	std::vector<std::atomic<int>> visits(COUNT);
-	std::atomic<size_t> total { 0 };
+	std::atomic<size_t> total{0};
 
 	store.EachParallel<const Velocity>([&](Entity, const Velocity &velocity) {
 		visits[static_cast<size_t>(velocity.X)].fetch_add(1, std::memory_order_relaxed);
@@ -71,27 +71,27 @@ TEST_CASE("every entity is visited exactly once", "[parallel]") {
 }
 
 TEST_CASE("writes through a component reference land", "[parallel]") {
-	Pool pool { 4 };
+	Pool pool{4};
 	Store store("test");
 	Fill(store, 5'000);
 
-	store.EachParallel<Position, const Velocity>(
-		[](Entity, Position &position, const Velocity &velocity) {
-			position.X = velocity.X * 2.0f;
-		});
+	store.EachParallel<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+		position.X = velocity.X * 2.0f;
+	});
 
 	size_t checked = 0;
 	store.Each<const Position, const Velocity>(
 		[&](Entity, const Position &position, const Velocity &velocity) {
 			REQUIRE(position.X == Approx(velocity.X * 2.0f));
 			checked++;
-		});
+		}
+	);
 
 	REQUIRE(checked == 5'000);
 }
 
 TEST_CASE("the parallel result equals the serial one", "[parallel]") {
-	Pool pool { 4 };
+	Pool pool{4};
 
 	// The property that matters. A parallel pass that is faster and different
 	// is not an optimisation.
@@ -105,22 +105,18 @@ TEST_CASE("the parallel result equals the serial one", "[parallel]") {
 	};
 
 	for (int tick = 0; tick < 8; tick++) {
-		serial.Each<Position, const Velocity>(
-			[&](Entity, Position &position, const Velocity &velocity) {
-				step(position, velocity);
-			});
+		serial.Each<Position, const Velocity>([&](Entity, Position &position, const Velocity &velocity) {
+			step(position, velocity);
+		});
 		parallel.EachParallel<Position, const Velocity>(
-			[&](Entity, Position &position, const Velocity &velocity) {
-				step(position, velocity);
-			});
+			[&](Entity, Position &position, const Velocity &velocity) { step(position, velocity); }
+		);
 	}
 
 	std::vector<float> serialResults;
 	std::vector<float> parallelResults;
-	serial.Each<const Position>(
-		[&](Entity, const Position &p) { serialResults.push_back(p.X); });
-	parallel.Each<const Position>(
-		[&](Entity, const Position &p) { parallelResults.push_back(p.X); });
+	serial.Each<const Position>([&](Entity, const Position &p) { serialResults.push_back(p.X); });
+	parallel.Each<const Position>([&](Entity, const Position &p) { parallelResults.push_back(p.X); });
 
 	REQUIRE(serialResults.size() == parallelResults.size());
 	for (size_t index = 0; index < serialResults.size(); index++) {
@@ -129,7 +125,7 @@ TEST_CASE("the parallel result equals the serial one", "[parallel]") {
 }
 
 TEST_CASE("work actually reaches more than one thread", "[parallel]") {
-	Pool pool { 4 };
+	Pool pool{4};
 	Store store("test");
 	Fill(store, 50'000);
 
@@ -143,10 +139,13 @@ TEST_CASE("work actually reaches more than one thread", "[parallel]") {
 		std::mutex guard;
 		std::set<std::thread::id> threads;
 
-		store.EachParallel<const Position>([&](Entity, const Position &) {
-			std::lock_guard lock(guard);
-			threads.insert(std::this_thread::get_id());
-		}, 512);
+		store.EachParallel<const Position>(
+			[&](Entity, const Position &) {
+				std::lock_guard lock(guard);
+				threads.insert(std::this_thread::get_id());
+			},
+			512
+		);
 
 		widest = std::max(widest, threads.size());
 	}
@@ -154,19 +153,21 @@ TEST_CASE("work actually reaches more than one thread", "[parallel]") {
 	REQUIRE(widest > 1);
 }
 
-TEST_CASE("a small set runs inline rather than paying for a handover",
-	"[parallel]") {
-	Pool pool { 4 };
+TEST_CASE("a small set runs inline rather than paying for a handover", "[parallel]") {
+	Pool pool{4};
 	Store store("test");
 	Fill(store, 8);
 
 	std::mutex guard;
 	std::set<std::thread::id> threads;
 
-	store.EachParallel<const Position>([&](Entity, const Position &) {
-		std::lock_guard lock(guard);
-		threads.insert(std::this_thread::get_id());
-	}, 256);
+	store.EachParallel<const Position>(
+		[&](Entity, const Position &) {
+			std::lock_guard lock(guard);
+			threads.insert(std::this_thread::get_id());
+		},
+		256
+	);
 
 	REQUIRE(threads.size() == 1);
 	REQUIRE(*threads.begin() == std::this_thread::get_id());
@@ -180,15 +181,14 @@ TEST_CASE("it works with no job pool at all", "[parallel]") {
 	Store store("test");
 	Fill(store, 500);
 
-	std::atomic<size_t> visited { 0 };
-	store.EachParallel<const Position>(
-		[&](Entity, const Position &) { visited.fetch_add(1); });
+	std::atomic<size_t> visited{0};
+	store.EachParallel<const Position>([&](Entity, const Position &) { visited.fetch_add(1); });
 
 	REQUIRE(visited.load() == 500);
 }
 
 TEST_CASE("an empty match visits nothing", "[parallel]") {
-	Pool pool { 2 };
+	Pool pool{2};
 	Store store("test");
 	Fill(store, 100);
 
@@ -199,29 +199,30 @@ TEST_CASE("an empty match visits nothing", "[parallel]") {
 }
 
 TEST_CASE("entities from several archetypes are all visited", "[parallel]") {
-	Pool pool { 4 };
+	Pool pool{4};
 	Store store("test");
 
 	// Two archetypes: with and without Marker. Tables are walked in order and
 	// each is partitioned, so both have to be covered.
 	for (size_t index = 0; index < 3'000; index++) {
 		const Entity entity = store.Create();
-		store.Set<Position>(entity, Position {});
-		store.Set<Velocity>(entity, Velocity { 1.0f });
+		store.Set<Position>(entity, Position{});
+		store.Set<Velocity>(entity, Velocity{1.0f});
 		if (index % 3 == 0) {
-			store.Set<Marker>(entity, Marker { 1 });
+			store.Set<Marker>(entity, Marker{1});
 		}
 	}
 
-	std::atomic<size_t> visited { 0 };
-	store.EachParallel<const Position>(
-		[&](Entity, const Position &) { visited.fetch_add(1, std::memory_order_relaxed); });
+	std::atomic<size_t> visited{0};
+	store.EachParallel<const Position>([&](Entity, const Position &) {
+		visited.fetch_add(1, std::memory_order_relaxed);
+	});
 
 	REQUIRE(visited.load() == 3'000);
 }
 
 TEST_CASE("the entity handed to the body is the right one", "[parallel]") {
-	Pool pool { 4 };
+	Pool pool{4};
 	Store store("test");
 
 	// The entity comes from the iterator's array while the components come
@@ -230,16 +231,19 @@ TEST_CASE("the entity handed to the body is the right one", "[parallel]") {
 	std::vector<Entity> created;
 	for (int index = 0; index < 2'000; index++) {
 		const Entity entity = store.Create();
-		store.Set<Marker>(entity, Marker { index });
+		store.Set<Marker>(entity, Marker{index});
 		created.push_back(entity);
 	}
 
 	std::mutex guard;
 	std::vector<std::pair<Entity, int>> seen;
-	store.EachParallel<const Marker>([&](Entity entity, const Marker &marker) {
-		std::lock_guard lock(guard);
-		seen.emplace_back(entity, marker.Value);
-	}, 64);
+	store.EachParallel<const Marker>(
+		[&](Entity entity, const Marker &marker) {
+			std::lock_guard lock(guard);
+			seen.emplace_back(entity, marker.Value);
+		},
+		64
+	);
 
 	REQUIRE(seen.size() == 2'000);
 	for (const auto &[entity, value] : seen) {

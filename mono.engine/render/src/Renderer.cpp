@@ -35,8 +35,9 @@ namespace engine::render {
 				return {};
 			}
 
-			std::vector<uint8_t> bytes(static_cast<const uint8_t *>(data),
-				static_cast<const uint8_t *>(data) + size);
+			std::vector<uint8_t> bytes(
+				static_cast<const uint8_t *>(data), static_cast<const uint8_t *>(data) + size
+			);
 			SDL_free(data);
 			return bytes;
 		}
@@ -70,8 +71,9 @@ namespace engine::render {
 
 		std::string Backend;
 
-		SDL_GPUShader *LoadShader(std::string_view name, SDL_GPUShaderStage stage,
-			uint32_t samplers, uint32_t uniformBuffers) const;
+		SDL_GPUShader *LoadShader(
+			std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
+		) const;
 
 		bool CreatePipelines();
 		bool CreateGeometry();
@@ -81,10 +83,7 @@ namespace engine::render {
 	};
 
 	SDL_GPUShader *Renderer::Impl::LoadShader(
-		std::string_view name,
-		SDL_GPUShaderStage stage,
-		uint32_t samplers,
-		uint32_t uniformBuffers
+		std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
 	) const {
 		// Staged under the owning module's name, so that two modules cannot
 		// collide on a common file name like fullscreen.vert.
@@ -96,7 +95,7 @@ namespace engine::render {
 			return nullptr;
 		}
 
-		SDL_GPUShaderCreateInfo info {};
+		SDL_GPUShaderCreateInfo info{};
 		info.code = code.data();
 		info.code_size = code.size();
 		info.entrypoint = "main";
@@ -113,47 +112,42 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::CreatePipelines() {
-		SDL_GPUShader *opaqueVertex =
-			LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-		SDL_GPUShader *opaqueFragment =
-			LoadShader("opaque.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
-		SDL_GPUShader *overlayVertex =
-			LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		SDL_GPUShader *overlayFragment =
-			LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		SDL_GPUShader *opaqueFragment = LoadShader("opaque.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
+		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
 		if (!opaqueVertex || !opaqueFragment || !overlayVertex || !overlayFragment) {
 			return false;
 		}
 
-		const SDL_GPUTextureFormat swapchainFormat =
-			SDL_GetGPUSwapchainTextureFormat(Device, Window);
+		const SDL_GPUTextureFormat swapchainFormat = SDL_GetGPUSwapchainTextureFormat(Device, Window);
 
 		// --- opaque ---------------------------------------------------------
 
 		const SDL_GPUVertexBufferDescription vertexBuffers[] = {
-			{ 0, sizeof(Vertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0 },
+			{0, sizeof(Vertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0},
 			// One step per instance: the same 36 indices are replayed for every
 			// entity, and only the matrix and colour change.
-			{ 1, sizeof(Instance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0 },
+			{1, sizeof(Instance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
 		};
 
 		const SDL_GPUVertexAttribute attributes[] = {
-			{ 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Position) },
-			{ 1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Normal) },
+			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Position)},
+			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Normal)},
 			// A mat4 attribute is four float4 locations; there is no matrix
 			// vertex format.
-			{ 2, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0 },
-			{ 3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 4 },
-			{ 4, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 8 },
-			{ 5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 12 },
-			{ 6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Instance, Colour) },
+			{2, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
+			{3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 4},
+			{4, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 8},
+			{5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 12},
+			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Instance, Colour)},
 		};
 
-		SDL_GPUColorTargetDescription opaqueTarget {};
+		SDL_GPUColorTargetDescription opaqueTarget{};
 		opaqueTarget.format = swapchainFormat;
 
-		SDL_GPUGraphicsPipelineCreateInfo opaque {};
+		SDL_GPUGraphicsPipelineCreateInfo opaque{};
 		opaque.vertex_shader = opaqueVertex;
 		opaque.fragment_shader = opaqueFragment;
 		opaque.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
@@ -180,7 +174,7 @@ namespace engine::render {
 
 		// --- overlay --------------------------------------------------------
 
-		SDL_GPUColorTargetDescription overlayTarget {};
+		SDL_GPUColorTargetDescription overlayTarget{};
 		overlayTarget.format = swapchainFormat;
 		overlayTarget.blend_state.enable_blend = true;
 		overlayTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
@@ -188,13 +182,11 @@ namespace engine::render {
 		// OverlayImage stores premultiplied RGB, so multiplying by source alpha
 		// here would apply alpha twice and darken every translucent panel pixel.
 		overlayTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-		overlayTarget.blend_state.dst_color_blendfactor =
-			SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		overlayTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 		overlayTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-		overlayTarget.blend_state.dst_alpha_blendfactor =
-			SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		overlayTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 
-		SDL_GPUGraphicsPipelineCreateInfo overlay {};
+		SDL_GPUGraphicsPipelineCreateInfo overlay{};
 		overlay.vertex_shader = overlayVertex;
 		overlay.fragment_shader = overlayFragment;
 		overlay.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
@@ -223,12 +215,12 @@ namespace engine::render {
 		constexpr uint32_t VERTEX_BYTES = sizeof(CUBE_VERTICES);
 		constexpr uint32_t INDEX_BYTES = sizeof(CUBE_INDICES);
 
-		SDL_GPUBufferCreateInfo vertexInfo {};
+		SDL_GPUBufferCreateInfo vertexInfo{};
 		vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 		vertexInfo.size = VERTEX_BYTES;
 		VertexBuffer = SDL_CreateGPUBuffer(Device, &vertexInfo);
 
-		SDL_GPUBufferCreateInfo indexInfo {};
+		SDL_GPUBufferCreateInfo indexInfo{};
 		indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
 		indexInfo.size = INDEX_BYTES;
 		IndexBuffer = SDL_CreateGPUBuffer(Device, &indexInfo);
@@ -240,7 +232,7 @@ namespace engine::render {
 
 		// The mesh never changes, so the transfer buffer is temporary — unlike
 		// the instance one, which is kept for the life of the renderer.
-		SDL_GPUTransferBufferCreateInfo transferInfo {};
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size = VERTEX_BYTES + INDEX_BYTES;
 
@@ -258,12 +250,12 @@ namespace engine::render {
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
-		SDL_GPUTransferBufferLocation source { transfer, 0 };
-		SDL_GPUBufferRegion destination { VertexBuffer, 0, VERTEX_BYTES };
+		SDL_GPUTransferBufferLocation source{transfer, 0};
+		SDL_GPUBufferRegion destination{VertexBuffer, 0, VERTEX_BYTES};
 		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 
 		source.offset = VERTEX_BYTES;
-		destination = SDL_GPUBufferRegion { IndexBuffer, 0, INDEX_BYTES };
+		destination = SDL_GPUBufferRegion{IndexBuffer, 0, INDEX_BYTES};
 		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 
 		SDL_EndGPUCopyPass(copy);
@@ -294,12 +286,12 @@ namespace engine::render {
 
 		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(Instance));
 
-		SDL_GPUBufferCreateInfo bufferInfo {};
+		SDL_GPUBufferCreateInfo bufferInfo{};
 		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 		bufferInfo.size = bytes;
 		InstanceBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
 
-		SDL_GPUTransferBufferCreateInfo transferInfo {};
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size = bytes;
 		InstanceTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
@@ -324,7 +316,7 @@ namespace engine::render {
 			DepthTexture = nullptr;
 		}
 
-		SDL_GPUTextureCreateInfo info {};
+		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
 		info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
@@ -359,7 +351,7 @@ namespace engine::render {
 			OverlayTransfer = nullptr;
 		}
 
-		SDL_GPUTextureCreateInfo info {};
+		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
 		info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
@@ -371,10 +363,10 @@ namespace engine::render {
 
 		OverlayTexture = SDL_CreateGPUTexture(Device, &info);
 
-		SDL_GPUTransferBufferCreateInfo transferInfo {};
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-		transferInfo.size = static_cast<uint32_t>(width) * static_cast<uint32_t>(height)
-			* OverlayImage::BYTES_PER_PIXEL;
+		transferInfo.size =
+			static_cast<uint32_t>(width) * static_cast<uint32_t>(height) * OverlayImage::BYTES_PER_PIXEL;
 		OverlayTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
 
 		if (!OverlayTexture || !OverlayTransfer) {
@@ -389,9 +381,7 @@ namespace engine::render {
 
 	// -----------------------------------------------------------------------
 
-	Renderer::Renderer()
-		: State(std::make_unique<Impl>()) {
-	}
+	Renderer::Renderer() : State(std::make_unique<Impl>()) {}
 
 	Renderer::~Renderer() {
 		Shutdown();
@@ -410,8 +400,7 @@ namespace engine::render {
 			return false;
 		}
 
-		const SDL_GPUPresentMode mode =
-			enabled ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
+		const SDL_GPUPresentMode mode = enabled ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
 
 		// VSYNC is the only mode required to exist. Asking for IMMEDIATE on a
 		// backend without it fails rather than silently staying synchronised,
@@ -422,8 +411,9 @@ namespace engine::render {
 			return false;
 		}
 
-		if (!SDL_SetGPUSwapchainParameters(State->Device, State->Window,
-				SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
+		if (!SDL_SetGPUSwapchainParameters(
+				State->Device, State->Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode
+			)) {
 			ENGINE_WARN("SDL_SetGPUSwapchainParameters: {}", SDL_GetError());
 			return false;
 		}
@@ -458,7 +448,7 @@ namespace engine::render {
 		const char *driver = SDL_GetGPUDeviceDriver(State->Device);
 		State->Backend = driver ? driver : "unknown";
 
-		SDL_GPUSamplerCreateInfo sampler {};
+		SDL_GPUSamplerCreateInfo sampler{};
 		// Nearest, because the overlay is pixel art at exactly one texel per
 		// pixel. Linear would blur the 3x5 font into illegibility.
 		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
@@ -524,14 +514,11 @@ namespace engine::render {
 		}
 		SDL_DestroyGPUDevice(device);
 
-		*State = Impl {};
+		*State = Impl{};
 	}
 
-	FrameResult Renderer::Render(
-		const Camera &camera,
-		std::span<const Instance> instances,
-		const OverlayImage &overlay
-	) {
+	FrameResult
+	Renderer::Render(const Camera &camera, std::span<const Instance> instances, const OverlayImage &overlay) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
 		FrameResult result;
@@ -548,9 +535,8 @@ namespace engine::render {
 		SDL_GPUTexture *swapchain = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;
-		if (!SDL_WaitAndAcquireGPUSwapchainTexture(command, State->Window, &swapchain, &width,
-				&height)
-			|| !swapchain) {
+		if (!SDL_WaitAndAcquireGPUSwapchainTexture(command, State->Window, &swapchain, &width, &height) ||
+			!swapchain) {
 			// Minimised, or mid-resize. Not an error, and not a reason to stop
 			// ticking — the simulation carries on and the next frame presents.
 			SDL_SubmitGPUCommandBuffer(command);
@@ -567,8 +553,8 @@ namespace engine::render {
 		const auto instanceCount = static_cast<uint32_t>(instances.size());
 		bool haveInstances = false;
 
-		const bool haveOverlay = overlay.IsDirty() && !overlay.IsEmpty()
-			&& State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
+		const bool haveOverlay = overlay.IsDirty() && !overlay.IsEmpty() &&
+								 State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
 
 		if (instanceCount > 0 && State->EnsureInstanceCapacity(instanceCount)) {
 			ENGINE_PROFILE_CAT("upload instances", core::ProfileCategory::Render);
@@ -583,8 +569,8 @@ namespace engine::render {
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
 			if (haveInstances) {
-				const SDL_GPUTransferBufferLocation source { State->InstanceTransfer, 0 };
-				const SDL_GPUBufferRegion destination {
+				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
+				const SDL_GPUBufferRegion destination{
 					State->InstanceBuffer,
 					0,
 					instanceCount * static_cast<uint32_t>(sizeof(Instance)),
@@ -595,15 +581,14 @@ namespace engine::render {
 			}
 
 			if (haveOverlay) {
-				void *mapped =
-					SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
+				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
 				std::memcpy(mapped, overlay.GetPixels(), overlay.GetByteCount());
 				SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
 
-				SDL_GPUTextureTransferInfo source {};
+				SDL_GPUTextureTransferInfo source{};
 				source.transfer_buffer = State->OverlayTransfer;
 
-				SDL_GPUTextureRegion destination {};
+				SDL_GPUTextureRegion destination{};
 				destination.texture = State->OverlayTexture;
 				destination.w = static_cast<uint32_t>(overlay.GetWidth());
 				destination.h = static_cast<uint32_t>(overlay.GetHeight());
@@ -617,13 +602,13 @@ namespace engine::render {
 
 		// --- opaque pass ----------------------------------------------------
 
-		SDL_GPUColorTargetInfo colourTarget {};
+		SDL_GPUColorTargetInfo colourTarget{};
 		colourTarget.texture = swapchain;
-		colourTarget.clear_color = SDL_FColor { 0.05f, 0.06f, 0.09f, 1.0f };
+		colourTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
 		colourTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 		colourTarget.store_op = SDL_GPU_STOREOP_STORE;
 
-		SDL_GPUDepthStencilTargetInfo depthTarget {};
+		SDL_GPUDepthStencilTargetInfo depthTarget{};
 		depthTarget.texture = State->DepthTexture;
 		depthTarget.clear_depth = 1.0f;
 		depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
@@ -637,19 +622,18 @@ namespace engine::render {
 		{
 			ENGINE_PROFILE_CAT("opaque pass", core::ProfileCategory::Render);
 
-			SDL_GPURenderPass *pass =
-				SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 
 			if (haveInstances) {
 				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
 				const SDL_GPUBufferBinding vertexBindings[] = {
-					{ State->VertexBuffer, 0 },
-					{ State->InstanceBuffer, 0 },
+					{State->VertexBuffer, 0},
+					{State->InstanceBuffer, 0},
 				};
 				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
 
-				const SDL_GPUBufferBinding indexBinding { State->IndexBuffer, 0 };
+				const SDL_GPUBufferBinding indexBinding{State->IndexBuffer, 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
 
 				const float aspect = static_cast<float>(width) / static_cast<float>(height);
@@ -664,22 +648,23 @@ namespace engine::render {
 				//
 				// GLM_FORCE_DEPTH_ZERO_TO_ONE is still required: the depth
 				// range is 0..1 everywhere SDL's GPU API runs.
-				const glm::mat4 projection = glm::perspective(camera.FieldOfViewRadians, aspect,
-					camera.NearPlane, camera.FarPlane);
+				const glm::mat4 projection =
+					glm::perspective(camera.FieldOfViewRadians, aspect, camera.NearPlane, camera.FarPlane);
 
-				const FrameUniforms frame {
+				const FrameUniforms frame{
 					projection * glm::inverse(camera.Frame.ToMatrix()),
 				};
 				SDL_PushGPUVertexUniformData(command, 0, &frame, sizeof(frame));
 
-				const LightingUniforms lighting {
-					glm::vec4 { -0.45f, -0.8f, -0.4f, 0.0f },
-					glm::vec4 { 0.26f, 0.28f, 0.34f, 1.0f },
+				const LightingUniforms lighting{
+					glm::vec4{-0.45f, -0.8f, -0.4f, 0.0f},
+					glm::vec4{0.26f, 0.28f, 0.34f, 1.0f},
 				};
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 
-				SDL_DrawGPUIndexedPrimitives(pass, static_cast<uint32_t>(CUBE_INDICES.size()),
-					instanceCount, 0, 0, 0);
+				SDL_DrawGPUIndexedPrimitives(
+					pass, static_cast<uint32_t>(CUBE_INDICES.size()), instanceCount, 0, 0, 0
+				);
 
 				result.DrawCalls = 1;
 				result.Triangles = static_cast<uint64_t>(CUBE_INDICES.size() / 3) * instanceCount;
@@ -700,7 +685,7 @@ namespace engine::render {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, nullptr);
 			SDL_BindGPUGraphicsPipeline(pass, State->OverlayPipeline);
 
-			const SDL_GPUTextureSamplerBinding binding {
+			const SDL_GPUTextureSamplerBinding binding{
 				State->OverlayTexture,
 				State->OverlaySampler,
 			};

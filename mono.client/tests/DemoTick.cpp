@@ -10,8 +10,6 @@
 // testable on a machine with no GPU, and drawing the line there is what keeps
 // the suite runnable everywhere.
 
-#include <client/Demo.hpp>
-
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -24,6 +22,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <client/Demo.hpp>
 
 TEST_SUITE_ID("client.demo.tick")
 TEST_DEPENDS("engine.ecs.scheduler")
@@ -47,7 +46,7 @@ namespace {
 	// point: after BuildDemoWorld returns, everything the tick reads and writes
 	// is inside the store.
 	struct Session {
-		Store World { "integration" };
+		Store World{"integration"};
 		Scheduler Systems;
 
 		Session() {
@@ -137,8 +136,8 @@ TEST_CASE("the camera is placed by a system, into the world", "[demo]") {
 	session.Tick(120);
 	const auto later = session.World.Resource<client::ActiveCamera>()->Value;
 
-	const bool moved = atRest.Frame.Position.X != Approx(later.Frame.Position.X)
-		|| atRest.Frame.Position.Z != Approx(later.Frame.Position.Z);
+	const bool moved = atRest.Frame.Position.X != Approx(later.Frame.Position.X) ||
+					   atRest.Frame.Position.Z != Approx(later.Frame.Position.Z);
 	REQUIRE(moved);
 
 	// Far enough out to hold the scene. The camera reads SceneBounds rather
@@ -154,18 +153,16 @@ namespace {
 	engine::core::Vector3 PositionOf(Store &store, int nth) {
 		engine::core::Vector3 found;
 		int seen = 0;
-		store.Each<const client::Transform>(
-			[&](engine::ecs::Entity, const client::Transform &transform) {
-				if (seen++ == nth) {
-					found = transform.Frame.Position;
-				}
-			});
+		store.Each<const client::Transform>([&](engine::ecs::Entity, const client::Transform &transform) {
+			if (seen++ == nth) {
+				found = transform.Frame.Position;
+			}
+		});
 		return found;
 	}
 }
 
-TEST_CASE("the scene is a function of elapsed time, not of tick count",
-	"[demo]") {
+TEST_CASE("the scene is a function of elapsed time, not of tick count", "[demo]") {
 	// Two sessions stepped over the same total duration in different-sized
 	// steps must agree. Without that, a frame-time comparison between two runs
 	// compares two different scenes.
@@ -228,12 +225,12 @@ TEST_CASE("alpha zero draws the previous tick exactly", "[demo]") {
 
 	engine::core::Vector3 previous;
 	int seen = 0;
-	session.World.Each<const client::PreviousTransform>(
-		[&](engine::ecs::Entity, const client::PreviousTransform &transform) {
-			if (seen++ == 3) {
-				previous = transform.Frame.Position;
-			}
-		});
+	session.World.Each<const client::PreviousTransform>([&](engine::ecs::Entity,
+															const client::PreviousTransform &transform) {
+		if (seen++ == 3) {
+			previous = transform.Frame.Position;
+		}
+	});
 
 	REQUIRE(drawn.x == Approx(previous.X).margin(1e-4));
 	REQUIRE(drawn.z == Approx(previous.Z).margin(1e-4));
@@ -287,13 +284,11 @@ TEST_CASE("a tick with a job pool matches one without", "[demo]") {
 	serial.Tick(30);
 
 	for (size_t index = 0; index < serial.Drawn().size(); index += 37) {
-		REQUIRE(pooled.Drawn()[index].Model[3][0]
-			== Approx(serial.Drawn()[index].Model[3][0]));
+		REQUIRE(pooled.Drawn()[index].Model[3][0] == Approx(serial.Drawn()[index].Model[3][0]));
 	}
 }
 
-TEST_CASE("a tick reports itself to the frame graph and the metrics sink",
-	"[demo]") {
+TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[demo]") {
 	Metrics::Clear();
 
 	Session session;
@@ -342,7 +337,7 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 
 	std::vector<engine::render::SystemTiming> timings;
 	for (const auto &timing : session.Systems.Timings()) {
-		timings.push_back({ timing.Name, timing.Milliseconds });
+		timings.push_back({timing.Name, timing.Milliseconds});
 	}
 	// capture-previous, orbit, spin, move-camera, collect-instances.
 	REQUIRE(timings.size() == 5);

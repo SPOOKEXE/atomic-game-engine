@@ -38,10 +38,10 @@ namespace engine::render {
 	// @client
 	struct Instance {
 		// Column-major transform from object space to world space.
-		glm::mat4 Model { 1.0f };
+		glm::mat4 Model{1.0f};
 
 		// Straight RGBA colour multiplier for the opaque mesh.
-		glm::vec4 Colour { 1.0f, 1.0f, 1.0f, 1.0f };
+		glm::vec4 Colour{1.0f, 1.0f, 1.0f, 1.0f};
 	};
 
 	// A right-handed, Y-up perspective camera that looks along local negative Z.
@@ -54,7 +54,7 @@ namespace engine::render {
 		core::CFrame Frame;
 
 		// Vertical field of view, in radians.
-		float FieldOfViewRadians = 1.22f;  // 70 degrees
+		float FieldOfViewRadians = 1.22f; // 70 degrees
 
 		// Near clipping distance in world units.
 		float NearPlane = 0.1f;
@@ -149,11 +149,8 @@ namespace engine::render {
 		// @param overlay   CPU premultiplied RGBA8 overlay; uploaded only when dirty
 		//                   and non-empty.
 		// @return Submitted draw counts and whether the frame was presented.
-		FrameResult Render(
-			const Camera &camera,
-			std::span<const Instance> instances,
-			const OverlayImage &overlay
-		);
+		FrameResult
+		Render(const Camera &camera, std::span<const Instance> instances, const OverlayImage &overlay);
 
 	  private:
 		struct Impl;

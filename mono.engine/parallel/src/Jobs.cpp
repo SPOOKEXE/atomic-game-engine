@@ -20,8 +20,8 @@ namespace engine::parallel {
 			const std::function<void(size_t, size_t)> *Body = nullptr;
 			size_t Count = 0;
 			size_t Grain = 0;
-			std::atomic<size_t> Next { 0 };
-			std::atomic<size_t> Outstanding { 0 };
+			std::atomic<size_t> Next{0};
+			std::atomic<size_t> Outstanding{0};
 
 			std::mutex FailureGuard;
 			std::exception_ptr Failure;
@@ -72,9 +72,7 @@ namespace engine::parallel {
 				Batch *batch = nullptr;
 				{
 					std::unique_lock lock(pool.Guard);
-					pool.Available.wait(lock, [&] {
-						return pool.Stopping || pool.Generation != seen;
-					});
+					pool.Available.wait(lock, [&] { return pool.Stopping || pool.Generation != seen; });
 					if (pool.Stopping) {
 						return;
 					}
@@ -181,9 +179,7 @@ namespace engine::parallel {
 
 		{
 			std::unique_lock lock(pool.Guard);
-			pool.Finished.wait(lock, [&] {
-				return batch.Outstanding.load(std::memory_order_acquire) == 0;
-			});
+			pool.Finished.wait(lock, [&] { return batch.Outstanding.load(std::memory_order_acquire) == 0; });
 			pool.Current = nullptr;
 		}
 

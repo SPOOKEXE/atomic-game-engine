@@ -178,9 +178,8 @@ namespace engine::core {
 
 			// Whatever fell out of the window. Dropping from the front of a ring
 			// is one index, which is the reason it is a ring.
-			while (state.HistoryCount > 1
-				&& frame.Seconds - state.History[state.HistoryStart].Seconds
-					> FrameGraph::HISTORY_SECONDS) {
+			while (state.HistoryCount > 1 &&
+				   frame.Seconds - state.History[state.HistoryStart].Seconds > FrameGraph::HISTORY_SECONDS) {
 				state.HistoryStart = (state.HistoryStart + 1) % FrameGraph::MAXIMUM_HISTORY_FRAMES;
 				state.HistoryCount--;
 			}
@@ -212,8 +211,7 @@ namespace engine::core {
 				return 0.0f;
 			}
 			std::sort(readings.begin(), readings.end());
-			const auto rank =
-				static_cast<size_t>(fraction * static_cast<double>(readings.size() - 1) + 0.5);
+			const auto rank = static_cast<size_t>(fraction * static_cast<double>(readings.size() - 1) + 0.5);
 			return readings[std::min(rank, readings.size() - 1)];
 		}
 
@@ -227,16 +225,16 @@ namespace engine::core {
 
 	std::string_view GetCategoryName(ProfileCategory category) {
 		switch (category) {
-			case ProfileCategory::Engine:
-				return "engine";
-			case ProfileCategory::Render:
-				return "render";
-			case ProfileCategory::Simulation:
-				return "sim";
-			case ProfileCategory::Script:
-				return "script";
-			case ProfileCategory::Count:
-				break;
+		case ProfileCategory::Engine:
+			return "engine";
+		case ProfileCategory::Render:
+			return "render";
+		case ProfileCategory::Simulation:
+			return "sim";
+		case ProfileCategory::Script:
+			return "script";
+		case ProfileCategory::Count:
+			break;
 		}
 		return "?";
 	}
@@ -396,8 +394,7 @@ namespace engine::core {
 		if (state.HistoryCount < 2) {
 			return 0.0;
 		}
-		const size_t last =
-			(state.HistoryStart + state.HistoryCount - 1) % MAXIMUM_HISTORY_FRAMES;
+		const size_t last = (state.HistoryStart + state.HistoryCount - 1) % MAXIMUM_HISTORY_FRAMES;
 		return state.History[last].Seconds - state.History[state.HistoryStart].Seconds;
 	}
 
@@ -419,8 +416,7 @@ namespace engine::core {
 
 		const double firstSeconds = state.History[state.HistoryStart].Seconds;
 		for (size_t offset = 0; offset < state.HistoryCount; offset++) {
-			const HistoryFrame &frame =
-				state.History[(state.HistoryStart + offset) % MAXIMUM_HISTORY_FRAMES];
+			const HistoryFrame &frame = state.History[(state.HistoryStart + offset) % MAXIMUM_HISTORY_FRAMES];
 			frameMilliseconds.push_back(frame.Milliseconds);
 			for (const auto &[id, milliseconds] : frame.Spans) {
 				readings[id].push_back(milliseconds);
@@ -436,22 +432,39 @@ namespace engine::core {
 
 		char line[512];
 		out << "atomic frame graph snapshot\n";
-		std::snprintf(line, sizeof(line),
+		std::snprintf(
+			line,
+			sizeof(line),
 			"window   %zu frames over %.3f s (bounds: %.1f s, %zu frames)\n",
-			state.HistoryCount, HistorySeconds(), HISTORY_SECONDS, MAXIMUM_HISTORY_FRAMES);
+			state.HistoryCount,
+			HistorySeconds(),
+			HISTORY_SECONDS,
+			MAXIMUM_HISTORY_FRAMES
+		);
 		out << line;
 
 		std::vector<float> frameSorted = frameMilliseconds;
 		const float p99 = Percentile(frameSorted, 0.99);
 		const float p50 = Percentile(frameSorted, 0.50);
-		std::snprintf(line, sizeof(line), "frame ms mean %.3f  max %.3f  p99 %.3f  p50 %.3f\n",
-			frameTotal / static_cast<double>(state.HistoryCount), frameWorst, p99, p50);
+		std::snprintf(
+			line,
+			sizeof(line),
+			"frame ms mean %.3f  max %.3f  p99 %.3f  p50 %.3f\n",
+			frameTotal / static_cast<double>(state.HistoryCount),
+			frameWorst,
+			p99,
+			p50
+		);
 		out << line;
 
 		if (state.HistoryNamesDropped > 0) {
-			std::snprintf(line, sizeof(line),
+			std::snprintf(
+				line,
+				sizeof(line),
 				"WARNING  %zu span names past the %zu tracked were not recorded\n",
-				state.HistoryNamesDropped, MAXIMUM_HISTORY_NAMES);
+				state.HistoryNamesDropped,
+				MAXIMUM_HISTORY_NAMES
+			);
 			out << line;
 		}
 
@@ -460,8 +473,9 @@ namespace engine::core {
 		// total: a span that opens once per camera would otherwise read as the
 		// sum of six cameras and not compare with anything else here.
 		out << "\nper span, worst reading in a frame. sorted by max.\n";
-		std::snprintf(line, sizeof(line), "%-34s %7s %8s %8s %8s %8s\n", "span", "frames", "mean",
-			"p50", "p99", "max");
+		std::snprintf(
+			line, sizeof(line), "%-34s %7s %8s %8s %8s %8s\n", "span", "frames", "mean", "p50", "p99", "max"
+		);
 		out << line;
 
 		std::vector<uint32_t> order;
@@ -471,8 +485,8 @@ namespace engine::core {
 			}
 		}
 		std::sort(order.begin(), order.end(), [&readings](uint32_t left, uint32_t right) {
-			return *std::max_element(readings[left].begin(), readings[left].end())
-				> *std::max_element(readings[right].begin(), readings[right].end());
+			return *std::max_element(readings[left].begin(), readings[left].end()) >
+				   *std::max_element(readings[right].begin(), readings[right].end());
 		});
 
 		for (uint32_t id : order) {
@@ -486,9 +500,17 @@ namespace engine::core {
 			std::vector<float> sorted = span;
 			const float spanP50 = Percentile(sorted, 0.50);
 			const float spanP99 = Percentile(sorted, 0.99);
-			std::snprintf(line, sizeof(line), "%-34s %7zu %8.3f %8.3f %8.3f %8.3f\n",
-				state.HistoryNames[id].c_str(), span.size(),
-				total / static_cast<double>(span.size()), spanP50, spanP99, worst);
+			std::snprintf(
+				line,
+				sizeof(line),
+				"%-34s %7zu %8.3f %8.3f %8.3f %8.3f\n",
+				state.HistoryNames[id].c_str(),
+				span.size(),
+				total / static_cast<double>(span.size()),
+				spanP50,
+				spanP99,
+				worst
+			);
 			out << line;
 		}
 
@@ -498,31 +520,36 @@ namespace engine::core {
 		for (size_t offset = 0; offset < state.HistoryCount; offset++) {
 			worstOrder[offset] = offset;
 		}
-		std::sort(worstOrder.begin(), worstOrder.end(),
-			[&frameMilliseconds](size_t left, size_t right) {
-				return frameMilliseconds[left] > frameMilliseconds[right];
-			});
+		std::sort(worstOrder.begin(), worstOrder.end(), [&frameMilliseconds](size_t left, size_t right) {
+			return frameMilliseconds[left] > frameMilliseconds[right];
+		});
 
 		const size_t listed = std::min(WORST_FRAMES, state.HistoryCount);
-		std::snprintf(line, sizeof(line), "\nworst %zu frames, and the biggest spans in each\n",
-			listed);
+		std::snprintf(line, sizeof(line), "\nworst %zu frames, and the biggest spans in each\n", listed);
 		out << line;
 
 		for (size_t rank = 0; rank < listed; rank++) {
 			const HistoryFrame &frame =
 				state.History[(state.HistoryStart + worstOrder[rank]) % MAXIMUM_HISTORY_FRAMES];
 
-			std::snprintf(line, sizeof(line), "  +%8.4f s  %8.3f ms ",
-				frame.Seconds - firstSeconds, frame.Milliseconds);
+			std::snprintf(
+				line, sizeof(line), "  +%8.4f s  %8.3f ms ", frame.Seconds - firstSeconds, frame.Milliseconds
+			);
 			out << line;
 
 			std::vector<std::pair<uint32_t, float>> spans = frame.Spans;
-			std::sort(spans.begin(), spans.end(),
-				[](const auto &left, const auto &right) { return left.second > right.second; });
+			std::sort(spans.begin(), spans.end(), [](const auto &left, const auto &right) {
+				return left.second > right.second;
+			});
 
 			for (size_t index = 0; index < spans.size() && index < WORST_FRAME_SPANS; index++) {
-				std::snprintf(line, sizeof(line), " %s %.3f",
-					state.HistoryNames[spans[index].first].c_str(), spans[index].second);
+				std::snprintf(
+					line,
+					sizeof(line),
+					" %s %.3f",
+					state.HistoryNames[spans[index].first].c_str(),
+					spans[index].second
+				);
 				out << line;
 			}
 			out << "\n";
@@ -563,19 +590,20 @@ namespace engine::core {
 
 		// Only recorded spans are on the stack, and a span is skipped only when
 		// its parent was, so the top of the stack is this one's parent.
-		const uint32_t parent =
-			state.Open.empty() ? NO_PARENT : static_cast<uint32_t>(state.Open.back());
+		const uint32_t parent = state.Open.empty() ? NO_PARENT : static_cast<uint32_t>(state.Open.back());
 
 		const size_t index = state.Building.size();
-		state.Building.push_back(FrameSpan {
-			name,
-			state.Depth,
-			parent,
-			MillisecondsSince(state.FrameStartNanoseconds),
-			0.0f,
-			0.0f,
-			category,
-		});
+		state.Building.push_back(
+			FrameSpan{
+				name,
+				state.Depth,
+				parent,
+				MillisecondsSince(state.FrameStartNanoseconds),
+				0.0f,
+				0.0f,
+				category,
+			}
+		);
 		state.Open.push_back(index);
 		state.Depth++;
 		return index;
@@ -606,8 +634,7 @@ namespace engine::core {
 		}
 
 		auto &span = state.Building[index];
-		span.Milliseconds =
-			MillisecondsSince(state.FrameStartNanoseconds) - span.StartMilliseconds;
+		span.Milliseconds = MillisecondsSince(state.FrameStartNanoseconds) - span.StartMilliseconds;
 		state.Open.pop_back();
 	}
 
@@ -620,9 +647,7 @@ namespace engine::core {
 	}
 
 	FrameGraph::CopiedScope::CopiedScope(
-		std::string_view fallback,
-		std::string_view name,
-		ProfileCategory category
+		std::string_view fallback, std::string_view name, ProfileCategory category
 	) {
 		auto &state = Get();
 		if (!state.Recording || std::this_thread::get_id() != state.Owner) {

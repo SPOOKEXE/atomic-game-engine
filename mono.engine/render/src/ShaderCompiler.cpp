@@ -8,12 +8,12 @@ namespace engine::render {
 	namespace {
 		shaderc_shader_kind ToKind(ShaderStage stage) {
 			switch (stage) {
-				case ShaderStage::Vertex:
-					return shaderc_glsl_vertex_shader;
-				case ShaderStage::Fragment:
-					return shaderc_glsl_fragment_shader;
-				case ShaderStage::Compute:
-					return shaderc_glsl_compute_shader;
+			case ShaderStage::Vertex:
+				return shaderc_glsl_vertex_shader;
+			case ShaderStage::Fragment:
+				return shaderc_glsl_fragment_shader;
+			case ShaderStage::Compute:
+				return shaderc_glsl_compute_shader;
 			}
 			return shaderc_glsl_fragment_shader;
 		}
@@ -24,8 +24,7 @@ namespace engine::render {
 		shaderc::CompileOptions Options;
 	};
 
-	ShaderCompiler::ShaderCompiler()
-		: State(new Impl) {
+	ShaderCompiler::ShaderCompiler() : State(new Impl) {
 		// Vulkan 1.0 / SPIR-V 1.0 is the floor every backend SDL's GPU API
 		// targets can accept. Raising it would compile shaders some drivers
 		// then refuse, which surfaces as a pipeline that will not create
@@ -40,14 +39,12 @@ namespace engine::render {
 
 	void ShaderCompiler::SetOptimise(bool optimise) {
 		State->Options.SetOptimizationLevel(
-			optimise ? shaderc_optimization_level_performance : shaderc_optimization_level_zero);
+			optimise ? shaderc_optimization_level_performance : shaderc_optimization_level_zero
+		);
 	}
 
-	ShaderCompilation ShaderCompiler::Compile(
-		std::string_view source,
-		ShaderStage stage,
-		std::string_view name
-	) {
+	ShaderCompilation
+	ShaderCompiler::Compile(std::string_view source, ShaderStage stage, std::string_view name) {
 		ENGINE_PROFILE_CAT("ShaderCompiler::Compile", core::ProfileCategory::Render);
 
 		ShaderCompilation result;
@@ -56,7 +53,8 @@ namespace engine::render {
 		// may be a view into a larger buffer.
 		const std::string label(name);
 		const auto compiled = State->Compiler.CompileGlslToSpv(
-			source.data(), source.size(), ToKind(stage), label.c_str(), "main", State->Options);
+			source.data(), source.size(), ToKind(stage), label.c_str(), "main", State->Options
+		);
 
 		result.Warnings = static_cast<uint32_t>(compiled.GetNumWarnings());
 

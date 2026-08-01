@@ -1,9 +1,9 @@
-#include <docgen/Filter.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <docgen/Filter.hpp>
 #include <string>
 
 TEST_SUITE_ID("tools.docgen.filter")
@@ -26,47 +26,45 @@ namespace {
 // drops one line sends every link on the page off by one — a failure that looks
 // like working documentation.
 TEST_CASE("the line count never changes", "[docgen]") {
-	const std::string source =
-		"#pragma once\n"
-		"\n"
-		"// A thing.\n"
-		"//\n"
-		"// And why it is that way.\n"
-		"\n"
-		"#include <string>\n"
-		"\n"
-		"namespace engine {\n"
-		"\tclass Thing {};\n"
-		"}\n";
+	const std::string source = "#pragma once\n"
+							   "\n"
+							   "// A thing.\n"
+							   "//\n"
+							   "// And why it is that way.\n"
+							   "\n"
+							   "#include <string>\n"
+							   "\n"
+							   "namespace engine {\n"
+							   "\tclass Thing {};\n"
+							   "}\n";
 
 	REQUIRE(LineCount(Promote(source)) == LineCount(source));
 }
 
 TEST_CASE("a file's opening prose documents the file", "[docgen]") {
-	const std::string source =
-		"#pragma once\n"
-		"\n"
-		"// A stable name, and a cheap handle for it.\n"
-		"\n"
-		"#include <string>\n";
+	const std::string source = "#pragma once\n"
+							   "\n"
+							   "// A stable name, and a cheap handle for it.\n"
+							   "\n"
+							   "#include <string>\n";
 
 	const std::string filtered = Promote(source);
 
 	// The blank line after `#pragma once` carries it, so the block below stays
 	// contiguous and the count is untouched.
-	REQUIRE(filtered ==
-			"#pragma once\n"
-			"/// @file\n"
-			"/// A stable name, and a cheap handle for it.\n"
-			"\n"
-			"#include <string>\n");
+	REQUIRE(
+		filtered == "#pragma once\n"
+					"/// @file\n"
+					"/// A stable name, and a cheap handle for it.\n"
+					"\n"
+					"#include <string>\n"
+	);
 }
 
 TEST_CASE("a file with no opening prose gets no @file", "[docgen]") {
-	const std::string source =
-		"#pragma once\n"
-		"\n"
-		"#include <string>\n";
+	const std::string source = "#pragma once\n"
+							   "\n"
+							   "#include <string>\n";
 
 	REQUIRE(Promote(source) == source);
 }
@@ -74,23 +72,22 @@ TEST_CASE("a file with no opening prose gets no @file", "[docgen]") {
 TEST_CASE("prose on the first line is still the file's", "[docgen]") {
 	// No `#pragma once`, so there is no blank line above the block. The one
 	// below it carries the command instead.
-	const std::string source =
-		"// What this file is.\n"
-		"\n"
-		"#include <string>\n";
+	const std::string source = "// What this file is.\n"
+							   "\n"
+							   "#include <string>\n";
 
-	REQUIRE(Promote(source) ==
-			"/// What this file is.\n"
-			"/// @file\n"
-			"#include <string>\n");
+	REQUIRE(
+		Promote(source) == "/// What this file is.\n"
+						   "/// @file\n"
+						   "#include <string>\n"
+	);
 }
 
 TEST_CASE("a comment owning its line is promoted, indentation kept", "[docgen]") {
-	const std::string source =
-		"class Name {\n"
-		"\t// Interns. Cheap to repeat.\n"
-		"\texplicit Name(std::string_view text);\n"
-		"};\n";
+	const std::string source = "class Name {\n"
+							   "\t// Interns. Cheap to repeat.\n"
+							   "\texplicit Name(std::string_view text);\n"
+							   "};\n";
 
 	REQUIRE(Contains(Promote(source), "\t/// Interns. Cheap to repeat.\n"));
 }
@@ -99,11 +96,10 @@ TEST_CASE("a comment owning its line is promoted, indentation kept", "[docgen]")
 // so the documentation would appear against the wrong field and read as if it
 // belonged there.
 TEST_CASE("a comment after code documents what is to its left", "[docgen]") {
-	const std::string source =
-		"struct Camera {\n"
-		"\tfloat FieldOfViewRadians = 1.22f;  // 70 degrees\n"
-		"\tfloat NearPlane = 0.1f;\n"
-		"};\n";
+	const std::string source = "struct Camera {\n"
+							   "\tfloat FieldOfViewRadians = 1.22f;  // 70 degrees\n"
+							   "\tfloat NearPlane = 0.1f;\n"
+							   "};\n";
 
 	const std::string filtered = Promote(source);
 	REQUIRE(Contains(filtered, "= 1.22f;  ///< 70 degrees\n"));
@@ -111,29 +107,26 @@ TEST_CASE("a comment after code documents what is to its left", "[docgen]") {
 }
 
 TEST_CASE("an empty comment line survives as an empty doc line", "[docgen]") {
-	const std::string source =
-		"// One.\n"
-		"//\n"
-		"// Two.\n"
-		"struct Thing {};\n";
+	const std::string source = "// One.\n"
+							   "//\n"
+							   "// Two.\n"
+							   "struct Thing {};\n";
 
 	REQUIRE(Contains(Promote(source), "/// One.\n///\n/// Two.\n"));
 }
 
 TEST_CASE("a marker somebody wrote on purpose is left alone", "[docgen]") {
-	const std::string source =
-		"/// Already Doxygen's.\n"
-		"//! Also already Doxygen's.\n"
-		"struct Thing {};\n";
+	const std::string source = "/// Already Doxygen's.\n"
+							   "//! Also already Doxygen's.\n"
+							   "struct Thing {};\n";
 
 	REQUIRE(Promote(source) == source);
 }
 
 TEST_CASE("slashes inside a string are not a comment", "[docgen]") {
-	const std::string source =
-		"const char *Url = \"https://example.com\";\n"
-		"const char *Both = \"// not a comment\";  // but this one is\n"
-		"const char Escaped = '\\\\';  // and so is this\n";
+	const std::string source = "const char *Url = \"https://example.com\";\n"
+							   "const char *Both = \"// not a comment\";  // but this one is\n"
+							   "const char Escaped = '\\\\';  // and so is this\n";
 
 	const std::string filtered = Promote(source);
 	REQUIRE(Contains(filtered, "\"https://example.com\";\n"));
@@ -157,12 +150,11 @@ void main() {}
 }
 
 TEST_CASE("slashes inside a block comment are not a comment", "[docgen]") {
-	const std::string source =
-		"/* opened here\n"
-		"   // still inside the block\n"
-		"*/\n"
-		"// out here it counts\n"
-		"struct Thing {};\n";
+	const std::string source = "/* opened here\n"
+							   "   // still inside the block\n"
+							   "*/\n"
+							   "// out here it counts\n"
+							   "struct Thing {};\n";
 
 	const std::string filtered = Promote(source);
 	REQUIRE(Contains(filtered, "   // still inside the block\n"));
@@ -178,18 +170,16 @@ TEST_CASE("an inline block comment does not swallow the rest of the line", "[doc
 // Unescaped, Doxygen reads these as HTML tags and renders `/shaders//` — the
 // placeholder disappears and the page does not say it did.
 TEST_CASE("a path placeholder is not an HTML tag", "[docgen]") {
-	const std::string source =
-		"// <assets>/shaders/<module>/. A module stages its own SPIR-V.\n"
-		"static std::filesystem::path Shaders(std::string_view module);\n";
+	const std::string source = "// <assets>/shaders/<module>/. A module stages its own SPIR-V.\n"
+							   "static std::filesystem::path Shaders(std::string_view module);\n";
 
 	REQUIRE(Contains(Promote(source), "/// &lt;assets>/shaders/&lt;module>/."));
 }
 
 TEST_CASE("angle brackets that were never tags are left alone", "[docgen]") {
-	const std::string source =
-		"// Included as <engine/core/Name.hpp>, and true when a < b.\n"
-		"// A std::map<K, V> is not a tag either.\n"
-		"struct Thing {};\n";
+	const std::string source = "// Included as <engine/core/Name.hpp>, and true when a < b.\n"
+							   "// A std::map<K, V> is not a tag either.\n"
+							   "struct Thing {};\n";
 
 	const std::string filtered = Promote(source);
 	REQUIRE(Contains(filtered, "<engine/core/Name.hpp>"));
@@ -205,8 +195,9 @@ TEST_CASE("line endings are preserved", "[docgen]") {
 	REQUIRE(Contains(filtered, "/// @file\r\n"));
 	REQUIRE(Contains(filtered, "/// A thing.\r\n"));
 	REQUIRE(filtered.find('\n') != std::string::npos);
-	REQUIRE(std::count(filtered.begin(), filtered.end(), '\r')
-			== std::count(source.begin(), source.end(), '\r'));
+	REQUIRE(
+		std::count(filtered.begin(), filtered.end(), '\r') == std::count(source.begin(), source.end(), '\r')
+	);
 }
 
 TEST_CASE("a file with no trailing newline keeps not having one", "[docgen]") {

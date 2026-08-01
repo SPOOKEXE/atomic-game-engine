@@ -32,10 +32,10 @@ namespace engine::core {
 
 	// A broad owner used to group a span's self time in the frame overlay.
 	enum class ProfileCategory : uint8_t {
-		Engine,     // General engine work.
-		Render,     // Rendering work.
+		Engine,		// General engine work.
+		Render,		// Rendering work.
 		Simulation, // Simulation work.
-		Script,     // Script runtime work.
+		Script,		// Script runtime work.
 
 		Count, // Number of categories; not a span category.
 	};
@@ -263,8 +263,7 @@ namespace engine::core {
 			// @param fallback Stable name used when `name` is empty.
 			// @param name Runtime name to copy into frame-owned storage.
 			// @param category Broad owner used for category totals.
-			CopiedScope(std::string_view fallback, std::string_view name,
-				ProfileCategory category);
+			CopiedScope(std::string_view fallback, std::string_view name, ProfileCategory category);
 
 			// Closes the copied-name span through Scope's RAII destructor.
 			~CopiedScope() = default;

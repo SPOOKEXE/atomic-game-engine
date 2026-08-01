@@ -1,6 +1,3 @@
-#include <server/Server.hpp>
-#include <server/Simulation.hpp>
-
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/testing/Suite.hpp>
@@ -10,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <server/Server.hpp>
+#include <server/Simulation.hpp>
 #include <thread>
 
 TEST_SUITE_ID("server.host")
@@ -45,14 +44,14 @@ namespace {
 }
 
 TEST_CASE("a server hosts the requested number of entities", "[server]") {
-	Hosted hosted { 128, 1 };
+	Hosted hosted{128, 1};
 
 	REQUIRE(hosted.Host.World().CountMatching<server::Position>() == 128);
 	REQUIRE(hosted.Host.World().CountMatching<server::Position, server::Velocity>() == 128);
 }
 
 TEST_CASE("a tick budget is honoured exactly", "[server]") {
-	Hosted hosted { 32, 25 };
+	Hosted hosted{32, 25};
 
 	const auto summary = hosted.Host.Run();
 	REQUIRE(summary.Ticks == 25);
@@ -68,17 +67,16 @@ TEST_CASE("a zero tick rate is refused rather than dividing by it", "[server]") 
 }
 
 TEST_CASE("entities move", "[server]") {
-	Hosted hosted { 64, 10 };
+	Hosted hosted{64, 10};
 
 	const auto positionOf = [&hosted](int nth) {
 		engine::core::Vector3 found;
 		int seen = 0;
-		hosted.Host.World().Each<const server::Position>(
-			[&](Entity, const server::Position &position) {
-				if (seen++ == nth) {
-					found = position.Value;
-				}
-			});
+		hosted.Host.World().Each<const server::Position>([&](Entity, const server::Position &position) {
+			if (seen++ == nth) {
+				found = position.Value;
+			}
+		});
 		return found;
 	};
 
@@ -90,7 +88,7 @@ TEST_CASE("entities move", "[server]") {
 }
 
 TEST_CASE("nothing escapes the bounds, however long it runs", "[server]") {
-	Hosted hosted { 256, 400 };
+	Hosted hosted{256, 400};
 	hosted.Host.Run();
 
 	// Reflecting the velocity without clamping the position lets an entity
@@ -101,17 +99,17 @@ TEST_CASE("nothing escapes the bounds, however long it runs", "[server]") {
 	const float limit = hosted.Host.World().Resource<server::WorldBounds>()->HalfExtent + 0.001f;
 
 	bool inside = true;
-	hosted.Host.World().Each<const server::Position>(
-		[&inside, limit](Entity, const server::Position &position) {
-			inside = inside && std::abs(position.Value.X) <= limit
-				&& std::abs(position.Value.Y) <= limit && std::abs(position.Value.Z) <= limit;
-		});
+	hosted.Host.World().Each<const server::Position>([&inside,
+													  limit](Entity, const server::Position &position) {
+		inside = inside && std::abs(position.Value.X) <= limit && std::abs(position.Value.Y) <= limit &&
+				 std::abs(position.Value.Z) <= limit;
+	});
 
 	REQUIRE(inside);
 }
 
 TEST_CASE("the world keeps its own tick count", "[server]") {
-	Hosted hosted { 32, 17 };
+	Hosted hosted{32, 17};
 
 	const auto summary = hosted.Host.Run();
 
@@ -119,13 +117,12 @@ TEST_CASE("the world keeps its own tick count", "[server]") {
 	// kept beside it, so the two cannot disagree.
 	REQUIRE(summary.Ticks == 17);
 	REQUIRE(hosted.Host.World().Time().Tick == 17);
-	REQUIRE(hosted.Host.World().Time().Elapsed
-		== Approx(17.0 / 30.0).margin(1e-6));
+	REQUIRE(hosted.Host.World().Time().Elapsed == Approx(17.0 / 30.0).margin(1e-6));
 }
 
 TEST_CASE("two servers built the same way stay identical", "[server]") {
-	Hosted first { 64, 50 };
-	Hosted second { 64, 50 };
+	Hosted first{64, 50};
+	Hosted second{64, 50};
 
 	first.Host.Run();
 	second.Host.Run();
@@ -134,10 +131,12 @@ TEST_CASE("two servers built the same way stay identical", "[server]") {
 	// there is no replay, and no way to reproduce a report from a log.
 	std::vector<engine::core::Vector3> a;
 	std::vector<engine::core::Vector3> b;
-	first.Host.World().Each<const server::Position>(
-		[&a](Entity, const server::Position &position) { a.push_back(position.Value); });
-	second.Host.World().Each<const server::Position>(
-		[&b](Entity, const server::Position &position) { b.push_back(position.Value); });
+	first.Host.World().Each<const server::Position>([&a](Entity, const server::Position &position) {
+		a.push_back(position.Value);
+	});
+	second.Host.World().Each<const server::Position>([&b](Entity, const server::Position &position) {
+		b.push_back(position.Value);
+	});
 
 	REQUIRE(a.size() == b.size());
 	for (size_t index = 0; index < a.size(); index++) {
@@ -159,10 +158,9 @@ TEST_CASE("the tick rate does not change the simulation", "[server]") {
 		host.Run();
 
 		std::vector<engine::core::Vector3> positions;
-		host.World().Each<const server::Position>(
-			[&positions](Entity, const server::Position &position) {
-				positions.push_back(position.Value);
-			});
+		host.World().Each<const server::Position>([&positions](Entity, const server::Position &position) {
+			positions.push_back(position.Value);
+		});
 		host.Shutdown();
 		return positions;
 	};
@@ -220,7 +218,7 @@ TEST_CASE("a paced server holds roughly its tick rate", "[server]") {
 
 TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[server]") {
 	Metrics::Clear();
-	Hosted hosted { 32, 1 };
+	Hosted hosted{32, 1};
 
 	FrameGraph::SetEnabled(true);
 	hosted.Host.Run();
@@ -228,8 +226,9 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 	FrameGraph::SetEnabled(false);
 
 	const auto named = [&spans](std::string_view name) {
-		return std::any_of(spans.begin(), spans.end(),
-			[name](const auto &span) { return span.Name == name; });
+		return std::any_of(spans.begin(), spans.end(), [name](const auto &span) {
+			return span.Name == name;
+		});
 	};
 
 	REQUIRE(named("Server::Tick"));
@@ -237,8 +236,7 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 	REQUIRE(named("bounce"));
 
 	const auto counters = Metrics::Drain();
-	REQUIRE(std::any_of(counters.begin(), counters.end(),
-		[](const auto &counter) {
-			return counter.Name == engine::core::Name("world.entities");
-		}));
+	REQUIRE(std::any_of(counters.begin(), counters.end(), [](const auto &counter) {
+		return counter.Name == engine::core::Name("world.entities");
+	}));
 }

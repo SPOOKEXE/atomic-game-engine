@@ -79,8 +79,7 @@ TEST_CASE("minimum is the worst frame, not the smallest delta", "[panels]") {
 	REQUIRE(statistics.Average() < 200.0f);
 }
 
-TEST_CASE("the average is the mean delta inverted, not the mean of the rates",
-	"[panels]") {
+TEST_CASE("the average is the mean delta inverted, not the mean of the rates", "[panels]") {
 	FrameStatistics statistics;
 
 	// One frame at 10 ms and one at 30 ms: 50 frames over one second's worth of
@@ -161,21 +160,21 @@ TEST_CASE("the flamegraph draws a frame's spans", "[panels]") {
 	// Designated rather than positional. These used to be positional and every
 	// one of them shifted a value into the wrong field the day FrameSpan grew
 	// a Parent — silently, because the types line up.
-	const std::vector<FrameSpan> spans {
-		{ .Name = "outer",
-			.Depth = 0,
-			.Parent = engine::core::FrameGraph::NO_PARENT,
-			.StartMilliseconds = 0.0f,
-			.Milliseconds = 8.0f,
-			.SelfMilliseconds = 2.0f,
-			.Category = ProfileCategory::Engine },
-		{ .Name = "inner",
-			.Depth = 1,
-			.Parent = 0,
-			.StartMilliseconds = 1.0f,
-			.Milliseconds = 6.0f,
-			.SelfMilliseconds = 6.0f,
-			.Category = ProfileCategory::Render },
+	const std::vector<FrameSpan> spans{
+		{.Name = "outer",
+		 .Depth = 0,
+		 .Parent = engine::core::FrameGraph::NO_PARENT,
+		 .StartMilliseconds = 0.0f,
+		 .Milliseconds = 8.0f,
+		 .SelfMilliseconds = 2.0f,
+		 .Category = ProfileCategory::Engine},
+		{.Name = "inner",
+		 .Depth = 1,
+		 .Parent = 0,
+		 .StartMilliseconds = 1.0f,
+		 .Milliseconds = 6.0f,
+		 .SelfMilliseconds = 6.0f,
+		 .Category = ProfileCategory::Render},
 	};
 
 	OverlayImage image;
@@ -219,24 +218,26 @@ TEST_CASE("a deeper frame makes a taller panel", "[panels]") {
 		return 0;
 	};
 
-	const std::vector<FrameSpan> shallow {
-		{ .Name = "a",
-			.Depth = 0,
-			.Parent = engine::core::FrameGraph::NO_PARENT,
-			.StartMilliseconds = 0.0f,
-			.Milliseconds = 8.0f,
-			.SelfMilliseconds = 8.0f,
-			.Category = ProfileCategory::Engine },
+	const std::vector<FrameSpan> shallow{
+		{.Name = "a",
+		 .Depth = 0,
+		 .Parent = engine::core::FrameGraph::NO_PARENT,
+		 .StartMilliseconds = 0.0f,
+		 .Milliseconds = 8.0f,
+		 .SelfMilliseconds = 8.0f,
+		 .Category = ProfileCategory::Engine},
 	};
 	std::vector<FrameSpan> deep = shallow;
 	for (uint32_t depth = 1; depth <= 6; depth++) {
-		deep.push_back({ .Name = "b",
-			.Depth = depth,
-			.Parent = depth - 1,
-			.StartMilliseconds = 0.0f,
-			.Milliseconds = 8.0f,
-			.SelfMilliseconds = 0.0f,
-			.Category = ProfileCategory::Engine });
+		deep.push_back(
+			{.Name = "b",
+			 .Depth = depth,
+			 .Parent = depth - 1,
+			 .StartMilliseconds = 0.0f,
+			 .Milliseconds = 8.0f,
+			 .SelfMilliseconds = 0.0f,
+			 .Category = ProfileCategory::Engine}
+		);
 	}
 
 	// A fixed half-screen panel spends most of its life as a large dark
@@ -245,14 +246,14 @@ TEST_CASE("a deeper frame makes a taller panel", "[panels]") {
 }
 
 TEST_CASE("a zero-length frame does not divide by it", "[panels]") {
-	const std::vector<FrameSpan> spans {
-		{ .Name = "outer",
-			.Depth = 0,
-			.Parent = engine::core::FrameGraph::NO_PARENT,
-			.StartMilliseconds = 0.0f,
-			.Milliseconds = 0.0f,
-			.SelfMilliseconds = 0.0f,
-			.Category = ProfileCategory::Engine },
+	const std::vector<FrameSpan> spans{
+		{.Name = "outer",
+		 .Depth = 0,
+		 .Parent = engine::core::FrameGraph::NO_PARENT,
+		 .StartMilliseconds = 0.0f,
+		 .Milliseconds = 0.0f,
+		 .SelfMilliseconds = 0.0f,
+		 .Category = ProfileCategory::Engine},
 	};
 
 	OverlayImage image;

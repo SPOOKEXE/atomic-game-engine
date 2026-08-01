@@ -1,5 +1,4 @@
 #include <docgen/Filter.hpp>
-
 #include <vector>
 
 namespace docgen {
@@ -23,7 +22,7 @@ namespace docgen {
 			while (start < source.size()) {
 				const size_t newline = source.find('\n', start);
 				if (newline == NONE) {
-					lines.push_back({ source.substr(start), {} });
+					lines.push_back({source.substr(start), {}});
 					break;
 				}
 				size_t end = newline;
@@ -32,7 +31,7 @@ namespace docgen {
 					end--;
 					ending = "\r\n";
 				}
-				lines.push_back({ source.substr(start, end - start), ending });
+				lines.push_back({source.substr(start, end - start), ending});
 				start = newline + 1;
 			}
 			return lines;
@@ -40,7 +39,7 @@ namespace docgen {
 
 		std::string_view TrimLeft(std::string_view text) {
 			const size_t first = text.find_first_not_of(" \t");
-			return first == NONE ? std::string_view {} : text.substr(first);
+			return first == NONE ? std::string_view{} : text.substr(first);
 		}
 
 		bool IsBlank(std::string_view text) {
@@ -69,8 +68,8 @@ namespace docgen {
 				return false;
 			}
 			size_t i = quote - 1;
-			while (i > 0 && (line[i - 1] == 'L' || line[i - 1] == 'u' || line[i - 1] == 'U'
-							 || line[i - 1] == '8')) {
+			while (i > 0 &&
+				   (line[i - 1] == 'L' || line[i - 1] == 'u' || line[i - 1] == 'U' || line[i - 1] == '8')) {
 				i--;
 			}
 			return i == 0 || !IsIdentifierChar(line[i - 1]);
@@ -185,8 +184,7 @@ namespace docgen {
 				size_t end = i + 1;
 				if (end < comment.size() && IsLetter(comment[end])) {
 					end++;
-					while (end < comment.size()
-						   && (IsIdentifierChar(comment[end]) || comment[end] == '-')) {
+					while (end < comment.size() && (IsIdentifierChar(comment[end]) || comment[end] == '-')) {
 						end++;
 					}
 				}

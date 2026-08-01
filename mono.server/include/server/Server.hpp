@@ -83,7 +83,7 @@ namespace server {
 		void Tick(float delta);
 
 		Options Settings;
-		engine::ecs::Store Store { "server" };
+		engine::ecs::Store Store{"server"};
 		engine::ecs::Scheduler Scheduler;
 
 		bool Running = false;

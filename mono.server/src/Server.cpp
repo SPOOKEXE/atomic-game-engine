@@ -1,6 +1,3 @@
-#include <server/Server.hpp>
-#include <server/Simulation.hpp>
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
@@ -8,13 +5,15 @@
 
 #include <algorithm>
 #include <atomic>
+#include <server/Server.hpp>
+#include <server/Simulation.hpp>
 #include <thread>
 
 namespace server {
 
 	namespace {
 		// Read between ticks by the loop, written by Stop from anywhere.
-		std::atomic<bool> StopRequested { false };
+		std::atomic<bool> StopRequested{false};
 	}
 
 	bool Server::Initialise(const Options &options) {
@@ -105,8 +104,7 @@ namespace server {
 			// not keep its own tally.
 			const uint64_t ticks = Store.Time().Tick;
 
-			if (Settings.MaximumTicks >= 0
-				&& ticks >= static_cast<uint64_t>(Settings.MaximumTicks)) {
+			if (Settings.MaximumTicks >= 0 && ticks >= static_cast<uint64_t>(Settings.MaximumTicks)) {
 				break;
 			}
 
@@ -139,16 +137,19 @@ namespace server {
 		}
 
 		summary.Ticks = Store.Time().Tick;
-		summary.Seconds =
-			static_cast<double>(engine::core::Clock::Nanoseconds() - started) / 1e9;
-		summary.MeanTickMilliseconds = summary.Ticks > 0
-			? static_cast<float>(totalTickSeconds / static_cast<double>(summary.Ticks) * 1000.0)
-			: 0.0f;
+		summary.Seconds = static_cast<double>(engine::core::Clock::Nanoseconds() - started) / 1e9;
+		summary.MeanTickMilliseconds =
+			summary.Ticks > 0
+				? static_cast<float>(totalTickSeconds / static_cast<double>(summary.Ticks) * 1000.0)
+				: 0.0f;
 
 		ENGINE_INFO(
 			"{} tick(s) over {:.2f}s · mean {:.3f} ms · slowest {:.3f} ms · {} overrun(s)",
-			summary.Ticks, summary.Seconds, summary.MeanTickMilliseconds,
-			summary.SlowestTickMilliseconds, summary.Overruns
+			summary.Ticks,
+			summary.Seconds,
+			summary.MeanTickMilliseconds,
+			summary.SlowestTickMilliseconds,
+			summary.Overruns
 		);
 
 		return summary;

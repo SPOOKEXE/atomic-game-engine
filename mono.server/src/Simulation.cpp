@@ -1,10 +1,9 @@
-#include <server/Simulation.hpp>
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 
 #include <cmath>
+#include <server/Simulation.hpp>
 
 namespace server {
 
@@ -56,8 +55,8 @@ namespace server {
 					// clamped as well as the velocity flipped, because
 					// flipping alone lets an entity that overshot on a long
 					// tick sit outside the box flipping every tick.
-					float *axis[] = { &position.Value.X, &position.Value.Y, &position.Value.Z };
-					float *speed[] = { &velocity.Value.X, &velocity.Value.Y, &velocity.Value.Z };
+					float *axis[] = {&position.Value.X, &position.Value.Y, &position.Value.Z};
+					float *speed[] = {&velocity.Value.X, &velocity.Value.Y, &velocity.Value.Z};
 
 					for (int index = 0; index < 3; index++) {
 						if (*axis[index] > halfExtent) {
@@ -81,29 +80,36 @@ namespace server {
 		// the measurement; CountMatching now keeps its query, so the world can
 		// be asked and the second copy of the number is gone.
 		void Report(Store &store) {
-			engine::core::Metrics::Count("world.entities",
-				static_cast<double>(store.CountMatching<Position>()));
+			engine::core::Metrics::Count(
+				"world.entities", static_cast<double>(store.CountMatching<Position>())
+			);
 		}
 	}
 
 	void BuildPlaceholderWorld(Store &store, Scheduler &scheduler, uint32_t count) {
 		constexpr float HALF_EXTENT = 64.0f;
 
-		store.SetResource(WorldBounds { HALF_EXTENT });
+		store.SetResource(WorldBounds{HALF_EXTENT});
 
 		for (uint32_t index = 0; index < count; index++) {
 			const Entity entity = store.Create();
 
-			store.Set<Position>(entity, Position { Vector3 {
-				Random::Range(index, 2u, -HALF_EXTENT, HALF_EXTENT),
-				Random::Range(index, 3u, -HALF_EXTENT, HALF_EXTENT),
-				Random::Range(index, 5u, -HALF_EXTENT, HALF_EXTENT),
-			} });
-			store.Set<Velocity>(entity, Velocity { Vector3 {
-				Random::Range(index, 7u, -10.0f, 10.0f),
-				Random::Range(index, 11u, -10.0f, 10.0f),
-				Random::Range(index, 13u, -10.0f, 10.0f),
-			} });
+			store.Set<Position>(
+				entity,
+				Position{Vector3{
+					Random::Range(index, 2u, -HALF_EXTENT, HALF_EXTENT),
+					Random::Range(index, 3u, -HALF_EXTENT, HALF_EXTENT),
+					Random::Range(index, 5u, -HALF_EXTENT, HALF_EXTENT),
+				}}
+			);
+			store.Set<Velocity>(
+				entity,
+				Velocity{Vector3{
+					Random::Range(index, 7u, -10.0f, 10.0f),
+					Random::Range(index, 11u, -10.0f, 10.0f),
+					Random::Range(index, 13u, -10.0f, 10.0f),
+				}}
+			);
 		}
 
 		ENGINE_INFO("placeholder world: {} entities", count);

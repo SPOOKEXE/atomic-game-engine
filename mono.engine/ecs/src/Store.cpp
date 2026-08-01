@@ -2,9 +2,7 @@
 
 namespace engine::ecs {
 
-	Store::Store(std::string_view name)
-		: StoreName(name)
-		, Owner(std::this_thread::get_id()) {
+	Store::Store(std::string_view name) : StoreName(name), Owner(std::this_thread::get_id()) {
 		// Disabled before anything is put on it. A disabled entity is not in
 		// any query's cache, so resources are unreachable from Each and from
 		// CountMatching — which is what lets a type be a component on entities
@@ -15,7 +13,7 @@ namespace engine::ecs {
 
 		// The clock is the one resource that is always present, so that no
 		// system has to check whether the world has a time.
-		SetResource(WorldTime {});
+		SetResource(WorldTime{});
 
 		ENGINE_TRACE("store '{}' created", StoreName);
 	}
@@ -46,12 +44,12 @@ namespace engine::ecs {
 
 	Entity Store::Create() {
 		RequireOwningThread("Create");
-		return Entity { World.entity().id() };
+		return Entity{World.entity().id()};
 	}
 
 	Entity Store::Create(std::string_view name) {
 		RequireOwningThread("Create");
-		return Entity { World.entity(std::string(name).c_str()).id() };
+		return Entity{World.entity(std::string(name).c_str()).id()};
 	}
 
 	void Store::Destroy(Entity entity) {

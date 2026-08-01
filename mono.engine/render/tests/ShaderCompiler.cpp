@@ -34,8 +34,7 @@ void main() {
 
 TEST_CASE("a valid fragment shader compiles to SPIR-V", "[shaderc]") {
 	ShaderCompiler compiler;
-	const ShaderCompilation result =
-		compiler.Compile(VALID_FRAGMENT, ShaderStage::Fragment, "valid.frag");
+	const ShaderCompilation result = compiler.Compile(VALID_FRAGMENT, ShaderStage::Fragment, "valid.frag");
 
 	REQUIRE_FALSE(result.Failed);
 	REQUIRE(result.Error.empty());
@@ -45,9 +44,9 @@ TEST_CASE("a valid fragment shader compiles to SPIR-V", "[shaderc]") {
 
 TEST_CASE("a malformed shader produces a non-empty error", "[shaderc]") {
 	ShaderCompiler compiler;
-	const ShaderCompilation result =
-		compiler.Compile("#version 450\nvoid main() { this is not glsl }\n",
-			ShaderStage::Fragment, "broken.frag");
+	const ShaderCompilation result = compiler.Compile(
+		"#version 450\nvoid main() { this is not glsl }\n", ShaderStage::Fragment, "broken.frag"
+	);
 
 	// This is the assertion that matters, and RENDER_PIPELINE.md §11.9.1 says
 	// so directly: an empty error on invalid input means nothing compiled it.
@@ -61,8 +60,8 @@ TEST_CASE("a malformed shader produces a non-empty error", "[shaderc]") {
 TEST_CASE("the diagnostic names the shader and the line", "[shaderc]") {
 	ShaderCompiler compiler;
 	const ShaderCompilation result = compiler.Compile(
-		"#version 450\nvoid main() {\n\tundeclared_function();\n}\n",
-		ShaderStage::Fragment, "named.frag");
+		"#version 450\nvoid main() {\n\tundeclared_function();\n}\n", ShaderStage::Fragment, "named.frag"
+	);
 
 	REQUIRE(result.Failed);
 	// The name is what a script author sees to locate the failure, so it has
@@ -76,9 +75,13 @@ TEST_CASE("each stage compiles its own kind", "[shaderc]") {
 
 	REQUIRE_FALSE(compiler.Compile(VALID_VERTEX, ShaderStage::Vertex, "v").Failed);
 	REQUIRE_FALSE(compiler.Compile(VALID_FRAGMENT, ShaderStage::Fragment, "f").Failed);
-	REQUIRE_FALSE(compiler.Compile(
-		"#version 450\nlayout(local_size_x = 8) in;\nvoid main() {}\n",
-		ShaderStage::Compute, "c").Failed);
+	REQUIRE_FALSE(
+		compiler
+			.Compile(
+				"#version 450\nlayout(local_size_x = 8) in;\nvoid main() {}\n", ShaderStage::Compute, "c"
+			)
+			.Failed
+	);
 }
 
 TEST_CASE("the stage is honoured, not ignored", "[shaderc]") {
@@ -93,8 +96,9 @@ TEST_CASE("the stage is honoured, not ignored", "[shaderc]") {
 	// on the way through, both would compile and the mismatch would surface
 	// later as a pipeline that will not create — much further from the cause.
 	REQUIRE(compiler.Compile(VALID_VERTEX, ShaderStage::Fragment, "no-gl-position").Failed);
-	REQUIRE(compiler.Compile("#version 450\nvoid main() { discard; }\n",
-		ShaderStage::Vertex, "no-discard").Failed);
+	REQUIRE(
+		compiler.Compile("#version 450\nvoid main() { discard; }\n", ShaderStage::Vertex, "no-discard").Failed
+	);
 }
 
 TEST_CASE("an empty source fails rather than returning nothing", "[shaderc]") {
@@ -107,12 +111,10 @@ TEST_CASE("an empty source fails rather than returning nothing", "[shaderc]") {
 
 TEST_CASE("optimising changes the output but not the outcome", "[shaderc]") {
 	ShaderCompiler compiler;
-	const ShaderCompilation unoptimised =
-		compiler.Compile(VALID_FRAGMENT, ShaderStage::Fragment, "f");
+	const ShaderCompilation unoptimised = compiler.Compile(VALID_FRAGMENT, ShaderStage::Fragment, "f");
 
 	compiler.SetOptimise(true);
-	const ShaderCompilation optimised =
-		compiler.Compile(VALID_FRAGMENT, ShaderStage::Fragment, "f");
+	const ShaderCompilation optimised = compiler.Compile(VALID_FRAGMENT, ShaderStage::Fragment, "f");
 
 	REQUIRE_FALSE(optimised.Failed);
 	REQUIRE(optimised.SpirV.front() == SPIRV_MAGIC);

@@ -23,22 +23,18 @@ namespace engine::core {
 	}
 
 	Arguments::Arguments(std::string_view program, std::string_view summary)
-		: Program(program)
-		, Summary(summary) {
+		: Program(program), Summary(summary) {
 		Flag("help", "Show this text");
 	}
 
 	Arguments &Arguments::Flag(std::string_view name, std::string_view description) {
-		Options.push_back(Option { name, {}, description, false, false, {} });
+		Options.push_back(Option{name, {}, description, false, false, {}});
 		return *this;
 	}
 
-	Arguments &Arguments::Value(
-		std::string_view name,
-		std::string_view valueName,
-		std::string_view description
-	) {
-		Options.push_back(Option { name, valueName, description, true, false, {} });
+	Arguments &
+	Arguments::Value(std::string_view name, std::string_view valueName, std::string_view description) {
+		Options.push_back(Option{name, valueName, description, true, false, {}});
 		return *this;
 	}
 
@@ -118,8 +114,8 @@ namespace engine::core {
 			const std::string_view next = argv[index + 1];
 			if (AsOptionName(next) && Find(*AsOptionName(next))) {
 				result.Ok = false;
-				result.Error = "--" + std::string(*name) + " needs a value, but " + std::string(next)
-					+ " is an option";
+				result.Error =
+					"--" + std::string(*name) + " needs a value, but " + std::string(next) + " is an option";
 				return result;
 			}
 
@@ -154,7 +150,7 @@ namespace engine::core {
 		const auto *begin = value->data();
 		const auto *end = begin + value->size();
 		const auto outcome = std::from_chars(begin, end, parsed);
-		if (outcome.ec != std::errc {} || outcome.ptr != end) {
+		if (outcome.ec != std::errc{} || outcome.ptr != end) {
 			return fallback;
 		}
 		return parsed;

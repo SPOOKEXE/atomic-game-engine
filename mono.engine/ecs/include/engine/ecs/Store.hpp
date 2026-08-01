@@ -128,8 +128,7 @@ namespace engine::ecs {
 		//
 		// @param entity The entity that owns the component.
 		// @param value  The component value to copy into the store.
-		template <class T>
-		void Set(Entity entity, const T &value) {
+		template <class T> void Set(Entity entity, const T &value) {
 			RequireOwningThread("Set");
 			Native().entity(entity.Id).set<T>(value);
 		}
@@ -138,8 +137,7 @@ namespace engine::ecs {
 		//
 		// @param entity The entity to inspect.
 		// @return `true` when the component is present.
-		template <class T>
-		bool Has(Entity entity) const {
+		template <class T> bool Has(Entity entity) const {
 			return NativeConst().entity(entity.Id).has<T>();
 		}
 
@@ -149,8 +147,7 @@ namespace engine::ecs {
 		//
 		// @param entity The entity whose component is requested.
 		// @return A read-only component pointer, or `nullptr` when absent.
-		template <class T>
-		const T *Get(Entity entity) const {
+		template <class T> const T *Get(Entity entity) const {
 			return NativeConst().entity(entity.Id).try_get<T>();
 		}
 
@@ -158,8 +155,7 @@ namespace engine::ecs {
 		//
 		// @param entity The entity whose component is requested.
 		// @return A mutable component pointer, or `nullptr` when absent.
-		template <class T>
-		T *GetMutable(Entity entity) {
+		template <class T> T *GetMutable(Entity entity) {
 			RequireOwningThread("GetMutable");
 			return Native().entity(entity.Id).try_get_mut<T>();
 		}
@@ -167,8 +163,7 @@ namespace engine::ecs {
 		// Removes one component type without destroying the entity.
 		//
 		// @param entity The entity from which to remove the component.
-		template <class T>
-		void Remove(Entity entity) {
+		template <class T> void Remove(Entity entity) {
 			RequireOwningThread("Remove");
 			Native().entity(entity.Id).remove<T>();
 		}
@@ -208,8 +203,7 @@ namespace engine::ecs {
 		// ResourceMutable, regardless of the resource type being set.
 		//
 		// @param value The resource value to copy into the store.
-		template <class T>
-		void SetResource(const T &value) {
+		template <class T> void SetResource(const T &value) {
 			RequireOwningThread("SetResource");
 			Native().entity(ResourceHolder).set<T>(value);
 		}
@@ -222,8 +216,7 @@ namespace engine::ecs {
 		// for any resource type, because either operation may move the holder.
 		//
 		// @return A read-only resource pointer, or `nullptr` when unset.
-		template <class T>
-		const T *Resource() const {
+		template <class T> const T *Resource() const {
 			return NativeConst().entity(ResourceHolder).try_get<T>();
 		}
 
@@ -233,8 +226,7 @@ namespace engine::ecs {
 		// means: do not hold one across world construction.
 		//
 		// @return A mutable resource pointer, or `nullptr` when unset.
-		template <class T>
-		T *ResourceMutable() {
+		template <class T> T *ResourceMutable() {
 			RequireOwningThread("ResourceMutable");
 			return Native().entity(ResourceHolder).try_get_mut<T>();
 		}
@@ -242,8 +234,7 @@ namespace engine::ecs {
 		// Reports whether the world contains a resource of the requested type.
 		//
 		// @return `true` when the resource is present.
-		template <class T>
-		bool HasResource() const {
+		template <class T> bool HasResource() const {
 			return NativeConst().entity(ResourceHolder).has<T>();
 		}
 
@@ -251,8 +242,7 @@ namespace engine::ecs {
 		//
 		// This invalidates every pointer previously returned by Resource or
 		// ResourceMutable, regardless of the resource type being removed.
-		template <class T>
-		void RemoveResource() {
+		template <class T> void RemoveResource() {
 			RequireOwningThread("RemoveResource");
 			Native().entity(ResourceHolder).remove<T>();
 		}
@@ -302,13 +292,12 @@ namespace engine::ecs {
 		// memory writes and are unaffected.
 		//
 		// @param body Called as `body(Entity, Ts &...)` for every matching entity.
-		template <class... Ts, class Body>
-		void Each(Body &&body) {
+		template <class... Ts, class Body> void Each(Body &&body) {
 			RequireOwningThread("Each");
 
 			Native().defer_begin();
 			Native().each([&](flecs::entity entity, Ts &...components) {
-				body(Entity { entity.id() }, components...);
+				body(Entity{entity.id()}, components...);
 			});
 			Native().defer_end();
 		}
@@ -346,7 +335,7 @@ namespace engine::ecs {
 		// higher than it looks.** Measured on a 24-core machine over an
 		// integration step of three float multiply-adds per row:
 		//
-		//     entities     Each      EachParallel     
+		//     entities     Each      EachParallel
 		//        20 000    0.050 ms      0.102 ms   2.0x slower
 		//       100 000    0.259 ms      0.195 ms   1.3x faster
 		//       500 000    1.204 ms      0.347 ms   3.5x faster
@@ -371,8 +360,7 @@ namespace engine::ecs {
 			// allowed here at all.
 			Native().template query<Ts...>().run([&](flecs::iter &iterator) {
 				while (iterator.next()) {
-					VisitTableInParallel<Ts...>(
-						iterator, body, grain, std::index_sequence_for<Ts...> {});
+					VisitTableInParallel<Ts...>(iterator, body, grain, std::index_sequence_for<Ts...>{});
 				}
 			});
 		}
@@ -391,8 +379,7 @@ namespace engine::ecs {
 		// after the first call are counted by the next one.
 		//
 		// @return The live number of entities carrying every requested component.
-		template <class... Ts>
-		size_t CountMatching() {
+		template <class... Ts> size_t CountMatching() {
 			static_assert(sizeof...(Ts) > 0, "CountMatching needs at least one component.");
 			RequireOwningThread("CountMatching");
 
@@ -426,10 +413,7 @@ namespace engine::ecs {
 		// copy and the parallel body touches no shared iterator state.
 		template <class... Ts, class Body, size_t... Indices>
 		void VisitTableInParallel(
-			flecs::iter &iterator,
-			Body &body,
-			size_t grain,
-			std::index_sequence<Indices...>
+			flecs::iter &iterator, Body &body, size_t grain, std::index_sequence<Indices...>
 		) {
 			const auto count = static_cast<size_t>(iterator.count());
 			if (count == 0) {
@@ -441,13 +425,12 @@ namespace engine::ecs {
 
 			parallel::Jobs::For(count, grain, [&](size_t begin, size_t end) {
 				for (size_t row = begin; row < end; row++) {
-					body(Entity { entities[row] }, std::get<Indices>(columns)[row]...);
+					body(Entity{entities[row]}, std::get<Indices>(columns)[row]...);
 				}
 			});
 		}
 
-		template <class Build>
-		size_t CachedCount(std::type_index key, Build &&build) {
+		template <class Build> size_t CachedCount(std::type_index key, Build &&build) {
 			auto found = CountQueries.find(key);
 			if (found == CountQueries.end()) {
 				found = CountQueries.emplace(key, build()).first;

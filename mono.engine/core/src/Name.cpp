@@ -51,8 +51,8 @@ namespace engine::core {
 		// gets consumed by ordinary interning. Skipping instead keeps both
 		// properties, at the cost of a walk that only ever advances.
 		uint32_t AllocateId(Registry &registry) {
-			while (registry.NextId < registry.Slots.size()
-				&& registry.Slots[registry.NextId] != Name::INVALID) {
+			while (registry.NextId < registry.Slots.size() &&
+				   registry.Slots[registry.NextId] != Name::INVALID) {
 				registry.NextId++;
 			}
 			return registry.NextId++;

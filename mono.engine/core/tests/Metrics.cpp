@@ -28,8 +28,9 @@ namespace {
 
 	const Counter *Find(const std::vector<Counter> &counters, const std::string &text) {
 		const Name name(text);
-		const auto found = std::find_if(counters.begin(), counters.end(),
-			[name](const Counter &counter) { return counter.Name == name; });
+		const auto found = std::find_if(counters.begin(), counters.end(), [name](const Counter &counter) {
+			return counter.Name == name;
+		});
 		return found == counters.end() ? nullptr : &*found;
 	}
 }

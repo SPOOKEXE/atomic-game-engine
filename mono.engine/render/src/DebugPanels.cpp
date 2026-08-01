@@ -20,7 +20,7 @@ namespace engine::render {
 			return;
 		}
 
-		Samples.push_back(Sample { now, deltaSeconds });
+		Samples.push_back(Sample{now, deltaSeconds});
 		while (!Samples.empty() && now - Samples.front().Time > WINDOW_SECONDS) {
 			Samples.pop_front();
 		}
@@ -105,16 +105,16 @@ namespace engine::render {
 
 	std::string_view GetProfilerTabName(ProfilerTab tab) {
 		switch (tab) {
-			case ProfilerTab::Frame:
-				return "frame";
-			case ProfilerTab::Categories:
-				return "categories";
-			case ProfilerTab::Systems:
-				return "systems";
-			case ProfilerTab::Counters:
-				return "counters";
-			case ProfilerTab::Count:
-				break;
+		case ProfilerTab::Frame:
+			return "frame";
+		case ProfilerTab::Categories:
+			return "categories";
+		case ProfilerTab::Systems:
+			return "systems";
+		case ProfilerTab::Counters:
+			return "counters";
+		case ProfilerTab::Count:
+			break;
 		}
 		return "?";
 	}
@@ -127,20 +127,20 @@ namespace engine::render {
 			uint8_t B;
 		};
 
-		constexpr Colour PANEL_BACKGROUND { 8, 10, 16 };
-		constexpr Colour TEXT { 220, 226, 236 };
-		constexpr Colour TEXT_DIM { 130, 138, 154 };
-		constexpr Colour TEXT_WARN { 240, 180, 80 };
-		constexpr Colour TEXT_BAD { 236, 96, 96 };
+		constexpr Colour PANEL_BACKGROUND{8, 10, 16};
+		constexpr Colour TEXT{220, 226, 236};
+		constexpr Colour TEXT_DIM{130, 138, 154};
+		constexpr Colour TEXT_WARN{240, 180, 80};
+		constexpr Colour TEXT_BAD{236, 96, 96};
 		constexpr uint8_t PANEL_ALPHA = 208;
 
 		// One colour per category, so a glance at the flamegraph says where the
 		// frame went before any label is read.
-		constexpr std::array<Colour, static_cast<size_t>(core::ProfileCategory::Count)> CATEGORY_COLOURS {
-			Colour { 108, 142, 216 },  // engine
-			Colour { 96, 190, 130 },   // render
-			Colour { 222, 158, 70 },   // simulation
-			Colour { 190, 120, 210 },  // script
+		constexpr std::array<Colour, static_cast<size_t>(core::ProfileCategory::Count)> CATEGORY_COLOURS{
+			Colour{108, 142, 216}, // engine
+			Colour{96, 190, 130},  // render
+			Colour{222, 158, 70},  // simulation
+			Colour{190, 120, 210}, // script
 		};
 
 		std::string Format(const char *format, ...) {
@@ -160,13 +160,12 @@ namespace engine::render {
 		// columns so the eye runs down the numbers instead of hunting for them
 		// past names of different lengths.
 		constexpr size_t NAME_FIELD = 26;
-		constexpr size_t VALUE_FIELD = 6;  // 999.99
+		constexpr size_t VALUE_FIELD = 6; // 999.99
 		// Beside MS and in the same units, because the pair is the point: read
 		// together they say "costs this much, except when it costs that much".
 		constexpr size_t RMAX_FIELD = 6;
-		constexpr size_t SHARE_FIELD = 6;  // 100.0%
-		constexpr size_t ROW_CHARS =
-			NAME_FIELD + 1 + VALUE_FIELD + 1 + RMAX_FIELD + 1 + SHARE_FIELD;
+		constexpr size_t SHARE_FIELD = 6; // 100.0%
+		constexpr size_t ROW_CHARS = NAME_FIELD + 1 + VALUE_FIELD + 1 + RMAX_FIELD + 1 + SHARE_FIELD;
 
 		// The colour chip that starts every row, and what separates one line
 		// from the next at a glance.
@@ -204,7 +203,7 @@ namespace engine::render {
 		// its root rather than as unrelated rows that happen to be adjacent.
 		Colour Shade(Colour colour, uint32_t depth) {
 			const float amount = std::max(1.0f - static_cast<float>(depth) * 0.08f, 0.5f);
-			return Colour {
+			return Colour{
 				static_cast<uint8_t>(static_cast<float>(colour.R) * amount),
 				static_cast<uint8_t>(static_cast<float>(colour.G) * amount),
 				static_cast<uint8_t>(static_cast<float>(colour.B) * amount),
@@ -250,8 +249,9 @@ namespace engine::render {
 		};
 
 		void DrawPanelBackground(OverlayImage &image, int x, int y, int width, int height) {
-			image.Blend(x, y, width, height, PANEL_BACKGROUND.R, PANEL_BACKGROUND.G,
-				PANEL_BACKGROUND.B, PANEL_ALPHA);
+			image.Blend(
+				x, y, width, height, PANEL_BACKGROUND.R, PANEL_BACKGROUND.G, PANEL_BACKGROUND.B, PANEL_ALPHA
+			);
 			// A one-pixel top edge, so the panel reads as a surface rather than
 			// as a dark patch of the scene.
 			image.Blend(x, y, width, 1, 90, 100, 120, 255);
@@ -278,7 +278,7 @@ namespace engine::render {
 
 			DrawPanelBackground(image, 0, 0, width, height);
 
-			Writer writer { image, padding, padding, scale };
+			Writer writer{image, padding, padding, scale};
 
 			if (!data.Statistics || !data.Statistics->HasSamples()) {
 				writer.Line("MEASURING", TEXT_DIM);
@@ -289,45 +289,54 @@ namespace engine::render {
 			const float milliseconds = statistics.CurrentMilliseconds();
 
 			writer.Line(
-				Format("%.0f FPS   %.2f MS", static_cast<double>(statistics.Current()),
-					static_cast<double>(milliseconds)),
+				Format(
+					"%.0f FPS   %.2f MS",
+					static_cast<double>(statistics.Current()),
+					static_cast<double>(milliseconds)
+				),
 				ColourForMilliseconds(milliseconds)
 			);
 			writer.Line(
-				Format("MIN %.1f  AVG %.1f  MAX %.1f", static_cast<double>(statistics.Minimum()),
+				Format(
+					"MIN %.1f  AVG %.1f  MAX %.1f",
+					static_cast<double>(statistics.Minimum()),
 					static_cast<double>(statistics.Average()),
-					static_cast<double>(statistics.Maximum())),
+					static_cast<double>(statistics.Maximum())
+				),
 				TEXT_DIM
 			);
-			writer.Line(
-				Format("JITTER %.2f MS", static_cast<double>(statistics.Jitter())),
-				TEXT_DIM
-			);
+			writer.Line(Format("JITTER %.2f MS", static_cast<double>(statistics.Jitter())), TEXT_DIM);
 
 			if (data.TickRate > 0.0) {
 				// Measured against configured. They diverge when the machine
 				// cannot keep up, and the dropped count says whether the
 				// simulation gave up catching back up.
-				const bool behind = data.TicksPerSecond
-					< static_cast<float>(data.TickRate) * 0.95f;
+				const bool behind = data.TicksPerSecond < static_cast<float>(data.TickRate) * 0.95f;
 				writer.Line(
-					Format("TICK %.0f HZ  (%.1f)%s", data.TickRate,
+					Format(
+						"TICK %.0f HZ  (%.1f)%s",
+						data.TickRate,
 						static_cast<double>(data.TicksPerSecond),
-						data.DroppedTicks > 0 ? "  DROPPED" : ""),
+						data.DroppedTicks > 0 ? "  DROPPED" : ""
+					),
 					data.DroppedTicks > 0 ? TEXT_BAD : (behind ? TEXT_WARN : TEXT_DIM)
 				);
 			}
+			writer.Line(Format("ENTITIES %llu", static_cast<unsigned long long>(data.Entities)), TEXT_DIM);
 			writer.Line(
-				Format("ENTITIES %llu", static_cast<unsigned long long>(data.Entities)),
+				Format(
+					"DRAWS %llu  TRIS %llu",
+					static_cast<unsigned long long>(data.DrawCalls),
+					static_cast<unsigned long long>(data.Triangles)
+				),
 				TEXT_DIM
 			);
 			writer.Line(
-				Format("DRAWS %llu  TRIS %llu", static_cast<unsigned long long>(data.DrawCalls),
-					static_cast<unsigned long long>(data.Triangles)),
+				data.Backend.empty()
+					? "GPU ?"
+					: Format("GPU %.*s", static_cast<int>(data.Backend.size()), data.Backend.data()),
 				TEXT_DIM
 			);
-			writer.Line(data.Backend.empty() ? "GPU ?" : Format("GPU %.*s",
-				static_cast<int>(data.Backend.size()), data.Backend.data()), TEXT_DIM);
 		}
 
 		// -----------------------------------------------------------------
@@ -344,20 +353,16 @@ namespace engine::render {
 		// each read identically whether they ran back to back or with the GPU
 		// wait between them.
 		void DrawFlameGraph(
-			OverlayImage &image,
-			const DebugPanelData &data,
-			int x,
-			int y,
-			int width,
-			int available
+			OverlayImage &image, const DebugPanelData &data, int x, int y, int width, int available
 		) {
 			const int scale = data.Scale;
 			const int rowHeight = DebugText::LineHeight(scale);
 			const int glyphHeight = DebugText::GLYPH_HEIGHT * scale;
 
 			if (data.Spans.empty()) {
-				DebugText::Draw(image, x, y, "NO SPANS THIS FRAME", TEXT_DIM.R, TEXT_DIM.G,
-					TEXT_DIM.B, scale);
+				DebugText::Draw(
+					image, x, y, "NO SPANS THIS FRAME", TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
+				);
 				return;
 			}
 
@@ -370,15 +375,21 @@ namespace engine::render {
 			const int timelineWidth = std::max(0, x + width - timelineLeft);
 
 			const float frameMilliseconds = std::max(data.FrameMilliseconds, 0.0001f);
-			const float timelineScale =
-				static_cast<float>(timelineWidth) / frameMilliseconds;
+			const float timelineScale = static_cast<float>(timelineWidth) / frameMilliseconds;
 
 			// The column header, so the numbers are readable without knowing the
 			// order they come in.
-			DebugText::Draw(image, textLeft, y,
-				PadRight("SPAN", NAME_FIELD) + " " + PadLeft("MS", VALUE_FIELD) + " "
-					+ PadLeft("RMAX", RMAX_FIELD) + " " + PadLeft("SHARE", SHARE_FIELD),
-				TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale);
+			DebugText::Draw(
+				image,
+				textLeft,
+				y,
+				PadRight("SPAN", NAME_FIELD) + " " + PadLeft("MS", VALUE_FIELD) + " " +
+					PadLeft("RMAX", RMAX_FIELD) + " " + PadLeft("SHARE", SHARE_FIELD),
+				TEXT_DIM.R,
+				TEXT_DIM.G,
+				TEXT_DIM.B,
+				scale
+			);
 
 			int cursor = y + rowHeight;
 			int skipped = 0;
@@ -397,9 +408,8 @@ namespace engine::render {
 
 				// Spans are in open order, so the next entry with a greater
 				// depth is a direct child of this one.
-				const bool collapsed = span.Depth == data.DepthLimit
-					&& index + 1 < data.Spans.size()
-					&& data.Spans[index + 1].Depth > span.Depth;
+				const bool collapsed = span.Depth == data.DepthLimit && index + 1 < data.Spans.size() &&
+									   data.Spans[index + 1].Depth > span.Depth;
 
 				if (skipped < data.Scroll) {
 					skipped++;
@@ -411,8 +421,7 @@ namespace engine::render {
 
 				// Deeper is dimmer, so a subtree reads as one thing shading away
 				// from its root rather than as unrelated adjacent rows.
-				const auto colour =
-					Shade(CATEGORY_COLOURS[static_cast<size_t>(span.Category)], span.Depth);
+				const auto colour = Shade(CATEGORY_COLOURS[static_cast<size_t>(span.Category)], span.Depth);
 				image.Blend(x, cursor, chipWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
 
 				// Two spaces a level, and no deeper: past this a row is more
@@ -427,26 +436,24 @@ namespace engine::render {
 				const float share = span.Milliseconds / frameMilliseconds;
 				const float recentMaximum = core::FrameGraph::RecentMaximum(span.Name);
 
-				const std::string row = PadRight(std::move(name), NAME_FIELD) + " "
-					+ PadLeft(Format("%.2f", static_cast<double>(span.Milliseconds)), VALUE_FIELD)
-					+ " "
-					+ PadLeft(Format("%.2f", static_cast<double>(recentMaximum)), RMAX_FIELD) + " "
-					+ PadLeft(Format("%.1f%%", static_cast<double>(share) * 100.0), SHARE_FIELD);
+				const std::string row =
+					PadRight(std::move(name), NAME_FIELD) + " " +
+					PadLeft(Format("%.2f", static_cast<double>(span.Milliseconds)), VALUE_FIELD) + " " +
+					PadLeft(Format("%.2f", static_cast<double>(recentMaximum)), RMAX_FIELD) + " " +
+					PadLeft(Format("%.1f%%", static_cast<double>(share) * 100.0), SHARE_FIELD);
 
 				const auto textColour = ColourForShare(share);
-				DebugText::Draw(image, textLeft, cursor, row, textColour.R, textColour.G,
-					textColour.B, scale);
+				DebugText::Draw(
+					image, textLeft, cursor, row, textColour.R, textColour.G, textColour.B, scale
+				);
 
 				// Where in the frame it ran.
 				if (timelineWidth > 0) {
-					const int left =
-						timelineLeft + static_cast<int>(span.StartMilliseconds * timelineScale);
+					const int left = timelineLeft + static_cast<int>(span.StartMilliseconds * timelineScale);
 					// One pixel minimum, so a span too short to see is still
 					// visibly there rather than silently absent.
-					const int barWidth =
-						std::max(1, static_cast<int>(span.Milliseconds * timelineScale));
-					image.Blend(left, cursor, barWidth, glyphHeight, colour.R, colour.G, colour.B,
-						235);
+					const int barWidth = std::max(1, static_cast<int>(span.Milliseconds * timelineScale));
+					image.Blend(left, cursor, barWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
 				}
 
 				cursor += rowHeight;
@@ -456,8 +463,7 @@ namespace engine::render {
 			// going long is visible without reading a number.
 			constexpr float BUDGET_MILLISECONDS = 1000.0f / 60.0f;
 			if (timelineWidth > 0 && data.FrameMilliseconds > BUDGET_MILLISECONDS) {
-				const int budgetX =
-					timelineLeft + static_cast<int>(BUDGET_MILLISECONDS * timelineScale);
+				const int budgetX = timelineLeft + static_cast<int>(BUDGET_MILLISECONDS * timelineScale);
 				image.Blend(budgetX, y, scale, cursor - y, TEXT_BAD.R, TEXT_BAD.G, TEXT_BAD.B, 180);
 			}
 		}
@@ -482,30 +488,42 @@ namespace engine::render {
 					}
 				}
 
-				DebugText::Draw(image, x, cursor,
-					Format("%.*s %.2f", static_cast<int>(name.size()), name.data(),
-						static_cast<double>(milliseconds)),
-					TEXT.R, TEXT.G, TEXT.B, scale);
-
-				const int barWidth = static_cast<int>(
-					static_cast<float>(width - labelWidth) * (milliseconds / total)
+				DebugText::Draw(
+					image,
+					x,
+					cursor,
+					Format(
+						"%.*s %.2f",
+						static_cast<int>(name.size()),
+						name.data(),
+						static_cast<double>(milliseconds)
+					),
+					TEXT.R,
+					TEXT.G,
+					TEXT.B,
+					scale
 				);
+
+				const int barWidth =
+					static_cast<int>(static_cast<float>(width - labelWidth) * (milliseconds / total));
 				const auto colour = CATEGORY_COLOURS[index];
-				image.Blend(x + labelWidth, cursor, std::max(barWidth, 1), barHeight, colour.R,
-					colour.G, colour.B, 235);
+				image.Blend(
+					x + labelWidth,
+					cursor,
+					std::max(barWidth, 1),
+					barHeight,
+					colour.R,
+					colour.G,
+					colour.B,
+					235
+				);
 
 				cursor += lineHeight;
 			}
 		}
 
-		void DrawRows(
-			OverlayImage &image,
-			const DebugPanelData &data,
-			int x,
-			int y,
-			int width,
-			int available
-		) {
+		void
+		DrawRows(OverlayImage &image, const DebugPanelData &data, int x, int y, int width, int available) {
 			const int scale = data.Scale;
 			const int lineHeight = DebugText::LineHeight(scale);
 			const int labelWidth = DebugText::Measure("00.00 MS  ", scale);
@@ -534,19 +552,34 @@ namespace engine::render {
 				// A system's name is the name of the span the scheduler opens
 				// around it, so the history already has it and the same RMAX
 				// column works here without anything extra being recorded.
-				const std::string label = isTime
-					? Format("%6.2f %6.2f  %.*s", static_cast<double>(value),
-						static_cast<double>(core::FrameGraph::RecentMaximum(name)),
-						static_cast<int>(name.size()), name.data())
-					: Format("%9.0f  %.*s", static_cast<double>(value),
-						static_cast<int>(name.size()), name.data());
+				const std::string label =
+					isTime ? Format(
+								 "%6.2f %6.2f  %.*s",
+								 static_cast<double>(value),
+								 static_cast<double>(core::FrameGraph::RecentMaximum(name)),
+								 static_cast<int>(name.size()),
+								 name.data()
+							 )
+						   : Format(
+								 "%9.0f  %.*s",
+								 static_cast<double>(value),
+								 static_cast<int>(name.size()),
+								 name.data()
+							 );
 
 				if (isTime) {
-					const int barWidth = static_cast<int>(
-						static_cast<float>(width - labelWidth) * (value / widest)
+					const int barWidth =
+						static_cast<int>(static_cast<float>(width - labelWidth) * (value / widest));
+					image.Blend(
+						x + labelWidth,
+						cursor,
+						std::max(barWidth, 1),
+						DebugText::GLYPH_HEIGHT * scale,
+						60,
+						72,
+						96,
+						220
 					);
-					image.Blend(x + labelWidth, cursor, std::max(barWidth, 1),
-						DebugText::GLYPH_HEIGHT * scale, 60, 72, 96, 220);
 				}
 
 				DebugText::Draw(image, x, cursor, label, TEXT.R, TEXT.G, TEXT.B, scale);
@@ -555,8 +588,9 @@ namespace engine::render {
 
 			if (data.Tab == ProfilerTab::Systems) {
 				if (data.Systems.empty()) {
-					DebugText::Draw(image, x, y, "NO SYSTEMS REGISTERED", TEXT_DIM.R, TEXT_DIM.G,
-						TEXT_DIM.B, scale);
+					DebugText::Draw(
+						image, x, y, "NO SYSTEMS REGISTERED", TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
+					);
 					return;
 				}
 				for (const auto &system : data.Systems) {
@@ -566,15 +600,17 @@ namespace engine::render {
 			}
 
 			if (data.Counters.empty()) {
-				DebugText::Draw(image, x, y, "NO COUNTERS THIS FRAME", TEXT_DIM.R, TEXT_DIM.G,
-					TEXT_DIM.B, scale);
+				DebugText::Draw(
+					image, x, y, "NO COUNTERS THIS FRAME", TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
+				);
 				return;
 			}
 			for (const auto &counter : data.Counters) {
 				// Times are accumulated in nanoseconds and shown as
 				// milliseconds; counts are shown as they were written.
-				row(counter.Name.Text(), counter.IsTime ? static_cast<float>(counter.Value / 1'000'000.0)
-											     : static_cast<float>(counter.Value),
+				row(counter.Name.Text(),
+					counter.IsTime ? static_cast<float>(counter.Value / 1'000'000.0)
+								   : static_cast<float>(counter.Value),
 					counter.IsTime);
 			}
 		}
@@ -588,8 +624,8 @@ namespace engine::render {
 			// reading. Narrower and the timeline is a smear; wider and the panel
 			// is covering the game for no extra information.
 			const int columnsWidth = MeasureChars(ROW_CHARS, scale);
-			const int wanted = padding * 2 + CHIP_WIDTH * scale + CHIP_GAP * scale + columnsWidth
-				+ TIMELINE_GAP * scale + TIMELINE_WIDTH * scale;
+			const int wanted = padding * 2 + CHIP_WIDTH * scale + CHIP_GAP * scale + columnsWidth +
+							   TIMELINE_GAP * scale + TIMELINE_WIDTH * scale;
 			const int width = std::min(image.GetWidth(), wanted);
 
 			// Sized to what is actually in it. A fixed half-screen panel spends
@@ -598,30 +634,30 @@ namespace engine::render {
 			// leave open.
 			int bodyRows = 1;
 			switch (data.Tab) {
-				case ProfilerTab::Frame: {
-					// A row per visible span now, not a row per depth. The two
-					// were the same only while every level was one bar.
-					int visible = 0;
-					for (const auto &span : data.Spans) {
-						if (span.Depth <= data.DepthLimit) {
-							visible++;
-						}
+			case ProfilerTab::Frame: {
+				// A row per visible span now, not a row per depth. The two
+				// were the same only while every level was one bar.
+				int visible = 0;
+				for (const auto &span : data.Spans) {
+					if (span.Depth <= data.DepthLimit) {
+						visible++;
 					}
-					// Plus the column header.
-					bodyRows = visible + 1 - std::max(data.Scroll, 0);
-					break;
 				}
-				case ProfilerTab::Categories:
-					bodyRows = static_cast<int>(core::ProfileCategory::Count);
-					break;
-				case ProfilerTab::Systems:
-					bodyRows = static_cast<int>(data.Systems.size()) - std::max(data.Scroll, 0);
-					break;
-				case ProfilerTab::Counters:
-					bodyRows = static_cast<int>(data.Counters.size()) - std::max(data.Scroll, 0);
-					break;
-				case ProfilerTab::Count:
-					break;
+				// Plus the column header.
+				bodyRows = visible + 1 - std::max(data.Scroll, 0);
+				break;
+			}
+			case ProfilerTab::Categories:
+				bodyRows = static_cast<int>(core::ProfileCategory::Count);
+				break;
+			case ProfilerTab::Systems:
+				bodyRows = static_cast<int>(data.Systems.size()) - std::max(data.Scroll, 0);
+				break;
+			case ProfilerTab::Counters:
+				bodyRows = static_cast<int>(data.Counters.size()) - std::max(data.Scroll, 0);
+				break;
+			case ProfilerTab::Count:
+				break;
 			}
 			bodyRows = std::clamp(bodyRows, 1, 40);
 
@@ -633,20 +669,23 @@ namespace engine::render {
 			const int room = std::max(image.GetHeight() - top, lineHeight);
 
 			// Two header lines, a blank, then the body.
-			const int height =
-				std::min(room, (3 + bodyRows) * lineHeight + padding * 2);
+			const int height = std::min(room, (3 + bodyRows) * lineHeight + padding * 2);
 
 			DrawPanelBackground(image, 0, top, width, height);
 
-			Writer writer { image, padding, top + padding, scale };
+			Writer writer{image, padding, top + padding, scale};
 
 			// The header says which view is open, how to change it, and whether
 			// Tracy is attached — because "the graph is empty" and "nothing is
 			// collecting" look identical otherwise.
 			const std::string_view tabName = GetProfilerTabName(data.Tab);
 			writer.Line(
-				Format("FRAME GRAPH  [%.*s]  F6/F7 TAB  PGUP/PGDN SCROLL  -/= DEPTH %u  F8 SNAPSHOT",
-					static_cast<int>(tabName.size()), tabName.data(), data.DepthLimit),
+				Format(
+					"FRAME GRAPH  [%.*s]  F6/F7 TAB  PGUP/PGDN SCROLL  -/= DEPTH %u  F8 SNAPSHOT",
+					static_cast<int>(tabName.size()),
+					tabName.data(),
+					data.DepthLimit
+				),
 				TEXT_DIM
 			);
 
@@ -654,10 +693,13 @@ namespace engine::render {
 			// much of itself it has: a reading over 0.2 s of history and one
 			// over the full five seconds are not the same claim.
 			writer.Line(
-				Format("%.2f MS   TRACY %s   RMAX OVER %.1fS%s",
+				Format(
+					"%.2f MS   TRACY %s   RMAX OVER %.1fS%s",
 					static_cast<double>(data.FrameMilliseconds),
-					data.TracyAttached ? "ATTACHED" : "OFF", data.HistorySeconds,
-					data.DroppedSpans > 0 ? "   SPANS DROPPED!" : ""),
+					data.TracyAttached ? "ATTACHED" : "OFF",
+					data.HistorySeconds,
+					data.DroppedSpans > 0 ? "   SPANS DROPPED!" : ""
+				),
 				data.DroppedSpans > 0 ? TEXT_WARN : ColourForMilliseconds(data.FrameMilliseconds)
 			);
 			writer.Skip();
@@ -667,18 +709,18 @@ namespace engine::render {
 			const int bodyWidth = width - padding * 2;
 
 			switch (data.Tab) {
-				case ProfilerTab::Frame:
-					DrawFlameGraph(image, data, padding, bodyTop, bodyWidth, available);
-					break;
-				case ProfilerTab::Categories:
-					DrawCategories(image, data, padding, bodyTop, bodyWidth);
-					break;
-				case ProfilerTab::Systems:
-				case ProfilerTab::Counters:
-					DrawRows(image, data, padding, bodyTop, bodyWidth, available);
-					break;
-				case ProfilerTab::Count:
-					break;
+			case ProfilerTab::Frame:
+				DrawFlameGraph(image, data, padding, bodyTop, bodyWidth, available);
+				break;
+			case ProfilerTab::Categories:
+				DrawCategories(image, data, padding, bodyTop, bodyWidth);
+				break;
+			case ProfilerTab::Systems:
+			case ProfilerTab::Counters:
+				DrawRows(image, data, padding, bodyTop, bodyWidth, available);
+				break;
+			case ProfilerTab::Count:
+				break;
 			}
 		}
 	}

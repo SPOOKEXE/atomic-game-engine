@@ -25,14 +25,7 @@ namespace engine::render {
 	}
 
 	void OverlayImage::Blend(
-		int x,
-		int y,
-		int width,
-		int height,
-		uint8_t red,
-		uint8_t green,
-		uint8_t blue,
-		uint8_t alpha
+		int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha
 	) {
 		if (IsEmpty() || alpha == 0 || width <= 0 || height <= 0) {
 			return;
@@ -53,9 +46,9 @@ namespace engine::render {
 		const uint32_t inverse = 255u - source;
 
 		for (int row = top; row < bottom; row++) {
-			uint8_t *pixel = Pixels.data()
-				+ (static_cast<size_t>(row) * static_cast<size_t>(Width) + static_cast<size_t>(left))
-					* BYTES_PER_PIXEL;
+			uint8_t *pixel = Pixels.data() + (static_cast<size_t>(row) * static_cast<size_t>(Width) +
+											  static_cast<size_t>(left)) *
+												 BYTES_PER_PIXEL;
 
 			for (int column = left; column < right; column++) {
 				// Source-over into premultiplied storage. The source channels are
@@ -79,9 +72,7 @@ namespace engine::render {
 			// Five rows of three bits, top row first. Bit index is
 			// row * 3 + column, with column 0 on the left.
 			constexpr uint16_t Glyph(uint16_t r0, uint16_t r1, uint16_t r2, uint16_t r3, uint16_t r4) {
-				return static_cast<uint16_t>(
-					(r0 << 0) | (r1 << 3) | (r2 << 6) | (r3 << 9) | (r4 << 12)
-				);
+				return static_cast<uint16_t>((r0 << 0) | (r1 << 3) | (r2 << 6) | (r3 << 9) | (r4 << 12));
 			}
 
 			// Written in binary so that the shape is visible in the source.
@@ -92,64 +83,64 @@ namespace engine::render {
 			};
 
 			constexpr GlyphEntry GLYPHS[] = {
-				{ '0', Glyph(0b111, 0b101, 0b101, 0b101, 0b111) },
-				{ '1', Glyph(0b010, 0b110, 0b010, 0b010, 0b111) },
-				{ '2', Glyph(0b111, 0b001, 0b111, 0b100, 0b111) },
-				{ '3', Glyph(0b111, 0b001, 0b111, 0b001, 0b111) },
-				{ '4', Glyph(0b101, 0b101, 0b111, 0b001, 0b001) },
-				{ '5', Glyph(0b111, 0b100, 0b111, 0b001, 0b111) },
-				{ '6', Glyph(0b111, 0b100, 0b111, 0b101, 0b111) },
-				{ '7', Glyph(0b111, 0b001, 0b001, 0b001, 0b001) },
-				{ '8', Glyph(0b111, 0b101, 0b111, 0b101, 0b111) },
-				{ '9', Glyph(0b111, 0b101, 0b111, 0b001, 0b111) },
+				{'0', Glyph(0b111, 0b101, 0b101, 0b101, 0b111)},
+				{'1', Glyph(0b010, 0b110, 0b010, 0b010, 0b111)},
+				{'2', Glyph(0b111, 0b001, 0b111, 0b100, 0b111)},
+				{'3', Glyph(0b111, 0b001, 0b111, 0b001, 0b111)},
+				{'4', Glyph(0b101, 0b101, 0b111, 0b001, 0b001)},
+				{'5', Glyph(0b111, 0b100, 0b111, 0b001, 0b111)},
+				{'6', Glyph(0b111, 0b100, 0b111, 0b101, 0b111)},
+				{'7', Glyph(0b111, 0b001, 0b001, 0b001, 0b001)},
+				{'8', Glyph(0b111, 0b101, 0b111, 0b101, 0b111)},
+				{'9', Glyph(0b111, 0b101, 0b111, 0b001, 0b111)},
 
-				{ 'A', Glyph(0b111, 0b101, 0b111, 0b101, 0b101) },
-				{ 'B', Glyph(0b110, 0b101, 0b110, 0b101, 0b110) },
-				{ 'C', Glyph(0b111, 0b100, 0b100, 0b100, 0b111) },
-				{ 'D', Glyph(0b110, 0b101, 0b101, 0b101, 0b110) },
-				{ 'E', Glyph(0b111, 0b100, 0b111, 0b100, 0b111) },
-				{ 'F', Glyph(0b111, 0b100, 0b111, 0b100, 0b100) },
-				{ 'G', Glyph(0b111, 0b100, 0b101, 0b101, 0b111) },
-				{ 'H', Glyph(0b101, 0b101, 0b111, 0b101, 0b101) },
-				{ 'I', Glyph(0b111, 0b010, 0b010, 0b010, 0b111) },
-				{ 'J', Glyph(0b001, 0b001, 0b001, 0b101, 0b111) },
-				{ 'K', Glyph(0b101, 0b101, 0b110, 0b101, 0b101) },
-				{ 'L', Glyph(0b100, 0b100, 0b100, 0b100, 0b111) },
-				{ 'M', Glyph(0b101, 0b111, 0b111, 0b101, 0b101) },
-				{ 'N', Glyph(0b110, 0b101, 0b101, 0b101, 0b101) },
-				{ 'O', Glyph(0b111, 0b101, 0b101, 0b101, 0b111) },
-				{ 'P', Glyph(0b111, 0b101, 0b111, 0b100, 0b100) },
-				{ 'Q', Glyph(0b111, 0b101, 0b101, 0b111, 0b001) },
-				{ 'R', Glyph(0b111, 0b101, 0b111, 0b110, 0b101) },
-				{ 'S', Glyph(0b111, 0b100, 0b111, 0b001, 0b111) },
-				{ 'T', Glyph(0b111, 0b010, 0b010, 0b010, 0b010) },
-				{ 'U', Glyph(0b101, 0b101, 0b101, 0b101, 0b111) },
-				{ 'V', Glyph(0b101, 0b101, 0b101, 0b101, 0b010) },
-				{ 'W', Glyph(0b101, 0b101, 0b111, 0b111, 0b101) },
-				{ 'X', Glyph(0b101, 0b101, 0b010, 0b101, 0b101) },
-				{ 'Y', Glyph(0b101, 0b101, 0b010, 0b010, 0b010) },
-				{ 'Z', Glyph(0b111, 0b001, 0b010, 0b100, 0b111) },
+				{'A', Glyph(0b111, 0b101, 0b111, 0b101, 0b101)},
+				{'B', Glyph(0b110, 0b101, 0b110, 0b101, 0b110)},
+				{'C', Glyph(0b111, 0b100, 0b100, 0b100, 0b111)},
+				{'D', Glyph(0b110, 0b101, 0b101, 0b101, 0b110)},
+				{'E', Glyph(0b111, 0b100, 0b111, 0b100, 0b111)},
+				{'F', Glyph(0b111, 0b100, 0b111, 0b100, 0b100)},
+				{'G', Glyph(0b111, 0b100, 0b101, 0b101, 0b111)},
+				{'H', Glyph(0b101, 0b101, 0b111, 0b101, 0b101)},
+				{'I', Glyph(0b111, 0b010, 0b010, 0b010, 0b111)},
+				{'J', Glyph(0b001, 0b001, 0b001, 0b101, 0b111)},
+				{'K', Glyph(0b101, 0b101, 0b110, 0b101, 0b101)},
+				{'L', Glyph(0b100, 0b100, 0b100, 0b100, 0b111)},
+				{'M', Glyph(0b101, 0b111, 0b111, 0b101, 0b101)},
+				{'N', Glyph(0b110, 0b101, 0b101, 0b101, 0b101)},
+				{'O', Glyph(0b111, 0b101, 0b101, 0b101, 0b111)},
+				{'P', Glyph(0b111, 0b101, 0b111, 0b100, 0b100)},
+				{'Q', Glyph(0b111, 0b101, 0b101, 0b111, 0b001)},
+				{'R', Glyph(0b111, 0b101, 0b111, 0b110, 0b101)},
+				{'S', Glyph(0b111, 0b100, 0b111, 0b001, 0b111)},
+				{'T', Glyph(0b111, 0b010, 0b010, 0b010, 0b010)},
+				{'U', Glyph(0b101, 0b101, 0b101, 0b101, 0b111)},
+				{'V', Glyph(0b101, 0b101, 0b101, 0b101, 0b010)},
+				{'W', Glyph(0b101, 0b101, 0b111, 0b111, 0b101)},
+				{'X', Glyph(0b101, 0b101, 0b010, 0b101, 0b101)},
+				{'Y', Glyph(0b101, 0b101, 0b010, 0b010, 0b010)},
+				{'Z', Glyph(0b111, 0b001, 0b010, 0b100, 0b111)},
 
-				{ '.', Glyph(0b000, 0b000, 0b000, 0b000, 0b010) },
-				{ ',', Glyph(0b000, 0b000, 0b000, 0b010, 0b100) },
-				{ ':', Glyph(0b000, 0b010, 0b000, 0b010, 0b000) },
-				{ '-', Glyph(0b000, 0b000, 0b111, 0b000, 0b000) },
-				{ '+', Glyph(0b000, 0b010, 0b111, 0b010, 0b000) },
-				{ '=', Glyph(0b000, 0b111, 0b000, 0b111, 0b000) },
-				{ '/', Glyph(0b001, 0b001, 0b010, 0b100, 0b100) },
-				{ '%', Glyph(0b101, 0b001, 0b010, 0b100, 0b101) },
-				{ '(', Glyph(0b001, 0b010, 0b010, 0b010, 0b001) },
-				{ ')', Glyph(0b100, 0b010, 0b010, 0b010, 0b100) },
-				{ '[', Glyph(0b011, 0b010, 0b010, 0b010, 0b011) },
-				{ ']', Glyph(0b110, 0b010, 0b010, 0b010, 0b110) },
-				{ '<', Glyph(0b001, 0b010, 0b100, 0b010, 0b001) },
-				{ '>', Glyph(0b100, 0b010, 0b001, 0b010, 0b100) },
-				{ '!', Glyph(0b010, 0b010, 0b010, 0b000, 0b010) },
-				{ '?', Glyph(0b111, 0b001, 0b011, 0b000, 0b010) },
-				{ '*', Glyph(0b101, 0b010, 0b111, 0b010, 0b101) },
-				{ '#', Glyph(0b101, 0b111, 0b101, 0b111, 0b101) },
-				{ '_', Glyph(0b000, 0b000, 0b000, 0b000, 0b111) },
-				{ '|', Glyph(0b010, 0b010, 0b010, 0b010, 0b010) },
+				{'.', Glyph(0b000, 0b000, 0b000, 0b000, 0b010)},
+				{',', Glyph(0b000, 0b000, 0b000, 0b010, 0b100)},
+				{':', Glyph(0b000, 0b010, 0b000, 0b010, 0b000)},
+				{'-', Glyph(0b000, 0b000, 0b111, 0b000, 0b000)},
+				{'+', Glyph(0b000, 0b010, 0b111, 0b010, 0b000)},
+				{'=', Glyph(0b000, 0b111, 0b000, 0b111, 0b000)},
+				{'/', Glyph(0b001, 0b001, 0b010, 0b100, 0b100)},
+				{'%', Glyph(0b101, 0b001, 0b010, 0b100, 0b101)},
+				{'(', Glyph(0b001, 0b010, 0b010, 0b010, 0b001)},
+				{')', Glyph(0b100, 0b010, 0b010, 0b010, 0b100)},
+				{'[', Glyph(0b011, 0b010, 0b010, 0b010, 0b011)},
+				{']', Glyph(0b110, 0b010, 0b010, 0b010, 0b110)},
+				{'<', Glyph(0b001, 0b010, 0b100, 0b010, 0b001)},
+				{'>', Glyph(0b100, 0b010, 0b001, 0b010, 0b100)},
+				{'!', Glyph(0b010, 0b010, 0b010, 0b000, 0b010)},
+				{'?', Glyph(0b111, 0b001, 0b011, 0b000, 0b010)},
+				{'*', Glyph(0b101, 0b010, 0b111, 0b010, 0b101)},
+				{'#', Glyph(0b101, 0b111, 0b101, 0b111, 0b101)},
+				{'_', Glyph(0b000, 0b000, 0b000, 0b000, 0b111)},
+				{'|', Glyph(0b010, 0b010, 0b010, 0b010, 0b010)},
 			};
 
 			uint16_t Lookup(char character) {
@@ -204,14 +195,7 @@ namespace engine::render {
 						}
 
 						image.Blend(
-							cursor + column * scale,
-							y + row * scale,
-							scale,
-							scale,
-							red,
-							green,
-							blue,
-							255
+							cursor + column * scale, y + row * scale, scale, scale, red, green, blue, 255
 						);
 					}
 				}

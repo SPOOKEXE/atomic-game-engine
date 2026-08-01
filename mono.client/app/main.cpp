@@ -5,13 +5,12 @@
 // server library and starts one in-process, which cannot be done when the whole
 // program is one executable's worth of globbed sources.
 
-#include <client/Client.hpp>
-
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/render/DebugPanels.hpp>
 
 #include <cctype>
+#include <client/Client.hpp>
 #include <cstdio>
 #include <string>
 
@@ -25,8 +24,7 @@ namespace {
 			character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
 		}
 
-		for (uint8_t index = 0; index < static_cast<uint8_t>(engine::render::ProfilerTab::Count);
-			index++) {
+		for (uint8_t index = 0; index < static_cast<uint8_t>(engine::render::ProfilerTab::Count); index++) {
 			const auto candidate = static_cast<engine::render::ProfilerTab>(index);
 			if (engine::render::GetProfilerTabName(candidate) == wanted) {
 				out = candidate;
@@ -102,8 +100,9 @@ int main(int argc, char **argv) {
 
 	if (auto tab = arguments.Get("profiler-tab")) {
 		if (!ParseProfilerTab(*tab, options.Tab)) {
-			std::fprintf(stderr, "--profiler-tab: no tab called '%.*s'\n",
-				static_cast<int>(tab->size()), tab->data());
+			std::fprintf(
+				stderr, "--profiler-tab: no tab called '%.*s'\n", static_cast<int>(tab->size()), tab->data()
+			);
 			return 2;
 		}
 		// Naming a tab is asking to see it.

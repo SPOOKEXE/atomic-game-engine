@@ -62,7 +62,8 @@ TEST_CASE("a long stall is clamped", "[clock]") {
 	// A breakpoint in a debugger is not a two-minute frame, and simulation code
 	// should not have to defend against one.
 	std::this_thread::sleep_for(
-		std::chrono::milliseconds(static_cast<int>(FrameClock::MAXIMUM_DELTA * 1000.0f) + 60));
+		std::chrono::milliseconds(static_cast<int>(FrameClock::MAXIMUM_DELTA * 1000.0f) + 60)
+	);
 
 	const float delta = clock.Tick();
 	REQUIRE(delta == Approx(FrameClock::MAXIMUM_DELTA));

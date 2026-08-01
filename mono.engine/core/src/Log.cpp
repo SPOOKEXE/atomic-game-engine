@@ -27,18 +27,18 @@ namespace engine::core {
 	void Log::SetLevel(LogLevel level) {
 		auto spdlogLevel = spdlog::level::info;
 		switch (level) {
-			case LogLevel::Trace:
-				spdlogLevel = spdlog::level::trace;
-				break;
-			case LogLevel::Info:
-				spdlogLevel = spdlog::level::info;
-				break;
-			case LogLevel::Warning:
-				spdlogLevel = spdlog::level::warn;
-				break;
-			case LogLevel::Error:
-				spdlogLevel = spdlog::level::err;
-				break;
+		case LogLevel::Trace:
+			spdlogLevel = spdlog::level::trace;
+			break;
+		case LogLevel::Info:
+			spdlogLevel = spdlog::level::info;
+			break;
+		case LogLevel::Warning:
+			spdlogLevel = spdlog::level::warn;
+			break;
+		case LogLevel::Error:
+			spdlogLevel = spdlog::level::err;
+			break;
 		}
 		Logger().set_level(spdlogLevel);
 	}

@@ -112,19 +112,16 @@ namespace engine::core {
 		}
 
 	  private:
-		constexpr explicit Name(uint32_t id)
-			: Identifier(id) {
-		}
+		constexpr explicit Name(uint32_t id) : Identifier(id) {}
 
 		uint32_t Identifier = INVALID;
 	};
 }
 
 // Hashes a Name by its process-local integer handle.
-template <>
-struct std::hash<engine::core::Name> {
+template <> struct std::hash<engine::core::Name> {
 	// Returns the standard uint32_t hash of Name::Id().
 	size_t operator()(const engine::core::Name &name) const noexcept {
-		return std::hash<uint32_t> {}(name.Id());
+		return std::hash<uint32_t>{}(name.Id());
 	}
 };

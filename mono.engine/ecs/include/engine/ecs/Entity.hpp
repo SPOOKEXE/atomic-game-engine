@@ -30,9 +30,7 @@ namespace engine::ecs {
 		// Constructs a handle from the backing store's complete entity id.
 		//
 		// @param id The generation-bearing entity id.
-		constexpr explicit Entity(uint64_t id)
-			: Id(id) {
-		}
+		constexpr explicit Entity(uint64_t id) : Id(id) {}
 
 		// Reports whether two handles identify the same entity generation.
 		//
@@ -61,17 +59,16 @@ namespace engine::ecs {
 	};
 
 	// The entity handle that belongs to no Store.
-	inline constexpr Entity NULL_ENTITY {};
+	inline constexpr Entity NULL_ENTITY{};
 }
 
 // Hashes Entity by its complete generation-bearing id.
-template <>
-struct std::hash<engine::ecs::Entity> {
+template <> struct std::hash<engine::ecs::Entity> {
 	// Computes a hash suitable for standard unordered containers.
 	//
 	// @param entity The entity handle to hash.
 	// @return The hash of `entity.Id`.
 	size_t operator()(const engine::ecs::Entity &entity) const noexcept {
-		return std::hash<uint64_t> {}(entity.Id);
+		return std::hash<uint64_t>{}(entity.Id);
 	}
 };

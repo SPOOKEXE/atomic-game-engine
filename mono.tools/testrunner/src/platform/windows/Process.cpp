@@ -1,9 +1,8 @@
 #include <testrunner/Process.hpp>
 
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include <array>
+#include <windows.h>
 
 namespace testrunner {
 
@@ -58,7 +57,7 @@ namespace testrunner {
 			return result;
 		}
 
-		SECURITY_ATTRIBUTES security {};
+		SECURITY_ATTRIBUTES security{};
 		security.nLength = sizeof(security);
 		security.bInheritHandle = TRUE;
 
@@ -79,16 +78,17 @@ namespace testrunner {
 			commandLine += Quote(arguments[index]);
 		}
 
-		STARTUPINFOW startup {};
+		STARTUPINFOW startup{};
 		startup.cb = sizeof(startup);
 		startup.dwFlags = STARTF_USESTDHANDLES;
 		startup.hStdOutput = writeEnd;
 		startup.hStdError = writeEnd;
 		startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 
-		PROCESS_INFORMATION process {};
-		const BOOL started = CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
-			0, nullptr, nullptr, &startup, &process);
+		PROCESS_INFORMATION process{};
+		const BOOL started = CreateProcessW(
+			nullptr, commandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &process
+		);
 
 		CloseHandle(writeEnd);
 		if (!started) {
@@ -98,10 +98,10 @@ namespace testrunner {
 
 		// Drain before waiting: the child blocks once it has written a pipe
 		// buffer's worth, and waiting first would deadlock against it.
-		std::array<char, 4096> buffer {};
+		std::array<char, 4096> buffer{};
 		DWORD read = 0;
-		while (ReadFile(readEnd, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)
-			&& read > 0) {
+		while (ReadFile(readEnd, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) &&
+			   read > 0) {
 			result.Output.append(buffer.data(), read);
 		}
 		CloseHandle(readEnd);

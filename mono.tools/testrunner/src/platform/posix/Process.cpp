@@ -1,12 +1,10 @@
-#include <testrunner/Process.hpp>
-
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <array>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <sys/wait.h>
+#include <testrunner/Process.hpp>
+#include <unistd.h>
 #include <vector>
 
 namespace testrunner {
@@ -17,7 +15,7 @@ namespace testrunner {
 			return result;
 		}
 
-		int pipes[2] = { -1, -1 };
+		int pipes[2] = {-1, -1};
 		if (pipe(pipes) != 0) {
 			return result;
 		}
@@ -60,7 +58,7 @@ namespace testrunner {
 		// Read to EOF before waiting. Waiting first deadlocks as soon as the
 		// child writes more than a pipe buffer, which for a failing test suite
 		// is immediately.
-		std::array<char, 4096> buffer {};
+		std::array<char, 4096> buffer{};
 		for (;;) {
 			const ssize_t read = ::read(pipes[0], buffer.data(), buffer.size());
 			if (read > 0) {

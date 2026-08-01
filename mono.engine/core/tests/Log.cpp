@@ -30,7 +30,7 @@ TEST_CASE("Initialise is idempotent", "[log]") {
 TEST_CASE("every level maps to something", "[log]") {
 	Log::Initialise("test");
 
-	for (auto level : { LogLevel::Trace, LogLevel::Info, LogLevel::Warning, LogLevel::Error }) {
+	for (auto level : {LogLevel::Trace, LogLevel::Info, LogLevel::Warning, LogLevel::Error}) {
 		REQUIRE_NOTHROW(Log::SetLevel(level));
 	}
 

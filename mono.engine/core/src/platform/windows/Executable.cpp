@@ -1,9 +1,8 @@
 #include "../Executable.hpp"
 
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include <vector>
+#include <windows.h>
 
 namespace engine::core::platform {
 
@@ -13,7 +12,8 @@ namespace engine::core::platform {
 		// does not.
 		std::vector<wchar_t> buffer(MAX_PATH);
 		for (;;) {
-			const DWORD written = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+			const DWORD written =
+				GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
 			if (written == 0) {
 				return {};
 			}

@@ -2,14 +2,13 @@
 // thin: single-player links this library and hosts a server in-process, which
 // is impossible when the program is one executable's worth of globbed sources.
 
-#include <server/Server.hpp>
-
 #include <engine/core/Arguments.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
 
 #include <csignal>
 #include <cstdio>
+#include <server/Server.hpp>
 
 namespace {
 	server::Server *Running = nullptr;

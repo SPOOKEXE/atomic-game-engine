@@ -105,6 +105,5 @@ namespace client {
 	//
 	// After this returns, the world is self-contained — ticking it needs the
 	// store and the scheduler and nothing else.
-	void BuildDemoWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler,
-		uint32_t count);
+	void BuildDemoWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t count);
 }

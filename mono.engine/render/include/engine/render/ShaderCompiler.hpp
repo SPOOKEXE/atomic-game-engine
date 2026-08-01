@@ -91,11 +91,8 @@ namespace engine::render {
 		// @param stage  Shader stage used to parse and compile the source.
 		// @param name   Human-locatable label included with line numbers in diagnostics.
 		// @return Owned SPIR-V and compiler diagnostics; check `Failed` for status.
-		ShaderCompilation Compile(
-			std::string_view source,
-			ShaderStage stage,
-			std::string_view name = "shader"
-		);
+		ShaderCompilation
+		Compile(std::string_view source, ShaderStage stage, std::string_view name = "shader");
 
 		// Optimisation costs compile time and is worth it for anything that
 		// will be used for more than a frame or two. Off while a user is

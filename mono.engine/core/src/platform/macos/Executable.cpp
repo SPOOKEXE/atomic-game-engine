@@ -1,7 +1,6 @@
 #include "../Executable.hpp"
 
 #include <mach-o/dyld.h>
-
 #include <system_error>
 #include <vector>
 

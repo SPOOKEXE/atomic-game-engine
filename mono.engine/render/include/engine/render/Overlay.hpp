@@ -58,8 +58,8 @@ namespace engine::render {
 		// @param green  Source green channel.
 		// @param blue   Source blue channel.
 		// @param alpha  Source alpha channel.
-		void Blend(int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue,
-			uint8_t alpha);
+		void
+		Blend(int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha);
 
 		// Returns the image width in pixels.
 		int GetWidth() const {
@@ -149,7 +149,15 @@ namespace engine::render {
 		// @param blue  Opaque glyph blue channel.
 		// @param scale Integer pixel scale.
 		// @client
-		void Draw(OverlayImage &image, int x, int y, std::string_view text, uint8_t red,
-			uint8_t green, uint8_t blue, int scale);
+		void Draw(
+			OverlayImage &image,
+			int x,
+			int y,
+			std::string_view text,
+			uint8_t red,
+			uint8_t green,
+			uint8_t blue,
+			int scale
+		);
 	}
 }

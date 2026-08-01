@@ -44,7 +44,7 @@ namespace {
 
 TEST_CASE("a declared flag is absent until it is given", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line {};
+	CommandLine line{};
 
 	REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 	REQUIRE_FALSE(arguments.Has("stats"));
@@ -52,7 +52,7 @@ TEST_CASE("a declared flag is absent until it is given", "[arguments]") {
 
 TEST_CASE("a flag is present when given", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--stats" };
+	CommandLine line{"--stats"};
 
 	REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 	REQUIRE(arguments.Has("stats"));
@@ -61,7 +61,7 @@ TEST_CASE("a flag is present when given", "[arguments]") {
 TEST_CASE("a value is accepted in both spellings", "[arguments]") {
 	SECTION("separated") {
 		auto arguments = Declared();
-		CommandLine line { "--frames", "120" };
+		CommandLine line{"--frames", "120"};
 
 		REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 		REQUIRE(arguments.GetInteger("frames", -1) == 120);
@@ -69,7 +69,7 @@ TEST_CASE("a value is accepted in both spellings", "[arguments]") {
 
 	SECTION("joined") {
 		auto arguments = Declared();
-		CommandLine line { "--frames=120" };
+		CommandLine line{"--frames=120"};
 
 		REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 		REQUIRE(arguments.GetInteger("frames", -1) == 120);
@@ -78,7 +78,7 @@ TEST_CASE("a value is accepted in both spellings", "[arguments]") {
 
 TEST_CASE("a single dash is the same option", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "-stats" };
+	CommandLine line{"-stats"};
 
 	REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 	REQUIRE(arguments.Has("stats"));
@@ -86,7 +86,7 @@ TEST_CASE("a single dash is the same option", "[arguments]") {
 
 TEST_CASE("an unknown option is an error rather than silence", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--stat" };
+	CommandLine line{"--stat"};
 
 	const auto result = arguments.Parse(line.Count(), line.Values());
 	REQUIRE_FALSE(result.Ok);
@@ -95,14 +95,14 @@ TEST_CASE("an unknown option is an error rather than silence", "[arguments]") {
 
 TEST_CASE("a missing value is an error", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--frames" };
+	CommandLine line{"--frames"};
 
 	REQUIRE_FALSE(arguments.Parse(line.Count(), line.Values()).Ok);
 }
 
 TEST_CASE("a forgotten value does not swallow the next option", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--frames", "--stats" };
+	CommandLine line{"--frames", "--stats"};
 
 	const auto result = arguments.Parse(line.Count(), line.Values());
 	REQUIRE_FALSE(result.Ok);
@@ -111,14 +111,14 @@ TEST_CASE("a forgotten value does not swallow the next option", "[arguments]") {
 
 TEST_CASE("a value that takes no value is an error", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--stats=1" };
+	CommandLine line{"--stats=1"};
 
 	REQUIRE_FALSE(arguments.Parse(line.Count(), line.Values()).Ok);
 }
 
 TEST_CASE("everything after -- is positional", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--stats", "--", "--frames", "file.scene" };
+	CommandLine line{"--stats", "--", "--frames", "file.scene"};
 
 	REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 	REQUIRE(arguments.Has("stats"));
@@ -129,7 +129,7 @@ TEST_CASE("everything after -- is positional", "[arguments]") {
 
 TEST_CASE("a bare word is positional", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "game.atomic" };
+	CommandLine line{"game.atomic"};
 
 	REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 	REQUIRE(arguments.Positional().size() == 1);
@@ -138,7 +138,7 @@ TEST_CASE("a bare word is positional", "[arguments]") {
 
 TEST_CASE("an unparseable number falls back rather than throwing", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--frames", "soon" };
+	CommandLine line{"--frames", "soon"};
 
 	REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
 	REQUIRE(arguments.GetInteger("frames", 60) == 60);
@@ -146,7 +146,7 @@ TEST_CASE("an unparseable number falls back rather than throwing", "[arguments]"
 
 TEST_CASE("help is declared without being asked for", "[arguments]") {
 	auto arguments = Declared();
-	CommandLine line { "--help" };
+	CommandLine line{"--help"};
 
 	const auto result = arguments.Parse(line.Count(), line.Values());
 	REQUIRE(result.Ok);

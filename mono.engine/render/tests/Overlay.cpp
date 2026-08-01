@@ -12,10 +12,9 @@ namespace {
 	// The image is RGBA8; this reads one channel back out.
 	uint8_t At(const OverlayImage &image, int x, int y, int channel) {
 		const size_t index =
-			(static_cast<size_t>(y) * static_cast<size_t>(image.GetWidth())
-				+ static_cast<size_t>(x))
-				* OverlayImage::BYTES_PER_PIXEL
-			+ static_cast<size_t>(channel);
+			(static_cast<size_t>(y) * static_cast<size_t>(image.GetWidth()) + static_cast<size_t>(x)) *
+				OverlayImage::BYTES_PER_PIXEL +
+			static_cast<size_t>(channel);
 		return image.GetPixels()[index];
 	}
 

@@ -1,5 +1,3 @@
-#include <client/Client.hpp>
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -10,6 +8,7 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <client/Client.hpp>
 
 namespace client {
 
@@ -47,8 +46,9 @@ namespace client {
 			return false;
 		}
 
-		Window = SDL_CreateWindow("atomic", Settings.Width, Settings.Height,
-			SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+		Window = SDL_CreateWindow(
+			"atomic", Settings.Width, Settings.Height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+		);
 		if (!Window) {
 			ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 			return false;
@@ -65,8 +65,7 @@ namespace client {
 		engine::parallel::Jobs::Start();
 
 		Timestep.SetRate(Settings.TickRate);
-		ENGINE_INFO("simulation at {:.0f} Hz, rendering unlocked from it",
-			Settings.TickRate);
+		ENGINE_INFO("simulation at {:.0f} Hz, rendering unlocked from it", Settings.TickRate);
 
 		Store.BindToCallingThread();
 		BuildDemoWorld(Store, Scheduler, Settings.Entities);
@@ -77,13 +76,11 @@ namespace client {
 		// a short run with nothing listening produces an empty capture. Waiting
 		// makes that an explicit choice rather than a surprise.
 		if (Settings.ProfilerWaitSeconds > 0.0 && !ENGINE_PROFILE_ATTACHED()) {
-			ENGINE_INFO("waiting up to {:.1f}s for a Tracy profiler",
-				Settings.ProfilerWaitSeconds);
+			ENGINE_INFO("waiting up to {:.1f}s for a Tracy profiler", Settings.ProfilerWaitSeconds);
 
 			const uint64_t started = engine::core::Clock::Nanoseconds();
 			while (!ENGINE_PROFILE_ATTACHED()) {
-				const double waited =
-					static_cast<double>(engine::core::Clock::Nanoseconds() - started) / 1e9;
+				const double waited = static_cast<double>(engine::core::Clock::Nanoseconds() - started) / 1e9;
 				if (waited >= Settings.ProfilerWaitSeconds) {
 					ENGINE_INFO("no profiler attached; continuing without one");
 					break;
@@ -145,8 +142,8 @@ namespace client {
 			ProfilerScroll = 0;
 		}
 		if (Actions.Fired(Action::PreviousProfilerTab)) {
-			Settings.Tab = static_cast<ProfilerTab>(
-				(static_cast<int>(Settings.Tab) + tabCount - 1) % tabCount);
+			Settings.Tab =
+				static_cast<ProfilerTab>((static_cast<int>(Settings.Tab) + tabCount - 1) % tabCount);
 			ProfilerScroll = 0;
 		}
 
@@ -163,8 +160,7 @@ namespace client {
 		if (Actions.Fired(Action::DecreaseProfilerDepth) && ProfilerDepth > 0) {
 			ProfilerDepth--;
 		}
-		if (Actions.Fired(Action::IncreaseProfilerDepth)
-			&& ProfilerDepth < FrameGraph::MAXIMUM_DEPTH) {
+		if (Actions.Fired(Action::IncreaseProfilerDepth) && ProfilerDepth < FrameGraph::MAXIMUM_DEPTH) {
 			ProfilerDepth++;
 		}
 
@@ -190,8 +186,12 @@ namespace client {
 			return;
 		}
 
-		ENGINE_INFO("snapshot: {} frame(s) over {:.2f}s written to {}",
-			FrameGraph::HistoryFrames(), FrameGraph::HistorySeconds(), path.string());
+		ENGINE_INFO(
+			"snapshot: {} frame(s) over {:.2f}s written to {}",
+			FrameGraph::HistoryFrames(),
+			FrameGraph::HistorySeconds(),
+			path.string()
+		);
 	}
 
 	void Client::Step() {
@@ -222,8 +222,9 @@ namespace client {
 				// system is handed a delta, so none of them can be handed the
 				// wrong one.
 				Store.AdvanceTick(Timestep.Delta());
-				Scheduler.RunPhases(Store,
-					engine::ecs::Phase::PreSimulation, engine::ecs::Phase::PostSimulation);
+				Scheduler.RunPhases(
+					Store, engine::ecs::Phase::PreSimulation, engine::ecs::Phase::PostSimulation
+				);
 			}
 		}
 
@@ -233,8 +234,7 @@ namespace client {
 			// one that interpolates.
 			ENGINE_PROFILE_CAT("pre-render", engine::core::ProfileCategory::Simulation);
 			Store.SetFrame(delta, Timestep.Alpha());
-			Scheduler.RunPhases(Store,
-				engine::ecs::Phase::PreRender, engine::ecs::Phase::PreRender);
+			Scheduler.RunPhases(Store, engine::ecs::Phase::PreRender, engine::ecs::Phase::PreRender);
 		}
 
 		Statistics.Record(Clock.Now(), delta);
@@ -244,8 +244,7 @@ namespace client {
 		// number worth seeing.
 		if (Clock.Now() - TickWindowStarted >= 1.0) {
 			const auto elapsed = static_cast<float>(Clock.Now() - TickWindowStarted);
-			MeasuredTicksPerSecond =
-				static_cast<float>(Timestep.TotalTicks() - TicksAtWindowStart) / elapsed;
+			MeasuredTicksPerSecond = static_cast<float>(Timestep.TotalTicks() - TicksAtWindowStart) / elapsed;
 			TickWindowStarted = Clock.Now();
 			TicksAtWindowStart = Timestep.TotalTicks();
 		}
@@ -262,8 +261,7 @@ namespace client {
 			if (Settings.ShowStatistics || Settings.ShowFrameGraph) {
 				SystemTimings.clear();
 				for (const auto &timing : Scheduler.Timings()) {
-					SystemTimings.push_back(
-						engine::render::SystemTiming { timing.Name, timing.Milliseconds });
+					SystemTimings.push_back(engine::render::SystemTiming{timing.Name, timing.Milliseconds});
 				}
 
 				const auto counters = Metrics::Drain();
@@ -312,9 +310,7 @@ namespace client {
 		// draw list was filled by one in PreRender, so what is drawn is exactly
 		// what the tick produced.
 		LastFrame = Renderer.Render(
-			Store.Resource<ActiveCamera>()->Value,
-			Store.Resource<DrawList>()->Instances,
-			Overlay
+			Store.Resource<ActiveCamera>()->Value, Store.Resource<DrawList>()->Instances, Overlay
 		);
 
 		FrameGraph::EndFrame();
@@ -345,14 +341,20 @@ namespace client {
 		}
 
 		if (Statistics.HasSamples()) {
-			ENGINE_INFO("{} frames · {:.1f} avg · {:.1f} min · {:.1f} max FPS", FramesDrawn,
-				Statistics.Average(), Statistics.Minimum(), Statistics.Maximum());
-			ENGINE_INFO("{} tick(s) at {:.0f} Hz · {:.1f} achieved · {} dropped",
-				Timestep.TotalTicks(), Settings.TickRate,
-				Clock.Now() > 0.0
-					? static_cast<double>(Timestep.TotalTicks()) / Clock.Now()
-					: 0.0,
-				Timestep.Dropped());
+			ENGINE_INFO(
+				"{} frames · {:.1f} avg · {:.1f} min · {:.1f} max FPS",
+				FramesDrawn,
+				Statistics.Average(),
+				Statistics.Minimum(),
+				Statistics.Maximum()
+			);
+			ENGINE_INFO(
+				"{} tick(s) at {:.0f} Hz · {:.1f} achieved · {} dropped",
+				Timestep.TotalTicks(),
+				Settings.TickRate,
+				Clock.Now() > 0.0 ? static_cast<double>(Timestep.TotalTicks()) / Clock.Now() : 0.0,
+				Timestep.Dropped()
+			);
 		}
 
 		return 0;

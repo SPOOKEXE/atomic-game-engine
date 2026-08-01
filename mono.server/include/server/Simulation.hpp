@@ -45,6 +45,5 @@ namespace server {
 	// Populates `store` and registers the systems that move it. Deterministic:
 	// the same count produces the same world, which is what lets two runs be
 	// compared.
-	void BuildPlaceholderWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler,
-		uint32_t count);
+	void BuildPlaceholderWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t count);
 }

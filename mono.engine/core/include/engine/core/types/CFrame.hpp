@@ -39,21 +39,15 @@ namespace engine::core {
 		CFrame() = default;
 
 		// Constructs a translation with identity rotation.
-		explicit CFrame(const Vector3 &position)
-			: Position(position) {
-		}
+		explicit CFrame(const Vector3 &position) : Position(position) {}
 
 		// Constructs a transform and stores the supplied quaternion without normalising it.
 		//
 		// @param position Translation in the containing space, in the caller's distance unit.
 		// @param rotation A unit quaternion describing the orientation.
 		CFrame(const Vector3 &position, const glm::quat &rotation)
-			: Position(position)
-			, QuaternionX(rotation.x)
-			, QuaternionY(rotation.y)
-			, QuaternionZ(rotation.z)
-			, QuaternionW(rotation.w) {
-		}
+			: Position(position), QuaternionX(rotation.x), QuaternionY(rotation.y), QuaternionZ(rotation.z),
+			  QuaternionW(rotation.w) {}
 
 		// Returns the stored orientation as a GLM quaternion without normalising it.
 		glm::quat Rotation() const {

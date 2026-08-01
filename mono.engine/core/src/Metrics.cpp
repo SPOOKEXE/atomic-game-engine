@@ -33,7 +33,7 @@ namespace engine::core {
 				return *existing;
 			}
 
-			counters.push_back(Counter { name, 0.0, 0, isTime });
+			counters.push_back(Counter{name, 0.0, 0, isTime});
 			return counters.back();
 		}
 	}
@@ -72,9 +72,7 @@ namespace engine::core {
 	}
 
 	ScopedCount::ScopedCount(std::string_view name)
-		: CounterName(name)
-		, StartNanoseconds(Clock::Nanoseconds()) {
-	}
+		: CounterName(name), StartNanoseconds(Clock::Nanoseconds()) {}
 
 	ScopedCount::~ScopedCount() {
 		Metrics::CountTime(CounterName, Clock::Nanoseconds() - StartNanoseconds);

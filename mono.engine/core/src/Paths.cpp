@@ -1,6 +1,6 @@
-#include <engine/core/Paths.hpp>
-
 #include "platform/Executable.hpp"
+
+#include <engine/core/Paths.hpp>
 
 namespace engine::core {
 

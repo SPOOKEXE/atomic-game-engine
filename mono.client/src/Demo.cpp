@@ -1,11 +1,10 @@
-#include <client/Demo.hpp>
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/parallel/Jobs.hpp>
 
 #include <algorithm>
+#include <client/Demo.hpp>
 #include <cmath>
 #include <numbers>
 
@@ -52,17 +51,14 @@ namespace client {
 			// second whether that second took 30 frames or 600.
 			const auto now = static_cast<float>(store.Time().Elapsed);
 
-			store.Each<Transform, const Orbit>(
-				[now](Entity, Transform &transform, const Orbit &orbit) {
-					const float angle = orbit.Phase + now * orbit.RadiansPerSecond;
-					transform.Frame.Position = orbit.Centre
-						+ Vector3 {
-							std::cos(angle) * orbit.Radius,
-							orbit.Height,
-							std::sin(angle) * orbit.Radius,
-						};
-				}
-			);
+			store.Each<Transform, const Orbit>([now](Entity, Transform &transform, const Orbit &orbit) {
+				const float angle = orbit.Phase + now * orbit.RadiansPerSecond;
+				transform.Frame.Position = orbit.Centre + Vector3{
+															  std::cos(angle) * orbit.Radius,
+															  orbit.Height,
+															  std::sin(angle) * orbit.Radius,
+														  };
+			});
 		}
 
 		void ApplySpin(Store &store) {
@@ -71,15 +67,13 @@ namespace client {
 			// a different name.
 			const float delta = store.Time().Delta;
 
-			store.Each<Transform, const Spin>(
-				[delta](Entity, Transform &transform, const Spin &spin) {
-					// Rotation composes on the right, so the spin is applied in
-					// the cube's own space and the orbit position is untouched.
-					transform.Frame = transform.Frame
-						* CFrame::Angles(spin.Rate.X * delta, spin.Rate.Y * delta,
-							spin.Rate.Z * delta);
-				}
-			);
+			store.Each<Transform, const Spin>([delta](Entity, Transform &transform, const Spin &spin) {
+				// Rotation composes on the right, so the spin is applied in
+				// the cube's own space and the orbit position is untouched.
+				transform.Frame =
+					transform.Frame *
+					CFrame::Angles(spin.Rate.X * delta, spin.Rate.Y * delta, spin.Rate.Z * delta);
+			});
 		}
 
 		// The camera is part of the scene, so it moves in the simulation on
@@ -95,7 +89,7 @@ namespace client {
 			const float distance = extent * 1.7f + 4.0f;
 			const float angle = now * 0.12f;
 
-			const Vector3 eye {
+			const Vector3 eye{
 				std::cos(angle) * distance,
 				5.0f + std::sin(now * 0.21f) * 3.5f,
 				std::sin(angle) * distance,
@@ -119,8 +113,12 @@ namespace client {
 			drawList->Instances.clear();
 
 			store.Each<const Transform, const PreviousTransform, const Visual>(
-				[drawList, alpha](Entity, const Transform &transform,
-					const PreviousTransform &previous, const Visual &visual) {
+				[drawList, alpha](
+					Entity,
+					const Transform &transform,
+					const PreviousTransform &previous,
+					const Visual &visual
+				) {
 					// Interpolated, not the tick position. At 300 fps against a
 					// 60 Hz tick, drawing tick positions shows each one five
 					// times and then jumps — which reads as a frame-rate
@@ -132,15 +130,16 @@ namespace client {
 					model[1] *= visual.Size;
 					model[2] *= visual.Size;
 
-					drawList->Instances.push_back(engine::render::Instance {
-						model,
-						glm::vec4 { visual.Colour.R, visual.Colour.G, visual.Colour.B, 1.0f },
-					});
+					drawList->Instances.push_back(
+						engine::render::Instance{
+							model,
+							glm::vec4{visual.Colour.R, visual.Colour.G, visual.Colour.B, 1.0f},
+						}
+					);
 				}
 			);
 
-			engine::core::Metrics::Count("render.instances",
-				static_cast<double>(drawList->Instances.size()));
+			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 		}
 	}
 
@@ -156,9 +155,8 @@ namespace client {
 		// `--entities 20000` would look *less* like a 3D scene than 500 does.
 		constexpr float INNER_RADIUS = 3.0f;
 		constexpr float OUTER_RADIUS = 12.0f;
-		const float ringStep = rings > 1
-			? (OUTER_RADIUS - INNER_RADIUS) / static_cast<float>(rings - 1)
-			: 0.0f;
+		const float ringStep =
+			rings > 1 ? (OUTER_RADIUS - INNER_RADIUS) / static_cast<float>(rings - 1) : 0.0f;
 
 		float extent = 1.0f;
 
@@ -171,30 +169,39 @@ namespace client {
 
 			const Entity entity = store.Create();
 
-			store.Set<Transform>(entity, Transform {});
-			store.Set<PreviousTransform>(entity, PreviousTransform {});
-			store.Set<Orbit>(entity, Orbit {
-				Vector3::Zero,
-				radius,
-				// Outer rings turn more slowly, which reads as depth without
-				// any depth cue in the shading.
-				0.45f / (1.0f + static_cast<float>(ring) * 0.35f),
-				withinRing / static_cast<float>(PER_RING) * TAU,
-				height,
-			});
-			store.Set<Spin>(entity, Spin { Vector3 {
-				Random::Range(index, 11u, -1.2f, 1.2f),
-				Random::Range(index, 13u, -1.2f, 1.2f),
-				Random::Range(index, 17u, -1.2f, 1.2f),
-			} });
-			store.Set<Visual>(entity, Visual {
-				Color3::FromLinear(
-					Random::Range(index, 19u, 0.15f, 0.90f),
-					Random::Range(index, 23u, 0.20f, 0.80f),
-					Random::Range(index, 29u, 0.35f, 0.95f)
-				),
-				Random::Range(index, 31u, 0.6f, 1.4f),
-			});
+			store.Set<Transform>(entity, Transform{});
+			store.Set<PreviousTransform>(entity, PreviousTransform{});
+			store.Set<Orbit>(
+				entity,
+				Orbit{
+					Vector3::Zero,
+					radius,
+					// Outer rings turn more slowly, which reads as depth without
+					// any depth cue in the shading.
+					0.45f / (1.0f + static_cast<float>(ring) * 0.35f),
+					withinRing / static_cast<float>(PER_RING) * TAU,
+					height,
+				}
+			);
+			store.Set<Spin>(
+				entity,
+				Spin{Vector3{
+					Random::Range(index, 11u, -1.2f, 1.2f),
+					Random::Range(index, 13u, -1.2f, 1.2f),
+					Random::Range(index, 17u, -1.2f, 1.2f),
+				}}
+			);
+			store.Set<Visual>(
+				entity,
+				Visual{
+					Color3::FromLinear(
+						Random::Range(index, 19u, 0.15f, 0.90f),
+						Random::Range(index, 23u, 0.20f, 0.80f),
+						Random::Range(index, 29u, 0.35f, 0.95f)
+					),
+					Random::Range(index, 31u, 0.6f, 1.4f),
+				}
+			);
 
 			extent = std::max(extent, radius);
 		}
@@ -202,9 +209,9 @@ namespace client {
 		// Every resource the systems below read, installed before any of them
 		// can run. A system that has to check whether its resource exists yet
 		// is a system with a branch for a state the world is never in.
-		store.SetResource(SceneBounds { extent });
-		store.SetResource(ActiveCamera {});
-		store.SetResource(DrawList {});
+		store.SetResource(SceneBounds{extent});
+		store.SetResource(ActiveCamera{});
+		store.SetResource(DrawList{});
 
 		// Reserved once rather than grown: the count is known, and the first
 		// frame is the one most likely to be looked at in a profile.

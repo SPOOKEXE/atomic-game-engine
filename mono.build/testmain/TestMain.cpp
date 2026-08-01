@@ -17,14 +17,13 @@ namespace engine::testing {
 
 	Suite &Registry::Declare(std::string_view id, std::string_view file) {
 		auto &suites = Suites();
-		auto existing = std::find_if(suites.begin(), suites.end(), [id](const Suite &suite) {
-			return suite.Id == id;
-		});
+		auto existing =
+			std::find_if(suites.begin(), suites.end(), [id](const Suite &suite) { return suite.Id == id; });
 		if (existing != suites.end()) {
 			return *existing;
 		}
 
-		suites.push_back(Suite { id, file, {} });
+		suites.push_back(Suite{id, file, {}});
 		return suites.back();
 	}
 

@@ -8,8 +8,6 @@
 // three lines long and what will let single-player link the server library into
 // this same process later.
 
-#include <client/Demo.hpp>
-
 #include <engine/core/Clock.hpp>
 #include <engine/core/FixedTimestep.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -18,6 +16,7 @@
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/Renderer.hpp>
 
+#include <client/Demo.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -103,7 +102,7 @@ namespace client {
 		// The world, and the only place simulation state lives. Everything
 		// below this line is the *program* — window, frame budget, panel
 		// scroll — which is not world state and does not belong in the store.
-		engine::ecs::Store Store { "client" };
+		engine::ecs::Store Store{"client"};
 		engine::ecs::Scheduler Scheduler;
 
 		std::vector<engine::render::SystemTiming> SystemTimings;

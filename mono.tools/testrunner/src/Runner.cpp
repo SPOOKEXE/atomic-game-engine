@@ -1,11 +1,10 @@
-#include <testrunner/Process.hpp>
-#include <testrunner/Runner.hpp>
-#include <testrunner/Sha256.hpp>
-
 #include <algorithm>
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <testrunner/Process.hpp>
+#include <testrunner/Runner.hpp>
+#include <testrunner/Sha256.hpp>
 
 namespace testrunner {
 
@@ -36,9 +35,8 @@ namespace testrunner {
 			if (error) {
 				return false;
 			}
-			return (permissions & (fs::perms::owner_exec | fs::perms::group_exec
-					   | fs::perms::others_exec))
-				!= fs::perms::none;
+			return (permissions & (fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec)) !=
+				   fs::perms::none;
 		}
 
 		fs::path Normalise(const fs::path &path) {
@@ -95,7 +93,7 @@ namespace testrunner {
 	std::vector<Suite> ReadSuites(const fs::path &binary) {
 		std::vector<Suite> suites;
 
-		const auto listed = Run({ binary.string(), "--mono-suites" });
+		const auto listed = Run({binary.string(), "--mono-suites"});
 		if (!listed.Started || listed.ExitCode != 0) {
 			return suites;
 		}
@@ -140,7 +138,7 @@ namespace testrunner {
 			return closures;
 		}
 
-		const auto dumped = Run({ "ninja", "-C", build.string(), "-t", "deps" });
+		const auto dumped = Run({"ninja", "-C", build.string(), "-t", "deps"});
 		if (!dumped.Started) {
 			return closures;
 		}
@@ -311,10 +309,10 @@ namespace testrunner {
 			if (fields.size() < 3) {
 				continue;
 			}
-			cache[fields[0]] = CacheEntry { fields[2], fields[1] == "pass" };
+			cache[fields[0]] = CacheEntry{fields[2], fields[1] == "pass"};
 		}
 
-		return versionSeen ? cache : std::map<std::string, CacheEntry> {};
+		return versionSeen ? cache : std::map<std::string, CacheEntry>{};
 	}
 
 	bool SaveCache(const fs::path &path, const std::map<std::string, CacheEntry> &cache) {
@@ -333,8 +331,7 @@ namespace testrunner {
 		// std::map iterates sorted, so the file is stable between runs and a
 		// diff of it shows only what actually changed.
 		for (const auto &[id, entry] : cache) {
-			file << id << '\t' << (entry.Passed ? "pass" : "fail") << '\t' << entry.Signature
-				 << '\n';
+			file << id << '\t' << (entry.Passed ? "pass" : "fail") << '\t' << entry.Signature << '\n';
 		}
 
 		return file.good();

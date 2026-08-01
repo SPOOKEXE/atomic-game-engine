@@ -15,43 +15,43 @@ namespace engine::input {
 		// The one table in the engine that names a key. Everything else asks
 		// for an action.
 		constexpr Binding BINDINGS[] = {
-			{ Action::Quit, SDLK_ESCAPE, "Esc" },
-			{ Action::ToggleStatistics, SDLK_F3, "F3" },
-			{ Action::ToggleFrameGraph, SDLK_F5, "F5" },
-			{ Action::PreviousProfilerTab, SDLK_F6, "F6" },
-			{ Action::NextProfilerTab, SDLK_F7, "F7" },
-			{ Action::ScrollProfilerUp, SDLK_PAGEUP, "PgUp" },
-			{ Action::ScrollProfilerDown, SDLK_PAGEDOWN, "PgDn" },
-			{ Action::DecreaseProfilerDepth, SDLK_MINUS, "-" },
-			{ Action::IncreaseProfilerDepth, SDLK_EQUALS, "=" },
-			{ Action::WriteProfilerSnapshot, SDLK_F8, "F8" },
+			{Action::Quit, SDLK_ESCAPE, "Esc"},
+			{Action::ToggleStatistics, SDLK_F3, "F3"},
+			{Action::ToggleFrameGraph, SDLK_F5, "F5"},
+			{Action::PreviousProfilerTab, SDLK_F6, "F6"},
+			{Action::NextProfilerTab, SDLK_F7, "F7"},
+			{Action::ScrollProfilerUp, SDLK_PAGEUP, "PgUp"},
+			{Action::ScrollProfilerDown, SDLK_PAGEDOWN, "PgDn"},
+			{Action::DecreaseProfilerDepth, SDLK_MINUS, "-"},
+			{Action::IncreaseProfilerDepth, SDLK_EQUALS, "="},
+			{Action::WriteProfilerSnapshot, SDLK_F8, "F8"},
 		};
 	}
 
 	std::string_view GetActionName(Action action) {
 		switch (action) {
-			case Action::Quit:
-				return "quit";
-			case Action::ToggleStatistics:
-				return "toggle statistics";
-			case Action::ToggleFrameGraph:
-				return "toggle frame graph";
-			case Action::PreviousProfilerTab:
-				return "previous tab";
-			case Action::NextProfilerTab:
-				return "next tab";
-			case Action::ScrollProfilerUp:
-				return "scroll up";
-			case Action::ScrollProfilerDown:
-				return "scroll down";
-			case Action::DecreaseProfilerDepth:
-				return "shallower graph";
-			case Action::IncreaseProfilerDepth:
-				return "deeper graph";
-			case Action::WriteProfilerSnapshot:
-				return "write profiler snapshot";
-			case Action::Count:
-				break;
+		case Action::Quit:
+			return "quit";
+		case Action::ToggleStatistics:
+			return "toggle statistics";
+		case Action::ToggleFrameGraph:
+			return "toggle frame graph";
+		case Action::PreviousProfilerTab:
+			return "previous tab";
+		case Action::NextProfilerTab:
+			return "next tab";
+		case Action::ScrollProfilerUp:
+			return "scroll up";
+		case Action::ScrollProfilerDown:
+			return "scroll down";
+		case Action::DecreaseProfilerDepth:
+			return "shallower graph";
+		case Action::IncreaseProfilerDepth:
+			return "deeper graph";
+		case Action::WriteProfilerSnapshot:
+			return "write profiler snapshot";
+		case Action::Count:
+			break;
 		}
 		return "?";
 	}
