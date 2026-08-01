@@ -150,6 +150,69 @@ TEST_CASE("an opaque blend replaces whatever was under it", "[overlay]") {
 	REQUIRE(At(image, 3, 1, 0) == 200);
 }
 
+TEST_CASE("clipped and unclipped text draw the same pixels", "[overlay]") {
+	// Text fully inside the image skips per-run clipping and writes straight
+	// into the buffer; text that might cross an edge goes the long way. Two
+	// paths drawing the same glyphs have to agree, or the panels change
+	// appearance the moment one is dragged near an edge.
+	OverlayImage wide;
+	OverlayImage tight;
+	wide.Resize(200, 40);
+	// Exactly as wide as the text needs, so the whole-string bounds test fails
+	// on the trailing advance and the clipped path runs.
+	tight.Resize(DebugText::Measure("ABC 123", 2), 40);
+
+	DebugText::Draw(wide, 0, 0, "ABC 123", 200, 100, 50, 2);
+	DebugText::Draw(tight, 0, 0, "ABC 123", 200, 100, 50, 2);
+
+	REQUIRE(tight.GetWidth() > 0);
+	for (int y = 0; y < tight.GetHeight(); y++) {
+		for (int x = 0; x < tight.GetWidth(); x++) {
+			REQUIRE(At(tight, x, y, 0) == At(wide, x, y, 0));
+			REQUIRE(At(tight, x, y, 3) == At(wide, x, y, 3));
+		}
+	}
+}
+
+TEST_CASE("text off the edge is clipped rather than corrupting memory", "[overlay]") {
+	OverlayImage image;
+	image.Resize(16, 16);
+
+	// The unclipped write path has no bounds check at all, so the decision of
+	// which path to take is load-bearing. Every one of these must take the slow
+	// one.
+	DebugText::Draw(image, -8, -3, "OFF THE EDGE", 255, 255, 255, 2);
+	DebugText::Draw(image, 12, 12, "OFF THE EDGE", 255, 255, 255, 2);
+	DebugText::Draw(image, 0, -20, "ABOVE", 255, 255, 255, 1);
+	DebugText::Draw(image, 0, 40, "BELOW", 255, 255, 255, 1);
+	DebugText::Draw(image, 500, 0, "RIGHT", 255, 255, 255, 1);
+
+	// Reaching this line without a sanitiser complaint is most of the test.
+	REQUIRE(image.GetByteCount() == 16u * 16u * OverlayImage::BYTES_PER_PIXEL);
+}
+
+TEST_CASE("a run of spaces draws nothing and still advances", "[overlay]") {
+	OverlayImage image;
+	image.Resize(64, 16);
+
+	// Rows are padded to a fixed column width, so most of a line is spaces. They
+	// are skipped without walking their bits — but the cursor still has to move,
+	// or every column after the first gap lands in the wrong place.
+	DebugText::Draw(image, 0, 0, "   A", 255, 255, 255, 1);
+
+	REQUIRE(image.IsDirty());
+
+	// Nothing in the first three advances.
+	for (int x = 0; x < 3 * DebugText::ADVANCE; x++) {
+		for (int y = 0; y < 5; y++) {
+			REQUIRE(At(image, x, y, 3) == 0);
+		}
+	}
+
+	// And the A is where it would have been without the skip.
+	REQUIRE(At(image, 3 * DebugText::ADVANCE, 0, 3) == 255);
+}
+
 TEST_CASE("every lit pixel of a glyph row is drawn", "[overlay]") {
 	OverlayImage image;
 	image.Resize(16, 16);

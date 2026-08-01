@@ -251,19 +251,38 @@ namespace engine::render {
 		) {
 			scale = std::max(scale, 1);
 
+			if (image.IsEmpty() || text.empty()) {
+				return;
+			}
+
+			// Clipped once for the whole string rather than once per run.
+			//
+			// A line of forty-odd characters is five glyph rows of up to two
+			// runs each — hundreds of runs two or three pixels wide. Deciding
+			// separately for each one whether it is on screen costs more than
+			// drawing it, and the answer is the same for all of them almost
+			// every time: a debug panel is drawn inside the window it is
+			// measuring.
+			const int right = x + static_cast<int>(text.size()) * ADVANCE * scale;
+			const int bottom = y + GLYPH_HEIGHT * scale;
+			const bool inside = x >= 0 && y >= 0 && right <= image.GetWidth() && bottom <= image.GetHeight();
+
 			int cursor = x;
 			for (const char character : text) {
 				const uint16_t bits = Lookup(character);
 
+				// A space, and everything else with nothing lit in it. Padding
+				// to a fixed column width means a row is mostly these, and
+				// walking fifteen bits to conclude so is fifteen bits wasted.
+				if (bits == 0) {
+					cursor += ADVANCE * scale;
+					continue;
+				}
+
 				for (int row = 0; row < GLYPH_HEIGHT; row++) {
-					// Runs of lit pixels, not pixels.
-					//
-					// A glyph row is three bits, so it is one run about as often
-					// as it is three separate ones — and a call per pixel means
-					// paying the clip, the bounds arithmetic and the dirty flag
-					// once for every scale-by-scale block. Coalescing first turns
-					// "111" from three calls into one and leaves everything else
-					// alone.
+					// Runs of lit pixels, not pixels. A glyph row is three bits,
+					// so it is one run about as often as it is two separate
+					// ones, and each run is a single write instead of three.
 					int column = 0;
 					while (column < GLYPH_WIDTH) {
 						// Column 0 is the leftmost, so it is the high bit of
@@ -283,16 +302,20 @@ namespace engine::render {
 							end++;
 						}
 
-						image.Blend(
-							cursor + column * scale,
-							y + row * scale,
-							(end - column) * scale,
-							scale,
-							red,
-							green,
-							blue,
-							255
-						);
+						const int left = cursor + column * scale;
+						const int top = y + row * scale;
+						const int span = (end - column) * scale;
+
+						if (inside) {
+							for (int line = 0; line < scale; line++) {
+								image.WriteOpaqueRun(left, top + line, span, red, green, blue);
+							}
+						} else {
+							// Off the edge, or an image too small to hold the
+							// line. Rare, and it goes the long way round rather
+							// than repeating the clip arithmetic above.
+							image.Blend(left, top, span, scale, red, green, blue, 255);
+						}
 
 						column = end;
 					}

@@ -333,7 +333,15 @@ namespace engine::render {
 			// One walk of the window for all six numbers. Asked one at a time
 			// this was six walks of tens of thousands of samples to draw three
 			// lines of text, and it cost more than the scene being measured.
-			const FrameSummary summary = data.Statistics->Summarise();
+			//
+			// Its own span, because it is the only part of this panel whose cost
+			// scales with the frame *rate* rather than with what is on screen —
+			// the faster the game runs, the more samples twenty seconds holds.
+			FrameSummary summary;
+			{
+				ENGINE_PROFILE_CAT("statistics summarise", core::ProfileCategory::Render);
+				summary = data.Statistics->Summarise();
+			}
 
 			writer.Line(
 				Format(
@@ -729,42 +737,119 @@ namespace engine::render {
 				}
 			}
 
-			int cursor = y;
-			int skipped = 0;
+			if (data.Tab == ProfilerTab::Systems && data.Systems.empty()) {
+				DebugText::Draw(
+					image, x, y, "NO SYSTEMS REGISTERED", TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
+				);
+				return;
+			}
+			if (data.Tab != ProfilerTab::Systems && data.Counters.empty()) {
+				DebugText::Draw(
+					image, x, y, "NO COUNTERS THIS FRAME", TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
+				);
+				return;
+			}
 
-			auto row = [&](std::string_view name, float value, bool isTime) {
-				if (skipped < data.Scroll) {
-					skipped++;
-					return;
-				}
-				if (cursor + lineHeight > y + available) {
-					return;
-				}
+			// The same four passes the flame graph runs, for the same reason:
+			// interleaved, a row's cost is one number covering a history scan,
+			// a string allocation and a few hundred glyph blends, and there is
+			// nothing to act on in that.
+			struct PlannedRow {
+				std::string_view Name;
+				float Value = 0.0f;
+				bool IsTime = false;
+				int Y = 0;
+				float RecentMaximum = 0.0f;
+			};
 
+			std::vector<PlannedRow> rows;
+			std::vector<std::string> text;
+
+			{
+				ENGINE_PROFILE_CAT("row select", core::ProfileCategory::Render);
+
+				int cursor = y;
+				int skipped = 0;
+				const auto plan = [&](std::string_view name, float value, bool isTime) {
+					if (skipped < data.Scroll) {
+						skipped++;
+						return;
+					}
+					if (cursor + lineHeight > y + available) {
+						return;
+					}
+					rows.push_back(PlannedRow{name, value, isTime, cursor, 0.0f});
+					cursor += lineHeight;
+				};
+
+				if (data.Tab == ProfilerTab::Systems) {
+					rows.reserve(data.Systems.size());
+					for (const auto &system : data.Systems) {
+						plan(system.Name, system.Milliseconds, true);
+					}
+				} else {
+					rows.reserve(data.Counters.size());
+					for (const auto &counter : data.Counters) {
+						// Times are accumulated in nanoseconds and shown as
+						// milliseconds; counts are shown as they were written.
+						plan(
+							counter.Name.Text(),
+							counter.IsTime ? static_cast<float>(counter.Value / 1'000'000.0)
+										   : static_cast<float>(counter.Value),
+							counter.IsTime
+						);
+					}
+				}
+			}
+
+			{
 				// A system's name is the name of the span the scheduler opens
 				// around it, so the history already has it and the same RMAX
-				// column works here without anything extra being recorded.
-				const std::string label =
-					isTime ? Format(
-								 "%6.2f %6.2f  %.*s",
-								 static_cast<double>(value),
-								 static_cast<double>(core::FrameGraph::RecentMaximum(name)),
-								 static_cast<int>(name.size()),
-								 name.data()
-							 )
-						   : Format(
-								 "%9.0f  %.*s",
-								 static_cast<double>(value),
-								 static_cast<int>(name.size()),
-								 name.data()
-							 );
+				// column works here without anything extra being recorded — at
+				// the price of a window scan per row, which is why it is its own
+				// span rather than hidden inside the formatting.
+				ENGINE_PROFILE_CAT("row history", core::ProfileCategory::Render);
+				for (auto &row : rows) {
+					if (row.IsTime) {
+						row.RecentMaximum = core::FrameGraph::RecentMaximum(row.Name);
+					}
+				}
+			}
 
-				if (isTime) {
+			{
+				ENGINE_PROFILE_CAT("row format", core::ProfileCategory::Render);
+				text.reserve(rows.size());
+				for (const auto &row : rows) {
+					text.push_back(
+						row.IsTime ? Format(
+										 "%6.2f %6.2f  %.*s",
+										 static_cast<double>(row.Value),
+										 static_cast<double>(row.RecentMaximum),
+										 static_cast<int>(row.Name.size()),
+										 row.Name.data()
+									 )
+								   : Format(
+										 "%9.0f  %.*s",
+										 static_cast<double>(row.Value),
+										 static_cast<int>(row.Name.size()),
+										 row.Name.data()
+									 )
+					);
+				}
+			}
+
+			{
+				// Before the glyphs, because the bar is behind the text.
+				ENGINE_PROFILE_CAT("row bars", core::ProfileCategory::Render);
+				for (const auto &row : rows) {
+					if (!row.IsTime) {
+						continue;
+					}
 					const int barWidth =
-						static_cast<int>(static_cast<float>(width - labelWidth) * (value / widest));
+						static_cast<int>(static_cast<float>(width - labelWidth) * (row.Value / widest));
 					image.Blend(
 						x + labelWidth,
-						cursor,
+						row.Y,
 						std::max(barWidth, 1),
 						DebugText::GLYPH_HEIGHT * scale,
 						60,
@@ -773,37 +858,13 @@ namespace engine::render {
 						220
 					);
 				}
-
-				DebugText::Draw(image, x, cursor, label, TEXT.R, TEXT.G, TEXT.B, scale);
-				cursor += lineHeight;
-			};
-
-			if (data.Tab == ProfilerTab::Systems) {
-				if (data.Systems.empty()) {
-					DebugText::Draw(
-						image, x, y, "NO SYSTEMS REGISTERED", TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
-					);
-					return;
-				}
-				for (const auto &system : data.Systems) {
-					row(system.Name, system.Milliseconds, true);
-				}
-				return;
 			}
 
-			if (data.Counters.empty()) {
-				DebugText::Draw(
-					image, x, y, "NO COUNTERS THIS FRAME", TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
-				);
-				return;
-			}
-			for (const auto &counter : data.Counters) {
-				// Times are accumulated in nanoseconds and shown as
-				// milliseconds; counts are shown as they were written.
-				row(counter.Name.Text(),
-					counter.IsTime ? static_cast<float>(counter.Value / 1'000'000.0)
-								   : static_cast<float>(counter.Value),
-					counter.IsTime);
+			{
+				ENGINE_PROFILE_CAT("row glyphs", core::ProfileCategory::Render);
+				for (size_t index = 0; index < rows.size(); index++) {
+					DebugText::Draw(image, x, rows[index].Y, text[index], TEXT.R, TEXT.G, TEXT.B, scale);
+				}
 			}
 		}
 

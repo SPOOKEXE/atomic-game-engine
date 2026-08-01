@@ -90,6 +90,44 @@ namespace engine::render {
 		void
 		Fill(int x, int y, int width, int height, uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha);
 
+		// Writes `count` opaque pixels rightward from (x, y). No clipping, no
+		// bounds check, no blending.
+		//
+		// **The caller must have clipped already.** Every other entry point here
+		// clips for you; this one does not, and an x or y outside the image
+		// writes over whatever is next to it in memory.
+		//
+		// It exists for the text rasteriser, and the reason is arithmetic rather
+		// than taste. A glyph is three bits wide, so a line of text is thousands
+		// of runs two or three pixels long — and at that size Blend's clip,
+		// dispatch and setup cost several times the handful of bytes it goes on
+		// to write. Drawing a panel of text was measured at half a millisecond,
+		// almost all of it spent deciding to write eight pixels.
+		//
+		// Inline on purpose: the whole point is that there is no call.
+		//
+		// @param x     Left pixel, already known to be inside the image.
+		// @param y     Row, already known to be inside the image.
+		// @param count Pixels to write; x + count must not exceed the width.
+		// @param red   Source red channel.
+		// @param green Source green channel.
+		// @param blue  Source blue channel.
+		void WriteOpaqueRun(int x, int y, int count, uint8_t red, uint8_t green, uint8_t blue) {
+			uint8_t *pixel = Pixels.data() +
+							 (static_cast<size_t>(y) * static_cast<size_t>(Width) + static_cast<size_t>(x)) *
+								 BYTES_PER_PIXEL;
+
+			for (int index = 0; index < count; index++) {
+				pixel[0] = red;
+				pixel[1] = green;
+				pixel[2] = blue;
+				pixel[3] = 255;
+				pixel += BYTES_PER_PIXEL;
+			}
+
+			Dirty = true;
+		}
+
 		// Returns the image width in pixels.
 		int GetWidth() const {
 			return Width;
