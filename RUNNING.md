@@ -237,11 +237,35 @@ says so, which is why the warnings are there rather than removed —
 just run                          # dev preset, no panels
 just run --stats --graph          # both debug panels open
 just demo                         # the same, spelled shorter
-./.cache/build/dev/client/client  # directly, no just
+scripts/run-demo.sh               # the same again, without just
+./.cache/build/dev/client/client  # directly, no just and no build
 ```
 
 `just run` passes everything after it straight through, and builds the client
 first.
+
+### Without `just`
+
+`scripts/run-demo.sh` and `scripts/run-demo.bat` are `just demo` for a machine
+that does not have `just` — which on Windows is most of them. They build the
+client and run the demo scene with both panels open, and everything after the
+script name reaches the client:
+
+```sh
+scripts/run-demo.sh --frames 600 --uncapped     # Linux, macOS
+scripts\run-demo.bat --frames 600 --uncapped    # Windows
+PRESET=release scripts/run-demo.sh              # any preset but `server`
+```
+
+They call CMake rather than `just`, so the two halves cannot drift apart, and
+they resolve the repository from their own path — run them from anywhere. The
+`.bat` wants a Developer Command Prompt, because the presets generate Ninja and
+a plain `cmd` window has no compiler in it.
+
+Both carry the note for what replaces them: the demo scene is C++ today
+(`mono.client/src/Demo.cpp`) and becomes
+`mono.engine/examples/Mirrors-1-world.luau` once the script runtime lands at
+v0.5.
 
 ### Options
 
