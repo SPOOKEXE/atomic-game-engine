@@ -133,30 +133,57 @@ docs-check: (build "docgen") docs
 # turns every future update into a conflict.
 mono_sources := "mono.engine mono.client mono.server mono.tools mono.build"
 
+# Finding it is two problems, not one.
+#
+# `.clang-format` sets `BinPackParameters: OnePerLine`, which is an enum
+# introduced in clang-format 21. Every older version reads that key as a boolean
+# and stops with "invalid boolean" — a message that reads like the config is
+# broken rather than the tool being too old, and which sent one person down the
+# wrong path already.
+#
+# And installing clang-format-21 on Ubuntu leaves no unversioned `clang-format`
+# on PATH, so looking for that name alone finds nothing on a machine that has
+# exactly the right tool sitting next to it.
+#
+# So: search the versioned names too, and check the version rather than trusting
+# whatever answers to the bare name.
+find-clang-format := '''
+    cf=""
+    for candidate in clang-format clang-format-23 clang-format-22 clang-format-21; do
+        command -v "$candidate" > /dev/null || continue
+        major=$("$candidate" --version | sed -nE 's/.*version ([0-9]+)\..*/\1/p')
+        if [ -n "$major" ] && [ "$major" -ge 21 ]; then cf="$candidate"; break; fi
+    done
+    if [ -z "$cf" ]; then
+        echo "no clang-format 21 or newer on PATH (.clang-format needs 21)." >&2
+        echo "  install:  sudo apt install clang-format-21     # apt.llvm.org" >&2
+        echo "  link it:  sudo update-alternatives --install /usr/bin/clang-format \\" >&2
+        echo "                clang-format /usr/bin/clang-format-21 100" >&2
+        exit 1
+    fi
+'''
+
 format:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v clang-format > /dev/null; then
-        echo "clang-format not found. Install it, or skip formatting and say so"
-        echo "in the pull request — do not hand-format to match."
-        exit 1
-    fi
+    {{find-clang-format}}
     # Parenthesised: without it the -o binds loosely and the file set depends
     # on which find you have.
     find {{mono_sources}} \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
-        | xargs -0 clang-format -i
-    echo "formatted $(find {{mono_sources}} \( -name '*.cpp' -o -name '*.hpp' \) | wc -l) file(s)"
+        | xargs -0 "$cf" -i
+    echo "formatted $(find {{mono_sources}} \( -name '*.cpp' -o -name '*.hpp' \) | wc -l) file(s) with $cf"
 
 # Fails if anything is misformatted, and changes nothing. What CI wants.
+#
+# Missing tool is a failure, not a skip. A check that exits 0 when it did not
+# run is worse than no check at all: CI goes green having verified nothing, and
+# everyone downstream reads that green as "formatting is fine".
 format-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v clang-format > /dev/null; then
-        echo "clang-format not found; skipping the format check"
-        exit 0
-    fi
+    {{find-clang-format}}
     find {{mono_sources}} \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
-        | xargs -0 clang-format --dry-run --Werror
+        | xargs -0 "$cf" --dry-run --Werror
 
 clean:
     rm -rf .cache/build

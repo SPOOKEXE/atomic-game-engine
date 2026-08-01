@@ -31,6 +31,14 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00004
+
+- `Engine::core` links Crypto++ for `engine::core::Random`, and everything links `core` — so a SHA-256 implementation is in the client and the server alike. Measured: 9,479 `CryptoPP::` symbols in each, 36 of the archive's 173 members, because `cryptlib.o` is unavoidable and drags the algorithm registry behind it. `docs/CPP_LINKER.md` §2 has the mechanism.
+- **The only callers today are placeholder scenes.** `BuildPlaceholderWorld` in `mono.server/src/Simulation.cpp` and the orbit demo in `mono.client/src/Demo.cpp`, both at spawn time, ~6 values per entity. `mono.client/AGENTS.md` already says `Demo.hpp`/`Demo.cpp` go away when there is a game file to load a scene from.
+- So the question to ask when the demo dies: **does anything still need `Random`?** If the answer is no, `core` should stop linking Crypto++ and the notices in `THIRD_PARTY_NOTICES.md` and `mono.vendor/THIRD_PARTY_NOTICES.md` move Crypto++ back to test-runner-only. Written down here because nobody asks it otherwise — the library sits in the binary forever and the next reader assumes it is load-bearing.
+- What `Random` is actually for outlives the demo, and is why this is deferred rather than reverted: a value identical on every machine, which `std::mt19937` plus `std::uniform_real_distribution` cannot promise. Procedural placement, replay, and anything a server and client must agree about want exactly that. If a v0.3 consumer appears, close this item and say so.
+- The cheaper option, if no such consumer appears: keep `Random`'s interface and put a small specified integer mixer behind it. Same portability guarantee, none of the archive. The interface was designed so this is an implementation swap, not a call-site change.
+
 ### [_] D00003
 
 - `Each` and `EachParallel` still build a query per call. `CountMatching` now caches its query and a typed cache for the iteration paths is the same idea, but it needs a per-store map of typed `flecs::query<Ts...>` rather than the one untyped kind, so it is a bigger change than the count was.
