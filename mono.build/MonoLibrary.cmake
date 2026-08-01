@@ -379,11 +379,22 @@ function(mono_add_program name)
 	endforeach()
 
 	if(shader_commands)
-		# Kept off the link step so that a shader-only edit still stages.
+		# A target of its own rather than a POST_BUILD command, so that a
+		# shader-only edit still stages without the program relinking.
 		add_custom_target(${name}_stage_shaders ALL ${shader_commands}
 			COMMENT "Staging shaders into ${stage}/shaders"
 			VERBATIM)
-		add_dependencies(${name}_stage_shaders ${shader_targets} ${target})
+		add_dependencies(${name}_stage_shaders ${shader_targets})
+
+		# The program depends on the staging, not the other way round.
+		#
+		# Reversed, `ALL` still stages it on a full build — and `cmake --build
+		# --target client` does not, because nothing it was asked for depends on
+		# it. That is exactly what `just run` asks for, so a fresh preset built
+		# the client, skipped its shaders, and failed at startup with four
+		# "shader not found" lines and no clue that a whole target had been
+		# missed. A full build had always happened to run first.
+		add_dependencies(${target} ${name}_stage_shaders)
 	endif()
 
 	# SDL3 is a shared library; it has to sit beside the binary that loads it.

@@ -17,12 +17,88 @@ namespace engine::render {
 		Width = width;
 		Height = height;
 		Pixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height) * BYTES_PER_PIXEL, 0);
-		Dirty = false;
+
+		// A new buffer, and a new texture to go with it. Nothing on the GPU
+		// survives a resize, so there is no vacated region to account for.
+		DirtyLeft = DirtyRight = DirtyTop = DirtyBottom = 0;
+		PreviousLeft = PreviousRight = PreviousTop = PreviousBottom = 0;
 	}
 
 	void OverlayImage::Clear() {
+		// Clearing a clean image is nothing — the buffer is already zero — and
+		// it must stay nothing, because the region below is what still has to
+		// reach the GPU.
+		//
+		// With the panels closed this runs every frame. Zeroing regardless would
+		// be a full-buffer write per frame to erase nothing, and it would forget
+		// the region on the *second* such frame: the pixels the panels used to
+		// occupy are still on the texture, and reopening a smaller panel would
+		// leave the old one's edges on screen around it.
+		if (!IsDirty()) {
+			return;
+		}
+
 		std::fill(Pixels.begin(), Pixels.end(), static_cast<uint8_t>(0));
-		Dirty = false;
+
+		// This frame's region becomes last frame's. The GPU still holds those
+		// pixels, so they have to be uploaded again — as transparent — or
+		// whatever was drawn there stays on screen after it stops being drawn.
+		PreviousLeft = DirtyLeft;
+		PreviousRight = DirtyRight;
+		PreviousTop = DirtyTop;
+		PreviousBottom = DirtyBottom;
+
+		DirtyLeft = DirtyRight = DirtyTop = DirtyBottom = 0;
+	}
+
+	void OverlayImage::MarkRegion(int x, int y, int width, int height) {
+		if (IsEmpty() || width <= 0 || height <= 0) {
+			return;
+		}
+
+		const int left = std::max(x, 0);
+		const int top = std::max(y, 0);
+		const int right = std::min(x + width, Width);
+		const int bottom = std::min(y + height, Height);
+		if (left >= right || top >= bottom) {
+			return;
+		}
+
+		if (!IsDirty()) {
+			DirtyLeft = left;
+			DirtyTop = top;
+			DirtyRight = right;
+			DirtyBottom = bottom;
+			return;
+		}
+
+		DirtyLeft = std::min(DirtyLeft, left);
+		DirtyTop = std::min(DirtyTop, top);
+		DirtyRight = std::max(DirtyRight, right);
+		DirtyBottom = std::max(DirtyBottom, bottom);
+	}
+
+	OverlayImage::Region OverlayImage::UploadRegion() const {
+		const bool now = DirtyLeft < DirtyRight && DirtyTop < DirtyBottom;
+		const bool before = PreviousLeft < PreviousRight && PreviousTop < PreviousBottom;
+
+		if (!now && !before) {
+			return Region{};
+		}
+		if (!before) {
+			return Region{DirtyLeft, DirtyTop, DirtyRight - DirtyLeft, DirtyBottom - DirtyTop};
+		}
+		if (!now) {
+			return Region{
+				PreviousLeft, PreviousTop, PreviousRight - PreviousLeft, PreviousBottom - PreviousTop
+			};
+		}
+
+		const int left = std::min(DirtyLeft, PreviousLeft);
+		const int top = std::min(DirtyTop, PreviousTop);
+		const int right = std::max(DirtyRight, PreviousRight);
+		const int bottom = std::max(DirtyBottom, PreviousBottom);
+		return Region{left, top, right - left, bottom - top};
 	}
 
 	void OverlayImage::Fill(
@@ -40,7 +116,7 @@ namespace engine::render {
 			return;
 		}
 
-		Dirty = true;
+		MarkRegion(left, top, right - left, bottom - top);
 
 		// What Blend arrives at over a transparent destination: the source
 		// channels premultiplied by the source alpha, and the alpha kept.
@@ -88,7 +164,7 @@ namespace engine::render {
 			return;
 		}
 
-		Dirty = true;
+		MarkRegion(left, top, right - left, bottom - top);
 
 		const uint32_t source = alpha;
 		const uint32_t inverse = 255u - source;
@@ -266,6 +342,11 @@ namespace engine::render {
 			const int right = x + static_cast<int>(text.size()) * ADVANCE * scale;
 			const int bottom = y + GLYPH_HEIGHT * scale;
 			const bool inside = x >= 0 && y >= 0 && right <= image.GetWidth() && bottom <= image.GetHeight();
+
+			// Once for the whole string. WriteOpaqueRun below records nothing:
+			// it is called thousands of times a frame, and the bookkeeping would
+			// cost more than the pixels it writes.
+			image.MarkRegion(x, y, right - x, bottom - y);
 
 			int cursor = x;
 			for (const char character : text) {

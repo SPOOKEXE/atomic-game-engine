@@ -69,6 +69,11 @@ namespace engine::render {
 		int OverlayWidth = 0;
 		int OverlayHeight = 0;
 
+		// Set when the overlay texture is created and cleared by the first
+		// upload after it, which is made to cover the whole image rather than
+		// only the region that changed.
+		bool OverlayUninitialised = false;
+
 		std::string Backend;
 
 		SDL_GPUShader *LoadShader(
@@ -376,6 +381,13 @@ namespace engine::render {
 
 		OverlayWidth = width;
 		OverlayHeight = height;
+
+		// A new texture holds whatever the driver had lying around. That did not
+		// matter while every frame uploaded the whole image; now that a frame
+		// uploads only the panels, everything outside them would be garbage
+		// until something happened to draw over it. The next upload covers the
+		// whole texture once to settle it.
+		OverlayUninitialised = true;
 		return true;
 	}
 
@@ -639,27 +651,72 @@ namespace engine::render {
 			}
 
 			if (haveOverlay) {
-				// The whole overlay image, every frame it changes — and it
-				// changes every frame the panels are open, because they redraw
-				// every frame. At 1080p that is eight megabytes of memcpy to
-				// show a few hundred glyphs, and it is the price of the debug
-				// panels that nothing in the panels themselves can show.
+				// Only the part of the overlay that anything has drawn on.
+				//
+				// The image is the size of the window and the panels are a
+				// corner of it, so sending all of it meant megabytes of
+				// transparent pixels per frame that had not changed since the
+				// program started — measured as the largest single cost in the
+				// frame. The region covers what was drawn this frame and what
+				// was drawn last frame, the second being how the pixels a
+				// shrinking panel vacates get told they are transparent now.
 				ENGINE_PROFILE_CAT("upload overlay", core::ProfileCategory::Render);
 
-				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
-				std::memcpy(mapped, overlay.GetPixels(), overlay.GetByteCount());
+				// The whole image on the frame the texture was created, so that
+				// the parts no panel ever covers are transparent rather than
+				// whatever the driver handed back.
+				const auto region = State->OverlayUninitialised
+										? OverlayImage::Region{0, 0, overlay.GetWidth(), overlay.GetHeight()}
+										: overlay.UploadRegion();
+				State->OverlayUninitialised = false;
+
+				const auto rowBytes = static_cast<size_t>(region.Width) * OverlayImage::BYTES_PER_PIXEL;
+
+				void *mapped = nullptr;
+				{
+					ENGINE_PROFILE_CAT("map overlay", core::ProfileCategory::Render);
+					mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
+				}
+
+				{
+					// Row by row, because the region is narrower than the image
+					// and its rows are not adjacent in it. Packed tightly on the
+					// way out, which is what pixels_per_row below promises.
+					ENGINE_PROFILE_CAT("copy overlay", core::ProfileCategory::Render);
+
+					auto *destination = static_cast<uint8_t *>(mapped);
+					const uint8_t *pixels = overlay.GetPixels();
+					const auto stride =
+						static_cast<size_t>(overlay.GetWidth()) * OverlayImage::BYTES_PER_PIXEL;
+
+					for (int row = 0; row < region.Height; row++) {
+						const size_t offset = static_cast<size_t>(region.Y + row) * stride +
+											  static_cast<size_t>(region.X) * OverlayImage::BYTES_PER_PIXEL;
+						std::memcpy(
+							destination + static_cast<size_t>(row) * rowBytes, pixels + offset, rowBytes
+						);
+					}
+				}
+
 				SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
 
 				SDL_GPUTextureTransferInfo source{};
 				source.transfer_buffer = State->OverlayTransfer;
+				source.pixels_per_row = static_cast<uint32_t>(region.Width);
+				source.rows_per_layer = static_cast<uint32_t>(region.Height);
 
 				SDL_GPUTextureRegion destination{};
 				destination.texture = State->OverlayTexture;
-				destination.w = static_cast<uint32_t>(overlay.GetWidth());
-				destination.h = static_cast<uint32_t>(overlay.GetHeight());
+				destination.x = static_cast<uint32_t>(region.X);
+				destination.y = static_cast<uint32_t>(region.Y);
+				destination.w = static_cast<uint32_t>(region.Width);
+				destination.h = static_cast<uint32_t>(region.Height);
 				destination.d = 1;
 
-				SDL_UploadToGPUTexture(copy, &source, &destination, true);
+				// False, not true. Cycling hands back a *fresh* texture, and a
+				// fresh texture is uninitialised everywhere this upload does not
+				// reach — which is now everywhere outside the panels.
+				SDL_UploadToGPUTexture(copy, &source, &destination, false);
 			}
 
 			SDL_EndGPUCopyPass(copy);

@@ -150,6 +150,97 @@ TEST_CASE("an opaque blend replaces whatever was under it", "[overlay]") {
 	REQUIRE(At(image, 3, 1, 0) == 200);
 }
 
+TEST_CASE("the upload region is what was drawn, not the whole image", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+
+	image.Fill(10, 20, 30, 40, 8, 10, 16, 208);
+
+	// The image is the size of the window and the panels are a corner of it.
+	// Sending all of it was the largest single cost in the frame.
+	const auto region = image.UploadRegion();
+	REQUIRE(region.X == 10);
+	REQUIRE(region.Y == 20);
+	REQUIRE(region.Width == 30);
+	REQUIRE(region.Height == 40);
+}
+
+TEST_CASE("the upload region is the union of everything drawn", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+
+	image.Fill(100, 100, 20, 20, 8, 10, 16, 208);
+	image.Blend(10, 200, 30, 30, 255, 255, 255, 255);
+	DebugText::Draw(image, 300, 5, "TEXT", 255, 255, 255, 2);
+
+	// Every entry point has to record what it touched, including the text
+	// rasteriser — which marks once per string rather than once per run.
+	const auto region = image.UploadRegion();
+	REQUIRE(region.X == 10);
+	REQUIRE(region.Y == 5);
+	REQUIRE(region.X + region.Width >= 300);
+	REQUIRE(region.Y + region.Height == 230);
+}
+
+TEST_CASE("the upload region covers what a shrinking panel vacated", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+
+	// A large panel, then a small one in its corner. The GPU still holds the
+	// large one's pixels, and only an upload covering them says they are gone.
+	image.Fill(0, 0, 200, 200, 8, 10, 16, 208);
+	image.Clear();
+	image.Fill(0, 0, 50, 50, 8, 10, 16, 208);
+
+	const auto region = image.UploadRegion();
+	REQUIRE(region.X == 0);
+	REQUIRE(region.Y == 0);
+	REQUIRE(region.Width == 200);
+	REQUIRE(region.Height == 200);
+}
+
+TEST_CASE("a region survives frames in which nothing is drawn", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+
+	image.Fill(0, 0, 200, 200, 8, 10, 16, 208);
+
+	// The panels close. Nothing is uploaded on these frames, so the texture
+	// keeps the large panel — and a Clear that forgot it on the second frame
+	// would leave those pixels on screen the moment a smaller panel reopened.
+	image.Clear();
+	image.Clear();
+	image.Clear();
+
+	image.Fill(0, 0, 50, 50, 8, 10, 16, 208);
+
+	const auto region = image.UploadRegion();
+	REQUIRE(region.Width == 200);
+	REQUIRE(region.Height == 200);
+}
+
+TEST_CASE("an untouched image asks for no upload", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+
+	REQUIRE_FALSE(image.IsDirty());
+	REQUIRE(image.UploadRegion().Width == 0);
+	REQUIRE(image.UploadRegion().Height == 0);
+}
+
+TEST_CASE("resizing forgets the region with the texture", "[overlay]") {
+	OverlayImage image;
+	image.Resize(400, 300);
+	image.Fill(0, 0, 200, 200, 8, 10, 16, 208);
+	image.Clear();
+
+	// A resize means a new texture, and nothing on it to correct.
+	image.Resize(800, 600);
+
+	REQUIRE_FALSE(image.IsDirty());
+	REQUIRE(image.UploadRegion().Width == 0);
+}
+
 TEST_CASE("clipped and unclipped text draw the same pixels", "[overlay]") {
 	// Text fully inside the image skips per-run clipping and writes straight
 	// into the buffer; text that might cross an edge goes the long way. Two

@@ -93,9 +93,11 @@ namespace engine::render {
 		// Writes `count` opaque pixels rightward from (x, y). No clipping, no
 		// bounds check, no blending.
 		//
-		// **The caller must have clipped already.** Every other entry point here
-		// clips for you; this one does not, and an x or y outside the image
-		// writes over whatever is next to it in memory.
+		// **The caller must have clipped and marked already.** Every other entry
+		// point here clips for you and records what it touched; this one does
+		// neither. An x or y outside the image writes over whatever is next to
+		// it in memory, and a region nobody passed to MarkRegion is drawn into
+		// the image and never sent to the GPU.
 		//
 		// It exists for the text rasteriser, and the reason is arithmetic rather
 		// than taste. A glyph is three bits wide, so a line of text is thousands
@@ -124,8 +126,6 @@ namespace engine::render {
 				pixel[3] = 255;
 				pixel += BYTES_PER_PIXEL;
 			}
-
-			Dirty = true;
 		}
 
 		// Returns the image width in pixels.
@@ -161,13 +161,73 @@ namespace engine::render {
 		// True if anything was drawn since the last Clear. The renderer skips
 		// the upload and the pass entirely when nothing was.
 		bool IsDirty() const {
-			return Dirty;
+			return DirtyLeft < DirtyRight && DirtyTop < DirtyBottom;
 		}
+
+		// A rectangle of the image, in pixels from the top-left.
+		struct Region {
+			// Left edge.
+			int X = 0;
+
+			// Top edge.
+			int Y = 0;
+
+			// Width. Zero for an empty region, which is what an image nobody has
+			// drawn on reports.
+			int Width = 0;
+
+			// Height. Zero for an empty region.
+			int Height = 0;
+		};
+
+		// The part of the image the renderer has to send to the GPU.
+		//
+		// Everything drawn since the last Clear, **plus** everything drawn
+		// before it. The second half is the one that is easy to miss: the GPU
+		// texture keeps whatever was uploaded last time, so a panel that shrinks
+		// leaves the pixels it used to occupy lit up on screen unless the area
+		// it vacated is uploaded as the transparent it now is.
+		//
+		// This matters because the image is the size of the *window* and the
+		// panels are a corner of it. Uploading all of it was, measured, the
+		// largest single cost in the frame — most of it transparent pixels that
+		// had not changed since the program started.
+		Region UploadRegion() const;
+
+		// Records that a region has been written to.
+		//
+		// Blend and Fill do this for themselves. It is public for the text
+		// rasteriser, which marks a whole string once and then writes its runs
+		// through WriteOpaqueRun — several thousand calls that would otherwise
+		// each pay for the bookkeeping.
+		//
+		// Clipped to the image, so a caller may name a region that hangs over
+		// the edge.
+		//
+		// @param x      Left edge in pixels.
+		// @param y      Top edge in pixels.
+		// @param width  Region width in pixels.
+		// @param height Region height in pixels.
+		void MarkRegion(int x, int y, int width, int height);
 
 	  private:
 		int Width = 0;
 		int Height = 0;
-		bool Dirty = false;
+
+		// Written since the last Clear, as a half-open rectangle. Empty when
+		// Left is not less than Right.
+		int DirtyLeft = 0;
+		int DirtyRight = 0;
+		int DirtyTop = 0;
+		int DirtyBottom = 0;
+
+		// The same, as it stood before the last Clear. Kept because the GPU
+		// still holds those pixels and nothing else will tell it they are gone.
+		int PreviousLeft = 0;
+		int PreviousRight = 0;
+		int PreviousTop = 0;
+		int PreviousBottom = 0;
+
 		std::vector<uint8_t> Pixels;
 	};
 
