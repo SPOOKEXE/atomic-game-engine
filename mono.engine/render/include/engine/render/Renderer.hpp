@@ -70,8 +70,7 @@ namespace engine::render {
 	//
 	// @client
 	struct FrameResult {
-		// Whether a swapchain texture was acquired and the command buffer was
-		// handed to SDL for submission.
+		// Whether SDL accepted a command buffer for presentation.
 		bool Presented = false;
 
 		// Number of opaque and overlay draw calls submitted for this frame.
@@ -139,7 +138,8 @@ namespace engine::render {
 
 		// Draws one frame and presents it. Returns false in Presented when the
 		// swapchain had no texture — minimised, or resizing — which is not an
-		// error and not a reason to stop ticking.
+		// error and not a reason to stop ticking. It is also false if SDL rejects
+		// command submission.
 		//
 		// `overlay` is uploaded only when it has something in it.
 		// The inputs are copied during the call and are not retained by the renderer.

@@ -82,6 +82,7 @@ TEST_CASE("an unbound key is not consumed", "[input]") {
 	actions.BeginFrame();
 
 	REQUIRE_FALSE(actions.HandleEvent(KeyEvent(SDLK_J, true)));
+	REQUIRE_FALSE(actions.HandleEvent(KeyEvent(SDLK_J, true, /*repeat=*/true)));
 }
 
 TEST_CASE("a window close request is the quit action", "[input]") {

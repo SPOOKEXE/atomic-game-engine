@@ -7,7 +7,7 @@ layout(location = 0) out vec4 outColour;
 layout(set = 2, binding = 0) uniform sampler2D overlayTexture;
 
 void main() {
-	// Straight alpha, matching what OverlayImage::Blend writes. The pipeline
-	// blends SRC_ALPHA / ONE_MINUS_SRC_ALPHA.
+	// OverlayImage stores premultiplied alpha. The pipeline blends colour with
+	// ONE / ONE_MINUS_SRC_ALPHA so alpha is applied exactly once.
 	outColour = texture(overlayTexture, inUv);
 }

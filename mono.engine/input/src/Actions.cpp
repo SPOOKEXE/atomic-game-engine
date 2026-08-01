@@ -83,15 +83,15 @@ namespace engine::input {
 			return false;
 		}
 
-		// Autorepeat is the OS deciding a held key is many presses. An action
-		// is an intent, and holding F5 is one intent.
-		if (down && event.key.repeat) {
-			return true;
-		}
-
 		for (const auto &binding : BINDINGS) {
 			if (binding.Key != event.key.key) {
 				continue;
+			}
+
+			// Autorepeat is the OS deciding a held key is many presses. An action
+			// is an intent, and holding F5 is one intent.
+			if (down && event.key.repeat) {
+				return true;
 			}
 
 			const auto index = static_cast<size_t>(binding.Bound);

@@ -185,7 +185,9 @@ namespace engine::render {
 		overlayTarget.blend_state.enable_blend = true;
 		overlayTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
 		overlayTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-		overlayTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		// OverlayImage stores premultiplied RGB, so multiplying by source alpha
+		// here would apply alpha twice and darken every translucent panel pixel.
+		overlayTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
 		overlayTarget.blend_state.dst_color_blendfactor =
 			SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 		overlayTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
@@ -712,7 +714,10 @@ namespace engine::render {
 			result.DrawCalls++;
 		}
 
-		SDL_SubmitGPUCommandBuffer(command);
+		if (!SDL_SubmitGPUCommandBuffer(command)) {
+			ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
+			return result;
+		}
 
 		result.Presented = true;
 		return result;

@@ -76,8 +76,8 @@ namespace engine::input {
 	  public:
 		// Handles one event and reports whether the action layer consumed it.
 		// Window-close requests fire Quit. Bound key transitions update action
-		// state. Every repeated key-down event is consumed before binding lookup
-		// and does not fire an action again.
+		// state; a repeated key-down for a bound action is consumed without firing
+		// the action again.
 		//
 		// @param event The event supplied by the caller-owned SDL event pump.
 		// @return True when the action layer consumed the event.
