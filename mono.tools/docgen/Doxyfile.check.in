@@ -1,0 +1,29 @@
+# The coverage pass. Configured by mono.tools/docgen/CMakeLists.txt.
+#
+# `EXTRACT_ALL = YES` disables WARN_IF_UNDOCUMENTED — Doxygen says so in its own
+# documentation, and it is easy to miss because nothing reports that the setting
+# was ignored. A build asked to both list everything and complain about the gaps
+# quietly stops complaining.
+#
+# The two are genuinely in conflict:
+#
+# - The *site* wants EXTRACT_ALL, so the whole public surface is on the page. An
+#   undocumented method that simply does not appear reads as one that does not
+#   exist.
+# - The *check* wants the opposite, because a gap it cannot see is a gap it
+#   cannot fail on.
+#
+# So the same configuration is read twice with one line different, and this file
+# is that line. It generates no HTML, which is most of why the second pass is
+# nearly free.
+
+@INCLUDE               = "@MONO_DOCS_OUTPUT@/Doxyfile"
+
+EXTRACT_ALL            = NO
+WARN_IF_UNDOCUMENTED   = YES
+WARN_LOGFILE           = "@MONO_DOCS_OUTPUT@/gaps.txt"
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+HAVE_DOT               = NO
+SOURCE_BROWSER         = NO

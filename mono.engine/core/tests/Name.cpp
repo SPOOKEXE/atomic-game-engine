@@ -1,0 +1,191 @@
+#include <engine/core/Name.hpp>
+#include <engine/testing/Suite.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <string>
+#include <thread>
+#include <unordered_set>
+#include <vector>
+
+TEST_SUITE_ID("engine.core.name")
+
+using engine::core::Name;
+
+namespace {
+	// The registry is process-wide and entries are never removed, so every case
+	// has to use text nothing else will. A counter would collide between runs
+	// of the same binary under Catch2's section reruns.
+	std::string Unique(const char *label) {
+		static int counter = 0;
+		return std::string("test.") + label + "." + std::to_string(counter++);
+	}
+}
+
+TEST_CASE("the same text interns to the same id", "[name]") {
+	const std::string text = Unique("same");
+
+	const Name first(text);
+	const Name second(text);
+
+	REQUIRE(first.IsValid());
+	REQUIRE(first == second);
+	REQUIRE(first.Id() == second.Id());
+}
+
+TEST_CASE("different text interns to different ids", "[name]") {
+	REQUIRE(Name(Unique("a")) != Name(Unique("b")));
+}
+
+TEST_CASE("the text comes back", "[name]") {
+	const std::string text = Unique("round-trip");
+	REQUIRE(Name(text).Text() == text);
+}
+
+TEST_CASE("a default Name is invalid and has no text", "[name]") {
+	const Name empty;
+
+	REQUIRE_FALSE(empty.IsValid());
+	REQUIRE_FALSE(static_cast<bool>(empty));
+	REQUIRE(empty.Id() == Name::INVALID);
+	REQUIRE(empty.Text().empty());
+}
+
+TEST_CASE("empty text is not a name", "[name]") {
+	REQUIRE_FALSE(Name("").IsValid());
+}
+
+TEST_CASE("a view into a temporary is safe to intern", "[name]") {
+	const std::string text = Unique("temporary");
+
+	// The registry keys on a view of its own copy, not the caller's argument.
+	// Keying on the argument would dangle the moment this scope ends.
+	Name interned;
+	{
+		const std::string temporary = text;
+		interned = Name(std::string_view(temporary));
+	}
+
+	REQUIRE(interned.Text() == text);
+}
+
+TEST_CASE("text stays valid after many more names are interned", "[name]") {
+	const std::string text = Unique("stable");
+	const Name early(text);
+	const std::string_view view = early.Text();
+
+	// A vector would reallocate and dangle every view already handed out. The
+	// registry uses a deque for exactly this.
+	for (int index = 0; index < 5'000; index++) {
+		Name(Unique("filler"));
+	}
+
+	REQUIRE(view == text);
+	REQUIRE(early.Text() == text);
+}
+
+TEST_CASE("FromId returns the same name", "[name]") {
+	const std::string text = Unique("from-id");
+	const Name original(text);
+
+	const Name recovered = Name::FromId(original.Id());
+	REQUIRE(recovered == original);
+	REQUIRE(recovered.Text() == text);
+}
+
+TEST_CASE("FromId on an unknown id is invalid rather than a crash", "[name]") {
+	REQUIRE_FALSE(Name::FromId(900'000).IsValid());
+	REQUIRE_FALSE(Name::FromId(Name::INVALID).IsValid());
+}
+
+TEST_CASE("Exists does not intern", "[name]") {
+	const std::string text = Unique("exists");
+
+	const size_t before = Name::Count();
+	REQUIRE_FALSE(Name::Exists(text));
+	REQUIRE(Name::Count() == before);
+
+	// Braces, not parentheses: `Name(text);` declares a variable called text.
+	Name{text};
+	REQUIRE(Name::Exists(text));
+}
+
+TEST_CASE("Reserve pins a name to a chosen id", "[name]") {
+	const std::string text = Unique("reserved");
+
+	const Name pinned = Name::Reserve(text, 500'000);
+	REQUIRE(pinned.IsValid());
+	REQUIRE(pinned.Id() == 500'000);
+	REQUIRE(pinned.Text() == text);
+
+	// Interning the same text afterwards has to find the pin, not allocate a
+	// second id for the same name.
+	REQUIRE(Name(text) == pinned);
+}
+
+TEST_CASE("Reserve is idempotent for the same pairing", "[name]") {
+	const std::string text = Unique("re-reserved");
+
+	REQUIRE(Name::Reserve(text, 500'100).Id() == 500'100);
+	REQUIRE(Name::Reserve(text, 500'100).Id() == 500'100);
+}
+
+TEST_CASE("Reserve refuses a contradiction", "[name]") {
+	const std::string first = Unique("clash-a");
+	const std::string second = Unique("clash-b");
+
+	REQUIRE(Name::Reserve(first, 500'200).IsValid());
+
+	// Two names on one id would compare equal, and one name on two ids would
+	// make the mapping ambiguous. Both are startup errors worth failing on.
+	REQUIRE_FALSE(Name::Reserve(second, 500'200).IsValid());
+	REQUIRE_FALSE(Name::Reserve(first, 500'201).IsValid());
+}
+
+TEST_CASE("an auto-assigned id never lands on a reserved one", "[name]") {
+	const std::string reserved = Unique("high-water");
+	const Name pinned = Name::Reserve(reserved, 600'000);
+	REQUIRE(pinned.IsValid());
+
+	for (int index = 0; index < 32; index++) {
+		const Name fresh(Unique("after-pin"));
+		REQUIRE(fresh.Id() != pinned.Id());
+
+		// And it stays *dense*. Jumping the counter past a high pin would be
+		// the easy way to avoid the collision, and it would throw away the
+		// reason for having a counter — as well as consuming every id below
+		// the pin that something else might want to reserve later.
+		REQUIRE(fresh.Id() < pinned.Id());
+	}
+}
+
+TEST_CASE("ids are usable as map keys", "[name]") {
+	std::unordered_set<Name> names;
+	const std::string text = Unique("hashable");
+
+	names.insert(Name(text));
+	names.insert(Name(text));
+
+	REQUIRE(names.size() == 1);
+	REQUIRE(names.count(Name(text)) == 1);
+}
+
+TEST_CASE("interning the same text from many threads yields one id", "[name]") {
+	const std::string text = Unique("contended");
+
+	std::vector<std::thread> threads;
+	std::vector<Name> results(8);
+	for (size_t index = 0; index < results.size(); index++) {
+		threads.emplace_back([&results, &text, index] { results[index] = Name(text); });
+	}
+	for (auto &thread : threads) {
+		thread.join();
+	}
+
+	// A race here would hand out two ids for one name, and two things that
+	// should be equal would silently not be.
+	for (const auto &name : results) {
+		REQUIRE(name == results.front());
+	}
+	REQUIRE(results.front().IsValid());
+}

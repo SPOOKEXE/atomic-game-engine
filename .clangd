@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://json.schemastore.org/clangd.json
+CompileFlags:
+    CompilationDatabase: ".cache/build/dev"
+
+Diagnostics:
+    UnusedIncludes: Strict
+    ClangTidy:
+        Add:
+            - bugprone-*
+            - performance-*
+            - readability-*
+        Remove:
+            - readability-magic-numbers
+            - readability-identifier-length
+            - bugprone-easily-swappable-parameters

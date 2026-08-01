@@ -1,0 +1,79 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.cache/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "dev — everything, with tests and Tracy",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MONO_BUILD_CLIENT": "ON",
+        "MONO_BUILD_SERVER": "ON",
+        "MONO_BUILD_TESTS": "ON",
+        "MONO_TRACY": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "release — the one preset that optimises first-party code",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MONO_BUILD_CLIENT": "ON",
+        "MONO_BUILD_SERVER": "ON",
+        "MONO_BUILD_TESTS": "OFF",
+        "MONO_TRACY": "ON",
+        "MONO_OPTIMISE": "ON"
+      }
+    },
+    {
+      "name": "server",
+      "inherits": "base",
+      "displayName": "server — no client program, and therefore no graphics stack",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MONO_BUILD_CLIENT": "OFF",
+        "MONO_BUILD_SERVER": "ON",
+        "MONO_BUILD_TESTS": "ON",
+        "MONO_TRACY": "ON"
+      }
+    },
+    {
+      "name": "ci",
+      "inherits": "dev",
+      "displayName": "ci — dev, with warnings fatal",
+      "cacheVariables": { "MONO_WERROR": "ON" }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "dev",      "configurePreset": "dev" },
+    { "name": "release",  "configurePreset": "release" },
+    { "name": "server",   "configurePreset": "server" },
+    { "name": "ci",       "configurePreset": "ci" }
+  ],
+
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "server",
+      "configurePreset": "server",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
