@@ -245,6 +245,128 @@ TEST_CASE("a deeper frame makes a taller panel", "[panels]") {
 	REQUIRE(heightOf(deep) > heightOf(shallow));
 }
 
+TEST_CASE("the panel keeps room for every span alongside the unmarked row", "[panels]") {
+	// The unmarked row and the column header are pinned above the scrollable
+	// body. Neither scrolls, so leaving them out of the height budget does not
+	// move the panel — it silently clips the last span off the bottom of it,
+	// which is the same class of bug as not reporting unmarked time at all.
+	auto heightOf = [](size_t count) {
+		std::vector<FrameSpan> spans;
+		for (size_t index = 0; index < count; index++) {
+			spans.push_back(
+				{.Name = "span",
+				 .Depth = 0,
+				 .Parent = engine::core::FrameGraph::NO_PARENT,
+				 .StartMilliseconds = 0.0f,
+				 .Milliseconds = 1.0f,
+				 .SelfMilliseconds = 1.0f,
+				 .Category = ProfileCategory::Engine}
+			);
+		}
+
+		OverlayImage image;
+		image.Resize(640, 480);
+
+		DebugPanelData data;
+		data.ShowFrameGraph = true;
+		data.Tab = ProfilerTab::Frame;
+		data.Spans = spans;
+		data.FrameMilliseconds = 8.0f;
+		data.UnmarkedMilliseconds = 8.0f - static_cast<float>(count);
+		DrawDebugPanels(image, data);
+
+		for (int y = image.GetHeight() - 1; y >= 0; y--) {
+			for (int x = 0; x < image.GetWidth(); x++) {
+				const size_t index = (static_cast<size_t>(y) * 640 + static_cast<size_t>(x)) * 4 + 3;
+				if (image.GetPixels()[index] != 0) {
+					return y + 1;
+				}
+			}
+		}
+		return 0;
+	};
+
+	// One more span is one more row, every time. A step that stops growing is
+	// the panel running out of budget and dropping a row on the floor.
+	const int step = heightOf(2) - heightOf(1);
+	REQUIRE(step > 0);
+	for (size_t count = 2; count < 8; count++) {
+		REQUIRE(heightOf(count + 1) - heightOf(count) == step);
+	}
+}
+
+TEST_CASE("the unmarked row is drawn even when there is nothing unmarked", "[panels]") {
+	const std::vector<FrameSpan> spans{
+		{.Name = "all of it",
+		 .Depth = 0,
+		 .Parent = engine::core::FrameGraph::NO_PARENT,
+		 .StartMilliseconds = 0.0f,
+		 .Milliseconds = 8.0f,
+		 .SelfMilliseconds = 8.0f,
+		 .Category = ProfileCategory::Engine},
+	};
+
+	auto heightOf = [&spans](float unmarked) {
+		OverlayImage image;
+		image.Resize(640, 480);
+
+		DebugPanelData data;
+		data.ShowFrameGraph = true;
+		data.Tab = ProfilerTab::Frame;
+		data.Spans = spans;
+		data.FrameMilliseconds = 8.0f;
+		data.UnmarkedMilliseconds = unmarked;
+		DrawDebugPanels(image, data);
+
+		for (int y = image.GetHeight() - 1; y >= 0; y--) {
+			for (int x = 0; x < image.GetWidth(); x++) {
+				const size_t index = (static_cast<size_t>(y) * 640 + static_cast<size_t>(x)) * 4 + 3;
+				if (image.GetPixels()[index] != 0) {
+					return y + 1;
+				}
+			}
+		}
+		return 0;
+	};
+
+	// A row that appears only when there is something to report makes its
+	// absence ambiguous: the reader cannot tell "nothing unmarked" from "this
+	// build does not measure that". Zero is a reading, and it is a good one.
+	REQUIRE(heightOf(0.0f) == heightOf(4.0f));
+}
+
+TEST_CASE("the categories tab has room for the unmarked bar", "[panels]") {
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Categories;
+	data.FrameMilliseconds = 8.0f;
+	data.UnmarkedMilliseconds = 6.0f;
+
+	// Category bars are self time, so without this one they sum to less than
+	// the frame and nothing on the panel says why.
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
+TEST_CASE("unmarked time larger than the frame does not run off the panel", "[panels]") {
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Categories;
+	data.FrameMilliseconds = 1.0f;
+	// Not reachable through FrameGraph, which clamps. Reachable by anyone else
+	// filling this struct, and a bar width is a multiply by a share.
+	data.UnmarkedMilliseconds = 100.0f;
+
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
 TEST_CASE("a zero-length frame does not divide by it", "[panels]") {
 	const std::vector<FrameSpan> spans{
 		{.Name = "outer",

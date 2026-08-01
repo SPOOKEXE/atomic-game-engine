@@ -123,6 +123,101 @@ TEST_CASE("category totals are self time, not double-counted", "[framegraph]") {
 	REQUIRE(render >= 1.0f);
 }
 
+TEST_CASE("work inside no span is reported rather than lost", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("marked"); }
+	// Nobody put a scope around this, which is exactly the case. A panel that
+	// lists the span above and nothing else is not reporting a fast frame; it
+	// is failing to report a slow one.
+	std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	FrameGraph::EndFrame();
+
+	REQUIRE(FrameGraph::Spans().size() == 1);
+	REQUIRE(FrameGraph::UnmarkedMilliseconds() >= 4.0f);
+	REQUIRE(FrameGraph::UnmarkedMilliseconds() <= FrameGraph::FrameMilliseconds());
+}
+
+TEST_CASE("a fully instrumented frame has nothing unmarked", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE("everything");
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	}
+	FrameGraph::EndFrame();
+
+	// The one root span covers the frame, so the gap is whatever BeginFrame and
+	// EndFrame cost between them. Loose bound: this is a real clock, and the
+	// claim is "nearly nothing", not "zero".
+	REQUIRE(FrameGraph::UnmarkedMilliseconds() < 1.0f);
+}
+
+TEST_CASE("unmarked time counts root spans once, not every span", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE("outer");
+		{
+			ENGINE_PROFILE("inner");
+			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		}
+	}
+	FrameGraph::EndFrame();
+
+	// Root durations are inclusive. Summing every span instead would count the
+	// nested 4 ms twice, drive the total past the frame, and clamp the gap to
+	// zero — which is the same wrong answer the panel had before, arrived at
+	// from the other direction.
+	REQUIRE(FrameGraph::Spans().size() == 2);
+	REQUIRE(FrameGraph::UnmarkedMilliseconds() < 1.0f);
+}
+
+TEST_CASE("the marked and unmarked halves add up to the frame", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE("first");
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	}
+	std::this_thread::sleep_for(std::chrono::milliseconds(3));
+	{
+		ENGINE_PROFILE("second");
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	}
+	FrameGraph::EndFrame();
+
+	// This is the property the overlay depends on: the rows a person reads and
+	// the heading above them describe the same frame.
+	float roots = 0.0f;
+	for (const auto &span : FrameGraph::Spans()) {
+		if (span.Depth == 0) {
+			roots += span.Milliseconds;
+		}
+	}
+
+	const float accounted = roots + FrameGraph::UnmarkedMilliseconds();
+	REQUIRE(accounted >= FrameGraph::FrameMilliseconds() - 0.5f);
+	REQUIRE(accounted <= FrameGraph::FrameMilliseconds() + 0.5f);
+	REQUIRE(FrameGraph::UnmarkedMilliseconds() >= 2.0f);
+}
+
+TEST_CASE("a frame nobody collected reports no unmarked time", "[framegraph]") {
+	FrameGraph::SetEnabled(false);
+
+	FrameGraph::BeginFrame();
+	std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	FrameGraph::EndFrame();
+
+	// Collection is off, so there is no frame to be missing anything from. A
+	// number here would be a reading of something nobody measured.
+	REQUIRE(FrameGraph::UnmarkedMilliseconds() == 0.0f);
+}
+
 TEST_CASE("the published frame survives the next one being built", "[framegraph]") {
 	Collecting collecting;
 

@@ -139,8 +139,7 @@ namespace client {
 						// a 60 Hz tick, drawing tick positions shows each one five
 						// times and then jumps — which reads as a frame-rate
 						// problem rather than as a tick-rate one.
-						glm::mat4 model =
-							previous[row].Frame.Lerp(transforms[row].Frame, alpha).ToMatrix();
+						glm::mat4 model = previous[row].Frame.Lerp(transforms[row].Frame, alpha).ToMatrix();
 						// Scale on the right, so it applies before the rotation
 						// and stays a scale rather than a shear.
 						model[0] *= visuals[row].Size;
@@ -150,10 +149,7 @@ namespace client {
 						out[row] = engine::render::Instance{
 							model,
 							glm::vec4{
-								visuals[row].Colour.R,
-								visuals[row].Colour.G,
-								visuals[row].Colour.B,
-								1.0f
+								visuals[row].Colour.R, visuals[row].Colour.G, visuals[row].Colour.B, 1.0f
 							},
 						};
 					}

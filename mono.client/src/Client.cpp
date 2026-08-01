@@ -277,6 +277,7 @@ namespace client {
 				panels.Statistics = &Statistics;
 				panels.Spans = FrameGraph::Spans();
 				panels.FrameMilliseconds = FrameGraph::FrameMilliseconds();
+				panels.UnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
 				panels.DroppedSpans = FrameGraph::Dropped();
 				panels.Systems = SystemTimings;
 				panels.Counters = counters;

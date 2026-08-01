@@ -50,6 +50,7 @@ namespace engine::core {
 			// Handed to the overlay after EndFrame.
 			std::vector<FrameSpan> Published;
 			float PublishedMilliseconds = 0.0f;
+			float PublishedUnmarked = 0.0f;
 			float PublishedCategories[static_cast<size_t>(ProfileCategory::Count)] = {};
 
 			size_t DroppedThisFrame = 0;
@@ -257,6 +258,7 @@ namespace engine::core {
 		if (!enabled) {
 			state.Published.clear();
 			state.PublishedMilliseconds = 0.0f;
+			state.PublishedUnmarked = 0.0f;
 			state.PublishedDropped = 0;
 			for (auto &total : state.PublishedCategories) {
 				total = 0.0f;
@@ -340,6 +342,28 @@ namespace engine::core {
 			state.PublishedCategories[static_cast<size_t>(span.Category)] += span.SelfMilliseconds;
 		}
 
+		// The frame's own self time: what ran between BeginFrame and EndFrame
+		// and inside no scope at all.
+		//
+		// Every other number here is the self time of something somebody named.
+		// This is the self time of the frame, and it is the one nobody was going
+		// to notice was missing — a panel that lists 0.3 ms of spans under a
+		// heading that says 1.1 ms is not reporting 0.3 ms of work, it is
+		// failing to report 0.8 ms of it.
+		//
+		// Root spans only. Their durations are inclusive, so adding the deeper
+		// ones would count the same nanoseconds again.
+		float marked = 0.0f;
+		for (const auto &span : state.Building) {
+			if (span.Depth == 0) {
+				marked += span.Milliseconds;
+			}
+		}
+		// Clamped. Two readings of the same clock taken either side of a tree of
+		// spans should not disagree, but a negative gap on a panel would read as
+		// a profiler bug rather than as the rounding it is.
+		state.PublishedUnmarked = total > marked ? total - marked : 0.0f;
+
 		// Before the swap, on the frame that was just recorded.
 		RecordHistory(state, total, now);
 
@@ -357,6 +381,10 @@ namespace engine::core {
 
 	float FrameGraph::FrameMilliseconds() {
 		return Get().PublishedMilliseconds;
+	}
+
+	float FrameGraph::UnmarkedMilliseconds() {
+		return Get().PublishedUnmarked;
 	}
 
 	float FrameGraph::CategoryMilliseconds(ProfileCategory category) {

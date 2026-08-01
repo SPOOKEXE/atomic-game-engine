@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/render/DebugPanels.hpp>
 
 #include <algorithm>
@@ -392,6 +393,34 @@ namespace engine::render {
 			);
 
 			int cursor = y + rowHeight;
+
+			// Pinned under the header rather than sorted into the list, and it
+			// does not scroll away. It is not a span — it is the part of the
+			// frame no span covers — and it is the first thing worth knowing
+			// when the rows below do not add up to the heading above.
+			//
+			// No timeline bar: unmarked time is not one interval, it is every
+			// gap between the ones that are marked, and drawing it as a block
+			// would put it somewhere it did not happen.
+			{
+				const float share = data.UnmarkedMilliseconds / frameMilliseconds;
+				const std::string row =
+					PadRight("(unmarked)", NAME_FIELD) + " " +
+					PadLeft(Format("%.2f", static_cast<double>(data.UnmarkedMilliseconds)), VALUE_FIELD) +
+					" " + PadLeft("-", RMAX_FIELD) + " " +
+					PadLeft(Format("%.1f%%", static_cast<double>(share) * 100.0), SHARE_FIELD);
+
+				// Coloured by how much of the frame it is, the same as any other
+				// row. A frame that is mostly uninstrumented should look as bad
+				// as a system that is mostly slow, because it is the same
+				// problem seen from the other side.
+				const auto textColour = ColourForShare(share);
+				DebugText::Draw(
+					image, textLeft, cursor, row, textColour.R, textColour.G, textColour.B, scale
+				);
+				cursor += rowHeight;
+			}
+
 			int skipped = 0;
 
 			for (size_t index = 0; index < data.Spans.size(); index++) {
@@ -520,6 +549,35 @@ namespace engine::render {
 
 				cursor += lineHeight;
 			}
+
+			// The category bars are self time, and self time only covers what a
+			// scope was opened around. Without this last bar they sum to less
+			// than the frame and nothing on the panel says why — the reader is
+			// left comparing four bars against a total none of them reach.
+			DebugText::Draw(
+				image,
+				x,
+				cursor,
+				Format("--- %.2f", static_cast<double>(data.UnmarkedMilliseconds)),
+				TEXT_DIM.R,
+				TEXT_DIM.G,
+				TEXT_DIM.B,
+				scale
+			);
+
+			const int unmarkedWidth = static_cast<int>(
+				static_cast<float>(width - labelWidth) * (data.UnmarkedMilliseconds / total)
+			);
+			image.Blend(
+				x + labelWidth,
+				cursor,
+				std::max(unmarkedWidth, 1),
+				barHeight,
+				TEXT_DIM.R,
+				TEXT_DIM.G,
+				TEXT_DIM.B,
+				235
+			);
 		}
 
 		void
@@ -643,12 +701,17 @@ namespace engine::render {
 						visible++;
 					}
 				}
-				// Plus the column header.
-				bodyRows = visible + 1 - std::max(data.Scroll, 0);
+				// Plus the column header, plus the pinned (unmarked) row. Both
+				// are drawn before the scrollable body and neither scrolls, so
+				// leaving them out of the budget does not move the panel — it
+				// clips the last span off the bottom of it.
+				bodyRows = visible + 2 - std::max(data.Scroll, 0);
 				break;
 			}
 			case ProfilerTab::Categories:
-				bodyRows = static_cast<int>(core::ProfileCategory::Count);
+				// Plus the unmarked bar, which is drawn after the categories so
+				// that the bars sum to the frame rather than to less than it.
+				bodyRows = static_cast<int>(core::ProfileCategory::Count) + 1;
 				break;
 			case ProfilerTab::Systems:
 				bodyRows = static_cast<int>(data.Systems.size()) - std::max(data.Scroll, 0);
@@ -709,32 +772,63 @@ namespace engine::render {
 			const int bodyWidth = width - padding * 2;
 
 			switch (data.Tab) {
-			case ProfilerTab::Frame:
+			// One span per tab body rather than one for all of them. The tabs
+			// cost different amounts — a flame graph is a row and a timeline bar
+			// per span, categories are four bars — and a single name covering
+			// all of them would report a number that changes when you press a
+			// key and never say which key.
+			case ProfilerTab::Frame: {
+				ENGINE_PROFILE_CAT("flame graph", core::ProfileCategory::Render);
 				DrawFlameGraph(image, data, padding, bodyTop, bodyWidth, available);
 				break;
-			case ProfilerTab::Categories:
+			}
+			case ProfilerTab::Categories: {
+				ENGINE_PROFILE_CAT("category bars", core::ProfileCategory::Render);
 				DrawCategories(image, data, padding, bodyTop, bodyWidth);
 				break;
+			}
 			case ProfilerTab::Systems:
-			case ProfilerTab::Counters:
+			case ProfilerTab::Counters: {
+				ENGINE_PROFILE_CAT("row list", core::ProfileCategory::Render);
 				DrawRows(image, data, padding, bodyTop, bodyWidth, available);
 				break;
+			}
 			case ProfilerTab::Count:
 				break;
 			}
 		}
 	}
 
+	// The panels are drawn by rasterising glyphs into a CPU image, one pixel at
+	// a time, every frame. That is the right trade for a tool that has to work
+	// with no second process attached — but it is not free, and until these
+	// scopes existed the whole cost landed as self time on whatever the caller
+	// had opened around it. A panel reporting a frame it is a large part of, and
+	// not saying so, is the one measurement error a profiler cannot afford.
+	//
+	// The reading is of the *previous* frame, so the panel does show its own
+	// cost. That is not a flaw to be corrected away: the observer is part of the
+	// frame while it is open, and hiding that would make closing the panel look
+	// like it fixed something.
 	void DrawDebugPanels(OverlayImage &image, const DebugPanelData &data) {
-		image.Clear();
+		{
+			// A full-buffer write of the overlay every frame, whatever is drawn
+			// on top of it afterwards. At 4K that is thirty megabytes touched
+			// before any panel has drawn a single glyph.
+			ENGINE_PROFILE_CAT("overlay clear", core::ProfileCategory::Render);
+			image.Clear();
+		}
+
 		if (image.IsEmpty()) {
 			return;
 		}
 
 		if (data.ShowStatistics) {
+			ENGINE_PROFILE_CAT("statistics panel", core::ProfileCategory::Render);
 			DrawStatistics(image, data);
 		}
 		if (data.ShowFrameGraph) {
+			ENGINE_PROFILE_CAT("profiler panel", core::ProfileCategory::Render);
 			DrawFrameGraphPanel(image, data);
 		}
 	}

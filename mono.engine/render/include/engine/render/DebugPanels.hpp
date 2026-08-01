@@ -162,6 +162,11 @@ namespace engine::render {
 		// Total duration of the published frame, in milliseconds.
 		float FrameMilliseconds = 0.0f;
 
+		// How much of that frame ran inside no span. Drawn as a row of its own
+		// and as a bar of its own, so the rows a person reads add up to the
+		// heading above them — see core::FrameGraph::UnmarkedMilliseconds.
+		float UnmarkedMilliseconds = 0.0f;
+
 		// Number of spans omitted while the published frame was collected.
 		size_t DroppedSpans = 0;
 

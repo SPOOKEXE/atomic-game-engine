@@ -138,6 +138,21 @@ namespace engine::core {
 		// Returns the total duration of the last completed frame in milliseconds.
 		static float FrameMilliseconds();
 
+		// Returns how much of the last completed frame ran inside no span at all.
+		//
+		// The frame's own self time — FrameMilliseconds() less the inclusive
+		// duration of the root spans. Everything else this class reports is time
+		// somebody thought to name; this is the rest of it, and on a frame that
+		// is only partly instrumented it is usually most of it.
+		//
+		// The overlay shows it as a row of its own because the alternative is a
+		// panel listing 0.3 ms of spans beneath a heading that says 1.1 ms and
+		// leaving the reader to work out which number is wrong. Neither is: the
+		// other 0.8 ms is real work nobody has put a scope around yet.
+		//
+		// @return Milliseconds inside the frame and outside every span.
+		static float UnmarkedMilliseconds();
+
 		// Returns the last completed frame's accumulated self time for a category.
 		// Invalid categories return zero.
 		//
