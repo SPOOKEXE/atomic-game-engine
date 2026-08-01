@@ -1,0 +1,161 @@
+# Configured by mono.tools/docgen/CMakeLists.txt. Edit the .in, not the copy in
+# the build directory — that one is overwritten on every configure.
+#
+# Only the settings that are a decision are here. Everything else is Doxygen's
+# default, because a Doxyfile carrying all three hundred options is one nobody
+# reads and one where a real choice hides among the noise.
+
+PROJECT_NAME           = "@PROJECT_NAME@"
+PROJECT_NUMBER         = "@PROJECT_VERSION@"
+PROJECT_BRIEF          = "@PROJECT_DESCRIPTION@"
+PROJECT_LOGO           = "@MONO_DOCS_LOGO@"
+OUTPUT_DIRECTORY       = "@MONO_DOCS_OUTPUT@"
+
+# Paths are shown relative to the checkout. Without this every page title
+# carries the absolute path of whoever generated it, which is noise on a good
+# day and somebody's home directory on the site the rest of the time.
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = "@CMAKE_SOURCE_DIR@"
+
+# So that a page says `#include <engine/core/Name.hpp>` — the line a caller
+# would actually write — rather than the path the file happens to sit at.
+STRIP_FROM_INC_PATH    = @MONO_DOCS_INCLUDE_ROOTS@
+
+# ---------------------------------------------------------------------------
+# What is documented
+# ---------------------------------------------------------------------------
+#
+# Public headers only. `src/` is the private include directory and `app/` is a
+# thin main — documenting either would put the module's insides on a page that
+# says "API reference", and the tier system exists precisely so that what a
+# caller may see is a decided question rather than a discovered one.
+
+INPUT                  = @MONO_DOCS_INPUT@
+RECURSIVE              = YES
+
+# The repository's own prose is part of the documentation rather than a separate
+# thing somebody has to know to go and read, so the markdown comes in beside the
+# headers and README.md becomes the front page.
+FILE_PATTERNS          = *.hpp *.md
+USE_MDFILE_AS_MAINPAGE = "@MONO_DOCS_MAINPAGE@"
+
+# `[Running from somewhere else](#running-from-somewhere-else)` is how a link
+# within a document is written, and it is what GitHub renders. Doxygen's own
+# anchor scheme does not produce that id, so without this every intra-document
+# link in RUNNING.md resolves on GitHub and dangles here.
+MARKDOWN_ID_STYLE      = GITHUB
+
+# `AGENTS.md` is in, and that is deliberate. README.md and CONTRIBUTING.md both
+# link to it, so leaving it out does not produce a tidier site — it produces the
+# same site with broken links in it, which is worse and quieter.
+#
+# CLAUDE.md is one line pointing at AGENTS.md, so it is the one page that would
+# be pure noise.
+EXCLUDE_PATTERNS       = */tests/* \
+                         */src/* \
+                         */app/* \
+                         */.cache/* \
+                         */CLAUDE.md
+
+# ---------------------------------------------------------------------------
+# The filter
+# ---------------------------------------------------------------------------
+#
+# Doxygen only reads a comment written `///`, `//!`, `/**` or `/*!`, and every
+# comment in this repository is a plain `//`. docgen rewrites them on the way
+# past, so the sources on disk stay prose. See mono.tools/docgen/AGENTS.md.
+
+# FILTER_PATTERNS, not INPUT_FILTER. INPUT_FILTER runs on every input file, and
+# the input includes markdown — so docgen would be handed README.md and apply
+# C++ rules to it. It did, before this line existed: the `//` in a URL became a
+# comment marker, and the paragraph in AGENTS.md *about* comment style was
+# rewritten by the thing it describes. A filter is a language tool and the
+# wiring has to name the language.
+FILTER_PATTERNS        = *.hpp="@MONO_DOCGEN_BINARY@"
+
+# The listing behind "go to the source code of this file" is generated from the
+# filtered text, and every link into it is by line number. This is safe only
+# because docgen preserves the line count exactly — that is what its first test
+# is about, and it is the reason to be careful about changing the filter.
+FILTER_SOURCE_FILES    = YES
+SOURCE_BROWSER         = YES
+
+# ---------------------------------------------------------------------------
+# How a comment is read
+# ---------------------------------------------------------------------------
+
+# The first sentence is the summary shown in listings, and the rest is the
+# detail on the page. That is how these comments are already written.
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+
+# The public surface is listed whether or not somebody documented it. A gap
+# should be visible on the page rather than absent from it — an undocumented
+# method that simply does not appear reads as a method that does not exist.
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+
+# `std::hash<Name>` is specialised in two headers, and without this Doxygen
+# cannot place them and warns instead.
+BUILTIN_STL_SUPPORT    = YES
+
+# ---------------------------------------------------------------------------
+# The gap report
+# ---------------------------------------------------------------------------
+#
+# `just docs-check` is the build's half of the bargain in AGENTS.md rule 6: a
+# rule the build does not check is documentation. It fails when a public entity
+# has no comment, so "public headers are documented" is a thing that is enforced
+# rather than a thing somebody remembers.
+
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+WARN_LOGFILE           = "@MONO_DOCS_OUTPUT@/warnings.txt"
+QUIET                  = YES
+
+# ---------------------------------------------------------------------------
+# The engine's own vocabulary
+# ---------------------------------------------------------------------------
+#
+# Moonwave has `@within` and `@server`; this is the same idea. A tier is already
+# in most file comments as prose — `L3 ·`, `L12 [client] ·`, `L1.` — in three
+# different spellings. As a command it is one spelling, and it collects into a
+# page you can read down.
+
+ALIASES += "tier=\xrefitem tiers \"Tier\" \"Tiers\" "
+ALIASES += "client=\xrefitem clientonly \"Client only\" \"Client-only API\" Not linked into a server build."
+ALIASES += "server=\xrefitem serveronly \"Server only\" \"Server-only API\" Not linked into a client build."
+ALIASES += "threadsafe=\xrefitem threadsafe \"Thread safe\" \"Thread-safe API\" "
+ALIASES += "tick=\xrefitem tickbound \"Tick bound\" \"Tick-bound API\" "
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_OUTPUT            = html
+
+# doxygen-awesome-css does its own light and dark theming, so Doxygen's must be
+# left alone or the two fight and the result is a page that is half of each.
+HTML_COLORSTYLE        = LIGHT
+
+HTML_HEADER            = "@MONO_DOCS_HEADER@"
+HTML_EXTRA_STYLESHEET  = @MONO_DOCS_STYLESHEETS@
+HTML_EXTRA_FILES       = @MONO_DOCS_SCRIPTS@
+
+# A copy button on a fragment, and anchors on paragraphs.
+HTML_DYNAMIC_SECTIONS  = YES
+
+# The dependency graphs, when graphviz is there to draw them. Set by CMake from
+# whether it found `dot`, so a machine without it produces a site with fewer
+# pictures rather than a configure error.
+HAVE_DOT               = @MONO_DOCS_HAVE_DOT@
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
