@@ -25,6 +25,24 @@ set_target_properties(docgen PROPERTIES
 # The docs target
 # ---------------------------------------------------------------------------
 
+# `find_program` caches its answer and does not look again once the variable is
+# set — including when the path it cached has since stopped existing. That is an
+# ordinary thing to happen rather than an exotic one: a doxygen unpacked into a
+# temporary directory, a toolchain on a removable volume, or a package upgraded
+# out from under the cache all leave an absolute path that resolves to nothing.
+#
+# The stale value is still truthy, so the check below is skipped and the failure
+# arrives much later as `doxygen -w failed (No such file or directory)` from
+# inside RunDoxygen.cmake — a message that names no program, suggests no fix,
+# and reads like the docs target is broken rather than the cache being wrong.
+# Drop the entry and search again, so the check below is what decides.
+foreach(tool MONO_DOXYGEN MONO_DOT)
+	if(${tool} AND NOT EXISTS "${${tool}}")
+		message(STATUS "docs: cached ${tool} (${${tool}}) is gone — searching again")
+		unset(${tool} CACHE)
+	endif()
+endforeach()
+
 find_program(MONO_DOXYGEN doxygen)
 find_program(MONO_DOT dot)
 
