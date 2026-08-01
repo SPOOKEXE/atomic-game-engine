@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://json.schemastore.org/clang-format-21.x.json
+---
+BasedOnStyle: LLVM
+Language: Cpp
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Always
+ColumnLimit: 110
+
+NamespaceIndentation: All
+FixNamespaceComments: false
+
+BinPackArguments: false
+BinPackParameters: OnePerLine
+ExperimentalAutoDetectBinPacking: false
+
+AlignAfterOpenBracket: BlockIndent
+Cpp11BracedListStyle: true
+
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+
+BreakBeforeBraces: Custom
+BreakBeforeConceptDeclarations: Never
+BraceWrapping:
+    AfterClass: false
+    AfterControlStatement: Never
+    AfterEnum: false
+    AfterFunction: false
+    AfterNamespace: false
+    AfterStruct: false
+    AfterUnion: false
+    BeforeElse: false
+    BeforeLambdaBody: false
+    BeforeWhile: false
+    SplitEmptyFunction: false
+    SplitEmptyRecord: false
+
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerIndentWidth: 4
+
+PointerAlignment: Right
+
+SpaceBeforeParens: ControlStatements
+SpacesInAngles: Never
+
+AlignConsecutiveAssignments:
+    Enabled: false
+AlignConsecutiveDeclarations:
+    Enabled: false
+
+# Public headers first, then the rest of the engine, then vendor, then the
+# standard library. A module's own header leads its .cpp.
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+    - Regex: '^<engine/'
+      Priority: 2
+    - Regex: '^"'
+      Priority: 1
+    - Regex: '^<(tracy|spdlog|flecs|glm|SDL3|catch2)'
+      Priority: 3
+    - Regex: '.*'
+      Priority: 4
