@@ -45,6 +45,23 @@ USE_MDFILE_AS_MAINPAGE = "@MONO_DOCS_MAINPAGE@"
 # link in RUNNING.md resolves on GitHub and dangles here.
 MARKDOWN_ID_STYLE      = GITHUB
 
+# How deep a markdown heading is still turned into a numbered section.
+#
+# Doxygen's default is 5, and at that depth it converts `###` into a
+# subsubsection — which is an error whenever the heading above it was a `#`,
+# because a section cannot contain a subsubsection without the subsection in
+# between. That is the ordinary shape of the prose here: RUNNING.md uses `#` for
+# a part and `###` for a heading inside it, which is what GitHub renders well,
+# and it produced three "Unexpected subsubsection command found inside section!"
+# warnings that had nothing to teach anyone.
+#
+# 2 is the depth that fixes it rather than hides it: `#` and `##` still become
+# sections and still get ids, so the intra-document links the setting above
+# exists for keep resolving. 0 would silence the same three warnings by removing
+# the ids entirely, and RUNNING.md's own `#running-from-somewhere-else` link
+# starts dangling the moment it does — measured, not assumed.
+TOC_INCLUDE_HEADINGS   = 2
+
 # `AGENTS.md` is in, and that is deliberate. README.md and CONTRIBUTING.md both
 # link to it, so leaving it out does not produce a tidier site — it produces the
 # same site with broken links in it, which is worse and quieter.
