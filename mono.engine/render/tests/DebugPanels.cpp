@@ -161,6 +161,79 @@ TEST_CASE("a wrapped window reads its samples in order", "[panels]") {
 	REQUIRE(statistics.Minimum() == Approx(25.0f).margin(0.1));
 }
 
+TEST_CASE("the extremes recover when the frame that set them ages out", "[panels]") {
+	FrameStatistics statistics;
+
+	// One catastrophic frame at the start, then a long run of good ones. While
+	// it is in the window it is the worst; the moment it leaves, the answer has
+	// to change — and a cached extreme that nothing invalidates would report a
+	// 2 FPS floor for the rest of the session.
+	statistics.Record(0.0, 0.500f);
+	for (int index = 1; index < 200; index++) {
+		statistics.Record(static_cast<double>(index) * 0.010, 0.010f);
+	}
+
+	REQUIRE(statistics.Minimum() == Approx(2.0f).margin(0.1));
+
+	// Push it past the window.
+	statistics.Record(FrameStatistics::WINDOW_SECONDS + 1.0, 0.010f);
+
+	REQUIRE(statistics.Minimum() == Approx(100.0f).margin(0.1));
+	REQUIRE(statistics.Maximum() == Approx(100.0f).margin(0.1));
+	REQUIRE(statistics.Average() == Approx(100.0f).margin(0.1));
+}
+
+TEST_CASE("the running totals match a walk of the window", "[panels]") {
+	FrameStatistics statistics;
+
+	// Average and Jitter are accumulated as samples arrive and leave rather
+	// than summed on demand. Every add has a matching subtract, and an eviction
+	// that forgets to remove its pair leaves the mean drifting away from the
+	// truth without ever looking obviously wrong.
+	std::vector<float> live;
+	double now = 0.0;
+	for (int index = 0; index < 400; index++) {
+		// Deliberately varied, so a dropped or double-counted term shows.
+		const float delta = 0.008f + static_cast<float>(index % 7) * 0.001f;
+		now += static_cast<double>(delta);
+		statistics.Record(now, delta);
+		live.push_back(delta);
+	}
+
+	// Drop what the window would have dropped.
+	double cutoff = now - FrameStatistics::WINDOW_SECONDS;
+	double running = 0.0;
+	std::vector<float> kept;
+	double stamp = 0.0;
+	for (const float delta : live) {
+		stamp += static_cast<double>(delta);
+		if (stamp > cutoff) {
+			kept.push_back(delta);
+		}
+	}
+	(void)running;
+
+	REQUIRE(statistics.SampleCount() == kept.size());
+
+	double total = 0.0;
+	double change = 0.0;
+	for (size_t index = 0; index < kept.size(); index++) {
+		total += kept[index];
+		if (index > 0) {
+			change += std::abs(kept[index] - kept[index - 1]);
+		}
+	}
+
+	REQUIRE(
+		statistics.Average() ==
+		Approx(static_cast<float>(static_cast<double>(kept.size()) / total)).margin(0.01)
+	);
+	REQUIRE(
+		statistics.Jitter() ==
+		Approx(static_cast<float>(change / static_cast<double>(kept.size() - 1)) * 1000.0f).margin(0.01)
+	);
+}
+
 TEST_CASE("Summarise agrees with asking one number at a time", "[panels]") {
 	FrameStatistics statistics;
 

@@ -136,6 +136,41 @@ namespace engine::render {
 		// Live samples, which is not Ring.size() — that is the capacity.
 		size_t Count = 0;
 
+		// Running totals, maintained as samples arrive and leave.
+		//
+		// A walk of the window was the obvious way to answer these, and it had
+		// the wrong shape: the number of samples in twenty seconds is the frame
+		// *rate* times twenty, so every frame the game got faster this got
+		// slower. Something that costs more the better the thing it measures
+		// performs is not a measurement anybody can leave switched on.
+		// Mutable for the same reason the extremes are: Rescan below rebuilds
+		// them, and it runs from a const query.
+		mutable double DeltaSum = 0.0;
+
+		// Sum of the absolute change between consecutive samples, which is what
+		// Jitter is a mean of. A sample leaving takes exactly one pair with it.
+		mutable double ChangeSum = 0.0;
+
+		// The extremes, cached. Mutable because they are rebuilt lazily by a
+		// const query rather than eagerly by every Record.
+		mutable float Worst = 0.0f;
+		mutable float Best = 0.0f;
+
+		// Set when the sample that *was* an extreme leaves the window, because
+		// nothing cheaper than another look can say what the next one is.
+		//
+		// The worst frame in twenty seconds ages out about once every twenty
+		// seconds, so this is rare — and in the pathological case where it is
+		// every frame, the cost is the walk this replaced. Never worse.
+		mutable bool ExtremesStale = false;
+
+		// Rebuilds the extremes, and the sums with them.
+		//
+		// The sums are recomputed here rather than only accumulated because a
+		// running total that is only ever added to and subtracted from drifts,
+		// and this pass is already touching every sample.
+		void Rescan() const;
+
 		// Ring index of the nth-oldest sample.
 		size_t IndexOf(size_t offset) const {
 			return (Head + offset) % Ring.size();
