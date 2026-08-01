@@ -73,8 +73,9 @@ namespace testrunner {
 
 	// What the last run knew about one suite.
 	//
-	// Both halves are needed to decide whether to skip. A matching signature
-	// says the suite is unchanged; it does not say the suite was passing.
+	// The first two fields are needed to decide whether to skip. A matching
+	// signature says the suite is unchanged; it does not say the suite was
+	// passing.
 	struct CacheEntry {
 		// The suite's cascading signature the last time it ran.
 		std::string Signature;
@@ -85,6 +86,38 @@ namespace testrunner {
 		// because the alternative is a red suite going quiet on the next
 		// invocation and staying quiet until something below it happens to move.
 		bool Passed = false;
+
+		// What it counted then, so that a suite the cascade skipped today still
+		// has a row in test-output.md rather than a hole.
+		//
+		// These decide nothing — the runner never reads them back to choose what
+		// to run. They are here because the alternative is a report that covers
+		// only the handful of suites one change happened to touch, which is the
+		// report nobody wants: the whole point is the shape of the tree.
+		// Test cases that passed when it last ran.
+		unsigned CasesPassed = 0;
+
+		// Test cases that failed then. Zero for every entry the runner is
+		// willing to skip, since a failing suite is always re-run.
+		unsigned CasesFailed = 0;
+
+		// Test cases Catch2 skipped then.
+		unsigned CasesSkipped = 0;
+
+		// Assertions that held then.
+		unsigned AssertionsPassed = 0;
+
+		// Assertions that did not hold then.
+		unsigned AssertionsFailed = 0;
+
+		// What the suite cost then, in microseconds, measured around the process
+		// rather than inside it.
+		//
+		// Per-case timings are deliberately not here. smart-tests.txt is one
+		// line per suite and a person can diff it; one line per *case* would be
+		// a different file with a different contract, and the report says which
+		// suites it therefore cannot break down.
+		unsigned long long Microseconds = 0;
 	};
 
 	// .cache/smart-tests.txt — a text file, and actually text: one tab-separated

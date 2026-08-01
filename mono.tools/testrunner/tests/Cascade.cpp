@@ -224,6 +224,63 @@ TEST_CASE("the cache round-trips", "[cache]") {
 	REQUIRE_FALSE(read.at("engine.ecs.store").Passed);
 }
 
+TEST_CASE("the cache remembers what a suite counted", "[cache]") {
+	Scratch scratch;
+	const fs::path path = scratch.Root / "smart-tests.txt";
+
+	CacheEntry entry;
+	entry.Signature = "abc123";
+	entry.Passed = true;
+	entry.CasesPassed = 12;
+	entry.CasesSkipped = 1;
+	entry.AssertionsPassed = 40;
+	entry.Microseconds = 1'234'567;
+	REQUIRE(testrunner::SaveCache(path, {{"engine.core.types", entry}}));
+
+	// The counts decide nothing about what runs. They are here so that a suite
+	// the cascade skips still has a row in test-output.md rather than a hole.
+	const auto read = testrunner::LoadCache(path);
+	REQUIRE(read.at("engine.core.types").CasesPassed == 12);
+	REQUIRE(read.at("engine.core.types").CasesSkipped == 1);
+	REQUIRE(read.at("engine.core.types").AssertionsPassed == 40);
+	REQUIRE(read.at("engine.core.types").Microseconds == 1'234'567);
+}
+
+TEST_CASE("a duration longer than a 32-bit count of microseconds survives", "[cache]") {
+	Scratch scratch;
+	const fs::path path = scratch.Root / "smart-tests.txt";
+
+	// An hour and a quarter in microseconds overflows 32 bits. A test suite
+	// that takes that long is a problem, but it is not this file's problem to
+	// silently report as seventy-one minutes less than it was.
+	CacheEntry entry;
+	entry.Signature = "abc123";
+	entry.Passed = true;
+	entry.Microseconds = 4'500'000'000ULL;
+	REQUIRE(testrunner::SaveCache(path, {{"engine.core.types", entry}}));
+
+	REQUIRE(testrunner::LoadCache(path).at("engine.core.types").Microseconds == 4'500'000'000ULL);
+}
+
+TEST_CASE("a line somebody trimmed by hand still reads", "[cache]") {
+	Scratch scratch;
+	const fs::path path = scratch.Root / "smart-tests.txt";
+
+	{
+		std::ofstream file(path);
+		file << "# atomic smart-tests cache v2\n";
+		file << "engine.core.types\tpass\tabc123\n";
+	}
+
+	// The signature is load-bearing and the counts are not, so a short line is
+	// read for what it has. Discarding it would turn an edit meant to force one
+	// suite to re-run into a full rebuild of the cache.
+	const auto read = testrunner::LoadCache(path);
+	REQUIRE(read.size() == 1);
+	REQUIRE(read.at("engine.core.types").Signature == "abc123");
+	REQUIRE(read.at("engine.core.types").CasesPassed == 0);
+}
+
 TEST_CASE("the cache is text a person can read and edit", "[cache]") {
 	Scratch scratch;
 	const fs::path path = scratch.Root / "smart-tests.txt";

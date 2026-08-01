@@ -277,7 +277,23 @@ namespace testrunner {
 	// -----------------------------------------------------------------------
 
 	namespace {
-		constexpr const char *CACHE_HEADER = "# atomic smart-tests cache v1";
+		// v2 added the per-suite counts and duration the report is built from.
+		// The bump costs one full re-run on the way past, which is the correct
+		// price: a v1 line carries neither, and inventing zeroes for it would
+		// put a suite in test-output.md claiming to hold no tests and cost no
+		// time.
+		constexpr const char *CACHE_HEADER = "# atomic smart-tests cache v2";
+
+		unsigned long long Count(const std::string &text) {
+			unsigned long long value = 0;
+			for (const char character : text) {
+				if (character < '0' || character > '9') {
+					return 0;
+				}
+				value = value * 10 + static_cast<unsigned long long>(character - '0');
+			}
+			return value;
+		}
 	}
 
 	std::map<std::string, CacheEntry> LoadCache(const fs::path &path) {
@@ -309,7 +325,24 @@ namespace testrunner {
 			if (fields.size() < 3) {
 				continue;
 			}
-			cache[fields[0]] = CacheEntry{fields[2], fields[1] == "pass"};
+
+			CacheEntry entry;
+			entry.Signature = fields[2];
+			entry.Passed = fields[1] == "pass";
+
+			// A line somebody hand-edited to force a re-run may well have lost
+			// its tail. The counts are cosmetic, so a short line is read for
+			// what it has rather than discarded.
+			if (fields.size() >= 9) {
+				entry.CasesPassed = static_cast<unsigned>(Count(fields[3]));
+				entry.CasesFailed = static_cast<unsigned>(Count(fields[4]));
+				entry.CasesSkipped = static_cast<unsigned>(Count(fields[5]));
+				entry.AssertionsPassed = static_cast<unsigned>(Count(fields[6]));
+				entry.AssertionsFailed = static_cast<unsigned>(Count(fields[7]));
+				entry.Microseconds = Count(fields[8]);
+			}
+
+			cache[fields[0]] = std::move(entry);
 		}
 
 		return versionSeen ? cache : std::map<std::string, CacheEntry>{};
@@ -327,11 +360,15 @@ namespace testrunner {
 		}
 
 		file << CACHE_HEADER << '\n';
-		file << "# suite\tstatus\tsignature\n";
+		file << "# suite\tstatus\tsignature\tcases pass\tfail\tskip\tassertions pass\tfail"
+				"\tmicroseconds\n";
 		// std::map iterates sorted, so the file is stable between runs and a
 		// diff of it shows only what actually changed.
 		for (const auto &[id, entry] : cache) {
-			file << id << '\t' << (entry.Passed ? "pass" : "fail") << '\t' << entry.Signature << '\n';
+			file << id << '\t' << (entry.Passed ? "pass" : "fail") << '\t' << entry.Signature << '\t'
+				 << entry.CasesPassed << '\t' << entry.CasesFailed << '\t' << entry.CasesSkipped << '\t'
+				 << entry.AssertionsPassed << '\t' << entry.AssertionsFailed << '\t' << entry.Microseconds
+				 << '\n';
 		}
 
 		return file.good();

@@ -478,11 +478,17 @@ the two programs and the test runner — `Demo.hpp` (14), `Server.hpp` (10),
 whose members had none, which is the shape the section above warns about.
 
 Keep it at zero. A check that has been failing for a while stops being read, and
-takes the real failures down with it — which is exactly what happened to the
-malformed-comment half of this gate, where one unfixable Doxygen warning about
-the main page's label hid the coverage pass behind it for long enough that
-nobody had seen the gap count. `mono.tools/docgen/RunDoxygen.cmake` explains
-that warning, what was measured against it, and what would let it be deleted.
+takes the real failures down with it — which is exactly what happened here. The
+site pass was failing on a warning that looked like it came from README.md, and
+because the site pass runs first, the coverage pass behind it had never run at
+all. Nobody had seen the gap count because nothing had ever printed one.
+
+The warning turned out to have nothing to do with README.md. Four empty
+`docs/index.md` placeholders each became a page, each was titled from its
+filename for want of a heading, and each claimed the page label `index` that the
+main page already holds. **An empty markdown file is not an inert one.**
+`mono.tools/docgen/CMakeLists.txt` now leaves pages with no content out of the
+site, and says so at configure time rather than dropping them quietly.
 
 `mono.tools/docgen/AGENTS.md` has the reasoning behind the filter itself,
 including why the line count is an invariant and why it is scoped to `*.hpp`.
@@ -505,8 +511,9 @@ just build docgen
 
 The second runs the real configuration over a scratch header and reports what
 Doxygen made of it. Point `INPUT` somewhere outside the repository so the probe
-never reaches the site, and turn the main page off so the front-page warning
-does not drown the result:
+never reaches the site, and turn the main page off with it — README.md is no
+longer in `INPUT` at that point, and a main page naming a file Doxygen was not
+given is a warning of its own:
 
 ```sh
 just docs                                    # once, so Doxyfile exists

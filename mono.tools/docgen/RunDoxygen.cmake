@@ -17,61 +17,8 @@ cmake_minimum_required(VERSION 3.24)
 
 file(MAKE_DIRECTORY "${OUTPUT}")
 
-# ---------------------------------------------------------------------------
-# The one warning that is Doxygen's and not ours
-# ---------------------------------------------------------------------------
-#
-# Doxygen names the main page `index`. `MARKDOWN_ID_STYLE = GITHUB` has the
-# first heading of the file that becomes the main page claim a GitHub-style id
-# in that same scope. They collide, on every run, and the result is:
-#
-#   README.md:2: warning: multiple use of section label 'index' for main page
-#
-# Four ways out were measured before this was written, and every one of them
-# costs more than the warning does:
-#
-# - Delete the heading README.md opens with. The warning moves to the next one.
-# - `MARKDOWN_ID_STYLE = DOXYGEN`. Silences it by breaking every intra-document
-#   link in the repository instead — Doxyfile.in says why those matter.
-# - `PROJECT_NAME` spelled exactly as the README's title, which is the advice
-#   usually given for this message. No effect: that advice is about the explicit
-#   `@mainpage` tag, and the main page here comes from a markdown file.
-# - `USE_MDFILE_AS_MAINPAGE` off. This is the one that does work — nothing warns
-#   — and it works by throwing away the front page, so the site opens on a file
-#   list instead of the README. Not a trade worth making for one line of log.
-#
-# So the line is dropped, because a check that cannot ever pass stops being read
-# and takes the real warnings down with it. It is dropped *loudly*: the count is
-# reported, so the day a newer Doxygen stops emitting it, the number goes to
-# zero, somebody notices, and this whole block can go.
-#
-# Matched on the text rather than the filename, so that it stays specific to
-# this defect and does not quietly start excusing anything else README.md does.
-function(_mono_filter_known_artefacts path out_suppressed)
-	set(${out_suppressed} 0 PARENT_SCOPE)
-	if(NOT EXISTS "${path}")
-		return()
-	endif()
-
-	file(READ "${path}" raw)
-
-	# Counted before the removal, and on the whole text rather than a CMake list
-	# — a warning quoting C++ can contain a semicolon, and `foreach(IN LISTS)`
-	# would split one line into two.
-	string(REGEX MATCHALL "multiple use of section label 'index' for main page" hits "${raw}")
-	list(LENGTH hits found)
-	if(found EQUAL 0)
-		return()
-	endif()
-
-	string(REGEX REPLACE
-		"[^\n]*multiple use of section label 'index' for main page[^\n]*\n?"
-		"" raw "${raw}")
-	file(WRITE "${path}" "${raw}")
-	set(${out_suppressed} ${found} PARENT_SCOPE)
-endfunction()
-
-# Lines remaining in a log, counted without building a list for the same reason.
+# Lines in a log, counted without building a CMake list — a warning quoting C++
+# can contain a semicolon, and `foreach(IN LISTS)` would split one line into two.
 function(_mono_count_lines path out_count)
 	set(${out_count} 0 PARENT_SCOPE)
 	if(NOT EXISTS "${path}")
@@ -99,11 +46,6 @@ if(CHECK)
 	if(NOT checked EQUAL 0)
 		message(FATAL_ERROR "doxygen failed (${checked}).")
 	endif()
-
-	# The coverage pass reads the same markdown and hits the same main-page
-	# collision, so it needs the same line removed — otherwise `docs-check`
-	# reports it as a documentation gap, which it is not.
-	_mono_filter_known_artefacts("${OUTPUT}/gaps.txt" ignored)
 
 	set(gaps "")
 	if(EXISTS "${OUTPUT}/gaps.txt")
@@ -189,15 +131,9 @@ endif()
 # This pass reports malformed documentation — a `@param` naming an argument that
 # is not there, a link that does not resolve. It cannot report a *missing*
 # comment; that is what `just docs-check` is for.
-_mono_filter_known_artefacts("${OUTPUT}/warnings.txt" suppressed)
 _mono_count_lines("${OUTPUT}/warnings.txt" count)
 
 message(STATUS "docs   ${OUTPUT}/html/index.html")
 if(count GREATER 0)
 	message(STATUS "errors ${count} — see ${OUTPUT}/warnings.txt")
-endif()
-if(suppressed GREATER 0)
-	message(STATUS
-		"note   ${suppressed} known Doxygen main-page label warning(s) dropped "
-		"— RunDoxygen.cmake says why, and what makes it removable")
 endif()

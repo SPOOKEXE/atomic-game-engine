@@ -436,6 +436,8 @@ just test-list                                # what it would run, and why
 ```
 --build DIR   A configured build directory
 --cache PATH  Cache file (default .cache/smart-tests.txt)
+--report DIR  Where test-output.md/.html go (default .cache)
+--no-report   Write no documents
 --all         Run every suite, cache or not
 --list        List suites and signatures, run nothing
 --verbose     Name every skipped suite
@@ -452,6 +454,73 @@ single line to re-run one thing.
 `just preset=server test` runs the server preset's suites with the server
 preset's runner — the preset override reaches `--build` too, so the binaries and
 the build directory cannot come from different presets.
+
+## The report
+
+Every run writes `.cache/test-output.md` and `.cache/test-output.html`, and
+prints both paths. `--list` writes nothing, because it ran nothing.
+
+Sections are the suite identifiers themselves: `engine.core.arguments` sits
+under `engine`, then under `engine.core`, and is a row of its own. There is no
+second taxonomy to keep in step with the first.
+
+Both documents cover **every** suite, not only the ones this invocation ran. A
+suite the cascade skipped shows its last known numbers and says `pass (cached)`
+in its result column — a green row you cannot tell from a row nothing
+re-checked is a green row that lies by omission. The counts and durations behind
+those rows live in `smart-tests.txt`, which is why it is at `v2`; a `v1` cache is
+discarded on sight rather than reported as a tree of suites holding no tests and
+costing no time.
+
+The numbers come from the test binaries. `mono.build/testmain` registers a
+Catch2 reporter named `mono` that writes one tab-separated line per test case,
+and the runner asks for it alongside the console reporter — so the output you
+read when something goes red is unchanged, and the report is a record of the run
+rather than a parse of its console text. You can ask a binary for it directly:
+
+```sh
+./.cache/build/dev/tests/test_core --reporter "mono::out=-"
+```
+
+Neither document carries a timestamp. Two runs that learned the same thing
+produce the same bytes, so a diff shows what moved rather than that it was
+written again.
+
+`ctest` writes no report. It never consults the cache either — see below.
+
+### Timings
+
+The runner prints what each suite cost as it goes, and both documents carry the
+same numbers — `Time` and `Slowest case` columns in the Markdown tables, and a
+flamegraph in the HTML.
+
+**Two clocks, measuring two different things.** A suite is timed by the runner,
+from the outside, so its number includes starting the process and running its
+static initialisers. A case is timed by the reporter, from the inside. A suite
+is therefore always wider than its cases add up to, and that gap is real: it is
+the fixed price of a suite existing, paid once per suite per run.
+
+That gap is the first thing the report is good for. If `engine.core.arguments`
+costs 300 ms and its slowest case costs 29 µs, none of that 300 ms is a test.
+
+`Time` beside `Slowest case` is the other diagnosis. A slow suite whose slowest
+case is most of it is one pathological test; a slow suite whose slowest case is a
+fraction of it is a lot of ordinary ones. Those want different fixes.
+
+### The flamegraph
+
+`test-output.html` opens with one. Width is wall-clock, depth is the identifier
+one component at a time — everything, then `engine`, then `engine.core`, then the
+suite, then its cases. Hover a box for its name and what it cost. Widest first,
+so what is worth looking at is where you are already looking.
+
+It is nested `div`s with percentage widths and no script, so it stays
+proportional when you resize the window and renders on a machine with no network.
+
+A suite the cascade skipped is a **leaf** — washed out, with no cases under it.
+`smart-tests.txt` is one line per suite, so it keeps a suite's total and not its
+breakdown; one line per *case* would be a different file with a different
+contract. Run `just test-all` for a graph that goes all the way down.
 
 ## Everything, always
 

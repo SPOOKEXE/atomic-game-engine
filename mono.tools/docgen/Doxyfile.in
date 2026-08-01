@@ -68,6 +68,11 @@ TOC_INCLUDE_HEADINGS   = 2
 #
 # CLAUDE.md is one line pointing at AGENTS.md, so it is the one page that would
 # be pure noise.
+# Markdown files with nothing in them, worked out at configure time rather than
+# listed by name. mono.tools/docgen/CMakeLists.txt says why an empty page is not
+# merely untidy.
+EXCLUDE                = @MONO_DOCS_EXCLUDE@
+
 EXCLUDE_PATTERNS       = */tests/* \
                          */src/* \
                          */app/* \
