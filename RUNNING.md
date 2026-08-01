@@ -298,7 +298,7 @@ collection on — asking to see something is not a separate flag from showing it
 |---|---|
 | **F3** | frame counter — FPS now, and min/avg/max over the last twenty seconds |
 | **F5** | frame graph — last frame's scope tree |
-| **F6** / **F7** | previous / next frame-graph view |
+| **F6** / **F7** | next / previous frame-graph view |
 | **PgUp** / **PgDn** | scroll a graph taller than the panel |
 | **-** / **=** | shallower / deeper flamegraph |
 | **F8** | write `frame-graph-snapshot.txt` beside the binary |

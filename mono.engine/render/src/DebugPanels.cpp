@@ -284,6 +284,34 @@ namespace engine::render {
 			return std::string(width - text.size(), ' ') + text;
 		}
 
+		// Thousands separated. A counter reading 1048576 and one reading 104857
+		// are the same width of digits at a glance, and the panel exists to be
+		// read at a glance.
+		std::string Grouped(double value) {
+			char digits[32];
+			std::snprintf(digits, sizeof(digits), "%.0f", value < 0.0 ? 0.0 : value);
+
+			std::string text = digits;
+			for (size_t at = text.size(); at > 3;) {
+				at -= 3;
+				text.insert(at, ",");
+			}
+			return text;
+		}
+
+		// A faint tint behind every other row.
+		//
+		// The rows are a pixel apart and a column of numbers with nothing
+		// between them is read wrong — the eye slides up a line between the name
+		// and the figure beside it.
+		constexpr uint8_t STRIPE_ALPHA = 16;
+
+		// The track a timeline bar sits in, and the quarter marks across it. A
+		// bar's *position* is the whole reason the timeline is there, and a
+		// position means nothing without something to measure it against.
+		constexpr uint8_t TRACK_ALPHA = 20;
+		constexpr uint8_t GRID_ALPHA = 26;
+
 		// Deeper is dimmer, so a subtree reads as one thing shading away from
 		// its root rather than as unrelated rows that happen to be adjacent.
 		Colour Shade(Colour colour, uint32_t depth) {
@@ -332,6 +360,56 @@ namespace engine::render {
 				Y += DebugText::LineHeight(Scale) * lines;
 			}
 		};
+
+		// Every tab, with the open one filled in.
+		//
+		// The header used to name the open tab in brackets and list the keys
+		// beside it, which told you what you were looking at and nothing about
+		// what else there was. A strip says both: four names, one lit, and the
+		// keys that move between them — a panel with a hidden control has none.
+		void DrawTabStrip(OverlayImage &image, const DebugPanelData &data, int x, int y, int width) {
+			const int scale = data.Scale;
+			const int glyphHeight = DebugText::GLYPH_HEIGHT * scale;
+			const int gap = DebugText::ADVANCE * scale;
+
+			int pen = x;
+			for (size_t index = 0; index < static_cast<size_t>(ProfilerTab::Count); index++) {
+				const auto tab = static_cast<ProfilerTab>(index);
+				const std::string_view name = GetProfilerTabName(tab);
+				const int textWidth = DebugText::Measure(name, scale);
+
+				if (tab == data.Tab) {
+					// A filled chip rather than a brighter word. Brightness alone
+					// is not a difference a person picks out of four short words
+					// in the corner of a game.
+					image.Blend(
+						pen - scale,
+						y - scale,
+						textWidth + scale * 2,
+						glyphHeight + scale * 2,
+						90,
+						130,
+						190,
+						200
+					);
+					DebugText::Draw(image, pen, y, name, 255, 255, 255, scale);
+				} else {
+					DebugText::Draw(image, pen, y, name, TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale);
+				}
+
+				pen += textWidth + gap * 2;
+			}
+
+			// Right-aligned, and only when it fits. A hint that overlaps the tab
+			// it is explaining is worse than no hint.
+			constexpr std::string_view HINT = "F6/F7 TAB  PGUP/PGDN  -/= DEPTH  F8 SNAP";
+			const int hintWidth = DebugText::Measure(HINT, scale);
+			if (pen + gap + hintWidth <= x + width) {
+				DebugText::Draw(
+					image, x + width - hintWidth, y, HINT, TEXT_DIM.R, TEXT_DIM.G, TEXT_DIM.B, scale
+				);
+			}
+		}
 
 		void DrawPanelBackground(OverlayImage &image, int x, int y, int width, int height) {
 			// Fill, not Blend. DrawDebugPanels clears the overlay before either
@@ -664,8 +742,30 @@ namespace engine::render {
 				// timeline bar on the right. Far fewer pixels than the glyphs,
 				// and worth knowing that rather than assuming it.
 				ENGINE_PROFILE_CAT("flame bars", core::ProfileCategory::Render);
-				for (const auto &row : rows) {
+
+				// Quarters of the frame, behind everything else. A bar's
+				// position is the whole reason the timeline is there, and a
+				// position means nothing without something to measure it
+				// against.
+				if (timelineWidth > 0 && !rows.empty()) {
+					const int top = rows.front().Y;
+					const int height = rows.back().Y + rowHeight - top;
+					for (int quarter = 1; quarter < 4; quarter++) {
+						const int line = timelineLeft + timelineWidth * quarter / 4;
+						image.Blend(line, top, scale, height, 255, 255, 255, GRID_ALPHA);
+					}
+				}
+
+				for (size_t index = 0; index < rows.size(); index++) {
+					const auto &row = rows[index];
 					const auto &span = data.Spans[row.Index];
+
+					// Every other row tinted. The rows are a pixel apart, and a
+					// column of numbers with nothing between them is read wrong
+					// — the eye slides up a line between a name and its figure.
+					if ((index & 1) != 0) {
+						image.Blend(x, row.Y - scale, width, rowHeight, 255, 255, 255, STRIPE_ALPHA);
+					}
 
 					// Deeper is dimmer, so a subtree reads as one thing shading
 					// away from its root rather than as unrelated adjacent rows.
@@ -673,8 +773,14 @@ namespace engine::render {
 						Shade(CATEGORY_COLOURS[static_cast<size_t>(span.Category)], span.Depth);
 					image.Blend(x, row.Y, chipWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
 
-					// Where in the frame it ran.
+					// Where in the frame it ran, in a track of its own — an empty
+					// track reads as "did not run", where empty space reads as a
+					// row nobody drew.
 					if (timelineWidth > 0) {
+						image.Blend(
+							timelineLeft, row.Y, timelineWidth, glyphHeight, 255, 255, 255, TRACK_ALPHA
+						);
+
 						const int left =
 							timelineLeft + static_cast<int>(span.StartMilliseconds * timelineScale);
 						// One pixel minimum, so a span too short to see is still
@@ -836,6 +942,9 @@ namespace engine::render {
 				bool IsTime = false;
 				int Y = 0;
 				float RecentMaximum = 0.0f;
+				// Writes that went into Value this frame. A total summed over
+				// six calls is a different number from one read once.
+				uint32_t Samples = 0;
 			};
 
 			std::vector<PlannedRow> rows;
@@ -846,7 +955,7 @@ namespace engine::render {
 
 				int cursor = y;
 				int skipped = 0;
-				const auto plan = [&](std::string_view name, float value, bool isTime) {
+				const auto plan = [&](std::string_view name, float value, bool isTime, uint32_t samples) {
 					if (skipped < data.Scroll) {
 						skipped++;
 						return;
@@ -854,14 +963,14 @@ namespace engine::render {
 					if (cursor + lineHeight > y + available) {
 						return;
 					}
-					rows.push_back(PlannedRow{name, value, isTime, cursor, 0.0f});
+					rows.push_back(PlannedRow{name, value, isTime, cursor, 0.0f, samples});
 					cursor += lineHeight;
 				};
 
 				if (data.Tab == ProfilerTab::Systems) {
 					rows.reserve(data.Systems.size());
 					for (const auto &system : data.Systems) {
-						plan(system.Name, system.Milliseconds, true);
+						plan(system.Name, system.Milliseconds, true, 1);
 					}
 				} else {
 					rows.reserve(data.Counters.size());
@@ -872,7 +981,8 @@ namespace engine::render {
 							counter.Name.Text(),
 							counter.IsTime ? static_cast<float>(counter.Value / 1'000'000.0)
 										   : static_cast<float>(counter.Value),
-							counter.IsTime
+							counter.IsTime,
+							counter.Samples
 						);
 					}
 				}
@@ -896,19 +1006,30 @@ namespace engine::render {
 				ENGINE_PROFILE_CAT("row format", core::ProfileCategory::Render);
 				text.reserve(rows.size());
 				for (const auto &row : rows) {
+					// A count written six times in a frame is a total, not a
+					// reading. The panel says which it is rather than leaving
+					// the difference to be guessed at.
+					std::string name(row.Name);
+					if (row.Samples > 1) {
+						name += " X" + std::to_string(row.Samples);
+					}
+
 					text.push_back(
 						row.IsTime ? Format(
 										 "%6.2f %6.2f  %.*s",
 										 static_cast<double>(row.Value),
 										 static_cast<double>(row.RecentMaximum),
-										 static_cast<int>(row.Name.size()),
-										 row.Name.data()
+										 static_cast<int>(name.size()),
+										 name.data()
 									 )
+								   // Grouped, because a counter reading 1048576 and one
+								   // reading 104857 are the same width of digits at the
+								   // glance this panel is read at.
 								   : Format(
-										 "%9.0f  %.*s",
-										 static_cast<double>(row.Value),
-										 static_cast<int>(row.Name.size()),
-										 row.Name.data()
+										 "%9s  %.*s",
+										 Grouped(static_cast<double>(row.Value)).c_str(),
+										 static_cast<int>(name.size()),
+										 name.data()
 									 )
 					);
 				}
@@ -917,10 +1038,30 @@ namespace engine::render {
 			{
 				// Before the glyphs, because the bar is behind the text.
 				ENGINE_PROFILE_CAT("row bars", core::ProfileCategory::Render);
-				for (const auto &row : rows) {
+				for (size_t index = 0; index < rows.size(); index++) {
+					const auto &row = rows[index];
+
+					// The same tint the flame graph uses, for the same reason.
+					if ((index & 1) != 0) {
+						image.Blend(x, row.Y - scale, width, lineHeight, 255, 255, 255, STRIPE_ALPHA);
+					}
+
 					if (!row.IsTime) {
 						continue;
 					}
+
+					// A track, so a short bar reads as short rather than as
+					// missing.
+					image.Blend(
+						x + labelWidth,
+						row.Y,
+						width - labelWidth,
+						DebugText::GLYPH_HEIGHT * scale,
+						255,
+						255,
+						255,
+						TRACK_ALPHA
+					);
 					const int barWidth =
 						static_cast<int>(static_cast<float>(width - labelWidth) * (row.Value / widest));
 					image.Blend(
@@ -1027,19 +1168,10 @@ namespace engine::render {
 			{
 				ENGINE_PROFILE_CAT("panel chrome", core::ProfileCategory::Render);
 
-				// The header says which view is open, how to change it, and
-				// whether Tracy is attached — because "the graph is empty" and
-				// "nothing is collecting" look identical otherwise.
-				const std::string_view tabName = GetProfilerTabName(data.Tab);
-				writer.Line(
-					Format(
-						"FRAME GRAPH  [%.*s]  F6/F7 TAB  PGUP/PGDN SCROLL  -/= DEPTH %u  F8 SNAPSHOT",
-						static_cast<int>(tabName.size()),
-						tabName.data(),
-						data.DepthLimit
-					),
-					TEXT_DIM
-				);
+				// Which views there are, which is open, and the keys that move
+				// between them.
+				DrawTabStrip(image, data, writer.X, writer.Y, width - padding * 2);
+				writer.Skip();
 
 				// RMAX is only meaningful against a window, so the window says how
 				// much of itself it has: a reading over 0.2 s of history and one
@@ -1049,11 +1181,12 @@ namespace engine::render {
 				// the total makes a fast engine look like a slow one.
 				writer.Line(
 					Format(
-						"%.2f MS   BUSY %.2f   IDLE %.2f   TRACY %s   RMAX OVER %.1fS%s",
+						"%.2f MS  BUSY %.2f  IDLE %.2f  DEPTH %u  TRACY %s  RMAX %.1fS%s",
 						static_cast<double>(data.FrameMilliseconds),
 						static_cast<double>(data.BusyMilliseconds()),
 						static_cast<double>(data.IdleMilliseconds),
-						data.TracyAttached ? "ATTACHED" : "OFF",
+						data.DepthLimit,
+						data.TracyAttached ? "ON" : "OFF",
 						data.HistorySeconds,
 						data.DroppedSpans > 0 ? "   SPANS DROPPED!" : ""
 					),

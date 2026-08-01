@@ -495,6 +495,64 @@ TEST_CASE("the unmarked row is drawn even when there is nothing unmarked", "[pan
 	REQUIRE(heightOf(0.0f) == heightOf(4.0f));
 }
 
+TEST_CASE("every tab is named on the strip, whichever is open", "[panels]") {
+	// The header used to name the open tab and nothing else, which said what
+	// you were looking at and nothing about what else there was. Whichever tab
+	// is open, the panel has to be wide enough to show them all.
+	auto widthOf = [](ProfilerTab tab) {
+		OverlayImage image;
+		image.Resize(900, 480);
+
+		DebugPanelData data;
+		data.ShowFrameGraph = true;
+		data.Tab = tab;
+		data.FrameMilliseconds = 8.0f;
+		DrawDebugPanels(image, data);
+
+		int widest = 0;
+		for (int y = 0; y < image.GetHeight(); y++) {
+			for (int x = image.GetWidth() - 1; x >= 0; x--) {
+				const size_t index = (static_cast<size_t>(y) * 900 + static_cast<size_t>(x)) * 4 + 3;
+				if (image.GetPixels()[index] != 0) {
+					widest = std::max(widest, x + 1);
+					break;
+				}
+			}
+		}
+		return widest;
+	};
+
+	// The strip is the same width whichever tab is lit — the names are all
+	// drawn, and only the chip moves.
+	const int frame = widthOf(ProfilerTab::Frame);
+	REQUIRE(frame > 0);
+	REQUIRE(widthOf(ProfilerTab::Counters) == frame);
+	REQUIRE(widthOf(ProfilerTab::Systems) == frame);
+}
+
+TEST_CASE("a counter written more than once says so", "[panels]") {
+	// A count summed over six calls in a frame is a total, not a reading, and
+	// the two are the same number on a panel that does not distinguish them.
+	engine::core::Counter counter;
+	counter.Name = engine::core::Name("draws");
+	counter.Value = 12.0;
+	counter.Samples = 6;
+
+	const std::vector<engine::core::Counter> counters{counter};
+
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Counters;
+	data.Counters = counters;
+	data.FrameMilliseconds = 8.0f;
+
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
 TEST_CASE("a share is a share of the work, not of the waiting", "[panels]") {
 	// A frame of 16.7 ms that spent 15 waiting for the display did 1.7 ms of
 	// work. A span costing 0.85 of that is half the work and five per cent of
