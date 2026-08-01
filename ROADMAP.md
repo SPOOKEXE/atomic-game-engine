@@ -23,6 +23,7 @@
 
 ## v0.2
 
+- [_] cli benchmarking (like smart tests but we benchmark all systems in the code instead to find bottlenecks). utilises tracy.
 - [_] hytale ECS setup. Universe = overarching simulation, worlds = each subarea to simulate. Multi-world with parallel processing, lock mechanism for global stores like player data and such in Universe, asynchronous and synchronous methods to not block scripts. plan ahead now.
 
 ## v0.3
