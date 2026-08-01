@@ -1,0 +1,78 @@
+# mono.server — module invariants
+
+The server program: a `server`-tier library and a thin main over it.
+
+## This binary contains no renderer
+
+Not "does not start one". Does not contain one. `mono.server` links no
+`client`-tier target, so `render`, `text`, `ui`, `input`, `audio` and `vfx` are
+absent from the link line.
+
+Three things follow, and all three are checkable rather than aspirational:
+
+- The `server` preset configures with no graphics stack at all.
+- The staged `server/` directory has no `shaders/` folder. A `shaders/` folder
+  appearing there is a link-line mistake anybody can see, with no tooling and
+  no graph query.
+- `mono.tools/architecture/expected_graph.json` records what this program
+  links, and the architecture test compares the real graph against it.
+
+If you need something that only exists on the client side, the answer is not to
+link it. It is either that the thing belongs in a `shared` module, or that the
+server does not actually need it.
+
+## Do not include a client header
+
+`mono.client/include/client/` is invisible here by construction. When something
+genuinely has to be shared between the two programs — components, most likely —
+it becomes a `shared` engine module, not an include across two programs.
+
+`server/Simulation.hpp` and `client/Demo.hpp` both define placeholder
+components on purpose. They are not duplication to be factored out; they are
+two programs each owning their own until `scene` at L7 owns both.
+
+## The tick is fixed, and the delta is not measured
+
+`Server::Run` feeds a constant delta derived from the tick rate, never the
+elapsed time. A tick is a function of its state and its inbox. Feed it real
+elapsed time and a recorded run stops replaying, every physics result becomes
+machine-dependent, and the divergence shows up somewhere far from the cause.
+
+If a tick overruns, the loop counts it and carries on. It does not simulate
+extra ticks to catch up — a server that tries to make up a lost second by
+running thirty ticks back to back falls further behind, and that spiral is much
+harder to diagnose than a dropped tick.
+
+## The world counts its own ticks
+
+`Server` keeps no tick counter. `RunSummary::Ticks`, the `--max-ticks` check and
+the log line all read `Store.Time().Tick`. A second tally on the host is a fact
+that can disagree with itself the first time one of the two is advanced inside a
+branch, and the disagreement surfaces as a summary nobody trusts.
+
+Same reason `WorldBounds` is a resource rather than a component. It was the
+same four bytes on every entity — a property of the world stored 4096 times,
+which the bounce loop then loaded per row.
+
+## Pacing is against an absolute schedule
+
+`nextTickAt += budget`, not `sleep(budget - spent)`. The second form
+accumulates the sleep's own overshoot, so the server drifts slower than its
+stated rate and nothing in the numbers says why.
+
+## The signal handler does one atomic store
+
+`Stop()` sets an atomic that the loop reads between ticks. Do not grow the
+handler. Logging, allocating or touching the world from a signal handler is
+undefined behaviour that works right up until it does not.
+
+## Not here yet
+
+`orchestration` at L12 — sessions, matchmaking, sharding, drain — is a `server`
+module and does not exist. Neither do `ledger`, `net`, `persistence` or
+`gamefile`. When they arrive they are engine modules that this program links,
+not code that grows inside `mono.server/`.
+
+This directory holds the program's own attachments: the main, the tick loop,
+world placement and the drain path. Anything reusable belongs under
+`mono.engine/`.

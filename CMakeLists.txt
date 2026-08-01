@@ -1,0 +1,133 @@
+# atomic-game-engine
+#
+# This file holds options, tiers and add_subdirectory. Nothing compiles here.
+# Where a file goes and what it may depend on is repo_layout.md; how a module is
+# declared is mono.build/MonoLibrary.cmake.
+
+cmake_minimum_required(VERSION 3.24)
+project(atomic
+	VERSION 0.1.0
+	DESCRIPTION "A 3D game engine for Roblox developers"
+	LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+option(MONO_BUILD_CLIENT "Build the client program"    ON)
+option(MONO_BUILD_SERVER "Build the server program"    ON)
+option(MONO_BUILD_TESTS  "Build the test binaries"     ON)
+option(MONO_TRACY        "Compile in the Tracy client" ON)
+option(MONO_WERROR       "Treat warnings as errors"    OFF)
+
+# Off by default, and the `release` preset is the one place it goes back on.
+#
+# First-party code is built at -O0 so that a profile measures what the engine
+# does rather than what the optimiser rescued. An algorithm that is only fast
+# at -O2 is a slow algorithm with a fast compiler, and the point of measuring
+# every day is to find that out on the day it lands.
+#
+# This applies to our targets only. Vendored SDL, flecs and Tracy keep the
+# build type's own flags, because unoptimised vendor code would dominate every
+# measurement with cost we are not going to change.
+option(MONO_OPTIMISE     "Optimise first-party targets" OFF)
+
+# On: compile shaders with the glslc built from mono.vendor/shaderc. Off: find
+# one on PATH.
+#
+# On by default because it removes glslc from the prerequisite list — a fresh
+# clone needs CMake, Ninja and a C++ compiler and nothing else — and because a
+# pinned compiler makes the SPIR-V reproducible. Two machines with different
+# Vulkan SDKs otherwise produce different bytes from the same source, which is
+# a difference nobody looks for.
+#
+# The cost is real: the first configure of a client preset builds glslang and
+# SPIRV-Tools. Turn it off for a faster first build if you have glslc already.
+option(MONO_VENDORED_GLSLC "Compile shaders with the vendored shaderc" ON)
+
+# Libraries are intermediate; programs are products. Each program stages into a
+# directory that is runnable as it stands. repo_layout.md §15.
+set(MONO_STAGE_ROOT "${CMAKE_BINARY_DIR}")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/lib")
+set(MONO_SHADER_STAGE "${CMAKE_BINARY_DIR}/shaderstage")
+
+# Applied by mono_add_library and mono_add_program, and therefore to first-party
+# targets only. target_compile_options land after CMAKE_CXX_FLAGS_<CONFIG> on the
+# command line, so the optimisation level chosen here wins over the build type's.
+if(MSVC)
+	set(MONO_COMPILE_OPTIONS /W4 /permissive-)
+	if(MONO_WERROR)
+		list(APPEND MONO_COMPILE_OPTIONS /WX)
+	endif()
+	if(NOT MONO_OPTIMISE)
+		list(APPEND MONO_COMPILE_OPTIONS /Od)
+	endif()
+else()
+	set(MONO_COMPILE_OPTIONS -Wall -Wextra -Wpedantic)
+	if(MONO_WERROR)
+		list(APPEND MONO_COMPILE_OPTIONS -Werror)
+	endif()
+	if(NOT MONO_OPTIMISE)
+		list(APPEND MONO_COMPILE_OPTIONS -O0 -fno-omit-frame-pointer)
+	endif()
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/mono.build")
+include(MonoVendor)
+
+# After MonoVendor, so that glslc_exe exists to be named. Only the presentation
+# modules own GLSL, so a server-only configure needs no shader compiler at all.
+#
+# MONO_GLSLC_DEPENDS is what makes a shader rebuild when the compiler it was
+# built with changes. Without it, bumping shaderc leaves every .spv stale.
+set(MONO_GLSLC_DEPENDS "")
+if(MONO_BUILD_CLIENT)
+	if(MONO_VENDORED_GLSLC)
+		set(MONO_GLSLC "$<TARGET_FILE:glslc_exe>")
+		set(MONO_GLSLC_DEPENDS glslc_exe)
+	else()
+		find_program(MONO_GLSLC glslc REQUIRED
+			DOC "GLSL to SPIR-V compiler, from shaderc")
+	endif()
+endif()
+include(MonoLibrary)
+
+if(MONO_BUILD_TESTS)
+	enable_testing()
+	add_subdirectory(mono.build/testmain)
+endif()
+
+# The engine is libraries and never a product. Programs are thin mains over
+# them, and each mono.X folder carries its own tests/ — there is no central
+# test directory.
+add_subdirectory(mono.engine)
+
+if(MONO_BUILD_CLIENT)
+	add_subdirectory(mono.client)
+endif()
+
+if(MONO_BUILD_SERVER)
+	add_subdirectory(mono.server)
+endif()
+
+# The test runner and the architecture check. Built always, not only under
+# MONO_BUILD_TESTS: the runner is a tool, and `just test` needs it to exist.
+add_subdirectory(mono.tools)
+
+# Every target now exists, so the tier rule can be checked across the whole
+# graph rather than only against what had been declared at each point.
+mono_check_all_tiers()
+
+# The checked-in expectation mono.tools/architecture/ compares against.
+mono_write_target_graph("${CMAKE_BINARY_DIR}/target-graph.json")
+
+message(STATUS "")
+message(STATUS "atomic ${PROJECT_VERSION}")
+message(STATUS "  stage      ${MONO_STAGE_ROOT}")
+message(STATUS "  programs   client=${MONO_BUILD_CLIENT} server=${MONO_BUILD_SERVER}")
+message(STATUS "  tracy      ${MONO_TRACY}")
+message(STATUS "  tests      ${MONO_BUILD_TESTS}")
+message(STATUS "  optimised  ${MONO_OPTIMISE}")
+message(STATUS "")

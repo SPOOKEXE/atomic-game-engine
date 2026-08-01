@@ -1,0 +1,112 @@
+; mono.vendor/ holds submodules and nothing else. A third-party source file
+; copied into the tree works once and then drifts invisibly.
+;
+; shallow = true keeps `just setup` to a single commit per vendor. The exact
+; commit is still pinned by the superproject, so a clone is reproducible.
+
+[submodule "mono.vendor/sdl"]
+	path = mono.vendor/sdl
+	url = https://github.com/libsdl-org/SDL.git
+	branch = release-3.2.x
+	shallow = true
+[submodule "mono.vendor/flecs"]
+	path = mono.vendor/flecs
+	url = https://github.com/SanderMertens/flecs.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/glm"]
+	path = mono.vendor/glm
+	url = https://github.com/g-truc/glm.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/spdlog"]
+	path = mono.vendor/spdlog
+	url = https://github.com/gabime/spdlog.git
+	branch = v1.x
+	shallow = true
+[submodule "mono.vendor/tracy"]
+	path = mono.vendor/tracy
+	url = https://github.com/wolfpld/tracy.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/catch2"]
+	path = mono.vendor/catch2
+	url = https://github.com/catchorg/Catch2.git
+	branch = devel
+	shallow = true
+
+; shaderc is the one vendor `just setup` cannot finish on its own. It pins
+; glslang, SPIRV-Tools and SPIRV-Headers in its own DEPS file rather than as
+; submodules, so `git submodule update --recursive` clones shaderc and leaves
+; third_party/ empty. The Justfile runs utils/git-sync-deps for that, and
+; MonoVendor.cmake stops with instructions if it has not been run.
+[submodule "mono.vendor/shaderc"]
+	path = mono.vendor/shaderc
+	url = https://github.com/google/shaderc.git
+	branch = main
+	shallow = true
+
+; The docking branch, not master. repo_layout.md §8 has mono.studio doing
+; "editor shell · docking · inspectors", and master has neither docking nor
+; viewports. It is a long-lived feature branch, which is fine — the superproject
+; pins the commit either way.
+[submodule "mono.vendor/imgui"]
+	path = mono.vendor/imgui
+	url = https://github.com/ocornut/imgui.git
+	branch = docking
+	shallow = true
+
+; Standalone asio, not Boost.Asio. The headers are under asio/include and there
+; is no CMakeLists — MonoVendor.cmake declares the target.
+[submodule "mono.vendor/asio"]
+	path = mono.vendor/asio
+	url = https://github.com/chriskohlhoff/asio.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/doxygen-awesome-css"]
+	path = mono.vendor/doxygen-awesome-css
+	url = https://github.com/jothepro/doxygen-awesome-css.git
+	branch = main
+; Crypto++ is two submodules, and that is the whole story of this entry.
+;
+; weidai11/cryptopp ships GNUmakefile and GNUmakefile-cross and no CMakeLists at
+; all — not an awkward one, none. That is normally the cue to declare the target
+; in MonoVendor.cmake the way asio and imgui are, but those are one INTERFACE
+; library and six source files. Crypto++ is 202 translation units whose compile
+; flags are chosen per file and per ISA — rijndael_simd.cpp wants -msse4.1
+; -maes, gcm_simd.cpp -mssse3 -mpclmul, chacha_avx.cpp -mavx2, with separate
+; matrices again for ARMv7 NEON, ARMv8 crypto extensions and POWER8 — and whose
+; first three objects must link in the order cryptlib, cpu, integer for static
+; initialisation to be correct (GNUmakefile:1187). Upstream picks the flags by
+; compiling probe programs from TestPrograms/.
+;
+; So the build system is vendored rather than reimplemented. Hand-porting it
+; would be ~250 lines of our build logic shadowing their makefile, drifting
+; silently at the first bump — the same failure mode AGENTS.md forbids for
+; source files, for the same reason.
+[submodule "mono.vendor/cryptopp"]
+	path = mono.vendor/cryptopp
+	url = https://github.com/weidai11/cryptopp.git
+	branch = master
+	shallow = true
+
+; The wrapper the Crypto++ wiki points at. BSD-3-Clause, so a second notice.
+;
+; MonoVendor.cmake points its CRYPTOPP_SOURCES at the sibling submodule above.
+; That setting is what stops it running FetchContent against github during
+; configure, and dropping it would make a build need the network and stop being
+; reproducible — it is the one line in the block that is load-bearing.
+;
+; The two move together. cryptopp-cmake carries an explicit source list in
+; cryptopp/sources.cmake rather than a glob, so a Crypto++ bump that adds or
+; renames a .cpp needs the matching cryptopp-cmake commit or the library quietly
+; loses a file. Bump both or neither, and re-run the file-list comparison
+; recorded in THIRD_PARTY_NOTICES.md.
+;
+; master on both, because neither publishes a release branch — the same
+; situation as flecs and glm above, and the superproject pins the SHA regardless.
+[submodule "mono.vendor/cryptopp-cmake"]
+	path = mono.vendor/cryptopp-cmake
+	url = https://github.com/abdes/cryptopp-cmake.git
+	branch = master
+	shallow = true

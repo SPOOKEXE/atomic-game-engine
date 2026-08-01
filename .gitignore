@@ -1,0 +1,23 @@
+# Every derived artifact in the repository lives under .cache/, so one entry
+# covers build trees, the shader stage and the test-runner cache.
+.cache/
+
+# Personal Claude settings. .claude/skills/ and .claude/commands/ are checked
+# in on purpose — everyone gets the same ones. Anything ending .local is yours.
+.claude/settings.local.json
+.claude/*.local.json
+
+# Editor and tooling
+compile_commands.json
+.vscode/
+.idea/
+.cache-clangd/
+*.swp
+.DS_Store
+
+# Nothing outside mono.vendor/ should ever be a third-party source tree.
+build/
+out/
+__pycache__/
+*.pyc
+.opencode/
