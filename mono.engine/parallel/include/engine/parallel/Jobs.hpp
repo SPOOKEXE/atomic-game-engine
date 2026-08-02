@@ -13,6 +13,7 @@
 // @tier L2 · shared
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 
 namespace engine::parallel {
@@ -21,6 +22,29 @@ namespace engine::parallel {
 	//
 	// The pool is process-wide and admits only one batch at a time. There are no
 	// handles: every range finishes before For returns.
+	// What one dispatch of `Jobs::For` cost.
+	//
+	// **Busy time is not wall time and the difference is the point.** Eight
+	// workers doing a millisecond each in one millisecond of wall clock is
+	// eight milliseconds of `Busy` and one of `Wall`; the ratio is how much of
+	// the machine the batch actually used. A profiler that only had the wall
+	// figure could not tell that batch from one worker doing nothing seven
+	// times.
+	//
+	// @since v0.2
+	struct BatchTiming {
+		// Work done, summed across every thread that took a range.
+		float BusyMilliseconds = 0.0f;
+
+		// Wall time the dispatch took, measured by the thread that dispatched.
+		float WallMilliseconds = 0.0f;
+
+		// How many threads took at least one range. One means it ran inline —
+		// too little work to hand over, no workers, or another dispatch already
+		// held the pool.
+		uint32_t Participants = 0;
+	};
+
 	class Jobs {
 	  public:
 		// Starts the process-wide worker pool if it is not already running.
@@ -83,6 +107,23 @@ namespace engine::parallel {
 		// @tick
 		// @threadsafe
 		static void For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body);
+
+		// What the calling thread's most recent `For` cost.
+		//
+		// **This is how parallel work reaches the frame graph.** A worker
+		// cannot record its own span — `FrameGraph::Push` refuses anything off
+		// the frame's owning thread, and locking there would put contention on
+		// every span of every frame — so the workers measure themselves, the
+		// dispatch sums what they reported, and the caller hands the number to
+		// `FrameGraph::Report`. The graph plots the latest timing received
+		// rather than a clock reading that belongs to another thread.
+		//
+		// Per calling thread, so two threads dispatching at once each read
+		// their own. Reset by every `For`, including the ones that ran inline.
+		//
+		// @return The last dispatch's timing, or zeroes before the first.
+		// @threadsafe
+		static BatchTiming LastBatch();
 
 		// Default pooled range size for cheap per-index work.
 		//

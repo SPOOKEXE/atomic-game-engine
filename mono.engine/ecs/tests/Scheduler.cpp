@@ -5,7 +5,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.scheduler")
@@ -156,9 +158,58 @@ TEST_CASE("systems appear in the frame graph without their own instrumentation",
 	scheduler.Tick(store, 0.016f);
 	FrameGraph::EndFrame();
 
+	// The scheduler, a span per phase, and the system inside its own. Four
+	// phases run even when only one holds a system: an empty phase costing
+	// nothing is worth seeing, because a phase that suddenly costs something is
+	// how a bottleneck announces itself.
 	const auto &spans = FrameGraph::Spans();
-	REQUIRE(spans.size() == 2);
-	REQUIRE(spans[0].Name == "Scheduler::RunPhases");
-	REQUIRE(spans[1].Name == "uninstrumented");
-	REQUIRE(spans[1].Depth == 1);
+	REQUIRE(spans.size() == 6);
+
+	REQUIRE(spans[0].Name == "ecs.systems");
+	REQUIRE(spans[0].Depth == 0);
+	REQUIRE(spans[0].Category == engine::core::ProfileCategory::ECS);
+
+	// Phases in declaration order, each a child of the scheduler.
+	REQUIRE(spans[1].Name == "pre-simulation");
+	REQUIRE(spans[2].Name == "simulation");
+	REQUIRE(spans[4].Name == "post-simulation");
+	REQUIRE(spans[5].Name == "pre-render");
+	for (size_t index : {1u, 2u, 4u, 5u}) {
+		REQUIRE(spans[index].Depth == 1);
+		REQUIRE(spans[index].Category == engine::core::ProfileCategory::ECS);
+	}
+
+	// The system sits under its phase rather than under the scheduler, which is
+	// what makes "which phase" answerable before "which system".
+	REQUIRE(spans[3].Name == "uninstrumented");
+	REQUIRE(spans[3].Depth == 2);
+	REQUIRE(spans[3].Category == engine::core::ProfileCategory::ECS);
+}
+
+TEST_CASE("every system's time is ECS time", "[scheduler]") {
+	// Each engine and game system runs through the scheduler, so a slow system
+	// is ECS time and the category bar has to say so. Before this the same work
+	// was filed under `Simulation` alongside the driver's own machinery, and
+	// the two could not be told apart.
+	Store store("test");
+	Scheduler scheduler;
+	scheduler.Add("busy", Phase::Simulation, [](Store &) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	});
+
+	struct Collecting {
+		Collecting() {
+			FrameGraph::SetEnabled(true);
+		}
+		~Collecting() {
+			FrameGraph::SetEnabled(false);
+		}
+	} collecting;
+
+	FrameGraph::BeginFrame();
+	scheduler.Tick(store, 0.016f);
+	FrameGraph::EndFrame();
+
+	REQUIRE(FrameGraph::CategoryMilliseconds(engine::core::ProfileCategory::ECS) >= 1.0f);
+	REQUIRE(FrameGraph::CategoryMilliseconds(engine::core::ProfileCategory::Simulation) == 0.0f);
 }

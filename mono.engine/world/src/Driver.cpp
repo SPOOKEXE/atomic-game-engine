@@ -119,6 +119,21 @@ namespace engine::world {
 
 		// --- 5. restart what died ---
 		Stats.Restarted = Supervisor_.Poll(now);
+
+		// --- what the hosts said their tick cost ---
+		//
+		// **A driver cannot time another address space**, so it plots the
+		// latest figure each host measured and sent. That is a barrier behind,
+		// which is the price of the only honest number available — and being a
+		// barrier behind about a host beats the alternative, which is a frame
+		// graph on which a process holding half the universe does not appear.
+		for (const HostStatus &host : Supervisor_.Hosts()) {
+			if (host.Milliseconds > 0.0f) {
+				core::FrameGraph::ReportNamed(
+					"host", host.Name.Text(), core::ProfileCategory::ECS, host.Milliseconds
+				);
+			}
+		}
 	}
 
 	WorldStatus Driver::Present(WorldId id, float frameSeconds, float alpha) {

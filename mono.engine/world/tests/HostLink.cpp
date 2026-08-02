@@ -469,3 +469,26 @@ TEST_CASE("a link carries whatever a fuzzer puts through it", "[world][fuzz]") {
 		}
 	}
 }
+
+TEST_CASE("a heartbeat carries what the host's tick cost", "[world]") {
+	// A driver cannot time another address space, so the only honest figure is
+	// the one the host measured and sent. Without it a process holding half the
+	// universe does not appear on the frame graph at all.
+	Supervised pair;
+
+	REQUIRE(pair.Host->Heartbeat(12, 4.5f));
+	REQUIRE(pair.Driver->Pump(1.0) == 1);
+
+	const auto status = pair.Driver->StatusOf(Name("host.one"));
+	REQUIRE(status.Tick == 12);
+	REQUIRE(status.Milliseconds == 4.5f);
+}
+
+TEST_CASE("a host that has never reported a cost reports zero, not a guess", "[world]") {
+	Supervised pair;
+
+	REQUIRE(pair.Host->Heartbeat(1));
+	REQUIRE(pair.Driver->Pump(1.0) == 1);
+
+	REQUIRE(pair.Driver->StatusOf(Name("host.one")).Milliseconds == 0.0f);
+}

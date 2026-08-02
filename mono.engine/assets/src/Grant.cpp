@@ -1,3 +1,5 @@
+#include "SecureWipe.hpp"
+
 #include <engine/assets/Grant.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -16,10 +18,6 @@ namespace engine::assets {
 		// the 32-bit count could ask for four billion, and the gap between those
 		// two numbers is the whole attack.
 		constexpr uint32_t MAXIMUM_BUNDLES = 65'536;
-
-		void Wipe(std::span<uint8_t> bytes) {
-			CryptoPP::SecureWipeBuffer(bytes.data(), bytes.size());
-		}
 
 		// The bytes the MAC is taken over: everything in the scope, in one
 		// arrangement, with the magic and version inside rather than beside.
@@ -74,18 +72,18 @@ namespace engine::assets {
 	}
 
 	GrantKey::~GrantKey() {
-		Wipe(Secret);
+		SecureWipe(Secret);
 	}
 
 	GrantKey::GrantKey(GrantKey &&other) noexcept : Secret(other.Secret) {
-		Wipe(other.Secret);
+		SecureWipe(other.Secret);
 	}
 
 	GrantKey &GrantKey::operator=(GrantKey &&other) noexcept {
 		if (this != &other) {
-			Wipe(Secret);
+			SecureWipe(Secret);
 			Secret = other.Secret;
-			Wipe(other.Secret);
+			SecureWipe(other.Secret);
 		}
 		return *this;
 	}

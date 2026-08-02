@@ -1,3 +1,4 @@
+#include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Jobs.hpp>
 
@@ -27,7 +28,24 @@ namespace engine::parallel {
 
 			std::mutex FailureGuard;
 			std::exception_ptr Failure;
+
+			// Summed across every thread that took a range, so the dispatcher
+			// can hand one number to the frame graph rather than the graph
+			// trying to time threads it does not own.
+			std::atomic<uint64_t> BusyNanoseconds{0};
+			std::atomic<uint32_t> Participants{0};
 		};
+
+		// The calling thread's most recent dispatch. Per thread, because two
+		// threads may dispatch at once and each wants its own answer.
+		thread_local BatchTiming LastTiming;
+
+		// A dispatch that ran on the calling thread: one participant, and busy
+		// equal to wall because there was nowhere else for the time to go.
+		BatchTiming Inline(uint64_t nanoseconds) {
+			const auto milliseconds = static_cast<float>(static_cast<double>(nanoseconds) / 1e6);
+			return BatchTiming{milliseconds, milliseconds, 1};
+		}
 
 		struct Pool {
 			std::vector<std::thread> Workers;
@@ -62,13 +80,22 @@ namespace engine::parallel {
 		// Claims ranges until there are none left. Run by the workers and by
 		// the calling thread, which is why the caller never idles.
 		void Drain(Batch &batch) {
+			uint64_t busy = 0;
+			bool took = false;
+
 			for (;;) {
 				const size_t begin = batch.Next.fetch_add(batch.Grain, std::memory_order_relaxed);
 				if (begin >= batch.Count) {
-					return;
+					break;
 				}
 
 				const size_t end = std::min(begin + batch.Grain, batch.Count);
+				took = true;
+
+				// Around the body only. The claim, the wait and the bookkeeping
+				// are the dispatch's cost and belong to the thread that paid
+				// them; what a worker reports is the work.
+				const uint64_t started = core::Clock::Nanoseconds();
 				try {
 					(*batch.Body)(begin, end);
 				} catch (...) {
@@ -77,6 +104,15 @@ namespace engine::parallel {
 						batch.Failure = std::current_exception();
 					}
 				}
+				busy += core::Clock::Nanoseconds() - started;
+			}
+
+			// Once per participant rather than once per range: a relaxed add
+			// per range would be a contended cache line in the innermost loop
+			// of the job system, which is the one place that cannot afford one.
+			if (took) {
+				batch.BusyNanoseconds.fetch_add(busy, std::memory_order_relaxed);
+				batch.Participants.fetch_add(1, std::memory_order_relaxed);
 			}
 		}
 
@@ -174,7 +210,9 @@ namespace engine::parallel {
 			workers = pool.Workers.size();
 		}
 		if (workers == 0 || count <= grain) {
+			const uint64_t started = core::Clock::Nanoseconds();
 			body(0, count);
+			LastTiming = Inline(core::Clock::Nanoseconds() - started);
 			return;
 		}
 
@@ -191,7 +229,9 @@ namespace engine::parallel {
 		// A world tick is a range in somebody else's batch once `world` exists,
 		// which is what makes this the ordinary case rather than the odd one.
 		if (pool.Claimed.exchange(true, std::memory_order_acquire)) {
+			const uint64_t started = core::Clock::Nanoseconds();
 			body(0, count);
+			LastTiming = Inline(core::Clock::Nanoseconds() - started);
 			return;
 		}
 
@@ -203,6 +243,8 @@ namespace engine::parallel {
 				Owner.Claimed.store(false, std::memory_order_release);
 			}
 		} claim{pool};
+
+		const uint64_t dispatched = core::Clock::Nanoseconds();
 
 		Batch batch;
 		batch.Body = &body;
@@ -225,8 +267,19 @@ namespace engine::parallel {
 			pool.Current = nullptr;
 		}
 
+		LastTiming.BusyMilliseconds = static_cast<float>(
+			static_cast<double>(batch.BusyNanoseconds.load(std::memory_order_relaxed)) / 1e6
+		);
+		LastTiming.WallMilliseconds =
+			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - dispatched) / 1e6);
+		LastTiming.Participants = batch.Participants.load(std::memory_order_relaxed);
+
 		if (batch.Failure) {
 			std::rethrow_exception(batch.Failure);
 		}
+	}
+
+	BatchTiming Jobs::LastBatch() {
+		return LastTiming;
 	}
 }

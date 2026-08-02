@@ -1,10 +1,17 @@
 #pragma once
 
-// The storage behind one Store, and the query cache over it.
+// The storage behind one Store, the query cache over it, and the primitives
+// that move rows around inside it.
 //
 // Private, because it is the layout. `Store`'s public header promises what a
 // world can do; this is how, and it is expected to change — see `ecs/AGENTS.md`
 // on everything public here being a migration cost.
+//
+// The primitives at the bottom are free functions rather than members of
+// anything, because `Store` is not the only caller: the instance façade in
+// `Instances.hpp` and the snapshot codec in `Snapshot.hpp` are built from the
+// same handful of operations, and a second copy of "move this row" is the one
+// kind of duplication this layout cannot survive.
 //
 // @tier L3 · shared
 
@@ -179,4 +186,125 @@ namespace engine::ecs {
 		// a component and move the rows out from under an iteration.
 		std::vector<Entity> Firing;
 	};
+
+	// None of what follows checks thread affinity. That belongs at the call the
+	// caller actually made — `Store::DestroyInstance` is one abort site, not one
+	// per row it touches — and a check inside a primitive would be able to fire
+	// from the middle of a half-applied structural change.
+
+	// The table for a set, creating it when this world has not needed one.
+	//
+	// @param state  The world to look in.
+	// @param wanted The set the caller is after, before change tracking has had
+	//               its say.
+	// @return The table index, valid until the world is cleared.
+	uint32_t TableFor(StoreState &state, const ComponentSet &wanted);
+
+	// Moves an entity's row into another table and fixes up whoever the removal
+	// displaced.
+	//
+	// @param state   The world holding both tables.
+	// @param index   The directory index of the entity to move.
+	// @param from    Where its row is now, or a default location when it has no
+	//                row yet.
+	// @param toTable The table to move it into.
+	void Relocate(StoreState &state, uint32_t index, EntityLocation from, uint32_t toTable);
+
+	// Drops an entity's row, leaving the directory alone.
+	//
+	// @param state The world holding the row.
+	// @param from  The row to drop. A location with no archetype does nothing.
+	void Vacate(StoreState &state, EntityLocation from);
+
+	// Takes a directory slot.
+	//
+	// @param state The world to allocate in.
+	// @return A live handle carrying no components and occupying no row.
+	Entity CreateEntity(StoreState &state);
+
+	// Frees an entity's row, its name and its directory slot.
+	//
+	// Deferred when the world is collecting commands.
+	//
+	// @param state  The world to remove it from.
+	// @param entity The generation to destroy. A stale handle does nothing.
+	void DestroyEntity(StoreState &state, Entity entity);
+
+	// Reports whether a handle names a live entity at the generation it was
+	// issued with.
+	//
+	// @param state  The world to ask.
+	// @param entity The handle to inspect.
+	// @return `false` for NULL_ENTITY, destroyed entities and stale generations.
+	bool IsEntityAlive(const StoreState &state, Entity entity);
+
+	// Adds or replaces one component value, moving the row when the component
+	// is new to it.
+	//
+	// Deferred when the world is collecting commands, in which case the value
+	// is copied and the copy owned by the command.
+	//
+	// @param state  The world to write into.
+	// @param entity The entity that owns the component.
+	// @param id     The component to write.
+	// @param value  The value to copy in.
+	void SetComponent(StoreState &state, Entity entity, ComponentId id, const void *value);
+
+	// Reports whether an entity carries a component.
+	//
+	// @param state  The world to ask.
+	// @param entity The entity to inspect.
+	// @param id     The component to look for.
+	// @return `true` when the component is present.
+	bool HasComponent(const StoreState &state, Entity entity, ComponentId id);
+
+	// Reads one component value.
+	//
+	// @param state  The world to read from.
+	// @param entity The entity that owns the component.
+	// @param id     The component to read.
+	// @return A pointer into the row, or `nullptr` when the component is
+	//         absent. A component with no data reports its column instead, so
+	//         that present and absent stay distinguishable.
+	const void *GetComponent(const StoreState &state, Entity entity, ComponentId id);
+
+	// Reads one component value for writing, and records the write.
+	//
+	// @param state  The world to read from.
+	// @param entity The entity that owns the component.
+	// @param id     The component to read.
+	// @return A pointer into the row, or `nullptr` when the component is absent.
+	void *GetComponentMutable(StoreState &state, Entity entity, ComponentId id);
+
+	// Removes one component, moving the row to the reduced set.
+	//
+	// Deferred when the world is collecting commands.
+	//
+	// @param state  The world to write into.
+	// @param entity The entity to take it from.
+	// @param id     The component to remove.
+	void RemoveComponent(StoreState &state, Entity entity, ComponentId id);
+
+	// Adds or replaces one world-scoped value.
+	//
+	// @param state The world to write into.
+	// @param id    The resource type.
+	// @param value The value to copy in.
+	void SetResourceValue(StoreState &state, ComponentId id, const void *value);
+
+	// Reads one world-scoped value.
+	//
+	// @param state The world to read from.
+	// @param id    The resource type.
+	// @return A pointer to the value, or `nullptr` when unset.
+	const void *GetResourceValue(const StoreState &state, ComponentId id);
+
+	// Empties a world and gives it a fresh clock.
+	//
+	// Signals survive. A listener is a registration made by whoever owns the
+	// world rather than part of its contents, and dropping them here would
+	// disconnect every consumer at the moment a snapshot was loaded.
+	//
+	// @param state The world to empty.
+	void ClearWorld(StoreState &state);
 }

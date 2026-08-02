@@ -435,9 +435,7 @@ namespace engine::world {
 		// ticks does not lose deliveries — it is the caller's job to take them.
 		//
 		// @return The pending deliveries, in barrier order.
-		std::span<const RemoteDelivery> Outbound() const {
-			return Pending_;
-		}
+		std::span<const RemoteDelivery> Outbound() const;
 
 		// Takes the pending remote deliveries, leaving none.
 		//
@@ -469,10 +467,6 @@ namespace engine::world {
 
 		void Apply(const Control &control);
 		void DrainControls();
-		void RouteBuses();
-		void DeliverInboxes();
-		void ApplyEnvelope(World &sender, const Envelope &envelope, std::vector<Delivery> *fanout);
-		void Deliver(WorldId id, Delivery delivery);
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
 		World *Reach(WorldId id);
 		const World *Reach(WorldId id) const;
@@ -496,32 +490,16 @@ namespace engine::world {
 
 		std::vector<Control> Pending;
 
-		// Deliveries for worlds that live elsewhere, awaiting the driver.
-		std::vector<RemoteDelivery> Pending_;
-
-		// What hosts handed over, awaiting the next barrier.
-		std::vector<Envelope> Ingested;
-
 		// Reused between driver ticks rather than rebuilt, because the active
 		// list is walked every frame and most frames it is nearly the same.
 		std::vector<World *> ActiveList;
 		std::vector<int> OwedList;
 
-		// The bus backends. Held by pointer so the header does not have to
-		// describe them — a DataStore's table is nobody else's business.
-		std::unique_ptr<struct Buses> BusState;
-
-		// Deliveries built during one barrier, keyed by destination world.
-		// Reused between barriers so routing allocates nothing in a steady
-		// universe.
-		std::vector<std::vector<Delivery>> Fanout;
-
-		// What the last barrier applied, and what the next one should apply
-		// instead of collecting. Kept across ticks so a steady universe
-		// allocates nothing for either.
-		std::vector<Envelope> Applied;
-		std::vector<Envelope> Injected;
-		bool Replaying = false;
+		// The bus backends and the barrier that applies traffic to them. Held
+		// by pointer so the header does not have to describe either — a
+		// DataStore's table is nobody else's business, and neither is the order
+		// the driver puts a tick's envelopes in.
+		std::unique_ptr<class BusRouter> Router;
 
 		std::thread::id Driver;
 		bool Ticking = false;

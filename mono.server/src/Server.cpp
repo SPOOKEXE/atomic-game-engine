@@ -500,7 +500,13 @@ namespace server {
 					// per-barrier one. A driver watching this for a host that
 					// is wedged rather than dead needs a number that only ever
 					// goes up.
-					Link->Heartbeat(Worlds().StatisticsOf(PrimaryWorld).Ticks);
+					// The tick cost travels with the count. A driver cannot
+					// time another address space, so what it graphs for this
+					// host is the number measured here and sent.
+					Link->Heartbeat(
+						Worlds().StatisticsOf(PrimaryWorld).Ticks,
+						Worlds().StatisticsOf(PrimaryWorld).LastTickMilliseconds
+					);
 				}
 			}
 

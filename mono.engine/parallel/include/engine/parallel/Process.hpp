@@ -26,7 +26,7 @@
 //
 // @tier L2 · shared
 
-#include <engine/parallel/Channel.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 
 #include <cstdint>
 #include <filesystem>

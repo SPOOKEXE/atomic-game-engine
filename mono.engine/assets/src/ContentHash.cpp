@@ -1,3 +1,5 @@
+#include "Hex.hpp"
+
 #include <engine/assets/ContentHash.hpp>
 
 #include <algorithm>
@@ -6,48 +8,18 @@
 
 namespace engine::assets {
 
-	namespace {
-		constexpr char HEX_DIGITS[] = "0123456789abcdef";
-
-		// -1 for anything that is not a lowercase hex digit. Uppercase is
-		// refused along with everything else: one spelling per address.
-		constexpr int HexValue(char character) {
-			if (character >= '0' && character <= '9') {
-				return character - '0';
-			}
-			if (character >= 'a' && character <= 'f') {
-				return character - 'a' + 10;
-			}
-			return -1;
-		}
-	}
-
 	bool ContentHash::IsZero() const {
 		return std::all_of(Digest.begin(), Digest.end(), [](uint8_t byte) { return byte == 0; });
 	}
 
 	std::string ContentHash::ToHex() const {
-		std::string text(BYTES * 2, '\0');
-		for (size_t index = 0; index < BYTES; ++index) {
-			text[index * 2] = HEX_DIGITS[Digest[index] >> 4];
-			text[index * 2 + 1] = HEX_DIGITS[Digest[index] & 0x0F];
-		}
-		return text;
+		return ToHexString(Digest);
 	}
 
 	std::optional<ContentHash> ContentHash::FromHex(std::string_view text) {
-		if (text.size() != BYTES * 2) {
-			return std::nullopt;
-		}
-
 		ContentHash hash;
-		for (size_t index = 0; index < BYTES; ++index) {
-			const int high = HexValue(text[index * 2]);
-			const int low = HexValue(text[index * 2 + 1]);
-			if (high < 0 || low < 0) {
-				return std::nullopt;
-			}
-			hash.Digest[index] = static_cast<uint8_t>((high << 4) | low);
+		if (!FromHexString(text, hash.Digest)) {
+			return std::nullopt;
 		}
 		return hash;
 	}

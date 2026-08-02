@@ -1,3 +1,5 @@
+#include "InheritedSlot.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Process.hpp>
 
@@ -112,10 +114,6 @@ namespace engine::parallel {
 			argv.push_back(argument.data());
 		}
 		argv.push_back(nullptr);
-
-		// The slot a child finds its channel at. Kept in step with `INHERITED`
-		// in the platform channel, and there is one caller of each.
-		constexpr int INHERITED = 3;
 
 		posix_spawn_file_actions_t actions;
 		posix_spawn_file_actions_t *actionsPointer = nullptr;

@@ -139,6 +139,14 @@ namespace engine::world {
 		// link is being serviced, and this says the simulation is.
 		uint64_t Tick = 0;
 
+		// What the sender's last tick cost, in milliseconds.
+		//
+		// **A driver cannot time a host.** The work happened in another address
+		// space, and the only honest number is the one the host measured and
+		// sent — which is what `FrameGraph::Report` exists to plot. A driver
+		// that timed the link instead would be graphing its own poll interval.
+		float Milliseconds = 0.0f;
+
 		// The envelopes a `Traffic` frame carries.
 		std::vector<Envelope> Traffic;
 
@@ -195,9 +203,12 @@ namespace engine::world {
 
 		// Sends a heartbeat.
 		//
-		// @param tick The sender's current tick count.
+		// @param tick         The sender's current tick count.
+		// @param milliseconds What its last tick cost. The driver plots this
+		//                     rather than timing the link, which would graph
+		//                     its own poll interval.
 		// @return `false` when it could not be sent.
-		bool Heartbeat(uint64_t tick);
+		bool Heartbeat(uint64_t tick, float milliseconds = 0.0f);
 
 		// Sends whatever a set of worlds posted.
 		//

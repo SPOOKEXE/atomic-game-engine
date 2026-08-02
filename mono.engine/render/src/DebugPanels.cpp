@@ -1,5 +1,6 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/DebugText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -10,176 +11,6 @@
 #include <vector>
 
 namespace engine::render {
-
-	// ---------------------------------------------------------------------
-	// FrameStatistics
-	// ---------------------------------------------------------------------
-
-	void FrameStatistics::Record(double now, float deltaSeconds) {
-		// A zero delta is the first frame, or a clock that did not move. Either
-		// way it would divide to infinity.
-		if (deltaSeconds <= 0.0f) {
-			return;
-		}
-
-		if (Count == Ring.size()) {
-			// Full. Doubling and re-linearising, so the oldest sample is at
-			// index zero again and the wrap arithmetic stays simple. How many
-			// samples twenty seconds holds depends on the frame rate, so the
-			// size cannot be picked up front — but it settles after a second or
-			// two and never grows again.
-			std::vector<Sample> grown(Ring.empty() ? 256 : Ring.size() * 2);
-			for (size_t offset = 0; offset < Count; offset++) {
-				grown[offset] = Ring[IndexOf(offset)];
-			}
-			Ring.swap(grown);
-			Head = 0;
-		}
-
-		// Before the sample lands, while the one it follows is still the newest.
-		if (Count > 0) {
-			ChangeSum += std::abs(deltaSeconds - Ring[IndexOf(Count - 1)].Delta);
-		}
-
-		Ring[(Head + Count) % Ring.size()] = Sample{now, deltaSeconds};
-		Count++;
-		DeltaSum += deltaSeconds;
-
-		if (Count == 1) {
-			Worst = deltaSeconds;
-			Best = deltaSeconds;
-			ExtremesStale = false;
-		} else {
-			Worst = std::max(Worst, deltaSeconds);
-			Best = std::min(Best, deltaSeconds);
-		}
-
-		while (Count > 0 && now - Ring[Head].Time > WINDOW_SECONDS) {
-			const float leaving = Ring[Head].Delta;
-
-			// The pair this sample formed with the one after it goes with it.
-			if (Count >= 2) {
-				ChangeSum -= std::abs(Ring[IndexOf(1)].Delta - leaving);
-			}
-			DeltaSum -= leaving;
-
-			// It may have been the best or the worst frame in the window, and
-			// there is no way to know what the next one is without looking.
-			if (leaving == Worst || leaving == Best) {
-				ExtremesStale = true;
-			}
-
-			Head = (Head + 1) % Ring.size();
-			Count--;
-		}
-
-		if (Count == 0) {
-			DeltaSum = 0.0;
-			ChangeSum = 0.0;
-			Worst = 0.0f;
-			Best = 0.0f;
-			ExtremesStale = false;
-		}
-	}
-
-	void FrameStatistics::Rescan() const {
-		ExtremesStale = false;
-
-		DeltaSum = 0.0;
-		ChangeSum = 0.0;
-		if (Count == 0) {
-			Worst = 0.0f;
-			Best = 0.0f;
-			return;
-		}
-
-		Worst = Ring[Head].Delta;
-		Best = Ring[Head].Delta;
-
-		float previous = Ring[Head].Delta;
-		for (size_t offset = 0; offset < Count; offset++) {
-			const float delta = Ring[IndexOf(offset)].Delta;
-			Worst = std::max(Worst, delta);
-			Best = std::min(Best, delta);
-			DeltaSum += delta;
-			if (offset > 0) {
-				ChangeSum += std::abs(delta - previous);
-			}
-			previous = delta;
-		}
-	}
-
-	void FrameStatistics::Clear() {
-		// The storage is kept. It is the size the frame rate needs it to be, and
-		// closing and reopening the panel should not pay to learn that again.
-		Head = 0;
-		Count = 0;
-		DeltaSum = 0.0;
-		ChangeSum = 0.0;
-		Worst = 0.0f;
-		Best = 0.0f;
-		ExtremesStale = false;
-	}
-
-	bool FrameStatistics::HasSamples() const {
-		return Count > 0;
-	}
-
-	FrameSummary FrameStatistics::Summarise() const {
-		FrameSummary summary;
-		if (Count == 0) {
-			return summary;
-		}
-
-		// Constant time on almost every frame. The walk happens only when the
-		// best or worst frame in the window has just aged out of it.
-		if (ExtremesStale) {
-			Rescan();
-		}
-
-		const float latest = Ring[IndexOf(Count - 1)].Delta;
-		summary.Current = 1.0f / latest;
-		summary.CurrentMilliseconds = latest * 1000.0f;
-
-		// The slowest frame is the lowest FPS, so Minimum reports the *largest*
-		// delta. Getting these the wrong way round makes the panel say the
-		// opposite of the truth, which is worse than not having it.
-		summary.Minimum = 1.0f / Worst;
-		summary.Maximum = 1.0f / Best;
-		// The mean of the deltas, then inverted. Averaging the per-frame FPS
-		// values instead would weight the fast frames far too heavily.
-		summary.Average = static_cast<float>(static_cast<double>(Count) / DeltaSum);
-		summary.Jitter =
-			Count < 2 ? 0.0f : static_cast<float>(ChangeSum / static_cast<double>(Count - 1)) * 1000.0f;
-
-		return summary;
-	}
-
-	// Each of these is the whole window for one number. They are here for a
-	// caller that wants exactly one; anything wanting several wants Summarise.
-	float FrameStatistics::Current() const {
-		return Summarise().Current;
-	}
-
-	float FrameStatistics::CurrentMilliseconds() const {
-		return Summarise().CurrentMilliseconds;
-	}
-
-	float FrameStatistics::Minimum() const {
-		return Summarise().Minimum;
-	}
-
-	float FrameStatistics::Maximum() const {
-		return Summarise().Maximum;
-	}
-
-	float FrameStatistics::Average() const {
-		return Summarise().Average;
-	}
-
-	float FrameStatistics::Jitter() const {
-		return Summarise().Jitter;
-	}
 
 	// ---------------------------------------------------------------------
 	// Drawing
@@ -221,12 +52,39 @@ namespace engine::render {
 		constexpr std::array<Colour, static_cast<size_t>(core::ProfileCategory::Count)> CATEGORY_COLOURS{
 			Colour{108, 142, 216}, // engine
 			Colour{96, 190, 130},  // render
+
+			// Cyan, and deliberately the most legible colour here after the
+			// warnings. Every engine and game system runs through the ECS, so
+			// this is the bar a reader is looking for — and it has to be
+			// unmistakable against both the engine blue above it and the render
+			// green beside it.
+			//
+			// **Positional.** This array is indexed by `ProfileCategory`, so a
+			// value inserted into that enum without a colour inserted here
+			// silently shifts every colour below it.
+			Colour{80, 200, 230}, // ECS
+
 			Colour{222, 158, 70},  // simulation
 			Colour{190, 120, 210}, // script
 			// Grey, and deliberately the dullest thing on the panel. Idle is the
 			// largest bar on a vsynced frame and the least interesting.
 			Colour{96, 104, 118}, // idle
 		};
+
+		// The positional rule above, made a build error rather than a comment.
+		//
+		// A `std::array` sized from the enum accepts too few initialisers in
+		// silence — the missing entries become black and every colour after an
+		// insertion point shifts by one, which reads as a palette somebody
+		// chose rather than as a mistake. Idle is last and its grey is
+		// distinctive, so checking that the last slot still holds it catches
+		// exactly the failure: a category added without a colour.
+		static_assert(
+			CATEGORY_COLOURS[static_cast<size_t>(core::ProfileCategory::Idle)].R == 96 &&
+				CATEGORY_COLOURS[static_cast<size_t>(core::ProfileCategory::Idle)].G == 104 &&
+				CATEGORY_COLOURS[static_cast<size_t>(core::ProfileCategory::Idle)].B == 118,
+			"A ProfileCategory was added without a colour in CATEGORY_COLOURS."
+		);
 
 		std::string Format(const char *format, ...) {
 			// snprintf twice rather than iostreams: this runs once per line per
@@ -804,7 +662,11 @@ namespace engine::render {
 			const int scale = data.Scale;
 			const int lineHeight = DebugText::LineHeight(scale);
 			const int barHeight = DebugText::GLYPH_HEIGHT * scale;
-			const int labelWidth = DebugText::Measure("SIM 00.00", scale) + 4 * scale;
+			// Measured against the longest category name rather than a sample
+			// one: `engine`, `render` and `script` are six characters and
+			// `ECS` is three, so a column sized for the short one puts the bars
+			// through the text.
+			const int labelWidth = DebugText::Measure("engine 00.00", scale) + 4 * scale;
 
 			const float total = std::max(data.FrameMilliseconds, 0.0001f);
 

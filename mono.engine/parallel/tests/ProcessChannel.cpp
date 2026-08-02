@@ -13,6 +13,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/parallel/Channel.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

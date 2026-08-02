@@ -1,3 +1,4 @@
+#include <engine/render/DebugText.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/testing/Suite.hpp>
 

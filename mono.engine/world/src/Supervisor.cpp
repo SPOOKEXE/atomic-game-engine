@@ -159,6 +159,7 @@ namespace engine::world {
 
 				case HostSignal::Heartbeat:
 					entry.Tick = frame.Tick;
+					entry.Milliseconds = frame.Milliseconds;
 					Heartbeat(entry.Plan.Name, now);
 					break;
 
@@ -425,6 +426,7 @@ namespace engine::world {
 			status.Restarts = entry.Restarts;
 			status.SinceHeartbeat = entry.EverBeat ? entry.LastHeartbeat : 0.0;
 			status.Tick = entry.Tick;
+			status.Milliseconds = entry.Milliseconds;
 			status.Linked = entry.Link != nullptr && entry.Link->Connected();
 			status.Ready = entry.Ready;
 			status.Worlds = entry.Plan.Worlds;
@@ -446,6 +448,7 @@ namespace engine::world {
 		status.Restarts = entry->Restarts;
 		status.SinceHeartbeat = entry->EverBeat ? entry->LastHeartbeat : 0.0;
 		status.Tick = entry->Tick;
+		status.Milliseconds = entry->Milliseconds;
 		status.Linked = entry->Link != nullptr && entry->Link->Connected();
 		status.Ready = entry->Ready;
 		status.Worlds = entry->Plan.Worlds;

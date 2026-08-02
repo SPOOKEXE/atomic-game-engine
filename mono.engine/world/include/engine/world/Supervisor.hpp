@@ -143,6 +143,14 @@ namespace engine::world {
 		// in a way a deadline alone would never notice.
 		uint64_t Tick = 0;
 
+		// What its last reported tick cost, in milliseconds.
+		//
+		// Measured in the host and sent, because a driver cannot time another
+		// address space. This is the latest figure received, so it is one
+		// barrier behind — which is worth far more than the nothing a driver
+		// could otherwise say about where a host's time goes.
+		float Milliseconds = 0.0f;
+
 		// Whether it has a link the driver can speak on.
 		bool Linked = false;
 
@@ -340,6 +348,7 @@ namespace engine::world {
 			uint32_t Restarts = 0;
 			double LastHeartbeat = 0.0;
 			uint64_t Tick = 0;
+			float Milliseconds = 0.0f;
 			bool EverBeat = false;
 			bool Ready = false;
 		};

@@ -1,16 +1,14 @@
 #pragma once
 
-// The four bus backends, and the router that applies traffic to them.
+// The four bus backends: the tables a MessagingService, a MemoryStore, a
+// DataStore and a Teleport are actually kept in.
 //
 // Private to this module. A bus is reached through `Postbox` from inside a
 // world, or not at all — nothing outside `world` has any business holding the
 // table a DataStore keeps.
 //
-// **Everything happens on the driver thread, at the barrier.** That is what
-// makes ordering a property of the data rather than of the scheduler: the
-// router walks every world's outbox in `(From, Sequence)` order and applies one
-// operation at a time. Two runs of the same universe therefore apply the same
-// operations in the same order, which is what a replay needs.
+// Storage and nothing else. What applies traffic to these, and in what order,
+// is `BusRouter.hpp`.
 //
 // @tier L4 · shared
 

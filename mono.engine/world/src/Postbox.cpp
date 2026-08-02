@@ -23,9 +23,17 @@ namespace engine::world {
 			return *store.ResourceMutable<BusBudget>();
 		}
 
-		// Envelopes and deliveries hold a vector and a Name, so neither can be
-		// written as its object representation: the vector is a pointer into
-		// this process and the name is a process-local id.
+		// Envelopes and deliveries hold a vector and a `core::Name`, so neither
+		// can be written as its object representation: the vector is a pointer
+		// into this process and the name is a process-local id.
+		//
+		// What each field is and in what order is `Bus.cpp`'s, not this file's.
+		// `Bus.hpp` gives the reason and names this exact caller: one encoder,
+		// because a recording, a snapshot of pending traffic and the link to a
+		// supervised host all read it, and three encoders would agree until the
+		// day one of them did not. These four are the shape
+		// `Components::Register` wants — a count and a void pointer — wrapped
+		// round that one encoder.
 		void WriteEnvelopes(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *boxes = static_cast<const Outbox *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -36,15 +44,7 @@ namespace engine::world {
 				writer.WriteUInt32(static_cast<uint32_t>(box.Pending.size()));
 
 				for (const Envelope &envelope : box.Pending) {
-					writer.WriteUInt8(static_cast<uint8_t>(envelope.Bus));
-					writer.WriteUInt8(static_cast<uint8_t>(envelope.Operation));
-					writer.WriteName(envelope.Key);
-					writer.WriteName(envelope.From);
-					writer.WriteUInt64(envelope.Sequence);
-					writer.WriteUInt64(envelope.Reply.Value);
-					writer.WriteUInt64(envelope.Version);
-					writer.WriteUInt32(static_cast<uint32_t>(envelope.Payload.size()));
-					writer.WriteRaw(envelope.Payload.data(), envelope.Payload.size());
+					WriteEnvelope(writer, envelope);
 				}
 			}
 		}
@@ -60,22 +60,7 @@ namespace engine::world {
 
 				const uint32_t pending = reader.ReadUInt32();
 				for (uint32_t at = 0; at < pending && !reader.Failed(); at++) {
-					Envelope envelope;
-					envelope.Bus = static_cast<BusKind>(reader.ReadUInt8());
-					envelope.Operation = static_cast<BusOperation>(reader.ReadUInt8());
-					envelope.Key = reader.ReadName();
-					envelope.From = reader.ReadName();
-					envelope.Sequence = reader.ReadUInt64();
-					envelope.Reply.Value = reader.ReadUInt64();
-					envelope.Version = reader.ReadUInt64();
-
-					const uint32_t bytes = reader.ReadUInt32();
-					envelope.Payload.resize(reader.Failed() ? 0 : bytes);
-					if (!envelope.Payload.empty()) {
-						reader.ReadRaw(envelope.Payload.data(), envelope.Payload.size());
-					}
-
-					box.Pending.push_back(std::move(envelope));
+					box.Pending.push_back(ReadEnvelope(reader));
 				}
 			}
 		}
@@ -87,14 +72,7 @@ namespace engine::world {
 				writer.WriteUInt32(static_cast<uint32_t>(box.Arrived.size()));
 
 				for (const Delivery &delivery : box.Arrived) {
-					writer.WriteUInt8(static_cast<uint8_t>(delivery.Bus));
-					writer.WriteName(delivery.Key);
-					writer.WriteName(delivery.From);
-					writer.WriteUInt64(delivery.Reply.Value);
-					writer.WriteUInt8(static_cast<uint8_t>(delivery.Status));
-					writer.WriteUInt64(delivery.Version);
-					writer.WriteUInt32(static_cast<uint32_t>(delivery.Payload.size()));
-					writer.WriteRaw(delivery.Payload.data(), delivery.Payload.size());
+					WriteDelivery(writer, delivery);
 				}
 			}
 		}
@@ -107,21 +85,7 @@ namespace engine::world {
 
 				const uint32_t arrived = reader.ReadUInt32();
 				for (uint32_t at = 0; at < arrived && !reader.Failed(); at++) {
-					Delivery delivery;
-					delivery.Bus = static_cast<BusKind>(reader.ReadUInt8());
-					delivery.Key = reader.ReadName();
-					delivery.From = reader.ReadName();
-					delivery.Reply.Value = reader.ReadUInt64();
-					delivery.Status = static_cast<BusStatus>(reader.ReadUInt8());
-					delivery.Version = reader.ReadUInt64();
-
-					const uint32_t bytes = reader.ReadUInt32();
-					delivery.Payload.resize(reader.Failed() ? 0 : bytes);
-					if (!delivery.Payload.empty()) {
-						reader.ReadRaw(delivery.Payload.data(), delivery.Payload.size());
-					}
-
-					box.Arrived.push_back(std::move(delivery));
+					box.Arrived.push_back(ReadDelivery(reader));
 				}
 			}
 		}

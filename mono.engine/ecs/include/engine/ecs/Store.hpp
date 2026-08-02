@@ -951,9 +951,6 @@ namespace engine::ecs {
 		VisitTables(std::span<const ComponentId> terms, const std::function<void(const TableSlice &)> &body);
 		size_t CountRows(std::span<const ComponentId> terms);
 
-		// Copies one instance without its subtree, returning the copy.
-		Entity CloneOne(Entity source);
-
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);

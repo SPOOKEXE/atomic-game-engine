@@ -1,3 +1,6 @@
+#include "Hex.hpp"
+#include "SecureWipe.hpp"
+
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -11,43 +14,6 @@
 namespace engine::assets {
 
 	namespace {
-		constexpr char HEX_DIGITS[] = "0123456789abcdef";
-
-		constexpr int HexValue(char character) {
-			if (character >= '0' && character <= '9') {
-				return character - '0';
-			}
-			if (character >= 'a' && character <= 'f') {
-				return character - 'a' + 10;
-			}
-			return -1;
-		}
-
-		template <size_t Length> std::string ToHexString(const std::array<uint8_t, Length> &value) {
-			std::string text(Length * 2, '\0');
-			for (size_t index = 0; index < Length; ++index) {
-				text[index * 2] = HEX_DIGITS[value[index] >> 4];
-				text[index * 2 + 1] = HEX_DIGITS[value[index] & 0x0F];
-			}
-			return text;
-		}
-
-		template <size_t Length>
-		bool FromHexString(std::string_view text, std::array<uint8_t, Length> &value) {
-			if (text.size() != Length * 2) {
-				return false;
-			}
-			for (size_t index = 0; index < Length; ++index) {
-				const int high = HexValue(text[index * 2]);
-				const int low = HexValue(text[index * 2 + 1]);
-				if (high < 0 || low < 0) {
-					return false;
-				}
-				value[index] = static_cast<uint8_t>((high << 4) | low);
-			}
-			return true;
-		}
-
 		// What is actually signed.
 		//
 		// Not the bare root. A key that signs manifest roots today may sign a
@@ -75,13 +41,6 @@ namespace engine::assets {
 				)
 			);
 			return hasher.Finish();
-		}
-
-		void Wipe(std::span<uint8_t> bytes) {
-			// SecureWipeBuffer rather than a loop or memset: an ordinary store
-			// to memory nothing reads again is exactly what a compiler is
-			// allowed to delete, and it does.
-			CryptoPP::SecureWipeBuffer(bytes.data(), bytes.size());
 		}
 	}
 
@@ -133,22 +92,22 @@ namespace engine::assets {
 	}
 
 	SigningKey::~SigningKey() {
-		Wipe(Seed);
+		SecureWipe(Seed);
 	}
 
 	SigningKey::SigningKey(SigningKey &&other) noexcept : Seed(other.Seed), Verifier(other.Verifier) {
 		// The source is wiped rather than merely left alone. A moved-from key
 		// whose seed is still in its storage is a copy of the secret nobody
 		// believes exists.
-		Wipe(other.Seed);
+		SecureWipe(other.Seed);
 	}
 
 	SigningKey &SigningKey::operator=(SigningKey &&other) noexcept {
 		if (this != &other) {
-			Wipe(Seed);
+			SecureWipe(Seed);
 			Seed = other.Seed;
 			Verifier = other.Verifier;
-			Wipe(other.Seed);
+			SecureWipe(other.Seed);
 		}
 		return *this;
 	}

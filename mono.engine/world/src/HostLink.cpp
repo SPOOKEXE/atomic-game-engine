@@ -46,6 +46,7 @@ namespace engine::world {
 		writer.WriteName(frame.Host);
 		writer.WriteName(frame.World);
 		writer.WriteUInt64(frame.Tick);
+		writer.WriteFloat(frame.Milliseconds);
 
 		writer.WriteUInt32(static_cast<uint32_t>(frame.Traffic.size()));
 		for (const Envelope &envelope : frame.Traffic) {
@@ -74,6 +75,7 @@ namespace engine::world {
 		read.Host = reader.ReadName();
 		read.World = reader.ReadName();
 		read.Tick = reader.ReadUInt64();
+		read.Milliseconds = reader.ReadFloat();
 
 		const uint32_t count = reader.ReadUInt32();
 		if (reader.Failed() || count > MAXIMUM_TRAFFIC) {
@@ -152,10 +154,11 @@ namespace engine::world {
 		return false;
 	}
 
-	bool HostLink::Heartbeat(uint64_t tick) {
+	bool HostLink::Heartbeat(uint64_t tick, float milliseconds) {
 		HostFrame frame;
 		frame.Signal = HostSignal::Heartbeat;
 		frame.Tick = tick;
+		frame.Milliseconds = milliseconds;
 		return Send(frame);
 	}
 

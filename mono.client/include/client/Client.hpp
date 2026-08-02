@@ -13,6 +13,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/input/Actions.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/world/Universe.hpp>
 
