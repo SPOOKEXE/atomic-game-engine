@@ -15,6 +15,7 @@ mono_add_library(server
 		Engine::core
 		Engine::parallel
 		Engine::ecs
+		Engine::world
 )
 
 mono_add_program(server

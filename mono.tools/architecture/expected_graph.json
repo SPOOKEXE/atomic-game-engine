@@ -18,31 +18,45 @@
     "The server program's row is the load-bearing one: no render, text, ui,",
     "input, audio or vfx. Not 'does not start one' — does not contain one. The",
     "staged server/ directory having no shaders/ folder is the same fact in a",
-    "form anyone can see without a graph query."
+    "form anyone can see without a graph query.",
+    "",
+    "The cdn program's row is the other one worth reading: repo_layout.md §8",
+    "gives it core, parallel and assets and stops. It links core alone today",
+    "because that is all it calls — a short row here is what makes",
+    "`cmake --preset cdn` configure on a container with no Vulkan SDK, no SDL",
+    "and no shader compiler."
   ],
 
   "modules": {
     "core":     { "tier": "shared", "links": [] },
     "parallel": { "tier": "shared", "links": ["core"] },
     "ecs":      { "tier": "shared", "links": ["core", "parallel"] },
+    "world":    { "tier": "shared", "links": ["core", "ecs", "parallel"] },
+    "assets":   { "tier": "shared", "links": ["core"] },
+    "net":      { "tier": "shared", "links": ["core"] },
 
     "input":    { "tier": "client", "links": ["core"], "requires": "MONO_BUILD_CLIENT" },
     "render":   { "tier": "client", "links": ["core"], "requires": "MONO_BUILD_CLIENT" },
 
-    "client":   { "tier": "client", "links": ["core", "ecs", "input", "parallel", "render"],
+    "client":   { "tier": "client", "links": ["core", "ecs", "input", "parallel", "render", "world"],
                   "requires": "MONO_BUILD_CLIENT" },
-    "server":   { "tier": "server", "links": ["core", "ecs", "parallel"],
+    "server":   { "tier": "server", "links": ["core", "ecs", "parallel", "world"],
                   "requires": "MONO_BUILD_SERVER" },
+    "cdn":      { "tier": "shared", "links": ["assets", "core", "parallel"],
+                  "requires": "MONO_BUILD_CDN" },
 
     "testrunner": { "tier": "shared", "links": ["core"] },
     "docgen":     { "tier": "shared", "links": ["core"] }
   },
 
   "programs": {
-    "client": { "tier": "client", "links": ["core", "ecs", "input", "parallel", "render"],
+    "client": { "tier": "client", "links": ["core", "ecs", "input", "parallel", "render", "world"],
                 "requires": "MONO_BUILD_CLIENT" },
 
-    "server": { "tier": "server", "links": ["core", "ecs", "parallel"],
-                "requires": "MONO_BUILD_SERVER" }
+    "server": { "tier": "server", "links": ["core", "ecs", "parallel", "world"],
+                "requires": "MONO_BUILD_SERVER" },
+
+    "cdn": { "tier": "shared", "links": ["assets", "core", "parallel"],
+             "requires": "MONO_BUILD_CDN" }
   }
 }

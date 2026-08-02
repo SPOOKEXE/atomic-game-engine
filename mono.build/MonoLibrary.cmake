@@ -275,6 +275,10 @@ function(mono_add_library name)
 	if(MONO_BUILD_TESTS AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 		mono_add_tests(${name} DEPS ${ARG_NAMESPACE}::${name})
 	endif()
+
+	if(MONO_BUILD_BENCH AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks")
+		mono_add_benchmarks(${name} DEPS ${ARG_NAMESPACE}::${name})
+	endif()
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -296,11 +300,68 @@ function(mono_add_tests name)
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::testmain Catch2::Catch2)
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+
+	# A module's own tests may reach its src/ directory, and only its own tests
+	# may. AGENTS.md states the rule this implements: do not widen a public
+	# header to make a test easier — link the private one instead. Without this
+	# line the only way to test a private type is to publish it, which is the
+	# outcome the rule exists to prevent.
+	if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src")
+		target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+	endif()
 	set_target_properties(${target} PROPERTIES
 		RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/tests")
 
 	add_test(NAME ${name} COMMAND ${target})
 	set_property(GLOBAL APPEND PROPERTY MONO_ALL_TEST_TARGETS ${target})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# mono_add_benchmarks
+# ---------------------------------------------------------------------------
+#
+# One binary per module, over every .cpp in that module's benchmarks/. The same
+# shape as mono_add_tests and deliberately so: a benchmark declares
+# `TEST_SUITE_ID`, answers `--mono-suites`, and is signed and selected by the
+# machinery that already selects tests. A second discovery mechanism would be a
+# second thing to keep correct, and the neglected one would be the one that
+# silently stopped re-running.
+#
+# Staged into bench/ rather than tests/, so `just test` never runs a benchmark
+# and `just bench` never runs a test — the two answer different questions and a
+# suite that did both would be slow at one and imprecise at the other.
+function(mono_add_benchmarks name)
+	cmake_parse_arguments(ARG "" "" "DEPS" ${ARGN})
+
+	file(GLOB_RECURSE sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.cpp")
+	if(NOT sources)
+		return()
+	endif()
+
+	set(target bench_${name})
+	add_executable(${target} ${sources})
+	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::benchmain)
+
+	# Optimised whatever the preset says, because a debug build measures the
+	# debug build. A benchmark run against unoptimised code reports a number
+	# that has no relationship to the one anybody ships, and the danger is not
+	# that it is slower — it is that the *ratios* between two implementations
+	# invert.
+	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+	if(NOT MSVC)
+		target_compile_options(${target} PRIVATE -O2 -g)
+	endif()
+
+	# A module's own benchmarks may reach its src/ directory, for the same
+	# reason its tests may: measuring a private type must not require
+	# publishing it.
+	if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src")
+		target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+	endif()
+
+	set_target_properties(${target} PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/bench")
+	set_property(GLOBAL APPEND PROPERTY MONO_ALL_BENCH_TARGETS ${target})
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -503,7 +564,9 @@ function(mono_write_target_graph path)
 	# not build it", and would have to accept both.
 	set(json "{\n  \"options\": {")
 	set(first TRUE)
-	foreach(option IN ITEMS MONO_BUILD_CLIENT MONO_BUILD_SERVER MONO_BUILD_TESTS MONO_TRACY MONO_OPTIMISE)
+	foreach(option IN ITEMS
+			MONO_BUILD_CLIENT MONO_BUILD_SERVER MONO_BUILD_CDN
+			MONO_BUILD_TESTS MONO_TRACY MONO_OPTIMISE)
 		if(${option})
 			set(value "true")
 		else()

@@ -13,9 +13,11 @@ namespace engine::parallel {
 	namespace {
 
 		// One batch in flight at a time. The pool exists to make a single
-		// parallel-for wide, not to overlap several of them — nesting For()
-		// inside For() would deadlock a fixed pool, so the design refuses the
-		// shape rather than defending against it.
+		// parallel-for wide, not to overlap several of them.
+		//
+		// The shape is refused rather than defended against, but it is refused
+		// *safely*: a second dispatch runs on the thread that asked for it
+		// instead of corrupting the first. See Pool::Claimed.
 		struct Batch {
 			const std::function<void(size_t, size_t)> *Body = nullptr;
 			size_t Count = 0;
@@ -32,6 +34,20 @@ namespace engine::parallel {
 			std::mutex Guard;
 			std::condition_variable Available;
 			std::condition_variable Finished;
+
+			// Whether a batch owns the pool right now.
+			//
+			// Not redundant with `Current`, and the difference is the whole
+			// point: `Current` is written *after* the winner has decided to
+			// dispatch, so two callers reaching that write both believed they
+			// had the pool. The second overwrote the pointer the workers were
+			// draining through and the first waited on an `Outstanding` count
+			// being decremented for somebody else's batch — a hang, or the
+			// wrong body run against the wrong range.
+			//
+			// Claiming first turns that into a decision: the loser runs its
+			// span itself and nothing is shared.
+			std::atomic<bool> Claimed{false};
 
 			Batch *Current = nullptr;
 			uint64_t Generation = 0;
@@ -161,6 +177,32 @@ namespace engine::parallel {
 			body(0, count);
 			return;
 		}
+
+		// Claim the pool, or run the span here.
+		//
+		// A losing caller is not an error and not a fallback for a broken case:
+		// it is how a nested For and two concurrently dispatching threads are
+		// both made safe without a work-stealing deque. The cost is parallelism
+		// for that one dispatch, never correctness — every body is already
+		// required to write only what its own range names, so a span run whole
+		// on one thread produces the same bytes as the same span split across
+		// twenty.
+		//
+		// A world tick is a range in somebody else's batch once `world` exists,
+		// which is what makes this the ordinary case rather than the odd one.
+		if (pool.Claimed.exchange(true, std::memory_order_acquire)) {
+			body(0, count);
+			return;
+		}
+
+		// Releases on every path out, including the one where a range threw and
+		// the exception is on its way back to the caller.
+		struct ClaimGuard {
+			Pool &Owner;
+			~ClaimGuard() {
+				Owner.Claimed.store(false, std::memory_order_release);
+			}
+		} claim{pool};
 
 		Batch batch;
 		batch.Body = &body;

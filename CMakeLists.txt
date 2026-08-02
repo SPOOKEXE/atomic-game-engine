@@ -18,7 +18,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(MONO_BUILD_CLIENT "Build the client program"    ON)
 option(MONO_BUILD_SERVER "Build the server program"    ON)
+option(MONO_BUILD_CDN    "Build the content origin"    ON)
 option(MONO_BUILD_TESTS  "Build the test binaries"     ON)
+# Off by default. A benchmark is built to be *run*, and a build that produces
+# binaries nobody times is a longer build for nothing — `just bench` turns it on
+# for the preset it uses.
+option(MONO_BUILD_BENCH  "Build the benchmark binaries" OFF)
 option(MONO_TRACY        "Compile in the Tracy client" ON)
 option(MONO_WERROR       "Treat warnings as errors"    OFF)
 
@@ -29,7 +34,7 @@ option(MONO_WERROR       "Treat warnings as errors"    OFF)
 # at -O2 is a slow algorithm with a fast compiler, and the point of measuring
 # every day is to find that out on the day it lands.
 #
-# This applies to our targets only. Vendored SDL, flecs and Tracy keep the
+# This applies to our targets only. Vendored SDL and Tracy keep the
 # build type's own flags, because unoptimised vendor code would dominate every
 # measurement with cost we are not going to change.
 option(MONO_OPTIMISE     "Optimise first-party targets" OFF)
@@ -96,7 +101,17 @@ include(MonoLibrary)
 
 if(MONO_BUILD_TESTS)
 	enable_testing()
+endif()
+
+# The suite registry, and the two mains over it. `testmain` is behind the tests
+# option; the registry itself is not, because a benchmark binary declares suites
+# the same way and is discovered by the same listing.
+if(MONO_BUILD_TESTS OR MONO_BUILD_BENCH)
 	add_subdirectory(mono.build/testmain)
+endif()
+
+if(MONO_BUILD_BENCH)
+	add_subdirectory(mono.build/benchmain)
 endif()
 
 # The engine is libraries and never a product. Programs are thin mains over
@@ -110,6 +125,13 @@ endif()
 
 if(MONO_BUILD_SERVER)
 	add_subdirectory(mono.server)
+endif()
+
+# The content origin. `shared` tier rather than `server`, so the tier rule
+# itself — not a guard here — is what keeps a graphics stack off its link line.
+# repo_layout.md §11.
+if(MONO_BUILD_CDN)
+	add_subdirectory(mono.cdn)
 endif()
 
 # The test runner and the architecture check. Built always, not only under
@@ -126,8 +148,9 @@ mono_write_target_graph("${CMAKE_BINARY_DIR}/target-graph.json")
 message(STATUS "")
 message(STATUS "atomic ${PROJECT_VERSION}")
 message(STATUS "  stage      ${MONO_STAGE_ROOT}")
-message(STATUS "  programs   client=${MONO_BUILD_CLIENT} server=${MONO_BUILD_SERVER}")
+message(STATUS "  programs   client=${MONO_BUILD_CLIENT} server=${MONO_BUILD_SERVER} cdn=${MONO_BUILD_CDN}")
 message(STATUS "  tracy      ${MONO_TRACY}")
 message(STATUS "  tests      ${MONO_BUILD_TESTS}")
+message(STATUS "  benchmarks ${MONO_BUILD_BENCH}")
 message(STATUS "  optimised  ${MONO_OPTIMISE}")
 message(STATUS "")

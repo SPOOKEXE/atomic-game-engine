@@ -1,7 +1,10 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
-
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -15,11 +18,12 @@
     {
       "name": "dev",
       "inherits": "base",
-      "displayName": "dev — everything, with tests and Tracy",
+      "displayName": "dev \u2014 everything, with tests and Tracy",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "MONO_BUILD_CLIENT": "ON",
         "MONO_BUILD_SERVER": "ON",
+        "MONO_BUILD_CDN": "ON",
         "MONO_BUILD_TESTS": "ON",
         "MONO_TRACY": "ON"
       }
@@ -27,11 +31,12 @@
     {
       "name": "release",
       "inherits": "base",
-      "displayName": "release — the one preset that optimises first-party code",
+      "displayName": "release \u2014 the one preset that optimises first-party code",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "MONO_BUILD_CLIENT": "ON",
         "MONO_BUILD_SERVER": "ON",
+        "MONO_BUILD_CDN": "ON",
         "MONO_BUILD_TESTS": "OFF",
         "MONO_TRACY": "ON",
         "MONO_OPTIMISE": "ON"
@@ -40,11 +45,25 @@
     {
       "name": "server",
       "inherits": "base",
-      "displayName": "server — no client program, and therefore no graphics stack",
+      "displayName": "server \u2014 no client program, and therefore no graphics stack",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "MONO_BUILD_CLIENT": "OFF",
         "MONO_BUILD_SERVER": "ON",
+        "MONO_BUILD_CDN": "OFF",
+        "MONO_BUILD_TESTS": "ON",
+        "MONO_TRACY": "ON"
+      }
+    },
+    {
+      "name": "cdn",
+      "inherits": "base",
+      "displayName": "cdn \u2014 the content origin alone, on a machine with nothing installed",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MONO_BUILD_CLIENT": "OFF",
+        "MONO_BUILD_SERVER": "OFF",
+        "MONO_BUILD_CDN": "ON",
         "MONO_BUILD_TESTS": "ON",
         "MONO_TRACY": "ON"
       }
@@ -52,28 +71,69 @@
     {
       "name": "ci",
       "inherits": "dev",
-      "displayName": "ci — dev, with warnings fatal",
-      "cacheVariables": { "MONO_WERROR": "ON" }
+      "displayName": "ci \u2014 dev, with warnings fatal",
+      "cacheVariables": {
+        "MONO_WERROR": "ON"
+      }
+    },
+    {
+      "name": "bench",
+      "inherits": "release",
+      "displayName": "bench \u2014 release, plus the benchmark binaries and nothing that only slows them down",
+      "cacheVariables": {
+        "MONO_BUILD_BENCH": "ON",
+        "MONO_BUILD_TESTS": "OFF",
+        "MONO_BUILD_CDN": "OFF"
+      }
     }
   ],
-
   "buildPresets": [
-    { "name": "dev",      "configurePreset": "dev" },
-    { "name": "release",  "configurePreset": "release" },
-    { "name": "server",   "configurePreset": "server" },
-    { "name": "ci",       "configurePreset": "ci" }
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "server",
+      "configurePreset": "server"
+    },
+    {
+      "name": "cdn",
+      "configurePreset": "cdn"
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci"
+    },
+    {
+      "name": "bench",
+      "configurePreset": "bench"
+    }
   ],
-
   "testPresets": [
     {
       "name": "dev",
       "configurePreset": "dev",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "server",
       "configurePreset": "server",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cdn",
+      "configurePreset": "cdn",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

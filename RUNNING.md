@@ -34,15 +34,23 @@ in `.cache/`.
 cmake --preset dev       # everything, tests, Tracy, unoptimised first-party code
 cmake --preset release   # optimised — the only preset that turns -O0 off
 cmake --preset server    # no client at all, and therefore no graphics stack
+cmake --preset cdn       # the content origin alone, on a machine with nothing installed
 cmake --preset ci        # dev, with warnings fatal
+cmake --preset bench     # release, plus the benchmark binaries
 ```
 
-| Preset | Client | Server | Tests | First-party `-O` |
-|---|---|---|---|---|
-| `dev` | yes | yes | yes | `-O0` |
-| `release` | yes | yes | no | optimised |
-| `server` | **no** | yes | yes | `-O0` |
-| `ci` | yes | yes | yes | `-O0`, warnings fatal |
+| Preset | Client | Server | CDN | Tests | First-party `-O` |
+|---|---|---|---|---|---|
+| `dev` | yes | yes | yes | yes | `-O0` |
+| `release` | yes | yes | yes | no | optimised |
+| `server` | **no** | yes | no | yes | `-O0` |
+| `cdn` | **no** | **no** | yes | yes | `-O0` |
+| `ci` | yes | yes | yes | yes | `-O0`, warnings fatal |
+
+`server` and `cdn` are the two presets that prove something rather than build
+something. `server` proves the client tier is absent; `cdn` proves the content
+origin needs no graphics stack at all — it configures where there is no Vulkan
+SDK, no SDL and no shader compiler.
 
 The first configure of a client preset builds glslang, SPIRV-Tools and shaderc,
 so that the `glslc` compiling the engine's shaders is pinned rather than
@@ -89,10 +97,13 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.engine/core` | `engine_core` | `Engine::core` | `test_core` | shared |
 | `mono.engine/parallel` | `engine_parallel` | `Engine::parallel` | `test_parallel` | shared |
 | `mono.engine/ecs` | `engine_ecs` | `Engine::ecs` | `test_ecs` | shared |
+| `mono.engine/assets` | `engine_assets` | `Engine::assets` | `test_assets` | shared |
+| `mono.engine/net` | `engine_net` | `Engine::net` | `test_net` | shared |
 | `mono.engine/input` | `engine_input` | `Engine::input` | `test_input` | client |
 | `mono.engine/render` | `engine_render` | `Engine::render` | `test_render` | client |
 | `mono.client` | `client_lib` | `Mono::client` | `test_client` | client |
 | `mono.server` | `server_lib` | `Mono::server` | `test_server` | server |
+| `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
 
 The names are derived, not chosen per module: `mono_add_library` makes
@@ -113,6 +124,7 @@ quietly building it.
 ```sh
 just client                # the client program and only its dependencies
 just server                # the server program and only its dependencies
+just cdn                   # the content origin and only its dependencies
 just build testrunner      # the test runner
 just preset=release client # optimised
 ```
@@ -129,6 +141,7 @@ Each preset writes to `.cache/build/<preset>/`:
 .cache/build/dev/
 ├─ client/       the client — binary, SDL3, shaders/render/
 ├─ server/       the server — no shaders, no SDL
+├─ cdn/          the content origin — no shaders, no SDL
 ├─ tools/        testrunner
 ├─ tests/        every test binary
 ├─ lib/          static libraries, intermediate and never shipped
@@ -170,6 +183,7 @@ mains over the parts of it they need.
 | Run a script with nothing else in the way | `atomic` *(v0.6)* | nothing |
 | See something on screen | `client` | window, input, renderer, and the client half of networking |
 | Host a simulation with no window | `server` | the tick loop, and the hosting half of networking |
+| Serve a game's content | `cdn` | a content root, and later the manifest and the origin's HTTP layer |
 | Exercise one module | its test binary | Catch2 |
 | Re-run only what your change affected | `testrunner` | — |
 | Check the architecture held | a CMake script | — |
@@ -274,7 +288,9 @@ v0.6.
 --graph                          Open the F5 frame graph at startup
 --uncapped                       Present without waiting for vblank
 --verbose                        Log at trace level
---entities N                     Cubes in the demo scene (default 2048)
+--worlds N                       Worlds to simulate and composite (default 1)
+--view-spacing UNITS             World units between composited views (default 40)
+--entities N                     Cubes in the demo scene, per world (default 2048)
 --frames N                       Exit after N presented frames
 --width PX                       Window width (default 1280)
 --height PX                      Window height (default 720)
@@ -288,6 +304,59 @@ v0.6.
 
 Naming a `--profiler-tab` opens the graph, and `--profile-seconds` turns
 collection on — asking to see something is not a separate flag from showing it.
+
+### Benchmarks
+
+```sh
+just bench                  # only what a change could have affected
+just bench-all              # every suite
+just bench-accept           # make what was measured the new baseline
+just bench --filter ecs     # one area
+```
+
+The same selection as `just test`, over `bench/` instead of `tests/`: a
+benchmark declares `TEST_SUITE_ID` and gets the same cascading signature, so a
+change at the bottom of the stack re-measures everything above it and nothing
+else. That matters more here than for tests — a test suite costs milliseconds
+and a benchmark suite costs seconds by design.
+
+Always against the `bench` preset, which optimises. A debug build measures the
+debug build, and the danger is not that it is slower: it is that the *ratios*
+between two implementations invert.
+
+```
+engine.ecs.bench.iteration
+  Each · 500k entities                     198.84 us      -1.8%
+  EachParallel · 500k entities              90.46 us     +33.6%  slower
+```
+
+**A number is reported, never enforced.** `just bench` does not fail on a slow
+figure and it should not: a laptop on battery, a CI runner with a noisy
+neighbour and a desktop with a compile going all swing further than most real
+regressions — the `+33.6%` above is one of those, not a change to the code. Read
+the number, then decide. `docs/CODE_QUALITY.md`'s rule about attaching a
+measurement to an algorithm change is what this exists to serve.
+
+Take a baseline on a quiet machine, and say so in the commit. One taken while
+something else was compiling makes every later run look like an improvement.
+
+### Compositing several worlds
+
+```sh
+just run --worlds 3 --entities 512
+```
+
+Three whole worlds, each with its own clock, its own store and its own view
+channel, drawn into one frame side by side. They are *placed* rather than
+overlaid because two worlds' coordinates do not mean the same thing — nothing
+says they should, and drawing two scenes inside each other and calling it one is
+the mistake `--view-spacing` exists to avoid.
+
+The renderer draws what the compositor took off the channels rather than
+reaching into a store. Between a world at its tick rate and a frame at the
+display's sit three slots and an atomic index, so a slow frame **drops rather
+than throttles a simulation** — and a producer that stalls keeps its last frame
+instead of vanishing for one.
 
 `--name=value` works everywhere `--name value` does. Everything after a bare
 `--` is a path, including something that looks like an option.
@@ -393,9 +462,74 @@ just host --ticks 300 --entities 20000
 --ticks N                        Exit after N ticks
 --seconds N                      Exit after N seconds
 --game PATH                      Script or game file to host (v0.2+)
+--record PATH                    Write a recording of this run
+--replay PATH                    Replay a recording instead of simulating
 --override-assets-directory DIR  Read staged data from here
+--chatter                        Make every world publish on a shared topic
+--host NAME                      Run as a supervised host under a driver
+--world NAME                     A world this host was granted (repeatable)
+--remote-world NAME              Place this world in a host process (repeatable)
+--worlds-per-host N              Shared worlds per host process (default 8)
+--host-program PATH              The program a host runs (default: this one)
+--processes N                    How many processes share this machine
 --help                           Show this text
 ```
+
+### Recording and replaying
+
+A recording is one snapshot plus every bus envelope applied since, which is
+complete because a world is deterministic given its state and its inbox.
+
+```sh
+./server --entities 512 --ticks 200 --unpaced --record run.rec
+./server --replay run.rec                       # the same run, again
+./server --replay run.rec --record again.rec    # and record what it replayed
+```
+
+The third form is what `just replay-check` runs: `again.rec` has to come back
+byte-identical to `run.rec`, which says the snapshot, the frame times and every
+envelope all reproduced — not merely that the replay survived. `just
+determinism` makes the weaker but broader claim, that two live runs of one scene
+produce identical files. Both are same-binary, same-machine; cross-machine
+agreement is deliberately not promised, because floating point differs between
+compilers and chips.
+
+### Host mode
+
+A host is not a different program. It is this one, holding some of a universe's
+worlds in its own address space so that a hard fault in one of them takes that
+process rather than the server — which is what makes the grouping a deployment
+decision instead of an engine one.
+
+You do not run the host side by hand. You run the *driver* side, and it spawns
+what it needs:
+
+```sh
+./server --seconds 10 --chatter --remote-world lobby --remote-world arena
+```
+
+That starts one host holding both worlds, links it, and routes every bus
+operation through the driver's own MessagingService, MemoryStore and DataStore —
+there is one router, so a world behaves the same wherever it is held. `--chatter`
+exists because there is no game file yet and therefore no traffic: it makes every
+world publish its name and tick on a shared topic, which is the only thing that
+crosses a link until v0.5 gives worlds something real to say.
+
+Running the host side directly is refused:
+
+```sh
+./server --host host.one --world lobby --world arena    # refuses: no driver
+```
+
+Deliberately. A host with no driver would tick worlds nobody asked for and answer
+to nobody, and accepting it would make `--host` look like a way to run the server
+under a nicer name.
+
+`--processes` is the worker budget. Every process calling for one worker per core
+is the bug it prevents: a driver and seven hosts on a twenty-four core machine
+would run a hundred and ninety threads over twenty-four cores. The driver works
+it out from the hosts it is about to spawn and passes the answer down, so you
+should not normally set it.
 
 ### Stopping it
 
@@ -419,6 +553,67 @@ just host --unpaced --ticks 1000 --entities 50000
 `--unpaced` removes the sleep between ticks, so `mean` measures the simulation
 rather than the pacing. Use it for any comparison; leave it off to check that a
 given entity count actually holds a given tick rate.
+
+---
+
+# The content origin
+
+Serves a game's content out of a directory. Two deployments, one program: beside
+the game for single-player, LAN and split-screen, or on its own for a large
+content collection. Nothing inside the program tells them apart — the difference
+is which directory it mounts and who can reach it.
+
+```sh
+just serve                            # the staged directory, beside the binary
+just serve --root ./content           # a directory of your own
+./.cache/build/dev/cdn/cdn --help
+```
+
+### Options
+
+```
+--root DIR   Directory to serve content from (default: beside the binary)
+--verbose    Log at trace level
+--help       Show this text
+```
+
+### What happens today
+
+**Nothing is served.** The program mounts the root, reports it and says so:
+
+```
+[info]    cdn: content root /home/you/game/content
+[warning] cdn: nothing is served — the manifest is Engine::assets and the
+          origin's HTTP layer is Engine::net, and neither has landed.
+```
+
+A root that is missing or is not a directory is refused at start-up with exit
+code 1, rather than being accepted and failing one request at a time.
+
+What exists is `cdn::ContentRoot` — the boundary between a content name and the
+filesystem. It refuses traversal by default, and both of its checks are
+load-bearing: components are checked before the disk is touched, which catches
+`..` and absolute names but cannot see a symlink, and the resolved path is then
+checked for containment, which catches the symlink. A symlink that stays inside
+the root is served, because an atomically swapped `current` is the deployment
+pattern this is for.
+
+The design — content addressing, the hierarchical hash, grants, and how groups
+are streamed so a game builds progressively — is `CDN.md` in the design notes.
+`ROADMAP.md` puts the rest at v0.8.
+
+### Proving it needs no graphics stack
+
+```sh
+just check-cdn-is-bare
+```
+
+Configures with no client and no server, builds, and fails if the staged `cdn/`
+directory has grown a `shaders/` folder or if another program was built into a
+cdn-only preset. The tier rule is what actually enforces this — `mono.cdn` is
+`shared` tier, and a `shared` target may link only `shared` — so a presentation
+module reaching this link line fails the configure with the edge named. The
+recipe is the version of that anybody can see without a graph query.
 
 ---
 

@@ -5,6 +5,11 @@
 // This is not the userland `thread` datatype or process dispatch. Jobs are
 // fork-joined inside the call that starts them and cannot outlive that call.
 //
+// One batch occupies the pool at a time. A second dispatch — nested, or from
+// another thread — is not refused and does not wait: it runs its span inline on
+// the thread that asked. So the pool never has to be reasoned about globally,
+// only locally, and the worst case is serial rather than wrong.
+//
 // @tier L2 · shared
 
 #include <cstddef>
@@ -51,11 +56,24 @@ namespace engine::parallel {
 		// ranges of at most `grain` indices. A zero count does not invoke `body`;
 		// a zero grain selects DEFAULT_GRAIN.
 		//
-		// Only one For may be active process-wide. Concurrent calls, including a
-		// nested For from `body`, are unsupported and can deadlock. If a pooled
-		// invocation throws, the failed range is abandoned, the other ranges
-		// finish, and the first captured exception is rethrown on the caller. An
-		// inline invocation rethrows directly.
+		// **Only one batch occupies the pool at a time, and a call that finds it
+		// occupied runs its whole span inline on the calling thread.** That
+		// covers a nested For from inside `body` and two threads dispatching at
+		// once, and neither deadlocks. Which of two racing callers wins is not
+		// defined; both return with every index visited.
+		//
+		// Inline and pooled execution are **observationally identical**. A body
+		// may only write what its own range names, so the same span run whole on
+		// one thread produces the same bytes as the same span split across
+		// twenty. Losing the pool costs wall time and changes no result, which
+		// is what makes a world tick safe to run as a range inside a larger
+		// batch: the world's own parallel loops degrade to serial instead of
+		// corrupting the batch that dispatched them.
+		//
+		// If a pooled invocation throws, the failed range is abandoned, the
+		// other ranges finish, and the first captured exception is rethrown on
+		// the caller. An inline invocation rethrows directly. Either way the
+		// pool is released, so a throwing batch does not strand it.
 		//
 		// @param count Number of indices in the half-open span `[0, count)`.
 		// @param grain Maximum indices per pooled range and the inline cutoff, or
@@ -63,6 +81,7 @@ namespace engine::parallel {
 		// @param body  Callable given each half-open range `[begin, end)`; shared
 		//              captures must permit concurrent access.
 		// @tick
+		// @threadsafe
 		static void For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body);
 
 		// Default pooled range size for cheap per-index work.

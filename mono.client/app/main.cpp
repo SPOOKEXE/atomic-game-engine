@@ -45,7 +45,9 @@ int main(int argc, char **argv) {
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Flag("verbose", "Log at trace level");
 
-	arguments.Value("entities", "N", "Cubes in the demo scene (default 2048)");
+	arguments.Value("entities", "N", "Cubes in the demo scene, per world (default 2048)");
+	arguments.Value("worlds", "N", "Worlds to simulate and composite (default 1)");
+	arguments.Value("view-spacing", "UNITS", "World units between composited views (default 40)");
 	arguments.Value("tick-rate", "HZ", "Simulation ticks per second (default 60)");
 	arguments.Value("frames", "N", "Exit after N presented frames");
 	arguments.Value("width", "PX", "Window width (default 1280)");
@@ -75,6 +77,8 @@ int main(int argc, char **argv) {
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
+	options.Worlds = static_cast<uint32_t>(arguments.GetInteger("worlds", options.Worlds));
+	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	options.ShowStatistics = arguments.Has("stats");

@@ -7,7 +7,7 @@ include_guard(GLOBAL)
 
 set(MONO_VENDOR "${CMAKE_SOURCE_DIR}/mono.vendor")
 
-if(NOT EXISTS "${MONO_VENDOR}/flecs/CMakeLists.txt")
+if(NOT EXISTS "${MONO_VENDOR}/glm/CMakeLists.txt")
 	message(FATAL_ERROR
 		"mono.vendor/ is empty. Run `just setup`, or:\n"
 		"  git submodule update --init --recursive --depth 1")
@@ -34,12 +34,6 @@ if(MONO_BUILD_CLIENT)
 	set(SDL_DISABLE_PCH ON  CACHE BOOL "" FORCE)
 	add_subdirectory("${MONO_VENDOR}/sdl" EXCLUDE_FROM_ALL)
 endif()
-
-# --- flecs ------------------------------------------------------------------
-set(FLECS_STATIC ON  CACHE BOOL "" FORCE)
-set(FLECS_SHARED OFF CACHE BOOL "" FORCE)
-set(FLECS_TESTS  OFF CACHE BOOL "" FORCE)
-add_subdirectory("${MONO_VENDOR}/flecs" EXCLUDE_FROM_ALL)
 
 # --- glm --------------------------------------------------------------------
 set(GLM_ENABLE_CXX_20 ON CACHE BOOL "" FORCE)
@@ -277,7 +271,7 @@ add_subdirectory("${MONO_VENDOR}/cryptopp-cmake" EXCLUDE_FROM_ALL)
 # Note what the second of those directories is: upstream puts the *parent* of
 # the source dir on the include path so that <cryptopp/sha.h> resolves. Here
 # that parent is mono.vendor/ itself, so anything linking this target can also
-# reach <sdl/...> and <flecs/...> by accident. Write <cryptopp/sha.h> and treat
+# reach <sdl/...> and <glm/...> by accident. Write <cryptopp/sha.h> and treat
 # the bare <sha.h> spelling as unavailable.
 get_target_property(_cryptopp_includes cryptopp INTERFACE_INCLUDE_DIRECTORIES)
 set_target_properties(cryptopp PROPERTIES
@@ -287,3 +281,114 @@ unset(_cryptopp_includes)
 # Vendor:: to match asio and imgui. cryptopp::cryptopp is upstream's own alias
 # and keeps working; this is the spelling the rest of the tree should use.
 add_library(Vendor::cryptopp ALIAS cryptopp)
+
+# --- BLAKE3 -----------------------------------------------------------------
+# The content hash. `assets` at L8 keys chunks, assets, bundles and the manifest
+# on it, and CDN.md §2 is built on the property that makes it the right choice
+# rather than merely a fast one: BLAKE3 is natively tree-structured, so
+# verifying one chunk of a large asset does not require the whole file. That is
+# exactly the origin's access pattern, and it is what lets a client verify a
+# stream as it lands instead of buffering an asset to check it.
+#
+# Crypto++ is already here and ships BLAKE2b, which would serve as a leaf hash.
+# Taking it would not have been the same decision. Content addressing is the one
+# place a hash is compared against an attacker's rather than against accident,
+# and changing the algorithm afterwards rehashes every byte anyone has stored —
+# so it is picked once, on purpose, and DATATYPES_LIBRARIES.md §1.1 picks this.
+#
+# Only the upstream `c/` directory is built. The Rust crate above it is the
+# reference implementation and is not vendored — one implementation of a format
+# is the rule, and the C one is what a game binary can link.
+#
+# Its CMakeLists enables ASM itself and dispatches SIMD at run time, so a single
+# build runs on every x86-64 machine rather than being tuned to the one that
+# compiled it. Not gated on a tier: portable C with no platform dependency, like
+# asio and Crypto++. Who may link it stays a tier question, decided by whichever
+# module first lists it.
+if(NOT EXISTS "${MONO_VENDOR}/blake3/c/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/blake3 is missing. Run `just setup`.")
+endif()
+
+# Upstream defaults this on and would otherwise fetch oneTBB from GitHub at
+# configure time — the same offline-and-reproducible line CRYPTOPP_SOURCES is.
+# The parallel hashing it buys is not wanted here anyway: chunking is already
+# fanned out a chunk at a time by Jobs::For, and two layers of parallelism over
+# one file is how a job system gets oversubscribed.
+set(BLAKE3_USE_TBB   OFF CACHE BOOL "" FORCE)
+set(BLAKE3_FETCH_TBB OFF CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/blake3/c" EXCLUDE_FROM_ALL)
+
+# Same reason as Crypto++: the `ci` preset builds first-party code with -Werror
+# and a warning in a vendored header must never be able to fail our build.
+get_target_property(_blake3_includes blake3 INTERFACE_INCLUDE_DIRECTORIES)
+set_target_properties(blake3 PROPERTIES
+	INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_blake3_includes}")
+unset(_blake3_includes)
+
+# Vendor:: to match the rest. BLAKE3::blake3 is upstream's own alias and keeps
+# working; this is the spelling the rest of the tree should use.
+add_library(Vendor::blake3 ALIAS blake3)
+
+# --- Zstandard --------------------------------------------------------------
+# Compression for delivery groups, and only for delivery groups.
+#
+# CDN.md §5 puts it at one level and no other: **per group, never per file and
+# never per manifest.** Per file loses the cross-file redundancy that is most of
+# the ratio on many small assets; per manifest defeats range requests, partial
+# fetch and the whole hash tree. Chunks stay uncompressed at rest so that dedup
+# works on them, and a group is the compressed thing in flight.
+#
+# The dictionary support is the reason this is Zstd rather than anything else
+# already here. A game's content is thousands of small files that share a great
+# deal — the same vertex layouts, the same material fields, the same strings —
+# and a trained dictionary is what turns that into a ratio rather than into
+# thousands of independently incompressible blobs.
+#
+# **BSD-3-Clause, not GPLv2.** Upstream is dual-licensed and ships both texts:
+# LICENSE is the BSD one and COPYING is GPLv2. We take BSD. That is not a
+# preference — GPLv2 would be incompatible with shipping this in a game binary
+# under MPL-2.0, and the choice is recorded in THIRD_PARTY_NOTICES.md rather
+# than left for somebody to infer from two files in a submodule.
+if(NOT EXISTS "${MONO_VENDOR}/zstd/build/cmake/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/zstd is missing. Run `just setup`.")
+endif()
+
+# Static only, no programs, no tests. `zstd` the command-line tool is not
+# something this repository ships or uses, and building it would put a binary in
+# the tree that nothing depends on.
+set(ZSTD_BUILD_STATIC    ON  CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED    OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_PROGRAMS  OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_CONTRIB   OFF CACHE BOOL "" FORCE)
+
+# Off, and this one is a decision rather than a default.
+#
+# Legacy support decodes frames from Zstd 0.x — formats that predate the
+# stabilised one and that nothing here could ever have written. It costs a large
+# amount of extra decoder surface, and that surface parses bytes an origin
+# supplied. `repo_layout.md` §1 says anyone can run a server, so a decoder we
+# cannot ever need is attack surface we should not carry.
+set(ZSTD_LEGACY_SUPPORT  OFF CACHE BOOL "" FORCE)
+
+# Off deliberately, and it is the same argument `parallel` already makes.
+#
+# Zstd's multithreading spawns its own worker threads per compression context.
+# The origin already fans out over *groups* with its own pool, and two layers of
+# parallelism over one workload is how a job system gets oversubscribed — the
+# reasoning BLAKE3_USE_TBB is off for, one library up.
+set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${MONO_VENDOR}/zstd/build/cmake" EXCLUDE_FROM_ALL)
+
+# Same reason as Crypto++ and BLAKE3: the `ci` preset builds first-party code
+# with -Werror, and a warning in a vendored header must never fail our build.
+get_target_property(_zstd_includes libzstd_static INTERFACE_INCLUDE_DIRECTORIES)
+if(_zstd_includes)
+	set_target_properties(libzstd_static PROPERTIES
+		INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_zstd_includes}")
+endif()
+unset(_zstd_includes)
+
+# Vendor:: to match the rest.
+add_library(Vendor::zstd ALIAS libzstd_static)

@@ -3,6 +3,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/Process.hpp>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -62,13 +63,50 @@ namespace client {
 			ENGINE_WARN("--uncapped had no effect; frames stay paced by the display");
 		}
 
-		engine::parallel::Jobs::Start();
+		engine::parallel::Jobs::Start(engine::parallel::WorkersPerHost(1));
 
-		Timestep.SetRate(Settings.TickRate);
 		ENGINE_INFO("simulation at {:.0f} Hz, rendering unlocked from it", Settings.TickRate);
 
-		Store.BindToCallingThread();
-		BuildDemoWorld(Store, Scheduler, Settings.Entities);
+		Universe_ = std::make_unique<engine::world::Universe>();
+
+		const uint32_t worlds = std::max(1u, Settings.Worlds);
+		for (uint32_t index = 0; index < worlds; index++) {
+			engine::world::WorldSettings world;
+
+			// Named rather than numbered, because a name is what a bus
+			// envelope, a snapshot and a view header all carry. The first keeps
+			// the name it has always had, so nothing that referred to it has to
+			// learn a new one.
+			world.Name = engine::core::Name(
+				index == 0 ? std::string("client.world") : "client.world." + std::to_string(index)
+			);
+			world.TickRate = Settings.TickRate;
+
+			const engine::world::WorldId id = Universe_->Create(world);
+			if (!id.IsValid()) {
+				ENGINE_ERROR("could not create the world to render");
+				return false;
+			}
+
+			Universe_->Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				BuildDemoWorld(store, systems, Settings.Entities);
+			});
+
+			// Sized at the world's entity count rather than at what it drew
+			// this frame, so publishing never allocates. A demo world draws at
+			// most one instance per entity.
+			Views.Track(id, world.Name, Settings.Entities);
+			Simulated.push_back(id);
+		}
+
+		// The first is the one the panels report on and the one the composed
+		// camera comes from. A client draws one world's worth of camera however
+		// many it composites.
+		Rendered = Simulated.front();
+
+		if (worlds > 1) {
+			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", worlds, Settings.ViewSpacing);
+		}
 
 		FrameGraph::SetEnabled(Settings.ShowFrameGraph);
 
@@ -212,29 +250,41 @@ namespace client {
 		// A system therefore never sees a variable delta, so the same scene
 		// behaves identically at 30 fps and 600 — and a recorded run replays.
 		// RENDER_PIPELINE.md §14.
-		const int ticks = Timestep.Advance(delta);
-		Scheduler.ClearTimings();
-
 		{
+			// The universe owns the accumulator now, so the world runs however
+			// many fixed ticks it owes and the client no longer keeps a second
+			// copy of the rate it is running at.
 			ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
-			for (int tick = 0; tick < ticks; tick++) {
-				// The world's clock moves, then the world's systems run. No
-				// system is handed a delta, so none of them can be handed the
-				// wrong one.
-				Store.AdvanceTick(Timestep.Delta());
-				Scheduler.RunPhases(
-					Store, engine::ecs::Phase::PreSimulation, engine::ecs::Phase::PostSimulation
-				);
-			}
+			Universe_->Tick(delta);
 		}
 
 		{
-			// Once per frame, and after the alpha is known — this is the phase
-			// that turns simulation state into something to draw, so it is the
-			// one that interpolates.
+			// Once per frame, and separate from the tick because a client draws
+			// one world while the rest keep simulating. This is the phase that
+			// turns simulation state into something to draw, so it is the one
+			// that interpolates.
 			ENGINE_PROFILE_CAT("pre-render", engine::core::ProfileCategory::Simulation);
-			Store.SetFrame(delta, Timestep.Alpha());
-			Scheduler.RunPhases(Store, engine::ecs::Phase::PreRender, engine::ecs::Phase::PreRender);
+
+			// Every world, not only the one whose camera is used. A world that
+			// is composited but not presented would publish the frame it built
+			// last time it was, which is a world that appears frozen for a
+			// reason nothing reports.
+			for (const engine::world::WorldId id : Simulated) {
+				Universe_->Present(id, delta, Universe_->AlphaOf(id));
+
+				// Published from inside the world, straight after its PreRender
+				// phase filled the draw list. The camera and the list stay
+				// where they were produced; what leaves is a copy in a buffer
+				// the renderer owns the other end of.
+				Universe_->Enter(id, [this, id](engine::ecs::Store &store) {
+					const auto *camera = store.Resource<ActiveCamera>();
+					const auto *list = store.Resource<DrawList>();
+					if (camera == nullptr || list == nullptr) {
+						return;
+					}
+					Views.Publish(id, camera->Value, list->Instances, store.Time().Tick, store.Time().Alpha);
+				});
+			}
 		}
 
 		Statistics.Record(Clock.Now(), delta);
@@ -244,9 +294,10 @@ namespace client {
 		// number worth seeing.
 		if (Clock.Now() - TickWindowStarted >= 1.0) {
 			const auto elapsed = static_cast<float>(Clock.Now() - TickWindowStarted);
-			MeasuredTicksPerSecond = static_cast<float>(Timestep.TotalTicks() - TicksAtWindowStart) / elapsed;
+			const uint64_t ticksNow = Universe_->StatisticsOf(Rendered).Ticks;
+			MeasuredTicksPerSecond = static_cast<float>(ticksNow - TicksAtWindowStart) / elapsed;
 			TickWindowStarted = Clock.Now();
-			TicksAtWindowStart = Timestep.TotalTicks();
+			TicksAtWindowStart = ticksNow;
 		}
 
 		int pixelWidth = 0;
@@ -300,9 +351,13 @@ namespace client {
 				Metrics::Clear();
 			} else if (Settings.ShowStatistics || Settings.ShowFrameGraph) {
 				SystemTimings.clear();
-				for (const auto &timing : Scheduler.Timings()) {
-					SystemTimings.push_back(engine::render::SystemTiming{timing.Name, timing.Milliseconds});
-				}
+				Universe_->Enter(Rendered, [this](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+					for (const auto &timing : systems.Timings()) {
+						SystemTimings.push_back(
+							engine::render::SystemTiming{timing.Name, timing.Milliseconds}
+						);
+					}
+				});
 
 				const auto counters = Metrics::Drain();
 
@@ -327,10 +382,15 @@ namespace client {
 				// number that matters is what the world actually holds, and
 				// the day something spawns or destroys an entity those two
 				// stop being the same.
-				panels.Entities = Store.CountMatching<Transform, Visual>();
+				panels.Entities = 0;
+				for (const engine::world::WorldId id : Simulated) {
+					Universe_->Enter(id, [&panels](engine::ecs::Store &store) {
+						panels.Entities += store.CountMatching<Transform, Visual>();
+					});
+				}
 				panels.TickRate = Settings.TickRate;
 				panels.TicksPerSecond = MeasuredTicksPerSecond;
-				panels.DroppedTicks = Timestep.Dropped();
+				panels.DroppedTicks = Universe_->StatisticsOf(Rendered).DroppedTicks;
 				panels.DrawCalls = LastFrame.DrawCalls;
 				panels.Triangles = LastFrame.Triangles;
 				panels.Backend = Renderer.BackendName();
@@ -348,13 +408,15 @@ namespace client {
 			}
 		}
 
-		// Both of these are read out of the world rather than out of a scene
-		// object. The camera was placed by a system in the simulation and the
-		// draw list was filled by one in PreRender, so what is drawn is exactly
-		// what the tick produced.
-		LastFrame = Renderer.Render(
-			Store.Resource<ActiveCamera>()->Value, Store.Resource<DrawList>()->Instances, Overlay
-		);
+		// Drawn from what the compositor took off the view channels, not from a
+		// store. The camera was placed by a system and the draw list was filled
+		// by one in PreRender — but the renderer runs at the display's rate and
+		// the worlds run at their own, so reaching into a store here would be
+		// reading something somebody else is writing. Between them sits three
+		// slots and an atomic index, which is what lets a slow frame drop
+		// rather than throttle a simulation.
+		Views.Compose(Settings.Worlds > 1 ? Settings.ViewSpacing : 0.0f);
+		LastFrame = Renderer.Render(Views.Camera(), Views.Instances(), Overlay);
 
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();
@@ -393,10 +455,11 @@ namespace client {
 			);
 			ENGINE_INFO(
 				"{} tick(s) at {:.0f} Hz · {:.1f} achieved · {} dropped",
-				Timestep.TotalTicks(),
+				Universe_->StatisticsOf(Rendered).Ticks,
 				Settings.TickRate,
-				Clock.Now() > 0.0 ? static_cast<double>(Timestep.TotalTicks()) / Clock.Now() : 0.0,
-				Timestep.Dropped()
+				Clock.Now() > 0.0 ? static_cast<double>(Universe_->StatisticsOf(Rendered).Ticks) / Clock.Now()
+								  : 0.0,
+				Universe_->StatisticsOf(Rendered).DroppedTicks
 			);
 		}
 

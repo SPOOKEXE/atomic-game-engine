@@ -19,11 +19,13 @@ using engine::ecs::Phase;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
 
-namespace {
+namespace scheduler_test {
 	struct Health {
 		int Value = 0;
 	};
 }
+
+using namespace scheduler_test;
 
 TEST_CASE("phases run in order regardless of registration order", "[scheduler]") {
 	Store store("test");

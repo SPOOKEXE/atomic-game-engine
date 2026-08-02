@@ -12,6 +12,7 @@ mono_add_library(client
 		Engine::core
 		Engine::parallel
 		Engine::ecs
+		Engine::world
 		Engine::input
 		Engine::render
 	VENDOR SDL3::SDL3

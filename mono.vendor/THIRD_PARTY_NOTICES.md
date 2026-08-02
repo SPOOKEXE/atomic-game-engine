@@ -33,7 +33,6 @@ distributions must carry its notice. Configuration lives in
 | Library | In client | In server | In tests only | Licence |
 |---|---|---|---|---|
 | SDL | yes | **no** | — | zlib |
-| flecs | yes | yes | — | MIT |
 | glm | yes | yes | — | Happy Bunny **or** MIT |
 | spdlog (bundles fmt) | yes | yes | — | MIT (fmt: MIT) |
 | Tracy | when `MONO_TRACY` | when `MONO_TRACY` | — | BSD-3-Clause |
@@ -44,6 +43,8 @@ distributions must carry its notice. Configuration lives in
 | Catch2 | — | — | yes | BSL-1.0 |
 | Crypto++ | yes | yes | — | BSL-1.0 (files public domain) |
 | cryptopp-cmake | **no** | **no** | **no** | BSD-3-Clause |
+| BLAKE3 | once `assets` is linked | once `assets` is linked | — | CC0-1.0 **or** Apache-2.0 **or** Apache-2.0-LLVM |
+| Zstandard | once `cdn` links it | once `cdn` links it | — | BSD-3-Clause **or** GPLv2 — **we take BSD** |
 
 shaderc is one submodule and **four** notices: it pins glslang, SPIRV-Tools and
 SPIRV-Headers in its own `DEPS` file rather than as submodules, so they arrive
@@ -96,23 +97,16 @@ project ever patches SDL rather than upstreaming the fix, the altered source has
 to be marked. `AGENTS.md` already forbids local patches for a different reason,
 which happens to keep this clause satisfied by construction.
 
-### flecs — MIT
+### flecs — removed at v0.2
 
-- Upstream: https://github.com/SanderMertens/flecs — branch `master`
-- Full text: `mono.vendor/flecs/LICENSE`
+flecs was the ECS storage for v0.1 and is no longer built, linked or shipped.
+`engine::ecs` owns its storage outright — `Column`, `ComponentSet`, `SparseSet`
+and the archetype behind them — which is what `Store::Native()` existed to
+apologise for and what its removal settles.
 
-```
-Copyright (c) 2025 Sander Mertens
-Portions Copyright (c) Meta Platforms, Inc. and affiliates
-```
-
-Under the MIT terms: permission is granted free of charge to use, copy, modify,
-merge, publish, distribute, sublicense and/or sell copies, subject to the
-copyright notice and permission notice being included in all copies or
-substantial portions. Provided "as is", without warranty of any kind.
-
-`VENDOR_PUBLIC` — flecs types appear in `ecs/Store.hpp`, so it is visible above
-its own module.
+The submodule is still checked out at `mono.vendor/flecs/`. Nothing configures
+it, so nothing links it and no binary contains it; the directory is repository
+history rather than a dependency. Delete it when convenient.
 
 ### glm — The Happy Bunny License or MIT
 
@@ -406,6 +400,69 @@ condition list and the disclaimer; do not use the copyright holder's or
 contributors' names to endorse or promote derived products without written
 permission.
 
+### BLAKE3 — CC0-1.0, or Apache-2.0, or Apache-2.0 with the LLVM exception
+
+- Upstream: https://github.com/BLAKE3-team/BLAKE3 — branch `master`
+- Full text: `mono.vendor/blake3/LICENSE_CC0`, `LICENSE_A2`, `LICENSE_A2LLVM`
+
+```
+This work is released into the public domain with CC0 1.0.
+Alternatively, it is licensed under the Apache License 2.0, or the
+Apache License (Version 2.0) with LLVM Exceptions.
+```
+
+**Three licences offered, and the choice is ours.** Taking the CC0 option makes
+this a public-domain dedication with no attribution requirement in any
+distribution, source or binary — the lightest obligation of anything in this
+file, lighter even than Crypto++'s BSL-1.0. Nothing has to travel.
+
+It is listed anyway. The rule here is one entry per submodule, and a licence
+review that finds a submodule this file does not mention stops there and asks
+why, regardless of what the licence turns out to permit.
+
+**Only `blake3/c/` is built.** The repository also contains the Rust reference
+implementation, `b3sum`, benchmarks and test vectors; none of them is compiled,
+linked or staged. `mono.build/MonoVendor.cmake` adds the `c/` directory alone,
+and `BLAKE3_USE_TBB` is forced off so that a configure never reaches GitHub for
+oneTBB.
+
+Where it ships is a consequence of who links `assets`, and `repo_layout.md` §8
+answers that with every program — client, server, studio, CLI and the content
+origin. So, like Crypto++ and unlike SDL, it produces no tier split: there is no
+build of this engine that carries it for one program and not another.
+
+### Zstandard — BSD-3-Clause, and that is a choice
+
+- Upstream: https://github.com/facebook/zstd — branch `release`, v1.5.7
+- Full text: `mono.vendor/zstd/LICENSE` (BSD-3-Clause)
+- Also present: `mono.vendor/zstd/COPYING` (GPLv2) — **the option we do not take**
+
+```
+BSD License
+
+For Zstandard software
+
+Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+```
+
+**Two licence files in one submodule, and only one of them applies to us.**
+Zstandard is offered under BSD-3-Clause *or* GPLv2 and the licensee chooses. We
+choose BSD-3-Clause. This is the one entry in this file where reading the wrong
+text leads to a materially wrong conclusion — GPLv2 would be incompatible with
+shipping this inside a game binary under MPL-2.0, so the choice is recorded here
+rather than left to be inferred.
+
+Obligations are the ordinary BSD-3-Clause ones set out under Tracy: retain the
+notice, the condition list and the disclaimer; do not use the copyright holder's
+name to endorse derived products.
+
+**Only the library is built.** `ZSTD_BUILD_PROGRAMS` and `ZSTD_BUILD_TESTS` are
+forced off in `MonoVendor.cmake`, so the `zstd` command-line tool is neither
+compiled nor shipped. `ZSTD_LEGACY_SUPPORT` is off as well, and that is a
+security decision as much as a size one: it decodes 0.x frames that nothing here
+could ever have written, and it is decoder surface parsing bytes an origin
+supplied.
+
 **This is a build system, not a library.** It exists because `weidai11/cryptopp`
 ships a GNUmakefile and no CMakeLists at all, and because reimplementing that
 makefile here — 202 translation units, a per-file ISA flag matrix across x86,
@@ -435,12 +492,12 @@ comm -13 /tmp/want /tmp/have   # sources present but unbuilt — must be empty
 
 ## 3 · What a shipped build must carry
 
-A **client** distribution has to include the notices for SDL, flecs, glm, spdlog
+A **client** distribution has to include the notices for SDL, glm, spdlog
 (with fmt), Crypto++, shaderc, glslang, SPIRV-Tools, SPIRV-Headers, and Tracy
 when it is compiled in. glslang's `LICENSE.txt` goes in whole, all 1013 lines of
 it.
 
-A **server** distribution has to include flecs, glm, spdlog (with fmt), Crypto++
+A **server** distribution has to include glm, spdlog (with fmt), Crypto++
 and Tracy — and **not** SDL, and **not** the four shaderc projects. Both are
 client-tier.
 

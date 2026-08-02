@@ -32,6 +32,19 @@ namespace engine::ecs {
 		// The fixed tick delta. What a simulation system integrates by.
 		float Delta = 1.0f / 60.0f;
 
+		// Explicit padding, and it is load-bearing.
+		//
+		// `Tick` needs eight-byte alignment, so without this the compiler
+		// leaves four bytes of *uninitialised* padding here — and a trivially
+		// copyable component is serialised as its object representation, so
+		// those four bytes go straight into the snapshot. Two runs of the same
+		// scene then produce different files, which breaks a recording, a CI
+		// determinism diff, and any byte comparison of two worlds.
+		//
+		// Found by `just determinism`, which is why that job exists. See
+		// `ecs/docs/TODO.md` on the general fix.
+		uint32_t Reserved = 0;
+
 		// Completed simulation ticks since the world started.
 		uint64_t Tick = 0;
 

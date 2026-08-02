@@ -15,7 +15,7 @@ using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 
-namespace {
+namespace store_test {
 	struct Position {
 		float X = 0.0f;
 		float Y = 0.0f;
@@ -30,6 +30,8 @@ namespace {
 		int Value = 0;
 	};
 }
+
+using namespace store_test;
 
 TEST_CASE("a fresh store has no entities of ours", "[ecs]") {
 	Store store("test");
@@ -327,7 +329,8 @@ TEST_CASE("a named entity keeps its name", "[ecs]") {
 
 	const Entity entity = store.Create("camera");
 	REQUIRE(store.Alive(entity));
-	REQUIRE(std::string(store.Native().entity(entity.Id).name()) == "camera");
+	REQUIRE(store.NameOf(entity) == "camera");
+	REQUIRE(store.Find("camera") == entity);
 }
 
 TEST_CASE("a store rebound to another thread accepts that thread", "[ecs]") {
@@ -346,4 +349,31 @@ TEST_CASE("a store rebound to another thread accepts that thread", "[ecs]") {
 
 	REQUIRE(succeeded);
 	REQUIRE_FALSE(store.IsOnOwningThread());
+}
+
+TEST_CASE("a store survives being rebound every tick", "[ecs]") {
+	Store store("test");
+
+	// What a world does once it is a range in a job batch: a different worker
+	// picks it up each tick, so the handoff is the common path rather than a
+	// setup step. Each thread must see its own bind, and the entity count must
+	// be exactly the number of ticks — a lost handoff shows up as an abort, a
+	// torn read as a miscount.
+	constexpr int TICKS = 64;
+
+	for (int tick = 0; tick < TICKS; tick++) {
+		bool ownedHere = false;
+		std::thread worker([&] {
+			store.BindToCallingThread();
+			ownedHere = store.IsOnOwningThread();
+			store.Set<Tag>(store.Create(), Tag{tick});
+		});
+		worker.join();
+
+		REQUIRE(ownedHere);
+		REQUIRE_FALSE(store.IsOnOwningThread());
+	}
+
+	store.BindToCallingThread();
+	REQUIRE(store.CountMatching<Tag>() == TICKS);
 }

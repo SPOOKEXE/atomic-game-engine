@@ -1,0 +1,222 @@
+#pragma once
+
+// One connection's life, with no socket anywhere in it.
+//
+// Join, leave, timeout and reconnect — v0.3's first roadmap item — expressed as
+// a state machine over *events*, not over a transport. A datagram socket, a
+// loopback and a test all drive the same object, which is what makes
+// `repo_layout.md` §16.6 honest: single-player uses a loopback with real
+// encoding, so there is no configuration in which this path is skipped and no
+// second lifecycle that only the real network exercises.
+//
+// **Time is passed in, never read.** Every call that could care about "now"
+// takes it as an argument. A wall clock read inside would put a
+// non-deterministic input in the middle of the one subsystem whose failures are
+// hardest to reproduce, and `ecs/AGENTS.md` already bans exactly that inside a
+// system. It also makes a timeout something a test states rather than waits for.
+//
+// **Budgets are per tick and enforced here.** DATATYPES_LIBRARIES.md §15.1 asks
+// for a byte budget per player per tick with the overflow visible in
+// `ConnectionStats` rather than as a mystery stall. Enforcing it at the transport
+// rather than in userland is the whole point: a limiter above this runs *after*
+// the payload has been received and parsed, which is the half that costs.
+//
+// @tier L11 · shared
+
+#include <engine/net/ConnectionId.hpp>
+#include <engine/net/ConnectionStats.hpp>
+#include <engine/net/Enums.hpp>
+#include <engine/net/Packet.hpp>
+
+#include <cstddef>
+#include <cstdint>
+
+namespace engine::net {
+
+	// How a connection is paced and when it is given up on.
+	//
+	// The defaults are conventional rather than measured, and saying so is
+	// better than implying otherwise — the same standing that `ChunkLimits` has.
+	struct LinkSettings {
+		// How long a handshake may take before the attempt is abandoned.
+		double HandshakeTimeoutSeconds = 5.0;
+
+		// How long a connection may hear nothing before it is presumed gone.
+		//
+		// Longer than the keep-alive by a wide margin on purpose: at a whisker
+		// above it, one lost keep-alive drops a healthy connection.
+		double IdleTimeoutSeconds = 10.0;
+
+		// How often to send something when there is nothing to say.
+		//
+		// A connection with no traffic is indistinguishable from a dead one, and
+		// a packet carrying only an acknowledgement is the cheapest way to tell
+		// them apart.
+		double KeepAliveSeconds = 1.0;
+
+		// Payload bytes this connection may send per tick.
+		uint32_t BytesPerTick = 64 * 1024;
+
+		// Packets this connection may send per tick.
+		//
+		// Separate from the byte budget because they bound different things: a
+		// thousand one-byte packets cost almost no bandwidth and a great deal of
+		// per-packet overhead at both ends.
+		uint32_t PacketsPerTick = 64;
+
+		// Whether these can be used. Requires positive timeouts, a keep-alive
+		// shorter than the idle timeout, and non-zero budgets.
+		bool IsValid() const;
+	};
+
+	// The lifecycle of one connection.
+	//
+	// Owned by whatever holds the transport. It never sends anything itself — it
+	// says what *should* be sent and records what was — because a state machine
+	// that can also do I/O is one that cannot be tested without doing I/O.
+	//
+	// @since v0.3
+	class Link {
+	  public:
+		// Opens a link in `Connecting`.
+		//
+		// @param id The handle this connection answers to.
+		// @param nowSeconds The current time.
+		// @param settings How it is paced.
+		Link(ConnectionId id, double nowSeconds, const LinkSettings &settings = {});
+
+		// The handle this connection answers to.
+		ConnectionId Id() const {
+			return Handle;
+		}
+
+		// Where it is in its life.
+		ConnectionState State() const {
+			return Phase;
+		}
+
+		// Why it ended, or `None` while it has not.
+		DisconnectReason Reason() const {
+			return Ending;
+		}
+
+		// What it has cost and lost.
+		const ConnectionStats &Stats() const {
+			return Totals;
+		}
+
+		// The settings in use, after the validity fallback.
+		const LinkSettings &Settings() const {
+			return Paced;
+		}
+
+		// Moves a `Connecting` link to `Connected`.
+		//
+		// @param nowSeconds The current time.
+		// @return False when the link was not `Connecting` — a handshake that
+		//         completes twice is a protocol error, not an idempotent call.
+		bool CompleteHandshake(double nowSeconds);
+
+		// Begins a graceful close.
+		//
+		// Moves to `Disconnecting` rather than straight to `Disconnected`, so a
+		// goodbye can reach the far side. Without that step a peer that left
+		// politely is indistinguishable from one that crashed, and every clean
+		// exit costs the other end a full idle timeout.
+		//
+		// @param reason Why. `None` is refused — an ending always has one.
+		// @return False when already ending or ended.
+		bool Disconnect(DisconnectReason reason);
+
+		// Completes a close, from either side.
+		//
+		// @param reason Why, when the link was not already `Disconnecting`.
+		void Close(DisconnectReason reason);
+
+		// Advances time: timeouts, and the keep-alive clock.
+		//
+		// Call once per tick, before deciding what to send.
+		//
+		// @param nowSeconds The current time.
+		void Advance(double nowSeconds);
+
+		// Records a packet that arrived and says whether to act on it.
+		//
+		// Applies the sequence rule: an unreliable packet older than one already
+		// seen is counted as stale and refused, because applying it would move
+		// the world backwards.
+		//
+		// @param header The packet's header.
+		// @param payloadBytes How much payload it carried.
+		// @param nowSeconds The current time.
+		// @return Whether the payload should be acted on.
+		bool OnPacket(const PacketHeader &header, size_t payloadBytes, double nowSeconds);
+
+		// Whether `payloadBytes` may be sent this tick, and books it if so.
+		//
+		// **Asks and books together, on purpose.** A separate "may I" and "I
+		// did" is two calls a caller can get out of step, and the one that gets
+		// forgotten is the second.
+		//
+		// @param payloadBytes The payload about to be sent.
+		// @return False when the link is not `Connected`, the payload is over
+		//         `Packet::MAXIMUM_PAYLOAD_BYTES`, or a budget is spent. A
+		//         refusal is counted in `ConnectionStats::SendsOverBudget`.
+		bool Reserve(size_t payloadBytes);
+
+		// Stamps the header for the next outgoing packet on a channel.
+		//
+		// Advances that channel's sequence and folds in the acknowledgement the
+		// far side is owed, so an acknowledgement never needs a packet of its
+		// own.
+		//
+		// @param channel Which channel the packet belongs to.
+		// @return The header to write.
+		PacketHeader NextHeader(ChannelKind channel);
+
+		// Returns the per-tick budgets to full.
+		//
+		// Called at the barrier, with everything else that is per tick. A budget
+		// reset at some other point would let a connection spend two ticks'
+		// worth inside one.
+		void ResetBudget();
+
+		// Whether nothing has been sent for `KeepAliveSeconds`.
+		//
+		// @param nowSeconds The current time.
+		// @return Whether to send a packet carrying only an acknowledgement.
+		bool NeedsKeepAlive(double nowSeconds) const;
+
+		// Records that a packet was sent, for the keep-alive clock and the
+		// totals.
+		//
+		// @param payloadBytes The payload that went.
+		// @param nowSeconds The current time.
+		void OnSent(size_t payloadBytes, double nowSeconds);
+
+	  private:
+		void Observe(uint16_t sequence);
+
+		ConnectionId Handle;
+		LinkSettings Paced;
+		ConnectionState Phase = ConnectionState::Connecting;
+		DisconnectReason Ending = DisconnectReason::None;
+		ConnectionStats Totals;
+
+		double OpenedAt = 0.0;
+		double LastReceiveAt = 0.0;
+		double LastSendAt = 0.0;
+
+		// One counter per channel, because the two are ordered independently —
+		// a reliable resend must not make an unreliable packet look stale.
+		uint16_t OutgoingSequence[2]{};
+
+		// The highest sequence seen from the far side, and the 32 before it.
+		uint16_t HighestSeen = 0;
+		uint32_t SeenBits = 0;
+		bool SeenAnything = false;
+
+		uint32_t BytesLeft = 0;
+		uint32_t PacketsLeft = 0;
+	};
+}

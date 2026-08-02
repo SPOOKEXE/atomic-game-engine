@@ -39,8 +39,9 @@ and for deleted marked items;
 - What `Random` is actually for outlives the demo, and is why this is deferred rather than reverted: a value identical on every machine, which `std::mt19937` plus `std::uniform_real_distribution` cannot promise. Procedural placement, replay, and anything a server and client must agree about want exactly that. If a v0.4 consumer appears, close this item and say so.
 - The cheaper option, if no such consumer appears: keep `Random`'s interface and put a small specified integer mixer behind it. Same portability guarantee, none of the archive. The interface was designed so this is an implementation swap, not a call-site change.
 
-### [_] D00003
+### [DELETED] D00003
 
+- **Closed at v0.2 by the storage rewrite.** Every iteration path now goes through one cached `QueryPlan` per term list, topped up rather than rebuilt as tables appear, so nothing builds a query per call. The flecs-shaped problem below no longer exists — there is no `flecs::query` to be typed or untyped about.
 - `Each` and `EachParallel` still build a query per call. `CountMatching` now caches its query and a typed cache for the iteration paths is the same idea, but it needs a per-store map of typed `flecs::query<Ts...>` rather than the one untyped kind, so it is a bigger change than the count was.
 - Not urgent and not measured. Both iteration paths cost what they always cost — this is a saving, not a regression to fix — and the number to have before doing it is what query construction is as a fraction of a tick at a realistic entity count.
 - Likely moot at v0.2, when `Column`/`ComponentSet` replace flecs as the storage and the query object stops being flecs's to build.

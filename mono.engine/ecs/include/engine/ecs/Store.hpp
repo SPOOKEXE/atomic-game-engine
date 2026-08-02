@@ -14,6 +14,12 @@
 // check, not visible to the profiler, and not there when a world is serialised
 // or replayed.
 //
+// The storage underneath is the engine's own — `ComponentSet` names an
+// archetype, `Column` holds one component's values contiguously, and
+// `SparseSet` maps an entity to its row. That is what makes a property
+// reachable by name at runtime, a column serialisable without knowing its type,
+// and a world restorable into another process.
+//
 // Thread affinity is checked rather than trusted. A store belongs to the
 // thread that bound it, every mutation aborts unless it is on that thread, and
 // the check is on in every build — a data race that only shows up under load on
@@ -22,23 +28,27 @@
 // @tier L3 · shared
 
 #include <engine/core/Log.hpp>
+#include <engine/ecs/ChangeChannel.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Time.hpp>
 #include <engine/parallel/Jobs.hpp>
 
-#include <flecs.h>
-
-#include <cstdlib>
+#include <atomic>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <tuple>
 #include <type_traits>
-#include <typeindex>
-#include <unordered_map>
 #include <utility>
 
 namespace engine::ecs {
+
+	struct StoreState;
 
 	// Owns every entity, component, resource, and clock value for one world.
 	//
@@ -81,29 +91,52 @@ namespace engine::ecs {
 		// A store constructed on the loader thread and ticked on a worker is
 		// the ordinary case, not an error. The previous owner must stop accessing
 		// the store before this handoff.
+		//
+		// Rebinding every tick is expected rather than exceptional: a world is
+		// picked up by whichever job worker claims it, so the owner is a
+		// different thread most ticks. That is why the owner is atomic — the
+		// handoff races the affinity check of any thread still holding a stale
+		// belief about who owns this store, and a plain read of a plain
+		// `std::thread::id` there is a data race by the letter of the standard
+		// even where it happens to be benign.
+		//
+		// @threadsafe
 		void BindToCallingThread();
 
 		// Reports whether the caller is the thread that currently owns the store.
 		//
 		// @return `true` when the current thread may mutate this Store.
+		// @threadsafe
 		bool IsOnOwningThread() const {
-			return std::this_thread::get_id() == Owner;
+			return std::this_thread::get_id() == Owner.load(std::memory_order_relaxed);
 		}
 
 		// --- entities ------------------------------------------------------
 
 		// Creates an unnamed entity owned by this store.
 		//
+		// A new entity carries no components and occupies no table until it is
+		// given one. That is not a special case to work around: an entity is a
+		// directory slot, and a row is what a component buys.
+		//
 		// @return A live entity handle.
 		Entity Create();
 
 		// Creates a named entity owned by this store.
 		//
-		// @param name The backing store name to copy onto the entity.
+		// Names are for the things a person or a save file has to be able to
+		// point at, not for every entity. An empty name creates an unnamed
+		// entity; a name already in use returns the entity holding it rather
+		// than creating a second.
+		//
+		// @param name The name to copy and associate with the entity.
 		// @return A live entity handle.
 		Entity Create(std::string_view name);
 
 		// Destroys an entity and all components attached to it.
+		//
+		// Deferred when called from inside Each, and applied when that loop
+		// ends.
 		//
 		// @param entity The entity generation to destroy.
 		void Destroy(Entity entity);
@@ -114,23 +147,37 @@ namespace engine::ecs {
 		// @return `false` for NULL_ENTITY, destroyed entities, and stale generations.
 		bool Alive(Entity entity) const;
 
-		// There is no Count() of everything, and that is deliberate rather than
-		// missing. The backing store's entity space also holds every component
-		// registration, tag and builtin module, so a total is a number nobody
-		// can act on — and the one that used to be here silently returned zero
-		// for the whole of v0.1 because nothing ever called it.
+		// The name an entity was created with.
 		//
-		// Count what you can name: `CountMatching<Ts...>()`.
+		// @param entity The entity to ask about.
+		// @return The name, or an empty view when the entity is unnamed or dead.
+		std::string_view NameOf(Entity entity) const;
+
+		// The entity holding a name.
+		//
+		// @param name The name to look up.
+		// @return The entity, or NULL_ENTITY when nothing holds that name.
+		Entity Find(std::string_view name) const;
+
+		// There is no Count() of everything, and that is deliberate rather than
+		// missing. Count what you can name: `CountMatching<Ts...>()`.
 
 		// --- components ----------------------------------------------------
 
 		// Adds or replaces one component value on an entity.
 		//
+		// Adding a component the entity does not have moves its row to another
+		// table, which invalidates every pointer previously returned by Get or
+		// GetMutable for that entity. Replacing a component it already has does
+		// not move anything.
+		//
+		// Deferred when called from inside Each.
+		//
 		// @param entity The entity that owns the component.
 		// @param value  The component value to copy into the store.
 		template <class T> void Set(Entity entity, const T &value) {
 			RequireOwningThread("Set");
-			Native().entity(entity.Id).set<T>(value);
+			SetRaw(entity, Components::Of<T>(), &value);
 		}
 
 		// Reports whether an entity carries a component of the requested type.
@@ -138,17 +185,21 @@ namespace engine::ecs {
 		// @param entity The entity to inspect.
 		// @return `true` when the component is present.
 		template <class T> bool Has(Entity entity) const {
-			return NativeConst().entity(entity.Id).has<T>();
+			return HasRaw(entity, Components::Of<T>());
 		}
 
 		// Null when absent. Callers check; there is no Get-or-default, because
 		// a default-constructed component silently standing in for a missing
 		// one is a bug that reads as working code.
 		//
+		// Invalidated by anything that moves the entity's row: adding or
+		// removing a component on it, or destroying another entity in the same
+		// table.
+		//
 		// @param entity The entity whose component is requested.
 		// @return A read-only component pointer, or `nullptr` when absent.
 		template <class T> const T *Get(Entity entity) const {
-			return NativeConst().entity(entity.Id).try_get<T>();
+			return static_cast<const T *>(GetRaw(entity, Components::Of<T>()));
 		}
 
 		// Returns mutable access to one component without adding it when absent.
@@ -157,15 +208,17 @@ namespace engine::ecs {
 		// @return A mutable component pointer, or `nullptr` when absent.
 		template <class T> T *GetMutable(Entity entity) {
 			RequireOwningThread("GetMutable");
-			return Native().entity(entity.Id).try_get_mut<T>();
+			return static_cast<T *>(GetRawMutable(entity, Components::Of<T>()));
 		}
 
 		// Removes one component type without destroying the entity.
 		//
+		// Deferred when called from inside Each.
+		//
 		// @param entity The entity from which to remove the component.
 		template <class T> void Remove(Entity entity) {
 			RequireOwningThread("Remove");
-			Native().entity(entity.Id).remove<T>();
+			RemoveRaw(entity, Components::Of<T>());
 		}
 
 		// --- resources -----------------------------------------------------
@@ -188,10 +241,10 @@ namespace engine::ecs {
 		// entity has the camera" is a question the world cannot answer without
 		// a search, where `Resource<ActiveCamera>()` is a lookup.
 		//
-		// Resources live on an entity that is disabled, so no query reaches
-		// them. A type used as both a component and a resource therefore does
-		// not silently gain a row in `Each<T>`; `tests/Resources.cpp` asserts
-		// that rather than trusting it.
+		// Resources live outside the table space entirely, so no query can
+		// reach one. A type used as a component *and* as a resource therefore
+		// cannot silently gain a row in `Each<T>` — not because something
+		// remembered to hide it, but because there is nowhere for it to appear.
 		//
 		// WorldTime is reserved for the dedicated clock API. Do not set, mutate,
 		// or remove it through these generic methods; Time() assumes the resource
@@ -199,52 +252,44 @@ namespace engine::ecs {
 
 		// Adds or replaces one world-scoped resource.
 		//
-		// This invalidates every pointer previously returned by Resource or
-		// ResourceMutable, regardless of the resource type being set.
-		//
 		// @param value The resource value to copy into the store.
 		template <class T> void SetResource(const T &value) {
 			RequireOwningThread("SetResource");
-			Native().entity(ResourceHolder).set<T>(value);
+			SetResourceRaw(Components::Of<T>(), &value);
 		}
 
 		// Null when unset, for the same reason Get is: a default-constructed
 		// resource standing in for one nobody set is a bug that reads as
 		// working code.
 		//
-		// The returned pointer is invalidated by SetResource or RemoveResource
-		// for any resource type, because either operation may move the holder.
+		// Unlike the previous storage, this pointer is **not** invalidated by
+		// setting an unrelated resource. Each resource owns its own storage,
+		// so only removing or re-setting *this* one moves it.
 		//
 		// @return A read-only resource pointer, or `nullptr` when unset.
 		template <class T> const T *Resource() const {
-			return NativeConst().entity(ResourceHolder).try_get<T>();
+			return static_cast<const T *>(GetResourceRaw(Components::Of<T>()));
 		}
 
-		// Invalidated by SetResource and RemoveResource of *any* type — adding
-		// a resource moves the holder between tables and everything on it with
-		// it. Resources are declared when a world is built, so in practice this
-		// means: do not hold one across world construction.
+		// Mutable access to one world-scoped resource.
 		//
 		// @return A mutable resource pointer, or `nullptr` when unset.
 		template <class T> T *ResourceMutable() {
 			RequireOwningThread("ResourceMutable");
-			return Native().entity(ResourceHolder).try_get_mut<T>();
+			return static_cast<T *>(GetResourceRawMutable(Components::Of<T>()));
 		}
 
 		// Reports whether the world contains a resource of the requested type.
 		//
 		// @return `true` when the resource is present.
 		template <class T> bool HasResource() const {
-			return NativeConst().entity(ResourceHolder).has<T>();
+			return GetResourceRaw(Components::Of<T>()) != nullptr;
 		}
 
 		// Removes one world-scoped resource when present.
-		//
-		// This invalidates every pointer previously returned by Resource or
-		// ResourceMutable, regardless of the resource type being removed.
 		template <class T> void RemoveResource() {
 			RequireOwningThread("RemoveResource");
-			Native().entity(ResourceHolder).remove<T>();
+			RemoveResourceRaw(Components::Of<T>());
 		}
 
 		// --- time ----------------------------------------------------------
@@ -255,8 +300,8 @@ namespace engine::ecs {
 
 		// By value, not by reference. It is 32 bytes, read once per system, and
 		// returning a copy makes two hazards impossible at once — a reference
-		// left dangling by a later SetResource, and a system quietly writing to
-		// the clock instead of reading it.
+		// left dangling by a later resource change, and a system quietly
+		// writing to the clock instead of reading it.
 		//
 		// @return A copy of the world's current clock state.
 		WorldTime Time() const;
@@ -284,22 +329,19 @@ namespace engine::ecs {
 		// component — are deferred until the loop ends. They are therefore
 		// safe, and not visible to the loop that made them.
 		//
-		// The deferred scope is this wrapper's doing, not the backing store's:
-		// iterating from outside a registered system locks the table, and a
-		// Destroy inside the loop would abort on that lock. Making it safe here
-		// is the whole reason this layer exists rather than the raw API being
-		// passed around. Writes *through* a component reference are direct
-		// memory writes and are unaffected.
+		// Writes *through* a component reference are direct memory writes and
+		// are unaffected.
 		//
 		// @param body Called as `body(Entity, Ts &...)` for every matching entity.
 		template <class... Ts, class Body> void Each(Body &&body) {
 			RequireOwningThread("Each");
 
-			Native().defer_begin();
-			Native().each([&](flecs::entity entity, Ts &...components) {
-				body(Entity{entity.id()}, components...);
+			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
+			const DeferScope defer(*this);
+
+			VisitTables(terms, [&](const TableSlice &slice) {
+				VisitRows<Ts...>(slice, body, std::index_sequence_for<Ts...>{});
 			});
-			Native().defer_end();
 		}
 
 		// Each, one call per contiguous run of rows instead of one per entity.
@@ -319,12 +361,8 @@ namespace engine::ecs {
 		//   - **No structural changes.** Not deferred, for the same reason
 		//     EachParallel is not: deferring exists to make a Create or Destroy
 		//     inside the loop safe, and one here would move the very arrays the
-		//     body is holding. Writes *through* the pointers are ordinary
-		//     memory writes and are fine.
-		//   - **No Entity.** Adding one would mean either a parallel array of a
-		//     type this header would have to promise is layout-compatible with
-		//     the backing store's, or a per-row conversion — which is the cost
-		//     this exists to remove. A body that needs entities wants Each.
+		//     body is holding.
+		//   - **No Entity.** A body that needs entities wants Each.
 		//
 		// Batches arrive in table order, and a table is not a unit anybody
 		// declared: adding a component to one entity moves it to another table
@@ -338,10 +376,10 @@ namespace engine::ecs {
 		template <class... Ts, class Body> void EachBatch(Body &&body) {
 			RequireOwningThread("EachBatch");
 
-			Native().template query<Ts...>().run([&](flecs::iter &iterator) {
-				while (iterator.next()) {
-					VisitTable<Ts...>(iterator, body, std::index_sequence_for<Ts...>{});
-				}
+			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
+
+			VisitTables(terms, [&](const TableSlice &slice) {
+				VisitBatch<Ts...>(slice, body, std::index_sequence_for<Ts...>{});
 			});
 		}
 
@@ -359,14 +397,7 @@ namespace engine::ecs {
 		//
 		// Every restriction EachBatch and EachParallel carry applies here, and
 		// one is worth repeating because the pointers make it easy to break:
-		// **no writes outside the rows the body was given.** Two workers hold
-		// neighbouring slices of the same array, and reaching sideways is a race
-		// the affinity check cannot see.
-		//
-		// Reach for it when the body is memory-bound over a large scene — that
-		// is the case where more threads means more outstanding loads and the
-		// crossover arrives soonest. Below it EachBatch wins; see the table on
-		// EachParallel below, and measure rather than assume.
+		// **no writes outside the rows the body was given.**
 		//
 		// @param body  Called concurrently as `body(size_t first, size_t rows,
 		//              Ts *...columns)`, with `rows` always non-zero.
@@ -378,14 +409,14 @@ namespace engine::ecs {
 		size_t EachBatchParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
 			RequireOwningThread("EachBatchParallel");
 
+			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
 			size_t visited = 0;
-			Native().template query<Ts...>().run([&](flecs::iter &iterator) {
-				while (iterator.next()) {
-					visited += VisitTableInParallelBatches<Ts...>(
-						iterator, body, grain, visited, std::index_sequence_for<Ts...>{}
-					);
-				}
+
+			VisitTables(terms, [&](const TableSlice &slice) {
+				visited +=
+					VisitBatchParallel<Ts...>(slice, body, grain, visited, std::index_sequence_for<Ts...>{});
 			});
+
 			return visited;
 		}
 
@@ -420,7 +451,8 @@ namespace engine::ecs {
 		//
 		// **This is slower than Each below a crossover, and the crossover is
 		// higher than it looks.** Measured on a 24-core machine over an
-		// integration step of three float multiply-adds per row:
+		// integration step of three float multiply-adds per row, against the
+		// previous storage:
 		//
 		//     entities     Each      EachParallel
 		//        20 000    0.050 ms      0.102 ms   2.0x slower
@@ -428,12 +460,11 @@ namespace engine::ecs {
 		//       500 000    1.204 ms      0.347 ms   3.5x faster
 		//     2 000 000    5.925 ms      1.704 ms   3.5x faster
 		//
-		// So for a cheap body the crossover is somewhere near 60-80k rows, and
-		// the ceiling is about 3.5x rather than the core count — past that it is
-		// memory bandwidth, not threads. An expensive body crosses over far
-		// sooner. Neither number is knowable in advance, which is why the answer
-		// is to measure the system you are writing rather than to reach for this
-		// by default.
+		// So for a cheap body the crossover was somewhere near 60-80k rows, and
+		// the ceiling about 3.5x rather than the core count — memory bandwidth,
+		// not threads. **Those numbers were taken against the previous backing
+		// store and have not been re-measured against this one.** Expect the
+		// crossover to move; do not expect it to vanish.
 		//
 		// @param body  Called concurrently as `body(Entity, Ts &...)` for each match.
 		// @param grain The minimum table-row range worth handing to a worker.
@@ -442,154 +473,504 @@ namespace engine::ecs {
 		void EachParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
 			RequireOwningThread("EachParallel");
 
+			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
+
 			// Not deferred, unlike Each. Deferring exists to make a structural
 			// change inside the loop safe, and structural changes are not
 			// allowed here at all.
-			Native().template query<Ts...>().run([&](flecs::iter &iterator) {
-				while (iterator.next()) {
-					VisitTableInParallel<Ts...>(iterator, body, grain, std::index_sequence_for<Ts...>{});
-				}
+			VisitTables(terms, [&](const TableSlice &slice) {
+				VisitRowsParallel<Ts...>(slice, body, grain, std::index_sequence_for<Ts...>{});
 			});
 		}
 
 		// How many entities Each would visit.
 		//
-		// The query is built once per type list per store and kept, so a system
-		// may call this every tick. It used to build one per call, which made a
-		// system that published an entity count the most expensive thing in the
-		// tick and skewed every measurement taken while it was there — so the
-		// count got captured at build time instead, and the world grew a second
-		// copy of a fact it already held. Caching the query is what removes the
-		// reason to keep that copy.
-		//
-		// The cached query is a live view, not a snapshot: entities created
-		// after the first call are counted by the next one.
+		// The plan is built once per term list and kept, so a system may call
+		// this every tick. The cached plan is a live view rather than a
+		// snapshot: entities and tables created afterwards are counted by the
+		// next call.
 		//
 		// @return The live number of entities carrying every requested component.
 		template <class... Ts> size_t CountMatching() {
 			static_assert(sizeof...(Ts) > 0, "CountMatching needs at least one component.");
 			RequireOwningThread("CountMatching");
 
-			return CachedCount(std::type_index(typeid(std::tuple<Ts...>)), [this] {
-				// Untyped, because counting needs the terms and not the column
-				// pointers, and one concrete query type keeps the cache a plain
-				// map rather than a type-erasure exercise.
-				auto builder = World.query_builder<>();
-				(builder.with<std::remove_const_t<Ts>>(), ...);
-				return builder.build();
+			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
+			return CountRows(terms);
+		}
+
+		// --- instances -----------------------------------------------------
+		//
+		// The Roblox-shaped half. An instance is an entity in the archetype its
+		// class names, carrying `InstanceClass`, `Hierarchy` and `InstanceName`
+		// alongside whatever else the class holds.
+		//
+		// The tree is organisational, not spatial: parenting moves nothing and
+		// propagates nothing, because a part's transform is world-space. That
+		// is Roblox's model and it is why the hierarchy costs four handles per
+		// node instead of a scene graph.
+
+		// Creates an instance of a class, starting from its prototype row.
+		//
+		// A column copy per component rather than a constructor call, which is
+		// also what makes `Clone` need no separate machinery.
+		//
+		// @param id   The class to instantiate.
+		// @param name The instance's name, which need not be unique.
+		// @return The new instance, or NULL_ENTITY for an invalid class.
+		Entity CreateInstance(ClassId id, std::string_view name = {});
+
+		// Copies one instance, its components and its whole subtree.
+		//
+		// The copy is parented nowhere, exactly as `:Clone()` leaves it — a
+		// clone that appeared in the world at the moment it was made would run
+		// its scripts before the caller had finished configuring it.
+		//
+		// References *inside* the subtree are rewritten to point at the copies.
+		// A reference pointing out of it is left alone, because the thing it
+		// names was not copied.
+		//
+		// @param source The instance to copy.
+		// @return The copy, or NULL_ENTITY when the source is not an instance.
+		Entity CloneInstance(Entity source);
+
+		// Destroys an instance and everything under it.
+		//
+		// Roblox keeps a destroyed instance readable while a script holds a
+		// reference; here the row is freed and the handle becomes a tombstone.
+		// Zombie rows are a cost every iterating system pays forever, and a
+		// generation check already makes the stale handle safe.
+		//
+		// Deferred when called from inside Each.
+		//
+		// @param instance The root of the subtree to destroy.
+		void DestroyInstance(Entity instance);
+
+		// The class an entity was created as.
+		//
+		// @param instance The entity to ask about.
+		// @return The class, or an invalid id when it is not an instance.
+		ClassId ClassOf(Entity instance) const;
+
+		// Reports whether an instance is of a class or one derived from it.
+		//
+		// @param instance The entity to test.
+		// @param id       The class to test against.
+		// @return `true` when the instance's class is `id` or descends from it.
+		bool IsA(Entity instance, ClassId id) const;
+
+		// Moves an instance under a new parent, or to no parent.
+		//
+		// Appends to the end of the sibling list, so `EachChild` yields
+		// insertion order — which replication and replay both depend on.
+		//
+		// Refuses to make an instance its own ancestor, because a cycle in the
+		// tree is a hang in every walk of it rather than a wrong answer.
+		//
+		// @param instance The instance to move.
+		// @param parent   The new parent, or NULL_ENTITY to detach.
+		// @return `false` when the move was refused.
+		bool SetParent(Entity instance, Entity parent);
+
+		// The parent of an instance.
+		//
+		// @param instance The instance to ask about.
+		// @return The parent, or NULL_ENTITY for a root or a non-instance.
+		Entity ParentOf(Entity instance) const;
+
+		// Visits every child in insertion order.
+		//
+		// Safe against the body reparenting or destroying the child it was
+		// handed, because the next sibling is read before the body runs.
+		//
+		// @param instance The parent whose children to visit.
+		// @param body     Called as `body(Entity)` for each child.
+		void EachChild(Entity instance, const std::function<void(Entity)> &body) const;
+
+		// The first child with a name, searching in insertion order.
+		//
+		// A walk rather than an index, because most instances have few children
+		// and an index per node would allocate for every one of them.
+		//
+		// @param instance The parent to search.
+		// @param name     The name to find.
+		// @return The child, or NULL_ENTITY when none matches.
+		Entity FindFirstChild(Entity instance, std::string_view name) const;
+
+		// Reports whether one instance is inside another's subtree.
+		//
+		// @param instance The instance to test.
+		// @param ancestor The subtree root to test against.
+		// @return `true` when instance is ancestor or sits beneath it.
+		bool IsDescendantOf(Entity instance, Entity ancestor) const;
+
+		// The name an instance carries.
+		//
+		// @param instance The instance to ask about.
+		// @return The name, or an invalid Name when unnamed.
+		core::Name InstanceNameOf(Entity instance) const;
+
+		// --- change tracking -----------------------------------------------
+
+		// Starts recording which entities write to `T`.
+		//
+		// Off by default and per type, because tracking costs a bit per row and
+		// most components have nobody asking. Declare what is observed when the
+		// world is built: observing later has to move every entity already
+		// carrying the component into an archetype that has somewhere to put
+		// the bits, which is correct but is a structural change nobody asked
+		// for at a moment nobody expected.
+		//
+		// Idempotent.
+		template <class T> void Observe() {
+			RequireOwningThread("Observe");
+			ObserveRaw(Components::Of<T>());
+		}
+
+		// Reports whether `T` is being tracked.
+		//
+		// @return `true` when writes to `T` set a bit.
+		template <class T> bool Observed() const {
+			return ObservedRaw(Components::Of<T>());
+		}
+
+		// Reports whether one entity's `T` was written since the last
+		// ClearChanges.
+		//
+		// Always false for a component nobody observes, which is the honest
+		// answer rather than an optimistic one: nothing recorded it, so nothing
+		// can say.
+		//
+		// @param entity The entity to ask about.
+		// @return `true` when the component changed.
+		template <class T> bool Changed(Entity entity) const {
+			return ChangedRaw(entity, Components::Of<T>());
+		}
+
+		// Visits every entity whose `T` was written since the last
+		// ClearChanges.
+		//
+		// This is the shape a replication delta and a render invalidation both
+		// want: the changed rows, not every row plus a test.
+		//
+		// @param body Called as `body(Entity, T &)` for each changed entity.
+		template <class T, class Body> void EachChanged(Body &&body) {
+			RequireOwningThread("EachChanged");
+
+			const ComponentId id = Components::Of<T>();
+			const ComponentId terms[] = {id, Components::Of<DirtyBits>()};
+			const DeferScope defer(*this);
+
+			VisitChanged(terms, id, [&](Entity entity, void *value) {
+				body(entity, *static_cast<T *>(value));
 			});
 		}
 
-		// The escape hatch. Present because wrapping the whole of flecs is not
-		// v0.1's job, and named so that a search finds every place that took
-		// the shortcut. Every use here is a line the binding generator will
-		// have to account for later.
+		// --- change signals --------------------------------------------------
+
+		// A registered change signal, so it can be taken back.
 		//
-		// @return Mutable access to the backing flecs world.
-		// @warning Do not call this from another module; add the required Store
-		//          operation instead.
-		flecs::world &Native() {
-			return World;
+		// A number rather than a callable, because two `std::function`s are not
+		// comparable and a disconnect has to name exactly one connection.
+		//
+		// @since v0.2
+		struct Connection {
+			// Zero for a connection that was never made.
+			uint64_t Id = 0;
+
+			// Whether this names a connection.
+			//
+			// @return `true` when it came from `OnChanged`.
+			bool Valid() const {
+				return Id != 0;
+			}
+		};
+
+		// Calls `body` at the next phase boundary for every entity whose `T`
+		// was written.
+		//
+		// **Not at the moment of assignment.** A callback that ran inside a
+		// batch would let a script mutate the world in the middle of a loop
+		// over it, and a tick would stop being one thing that starts and
+		// finishes. It also means a property written three times in one tick
+		// signals once, with the value it ended up at, rather than three times
+		// with two values nobody will ever see.
+		//
+		// Observes `T` as a side effect, because a signal on a type nothing
+		// records would never fire and the silence would look like a bug in
+		// the listener. That carries `Observe`'s own warning: do it when the
+		// world is built rather than later.
+		//
+		// @param body Called as `body(Store &, Entity, const T &)`.
+		// @return The connection, for `Disconnect`.
+		template <class T, class Body> Connection OnChanged(Body &&body) {
+			RequireOwningThread("OnChanged");
+			Observe<T>();
+
+			return Listen(
+				Components::Of<T>(),
+				[body = std::forward<Body>(body)](Store &store, Entity entity, const void *value) {
+					body(store, entity, *static_cast<const T *>(value));
+				}
+			);
 		}
+
+		// Takes back a change signal.
+		//
+		// @param connection The connection to drop.
+		// @return `false` when it was already dropped or never made.
+		bool Disconnect(Connection connection);
+
+		// How many change signals are registered.
+		//
+		// @return The listener count.
+		size_t Listeners() const;
+
+		// Fires every change signal for what has been written since the last
+		// clear.
+		//
+		// Called by `World::Tick` after the simulation phases, which is the
+		// phase boundary the signals are named for. A `Store` driven by hand
+		// calls it wherever its own boundary is.
+		//
+		// **Re-entrant calls do nothing.** A listener that writes has made a
+		// change belonging to the *next* boundary; firing it inside this one
+		// would be the mid-batch dispatch the whole design avoids, and a
+		// listener that writes what it listens to would never stop.
+		//
+		// @return The number of listener calls made.
+		size_t FlushSignals();
+
+		// Clears every recorded change.
+		//
+		// Called at a phase boundary rather than after each read, because a
+		// property written three times in one tick should signal once and every
+		// consumer should see the same set. A memset per observed table.
+		void ClearChanges();
+
+		// How many writes to observed components have been recorded.
+		//
+		// The coarse signal, and the one a batch write still moves: a consumer
+		// that only needs "did anything change at all" can compare this instead
+		// of walking rows.
+		//
+		// @return A counter that only increases.
+		uint64_t ChangeVersion() const;
+
+		// --- snapshots -----------------------------------------------------
+
+		// Writes the whole world: entities, tables, resources, names, clock.
+		//
+		// **Component types are recorded by name**, never by id, so a snapshot
+		// written by one process restores into another that assigned different
+		// ids — which is the entire point, since the consumers are a restart
+		// after a crash, a world moving between host processes, and a recording
+		// replayed by a later build.
+		//
+		// The entity directory is reproduced exactly, index and generation
+		// alike. A component may hold an `Entity` — a parent, a target, an
+		// owner — and those handles are only still valid if the directory comes
+		// back unchanged rather than being re-allocated in order.
+		//
+		// @param writer The writer to append the snapshot to.
+		// @return `false` when the world holds a component with no
+		//         serialisation, which is refused rather than written as bytes
+		//         that cannot be read back.
+		bool Save(core::ByteWriter &writer) const;
+
+		// Replaces this world's entire contents with a snapshot.
+		//
+		// On any failure the store is left **empty** rather than half-restored,
+		// because a world that is partly one snapshot and partly another is
+		// worse than no world at all — it looks like it works.
+		//
+		// @param reader The reader to consume.
+		// @return `false` on a corrupt, truncated, or wrong-version snapshot,
+		//         or when it names a component this build does not have.
+		bool Load(core::ByteReader &reader);
+
+		// Applies a snapshot to a world that is already running.
+		//
+		// **The capability the replication seam exists to reserve.** `Load`
+		// replaces a world; this one merges into it. A client holding a replica
+		// receives authoritative state every tick and has to reconcile against
+		// what it already has — same entity, new values, no destroy-and-recreate
+		// — because destroying and recreating would reset everything the client
+		// predicted and make every correction a visible pop.
+		//
+		// Cheap to allow for now and expensive to retrofit, which is why it is
+		// here before the layer that needs it. `v02v03.md` §2.12.
+		//
+		// Entity handles are matched by index *and* generation, so an entity the
+		// sender destroyed and recreated is a different entity here too rather
+		// than the old one wearing new values.
+		//
+		// On failure the live world is **left as it was** — not cleared, and not
+		// half-merged. A replica that lost its world to a corrupt packet would
+		// be worse off than one that ignored it.
+		//
+		// @param reader The snapshot to apply.
+		// @param mode   What to do with entities the snapshot does not mention.
+		// @return `false` when the snapshot could not be read.
+		bool Apply(core::ByteReader &reader, ApplyMode mode);
+
+		// Empties the world: every entity, table, resource and name.
+		//
+		// The clock is reset and re-created, because a world with no clock is
+		// one where every system has to check.
+		void Clear();
+
+		// The snapshot format this build writes and accepts.
+		//
+		// A reader refuses anything else outright. A format that tries to be
+		// tolerant of versions it has never seen is one that restores a world
+		// nobody can reason about.
+		static constexpr uint32_t SNAPSHOT_VERSION = 1;
+
+		// The number of tables this world holds.
+		//
+		// A diagnostic: a world with thousands of tables is a world whose
+		// components are fragmenting its storage, and that shows up as
+		// iteration that will not parallelise.
+		//
+		// @return The archetype count.
+		size_t TableCount() const;
 
 	  private:
-		// The array behind one field.
+		// One table's rows, resolved for one term list.
+		struct TableSlice {
+			size_t Rows = 0;
+			const Entity *Entities = nullptr;
+
+			// One base pointer per term, in the order the caller named them.
+			// Null for a component with no data.
+			void *const *Columns = nullptr;
+		};
+
+		// Collects structural changes for the length of a scope.
+		struct DeferScope {
+			Store &Owner;
+
+			explicit DeferScope(Store &owner) : Owner(owner) {
+				Owner.BeginDefer();
+			}
+			~DeferScope() {
+				Owner.EndDefer();
+			}
+		};
+
+		// One row of one column, as the requested reference type.
 		//
-		// `flecs::field` exposes it only through `operator->`, which reads as an
-		// accessor for the shared-field case and is in fact the pointer either
-		// way. Naming it once here keeps `.operator->()` out of the call site.
-		template <class T> static T *ColumnData(const flecs::field<T> &column) {
-			return column.operator->();
+		// A component with no data has no bytes to point at, so every instance
+		// of it is the same instance — which is exactly true, since an empty
+		// type has no state to tell two of them apart. Handing back a shared
+		// object keeps a tag usable as a query term without giving a column of
+		// nothing a pointer nobody could dereference.
+		template <class T> static T &Row(void *base, size_t row) {
+			if constexpr (std::is_empty_v<std::remove_const_t<T>>) {
+				static std::remove_const_t<T> shared;
+				return shared;
+			} else {
+				return *(static_cast<T *>(base) + row);
+			}
 		}
 
-		// One table, handed over whole.
+		// One row of one column, as a pointer for the batch paths.
+		template <class T> static T *Rows(void *base) {
+			if constexpr (std::is_empty_v<std::remove_const_t<T>>) {
+				static std::remove_const_t<T> shared;
+				return &shared;
+			} else {
+				return static_cast<T *>(base);
+			}
+		}
+
 		template <class... Ts, class Body, size_t... Indices>
-		void VisitTable(flecs::iter &iterator, Body &body, std::index_sequence<Indices...>) {
-			const auto count = static_cast<size_t>(iterator.count());
-			// An empty table is a table, and a body promised a non-zero row
-			// count should not have to check for one.
-			if (count == 0) {
+		void VisitRows(const TableSlice &slice, Body &body, std::index_sequence<Indices...>) {
+			for (size_t row = 0; row < slice.Rows; row++) {
+				body(slice.Entities[row], Row<Ts>(slice.Columns[Indices], row)...);
+			}
+		}
+
+		template <class... Ts, class Body, size_t... Indices>
+		void VisitBatch(const TableSlice &slice, Body &body, std::index_sequence<Indices...>) {
+			if (slice.Rows == 0) {
 				return;
 			}
-
-			body(count, ColumnData(iterator.field<Ts>(static_cast<int8_t>(Indices)))...);
+			body(slice.Rows, Rows<Ts>(slice.Columns[Indices])...);
 		}
 
-		// One table, split across workers and handed over in slices.
-		//
-		// @param base The number of rows already visited in earlier tables, so
-		//             that a slice can name its own place in the whole.
-		// @return This table's row count, for the caller to add to `base`.
 		template <class... Ts, class Body, size_t... Indices>
-		size_t VisitTableInParallelBatches(
-			flecs::iter &iterator, Body &body, size_t grain, size_t base, std::index_sequence<Indices...>
+		size_t VisitBatchParallel(
+			const TableSlice &slice, Body &body, size_t grain, size_t base, std::index_sequence<Indices...>
 		) {
-			const auto count = static_cast<size_t>(iterator.count());
-			if (count == 0) {
+			if (slice.Rows == 0) {
 				return 0;
 			}
 
-			// Captured by value, for the same reason VisitTableInParallel does
-			// it: each field is a {pointer, count, is_shared} triple, so every
-			// worker gets its own copy and no shared iterator state is touched.
-			auto columns = std::make_tuple(iterator.field<Ts>(static_cast<int8_t>(Indices))...);
-
-			parallel::Jobs::For(count, grain, [&](size_t begin, size_t end) {
-				body(base + begin, end - begin, (ColumnData(std::get<Indices>(columns)) + begin)...);
+			parallel::Jobs::For(slice.Rows, grain, [&](size_t begin, size_t end) {
+				body(base + begin, end - begin, (Rows<Ts>(slice.Columns[Indices]) + begin)...);
 			});
 
-			return count;
+			return slice.Rows;
 		}
 
-		// One table's rows, split across workers.
-		//
-		// The field objects are captured by value on purpose. Each is a
-		// {pointer, count, is_shared} triple, so every worker gets its own
-		// copy and the parallel body touches no shared iterator state.
 		template <class... Ts, class Body, size_t... Indices>
-		void VisitTableInParallel(
-			flecs::iter &iterator, Body &body, size_t grain, std::index_sequence<Indices...>
+		void VisitRowsParallel(
+			const TableSlice &slice, Body &body, size_t grain, std::index_sequence<Indices...>
 		) {
-			const auto count = static_cast<size_t>(iterator.count());
-			if (count == 0) {
+			if (slice.Rows == 0) {
 				return;
 			}
 
-			auto entities = iterator.entities();
-			auto columns = std::make_tuple(iterator.field<Ts>(static_cast<int8_t>(Indices))...);
-
-			parallel::Jobs::For(count, grain, [&](size_t begin, size_t end) {
+			parallel::Jobs::For(slice.Rows, grain, [&](size_t begin, size_t end) {
 				for (size_t row = begin; row < end; row++) {
-					body(Entity{entities[row]}, std::get<Indices>(columns)[row]...);
+					body(slice.Entities[row], Row<Ts>(slice.Columns[Indices], row)...);
 				}
 			});
 		}
 
-		template <class Build> size_t CachedCount(std::type_index key, Build &&build) {
-			auto found = CountQueries.find(key);
-			if (found == CountQueries.end()) {
-				found = CountQueries.emplace(key, build()).first;
-			}
-			return static_cast<size_t>(found->second.count());
-		}
+		// --- the non-template half -----------------------------------------
+		//
+		// Every template above narrows to one of these. Keeping the storage out
+		// of the header is what lets the layout change without recompiling
+		// every system, and what keeps flecs-shaped debt from reappearing.
 
-		const flecs::world &NativeConst() const {
-			return World;
-		}
+		void SetRaw(Entity entity, ComponentId id, const void *value);
+		bool HasRaw(Entity entity, ComponentId id) const;
+		const void *GetRaw(Entity entity, ComponentId id) const;
+		void *GetRawMutable(Entity entity, ComponentId id);
+		void RemoveRaw(Entity entity, ComponentId id);
+
+		void SetResourceRaw(ComponentId id, const void *value);
+		const void *GetResourceRaw(ComponentId id) const;
+		void *GetResourceRawMutable(ComponentId id);
+		void RemoveResourceRaw(ComponentId id);
+
+		void
+		VisitTables(std::span<const ComponentId> terms, const std::function<void(const TableSlice &)> &body);
+		size_t CountRows(std::span<const ComponentId> terms);
+
+		// Copies one instance without its subtree, returning the copy.
+		Entity CloneOne(Entity source);
+
+		void ObserveRaw(ComponentId id);
+		bool ObservedRaw(ComponentId id) const;
+		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
+		bool ChangedRaw(Entity entity, ComponentId id) const;
+		void VisitChanged(
+			std::span<const ComponentId> terms,
+			ComponentId subject,
+			const std::function<void(Entity, void *)> &body
+		);
+
+		void BeginDefer();
+		void EndDefer();
 
 		void RequireOwningThread(const char *what) const;
 
-		flecs::world World;
+		std::unique_ptr<StoreState> State;
 		std::string StoreName;
-		std::thread::id Owner;
-
-		// Every resource hangs off this one entity, which is disabled so that
-		// no query reaches it. Created by the constructor, so `Resource<T>()`
-		// on a store nobody has set anything on returns null rather than
-		// touching a stale id.
-		flecs::entity_t ResourceHolder = 0;
-
-		// One persistent query per component list, keyed by the list's type.
-		std::unordered_map<std::type_index, flecs::query<>> CountQueries;
+		std::atomic<std::thread::id> Owner;
 	};
 }

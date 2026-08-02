@@ -9,16 +9,18 @@
 // this same process later.
 
 #include <engine/core/Clock.hpp>
-#include <engine/core/FixedTimestep.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/input/Actions.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/world/Universe.hpp>
 
+#include <client/Compositor.hpp>
 #include <client/Demo.hpp>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 struct SDL_Window;
@@ -38,8 +40,23 @@ namespace client {
 		// where it starts and not where it stays.
 		int Height = 720;
 
-		// How many cubes the demo scene builds.
+		// How many cubes the demo scene builds, per world.
 		uint32_t Entities = 2048;
+
+		// How many worlds to simulate and composite.
+		//
+		// Each is a whole world with its own clock, its own store and its own
+		// view channel, and the compositor places them side by side because two
+		// worlds' coordinates do not mean the same thing. One is the ordinary
+		// case; more than one is what makes the compositing path a path rather
+		// than a plan.
+		uint32_t Worlds = 1;
+
+		// World units between adjacent views.
+		//
+		// A compositor's decision, not a simulation's — which is why it is a
+		// client option and not a world setting.
+		float ViewSpacing = 40.0f;
 
 		// Simulation ticks per second, independent of the frame rate. The
 		// frame runs as fast as it can; the simulation advances in fixed steps
@@ -134,13 +151,30 @@ namespace client {
 
 		engine::input::Actions Actions;
 		engine::core::FrameClock Clock;
-		engine::core::FixedTimestep Timestep;
 
 		// The world, and the only place simulation state lives. Everything
 		// below this line is the *program* — window, frame budget, panel
 		// scroll — which is not world state and does not belong in the store.
-		engine::ecs::Store Store{"client"};
-		engine::ecs::Scheduler Scheduler;
+		// The universe this client drives, and the world it draws.
+		//
+		// A client renders one world while the rest keep simulating, which is
+		// why presentation is a separate call from the tick. Today there is one
+		// world; nothing above this line assumes so.
+		//
+		// Held by pointer because a universe binds its driver thread on
+		// construction, and that thread is decided in Initialise rather than
+		// wherever this object was declared.
+		std::unique_ptr<engine::world::Universe> Universe_;
+
+		// The world the panels report on, and the first view composited.
+		engine::world::WorldId Rendered;
+
+		// Every world this client simulates, in creation order.
+		std::vector<engine::world::WorldId> Simulated;
+
+		// N views in, one frame out. The renderer draws what this composed
+		// rather than reaching into a store that somebody else is writing.
+		Compositor Views;
 
 		std::vector<engine::render::SystemTiming> SystemTimings;
 
