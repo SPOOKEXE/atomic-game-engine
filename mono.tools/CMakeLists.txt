@@ -8,6 +8,13 @@
 
 add_subdirectory(testrunner)
 
+# The benchmark runner, over the test runner's own library. Declared only when
+# there are benchmarks to run: it exists to time them, and a tool built to time
+# binaries nobody produced is a longer build for nothing.
+if(MONO_BUILD_BENCH)
+	add_subdirectory(benchrunner)
+endif()
+
 # The documentation filter, and the `docs` target it feeds. Declared always: the
 # filter is an ordinary library with ordinary tests, and only the `docs` target
 # itself needs Doxygen to be installed.

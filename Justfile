@@ -44,6 +44,7 @@ build target="":
 # One program and only its dependencies.
 client: (build "client")
 server: (build "server")
+cdn: (build "cdn")
 
 # Only the suites a change could have affected, by cascading signature hash.
 test: build
@@ -57,6 +58,36 @@ test-all: build
 test-list: build
     ./{{build}}/tools/testrunner --build {{build}} --list
 
+# Measure the benchmark suites a change could have affected.
+#
+# **The same selection as `just test`, over `bench/` instead of `tests/`.** A
+# benchmark declares `TEST_SUITE_ID` and gets a cascading signature exactly as a
+# test does, so a change at the bottom of the stack re-measures everything above
+# it and nothing else. That matters more here than for tests: a test suite costs
+# milliseconds and a benchmark suite costs seconds by design, and running all of
+# them on every change is how a benchmark suite stops being run at all.
+#
+# Against the `bench` preset, which optimises. A debug build measures the debug
+# build, and the danger is not that it is slower — it is that the *ratios*
+# between two implementations invert.
+#
+# A number is reported, never enforced. A laptop on battery and a machine with a
+# compile going both swing further than most real regressions, so `just bench`
+# does not fail on a slow figure. Read it, then decide.
+bench *args:
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench {{args}}
+
+# Every benchmark, whatever changed.
+bench-all *args: (bench "--all" args)
+
+# Make what was just measured the numbers everything is compared against.
+#
+# Do this on a quiet machine and say so in the commit. A baseline taken while
+# something else was compiling makes every later run look like an improvement.
+bench-accept *args: (bench "--all" "--accept" args)
+
 # The architecture test on its own — the target graph against the expectation.
 # Needs a configure, not a build: it reads what CMake emitted.
 test-architecture:
@@ -64,6 +95,21 @@ test-architecture:
     cmake -DGRAPH={{build}}/target-graph.json \
           -DEXPECTED=mono.tools/architecture/expected_graph.json \
           -P mono.tools/architecture/CheckTargetGraph.cmake
+
+# Everything CI runs, in the order CI runs it, against one preset.
+#
+# Here so that "it passes locally" and "it passes in CI" mean the same thing.
+# `.github/workflows/ci.yml` splits this across jobs by what each one needs
+# installed — the point of the split is that the headless half runs on a machine
+# with no graphics stack at all — but the checks are these and in this order:
+# cheapest and most likely to fail first, so a misformatted file does not wait
+# behind a compile.
+#
+# Not `preset=ci` by default, because that makes every warning fatal and the
+# recipe is meant to be runnable mid-change. Use `just preset=ci check` for what
+# the pipeline actually enforces.
+check: format-check build test-all test-architecture determinism replay-check
+    @echo "check ok — format, build, tests, architecture, determinism, replay"
 
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")
@@ -77,6 +123,43 @@ demo: (build "client")
 host *args: (build "server")
     ./{{build}}/server/server {{args}}
 
+# Run the content origin. `just serve --root ./content` passes flags through.
+serve *args: (build "cdn")
+    ./{{build}}/cdn/cdn {{args}}
+
+# Two runs of one scene, compared byte for byte.
+#
+# The determinism guarantee, checked rather than claimed. A recording is one
+# snapshot plus every envelope applied since, and both halves are written in a
+# stable order — so two runs of the same scene produce identical files, and any
+# difference is a wall clock, a pointer address, or an unordered container that
+# reached the simulation.
+#
+# Same binary, same machine. Cross-machine agreement is deliberately not
+# promised: floating point differs between compilers and chips.
+determinism entities="512" ticks="200": (build "server")
+    @rm -f .cache/determinism-a.rec .cache/determinism-b.rec
+    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/determinism-a.rec > /dev/null
+    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/determinism-b.rec > /dev/null
+    @cmp .cache/determinism-a.rec .cache/determinism-b.rec         || (echo "FAIL: two runs of the same scene diverged" && exit 1)
+    @echo "determinism ok — {{ticks}} ticks over {{entities}} entities, byte-identical"
+    @rm -f .cache/determinism-a.rec .cache/determinism-b.rec
+
+# A recorded run, replayed, and the replay recorded again.
+#
+# Stronger than the above: it proves the *replay* path reproduces the run rather
+# than merely that two live runs agree. A snapshot carries state and never code,
+# so the replaying process registers the same systems — which it does by being
+# the same program.
+replay-check entities="256" ticks="120": (build "server")
+    @rm -f .cache/replay-source.rec .cache/replay-again.rec
+    ./{{build}}/server/server --entities {{entities}} --ticks {{ticks}} --unpaced         --record .cache/replay-source.rec > /dev/null
+    ./{{build}}/server/server --replay .cache/replay-source.rec         --record .cache/replay-again.rec > /dev/null
+    @test -f .cache/replay-again.rec         || (echo "FAIL: replaying with --record wrote nothing" && exit 1)
+    @cmp .cache/replay-source.rec .cache/replay-again.rec         || (echo "FAIL: the replay did not reproduce the run it replayed" && exit 1)
+    @echo "replay ok — {{ticks}} barriers reproduced, byte-identical"
+    @rm -f .cache/replay-source.rec .cache/replay-again.rec
+
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.
 check-server-is-headless:
@@ -87,6 +170,24 @@ check-server-is-headless:
     @test ! -d .cache/build/server/client \
         || (echo "FAIL: the client was built into a server-only preset" && exit 1)
     @echo "server contains no graphics stack"
+
+# The origin on its own, which is how repo_layout.md §11's claim is proved
+# rather than asserted: it configures and builds where there is no Vulkan SDK,
+# no SDL and no shader compiler.
+#
+# MONO_VENDORED_GLSLC is left alone deliberately. The preset builds no client,
+# so the root CMakeLists never resolves a glslc at all — and if that stops being
+# true, this recipe is where it shows up.
+check-cdn-is-bare:
+    cmake --preset cdn > /dev/null
+    cmake --build --preset cdn
+    @test ! -d .cache/build/cdn/cdn/shaders \
+        || (echo "FAIL: the cdn staged a shaders/ directory" && exit 1)
+    @test ! -d .cache/build/cdn/client \
+        || (echo "FAIL: the client was built into a cdn-only preset" && exit 1)
+    @test ! -d .cache/build/cdn/server \
+        || (echo "FAIL: the server was built into a cdn-only preset" && exit 1)
+    @echo "cdn contains no graphics stack and nothing else's program"
 
 # The API reference, from the comments already in the headers.
 #
@@ -131,7 +232,7 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched — reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.tools mono.build"
+mono_sources := "mono.engine mono.client mono.server mono.cdn mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #

@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -543,4 +544,153 @@ TEST_CASE(
 	// capture is worse than a refusal the caller can report.
 	REQUIRE_FALSE(FrameGraph::WriteSnapshot(path));
 	REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
+// --- timings measured somewhere else ------------------------------------------
+//
+// A worker's span cannot be recorded live — `Push` refuses anything off the
+// owning thread — so the producer measures itself and hands the number back.
+// What these check is that the handed-over number lands in the tree without
+// corrupting the arithmetic of the spans that were measured here.
+
+TEST_CASE("a reported span carries the duration it was given", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("worker", ProfileCategory::ECS, 12.5f);
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 1);
+	REQUIRE(spans[0].Name == "worker");
+	REQUIRE(spans[0].Milliseconds == 12.5f);
+	REQUIRE(spans[0].Reported);
+	REQUIRE(spans[0].Category == ProfileCategory::ECS);
+}
+
+TEST_CASE("a reported child does not make its parent's self time negative", "[framegraph]") {
+	// The case the whole `Reported` flag exists for. Eight workers each
+	// reporting five milliseconds under a batch that took almost none is
+	// forty milliseconds of work inside a scope that waited for one — and
+	// subtracting that from the parent would produce a number that is not
+	// merely wrong, it is a different quantity.
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE_CAT("batch", ProfileCategory::ECS);
+		for (int worker = 0; worker < 8; worker++) {
+			FrameGraph::Report("worker", ProfileCategory::ECS, 5.0f);
+		}
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 9);
+
+	// The parent keeps the wall time it actually spent, not wall minus forty.
+	REQUIRE(spans[0].Name == "batch");
+	REQUIRE(spans[0].SelfMilliseconds >= 0.0f);
+	REQUIRE(spans[0].SelfMilliseconds == spans[0].Milliseconds);
+}
+
+TEST_CASE("a measured child is still subtracted from its parent", "[framegraph]") {
+	// The other half of the same rule: skipping reported children must not
+	// have stopped ordinary nesting from working.
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE_CAT("outer", ProfileCategory::Engine);
+		{
+			ENGINE_PROFILE_CAT("inner", ProfileCategory::Engine);
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		}
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 2);
+	REQUIRE(spans[0].SelfMilliseconds < spans[0].Milliseconds);
+	REQUIRE(spans[1].Milliseconds >= 1.0f);
+}
+
+TEST_CASE("reported time counts towards its category", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("worlds", ProfileCategory::ECS, 7.0f);
+	FrameGraph::EndFrame();
+
+	REQUIRE(FrameGraph::CategoryMilliseconds(ProfileCategory::ECS) == 7.0f);
+}
+
+TEST_CASE("a reported span is a leaf and never becomes a parent", "[framegraph]") {
+	// Its work happened elsewhere, so nothing recorded on this thread was
+	// inside it. A sibling opened afterwards must sit beside it, not under it.
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("worker", ProfileCategory::ECS, 1.0f);
+	{ ENGINE_PROFILE_CAT("after", ProfileCategory::Engine); }
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 2);
+	REQUIRE(spans[0].Depth == spans[1].Depth);
+}
+
+TEST_CASE("a negative duration is refused rather than clamped", "[framegraph]") {
+	// It means the producer measured wrongly — two clocks, or a start it never
+	// set. Folding it to zero would put a plausible bar on the graph where the
+	// honest outcome is a missing one and a bump in the drop count.
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("impossible", ProfileCategory::ECS, -1.0f);
+	FrameGraph::EndFrame();
+
+	REQUIRE(FrameGraph::Spans().empty());
+	REQUIRE(FrameGraph::Dropped() == 1);
+}
+
+TEST_CASE("a report from a worker thread is dropped, not recorded", "[framegraph]") {
+	// The same rule `Push` applies. `Report` exists so a worker can hand its
+	// number to the owner, not so a worker can write into the owner's tree.
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	std::thread([] { FrameGraph::Report("elsewhere", ProfileCategory::ECS, 3.0f); }).join();
+	FrameGraph::EndFrame();
+
+	REQUIRE(FrameGraph::Spans().empty());
+	REQUIRE(FrameGraph::Dropped() == 1);
+}
+
+TEST_CASE("reporting while collection is off does nothing at all", "[framegraph]") {
+	FrameGraph::SetEnabled(false);
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("worker", ProfileCategory::ECS, 4.0f);
+	FrameGraph::EndFrame();
+
+	REQUIRE(FrameGraph::Spans().empty());
+}
+
+TEST_CASE("a reported span can be named at runtime", "[framegraph]") {
+	Collecting collecting;
+
+	const std::string host = "host.shared.0";
+
+	FrameGraph::BeginFrame();
+	FrameGraph::ReportNamed("host", host, ProfileCategory::Simulation, 2.5f);
+	FrameGraph::ReportNamed("host", {}, ProfileCategory::Simulation, 1.5f);
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 2);
+	REQUIRE(spans[0].Name == "host.shared.0");
+	REQUIRE(spans[0].Milliseconds == 2.5f);
+
+	// Empty text falls back to the stable name rather than drawing a blank bar.
+	REQUIRE(spans[1].Name == "host");
 }

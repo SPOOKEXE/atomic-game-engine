@@ -4,14 +4,13 @@ This engine is MPL-2.0. It builds against the projects below, each under its own
 licence. Every one of them lives in `mono.vendor/` as a git submodule, so the
 full licence text ships with the source in `mono.vendor/<name>/`.
 
-All twelve are permissive and compatible with MPL-2.0. **Nothing here is copyleft
-beyond MPL-2.0's own file-level scope**, and that is a condition of adding a
-dependency rather than a happy accident — see `mono.vendor/AGENTS.md`.
+All fourteen are permissive and compatible with MPL-2.0. **Nothing here is
+copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
+adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`.
 
 | Library | Licence | Used for | In a shipped game |
 |---|---|---|---|
 | [SDL3](https://github.com/libsdl-org/SDL) | Zlib | window, input, GPU abstraction | client only |
-| [flecs](https://github.com/SanderMertens/flecs) | MIT | ECS storage behind `engine::ecs` | yes |
 | [glm](https://github.com/g-truc/glm) | MIT / Happy Bunny | the maths under `core/types` | yes |
 | [spdlog](https://github.com/gabime/spdlog) | MIT | logging behind `core::Log` | yes |
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
@@ -21,6 +20,8 @@ dependency rather than a happy accident — see `mono.vendor/AGENTS.md`.
 | [asio](https://github.com/chriskohlhoff/asio) | BSL-1.0 | networking, when `net` exists | yes, once linked |
 | [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | SHA-256 behind `core::Random`, and the test runner's cache | yes |
 | [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | BSD-3-Clause | the CMake build for Crypto++ | no — build system only |
+| [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` — chunk, asset, bundle and manifest addressing | yes, once linked |
+| [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
 | [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no — `just docs` only |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
@@ -76,6 +77,36 @@ contains the `yes` rows and not the others:
   machine-executable object code from attribution, so a binary-only
   distribution owes nothing; a source distribution owes `License.txt` whole,
   all three licences in it.
+- **BLAKE3 is the lightest obligation here, and it is genuinely optional.** It
+  is offered under CC0-1.0 *or* Apache-2.0 *or* Apache-2.0 with the LLVM
+  exception, and taking the CC0 option means a public-domain dedication with no
+  attribution requirement at all. It is listed anyway, because the rule here is
+  one entry per submodule and because a licence review that finds an unlisted
+  submodule stops regardless of what the licence turns out to say.
+
+  Only `mono.vendor/blake3/c/` is built — the C implementation. The Rust crate
+  in the same repository is upstream's reference and is not vendored, compiled
+  or shipped.
+
+  It ships wherever `assets` is linked, which by `repo_layout.md` §8 is every
+  program: the client, the server, studio, the CLI and the origin. Like
+  Crypto++ and unlike SDL, it produces no tier split.
+- **Zstandard is dual-licensed, and which half we take matters.** Upstream ships
+  two texts: `LICENSE` is BSD-3-Clause and `COPYING` is GPLv2. **We take the
+  BSD-3-Clause option**, and that is a decision rather than a formality — the
+  GPLv2 option would be incompatible with shipping this inside a game binary
+  under MPL-2.0, so a reader who assumed the wrong half would reach the wrong
+  conclusion about the whole engine.
+
+  Obligations are the ordinary BSD-3-Clause ones: retain the notice, the
+  condition list and the disclaimer, and do not use the copyright holder's name
+  to endorse derived products.
+
+  Only the library is built — `ZSTD_BUILD_PROGRAMS` and `ZSTD_BUILD_TESTS` are
+  forced off, so the `zstd` command-line tool is neither compiled nor shipped.
+  Legacy (0.x) frame support is off too, which is a security decision as much as
+  a size one: it is decoder surface parsing origin-supplied bytes that nothing
+  here could ever have written.
 - **doxygen-awesome-css is a stylesheet.** It is copied beside the generated
   HTML by `just docs` and is never compiled, linked or staged. It is a submodule
   rather than a copied `.css` for the ordinary reason — a vendored file gets a

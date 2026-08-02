@@ -72,9 +72,13 @@ namespace testrunner {
 	}
 
 	std::vector<fs::path> FindTestBinaries(const fs::path &build) {
+		return FindBinaries(build, "tests");
+	}
+
+	std::vector<fs::path> FindBinaries(const fs::path &build, const std::string &subdirectory) {
 		std::vector<fs::path> binaries;
 
-		const fs::path directory = build / "tests";
+		const fs::path directory = build / subdirectory;
 		std::error_code error;
 		if (!fs::is_directory(directory, error)) {
 			return binaries;

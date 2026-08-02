@@ -1,14 +1,20 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Components.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <server/Simulation.hpp>
+#include <string>
+#include <vector>
 
 namespace server {
 
 	using engine::core::Random;
 	using engine::core::Vector3;
+	using engine::ecs::Components;
 	using engine::ecs::Entity;
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
@@ -41,6 +47,14 @@ namespace server {
 					position.Value = position.Value + velocity.Value * delta;
 				}
 			);
+
+			// Every position just moved, and nothing else knows. An iteration
+			// hands out a reference and the store never sees the write, so a
+			// replication delta built from the dirty bits would carry nothing at
+			// all — which is a client that joins, receives a snapshot, and then
+			// watches a frozen world. Costs nothing when nobody is observing
+			// `Position`, which is the case whenever `--listen` was not given.
+			store.MarkAllChanged<Position>();
 		}
 
 		void Bounce(Store &store) {
@@ -69,6 +83,16 @@ namespace server {
 					}
 				}
 			);
+
+			// Both, and both over-report: `Position` moved on every row anyway,
+			// and `Velocity` changed only on the few rows that hit a wall. A
+			// system that could name those rows should mark those rows — the
+			// cost of marking all of them is a delta carrying values that
+			// already match at the other end, which is bandwidth rather than
+			// error. Under-reporting a bounce would be a client that watches an
+			// entity keep going through the wall until the next snapshot.
+			store.MarkAllChanged<Position>();
+			store.MarkAllChanged<Velocity>();
 		}
 
 		// PreRender on a headless server is where replication will hang:
@@ -84,6 +108,95 @@ namespace server {
 				"world.entities", static_cast<double>(store.CountMatching<Position>())
 			);
 		}
+	}
+
+	void RegisterPlaceholderComponents() {
+		Components::Register<Position>("server.Position");
+		Components::Register<Velocity>("server.Velocity");
+		Components::Register<WorldBounds>("server.WorldBounds");
+
+		// `Chatter` holds a `core::Name`, which is a process-local id — writing
+		// it as an object representation would restore as whatever name
+		// happened to take that id in the reading process. So it is written as
+		// text, which is the rule every name on the wire follows.
+		Components::Register<Chatter>(
+			"server.Chatter",
+			[](engine::core::ByteWriter &writer, const void *values, size_t count) {
+				const auto *chatter = static_cast<const Chatter *>(values);
+				for (size_t index = 0; index < count; index++) {
+					writer.WriteName(chatter[index].Topic);
+				}
+			},
+			[](engine::core::ByteReader &reader, void *values, size_t count) {
+				auto *chatter = static_cast<Chatter *>(values);
+				for (size_t index = 0; index < count; index++) {
+					chatter[index].Topic = reader.ReadName();
+				}
+			}
+		);
+		Components::Register<Heard>(
+			"server.Heard",
+			[](engine::core::ByteWriter &writer, const void *values, size_t count) {
+				const auto *heard = static_cast<const Heard *>(values);
+				for (size_t index = 0; index < count; index++) {
+					writer.WriteUInt64(heard[index].Count);
+					writer.WriteName(heard[index].From);
+				}
+			},
+			[](engine::core::ByteReader &reader, void *values, size_t count) {
+				auto *heard = static_cast<Heard *>(values);
+				for (size_t index = 0; index < count; index++) {
+					heard[index].Count = reader.ReadUInt64();
+					heard[index].From = reader.ReadName();
+				}
+			}
+		);
+	}
+
+	// Subscribes once, then publishes this world's name and tick every tick.
+	//
+	// Runs in PreSimulation so a publish and the deliveries it produces sit on
+	// either side of the barrier the way any other bus traffic does.
+	void Chat(Store &store) {
+		const Chatter *chatter = store.Resource<Chatter>();
+		if (chatter == nullptr) {
+			return;
+		}
+
+		engine::world::Postbox box(store);
+		const std::string topic(chatter->Topic.Text());
+
+		// Everything that arrived, before anything is sent. A world reading its
+		// own publish back would mean the driver stopped filtering it out.
+		Heard heard = store.Resource<Heard>() == nullptr ? Heard{} : *store.Resource<Heard>();
+		for (const engine::world::Delivery &delivery : box.Deliveries()) {
+			if (delivery.Key != chatter->Topic) {
+				continue;
+			}
+			heard.Count++;
+			heard.From = delivery.From;
+		}
+		store.SetResource(heard);
+
+		if (store.Time().Tick <= 1) {
+			// Takes effect at the next barrier, so nothing published this tick
+			// comes back — which is the honest answer, since the subscription
+			// did not exist when it was sent.
+			box.Subscribe(topic);
+			return;
+		}
+
+		const std::string message = std::string(store.Name()) + ":" + std::to_string(store.Time().Tick);
+		std::vector<std::byte> payload(message.size());
+		std::memcpy(payload.data(), message.data(), message.size());
+		box.Publish(topic, payload);
+	}
+
+	void RegisterPlaceholderSystems(Store &, Scheduler &scheduler) {
+		scheduler.Add("chat", Phase::PreSimulation, Chat);
+		scheduler.Add("integrate", Phase::Simulation, Integrate);
+		scheduler.Add("bounce", Phase::PostSimulation, Bounce);
+		scheduler.Add("report", Phase::PreRender, Report);
 	}
 
 	void BuildPlaceholderWorld(Store &store, Scheduler &scheduler, uint32_t count) {
@@ -113,9 +226,6 @@ namespace server {
 		}
 
 		ENGINE_INFO("placeholder world: {} entities", count);
-
-		scheduler.Add("integrate", Phase::Simulation, Integrate);
-		scheduler.Add("bounce", Phase::PostSimulation, Bounce);
-		scheduler.Add("report", Phase::PreRender, Report);
+		RegisterPlaceholderSystems(store, scheduler);
 	}
 }

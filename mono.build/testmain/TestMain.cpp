@@ -12,32 +12,6 @@
 #include <string>
 #include <utility>
 
-namespace engine::testing {
-
-	// Function-local, so that a suite declared during static initialisation in
-	// another translation unit cannot race the container's construction.
-	static std::vector<Suite> &Suites() {
-		static std::vector<Suite> suites;
-		return suites;
-	}
-
-	Suite &Registry::Declare(std::string_view id, std::string_view file) {
-		auto &suites = Suites();
-		auto existing =
-			std::find_if(suites.begin(), suites.end(), [id](const Suite &suite) { return suite.Id == id; });
-		if (existing != suites.end()) {
-			return *existing;
-		}
-
-		suites.push_back(Suite{id, file, {}});
-		return suites.back();
-	}
-
-	const std::vector<Suite> &Registry::All() {
-		return Suites();
-	}
-}
-
 namespace {
 
 	// The `mono` reporter: one tab-separated line per test case, then a totals

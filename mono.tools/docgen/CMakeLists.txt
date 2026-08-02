@@ -102,6 +102,11 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/CONTRIBUTING.md"
 	"${CMAKE_SOURCE_DIR}/RUNNING.md"
 	"${CMAKE_SOURCE_DIR}/ROADMAP.md"
+	# ROADMAP.md links to this from four of its version sections, so leaving it
+	# out is four dangling links rather than a smaller site — and `docs-check`
+	# fails on those, which took the whole gate down while the target was
+	# spelled `v02v03.md` and no such file had ever existed.
+	"${CMAKE_SOURCE_DIR}/v02v03v04.md"
 	"${CMAKE_SOURCE_DIR}/SECURITY.md"
 	"${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
 	"${CMAKE_SOURCE_DIR}/docs"
@@ -113,6 +118,7 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/mono.engine"
 	"${CMAKE_SOURCE_DIR}/mono.client"
 	"${CMAKE_SOURCE_DIR}/mono.server"
+	"${CMAKE_SOURCE_DIR}/mono.cdn"
 	"${CMAKE_SOURCE_DIR}/mono.tools")
 	# An input Doxygen cannot read is a warning, and `docs-check` fails on
 	# warnings — so a checkout that legitimately does not have one of these yet
@@ -144,6 +150,7 @@ file(GLOB_RECURSE MONO_DOCS_MARKDOWN
 	"${CMAKE_SOURCE_DIR}/mono.engine/*.md"
 	"${CMAKE_SOURCE_DIR}/mono.client/*.md"
 	"${CMAKE_SOURCE_DIR}/mono.server/*.md"
+	"${CMAKE_SOURCE_DIR}/mono.cdn/*.md"
 	"${CMAKE_SOURCE_DIR}/mono.tools/*.md")
 
 set(MONO_DOCS_EXCLUDE "")
@@ -178,6 +185,7 @@ file(GLOB MONO_INCLUDE_ROOTS
 	"${CMAKE_SOURCE_DIR}/mono.engine/*/include"
 	"${CMAKE_SOURCE_DIR}/mono.client/include"
 	"${CMAKE_SOURCE_DIR}/mono.server/include"
+	"${CMAKE_SOURCE_DIR}/mono.cdn/include"
 	"${CMAKE_SOURCE_DIR}/mono.tools/*/include"
 	"${CMAKE_SOURCE_DIR}/mono.build/*/include")
 set(MONO_DOCS_INCLUDE_ROOTS "")

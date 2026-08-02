@@ -23,7 +23,7 @@ using Catch::Approx;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 
-namespace {
+namespace parallel_test {
 	struct Position {
 		float X = 0.0f;
 	};
@@ -53,6 +53,8 @@ namespace {
 		}
 	}
 }
+
+using namespace parallel_test;
 
 TEST_CASE("every entity is visited exactly once", "[parallel]") {
 	Pool pool{4};

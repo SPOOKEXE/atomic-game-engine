@@ -230,6 +230,8 @@ namespace engine::core {
 			return "engine";
 		case ProfileCategory::Render:
 			return "render";
+		case ProfileCategory::ECS:
+			return "ECS";
 		case ProfileCategory::Simulation:
 			return "sim";
 		case ProfileCategory::Idle:
@@ -330,7 +332,12 @@ namespace engine::core {
 				if (candidate.Depth <= span.Depth) {
 					break;
 				}
-				if (candidate.Depth == span.Depth + 1) {
+				// A reported child is time from another thread or another
+				// process. Subtracting it would give a parent a negative self
+				// time as soon as the work it dispatched outran the wall clock
+				// it waited for — which is the normal case for anything
+				// parallel, not an edge one.
+				if (candidate.Depth == span.Depth + 1 && !candidate.Reported) {
 					children += candidate.Milliseconds;
 				}
 			}
@@ -700,5 +707,75 @@ namespace engine::core {
 		}
 
 		Index = Push(Intern(state, name), category);
+	}
+
+	void FrameGraph::Report(std::string_view name, ProfileCategory category, float milliseconds) {
+		auto &state = Get();
+		if (!state.Recording) {
+			return;
+		}
+
+		// The same owner rule `Push` applies, and for the same reason. What is
+		// different is only where the number came from: a producer that cannot
+		// record its own span hands the duration to whoever can.
+		if (std::this_thread::get_id() != state.Owner) {
+			state.DroppedThisFrame++;
+			return;
+		}
+
+		// Ignored rather than clamped. A negative duration means the producer
+		// measured wrongly — two clocks, or a start it never set — and folding
+		// it to zero would put a plausible bar on the graph instead of a
+		// missing one.
+		if (!(milliseconds >= 0.0f)) {
+			state.DroppedThisFrame++;
+			return;
+		}
+
+		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
+			state.DroppedThisFrame++;
+			return;
+		}
+
+		// Opened and closed here, so it is a leaf under whatever is currently
+		// open. It never becomes anybody's parent: the work it describes
+		// happened elsewhere, and nothing recorded on this thread was inside
+		// it.
+		const size_t index = Push(name, category);
+		if (index == NOT_RECORDING || index == DEPTH_ONLY) {
+			Pop(index);
+			return;
+		}
+
+		Pop(index);
+
+		// Overwritten after the close, which is the whole point: the elapsed
+		// time this thread would have measured is the cost of the call, and the
+		// number worth showing is the one the producer reported.
+		// Overwritten after the close, which is the point: the elapsed time this
+		// thread would have measured is the cost of the call, and the number
+		// worth showing is the one the producer reported. `EndFrame` does the
+		// self-time and category accounting from here as it does for every
+		// other span.
+		FrameSpan &span = state.Building[index];
+		span.Milliseconds = milliseconds;
+		span.Reported = true;
+	}
+
+	void FrameGraph::ReportNamed(
+		std::string_view fallback, std::string_view name, ProfileCategory category, float milliseconds
+	) {
+		auto &state = Get();
+		if (!state.Recording || std::this_thread::get_id() != state.Owner || name.empty()) {
+			Report(fallback, category, milliseconds);
+			return;
+		}
+
+		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
+			Report(fallback, category, milliseconds);
+			return;
+		}
+
+		Report(Intern(state, name), category, milliseconds);
 	}
 }

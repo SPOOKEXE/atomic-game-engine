@@ -32,10 +32,26 @@ namespace engine::core {
 
 	// A broad owner used to group a span's self time in the frame overlay.
 	enum class ProfileCategory : uint8_t {
-		Engine,		// General engine work.
-		Render,		// Rendering work.
-		Simulation, // Simulation work.
-		Script,		// Script runtime work.
+		Engine, // General engine work.
+		Render, // Rendering work.
+
+		// Time inside the entity-component system: the scheduler, every system
+		// it ran, and the storage work underneath them.
+		//
+		// **This is where a game's time goes.** Every engine and game system
+		// runs through the ECS, so a system that is slow is ECS time and the
+		// bar says so. It is separate from `Simulation` because the two answer
+		// different questions: this one is "what did the systems cost", and
+		// that one is "what did the machinery around them cost" — a driver
+		// spending more on its barrier than on its worlds is a real and
+		// findable problem, and one category could not show it.
+		ECS,
+
+		// Simulation work that is not a system: the fixed-timestep accumulator,
+		// the driver's barrier, bus routing, snapshotting.
+		Simulation,
+
+		Script, // Script runtime work.
 
 		// Time the frame spent waiting rather than working — the wait for the
 		// display, above all.
@@ -87,6 +103,21 @@ namespace engine::core {
 
 		// Broad owner used when accumulating category self time.
 		ProfileCategory Category = ProfileCategory::Engine;
+
+		// Whether this duration was measured somewhere else and handed over.
+		//
+		// **A reported span is not wall time on this thread**, so it must not
+		// be subtracted from its parent's self time. Eight workers each
+		// reporting five milliseconds under a batch that took one would give
+		// that batch a self time of minus thirty-nine — a number that is not
+		// wrong by a little, it is a different quantity. The tree maths skips
+		// these, and the parent keeps the wall time it actually spent waiting.
+		//
+		// It follows that a frame's spans no longer sum to the frame, and that
+		// is correct: eight workers really did do eight milliseconds of work in
+		// one millisecond of wall clock. The overlay marks them so a reader
+		// knows which bars are concurrent.
+		bool Reported = false;
 	};
 
 	// Collects one thread's nested scopes into a bounded per-frame tree and
@@ -178,6 +209,53 @@ namespace engine::core {
 		// opened outside the thread that called BeginFrame(). The overlay shows the
 		// count because a partial flame graph must not look complete.
 		static size_t Dropped();
+
+		// --- timings measured somewhere else -----------------------------------
+
+		// Records a span whose duration was measured on another thread or in
+		// another process.
+		//
+		// **A worker's time cannot be recorded live.** `Push` refuses a span
+		// opened on any thread but the frame's owner, and it is right to: the
+		// depth is the owning thread's stack, and a worker moving it would
+		// corrupt that thread's nesting. Locking instead would put contention
+		// in the one path that runs on every span of every frame — so today
+		// every worker's work is counted by `Dropped()` and shown nowhere.
+		//
+		// The answer is not to time it from here. It is for the producer to
+		// measure itself and hand the number back, and for the owner to plot
+		// **the latest timing it received**. That is a frame behind for a
+		// worker and a barrier behind for a host process, and being a frame
+		// behind about a worker is worth far more than being silent about one.
+		//
+		// The span is placed at the current depth, so a reported worker sits
+		// under whatever opened the batch. Its start is the moment of the call
+		// rather than the moment the work happened: this is a duration in a
+		// tree, not a position on a timeline, and pretending otherwise would
+		// draw bars that overlap their own parent.
+		//
+		// @param name         What ran. Same lifetime rule as `Scope`: a
+		//                     literal, or text outliving the frame.
+		// @param category     Broad owner used for category totals.
+		// @param milliseconds What the producer said it took. A negative value
+		//                     is ignored rather than clamped — it means the
+		//                     producer measured wrongly, and turning it into
+		//                     zero would hide that.
+		static void Report(std::string_view name, ProfileCategory category, float milliseconds);
+
+		// Records a reported span whose name is only known at runtime.
+		//
+		// For a producer named at runtime — a worker index, a host name. The
+		// text is copied into frame-owned storage, exactly as `CopiedScope`
+		// does and for the same reason.
+		//
+		// @param fallback     Stable name used when `name` is empty.
+		// @param name         Runtime name to copy.
+		// @param category     Broad owner used for category totals.
+		// @param milliseconds What the producer said it took.
+		static void ReportNamed(
+			std::string_view fallback, std::string_view name, ProfileCategory category, float milliseconds
+		);
 
 		// --- history ---------------------------------------------------------
 
