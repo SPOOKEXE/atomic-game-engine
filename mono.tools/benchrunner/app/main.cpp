@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -321,6 +322,23 @@ int main(int argc, char **argv) {
 		row << "  " << measurement.Name << std::string(widest - measurement.Name.size() + 2, ' ')
 			<< std::setw(12) << std::right << FormatTime(measurement.Nanoseconds);
 
+		// The spread, as a percentage of the figure beside it.
+		//
+		// **Shown always, because a delta means nothing without it.** A
+		// benchmark whose own samples vary by half cannot report a quarter as a
+		// change, and the run that taught this lesson reported `+52.1% slower`
+		// for code that had just been made faster. A reader who can see the
+		// spread can see that for themselves; one who cannot will believe the
+		// delta.
+		const double noise = measurement.Nanoseconds > 0 ? static_cast<double>(measurement.Spread) /
+															   static_cast<double>(measurement.Nanoseconds)
+														 : 0.0;
+		{
+			std::ostringstream spread;
+			spread << "+-" << std::fixed << std::setprecision(0) << (noise * 100.0) << "%";
+			row << " " << std::setw(7) << std::right << spread.str();
+		}
+
 		const auto previous = baseline.find(KeyOf(measurement));
 		if (previous != baseline.end() && previous->second > 0) {
 			const double delta =
@@ -331,7 +349,15 @@ int main(int argc, char **argv) {
 			change << std::showpos << std::fixed << std::setprecision(1) << (delta * 100.0) << "%";
 
 			row << "   " << std::setw(8) << std::right << change.str();
-			if (delta > NOTABLE) {
+
+			// A move smaller than this run's own spread is not a result. Saying
+			// so is the difference between a tool that measures and one that
+			// generates confident noise — and the counters below only count
+			// what survived the test, so "2 slower" means two that moved
+			// further than the measurement could explain.
+			if (std::abs(delta) <= noise) {
+				row << "  (noise)";
+			} else if (delta > NOTABLE) {
 				row << "  slower";
 				regressed++;
 			} else if (delta < -NOTABLE) {

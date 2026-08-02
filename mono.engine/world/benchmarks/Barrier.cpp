@@ -99,16 +99,18 @@ namespace barrier_bench {
 
 	// A universe whose worlds all talk on one topic. What a barrier costs when
 	// there is traffic to route rather than none.
-	Universe &ChattyUniverse(size_t worlds) {
-		static std::unique_ptr<Universe> universe;
-		static size_t made = 0;
+	Universe &ChattyUniverse(size_t worlds, ExecutionMode mode = ExecutionMode::WorldParallel) {
+		static std::vector<std::pair<std::pair<size_t, ExecutionMode>, std::unique_ptr<Universe>>> built;
 
-		if (universe != nullptr && made == worlds) {
-			return *universe;
+		for (auto &[key, held] : built) {
+			if (key.first == worlds && key.second == mode) {
+				return *held;
+			}
 		}
 
-		universe = std::make_unique<Universe>();
-		made = worlds;
+		UniverseSettings settings;
+		settings.Mode = mode;
+		auto universe = std::make_unique<Universe>(settings);
 
 		for (size_t index = 0; index < worlds; index++) {
 			WorldSettings world;
@@ -133,7 +135,9 @@ namespace barrier_bench {
 		// the setup.
 		universe->Tick(1.0f / 60.0f);
 		universe->Tick(1.0f / 60.0f);
-		return *universe;
+
+		built.emplace_back(std::make_pair(worlds, mode), std::move(universe));
+		return *built.back().second;
 	}
 }
 
@@ -197,6 +201,44 @@ BENCH("Tick · 200 worlds of 100", 20) {
 BENCH("Tick · 50 quiet worlds, no entities", 200) {
 	Universe &universe = UniverseOf(50, 0, ExecutionMode::WorldParallel);
 	for (int pass = 0; pass < 200; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 50 quiet worlds, serial", 200) {
+	// The same thing with the job system taken out of the measurement.
+	//
+	// **The parallel version above cannot see a change to the barrier.** Its
+	// samples vary by a quarter to a half because thread wake-up latency
+	// dominates fifty empty worlds, and a measurement whose noise is larger
+	// than its subject measures the scheduler. This one runs the identical
+	// bookkeeping on the calling thread, so what it reports is the per-world
+	// cost of a barrier and nothing else — which is the number the storage and
+	// resource paths are actually judged on.
+	Universe &universe = UniverseOf(50, 0, ExecutionMode::WorldSerial);
+	for (int pass = 0; pass < 200; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 200 quiet worlds, serial", 50) {
+	// Four times the worlds, same emptiness. Against the case above this is
+	// the per-world term on its own, with every fixed cost of a barrier
+	// divided out.
+	Universe &universe = UniverseOf(200, 0, ExecutionMode::WorldSerial);
+	for (int pass = 0; pass < 50; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 50 worlds all publishing, serial", 50) {
+	// The delivery path with the scheduler taken out, which is the only shape
+	// that can see a change to how an inbox is handed over. Fifty publishes
+	// fanned to forty-nine subscribers each is 2450 deliveries a tick, so the
+	// per-world inbox handover is the measurement rather than a rounding error
+	// beside thread wake-up.
+	Universe &universe = ChattyUniverse(50, ExecutionMode::WorldSerial);
+	for (int pass = 0; pass < 50; pass++) {
 		universe.Tick(1.0f / 60.0f);
 	}
 }

@@ -539,7 +539,15 @@ namespace engine::world {
 	}
 
 	void Universe::RouteBuses() {
-		Fanout.assign(Registry.size(), {});
+		// Resized and cleared, never reassigned. `assign(N, {})` destroys every
+		// per-world vector and default-constructs a replacement, which throws
+		// away the capacity each world built up — once per world per tick,
+		// forever. Clearing keeps the buffer, which is this version's standing
+		// discipline: preallocate and reuse by default.
+		Fanout.resize(Registry.size());
+		for (std::vector<Delivery> &pending : Fanout) {
+			pending.clear();
+		}
 
 		// Every pending envelope from every world, stamped with its sender and
 		// sorted by `(From, Sequence)`.
@@ -704,16 +712,41 @@ namespace engine::world {
 			ecs::Store &store = Registry[index]->Storage();
 			store.BindToCallingThread();
 
-			Inbox inbox;
-			inbox.Arrived = std::move(Fanout[index]);
-			Stats.Deliveries += inbox.Arrived.size();
-			store.SetResource(inbox);
+			Stats.Deliveries += Fanout[index].size();
+
+			// Swapped, not assigned. `SetResource` copies, and a resource
+			// column holding a non-trivial type *destroys and re-copies* on
+			// assignment — so handing over an inbox this way used to free the
+			// world's delivery buffer and allocate a new one every barrier, per
+			// world, whether or not anything had arrived.
+			//
+			// Swapping gives the world its arrivals and gives the fanout the
+			// world's old buffer, which is cleared at the next barrier. Neither
+			// side allocates once the high-water mark is reached, and the
+			// observable behaviour is unchanged: an inbox is still replaced
+			// wholesale rather than appended to, so a system that forgets to
+			// drain it still misses messages rather than accumulating them.
+			if (Inbox *inbox = store.ResourceMutable<Inbox>(); inbox != nullptr) {
+				inbox->Arrived.swap(Fanout[index]);
+			} else {
+				// First barrier for this world. One copy, once.
+				Inbox first;
+				first.Arrived = std::move(Fanout[index]);
+				store.SetResource(first);
+			}
 
 			// The budget is per tick, so it resets where every other per-tick
-			// thing does.
-			BusBudget budget;
-			budget.PerTick = Settings_.BusBudgetPerTick;
-			store.SetResource(budget);
+			// thing does. Written in place for the same reason: `SetResource`
+			// is a hash lookup and a copy, and this one runs per world per
+			// tick to move eight bytes.
+			if (BusBudget *budget = store.ResourceMutable<BusBudget>(); budget != nullptr) {
+				budget->PerTick = Settings_.BusBudgetPerTick;
+				budget->Spent = 0;
+			} else {
+				BusBudget first;
+				first.PerTick = Settings_.BusBudgetPerTick;
+				store.SetResource(first);
+			}
 		}
 	}
 
