@@ -66,35 +66,58 @@ Deferred:
 
 ## v0.2
 
-- [_] hytale ECS setup. Universe = overarching simulation, worlds = each subarea to simulate. Multi-world with parallel processing, lock mechanism for global stores like player data and such in Universe, asynchronous and synchronous methods to not block scripts. plan ahead now.
-- [_] World Entities
-- [_] Universe Data (shared data in Universe)
+Planned in [v02v03.md](v02v03.md). Userland gets Roblox-style instancing, tweaked; the engine underneath is full ECS. The order below is the order the steps land in, and each one leaves the tree building and passing.
+
+- [_] jobs: an atomic pool claim so a nested or concurrent `For` runs inline instead of deadlocking; `Store::Owner` atomic, because a world is picked up by a different worker every tick
+- [_] `core::ByteWriter` / `ByteReader` — explicit little-endian framing, used by messages now and by saves and the wire later
+- [_] engine-owned storage: `TypeDescriptor`, `Column`, `ComponentSet`, `SparseSet`, the archetype graph and cached queries. flecs removed, `Store::Native()` deleted, and the public `Store` API unchanged so the existing suites are the acceptance criterion
+- [_] `ecs::ChangeChannel` — version stamps per column and per row range
+- [_] instance model: the class table, `:IsA`, property descriptors, the `Parent`/`FirstChild`/`NextSibling` hierarchy, and change signals fired at a phase boundary rather than on assignment
+- [_] world snapshot — serialise and restore a world through its `TypeDescriptor`s
+- [_] `mono.engine/world` at L4: `Universe`, `World`, `WorldId`, `Address`, the directory and the control queue. Universe = overarching simulation, worlds = each subarea to simulate
+- [_] World Entities — each world's root instance, and entity lifetime across the barrier
+- [_] mailboxes and router — outbox and inbox, exactly one tick of latency, inbox sorted by `(sender, sequence)` so a replay cannot diverge
+- [_] multi-world parallel processing — worlds are the batch; `WorldParallel` and `WorldSerial` are a tuning knob that changes no result
+- [_] Universe Data (shared data in Universe) — the shared store on the driver barrier, with `Universe::Exclusive` as a documented escape hatch for consumers outside the simulation
+- [_] asynchronous and synchronous methods to not block scripts — a `Ticket` inside a tick, `Await` only outside one
+- [_] `parallel/ipc` — `Channel`, framed bytes, local implementation, the router never learning which it has
+- [_] `parallel/process` — `WorldHost` child process, supervisor, heartbeat, restart from snapshot. The argument is crash isolation, not speed
+- [_] server and client move onto `Universe`; the world a client renders is local
 
 ## v0.3
 
-- [_] Basic Components: Transform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash
-- [_] Part
-- [_] Camera
-- [_] basic physics collider
-- [_] basic physics pipeline (box, cylinder and sphere colliders, optimised spatial query, etc)
+Planned in [v02v03.md](v02v03.md).
+
+- [_] `mono.engine/scene` at L7 — Basic Components: Transform, PreviousTransform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash. Deletes the duplicated component definitions in `mono.client/Demo.hpp` and `mono.server/Simulation.cpp`; the C++ test scene itself stays until v0.4/v0.5 give it a game file to load
+- [_] `core/types`: AABB, Ray, RayHit — the value types v0.3 gives a consumer
+- [_] `mono.engine/spatial` at L6 — uniform hash grid, and the optimised spatial query: raycast, overlap and shapecast with layer masks
+- [_] basic physics collider — box, sphere and cylinder shapes, `Collider`/`RigidBody`/`Surface`, and the `SurfaceTable` resource the narrow phase reads once
+- [_] basic physics pipeline — integrate, broadphase with sorted pairs, six exact analytic narrow-phase pairs, a serial sequential-impulse solver, contact events
+- [_] Part — a class rather than a component: `{Transform, Bounds, Visual, Collider, Surface}`, with `PartDesc` and `MakePart` as the one place that decides what a part is
+- [_] Camera — the `Camera` component, plus the `ActiveCamera` resource holding the live one and its resolved matrices
 
 ## v0.4
 
-- [_] bindings manifest for luau/typescript
-- [_] plans for luau and typescript multi-threading and multi-processing systems (with locks, synchronise, etc, also plan integration with hytale setup for worlds)
+The engine has been full ECS since v0.2 and userland instancing is a façade over it — see [v02v03.md](v02v03.md). The test scene is still C++ at this point; v0.4 makes the façade reachable from script and v0.5 is where the scene actually moves.
+
+- [_] bindings manifest for luau/typescript — generated from v0.2's `TypeDescriptor` property lists and class table, so there is no second source of truth for what a class is or what a property costs
+- [_] plans for luau and typescript multi-threading and multi-processing systems (with locks, synchronise, etc, also plan integration with hytale setup for worlds) — over what v0.2 already established: the driver barrier, worlds-as-batch, `Ticket`/`Await`, `parallel/ipc` and `parallel/process`. The userland `thread` datatype is `parallel/threads/` and is a different contract from `Jobs`, because it has to survive a script yielding
 
 ## v0.5
 
-- [_] luau and typescript
+Where the C++ test scene becomes a script. v0.3 rebuilt it on `scene`'s classes precisely so this is a port rather than a rewrite, and `Demo.hpp`/`Demo.cpp` go away here — `mono.client/AGENTS.md` has always said they die when there is a game file to load a scene from.
+
+- [_] luau and typescript — `Instance.new`, properties, `.Changed`, the hierarchy and `:IsA` bind to v0.2's class table, the same one C++ calls. A calling convention, not a second mechanism
 - [_] camera
 - [_] surface camera (for mirrors, use previous frame as visual)
 - [_] basic rendering pipeline (color, shadows, basic fov cull, sequential for many worlds) — the graph of `RENDER_PIPELINE.md`, its stages 1 to 7. Needs `mono.engine/graph/` at L9 first, and that needs v0.2's `ChangeChannel`
-- [_] demo\_1world\_scene.luau (mirrors.luau, mirrors.ts)
+- [_] demo\_1world\_scene.luau (mirrors.luau, mirrors.ts) — the port of the C++ test scene, and the point where `D00001`'s `--script PATH` stops warning and starts loading
+- [_] the demo dying is `D00004`'s trigger: ask whether anything still needs `core::Random`, and either close the item or say what renewed it
 
 ## v0.6
 
 - [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
-- [_] demo\_2world\_scene.luau (mirrors.luau, mirrors.ts, split-screen for two worlds running in parallel via multi-process)
+- [_] demo\_2world\_scene.luau (mirrors.luau, mirrors.ts, split-screen for two worlds running in parallel via multi-process) — v0.2 renders only worlds hosted in this process, so drawing a world owned by a child host needs replication. Either both worlds are local for this demo, or replication lands first; decide which before starting
 
 ## v0.7
 
