@@ -1,4 +1,4 @@
 # Every path in this repository is owned by the repository owner.
 # Combined with "Require review from Code Owners" on the main branch,
 # this makes @SPOOKEXE a required reviewer on every pull request.
-*  @SPOOKEXE
+# *  @SPOOKEXE
