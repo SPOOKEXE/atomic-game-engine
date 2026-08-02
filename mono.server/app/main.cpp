@@ -47,6 +47,7 @@ int main(int argc, char **argv) {
 	arguments.Value("worlds-per-host", "N", "Shared worlds per host process (default 8)");
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
+	arguments.Value("listen", "PORT", "Serve the world to clients on this UDP port (0 for ephemeral)");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -101,6 +102,20 @@ int main(int argc, char **argv) {
 		options.HostProgram = std::filesystem::path(*program);
 	}
 	options.Processes = static_cast<uint32_t>(arguments.GetInteger("processes", options.Processes));
+
+	if (arguments.Has("listen")) {
+		const int64_t port = arguments.GetInteger("listen", 0);
+		if (port < 0 || port > 65535) {
+			std::fprintf(stderr, "--listen takes a port between 0 and 65535.\n");
+			return 2;
+		}
+
+		// Zero is a real answer here — bind an ephemeral port — so "was it
+		// given" and "what was it set to" are different questions and the flag
+		// being present is what turns listening on.
+		options.ListenPort = static_cast<uint16_t>(port);
+		options.Listening = true;
+	}
 
 	if (!options.HostName.empty() && !options.RemoteWorlds.empty()) {
 		// A host that spawned hosts of its own would build a tree nobody

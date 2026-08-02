@@ -47,6 +47,14 @@ namespace server {
 					position.Value = position.Value + velocity.Value * delta;
 				}
 			);
+
+			// Every position just moved, and nothing else knows. An iteration
+			// hands out a reference and the store never sees the write, so a
+			// replication delta built from the dirty bits would carry nothing at
+			// all — which is a client that joins, receives a snapshot, and then
+			// watches a frozen world. Costs nothing when nobody is observing
+			// `Position`, which is the case whenever `--listen` was not given.
+			store.MarkAllChanged<Position>();
 		}
 
 		void Bounce(Store &store) {
@@ -75,6 +83,16 @@ namespace server {
 					}
 				}
 			);
+
+			// Both, and both over-report: `Position` moved on every row anyway,
+			// and `Velocity` changed only on the few rows that hit a wall. A
+			// system that could name those rows should mark those rows — the
+			// cost of marking all of them is a delta carrying values that
+			// already match at the other end, which is bandwidth rather than
+			// error. Under-reporting a bounce would be a client that watches an
+			// entity keep going through the wall until the next snapshot.
+			store.MarkAllChanged<Position>();
+			store.MarkAllChanged<Velocity>();
 		}
 
 		// PreRender on a headless server is where replication will hang:

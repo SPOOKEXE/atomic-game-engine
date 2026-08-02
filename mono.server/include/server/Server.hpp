@@ -16,6 +16,8 @@
 #include <engine/core/Clock.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/net/Transport.hpp>
+#include <engine/replication/Listener.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Recording.hpp>
@@ -138,6 +140,27 @@ namespace server {
 		// once by the only process that knows the answer.
 		uint32_t Processes = 0;
 
+		// Whether to serve the primary world to clients at all.
+		//
+		// Off by default, and that is what every existing recipe and test gets:
+		// a server that opened a socket because nobody said not to would be a
+		// behaviour change in the determinism run, and a port bound by accident
+		// is a port somebody else cannot bind.
+		//
+		// **A host never listens.** A host holds worlds for a driver and the
+		// driver is the authority for all of them; two processes each streaming
+		// the same world to the same client is the split brain the federated
+		// universe exists to prevent.
+		bool Listening = false;
+
+		// The UDP port to serve on. Only read when `Listening`.
+		//
+		// Zero binds an ephemeral port, which is a real answer rather than a
+		// way of saying no — a test wants one so that two runs on one machine do
+		// not collide. `Server::ListeningOn` says which was chosen. That is why
+		// there is a flag beside it rather than zero meaning off.
+		uint16_t ListenPort = 0;
+
 		// Make every world this process builds talk on a bus.
 		//
 		// There is no game yet, so there is no traffic. This is the only thing
@@ -242,6 +265,26 @@ namespace server {
 			return !Settings.HostName.empty();
 		}
 
+		// The replication endpoint, when this server is listening.
+		//
+		// For a caller that wants to declare what is replicated or read how many
+		// clients are connected — and for a test, which is the only way to prove
+		// the socket was actually bound.
+		//
+		// @return The listener, or null when `--listen` was not given.
+		engine::replication::Listener *Clients() {
+			return Replication.get();
+		}
+
+		// The address the replication socket is bound to.
+		//
+		// Worth asking for even though the port was named: `--listen 0` binds an
+		// ephemeral port, which is what a test wants so that two runs on one
+		// machine do not collide.
+		//
+		// @return The endpoint, or an invalid one when not listening.
+		engine::net::Endpoint ListeningOn() const;
+
 	  private:
 		// Builds the worlds a host was granted and announces itself.
 		//
@@ -280,6 +323,20 @@ namespace server {
 		// @return `false` when recording was asked for and cannot be done.
 		bool BeginRecording();
 
+		// Binds the replication socket and declares what is replicated.
+		//
+		// @return `false` when a port was asked for and could not be bound.
+		bool BeginListening();
+
+		// Runs one tick's worth of replication: take what arrived, publish what
+		// changed, advance the links.
+		//
+		// Called from inside the world's scope, because the delta is built from
+		// the store's change bits and those are the world's.
+		//
+		// @param nowSeconds The current time.
+		void ServeClients(double nowSeconds);
+
 		Options Settings;
 
 		// The universe this process holds, plus the hosts holding the rest.
@@ -297,6 +354,12 @@ namespace server {
 
 		std::unique_ptr<engine::world::Recorder> Recorder_;
 		std::unique_ptr<engine::world::Replayer> Replayer_;
+
+		// The replication socket and the clients on it. Both null unless
+		// `--listen` was given, which is what keeps a headless determinism run
+		// from binding a port it has no use for.
+		std::unique_ptr<engine::net::Transport> Socket;
+		std::unique_ptr<engine::replication::Listener> Replication;
 
 		// Present only in host mode. A driver holds one of these per host; a
 		// host holds exactly one, to whoever started it.

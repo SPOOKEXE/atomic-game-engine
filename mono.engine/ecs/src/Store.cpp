@@ -87,7 +87,32 @@ namespace engine::ecs {
 	Entity Store::Create() {
 		RequireOwningThread("Create");
 
+		if (State->AdoptOnly) {
+			// Once, not once per attempt. A system that creates in a loop would
+			// otherwise write a log line per entity, and the first one already
+			// said everything the rest would.
+			if (!State->WarnedAboutMinting) {
+				State->WarnedAboutMinting = true;
+				ENGINE_ERROR(
+					"store '{}': refusing to create an entity in a replica. An index minted here "
+					"collides with one the authority minted, and nothing can tell them apart.",
+					StoreName
+				);
+			}
+			return NULL_ENTITY;
+		}
+
 		return CreateEntity(*State);
+	}
+
+	void Store::SetAdoptOnly(bool adoptOnly) {
+		RequireOwningThread("SetAdoptOnly");
+
+		State->AdoptOnly = adoptOnly;
+	}
+
+	bool Store::AdoptOnly() const {
+		return State->AdoptOnly;
 	}
 
 	Entity Store::Create(std::string_view name) {
@@ -381,11 +406,9 @@ namespace engine::ecs {
 	// --- change tracking ---------------------------------------------------
 
 	void Store::ObserveRaw(ComponentId id) {
-		if (!id.IsValid() || ObservedRaw(id)) {
+		if (!WatchComponent(*State, id)) {
 			return;
 		}
-
-		State->Watched.push_back(id);
 
 		// Every table already holding this component needs somewhere to put the
 		// bits, and the entities in it have to move there. Declaring what is
@@ -634,6 +657,43 @@ namespace engine::ecs {
 
 		State->Flushing = false;
 		return fired;
+	}
+
+	void Store::MarkAllChangedRaw(ComponentId component) {
+		RequireOwningThread("MarkAllChanged");
+
+		if (!component.IsValid() || State->Watched.empty()) {
+			return;
+		}
+
+		const ComponentId bitsId = Components::Of<DirtyBits>();
+
+		for (Archetype &table : State->Tables) {
+			Column *bits = table.Find(bitsId);
+			if (bits == nullptr || bits->Empty()) {
+				continue;
+			}
+
+			// The bit index is the component's position in the table's sorted
+			// set, which is also where its column sits — the same resolution
+			// `MarkWritten` does per write, done once per table here.
+			const std::span<const ComponentId> ids = table.Set().Ids();
+			const auto at = std::lower_bound(ids.begin(), ids.end(), component);
+			if (at == ids.end() || *at != component) {
+				continue;
+			}
+
+			const auto position = static_cast<size_t>(at - ids.begin());
+			auto *rows = static_cast<DirtyBits *>(bits->Data());
+			for (size_t row = 0; row < table.Rows(); row++) {
+				rows[row].Mark(position);
+			}
+
+			// The coarse counter moves by the number of rows, so a consumer
+			// watching `ChangeVersion` sees a batch write the same way it sees
+			// that many individual ones.
+			State->Changes += table.Rows();
+		}
 	}
 
 	void Store::ClearChanges() {

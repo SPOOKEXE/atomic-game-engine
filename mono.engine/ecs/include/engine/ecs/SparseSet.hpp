@@ -56,11 +56,34 @@ namespace engine::ecs {
 	// @since v0.2
 	class SparseSet {
 	  public:
-		// Entities per page.
+		// Entities in the first page.
 		//
-		// A page is 4096 entries of twelve bytes, so about 48 KB — big enough
-		// that a large world holds few pages, small enough that a world of ten
-		// entities does not pay for a megabyte.
+		// **A world's entry fee for having a directory at all.** A page is
+		// allocated whole, and the first one is allocated on the first entity,
+		// so every world pays this much whether it holds ten entities or the
+		// page's worth. That went unnoticed while there was one world: measured
+		// at the scale `ecs/docs/TODO.md` actually names — a thousand small
+		// worlds in one host — a thousand worlds of a hundred entities held
+		// **72.7 MB resident against 2.7 MB of live rows, and 64 MB of it was
+		// directory pages**, because every world was paying a 64 KB entry fee
+		// for a hundred entities. Not the column capacity the TODO blamed.
+		//
+		// 512 slots is 8 KB. Smaller and the allocation header starts to be a
+		// visible fraction of the page.
+		static constexpr uint32_t FIRST_PAGE_SIZE = 512;
+
+		// Entities per page after the first.
+		//
+		// Still 4096 — 64 KB — and deliberately unchanged. **Shrinking every
+		// page rather than only the first was measured and rejected**: it costs
+		// a large world eight times as many allocations, which interleave with
+		// the columns and scatter them, and a multi-world tick over 100k
+		// entities each came out 8% to 21% slower across repeated runs. Two
+		// sizes rather than one keeps a big world's heap exactly as it was while
+		// a small world stops paying for a page it will never fill.
+		//
+		// The cost is one branch in the index arithmetic, which does not show
+		// against a directory lookup that misses cache.
 		static constexpr uint32_t PAGE_SIZE = 4096;
 
 		// The generation a never-used index starts at.
@@ -174,6 +197,26 @@ namespace engine::ecs {
 		// One page of slots. Held by pointer so that a page address is stable
 		// once allocated.
 		using Page = std::vector<Slot>;
+
+		// Which page an index falls in, and where inside it.
+		struct Seat {
+			size_t Page = 0;
+			uint32_t Offset = 0;
+		};
+
+		// Resolves an index against the two page sizes.
+		//
+		// One place rather than four: `Reach` and both `Peek` overloads had the
+		// same two lines of arithmetic, and two page sizes turn two lines into
+		// four with a branch — which is three more chances for one copy to be
+		// subtly different from the others.
+		static Seat SeatOf(uint32_t index);
+
+		// How many slots a page holds, which depends only on whether it is the
+		// first.
+		static uint32_t SizeOf(size_t page) {
+			return page == 0 ? FIRST_PAGE_SIZE : PAGE_SIZE;
+		}
 
 		// The slot for an index, allocating pages up to it.
 		Slot &Reach(uint32_t index);

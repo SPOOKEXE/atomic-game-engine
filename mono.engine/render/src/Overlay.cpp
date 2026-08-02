@@ -42,25 +42,53 @@ namespace engine::render {
 
 		// Only what was painted, not the whole buffer.
 		//
-		// **The rest is already zero, and that is an invariant rather than a
-		// hope.** `Resize` zeroes everything, every writer goes through
-		// `MarkRegion` (including `WriteOpaqueRun`, whose contract requires the
-		// caller to mark), and this clears exactly what was marked before
-		// resetting it. So a pixel outside the dirty rectangle has not been
-		// written since the last time it was zeroed.
+		// **Painted means the dirty rectangle *or* the last uploaded one, and
+		// getting that wrong is what stopped the panels clearing.** The obvious
+		// invariant — everything outside the dirty rectangle is zero — is false,
+		// and `MarkUploaded` is why: it empties the dirty rectangle without
+		// touching a pixel, which is correct, because at that moment the image
+		// and the texture agree and neither is wrong. So on the next frame the
+		// buffer still holds the whole panel while the dirty rectangle claims
+		// nothing has been drawn. Clearing only what was marked cleared nothing,
+		// and `UploadRegion` then dutifully re-sent the old picture over itself:
+		// the flamegraph never went away when it was closed, and a statistics
+		// panel redrawn smaller left the previous one's glyphs beside it.
+		//
+		// So the union. `Previous` holds what is on the texture, `Dirty` holds
+		// what has been painted since, and every non-zero pixel is inside one of
+		// them.
 		//
 		// The old shape zeroed the entire image. On a 4K display that is
 		// thirty-three megabytes of memory traffic per frame to erase two
 		// panels that cover a fraction of it — and it is why the panels
 		// measured fifteen times slower at 4K than at 1080p for four times the
-		// pixels. The cost now scales with what is drawn rather than with the
-		// size of the display it is drawn on.
-		const size_t stride = static_cast<size_t>(Width) * BYTES_PER_PIXEL;
-		const size_t run = static_cast<size_t>(DirtyRight - DirtyLeft) * BYTES_PER_PIXEL;
+		// pixels. The union is still bounded by what has been drawn rather than
+		// by the size of the display it is drawn on, so that saving stands.
+		int left = DirtyLeft;
+		int top = DirtyTop;
+		int right = DirtyRight;
+		int bottom = DirtyBottom;
 
-		for (int row = DirtyTop; row < DirtyBottom; row++) {
+		if (PreviousLeft < PreviousRight && PreviousTop < PreviousBottom) {
+			if (left >= right || top >= bottom) {
+				left = PreviousLeft;
+				top = PreviousTop;
+				right = PreviousRight;
+				bottom = PreviousBottom;
+			} else {
+				left = std::min(left, PreviousLeft);
+				top = std::min(top, PreviousTop);
+				right = std::max(right, PreviousRight);
+				bottom = std::max(bottom, PreviousBottom);
+			}
+		}
+
+		const size_t stride = static_cast<size_t>(Width) * BYTES_PER_PIXEL;
+		const size_t run = static_cast<size_t>(right - left) * BYTES_PER_PIXEL;
+
+		for (int row = top; row < bottom; row++) {
 			uint8_t *start = Pixels.data() + static_cast<size_t>(row) * stride +
-							 static_cast<size_t>(DirtyLeft) * BYTES_PER_PIXEL;
+							 static_cast<size_t>(left) * BYTES_PER_PIXEL;
 			std::fill(start, start + run, static_cast<uint8_t>(0));
 		}
 

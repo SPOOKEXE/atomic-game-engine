@@ -521,3 +521,81 @@ TEST_CASE("scale multiplies every glyph pixel", "[overlay]") {
 	REQUIRE(singleSet > 0);
 	REQUIRE(doubledSet == singleSet * 4);
 }
+
+// --- clearing what was uploaded ----------------------------------------------
+//
+// The cases above check the *region* bookkeeping, which was right. What none of
+// them checked is the pixels after a clear that follows an upload, and that is
+// where the panels stopped clearing: `MarkUploaded` empties the dirty rectangle
+// without zeroing anything — correctly, because at that moment the image and the
+// texture agree — so a `Clear` that erased only the dirty rectangle erased
+// nothing at all, and re-uploaded the old picture on top of itself.
+
+TEST_CASE("clearing after an upload actually zeroes the pixels", "[overlay]") {
+	OverlayImage image;
+	image.Resize(64, 32);
+
+	image.Fill(0, 0, 20, 20, 8, 10, 16, 255);
+	image.MarkUploaded();
+
+	// The dirty rectangle is empty here and the pixels are not. Clearing only
+	// what is marked would leave every one of them in place.
+	image.Clear();
+	REQUIRE_FALSE(AnyPixelSet(image));
+}
+
+TEST_CASE("a panel that shrinks leaves nothing of the larger one behind", "[overlay]") {
+	OverlayImage image;
+	image.Resize(64, 32);
+
+	// The flamegraph, open.
+	image.Fill(0, 0, 40, 24, 8, 10, 16, 255);
+	image.MarkUploaded();
+
+	// Closed, and the statistics panel alone redrawn in its corner. What the
+	// big panel occupied outside the small one has to be gone — this is the
+	// "fps counter appears twice" report, where the old glyphs stayed put and
+	// the new ones drew beside them.
+	image.Clear();
+	image.Fill(0, 0, 10, 8, 8, 10, 16, 255);
+
+	REQUIRE(At(image, 5, 4, 3) == 255);
+	REQUIRE(At(image, 30, 4, 3) == 0);
+	REQUIRE(At(image, 5, 20, 3) == 0);
+	REQUIRE(At(image, 30, 20, 3) == 0);
+}
+
+TEST_CASE("closing the panels leaves an empty image and asks for the erase", "[overlay]") {
+	OverlayImage image;
+	image.Resize(64, 32);
+
+	image.Fill(4, 4, 32, 16, 8, 10, 16, 255);
+	image.MarkUploaded();
+	image.Clear();
+
+	// Both halves matter and only one of them was true before. The region says
+	// "send this again", and the pixels being zero is what makes sending it an
+	// erase rather than a redraw of what is already there.
+	REQUIRE_FALSE(AnyPixelSet(image));
+	REQUIRE(image.UploadRegion().Width == 32);
+	REQUIRE(image.UploadRegion().Height == 16);
+}
+
+TEST_CASE("clearing twice over is still empty and still costs nothing", "[overlay]") {
+	OverlayImage image;
+	image.Resize(64, 32);
+
+	image.Fill(0, 0, 20, 20, 8, 10, 16, 255);
+	image.MarkUploaded();
+
+	image.Clear();
+	image.Clear();
+	image.Clear();
+
+	REQUIRE_FALSE(AnyPixelSet(image));
+
+	// Still asking, because nothing has uploaded the erase yet. A clear that
+	// forgot the region on the second pass is the bug the region cases above
+	// already pin; this checks the pixels agree with them.
+	REQUIRE(image.UploadRegion().Width == 20);
+}

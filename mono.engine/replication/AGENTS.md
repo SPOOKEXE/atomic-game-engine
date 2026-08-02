@@ -74,12 +74,32 @@ is right and is visible as rubber-banding when it is wrong.
 expected; correcting the drift is the mechanism, not a fallback. Nothing here
 may assume a client and server compute the same floats.
 
+## A message has to fit a datagram, and the whole world does not
+
+The snapshot is chunked and spread across ticks. **So is a delta**, and for the
+same reason with a sharper edge: a delta too large for a payload is not slow, it
+is refused by `Link::Reserve` and silently never sent, because a refusal is
+ordinary backpressure and a message that can never fit looks exactly like one. A
+world of thirty-two entities already built one.
+
+`EmitDelta` splits a tick's delta into however many messages it takes, each
+under `ChunkBytes` and **each independently applicable** — not a numbered
+sequence to reassemble, because this is the unreliable channel and waiting for a
+part that was dropped is a stall on a path whose premise is that the next tick
+is already on its way. That is why `Replica` treats a delta at the tick it has
+already applied as another part rather than as stale.
+
 ## Not here yet
 
 - **Lag compensation** — rewinding the server to what a client saw when it
   fired. Its own plan, and it needs the history buffer this does not keep.
-- **Delta compression against an acknowledged baseline** — today a delta carries
-  whatever moved since the last tick, not since the last tick the client
-  confirmed. The second is smaller and needs per-client history.
 - **Priority under a bandwidth cap** — interest says what a client may see;
-  nothing yet decides what to drop when what it may see does not fit.
+  nothing yet decides what to drop when what it may see does not fit. **There is
+  already a policy here and nobody chose it**: a tick's delta goes out as several
+  messages and the link refuses the ones past its budget, so what gets dropped
+  is whatever happened to be last in the component list. Deterministic, which is
+  something, and arbitrary, which is the problem — one component starving
+  forever because of where it sits in a vector is the failure mode. See
+  `docs/DEFERRED.md`.
+- **Authenticating a client** — `Listener` admits on first contact.
+  `net::Handshake` is built and not wired in. `docs/DEFERRED.md`.

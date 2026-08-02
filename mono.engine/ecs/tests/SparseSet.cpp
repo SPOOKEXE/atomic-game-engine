@@ -160,21 +160,47 @@ TEST_CASE("indices past the first page work", "[ecs]") {
 	SparseSet set;
 
 	// Three pages' worth, so the paging maths is exercised at both boundaries
-	// rather than only within the first block.
-	const uint32_t count = SparseSet::PAGE_SIZE * 2 + 5;
+	// rather than only within the first block. The first page is deliberately
+	// smaller than the rest, so the two boundaries are at different strides —
+	// which is exactly the arithmetic worth testing.
+	const uint32_t count = SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE * 2 + 5;
 	for (uint32_t index = 0; index < count; index++) {
 		REQUIRE(set.Allocate() == index);
 	}
 
 	REQUIRE(set.LiveCount() == count);
 
-	set.Relocate(SparseSet::PAGE_SIZE - 1, EntityLocation{1, 1});
-	set.Relocate(SparseSet::PAGE_SIZE, EntityLocation{2, 2});
-	set.Relocate(SparseSet::PAGE_SIZE * 2, EntityLocation{3, 3});
+	set.Relocate(SparseSet::FIRST_PAGE_SIZE - 1, EntityLocation{1, 1});
+	set.Relocate(SparseSet::FIRST_PAGE_SIZE, EntityLocation{2, 2});
+	set.Relocate(SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE - 1, EntityLocation{3, 3});
+	set.Relocate(SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE, EntityLocation{4, 4});
 
-	REQUIRE(set.Locate(SparseSet::PAGE_SIZE - 1)->Archetype == 1);
-	REQUIRE(set.Locate(SparseSet::PAGE_SIZE)->Archetype == 2);
-	REQUIRE(set.Locate(SparseSet::PAGE_SIZE * 2)->Archetype == 3);
+	REQUIRE(set.Locate(SparseSet::FIRST_PAGE_SIZE - 1)->Archetype == 1);
+	REQUIRE(set.Locate(SparseSet::FIRST_PAGE_SIZE)->Archetype == 2);
+	REQUIRE(set.Locate(SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE - 1)->Archetype == 3);
+	REQUIRE(set.Locate(SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE)->Archetype == 4);
+}
+
+TEST_CASE("every index in the first three pages is its own slot", "[ecs]") {
+	// Two page sizes make the index arithmetic a branch plus a subtraction, and
+	// an off-by-one there aliases two indices onto one slot — which shows up as
+	// two entities sharing a location rather than as a crash. Writing a distinct
+	// value through every index and reading them all back catches that
+	// wherever it is, rather than only at the boundaries somebody thought of.
+	SparseSet set;
+
+	const uint32_t count = SparseSet::FIRST_PAGE_SIZE + SparseSet::PAGE_SIZE * 2;
+	for (uint32_t index = 0; index < count; index++) {
+		REQUIRE(set.Allocate() == index);
+		set.Relocate(index, EntityLocation{index, index + 1});
+	}
+
+	for (uint32_t index = 0; index < count; index++) {
+		const EntityLocation *location = set.Locate(index);
+		REQUIRE(location != nullptr);
+		REQUIRE(location->Archetype == index);
+		REQUIRE(location->Row == index + 1);
+	}
 }
 
 TEST_CASE("a location pointer survives an unrelated allocation", "[ecs]") {

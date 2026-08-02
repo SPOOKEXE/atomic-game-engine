@@ -58,6 +58,7 @@ int main(int argc, char **argv) {
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
+	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -100,6 +101,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
+	}
+	if (auto server = arguments.Get("connect")) {
+		options.ConnectAddress = std::string(*server);
 	}
 
 	if (auto tab = arguments.Get("profiler-tab")) {

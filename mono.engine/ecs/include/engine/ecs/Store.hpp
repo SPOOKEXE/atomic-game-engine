@@ -119,8 +119,43 @@ namespace engine::ecs {
 		// given one. That is not a special case to work around: an entity is a
 		// directory slot, and a row is what a component buys.
 		//
-		// @return A live entity handle.
+		// Refused, and `NULL_ENTITY`, in an adopt-only store — see
+		// `SetAdoptOnly`.
+		//
+		// @return A live entity handle, or `NULL_ENTITY`.
 		Entity Create();
+
+		// Refuses to mint entities in this store, allowing only adopted ones.
+		//
+		// **For a replica, and it closes a hole that is otherwise silent.** An
+		// entity is an index plus a generation, and two independently built
+		// stores both start at index 0 generation 1 — so an entity a replica
+		// mints for itself collides *exactly* with one the authority minted, and
+		// `Apply` is right to treat them as the same entity because nothing
+		// tells them apart. The failure is not a crash: it is two different
+		// things quietly becoming one, discovered later and somewhere else.
+		//
+		// Set, `Create` returns `NULL_ENTITY` and says so once. `CreateAt` is
+		// unaffected, because adopting a handle somebody else issued is the
+		// whole point — this refuses *minting*, not receiving. That matches what
+		// a replica is for: an operation a client wants performed goes up as an
+		// input and comes back as state, which is the same shape
+		// `world::Postbox` enforces for bus writes.
+		//
+		// **This is a guard, not the fix.** The fix is an index range the
+		// authority never allocates from, so a replica *can* mint predicted
+		// entities safely; it is a v0.4 item because it changes how the entity
+		// directory is laid out and therefore how a snapshot writes it. Until
+		// then a replica that only adopts is safe, and this is what makes
+		// "only adopts" a property rather than a hope.
+		//
+		// @param adoptOnly Whether to refuse minting.
+		void SetAdoptOnly(bool adoptOnly);
+
+		// Whether this store refuses to mint entities.
+		//
+		// @return `true` when only adopted entities may exist here.
+		bool AdoptOnly() const;
 
 		// Creates a named entity owned by this store.
 		//
@@ -729,6 +764,39 @@ namespace engine::ecs {
 		template <class T> bool Changed(Entity entity) const {
 			return ChangedRaw(entity, Components::Of<T>());
 		}
+
+		// Records that every entity carrying `T` has just been written.
+		//
+		// **For a system that swept the world through `Each` and wrote through
+		// the reference it was handed.** Dirty bits are set by `Set` and by
+		// nothing else, because a mutable reference handed out by an iteration
+		// is a pointer the store never sees written through — so an integrator
+		// that does `position.Value = position.Value + ...` marks nothing, and a
+		// replication delta built from the bits carries none of it. That is the
+		// fast path the whole storage layout exists to make fast, so "write
+		// through `Set` instead" is the wrong answer.
+		//
+		// The claim it makes is the honest one for that case and not for
+		// others: *everything holding this component changed.* A system that
+		// wrote some rows and not others and calls this has over-reported, and
+		// over-reporting costs bandwidth rather than correctness — a delta
+		// carrying an unchanged value writes the same value at the other end.
+		// Under-reporting is the failure that cannot be recovered from, which is
+		// why this is the primitive rather than a per-row one nobody would call
+		// in a hot loop.
+		//
+		// Does nothing for a component nobody observes, and nothing to a table
+		// with no bits.
+		template <class T> void MarkAllChanged() {
+			RequireOwningThread("MarkAllChanged");
+			MarkAllChangedRaw(Components::Of<T>());
+		}
+
+		// Records that every entity carrying a component named at runtime has
+		// just been written.
+		//
+		// @param component The component's id, from `Components::Find`.
+		void MarkAllChangedRaw(ComponentId component);
 
 		// Visits every entity whose `T` was written since the last
 		// ClearChanges.

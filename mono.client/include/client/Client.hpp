@@ -12,9 +12,11 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/input/Actions.hpp>
+#include <engine/net/Transport.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/replication/Connector.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <client/Compositor.hpp>
@@ -105,6 +107,17 @@ namespace client {
 		// message rather than being silently ignored — there is no VM until
 		// L13 exists.
 		std::string ScriptPath;
+
+		// `host:port` of a server to replicate from. Empty means run the local
+		// demo alone.
+		//
+		// **This adds a world rather than replacing one.** The replicated world
+		// is a second world in the same universe, marked `world::Replica` so its
+		// bus handle refuses writes, and the demo keeps running beside it. That
+		// is not a placeholder arrangement — a client compositing several worlds
+		// is what v0.2 built the compositor for, and one of them being somebody
+		// else's authority is the case this version adds.
+		std::string ConnectAddress;
 	};
 
 	// The window, the renderer and the frame loop over one world.
@@ -138,10 +151,39 @@ namespace client {
 		// profile duration elapses. Returns the process exit code.
 		int Run();
 
+		// The connection to a server, when `--connect` was given.
+		//
+		// For a test, which is the only way to prove a join happened rather than
+		// a socket being opened.
+		//
+		// @return The connector, or null when running the demo alone.
+		engine::replication::Connector *Server() {
+			return Connection.get();
+		}
+
+		// The replicated world's handle.
+		//
+		// @return The handle, or an invalid one when not connected.
+		engine::world::WorldId ReplicatedWorld() const {
+			return Replicated;
+		}
+
 	  private:
 		void PumpEvents();
 		void Step();
 		void WriteSnapshot();
+
+		// Opens the socket, creates the replica world and joins.
+		//
+		// @return `false` when the address will not parse or the socket will not
+		//         open. A client that meant to connect and silently did not is
+		//         a client that looks like a server bug.
+		bool BeginConnecting();
+
+		// Takes one tick's worth of what the server sent.
+		//
+		// @param nowSeconds The current time.
+		void PollServer(double nowSeconds);
 
 		Options Settings;
 
@@ -172,6 +214,19 @@ namespace client {
 
 		// Every world this client simulates, in creation order.
 		std::vector<engine::world::WorldId> Simulated;
+
+		// The socket and the connection to a server. Both null unless
+		// `--connect` was given, which is what keeps a single-player run from
+		// opening a port it has no use for.
+		std::unique_ptr<engine::net::Transport> Socket;
+		std::unique_ptr<engine::replication::Connector> Connection;
+
+		// The world the server owns. Invalid when not connected.
+		engine::world::WorldId Replicated;
+
+		// Whether the join has been reported. A client logs "joined" once, not
+		// every frame at six hundred a second.
+		bool ReportedJoin = false;
 
 		// N views in, one frame out. The renderer draws what this composed
 		// rather than reaching into a store that somebody else is writing.

@@ -15,6 +15,12 @@ mono_add_library(client
 		Engine::world
 		Engine::input
 		Engine::render
+
+		# `--connect` makes one of this client's worlds somebody else's
+		# authority. Both are `shared` tier, so neither widens what a client is
+		# allowed to link — the tier rule already permits `shared` here.
+		Engine::net
+		Engine::replication
 	VENDOR SDL3::SDL3
 )
 

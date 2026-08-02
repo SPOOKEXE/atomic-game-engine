@@ -2,31 +2,43 @@
 
 namespace engine::ecs {
 
+	SparseSet::Seat SparseSet::SeatOf(uint32_t index) {
+		if (index < FIRST_PAGE_SIZE) {
+			return Seat{0, index};
+		}
+
+		// Everything past the small first page is laid out in full pages, so the
+		// arithmetic is the old arithmetic with the first page's slots taken off
+		// the front.
+		const uint32_t beyond = index - FIRST_PAGE_SIZE;
+		return Seat{1 + beyond / PAGE_SIZE, beyond % PAGE_SIZE};
+	}
+
 	SparseSet::Slot &SparseSet::Reach(uint32_t index) {
-		const size_t page = index / PAGE_SIZE;
-		while (Pages.size() <= page) {
+		const Seat seat = SeatOf(index);
+		while (Pages.size() <= seat.Page) {
 			// Sized whole rather than grown, because a half-filled page would
 			// have to reallocate and every location pointer handed out of it
 			// would dangle.
-			Pages.push_back(std::make_unique<Page>(PAGE_SIZE));
+			Pages.push_back(std::make_unique<Page>(SizeOf(Pages.size())));
 		}
-		return (*Pages[page])[index % PAGE_SIZE];
+		return (*Pages[seat.Page])[seat.Offset];
 	}
 
 	const SparseSet::Slot *SparseSet::Peek(uint32_t index) const {
-		const size_t page = index / PAGE_SIZE;
-		if (page >= Pages.size()) {
+		const Seat seat = SeatOf(index);
+		if (seat.Page >= Pages.size()) {
 			return nullptr;
 		}
-		return &(*Pages[page])[index % PAGE_SIZE];
+		return &(*Pages[seat.Page])[seat.Offset];
 	}
 
 	SparseSet::Slot *SparseSet::Peek(uint32_t index) {
-		const size_t page = index / PAGE_SIZE;
-		if (page >= Pages.size()) {
+		const Seat seat = SeatOf(index);
+		if (seat.Page >= Pages.size()) {
 			return nullptr;
 		}
-		return &(*Pages[page])[index % PAGE_SIZE];
+		return &(*Pages[seat.Page])[seat.Offset];
 	}
 
 	uint32_t SparseSet::Allocate() {

@@ -84,8 +84,10 @@
         "core",
         "ecs",
         "input",
+        "net",
         "parallel",
         "render",
+        "replication",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -95,7 +97,9 @@
       "links": [
         "core",
         "ecs",
+        "net",
         "parallel",
+        "replication",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"
@@ -139,8 +143,10 @@
         "core",
         "ecs",
         "input",
+        "net",
         "parallel",
         "render",
+        "replication",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -150,7 +156,9 @@
       "links": [
         "core",
         "ecs",
+        "net",
         "parallel",
+        "replication",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"

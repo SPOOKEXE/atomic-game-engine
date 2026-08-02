@@ -62,6 +62,21 @@ namespace engine::ecs {
 		}
 	}
 
+	bool WatchComponent(StoreState &state, ComponentId id) {
+		if (!id.IsValid() || Watching(state, id)) {
+			return false;
+		}
+
+		state.Watched.push_back(id);
+
+		// The edges are now wrong rather than merely cold: a table holding this
+		// component needs a `DirtyBits` column from here on, so a transition
+		// into it has a different destination than the one already recorded.
+		state.WatchEpoch++;
+		state.Edges.Forget();
+		return true;
+	}
+
 	uint32_t TableFor(StoreState &state, const ComponentSet &wanted) {
 		const ComponentSet &set = Tracked(state, wanted);
 		const auto found = state.TableBySet.find(set.Id());
@@ -178,11 +193,26 @@ namespace engine::ecs {
 			}
 		}
 
-		const ComponentSet &current = location.Archetype == EntityLocation::NO_ARCHETYPE
-										  ? ComponentSet::Empty()
-										  : state.Tables[location.Archetype].Set();
+		// An entity with no row yet has no table to hang an edge off, so the
+		// cache covers table-to-table transitions only. That is the case worth
+		// covering: the first component an entity gains happens once, and the
+		// ones after it happen every time anything toggles.
+		uint32_t destination = location.Archetype == EntityLocation::NO_ARCHETYPE
+								   ? ArchetypeEdges::NO_TABLE
+								   : state.Edges.Added(state.WatchEpoch, location.Archetype, id);
 
-		const uint32_t destination = TableFor(state, current.With(id));
+		if (destination == ArchetypeEdges::NO_TABLE) {
+			const ComponentSet &current = location.Archetype == EntityLocation::NO_ARCHETYPE
+											  ? ComponentSet::Empty()
+											  : state.Tables[location.Archetype].Set();
+
+			destination = TableFor(state, current.With(id));
+
+			if (location.Archetype != EntityLocation::NO_ARCHETYPE) {
+				state.Edges.RecordAddition(state.WatchEpoch, location.Archetype, id, destination);
+			}
+		}
+
 		Relocate(state, key.Index, location, destination);
 
 		const EntityLocation moved = *state.Directory.Locate(key.Index);
@@ -263,6 +293,16 @@ namespace engine::ecs {
 			return;
 		}
 
+		const uint32_t cached = state.Edges.Removed(state.WatchEpoch, location.Archetype, id);
+		if (cached != ArchetypeEdges::NO_TABLE) {
+			// Only a transition that produced a table is ever recorded, so a hit
+			// here already means the component was present and something was
+			// left over — both of the checks below have been answered once and
+			// cannot have changed, because a table's set does not.
+			Relocate(state, key.Index, location, cached);
+			return;
+		}
+
 		const ComponentSet &current = state.Tables[location.Archetype].Set();
 		if (!current.Contains(id)) {
 			return;
@@ -271,13 +311,17 @@ namespace engine::ecs {
 		const ComponentSet &reduced = current.Without(id);
 		if (reduced.IsEmpty()) {
 			// Back to no components at all, which is a directory slot and no row
-			// rather than a row in a table of nothing.
+			// rather than a row in a table of nothing. Deliberately not cached:
+			// there is no destination table to name, and a sentinel meaning
+			// "nowhere" would be a second thing every reader has to handle.
 			Vacate(state, location);
 			state.Directory.Relocate(key.Index, EntityLocation{});
 			return;
 		}
 
-		Relocate(state, key.Index, location, TableFor(state, reduced));
+		const uint32_t destination = TableFor(state, reduced);
+		state.Edges.RecordRemoval(state.WatchEpoch, location.Archetype, id, destination);
+		Relocate(state, key.Index, location, destination);
 	}
 
 	void SetResourceValue(StoreState &state, ComponentId id, const void *value) {
@@ -306,6 +350,10 @@ namespace engine::ecs {
 	void ClearWorld(StoreState &state) {
 		state.Tables.clear();
 		state.TableBySet.clear();
+
+		// Before anything else creates a table: an edge names a table by index,
+		// and index zero is about to belong to a different world.
+		state.Edges.Forget();
 		state.Directory.Clear();
 		state.NamesByIndex.clear();
 		state.EntitiesByName.clear();

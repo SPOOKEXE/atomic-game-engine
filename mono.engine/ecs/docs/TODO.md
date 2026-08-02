@@ -31,20 +31,46 @@ For orientation, since everything below is defined against it.
 
 ## v0.2 — the rest of this version
 
-### Chunked column storage with a shared span pool
+### Chunked column storage with a shared span pool — **moved to v0.4**
 
-**Trigger: hundreds of small worlds in one host.** Today a column owns one
-growing allocation and never gives it back, so a thousand worlds each hold
-their own high-water mark forever. Chunks of a fixed row count, drawn from and
-returned to a process-wide pool, bound that: a world that shrinks releases spans
-another world reuses.
+The measurement this was waiting on got taken, and it moved the item twice: it
+narrowed the trigger, and it found that most of what the trigger was blamed for
+came from somewhere else entirely.
+
+| Shape | Resident | Live rows | Ratio |
+|---|---|---|---|
+| 1000 worlds, always 100 entities | 72.7 MB | 2.7 MB | 26.6x |
+| 1000 worlds, peaked at 10k, settled at 100 | 705.8 MB | 2.7 MB | 258x |
+
+**The first row was not columns.** 64 MB of that 72.7 was `SparseSet` pages:
+a page is allocated whole on a world's first entity, and it was 4096 slots of
+sixteen bytes, so a world of a hundred entities paid a 64 KB entry fee. Fixed,
+by making the first page 512 slots and leaving every page after it at 4096 —
+**72.7 MB to 16.7 MB.** Shrinking all of them was tried and rejected: eight
+times the allocations scatter a large world's columns and a multi-world tick
+over 100k entities each measured 8–21% slower.
+
+**The second row is what chunked storage is actually for**, and roughly two
+thirds of it is column capacity that will not be used again. Still worth doing,
+now with a number behind it and a narrower trigger: *a world whose population
+falls a long way from its peak*, not *a world that is small*.
+
+It goes to v0.4 because the vectorisable-component-layout item there reopens the
+same bytes. Chunking makes `Column::At` a divide and a modulo; a vectorisable
+layout changes what a row is; a chunk is the natural granularity for a
+vectorised block. Sequenced separately, `Column`'s internals get rewritten twice
+and the second rewrite invalidates the first's benchmark.
 
 Compatible with the iteration paths as they stand — `EachBatch` already
 promises nothing about where a batch ends, so one batch per chunk is a legal
-division. `Column::At` becomes a divide and a modulo, which is why this wants a
-measurement before and after rather than an assumption.
+division.
 
 Explicitly **not** an occupancy flag per row. See "Rejected" below.
+
+Take the directory's own leftover in the same pass: `Free` and `Clear` both keep
+pages on purpose, so a world that shrank still holds every page it ever touched.
+Bounded and small beside the column capacity next to it, which is why it is a
+line here rather than an item.
 
 ### The class table and the instance model
 
@@ -58,13 +84,25 @@ Explicitly **not** an occupancy flag per row. See "Rejected" below.
   `Transform` is world-space and nothing propagates.
 - Property descriptors: `{class, name} -> {component, offset, value type}`.
 
-### Archetype edge cache
+### ~~Archetype edge cache~~ — built
 
-**Trigger: a measurement.** `Set` on a component an entity lacks currently
-interns `set.With(id)` — a sort, a hash and a map lookup. Caching add-one and
-remove-one edges per archetype turns it into one lookup. Not urgent: nothing has
-shown it in a profile, and the number to have first is what archetype
-transitions cost as a fraction of a tick.
+The trigger was a measurement, and the measurement is
+`benchmarks/Structure.cpp`. It reported a transition at **50.8 ns** against
+**9.2 ns** for overwriting a component already present, with **28 ns** of that
+being the intern alone — a vector allocation, a sort, an FNV hash and a
+process-wide mutex, to recompute an answer that cannot change.
+
+`ArchetypeEdges` (in `src/`, private like `Archetype` itself) caches add-one and
+remove-one per table. **11.99 ms to 6.25 ms on 100k toggles.** A scanned list
+rather than a hash map: an archetype has a handful of edges, and a hash of a
+composite key would have cost roughly what it replaced.
+
+The invariant to keep: an edge is valid only for the watch epoch it was recorded
+under. `Observe` gives a table a `DirtyBits` column and therefore moves where a
+transition lands, so an edge from before it sends the row to a table that does
+not track changes — a write that goes unreported rather than a crash. `Watched`
+is only added to through `WatchComponent`, which bumps the epoch beside it, so
+there is one place to get that right rather than three.
 
 ---
 
@@ -96,10 +134,26 @@ entity because it has nothing to tell them apart.
 same indices, and apply cannot tell them apart*, so the day this is fixed the
 test says so.
 
-The likely shape: reserve a high index range that the authority never allocates
-from, and give a replica's `Create` that range. A predicted entity then has an
-identity the server can never mint, and promoting one to a server entity is an
-explicit step rather than a coincidence.
+**Guarded at v0.3, moved to v0.4.** `Store::SetAdoptOnly` refuses to mint in a
+replica and every store a `replication::Connector` writes into has it set, so
+the collision cannot be walked into any more. `CreateAt` is untouched: this
+refuses minting, not receiving. The pinned test still reaches the collision by
+deliberately not setting the flag, so what it pins is the storage's behaviour
+rather than a replica's.
+
+The shape of the real fix: reserve a high index range that the authority never
+allocates from, and give a replica's `Create` that range. A predicted entity
+then has an identity the server can never mint, and promoting one to a server
+entity is an explicit step rather than a coincidence.
+
+**Why it is a v0.4 item and not a v0.3 one.** It changes the directory's layout.
+A reserved base at 2³¹ under one linear page list would have `Reach` allocate
+half a million pages to get there, so `SparseSet` needs a second page region —
+and `SaveSnapshot` writes the directory as a run of `Capacity()` entries, so it
+needs the same split and a format bump. v0.4 already reopens this storage for
+chunked columns and vectorisable components, and one bump beats two. The trigger
+is also still unmet: nothing can predict a spawn until there is a projectile to
+predict, which wants v0.4's physics and `Part`.
 
 ### Interest filtering
 

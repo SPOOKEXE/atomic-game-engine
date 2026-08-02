@@ -269,10 +269,7 @@ namespace engine::ecs {
 
 		const uint32_t watchedCount = reader.ReadUInt32();
 		for (uint32_t index = 0; index < watchedCount && !reader.Failed(); index++) {
-			const ComponentId id = lookup(reader.ReadUInt32());
-			if (id.IsValid()) {
-				state.Watched.push_back(id);
-			}
+			WatchComponent(state, lookup(reader.ReadUInt32()));
 		}
 
 		if (reader.Failed()) {

@@ -480,3 +480,110 @@ TEST_CASE("runs and rows agree on what changed", "[ecs][fuzz]") {
 		REQUIRE(byRun == expected);
 	}
 }
+
+// --- the batch write -------------------------------------------------------
+//
+// `Set` and `GetMutable` mark; an iteration does not, because a reference handed
+// out by `Each` is a pointer the store never sees written through. That is the
+// engine's fastest write path and the one a replication delta most needs to
+// know about, so there is a primitive for saying so afterwards.
+
+TEST_CASE("iterating and writing marks nothing on its own", "[ecs]") {
+	Store store("changes");
+	store.Observe<Spot>();
+
+	const Entity entity = store.Create();
+	store.Set<Spot>(entity, Spot{1.0f});
+	store.ClearChanges();
+
+	store.Each<Spot>([](Entity, Spot &spot) { spot.X = 2.0f; });
+
+	// The value moved and nothing recorded it. Pinned rather than lamented: a
+	// delta built from the bits would carry none of this, and the day the
+	// engine starts marking on iteration this test says so.
+	REQUIRE(store.Get<Spot>(entity)->X == 2.0f);
+	REQUIRE_FALSE(store.Changed<Spot>(entity));
+	REQUIRE(ChangedSpots(store).empty());
+}
+
+TEST_CASE("MarkAllChanged reports every row holding the component", "[ecs]") {
+	Store store("changes");
+	store.Observe<Spot>();
+
+	std::vector<Entity> marked;
+	for (int index = 0; index < 8; index++) {
+		const Entity entity = store.Create();
+		store.Set<Spot>(entity, Spot{static_cast<float>(index)});
+		marked.push_back(entity);
+	}
+
+	// A second archetype, so this is not a one-table answer.
+	for (int index = 0; index < 4; index++) {
+		const Entity entity = store.Create();
+		store.Set<Spot>(entity, Spot{0.0f});
+		store.Set<Drift>(entity, Drift{1.0f});
+		marked.push_back(entity);
+	}
+
+	// One that has no Spot at all, and must not appear.
+	const Entity other = store.Create();
+	store.Set<Drift>(other, Drift{1.0f});
+
+	store.ClearChanges();
+	store.Each<Spot>([](Entity, Spot &spot) { spot.X += 1.0f; });
+	store.MarkAllChanged<Spot>();
+
+	std::vector<Entity> reported = ChangedSpots(store);
+	std::sort(marked.begin(), marked.end(), [](Entity left, Entity right) { return left.Id < right.Id; });
+
+	REQUIRE(reported == marked);
+	REQUIRE_FALSE(store.Changed<Spot>(other));
+}
+
+TEST_CASE("MarkAllChanged marks one component and not its neighbours", "[ecs]") {
+	Store store("changes");
+	store.Observe<Spot>();
+	store.Observe<Drift>();
+
+	const Entity entity = store.Create();
+	store.Set<Spot>(entity, Spot{1.0f});
+	store.Set<Drift>(entity, Drift{1.0f});
+	store.ClearChanges();
+
+	store.MarkAllChanged<Spot>();
+
+	// The bit index is a position in the table's sorted set, so marking the
+	// wrong one is an off-by-one that reports a component nobody touched.
+	REQUIRE(store.Changed<Spot>(entity));
+	REQUIRE_FALSE(store.Changed<Drift>(entity));
+}
+
+TEST_CASE("MarkAllChanged on an unobserved component does nothing", "[ecs]") {
+	Store store("changes");
+
+	const Entity entity = store.Create();
+	store.Set<Quiet>(entity, Quiet{1});
+
+	// No table has a bits column, so there is nowhere to record it. Silent
+	// rather than an error, matching `Changed` answering false for the same
+	// reason: nothing recorded it, so nothing can say.
+	store.MarkAllChanged<Quiet>();
+	REQUIRE_FALSE(store.Changed<Quiet>(entity));
+}
+
+TEST_CASE("MarkAllChanged moves the coarse counter by the row count", "[ecs]") {
+	Store store("changes");
+	store.Observe<Spot>();
+
+	for (int index = 0; index < 5; index++) {
+		store.Set<Spot>(store.Create(), Spot{1.0f});
+	}
+	store.ClearChanges();
+
+	const uint64_t before = store.ChangeVersion();
+	store.MarkAllChanged<Spot>();
+
+	// A consumer watching the version to decide whether to rebuild has to see a
+	// batch write the same way it sees that many individual ones.
+	REQUIRE(store.ChangeVersion() == before + 5);
+}

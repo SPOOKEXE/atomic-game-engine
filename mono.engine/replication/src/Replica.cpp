@@ -105,7 +105,16 @@ namespace engine::replication {
 
 		// An unreliable transport reorders, and the newer state is already
 		// applied. Not an error, and not a reason to disconnect.
-		if (delta.Tick <= Applied_) {
+		//
+		// **Strictly older, not older-or-equal.** A tick's delta does not fit
+		// one datagram once a world has more than a handful of entities, so the
+		// authority sends it as several independently applicable messages all
+		// stamped with the same tick — see `Authority::EmitDelta`. Refusing the
+		// second one as stale is how a world of thirty-two entities received
+		// exactly the first fragment of every tick and nothing else. A genuine
+		// duplicate re-applies the same values, which is a write that changes
+		// nothing rather than a corruption.
+		if (delta.Tick < Applied_) {
 			Stats_.Stale++;
 			return ApplyStatus::Stale;
 		}

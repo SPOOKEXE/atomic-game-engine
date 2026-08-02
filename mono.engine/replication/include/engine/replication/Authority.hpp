@@ -261,12 +261,32 @@ namespace engine::replication {
 			uint64_t Applied = 0;
 			std::vector<Input> Pending;
 			std::vector<std::vector<std::byte>> Outgoing;
+
+			// What has been sent and not confirmed, per replicated component:
+			// entity to the tick its value last went out on, or zero for one
+			// that has changed and not yet been sent.
+			//
+			// **This is the baseline.** A delta built from the dirty bits alone
+			// describes one tick, so an entity that moved in a tick whose
+			// datagram was lost and then went still is wrong on that client
+			// until something re-snapshots it — and nothing will, because the
+			// client is acknowledging happily and is not behind. Carrying the
+			// unconfirmed entries forward makes the stream self-healing: a value
+			// keeps being resent until the client says it applied a tick at or
+			// after the one it went out on.
+			//
+			// Bounded by the visible world rather than by time, because an entry
+			// is replaced rather than appended when the same entity changes
+			// again, and the whole map is dropped when a client is
+			// re-snapshotted.
+			std::vector<std::unordered_map<uint64_t, uint64_t>> Unconfirmed;
 		};
 
 		Client *Reach(ClientId client);
 		const Client *Reach(ClientId client) const;
 		void BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick);
-		void BuildComponents(ecs::Store &store, const Client &client, Delta &delta);
+		void BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
+		void EmitDelta(Client &client, const Delta &delta);
 
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity)> Interest;

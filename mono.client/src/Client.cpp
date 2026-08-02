@@ -4,12 +4,14 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
 #include <client/Client.hpp>
+#include <client/Replicated.hpp>
 
 namespace client {
 
@@ -104,6 +106,10 @@ namespace client {
 		// many it composites.
 		Rendered = Simulated.front();
 
+		if (!BeginConnecting()) {
+			return false;
+		}
+
 		if (worlds > 1) {
 			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", worlds, Settings.ViewSpacing);
 		}
@@ -135,6 +141,15 @@ namespace client {
 	}
 
 	void Client::Shutdown() {
+		// The connection before the socket it borrows, and both before the
+		// universe holding the world it writes into. A connector outliving its
+		// transport is a dangling reference in a destructor.
+		Connection.reset();
+		if (Socket != nullptr) {
+			Socket->Close();
+			Socket.reset();
+		}
+
 		if (Window) {
 			// Before SDL_Quit: the renderer holds a device that holds the
 			// window, and tearing SDL down underneath it is a crash on exit.
@@ -144,6 +159,95 @@ namespace client {
 			SDL_Quit();
 		}
 		engine::parallel::Jobs::Stop();
+	}
+
+	bool Client::BeginConnecting() {
+		if (Settings.ConnectAddress.empty()) {
+			return true;
+		}
+
+		const std::optional<engine::net::Endpoint> server =
+			engine::net::Endpoint::Parse(Settings.ConnectAddress);
+		if (!server.has_value()) {
+			ENGINE_ERROR("--connect '{}' is not a host:port", Settings.ConnectAddress);
+			return false;
+		}
+
+		// Before the socket, and before any datagram can arrive: a snapshot
+		// names its components and a process that has not registered them
+		// resolves the names to nothing and applies an empty world.
+		RegisterReplicatedComponents();
+
+		// Port zero: the client does not need a known address, only the server
+		// does. Binding a fixed one would stop two clients sharing a machine.
+		Socket = engine::net::MakeUdpTransport(0);
+		if (Socket == nullptr) {
+			ENGINE_ERROR("could not open a socket to connect from");
+			return false;
+		}
+
+		engine::world::WorldSettings world;
+		world.Name = engine::core::Name("client.replica");
+		world.TickRate = Settings.TickRate;
+
+		Replicated = Universe_->Create(world);
+		if (!Replicated.IsValid()) {
+			ENGINE_ERROR("could not create the replicated world");
+			return false;
+		}
+
+		Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
+			// The v0.2 refusal, used for what it was reserved for. A replica
+			// that published to a bus would be telling the universe something
+			// the server never said; the inbox still delivers, which is how it
+			// receives.
+			store.SetResource(engine::world::Replica{true});
+
+			// A replicated world runs no systems of its own. Everything in it
+			// arrived, and simulating it here would be this process disagreeing
+			// with the authority once per tick.
+		});
+
+		Connection = std::make_unique<engine::replication::Connector>(
+			*Socket, *server, engine::core::Clock::Seconds()
+		);
+
+		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
+		return true;
+	}
+
+	void Client::PollServer(double nowSeconds) {
+		if (Connection == nullptr) {
+			return;
+		}
+
+		Universe_->Enter(Replicated, [this, nowSeconds](engine::ecs::Store &store) {
+			Connection->Poll(store, nowSeconds);
+		});
+
+		// Once, on the tick it becomes true. A client that logged this every
+		// frame would write six hundred lines a second saying the same thing.
+		if (!ReportedJoin && Connection->Joined()) {
+			ReportedJoin = true;
+
+			size_t entities = 0;
+			Universe_->Enter(Replicated, [&entities](engine::ecs::Store &store) {
+				store.EachEntity([&entities](engine::ecs::Entity) { entities++; });
+			});
+
+			ENGINE_INFO("joined: {} entities at tick {}", entities, Connection->Applied());
+		}
+
+		// **The replicated world is not drawn yet, and that is a stated gap
+		// rather than an oversight.** What arrives is `server.Position` and
+		// `server.Velocity`; what the renderer needs is `Transform`, `Visual`
+		// and a `DrawList`, and the two programs declare none of those in
+		// common. `mono.engine/scene` at v0.4 is the item that gives both halves
+		// one set of components, and drawing this is the first thing that falls
+		// out of it. Bridging it here would mean a translation system this
+		// program would then have to delete.
+
+		Connection->Advance(nowSeconds);
 	}
 
 	void Client::PumpEvents() {
@@ -256,6 +360,14 @@ namespace client {
 			// copy of the rate it is running at.
 			ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 			Universe_->Tick(delta);
+		}
+
+		{
+			// After the tick and before presentation, the same place the server
+			// publishes from — so what the replica applied this frame is what
+			// the frame draws, rather than being one frame stale for no reason.
+			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::ECS);
+			PollServer(engine::core::Clock::Seconds());
 		}
 
 		{

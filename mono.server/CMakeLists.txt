@@ -16,6 +16,13 @@ mono_add_library(server
 		Engine::parallel
 		Engine::ecs
 		Engine::world
+
+		# `--listen` makes this process the authority for clients. Both are
+		# `shared` tier, so neither costs the headless property above: a UDP
+		# socket and a component delta need no graphics stack, which is why
+		# `check-server-is-headless` still passes with them on the line.
+		Engine::net
+		Engine::replication
 )
 
 mono_add_program(server

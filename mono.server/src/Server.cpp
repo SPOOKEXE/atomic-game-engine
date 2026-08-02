@@ -220,9 +220,83 @@ namespace server {
 			return false;
 		}
 
+		if (!BeginListening()) {
+			return false;
+		}
+
 		Running = true;
 		ENGINE_INFO("server ready at {:.1f} Hz", Settings.TickRate);
 		return true;
+	}
+
+	bool Server::BeginListening() {
+		if (!Settings.Listening) {
+			return true;
+		}
+
+		if (IsHost()) {
+			// A driver is the authority for every world in the universe,
+			// including the ones a host holds. A host that also streamed would
+			// be a second answer to the same world, which is the split brain the
+			// federated universe exists to prevent.
+			ENGINE_ERROR("--listen is for a driver. A host serves its driver, not clients.");
+			return false;
+		}
+
+		Socket = engine::net::MakeUdpTransport(Settings.ListenPort);
+		if (Socket == nullptr) {
+			ENGINE_ERROR("could not bind UDP port {}", Settings.ListenPort);
+			return false;
+		}
+
+		Replication = std::make_unique<engine::replication::Listener>(*Socket);
+
+		// **Opt in, by name.** A world holds components no client has any
+		// business receiving, and a default of "everything" makes leaking one
+		// the consequence of forgetting rather than of deciding. These three are
+		// the placeholder scene; a game file names its own at v0.5.
+		Replication->Authority().Replicate(engine::core::Name("server.Position"));
+		Replication->Authority().Replicate(engine::core::Name("server.Velocity"));
+
+		// A delta is the third reader of the dirty bits, so the components that
+		// travel have to be observed or nothing ever looks changed.
+		Worlds().Enter(PrimaryWorld, [](engine::ecs::Store &store) {
+			store.Observe<Position>();
+			store.Observe<Velocity>();
+		});
+
+		ENGINE_INFO("replication listening on {}", Socket->Local().Text());
+		return true;
+	}
+
+	engine::net::Endpoint Server::ListeningOn() const {
+		return Socket == nullptr ? engine::net::Endpoint{} : Socket->Local();
+	}
+
+	void Server::ServeClients(double nowSeconds) {
+		if (Replication == nullptr) {
+			return;
+		}
+
+		// Inbound first, so an acknowledgement that arrived this tick is counted
+		// before this tick's delta is built against it.
+		Replication->Poll(nowSeconds);
+
+		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
+			// Before `ClearChanges`, which the world does at the start of its
+			// next tick — the bits are the delta source and reading them after
+			// they are cleared is how a tick's worth of movement goes missing.
+			Replication->Publish(store, store.Time().Tick, nowSeconds);
+		});
+
+		// Nothing consumes inputs yet: the placeholder scene has no notion of a
+		// player, so an input has nowhere to be applied. Dropped rather than
+		// left to accumulate, which would be a slow leak per connected client
+		// for a feature that does not exist. A game file at v0.5 is what turns
+		// this into an apply.
+		Replication->ClearInputs();
+
+		Replication->Advance(nowSeconds);
 	}
 
 	size_t Server::PlannedHosts() const {
@@ -417,6 +491,17 @@ namespace server {
 		Running = false;
 		Recorder_.reset();
 		Replayer_.reset();
+
+		// The listener before the socket it borrows, and both before the driver
+		// whose worlds it reads. A listener outliving its transport is a
+		// dangling reference in a destructor, which is the least debuggable
+		// place for one.
+		Replication.reset();
+		if (Socket != nullptr) {
+			Socket->Close();
+			Socket.reset();
+		}
+
 		Driver_.reset();
 		engine::parallel::Jobs::Stop();
 	}
@@ -516,6 +601,18 @@ namespace server {
 			// the same shape as deriving what to draw — so it runs every tick,
 			// with an alpha of zero because nothing here interpolates.
 			Worlds().Present(PrimaryWorld, delta, 0.0f);
+
+			// After presentation, because that is the phase this comment has
+			// always said replication extraction belongs to, and before the next
+			// tick clears the change bits it reads.
+			//
+			// A replay does not serve clients: a recording reproduces a run, and
+			// a run that also streamed would depend on whether anybody was
+			// connected — which is exactly the kind of input that stops a replay
+			// being byte-identical.
+			if (!Replayer_) {
+				ServeClients(static_cast<double>(tickStarted) / 1e9);
+			}
 
 			engine::core::FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();

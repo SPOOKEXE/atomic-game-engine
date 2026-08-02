@@ -16,6 +16,7 @@
 // @tier L3 · shared
 
 #include "Archetype.hpp"
+#include "ArchetypeEdges.hpp"
 
 #include <engine/ecs/ComponentSet.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -271,6 +272,10 @@ namespace engine::ecs {
 		// for a set a hash of one number.
 		std::unordered_map<uint32_t, uint32_t> TableBySet;
 
+		// Where a row lands when one component is added or removed, so that a
+		// repeated transition is a scan of a short list rather than an intern.
+		ArchetypeEdges Edges;
+
 		// Entity index to generation and location.
 		SparseSet Directory;
 
@@ -294,9 +299,25 @@ namespace engine::ecs {
 		std::vector<Command> Commands;
 		int DeferDepth = 0;
 
+		// Whether this world may mint entities of its own, or only adopt ones
+		// somebody else issued. See `Store::SetAdoptOnly` for why a replica is
+		// the second kind.
+		bool AdoptOnly = false;
+
+		// So a refusal is reported once rather than once per attempt.
+		bool WarnedAboutMinting = false;
+
 		// Component types whose writes are recorded, and the coarse counter a
 		// batch write still moves.
+		//
+		// **Only ever changed through `WatchComponent`**, which bumps the epoch
+		// beside it. Observing a component changes which tables carry a
+		// `DirtyBits` column and therefore where a transition should land, so a
+		// cached archetype edge taken before it is not merely stale — it points
+		// at a table that does not track changes, and a write through it would
+		// go unreported. The epoch is what `ArchetypeEdges` checks.
 		std::vector<ComponentId> Watched;
+		uint64_t WatchEpoch = 0;
 		uint64_t Changes = 0;
 
 		// One registered change signal.
@@ -342,6 +363,18 @@ namespace engine::ecs {
 	//               its say.
 	// @return The table index, valid until the world is cleared.
 	uint32_t TableFor(StoreState &state, const ComponentSet &wanted);
+
+	// Starts recording writes to one component, and invalidates the edge cache.
+	//
+	// The only way `Watched` is added to. A second one would eventually be a
+	// second one that forgot the epoch, and the symptom of that is a change
+	// nothing reports rather than a crash — see the note on `Watched` itself.
+	//
+	// @param state The world to observe in.
+	// @param id    The component whose writes to record.
+	// @return `false` when it was already observed, so a caller can skip the
+	//         table migration that follows a genuinely new one.
+	bool WatchComponent(StoreState &state, ComponentId id);
 
 	// Moves an entity's row into another table and fixes up whoever the removal
 	// displaced.

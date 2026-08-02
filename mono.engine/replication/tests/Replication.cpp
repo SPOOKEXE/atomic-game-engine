@@ -496,3 +496,87 @@ TEST_CASE("a client converges however much is lost on the way", "[replication][f
 		REQUIRE(pair.Client.Get<Spot>(entity)->X == 7777.0f);
 	}
 }
+
+// --- the acknowledged baseline -----------------------------------------------
+//
+// A delta built from the dirty bits alone describes exactly one tick. That is
+// correct only while nothing is lost: an entity that moved on a tick whose
+// datagram went missing and then stopped moving is wrong on that client
+// forever, because no later delta mentions it and the client is acknowledging
+// happily so nothing re-snapshots it. Carrying the unconfirmed entries forward
+// makes the stream converge instead.
+
+TEST_CASE("a value lost in transit is resent until it is confirmed", "[replication]") {
+	Pair pair;
+
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{1.0f, 1.0f});
+	REQUIRE(pair.Join());
+	REQUIRE(pair.Replica_.Applied() > 0);
+
+	// One move, and then the entity is still for the rest of the test. This is
+	// the case that used to be unrecoverable — a change that happens once and
+	// whose only delta is dropped.
+	pair.Server.Set<Spot>(entity, Spot{9.0f, 9.0f});
+	pair.Tick([](size_t) { return true; });
+
+	REQUIRE(pair.Client.Get<Spot>(entity)->X == 1.0f);
+
+	// Nothing changes on the server from here. The value still has to arrive.
+	for (int tick = 0; tick < 4; tick++) {
+		pair.Tick();
+	}
+
+	REQUIRE(pair.Client.Get<Spot>(entity)->X == 9.0f);
+	REQUIRE(pair.Client.Get<Spot>(entity)->Y == 9.0f);
+}
+
+TEST_CASE("a confirmed value stops being resent", "[replication]") {
+	Pair pair;
+
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{1.0f, 1.0f});
+	REQUIRE(pair.Join());
+
+	pair.Server.Set<Spot>(entity, Spot{5.0f, 5.0f});
+	pair.Tick();
+	REQUIRE(pair.Client.Get<Spot>(entity)->X == 5.0f);
+
+	// Acknowledged, so the entry retires. A world where nothing is moving has
+	// to fall silent — a baseline that never retired would turn every delta
+	// into a full world update forever, which is the opposite of what carrying
+	// one is for.
+	pair.Tick();
+	REQUIRE(pair.Authority_.Outgoing(pair.Handle).empty());
+}
+
+TEST_CASE("a run of losses still converges", "[replication]") {
+	Pair pair;
+
+	std::vector<Entity> entities;
+	for (int index = 0; index < 24; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{0.0f, 0.0f});
+		entities.push_back(entity);
+	}
+	REQUIRE(pair.Join());
+
+	// Move everything, then lose ten consecutive ticks' worth of deltas. A
+	// client this far behind is still not behind enough to be re-snapshotted,
+	// which is exactly the window where a one-tick delta leaves it wrong.
+	for (size_t index = 0; index < entities.size(); index++) {
+		pair.Server.Set<Spot>(entities[index], Spot{static_cast<float>(index), 2.0f});
+	}
+	for (int tick = 0; tick < 10; tick++) {
+		pair.Tick([](size_t) { return true; });
+	}
+
+	for (int tick = 0; tick < 4; tick++) {
+		pair.Tick();
+	}
+
+	for (size_t index = 0; index < entities.size(); index++) {
+		REQUIRE(pair.Client.Get<Spot>(entities[index])->X == static_cast<float>(index));
+		REQUIRE(pair.Client.Get<Spot>(entities[index])->Y == 2.0f);
+	}
+}

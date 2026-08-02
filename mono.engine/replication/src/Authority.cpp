@@ -110,8 +110,49 @@ namespace engine::replication {
 	}
 
 	void Authority::BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick) {
+		// **Copied into a scratch world first, and this is not an
+		// optimisation.** Saving the authoritative store directly sends the
+		// whole of it: every component whether or not it is replicated, every
+		// entity whether or not the client may see it, and every resource —
+		// which is where the bus outbox, the DataStore records and the world's
+		// own bookkeeping live. That contradicts the opt-in rule this module is
+		// built on, where `Replicate` names what a client receives and the
+		// default is nothing.
+		//
+		// It also sent `DirtyBits`. Change bits are the sender's own
+		// bookkeeping, and a receiving process that never observed anything has
+		// no such component registered — so the snapshot named a component that
+		// build did not have and the join failed outright. In-process that
+		// never showed, because both halves shared one component table; it took
+		// a real second process to surface it.
+		//
+		// The copy costs the size of the visible world, once per join, which is
+		// already the expensive operation being spread over ticks below.
+		ecs::Store scratch("replica");
+
+		for (const ecs::Entity entity : Visible) {
+			// At the sender's exact index *and* generation. A handle stored
+			// inside a component has to mean the same entity on both machines,
+			// and re-allocating in order would quietly renumber the world.
+			scratch.CreateAt(entity);
+		}
+
+		for (const core::Name name : Components) {
+			const ecs::ComponentId id = ecs::Components::Find(name);
+			if (!id.IsValid()) {
+				ENGINE_WARN("replication: '{}' is replicated but not registered here.", name.Text());
+				continue;
+			}
+
+			for (const ecs::Entity entity : Visible) {
+				if (const void *value = store.GetComponent(entity, id); value != nullptr) {
+					scratch.SetComponent(entity, id, value);
+				}
+			}
+		}
+
 		core::ByteWriter writer;
-		if (!store.Save(writer)) {
+		if (!scratch.Save(writer)) {
 			// A world that cannot be snapshotted cannot admit anybody, and
 			// saying so beats sending a client half a world.
 			ENGINE_ERROR("replication: the world cannot be snapshotted, so no client can join it.");
@@ -130,10 +171,139 @@ namespace engine::replication {
 		for (const ecs::Entity entity : Visible) {
 			client.Known.insert(entity.Id);
 		}
+
+		// And nothing is outstanding any more: the snapshot carries the current
+		// value of everything in it, so a pending resend would be resending a
+		// value the client is about to be told anyway.
+		for (std::unordered_map<uint64_t, uint64_t> &unconfirmed : client.Unconfirmed) {
+			unconfirmed.clear();
+		}
 	}
 
-	void Authority::BuildComponents(ecs::Store &store, const Client &client, Delta &delta) {
-		for (const core::Name name : Components) {
+	void Authority::EmitDelta(Client &client, const Delta &delta) {
+		// **A delta has to fit a datagram, and one for a whole world does not.**
+		// The snapshot was chunked from the start and the delta was not, so a
+		// world of thirty-two entities already built a 1365-byte message against
+		// a 1200-byte payload limit — and `Link::Reserve` refused every one of
+		// them. Silently: the refusal is backpressure, which is the right answer
+		// for a link over budget and the wrong diagnosis for a message that can
+		// never fit. The symptom was a client that joined and then watched a
+		// frozen world forever, which is why this went unnoticed in a suite that
+		// only ever checked the join.
+		//
+		// So a tick's delta goes out as however many messages it takes, each
+		// under `ChunkBytes` and **each independently applicable**. Not a
+		// numbered sequence to reassemble: this is the unreliable channel, and a
+		// reassembly that waits for a part which was dropped is a stall on a
+		// path whose whole premise is that the next tick is already on its way.
+		// Losing a piece costs those entities one tick.
+		//
+		// The pieces all carry the same tick, which is why `Replica` treats a
+		// delta at the tick it has already applied as another part rather than
+		// as stale.
+		const size_t budget = Settings_.ChunkBytes;
+
+		// What a message costs before any payload: the kind, the version, the
+		// tick, the baseline and four counts. Deliberately generous — the
+		// consequence of underestimating is a message that does not fit, which
+		// is the failure being fixed.
+		constexpr size_t OVERHEAD = 64;
+
+		// A component name is written per entry, so an entry is only worth
+		// opening if something can follow it.
+		constexpr size_t ENTRY_OVERHEAD = 96;
+
+		Delta piece;
+		piece.Tick = delta.Tick;
+		piece.Baseline = delta.Baseline;
+		size_t used = OVERHEAD;
+
+		const auto flush = [&] {
+			const bool empty = piece.Created.empty() && piece.Destroyed.empty() && piece.Components.empty();
+			if (!empty) {
+				client.Outgoing.push_back(Encode(piece));
+			}
+			piece = Delta{};
+			piece.Tick = delta.Tick;
+			piece.Baseline = delta.Baseline;
+			used = OVERHEAD;
+		};
+
+		// Structure first, and in its own pieces when it needs them. A component
+		// value for a row the receiver has not created yet is dropped, so
+		// creations lead.
+		const auto place = [&](std::vector<ecs::Entity> &into, const std::vector<ecs::Entity> &from) {
+			for (const ecs::Entity entity : from) {
+				if (used + sizeof(uint64_t) > budget) {
+					flush();
+				}
+				into.push_back(entity);
+				used += sizeof(uint64_t);
+			}
+		};
+		place(piece.Created, delta.Created);
+		place(piece.Destroyed, delta.Destroyed);
+
+		for (const ComponentDelta &component : delta.Components) {
+			if (component.Entities.empty()) {
+				continue;
+			}
+
+			// From the entry itself rather than from the descriptor, because
+			// this is the number of bytes that were actually written for each
+			// entity — a type with a custom serialiser is not its `sizeof`.
+			const size_t stride = component.Values.size() / component.Entities.size();
+			const size_t perEntity = sizeof(uint64_t) + stride;
+
+			size_t offset = 0;
+			while (offset < component.Entities.size()) {
+				if (used + ENTRY_OVERHEAD + perEntity > budget) {
+					flush();
+				}
+
+				const size_t room = budget - used - ENTRY_OVERHEAD;
+				const size_t take = std::min(room / perEntity, component.Entities.size() - offset);
+				if (take == 0) {
+					// One entity of this component does not fit an empty
+					// message. Nothing can be done about it here and dropping it
+					// quietly would be a component that never arrives.
+					ENGINE_WARN(
+						"replication: '{}' is {} bytes and cannot fit a delta message.",
+						component.Component.Text(),
+						stride
+					);
+					break;
+				}
+
+				ComponentDelta fragment;
+				fragment.Component = component.Component;
+				fragment.Entities.assign(
+					component.Entities.begin() + static_cast<ptrdiff_t>(offset),
+					component.Entities.begin() + static_cast<ptrdiff_t>(offset + take)
+				);
+				fragment.Values.assign(
+					component.Values.begin() + static_cast<ptrdiff_t>(offset * stride),
+					component.Values.begin() + static_cast<ptrdiff_t>((offset + take) * stride)
+				);
+
+				used += ENTRY_OVERHEAD + take * perEntity;
+				piece.Components.push_back(std::move(fragment));
+				offset += take;
+			}
+		}
+
+		flush();
+	}
+
+	void Authority::BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick) {
+		// One map per replicated component, and the list only grows, so an
+		// index into it is stable for the life of the server.
+		client.Unconfirmed.resize(Components.size());
+
+		for (size_t slot = 0; slot < Components.size(); slot++) {
+			const core::Name name = Components[slot];
+			std::unordered_map<uint64_t, uint64_t> &unconfirmed = client.Unconfirmed[slot];
+
 			const ecs::ComponentId id = ecs::Components::Find(name);
 			if (!id.IsValid()) {
 				// Named but never registered. Silently sending nothing would
@@ -168,6 +338,7 @@ namespace engine::replication {
 					}
 
 					component.Entities.push_back(entity);
+					unconfirmed[entity.Id] = tick;
 					if (descriptor.Size > 0) {
 						descriptor.Write(
 							values, static_cast<const std::byte *>(data) + row * descriptor.Size, 1
@@ -175,6 +346,46 @@ namespace engine::replication {
 					}
 				}
 			});
+
+			// **Everything sent earlier and not yet confirmed, again.** The run
+			// walk above is the fast path and covers what moved this tick; this
+			// is the recovery path and covers what moved on a tick whose
+			// datagram did not arrive. Read one at a time rather than as runs,
+			// because the current value is wanted and not the one that was
+			// current when the change happened — and because on a link that is
+			// not dropping anything this loop finds nothing to do.
+			for (auto entry = unconfirmed.begin(); entry != unconfirmed.end();) {
+				const uint64_t sentAt = entry->second;
+				const ecs::Entity entity{entry->first};
+
+				if (sentAt == tick) {
+					// Already in this delta, from the run walk.
+					++entry;
+					continue;
+				}
+
+				if (client.Known.find(entity.Id) == client.Known.end() || !store.Alive(entity)) {
+					// Gone or no longer visible. `Destroyed` and `Forget` say so
+					// on their own; holding a resend for it would be resending a
+					// value for a row the client has been told to drop.
+					entry = unconfirmed.erase(entry);
+					continue;
+				}
+
+				const void *value = store.GetComponent(entity, id);
+				if (value == nullptr) {
+					entry = unconfirmed.erase(entry);
+					continue;
+				}
+
+				component.Entities.push_back(entity);
+				if (descriptor.Size > 0) {
+					descriptor.Write(values, static_cast<const std::byte *>(value), 1);
+				}
+
+				entry->second = tick;
+				++entry;
+			}
 
 			if (component.Entities.empty()) {
 				continue;
@@ -335,11 +546,11 @@ namespace engine::replication {
 				client.Known.erase(entity.Id);
 			}
 
-			BuildComponents(store, client, delta);
+			BuildComponents(store, client, delta, tick);
 
 			const bool quiet = delta.Created.empty() && delta.Destroyed.empty() && delta.Components.empty();
 			if (!quiet) {
-				client.Outgoing.push_back(Encode(delta));
+				EmitDelta(client, delta);
 			}
 			if (!forget.Entities.empty()) {
 				client.Outgoing.push_back(Encode(forget));
@@ -382,6 +593,17 @@ namespace engine::replication {
 			// believing it would restart a stream that is working.
 			if (read.Applied.Tick > found->Applied) {
 				found->Applied = read.Applied.Tick;
+
+				// Retire what this confirms. An entry sent at or before the tick
+				// the client says it applied has arrived, so it stops being
+				// resent — and an entry that has not yet gone out at all, which
+				// is the zero, is not confirmed by anything.
+				for (std::unordered_map<uint64_t, uint64_t> &unconfirmed : found->Unconfirmed) {
+					for (auto entry = unconfirmed.begin(); entry != unconfirmed.end();) {
+						const bool confirmed = entry->second != 0 && entry->second <= found->Applied;
+						entry = confirmed ? unconfirmed.erase(entry) : std::next(entry);
+					}
+				}
 			}
 			return true;
 

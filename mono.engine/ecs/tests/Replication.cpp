@@ -223,6 +223,12 @@ TEST_CASE("two stores allocate the same indices, and apply cannot tell them apar
 	// need an index range the authority never allocates from. `ecs/docs/TODO.md`
 	// carries it with that trigger. This case pins the current behaviour so the
 	// day it changes, something says so.
+	//
+	// **What has changed is that a replica can no longer walk into this by
+	// accident** — `SetAdoptOnly` refuses to mint, and every store a
+	// `replication::Connector` writes into has it set. This case reaches the
+	// collision by *not* setting it, which is what makes it still the pinned
+	// behaviour of the storage rather than of a replica.
 	Store authority("authority");
 	const Entity theirs = authority.Create();
 	authority.Set<Spot>(theirs, Spot{1.0f});
@@ -372,4 +378,40 @@ TEST_CASE("a replica converges however far it has drifted", "[ecs][fuzz]") {
 	}
 
 	REQUIRE(diverged == 0);
+}
+
+TEST_CASE("an adopt-only store refuses to mint and still adopts", "[ecs]") {
+	// The guard standing in for the index range until v0.4 builds it. A replica
+	// that only adopts cannot collide with its authority, and this is what makes
+	// "only adopts" a property rather than a hope.
+	Store replica("replica");
+	replica.SetAdoptOnly(true);
+	REQUIRE(replica.AdoptOnly());
+
+	REQUIRE(replica.Create() == engine::ecs::NULL_ENTITY);
+	REQUIRE(replica.Create("named") == engine::ecs::NULL_ENTITY);
+
+	// Adopting is the whole point and is untouched: this refuses minting, not
+	// receiving.
+	Store authority("authority");
+	const Entity theirs = authority.Create();
+	authority.Set<Spot>(theirs, Spot{4.0f});
+
+	REQUIRE(replica.CreateAt(theirs));
+	REQUIRE(replica.Alive(theirs));
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Authoritative));
+	REQUIRE(replica.Get<Spot>(theirs)->X == 4.0f);
+}
+
+TEST_CASE("adopt-only is a switch, not a one-way door", "[ecs]") {
+	// A world promoted out of being a replica — single-player taking over a
+	// session, a test building a fixture — has to be able to mint again.
+	Store store("world");
+	store.SetAdoptOnly(true);
+	REQUIRE(store.Create() == engine::ecs::NULL_ENTITY);
+
+	store.SetAdoptOnly(false);
+	const Entity entity = store.Create();
+	REQUIRE(entity != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Alive(entity));
 }
