@@ -74,16 +74,18 @@ Standing discipline for v0.2 and v0.3, in that document's own section: prealloca
 - [_] `core::ByteWriter` / `ByteReader` — explicit little-endian framing, used by messages now and by saves and the wire later
 - [_] engine-owned storage: `TypeDescriptor`, `Column`, `ComponentSet`, `SparseSet`, the archetype graph and cached queries. flecs removed, `Store::Native()` deleted, and the public `Store` API unchanged so the existing suites are the acceptance criterion
 - [_] `ecs::ChangeChannel` — version stamps per column and per row range
-- [_] instance model: the class table, `:IsA`, property descriptors, the `Parent`/`FirstChild`/`NextSibling` hierarchy, and change signals fired at a phase boundary rather than on assignment
+- [_] instance model: the class table with per-class prototype rows (so `Instance.new` is a column copy and `:Clone()` falls out of it), `:IsA`, property descriptors, the `Parent`/`FirstChild`/`NextSibling` hierarchy, and change signals fired at a phase boundary rather than on assignment
 - [_] world snapshot — serialise and restore a world through its `TypeDescriptor`s
 - [_] `mono.engine/world` at L4: `Universe`, `World`, `WorldId`, `Address`, the directory and the control queue. Universe = overarching simulation, worlds = each subarea to simulate
 - [_] World Entities — each world's root instance, and entity lifetime across the barrier
-- [_] mailboxes and router — outbox and inbox, exactly one tick of latency, inbox sorted by `(sender, sequence)` so a replay cannot diverge
-- [_] multi-world parallel processing — worlds are the batch; `WorldParallel` and `WorldSerial` are a tuning knob that changes no result
-- [_] Universe Data (shared data in Universe) — the shared store on the driver barrier, with `Universe::Exclusive` as a documented escape hatch for consumers outside the simulation
-- [_] asynchronous and synchronous methods to not block scripts — a `Ticket` inside a tick, `Await` only outside one
+- [_] communication buses — worlds never address each other: MessagingService (pub/sub topics), MemoryStore (ephemeral shared map, sorted map, queue), DataStore (durable key/value, versioned, read-modify-write) and Teleport. Routing is hub-and-spoke, so there are N channels rather than N², and every ordering decision is made in one place. There is no cross-world entity reference at all, which is the Roblox model and deletes the type that would have broken rule 3
+- [_] outbox and inbox — exactly one tick of latency, applied at the barrier in `(sender, sequence)` order. Each sender's queue is already ordered, so delivery is a k-way merge rather than a sort
+- [_] multi-world parallel processing — worlds are the batch; `WorldParallel` and `WorldSerial` are a per-host tuning knob that changes no result, and each host sizes its own pool from a budget rather than from the core count
+- [_] Universe Data (shared data in Universe) — the bus backends and nothing else. Player data is a DataStore key, not a row in a world nobody owns. `Universe::Exclusive` stays as a documented escape hatch for consumers outside the simulation
+- [_] asynchronous and synchronous methods to not block scripts — every bus call returns a `Ticket` and replies land next tick, which is the contract `:GetAsync()` already teaches. Per-world request budgets so one world cannot starve a neighbour
+- [_] recording and replay — a versioned format that is one snapshot plus retained input, `mono.server --record` / `--replay`, and a CI job that runs a scene twice and diffs. Cheap because crash recovery already needs both halves; determinism is same-binary, and cross-machine is documented as not promised
 - [_] `parallel/ipc` — `Channel`, framed bytes, local implementation, the router never learning which it has
-- [_] `parallel/process` — `WorldHost` child process, supervisor, heartbeat, restart from snapshot. The argument is crash isolation, not speed
+- [_] `parallel/process` — `mono.server` in host mode, supervisor, heartbeat, restart from snapshot. The argument is crash isolation, not speed. Several worlds per host with per-world quarantine for soft faults (a throwing system, a script error, a budget overrun); a hard fault takes the host, so a world that cannot tolerate a neighbour's declares `Isolation::Dedicated`
 - [_] multi-world rendering — a `ViewChannel` per world view: three slots and an atomic publish index rather than a lock, so a slow compositor drops frames instead of throttling a simulation. Carries a draw list rather than pixels, because a host that publishes pixels needs a GPU and stops being `server` tier, and SDL3's GPU API exposes no shared texture handles. Local and cross-process are the same call site with a different region
 - [_] server and client move onto `Universe`; the client composites N views, and a local world is a view whose producer is in this process
 
