@@ -1,9 +1,9 @@
 #include "Hex.hpp"
-#include "SecureWipe.hpp"
 
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/core/SecureWipe.hpp>
 
 #include <algorithm>
 #include <cryptopp/donna.h>
@@ -92,22 +92,22 @@ namespace engine::assets {
 	}
 
 	SigningKey::~SigningKey() {
-		SecureWipe(Seed);
+		core::SecureWipe(Seed);
 	}
 
 	SigningKey::SigningKey(SigningKey &&other) noexcept : Seed(other.Seed), Verifier(other.Verifier) {
 		// The source is wiped rather than merely left alone. A moved-from key
 		// whose seed is still in its storage is a copy of the secret nobody
 		// believes exists.
-		SecureWipe(other.Seed);
+		core::SecureWipe(other.Seed);
 	}
 
 	SigningKey &SigningKey::operator=(SigningKey &&other) noexcept {
 		if (this != &other) {
-			SecureWipe(Seed);
+			core::SecureWipe(Seed);
 			Seed = other.Seed;
 			Verifier = other.Verifier;
-			SecureWipe(other.Seed);
+			core::SecureWipe(other.Seed);
 		}
 		return *this;
 	}

@@ -1,8 +1,8 @@
-#include "SecureWipe.hpp"
 
 #include <engine/assets/Grant.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/core/SecureWipe.hpp>
 
 #include <algorithm>
 #include <cryptopp/hmac.h>
@@ -72,18 +72,18 @@ namespace engine::assets {
 	}
 
 	GrantKey::~GrantKey() {
-		SecureWipe(Secret);
+		core::SecureWipe(Secret);
 	}
 
 	GrantKey::GrantKey(GrantKey &&other) noexcept : Secret(other.Secret) {
-		SecureWipe(other.Secret);
+		core::SecureWipe(other.Secret);
 	}
 
 	GrantKey &GrantKey::operator=(GrantKey &&other) noexcept {
 		if (this != &other) {
-			SecureWipe(Secret);
+			core::SecureWipe(Secret);
 			Secret = other.Secret;
-			SecureWipe(other.Secret);
+			core::SecureWipe(other.Secret);
 		}
 		return *this;
 	}

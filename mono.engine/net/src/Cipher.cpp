@@ -1,5 +1,6 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/core/SecureWipe.hpp>
 #include <engine/net/Cipher.hpp>
 
 #include <cryptopp/chachapoly.h>
@@ -9,20 +10,6 @@
 namespace engine::net {
 
 	namespace {
-		// Zeroes secret bytes.
-		//
-		// SecureWipeBuffer rather than a loop or memset: an ordinary store to
-		// memory nothing reads again is exactly what a compiler is allowed to
-		// delete, and it does.
-		//
-		// The same three lines as `assets/src/SecureWipe.hpp`, duplicated because
-		// that is another module's private header and a module may not include
-		// one. Promoting it to `core` would remove the copy and is a change to a
-		// module this file does not own.
-		void SecureWipe(std::span<uint8_t> bytes) {
-			CryptoPP::SecureWipeBuffer(bytes.data(), bytes.size());
-		}
-
 		// The 96-bit nonce for one frame: the fixed part, then the counter.
 		//
 		// RFC 8439 §2.8 constructs it exactly this way. Big-endian for the
@@ -57,7 +44,7 @@ namespace engine::net {
 	}
 
 	Cipher::Sealer::~Sealer() {
-		SecureWipe(Key);
+		core::SecureWipe(Key);
 	}
 
 	Cipher::Sealer::Sealer(Sealer &&other) noexcept
@@ -66,18 +53,18 @@ namespace engine::net {
 		// The source is wiped and retired rather than merely left alone. Two
 		// Sealers holding this key and counting from this counter is the one way
 		// a caller could get a nonce to repeat, so there is never a second.
-		SecureWipe(other.Key);
+		core::SecureWipe(other.Key);
 		other.Counter = EXHAUSTED;
 	}
 
 	Cipher::Sealer &Cipher::Sealer::operator=(Sealer &&other) noexcept {
 		if (this != &other) {
-			SecureWipe(Key);
+			core::SecureWipe(Key);
 			Key = other.Key;
 			NoncePrefix = other.NoncePrefix;
 			Counter = other.Counter;
 			Frame = std::move(other.Frame);
-			SecureWipe(other.Key);
+			core::SecureWipe(other.Key);
 			other.Counter = EXHAUSTED;
 		}
 		return *this;
@@ -133,21 +120,21 @@ namespace engine::net {
 	}
 
 	Cipher::Opener::~Opener() {
-		SecureWipe(Key);
+		core::SecureWipe(Key);
 	}
 
 	Cipher::Opener::Opener(Opener &&other) noexcept
 		: Key(other.Key), NoncePrefix(other.NoncePrefix), Plain(std::move(other.Plain)) {
-		SecureWipe(other.Key);
+		core::SecureWipe(other.Key);
 	}
 
 	Cipher::Opener &Cipher::Opener::operator=(Opener &&other) noexcept {
 		if (this != &other) {
-			SecureWipe(Key);
+			core::SecureWipe(Key);
 			Key = other.Key;
 			NoncePrefix = other.NoncePrefix;
 			Plain = std::move(other.Plain);
-			SecureWipe(other.Key);
+			core::SecureWipe(other.Key);
 		}
 		return *this;
 	}

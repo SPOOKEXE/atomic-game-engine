@@ -1,5 +1,6 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/core/SecureWipe.hpp>
 #include <engine/net/Handshake.hpp>
 
 #include <cryptopp/donna.h>
@@ -13,21 +14,6 @@
 namespace engine::net {
 
 	namespace {
-		// Zeroes secret bytes.
-		//
-		// SecureWipeBuffer rather than a loop or memset: an ordinary store to
-		// memory nothing reads again is exactly what a compiler is allowed to
-		// delete, and it does.
-		//
-		// The same three lines as `assets/src/SecureWipe.hpp` and as
-		// `net/src/Cipher.cpp`. Duplicated because the first is another module's
-		// private header and the second is a translation unit — a module may
-		// include neither. Promoting the helper to `core` is the fix and is a
-		// change to a module this file does not own.
-		void SecureWipe(std::span<uint8_t> bytes) {
-			CryptoPP::SecureWipeBuffer(bytes.data(), bytes.size());
-		}
-
 		// The salt every key in this protocol is derived under.
 		//
 		// Domain separation, for the reason `assets/src/Signature.cpp` tags what
@@ -60,13 +46,13 @@ namespace engine::net {
 			// The answer is to refuse the connection. A fallback to a weaker
 			// source here would be a session anybody can decrypt, reported as a
 			// success.
-			SecureWipe(secret);
+			core::SecureWipe(secret);
 			core::Metrics::Count("net.handshake.no_entropy", 1.0);
 			return std::nullopt;
 		}
 
 		auto handshake = BeginFromSecret(role, std::as_bytes(std::span<const uint8_t>(secret)));
-		SecureWipe(secret);
+		core::SecureWipe(secret);
 		return handshake;
 	}
 
@@ -157,7 +143,7 @@ namespace engine::net {
 
 		std::array<uint8_t, MESSAGE_BYTES> shared{};
 		if (CryptoPP::Donna::curve25519_mult(shared.data(), Secret.data(), peer.data()) != 0) {
-			SecureWipe(shared);
+			core::SecureWipe(shared);
 			return refuse();
 		}
 
@@ -167,16 +153,16 @@ namespace engine::net {
 		// it knows in full, because it knows the agreement was zero.
 		const std::array<uint8_t, MESSAGE_BYTES> zero{};
 		if (CryptoPP::VerifyBufsEqual(shared.data(), zero.data(), zero.size())) {
-			SecureWipe(shared);
+			core::SecureWipe(shared);
 			return refuse();
 		}
 
 		Derive(peer, shared);
-		SecureWipe(shared);
+		core::SecureWipe(shared);
 
 		// The scalar has done the only job it has. Held any longer it is forward
 		// secrecy waiting to be lost to whatever reads this process's memory.
-		SecureWipe(Secret);
+		core::SecureWipe(Secret);
 
 		Phase = HandshakeState::Established;
 		core::Metrics::Count("net.handshake.established", 1.0);
@@ -228,7 +214,7 @@ namespace engine::net {
 			Keys.ReceiveNoncePrefix.data(), receiving + Cipher::KEY_BYTES, Cipher::NONCE_PREFIX_BYTES
 		);
 
-		SecureWipe(derived);
+		core::SecureWipe(derived);
 	}
 
 	std::optional<Handshake::Session> Handshake::TakeKeys() {
@@ -257,10 +243,10 @@ namespace engine::net {
 	}
 
 	void Handshake::Forget() {
-		SecureWipe(Secret);
-		SecureWipe(Keys.SendKey);
-		SecureWipe(Keys.SendNoncePrefix);
-		SecureWipe(Keys.ReceiveKey);
-		SecureWipe(Keys.ReceiveNoncePrefix);
+		core::SecureWipe(Secret);
+		core::SecureWipe(Keys.SendKey);
+		core::SecureWipe(Keys.SendNoncePrefix);
+		core::SecureWipe(Keys.ReceiveKey);
+		core::SecureWipe(Keys.ReceiveNoncePrefix);
 	}
 }
