@@ -4,15 +4,13 @@
 # L13 — so what leaves include/ becomes a migration cost the day it changes.
 # See AGENTS.md in this directory.
 
+# No vendor appears here at all, and that is the point. The storage is the
+# engine's own — Column, ComponentSet, SparseSet and the archetype behind them —
+# so nothing about a third-party ECS propagates into the templates in Store.hpp.
+# `Store::Native()` was the debt AGENTS.md described; it is paid.
 mono_add_library(ecs
 	TIER shared
 	DEPS
 		Engine::core
 		Engine::parallel
-
-	# flecs types appear in the templates in Store.hpp, so it propagates. That
-	# is the debt AGENTS.md describes and the thing bindings will have to pay
-	# down; it is not a licence to use flecs directly from another module.
-	VENDOR_PUBLIC
-		flecs::flecs_static
 )

@@ -310,11 +310,25 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[dem
 		});
 	};
 
-	REQUIRE(named("Scheduler::RunPhases"));
+	REQUIRE(named("ecs.systems"));
 	REQUIRE(named("orbit"));
 	REQUIRE(named("spin"));
 	REQUIRE(named("move-camera"));
 	REQUIRE(named("collect-instances"));
+
+	// A span per phase between the scheduler and its systems, so "which part of
+	// the tick" is answerable before "which system" — and every one of them is
+	// ECS time, because every engine and game system runs through the ECS.
+	REQUIRE(named("simulation"));
+	REQUIRE(named("pre-render"));
+
+	const auto categorised = [&spans](std::string_view name) {
+		const auto found =
+			std::find_if(spans.begin(), spans.end(), [name](const auto &span) { return span.Name == name; });
+		return found != spans.end() && found->Category == engine::core::ProfileCategory::ECS;
+	};
+	REQUIRE(categorised("orbit"));
+	REQUIRE(categorised("collect-instances"));
 
 	const auto counters = Metrics::Drain();
 	const auto instances = std::find_if(counters.begin(), counters.end(), [](const auto &counter) {

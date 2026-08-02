@@ -9,16 +9,21 @@
 // this same process later.
 
 #include <engine/core/Clock.hpp>
-#include <engine/core/FixedTimestep.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/input/Actions.hpp>
+#include <engine/net/Transport.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/replication/Connector.hpp>
+#include <engine/world/Universe.hpp>
 
+#include <client/Compositor.hpp>
 #include <client/Demo.hpp>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 struct SDL_Window;
@@ -38,8 +43,23 @@ namespace client {
 		// where it starts and not where it stays.
 		int Height = 720;
 
-		// How many cubes the demo scene builds.
+		// How many cubes the demo scene builds, per world.
 		uint32_t Entities = 2048;
+
+		// How many worlds to simulate and composite.
+		//
+		// Each is a whole world with its own clock, its own store and its own
+		// view channel, and the compositor places them side by side because two
+		// worlds' coordinates do not mean the same thing. One is the ordinary
+		// case; more than one is what makes the compositing path a path rather
+		// than a plan.
+		uint32_t Worlds = 1;
+
+		// World units between adjacent views.
+		//
+		// A compositor's decision, not a simulation's — which is why it is a
+		// client option and not a world setting.
+		float ViewSpacing = 40.0f;
 
 		// Simulation ticks per second, independent of the frame rate. The
 		// frame runs as fast as it can; the simulation advances in fixed steps
@@ -82,11 +102,22 @@ namespace client {
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path AssetsDirectory;
 
-		// TODO(v0.5): run this Luau script at startup. Parsed and reported now
+		// TODO(v0.6): run this Luau script at startup. Parsed and reported now
 		// so that a command line written against the roadmap fails with a clear
 		// message rather than being silently ignored — there is no VM until
 		// L13 exists.
 		std::string ScriptPath;
+
+		// `host:port` of a server to replicate from. Empty means run the local
+		// demo alone.
+		//
+		// **This adds a world rather than replacing one.** The replicated world
+		// is a second world in the same universe, marked `world::Replica` so its
+		// bus handle refuses writes, and the demo keeps running beside it. That
+		// is not a placeholder arrangement — a client compositing several worlds
+		// is what v0.2 built the compositor for, and one of them being somebody
+		// else's authority is the case this version adds.
+		std::string ConnectAddress;
 	};
 
 	// The window, the renderer and the frame loop over one world.
@@ -120,10 +151,39 @@ namespace client {
 		// profile duration elapses. Returns the process exit code.
 		int Run();
 
+		// The connection to a server, when `--connect` was given.
+		//
+		// For a test, which is the only way to prove a join happened rather than
+		// a socket being opened.
+		//
+		// @return The connector, or null when running the demo alone.
+		engine::replication::Connector *Server() {
+			return Connection.get();
+		}
+
+		// The replicated world's handle.
+		//
+		// @return The handle, or an invalid one when not connected.
+		engine::world::WorldId ReplicatedWorld() const {
+			return Replicated;
+		}
+
 	  private:
 		void PumpEvents();
 		void Step();
 		void WriteSnapshot();
+
+		// Opens the socket, creates the replica world and joins.
+		//
+		// @return `false` when the address will not parse or the socket will not
+		//         open. A client that meant to connect and silently did not is
+		//         a client that looks like a server bug.
+		bool BeginConnecting();
+
+		// Takes one tick's worth of what the server sent.
+		//
+		// @param nowSeconds The current time.
+		void PollServer(double nowSeconds);
 
 		Options Settings;
 
@@ -134,13 +194,43 @@ namespace client {
 
 		engine::input::Actions Actions;
 		engine::core::FrameClock Clock;
-		engine::core::FixedTimestep Timestep;
 
 		// The world, and the only place simulation state lives. Everything
 		// below this line is the *program* — window, frame budget, panel
 		// scroll — which is not world state and does not belong in the store.
-		engine::ecs::Store Store{"client"};
-		engine::ecs::Scheduler Scheduler;
+		// The universe this client drives, and the world it draws.
+		//
+		// A client renders one world while the rest keep simulating, which is
+		// why presentation is a separate call from the tick. Today there is one
+		// world; nothing above this line assumes so.
+		//
+		// Held by pointer because a universe binds its driver thread on
+		// construction, and that thread is decided in Initialise rather than
+		// wherever this object was declared.
+		std::unique_ptr<engine::world::Universe> Universe_;
+
+		// The world the panels report on, and the first view composited.
+		engine::world::WorldId Rendered;
+
+		// Every world this client simulates, in creation order.
+		std::vector<engine::world::WorldId> Simulated;
+
+		// The socket and the connection to a server. Both null unless
+		// `--connect` was given, which is what keeps a single-player run from
+		// opening a port it has no use for.
+		std::unique_ptr<engine::net::Transport> Socket;
+		std::unique_ptr<engine::replication::Connector> Connection;
+
+		// The world the server owns. Invalid when not connected.
+		engine::world::WorldId Replicated;
+
+		// Whether the join has been reported. A client logs "joined" once, not
+		// every frame at six hundred a second.
+		bool ReportedJoin = false;
+
+		// N views in, one frame out. The renderer draws what this composed
+		// rather than reaching into a store that somebody else is writing.
+		Compositor Views;
 
 		std::vector<engine::render::SystemTiming> SystemTimings;
 

@@ -150,6 +150,198 @@ TEST_CASE("an exception in a range reaches the caller", "[jobs]") {
 	);
 }
 
+// --- one batch at a time -------------------------------------------------
+//
+// A second dispatch finding the pool occupied runs its span inline rather than
+// waiting or corrupting the batch already in flight. These cover the two ways
+// that happens — nested, and from another thread — because both become the
+// ordinary case once a world tick is itself a range in a larger batch.
+
+namespace {
+	// Counts entries that were not visited exactly once.
+	//
+	// A reduction rather than an assertion per index: a REQUIRE per element
+	// turns a completeness check over tens of thousands of rows into tens of
+	// thousands of recorded assertions, and the failure message is no better
+	// for it.
+	size_t NotVisitedExactlyOnce(const std::vector<std::atomic<int>> &visits) {
+		size_t wrong = 0;
+		for (const auto &visit : visits) {
+			if (visit.load(std::memory_order_relaxed) != 1) {
+				wrong++;
+			}
+		}
+		return wrong;
+	}
+
+	// Whether a dispatch of `count` reached a thread other than the caller.
+	//
+	// Retried for the reason the wide-dispatch case above is: one dispatch is
+	// allowed to stay on the calling thread, because the caller drains too.
+	bool PoolParticipates(size_t count) {
+		constexpr int ATTEMPTS = 25;
+
+		for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+			std::atomic<bool> elsewhere{false};
+			const std::thread::id caller = std::this_thread::get_id();
+
+			Jobs::For(count, 128, [&](size_t begin, size_t end) {
+				if (std::this_thread::get_id() != caller) {
+					elsewhere.store(true, std::memory_order_relaxed);
+				}
+				volatile size_t sink = 0;
+				for (size_t index = begin; index < end; index++) {
+					sink += index;
+				}
+			});
+
+			if (elsewhere.load(std::memory_order_relaxed)) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+TEST_CASE("a nested For runs inline rather than deadlocking", "[jobs]") {
+	Pool pool{4};
+
+	constexpr size_t OUTER = 1'000;
+	constexpr size_t INNER = 32;
+
+	std::vector<std::atomic<int>> visits(OUTER * INNER);
+	std::atomic<size_t> dispatches{0};
+	std::atomic<size_t> stayedOnDispatcher{0};
+
+	// The outer batch owns the pool, so every inner dispatch loses the claim.
+	// The inner grain of 1 would otherwise force a pooled dispatch, which is
+	// the shape that used to deadlock.
+	Jobs::For(OUTER, 8, [&](size_t begin, size_t end) {
+		for (size_t outer = begin; outer < end; outer++) {
+			const std::thread::id dispatcher = std::this_thread::get_id();
+			bool elsewhere = false;
+
+			Jobs::For(INNER, 1, [&](size_t innerBegin, size_t innerEnd) {
+				elsewhere = elsewhere || std::this_thread::get_id() != dispatcher;
+				for (size_t inner = innerBegin; inner < innerEnd; inner++) {
+					visits[outer * INNER + inner].fetch_add(1, std::memory_order_relaxed);
+				}
+			});
+
+			dispatches.fetch_add(1, std::memory_order_relaxed);
+			if (!elsewhere) {
+				stayedOnDispatcher.fetch_add(1, std::memory_order_relaxed);
+			}
+		}
+	});
+
+	REQUIRE(dispatches.load() == OUTER);
+
+	// Inline is not an optimisation the nested call may decline. A nested
+	// dispatch that reached another thread would mean two batches were live at
+	// once, which is the corruption this exists to prevent.
+	REQUIRE(stayedOnDispatcher.load() == OUTER);
+	REQUIRE(NotVisitedExactlyOnce(visits) == 0);
+}
+
+TEST_CASE("two threads dispatching at once both complete", "[jobs]") {
+	Pool pool{4};
+
+	constexpr size_t COUNT = 20'000;
+	std::vector<std::atomic<int>> first(COUNT);
+	std::vector<std::atomic<int>> second(COUNT);
+
+	auto dispatch = [](std::vector<std::atomic<int>> &visits) {
+		Jobs::For(visits.size(), 64, [&](size_t begin, size_t end) {
+			for (size_t index = begin; index < end; index++) {
+				visits[index].fetch_add(1, std::memory_order_relaxed);
+			}
+		});
+	};
+
+	// Which of the two wins the pool is not defined and does not matter. Both
+	// return with every index visited exactly once, which is the contract.
+	std::thread other([&] { dispatch(second); });
+	dispatch(first);
+	other.join();
+
+	REQUIRE(NotVisitedExactlyOnce(first) == 0);
+	REQUIRE(NotVisitedExactlyOnce(second) == 0);
+}
+
+TEST_CASE("inline and pooled dispatch produce the same result", "[jobs]") {
+	constexpr size_t COUNT = 5'000;
+
+	// The property the whole scheme rests on: losing the pool costs time and
+	// changes nothing. Run the same body with no pool at all, then against
+	// four workers, and compare.
+	auto accumulate = [](std::vector<size_t> &output) {
+		Jobs::For(output.size(), 64, [&](size_t begin, size_t end) {
+			for (size_t index = begin; index < end; index++) {
+				output[index] = index * 3 + 1;
+			}
+		});
+	};
+
+	std::vector<size_t> serial(COUNT);
+	{
+		Jobs::Stop();
+		accumulate(serial);
+	}
+
+	std::vector<size_t> parallel(COUNT);
+	{
+		Pool pool{4};
+		accumulate(parallel);
+	}
+
+	REQUIRE(serial == parallel);
+}
+
+TEST_CASE("an exception from a nested For reaches the outer caller", "[jobs]") {
+	Pool pool{4};
+
+	// The inner dispatch is inline, so it rethrows directly into the outer
+	// body, which captures it as that batch's failure and hands it back here.
+	REQUIRE_THROWS_AS(
+		Jobs::For(
+			1'000,
+			8,
+			[](size_t begin, size_t) {
+				Jobs::For(4, 1, [&](size_t, size_t) {
+					if (begin == 0) {
+						throw std::runtime_error("nested range failed");
+					}
+				});
+			}
+		),
+		std::runtime_error
+	);
+}
+
+TEST_CASE("a throwing batch releases the pool", "[jobs]") {
+	Pool pool{4};
+
+	REQUIRE_THROWS_AS(
+		Jobs::For(
+			10'000,
+			64,
+			[](size_t begin, size_t) {
+				if (begin == 0) {
+					throw std::runtime_error("range failed");
+				}
+			}
+		),
+		std::runtime_error
+	);
+
+	// A leaked claim would not fail anything: every later dispatch would run
+	// inline, which is correct and silently serial forever. So the assertion
+	// has to be that the pool is participating again, not merely that the next
+	// call returns.
+	REQUIRE(PoolParticipates(100'000));
+}
+
 TEST_CASE("Start is idempotent and Stop is safe without Start", "[jobs]") {
 	Jobs::Stop();
 	REQUIRE(Jobs::WorkerCount() == 0);

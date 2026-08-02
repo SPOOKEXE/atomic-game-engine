@@ -65,7 +65,22 @@ namespace engine::core {
 
 		// The value given, or nothing if the option was absent. An option
 		// declared with Flag always reports nothing.
+		//
+		// The *last* value, when the option was given more than once. That is
+		// the conventional reading of a repeated option and the one a caller
+		// who was not expecting a repeat wants; `GetAll` is for the callers who
+		// were.
 		std::optional<std::string_view> Get(std::string_view name) const;
+
+		// Every value given for an option, in the order they appeared.
+		//
+		// For an option that names one of several things — the worlds a
+		// supervised host was granted, say. Order is kept because a caller may
+		// depend on it and sorting here would hide that.
+		//
+		// @param name The option to read.
+		// @return The values, empty when the option was absent.
+		std::vector<std::string_view> GetAll(std::string_view name) const;
 
 		// Parses a complete signed decimal integer, or returns `fallback` when the
 		// option is absent, empty, or not an integer.
@@ -92,6 +107,10 @@ namespace engine::core {
 
 			bool Present = false;
 			std::string_view Given;
+
+			// Every value, for the options that may repeat. `Given` stays the
+			// last of them so nothing that only ever expected one has to change.
+			std::vector<std::string_view> All;
 		};
 
 		Option *Find(std::string_view name);

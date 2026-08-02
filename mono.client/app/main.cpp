@@ -45,17 +45,20 @@ int main(int argc, char **argv) {
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Flag("verbose", "Log at trace level");
 
-	arguments.Value("entities", "N", "Cubes in the demo scene (default 2048)");
+	arguments.Value("entities", "N", "Cubes in the demo scene, per world (default 2048)");
+	arguments.Value("worlds", "N", "Worlds to simulate and composite (default 1)");
+	arguments.Value("view-spacing", "UNITS", "World units between composited views (default 40)");
 	arguments.Value("tick-rate", "HZ", "Simulation ticks per second (default 60)");
 	arguments.Value("frames", "N", "Exit after N presented frames");
 	arguments.Value("width", "PX", "Window width (default 1280)");
 	arguments.Value("height", "PX", "Window height (default 720)");
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems or counters");
 
-	arguments.Value("script", "PATH", "Luau script to run at startup (v0.5)");
+	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
+	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -75,6 +78,8 @@ int main(int argc, char **argv) {
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
+	options.Worlds = static_cast<uint32_t>(arguments.GetInteger("worlds", options.Worlds));
+	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	options.ShowStatistics = arguments.Has("stats");
@@ -96,6 +101,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
+	}
+	if (auto server = arguments.Get("connect")) {
+		options.ConnectAddress = std::string(*server);
 	}
 
 	if (auto tab = arguments.Get("profiler-tab")) {

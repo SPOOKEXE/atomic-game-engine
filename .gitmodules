@@ -110,3 +110,13 @@
 	url = https://github.com/abdes/cryptopp-cmake.git
 	branch = master
 	shallow = true
+[submodule "mono.vendor/blake3"]
+	path = mono.vendor/blake3
+	url = https://github.com/BLAKE3-team/BLAKE3.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/zstd"]
+	path = mono.vendor/zstd
+	url = https://github.com/facebook/zstd.git
+	branch = release
+	shallow = true

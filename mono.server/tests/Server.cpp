@@ -7,9 +7,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
 #include <thread>
+#include <vector>
 
 TEST_SUITE_ID("server.host")
 TEST_DEPENDS("engine.ecs.store")
@@ -19,6 +23,7 @@ using Catch::Approx;
 using engine::core::FrameGraph;
 using engine::core::Metrics;
 using engine::ecs::Entity;
+using engine::ecs::Store;
 
 namespace {
 	server::Options Headless(uint32_t entities, int64_t ticks) {
@@ -46,8 +51,14 @@ namespace {
 TEST_CASE("a server hosts the requested number of entities", "[server]") {
 	Hosted hosted{128, 1};
 
-	REQUIRE(hosted.Host.World().CountMatching<server::Position>() == 128);
-	REQUIRE(hosted.Host.World().CountMatching<server::Position, server::Velocity>() == 128);
+	size_t positions = 0;
+	size_t moving = 0;
+	hosted.Host.Enter([&](Store &store) {
+		positions = store.CountMatching<server::Position>();
+		moving = store.CountMatching<server::Position, server::Velocity>();
+	});
+	REQUIRE(positions == 128);
+	REQUIRE(moving == 128);
 }
 
 TEST_CASE("a tick budget is honoured exactly", "[server]") {
@@ -72,10 +83,12 @@ TEST_CASE("entities move", "[server]") {
 	const auto positionOf = [&hosted](int nth) {
 		engine::core::Vector3 found;
 		int seen = 0;
-		hosted.Host.World().Each<const server::Position>([&](Entity, const server::Position &position) {
-			if (seen++ == nth) {
-				found = position.Value;
-			}
+		hosted.Host.Enter([&](Store &store) {
+			store.Each<const server::Position>([&](Entity, const server::Position &position) {
+				if (seen++ == nth) {
+					found = position.Value;
+				}
+			});
 		});
 		return found;
 	};
@@ -96,13 +109,14 @@ TEST_CASE("nothing escapes the bounds, however long it runs", "[server]") {
 	// a stuck entity rather than as a bounds bug.
 	// The box is a property of the world, so it is read once from the world
 	// rather than off each entity.
-	const float limit = hosted.Host.World().Resource<server::WorldBounds>()->HalfExtent + 0.001f;
-
 	bool inside = true;
-	hosted.Host.World().Each<const server::Position>([&inside,
-													  limit](Entity, const server::Position &position) {
-		inside = inside && std::abs(position.Value.X) <= limit && std::abs(position.Value.Y) <= limit &&
-				 std::abs(position.Value.Z) <= limit;
+	hosted.Host.Enter([&inside](Store &store) {
+		const float limit = store.Resource<server::WorldBounds>()->HalfExtent + 0.001f;
+
+		store.Each<const server::Position>([&inside, limit](Entity, const server::Position &position) {
+			inside = inside && std::abs(position.Value.X) <= limit && std::abs(position.Value.Y) <= limit &&
+					 std::abs(position.Value.Z) <= limit;
+		});
 	});
 
 	REQUIRE(inside);
@@ -116,8 +130,10 @@ TEST_CASE("the world keeps its own tick count", "[server]") {
 	// The summary is read out of the world rather than off a counter the loop
 	// kept beside it, so the two cannot disagree.
 	REQUIRE(summary.Ticks == 17);
-	REQUIRE(hosted.Host.World().Time().Tick == 17);
-	REQUIRE(hosted.Host.World().Time().Elapsed == Approx(17.0 / 30.0).margin(1e-6));
+	hosted.Host.Enter([](Store &store) {
+		REQUIRE(store.Time().Tick == 17);
+		REQUIRE(store.Time().Elapsed == Approx(17.0 / 30.0).margin(1e-6));
+	});
 }
 
 TEST_CASE("two servers built the same way stay identical", "[server]") {
@@ -131,11 +147,15 @@ TEST_CASE("two servers built the same way stay identical", "[server]") {
 	// there is no replay, and no way to reproduce a report from a log.
 	std::vector<engine::core::Vector3> a;
 	std::vector<engine::core::Vector3> b;
-	first.Host.World().Each<const server::Position>([&a](Entity, const server::Position &position) {
-		a.push_back(position.Value);
+	first.Host.Enter([&a](Store &store) {
+		store.Each<const server::Position>([&a](Entity, const server::Position &position) {
+			a.push_back(position.Value);
+		});
 	});
-	second.Host.World().Each<const server::Position>([&b](Entity, const server::Position &position) {
-		b.push_back(position.Value);
+	second.Host.Enter([&b](Store &store) {
+		store.Each<const server::Position>([&b](Entity, const server::Position &position) {
+			b.push_back(position.Value);
+		});
 	});
 
 	REQUIRE(a.size() == b.size());
@@ -158,8 +178,10 @@ TEST_CASE("the tick rate does not change the simulation", "[server]") {
 		host.Run();
 
 		std::vector<engine::core::Vector3> positions;
-		host.World().Each<const server::Position>([&positions](Entity, const server::Position &position) {
-			positions.push_back(position.Value);
+		host.Enter([&positions](Store &store) {
+			store.Each<const server::Position>([&positions](Entity, const server::Position &position) {
+				positions.push_back(position.Value);
+			});
 		});
 		host.Shutdown();
 		return positions;
@@ -231,7 +253,12 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 		});
 	};
 
-	REQUIRE(named("Server::Tick"));
+	// The server no longer has a tick span of its own: the universe drives the
+	// barrier and the world runs the phases, so those are what the graph names.
+	// A span called after the program rather than after the work would have
+	// said less, not more.
+	REQUIRE(named("Universe::Tick"));
+	REQUIRE(named("World::Tick"));
 	REQUIRE(named("integrate"));
 	REQUIRE(named("bounce"));
 
@@ -239,4 +266,136 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 	REQUIRE(std::any_of(counters.begin(), counters.end(), [](const auto &counter) {
 		return counter.Name == engine::core::Name("world.entities");
 	}));
+}
+
+// --- recording ------------------------------------------------------------
+
+TEST_CASE("a recorded run replays to the same state", "[server]") {
+	// The determinism guarantee end to end, through the program's own options
+	// rather than through the engine API: record a run, replay it, and compare
+	// every entity. Same binary, same machine — which is what `v02v03.md`
+	// decision 8 promises and all it promises.
+	const std::filesystem::path recording = std::filesystem::temp_directory_path() / "mono-server-replay.rec";
+
+	const auto positionsOf = [](server::Server &host) {
+		std::vector<engine::core::Vector3> found;
+		host.Enter([&found](Store &store) {
+			store.Each<const server::Position>([&found](Entity, const server::Position &position) {
+				found.push_back(position.Value);
+			});
+		});
+		return found;
+	};
+
+	std::vector<engine::core::Vector3> live;
+	{
+		server::Server host;
+		auto options = Headless(64, 30);
+		options.RecordPath = recording;
+
+		REQUIRE(host.Initialise(options));
+		REQUIRE(host.Run().Ticks == 30);
+		live = positionsOf(host);
+		host.Shutdown(); // writes the recording
+	}
+
+	REQUIRE(std::filesystem::exists(recording));
+
+	std::vector<engine::core::Vector3> replayed;
+	{
+		server::Server host;
+		server::Options options;
+		options.ReplayPath = recording;
+
+		REQUIRE(host.Initialise(options));
+		REQUIRE(host.Run().Ticks == 30);
+		replayed = positionsOf(host);
+		host.Shutdown();
+	}
+
+	REQUIRE(live.size() == replayed.size());
+	REQUIRE_FALSE(live.empty());
+
+	size_t drifted = 0;
+	for (size_t index = 0; index < live.size(); index++) {
+		if (!(live[index] == replayed[index])) {
+			drifted++;
+		}
+	}
+	REQUIRE(drifted == 0);
+
+	std::filesystem::remove(recording);
+}
+
+TEST_CASE("recording a replay reproduces the recording it replayed", "[server]") {
+	// The strongest statement the replay path can make about itself, and the
+	// one `just replay-check` runs in CI. Comparing *positions* after a replay
+	// says the simulation agreed; comparing the two recordings byte for byte
+	// says the snapshot, the frame times and every envelope agreed too — which
+	// is what a supervisor restoring a crashed host is relying on.
+	const auto directory = std::filesystem::temp_directory_path();
+	const std::filesystem::path source = directory / "mono-server-replay-source.rec";
+	const std::filesystem::path again = directory / "mono-server-replay-again.rec";
+	std::filesystem::remove(source);
+	std::filesystem::remove(again);
+
+	{
+		server::Server host;
+		auto options = Headless(48, 40);
+		options.RecordPath = source;
+		REQUIRE(host.Initialise(options));
+		REQUIRE(host.Run().Ticks == 40);
+		host.Shutdown();
+	}
+	REQUIRE(std::filesystem::exists(source));
+
+	{
+		server::Server host;
+		server::Options options;
+		options.ReplayPath = source;
+		options.RecordPath = again;
+		REQUIRE(host.Initialise(options));
+		REQUIRE(host.Run().Ticks == 40);
+		host.Shutdown();
+	}
+
+	// The flag combination used to be accepted and ignored, so the file
+	// existing is worth asserting separately from its contents.
+	REQUIRE(std::filesystem::exists(again));
+
+	const auto read = [](const std::filesystem::path &path) {
+		std::ifstream stream(path, std::ios::binary);
+		return std::vector<char>(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+	};
+	REQUIRE(read(source) == read(again));
+
+	std::filesystem::remove(source);
+	std::filesystem::remove(again);
+}
+
+TEST_CASE("a replay of something that is not a recording is refused", "[server]") {
+	const std::filesystem::path rubbish = std::filesystem::temp_directory_path() / "mono-server-rubbish.rec";
+
+	{
+		std::ofstream file(rubbish, std::ios::binary);
+		file << "this is not a recording";
+	}
+
+	server::Server host;
+	server::Options options;
+	options.ReplayPath = rubbish;
+
+	REQUIRE_FALSE(host.Initialise(options));
+	host.Shutdown();
+
+	std::filesystem::remove(rubbish);
+}
+
+TEST_CASE("a replay of a file that does not exist is refused", "[server]") {
+	server::Server host;
+	server::Options options;
+	options.ReplayPath = "/definitely/not/a/recording/anywhere.rec";
+
+	REQUIRE_FALSE(host.Initialise(options));
+	host.Shutdown();
 }

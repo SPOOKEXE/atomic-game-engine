@@ -51,6 +51,20 @@ namespace testrunner {
 	// source path -> every file that translation unit included.
 	using DependencyClosures = std::map<std::filesystem::path, std::vector<std::filesystem::path>>;
 
+	// Every executable staged under `<build>/<directory>/`.
+	//
+	// Parameterised because the benchmark runner wants exactly this over
+	// `bench/`. The alternative — a second copy that walks a different
+	// directory — is the copy that would stop matching the day this one learned
+	// something.
+	//
+	// @param build     A configured build directory.
+	// @param directory The subdirectory to walk, such as `tests` or `bench`.
+	// @return The executables, sorted, so discovery order is not the
+	//         filesystem's opinion.
+	std::vector<std::filesystem::path>
+	FindBinaries(const std::filesystem::path &build, const std::string &directory);
+
 	// Every executable staged under <build>/tests/.
 	std::vector<std::filesystem::path> FindTestBinaries(const std::filesystem::path &build);
 

@@ -25,7 +25,7 @@ using engine::ecs::Scheduler;
 using engine::ecs::Store;
 using engine::ecs::WorldTime;
 
-namespace {
+namespace resources_test {
 	struct Gravity {
 		float Metres = 9.81f;
 	};
@@ -43,6 +43,8 @@ namespace {
 		std::vector<int> Items;
 	};
 }
+
+using namespace resources_test;
 
 TEST_CASE("a resource is null until it is set", "[resources]") {
 	Store store("test");

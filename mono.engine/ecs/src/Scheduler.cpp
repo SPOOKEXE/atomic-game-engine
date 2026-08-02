@@ -46,12 +46,30 @@ namespace engine::ecs {
 	}
 
 	void Scheduler::RunPhases(Store &store, Phase first, Phase last) {
-		ENGINE_PROFILE_CAT("Scheduler::RunPhases", core::ProfileCategory::Simulation);
+		// `ECS`, not `Simulation`. Every engine and game system runs through
+		// here, so this is where a game's time goes — and a category that only
+		// said "simulation" could not separate the systems from the driver
+		// around them.
+		ENGINE_PROFILE_CAT("ecs.systems", core::ProfileCategory::ECS);
 
 		for (uint8_t index = static_cast<uint8_t>(first);
 			 index <= static_cast<uint8_t>(last) && index < static_cast<uint8_t>(Phase::Count);
 			 index++) {
 			const auto phase = static_cast<Phase>(index);
+
+			// A span per phase, between the scheduler and its systems.
+			//
+			// **This is the level a bottleneck is obvious at.** One bar for the
+			// whole tick says the tick is slow; forty bars, one per system, is
+			// a wall of text nobody reads at sixty frames a second. Four bars
+			// — one per phase — is the shape that answers "which part" in a
+			// glance, and the systems under it answer "which one" when you
+			// look closer.
+			//
+			// STABLE, because `GetPhaseName` returns a literal that outlives
+			// the frame; there is nothing to copy.
+			const std::string_view phaseName = GetPhaseName(phase);
+			ENGINE_PROFILE_DYNAMIC_STABLE("phase", phaseName, core::ProfileCategory::ECS);
 
 			for (auto &system : Systems) {
 				if (system.RunPhase != phase) {
@@ -64,7 +82,7 @@ namespace engine::ecs {
 					// string for the life of the run, so there is nothing to
 					// copy and no name to keep alive.
 					const std::string_view label = system.Name;
-					ENGINE_PROFILE_DYNAMIC_STABLE("system", label, core::ProfileCategory::Simulation);
+					ENGINE_PROFILE_DYNAMIC_STABLE("system", label, core::ProfileCategory::ECS);
 					system.Body(store);
 				}
 				const uint64_t finished = core::Clock::Nanoseconds();

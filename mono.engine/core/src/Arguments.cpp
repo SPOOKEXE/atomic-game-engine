@@ -99,6 +99,7 @@ namespace engine::core {
 
 			if (inlineValue) {
 				option->Given = *inlineValue;
+				option->All.push_back(*inlineValue);
 				continue;
 			}
 
@@ -120,6 +121,7 @@ namespace engine::core {
 			}
 
 			option->Given = next;
+			option->All.push_back(next);
 			index++;
 		}
 
@@ -138,6 +140,14 @@ namespace engine::core {
 			return std::nullopt;
 		}
 		return option->Given;
+	}
+
+	std::vector<std::string_view> Arguments::GetAll(std::string_view name) const {
+		const Option *option = Find(name);
+		if (!option || !option->Present || !option->TakesValue) {
+			return {};
+		}
+		return option->All;
 	}
 
 	int64_t Arguments::GetInteger(std::string_view name, int64_t fallback) const {

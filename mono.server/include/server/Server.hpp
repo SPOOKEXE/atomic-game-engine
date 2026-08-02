@@ -16,10 +16,19 @@
 #include <engine/core/Clock.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/net/Transport.hpp>
+#include <engine/replication/Listener.hpp>
+#include <engine/world/Driver.hpp>
+#include <engine/world/HostLink.hpp>
+#include <engine/world/Recording.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace server {
 
@@ -58,6 +67,108 @@ namespace server {
 		// the default location. Set once during Initialise, before anything has
 		// resolved a path through it.
 		std::filesystem::path AssetsDirectory;
+
+		// Write a recording of the run here. Empty means record nothing.
+		//
+		// A recording is one snapshot plus every envelope applied since, which
+		// is complete because a world is deterministic given its state and its
+		// inbox. Reading it back reproduces the run exactly — same binary, same
+		// machine.
+		std::filesystem::path RecordPath;
+
+		// Replay this recording instead of simulating.
+		//
+		// The world's own outbox is discarded for each replayed barrier, since
+		// a replayed world re-derives the same requests and applying both
+		// copies would double every operation.
+		std::filesystem::path ReplayPath;
+
+		// Host the world in a universe that permits several. Named worlds are
+		// the unit a supervisor grants and revokes; one is simply the common
+		// case rather than the only one.
+		uint32_t Worlds = 1;
+
+		// Run as a supervised host under a driver, rather than as a driver.
+		//
+		// **A host is not a different program.** It is this one, holding some
+		// of a universe's worlds in its own address space so that a hard fault
+		// in one of them takes this process rather than the server. That is
+		// what makes the grouping a deployment decision instead of an engine
+		// one, and it is the reason there is no `mono.host`.
+		//
+		// Empty means this process is a driver. Set, it names this host to its
+		// driver — and the process then expects a channel it was started with,
+		// and refuses to start without one.
+		std::string HostName;
+
+		// The worlds this host was granted, by name.
+		//
+		// Names rather than ids: an id is an index into one process's registry
+		// and means something else here. Empty with `HostName` set is a host
+		// that was given nothing, which is an error rather than an idle
+		// process — a supervisor that granted nothing has a bug in its plan.
+		std::vector<std::string> HostWorlds;
+
+		// Worlds to place into supervised host processes rather than hold here.
+		//
+		// **Processes are for crash isolation, not for speed.** A world here
+		// costs a process and an address space and buys exactly one thing:
+		// a hard fault in it takes that process rather than the server. Two
+		// worlds in two processes are not faster than two in two threads.
+		//
+		// The driver still routes every bus operation, so a world's behaviour
+		// does not change by being moved out — which is what makes this a
+		// deployment decision.
+		std::vector<std::string> RemoteWorlds;
+
+		// How many `Shared` worlds may sit in one host.
+		uint32_t WorldsPerHost = 8;
+
+		// The program a host runs. Empty means this executable.
+		std::filesystem::path HostProgram;
+
+		// How many processes share this machine, including this one.
+		//
+		// **Every process calling `Jobs::Start(0)` is the bug this prevents.**
+		// That asks for one worker per hardware thread, so a driver and seven
+		// hosts on a twenty-four core machine run a hundred and ninety threads
+		// over twenty-four cores, and every one of them is slower than it would
+		// have been alone.
+		//
+		// Zero means work it out: a driver counts the hosts it is about to
+		// spawn and tells each of them the total, so the arithmetic is done
+		// once by the only process that knows the answer.
+		uint32_t Processes = 0;
+
+		// Whether to serve the primary world to clients at all.
+		//
+		// Off by default, and that is what every existing recipe and test gets:
+		// a server that opened a socket because nobody said not to would be a
+		// behaviour change in the determinism run, and a port bound by accident
+		// is a port somebody else cannot bind.
+		//
+		// **A host never listens.** A host holds worlds for a driver and the
+		// driver is the authority for all of them; two processes each streaming
+		// the same world to the same client is the split brain the federated
+		// universe exists to prevent.
+		bool Listening = false;
+
+		// The UDP port to serve on. Only read when `Listening`.
+		//
+		// Zero binds an ephemeral port, which is a real answer rather than a
+		// way of saying no — a test wants one so that two runs on one machine do
+		// not collide. `Server::ListeningOn` says which was chosen. That is why
+		// there is a flag beside it rather than zero meaning off.
+		uint16_t ListenPort = 0;
+
+		// Make every world this process builds talk on a bus.
+		//
+		// There is no game yet, so there is no traffic. This is the only thing
+		// that crosses a driver-to-host link until a game file arrives with
+		// traffic of its own, and it is what makes a multi-process universe
+		// demonstrable rather than merely startable. Off by default; passed
+		// down to hosts when it is on.
+		bool Chatter = false;
 	};
 
 	// What the run produced. Returned rather than logged only, so a test can
@@ -111,27 +222,157 @@ namespace server {
 		// Safe from another thread: the loop reads it between ticks.
 		void Stop();
 
-		// The world this server hosts.
+		// Runs `body` against the primary world's storage.
 		//
-		// Bound to the thread that called Initialise, so a caller reaching in
-		// from elsewhere is the affinity check's problem, not a race nobody
-		// notices. Singular for now: one process hosts one world at v0.1, and
-		// this becomes a lookup when the universe holds several.
-		engine::ecs::Store &World() {
-			return Store;
+		// **Scoped, because the universe hands out identifiers rather than
+		// stores.** A long-lived `Store &` is what makes thread-per-world and
+		// process-per-world different designs; a reference that exists for the
+		// length of a call does not. The day this world lives in a child
+		// process, this becomes a request and the callers do not change.
+		//
+		// @param body Called as `body(Store &)` on the driver thread.
+		// @return `false` when there is no world to enter.
+		bool Enter(const std::function<void(engine::ecs::Store &)> &body);
+
+		// The universe this server drives.
+		//
+		// For a caller that needs more than the primary world — a supervisor,
+		// or a test that creates a second one.
+		//
+		// @return The universe.
+		engine::world::Universe &Worlds() {
+			return Driver_->Worlds();
 		}
 
+		// The universe and the hosts holding the rest of it.
+		//
+		// @return The driver, or null before Initialise.
+		engine::world::Driver *Hosts() {
+			return Driver_.get();
+		}
+
+		// The primary world's handle.
+		//
+		// @return The handle, or an invalid one before Initialise.
+		engine::world::WorldId Primary() const {
+			return PrimaryWorld;
+		}
+
+		// Whether this process is a supervised host.
+		//
+		// @return `true` when it holds worlds for a driver.
+		bool IsHost() const {
+			return !Settings.HostName.empty();
+		}
+
+		// The replication endpoint, when this server is listening.
+		//
+		// For a caller that wants to declare what is replicated or read how many
+		// clients are connected — and for a test, which is the only way to prove
+		// the socket was actually bound.
+		//
+		// @return The listener, or null when `--listen` was not given.
+		engine::replication::Listener *Clients() {
+			return Replication.get();
+		}
+
+		// The address the replication socket is bound to.
+		//
+		// Worth asking for even though the port was named: `--listen 0` binds an
+		// ephemeral port, which is what a test wants so that two runs on one
+		// machine do not collide.
+		//
+		// @return The endpoint, or an invalid one when not listening.
+		engine::net::Endpoint ListeningOn() const;
+
 	  private:
-		void Tick(float delta);
+		// Builds the worlds a host was granted and announces itself.
+		//
+		// @return `false` when there is no link, or no worlds to hold.
+		bool InitialiseHost();
+
+		// How many hosts `RemoteWorlds` will be placed into.
+		//
+		// Run before anything is spawned, because the worker budget depends on
+		// it and the job pool starts first.
+		//
+		// @return The host count, zero when nothing is remote.
+		size_t PlannedHosts() const;
+
+		// Places the worlds `RemoteWorlds` names into hosts and starts them.
+		//
+		// @return `false` when a host could not be started.
+		bool StartHosts();
+
+		// Exchanges one barrier's worth of frames with the driver.
+		//
+		// Called once per tick, before the tick: what the driver decided last
+		// barrier has to be in the inboxes before the systems that read them
+		// run, and what this host's worlds posted goes up straight after.
+		//
+		// @return `false` when the driver asked this host to stop, or went
+		//         away.
+		bool ServiceLink();
+
+		// Starts the recorder when `RecordPath` is set.
+		//
+		// Shared by the fresh-world and the replay path, because a replay that
+		// accepted `--record` and wrote nothing is how the recipe that checks
+		// the replay path came to check nothing.
+		//
+		// @return `false` when recording was asked for and cannot be done.
+		bool BeginRecording();
+
+		// Binds the replication socket and declares what is replicated.
+		//
+		// @return `false` when a port was asked for and could not be bound.
+		bool BeginListening();
+
+		// Runs one tick's worth of replication: take what arrived, publish what
+		// changed, advance the links.
+		//
+		// Called from inside the world's scope, because the delta is built from
+		// the store's change bits and those are the world's.
+		//
+		// @param nowSeconds The current time.
+		void ServeClients(double nowSeconds);
 
 		Options Settings;
-		engine::ecs::Store Store{"server"};
-		engine::ecs::Scheduler Scheduler;
+
+		// The universe this process holds, plus the hosts holding the rest.
+		//
+		// Always a driver, even with no hosts: a `Driver` with an empty
+		// supervisor is a `Universe` and five lines of nothing, and one code
+		// path that sometimes has hosts beats two that differ in where the
+		// barrier lives.
+		//
+		// Held by pointer so the header does not have to be complete before the
+		// options are read — a universe binds its driver thread on
+		// construction, and that thread is decided in Initialise.
+		std::unique_ptr<engine::world::Driver> Driver_;
+		engine::world::WorldId PrimaryWorld;
+
+		std::unique_ptr<engine::world::Recorder> Recorder_;
+		std::unique_ptr<engine::world::Replayer> Replayer_;
+
+		// The replication socket and the clients on it. Both null unless
+		// `--listen` was given, which is what keeps a headless determinism run
+		// from binding a port it has no use for.
+		std::unique_ptr<engine::net::Transport> Socket;
+		std::unique_ptr<engine::replication::Listener> Replication;
+
+		// Present only in host mode. A driver holds one of these per host; a
+		// host holds exactly one, to whoever started it.
+		std::unique_ptr<engine::world::HostLink> Link;
+
+		// Reused across barriers so a host servicing its link every tick stops
+		// allocating.
+		std::vector<engine::world::HostFrame> Frames;
 
 		bool Running = false;
 
-		// There is no tick counter here. The world keeps one — `Store.Time()`
-		// — and a second copy on the host is a fact that can disagree with
-		// itself the first time one of them is advanced in a branch.
+		// There is no tick counter here. The world keeps one — its own clock —
+		// and a second copy on the host is a fact that can disagree with itself
+		// the first time one of them is advanced in a branch.
 	};
 }
