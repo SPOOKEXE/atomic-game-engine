@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
 	arguments.Value("height", "PX", "Window height (default 720)");
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems or counters");
 
-	arguments.Value("script", "PATH", "Luau script to run at startup (v0.5)");
+	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");

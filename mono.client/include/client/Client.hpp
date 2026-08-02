@@ -82,7 +82,7 @@ namespace client {
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path AssetsDirectory;
 
-		// TODO(v0.5): run this Luau script at startup. Parsed and reported now
+		// TODO(v0.6): run this Luau script at startup. Parsed and reported now
 		// so that a command line written against the roadmap fails with a clear
 		// message rather than being silently ignored — there is no VM until
 		// L13 exists.

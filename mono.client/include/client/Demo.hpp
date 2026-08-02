@@ -5,7 +5,7 @@
 // Components and resources live here rather than in `ecs` because the ECS is
 // storage and does not know what a Transform is, and rather than in `render`
 // because a transform is not a presentation concept. They move to `scene` at L7
-// when v0.3 brings the real Basic Components set; until then the program that
+// when v0.4 brings the real Basic Components set; until then the program that
 // uses them owns them, which is the smallest place they can live.
 //
 // **There is no scene object.** Building the world is a function, and

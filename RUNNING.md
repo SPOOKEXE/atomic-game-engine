@@ -167,7 +167,7 @@ mains over the parts of it they need.
 
 | You want to | Run | Adds, over the engine |
 |---|---|---|
-| Run a script with nothing else in the way | `atomic` *(v0.5)* | nothing |
+| Run a script with nothing else in the way | `atomic` *(v0.6)* | nothing |
 | See something on screen | `client` | window, input, renderer, and the client half of networking |
 | Host a simulation with no window | `server` | the tick loop, and the hosting half of networking |
 | Exercise one module | its test binary | Catch2 |
@@ -185,7 +185,7 @@ option declarations, so they cannot drift from what the program accepts.
 
 ---
 
-# Running a script file *(v0.5)*
+# Running a script file *(v0.6)*
 
 The engine runs `.luau` and `.ts` files directly. A game is a script, not a
 compiled artefact, and all three programs take a path to one:
@@ -224,7 +224,7 @@ both.
 - `atomic` is not a target. It arrives with the runtime.
 - The files in `mono.engine/examples/` are placeholders.
 
-The VM, the bindings and the standalone runtime are v0.4–v0.5 on
+The VM, the bindings and the standalone runtime are v0.5–v0.6 on
 [ROADMAP.md](ROADMAP.md). A flag that is silently ignored is worse than one that
 says so, which is why the warnings are there rather than removed —
 [docs/DEFERRED.md](docs/DEFERRED.md).
@@ -265,7 +265,7 @@ a plain `cmd` window has no compiler in it.
 Both carry the note for what replaces them: the demo scene is C++ today
 (`mono.client/src/Demo.cpp`) and becomes
 `mono.engine/examples/Mirrors-1-world.luau` once the script runtime lands at
-v0.5.
+v0.6.
 
 ### Options
 
@@ -279,7 +279,7 @@ v0.5.
 --width PX                       Window width (default 1280)
 --height PX                      Window height (default 720)
 --profiler-tab NAME              frame, categories, systems or counters
---script PATH                    Luau or TypeScript script to run at startup (v0.5)
+--script PATH                    Luau or TypeScript script to run at startup (v0.6)
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
 --override-assets-directory DIR  Read shaders and data from here

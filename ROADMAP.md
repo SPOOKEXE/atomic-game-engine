@@ -68,7 +68,7 @@ Deferred:
 
 Planned in [v02v03.md](v02v03.md). Userland gets Roblox-style instancing, tweaked; the engine underneath is full ECS. The order below is the order the steps land in, and each one leaves the tree building and passing.
 
-Standing discipline for v0.2 and v0.3, in that document's own section: preallocate and reuse by default, take the better data structure without ceremony but attach a number to an algorithm swap, and allow async only for work the tick cannot observe finishing.
+Standing discipline for v0.2 and v0.4, in that document's own section: preallocate and reuse by default, take the better data structure without ceremony but attach a number to an algorithm swap, and allow async only for work the tick cannot observe finishing.
 
 - [_] jobs: an atomic pool claim so a nested or concurrent `For` runs inline instead of deadlocking; `Store::Owner` atomic, because a world is picked up by a different worker every tick
 - [_] `core::ByteWriter` / `ByteReader` — explicit little-endian framing, used by messages now and by saves and the wire later
@@ -76,7 +76,7 @@ Standing discipline for v0.2 and v0.3, in that document's own section: prealloca
 - [_] `ecs::ChangeChannel` — version stamps per column and per row range
 - [_] instance model: the class table with per-class prototype rows (so `Instance.new` is a column copy and `:Clone()` falls out of it), `:IsA`, property descriptors, the `Parent`/`FirstChild`/`NextSibling` hierarchy, and change signals fired at a phase boundary rather than on assignment
 - [_] world snapshot — serialise and restore a world through its `TypeDescriptor`s
-- [_] `mono.engine/world` at L4: `Universe`, `World`, `WorldId`, `Address`, the directory and the control queue. Universe = overarching simulation, worlds = each subarea to simulate
+- [_] `mono.engine/world` at L4: `Universe`, `World`, `WorldId`, the directory and the control queue. Universe = overarching simulation, worlds = each subarea to simulate
 - [_] World Entities — each world's root instance, and entity lifetime across the barrier
 - [_] communication buses — worlds never address each other: MessagingService (pub/sub topics), MemoryStore (ephemeral shared map, sorted map, queue), DataStore (durable key/value, versioned, read-modify-write) and Teleport. Routing is hub-and-spoke, so there are N channels rather than N², and every ordering decision is made in one place. There is no cross-world entity reference at all, which is the Roblox model and deletes the type that would have broken rule 3
 - [_] outbox and inbox — exactly one tick of latency, applied at the barrier in `(sender, sequence)` order. Each sender's queue is already ordered, so delivery is a k-way merge rather than a sort
@@ -92,27 +92,39 @@ Standing discipline for v0.2 and v0.3, in that document's own section: prealloca
 
 ## v0.3
 
-Planned in [v02v03.md](v02v03.md).
+Replication. The server has authority and a client simulates its own replica and syncs against it — decided while planning v0.2, which reserves the seam for it (see [v02v03.md](v02v03.md) §2.12) and builds nothing else. It sits here rather than later so that physics, scripting and rendering are all built against a replicated world instead of being retrofitted into one.
 
-- [_] `mono.engine/scene` at L7 — Basic Components: Transform, PreviousTransform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash. Deletes the duplicated component definitions in `mono.client/Demo.hpp` and `mono.server/Simulation.cpp`; the C++ test scene itself stays until v0.4/v0.5 give it a game file to load
+- [_] wire transport and connection lifecycle — join, leave, timeout, reconnect. asio is already vendored
+- [_] join by full snapshot, then per-tick deltas — the snapshot format v0.2 already produces, so there is one serialisation path and a client that falls too far behind is re-snapshotted rather than repaired
+- [_] deltas from `ChangeChannel`'s per-row dirty bits — the third reader of the bits v0.2 builds for `.Changed` and render invalidation
+- [_] client-side prediction of the local player only, with everything else interpolated authoritative state. `PreviousTransform` and the render `Alpha` already exist and are what a correction smooths against
+- [_] reconciliation — apply authoritative state into a running store, which is the v0.2 capability this depends on. Note that this needs no cross-machine determinism: the client drifting is expected, correcting the drift is the mechanism
+- [_] client input submission, and the server-side rule that a replica may not write to a bus
+- [_] interest management — what a client is sent at all. Deferred within this version if the first worlds are small enough that everything fits; say so explicitly rather than silently
+
+## v0.4
+
+Planned in [v02v03.md](v02v03.md) — written when this was v0.3, before replication took that slot.
+
+- [_] `mono.engine/scene` at L7 — Basic Components: Transform, PreviousTransform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash. Deletes the duplicated component definitions in `mono.client/Demo.hpp` and `mono.server/Simulation.cpp`; the C++ test scene itself stays until v0.5/v0.6 give it a game file to load
 - [_] `scene::DrawInstance` — the draw-list payload v0.2's `ViewChannel` carries, at `shared` tier because a `server`-tier host writes it and a `client`-tier consumer reads it. Replaces `render::Instance` as the thing a world publishes; `mono.server` gains `scene` and `world` in its link row
-- [_] `core/types`: AABB, Ray, RayHit — the value types v0.3 gives a consumer
+- [_] `core/types`: AABB, Ray, RayHit — the value types v0.4 gives a consumer
 - [_] `mono.engine/spatial` at L6 — uniform hash grid, and the optimised spatial query: raycast, overlap and shapecast with layer masks
 - [_] basic physics collider — box, sphere and cylinder shapes, `Collider`/`RigidBody`/`Surface`, and the `SurfaceTable` resource the narrow phase reads once
 - [_] basic physics pipeline — integrate, broadphase with sorted pairs, six exact analytic narrow-phase pairs, a serial sequential-impulse solver, contact events
 - [_] Part — a class rather than a component: `{Transform, Bounds, Visual, Collider, Surface}`, with `PartDesc` and `MakePart` as the one place that decides what a part is
 - [_] Camera — the `Camera` component, plus the `ActiveCamera` resource holding the live one and its resolved matrices
 
-## v0.4
+## v0.5
 
-The engine has been full ECS since v0.2 and userland instancing is a façade over it — see [v02v03.md](v02v03.md). The test scene is still C++ at this point; v0.4 makes the façade reachable from script and v0.5 is where the scene actually moves.
+The engine has been full ECS since v0.2 and userland instancing is a façade over it — see [v02v03.md](v02v03.md). The test scene is still C++ at this point; v0.5 makes the façade reachable from script and v0.6 is where the scene actually moves.
 
 - [_] bindings manifest for luau/typescript — generated from v0.2's `TypeDescriptor` property lists and class table, so there is no second source of truth for what a class is or what a property costs
 - [_] plans for luau and typescript multi-threading and multi-processing systems (with locks, synchronise, etc, also plan integration with hytale setup for worlds) — over what v0.2 already established: the driver barrier, worlds-as-batch, `Ticket`/`Await`, `parallel/ipc` and `parallel/process`. The userland `thread` datatype is `parallel/threads/` and is a different contract from `Jobs`, because it has to survive a script yielding
 
-## v0.5
+## v0.6
 
-Where the C++ test scene becomes a script. v0.3 rebuilt it on `scene`'s classes precisely so this is a port rather than a rewrite, and `Demo.hpp`/`Demo.cpp` go away here — `mono.client/AGENTS.md` has always said they die when there is a game file to load a scene from.
+Where the C++ test scene becomes a script. v0.4 rebuilt it on `scene`'s classes precisely so this is a port rather than a rewrite, and `Demo.hpp`/`Demo.cpp` go away here — `mono.client/AGENTS.md` has always said they die when there is a game file to load a scene from.
 
 - [_] luau and typescript — `Instance.new`, properties, `.Changed`, the hierarchy and `:IsA` bind to v0.2's class table, the same one C++ calls. A calling convention, not a second mechanism
 - [_] camera
@@ -121,12 +133,12 @@ Where the C++ test scene becomes a script. v0.3 rebuilt it on `scene`'s classes 
 - [_] demo\_1world\_scene.luau (mirrors.luau, mirrors.ts) — the port of the C++ test scene, and the point where `D00001`'s `--script PATH` stops warning and starts loading
 - [_] the demo dying is `D00004`'s trigger: ask whether anything still needs `core::Random`, and either close the item or say what renewed it
 
-## v0.6
+## v0.7
 
 - [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
 - [_] demo\_2world\_scene.luau (mirrors.luau, mirrors.ts, split-screen for two worlds running in parallel via multi-process) — two `ViewChannel` producers and one compositor, which v0.2 already built. This demo is what proves the cross-process view path end to end
 
-## v0.7
+## v0.8
 
 - [_] local filesystem content delivery network (cdn) in engine
 - [_] mesh importing, baking and rendering pipeline
@@ -137,7 +149,7 @@ Where the C++ test scene becomes a script. v0.3 rebuilt it on `scene`'s classes 
 - [_] put infront mirrors to see if it works with texture rendering
 - [_] scripts that create MeshPart and set mesh properties (surfaceappearance equivalent but as components).
 
-## v0.8
+## v0.9
 
 - [_] CurrentCamera
 - [_] basic character controls
@@ -145,15 +157,15 @@ Where the C++ test scene becomes a script. v0.3 rebuilt it on `scene`'s classes 
 - [_] basic camera and controls (zoom, pan, control camera via script)
 - [_] UserInputService and ContextActionService
 
-## v0.9
-
-- [_] ...
-
 ## v0.10
 
 - [_] ...
 
 ## v0.11
+
+- [_] ...
+
+## v0.12
 
 ---
 

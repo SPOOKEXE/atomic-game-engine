@@ -32,11 +32,11 @@ namespace client {
 		}
 
 		if (!Settings.ScriptPath.empty()) {
-			// TODO(v0.5): hand this to the Luau host once L13 exists. Refusing
+			// TODO(v0.6): hand this to the Luau host once L13 exists. Refusing
 			// loudly beats accepting a flag and doing nothing with it.
 			ENGINE_WARN(
 				"--script is accepted but has no effect until the scripting layer lands in "
-				"v0.5. Ignoring '{}'.",
+				"v0.6. Ignoring '{}'.",
 				Settings.ScriptPath
 			);
 		}

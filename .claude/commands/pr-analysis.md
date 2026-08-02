@@ -134,7 +134,7 @@ Places the change should have reached *upward* — toward the person writing a
 script or a game against this engine, and the developer reading the docs. This
 is the section most likely to be skipped, because none of it fails a build.
 
-The engine has no VM yet; Luau and TypeScript arrive in ROADMAP v0.4–v0.5, and
+The engine has no VM yet; Luau and TypeScript arrive in ROADMAP v0.5–v0.6, and
 the bindings manifest with them. That is exactly why this matters now: a name
 or a shape that ships today is one the binding layer has to either expose or
 rename later, and by then something depends on it.

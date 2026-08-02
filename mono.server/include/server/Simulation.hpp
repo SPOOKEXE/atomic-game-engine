@@ -6,7 +6,7 @@
 // Components and resources live here for the same reason the client's do: the
 // ECS is storage and does not know what a Transform is, and `scene` at L7 —
 // which will own the real Basic Components set — does not exist yet. They move
-// there at v0.3.
+// there at v0.4.
 //
 // Deliberately not shared with `mono.client`. A client-tier header is invisible
 // to this binary by construction, and reaching for one would be the first crack
