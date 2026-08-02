@@ -27,6 +27,17 @@ becomes:
 
 or defer to another version.
 
+## Documents referenced from here that are not in this repository
+
+`CDN.md`, `RENDER_PIPELINE.md`, `repo_layout.md`, `GARG_ECS_Layout.md` and
+`DATATYPES_LIBRARIES.md` are cited by section number throughout this file and by
+several module `AGENTS.md` files. None of them has ever been committed —
+`git rev-list --all --objects` finds no such path. They are design notes held
+outside the tree, so a section reference here is a pointer somebody has to be
+handed rather than one they can follow. Said once, at the top, rather than
+qualified at every citation. `v02v03v04.md` carries the same note for the three
+it depends on.
+
 ## VERSIONS
 
 ### v0.0
@@ -64,7 +75,7 @@ Deferred:
 Deferred:
 - D00002
 
-## v0.2
+### v0.2
 
 Planned in [v02v03v04.md](v02v03v04.md). Userland gets Roblox-style instancing, tweaked; the engine underneath is full ECS. The order below is the order the steps land in, and each one leaves the tree building and passing.
 
@@ -86,7 +97,7 @@ Standing discipline for v0.2 and v0.4, in that document's own section: prealloca
 - [x] asynchronous and synchronous methods to not block scripts — every bus call returns a `Ticket` and replies land next tick, which is the contract `:GetAsync()` already teaches. Per-world request budgets, reset at the barrier, so one world cannot starve a neighbour
 - [x] recording and replay — `Recorder`/`Replayer` over a versioned format that is one snapshot plus retained input, plus `Universe::Save`/`Load`. Snapshots are byte-stable (every map is written in name order), so two of them can be diffed. Determinism is same-binary and cross-machine is documented as not promised
 - [x] `mono.server --record` / `--replay` flags, proven end to end by a test that records a run, replays it and compares every entity
-- [x] a CI job that runs a scene twice and diffs — `.github/workflows/ci.yml`, split by what each job needs installed rather than by what it checks, so the half that runs the determinism diff runs on a machine with no graphics stack at all and proves the tier split by existing. `just check` runs the same list locally in the same order, so "it passes here" and "it passes in CI" mean one thing. `just replay-check` now diffs as well as runs: recording a replay has to give back the recording it replayed, which needed `--replay` and `--record` together to stop being silently ignored. The workflow itself has not had a first run on GitHub — every recipe in it passes locally
+- [x] a scene run twice and diffed — `just determinism` records the same scene twice and `cmp`s the two files, so a wall clock, a pointer address or an unordered container that reached the simulation fails a recipe rather than becoming an unreproducible bug a week later. `just replay-check` is the stronger one and now diffs as well as runs: recording a replay has to give back the recording it replayed, which needed `--replay` and `--record` together to stop being silently ignored. `just check` chains format, build, every suite, the architecture check and both of those, cheapest first
 - [x] `parallel/ipc` — `Channel`, framed bytes, bounded and non-blocking (a send that waited would stall a job worker and with it every world in the host). Local implementation; the caller cannot tell which transport it holds, which is the whole point
 - [x] `parallel/process` — `Process` (spawn, poll-and-reap, request-stop, kill) over `posix_spawn`, plus `WorkersPerHost` so eight hosts on a 24-core machine do not each start 23 workers. A destroyed handle never leaves an orphan
 - [x] soft-fault quarantine — a throwing system faults one world and its neighbours never notice; a hard fault takes the host and is documented as un-isolatable, because catching `SIGSEGV` and carrying on means carrying on with a suspect heap
@@ -104,7 +115,7 @@ Standing discipline for v0.2 and v0.4, in that document's own section: prealloca
 - [x] `mono.engine/assets` at L8 `shared` — the second new engine module this version, after `world`. Content addressing, chunking, the hash tree, the manifest and the one signature over it; the format both halves of content delivery share, so the running game and the origin cannot acquire a dialect. Deliberately depends on no simulation module, which is what lets the origin link it alone. Full detail under v0.8
 - [x] two vendors added — **BLAKE3** for content addressing and **Zstd** for delivery-group compression, both in `mono.build/MonoVendor.cmake` with an entry in each `THIRD_PARTY_NOTICES.md`. Neither is gated on a tier: portable code with no platform dependency, like asio and Crypto++. Zstd is dual-licensed and **we take BSD-3-Clause, not GPLv2** — the one choice in that file where reading the wrong text leads to a materially wrong conclusion about shipping the engine. Legacy 0.x frame support is off, as decoder surface parsing origin-supplied bytes that nothing here could have written
 - [x] `just docs-check` restored to green — four dangling `[v02v03.md]` links in this file were failing the site pass, and because that pass runs first, the coverage pass behind it had never run at all. Exactly the cascade `docs/CODE_DOCUMENTING.md` describes happening once before: a check that has been failing for a while stops being read, and takes the real failures down with it. Fixing the links surfaced two genuine documentation gaps that had been invisible
-- [x] the `cdn` preset wired into CI — `just preset=cdn test-all` on the bare headless runner, so the origin's suites are run rather than merely compiled, plus `test-architecture` on the `server` and `cdn` presets. **That last one is the only place `requires` in `expected_graph.json` is exercised at all**: the `full` job checks a preset with every option on, and there an entry whose `requires` is wrong looks exactly like one that is right
+- [x] the recipes a pipeline would call all exist and pass locally — `just preset=cdn test-all` runs the origin's suites rather than merely compiling them, `just test-architecture` takes a `preset=`, and `check-server-is-headless` / `check-cdn-is-bare` / `docs-check` each configure a preset from scratch. **Running `test-architecture` on the `server` and `cdn` presets is the only thing that exercises `requires` in `expected_graph.json` at all**: against a preset with every option on, an entry whose `requires` is wrong looks exactly like one that is right
 - [x] `mono.cdn` wired into the documentation build — it was absent from all three of docgen's hand-maintained input lists, so its pages were never generated. The include-roots list is globbed precisely so a new module cannot be missed; the two above it are literal, so it was
 - [x] smart benchmarking — `benchrunner`, a thin main over `Tool::testrunner`'s own library, so discovery, the cascading signature and the skip cache are the *same code* rather than a second copy that drifts. A benchmark declares `TEST_SUITE_ID` like a test and answers `--mono-suites` like one; `mono_suites` was split out of `testmain` so a benchmark binary gets that without linking a test framework whose per-case overhead would land inside the numbers. Reports the **minimum** sample per iteration, not the mean — a benchmark is bounded below by the work and unbounded above by the machine's mood — with the spread beside it. `just bench` / `bench-all` / `bench-accept` against a `bench` preset that optimises, and its skip cache lives in the build directory because a signature covers sources and not compiler flags. A regression is reported and never enforced: a laptop on battery swings further than most real ones
 - [x] benchmark the ECS, world and renderer areas — 24 measurements across `engine.ecs.bench.iteration`, `engine.world.bench.barrier` and `engine.render.bench.overlay`. They confirm two documented claims and produce one number nothing had: `EachParallel` is **5.5x slower than `Each` at 10k entities** (21.9 us against 4.0) and **3.0x faster at 500k** (67.7 us against 202), so the ~60k crossover the default grain was chosen for still holds after the storage rewrite; `EachBatchParallel` at 500k is 2.5x `Each`; a *quiet, empty* world costs about 0.4 us of barrier per tick measured serially, so 200 of them are 81 us before any simulates anything; and the debug panels cost 997 us at 4K against 60 us at 1080p — 16.7x the time for 4x the pixels, which is superlinear and the one figure here nobody had guessed
@@ -114,9 +125,15 @@ Standing discipline for v0.2 and v0.4, in that document's own section: prealloca
 - [x] act on those numbers, second pass — four wins, each measured against the baseline before and after. **The overlay was clearing its whole buffer every frame**: thirty-three megabytes at 4K to erase two panels covering a fraction of it, which is why it measured fifteen times slower at 4K than at 1080p for four times the pixels. It clears the dirty rectangle instead — an invariant `Resize` and `MarkRegion` already maintained — and went **997 us to 10.2 us, and flat across resolutions**. **`VisitTables` allocated three times per query call** — a vector and a string for the plan key, plus the columns vector — on the hottest non-row path in the engine; a stack buffer and a transparent hash made the hit path allocate nothing, **25% off `CountMatching`**. **`Jobs::For` woke the whole pool for two chunks**: a ten-thousand-row parallel iteration cost 21.7 us against 4.0 serial, so a span must now hold `MINIMUM_GRAINS` of work to be dispatched — **91% off `EachParallel` at 10k**. Resources moved from a hash map to a sorted vector, which is right on its merits but measured inside the noise and is not claimed as a win
 - [x] established what `Each` at 500k actually costs, rather than asserting it. The claim that it was at the memory wall was a conclusion with no control behind it, and one figure contradicted it: `EachBatchParallel` gets 2.7x from threads, which a bandwidth-bound loop should not. So the floor was measured — two flat arrays, the same three adds, no query, no table walk, no per-row dispatch. **Raw arrays are 211.7 us at 500k and 39.2 at 100k; `Each` is 203.3 and 40.1.** The ECS costs nothing measurable over hand-written array code, so there is no software overhead here to remove and the serial loop is at the single core's streaming limit. That the pool still buys 2.7x is consistent rather than contradictory: one core cannot saturate memory on its own, several can — which `EachParallel` already does. `benchmarks/Iteration.cpp` keeps the control beside the measurement, because "500k takes 200 microseconds" is unreadable without it: it could be a hardware limit or ten times more overhead than work, and those want opposite responses
 
-## v0.3
+- [_] **`.github/workflows/ci.yml` itself.** The checks are written and pass locally; the file that makes a machine other than this one run them was never committed — `.github/` holds `CODEOWNERS` and nothing else, and no such path appears anywhere in the history. Two items above used to claim otherwise, which is the failure mode `docs/CODE_DOCUMENTING.md` describes: a green claim nobody re-reads. The split the workflow wants is by *what each job needs installed* rather than by what it checks, so the half running the determinism diff runs on a box with no graphics stack and proves the tier split by existing. `just check` is the local list and the job list should stay the same list in the same order, or "it passes here" and "it passes in CI" stop meaning one thing
+- [_] chunked column storage with a shared span pool — `ecs/docs/TODO.md` files this under v0.2 and it is not built. A `Column` owns one growing allocation and never returns it, so a thousand small worlds each hold their own high-water mark forever. Trigger is hundreds of small worlds in one host, which is the target scale decision 7 names. Legal against the iteration paths as they stand, because `EachBatch` already promises nothing about where a batch ends; `Column::At` becomes a divide and a modulo, which is exactly why it wants a benchmark on both sides rather than an assumption
+- [_] archetype edge cache — `Set` on a component an entity lacks interns `set.With(id)`, which is a sort, a hash and a map lookup. Caching add-one and remove-one edges per archetype makes it one lookup. Trigger is a measurement and nothing has shown it in a profile yet, so the number to have first is what archetype transitions cost as a fraction of a tick
+
+### v0.3
 
 Replication. The server has authority and a client simulates its own replica and syncs against it — decided while planning v0.2, which reserves the seam for it (see [v02v03v04.md](v02v03v04.md) §2.12) and builds nothing else. It sits here rather than later so that physics, scripting and rendering are all built against a replicated world instead of being retrofitted into one.
+
+**Where this version actually stands:** the two modules are built, covered and passing — `net` at L11 and `replication` at L12, with `replication/tests/EndToEnd.cpp` running a join, a chunked snapshot, a delta stream, an input and an acknowledgement over a loopback transport with real encoding. **Neither program links either module.** So the mechanism is finished and nothing ships replicated yet; the first open item below is that gap, and it is the one that closes the version.
 
 - [x] `mono.engine/net` at L11 `shared` — the connection lifecycle, framing and channels every one of `upstream/`, `downstream/`, `predict/` and `http/` sits on. `Link` is the state machine: Connecting → Connected → Disconnecting → Disconnected, handshake and idle timeouts, keep-alive, per-tick byte *and* packet budgets with the overflow visible in `ConnectionStats` rather than as a mystery stall. **Time is passed in, never read** — no wall clock in the subsystem whose failures are hardest to reproduce, and a timeout the suite states rather than waits for. `Packet` is the wire format, and it refuses a wrong magic, an unknown version, a channel byte outside the enum, and a length that runs past the buffer; a version mismatch is refused rather than negotiated downward. Sequence comparison is wrap-aware, because a 16-bit counter wraps every eighteen minutes at sixty packets a second and a plain `>` breaks every long match. Unreliable is the default and the stale rule applies to it alone — a late reliable packet is a resend that still has to be delivered
 - [x] the transports — `net::Transport` over a loopback hub and an asio UDP socket, both behind one interface a caller cannot tell apart. `Endpoint` is this engine's own value type, so no public header names a socket or an `error_code` and the transport stays swappable. A hub rather than a connected pair, because the two cases only a routed network produces are the two this layer must get right: a datagram from a sender nobody has heard of, and one addressed where nobody listens. UDP is polled from the tick and never calls `run()` — async delivery on somebody else's thread is exactly what a reproducible tick cannot have
@@ -130,14 +147,22 @@ Replication. The server has authority and a client simulates its own replica and
 - [x] interest management — a predicate per client per entity, with a per-client known set that `Created`, `Destroyed` and `Forget` are all differences against. **Losing sight of an entity is a forget, never a destroy**: a client that conflated the two would delete something still there and then be wrong about it the moment it came back into view. Not deferred
 
 - [x] the joint between the two layers — `replication::Session` binds a `Transport`, a `Link` and the reliable pair, so a message goes out framed by `net::Packet` with a real budget, a real acknowledgement window and a real resend. Proved end to end by six cases running a join and a stream over a loopback transport with real encoding, which is what makes `repo_layout.md` §16.6's claim checkable rather than asserted — there is no configuration in which this path is skipped
+- [x] `core::SecureWipe` — one zeroing primitive the optimiser may not delete, at L1. It had grown three private copies: `assets` wiped a signing seed and a grant key, `net` wiped a cipher key and a handshake secret, and each carried its own spelling of the same reasoning. A module may not include another module's private header, so the only place one copy serves all of them is the module every module already links. **Three copies of a security primitive is three chances for one of them to be quietly weakened** — and a key erased with `memset` in a destructor is frequently not erased at all, because the write is dead by every rule the optimiser has. Two overloads, `uint8_t` and `std::byte`, rather than one and a `reinterpret_cast` at every call site: a cast in front of a security primitive is a place for a wrong length to hide
 
-## v0.4
+- [_] **wire `net` and `replication` into the two programs.** This is the gap between v0.3 building and v0.3 shipping, and it is not small: `mono.tools/architecture/expected_graph.json` gives the `client` program `core, ecs, input, parallel, render, world` and the `server` program `core, ecs, parallel, world` — **neither links `net` or `replication`**, and neither declares a `--connect` or a `--listen`. Everything above is proved by `replication/tests/EndToEnd.cpp`, which stands both halves up inside one process over a loopback transport with real encoding. That is the right shape for a suite and it is not a running game: no process has yet been an authority for another process. The work is a listen flag on the server, a connect flag on the client, both programs' link rows in `expected_graph.json`, and the single-player `ALLOW_TIER_ESCAPE` that `mono.client/CMakeLists.txt` already has written out in a comment and deliberately not declared
+- [_] an index range for locally predicted entities — the one thing v0.2's replication seam surfaced and v0.3 did not close. Entity identity is an index plus a generation and two independently built stores both start at index 0 generation 1, so an entity a replica mints for itself collides exactly with one the authority minted, and `Store::Apply` is right to treat them as the same entity because nothing tells them apart. `ecs/tests/Replication.cpp` pins the current behaviour, so the day this is fixed the test says so. Likely shape: reserve a high index range the authority never allocates from, and promote a predicted entity to a server one as an explicit step rather than a coincidence. **Trigger is the client predicting anything that spawns**, which is the first projectile
+- [_] delta compression against an acknowledged baseline — today a delta carries whatever moved since the last tick, not since the last tick the client confirmed. The second is smaller and needs per-client history, which is the cost
+- [_] priority under a bandwidth cap, and lag compensation — interest management says what a client *may* see and nothing yet decides what to drop when what it may see does not fit. Lag compensation needs a server-side history buffer this module does not keep. Both are named in `replication/AGENTS.md` under "not here yet" and both want their own plan rather than being squeezed in here
+
+### v0.4
 
 Planned in [v02v03v04.md](v02v03v04.md) — written when this was v0.3, before replication took that slot.
 
+**Not started.** None of `scene`, `spatial` or `physics` exists under `mono.engine/`, `core/types` still holds `Vector3`, `Color3` and `CFrame` alone, and both programs still carry their own component definitions. Read that plan's §3 against this list before starting; the layer heights it proposes were inferred and two of them now want a second look (see its own note on §3.1).
+
 - [_] vectorisable component layout — `Each` is already at the single core's streaming limit and the ECS adds nothing over hand-written array code (measured in v0.2: raw arrays 211.7 us at 500k against `Each`'s 203.3), so the only way past it is the data. `Position` and `Velocity` are twelve-byte structs and a compiler cannot vectorise a twelve-byte stride cleanly whatever the iteration does. This is the version that decides what a component *is*, so it is the version that can fix it — and `engine.ecs.bench.iteration`'s control benchmark is the before to measure against
-- [_] `mono.engine/scene` at L7 — Basic Components: Transform, PreviousTransform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash. Deletes the duplicated component definitions in `mono.client/Demo.hpp` and `mono.server/Simulation.cpp`; the C++ test scene itself stays until v0.5/v0.6 give it a game file to load
-- [_] `scene::DrawInstance` — the draw-list payload v0.2's `ViewChannel` carries, at `shared` tier because a `server`-tier host writes it and a `client`-tier consumer reads it. Replaces `render::Instance` as the thing a world publishes; `mono.server` gains `scene` and `world` in its link row
+- [_] `mono.engine/scene` at L7 — Basic Components: Transform, PreviousTransform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash. Deletes the duplicated component definitions, which are all in headers rather than sources: `Transform`, `PreviousTransform`, `Visual`, `SceneBounds` and `ActiveCamera` in `mono.client/include/client/Demo.hpp`, and `Position`, `Velocity` and `WorldBounds` in `mono.server/include/server/Simulation.hpp`. `Spin`, `Orbit`, `DrawList`, `Chatter` and `Heard` are demo and placeholder types rather than duplicates and stay where they are. The C++ test scene itself stays until v0.5/v0.6 give it a game file to load
+- [_] `scene::DrawInstance` — the draw-list payload v0.2's `ViewChannel` carries, at `shared` tier because a `server`-tier host writes it and a `client`-tier consumer reads it. Replaces `render::Instance` as the thing a world publishes. `mono.server` gains **`scene`** in its link row — it already links `world`, which it did not when this was written
 - [_] `core/types`: AABB, Ray, RayHit — the value types v0.4 gives a consumer
 - [_] `mono.engine/spatial` at L6 — uniform hash grid, and the optimised spatial query: raycast, overlap and shapecast with layer masks
 - [_] basic physics collider — box, sphere and cylinder shapes, `Collider`/`RigidBody`/`Surface`, and the `SurfaceTable` resource the narrow phase reads once
@@ -145,14 +170,14 @@ Planned in [v02v03v04.md](v02v03v04.md) — written when this was v0.3, before r
 - [_] Part — a class rather than a component: `{Transform, Bounds, Visual, Collider, Surface}`, with `PartDesc` and `MakePart` as the one place that decides what a part is
 - [_] Camera — the `Camera` component, plus the `ActiveCamera` resource holding the live one and its resolved matrices
 
-## v0.5
+### v0.5
 
 The engine has been full ECS since v0.2 and userland instancing is a façade over it — see [v02v03v04.md](v02v03v04.md). The test scene is still C++ at this point; v0.5 makes the façade reachable from script and v0.6 is where the scene actually moves.
 
 - [_] bindings manifest for luau/typescript — generated from v0.2's `TypeDescriptor` property lists and class table, so there is no second source of truth for what a class is or what a property costs
 - [_] plans for luau and typescript multi-threading and multi-processing systems (with locks, synchronise, etc, also plan integration with hytale setup for worlds) — over what v0.2 already established: the driver barrier, worlds-as-batch, `Ticket`/`Await`, `parallel/ipc` and `parallel/process`. The userland `thread` datatype is `parallel/threads/` and is a different contract from `Jobs`, because it has to survive a script yielding
 
-## v0.6
+### v0.6
 
 Where the C++ test scene becomes a script. v0.4 rebuilt it on `scene`'s classes precisely so this is a port rather than a rewrite, and `Demo.hpp`/`Demo.cpp` go away here — `mono.client/AGENTS.md` has always said they die when there is a game file to load a scene from.
 
@@ -160,15 +185,15 @@ Where the C++ test scene becomes a script. v0.4 rebuilt it on `scene`'s classes 
 - [_] camera
 - [_] surface camera (for mirrors, use previous frame as visual) — a view on v0.2's `ViewChannel` whose producer is the local world and whose consumer is a texture rather than the swapchain. The one-frame staleness is the latency that design already assumed
 - [_] basic rendering pipeline (color, shadows, basic fov cull, sequential for many worlds) — the graph of `RENDER_PIPELINE.md`, its stages 1 to 7. Needs `mono.engine/graph/` at L9 first, and that needs v0.2's `ChangeChannel`
-- [_] demo\_1world\_scene.luau (mirrors.luau, mirrors.ts) — the port of the C++ test scene, and the point where `D00001`'s `--script PATH` stops warning and starts loading
+- [_] `mono.engine/examples/Mirrors-1-world.luau` and `.ts` — the port of the C++ test scene, and the point where `D00001`'s `--script PATH` stops warning and starts loading. Both files exist in the tree and are **empty**, reserving the names and nothing else; docgen skips an empty page by content rather than by filename, so they cost the documentation site nothing while they wait
 - [_] the demo dying is `D00004`'s trigger: ask whether anything still needs `core::Random`, and either close the item or say what renewed it
 
-## v0.7
+### v0.7
 
 - [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
-- [_] demo\_2world\_scene.luau (mirrors.luau, mirrors.ts, split-screen for two worlds running in parallel via multi-process) — two `ViewChannel` producers and one compositor, which v0.2 already built. This demo is what proves the cross-process view path end to end
+- [_] `mono.engine/examples/Mirrors-4-worlds.luau` and `.ts` — split-screen across worlds running in parallel via multi-process. Four `ViewChannel` producers and one compositor, which v0.2 already built and `--worlds N` already drives with a synthetic scene. This demo is what proves the cross-process view path end to end. Both files exist and are empty, same as the v0.6 pair. **Four rather than the two this line used to say**, because the names in the tree are the ones the ports will take and two of anything is the count at which a bug in the placement loop still looks like correct behaviour
 
-## v0.8
+### v0.8
 
 - [x] local filesystem content delivery network (cdn) — `mono.cdn` and `cdn::ContentRoot` landed early, at v0.2
 - [x] cdn content addressing — `Engine::assets` at L8 `shared`: `ContentHash` (BLAKE3-256, checked against the published vectors rather than against itself), `Chunker` (gear rolling hash, FastCDC normalised two-mask cut, table generated from a stated seed so 256 frozen constants are reviewable as an algorithm), `HashTree` (Merkle with a tagged interior and the leaf count sealed into the root, so neither a subtree nor a duplicated node can pass as a whole tree), `Signature` (Ed25519 over a domain-separated message, one signature at the root and none below it) and `Manifest` (the four-level tree, canonical order, byte-stable output, and a reader that recomputes every root rather than believing it). BLAKE3 vendored. `CDN.md` §2
@@ -177,9 +202,9 @@ Where the C++ test scene becomes a script. v0.4 rebuilt it on `scene`'s classes 
 - [x] cdn group compression — `cdn::GroupCodec` and `cdn::Dictionary` over vendored Zstd: per group and never per file or per manifest, chunks left uncompressed at rest so dedup works on them, dictionaries trained per build and content-addressed so they version like everything else. The content checksum is turned on because Zstd leaves it off and a flipped byte otherwise decompresses cleanly to the wrong content; a decompression buffer is sized from the signed manifest and never from the frame, which is what stops a kilobyte declaring a gigabyte. Zstd vendored under BSD-3-Clause, legacy frame support off as attack surface we cannot need. `CDN.md` §5
 - [x] cdn prepared-group cache and cancellation — `cdn::PreparedCache`, keyed by bundle root **and** dictionary hash because a group compressed against one dictionary is a different artefact from the same group compressed against another. LRU, bounded, thread-safe, and frames handed out as shared ownership so an eviction cannot free bytes underneath a client still streaming them. Cancellation is load-bearing: a cancelled request costs no compression, and one cancelled mid-preparation has its result discarded rather than delivered to nobody
 - [x] cdn as a cache server — `CDNSettings` is the whole of an origin's setup, and CDN.md §6's three sources are field combinations rather than three programs: local store (`AllowUpstream` off), cache server (local first, forward on a miss, keep what came back) and pure proxy (`LocalFirst` off, `CacheUpstream` off). Local content is checked before anything external, which is what makes a hit cost no network at all. What an upstream returns is verified against the **signed** manifest before it is cached or served — a length check, honestly not chunk-level, because the chunk layout inside a group is not designed yet; the client verifies end to end regardless, so this is defence in depth. Upstream attempts are bounded, and an upstream that is down is counted apart from one serving wrong content
-- [_] cdn wire streaming — parallel group streams over a real connection. Needs `Engine::net`'s transport: `Link` and the framing exist, the loopback and UDP sockets do not. `CDN.md` §5
+- [_] cdn wire streaming — parallel group streams over a real connection. **The blocker this line used to name is gone**: v0.3 built the loopback and asio UDP transports, so `net::Transport`, `Link`, framing, reliability and encryption are all in place. What is still missing is `net`'s `http/` sub-area, because a content origin serves bulk bytes over a request/response protocol rather than over a game datagram channel with a per-tick packet budget, and `mono.cdn` links `core`, `parallel` and `assets` — not `net` — so this also moves the origin's link row. Unblocked and unbuilt, which is a different state from blocked. `CDN.md` §5
 - [x] cdn async pipeline — `cdn::Origin`: submit, pump, take, cancel. A publication is immutable and publishing is an **atomic swap**, so a request already admitted is served against what it was admitted against whatever is published underneath — pinned by a test that swaps mid-request. Concurrency is per request; `Jobs::For` appears in exactly one place, compressing a known set of groups, because that is CPU work with a known end and the pipeline around it waits on a filesystem. Cache lookups happen before the fan-out so a hit costs no compression. A bundle with no payload is refused rather than served empty. `CDN.md` §3
-- [_] the client half of the async pipeline — a fetch issued from a world lives inside a tick, so its completion applies at the barrier; a chunk visible mid-tick is a desync. Belongs to `Engine::assets` and the world driver rather than to `mono.cdn`. `CDN.md` §3
+- [_] the client half of the async pipeline — a fetch issued from a world lives inside a tick, so its completion applies at the barrier; a chunk visible mid-tick is a desync. Belongs to `Engine::assets` and the world driver rather than to `mono.cdn`. Both of those now exist — `world::Driver` runs the barrier and `assets` is at L8 — so what remains is the `Ticket` shape v0.2 built for the buses applied to a fetch, and `assets` gaining a dependency it does not have today. `CDN.md` §3
 - [_] mesh importing, baking and rendering pipeline
 - [_] texture importing, baking and rendering
 - [_] importing node pipeline (input nodes, processing nodes, export nodes)
@@ -188,7 +213,7 @@ Where the C++ test scene becomes a script. v0.4 rebuilt it on `scene`'s classes 
 - [_] put infront mirrors to see if it works with texture rendering
 - [_] scripts that create MeshPart and set mesh properties (surfaceappearance equivalent but as components).
 
-## v0.9
+### v0.9
 
 - [_] CurrentCamera
 - [_] basic character controls
@@ -196,15 +221,15 @@ Where the C++ test scene becomes a script. v0.4 rebuilt it on `scene`'s classes 
 - [_] basic camera and controls (zoom, pan, control camera via script)
 - [_] UserInputService and ContextActionService
 
-## v0.10
+### v0.10
 
 - [_] ...
 
-## v0.11
+### v0.11
 
 - [_] ...
 
-## v0.12
+### v0.12
 
 ---
 
