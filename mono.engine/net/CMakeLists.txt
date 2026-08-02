@@ -26,4 +26,5 @@ mono_add_library(net
 		Engine::core
 	VENDOR
 		Vendor::asio
+		Vendor::cryptopp
 )

@@ -162,6 +162,50 @@ namespace engine::ecs {
 		// There is no Count() of everything, and that is deliberate rather than
 		// missing. Count what you can name: `CountMatching<Ts...>()`.
 
+		// Creates an entity at an exact index and generation.
+		//
+		// **For a replica applying authoritative state, and nothing else.**
+		// Ordinary creation allocates the next free index; this takes the one
+		// it is given, because a replicated handle has to mean the same thing
+		// on both machines — an entity stored inside a component is only still
+		// the same entity if the directory agrees.
+		//
+		// `Save`/`Load` and `Apply` already do this internally for a whole
+		// world; a delta needs it for one row, and duplicating the mechanism
+		// outside the class would mean two places that know how the directory
+		// is laid out.
+		//
+		// **This can collide.** Two stores allocate the same indices, so a
+		// world that creates entities of its own *and* adopts them from
+		// somebody else will eventually be told to adopt one it already has.
+		// See `ecs/docs/TODO.md` on the index range that fixes it. A replica
+		// that only adopts is safe today, which is what a replica is.
+		//
+		// @param entity The exact handle to bring into being.
+		// @return `false` when that handle is already live here.
+		bool CreateAt(Entity entity);
+
+		// Visits every live entity, in index order.
+		//
+		// The primitive an interest filter and a debug view both want: "every
+		// entity", including ones carrying no components at all, which a query
+		// cannot express because a query is defined by the components it names.
+		//
+		// Not a `Count()` in disguise. It is a walk, and a caller that wants a
+		// number should still count what it can name — this exists for the
+		// callers that have to look at each one.
+		//
+		// Index order rather than creation order, and deterministic: two runs
+		// of the same world visit the same entities in the same sequence, which
+		// is what lets anything built on it be compared between runs.
+		//
+		// **Structural changes are deferred**, as they are inside `Each`: the
+		// directory is being walked, and creating an entity mid-walk would grow
+		// the very thing being iterated.
+		//
+		// @param body Called as `body(Entity)` for each live entity.
+		void EachEntity(const std::function<void(Entity)> &body);
+
 		// --- components ----------------------------------------------------
 
 		// Adds or replaces one component value on an entity.
@@ -610,6 +654,45 @@ namespace engine::ecs {
 		// @return The name, or an invalid Name when unnamed.
 		core::Name InstanceNameOf(Entity instance) const;
 
+		// --- components, named at runtime ------------------------------------
+		//
+		// The runtime counterpart of `Set<T>` and friends, for a layer that
+		// resolves component *names* rather than naming types. Replication
+		// reads a name off a wire and a game file will name components in text;
+		// neither can be a template parameter.
+		//
+		// The value is raw, so a caller writes and reads it through the
+		// component's own `TypeDescriptor` — which is what makes a type with a
+		// custom serialiser behave correctly instead of crossing as its object
+		// representation.
+
+		// Adds or replaces a component named at runtime.
+		//
+		// @param entity    The entity to write to.
+		// @param component The component's id, from `Components::Find`.
+		// @param value     A pointer to a value of that type, or null for a tag.
+		void SetComponent(Entity entity, ComponentId component, const void *value);
+
+		// Whether an entity carries a component named at runtime.
+		//
+		// @param entity    The entity to test.
+		// @param component The component's id.
+		// @return `true` when it is present.
+		bool HasComponent(Entity entity, ComponentId component) const;
+
+		// Reads a component named at runtime.
+		//
+		// @param entity    The entity to read.
+		// @param component The component's id.
+		// @return A pointer to the value, or null when absent.
+		const void *GetComponent(Entity entity, ComponentId component) const;
+
+		// Removes a component named at runtime.
+		//
+		// @param entity    The entity to write to.
+		// @param component The component's id.
+		void RemoveComponent(Entity entity, ComponentId component);
+
 		// --- change tracking -----------------------------------------------
 
 		// Starts recording which entities write to `T`.
@@ -665,6 +748,50 @@ namespace engine::ecs {
 				body(entity, *static_cast<T *>(value));
 			});
 		}
+
+		// Visits every *run* of adjacent changed rows, as arrays.
+		//
+		// The shape a replication delta wants. `EachChanged` hands over one row
+		// at a time, which is right for a signal and wrong for a delta: rows
+		// that changed together are usually adjacent — a system walks a table in
+		// order and writes as it goes — so a delta over runs is a memcpy per
+		// run instead of a copy per entity.
+		//
+		// A run never crosses a table, so the entities and values in one call
+		// are contiguous in storage and may be copied as blocks.
+		//
+		// @param body Called as `body(const Entity *, T *, size_t rows)` for
+		//             each run, with `rows` always non-zero.
+		template <class T, class Body> void EachChangedBatch(Body &&body) {
+			RequireOwningThread("EachChangedBatch");
+
+			const ComponentId id = Components::Of<T>();
+			const ComponentId terms[] = {id, Components::Of<DirtyBits>()};
+			const DeferScope defer(*this);
+
+			VisitChangedRuns(terms, id, [&body](const Entity *entities, void *values, size_t rows) {
+				body(entities, static_cast<T *>(values), rows);
+			});
+		}
+
+		// `EachChangedBatch`, for a component named at runtime.
+		//
+		// The shape replication needs. It resolves component *names* at startup
+		// — an id means something else in the process it is talking to — so it
+		// cannot name a type at compile time, and templating it on one would
+		// mean the set of replicated components had to be a template parameter
+		// list rather than a table read from a game file.
+		//
+		// The values are raw. A caller writes them through the component's own
+		// `TypeDescriptor`, which is what makes a type with a custom serialiser
+		// cross correctly rather than as its object representation.
+		//
+		// @param component The component to walk.
+		// @param body      Called as `body(const Entity *, void *, size_t rows)`
+		//                  for each run, with `rows` always non-zero.
+		void EachChangedRuns(
+			ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body
+		);
 
 		// --- change signals --------------------------------------------------
 
@@ -959,6 +1086,12 @@ namespace engine::ecs {
 			std::span<const ComponentId> terms,
 			ComponentId subject,
 			const std::function<void(Entity, void *)> &body
+		);
+
+		void VisitChangedRuns(
+			std::span<const ComponentId> terms,
+			ComponentId subject,
+			const std::function<void(const Entity *, void *, size_t)> &body
 		);
 
 		void BeginDefer();

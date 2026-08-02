@@ -14,6 +14,7 @@ add_subdirectory(ecs)       # L3 storage                   [shared]
 add_subdirectory(world)     # L4 universe, worlds, ticking  [shared]
 add_subdirectory(assets)    # L8 content addressing         [shared]
 add_subdirectory(net)       # L11 transport and authority   [shared]
+add_subdirectory(replication) # L12 what the wire means     [shared]
 
 # The presentation half of L12, configured only when something links it.
 #

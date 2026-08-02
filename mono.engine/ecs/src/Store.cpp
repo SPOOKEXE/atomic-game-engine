@@ -122,6 +122,41 @@ namespace engine::ecs {
 		return IsEntityAlive(*State, entity);
 	}
 
+	bool Store::CreateAt(Entity entity) {
+		RequireOwningThread("CreateAt");
+
+		const EntityId key = EntityId::Of(entity);
+		if (State->Directory.Alive(key.Index, key.Generation)) {
+			return false;
+		}
+
+		// The sender's index *and* generation. Matching on the index alone
+		// would let a recycled slot arrive wearing the old entity's identity.
+		State->Directory.Restore(key.Index, key.Generation, true);
+		State->Directory.FinishRestore(
+			std::max(State->Directory.Capacity(), static_cast<size_t>(key.Index) + 1)
+		);
+		return true;
+	}
+
+	void Store::EachEntity(const std::function<void(Entity)> &body) {
+		RequireOwningThread("EachEntity");
+
+		// Deferred, as `Each` is. The directory is being walked and a create
+		// inside the body would grow the very thing being iterated.
+		const DeferScope defer(*this);
+
+		// The directory rather than the tables, because an entity carrying no
+		// components at all is in no table and is still an entity.
+		const size_t capacity = State->Directory.Capacity();
+		for (uint32_t index = 0; index < capacity; index++) {
+			if (!State->Directory.Live(index)) {
+				continue;
+			}
+			body(EntityId::Pack(index, State->Directory.Generation(index)));
+		}
+	}
+
 	std::string_view Store::NameOf(Entity entity) const {
 		if (!Alive(entity)) {
 			return {};
@@ -144,24 +179,28 @@ namespace engine::ecs {
 
 	// --- components --------------------------------------------------------
 
+	// Qualified, every one of them. The public runtime-keyed methods below
+	// share these names deliberately — they are the same operation, one taking
+	// a state and one taking a `Store` — and unqualified lookup inside a member
+	// finds the member first and recurses.
 	void Store::SetRaw(Entity entity, ComponentId id, const void *value) {
-		SetComponent(*State, entity, id, value);
+		engine::ecs::SetComponent(*State, entity, id, value);
 	}
 
 	bool Store::HasRaw(Entity entity, ComponentId id) const {
-		return HasComponent(*State, entity, id);
+		return engine::ecs::HasComponent(*State, entity, id);
 	}
 
 	const void *Store::GetRaw(Entity entity, ComponentId id) const {
-		return GetComponent(*State, entity, id);
+		return engine::ecs::GetComponent(*State, entity, id);
 	}
 
 	void *Store::GetRawMutable(Entity entity, ComponentId id) {
-		return GetComponentMutable(*State, entity, id);
+		return engine::ecs::GetComponentMutable(*State, entity, id);
 	}
 
 	void Store::RemoveRaw(Entity entity, ComponentId id) {
-		RemoveComponent(*State, entity, id);
+		engine::ecs::RemoveComponent(*State, entity, id);
 	}
 
 	// --- resources ---------------------------------------------------------
@@ -429,6 +468,76 @@ namespace engine::ecs {
 				if (bits[row].Test(position)) {
 					body(slice.Entities[row], values + row * stride);
 				}
+			}
+		});
+	}
+
+	void Store::SetComponent(Entity entity, ComponentId component, const void *value) {
+		SetRaw(entity, component, value);
+	}
+
+	bool Store::HasComponent(Entity entity, ComponentId component) const {
+		return HasRaw(entity, component);
+	}
+
+	const void *Store::GetComponent(Entity entity, ComponentId component) const {
+		return GetRaw(entity, component);
+	}
+
+	void Store::RemoveComponent(Entity entity, ComponentId component) {
+		RemoveRaw(entity, component);
+	}
+
+	void Store::EachChangedRuns(
+		ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body
+	) {
+		RequireOwningThread("EachChangedRuns");
+		if (!component.IsValid()) {
+			return;
+		}
+
+		const ComponentId terms[] = {component, Components::Of<DirtyBits>()};
+		const DeferScope defer(*this);
+		VisitChangedRuns(terms, component, body);
+	}
+
+	void Store::VisitChangedRuns(
+		std::span<const ComponentId> terms,
+		ComponentId subject,
+		const std::function<void(const Entity *, void *, size_t)> &body
+	) {
+		VisitTables(terms, [&](const TableSlice &slice) {
+			auto *bits = static_cast<DirtyBits *>(slice.Columns[1]);
+			auto *values = static_cast<std::byte *>(slice.Columns[0]);
+			const size_t stride = Components::Describe(subject).Size;
+
+			// The subject's bit index in this table, resolved once per table.
+			size_t position = 0;
+			{
+				const EntityId key = EntityId::Of(slice.Entities[0]);
+				const EntityLocation *location = State->Directory.Locate(key.Index);
+				const std::span<const ComponentId> ids = State->Tables[location->Archetype].Set().Ids();
+				const auto at = std::lower_bound(ids.begin(), ids.end(), subject);
+				position = static_cast<size_t>(at - ids.begin());
+			}
+
+			// Runs of adjacent set bits. A system walks a table in order and
+			// writes as it goes, so the changed rows are usually one run or a
+			// few — which is what makes a delta a memcpy per run rather than a
+			// copy per entity.
+			size_t row = 0;
+			while (row < slice.Rows) {
+				if (!bits[row].Test(position)) {
+					row++;
+					continue;
+				}
+
+				const size_t start = row;
+				while (row < slice.Rows && bits[row].Test(position)) {
+					row++;
+				}
+
+				body(slice.Entities + start, values + start * stride, row - start);
 			}
 		});
 	}

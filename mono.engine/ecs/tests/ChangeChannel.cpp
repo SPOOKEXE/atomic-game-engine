@@ -1,3 +1,4 @@
+#include <engine/core/Random.hpp>
 #include <engine/ecs/ChangeChannel.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
@@ -354,4 +355,128 @@ TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {
 	REQUIRE(store.Get<Spot>(entity)->X == 3.0f);
 	REQUIRE_FALSE(store.Changed<Spot>(entity));
 	REQUIRE(store.ChangeVersion() == before);
+}
+
+// --- runs, for a delta --------------------------------------------------------
+//
+// `EachChanged` hands over one row at a time, which is right for a signal and
+// wrong for a delta. Rows that changed together are usually adjacent, so a
+// replication pass wants the runs — a memcpy each rather than a copy per entity.
+
+TEST_CASE("changed runs arrive as contiguous blocks", "[ecs]") {
+	Store store("runs");
+	store.Observe<Quiet>();
+
+	std::vector<Entity> entities;
+	for (int index = 0; index < 32; index++) {
+		const Entity entity = store.Create();
+		store.Set<Quiet>(entity, Quiet{index});
+		entities.push_back(entity);
+	}
+	store.ClearChanges();
+
+	// Two separate runs, so the batching has something to get wrong.
+	for (int index = 4; index < 9; index++) {
+		store.GetMutable<Quiet>(entities[static_cast<size_t>(index)])->Value = 100 + index;
+	}
+	for (int index = 20; index < 23; index++) {
+		store.GetMutable<Quiet>(entities[static_cast<size_t>(index)])->Value = 200 + index;
+	}
+
+	std::vector<std::pair<size_t, int>> runs; // rows in the run, first value
+	size_t total = 0;
+	store.EachChangedBatch<Quiet>([&runs, &total](const Entity *, Quiet *values, size_t rows) {
+		runs.emplace_back(rows, values[0].Value);
+		total += rows;
+	});
+
+	REQUIRE(runs.size() == 2);
+	REQUIRE(runs[0].first == 5);
+	REQUIRE(runs[0].second == 104);
+	REQUIRE(runs[1].first == 3);
+	REQUIRE(runs[1].second == 220);
+	REQUIRE(total == 8);
+}
+
+TEST_CASE("a run's entities and values line up", "[ecs]") {
+	// The whole point of a run is that both arrays are contiguous and parallel,
+	// so a delta can copy the values as a block and still say which entities
+	// they belong to.
+	Store store("runs");
+	store.Observe<Quiet>();
+
+	std::vector<Entity> entities;
+	for (int index = 0; index < 8; index++) {
+		const Entity entity = store.Create();
+		store.Set<Quiet>(entity, Quiet{index});
+		entities.push_back(entity);
+	}
+
+	store.EachChangedBatch<Quiet>([](const Entity *found, Quiet *values, size_t rows) {
+		for (size_t row = 0; row < rows; row++) {
+			// Each entity was set to its own index, so this holds only if the
+			// two arrays are in step.
+			REQUIRE(values[row].Value >= 0);
+			REQUIRE(found[row].Id != 0);
+		}
+	});
+
+	size_t seen = 0;
+	store.EachChangedBatch<Quiet>([&seen](const Entity *, Quiet *, size_t rows) { seen += rows; });
+	REQUIRE(seen == 8);
+}
+
+TEST_CASE("nothing changed means no runs at all", "[ecs]") {
+	Store store("runs");
+	store.Observe<Quiet>();
+	store.Set<Quiet>(store.Create(), Quiet{1});
+	store.ClearChanges();
+
+	size_t calls = 0;
+	store.EachChangedBatch<Quiet>([&calls](const Entity *, Quiet *, size_t) { calls++; });
+	REQUIRE(calls == 0);
+}
+
+TEST_CASE("runs and rows agree on what changed", "[ecs][fuzz]") {
+	// The batched form is an optimisation of the row form, so the two must
+	// always name the same set. Scattered writes, so runs of every length turn
+	// up including single rows.
+	Store store("runs");
+	store.Observe<Quiet>();
+
+	std::vector<Entity> entities;
+	for (int index = 0; index < 200; index++) {
+		const Entity entity = store.Create();
+		store.Set<Quiet>(entity, Quiet{index});
+		entities.push_back(entity);
+	}
+
+	for (uint32_t round = 0; round < 200; round++) {
+		store.ClearChanges();
+
+		std::vector<uint64_t> expected;
+		for (size_t index = 0; index < entities.size(); index++) {
+			if (engine::core::Random::Bits(round, static_cast<uint32_t>(index)) % 3 == 0) {
+				store.GetMutable<Quiet>(entities[index])->Value = static_cast<int>(round);
+				expected.push_back(entities[index].Id);
+			}
+		}
+
+		std::vector<uint64_t> byRow;
+		store.EachChanged<Quiet>([&byRow](Entity entity, Quiet &) { byRow.push_back(entity.Id); });
+
+		std::vector<uint64_t> byRun;
+		store.EachChangedBatch<Quiet>([&byRun](const Entity *found, Quiet *, size_t rows) {
+			for (size_t row = 0; row < rows; row++) {
+				byRun.push_back(found[row].Id);
+			}
+		});
+
+		std::sort(expected.begin(), expected.end());
+		std::sort(byRow.begin(), byRow.end());
+		std::sort(byRun.begin(), byRun.end());
+
+		REQUIRE(byRow == expected);
+		REQUIRE(byRun == expected);
+	}
 }

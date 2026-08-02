@@ -1,62 +1,168 @@
 {
   "_comment": [
-    "The checked-in expectation of repo_layout.md §8: what each module and each",
+    "The checked-in expectation of repo_layout.md \u00a78: what each module and each",
     "program actually links. check_target_graph.py compares the real CMake",
     "target graph against this.",
     "",
     "A change here is a change to the architecture, and reviewing the diff to",
     "this file is reviewing that change. If a build fails against it, the",
-    "question is which of the two is wrong — not which is easier to edit.",
+    "question is which of the two is wrong \u2014 not which is easier to edit.",
     "",
     "`links` is the transitive closure of first-party modules, sorted.",
     "",
     "`requires` names a build option the entry depends on. With it, the check",
-    "can tell 'this module was deleted' from 'this preset does not build it' —",
+    "can tell 'this module was deleted' from 'this preset does not build it' \u2014",
     "an entry whose option is ON must exist, and one whose option is OFF must",
     "not. Without it, one of those two would have to go unnoticed.",
     "",
     "The server program's row is the load-bearing one: no render, text, ui,",
-    "input, audio or vfx. Not 'does not start one' — does not contain one. The",
+    "input, audio or vfx. Not 'does not start one' \u2014 does not contain one. The",
     "staged server/ directory having no shaders/ folder is the same fact in a",
     "form anyone can see without a graph query.",
     "",
-    "The cdn program's row is the other one worth reading: repo_layout.md §8",
+    "The cdn program's row is the other one worth reading: repo_layout.md \u00a78",
     "gives it core, parallel and assets and stops. It links core alone today",
-    "because that is all it calls — a short row here is what makes",
+    "because that is all it calls \u2014 a short row here is what makes",
     "`cmake --preset cdn` configure on a container with no Vulkan SDK, no SDL",
     "and no shader compiler."
   ],
-
   "modules": {
-    "core":     { "tier": "shared", "links": [] },
-    "parallel": { "tier": "shared", "links": ["core"] },
-    "ecs":      { "tier": "shared", "links": ["core", "parallel"] },
-    "world":    { "tier": "shared", "links": ["core", "ecs", "parallel"] },
-    "assets":   { "tier": "shared", "links": ["core"] },
-    "net":      { "tier": "shared", "links": ["core"] },
-
-    "input":    { "tier": "client", "links": ["core"], "requires": "MONO_BUILD_CLIENT" },
-    "render":   { "tier": "client", "links": ["core"], "requires": "MONO_BUILD_CLIENT" },
-
-    "client":   { "tier": "client", "links": ["core", "ecs", "input", "parallel", "render", "world"],
-                  "requires": "MONO_BUILD_CLIENT" },
-    "server":   { "tier": "server", "links": ["core", "ecs", "parallel", "world"],
-                  "requires": "MONO_BUILD_SERVER" },
-    "cdn":      { "tier": "shared", "links": ["assets", "core", "parallel"],
-                  "requires": "MONO_BUILD_CDN" },
-
-    "testrunner": { "tier": "shared", "links": ["core"] },
-    "docgen":     { "tier": "shared", "links": ["core"] }
+    "core": {
+      "tier": "shared",
+      "links": []
+    },
+    "parallel": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "ecs": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "parallel"
+      ]
+    },
+    "world": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel"
+      ]
+    },
+    "assets": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "net": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "input": {
+      "tier": "client",
+      "links": [
+        "core"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "render": {
+      "tier": "client",
+      "links": [
+        "core"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "client": {
+      "tier": "client",
+      "links": [
+        "core",
+        "ecs",
+        "input",
+        "parallel",
+        "render",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "server": {
+      "tier": "server",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "world"
+      ],
+      "requires": "MONO_BUILD_SERVER"
+    },
+    "cdn": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "core",
+        "parallel"
+      ],
+      "requires": "MONO_BUILD_CDN"
+    },
+    "testrunner": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "docgen": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "replication": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "net",
+        "parallel",
+        "world"
+      ]
+    }
   },
-
   "programs": {
-    "client": { "tier": "client", "links": ["core", "ecs", "input", "parallel", "render", "world"],
-                "requires": "MONO_BUILD_CLIENT" },
-
-    "server": { "tier": "server", "links": ["core", "ecs", "parallel", "world"],
-                "requires": "MONO_BUILD_SERVER" },
-
-    "cdn": { "tier": "shared", "links": ["assets", "core", "parallel"],
-             "requires": "MONO_BUILD_CDN" }
+    "client": {
+      "tier": "client",
+      "links": [
+        "core",
+        "ecs",
+        "input",
+        "parallel",
+        "render",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "server": {
+      "tier": "server",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "world"
+      ],
+      "requires": "MONO_BUILD_SERVER"
+    },
+    "cdn": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "core",
+        "parallel"
+      ],
+      "requires": "MONO_BUILD_CDN"
+    }
   }
 }
