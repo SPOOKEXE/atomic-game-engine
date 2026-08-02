@@ -88,6 +88,45 @@ namespace iteration_bench {
 
 using namespace iteration_bench;
 
+// --- the floor -----------------------------------------------------------------
+//
+// Two flat arrays and the same arithmetic, with no query, no table walk and no
+// per-row dispatch. **Nothing here can be made faster by changing the ECS**, so
+// the gap between this and `Each` at the same size is what the ECS costs, and
+// this number is what the machine costs.
+//
+// Without it "500k takes 200 microseconds" is unreadable: it could be a
+// hardware limit or it could be ten times more overhead than work, and those
+// want completely different responses.
+
+BENCH("control · raw arrays, 500k", 2) {
+	static std::vector<Position> positions(500'000);
+	static std::vector<Velocity> velocities(500'000, Velocity{1.0f, 2.0f, 3.0f});
+
+	for (int pass = 0; pass < 2; pass++) {
+		for (size_t index = 0; index < positions.size(); index++) {
+			positions[index].X += velocities[index].X;
+			positions[index].Y += velocities[index].Y;
+			positions[index].Z += velocities[index].Z;
+		}
+		Consume(positions[0].X);
+	}
+}
+
+BENCH("control · raw arrays, 100k", 10) {
+	static std::vector<Position> positions(100'000);
+	static std::vector<Velocity> velocities(100'000, Velocity{1.0f, 2.0f, 3.0f});
+
+	for (int pass = 0; pass < 10; pass++) {
+		for (size_t index = 0; index < positions.size(); index++) {
+			positions[index].X += velocities[index].X;
+			positions[index].Y += velocities[index].Y;
+			positions[index].Z += velocities[index].Z;
+		}
+		Consume(positions[0].X);
+	}
+}
+
 // --- the inner loop, at three sizes ------------------------------------------
 
 BENCH("Each · 10k entities", 100) {

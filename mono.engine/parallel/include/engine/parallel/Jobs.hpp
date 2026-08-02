@@ -18,10 +18,6 @@
 
 namespace engine::parallel {
 
-	// Dispatches one blocking parallel-for batch across the caller and a worker pool.
-	//
-	// The pool is process-wide and admits only one batch at a time. There are no
-	// handles: every range finishes before For returns.
 	// What one dispatch of `Jobs::For` cost.
 	//
 	// **Busy time is not wall time and the difference is the point.** Eight
@@ -45,6 +41,11 @@ namespace engine::parallel {
 		uint32_t Participants = 0;
 	};
 
+	// Dispatches one blocking parallel-for batch across the caller and a worker
+	// pool.
+	//
+	// The pool is process-wide and admits only one batch at a time. There are no
+	// handles: every range finishes before For returns.
 	class Jobs {
 	  public:
 		// Starts the process-wide worker pool if it is not already running.
