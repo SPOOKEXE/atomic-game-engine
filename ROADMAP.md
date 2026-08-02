@@ -66,16 +66,17 @@ Deferred:
 
 ## v0.2
 
-- [_] cli benchmarking (like smart tests but we benchmark all systems in the code instead to find bottlenecks). utilises tracy.
 - [_] hytale ECS setup. Universe = overarching simulation, worlds = each subarea to simulate. Multi-world with parallel processing, lock mechanism for global stores like player data and such in Universe, asynchronous and synchronous methods to not block scripts. plan ahead now.
+- [_] World Entities
+- [_] Universe Data (shared data in Universe)
 
 ## v0.3
 
 - [_] Basic Components: Transform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash
 - [_] Part
 - [_] Camera
-- [_] World Entities
-- [_] Universe Data (shared data in Universe)
+- [_] basic physics collider
+- [_] basic physics pipeline (box, cylinder and sphere colliders, optimised spatial query, etc)
 
 ## v0.4
 
@@ -109,8 +110,6 @@ Deferred:
 ## v0.8
 
 - [_] CurrentCamera
-- [_] basic physics collider
-- [_] basic physics
 - [_] basic character controls
 - [_] basic controls (enable/disable/shift-lock)
 - [_] basic camera and controls (zoom, pan, control camera via script)
