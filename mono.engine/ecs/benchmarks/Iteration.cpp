@@ -174,6 +174,18 @@ BENCH("EachParallel · 10k entities", 100) {
 	}
 }
 
+BENCH("EachParallel · 100k entities", 10) {
+	// Between the two above, so the pair brackets the crossover rather than
+	// merely straddling it. Waking a pool costs the same whatever the work is,
+	// so the question this answers is how much work repays it.
+	Store &store = WorldOf(100'000, false);
+	for (int pass = 0; pass < 10; pass++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) { position.X += velocity.X; }
+		);
+	}
+}
+
 BENCH("EachParallel · 500k entities", 2) {
 	Store &store = WorldOf(500'000, false);
 	for (int pass = 0; pass < 2; pass++) {

@@ -191,7 +191,8 @@ namespace engine::parallel {
 		return static_cast<unsigned>(pool.Workers.size());
 	}
 
-	void Jobs::For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body) {
+	void
+	Jobs::For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body, size_t minimum) {
 		if (count == 0) {
 			return;
 		}
@@ -209,7 +210,14 @@ namespace engine::parallel {
 			std::lock_guard lock(pool.Guard);
 			workers = pool.Workers.size();
 		}
-		if (workers == 0 || count <= grain) {
+		// `MINIMUM_GRAINS` rather than one grain. A span just over the grain
+		// dispatched two chunks and paid the full cost of waking the pool to do
+		// it — which measured five times slower than simply running it here.
+		//
+		// Derived from the grain unless the caller said otherwise, because only
+		// the caller knows whether one index is a row or a whole world.
+		const size_t floor = minimum > 0 ? minimum : grain * Jobs::MINIMUM_GRAINS;
+		if (workers == 0 || count < floor) {
 			const uint64_t started = core::Clock::Nanoseconds();
 			body(0, count);
 			LastTiming = Inline(core::Clock::Nanoseconds() - started);

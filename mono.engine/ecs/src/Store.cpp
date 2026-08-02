@@ -12,23 +12,41 @@
 namespace engine::ecs {
 
 	namespace {
-		// The key a query plan is cached under.
+		// The key a query plan is cached under: the sorted term ids as raw
+		// bytes, so two systems asking for the same components in different
+		// orders share one plan.
 		//
-		// The sorted term ids as raw bytes. A string rather than a vector so
-		// the map needs no custom hash, and sorted so that two systems asking
-		// for the same components in different orders share one plan.
-		std::string PlanKey(std::span<const ComponentId> terms) {
-			std::vector<uint32_t> sorted;
-			sorted.reserve(terms.size());
-			for (const ComponentId term : terms) {
-				sorted.push_back(term.Index);
-			}
-			std::sort(sorted.begin(), sorted.end());
+		// **Built on the caller's stack, not on the heap.** This runs once per
+		// query per system per tick — the hottest non-row path in the engine —
+		// and the previous shape allocated a vector *and* a string on every
+		// call, to look up a cache entry that was almost always already there.
+		// A stack buffer plus a transparent hash makes the hit path allocate
+		// nothing; only an insert has to own its bytes.
+		//
+		// Nesting-safe by construction: the storage is a local, so a system
+		// iterating inside an iteration gets its own.
+		struct PlanKey {
+			uint32_t Inline[INLINE_QUERY_TERMS];
+			std::vector<uint32_t> Overflow;
+			std::string_view Bytes;
 
-			return std::string(
-				reinterpret_cast<const char *>(sorted.data()), sorted.size() * sizeof(uint32_t)
-			);
-		}
+			explicit PlanKey(std::span<const ComponentId> terms) {
+				uint32_t *sorted = Inline;
+				if (terms.size() > INLINE_QUERY_TERMS) {
+					// Absurd, but it must work rather than corrupt the stack.
+					Overflow.resize(terms.size());
+					sorted = Overflow.data();
+				}
+
+				for (size_t index = 0; index < terms.size(); index++) {
+					sorted[index] = terms[index].Index;
+				}
+				std::sort(sorted, sorted + terms.size());
+
+				Bytes =
+					std::string_view(reinterpret_cast<const char *>(sorted), terms.size() * sizeof(uint32_t));
+			}
+		};
 	}
 
 	Store::Store(std::string_view name)
@@ -161,7 +179,7 @@ namespace engine::ecs {
 	}
 
 	void Store::RemoveResourceRaw(ComponentId id) {
-		State->Resources.erase(id.Index);
+		State->Resources.Erase(id.Index);
 	}
 
 	// --- time --------------------------------------------------------------
@@ -193,7 +211,15 @@ namespace engine::ecs {
 	void Store::VisitTables(
 		std::span<const ComponentId> terms, const std::function<void(const TableSlice &)> &body
 	) {
-		QueryPlan &plan = State->Plans[PlanKey(terms)];
+		const PlanKey key(terms);
+
+		// Found without allocating; inserted only the first time, when the key
+		// finally has to own its bytes.
+		auto found = State->Plans.find(key.Bytes);
+		if (found == State->Plans.end()) {
+			found = State->Plans.emplace(std::string(key.Bytes), QueryPlan{}).first;
+		}
+		QueryPlan &plan = found->second;
 
 		// Topped up rather than rebuilt. Tables are only ever added, so
 		// everything matched before still matches and only the new ones need
@@ -223,7 +249,16 @@ namespace engine::ecs {
 			plan.SeenTables = State->Tables.size();
 		}
 
-		std::vector<void *> columns(terms.size(), nullptr);
+		// On the stack for the same reason the key is: a heap allocation per
+		// query per tick, to hold at most a handful of pointers.
+		void *inlineColumns[INLINE_QUERY_TERMS];
+		std::vector<void *> overflowColumns;
+
+		void **columns = inlineColumns;
+		if (terms.size() > INLINE_QUERY_TERMS) {
+			overflowColumns.resize(terms.size());
+			columns = overflowColumns.data();
+		}
 
 		for (const QueryPlan::Match &match : plan.Matches) {
 			Archetype &table = State->Tables[match.Table];
@@ -238,7 +273,7 @@ namespace engine::ecs {
 			TableSlice slice;
 			slice.Rows = table.Rows();
 			slice.Entities = table.Entities().data();
-			slice.Columns = columns.data();
+			slice.Columns = columns;
 
 			body(slice);
 		}

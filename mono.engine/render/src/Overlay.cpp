@@ -40,7 +40,29 @@ namespace engine::render {
 			return;
 		}
 
-		std::fill(Pixels.begin(), Pixels.end(), static_cast<uint8_t>(0));
+		// Only what was painted, not the whole buffer.
+		//
+		// **The rest is already zero, and that is an invariant rather than a
+		// hope.** `Resize` zeroes everything, every writer goes through
+		// `MarkRegion` (including `WriteOpaqueRun`, whose contract requires the
+		// caller to mark), and this clears exactly what was marked before
+		// resetting it. So a pixel outside the dirty rectangle has not been
+		// written since the last time it was zeroed.
+		//
+		// The old shape zeroed the entire image. On a 4K display that is
+		// thirty-three megabytes of memory traffic per frame to erase two
+		// panels that cover a fraction of it — and it is why the panels
+		// measured fifteen times slower at 4K than at 1080p for four times the
+		// pixels. The cost now scales with what is drawn rather than with the
+		// size of the display it is drawn on.
+		const size_t stride = static_cast<size_t>(Width) * BYTES_PER_PIXEL;
+		const size_t run = static_cast<size_t>(DirtyRight - DirtyLeft) * BYTES_PER_PIXEL;
+
+		for (int row = DirtyTop; row < DirtyBottom; row++) {
+			uint8_t *start = Pixels.data() + static_cast<size_t>(row) * stride +
+							 static_cast<size_t>(DirtyLeft) * BYTES_PER_PIXEL;
+			std::fill(start, start + run, static_cast<uint8_t>(0));
+		}
 
 		// The uploaded region is left exactly as it was. It records what the GPU
 		// is *showing*, and clearing this image does not change that — the

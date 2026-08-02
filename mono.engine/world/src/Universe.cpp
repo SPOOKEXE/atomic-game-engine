@@ -573,12 +573,21 @@ namespace engine::world {
 			// Grain of one: a world is the unit of work, and there is no
 			// smaller division of it. Whichever worker claims a world runs it,
 			// which is why the store rebinds every tick.
-			parallel::Jobs::For(order.size(), 1, [this, &order](size_t begin, size_t end) {
-				for (size_t at = begin; at < end; at++) {
-					const size_t index = order[at];
-					ActiveList[index]->Tick(OwedList[index]);
-				}
-			});
+			// Two, explicitly: a world tick is tens of microseconds, so the
+			// pool repays its wake cost at the second one. The grain-derived
+			// default assumes an index is a row and would refuse to dispatch
+			// below eight worlds — measured, that costs 1.9x at four.
+			parallel::Jobs::For(
+				order.size(),
+				1,
+				[this, &order](size_t begin, size_t end) {
+					for (size_t at = begin; at < end; at++) {
+						const size_t index = order[at];
+						ActiveList[index]->Tick(OwedList[index]);
+					}
+				},
+				2
+			);
 
 			// **The workers' time, reported rather than timed from here.**
 			// Every span a world opened ran on a worker thread, and the frame

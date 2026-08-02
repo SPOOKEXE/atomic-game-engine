@@ -71,9 +71,9 @@ namespace engine::ecs {
 		// job both do. Sorted by text rather than by id, because ids are
 		// assigned in interning order and that differs after a restore.
 		std::vector<uint32_t> resourceKeys;
-		resourceKeys.reserve(state.Resources.size());
-		for (const auto &entry : state.Resources) {
-			resourceKeys.push_back(entry.first);
+		resourceKeys.reserve(state.Resources.Size());
+		for (const auto &entry : state.Resources.Entries()) {
+			resourceKeys.push_back(entry.Index);
 		}
 		std::sort(resourceKeys.begin(), resourceKeys.end(), [](uint32_t left, uint32_t right) {
 			return Components::Describe(ComponentId{left}).Name.Text() <
@@ -82,7 +82,7 @@ namespace engine::ecs {
 
 		body.WriteUInt32(static_cast<uint32_t>(resourceKeys.size()));
 		for (const uint32_t index : resourceKeys) {
-			const Column &column = state.Resources.at(index);
+			const Column &column = *state.Resources.Find(index);
 			const ComponentId id{index};
 			const TypeDescriptor &descriptor = Components::Describe(id);
 			if (descriptor.Size > 0 && !descriptor.Serialisable) {
@@ -251,7 +251,7 @@ namespace engine::ecs {
 				ClearWorld(state);
 				return false;
 			}
-			state.Resources.insert_or_assign(id.Index, std::move(column));
+			state.Resources.Assign(id, std::move(column));
 		}
 
 		const uint32_t nameCount = reader.ReadUInt32();
@@ -374,8 +374,8 @@ namespace engine::ecs {
 		}
 
 		// --- resources and the clock ---
-		for (const auto &[index, column] : scratch.Resources) {
-			SetResourceValue(state, ComponentId{index}, column.At(0));
+		for (const auto &entry : scratch.Resources.Entries()) {
+			SetResourceValue(state, ComponentId{entry.Index}, entry.Storage.At(0));
 		}
 
 		return true;

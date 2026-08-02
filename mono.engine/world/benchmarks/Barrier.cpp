@@ -175,6 +175,23 @@ BENCH("Tick · 2 worlds of 100k, serial", 20) {
 // the same total entity count in different numbers of worlds, so the difference
 // between them is the overhead and nothing else.
 
+BENCH("Tick · 4 worlds of 100k, parallel", 20) {
+	// A few large worlds is half the stated target scale, and it is the case a
+	// blanket "not worth dispatching below N" rule would quietly ruin: four
+	// world ticks are four expensive things, not four cheap ones.
+	Universe &universe = UniverseOf(4, 100'000, ExecutionMode::WorldParallel);
+	for (int pass = 0; pass < 20; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 4 worlds of 100k, serial", 20) {
+	Universe &universe = UniverseOf(4, 100'000, ExecutionMode::WorldSerial);
+	for (int pass = 0; pass < 20; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
 BENCH("Tick · 10 worlds of 2k", 50) {
 	Universe &universe = UniverseOf(10, 2'000, ExecutionMode::WorldParallel);
 	for (int pass = 0; pass < 50; pass++) {
@@ -218,6 +235,28 @@ BENCH("Tick · 50 quiet worlds, serial", 200) {
 	Universe &universe = UniverseOf(50, 0, ExecutionMode::WorldSerial);
 	for (int pass = 0; pass < 200; pass++) {
 		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 200 suspended worlds, serial", 50) {
+	// The barrier on its own. A suspended world is still walked by the router
+	// and still given an inbox and a budget; what it does not do is tick.
+	//
+	// Against the case below, the difference is `World::Tick` and the
+	// difference alone — which is the only way to tell "the barrier costs too
+	// much per world" from "an empty tick costs too much", and those want
+	// opposite fixes.
+	static Universe *suspended = nullptr;
+	if (suspended == nullptr) {
+		// Its own universe, not the one the active case caches: suspending that
+		// one would silently change what the benchmark below measures.
+		suspended = &UniverseOf(201, 0, ExecutionMode::WorldSerial);
+		for (const WorldId id : suspended->Worlds()) {
+			suspended->SetState(id, engine::world::WorldState::Suspended);
+		}
+	}
+	for (int pass = 0; pass < 50; pass++) {
+		suspended->Tick(1.0f / 60.0f);
 	}
 }
 

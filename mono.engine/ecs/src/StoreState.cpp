@@ -285,12 +285,7 @@ namespace engine::ecs {
 			return;
 		}
 
-		auto found = state.Resources.find(id.Index);
-		if (found == state.Resources.end()) {
-			found = state.Resources.emplace(id.Index, Column(id)).first;
-		}
-
-		Column &column = found->second;
+		Column &column = state.Resources.Reach(id);
 		if (column.Empty()) {
 			column.PushCopy(value);
 		} else {
@@ -299,12 +294,12 @@ namespace engine::ecs {
 	}
 
 	const void *GetResourceValue(const StoreState &state, ComponentId id) {
-		const auto found = state.Resources.find(id.Index);
-		if (found == state.Resources.end() || found->second.Empty()) {
+		const Column *found = state.Resources.Find(id.Index);
+		if (found == nullptr || found->Empty()) {
 			return nullptr;
 		}
 
-		const Column &column = found->second;
+		const Column &column = *found;
 		return column.Describe().Size == 0 ? static_cast<const void *>(&column) : column.At(0);
 	}
 
@@ -314,7 +309,7 @@ namespace engine::ecs {
 		state.Directory.Clear();
 		state.NamesByIndex.clear();
 		state.EntitiesByName.clear();
-		state.Resources.clear();
+		state.Resources.Clear();
 		state.Plans.clear();
 		state.Commands.clear();
 		state.Watched.clear();

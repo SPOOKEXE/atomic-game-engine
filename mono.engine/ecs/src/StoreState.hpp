@@ -21,12 +21,14 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/SparseSet.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -95,6 +97,147 @@ namespace engine::ecs {
 	//
 	// Built once per term list and kept, so a system may iterate every tick
 	// without rebuilding it. `D00003` is the deferred item this closes.
+	// The most terms a query keys without touching the heap.
+	//
+	// A query is a handful of components; sixteen is far past anything real and
+	// still only sixty-four bytes of stack. Past it the lookup falls back to a
+	// heap buffer rather than refusing, because an absurd query should be slow
+	// and not broken.
+	inline constexpr size_t INLINE_QUERY_TERMS = 16;
+
+	// Hashes a plan key without building a `std::string` to hash.
+	//
+	// **This is the whole reason the map is transparent.** `VisitTables` runs
+	// once per query per system per tick, and keying it by an owning string
+	// meant an allocation on every one of those calls just to find a cache
+	// entry that was already there. The bytes are on the caller's stack; only
+	// an insert needs to own them.
+	struct PlanKeyHash {
+		using is_transparent = void;
+
+		size_t operator()(std::string_view key) const {
+			return std::hash<std::string_view>{}(key);
+		}
+		size_t operator()(const std::string &key) const {
+			return std::hash<std::string_view>{}(key);
+		}
+	};
+
+	// A world's resources, keyed by component id.
+	//
+	// **A sorted vector rather than a hash map.** A world holds a handful of
+	// resources and reads several of them on every tick and every barrier —
+	// the clock, the outbox, the inbox, the budget — so this is one of the
+	// hottest lookups in the engine. Hashing a four-byte key to find one of
+	// five entries costs more than a binary search over five, and a node-based
+	// map also charges a world one allocation per resource where this charges
+	// one buffer for all of them. At hundreds of small worlds both halves of
+	// that matter.
+	//
+	// Kept sorted by id so the search is a `lower_bound` and so iteration is in
+	// a defined order — which a snapshot needs, though it sorts by name rather
+	// than by id for a reason of its own.
+	//
+	// @since v0.2
+	class ResourceTable {
+	  public:
+		// One resource: the component it is, and the single row holding it.
+		struct Entry {
+			uint32_t Index = 0;
+			Column Storage;
+		};
+
+		// The column for `id`, or null when the resource is unset.
+		//
+		// @param id The resource type.
+		// @return The column, or `nullptr`.
+		Column *Find(uint32_t id) {
+			const auto at = Lower(id);
+			return (at != Entries_.end() && at->Index == id) ? &at->Storage : nullptr;
+		}
+
+		// The column for `id`, or null when the resource is unset.
+		//
+		// @param id The resource type.
+		// @return The column, or `nullptr`.
+		const Column *Find(uint32_t id) const {
+			const auto at = Lower(id);
+			return (at != Entries_.end() && at->Index == id) ? &at->Storage : nullptr;
+		}
+
+		// The column for `id`, creating an empty one when it is unset.
+		//
+		// @param id The resource type.
+		// @return The column, never null.
+		Column &Reach(ComponentId id) {
+			const auto at = Lower(id.Index);
+			if (at != Entries_.end() && at->Index == id.Index) {
+				return at->Storage;
+			}
+			return Entries_.insert(at, Entry{id.Index, Column(id)})->Storage;
+		}
+
+		// Replaces the column for `id`, inserting it when unset.
+		//
+		// @param id     The resource type.
+		// @param column The column to take.
+		void Assign(ComponentId id, Column &&column) {
+			const auto at = Lower(id.Index);
+			if (at != Entries_.end() && at->Index == id.Index) {
+				at->Storage = std::move(column);
+				return;
+			}
+			Entries_.insert(at, Entry{id.Index, std::move(column)});
+		}
+
+		// Removes a resource.
+		//
+		// @param id The resource type.
+		void Erase(uint32_t id) {
+			const auto at = Lower(id);
+			if (at != Entries_.end() && at->Index == id) {
+				Entries_.erase(at);
+			}
+		}
+
+		// Removes every resource, keeping the buffer.
+		void Clear() {
+			Entries_.clear();
+		}
+
+		// Every resource, in id order.
+		//
+		// @return The entries.
+		const std::vector<Entry> &Entries() const {
+			return Entries_;
+		}
+
+		// The number of resources set.
+		//
+		// @return The count.
+		size_t Size() const {
+			return Entries_.size();
+		}
+
+	  private:
+		std::vector<Entry>::iterator Lower(uint32_t id) {
+			return std::lower_bound(
+				Entries_.begin(), Entries_.end(), id, [](const Entry &entry, uint32_t key) {
+					return entry.Index < key;
+				}
+			);
+		}
+		std::vector<Entry>::const_iterator Lower(uint32_t id) const {
+			return std::lower_bound(
+				Entries_.begin(), Entries_.end(), id, [](const Entry &entry, uint32_t key) {
+					return entry.Index < key;
+				}
+			);
+		}
+
+		std::vector<Entry> Entries_;
+	};
+
 	struct QueryPlan {
 		// The terms, sorted, which is what the cache is keyed by.
 		std::vector<ComponentId> Terms;
@@ -142,10 +285,10 @@ namespace engine::ecs {
 		// That is what makes a resource structurally invisible to a query —
 		// with a hidden entity it was invisible only because somebody
 		// remembered to disable it.
-		std::unordered_map<uint32_t, Column> Resources;
+		ResourceTable Resources;
 
 		// Query plans, keyed by the sorted term list.
-		std::unordered_map<std::string, QueryPlan> Plans;
+		std::unordered_map<std::string, QueryPlan, PlanKeyHash, std::equal_to<>> Plans;
 
 		// Deferred structural changes, and whether we are collecting them.
 		std::vector<Command> Commands;

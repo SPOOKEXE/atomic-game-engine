@@ -106,7 +106,14 @@ namespace engine::parallel {
 		//              captures must permit concurrent access.
 		// @tick
 		// @threadsafe
-		static void For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body);
+		// @param minimum Indices below which the span runs inline whatever the
+		//                grain says. Zero derives it from the grain, which
+		//                assumes one index is cheap. A caller whose unit of
+		//                work is already expensive — a world tick, a chunk
+		//                compression — passes its own and gets dispatched at
+		//                the count where that actually pays.
+		static void
+		For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body, size_t minimum = 0);
 
 		// What the calling thread's most recent `For` cost.
 		//
@@ -130,5 +137,33 @@ namespace engine::parallel {
 		// Measured with a three-multiply-add ECS integration step. Expensive work
 		// should pass a smaller grain selected from its own release-build profile.
 		static constexpr size_t DEFAULT_GRAIN = 4096;
+
+		// How many grains of work a span must hold before the pool is woken.
+		//
+		// **Waking the pool costs the same whatever the work is.** Measured
+		// against the ECS integration step: a ten-thousand-row span costs about
+		// four microseconds serially and about twenty-two through the pool —
+		// five times worse — while a hundred thousand rows costs forty
+		// serially and twenty-eight through the pool. The fixed cost of the
+		// handover is roughly twenty microseconds, and a span that cannot repay
+		// it should never pay it.
+		//
+		// Expressed in grains rather than as a row count so that the existing
+		// knob covers it: `grain` already means "how much work is worth handing
+		// over", so a caller with an expensive body passes a smaller grain and
+		// gets a proportionally smaller threshold. A cheap body at the default
+		// grain parallelises above about thirty-two thousand indices, which is
+		// where the measurement puts the crossover.
+		//
+		// Eight also has a reason of its own: dispatching two or three chunks
+		// leaves most of the pool idle and pays the whole wake cost anyway.
+		//
+		// **It is a default and not a law.** It infers the cost of one index
+		// from the grain, which is right for rows and wrong for anything whose
+		// unit of work is already large — a world tick is one index and tens of
+		// microseconds. Those callers pass `minimum` and say so; measured, four
+		// world ticks are 1.9x faster dispatched than run inline, and this rule
+		// alone would have refused to dispatch them.
+		static constexpr size_t MINIMUM_GRAINS = 8;
 	};
 }
