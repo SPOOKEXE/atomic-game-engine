@@ -82,13 +82,15 @@ Planned in [v02v03.md](v02v03.md). Userland gets Roblox-style instancing, tweake
 - [_] asynchronous and synchronous methods to not block scripts — a `Ticket` inside a tick, `Await` only outside one
 - [_] `parallel/ipc` — `Channel`, framed bytes, local implementation, the router never learning which it has
 - [_] `parallel/process` — `WorldHost` child process, supervisor, heartbeat, restart from snapshot. The argument is crash isolation, not speed
-- [_] server and client move onto `Universe`; the world a client renders is local
+- [_] multi-world rendering — a `ViewChannel` per world view: three slots and an atomic publish index rather than a lock, so a slow compositor drops frames instead of throttling a simulation. Carries a draw list rather than pixels, because a host that publishes pixels needs a GPU and stops being `server` tier, and SDL3's GPU API exposes no shared texture handles. Local and cross-process are the same call site with a different region
+- [_] server and client move onto `Universe`; the client composites N views, and a local world is a view whose producer is in this process
 
 ## v0.3
 
 Planned in [v02v03.md](v02v03.md).
 
 - [_] `mono.engine/scene` at L7 — Basic Components: Transform, PreviousTransform, Bounds, Visual, Collider, RigidBody, Surface, Motion, Camera, QuickHash. Deletes the duplicated component definitions in `mono.client/Demo.hpp` and `mono.server/Simulation.cpp`; the C++ test scene itself stays until v0.4/v0.5 give it a game file to load
+- [_] `scene::DrawInstance` — the draw-list payload v0.2's `ViewChannel` carries, at `shared` tier because a `server`-tier host writes it and a `client`-tier consumer reads it. Replaces `render::Instance` as the thing a world publishes; `mono.server` gains `scene` and `world` in its link row
 - [_] `core/types`: AABB, Ray, RayHit — the value types v0.3 gives a consumer
 - [_] `mono.engine/spatial` at L6 — uniform hash grid, and the optimised spatial query: raycast, overlap and shapecast with layer masks
 - [_] basic physics collider — box, sphere and cylinder shapes, `Collider`/`RigidBody`/`Surface`, and the `SurfaceTable` resource the narrow phase reads once
@@ -109,7 +111,7 @@ Where the C++ test scene becomes a script. v0.3 rebuilt it on `scene`'s classes 
 
 - [_] luau and typescript — `Instance.new`, properties, `.Changed`, the hierarchy and `:IsA` bind to v0.2's class table, the same one C++ calls. A calling convention, not a second mechanism
 - [_] camera
-- [_] surface camera (for mirrors, use previous frame as visual)
+- [_] surface camera (for mirrors, use previous frame as visual) — a view on v0.2's `ViewChannel` whose producer is the local world and whose consumer is a texture rather than the swapchain. The one-frame staleness is the latency that design already assumed
 - [_] basic rendering pipeline (color, shadows, basic fov cull, sequential for many worlds) — the graph of `RENDER_PIPELINE.md`, its stages 1 to 7. Needs `mono.engine/graph/` at L9 first, and that needs v0.2's `ChangeChannel`
 - [_] demo\_1world\_scene.luau (mirrors.luau, mirrors.ts) — the port of the C++ test scene, and the point where `D00001`'s `--script PATH` stops warning and starts loading
 - [_] the demo dying is `D00004`'s trigger: ask whether anything still needs `core::Random`, and either close the item or say what renewed it
@@ -117,7 +119,7 @@ Where the C++ test scene becomes a script. v0.3 rebuilt it on `scene`'s classes 
 ## v0.6
 
 - [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
-- [_] demo\_2world\_scene.luau (mirrors.luau, mirrors.ts, split-screen for two worlds running in parallel via multi-process) — v0.2 renders only worlds hosted in this process, so drawing a world owned by a child host needs replication. Either both worlds are local for this demo, or replication lands first; decide which before starting
+- [_] demo\_2world\_scene.luau (mirrors.luau, mirrors.ts, split-screen for two worlds running in parallel via multi-process) — two `ViewChannel` producers and one compositor, which v0.2 already built. This demo is what proves the cross-process view path end to end
 
 ## v0.7
 
