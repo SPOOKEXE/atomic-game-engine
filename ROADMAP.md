@@ -87,7 +87,8 @@ Standing discipline for v0.2 and v0.3, in that document's own section: prealloca
 - [_] `parallel/ipc` — `Channel`, framed bytes, local implementation, the router never learning which it has
 - [_] `parallel/process` — `mono.server` in host mode, supervisor, heartbeat, restart from snapshot. The argument is crash isolation, not speed. Several worlds per host with per-world quarantine for soft faults (a throwing system, a script error, a budget overrun); a hard fault takes the host, so a world that cannot tolerate a neighbour's declares `Isolation::Dedicated`
 - [_] multi-world rendering — a `ViewChannel` per world view: three slots and an atomic publish index rather than a lock, so a slow compositor drops frames instead of throttling a simulation. Carries a draw list rather than pixels, because a host that publishes pixels needs a GPU and stops being `server` tier, and SDL3's GPU API exposes no shared texture handles. Local and cross-process are the same call site with a different region
-- [_] server and client move onto `Universe`; the client composites N views, and a local world is a view whose producer is in this process
+- [_] server and client move onto `Universe`; the client composites N views, and a local world is a view whose producer is in this process. The whole driver is `mono.engine` code — both programs run worlds out of it, single-player runs both halves on one machine, a dedicated server runs the server half and clients connect
+- [_] reserve the replication seam — the server has authority and a client simulates its own replica, so v0.2 makes snapshot restore work into a *running* store rather than only an empty one, and a replica's bus handle refuses writes. The wire protocol, interest management and lag compensation are a later version with their own plan, and are not started here
 
 ## v0.3
 
