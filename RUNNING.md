@@ -106,6 +106,7 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.unified_server_client` | `unified_server_client_lib` | `Mono::unified_server_client` | `test_unified_server_client` | client |
 | `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
+| `mono.tools/linecount` | `linecount_lib` | `Tool::linecount` | `test_linecount` | shared |
 
 The names are derived, not chosen per module: `mono_add_library` makes
 `engine_<name>` for an `Engine::` module and `<name>_lib` for a product's own
@@ -819,6 +820,34 @@ see what Doxygen is being shown:
 
 `mono.tools/docgen/AGENTS.md` is the reasoning, including why the line count is
 an invariant and why the filter is scoped to `*.hpp`.
+
+## Counting the lines
+
+```sh
+just linecount                                  # the whole repository
+just linecount mono.engine/render               # one module
+just linecount mono.engine --files              # a row per file as well
+just linecount > LINECOUNT.md                   # keep it
+```
+
+Empty, comment and code across every `.cpp`, `.hpp`, `.h`, `.inl` and their
+relatives, as a markdown table. Directory rows are grouped two path segments
+deep — so a walk of the root reports per module — and `--depth 3` splits each
+one into its `src/`, `include/` and `tests/`.
+
+**`mono.vendor` and every dot-directory are excluded.** The vendored libraries
+are an order of magnitude more code than the engine, so counting them answers a
+question about somebody else's project; `.cache/build/<preset>/` holds generated
+headers, so counting it makes the number depend on which presets happen to be
+configured. `--vendor` includes the first, and `--exclude TEXT` drops anything
+else by substring.
+
+The classification is a scan of the whole file rather than a test on each line,
+because two things outlive a line — an open `/* */` and an unterminated raw
+string. A blank line is empty wherever it is, including inside a comment block;
+a line with code and a comment after it is code; and the GLSL in a `R"(...)"`
+is code, not comment. `mono.tools/linecount/include/linecount/Counter.hpp`
+states the rules, and `tests/Counter.cpp` is where each one is pinned.
 
 ---
 

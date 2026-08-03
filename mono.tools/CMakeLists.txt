@@ -21,6 +21,11 @@ endif()
 add_subdirectory(bindings)
 add_subdirectory(docgen)
 
+# The line counter. Declared always, for the same reason as docgen: it is an
+# ordinary library with ordinary tests over a pure function, and nothing about
+# it needs a program to be installed.
+add_subdirectory(linecount)
+
 # --- architecture ------------------------------------------------------------
 #
 # A CMake script rather than a compiled tool: its input is a JSON file CMake

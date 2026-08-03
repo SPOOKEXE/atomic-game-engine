@@ -234,6 +234,12 @@
 				"core"
 			]
 		},
+		"linecount": {
+			"tier": "shared",
+			"links": [
+				"core"
+			]
+		},
 		"replication": {
 			"tier": "shared",
 			"links": [
