@@ -235,7 +235,12 @@ namespace engine::script {
 			return true;
 		}
 
-		const std::filesystem::path path = core::Paths::Assets() / source->Path.Text();
+		// An absolute `Source` is used as it stands. `operator/` already drops
+		// the left side for an absolute right side, so this is what the standard
+		// does anyway — said out loud because a reader checking whether
+		// `--script /tmp/x.luau` works should not have to know that.
+		const std::filesystem::path named(source->Path.Text());
+		const std::filesystem::path path = named.is_absolute() ? named : core::Paths::Assets() / named;
 
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {

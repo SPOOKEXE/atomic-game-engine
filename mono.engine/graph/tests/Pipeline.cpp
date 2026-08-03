@@ -34,44 +34,71 @@ TEST_CASE("the standard pipeline validates", "[graph][pipeline]") {
 
 TEST_CASE("the standard pipeline is the four stages v0.6 ships", "[graph][pipeline]") {
 	const Pipeline pipeline = StandardPipeline();
-	REQUIRE(pipeline.Count() == 4);
+	REQUIRE(pipeline.Count() == 5);
 
 	const auto stages = pipeline.Stages();
 	CHECK(stages[0].Name == Name("shadow"));
-	CHECK(stages[1].Name == Name("opaque"));
-	CHECK(stages[2].Name == Name("transparent"));
-	CHECK(stages[3].Name == Name("overlay"));
+	CHECK(stages[1].Name == Name("surface"));
+	CHECK(stages[2].Name == Name("opaque"));
+	CHECK(stages[3].Name == Name("transparent"));
+	CHECK(stages[4].Name == Name("overlay"));
+}
+
+TEST_CASE("the surface pass reads the shadow map and the opaque pass reads both", "[graph][pipeline]") {
+	// **The ordering `Validate` is here to protect.** A mirror shows a lit
+	// world, so its own pass needs the shadow map — and the screen pass needs
+	// the surface, so moving it earlier would sample a texture nothing had
+	// rendered. On a GPU that is not a crash, it is a mirror showing whatever
+	// was in that memory.
+	const Pipeline pipeline = StandardPipeline();
+	const auto stages = pipeline.Stages();
+
+	REQUIRE(stages[1].Reads.size() == 1);
+	CHECK(stages[1].Reads[0].Name == Name("shadow"));
+
+	REQUIRE(stages[2].Reads.size() == 2);
+	CHECK(stages[2].Reads[0].Name == Name("shadow"));
+	CHECK(stages[2].Reads[1].Name == Name("surface"));
 }
 
 TEST_CASE("a shadow map is per light and a colour pass is per view", "[graph][pipeline]") {
 	// The distinction that decides what many worlds cost: four split-screen
 	// views of one world pay for one shadow map and four colour passes.
-	const auto stages = StandardPipeline().Stages();
+	const Pipeline pipeline = StandardPipeline();
+	const auto stages = pipeline.Stages();
 
 	CHECK_FALSE(stages[0].PerView);
-	CHECK(stages[1].PerView);
+
+	// The surface camera does not move with the eye either, so several views of
+	// one world share its texture exactly as they share the shadow map.
+	CHECK_FALSE(stages[1].PerView);
+
 	CHECK(stages[2].PerView);
+	CHECK(stages[3].PerView);
 }
 
 TEST_CASE("the passes that can be skipped say so", "[graph][pipeline]") {
 	// A scene with no transparency should not pay a pipeline switch to draw
 	// nothing, and the overlay with no panels open is the same. Named rather
 	// than inferred, so it is a decision the list records.
-	const auto stages = StandardPipeline().Stages();
+	const Pipeline pipeline = StandardPipeline();
+	const auto stages = pipeline.Stages();
 
-	CHECK_FALSE(stages[1].Optional);
-	CHECK(stages[2].Optional);
+	CHECK_FALSE(stages[2].Optional);
+	CHECK(stages[1].Optional);
 	CHECK(stages[3].Optional);
+	CHECK(stages[4].Optional);
 }
 
 TEST_CASE("the opaque pass clears and the transparent one loads", "[graph][pipeline]") {
 	// The difference between drawing *onto* the first pass and drawing *over*
 	// it. A transparent pass that cleared would erase the scene it blends with.
-	const auto stages = StandardPipeline().Stages();
+	const Pipeline pipeline = StandardPipeline();
+	const auto stages = pipeline.Stages();
 
-	CHECK(stages[1].Writes[0].Clear);
-	CHECK_FALSE(stages[2].Writes[0].Clear);
+	CHECK(stages[2].Writes[0].Clear);
 	CHECK_FALSE(stages[3].Writes[0].Clear);
+	CHECK_FALSE(stages[4].Writes[0].Clear);
 }
 
 TEST_CASE("reordering the shadow pass after the colour pass is an error", "[graph][pipeline]") {

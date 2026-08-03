@@ -2,6 +2,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
+#include <engine/graph/Shadow.hpp>
 #include <engine/render/Primitives.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -63,12 +64,46 @@ namespace engine::render {
 
 		struct FrameUniforms {
 			glm::mat4 ViewProjection;
+
+			// World space to the light's clip space. Passed rather than
+			// recomputed in the shader, because a second derivation is a second
+			// chance to disagree — and the symptom would be shadows offset from
+			// what casts them.
+			glm::mat4 LightViewProjection;
+
+			// World space to the surface camera's clip space, for the planar
+			// projection a mirror samples with. Identity when nothing renders to
+			// a surface.
+			glm::mat4 SurfaceViewProjection;
 		};
 
 		struct LightingUniforms {
 			glm::vec4 Direction;
 			glm::vec4 Ambient;
+
+			// x: whether a shadow map was rendered. y: one shadow texel.
+			// z: whether this draw samples the surface texture. w: unused, and
+			// named so the struct's size is stated rather than implied.
+			glm::vec4 Flags;
 		};
+
+		// The one directional light this pipeline has.
+		//
+		// **A constant, and it is honest about being one.** A light is a row in
+		// a world the moment anything needs two, and `scene` is where that row
+		// would live — putting it there now would be a component nothing writes.
+		// What this buys today is that the shadow fit and the shading agree
+		// about which way the sun points, which they did not have to before
+		// because only one of them existed.
+		constexpr glm::vec3 SUN_DIRECTION{-0.45f, -0.8f, -0.4f};
+		constexpr glm::vec4 SUN_AMBIENT{0.26f, 0.28f, 0.34f, 1.0f};
+
+		// **2048, which is a resolution rather than a guess.** The map covers
+		// the whole scene, so its texel size is the scene's extent over this —
+		// about six centimetres across a 128-metre world, which is under the
+		// size of the smallest thing the demo draws. Halving it doubles that and
+		// the stair-stepping becomes visible on a cube edge.
+		constexpr uint32_t SHADOW_RESOLUTION = 2048;
 
 		std::vector<uint8_t> ReadFile(const std::filesystem::path &path) {
 			size_t size = 0;
@@ -111,6 +146,13 @@ namespace engine::render {
 		// splits one buffer into two draws.
 		std::vector<uint32_t> Visible;
 		std::vector<scene::DrawInstance> VisibleInstances;
+
+		// The whole draw list, ordered for the surface camera. What the shadow
+		// pass and the surface pass draw, because neither is the eye's: a caster
+		// off screen still shadows, and a mirror shows what is behind the
+		// viewer.
+		std::vector<scene::DrawInstance> SceneInstances;
+		std::vector<uint32_t> SceneOrder;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
 		SDL_GPUBuffer *VertexBuffer = nullptr;
@@ -123,6 +165,49 @@ namespace engine::render {
 		SDL_GPUTexture *DepthTexture = nullptr;
 		uint32_t DepthWidth = 0;
 		uint32_t DepthHeight = 0;
+
+		// --- the shadow map -------------------------------------------------
+		//
+		// A depth texture and the pipeline that fills it. The **same instance
+		// buffer** the colour pass binds, which is what makes a shadow map one
+		// more draw over data that is already on the device.
+		SDL_GPUGraphicsPipeline *ShadowPipeline = nullptr;
+		SDL_GPUTexture *ShadowTexture = nullptr;
+		SDL_GPUSampler *ShadowSampler = nullptr;
+
+		// --- the surface target ----------------------------------------------
+		//
+		// Where a `SurfaceView` renders. Colour and depth, because a view is a
+		// view: the geometry it draws needs sorting by depth exactly as the
+		// swapchain's does.
+		// **Two of them, ping-ponged, and that is what makes a mirror visible
+		// inside a mirror.** The surface pass writes one and samples the other,
+		// so a mirror it draws shows the *previous* frame's reflection instead
+		// of nothing — which is the recursion a real mirror has, one bounce per
+		// frame deep.
+		//
+		// It also fixes something that was simply illegal: with one texture the
+		// surface pass bound its own render target as a sampler. The shader
+		// never read it, but the binding is undefined behaviour on every
+		// backend that checks.
+		SDL_GPUTexture *SurfaceTexture[2] = {nullptr, nullptr};
+		SDL_GPUTexture *SurfaceDepth = nullptr;
+		SDL_GPUSampler *SurfaceSampler = nullptr;
+		uint32_t SurfaceWidth = 0;
+		uint32_t SurfaceHeight = 0;
+
+		// Which of the pair the surface pass writes this frame. The other is
+		// what it samples.
+		uint32_t SurfaceSlot = 0;
+
+		// Whether either texture holds a frame yet.
+		//
+		// The first frame has nothing to show, so a mirror draws as its own tint
+		// rather than sampling whatever the driver handed back.
+		bool SurfaceReady = false;
+
+		bool EnsureShadow();
+		bool EnsureSurface(uint32_t width, uint32_t height);
 
 		SDL_GPUTexture *OverlayTexture = nullptr;
 		SDL_GPUTransferBuffer *OverlayTransfer = nullptr;
@@ -179,11 +264,20 @@ namespace engine::render {
 
 	bool Renderer::Impl::CreatePipelines() {
 		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-		SDL_GPUShader *opaqueFragment = LoadShader("opaque.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
+
+		// **Two samplers now: the shadow map and the surface.** The count is
+		// part of the shader object rather than of the pipeline, so a mismatch
+		// with the `layout(set = 2, binding = n)` declarations is a bind that
+		// silently reads nothing rather than a validation error.
+		SDL_GPUShader *opaqueFragment = LoadShader("opaque.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+
+		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
-		if (!opaqueVertex || !opaqueFragment || !overlayVertex || !overlayFragment) {
+		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
+			!overlayFragment) {
 			return false;
 		}
 
@@ -236,6 +330,26 @@ namespace engine::render {
 		OpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
 		if (!OpaquePipeline) {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
+		}
+
+		// --- shadow ---------------------------------------------------------
+		//
+		// The opaque pipeline with **no colour target at all** and the other
+		// face culled. Front-face culling is the classic trick: rendering back
+		// faces into the map moves the recorded depth to the far side of each
+		// object, which pushes self-shadowing acne behind the surface that would
+		// have shown it. It costs a little peter-panning on thin geometry, which
+		// the slope-scaled bias in the fragment shader is sized against.
+		SDL_GPUGraphicsPipelineCreateInfo shadow = opaque;
+		shadow.vertex_shader = shadowVertex;
+		shadow.fragment_shader = shadowFragment;
+		shadow.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_FRONT;
+		shadow.target_info.color_target_descriptions = nullptr;
+		shadow.target_info.num_color_targets = 0;
+
+		ShadowPipeline = SDL_CreateGPUGraphicsPipeline(Device, &shadow);
+		if (!ShadowPipeline) {
+			ENGINE_ERROR("shadow pipeline: {}", SDL_GetError());
 		}
 
 		// --- transparent ----------------------------------------------------
@@ -314,7 +428,11 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
 
-		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && OverlayPipeline != nullptr;
+		SDL_ReleaseGPUShader(Device, shadowVertex);
+		SDL_ReleaseGPUShader(Device, shadowFragment);
+
+		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && ShadowPipeline != nullptr &&
+			   OverlayPipeline != nullptr;
 	}
 
 	bool Renderer::Impl::CreateGeometry() {
@@ -440,6 +558,128 @@ namespace engine::render {
 
 		DepthWidth = width;
 		DepthHeight = height;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureShadow() {
+		if (ShadowTexture != nullptr) {
+			return true;
+		}
+
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+		info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+
+		// **Both usages, and the sampler one is the point.** A depth attachment
+		// that is only a target cannot be read, and a shadow map that cannot be
+		// read is a pass that costs a draw and changes nothing.
+		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		info.width = SHADOW_RESOLUTION;
+		info.height = SHADOW_RESOLUTION;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		ShadowTexture = SDL_CreateGPUTexture(Device, &info);
+		if (!ShadowTexture) {
+			ENGINE_ERROR("shadow texture: {}", SDL_GetError());
+			return false;
+		}
+
+		SDL_GPUSamplerCreateInfo sampler{};
+		sampler.min_filter = SDL_GPU_FILTER_LINEAR;
+		sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
+		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+
+		// **Clamped to the edge, and the fragment shader also range-checks.**
+		// Either alone would do; both, because a wrap mode would tile the map
+		// across the world and the range check is what makes "outside the map is
+		// lit" a stated rule rather than a property of a sampler setting.
+		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+
+		ShadowSampler = SDL_CreateGPUSampler(Device, &sampler);
+		if (!ShadowSampler) {
+			ENGINE_ERROR("shadow sampler: {}", SDL_GetError());
+			return false;
+		}
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureSurface(uint32_t width, uint32_t height) {
+		if (SurfaceTexture[0] != nullptr && width == SurfaceWidth && height == SurfaceHeight) {
+			return true;
+		}
+
+		for (SDL_GPUTexture *&texture : SurfaceTexture) {
+			if (texture) {
+				SDL_ReleaseGPUTexture(Device, texture);
+				texture = nullptr;
+			}
+		}
+		if (SurfaceDepth) {
+			SDL_ReleaseGPUTexture(Device, SurfaceDepth);
+			SurfaceDepth = nullptr;
+		}
+
+		// Resized, so whatever it held is gone. A mirror that showed the last
+		// frame at the old resolution stretched across the new one would be a
+		// visible artefact on exactly the frame a window was dragged.
+		SurfaceReady = false;
+
+		SDL_GPUTextureCreateInfo colour{};
+		colour.type = SDL_GPU_TEXTURETYPE_2D;
+		colour.format = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		colour.width = width;
+		colour.height = height;
+		colour.layer_count_or_depth = 1;
+		colour.num_levels = 1;
+		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		for (SDL_GPUTexture *&texture : SurfaceTexture) {
+			texture = SDL_CreateGPUTexture(Device, &colour);
+			if (!texture) {
+				ENGINE_ERROR("surface texture {}x{}: {}", width, height, SDL_GetError());
+				return false;
+			}
+		}
+
+		SDL_GPUTextureCreateInfo depth{};
+		depth.type = SDL_GPU_TEXTURETYPE_2D;
+		depth.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.width = width;
+		depth.height = height;
+		depth.layer_count_or_depth = 1;
+		depth.num_levels = 1;
+		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		SurfaceDepth = SDL_CreateGPUTexture(Device, &depth);
+		if (!SurfaceDepth) {
+			ENGINE_ERROR("surface depth {}x{}: {}", width, height, SDL_GetError());
+			return false;
+		}
+
+		if (SurfaceSampler == nullptr) {
+			SDL_GPUSamplerCreateInfo sampler{};
+			sampler.min_filter = SDL_GPU_FILTER_LINEAR;
+			sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
+			sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+			sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+			sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+			sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+
+			SurfaceSampler = SDL_CreateGPUSampler(Device, &sampler);
+			if (!SurfaceSampler) {
+				ENGINE_ERROR("surface sampler: {}", SDL_GetError());
+				return false;
+			}
+		}
+
+		SurfaceWidth = width;
+		SurfaceHeight = height;
 		return true;
 	}
 
@@ -597,6 +837,26 @@ namespace engine::render {
 		if (State->TransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
 		}
+		if (State->ShadowPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->ShadowPipeline);
+		}
+		if (State->ShadowTexture) {
+			SDL_ReleaseGPUTexture(device, State->ShadowTexture);
+		}
+		if (State->ShadowSampler) {
+			SDL_ReleaseGPUSampler(device, State->ShadowSampler);
+		}
+		for (SDL_GPUTexture *texture : State->SurfaceTexture) {
+			if (texture) {
+				SDL_ReleaseGPUTexture(device, texture);
+			}
+		}
+		if (State->SurfaceDepth) {
+			SDL_ReleaseGPUTexture(device, State->SurfaceDepth);
+		}
+		if (State->SurfaceSampler) {
+			SDL_ReleaseGPUSampler(device, State->SurfaceSampler);
+		}
 		if (State->OverlayPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OverlayPipeline);
 		}
@@ -637,7 +897,8 @@ namespace engine::render {
 		const core::CFrame &cameraFrame,
 		const scene::Camera &camera,
 		std::span<const scene::DrawInstance> instances,
-		OverlayImage &overlay
+		OverlayImage &overlay,
+		const SurfaceView *surface
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
@@ -712,6 +973,25 @@ namespace engine::render {
 		// cannot disagree with what was actually projected. A frustum built from
 		// a field of view and an aspect ratio kept separately is the bug that
 		// pops geometry at the screen edge on one machine and not another.
+		// **Fitted to the whole draw list, not to what survived culling.** A
+		// caster outside the camera's frustum still shadows into it, so the
+		// light has to see everything — and fitting to the culled set is the
+		// classic version of this bug: shadows that vanish as their casters
+		// leave the screen.
+		const glm::mat4 lightViewProjection = graph::FitDirectionalLight(
+			graph::BoundsOfAll(instances), core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
+		);
+
+		// The surface camera's own view, used both to render into the texture
+		// and — one frame later — to project it back onto whatever samples it.
+		glm::mat4 surfaceViewProjection{1.0f};
+		if (surface != nullptr) {
+			const float surfaceAspect =
+				static_cast<float>(surface->Width) / static_cast<float>(std::max(surface->Height, 1u));
+			surfaceViewProjection =
+				scene::ResolveCamera(surface->Frame, surface->Lens, surfaceAspect).ViewProjection;
+		}
+
 		size_t visibleCount = 0;
 		{
 			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
@@ -739,6 +1019,73 @@ namespace engine::render {
 		}
 		const auto transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
 
+		// **Surface instances moved to the back of the opaque head**, so the
+		// camera range is three contiguous runs — plain opaque, then mirrors,
+		// then transparent — and each is one draw with one `first_instance`.
+		// Whether an instance samples the surface is per instance and the
+		// uniform that says so is per draw, so the alternative is a branch on
+		// data the fragment shader does not have.
+		//
+		// Stable, for the reason the ordering itself is: an opaque scene with no
+		// mirrors must come out of this exactly as it went in.
+		uint32_t surfaceInCamera = 0;
+		if (opaqueCount > 0) {
+			ENGINE_PROFILE_CAT("partition surfaces", core::ProfileCategory::Render);
+
+			const auto opaqueEnd = State->DrawOrder.begin() + static_cast<ptrdiff_t>(opaqueCount);
+			const auto boundary =
+				std::stable_partition(State->DrawOrder.begin(), opaqueEnd, [&](uint32_t index) {
+					return State->VisibleInstances[index].Surface < 0;
+				});
+
+			surfaceInCamera = static_cast<uint32_t>(std::distance(boundary, opaqueEnd));
+		}
+		const auto plainOpaque = static_cast<uint32_t>(opaqueCount) - surfaceInCamera;
+
+		// **A second range holding everything, for the two passes that are not
+		// the camera's.** A caster outside the camera's frustum still shadows
+		// into it, and a mirror shows what is behind the viewer — so culling to
+		// the eye would give shadows that vanish as their casters leave the
+		// screen and a mirror that reflects only what is already on screen.
+		// Both are the classic version of this mistake.
+		//
+		// Ordered from the surface camera when there is one, because the surface
+		// pass is the only consumer that needs an order at all — a depth-only
+		// pass does not care.
+		const bool wantSurface = surface != nullptr && State->EnsureSurface(surface->Width, surface->Height);
+		const core::Vector3 sceneEye = wantSurface ? surface->Frame.Position : cameraFrame.Position;
+
+		State->SceneInstances.assign(instances.begin(), instances.end());
+
+		size_t sceneOpaque = 0;
+		{
+			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
+			sceneOpaque = scene::OrderForDrawing(State->SceneInstances, sceneEye, State->SceneOrder);
+		}
+		const auto sceneCount = static_cast<uint32_t>(State->SceneInstances.size());
+		const auto sceneTransparent = static_cast<uint32_t>(sceneCount - sceneOpaque);
+
+		// **Surface instances to the back of the scene's opaque head, so the
+		// surface pass can skip them.** A mirror sits between its own reflection
+		// camera and the world — the camera is *behind* the plane looking
+		// through it — so drawing the pane into its own reflection fills the
+		// texture with the pane. The mirror then shows itself, which reads as a
+		// mirror that is not working at all.
+		//
+		// Physically right as well as necessary: nothing sees itself in its own
+		// reflection.
+		uint32_t sceneSurfaces = 0;
+		if (sceneOpaque > 0) {
+			const auto opaqueEnd = State->SceneOrder.begin() + static_cast<ptrdiff_t>(sceneOpaque);
+			const auto boundary =
+				std::stable_partition(State->SceneOrder.begin(), opaqueEnd, [&](uint32_t index) {
+					return State->SceneInstances[index].Surface < 0;
+				});
+
+			sceneSurfaces = static_cast<uint32_t>(std::distance(boundary, opaqueEnd));
+		}
+		const auto sceneReflected = static_cast<uint32_t>(sceneOpaque) - sceneSurfaces;
+
 		{
 			// Allocation, on the frame an overlay first appears or changes size.
 			// Zero on every other frame, which is what makes a reading here
@@ -755,14 +1102,20 @@ namespace engine::render {
 		const auto instanceCount = static_cast<uint32_t>(visibleCount);
 		result.Culled = totalCount - instanceCount;
 
-		if (instanceCount > 0) {
+		// **One buffer, two ranges.** The scene range first so its offset is
+		// zero and the camera range starts where it ends — which is what makes
+		// each pass one `first_instance` rather than a second buffer and a
+		// second bind.
+		const uint32_t uploadCount = sceneCount + instanceCount;
+
+		if (uploadCount > 0) {
 			bool capacity = false;
 			{
 				// Grows the device buffer when the scene does. Separate from the
 				// copy below because one is a GPU allocation and the other is a
 				// memcpy, and a spike in either means something different.
 				ENGINE_PROFILE_CAT("ensure instance capacity", core::ProfileCategory::Render);
-				capacity = State->EnsureInstanceCapacity(instanceCount);
+				capacity = State->EnsureInstanceCapacity(uploadCount);
 			}
 
 			if (capacity) {
@@ -790,8 +1143,14 @@ namespace engine::render {
 					ENGINE_PROFILE_CAT("convert instances", core::ProfileCategory::Render);
 
 					auto *out = static_cast<GpuInstance *>(mapped);
+
+					for (size_t index = 0; index < State->SceneOrder.size(); index++) {
+						out[index] = ToGpu(State->SceneInstances[State->SceneOrder[index]]);
+					}
+
+					auto *camera = out + State->SceneOrder.size();
 					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
-						out[index] = ToGpu(State->VisibleInstances[State->DrawOrder[index]]);
+						camera[index] = ToGpu(State->VisibleInstances[State->DrawOrder[index]]);
 					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
@@ -815,7 +1174,7 @@ namespace engine::render {
 				const SDL_GPUBufferRegion destination{
 					State->InstanceBuffer,
 					0,
-					instanceCount * static_cast<uint32_t>(sizeof(GpuInstance)),
+					uploadCount * static_cast<uint32_t>(sizeof(GpuInstance)),
 				};
 				// Cycling hands back a fresh allocation rather than stalling on
 				// the copy the previous frame may still be reading.
@@ -898,6 +1257,157 @@ namespace engine::render {
 			SDL_EndGPUCopyPass(copy);
 		}
 
+		// --- shadow pass ----------------------------------------------------
+		//
+		// **The scene range, not the camera's**, and no colour target at all.
+		// Every caster casts, whether or not the eye can see it.
+		const bool haveShadow = haveInstances && sceneCount > 0 && State->EnsureShadow();
+
+		if (haveShadow) {
+			ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
+
+			SDL_GPUDepthStencilTargetInfo shadowTarget{};
+			shadowTarget.texture = State->ShadowTexture;
+			shadowTarget.clear_depth = 1.0f;
+			shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+
+			// **Stored, unlike the colour pass's depth.** This one is read by
+			// the next pass, which is the entire point of rendering it.
+			shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
+			shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+			shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+			shadowTarget.cycle = true;
+
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
+			SDL_BindGPUGraphicsPipeline(pass, State->ShadowPipeline);
+
+			const SDL_GPUBufferBinding vertexBindings[] = {
+				{State->VertexBuffer, 0},
+				{State->InstanceBuffer, 0},
+			};
+			SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+
+			const SDL_GPUBufferBinding indexBinding{State->IndexBuffer, 0};
+			SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+
+			SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
+
+			// **Only the opaque part of the scene casts.** A transparent pane
+			// writing full depth into the shadow map would cast a solid shadow,
+			// which is the most obviously wrong thing glass can do.
+			SDL_DrawGPUIndexedPrimitives(
+				pass, static_cast<uint32_t>(CUBE_INDICES.size()), static_cast<uint32_t>(sceneOpaque), 0, 0, 0
+			);
+
+			SDL_EndGPURenderPass(pass);
+			result.DrawCalls++;
+		}
+
+		// --- surface pass ----------------------------------------------------
+		//
+		// The same scene range, from the surface camera, into a texture. What a
+		// mirror shows next frame — the one-frame staleness `ViewChannel`
+		// already assumed, and what breaks the dependency cycle between a mirror
+		// and what it reflects.
+		if (wantSurface && haveInstances && sceneCount > 0) {
+			ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
+
+			// Flipped before the pass, so what it writes is not what it reads.
+			State->SurfaceSlot ^= 1u;
+
+			SDL_GPUColorTargetInfo surfaceColour{};
+			surfaceColour.texture = State->SurfaceTexture[State->SurfaceSlot];
+			surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+			surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
+			surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
+			surfaceColour.cycle = true;
+
+			SDL_GPUDepthStencilTargetInfo surfaceDepth{};
+			surfaceDepth.texture = State->SurfaceDepth;
+			surfaceDepth.clear_depth = 1.0f;
+			surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
+			surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+			surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+			surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+			surfaceDepth.cycle = true;
+
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
+			SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+
+			const SDL_GPUBufferBinding vertexBindings[] = {
+				{State->VertexBuffer, 0},
+				{State->InstanceBuffer, 0},
+			};
+			SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+
+			const SDL_GPUBufferBinding indexBinding{State->IndexBuffer, 0};
+			SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+
+			const FrameUniforms surfaceFrame{
+				surfaceViewProjection,
+				lightViewProjection,
+				glm::mat4{1.0f},
+			};
+			SDL_PushGPUVertexUniformData(command, 0, &surfaceFrame, sizeof(surfaceFrame));
+
+			// **Shadowed, and surfaced from the other texture.** The mirror's
+			// own view gets the shadow map, so what it reflects is lit the same
+			// way — and it samples the *previous* frame's surface, which is what
+			// puts a mirror inside a mirror. One bounce per frame, which is what
+			// a real mirror does and what the reference render graph calls
+			// breaking the cycle by reading last frame.
+			const LightingUniforms surfaceLighting{
+				glm::vec4{SUN_DIRECTION, 0.0f},
+				SUN_AMBIENT,
+				glm::vec4{
+					haveShadow ? 1.0f : 0.0f,
+					1.0f / static_cast<float>(SHADOW_RESOLUTION),
+					State->SurfaceReady ? 1.0f : 0.0f,
+					0.0f
+				},
+			};
+			SDL_PushGPUFragmentUniformData(command, 0, &surfaceLighting, sizeof(surfaceLighting));
+
+			SDL_GPUTexture *const previous = State->SurfaceTexture[State->SurfaceSlot ^ 1u];
+			const SDL_GPUTextureSamplerBinding samplers[] = {
+				{State->ShadowTexture != nullptr ? State->ShadowTexture : previous,
+				 State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler},
+				{previous, State->SurfaceSampler},
+			};
+			SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
+
+			// **The same two-pipeline split the screen pass makes.** Drawing the
+			// whole range with the opaque pipeline would reflect a glass pane as
+			// a solid one, which is the sort of difference between a mirror and
+			// the world it shows that nobody looks for.
+			if (sceneReflected > 0) {
+				SDL_DrawGPUIndexedPrimitives(
+					pass, static_cast<uint32_t>(CUBE_INDICES.size()), sceneReflected, 0, 0, 0
+				);
+				result.DrawCalls++;
+			}
+
+			if (sceneTransparent > 0) {
+				SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+				SDL_DrawGPUIndexedPrimitives(
+					pass,
+					static_cast<uint32_t>(CUBE_INDICES.size()),
+					sceneTransparent,
+					0,
+					0,
+					static_cast<uint32_t>(sceneOpaque)
+				);
+				result.DrawCalls++;
+			}
+
+			SDL_EndGPURenderPass(pass);
+
+			// From here a surface texture holds a frame, so the screen pass may
+			// sample the one just written and the next surface pass may sample
+			// it as its previous.
+			State->SurfaceReady = true;
+		}
+
 		// --- opaque pass ----------------------------------------------------
 
 		SDL_GPUColorTargetInfo colourTarget{};
@@ -952,30 +1462,92 @@ namespace engine::render {
 				// actually drawn into.
 				const FrameUniforms frame{
 					scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection,
+					lightViewProjection,
+					surfaceViewProjection,
 				};
 				SDL_PushGPUVertexUniformData(command, 0, &frame, sizeof(frame));
 
+				// **The surface flag is off for the opaque range and on for a
+				// second draw over the instances that carry one.** Whether an
+				// instance samples the surface is per instance and the uniform
+				// is per draw, so the split is a third draw rather than a
+				// per-fragment branch on data the shader does not have.
 				const LightingUniforms lighting{
-					glm::vec4{-0.45f, -0.8f, -0.4f, 0.0f},
-					glm::vec4{0.26f, 0.28f, 0.34f, 1.0f},
+					glm::vec4{SUN_DIRECTION, 0.0f},
+					SUN_AMBIENT,
+					glm::vec4{
+						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f
+					},
 				};
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
+
+				// Both samplers, every draw. A shadow map that was not rendered
+				// binds the surface texture in its place rather than nothing:
+				// the flag above is what stops it being read, and an unbound
+				// sampler is undefined behaviour on several backends where a
+				// wrongly-bound one is merely ignored.
+				SDL_GPUTexture *const shadow =
+					State->ShadowTexture != nullptr ? State->ShadowTexture : State->OverlayTexture;
+				SDL_GPUSampler *const shadowSampler =
+					State->ShadowSampler != nullptr ? State->ShadowSampler : State->OverlaySampler;
+				// **The one just written**, so the screen shows this frame's
+				// reflection rather than last frame's. Only what a mirror sees
+				// *of another mirror* is a frame behind.
+				SDL_GPUTexture *const surfaceMap = State->SurfaceTexture[State->SurfaceSlot] != nullptr
+													   ? State->SurfaceTexture[State->SurfaceSlot]
+													   : shadow;
+				SDL_GPUSampler *const surfaceSampler =
+					State->SurfaceSampler != nullptr ? State->SurfaceSampler : shadowSampler;
+
+				if (shadow != nullptr && surfaceMap != nullptr) {
+					const SDL_GPUTextureSamplerBinding samplers[] = {
+						{shadow, shadowSampler},
+						{surfaceMap, surfaceSampler},
+					};
+					SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
+				}
 
 				// **Two draws over one buffer, split at the boundary the
 				// ordering produced.** `first_instance` is what makes that
 				// possible without a second upload: the instance attributes are
 				// per-instance vertex data, so the offset picks up where the
 				// opaque range left off.
-				if (opaqueCount > 0) {
+				if (plainOpaque > 0) {
+					SDL_DrawGPUIndexedPrimitives(
+						pass, static_cast<uint32_t>(CUBE_INDICES.size()), plainOpaque, 0, 0, sceneCount
+					);
+					result.DrawCalls++;
+				}
+
+				// **The surface draw, over the instances that show one.** They
+				// were partitioned to the front of the *camera* range by the
+				// ordering below, so this is one contiguous run rather than a
+				// per-instance branch.
+				if (surfaceInCamera > 0 && State->SurfaceReady) {
+					const LightingUniforms mirrored{
+						glm::vec4{SUN_DIRECTION, 0.0f},
+						SUN_AMBIENT,
+						glm::vec4{
+							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 1.0f, 0.0f
+						},
+					};
+					SDL_PushGPUFragmentUniformData(command, 0, &mirrored, sizeof(mirrored));
+
 					SDL_DrawGPUIndexedPrimitives(
 						pass,
 						static_cast<uint32_t>(CUBE_INDICES.size()),
-						static_cast<uint32_t>(opaqueCount),
+						surfaceInCamera,
 						0,
 						0,
-						0
+						sceneCount + plainOpaque
 					);
+
 					result.DrawCalls++;
+					result.SurfaceInstances = surfaceInCamera;
+
+					// Back to the ordinary uniform, so the transparent draw
+					// below does not inherit the mirror flag.
+					SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 				}
 
 				if (transparentCount > 0) {
@@ -991,7 +1563,7 @@ namespace engine::render {
 						transparentCount,
 						0,
 						0,
-						static_cast<uint32_t>(opaqueCount)
+						sceneCount + static_cast<uint32_t>(opaqueCount)
 					);
 					result.DrawCalls++;
 				}

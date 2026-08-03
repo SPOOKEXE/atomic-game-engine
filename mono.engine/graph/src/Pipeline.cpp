@@ -78,12 +78,28 @@ namespace engine::graph {
 			}
 		);
 
+		// **The surface pass, between the shadow map and the screen.** A second
+		// view rendered into a texture, which a mirror samples a frame later —
+		// so it reads the shadow map and writes a target nothing else does.
+		//
+		// Per light rather than per view for the same reason the shadow pass is:
+		// there is one surface camera and it does not move with the eye.
+		pipeline.Add(
+			Stage{
+				core::Name("surface"),
+				{Attachment{core::Name("shadow"), false}},
+				{Attachment{core::Name("surface"), true}, Attachment{core::Name("surfaceDepth"), true}},
+				false,
+				true,
+			}
+		);
+
 		// The opaque pass. Clears both targets, because it is the first thing
 		// that touches them in a frame.
 		pipeline.Add(
 			Stage{
 				core::Name("opaque"),
-				{Attachment{core::Name("shadow"), false}},
+				{Attachment{core::Name("shadow"), false}, Attachment{core::Name("surface"), false}},
 				{Attachment{core::Name("colour"), true}, Attachment{core::Name("depth"), true}},
 				true,
 				false,

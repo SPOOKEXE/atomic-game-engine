@@ -115,10 +115,20 @@ namespace engine::graph {
 
 		// The stages, in declaration order.
 		//
-		// @return The list.
-		std::span<const Stage> Stages() const {
+		// **Refused on a temporary, and that is not pedantry.** The span points
+		// into this object, so `StandardPipeline().Stages()` hands back a view
+		// of a `Pipeline` that died at the end of the expression — and the
+		// memory stays readable for a while, so the mistake passes its tests
+		// until it does not. A test wrote exactly that and got three assertions
+		// comparing freed names; the `&&` overload turns it into a compile
+		// error.
+		//
+		// @return The list, valid while this pipeline is.
+		std::span<const Stage> Stages() const & {
 			return Steps;
 		}
+
+		std::span<const Stage> Stages() const && = delete;
 
 		// Checks the one property that goes wrong at this size.
 		//

@@ -23,6 +23,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
 #include <cstdint>
@@ -75,6 +76,20 @@ namespace client {
 	// @param path      The `.luau` file to run.
 	// @param reserve   How much draw-list capacity to reserve up front.
 	// @return `false` when the script could not be read, compiled or run.
+	// The world's first surface camera, if it has one.
+	//
+	// **First rather than all**, and this pipeline renders one offscreen view.
+	// A world with two surface cameras gets the first by entity id — which is
+	// creation order — and the second is ignored. Said here rather than left to
+	// be discovered: the render-node system that replaces this pipeline is where
+	// several belong, and a silent pick would make its absence look like a bug
+	// in the mirror rather than a limit of the pipeline.
+	//
+	// @param store   The world to search.
+	// @param surface Filled in when one is found.
+	// @return `false` when the world has no surface camera.
+	bool FindSurfaceCamera(engine::ecs::Store &store, engine::render::SurfaceView &surface);
+
 	bool BuildScriptedWorld(
 		engine::ecs::Store &store,
 		engine::ecs::Scheduler &scheduler,

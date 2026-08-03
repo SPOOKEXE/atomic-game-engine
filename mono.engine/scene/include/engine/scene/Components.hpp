@@ -242,17 +242,26 @@ namespace engine::scene {
 		// Whether this entity is submitted for drawing at all.
 		bool Visible = true;
 
+		// Which surface texture this entity shows, or -1 for none.
+		//
+		// **Fitted into the padding rather than growing the struct.** There were
+		// three named bytes after `Visible` and there are two now; the type is
+		// the same size it was. See `DrawInstance::Surface` for what the field
+		// means and why it is a mirror feature rather than a general one.
+		int8_t Surface = -1;
+
 		// Explicit padding. `Visual` is registered with an explicit writer
 		// because it holds names, so these bytes do not reach a snapshot today
 		// — they are named anyway, because the day somebody re-registers this
 		// type without one is the day three uninitialised bytes start ending up
 		// in a recording.
 		//
-		// **Still three, and still after `Visible`.** `Transparency` did not
-		// land here: a float needs four-byte alignment and these are the tail
-		// after a `bool`, so the struct grew by four rather than absorbing them.
-		// The warning above applies unchanged.
-		uint8_t Reserved[3] = {};
+		// **Two now, not three.** `Surface` took one of them, which is what
+		// named padding is for: a field that fits goes in the hole rather than
+		// widening the row. `Transparency` did not fit — a float needs
+		// four-byte alignment and these are the tail after a `bool` — so the
+		// struct grew by four for that one and by nothing for this one.
+		uint8_t Reserved[2] = {};
 	};
 
 	// A point of view on a world.
@@ -276,6 +285,42 @@ namespace engine::scene {
 
 		// Far clipping distance, in metres.
 		float FarPlane = 500.0f;
+	};
+
+	// A camera that renders into a texture rather than onto the screen.
+	//
+	// **A second component beside `Camera`, not a field on it.** Most cameras
+	// do not render to a texture, and a field would put two numbers on every one
+	// of them — but more than that, the presence of this component is what a
+	// consumer queries for. A flag would mean walking every camera to find the
+	// one that has it set.
+	//
+	// The result is what `render::SurfaceView` renders and what an instance
+	// carrying `Visual::Surface` samples a frame later. That staleness is the
+	// design rather than a limitation: it is what breaks the dependency cycle
+	// between a mirror and what it reflects, and `world::ViewChannel` assumed it
+	// from the start.
+	//
+	// @since v0.6
+	struct SurfaceCamera {
+		// How big the texture is, in pixels.
+		//
+		// Not square by requirement: a wide mirror wants a wide target, and
+		// giving it a square one wastes half the texels on nothing.
+		uint16_t Width = 1024;
+
+		// The other axis.
+		uint16_t Height = 1024;
+
+		// Which surface index this camera writes.
+		//
+		// One today, and the field exists because the pipeline that replaces
+		// this one will have several — a stage list that had to be rewritten to
+		// add a second mirror would be a stage list that encoded the count.
+		int8_t Surface = 0;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// A content hash of what a consumer last saw, for consumers that cannot

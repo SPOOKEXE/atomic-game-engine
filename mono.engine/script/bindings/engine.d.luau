@@ -66,6 +66,7 @@ export type BasePart = {
 	Parent: Instance,
 	Position: Vector3,
 	Size: Vector3,
+	Surface: number,
 	Transparency: number,
 	Visible: boolean,
 }
@@ -85,6 +86,7 @@ export type Part = {
 	Parent: Instance,
 	Position: Vector3,
 	Size: Vector3,
+	Surface: number,
 	Transparency: number,
 	Visible: boolean,
 }
@@ -100,6 +102,7 @@ export type Camera = {
 	Orientation: Vector3,
 	Parent: Instance,
 	Position: Vector3,
+	SurfaceSize: Vector3,
 }
 
 -- LuaSourceContainer : Instance

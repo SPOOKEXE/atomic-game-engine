@@ -11,6 +11,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Instances.hpp>
@@ -1879,4 +1880,87 @@ TEST_CASE("javascript casts the same ray", "[scripting][raycast][js]") {
 		const params = RaycastParams.new();
 		if (typeOf(params) !== 'RaycastParams') throw new Error(typeOf(params));
 	)");
+}
+
+// --- the surface camera -----------------------------------------------------
+
+TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scripting][surface]") {
+	// **Structural, so the component's presence is the query.** A camera with
+	// no `SurfaceCamera` is an ordinary camera and a consumer walks past it;
+	// setting a size is what makes it one that renders offscreen.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local camera = Instance.new('Camera')
+		camera.Name = 'Reflection'
+		camera.Parent = workspace
+
+		assert(camera.SurfaceSize == Vector3.new(0, 0, 0), 'a fresh camera renders to a texture')
+
+		camera.SurfaceSize = Vector3.new(1024, 512, 0)
+		assert(camera.SurfaceSize == Vector3.new(1024, 512, 0), 'the size did not round-trip')
+
+		-- Back to nothing takes the component away again, which is what makes
+		-- the property structural rather than a flag.
+		camera.SurfaceSize = Vector3.new(0, 0, 0)
+		assert(camera.SurfaceSize == Vector3.new(0, 0, 0), 'clearing did not take')
+	)");
+
+	const Entity camera = store.FindFirstRoot("Reflection");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::SurfaceCamera>(camera) == nullptr);
+
+	MustRun(*runtime, "workspace.Reflection.SurfaceSize = Vector3.new(256, 256, 0)");
+
+	const auto *surface = store.Get<engine::scene::SurfaceCamera>(camera);
+	REQUIRE(surface != nullptr);
+	CHECK(surface->Width == 256);
+	CHECK(surface->Height == 256);
+}
+
+TEST_CASE("a part names which surface it shows", "[scripting][surface]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local pane = Instance.new('Part')
+		pane.Name = 'Pane'
+		pane.Parent = workspace
+
+		assert(pane.Surface == -1, 'a fresh part shows a surface')
+
+		pane.Surface = 0
+		assert(pane.Surface == 0, 'the surface did not round-trip')
+	)");
+
+	const Entity pane = store.FindFirstRoot("Pane");
+	CHECK(store.Get<Visual>(pane)->Surface == 0);
+}
+
+TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const camera = Instance.new('Camera');
+		camera.Name = 'JsReflection';
+		camera.SurfaceSize = Vector3.new(512, 256, 0);
+		camera.Parent = workspace;
+
+		const pane = Instance.new('Part');
+		pane.Name = 'JsPane';
+		pane.Surface = 0;
+		pane.Parent = workspace;
+	)");
+
+	const auto *surface = store.Get<engine::scene::SurfaceCamera>(store.FindFirstRoot("JsReflection"));
+	REQUIRE(surface != nullptr);
+	CHECK(surface->Width == 512);
+	CHECK(surface->Height == 256);
+
+	CHECK(store.Get<Visual>(store.FindFirstRoot("JsPane"))->Surface == 0);
 }

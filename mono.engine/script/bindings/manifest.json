@@ -57,6 +57,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
+				{"name": "Surface", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
 			]
@@ -79,6 +80,7 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
+				{"name": "Surface", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
 			]
@@ -96,7 +98,8 @@
 				{"name": "NearPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
-				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
 			]
 		},
 		{

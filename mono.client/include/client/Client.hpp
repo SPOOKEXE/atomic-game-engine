@@ -285,6 +285,11 @@ namespace client {
 		// world is drawn through it and has no camera of its own: a camera is
 		// an entity, and a replica may not mint one until the predicted-entity
 		// index range exists.
+		// The surface camera this frame renders an offscreen view from, and
+		// whether the world had one. See `FindSurfaceCamera`.
+		engine::render::SurfaceView Surface;
+		bool HaveSurface = false;
+
 		engine::core::CFrame ComposedFrame;
 		engine::scene::Camera ComposedCamera;
 

@@ -110,6 +110,16 @@ namespace engine::script {
 		// --- CFrame ----------------------------------------------------------
 
 		int CFrameNew(lua_State *state) {
+			// **A `Vector3` or three numbers, because Roblox takes both.** An
+			// author holding a position writes `CFrame.new(position)` far more
+			// often than they unpack it, and a binding that only took numbers
+			// made every such line a type error naming the wrong argument.
+			if (lua_touserdatatagged(state, 1, TAG_VECTOR3) != nullptr) {
+				const Vector3 position = CheckVector3(state, 1);
+				*PushCFrame(state) = CFrame{position};
+				return 1;
+			}
+
 			const auto x = static_cast<float>(luaL_optnumber(state, 1, 0.0));
 			const auto y = static_cast<float>(luaL_optnumber(state, 2, 0.0));
 			const auto z = static_cast<float>(luaL_optnumber(state, 3, 0.0));
@@ -132,6 +142,26 @@ namespace engine::script {
 			const auto roll = static_cast<float>(luaL_checknumber(state, 3));
 
 			*PushCFrame(state) = CFrame::Angles(pitch, yaw, roll);
+			return 1;
+		}
+
+		// `CFrame.lookAt(from, to, up)` — Roblox's, and the one a camera needs.
+		//
+		// **Without it a camera can only be placed, not aimed.** `CFrame.new`
+		// carries identity rotation, which in this engine's convention looks
+		// down -Z — so a camera positioned behind a mirror to reflect it faced
+		// away from the mirror and rendered empty space. That was a real bug in
+		// `Mirrors-1-world.luau`, and it is the sort a binding gap produces:
+		// the script was correct about *where* and had no way to say *which
+		// way*.
+		int CFrameLookAt(lua_State *state) {
+			const Vector3 from = CheckVector3(state, 1);
+			const Vector3 to = CheckVector3(state, 2);
+
+			const Vector3 up = lua_touserdatatagged(state, 3, TAG_VECTOR3) != nullptr ? CheckVector3(state, 3)
+																					  : Vector3::YAxis;
+
+			*PushCFrame(state) = CFrame::LookAt(from, to, up);
 			return 1;
 		}
 
@@ -349,7 +379,7 @@ namespace engine::script {
 			{"new", Color3New}, {"fromRGB", Color3FromRgb}, {nullptr, nullptr}
 		};
 		static const luaL_Reg frameConstructors[] = {
-			{"new", CFrameNew}, {"Angles", CFrameAngles}, {nullptr, nullptr}
+			{"new", CFrameNew}, {"Angles", CFrameAngles}, {"lookAt", CFrameLookAt}, {nullptr, nullptr}
 		};
 
 		Install(

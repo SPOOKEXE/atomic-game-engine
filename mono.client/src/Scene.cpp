@@ -206,6 +206,7 @@ namespace client {
 							// this loop runs once for a world that may be drawn
 							// from several views.
 							visuals[row].Transparency,
+							visuals[row].Surface,
 						};
 					}
 				});
@@ -257,6 +258,35 @@ namespace client {
 
 	}
 
+	bool FindSurfaceCamera(Store &store, engine::render::SurfaceView &surface) {
+		bool found = false;
+		Entity chosen = engine::ecs::NULL_ENTITY;
+
+		// By entity id, which is creation order, so a world loaded the same way
+		// twice picks the same camera. An archetype walk would pick whichever
+		// row happened to be first, and that moves when anything changes a
+		// component set.
+		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
+			[&](Entity entity,
+				const engine::scene::SurfaceCamera &target,
+				const engine::scene::Camera &lens,
+				const Transform &placement) {
+				if (found && entity.Id >= chosen.Id) {
+					return;
+				}
+
+				chosen = entity;
+				found = true;
+
+				surface.Frame = placement.Frame;
+				surface.Lens = lens;
+				surface.Width = target.Width;
+				surface.Height = target.Height;
+			}
+		);
+		return found;
+	}
+
 	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
@@ -267,12 +297,28 @@ namespace client {
 		}
 
 		const float extent = store.Resource<WorldBounds>()->HalfExtent;
-		const Entity camera = InstallCamera(store);
+
+		// **A scene that placed its own camera keeps it.** `MoveCamera` is this
+		// client's placeholder — it orbits whatever `ActiveCamera` names so that
+		// a scene with no camera of its own is still looked at from somewhere —
+		// and running it beside a script that aimed one is two things writing
+		// one `Transform`, the second winning silently every tick.
+		//
+		// That is not hypothetical: `Mirrors-1-world.luau` computes its
+		// reflection camera from where the eye stands, so an orbiting eye makes
+		// the reflection correct for a position the viewer is no longer at. The
+		// mirror looked broken and the camera was the reason.
+		const auto *existing = store.Resource<ActiveCamera>();
+		const bool scripted = existing != nullptr && existing->Entity != engine::ecs::NULL_ENTITY &&
+							  store.Alive(existing->Entity);
+
+		const Entity camera = scripted ? existing->Entity : InstallCamera(store);
 		InstallResources(store, camera, extent, std::max<uint32_t>(reserve, 1));
 
-		// Only the two a client owns. `capture-previous`, `orbit` and `spin`
-		// were installed by the loader, because a server runs those too.
-		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
+		if (!scripted) {
+			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
+		}
+
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 		return true;
 	}

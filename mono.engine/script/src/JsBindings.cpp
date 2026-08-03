@@ -562,6 +562,13 @@ namespace engine::script {
 		}
 
 		JSValue CFrameNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			// A `Vector3` or three numbers, for the reason the Luau side gives.
+			if (argc > 0) {
+				if (const core::Vector3 *position = AsVector3(context, argv[0]); position != nullptr) {
+					return MakeCFrame(context, core::CFrame{*position});
+				}
+			}
+
 			double x = 0.0;
 			double y = 0.0;
 			double z = 0.0;
@@ -601,6 +608,25 @@ namespace engine::script {
 				core::CFrame::Angles(
 					static_cast<float>(pitch), static_cast<float>(yaw), static_cast<float>(roll)
 				)
+			);
+		}
+
+		// `CFrame.lookAt(from, to, up)` — see the Luau side for why a camera
+		// needs it and what its absence cost.
+		JSValue CFrameLookAt(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			if (argc < 2) {
+				return JS_ThrowTypeError(context, "lookAt needs a from and a to");
+			}
+
+			const core::Vector3 *from = AsVector3(context, argv[0]);
+			const core::Vector3 *to = AsVector3(context, argv[1]);
+			if (from == nullptr || to == nullptr) {
+				return JS_ThrowTypeError(context, "lookAt needs two Vector3s");
+			}
+
+			const core::Vector3 *up = argc > 2 ? AsVector3(context, argv[2]) : nullptr;
+			return MakeCFrame(
+				context, core::CFrame::LookAt(*from, *to, up != nullptr ? *up : core::Vector3::YAxis)
 			);
 		}
 
@@ -1094,6 +1120,7 @@ namespace engine::script {
 			JSValue table = JS_NewObject(context);
 			JS_SetPropertyStr(context, table, "new", JS_NewCFunction(context, CFrameNew, "new", 3));
 			JS_SetPropertyStr(context, table, "Angles", JS_NewCFunction(context, CFrameAngles, "Angles", 3));
+			JS_SetPropertyStr(context, table, "lookAt", JS_NewCFunction(context, CFrameLookAt, "lookAt", 3));
 			JS_SetPropertyStr(context, global, "CFrame", table);
 		}
 

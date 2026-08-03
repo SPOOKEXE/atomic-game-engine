@@ -58,6 +58,7 @@ declare interface BasePart extends PVInstance {
 	Material: Enum_Material;
 	Mesh: string;
 	Size: Vector3;
+	Surface: number;
 	Transparency: number;
 	Visible: boolean;
 }
@@ -69,6 +70,7 @@ declare interface Camera extends PVInstance {
 	FarPlaneZ: number;
 	FieldOfView: number;
 	NearPlaneZ: number;
+	SurfaceSize: Vector3;
 }
 
 declare interface LuaSourceContainer extends Instance {

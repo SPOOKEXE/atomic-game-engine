@@ -45,6 +45,32 @@ namespace engine::render {
 	// is minimised or resizing and when the renderer is unavailable.
 	//
 	// @client
+	// A second view, rendered into a texture instead of the swapchain.
+	//
+	// **`world::ViewChannel`'s shape, with a texture on the far end.** v0.2
+	// built the seam for a hosted world publishing a view to a client; this is
+	// the same idea with the consumer inside the process — and the one-frame
+	// staleness that design already assumed is what makes a mirror cheap: the
+	// surface shows the frame *before* the one being drawn, so there is no
+	// dependency cycle between a mirror and what it reflects.
+	//
+	// One per frame. Several would be several passes and a texture array, which
+	// is the render-node system's job rather than this pipeline's.
+	//
+	// @since v0.6
+	struct SurfaceView {
+		// Where the surface camera is, in world space.
+		core::CFrame Frame;
+
+		// Its field of view and clipping distances.
+		scene::Camera Lens;
+
+		// How big the texture is. Square is not required; a wide mirror wants a
+		// wide target, and giving it a square one wastes half the texels.
+		uint32_t Width = 1024;
+		uint32_t Height = 1024;
+	};
+
 	struct FrameResult {
 		// Whether SDL accepted a command buffer for presentation.
 		bool Presented = false;
@@ -54,6 +80,9 @@ namespace engine::render {
 
 		// Number of opaque mesh triangles submitted for this frame.
 		uint64_t Triangles = 0;
+
+		// How many instances showed a surface texture.
+		uint32_t SurfaceInstances = 0;
 
 		// How many instances the frustum rejected.
 		//
@@ -153,7 +182,8 @@ namespace engine::render {
 			const core::CFrame &cameraFrame,
 			const scene::Camera &camera,
 			std::span<const scene::DrawInstance> instances,
-			OverlayImage &overlay
+			OverlayImage &overlay,
+			const SurfaceView *surface = nullptr
 		);
 
 	  private:

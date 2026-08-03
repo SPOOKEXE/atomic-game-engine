@@ -29,6 +29,7 @@ using engine::scene::QuickHash;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
+using engine::scene::SurfaceCamera;
 using engine::scene::Transform;
 using engine::scene::Visual;
 using engine::scene::WorldBounds;
@@ -68,23 +69,30 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(Surface) == sizeof(Name));
 	CHECK(sizeof(QuickHash) == sizeof(uint64_t));
 	CHECK(sizeof(Camera) == 3 * sizeof(float));
+	CHECK(sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(int8_t) + 3);
+	CHECK(offsetof(SurfaceCamera, Reserved) + 3 == sizeof(SurfaceCamera));
 
 	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + sizeof(BodyKind) + 3);
 	CHECK(
 		sizeof(Collider) ==
 		sizeof(Vector3) + 2 * sizeof(LayerMask) + sizeof(ShapeKind) + sizeof(bool) + sizeof(uint16_t)
 	);
-	// Grew by a float at v0.6. `Transparency` did not fit into `Reserved[3]`:
-	// a float needs four-byte alignment and those are the tail after a `bool`,
-	// so the struct got wider rather than absorbing them — which is exactly
-	// what this check is here to notice.
-	CHECK(sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + 3);
+	// **Two v0.6 fields, and only one of them widened the struct.**
+	// `Transparency` is a float and needed four-byte alignment, so it could not
+	// live in the three named bytes after `Visible` and the row got wider.
+	// `Surface` is an `int8_t` and fits, so it took one of those bytes and cost
+	// nothing — which is what named padding is *for*, and what this check is
+	// here to keep honest.
+	CHECK(
+		sizeof(Visual) ==
+		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + 2
+	);
 
 	// The named padding is the last thing in each, so a member appended after
 	// it would reopen the hole silently.
 	CHECK(offsetof(RigidBody, Reserved) + 3 == sizeof(RigidBody));
 	CHECK(offsetof(Collider, Reserved) + sizeof(uint16_t) == sizeof(Collider));
-	CHECK(offsetof(Visual, Reserved) + 3 == sizeof(Visual));
+	CHECK(offsetof(Visual, Reserved) + 2 == sizeof(Visual));
 }
 
 TEST_CASE("a default transform is the identity at the origin", "[scene][components]") {

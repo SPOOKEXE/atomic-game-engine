@@ -422,6 +422,109 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Surface: which surface texture a part shows, as a script integer.
+		//
+		// **A conversion rather than a plain field, and the reason is a real
+		// hazard.** `Visual::Surface` is an `int8_t` — one byte, because it fits
+		// in padding the struct already had — and no `PropertyType` describes
+		// one. Declaring it with `Classes::Property` would type it `Opaque` and
+		// size it at one byte, and a binding marshalling an `Int32` into that
+		// would write four bytes over three neighbouring fields.
+		//
+		// So the width changes here, once, where it can be seen. Neither Luau
+		// nor JavaScript has an eight-bit integer to hand back anyway.
+		PropertyDescriptor SurfaceProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Surface");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Visual *visual = store.Get<Visual>(instance);
+				if (visual == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = visual->Surface;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const auto index = *static_cast<const int32_t *>(value);
+
+				// Anything out of range is "no surface" rather than a refusal.
+				// A script computing an index that came out wrong gets a part
+				// that draws normally, which is visible; a refusal mid-loop
+				// would stop the rest of the scene being built.
+				Visual *visual = store.GetMutable<Visual>(instance);
+				if (visual == nullptr) {
+					return false;
+				}
+
+				visual->Surface = index >= 0 && index < 127 ? static_cast<int8_t>(index) : int8_t{-1};
+				return true;
+			};
+			return property;
+		}
+
+		// SurfaceSize: the texture a surface camera renders into.
+		//
+		// **Structural, because the component's presence is the query.** A
+		// camera with no `SurfaceCamera` is an ordinary camera and a consumer
+		// walks past it; setting a non-zero size is what makes it one that
+		// renders to a texture, and setting a zero size takes it back.
+		//
+		// A `Vector2` rather than two properties: a width without a height is
+		// half a target, and two writes means a frame where the two disagree.
+		PropertyDescriptor SurfaceSizeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("SurfaceSize");
+			property.Type = PropertyType::Vector3;
+			property.Size = sizeof(core::Vector3);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
+			property.Writes = property.Reads;
+
+			// **A `Vector3` carrying two numbers**, because `PropertyType` has
+			// no `Vector2` case and adding one is a decision about what userland
+			// can hold rather than a detail this property gets to take. Z is
+			// unused and reads back as zero, which is the honest shape — a
+			// script that set it would find it ignored rather than silently
+			// meaning something.
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceCamera *surface = store.Get<SurfaceCamera>(instance);
+				*static_cast<core::Vector3 *>(out) =
+					surface == nullptr
+						? core::Vector3::Zero
+						: core::Vector3{
+							  static_cast<float>(surface->Width), static_cast<float>(surface->Height), 0.0f
+						  };
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const auto size = *static_cast<const core::Vector3 *>(value);
+
+				if (size.X < 1.0f || size.Y < 1.0f) {
+					store.Remove<SurfaceCamera>(instance);
+					return true;
+				}
+
+				// Clamped rather than refused. A texture larger than any device
+				// allows fails at creation with a driver message nobody can act
+				// on; sixteen thousand is past every limit worth having and
+				// small enough to allocate.
+				SurfaceCamera surface;
+				surface.Width = static_cast<uint16_t>(std::min(size.X, 16384.0f));
+				surface.Height = static_cast<uint16_t>(std::min(size.Y, 16384.0f));
+				store.Set(instance, surface);
+				return true;
+			};
+			return property;
+		}
+
 		// The class tree, built once for the process.
 		//
 		// A function-local static, so the tree exists before the first caller
@@ -563,6 +666,12 @@ namespace engine::scene {
 			// would have sat in a snapshot and a delta being read by nobody.
 			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
 
+			// Which surface texture this part shows, or -1 for none. An `int32`
+			// rather than a reference to the camera: the renderer indexes a
+			// small fixed set, and a handle would have to be resolved back to an
+			// index every frame for every part.
+			ecs::Classes::Computed(basePart, SurfaceProperty());
+
 			// The two that were named as gaps at v0.5, both now closed with the
 			// thing they were waiting for rather than with a guess.
 			ecs::Classes::Computed(basePart, MaterialProperty());
@@ -575,6 +684,7 @@ namespace engine::scene {
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
+			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.

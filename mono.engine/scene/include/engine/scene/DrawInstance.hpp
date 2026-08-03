@@ -80,6 +80,22 @@ namespace engine::scene {
 		// looking*, and the reason this arrived with the pass rather than ahead
 		// of it. See `SortForDrawing`.
 		float Transparency = 0.0f;
+
+		// Which surface texture this instance shows, or -1 for none.
+		//
+		// **A mirror, and nothing more general than that.** A surface camera
+		// renders the world into a texture and an instance carrying its index
+		// samples it with a planar projection from that camera — which is
+		// exactly right for a flat pane and exactly wrong for anything curved.
+		// The narrowness is the design: a general reflection needs a cube map
+		// or a screen-space trace, and neither belongs in a pipeline this size.
+		int8_t Surface = -1;
+
+		// Explicit padding, for the reason every other `Reserved` in the engine
+		// exists: this type crosses as its object representation the day a world
+		// is a process, and uninitialised bytes make two runs of one scene
+		// produce different files.
+		uint8_t Reserved[3] = {};
 	};
 
 	// Produces the order a draw list should be submitted in.
