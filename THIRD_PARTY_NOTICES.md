@@ -4,7 +4,7 @@ This engine is MPL-2.0. It builds against the projects below, each under its own
 licence. Every one of them lives in `mono.vendor/` as a git submodule, so the
 full licence text ships with the source in `mono.vendor/<name>/`.
 
-All fourteen are permissive and compatible with MPL-2.0. **Nothing here is
+All fifteen are permissive and compatible with MPL-2.0. **Nothing here is
 copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
 adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`.
 
@@ -23,6 +23,7 @@ adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` — chunk, asset, bundle and manifest addressing | yes, once linked |
 | [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
 | [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no — `just docs` only |
+| [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the script VM and its compiler, from v0.6 | yes, once linked — nothing links it today |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They

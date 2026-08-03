@@ -120,3 +120,18 @@
 	url = https://github.com/facebook/zstd.git
 	branch = release
 	shallow = true
+; Luau is vendored ahead of its consumer. Nothing links it until v0.6 runs a
+; script; MonoVendor.cmake adds it EXCLUDE_FROM_ALL so it costs a clone and no
+; build time until then. `v05.md` open question 3 is what this answers, and it
+; is answered early because the bindings manifest generates Luau type
+; declarations and those are written against a value model rather than in the
+; abstract.
+;
+; master, because Luau tags releases rather than publishing a release branch —
+; the same situation as flecs, glm and the cryptopp pair above, and the
+; superproject pins the SHA regardless.
+[submodule "mono.vendor/luau"]
+	path = mono.vendor/luau
+	url = https://github.com/luau-lang/luau.git
+	branch = master
+	shallow = true

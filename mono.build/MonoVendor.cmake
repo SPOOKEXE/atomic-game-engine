@@ -392,3 +392,70 @@ unset(_zstd_includes)
 
 # Vendor:: to match the rest.
 add_library(Vendor::zstd ALIAS libzstd_static)
+
+# --- Luau -------------------------------------------------------------------
+# The script VM, vendored ahead of its consumer.
+#
+# `v05.md` open question 3 asked which VM and said the answer should be taken
+# before the bindings manifest generates declaration files, because a `.d.ts`
+# and a Luau type file are written against a value model rather than in the
+# abstract. This is that answer. **Nothing links it yet** — v0.6 is where a
+# script runs — and EXCLUDE_FROM_ALL is what makes vendoring it early cost
+# nothing until then.
+#
+# MIT, twice over: Roblox's own text in LICENSE.txt and Lua.org's in
+# lua_LICENSE.txt, since Luau is a fork of Lua 5.1. Both are permissive and both
+# ship with the submodule.
+if(NOT EXISTS "${MONO_VENDOR}/luau/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/luau is missing. Run `just setup`.")
+endif()
+
+# Upstream defaults the CLI and the tests ON, which would put `luau`,
+# `luau-analyze` and a test binary in the build for a dependency nothing links.
+# Same line ZSTD_BUILD_PROGRAMS is off on.
+set(LUAU_BUILD_CLI    OFF CACHE BOOL "" FORCE)
+set(LUAU_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+set(LUAU_BUILD_WEB    OFF CACHE BOOL "" FORCE)
+set(LUAU_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+
+# Off, and not merely inherited: upstream's own default is already OFF, but this
+# repository builds first-party code with -Werror under the `ci` preset and a
+# vendored tree that promotes its own warnings is a build we cannot fix without
+# a fork. Stated rather than assumed, because a default is not a decision.
+set(LUAU_WERROR OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${MONO_VENDOR}/luau" EXCLUDE_FROM_ALL)
+
+# Same reason as Crypto++, BLAKE3 and Zstd.
+foreach(_luau_target Luau.VM Luau.Compiler Luau.Ast Luau.Common)
+	if(TARGET ${_luau_target})
+		get_target_property(_luau_includes ${_luau_target} INTERFACE_INCLUDE_DIRECTORIES)
+		if(_luau_includes)
+			set_target_properties(${_luau_target} PROPERTIES
+				INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_luau_includes}")
+		endif()
+		unset(_luau_includes)
+	endif()
+endforeach()
+unset(_luau_target)
+
+# Two aliases, not eleven, and the omissions are the decision here.
+#
+# `Luau.VM` executes bytecode and `Luau.Compiler` produces it from source; those
+# are what running a game script needs. The rest stay unaliased until something
+# asks:
+#
+# - **`Luau.CodeGen` is the native-code backend, and it is off the table until
+#   determinism is measured rather than assumed.** This repository diffs two runs
+#   byte for byte — `just determinism` and `just replay-check` — and a JIT is a
+#   second execution path for the same script. That is exactly the test v0.4
+#   stated before changing to `-O3`, and it has to be stated again before a
+#   second backend, not after.
+# - **`Luau.Analysis` is the type checker.** Wanted by a tool that checks the
+#   generated declaration files, which is `v05.md` §5.7's business and not a
+#   runtime's. It gets an alias when that tool exists.
+# - **`Luau.Require` resolves `require` against a filesystem.** A game's scripts
+#   arrive through `assets` and the CDN, content-addressed and signed. A resolver
+#   that reads paths would be a second way in that none of that covers.
+add_library(Vendor::luau_vm ALIAS Luau.VM)
+add_library(Vendor::luau_compiler ALIAS Luau.Compiler)
