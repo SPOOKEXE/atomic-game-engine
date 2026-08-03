@@ -9,6 +9,7 @@
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.scene.part")
@@ -194,4 +195,159 @@ TEST_CASE("a replica refuses to mint a part", "[scene][part]") {
 	store.SetAdoptOnly(true);
 
 	CHECK(MakePart(store, PartDesc{}) == NULL_ENTITY);
+}
+
+// --- the property surface ---------------------------------------------------
+//
+// `v05.md` §5.5's tests. The interesting ones are not "does a setter set" —
+// they are the four ways a property write can look like it worked and not have.
+
+namespace {
+	// Reads a property into a value of the type it says it is.
+	template <class T> T Read(const Store &store, Entity instance, const char *property) {
+		T value{};
+		REQUIRE(store.GetProperty(instance, Name(property), &value, sizeof(T)));
+		return value;
+	}
+
+	template <class T> bool Write(Store &store, Entity instance, const char *property, const T &value) {
+		return store.SetProperty(instance, Name(property), &value, sizeof(T));
+	}
+}
+
+TEST_CASE("Position writes the translation and keeps the rotation", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	// A rotation that is not the identity, so a setter that replaced the whole
+	// CFrame would be visible rather than a no-op.
+	REQUIRE(Write(store, part, "Orientation", Vector3{0.0f, 90.0f, 0.0f}));
+	const Vector3 before = Read<Vector3>(store, part, "Orientation");
+
+	REQUIRE(Write(store, part, "Position", Vector3{3.0f, -4.0f, 5.0f}));
+
+	const Vector3 position = Read<Vector3>(store, part, "Position");
+	CHECK(position.X == 3.0f);
+	CHECK(position.Y == -4.0f);
+	CHECK(position.Z == 5.0f);
+
+	// The whole point: an offset-shaped setter would have written twelve bytes
+	// over the front of the CFrame and left the quaternion behind.
+	const Vector3 after = Read<Vector3>(store, part, "Orientation");
+	CHECK(after.Y == Catch::Approx(before.Y).margin(1.0e-3f));
+}
+
+TEST_CASE("Orientation writes the rotation and keeps the translation", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	REQUIRE(Write(store, part, "Position", Vector3{1.0f, 2.0f, 3.0f}));
+	REQUIRE(Write(store, part, "Orientation", Vector3{0.0f, 45.0f, 0.0f}));
+
+	const Vector3 position = Read<Vector3>(store, part, "Position");
+	CHECK(position.X == 1.0f);
+	CHECK(position.Y == 2.0f);
+	CHECK(position.Z == 3.0f);
+
+	// Degrees, because Roblox's Orientation is degrees. Radians here would be
+	// a factor of 57 that nothing else in the suite would notice.
+	CHECK(Read<Vector3>(store, part, "Orientation").Y == Catch::Approx(45.0f).margin(1.0e-2f));
+}
+
+TEST_CASE("Size is a full extent over a stored half, and moves the collider too", "[scene][part]") {
+	Store store("property_test");
+	PartDesc desc;
+	desc.Size = Vector3{2.0f, 2.0f, 2.0f};
+	const Entity part = MakePart(store, desc);
+
+	CHECK(Read<Vector3>(store, part, "Size").X == 2.0f);
+	CHECK(store.Get<Bounds>(part)->HalfExtent.X == 1.0f);
+
+	REQUIRE(Write(store, part, "Size", Vector3{4.0f, 6.0f, 8.0f}));
+
+	CHECK(store.Get<Bounds>(part)->HalfExtent.X == 2.0f);
+	CHECK(store.Get<Bounds>(part)->HalfExtent.Y == 3.0f);
+
+	// Drawn at one size and collided at another is the bug this asserts
+	// against, and nothing else in the tree would report it.
+	CHECK(store.Get<Collider>(part)->Extent.X == 2.0f);
+	CHECK(store.Get<Collider>(part)->Extent.Y == 3.0f);
+}
+
+TEST_CASE("a property write marks its column changed", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	// The one that matters most and is invisible when it breaks: replication
+	// builds deltas from the change channel, so a write the channel never sees
+	// is a script edit the server never sends.
+	store.Observe<Transform>();
+	store.ClearChanges();
+	CHECK_FALSE(store.Changed<Transform>(part));
+
+	REQUIRE(Write(store, part, "Position", Vector3{1.0f, 0.0f, 0.0f}));
+	CHECK(store.Changed<Transform>(part));
+}
+
+TEST_CASE("a size that disagrees with the property is refused", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	// A Vector3 handed to a CFrame property. Truncating would leave the
+	// rotation from whatever was there before, which reads as a physics bug a
+	// long way from the binding that caused it.
+	const Vector3 wrong{1.0f, 2.0f, 3.0f};
+	CHECK_FALSE(store.SetProperty(part, Name("CFrame"), &wrong, sizeof(wrong)));
+
+	CFrame value;
+	CHECK_FALSE(store.GetProperty(part, Name("CFrame"), &value, sizeof(Vector3)));
+
+	// And a name nothing declares.
+	CHECK_FALSE(Write(store, part, "Transparency", 0.5f));
+}
+
+TEST_CASE("Anchored is presence rather than a flag", "[scene][part]") {
+	Store store("property_test");
+
+	const Entity dynamic = MakePart(store, PartDesc{});
+	CHECK(store.Get<RigidBody>(dynamic) != nullptr);
+	CHECK_FALSE(Read<bool>(store, dynamic, "Anchored"));
+
+	// A structural write: the row moves to another archetype rather than a
+	// boolean changing inside it.
+	REQUIRE(Write(store, dynamic, "Anchored", true));
+	CHECK(store.Get<RigidBody>(dynamic) == nullptr);
+	CHECK(store.Get<Motion>(dynamic) == nullptr);
+	CHECK(Read<bool>(store, dynamic, "Anchored"));
+
+	REQUIRE(Write(store, dynamic, "Anchored", false));
+	CHECK(store.Get<RigidBody>(dynamic) != nullptr);
+	CHECK_FALSE(Read<bool>(store, dynamic, "Anchored"));
+}
+
+TEST_CASE("CanCollide is the inverse of the trigger flag", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	CHECK(Read<bool>(store, part, "CanCollide"));
+
+	REQUIRE(Write(store, part, "CanCollide", false));
+	CHECK(store.Get<Collider>(part)->Trigger);
+
+	// The layer mask is untouched, which is why this maps to Trigger and not
+	// to the mask: clearing and restoring a mask loses whatever a game had
+	// configured, and the loss only shows up much later.
+	CHECK(store.Get<Collider>(part)->Mask == engine::spatial::LayerMask::All());
+}
+
+TEST_CASE("a replica refuses a property write", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	store.SetAdoptOnly(true);
+
+	// Refused rather than applied-then-overwritten. A script author cannot tell
+	// those apart from inside the script.
+	CHECK_FALSE(Write(store, part, "Position", Vector3{9.0f, 9.0f, 9.0f}));
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == 0.0f);
 }

@@ -800,3 +800,136 @@ TEST_CASE("the network panel does not overlap the statistics panel", "[panels][n
 	REQUIRE(networkLeft < WIDTH);
 	REQUIRE(statisticsRight < networkLeft);
 }
+
+// --- the SHARE column -------------------------------------------------------
+//
+// The bug this guards against was reported off the screen, not off a test: the
+// column read **2634%**. Nothing was corrupt — a span's `Milliseconds` is
+// inclusive, the denominator was the frame less its idle time, and the render
+// span encloses the swapchain wait. The arithmetic divided two real numbers
+// that were never the same measurement.
+
+namespace {
+	// The frame the bug was found on, to the numbers the snapshot recorded.
+	//
+	// frame 16.737 ms, of which `acquire swapchain` waited 16.115 ms, so the
+	// busy part is 0.622 ms and `Renderer::Render` covers 16.385 ms of it.
+	std::vector<FrameSpan> VsyncedFrame() {
+		std::vector<FrameSpan> spans(3);
+
+		spans[0].Name = "Renderer::Render";
+		spans[0].Depth = 0;
+		spans[0].Parent = 0;
+		spans[0].Milliseconds = 16.385f;
+		spans[0].SelfMilliseconds = 0.270f;
+		spans[0].Category = ProfileCategory::Render;
+
+		spans[1].Name = "acquire swapchain";
+		spans[1].Depth = 1;
+		spans[1].Parent = 0;
+		spans[1].Milliseconds = 16.115f;
+		spans[1].SelfMilliseconds = 16.115f;
+		spans[1].Category = ProfileCategory::Idle;
+
+		spans[2].Name = "simulation";
+		spans[2].Depth = 0;
+		spans[2].Parent = 2;
+		spans[2].Milliseconds = 0.231f;
+		spans[2].SelfMilliseconds = 0.231f;
+		spans[2].Category = ProfileCategory::Simulation;
+
+		return spans;
+	}
+}
+
+TEST_CASE("a span enclosing the vsync wait does not exceed 100%", "[panels]") {
+	const std::vector<FrameSpan> spans = VsyncedFrame();
+	const std::vector<float> shares = engine::render::BusyShares(spans, 0.622f);
+
+	REQUIRE(shares.size() == spans.size());
+
+	// 16.385 / 0.622 was 2634%. With the wait taken out of the numerator it is
+	// 0.270 / 0.622, which is what the render actually cost.
+	CHECK(shares[0] == Approx(0.270f / 0.622f).margin(0.01));
+	CHECK(shares[0] < 1.0f);
+
+	// A scope whose entire job is to block accounts for none of the busy time.
+	// Zero is the honest answer rather than a suppressed one.
+	CHECK(shares[1] == Approx(0.0f).margin(0.001));
+
+	CHECK(shares[2] == Approx(0.231f / 0.622f).margin(0.01));
+}
+
+TEST_CASE("no span's share exceeds the whole busy frame", "[panels]") {
+	const std::vector<FrameSpan> spans = VsyncedFrame();
+	const std::vector<float> shares = engine::render::BusyShares(spans, 0.622f);
+
+	for (const float share : shares) {
+		CHECK(share >= 0.0f);
+		CHECK(share <= 1.0f);
+	}
+}
+
+TEST_CASE("nested waits are not counted twice", "[panels]") {
+	std::vector<FrameSpan> spans(3);
+
+	spans[0].Name = "outer";
+	spans[0].Depth = 0;
+	spans[0].Parent = 0;
+	spans[0].Milliseconds = 10.0f;
+	spans[0].SelfMilliseconds = 2.0f;
+	spans[0].Category = ProfileCategory::Render;
+
+	// A wait containing another wait. Subtracting inclusive time at both levels
+	// would remove the inner one twice and drive the outer share negative.
+	spans[1].Depth = 1;
+	spans[1].Parent = 0;
+	spans[1].Milliseconds = 8.0f;
+	spans[1].SelfMilliseconds = 3.0f;
+	spans[1].Category = ProfileCategory::Idle;
+
+	spans[2].Depth = 2;
+	spans[2].Parent = 1;
+	spans[2].Milliseconds = 5.0f;
+	spans[2].SelfMilliseconds = 5.0f;
+	spans[2].Category = ProfileCategory::Idle;
+
+	const std::vector<float> shares = engine::render::BusyShares(spans, 2.0f);
+
+	// 10 inclusive less 8 of waiting is 2, which is the whole busy frame.
+	CHECK(shares[0] == Approx(1.0f).margin(0.001));
+	CHECK(shares[1] == Approx(0.0f).margin(0.001));
+	CHECK(shares[2] == Approx(0.0f).margin(0.001));
+}
+
+TEST_CASE("a frame with no idle is unchanged by the correction", "[panels]") {
+	std::vector<FrameSpan> spans(1);
+	spans[0].Depth = 0;
+	spans[0].Parent = 0;
+	spans[0].Milliseconds = 4.0f;
+	spans[0].SelfMilliseconds = 4.0f;
+	spans[0].Category = ProfileCategory::Simulation;
+
+	// The uncapped case, where the fix must do nothing at all.
+	CHECK(engine::render::BusyShares(spans, 8.0f)[0] == Approx(0.5f).margin(0.001));
+}
+
+TEST_CASE("a parent chain that points at itself terminates", "[panels]") {
+	std::vector<FrameSpan> spans(2);
+	spans[0].Depth = 0;
+	spans[0].Parent = 1;
+	spans[0].Milliseconds = 1.0f;
+	spans[0].Category = ProfileCategory::Idle;
+	spans[0].SelfMilliseconds = 1.0f;
+
+	spans[1].Depth = 0;
+	spans[1].Parent = 0;
+	spans[1].Milliseconds = 1.0f;
+	spans[1].Category = ProfileCategory::Render;
+
+	// A cycle is not something the frame graph should produce, and the overlay
+	// must not hang if it ever does — a profiler that freezes the frame it is
+	// profiling is worse than a wrong number.
+	const std::vector<float> shares = engine::render::BusyShares(spans, 1.0f);
+	CHECK(shares.size() == 2);
+}

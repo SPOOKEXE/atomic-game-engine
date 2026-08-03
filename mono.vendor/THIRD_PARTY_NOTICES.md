@@ -97,16 +97,23 @@ project ever patches SDL rather than upstreaming the fix, the altered source has
 to be marked. `AGENTS.md` already forbids local patches for a different reason,
 which happens to keep this clause satisfied by construction.
 
-### flecs — removed at v0.2
+### flecs — removed at v0.2, submodule deleted at v0.4
 
 flecs was the ECS storage for v0.1 and is no longer built, linked or shipped.
 `engine::ecs` owns its storage outright — `Column`, `ComponentSet`, `SparseSet`
 and the archetype behind them — which is what `Store::Native()` existed to
 apologise for and what its removal settles.
 
-The submodule is still checked out at `mono.vendor/flecs/`. Nothing configures
-it, so nothing links it and no binary contains it; the directory is repository
-history rather than a dependency. Delete it when convenient.
+**The submodule is gone.** This entry used to end "delete it when convenient",
+and it stayed checked out for two versions after nothing configured it — which
+is the small version of the thing this repository keeps finding: **an artefact
+nothing builds is one nobody re-reads, and it goes on looking like a dependency
+to everyone who greps for one.** It was still costing every `just setup` a clone
+and still appearing in a licence count that the table below it had already
+stopped listing.
+
+Kept as an entry rather than deleted, because "why is there no flecs" is a
+question the v0.1 history invites and the answer belongs somewhere.
 
 ### glm — The Happy Bunny License or MIT
 

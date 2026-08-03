@@ -166,7 +166,7 @@ work, so it belongs beside this.
 `PUBLIC` include path so that `<cryptopp/sha.h>` resolves. In this tree that
 parent is `mono.vendor/` itself. Any target linking `Vendor::cryptopp` therefore
 has `mono.vendor/` on its include path and can reach `<glm/...>`, `<sdl/...>`
-and `<flecs/...>` whether or not it links them:
+and `<luau/...>` whether or not it links them:
 
 ```
 -isystem /…/mono.vendor/cryptopp

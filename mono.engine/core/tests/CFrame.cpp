@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <numbers>
 
 TEST_SUITE_ID("engine.core.types.cframe")
@@ -203,4 +204,74 @@ TEST_CASE("ToMatrix puts the position in the fourth column", "[cframe]") {
 	REQUIRE(matrix[3][1] == Approx(2.0f));
 	REQUIRE(matrix[3][2] == Approx(3.0f));
 	REQUIRE(matrix[3][3] == Approx(1.0f));
+}
+
+// --- ToAngles ---------------------------------------------------------------
+//
+// The property surface exposes an `Orientation` a script can read, modify and
+// assign back, so the pair has to be an exact inverse rather than merely a
+// plausible Euler extraction. `part.Orientation = part.Orientation` drifting a
+// little on every assignment is a bug that only appears in a loop.
+
+namespace {
+	// Compares rotations rather than angle triples. Two different triples can
+	// name one rotation — that is what gimbal lock *is* — so asserting on the
+	// angles would fail for a correct answer.
+	void RequireSameRotation(const CFrame &produced, const CFrame &expected, float margin = 1.0e-4f) {
+		for (const Vector3 &probe :
+			 {Vector3::XAxis, Vector3::YAxis, Vector3::ZAxis, Vector3{0.37f, -0.62f, 0.19f}}) {
+			const Vector3 first = produced.VectorToWorldSpace(probe);
+			const Vector3 second = expected.VectorToWorldSpace(probe);
+			REQUIRE(first.X == Approx(second.X).margin(margin));
+			REQUIRE(first.Y == Approx(second.Y).margin(margin));
+			REQUIRE(first.Z == Approx(second.Z).margin(margin));
+		}
+	}
+}
+
+TEST_CASE("ToAngles inverts Angles across all three axes", "[cframe]") {
+	constexpr float DEGREE = std::numbers::pi_v<float> / 180.0f;
+
+	// A spread rather than one triple, and deliberately not axis-aligned: a
+	// wrong Euler *order* reproduces any single-axis rotation correctly and
+	// fails the moment two turns compose.
+	const float samples[] = {-170.0f, -95.0f, -44.0f, -1.0f, 0.0f, 17.0f, 89.0f, 133.0f};
+
+	for (const float pitch : samples) {
+		for (const float yaw : samples) {
+			for (const float roll : samples) {
+				const CFrame original = CFrame::Angles(pitch * DEGREE, yaw * DEGREE, roll * DEGREE);
+				const Vector3 recovered = original.ToAngles();
+				RequireSameRotation(CFrame::Angles(recovered.X, recovered.Y, recovered.Z), original);
+			}
+		}
+	}
+}
+
+TEST_CASE("ToAngles round-trips at the gimbal poles", "[cframe]") {
+	constexpr float HALF_PI = std::numbers::pi_v<float> / 2.0f;
+
+	// Pitch at ±90° is where cos(pitch) reaches zero and the yaw and roll axes
+	// coincide. The triple that comes back is not the one that went in — it
+	// cannot be, the information is genuinely gone — but the rotation it
+	// rebuilds has to be identical.
+	for (const float pitch : {HALF_PI, -HALF_PI}) {
+		for (const float yaw : {0.0f, 0.9f, -2.1f}) {
+			for (const float roll : {0.0f, 0.6f, -1.4f}) {
+				const CFrame original = CFrame::Angles(pitch, yaw, roll);
+				const Vector3 recovered = original.ToAngles();
+
+				REQUIRE(std::isfinite(recovered.X));
+				REQUIRE(std::isfinite(recovered.Y));
+				REQUIRE(std::isfinite(recovered.Z));
+
+				// A looser margin than the sweep above, and it is float
+				// precision rather than slack. At the pole `sin(pitch)` comes
+				// back as 0.99999994, so the axis the extraction leans on has
+				// about 3.5e-4 of magnitude left to carry a ratio — that error
+				// is the arithmetic's floor here, not the algorithm's.
+				RequireSameRotation(CFrame::Angles(recovered.X, recovered.Y, recovered.Z), original, 1.0e-3f);
+			}
+		}
+	}
 }

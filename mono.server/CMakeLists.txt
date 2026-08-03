@@ -23,6 +23,12 @@ mono_add_library(server
 		# a `DrawInstance` are arithmetic and names, and neither needs a device.
 		Engine::scene
 
+		# L10, `shared`. `--game` hosts the same scene file a client loads,
+		# through the same loader. A server that authored it differently would
+		# disagree with its own replicas once per tick, and both sides would
+		# look internally consistent while doing it.
+		Engine::examples
+
 		# `--listen` makes this process the authority for clients. Both are
 		# `shared` tier, so neither costs the headless property above: a UDP
 		# socket and a component delta need no graphics stack, which is why

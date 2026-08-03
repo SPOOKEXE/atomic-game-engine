@@ -18,6 +18,7 @@ endif()
 # The documentation filter, and the `docs` target it feeds. Declared always: the
 # filter is an ordinary library with ordinary tests, and only the `docs` target
 # itself needs Doxygen to be installed.
+add_subdirectory(bindings)
 add_subdirectory(docgen)
 
 # --- architecture ------------------------------------------------------------

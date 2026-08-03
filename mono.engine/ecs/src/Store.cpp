@@ -3,6 +3,7 @@
 #include "Snapshot.hpp"
 #include "StoreState.hpp"
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
@@ -459,6 +460,85 @@ namespace engine::ecs {
 
 	bool Store::IsA(Entity instance, ClassId id) const {
 		return engine::ecs::IsA(*State, instance, id);
+	}
+
+	// --- properties by name ------------------------------------------------
+
+	namespace {
+		// The descriptor for one name on one instance, or nullptr.
+		//
+		// Linear over the merged list rather than a map. A class has a handful
+		// of properties, the list is contiguous, and a binding that cares about
+		// the cost resolves the descriptor once and keeps it — which is what
+		// `PropertiesOf` is for.
+		const PropertyDescriptor *FindProperty(const Store &store, Entity instance, core::Name name) {
+			const ClassId id = store.ClassOf(instance);
+			if (!id.IsValid()) {
+				return nullptr;
+			}
+
+			for (const PropertyDescriptor &property : Classes::Describe(id).Properties) {
+				if (property.Name == name) {
+					return &property;
+				}
+			}
+			return nullptr;
+		}
+	}
+
+	std::span<const PropertyDescriptor> Store::PropertiesOf(Entity instance) const {
+		const ClassId id = ClassOf(instance);
+		return id.IsValid() ? Classes::Describe(id).Properties : std::span<const PropertyDescriptor>{};
+	}
+
+	bool Store::GetProperty(Entity instance, core::Name property, void *out, size_t bytes) const {
+		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
+		if (descriptor == nullptr || descriptor->Get == nullptr) {
+			return false;
+		}
+
+		// A size that disagrees is a caller holding a different type than the
+		// one this property is. Refused rather than truncated: a short write
+		// into a `CFrame` leaves a rotation from the previous value, which
+		// looks like a physics bug a long way from here.
+		if (bytes != descriptor->Size || out == nullptr) {
+			return false;
+		}
+
+		return descriptor->Get(*this, instance, out);
+	}
+
+	bool Store::SetProperty(Entity instance, core::Name property, const void *value, size_t bytes) {
+		RequireOwningThread("SetProperty");
+
+		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
+		if (descriptor == nullptr || descriptor->Set == nullptr || !descriptor->Writable) {
+			return false;
+		}
+
+		if (bytes != descriptor->Size || value == nullptr) {
+			return false;
+		}
+
+		// A replica's rows belong to the authority. v0.3 made minting here
+		// impossible; a property write is the same hazard one step along — a
+		// client-side script setting a value the next delta overwrites, which
+		// presents as "my script works sometimes" rather than as an error.
+		//
+		// Refused loudly rather than quietly, because a script author cannot
+		// see the difference between a write that was rejected and one that
+		// was applied and then replaced.
+		if (AdoptOnly()) {
+			ENGINE_ERROR(
+				"store '{}': refusing to set '{}' in a replica. The authority owns this row, and "
+				"a value written here survives until its next delta and no longer.",
+				Name(),
+				property.Text()
+			);
+			return false;
+		}
+
+		return descriptor->Set(*this, instance, value);
 	}
 
 	core::Name Store::InstanceNameOf(Entity instance) const {

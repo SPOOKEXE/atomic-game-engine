@@ -56,6 +56,7 @@
 #include <client/Demo.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace unified {
@@ -66,6 +67,14 @@ namespace unified {
 	struct Settings {
 		// Entities in the server's placeholder world.
 		uint32_t Entities = 64;
+
+		// A scene file to author the server's world from, or empty for the
+		// placeholder.
+		//
+		// The same loader the client and the server call, over the same file.
+		// This harness exists to prove a server and a client agree, so a
+		// scene it could not author would be the one thing it cannot check.
+		std::string ScenePath;
 
 		// The authority's tick rate, in ticks per second. The server's own
 		// default, because that is what a client meets in practice and the

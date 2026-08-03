@@ -28,6 +28,12 @@ mono_add_library(client
 		# allowed to link — the tier rule already permits `shared` here.
 		Engine::net
 		Engine::replication
+
+		# L10, `shared`. `--script` builds the scene by running a Luau file
+		# instead of the C++ loop in Demo.cpp. The VM itself is private to that
+		# module — nothing here compiles against Luau — so this row says "the
+		# client can run a game file" and nothing about which language it is in.
+		Engine::examples
 	VENDOR SDL3::SDL3
 )
 

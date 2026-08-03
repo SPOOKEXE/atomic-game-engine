@@ -2,9 +2,13 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Property.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 
 #include <algorithm>
@@ -44,48 +48,6 @@ namespace client {
 		// because there is nothing outside the world for it to capture — which
 		// is what makes them registerable from bindings, replayable from a
 		// recording, and reusable by a second world.
-
-		// Before anything moves. Rendering interpolates from here, so it has to
-		// be the position at the start of *this* tick — capturing it after a
-		// system has run would interpolate from a place nothing was ever at.
-		void CapturePrevious(Store &store) {
-			store.EachParallel<PreviousTransform, const Transform>(
-				[](Entity, PreviousTransform &previous, const Transform &transform) {
-					previous.Frame = transform.Frame;
-				}
-			);
-		}
-
-		void MoveOrbits(Store &store) {
-			// Simulated seconds, from the world's clock. Nothing accumulates
-			// wall time here: the scene has to be in the same place after one
-			// second whether that second took 30 frames or 600.
-			const auto now = static_cast<float>(store.Time().Elapsed);
-
-			store.Each<Transform, const Orbit>([now](Entity, Transform &transform, const Orbit &orbit) {
-				const float angle = orbit.Phase + now * orbit.RadiansPerSecond;
-				transform.Frame.Position = orbit.Centre + Vector3{
-															  std::cos(angle) * orbit.Radius,
-															  orbit.Height,
-															  std::sin(angle) * orbit.Radius,
-														  };
-			});
-		}
-
-		void ApplySpin(Store &store) {
-			// The tick delta, which is fixed. There is no way to reach the
-			// frame delta from here by accident — it is a different field with
-			// a different name.
-			const float delta = store.Time().Delta;
-
-			store.Each<Transform, const Spin>([delta](Entity, Transform &transform, const Spin &spin) {
-				// Rotation composes on the right, so the spin is applied in
-				// the cube's own space and the orbit position is untouched.
-				transform.Frame =
-					transform.Frame *
-					CFrame::Angles(spin.Rate.X * delta, spin.Rate.Y * delta, spin.Rate.Z * delta);
-			});
-		}
 
 		// The camera is part of the scene, so it moves in the simulation on
 		// simulated time. Driving it from wall time would slide it past
@@ -257,6 +219,62 @@ namespace client {
 		}
 	}
 
+	// --- what the systems need, whoever built the entities --------------------
+	//
+	// Split out of `BuildDemoWorld` when the scene became loadable from a
+	// script. Both paths install the same resources and the same systems,
+	// because the difference between them is *what entities exist* and nothing
+	// else — a scripted scene that ran different systems would not be a port of
+	// this one, it would be a second demo that happens to look similar.
+
+	namespace {
+		Entity InstallCamera(Store &store) {
+			const Entity camera = store.Create();
+			store.Set<Transform>(camera, Transform{});
+			store.Set<engine::scene::Camera>(camera, engine::scene::Camera{});
+			return camera;
+		}
+
+		void InstallResources(Store &store, Entity camera, float extent, uint32_t reserve) {
+			store.SetResource(WorldBounds{extent});
+
+			ActiveCamera live;
+			live.Entity = camera;
+			store.SetResource(live);
+			store.SetResource(DrawList{});
+
+			store.ResourceMutable<DrawList>()->Instances.reserve(reserve);
+		}
+
+		void InstallSystems(Scheduler &scheduler) {
+			// The three that move the scene belong to every program that loads
+			// it, so they are the engine's. Only the last two are a client's.
+			engine::examples::InstallMotionSystems(scheduler);
+			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
+			scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+		}
+	}
+
+	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
+		// The scene, the components and the systems that move it are the
+		// engine's and every program's. What follows is the client's half.
+		std::string error;
+		if (!engine::examples::LoadScene(store, scheduler, path, error)) {
+			ENGINE_ERROR("script '{}' failed:\n{}", path, error);
+			return false;
+		}
+
+		const float extent = store.Resource<WorldBounds>()->HalfExtent;
+		const Entity camera = InstallCamera(store);
+		InstallResources(store, camera, extent, std::max<uint32_t>(reserve, 1));
+
+		// Only the two a client owns. `capture-previous`, `orbit` and `spin`
+		// were installed by the loader, because a server runs those too.
+		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
+		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+		return true;
+	}
+
 	void BuildDemoWorld(Store &store, Scheduler &scheduler, uint32_t count) {
 		// Before the first `Set`, on every path. An unregistered component is
 		// minted under whatever the compiler calls the type, which is a name a
@@ -335,33 +353,22 @@ namespace client {
 		// The camera is a row, not a resource holding a value. A world may hold
 		// several — a spectator, a cutscene — and `ActiveCamera` names the live
 		// one, so "where is the camera" stays a lookup rather than a search.
-		const Entity camera = store.Create();
-		store.Set<Transform>(camera, Transform{});
-		store.Set<engine::scene::Camera>(camera, engine::scene::Camera{});
-
-		// Every resource the systems below read, installed before any of them
-		// can run. A system that has to check whether its resource exists yet
-		// is a system with a branch for a state the world is never in.
+		//
+		// Every resource the systems read is installed before any of them can
+		// run. A system that has to check whether its resource exists yet is a
+		// system with a branch for a state the world is never in.
 		//
 		// `WorldBounds` is how far this scene reaches from the origin, which is
 		// what the camera frames from — the same resource the server's world
 		// bounces inside, because they are one idea and used to be two names.
-		store.SetResource(WorldBounds{extent});
-		ActiveCamera live;
-		live.Entity = camera;
-		store.SetResource(live);
-		store.SetResource(DrawList{});
-
+		//
 		// Reserved once rather than grown: the count is known, and the first
 		// frame is the one most likely to be looked at in a profile.
-		store.ResourceMutable<DrawList>()->Instances.reserve(count);
+		const Entity camera = InstallCamera(store);
+		InstallResources(store, camera, extent, count);
 
 		ENGINE_INFO("demo scene: {} entities across {} ring(s)", count, rings);
 
-		scheduler.Add("capture-previous", Phase::PreSimulation, CapturePrevious);
-		scheduler.Add("orbit", Phase::Simulation, MoveOrbits);
-		scheduler.Add("spin", Phase::Simulation, ApplySpin);
-		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
-		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+		InstallSystems(scheduler);
 	}
 }

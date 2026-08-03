@@ -272,14 +272,30 @@ during the flush that already exists, rather than a second dispatch mechanism.
 The engine-level signal is the right primitive underneath either way, which is
 why this is deferred rather than designed now.
 
-- Property get/set **by name at runtime**, through the descriptor table.
-- Attributes: a per-entity dynamic key/value map, which is a component holding a
-  small map rather than anything the archetype knows about.
-- The bindings manifest, generated from `TypeDescriptor::Properties` — which
+- ~~Property get/set **by name at runtime**, through the descriptor table.~~
+  **Built at v0.5** as `Store::GetProperty`/`SetProperty`. Bytes and a size,
+  size-checked; a conversion reaches its component through `GetMutable`, so the
+  change mark comes for free rather than being something the setter has to
+  remember.
+- ~~The bindings manifest, generated from `TypeDescriptor::Properties` — which
   means property descriptors have to carry enough to generate from, not just
-  enough to read with.
+  enough to read with.~~ **Built at v0.5, and that last clause was the whole
+  problem.** A descriptor carried a component and an offset, which is enough to
+  read `Visible` with and cannot describe `Size` at all. It is a getter, a
+  setter, a kind and the component sets each side touches now — so the manifest
+  needs **no offsets**, and rule 4 is satisfied by construction rather than by a
+  disclaimer about which fields survive a recompile.
+- Attributes: a per-entity dynamic key/value map, which is a component holding a
+  small map rather than anything the archetype knows about. **Still open, and
+  the manifest deliberately does not describe it** — it is dynamic, so there is
+  nothing static to describe, and the absence should not read as an oversight.
 - `FLECS_CPP_NO_AUTO_REGISTRATION`'s equivalent: making `Components::Of<T>` on
   an unregistered type an error in release, once every component is declared.
+  **Still open, and v0.5 found the sharpest case for it yet**: constructing a
+  `world::Postbox` on a store that never registered its mailbox types minted
+  them under the compiler's spelling, and nothing failed until the next
+  `Universe` registered them properly and aborted — in whichever test order
+  reached it first.
 
 ---
 

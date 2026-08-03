@@ -96,6 +96,25 @@ test-architecture:
           -DEXPECTED=mono.tools/architecture/expected_graph.json \
           -P mono.tools/architecture/CheckTargetGraph.cmake
 
+# Regenerate the scripting manifest and the type declarations.
+#
+# The class table is the source; these are its output. Run this after changing a
+# property declaration and review the diff — a change to what the manifest says
+# is a change to what every script in every language can name.
+bindings: (build "bindings")
+    ./{{build}}/tools/bindings
+
+# The manifest and the declarations against what the class table actually says.
+#
+# The same shape as `test-architecture`, and mandatory for the same reason: rule
+# 6 says a rule the build does not check is documentation. Without this the
+# manifest is a generated artefact nothing consumes, which is the failure this
+# repository has already watched twice — `just docs-check` at v0.2 and
+# `just preset=ci check` at v0.4, both of which stopped being true while still
+# claiming to pass.
+bindings-check: (build "bindings")
+    ./{{build}}/tools/bindings --check
+
 # Everything CI runs, in the order CI runs it, against one preset.
 #
 # Here so that "it passes locally" and "it passes in CI" mean the same thing.
@@ -108,8 +127,8 @@ test-architecture:
 # Not `preset=ci` by default, because that makes every warning fatal and the
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for what
 # the pipeline actually enforces.
-check: format-check build test-all test-architecture determinism replay-check
-    @echo "check ok — format, build, tests, architecture, determinism, replay"
+check: format-check build test-all test-architecture bindings-check determinism replay-check
+    @echo "check ok — format, build, tests, architecture, bindings, determinism, replay"
 
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")
