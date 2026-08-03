@@ -9,6 +9,31 @@ export type Vector3 = { X: number, Y: number, Z: number }
 export type Color3 = { R: number, G: number, B: number }
 export type CFrame = { Position: Vector3 }
 
+export type EnumItem = { Name: string, EnumType: string }
+export type Enum_Material = EnumItem
+
+declare Enum: {
+	Material: {
+		Plastic: Enum_Material,
+		SmoothPlastic: Enum_Material,
+		Wood: Enum_Material,
+		WoodPlanks: Enum_Material,
+		Metal: Enum_Material,
+		CorrodedMetal: Enum_Material,
+		DiamondPlate: Enum_Material,
+		Concrete: Enum_Material,
+		Brick: Enum_Material,
+		Cobblestone: Enum_Material,
+		Grass: Enum_Material,
+		Sand: Enum_Material,
+		Slate: Enum_Material,
+		Ice: Enum_Material,
+		Glass: Enum_Material,
+		Neon: Enum_Material,
+		ForceField: Enum_Material,
+	},
+}
+
 -- Instance
 export type Instance = {
 	Name: string,
@@ -32,14 +57,16 @@ export type BasePart = {
 	Anchored: boolean,
 	CFrame: CFrame,
 	CanCollide: boolean,
+	CollisionGroup: string,
 	Color: Color3,
-	Material: string,
+	Material: Enum_Material,
 	Mesh: string,
 	Name: string,
 	Orientation: Vector3,
 	Parent: Instance,
 	Position: Vector3,
 	Size: Vector3,
+	Transparency: number,
 	Visible: boolean,
 }
 
@@ -49,14 +76,56 @@ export type Part = {
 	Anchored: boolean,
 	CFrame: CFrame,
 	CanCollide: boolean,
+	CollisionGroup: string,
 	Color: Color3,
-	Material: string,
+	Material: Enum_Material,
 	Mesh: string,
 	Name: string,
 	Orientation: Vector3,
 	Parent: Instance,
 	Position: Vector3,
 	Size: Vector3,
+	Transparency: number,
 	Visible: boolean,
+}
+
+-- Camera : PVInstance
+export type Camera = {
+	Name: string,
+	CFrame: CFrame,
+	FarPlaneZ: number,
+	FieldOfView: number,
+	Name: string,
+	NearPlaneZ: number,
+	Orientation: Vector3,
+	Parent: Instance,
+	Position: Vector3,
+}
+
+-- LuaSourceContainer : Instance
+export type LuaSourceContainer = {
+	Name: string,
+	Disabled: boolean,
+	Name: string,
+	Parent: Instance,
+	Source: string,
+}
+
+-- Script : LuaSourceContainer
+export type Script = {
+	Name: string,
+	Disabled: boolean,
+	Name: string,
+	Parent: Instance,
+	Source: string,
+}
+
+-- LocalScript : LuaSourceContainer
+export type LocalScript = {
+	Name: string,
+	Disabled: boolean,
+	Name: string,
+	Parent: Instance,
+	Source: string,
 }
 

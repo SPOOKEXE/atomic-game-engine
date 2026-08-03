@@ -25,6 +25,7 @@
 // @tier L12 · client
 
 #include <engine/core/types/CFrame.hpp>
+#include <engine/graph/Frustum.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -53,6 +54,16 @@ namespace engine::render {
 
 		// Number of opaque mesh triangles submitted for this frame.
 		uint64_t Triangles = 0;
+
+		// How many instances the frustum rejected.
+		//
+		// **Reported rather than inferred**, because the interesting number is
+		// the ratio and the denominator is the caller's draw list — which the
+		// caller has and this does not need to repeat. A camera framing its own
+		// scene culls almost nothing and a camera inside a large world culls
+		// almost everything; a reading that never moves means the frustum is
+		// wrong, not that the scene is small.
+		uint32_t Culled = 0;
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.

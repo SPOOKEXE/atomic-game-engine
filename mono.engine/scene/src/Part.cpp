@@ -1,13 +1,16 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/spatial/CollisionGroups.hpp>
 
 #include <array>
 #include <numbers>
+#include <string_view>
 
 namespace engine::scene {
 
@@ -280,6 +283,145 @@ namespace engine::scene {
 			return property;
 		}
 
+		// CollisionGroup: a name over `Collider::Layer`.
+		//
+		// **The bits stay anonymous in `scene` and the naming lives in
+		// `spatial`**, which is where `LayerMask` is. This module holding the
+		// table would be a component module deciding a physics policy for every
+		// game that uses it — the reason this property was named as a gap at
+		// v0.5 rather than guessed at.
+		//
+		// A **name** crosses, never the index. Rule 4: which bit a group holds
+		// depends on registration order, which is the order a game's files
+		// linked in, and a save file carrying the number would point at a
+		// different group after a build that reordered two registrations.
+		PropertyDescriptor CollisionGroupProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CollisionGroup");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Collider>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Collider *collider = store.Get<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+
+				// The lowest set bit. A collider belongs to exactly one group
+				// even though `Layer` could hold several — `MakePart` sets
+				// `Only(0)` — so this reports the group it was put in rather
+				// than inventing an answer for a mask nothing here produces.
+				uint32_t index = 0;
+				for (; index < spatial::LayerMask::LAYER_COUNT; index++) {
+					if ((collider->Layer.Bits & (1u << index)) != 0) {
+						break;
+					}
+				}
+
+				*static_cast<core::Name *>(out) = spatial::CollisionGroups::NameOf(index);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const auto name = *static_cast<const core::Name *>(value);
+				const uint32_t index = spatial::CollisionGroups::IndexOf(name);
+				if (index == spatial::NO_GROUP) {
+					// Refused rather than defaulted. A typo that silently put a
+					// part in `Default` would be a collision bug nobody could
+					// see from the script that caused it.
+					return false;
+				}
+
+				Collider *collider = store.GetMutable<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+
+				// **Both halves.** The layer says which group this is; the mask
+				// says which groups it meets, and that comes from the matrix
+				// rather than from the caller. Writing only the layer would put
+				// the part in a group whose configuration it then ignored.
+				collider->Layer = spatial::LayerMask::Only(index);
+				collider->Mask = spatial::CollisionGroups::MaskFor(index);
+				return true;
+			};
+			return property;
+		}
+
+		// Material: the name, checked against a registered set.
+		//
+		// The storage is `Visual::Material`, a `core::Name`, exactly as it was.
+		// What `PropertyType::Enum` adds is that `part.Material = "Plsatic"` is
+		// refused where it was written instead of landing in the component and
+		// surfacing as a part drawn with the default for reasons nobody can see.
+		PropertyDescriptor MaterialProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Material");
+			property.Type = PropertyType::Enum;
+			property.EnumName = core::Name("Material");
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Visual *visual = store.Get<Visual>(instance);
+				if (visual == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) = visual->Material;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Visual *visual = store.GetMutable<Visual>(instance);
+				if (visual == nullptr) {
+					return false;
+				}
+				visual->Material = *static_cast<const core::Name *>(value);
+				return true;
+			};
+			return property;
+		}
+
+		// FieldOfView: the camera's vertical angle, in degrees.
+		//
+		// Degrees out, radians stored — Roblox's `Camera.FieldOfView` is
+		// degrees and every trigonometric consumer wants radians, so the
+		// conversion is exactly what a computed property is for. `Orientation`
+		// makes the same trade one file up.
+		PropertyDescriptor FieldOfViewProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("FieldOfView");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Camera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Camera *camera = store.Get<Camera>(instance);
+				if (camera == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = camera->FieldOfViewRadians * DEGREES_PER_RADIAN;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Camera *camera = store.GetMutable<Camera>(instance);
+				if (camera == nullptr) {
+					return false;
+				}
+				camera->FieldOfViewRadians = *static_cast<const float *>(value) * RADIANS_PER_DEGREE;
+				return true;
+			};
+			return property;
+		}
+
 		// The class tree, built once for the process.
 		//
 		// A function-local static, so the tree exists before the first caller
@@ -288,6 +430,41 @@ namespace engine::scene {
 		// there is nothing to tear down.
 		ecs::ClassId RegisterTree() {
 			RegisterSceneComponents();
+
+			// The materials `Visual::Material` may name.
+			//
+			// **Roblox's set, and a subset of it**, which is the honest shape:
+			// every name here is one a renderer could plausibly be asked to
+			// draw, and adding a name the renderer ignores would be offering an
+			// author completion for something that does nothing. A game
+			// registers its own with `ecs::EnumTable::Register`, and the
+			// registry takes a second declaration of an existing member as
+			// agreement rather than conflict.
+			static const std::string_view MATERIALS[] = {
+				"Plastic",
+				"SmoothPlastic",
+				"Wood",
+				"WoodPlanks",
+				"Metal",
+				"CorrodedMetal",
+				"DiamondPlate",
+				"Concrete",
+				"Brick",
+				"Cobblestone",
+				"Grass",
+				"Sand",
+				"Slate",
+				"Ice",
+				"Glass",
+				"Neon",
+				"ForceField",
+			};
+			ecs::EnumTable::Register("Material", MATERIALS);
+
+			// The default collision group, so `CollisionGroup` reads back
+			// something a script can compare rather than an invalid name on a
+			// part nobody configured.
+			spatial::CollisionGroups::Register(spatial::CollisionGroups::DEFAULT);
 
 			const ecs::ClassId instance = ecs::Classes::Register("Instance", {});
 
@@ -326,6 +503,18 @@ namespace engine::scene {
 			// `PartDesc::Anchored`'s decision, and putting them in the class
 			// set would land static geometry in the dynamic archetype.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
+
+			// **A camera is an instance, because a camera is a row.**
+			// `scene::Camera` has been a component since v0.4 precisely so a
+			// world can hold several — a spectator, a cutscene, a security
+			// monitor — and `ActiveCamera` names the live one. What was missing
+			// was a class, so `Instance.new("Camera")` had nothing to resolve to
+			// and a script could not make one, aim one, or ask which was live.
+			//
+			// Derives from `PVInstance` rather than from `BasePart`: a camera
+			// has a place in the world and is not drawn, collided or bounded.
+			const std::array camera{ecs::Components::Of<Camera>()};
+			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
 
 			// --- properties, declared where the component arrives ------------
 			//
@@ -367,20 +556,33 @@ namespace engine::scene {
 			ecs::Classes::Property<&Visual::Tint>(basePart, "Color");
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
 			ecs::Classes::Property<&Visual::Mesh>(basePart, "Mesh");
-			ecs::Classes::Property<&Visual::Material>(basePart, "Material");
 
-			// Not declared, and each for a stated reason rather than an
-			// oversight:
-			//
-			// - **`Transparency`** has no field to project onto. It becomes a
-			//   renderer feature at v0.6 — `ROADMAP.md` carries it — because the
-			//   component should move for rendering's sake and not for a
-			//   binding's. A float nothing draws is a field that lies.
-			// - **`CollisionGroup`** needs a name-to-layer registry that does
-			//   not exist. `Collider::Layer` is 32 anonymous bits, and inventing
-			//   a naming scheme here would be this module deciding a physics
-			//   policy. Roblox has `PhysicsService` for it; that is the shape,
-			//   and it wants its own design rather than a guess.
+			// **`Transparency` has a field to project onto now**, and it arrived
+			// with the sorted pass that makes it mean something rather than
+			// ahead of it. A float nothing draws is a field that lies, and it
+			// would have sat in a snapshot and a delta being read by nobody.
+			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
+
+			// The two that were named as gaps at v0.5, both now closed with the
+			// thing they were waiting for rather than with a guess.
+			ecs::Classes::Computed(basePart, MaterialProperty());
+			ecs::Classes::Computed(basePart, CollisionGroupProperty());
+
+			// The camera's own three. `FieldOfView` is **degrees**, because
+			// Roblox's is and because `Orientation` already reproduces that same
+			// split — the component stores radians and the conversion is where
+			// the unit changes, which is the whole shape of a property here.
+			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
+			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
+			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
+
+			// Still not declared, and for a reason rather than an oversight:
+			// **`Surface::Material`**, which is what a part *feels* like.
+			// `Visual::Material` above is what it looks like, and the two are
+			// separate facts that share a name — a mirror-finish floor and a
+			// rubber floor may share a surface and never a material. Binding
+			// both under one script name would make one of them unreachable and
+			// the other ambiguous.
 			return part;
 		}
 	}
@@ -388,6 +590,17 @@ namespace engine::scene {
 	ecs::ClassId PartClass() {
 		static const ecs::ClassId part = RegisterTree();
 		return part;
+	}
+
+	ecs::ClassId CameraClass() {
+		// Through `PartClass` rather than through a second static, so the whole
+		// tree is registered exactly once whichever class a caller asks for
+		// first. Two function-local statics each calling `RegisterTree` would
+		// have raced to register the same names, which `Classes::Register`
+		// tolerates — and then the *order* of the two would decide which id each
+		// class got, which is rule 4's hazard arriving inside one process.
+		PartClass();
+		return ecs::Classes::Find(core::Name("Camera"));
 	}
 
 	ecs::Entity MakePart(ecs::Store &store, const PartDesc &desc) {

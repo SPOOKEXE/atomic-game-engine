@@ -53,7 +53,7 @@
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 
-#include <client/Demo.hpp>
+#include <client/Scene.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <string>

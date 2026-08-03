@@ -1,6 +1,9 @@
 #include "JavaScriptRuntime.hpp"
 #include "LuauRuntime.hpp"
 
+#include <engine/core/Log.hpp>
+#include <engine/core/Paths.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
 #include <filesystem>
@@ -33,6 +36,34 @@ namespace engine::script {
 		std::ostringstream contents;
 		contents << file.rdbuf();
 		return Run(contents.str(), path);
+	}
+
+	size_t Runtime::RunWorldScripts() {
+		Error.clear();
+
+		const std::vector<ecs::Entity> scripts = ScriptsIn(Store, HostRoleValue.Server, HostRoleValue.Client);
+
+		size_t ran = 0;
+		std::string firstError;
+
+		for (const ecs::Entity instance : scripts) {
+			if (RunInstance(instance)) {
+				ran++;
+				continue;
+			}
+
+			// **Every script runs even when one fails**, for the reason every
+			// heartbeat connection does: a game where half the scripts silently
+			// did not start is a bug report with nothing in it. Logged per
+			// failure and reported once.
+			ENGINE_ERROR("script '{}': {}", Store.InstanceNameOf(instance).Text(), Error);
+			if (firstError.empty()) {
+				firstError = Error;
+			}
+		}
+
+		Error = firstError;
+		return ran;
 	}
 
 	std::unique_ptr<Runtime> MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits) {

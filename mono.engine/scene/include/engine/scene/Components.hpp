@@ -223,6 +223,22 @@ namespace engine::scene {
 		// floor may share a surface and never a material.
 		core::Name Material;
 
+		// How much of what is behind shows through, 0 to 1.
+		//
+		// **The field is cheap and the ordering is not**, which is why this
+		// arrived with a renderer feature rather than with a binding. Opaque
+		// geometry draws in any order and transparent geometry does not, so a
+		// non-zero value here puts the entity in a second pass sorted
+		// back-to-front per view — the first thing the renderer does that
+		// depends on *which camera is looking*.
+		//
+		// **Distinct from `Visible`, and they must not be conflated.** A part at
+		// `Transparency = 1` is invisible and still collides; a part with
+		// `Visible = false` is not submitted at all. A draw path that treated
+		// one as the other would either give invisible parts no physics or make
+		// hidden parts cost a sort.
+		float Transparency = 0.0f;
+
 		// Whether this entity is submitted for drawing at all.
 		bool Visible = true;
 
@@ -231,6 +247,11 @@ namespace engine::scene {
 		// — they are named anyway, because the day somebody re-registers this
 		// type without one is the day three uninitialised bytes start ending up
 		// in a recording.
+		//
+		// **Still three, and still after `Visible`.** `Transparency` did not
+		// land here: a float needs four-byte alignment and these are the tail
+		// after a `bool`, so the struct grew by four rather than absorbing them.
+		// The warning above applies unchanged.
 		uint8_t Reserved[3] = {};
 	};
 

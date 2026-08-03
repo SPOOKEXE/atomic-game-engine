@@ -840,6 +840,36 @@ namespace engine::ecs {
 		// @return The child, or NULL_ENTITY when none matches.
 		Entity FindFirstChild(Entity instance, std::string_view name) const;
 
+		// Visits every instance with no parent.
+		//
+		// **The world's own children.** `SetParent(instance, NULL_ENTITY)` means
+		// "a root of this world", and `script`'s `workspace` is the world — so
+		// `workspace:GetChildren()` is this. `EachChild` cannot answer it,
+		// because the null entity carries no `Hierarchy` and therefore heads no
+		// sibling list.
+		//
+		// **Ordered by entity id, which is creation order and not insertion
+		// order**, and the difference is worth stating rather than hiding. A
+		// child list is threaded in insertion order, so reparenting moves an
+		// instance to the end of its new siblings; a root that was detached and
+		// reattached keeps its original place here. Deterministic either way,
+		// which is what a recording needs — an archetype walk would not have
+		// been, because a row moves when its archetype does.
+		//
+		// The cost is a scan of every instance in the world. That is why this is
+		// a call and not a cached list: a root list maintained on every reparent
+		// would be a second copy of a fact `Hierarchy::Parent` already holds,
+		// and rule 2 exists because two copies drift.
+		//
+		// @param body Called as `body(Entity)` for each root.
+		void EachRoot(const std::function<void(Entity)> &body) const;
+
+		// The first root with a name, in the order `EachRoot` visits.
+		//
+		// @param name The name to find.
+		// @return The root, or NULL_ENTITY when none matches.
+		Entity FindFirstRoot(std::string_view name) const;
+
 		// Reports whether one instance is inside another's subtree.
 		//
 		// @param instance The instance to test.
@@ -927,6 +957,37 @@ namespace engine::ecs {
 		// @return `true` when the component changed.
 		template <class T> bool Changed(Entity entity) const {
 			return ChangedRaw(entity, Components::Of<T>());
+		}
+
+		// Starts recording writes to a component named at runtime.
+		//
+		// The runtime counterpart of `Observe<T>`, for the same reason the
+		// component accessors above have one: a layer that resolved a
+		// *property* name cannot name the type it projects onto as a template
+		// parameter. `script`'s `.Changed` is the caller — it observes exactly
+		// the components in the `Reads` set of every property somebody
+		// connected to, and it learns those from a descriptor at run time.
+		//
+		// Idempotent, and carries `Observe<T>`'s own warning about observing
+		// late.
+		//
+		// @param component The component's id.
+		void ObserveComponent(ComponentId component) {
+			RequireOwningThread("ObserveComponent");
+			ObserveRaw(component);
+		}
+
+		// Reports whether a component named at runtime was written since the
+		// last ClearChanges.
+		//
+		// Always false for a component nobody observes, exactly as `Changed<T>`
+		// is.
+		//
+		// @param entity    The entity to ask about.
+		// @param component The component's id.
+		// @return `true` when the component changed.
+		bool ChangedComponent(Entity entity, ComponentId component) const {
+			return ChangedRaw(entity, component);
 		}
 
 		// Records that every entity carrying `T` has just been written.
@@ -1072,6 +1133,32 @@ namespace engine::ecs {
 					body(store, entity, *static_cast<const T *>(value));
 				}
 			);
+		}
+
+		// Calls `body` at the next phase boundary for every entity whose
+		// component — named at runtime — was written.
+		//
+		// The runtime counterpart of `OnChanged<T>`, and `script`'s `.Changed`
+		// is the caller. A property is a projection of one or more components,
+		// so a listener that wants "did this instance's `Position` move" has to
+		// subscribe to whatever `PropertyDescriptor::Reads` names — which is a
+		// `ComponentId` read out of a descriptor, not a type it can write down.
+		//
+		// The value arrives as raw bytes for the same reason: the subscriber
+		// resolved a name and has no type to cast to. A caller that does know
+		// the type should use `OnChanged<T>`.
+		//
+		// Observes the component as a side effect, exactly as `OnChanged<T>`
+		// does, and carries the same warning about observing late.
+		//
+		// @param component The component's id.
+		// @param body      Called as `body(Store &, Entity, const void *)`.
+		// @return The connection, for `Disconnect`.
+		Connection
+		OnChangedComponent(ComponentId component, std::function<void(Store &, Entity, const void *)> body) {
+			RequireOwningThread("OnChangedComponent");
+			ObserveRaw(component);
+			return Listen(component, std::move(body));
 		}
 
 		// Takes back a change signal.

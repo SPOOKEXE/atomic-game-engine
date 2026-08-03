@@ -1,6 +1,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/graph/Cull.hpp>
 #include <engine/render/Primitives.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -50,7 +51,13 @@ namespace engine::render {
 			gpu.Model[1] *= instance.HalfExtent.Y * 2.0f;
 			gpu.Model[2] *= instance.HalfExtent.Z * 2.0f;
 
-			gpu.Colour = glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f};
+			// **Alpha is one minus transparency**, because a shader blends by
+			// coverage and an author authors by see-through-ness. Roblox's
+			// `Transparency` is the same inversion, so a script's number means
+			// what its author expects on the way in and what the blender wants
+			// on the way out.
+			gpu.Colour =
+				glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency};
 			return gpu;
 		}
 
@@ -85,6 +92,25 @@ namespace engine::render {
 		SDL_GPUDevice *Device = nullptr;
 
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
+
+		// The same geometry and the same shaders as the opaque pipeline, with
+		// blending on and depth writes off. Two pipelines rather than one with
+		// a uniform, because blend state is baked into a pipeline on every
+		// modern API and cannot be changed by a draw call.
+		SDL_GPUGraphicsPipeline *TransparentPipeline = nullptr;
+
+		// The submission order, rebuilt each frame and kept so it is not
+		// reallocated per frame. See `scene::OrderForDrawing`.
+		std::vector<uint32_t> DrawOrder;
+
+		// What survived culling: the indices, and the instances themselves.
+		//
+		// **The copy is what buys the second pass a contiguous range.** Ordering
+		// over a scattered index list would leave the draw unable to say "these
+		// N in a row are opaque", and `first_instance` is the only thing that
+		// splits one buffer into two draws.
+		std::vector<uint32_t> Visible;
+		std::vector<scene::DrawInstance> VisibleInstances;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
 		SDL_GPUBuffer *VertexBuffer = nullptr;
@@ -212,6 +238,46 @@ namespace engine::render {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
 		}
 
+		// --- transparent ----------------------------------------------------
+		//
+		// The opaque pipeline with two changes, and each one is the whole
+		// reason a second pipeline exists:
+		//
+		// - **Blending on**, source alpha over one-minus-source-alpha. Not
+		//   premultiplied, unlike the overlay below: these instances carry a
+		//   straight `Color3` from `Visual::Tint`, and premultiplying it in the
+		//   producer would make the same colour mean two things depending on
+		//   which pass read it.
+		// - **Depth writes off, depth *test* on.** A transparent pane must be
+		//   hidden by an opaque wall in front of it, so the test stays; but it
+		//   must not stop the pane behind it from being drawn, so the write
+		//   goes. Leaving the write on is the classic version of this bug — the
+		//   nearest pane silently erases everything behind it and the scene
+		//   looks like the sort failed.
+		SDL_GPUColorTargetDescription blendedTarget{};
+		blendedTarget.format = swapchainFormat;
+		blendedTarget.blend_state.enable_blend = true;
+		blendedTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+		blendedTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		blendedTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		blendedTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		blendedTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		blendedTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+		SDL_GPUGraphicsPipelineCreateInfo transparent = opaque;
+		transparent.depth_stencil_state.enable_depth_write = false;
+		transparent.target_info.color_target_descriptions = &blendedTarget;
+
+		// **Back faces are drawn too.** A cube with see-through walls shows its
+		// own far side, and culling it leaves a shape that reads as hollow
+		// rather than as glass.
+		transparent.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+		TransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &transparent);
+		if (!TransparentPipeline) {
+			ENGINE_ERROR("transparent pipeline: {}", SDL_GetError());
+		}
+
 		// --- overlay --------------------------------------------------------
 
 		SDL_GPUColorTargetDescription overlayTarget{};
@@ -248,7 +314,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
 
-		return OpaquePipeline != nullptr && OverlayPipeline != nullptr;
+		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && OverlayPipeline != nullptr;
 	}
 
 	bool Renderer::Impl::CreateGeometry() {
@@ -528,6 +594,9 @@ namespace engine::render {
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
 		}
+		if (State->TransparentPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
+		}
 		if (State->OverlayPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OverlayPipeline);
 		}
@@ -631,9 +700,44 @@ namespace engine::render {
 
 		// --- uploads --------------------------------------------------------
 
-		const auto instanceCount = static_cast<uint32_t>(instances.size());
+		const auto totalCount = static_cast<uint32_t>(instances.size());
 		bool haveInstances = false;
 		bool haveOverlay = false;
+
+		// **Culled, then ordered, then uploaded** — and the sequence is the
+		// point. Culling first means the sort runs over what survives rather
+		// than over the world, and the upload carries only what is drawn.
+		//
+		// The frustum comes from the same `ResolveCamera` the draw does, so it
+		// cannot disagree with what was actually projected. A frustum built from
+		// a field of view and an aspect ratio kept separately is the bug that
+		// pops geometry at the screen edge on one machine and not another.
+		size_t visibleCount = 0;
+		{
+			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
+
+			const float aspect = static_cast<float>(width) / static_cast<float>(height);
+			const graph::Frustum frustum = graph::Frustum::FromViewProjection(
+				scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
+			);
+			visibleCount = graph::Cull(instances, frustum, State->Visible);
+		}
+
+		// Ordered over the survivors, so the two passes are two ranges of one
+		// buffer. Opaque first in whatever order the world produced, then the
+		// transparent tail back to front from where the camera is.
+		State->VisibleInstances.resize(visibleCount);
+		for (size_t index = 0; index < visibleCount; index++) {
+			State->VisibleInstances[index] = instances[State->Visible[index]];
+		}
+
+		size_t opaqueCount = 0;
+		{
+			ENGINE_PROFILE_CAT("order instances", core::ProfileCategory::Render);
+			opaqueCount =
+				scene::OrderForDrawing(State->VisibleInstances, cameraFrame.Position, State->DrawOrder);
+		}
+		const auto transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
 
 		{
 			// Allocation, on the frame an overlay first appears or changes size.
@@ -647,6 +751,9 @@ namespace engine::render {
 			haveOverlay = overlay.HasContent() && !overlay.IsEmpty() &&
 						  State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
 		}
+
+		const auto instanceCount = static_cast<uint32_t>(visibleCount);
+		result.Culled = totalCount - instanceCount;
 
 		if (instanceCount > 0) {
 			bool capacity = false;
@@ -683,8 +790,8 @@ namespace engine::render {
 					ENGINE_PROFILE_CAT("convert instances", core::ProfileCategory::Render);
 
 					auto *out = static_cast<GpuInstance *>(mapped);
-					for (size_t index = 0; index < instances.size(); index++) {
-						out[index] = ToGpu(instances[index]);
+					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
+						out[index] = ToGpu(State->VisibleInstances[State->DrawOrder[index]]);
 					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
@@ -854,11 +961,41 @@ namespace engine::render {
 				};
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 
-				SDL_DrawGPUIndexedPrimitives(
-					pass, static_cast<uint32_t>(CUBE_INDICES.size()), instanceCount, 0, 0, 0
-				);
+				// **Two draws over one buffer, split at the boundary the
+				// ordering produced.** `first_instance` is what makes that
+				// possible without a second upload: the instance attributes are
+				// per-instance vertex data, so the offset picks up where the
+				// opaque range left off.
+				if (opaqueCount > 0) {
+					SDL_DrawGPUIndexedPrimitives(
+						pass,
+						static_cast<uint32_t>(CUBE_INDICES.size()),
+						static_cast<uint32_t>(opaqueCount),
+						0,
+						0,
+						0
+					);
+					result.DrawCalls++;
+				}
 
-				result.DrawCalls = 1;
+				if (transparentCount > 0) {
+					// Same pass, same depth attachment, different pipeline —
+					// blending on and depth writes off. A separate render pass
+					// would have to reload the depth buffer, and the whole point
+					// is that these fragments are tested against what the opaque
+					// pass already wrote.
+					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+					SDL_DrawGPUIndexedPrimitives(
+						pass,
+						static_cast<uint32_t>(CUBE_INDICES.size()),
+						transparentCount,
+						0,
+						0,
+						static_cast<uint32_t>(opaqueCount)
+					);
+					result.DrawCalls++;
+				}
+
 				result.Triangles = static_cast<uint64_t>(CUBE_INDICES.size() / 3) * instanceCount;
 			}
 

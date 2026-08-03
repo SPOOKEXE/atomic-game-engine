@@ -85,19 +85,28 @@ namespace client {
 				return false;
 			}
 
+			// **There is one path now, and it is the scripted one.**
+			// `BuildDemoWorld` built the ring scene in C++ and died at v0.6:
+			// `Rings.luau` builds the same scene through the same class table,
+			// and keeping both would have been two ways to do one job — the
+			// most expensive kind of debt in a monorepo, because both accumulate
+			// callers.
+			//
+			// `--script` with no argument therefore falls back to the example
+			// rather than to a second implementation.
+			const std::string scenePath = Settings.ScriptPath.empty()
+											  ? engine::examples::ExamplePath("Rings.luau")
+											  : Settings.ScriptPath;
+
 			bool scripted = true;
 			Universe_->Enter(
-				id, [this, &scripted](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-					if (Settings.ScriptPath.empty()) {
-						BuildDemoWorld(store, systems, Settings.Entities);
-						return;
-					}
-
+				id,
+				[this, &scripted, &scenePath](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 					// A script that fails leaves an empty world rather than a
 					// half-built one, so the failure is reported here and the
 					// client stops instead of presenting a black screen and
 					// letting somebody wonder why.
-					scripted = BuildScriptedWorld(store, systems, Settings.ScriptPath, Settings.Entities);
+					scripted = BuildScriptedWorld(store, systems, scenePath, Settings.Entities);
 				}
 			);
 

@@ -12,7 +12,7 @@
 #include <engine/scene/Registration.hpp>
 
 #include <algorithm>
-#include <client/Demo.hpp>
+#include <client/Scene.hpp>
 #include <cmath>
 #include <numbers>
 
@@ -199,6 +199,13 @@ namespace client {
 							visuals[row].Tint,
 							visuals[row].Mesh,
 							visuals[row].Material,
+
+							// Copied rather than resolved here. Which pass this
+							// instance lands in is the renderer's decision,
+							// because it depends on where the camera is — and
+							// this loop runs once for a world that may be drawn
+							// from several views.
+							visuals[row].Transparency,
 						};
 					}
 				});
@@ -222,10 +229,12 @@ namespace client {
 	// --- what the systems need, whoever built the entities --------------------
 	//
 	// Split out of `BuildDemoWorld` when the scene became loadable from a
-	// script. Both paths install the same resources and the same systems,
-	// because the difference between them is *what entities exist* and nothing
-	// else — a scripted scene that ran different systems would not be a port of
-	// this one, it would be a second demo that happens to look similar.
+	// script, and **`BuildDemoWorld` is gone now.** There is one path: a script
+	// builds the world and a client installs the two systems it owns. Keeping
+	// the C++ scene beside the Luau one would have been two ways to do one job,
+	// which is the most expensive kind of debt in a monorepo because both
+	// accumulate callers — and the scripted path is the one that proves the
+	// bindings work.
 
 	namespace {
 		Entity InstallCamera(Store &store) {
@@ -246,13 +255,6 @@ namespace client {
 			store.ResourceMutable<DrawList>()->Instances.reserve(reserve);
 		}
 
-		void InstallSystems(Scheduler &scheduler) {
-			// The three that move the scene belong to every program that loads
-			// it, so they are the engine's. Only the last two are a client's.
-			engine::examples::InstallMotionSystems(scheduler);
-			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
-			scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
-		}
 	}
 
 	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
@@ -275,100 +277,4 @@ namespace client {
 		return true;
 	}
 
-	void BuildDemoWorld(Store &store, Scheduler &scheduler, uint32_t count) {
-		// Before the first `Set`, on every path. An unregistered component is
-		// minted under whatever the compiler calls the type, which is a name a
-		// recording written by one build cannot be read back by another under.
-		// Idempotent, so a second world costs a hash lookup.
-		engine::scene::RegisterSceneComponents();
-
-		// Rings rather than a cube of cubes: a ring shows depth, occlusion and
-		// the shading model at a glance, and it makes the orbit motion legible.
-		constexpr uint32_t PER_RING = 64;
-		const uint32_t rings = std::max(1u, (count + PER_RING - 1) / PER_RING);
-
-		// The rings share a fixed radius band instead of each one being a step
-		// further out. Growing the scene with the entity count would push the
-		// camera back to fit it, and every cube would shrink to a speck — so
-		// `--entities 20000` would look *less* like a 3D scene than 500 does.
-		constexpr float INNER_RADIUS = 3.0f;
-		constexpr float OUTER_RADIUS = 12.0f;
-		const float ringStep =
-			rings > 1 ? (OUTER_RADIUS - INNER_RADIUS) / static_cast<float>(rings - 1) : 0.0f;
-
-		float extent = 1.0f;
-
-		for (uint32_t index = 0; index < count; index++) {
-			const uint32_t ring = index / PER_RING;
-			const float withinRing = static_cast<float>(index % PER_RING);
-
-			const float radius = INNER_RADIUS + static_cast<float>(ring) * ringStep;
-			const float height = Random::Range(index, 7u, -5.0f, 5.0f);
-
-			const Entity entity = store.Create();
-
-			store.Set<Transform>(entity, Transform{});
-			store.Set<PreviousTransform>(entity, PreviousTransform{});
-			store.Set<Orbit>(
-				entity,
-				Orbit{
-					Vector3::Zero,
-					radius,
-					// Outer rings turn more slowly, which reads as depth without
-					// any depth cue in the shading.
-					0.45f / (1.0f + static_cast<float>(ring) * 0.35f),
-					withinRing / static_cast<float>(PER_RING) * TAU,
-					height,
-				}
-			);
-			store.Set<Spin>(
-				entity,
-				Spin{Vector3{
-					Random::Range(index, 11u, -1.2f, 1.2f),
-					Random::Range(index, 13u, -1.2f, 1.2f),
-					Random::Range(index, 17u, -1.2f, 1.2f),
-				}}
-			);
-			// Half the edge length, because `Bounds` is a half-extent and the
-			// number this scene has always randomised is the edge. Halving in
-			// one place is what stops the two disagreeing by a factor of two.
-			const float halfEdge = Random::Range(index, 31u, 0.6f, 1.4f) * 0.5f;
-			store.Set<Bounds>(entity, Bounds{Vector3{halfEdge, halfEdge, halfEdge}});
-
-			Visual visual;
-			visual.Tint = Color3::FromLinear(
-				Random::Range(index, 19u, 0.15f, 0.90f),
-				Random::Range(index, 23u, 0.20f, 0.80f),
-				Random::Range(index, 29u, 0.35f, 0.95f)
-			);
-			// Mesh and material stay invalid: an invalid name means the
-			// consumer's own default, which is the unit cube the renderer
-			// carries. Naming one here would be this scene deciding what a
-			// presentation module's default is.
-			store.Set<Visual>(entity, visual);
-
-			extent = std::max(extent, radius);
-		}
-
-		// The camera is a row, not a resource holding a value. A world may hold
-		// several — a spectator, a cutscene — and `ActiveCamera` names the live
-		// one, so "where is the camera" stays a lookup rather than a search.
-		//
-		// Every resource the systems read is installed before any of them can
-		// run. A system that has to check whether its resource exists yet is a
-		// system with a branch for a state the world is never in.
-		//
-		// `WorldBounds` is how far this scene reaches from the origin, which is
-		// what the camera frames from — the same resource the server's world
-		// bounces inside, because they are one idea and used to be two names.
-		//
-		// Reserved once rather than grown: the count is known, and the first
-		// frame is the one most likely to be looked at in a profile.
-		const Entity camera = InstallCamera(store);
-		InstallResources(store, camera, extent, count);
-
-		ENGINE_INFO("demo scene: {} entities across {} ring(s)", count, rings);
-
-		InstallSystems(scheduler);
-	}
 }

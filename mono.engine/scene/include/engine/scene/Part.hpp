@@ -77,6 +77,17 @@ namespace engine::scene {
 	// @return The registered class id for `"Part"`.
 	ecs::ClassId PartClass();
 
+	// The `Camera` class id, registering the tree on first call.
+	//
+	// **A camera is an instance, because a camera is a row.** `scene::Camera`
+	// has been a component since v0.4 so a world can hold several; what was
+	// missing was a class, so `Instance.new("Camera")` had nothing to resolve
+	// to. Derives from `PVInstance`: it has a place in the world and is neither
+	// drawn nor collided.
+	//
+	// @return The class id.
+	ecs::ClassId CameraClass();
+
 	// Creates one part in a world.
 	//
 	// The single place that decides what a part is made of. Anything building

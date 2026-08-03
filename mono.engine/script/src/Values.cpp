@@ -165,6 +165,68 @@ namespace engine::script {
 			luaL_errorL(state, "CFrame has no member '%s'", field);
 		}
 
+		// **Value equality, not identity.** `Vector3.new(1, 2, 3) ==
+		// Vector3.new(1, 2, 3)` is true in Roblox and was false here, because
+		// two userdata are two objects — so every comparison an author wrote
+		// against a constructed value silently failed. Roblox's semantics are
+		// what a script expects, and a value type whose equality is identity is
+		// not a value type.
+		int Vector3Equal(lua_State *state) {
+			lua_pushboolean(state, CheckVector3(state, 1) == CheckVector3(state, 2));
+			return 1;
+		}
+
+		int Color3Equal(lua_State *state) {
+			const Color3 &left = CheckColor3(state, 1);
+			const Color3 &right = CheckColor3(state, 2);
+			lua_pushboolean(state, left.R == right.R && left.G == right.G && left.B == right.B);
+			return 1;
+		}
+
+		// Exact, component by component. **No epsilon**, and that is the honest
+		// choice: two frames built by different arithmetic are not the same
+		// frame, and a comparison that pretended otherwise would hide drift
+		// rather than reveal it. An author who wants a tolerance writes one.
+		int CFrameEqual(lua_State *state) {
+			const CFrame &left = CheckCFrame(state, 1);
+			const CFrame &right = CheckCFrame(state, 2);
+			lua_pushboolean(
+				state,
+				left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
+					left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
+					left.QuaternionW == right.QuaternionW
+			);
+			return 1;
+		}
+
+		int Vector3Add(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1) + CheckVector3(state, 2);
+			return 1;
+		}
+
+		int Vector3Sub(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1) - CheckVector3(state, 2);
+			return 1;
+		}
+
+		int Vector3Mul(lua_State *state) {
+			if (lua_isnumber(state, 2)) {
+				*PushVector3(state) = CheckVector3(state, 1) * static_cast<float>(lua_tonumber(state, 2));
+				return 1;
+			}
+			if (lua_isnumber(state, 1)) {
+				*PushVector3(state) = CheckVector3(state, 2) * static_cast<float>(lua_tonumber(state, 1));
+				return 1;
+			}
+			*PushVector3(state) = CheckVector3(state, 1) * CheckVector3(state, 2);
+			return 1;
+		}
+
+		int Vector3Unm(lua_State *state) {
+			*PushVector3(state) = -CheckVector3(state, 1);
+			return 1;
+		}
+
 		// Registers one value type: a metatable carrying `__index` and a global
 		// table carrying the constructors.
 		void Install(
@@ -173,12 +235,41 @@ namespace engine::script {
 			lua_CFunction index,
 			lua_CFunction toString,
 			const luaL_Reg *constructors,
-			lua_CFunction multiply = nullptr
+			lua_CFunction multiply = nullptr,
+			lua_CFunction equal = nullptr,
+			lua_CFunction add = nullptr,
+			lua_CFunction subtract = nullptr,
+			lua_CFunction negate = nullptr
 		) {
 			luaL_newmetatable(state, name);
 
 			lua_pushcfunction(state, index, "__index");
 			lua_setfield(state, -2, "__index");
+
+			// **What `typeof` actually reads.** Luau's `typeof` is a fastcall
+			// builtin, so a global of that name is never consulted — the VM
+			// reaches `luaB_typeof` directly, and that function returns this
+			// field when a metatable carries one. One string beside the type's
+			// own name, rather than a table of userdata tags somewhere else.
+			lua_pushstring(state, name);
+			lua_setfield(state, -2, "__type");
+
+			const struct {
+				const char *Field;
+				lua_CFunction Function;
+			} METAMETHODS[] = {
+				{"__eq", equal},
+				{"__add", add},
+				{"__sub", subtract},
+				{"__unm", negate},
+			};
+
+			for (const auto &entry : METAMETHODS) {
+				if (entry.Function != nullptr) {
+					lua_pushcfunction(state, entry.Function, entry.Field);
+					lua_setfield(state, -2, entry.Field);
+				}
+			}
 
 			if (multiply != nullptr) {
 				lua_pushcfunction(state, multiply, "__mul");
@@ -261,8 +352,19 @@ namespace engine::script {
 			{"new", CFrameNew}, {"Angles", CFrameAngles}, {nullptr, nullptr}
 		};
 
-		Install(state, "Vector3", Vector3Index, Vector3ToString, vectorConstructors);
-		Install(state, "Color3", Color3Index, nullptr, colorConstructors);
-		Install(state, "CFrame", CFrameIndex, nullptr, frameConstructors, CFrameMultiply);
+		Install(
+			state,
+			"Vector3",
+			Vector3Index,
+			Vector3ToString,
+			vectorConstructors,
+			Vector3Mul,
+			Vector3Equal,
+			Vector3Add,
+			Vector3Sub,
+			Vector3Unm
+		);
+		Install(state, "Color3", Color3Index, nullptr, colorConstructors, nullptr, Color3Equal);
+		Install(state, "CFrame", CFrameIndex, nullptr, frameConstructors, CFrameMultiply, CFrameEqual);
 	}
 }

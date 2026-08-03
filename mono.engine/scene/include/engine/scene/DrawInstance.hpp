@@ -37,6 +37,11 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
 
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
+
 namespace engine::scene {
 
 	// One thing to draw, flat and copyable.
@@ -66,5 +71,61 @@ namespace engine::scene {
 
 		// Which material, by name. Invalid means the consumer's default.
 		core::Name Material;
+
+		// How much of what is behind shows through, 0 to 1.
+		//
+		// **The field is cheap and the ordering is not.** A non-zero value puts
+		// this instance in a second pass, sorted back-to-front per view — which
+		// is the first thing the renderer does that depends on *which camera is
+		// looking*, and the reason this arrived with the pass rather than ahead
+		// of it. See `SortForDrawing`.
+		float Transparency = 0.0f;
 	};
+
+	// Produces the order a draw list should be submitted in.
+	//
+	// **An order rather than a sort in place**, because the consumer holds a
+	// `std::span<const DrawInstance>` — a view published by a world it does not
+	// own, which may be another process's memory. Writing an index list also
+	// costs four bytes an instance instead of moving eighty.
+	//
+	// **Why the renderer cannot just draw them in any order.** Opaque geometry
+	// writes depth, so whatever is nearest wins whichever order it arrived in.
+	// A blended fragment does not replace what is behind it — it mixes with
+	// whatever is already in the target — so drawing a near pane before a far
+	// one blends the far one *into* a pixel that should have hidden it. The
+	// result is a window that looks right from one side of the room and wrong
+	// from the other, which reads as a shader bug rather than an ordering one.
+	//
+	// **Back to front, by squared distance from the eye.** The square root is
+	// not taken: it is monotonic, so it cannot change an ordering, and this runs
+	// over every transparent instance every frame per view.
+	//
+	// **A stable sort**, so two panes at the same distance keep the order the
+	// world produced them in. An unstable one would swap them from frame to
+	// frame as the comparison fell either way, and a recording would stop
+	// replaying — which is a determinism failure arriving through a renderer.
+	//
+	// Here rather than in `render` because it is arithmetic over a `shared`
+	// type, and a headless host publishing a view has the same reason to order
+	// it. `render` is where the *pipeline* lives; this is where the list does.
+	//
+	// @param instances The draw list.
+	// @param eye       Where the view is, in world space.
+	// @param order     Filled in with indices into `instances`. Cleared first.
+	// @return How many indices at the front of `order` name opaque instances.
+	size_t OrderForDrawing(
+		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
+	);
+
+	// Whether an instance needs the blended pass.
+	//
+	// **Not `> 0`, and the epsilon is the point.** A `Transparency` of a
+	// millionth is visually opaque and costs a sort, a pipeline switch and the
+	// loss of depth writes; a value that small is arithmetic noise from a tween
+	// rather than an author's intent.
+	//
+	// @param instance The instance to classify.
+	// @return `true` when it belongs in the transparent pass.
+	bool IsTransparent(const DrawInstance &instance);
 }

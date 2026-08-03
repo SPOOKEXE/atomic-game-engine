@@ -74,7 +74,11 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 		sizeof(Collider) ==
 		sizeof(Vector3) + 2 * sizeof(LayerMask) + sizeof(ShapeKind) + sizeof(bool) + sizeof(uint16_t)
 	);
-	CHECK(sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(bool) + 3);
+	// Grew by a float at v0.6. `Transparency` did not fit into `Reserved[3]`:
+	// a float needs four-byte alignment and those are the tail after a `bool`,
+	// so the struct got wider rather than absorbing them — which is exactly
+	// what this check is here to notice.
+	CHECK(sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + 3);
 
 	// The named padding is the last thing in each, so a member appended after
 	// it would reopen the hole silently.

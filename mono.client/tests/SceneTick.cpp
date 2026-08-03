@@ -12,8 +12,10 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -24,9 +26,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <client/Demo.hpp>
+#include <client/Scene.hpp>
 
-TEST_SUITE_ID("client.demo.tick")
+TEST_SUITE_ID("client.scene.tick")
 TEST_DEPENDS("engine.ecs.scheduler")
 TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.ecs.resources")
@@ -54,14 +56,35 @@ namespace {
 	constexpr float STEP = 1.0f / 60.0f;
 
 	// A world and the scheduler that ticks it. Nothing else — which is the
-	// point: after BuildDemoWorld returns, everything the tick reads and writes
-	// is inside the store.
+	// point: after the scene loads, everything the tick reads and writes is
+	// inside the store.
+	//
+	// **Built from the script now, not from `BuildDemoWorld`.** That function
+	// died at v0.6: `Rings.luau` builds the same scene through the same class
+	// table, and this suite exercising the C++ path while the client ran the
+	// scripted one would have been testing something nothing shipped.
 	struct Session {
 		Store World{"integration"};
 		Scheduler Systems;
 
 		Session() {
-			client::BuildDemoWorld(World, Systems, ENTITIES);
+			engine::parallel::Jobs::Start(2);
+
+			// **The staged assets root, not the test binary's own directory.**
+			// `Paths::Assets` defaults to where the running executable sits, and
+			// a test binary sits in `tests/` while the examples stage into
+			// `assets/`. A client finds them because a client stages beside
+			// them; this has to be told.
+			engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+
+			const bool built = client::BuildScriptedWorld(
+				World, Systems, engine::examples::ExamplePath("Rings.luau"), ENTITIES
+			);
+			REQUIRE(built);
+		}
+
+		~Session() {
+			engine::parallel::Jobs::Stop();
 		}
 
 		void Tick(int ticks, float step = STEP) {
@@ -334,8 +357,13 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[dem
 	};
 
 	REQUIRE(named("ecs.systems"));
-	REQUIRE(named("orbit"));
-	REQUIRE(named("spin"));
+
+	// **`script-heartbeat` where `orbit` and `spin` used to be.** The scene
+	// moves itself now: `Rings.luau` connects to `RunService.Heartbeat` and
+	// writes `CFrame` directly, so there is one system driving the motion
+	// instead of two C++ ones reading components the script never fills in.
+	REQUIRE(named("capture-previous"));
+	REQUIRE(named("script-heartbeat"));
 	REQUIRE(named("move-camera"));
 	REQUIRE(named("collect-instances"));
 
@@ -350,7 +378,7 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[dem
 			std::find_if(spans.begin(), spans.end(), [name](const auto &span) { return span.Name == name; });
 		return found != spans.end() && found->Category == engine::core::ProfileCategory::ECS;
 	};
-	REQUIRE(categorised("orbit"));
+	REQUIRE(categorised("script-heartbeat"));
 	REQUIRE(categorised("collect-instances"));
 
 	const auto counters = Metrics::Drain();
@@ -376,8 +404,10 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	for (const auto &timing : session.Systems.Timings()) {
 		timings.push_back({timing.Name, timing.Milliseconds});
 	}
-	// capture-previous, orbit, spin, move-camera, collect-instances.
-	REQUIRE(timings.size() == 5);
+	// capture-previous, script-heartbeat, move-camera, collect-instances. Four
+	// rather than the five the C++ demo ran: one scripted heartbeat replaced
+	// `orbit` and `spin`.
+	REQUIRE(timings.size() == 4);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

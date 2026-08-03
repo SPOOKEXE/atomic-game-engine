@@ -1,59 +1,82 @@
 #include "Bindings.hpp"
 
 #include <lualib.h>
-#include <vector>
+#include <string_view>
 
 namespace engine::script {
 
 	namespace {
-		// The registry key the connection list lives under.
+		// `RunService:IsServer()` / `IsClient()` / `IsStudio()`
 		//
-		// A table in the registry rather than a C++ vector of `lua_ref`s,
-		// because the registry is what keeps a function from being collected
-		// and a second list would be a second thing to keep in step with it.
-		constexpr const char *CONNECTIONS = "engine.heartbeat.connections";
-
-		int Connect(lua_State *state) {
-			// `signal:Connect(fn)` — the colon call, so the signal itself
-			// arrives as the first argument. Roblox's spelling, and a script
-			// author who writes `.Connect(fn)` gets a type error naming the
-			// function rather than silently connecting the signal.
-			luaL_checktype(state, 2, LUA_TFUNCTION);
-
-			lua_getfield(state, LUA_REGISTRYINDEX, CONNECTIONS);
-			const int count = lua_objlen(state, -1);
-
-			lua_pushvalue(state, 2);
-			lua_rawseti(state, -2, count + 1);
-			lua_pop(state, 1);
-
-			// Roblox returns an `RBXScriptConnection` with `:Disconnect()`.
-			// Returning nothing is the honest subset: a handle whose only
-			// method did not exist would be worse than no handle, and a scene
-			// script has nothing to disconnect from yet.
-			return 0;
+		// **A script needs to be able to ask before it tries.**
+		// `Store::SetProperty` already refuses a write on an adopt-only store
+		// and says why, but a refusal is an error a script has to catch — and
+		// the whole point of a client-side script is that it knows it is one.
+		// These are the question that makes the refusal avoidable.
+		int IsServer(lua_State *state) {
+			lua_pushboolean(state, UpvalueContext(state).Role.Server);
+			return 1;
 		}
-	}
 
-	namespace {
+		int IsClient(lua_State *state) {
+			lua_pushboolean(state, UpvalueContext(state).Role.Client);
+			return 1;
+		}
+
+		int IsStudio(lua_State *state) {
+			lua_pushboolean(state, UpvalueContext(state).Role.Studio);
+			return 1;
+		}
+
+		// `RunService:IsReplica()` — whether this world's rows belong to somebody
+		// else.
+		//
+		// **Not Roblox's, and it is the more precise question.** `IsServer()`
+		// is about the *host*; this is about the *world*, and a single-player
+		// process is a server whose client-side world is still a replica. A
+		// script that guarded a write with `IsServer()` alone would be right on
+		// a dedicated server and wrong in single player, which is the worst
+		// place for a guard to be wrong.
+		int IsReplica(lua_State *state) {
+			lua_pushboolean(state, UpvalueContext(state).World->AdoptOnly());
+			return 1;
+		}
+
 		// `game:GetService("RunService")`.
 		//
-		// The service locator every Roblox script opens with. One service, and
-		// it returns the same table the `RunService` global holds rather than a
-		// second object — two objects for one service is two things to keep in
-		// step, and a script comparing them would find them different.
+		// The service locator every Roblox script opens with. Looked up as a
+		// global rather than from a table of its own, so
+		// `game:GetService("RunService")` and `RunService` are one object — two
+		// objects for one service is two things to keep in step, and a script
+		// comparing them would find them different.
 		int GetService(lua_State *state) {
 			const char *name = luaL_checkstring(state, 2);
 
-			// Looked up as a global rather than from a table of its own, so
-			// `game:GetService("RunService")` and `RunService` are one object.
-			// Two objects for one service is two things to keep in step, and a
-			// script comparing them would find them different.
 			lua_getglobal(state, name);
 			if (lua_isnil(state, -1)) {
 				luaL_errorL(state, "'%s' is not a service this engine provides", name);
 			}
 			return 1;
+		}
+
+		// `game.Workspace` and `game:GetService("Workspace")`.
+		int GameIndex(lua_State *state) {
+			const std::string_view field = luaL_checkstring(state, 2);
+
+			// `game.Workspace` is the world this script runs on, which is the
+			// mapping `Bindings.hpp` states: game is the universe, workspace is
+			// the world.
+			if (field == "Workspace") {
+				lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+				return 1;
+			}
+
+			if (field == "GetService") {
+				lua_pushcfunction(state, GetService, "GetService");
+				return 1;
+			}
+
+			luaL_errorL(state, "game has no member '%s'", std::string(field).c_str());
 		}
 	}
 
@@ -69,61 +92,55 @@ namespace engine::script {
 		//     game      -> the universe
 		//     workspace -> the world this script runs on
 		//
-		// What it carries today is `GetService`, and the omission is worth
-		// stating: the universe's *own* surface — other worlds by name,
-		// `Teleport`, the four buses — is v0.6's, and `docs/SCRIPT_CONCURRENCY.md`
-		// settles the rules it has to arrive under first. A `game` that
-		// pretended to reach another world would be the one promise this
-		// engine most needs to keep.
+		// What it carries is `GetService` and `Workspace`. Reaching *another*
+		// world is deliberately not here and never will be as a property:
+		// rule 3 says nothing crossing a world boundary is a pointer, so the
+		// route out is `MessagingService` and the other bus services, which
+		// carry copies.
 		lua_newtable(state);
-		lua_pushcfunction(state, GetService, "GetService");
-		lua_setfield(state, -2, "GetService");
+
+		lua_newtable(state);
+		lua_pushcfunction(state, GameIndex, "__index");
+		lua_setfield(state, -2, "__index");
+		lua_pushstring(state, "DataModel");
+		lua_setfield(state, -2, "__metatable");
+		lua_setmetatable(state, -2);
+
 		lua_setglobal(state, "game");
 	}
 
 	void OpenRunService(lua_State *state) {
-		lua_newtable(state);
-		lua_setfield(state, LUA_REGISTRYINDEX, CONNECTIONS);
+		LuauContext &context = ContextOf(state);
 
-		// The signal object. `Heartbeat` is a table with a `Connect` method
-		// rather than a function, because `signal:Connect(fn)` is what a Roblox
-		// author's fingers already type.
+		// `Heartbeat` is a real signal now rather than a list of its own, so
+		// `:Connect` hands back an `RBXScriptConnection` a script can
+		// `:Disconnect` — which is the thing v0.5 said was worse to fake than to
+		// omit.
 		lua_newtable(state);
-		lua_pushcfunction(state, Connect, "Connect");
-		lua_setfield(state, -2, "Connect");
-
-		lua_newtable(state);
-		lua_pushvalue(state, -2);
+		PushSignal(state, SignalKind::Heartbeat, ecs::NULL_ENTITY);
 		lua_setfield(state, -2, "Heartbeat");
-		lua_setglobal(state, "RunService");
 
-		lua_pop(state, 1);
+		static const struct {
+			const char *Name;
+			lua_CFunction Function;
+		} PREDICATES[] = {
+			{"IsServer", IsServer},
+			{"IsClient", IsClient},
+			{"IsStudio", IsStudio},
+			{"IsReplica", IsReplica},
+		};
+
+		for (const auto &entry : PREDICATES) {
+			lua_pushlightuserdata(state, &context);
+			lua_pushcclosure(state, entry.Function, entry.Name, 1);
+			lua_setfield(state, -2, entry.Name);
+		}
+
+		lua_setglobal(state, "RunService");
 	}
 
 	std::string PumpHeartbeat(lua_State *state, float delta) {
-		lua_getfield(state, LUA_REGISTRYINDEX, CONNECTIONS);
-		const int count = lua_objlen(state, -1);
-
-		std::string firstError;
-		for (int index = 1; index <= count; index++) {
-			lua_rawgeti(state, -1, index);
-			lua_pushnumber(state, delta);
-
-			// **Every connection runs even when one raises**, and the first
-			// error is what the host hears about. A script that threw once
-			// would otherwise silently stop everything registered after it, and
-			// the symptom — half a scene animating — points nowhere near the
-			// cause.
-			if (lua_pcall(state, 1, 0, 0) != LUA_OK) {
-				if (firstError.empty()) {
-					const char *message = lua_tostring(state, -1);
-					firstError = message != nullptr ? message : "a heartbeat connection failed";
-				}
-				lua_pop(state, 1);
-			}
-		}
-
-		lua_pop(state, 1);
-		return firstError;
+		lua_pushnumber(state, delta);
+		return FireSignal(state, SignalKind::Heartbeat, ecs::NULL_ENTITY, 1);
 	}
 }

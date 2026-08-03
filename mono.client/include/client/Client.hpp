@@ -21,7 +21,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <client/Compositor.hpp>
-#include <client/Demo.hpp>
+#include <client/Scene.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <memory>

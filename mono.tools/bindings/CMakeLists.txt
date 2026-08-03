@@ -15,7 +15,14 @@ add_executable(bindings app/main.cpp)
 target_link_libraries(bindings PRIVATE
 	Engine::core
 	Engine::ecs
-	Engine::scene)
+	Engine::scene
+
+	# **Because `script` registers classes a script can name.** `Script`,
+	# `LocalScript` and `LuaSourceContainer` are as much of the scripting surface
+	# as `Part` is, and a manifest generated without them would pass its own
+	# drift check while describing less than half the tree — which is the one
+	# failure mode this tool exists to make impossible.
+	Engine::script)
 target_compile_options(bindings PRIVATE ${MONO_COMPILE_OPTIONS})
 
 set_target_properties(bindings PROPERTIES

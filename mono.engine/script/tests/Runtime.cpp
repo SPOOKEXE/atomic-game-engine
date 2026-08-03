@@ -198,11 +198,23 @@ TEST_CASE("a property nobody declared is an error, not a silent nil", "[script]"
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// `Transparency` is the interesting name here: it is a real Roblox property
-	// that this engine has no field for yet, and it becomes a renderer feature
-	// at v0.6. Reading it must say so rather than hand back nil.
-	CHECK_FALSE(runtime->Run("Instance.new('Part').Transparency = 0.5"));
-	CHECK(runtime->LastError().find("Transparency") != std::string::npos);
+	// `Reflectance` is the interesting name now: a real Roblox property this
+	// engine has no field for. Writing it must say so rather than accept it
+	// silently, which is what a plain table would do.
+	//
+	// It used to be `Transparency`, and that is the point — the gap closed at
+	// v0.6, so the test moved to a name that is still a gap rather than
+	// asserting something no longer true.
+	CHECK_FALSE(runtime->Run("Instance.new('Part').Reflectance = 0.5"));
+	CHECK(runtime->LastError().find("Reflectance") != std::string::npos);
+
+	// And the property that arrived is genuinely there, so this suite covers
+	// both sides of the same boundary.
+	CHECK(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Transparency = 0.5
+		assert(math.abs(part.Transparency - 0.5) < 1e-6, 'Transparency did not round-trip')
+	)"));
 }
 
 TEST_CASE("a value of the wrong type is refused", "[script]") {
@@ -352,13 +364,13 @@ TEST_CASE("javascript refuses an undeclared property", "[script][js]") {
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
-	// The prototype carries exactly the declared properties, so `Transparency`
+	// The prototype carries exactly the declared properties, so `Reflectance`
 	// is not there to assign to. Silently accepting it — which a plain object
 	// would — is what this asserts against.
 	CHECK_FALSE(runtime->Run(R"(
 		const part = Instance.new('Part');
-		part.Transparency = 0.5;
-		if (part.Transparency !== 0.5) throw new Error('not a real property');
+		part.Reflectance = 0.5;
+		if (part.Reflectance !== 0.5) throw new Error('not a real property');
 	)"));
 }
 
@@ -719,11 +731,14 @@ TEST_CASE("a script has no route to another world", "[script]") {
 	// The invariant the whole arrangement rests on. `workspace` is *this*
 	// world, and there is no `game.Workspaces`, no `GetWorld`, no way to name
 	// another one. If one ever appears, rule 3 is what it has to answer to.
-	REQUIRE(runtime->Run(R"(
-		assert(workspace.Name == 'test.world')
-		assert(game.GetWorld == nil, 'a script can name another world')
-		assert(game.Workspaces == nil, 'a script can enumerate worlds')
-	)"));
+	REQUIRE(runtime->Run("assert(workspace.Name == 'test.world')"));
+
+	// Naming another world is an **error**, not a nil. That is stronger than
+	// the check this used to make: a nil member is indistinguishable from a
+	// member that exists and happens to be unset, and `game` refusing an
+	// unknown name outright is also what Roblox does.
+	CHECK_FALSE(runtime->Run("return game.GetWorld"));
+	CHECK_FALSE(runtime->Run("return game.Workspaces"));
 }
 
 TEST_CASE("nil is spelled nil in both languages", "[script]") {

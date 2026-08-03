@@ -8,11 +8,13 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <memory>
 
 namespace engine::examples {
@@ -113,8 +115,25 @@ namespace engine::examples {
 		// the last reference and drops it with the world.
 		std::shared_ptr<script::Runtime> runtime = script::MakeRuntime(store, script::LanguageOf(path));
 
-		if (!runtime->RunFile(path)) {
-			error = runtime->LastError();
+		// **The scene's script is an instance in the scene**, which is what v0.6
+		// made structural. `RunFile` still exists and still works; what this
+		// buys is that the world now *contains* what animates it, so a save file
+		// could write the pair out together — and the chunk gets a `script`
+		// global naming itself, which is the difference between one file that
+		// builds a world and a game made of many.
+		const std::filesystem::path relative =
+			std::filesystem::relative(std::filesystem::path(path), core::Paths::Assets());
+
+		const ecs::Entity program = script::MakeScript(
+			store, relative.empty() ? path : relative.string(), std::filesystem::path(path).stem().string()
+		);
+		if (program == ecs::NULL_ENTITY) {
+			error = "the world refused a script instance";
+			return false;
+		}
+
+		if (runtime->RunWorldScripts() == 0) {
+			error = runtime->LastError().empty() ? "the scene script did not run" : runtime->LastError();
 			return false;
 		}
 

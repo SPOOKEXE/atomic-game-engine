@@ -63,14 +63,6 @@ namespace client {
 		std::vector<engine::scene::DrawInstance> Instances;
 	};
 
-	// Builds a scene of `count` orbiting, spinning cubes, registers the systems
-	// that move them, and installs the resources they read. Deterministic: the
-	// same count produces the same world.
-	//
-	// After this returns, the world is self-contained — ticking it needs the
-	// store and the scheduler and nothing else.
-	void BuildDemoWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t count);
-
 	// Builds the scene by running a Luau file instead of a C++ loop.
 	//
 	// The entities, the components and the systems that move them all come from

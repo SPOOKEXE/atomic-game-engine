@@ -7,8 +7,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <cstring>
 #include <type_traits>
+#include <vector>
 
 TEST_SUITE_ID("engine.scene.drawinstance")
 
@@ -77,4 +79,108 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 	CHECK(instance.Tint.G == 0.5f);
 	CHECK(instance.Mesh == visual.Mesh);
 	CHECK(instance.Material == visual.Material);
+}
+
+// --- ordering for the transparent pass --------------------------------------
+
+TEST_CASE("an opaque list keeps the order the world produced", "[scene][drawinstance]") {
+	// The cheap case, and the common one. A scene with no transparency must
+	// come out of this exactly as it went in — that is what makes a recording
+	// of one replay, and it means the cost is one pass and no comparisons.
+	std::vector<DrawInstance> instances(5);
+	for (size_t index = 0; index < instances.size(); index++) {
+		instances[index].Frame = CFrame{Vector3{static_cast<float>(index), 0.0f, 0.0f}};
+	}
+
+	std::vector<uint32_t> order;
+	const size_t opaque = engine::scene::OrderForDrawing(instances, Vector3::Zero, order);
+
+	CHECK(opaque == instances.size());
+	CHECK(order == std::vector<uint32_t>{0, 1, 2, 3, 4});
+}
+
+TEST_CASE("transparent instances move to the back, farthest first", "[scene][drawinstance]") {
+	// A blended fragment mixes with what is already in the target, so a near
+	// pane drawn before a far one blends the far one *into* a pixel that should
+	// have hidden it — a window that looks right from one side of the room and
+	// wrong from the other.
+	std::vector<DrawInstance> instances(4);
+	instances[0].Frame = CFrame{Vector3{1.0f, 0.0f, 0.0f}};
+	instances[0].Transparency = 0.5f;
+	instances[1].Frame = CFrame{Vector3{2.0f, 0.0f, 0.0f}};
+	instances[2].Frame = CFrame{Vector3{9.0f, 0.0f, 0.0f}};
+	instances[2].Transparency = 0.5f;
+	instances[3].Frame = CFrame{Vector3{4.0f, 0.0f, 0.0f}};
+
+	std::vector<uint32_t> order;
+	const size_t opaque = engine::scene::OrderForDrawing(instances, Vector3::Zero, order);
+
+	CHECK(opaque == 2);
+
+	// The opaque head, in world order.
+	CHECK(order[0] == 1);
+	CHECK(order[1] == 3);
+
+	// The transparent tail, farthest from the eye first.
+	CHECK(order[2] == 2);
+	CHECK(order[3] == 0);
+}
+
+TEST_CASE("the order depends on where the camera is", "[scene][drawinstance]") {
+	// **The first thing the renderer does that depends on which camera is
+	// looking.** Two views of one world produce two orders, which is exactly
+	// why the ordering is per view rather than baked into the draw list.
+	std::vector<DrawInstance> instances(2);
+	instances[0].Frame = CFrame{Vector3{0.0f, 0.0f, 0.0f}};
+	instances[0].Transparency = 0.5f;
+	instances[1].Frame = CFrame{Vector3{10.0f, 0.0f, 0.0f}};
+	instances[1].Transparency = 0.5f;
+
+	std::vector<uint32_t> order;
+
+	engine::scene::OrderForDrawing(instances, Vector3{-5.0f, 0.0f, 0.0f}, order);
+	CHECK(order == std::vector<uint32_t>{1, 0});
+
+	engine::scene::OrderForDrawing(instances, Vector3{15.0f, 0.0f, 0.0f}, order);
+	CHECK(order == std::vector<uint32_t>{0, 1});
+}
+
+TEST_CASE("equal distances keep world order, so a recording replays", "[scene][drawinstance]") {
+	// An unstable sort would swap them from frame to frame as the comparison
+	// fell either way — a determinism failure arriving through a renderer.
+	std::vector<DrawInstance> instances(3);
+	for (auto &instance : instances) {
+		instance.Frame = CFrame{Vector3{3.0f, 0.0f, 0.0f}};
+		instance.Transparency = 0.5f;
+	}
+
+	std::vector<uint32_t> first;
+	std::vector<uint32_t> again;
+	engine::scene::OrderForDrawing(instances, Vector3::Zero, first);
+	engine::scene::OrderForDrawing(instances, Vector3::Zero, again);
+
+	CHECK(first == std::vector<uint32_t>{0, 1, 2});
+	CHECK(first == again);
+}
+
+TEST_CASE("a hair of transparency is treated as opaque", "[scene][drawinstance]") {
+	// A tween settling on "opaque" lands a few millionths off, and paying a
+	// sort, a pipeline switch and the loss of depth writes for that is paying
+	// for nothing.
+	DrawInstance nearlyOpaque;
+	nearlyOpaque.Transparency = 1.0f / 100000.0f;
+	CHECK_FALSE(engine::scene::IsTransparent(nearlyOpaque));
+
+	DrawInstance glass;
+	glass.Transparency = 0.5f;
+	CHECK(engine::scene::IsTransparent(glass));
+
+	DrawInstance solid;
+	CHECK_FALSE(engine::scene::IsTransparent(solid));
+}
+
+TEST_CASE("an empty list orders to nothing", "[scene][drawinstance]") {
+	std::vector<uint32_t> order;
+	CHECK(engine::scene::OrderForDrawing({}, Vector3::Zero, order) == 0);
+	CHECK(order.empty());
 }

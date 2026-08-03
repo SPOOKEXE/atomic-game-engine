@@ -302,8 +302,10 @@ TEST_CASE("a size that disagrees with the property is refused", "[scene][part]")
 	CFrame value;
 	CHECK_FALSE(store.GetProperty(part, Name("CFrame"), &value, sizeof(Vector3)));
 
-	// And a name nothing declares.
-	CHECK_FALSE(Write(store, part, "Transparency", 0.5f));
+	// And a name nothing declares. Not `Transparency` any more — that is a real
+	// property at v0.6, and a test asserting a gap that has been closed is a
+	// test that outlived what it was checking.
+	CHECK_FALSE(Write(store, part, "Reflectance", 0.5f));
 }
 
 TEST_CASE("Anchored is presence rather than a flag", "[scene][part]") {
