@@ -6,7 +6,7 @@
 
 cmake_minimum_required(VERSION 3.24)
 project(atomic
-	VERSION 0.1.0
+	VERSION 0.4.0
 	DESCRIPTION "A 3D game engine for Roblox developers"
 	LANGUAGES C CXX)
 
