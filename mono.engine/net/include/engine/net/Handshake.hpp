@@ -22,7 +22,7 @@
 // server identity — the session descriptor and the Ed25519 key `assets` already
 // verifies manifests with — and that belongs in the layer that knows what a
 // server is.
-// TODO(v0.4): bind the transcript to the server's Ed25519 identity.
+// TODO(D00006): bind the transcript to the server's Ed25519 identity.
 //
 // Time is passed in, never read — the module rule, and here it costs nothing.
 // No step of this has a deadline of its own; a handshake that never finishes is

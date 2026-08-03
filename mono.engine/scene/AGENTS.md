@@ -238,13 +238,42 @@ stay where they are.
 decides what a camera's matrices are.** A second one reappearing in a
 presentation module is the change to refuse.
 
+## The property surface is declared, and a property is a conversion
+
+`Part.cpp` declares what a script can name: `CFrame`, `Position`, `Orientation`,
+`Size`, `Color`, `Visible`, `Mesh`, `Material`, `CanCollide`, `Anchored`, and
+`Name`/`Parent` on `Instance`.
+
+This section used to forbid exactly that, and the reason it gave was right:
+*"the useful properties do not map to a field — Roblox's `Size` is a full extent
+and `Bounds::HalfExtent` is half of one, which a member pointer cannot express.
+Declaring the ones that do map and leaving the rest is worse than declaring
+none, because it reads as a complete list."*
+
+**What changed is the primitive, not the rule.** A `PropertyDescriptor` is a
+getter and a setter now rather than a component and an offset, so a doubled
+half-extent, a translation with its rotation kept, and a flag that is really an
+archetype move are all expressible. The list is complete because it can be, and
+the invariant was satisfied rather than excepted.
+
+Two things it still forbids, and both for the original reason:
+
+- **Do not reshape a component to match a property.** `Bounds` keeps a
+  half-extent because that is the form every containment and overlap test wants.
+  The shim converts; the storage does not accommodate.
+- **Do not declare a property for scripts alone.** Every consumer of the class
+  table gets what is declared here — the manifest, the generated declarations,
+  both VMs — so a property that exists for one caller is a fact with one reader
+  and several places to go stale.
+
+`Transparency` is the one entry with nothing to project onto: `Visual` has no
+such field, and it becomes a renderer feature at v0.6 rather than a float
+nothing draws. `CollisionGroup` waits on a name-to-layer registry that does not
+exist, because inventing one here would be this module deciding a physics
+policy.
+
 ## Not here yet, so do not add half of one
 
-- **No property declarations.** `Classes::Property` is what the v0.5 bindings
-  manifest is generated from, and the useful properties do not map to a field:
-  Roblox's `Size` is a full extent and `Bounds::HalfExtent` is half of one, which
-  a member pointer cannot express. Declaring the ones that *do* map and leaving
-  the rest is worse than declaring none — it reads as a complete list.
 - **No systems.** `IntegrateMotion`, `SyncBroadphase` and the rest of
   `v02v03v04.md` §3.5 belong to `physics` at L8, which reads these components
   and is not read by them. This module holds the data and one resolver.
