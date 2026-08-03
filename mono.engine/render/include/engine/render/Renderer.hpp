@@ -12,15 +12,22 @@
 // Vulkan path; the other backends need their platform shader formats first.
 //
 // No SDL GPU type appears here. The public surface is a window pointer, a
-// camera, and a span of instances.
+// camera, and a span of `scene::DrawInstance`.
+//
+// **This module does not describe a frame; it consumes one.** What crosses from
+// simulation to presentation is `scene::DrawInstance` at L7, because a
+// `server`-tier host writes it and a `client`-tier consumer reads it and a type
+// only one of those tiers can name cannot be the thing they hand between them.
+// There used to be a `render::Instance` and a `render::Camera` here, and the
+// client converted into them; the conversion into a GPU layout now happens once,
+// below, at the point of upload.
 //
 // @tier L12 · client
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/render/Overlay.hpp>
-
-#include <glm/mat4x4.hpp>
-#include <glm/vec4.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -30,38 +37,6 @@
 struct SDL_Window;
 
 namespace engine::render {
-
-	// One drawable thing. Deliberately flat and copyable: this is what crosses
-	// from simulation to presentation, and the day a world is a process it has
-	// to survive being memcpy'd.
-	//
-	// @client
-	struct Instance {
-		// Column-major transform from object space to world space.
-		glm::mat4 Model{1.0f};
-
-		// Straight RGBA colour multiplier for the opaque mesh.
-		glm::vec4 Colour{1.0f, 1.0f, 1.0f, 1.0f};
-	};
-
-	// A right-handed, Y-up perspective camera that looks along local negative Z.
-	//
-	// SDL presents Y-up clip space on every backend. Depth is mapped to 0..1.
-	//
-	// @client
-	struct Camera {
-		// Camera transform in world space; the renderer uses its inverse as the view transform.
-		core::CFrame Frame;
-
-		// Vertical field of view, in radians.
-		float FieldOfViewRadians = 1.22f; // 70 degrees
-
-		// Near clipping distance in world units.
-		float NearPlane = 0.1f;
-
-		// Far clipping distance in world units.
-		float FarPlane = 500.0f;
-	};
 
 	// Work encoded by one Render call.
 	//
@@ -150,13 +125,25 @@ namespace engine::render {
 		//
 		// The camera and instances are copied during the call and not retained.
 		//
-		// @param camera    World-space camera and perspective clipping settings.
-		// @param instances Object-to-world transforms and colours to draw as cubes.
-		// @param overlay   CPU premultiplied RGBA8 overlay. Uploaded only when it
-		//                   has a pending region, drawn whenever it has content,
-		//                   and marked uploaded on the way out.
+		// The aspect ratio comes from the swapchain texture this call acquired
+		// rather than from a caller, so a frame taken during a resize is
+		// projected for the image it is actually drawn into. `scene::Camera`
+		// therefore holds no aspect ratio and `scene::ResolveCamera` takes one.
+		//
+		// @param cameraFrame World-space placement of the camera.
+		// @param camera      Field of view and clipping distances.
+		// @param instances   What to draw, as the world described it. Each is
+		//                    turned into a model matrix and a colour here.
+		// @param overlay     CPU premultiplied RGBA8 overlay. Uploaded only when
+		//                    it has a pending region, drawn whenever it has
+		//                    content, and marked uploaded on the way out.
 		// @return Submitted draw counts and whether the frame was presented.
-		FrameResult Render(const Camera &camera, std::span<const Instance> instances, OverlayImage &overlay);
+		FrameResult Render(
+			const core::CFrame &cameraFrame,
+			const scene::Camera &camera,
+			std::span<const scene::DrawInstance> instances,
+			OverlayImage &overlay
+		);
 
 	  private:
 		struct Impl;

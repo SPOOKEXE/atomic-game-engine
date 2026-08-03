@@ -103,6 +103,7 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.engine/render` | `engine_render` | `Engine::render` | `test_render` | client |
 | `mono.client` | `client_lib` | `Mono::client` | `test_client` | client |
 | `mono.server` | `server_lib` | `Mono::server` | `test_server` | server |
+| `mono.unified_server_client` | `unified_server_client_lib` | `Mono::unified_server_client` | `test_unified_server_client` | client |
 | `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
 

@@ -143,8 +143,17 @@ namespace engine::net {
 		// Records a packet that arrived and says whether to act on it.
 		//
 		// Applies the sequence rule: an unreliable packet older than one already
-		// seen is counted as stale and refused, because applying it would move
-		// the world backwards.
+		// seen **on its own channel** is counted as stale and refused, because
+		// applying it would move the world backwards.
+		//
+		// **The high-water mark it is judged against is that channel's.** The
+		// counters are per channel, so one mark for the link lets a reliable
+		// resend drag it past the unreliable stream and the next unreliable
+		// packet is then thrown away for being behind a number it was never
+		// counting against.
+		//
+		// A `Handshake` packet has no mark and moves none. It is answered
+		// before there is a link to number it, so it belongs to no stream.
 		//
 		// @param header The packet's header.
 		// @param payloadBytes How much payload it carried.
@@ -158,10 +167,11 @@ namespace engine::net {
 		// did" is two calls a caller can get out of step, and the one that gets
 		// forgotten is the second.
 		//
-		// @param payloadBytes The payload about to be sent.
+		// @param payloadBytes The payload about to be sent, before it is sealed.
 		// @return False when the link is not `Connected`, the payload is over
-		//         `Packet::MAXIMUM_PAYLOAD_BYTES`, or a budget is spent. A
-		//         refusal is counted in `ConnectionStats::SendsOverBudget`.
+		//         `Packet::MAXIMUM_MESSAGE_BYTES` — the limit less the tag it
+		//         will grow by — or a budget is spent. A refusal is counted in
+		//         `ConnectionStats::SendsOverBudget`.
 		bool Reserve(size_t payloadBytes);
 
 		// Stamps the header for the next outgoing packet on a channel.
@@ -169,6 +179,13 @@ namespace engine::net {
 		// Advances that channel's sequence and folds in the acknowledgement the
 		// far side is owed, so an acknowledgement never needs a packet of its
 		// own.
+		//
+		// **The acknowledgement is of the same channel this packet goes on**,
+		// because there is one sequence space per channel and one field to say
+		// which sequence arrived. A caller that needs the reliable stream
+		// acknowledged by every packet whatever its channel — which is what
+		// retires a reliable payload on a mostly one-way conversation —
+		// overwrites these two fields with `ReliableReceiver::Acknowledging`.
 		//
 		// @param channel Which channel the packet belongs to.
 		// @return The header to write.
@@ -195,7 +212,38 @@ namespace engine::net {
 		void OnSent(size_t payloadBytes, double nowSeconds);
 
 	  private:
-		void Observe(uint16_t sequence);
+		// What the far side has sent on one channel, and what went missing.
+		//
+		// One of these per channel because the sequences are per channel. A
+		// single mark for the whole link is judged with `Packet::IsNewer`
+		// against whichever channel most recently moved it, and the reliable
+		// channel moves it a long way at a join — so the first unreliable
+		// packets after one were refused as stale, which is exactly the failure
+		// the per-channel counters exist to prevent.
+		struct ChannelWindow {
+			// The highest sequence seen on this channel.
+			//
+			// Wrap-compared against this channel's traffic and no other's:
+			// `IsNewer` is a half-range comparison and answers nonsense when
+			// the two numbers come from different counters.
+			uint16_t Highest = 0;
+
+			// The 32 sequences before `Highest`, one bit each.
+			uint32_t Bits = 0;
+
+			// Whether anything has arrived on this channel at all.
+			//
+			// **A flag rather than a sentinel value, and that is the off-by-one
+			// this avoids.** All 65536 sequences are legitimate — zero most of
+			// all, since it is the first one `NextHeader` stamps — so there is
+			// no number that can mean "nothing yet". Starting `Highest` at zero
+			// and trusting it would read a channel's first packet as a repeat
+			// of one that never existed, and would count `Sequence` packets
+			// lost for a stream that opens anywhere else.
+			bool Seen = false;
+		};
+
+		void Observe(ChannelWindow &window, uint16_t sequence);
 
 		ConnectionId Handle;
 		LinkSettings Paced;
@@ -207,14 +255,22 @@ namespace engine::net {
 		double LastReceiveAt = 0.0;
 		double LastSendAt = 0.0;
 
-		// One counter per channel, because the two are ordered independently —
-		// a reliable resend must not make an unreliable packet look stale.
-		uint16_t OutgoingSequence[2]{};
+		// One counter per channel, because they are ordered independently — a
+		// reliable resend must not make an unreliable packet look stale.
+		//
+		// Sized from the enum rather than from a literal. The handshake slot is
+		// never advanced, because a handshake datagram is sent before there is a
+		// link to number it; it is here so that indexing by channel cannot run
+		// off the end the day another one is added.
+		uint16_t OutgoingSequence[static_cast<size_t>(ChannelKind::Handshake) + 1]{};
 
-		// The highest sequence seen from the far side, and the 32 before it.
-		uint16_t HighestSeen = 0;
-		uint32_t SeenBits = 0;
-		bool SeenAnything = false;
+		// What has arrived, one window per channel — the receiving mirror of
+		// the counters above, and sized from the enum for the same reason.
+		//
+		// The handshake slot is never touched, because a handshake datagram
+		// carries no sequence anybody assigned. It is here so that indexing by
+		// channel cannot run off the end.
+		ChannelWindow Incoming[static_cast<size_t>(ChannelKind::Handshake) + 1];
 
 		uint32_t BytesLeft = 0;
 		uint32_t PacketsLeft = 0;

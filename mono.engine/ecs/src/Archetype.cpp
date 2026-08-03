@@ -28,6 +28,14 @@ namespace engine::ecs {
 		return const_cast<Archetype *>(this)->Find(id);
 	}
 
+	size_t Archetype::ResidentBytes() const {
+		size_t bytes = Ids.capacity() * sizeof(Entity);
+		for (const Column &column : Columns) {
+			bytes += column.ResidentBytes();
+		}
+		return bytes;
+	}
+
 	size_t Archetype::Append(Entity entity) {
 		const size_t row = Ids.size();
 		Ids.push_back(entity);
@@ -58,7 +66,34 @@ namespace engine::ecs {
 		}
 
 		Ids.pop_back();
+		TrimIds();
 		return moved;
+	}
+
+	void Archetype::TrimIds() {
+		// The id array is the one part of a row that is not a `Column`, and it
+		// had the same leak: `pop_back` never returns capacity, so a table that
+		// peaked at ten thousand rows kept eighty kilobytes of handles for a
+		// hundred entities. At eight bytes against a thirty-two byte row that is
+		// a quarter of what chunking gives back.
+		//
+		// Rebuilt rather than chunked. `VisitChangedRuns` hands a callback
+		// `entities + start` beside a value pointer, and one contiguous array is
+		// what keeps that a single addition — worth more than the bytes a second
+		// chunk directory would save.
+		//
+		// A quarter full before it shrinks, and it shrinks to half: a population
+		// has to double before it can shrink again, so a world oscillating
+		// across the threshold does not rebuild on every oscillation. The copies
+		// are geometric, so settling from a peak costs O(peak) once.
+		if (Ids.capacity() < 4 * Ids.size() + 4) {
+			return;
+		}
+
+		std::vector<Entity> tightened;
+		tightened.reserve(2 * Ids.size() + 1);
+		tightened.assign(Ids.begin(), Ids.end());
+		Ids.swap(tightened);
 	}
 
 	void Archetype::Reserve(size_t rows) {

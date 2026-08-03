@@ -41,7 +41,7 @@ TEST_CASE("every state has a name", "[net][enums]") {
 		CHECK(std::string(Describe(reason)) != "?");
 	}
 
-	for (const ChannelKind kind : {ChannelKind::Unreliable, ChannelKind::Reliable}) {
+	for (const ChannelKind kind : {ChannelKind::Unreliable, ChannelKind::Reliable, ChannelKind::Handshake}) {
 		CHECK(std::string(Describe(kind)) != "?");
 	}
 }

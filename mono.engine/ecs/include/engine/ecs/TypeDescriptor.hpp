@@ -90,6 +90,49 @@ namespace engine::ecs {
 		}
 	};
 
+	// A component's second serialisation: the compact, lossy form it crosses a
+	// replication wire in.
+	//
+	// **Separate from `Write` and `Read` on purpose, and that separation is the
+	// whole reason this type exists rather than a codec installed over them.**
+	// `Store::Save` and `Store::Load` are what a recording is made of, and
+	// `just replay-check` requires a replay to reproduce the run it replayed
+	// byte for byte. A lossy codec fitted over `Write` would make every
+	// recording lossy and the check would go on passing, because it would be
+	// comparing one lossy file against another. So this pair is named
+	// differently and the storage never reaches it: **nothing in `ecs` calls
+	// these**, and the only caller is `replication`.
+	//
+	// It is also why a wire codec belongs here rather than in a table
+	// `replication` keeps by component name. The registration that installs it
+	// is the same one that names the type, so a server and a client cannot
+	// disagree about a component's wire form without disagreeing about the
+	// component — and a receiver decoding ten bytes as twenty-eight is not a
+	// failure worth making a caller's discipline.
+	//
+	// @since v0.5
+	struct WireFormat {
+		// Appends `count` values in the compact form.
+		void (*Write)(core::ByteWriter &writer, const void *source, size_t count) = nullptr;
+
+		// Reads `count` already-constructed values back out of it.
+		//
+		// **Must be total over its input.** Every bit pattern reaches this from
+		// a peer, so a decode has to produce a usable value for all of them
+		// rather than only for the ones an encoder would have produced.
+		void (*Read)(core::ByteReader &reader, void *destination, size_t count) = nullptr;
+
+		// Bytes one value occupies in that form. Zero when there is none.
+		uint32_t Size = 0;
+
+		// Whether this format is usable.
+		//
+		// @return `true` when a caller may encode and decode through it.
+		bool Present() const {
+			return Write != nullptr && Read != nullptr && Size > 0;
+		}
+	};
+
 	// Everything the storage needs to handle a component it cannot name.
 	//
 	// The function pointers operate on *ranges* rather than single values so
@@ -150,6 +193,14 @@ namespace engine::ecs {
 		// Serialisable. A short or corrupt buffer leaves the reader failed and
 		// the values unspecified but valid — never a partial object.
 		void (*Read)(core::ByteReader &reader, void *destination, size_t count) = nullptr;
+
+		// The compact form this type crosses a replication wire in, if it has
+		// one. Empty means the wire carries `Write`'s bytes unchanged.
+		//
+		// **Lossy, so `Save` and `Load` must never touch it.** See `WireFormat`
+		// for what that would cost, and `ecs/AGENTS.md` for the convention,
+		// which the build cannot check.
+		WireFormat Wire;
 	};
 
 	// The name a type is registered under when nobody supplies one.

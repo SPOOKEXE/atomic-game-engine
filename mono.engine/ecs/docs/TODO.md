@@ -18,9 +18,10 @@ For orientation, since everything below is defined against it.
 | `Entity` | index + generation, no pointer |
 | `ComponentId` / `TypeDescriptor` | runtime type info: size, align, lifetime hooks, serialisation |
 | `Components` | the process-wide type table, sealed after startup |
-| `Column` | one type-erased contiguous array, swap-back removal |
+| `Column` | one type-erased component array as a directory of doubling chunks, swap-back removal, capacity released as the rows fall |
+| `ChunkPool` (private) | the process-wide freelist chunks are taken from and given back to, capped so it cannot become the leak it removed |
 | `ComponentSet` | interned sorted id set — archetype identity, and a class |
-| `SparseSet` | paged entity directory: generation, liveness, location |
+| `SparseSet` | paged entity directory: generation, liveness, location, in two index regions |
 | `Archetype` (private) | one table: id array + one column per component |
 | `Store` | the world: entities, components, resources, clock, queries, deferral |
 | `ChangeChannel` | per-row dirty bits as a `DirtyBits` column |
@@ -31,7 +32,7 @@ For orientation, since everything below is defined against it.
 
 ## v0.2 — the rest of this version
 
-### Chunked column storage with a shared span pool — **moved to v0.4**
+### ~~Chunked column storage with a shared span pool~~ — built at v0.4
 
 The measurement this was waiting on got taken, and it moved the item twice: it
 narrowed the trigger, and it found that most of what the trigger was blamed for
@@ -44,33 +45,114 @@ came from somewhere else entirely.
 
 **The first row was not columns.** 64 MB of that 72.7 was `SparseSet` pages:
 a page is allocated whole on a world's first entity, and it was 4096 slots of
-sixteen bytes, so a world of a hundred entities paid a 64 KB entry fee. Fixed,
-by making the first page 512 slots and leaving every page after it at 4096 —
-**72.7 MB to 16.7 MB.** Shrinking all of them was tried and rejected: eight
-times the allocations scatter a large world's columns and a multi-world tick
-over 100k entities each measured 8–21% slower.
+sixteen bytes, so a world of a hundred entities paid a 64 KB entry fee. Fixed at
+v0.2, by making the first page 512 slots and leaving every page after it at 4096
+— **72.7 MB to 16.7 MB.** Shrinking all of them was tried and rejected: eight
+times the allocations scatter a large world's columns and a multi-world tick over
+100k entities each measured 8-21% slower.
 
-**The second row is what chunked storage is actually for**, and roughly two
-thirds of it is column capacity that will not be used again. Still worth doing,
-now with a number behind it and a narrower trigger: *a world whose population
-falls a long way from its peak*, not *a world that is small*.
+**The second row is what chunked storage was for**, and it is now closed. A
+`Column` is a directory of chunks taken from a process-wide `ChunkPool`, and a
+chunk goes back the moment the rows stop reaching into it.
 
-It goes to v0.4 because the vectorisable-component-layout item there reopens the
-same bytes. Chunking makes `Column::At` a divide and a modulo; a vectorisable
-layout changes what a row is; a chunk is the natural granularity for a
-vectorised block. Sequenced separately, `Column`'s internals get rewritten twice
-and the second rewrite invalidates the first's benchmark.
+**Chunks double rather than being a fixed size, and that is the decision worth
+keeping.** A fixed size has to choose between giving a settled world its peak
+back and not scattering a big world's rows, and measured, it cannot have both:
 
-Compatible with the iteration paths as they stand — `EachBatch` already
-promises nothing about where a batch ends, so one batch per chunk is a legal
-division.
+| Rows per chunk | `Each · 100k` | `Each over two archetypes · 100k` |
+|---|---|---|
+| 1024, fixed | +8.0% | +16.6% |
+| 2048, fixed | +2.6% | +12.3% |
+| 4096, fixed | +2.1% | +6.9% |
+| 16384, fixed | +0.9% | +2.9% |
+| **8, doubling** | **+0.4%** | **+1.4%** |
+
+Doubling refuses the choice: chunk zero holds eight rows — exactly the capacity
+the column used to jump to on its first growth, so **nothing got worse for a
+world that never grows** — and chunk `k` holds `8 << (k-1)`, so capacity is never
+more than twice the rows and almost every row of a big column is in its largest
+two chunks. Eight rows also matters for a reason a row count hides: a *resource*
+is a column of one row and some of them are 720 bytes wide, so a fixed thousand-
+row chunk would have charged a world a megabyte and a half to hold one.
+
+Measured on the shape the item names, a thousand worlds of three components
+peaking at 10k and settling at 100:
+
+| | Storage's own accounting | Process resident |
+|---|---|---|
+| Held at peak, which is what the old layout kept forever | 820.3 MB | 620.7 MB |
+| After settling, chunked | **13.7 MB** | **85.2 MB** |
+
+The remaining 85 MB is not the storage: `Store::ResidentStorageBytes` accounts for
+13.7 MB and `ChunkPool` for at most 8 MB, and `malloc_trim` moves the figure by
+0.1 MB — the rest is glibc holding freed blocks in its arenas. Getting that back
+wants an arena-aware allocator and is not this item.
+
+What it cost, against the same tree with the change reverted, on a quiet machine
+with fifteen samples and the minimum reported:
+
+| | Before | After | |
+|---|---|---|---|
+| `Each · 10k` | 3.91 us | 3.97 us | +1.5% |
+| `Each · 100k` | 39.01 us | 39.17 us | +0.4% |
+| `Each · 500k` | 204.18 us | 194.89 us | -4.6% |
+| `EachBatch · 100k` | 39.44 us | 39.58 us | +0.4% |
+| `EachBatch · 500k` | 203.11 us | 195.57 us | -3.7% |
+| `EachBatchParallel · 500k` | 73.08 us | 65.61 us | -10.2% |
+| `toggle · add and remove, 10k` | 703.49 us | 759.23 us | **+7.9%** |
+| `control · Each over 10k rows` | 4.00 us | 4.54 us | **+13.5%** |
+
+Two costs are real and reproducible. **A structural change is 6-9% slower**,
+because `At` is a directory lookup rather than a multiply and a removal has to
+notice when it emptied a chunk. And `Structure.cpp`'s control — an `Each` over
+10k rows in a world the toggle benchmarks have just churned — is **13.5% slower**,
+which the same `Each` over an unchurned 10k world is not: after heavy structural
+churn a column's chunks come back from the pool in release order rather than in
+address order, so iteration walks memory out of order. A pool that handed back
+the lowest-addressed free chunk of a class would fix it and would cost a sorted
+insert on every release; that trade has not been measured and is the obvious
+thing to try if this ever matters.
+
+**Two static-teardown bugs came out of this and neither was new.** A `Column`
+destroyed during static teardown reaches the process-wide chunk pool and the
+process-wide component registry, and both were function-local statics built
+*later* than whatever static owned the store — so reverse destruction order tore
+them down first and the column's destructor read freed memory. It surfaced as a
+benchmark binary that printed its whole report and then segfaulted, which then
+made every suite measured after it look slow. Both singletons now outlive the
+process. The failure depends on which static was touched first, which is why it
+had not shown up before.
+
+**The multi-world *parallel* barrier benchmarks could not be attributed and are
+not claimed either way.** `Tick · 50 quiet worlds, no entities` measured +3.5%,
++61%, +3.3% and +61% across runs of the same binary, and a world with no entities
+holds no columns to chunk; bypassing the pool entirely changed nothing. Every
+*serial* variant — which is what `ROADMAP.md` added them for, because thread
+wake-up dominates fifty empty worlds — is inside its own spread.
+
+**The directory's own leftover went in the same pass**, and the roadmap
+over-specified it. `SparseSet::Free` still releases nothing on its own — dropping
+a page there needs the page's indices purged from the LIFO free list, which is an
+O(FreeList) pass inside the operation whose whole value is being O(1). What
+happens instead is that a page emptying releases every *trailing* page holding
+nothing live, the high-water mark comes back down with them, and a free-list entry
+naming a released index is discarded once when it surfaces. `Clear` releases
+everything.
+
+The hazard that comes with it is generations: a recreated page starting again at
+`FIRST_GENERATION` hands a reissued index back at exactly the generation the
+oldest handles were issued with, and every one of them comes alive. Each page
+index keeps an **epoch** — one past the highest generation it ever issued — for as
+long as the directory exists, and a recreated page starts every slot there. Four
+bytes per 64 KB page, and it makes the revival impossible by construction.
+
+`Archetype::Ids` stayed one contiguous array rather than being chunked, because
+`VisitChangedRuns` hands a callback `entities + start` beside a value pointer and
+one addition is worth more than the bytes a second directory would save. Its
+capacity is rebuilt when it is four times the rows and comes back to twice them,
+so a population has to double before it can shrink again.
 
 Explicitly **not** an occupancy flag per row. See "Rejected" below.
-
-Take the directory's own leftover in the same pass: `Free` and `Clear` both keep
-pages on purpose, so a world that shrank still holds every page it ever touched.
-Bounded and small beside the column capacity next to it, which is why it is a
-line here rather than an item.
 
 ### The class table and the instance model
 
@@ -122,38 +204,40 @@ about. That is a merge, not a replace: same entity, new values, no destroy and
 re-create. `v02v03.md` §2.12 names this as the one capability worth reserving
 now because it is expensive to retrofit.
 
-### An index range for locally predicted entities
+### ~~An index range for locally predicted entities~~ — built at v0.4
 
-**Trigger: the client predicts anything that spawns.** Entity identity is an
-index plus a generation, and two independently built stores both start at index
-0 generation 1 — so an entity a replica creates for itself collides exactly with
-one the authority created, and `Store::Apply` is right to treat them as the same
-entity because it has nothing to tell them apart.
+`SparseSet` splits the index space at 2³¹. An authority allocates from
+`[0, 2³¹)`; `Store::CreatePredicted` allocates from `[2³¹, 2³²−1)`, with
+`0xFFFF'FFFF` reserved as the value a refused allocation returns. Neither side
+wraps into the other — an exhausted range refuses and says which one it was,
+because wrapping would put the collision back at the one moment nobody is
+watching.
 
-`tests/Replication.cpp` pins the current behaviour in *two stores allocate the
-same indices, and apply cannot tell them apart*, so the day this is fixed the
-test says so.
+The directory is **two page regions**, each paged exactly as the single one was,
+so the small-first-page rule holds for both and a store that never predicts
+anything allocates nothing for the second. `SaveSnapshot` writes the directory as
+one run per region and `SNAPSHOT_VERSION` is **2**; the two layouts are
+indistinguishable from the bytes, so an older snapshot is refused rather than
+sniffed.
 
-**Guarded at v0.3, moved to v0.4.** `Store::SetAdoptOnly` refuses to mint in a
-replica and every store a `replication::Connector` writes into has it set, so
-the collision cannot be walked into any more. `CreateAt` is untouched: this
-refuses minting, not receiving. The pinned test still reaches the collision by
-deliberately not setting the flag, so what it pins is the storage's behaviour
-rather than a replica's.
+`SetAdoptOnly` stays and its meaning narrows to what it always meant: a replica
+may not mint an *authoritative* entity. It now covers `CreateInstance` and
+`CloneInstance` as well as `Create` — it did not, and `scene::MakePart` carried a
+copy of the check to work around that, which is now deleted.
 
-The shape of the real fix: reserve a high index range that the authority never
-allocates from, and give a replica's `Create` that range. A predicted entity
-then has an identity the server can never mint, and promoting one to a server
-entity is an explicit step rather than a coincidence.
+`tests/Replication.cpp` still pins the collision by minting authoritatively in
+both stores, and the case beside it takes the same scenario through
+`CreatePredicted` and keeps both entities. `engine.ecs.prediction` covers the
+range, promotion and the adopt-only split.
 
-**Why it is a v0.4 item and not a v0.3 one.** It changes the directory's layout.
-A reserved base at 2³¹ under one linear page list would have `Reach` allocate
-half a million pages to get there, so `SparseSet` needs a second page region —
-and `SaveSnapshot` writes the directory as a run of `Capacity()` entries, so it
-needs the same split and a format bump. v0.4 already reopens this storage for
-chunked columns and vectorisable components, and one bump beats two. The trigger
-is also still unmet: nothing can predict a spawn until there is a projectile to
-predict, which wants v0.4's physics and `Part`.
+**`Store::Promote` is the primitive and the policy is deliberately absent.** It
+rewrites a predicted entity's identity to an authoritative one without moving the
+row, and fixes up the directory, the row's own handle, the name maps and the
+instance tree. It does **not** rewrite an `ecs::Entity` held inside an arbitrary
+component — nothing in `TypeDescriptor` says which bytes are handles — and such a
+handle reads as dead afterwards rather than as a different entity. *When* to
+promote belongs to whatever predicts, and the trigger for that is still unmet:
+nothing predicts a spawn until there is a projectile.
 
 ### Interest filtering
 
@@ -217,6 +301,47 @@ why this is deferred rather than designed now.
 ## Rejected, with the reason
 
 Kept so the same idea is not re-proposed without new information.
+
+### Padding a twelve-byte component to sixteen, for vectorisation
+
+The proposal, and `ROADMAP.md`'s v0.4 item: `Each` is at the single core's
+streaming limit and "a compiler cannot vectorise a twelve-byte stride cleanly
+whatever the iteration does", so widen the row — a declared fourth member rather
+than `alignas(16)`, because implicit padding is never initialised and would make
+two runs of one scene serialise differently.
+
+**Measured, and the premise is backwards.** The same loop over two arrays, three
+adds per row, minimum of twenty-five samples:
+
+| | 100k rows | 500k rows |
+|---|---|---|
+| 12 bytes, `-O2` | 38.74 us | 196.38 us |
+| 16 bytes, `-O2` | 39.59 us | 189.77 us |
+| 12 bytes, `-O3` | **16.61 us** | **85.63 us** |
+| 16 bytes, `-O3` | 41.93 us | 201.54 us |
+
+At the flags this project actually builds with there is no difference at all. At
+`-O3`, where GCC vectorises, **the packed twelve-byte layout is 2.4x faster than
+the padded one** — which is the opposite of the claim. A twelve-byte AoS of
+floats has no gaps, so the vectoriser treats it as one flat float stream and
+fills every lane; padding puts a lane nobody writes in every vector and throws a
+quarter of the width away.
+
+Through the ECS, at `-O2`, padding both benchmark components to sixteen bytes
+moved `Each` and `EachBatch` at 10k, 100k and 500k by less than 3% in either
+direction — inside the run-to-run spread — and made `Each over two archetypes ·
+100k` **14-19% slower**, which is the most bandwidth-bound case in the suite and
+the one 33% more bytes should hurt. The acceptance criterion was *10k and 100k
+improve by more than 500k regresses*; nothing improved.
+
+So the padding is reverted and `scene`'s components keep their widths.
+
+**What would reopen it:** not a compiler flag argument — a *measurement* showing a
+specific loop the vectoriser refuses for a stride reason. The number worth
+chasing instead is in the table above and has nothing to do with layout: the
+control loop is **2.4x faster at `-O3` than at `-O2`**, and the `bench` and
+`release` presets build first-party code at `-O2`. If `Each` at 500k is the
+number that matters, that is where the factor is.
 
 ### An `Assigned` / `Allocated` flag per component slot
 

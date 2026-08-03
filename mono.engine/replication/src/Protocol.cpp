@@ -67,8 +67,8 @@ namespace engine::replication {
 			return "snapshot chunk";
 		case MessageKind::Delta:
 			return "delta";
-		case MessageKind::Forget:
-			return "forget";
+		case MessageKind::Structure:
+			return "structure";
 		case MessageKind::Input:
 			return "input";
 		case MessageKind::Applied:
@@ -91,8 +91,12 @@ namespace engine::replication {
 		writer.WriteUInt64(delta.Tick);
 		writer.WriteUInt64(delta.Baseline);
 
-		WriteEntities(writer, delta.Created);
-		WriteEntities(writer, delta.Destroyed);
+		// Three bytes on every part of every tick, which is what it costs to
+		// let a receiver tell "that is all of tick N" from "that is all of tick
+		// N that arrived". Fixed width, so re-encoding a part to set the marker
+		// cannot change the size the packing already budgeted for.
+		writer.WriteUInt16(delta.Part);
+		writer.WriteBool(delta.Final);
 
 		writer.WriteUInt32(static_cast<uint32_t>(delta.Components.size()));
 		for (const ComponentDelta &component : delta.Components) {
@@ -104,10 +108,12 @@ namespace engine::replication {
 		}
 	}
 
-	void WriteMessage(core::ByteWriter &writer, const Forget &forget) {
-		WriteFront(writer, MessageKind::Forget);
-		writer.WriteUInt64(forget.Tick);
-		WriteEntities(writer, forget.Entities);
+	void WriteMessage(core::ByteWriter &writer, const Structure &structure) {
+		WriteFront(writer, MessageKind::Structure);
+		writer.WriteUInt64(structure.Tick);
+		WriteEntities(writer, structure.Created);
+		WriteEntities(writer, structure.Destroyed);
+		WriteEntities(writer, structure.Forgotten);
 	}
 
 	void WriteMessage(core::ByteWriter &writer, const Input &input) {
@@ -160,10 +166,13 @@ namespace engine::replication {
 		case MessageKind::Delta: {
 			read.Delta.Tick = reader.ReadUInt64();
 			read.Delta.Baseline = reader.ReadUInt64();
-			if (reader.Failed()) {
-				return false;
-			}
-			if (!ReadEntities(reader, read.Delta.Created) || !ReadEntities(reader, read.Delta.Destroyed)) {
+			read.Delta.Part = reader.ReadUInt16();
+			read.Delta.Final = reader.ReadBool();
+
+			// Bounded before anything is remembered about it. A receiver keeps
+			// one bit per part of the tick it is counting, so an unbounded part
+			// number is a peer deciding how large that record is.
+			if (reader.Failed() || read.Delta.Part >= MAXIMUM_PARTS) {
 				return false;
 			}
 
@@ -187,9 +196,11 @@ namespace engine::replication {
 			break;
 		}
 
-		case MessageKind::Forget:
-			read.Forget.Tick = reader.ReadUInt64();
-			if (reader.Failed() || !ReadEntities(reader, read.Forget.Entities)) {
+		case MessageKind::Structure:
+			read.Structure.Tick = reader.ReadUInt64();
+			if (reader.Failed() || !ReadEntities(reader, read.Structure.Created) ||
+				!ReadEntities(reader, read.Structure.Destroyed) ||
+				!ReadEntities(reader, read.Structure.Forgotten)) {
 				return false;
 			}
 			break;

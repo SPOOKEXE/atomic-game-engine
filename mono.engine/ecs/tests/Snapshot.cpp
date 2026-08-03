@@ -1,6 +1,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/SparseSet.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -137,6 +138,59 @@ TEST_CASE("generations survive, so a stale handle stays stale", "[ecs]") {
 
 	REQUIRE(restored.Alive(live));
 	REQUIRE_FALSE(restored.Alive(dead));
+}
+
+TEST_CASE("both index regions round-trip, generations and all", "[ecs]") {
+	// The format's half of the split. The directory is written as one run per
+	// region, so a save that wrote only the authoritative run would lose every
+	// prediction — silently, because a world with none looks identical.
+	Store source("source");
+
+	const Entity theirs = source.Create();
+	const Entity retired = source.Create();
+	const Entity mine = source.CreatePredicted();
+	const Entity discarded = source.CreatePredicted();
+
+	REQUIRE(Store::IsPredicted(mine));
+	REQUIRE_FALSE(Store::IsPredicted(theirs));
+
+	source.Set<Spot>(theirs, Spot{1.0f, 2.0f});
+	source.Set<Spot>(mine, Spot{3.0f, 4.0f});
+
+	// A handle stored *inside* a component, in both directions: this is the
+	// case the directory has to come back exactly for, and a promotion or a
+	// second region must not weaken it.
+	source.Set<Linked>(theirs, Linked{mine});
+	source.Set<Linked>(mine, Linked{theirs});
+
+	// Destroyed on both sides, so the generations coming back are not all the
+	// first one and the free lists have something in them.
+	source.Destroy(retired);
+	source.Destroy(discarded);
+
+	Store restored("restored");
+	REQUIRE(Transfer(source, restored));
+
+	REQUIRE(restored.Alive(theirs));
+	REQUIRE(restored.Alive(mine));
+	REQUIRE_FALSE(restored.Alive(retired));
+	REQUIRE_FALSE(restored.Alive(discarded));
+
+	REQUIRE(restored.Get<Spot>(mine)->X == 3.0f);
+	REQUIRE(restored.Get<Linked>(theirs)->Other == mine);
+	REQUIRE(restored.Get<Linked>(mine)->Other == theirs);
+	REQUIRE(restored.Alive(restored.Get<Linked>(theirs)->Other));
+	REQUIRE(restored.Get<Spot>(restored.Get<Linked>(theirs)->Other)->X == 3.0f);
+
+	// And each region's free list came back its own, so the next mint on each
+	// side is the handle the source would have issued — index, generation and
+	// region alike. A shared or dropped free list shows here and nowhere else.
+	REQUIRE(restored.Create() == source.Create());
+
+	const Entity guessed = restored.CreatePredicted();
+	REQUIRE(guessed == source.CreatePredicted());
+	REQUIRE(Store::IsPredicted(guessed));
+	REQUIRE(guessed != discarded); // reused index, moved-on generation
 }
 
 TEST_CASE("the free list comes back, so restored worlds allocate alike", "[ecs]") {
@@ -335,6 +389,80 @@ TEST_CASE("a future version is refused rather than guessed at", "[ecs]") {
 	Store restored("restored");
 	ByteReader reader(tampered);
 	REQUIRE_FALSE(restored.Load(reader));
+}
+
+TEST_CASE("a snapshot written at the previous version is refused", "[ecs]") {
+	// **Version 1 wrote the entity directory as one run and version 2 writes
+	// two**, one per index region. The two layouts are indistinguishable from
+	// the bytes — a version 1 stream's table count sits exactly where version
+	// 2's predicted-run length does — so a reader that tried to cope would
+	// restore a world nobody can reason about rather than refusing one.
+	Store source("source");
+	source.Set<Spot>(source.Create(), Spot{1.0f, 2.0f});
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	std::vector<std::byte> old(writer.Bytes().begin(), writer.Bytes().end());
+	old[8] = static_cast<std::byte>(1);
+
+	Store restored("restored");
+	restored.Set<Spot>(restored.Create(), Spot{9.0f, 9.0f});
+
+	ByteReader reader(old);
+	REQUIRE_FALSE(restored.Load(reader));
+
+	// Empty rather than half-restored, which is what `Load` promises on any
+	// failure and is the difference between a refusal and a misread.
+	REQUIRE(restored.CountMatching<Spot>() == 0);
+	REQUIRE(restored.TableCount() == 0);
+}
+
+TEST_CASE("a snapshot claiming more entities than a region holds is refused", "[ecs]") {
+	// Every field of an inbound snapshot is hostile. The directory is a count
+	// followed by a run, and a count of four billion would otherwise have the
+	// reader walk to it one failed read at a time.
+	Store source("source");
+	source.Create();
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	std::vector<std::byte> tampered(writer.Bytes().begin(), writer.Bytes().end());
+
+	// The authoritative directory count is the field after the header, and the
+	// header is variable-length — the store's name and the component table are
+	// both in it. Walked with a reader rather than computed as an offset, so a
+	// field moving breaks this loudly instead of silently overwriting the wrong
+	// eight bytes and still passing.
+	ByteReader header(writer.Bytes());
+	header.ReadUInt64();
+	header.ReadUInt32();
+	header.ReadString();
+	const uint32_t components = header.ReadUInt32();
+	for (uint32_t index = 0; index < components; index++) {
+		header.ReadName();
+	}
+	const size_t at = header.Position();
+	REQUIRE(header.ReadUInt64() == 1); // the honest count, before it is spoiled
+
+	// One more authoritative entity than the range holds.
+	const uint64_t absurd = static_cast<uint64_t>(engine::ecs::SparseSet::AUTHORITATIVE_INDICES) + 1;
+	for (size_t byte = 0; byte < 8; byte++) {
+		tampered[at + byte] = static_cast<std::byte>((absurd >> (byte * 8)) & 0xFF);
+	}
+
+	Store restored("restored");
+	ByteReader reader(tampered);
+	REQUIRE_FALSE(restored.Load(reader));
+	REQUIRE(restored.TableCount() == 0);
+
+	// **Refused at the count, not after eating the stream.** A reader without
+	// the check refuses too — it runs out of bytes and fails — so the outcome
+	// alone proves nothing. What the check buys is that the count is judged
+	// before a single directory entry is read against it, and the cursor is
+	// where that shows.
+	REQUIRE(reader.Position() == at + sizeof(uint64_t));
 }
 
 TEST_CASE("a truncated snapshot leaves the store empty", "[ecs]") {

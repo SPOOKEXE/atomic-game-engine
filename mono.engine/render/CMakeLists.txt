@@ -7,7 +7,16 @@
 
 mono_add_library(render
 	TIER client
-	DEPS Engine::core
+	DEPS
+		Engine::core
+
+		# L7, and below this. `scene::DrawInstance` is what a world publishes and
+		# `scene::Camera` is what it is looked at through; converting either into
+		# a GPU layout is this module's job and nobody else's, so this module is
+		# where they arrive. The alternative was a `render::Instance` the client
+		# converted into — which is two descriptions of one frame, and the debt
+		# `scene` exists to pay off.
+		Engine::scene
 
 	# Both private. SDL's GPU types are behind the pimpl in Renderer.cpp — only
 	# `struct SDL_Window;` reaches a public header, as a forward declaration —

@@ -1,5 +1,6 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -18,12 +19,16 @@
 TEST_SUITE_ID("server.host")
 TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.ecs.scheduler")
+TEST_DEPENDS("engine.scene.components")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
 using engine::core::Metrics;
 using engine::ecs::Entity;
 using engine::ecs::Store;
+using engine::scene::Motion;
+using engine::scene::Transform;
+using engine::scene::WorldBounds;
 
 namespace {
 	server::Options Headless(uint32_t entities, int64_t ticks) {
@@ -54,8 +59,8 @@ TEST_CASE("a server hosts the requested number of entities", "[server]") {
 	size_t positions = 0;
 	size_t moving = 0;
 	hosted.Host.Enter([&](Store &store) {
-		positions = store.CountMatching<server::Position>();
-		moving = store.CountMatching<server::Position, server::Velocity>();
+		positions = store.CountMatching<Transform>();
+		moving = store.CountMatching<Transform, Motion>();
 	});
 	REQUIRE(positions == 128);
 	REQUIRE(moving == 128);
@@ -84,9 +89,9 @@ TEST_CASE("entities move", "[server]") {
 		engine::core::Vector3 found;
 		int seen = 0;
 		hosted.Host.Enter([&](Store &store) {
-			store.Each<const server::Position>([&](Entity, const server::Position &position) {
+			store.Each<const Transform>([&](Entity, const Transform &transform) {
 				if (seen++ == nth) {
-					found = position.Value;
+					found = transform.Frame.Position;
 				}
 			});
 		});
@@ -111,11 +116,12 @@ TEST_CASE("nothing escapes the bounds, however long it runs", "[server]") {
 	// rather than off each entity.
 	bool inside = true;
 	hosted.Host.Enter([&inside](Store &store) {
-		const float limit = store.Resource<server::WorldBounds>()->HalfExtent + 0.001f;
+		const float limit = store.Resource<WorldBounds>()->HalfExtent + 0.001f;
 
-		store.Each<const server::Position>([&inside, limit](Entity, const server::Position &position) {
-			inside = inside && std::abs(position.Value.X) <= limit && std::abs(position.Value.Y) <= limit &&
-					 std::abs(position.Value.Z) <= limit;
+		store.Each<const Transform>([&inside, limit](Entity, const Transform &transform) {
+			const engine::core::Vector3 &position = transform.Frame.Position;
+			inside = inside && std::abs(position.X) <= limit && std::abs(position.Y) <= limit &&
+					 std::abs(position.Z) <= limit;
 		});
 	});
 
@@ -148,13 +154,13 @@ TEST_CASE("two servers built the same way stay identical", "[server]") {
 	std::vector<engine::core::Vector3> a;
 	std::vector<engine::core::Vector3> b;
 	first.Host.Enter([&a](Store &store) {
-		store.Each<const server::Position>([&a](Entity, const server::Position &position) {
-			a.push_back(position.Value);
+		store.Each<const Transform>([&a](Entity, const Transform &transform) {
+			a.push_back(transform.Frame.Position);
 		});
 	});
 	second.Host.Enter([&b](Store &store) {
-		store.Each<const server::Position>([&b](Entity, const server::Position &position) {
-			b.push_back(position.Value);
+		store.Each<const Transform>([&b](Entity, const Transform &transform) {
+			b.push_back(transform.Frame.Position);
 		});
 	});
 
@@ -179,8 +185,8 @@ TEST_CASE("the tick rate does not change the simulation", "[server]") {
 
 		std::vector<engine::core::Vector3> positions;
 		host.Enter([&positions](Store &store) {
-			store.Each<const server::Position>([&positions](Entity, const server::Position &position) {
-				positions.push_back(position.Value);
+			store.Each<const Transform>([&positions](Entity, const Transform &transform) {
+				positions.push_back(transform.Frame.Position);
 			});
 		});
 		host.Shutdown();
@@ -280,8 +286,8 @@ TEST_CASE("a recorded run replays to the same state", "[server]") {
 	const auto positionsOf = [](server::Server &host) {
 		std::vector<engine::core::Vector3> found;
 		host.Enter([&found](Store &store) {
-			store.Each<const server::Position>([&found](Entity, const server::Position &position) {
-				found.push_back(position.Value);
+			store.Each<const Transform>([&found](Entity, const Transform &transform) {
+				found.push_back(transform.Frame.Position);
 			});
 		});
 		return found;

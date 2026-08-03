@@ -3,6 +3,9 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Registration.hpp>
 
 #include <algorithm>
 #include <client/Demo.hpp>
@@ -19,6 +22,13 @@ namespace client {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::scene::ActiveCamera;
+	using engine::scene::Bounds;
+	using engine::scene::DrawInstance;
+	using engine::scene::PreviousTransform;
+	using engine::scene::Transform;
+	using engine::scene::Visual;
+	using engine::scene::WorldBounds;
 
 	namespace {
 		constexpr float TAU = 2.0f * std::numbers::pi_v<float>;
@@ -80,9 +90,25 @@ namespace client {
 		// The camera is part of the scene, so it moves in the simulation on
 		// simulated time. Driving it from wall time would slide it past
 		// everything it is looking at whenever the frame rate changed.
+		//
+		// It is a row like anything else with a place in the world: a
+		// `scene::Camera` and a `scene::Transform` on an entity, with the
+		// `ActiveCamera` resource naming which of a world's cameras is live.
+		// That is what makes a second one — a spectator, a mirror — a create
+		// rather than a rewrite of this function.
 		void MoveCamera(Store &store) {
+			const ActiveCamera *active = store.Resource<ActiveCamera>();
+			if (active == nullptr) {
+				return;
+			}
+
+			// Read out before anything is written: `Set` may move the row this
+			// resource's entity handle resolves to, and holding a pointer
+			// across that is holding a pointer into storage that moved.
+			const Entity entity = active->Entity;
+
 			const auto now = static_cast<float>(store.Time().Elapsed);
-			const float extent = store.Resource<SceneBounds>()->Extent;
+			const float extent = store.Resource<WorldBounds>()->HalfExtent;
 
 			// Far enough out that the whole scene fits, and drifting slowly so
 			// that the depth buffer and the culling are visibly doing
@@ -96,9 +122,13 @@ namespace client {
 				std::sin(angle) * distance,
 			};
 
-			auto *camera = store.ResourceMutable<ActiveCamera>();
-			camera->Value.Frame = CFrame::LookAt(eye, Vector3::Zero);
-			camera->Value.FarPlane = distance * 3.0f;
+			store.Set(entity, Transform{CFrame::LookAt(eye, Vector3::Zero)});
+
+			if (engine::scene::Camera *lens = store.GetMutable<engine::scene::Camera>(entity)) {
+				// The far plane follows the orbit rather than being a constant,
+				// so growing the scene does not clip its far side away.
+				lens->FarPlane = distance * 3.0f;
+			}
 		}
 
 		// The one phase that turns simulation state into something to draw. It
@@ -124,7 +154,7 @@ namespace client {
 			size_t matching = 0;
 			{
 				ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-				matching = store.CountMatching<Transform, PreviousTransform, Visual>();
+				matching = store.CountMatching<Transform, PreviousTransform, Bounds, Visual>();
 			}
 
 			{
@@ -160,56 +190,56 @@ namespace client {
 				// Taken once, outside. A worker cannot grow the vector — that is
 				// a reallocation under every other worker's feet — so the buffer
 				// is sized before the loop starts and the body writes into it.
-				engine::render::Instance *const out = drawList->Instances.data();
+				DrawInstance *const out = drawList->Instances.data();
 				const size_t capacity = drawList->Instances.size();
 
-				written = store.EachBatchParallel<const Transform, const PreviousTransform, const Visual>(
-					[out, capacity, alpha](
-						size_t first,
-						size_t rows,
-						const Transform *transforms,
-						const PreviousTransform *previous,
-						const Visual *visuals
-					) {
-						// The count came from a different query than the one
-						// being walked. They agree, and this is what happens if
-						// they ever stop: instances go missing and the number on
-						// the panel drops, rather than a worker writing past the
-						// end of the buffer.
-						if (first >= capacity) {
-							return;
-						}
-						rows = std::min(rows, capacity - first);
-
-						for (size_t row = 0; row < rows; row++) {
-							// Interpolated, not the tick position. At 300 fps against
-							// a 60 Hz tick, drawing tick positions shows each one five
-							// times and then jumps — which reads as a frame-rate
-							// problem rather than as a tick-rate one.
-							//
-							// NLerp, not Lerp. The endpoints are one simulation tick
-							// apart — a few degrees at most — and over an arc that
-							// short the two agree to well inside a pixel. Lerp's
-							// constant angular speed costs an acos and three sin
-							// calls per entity, which on this loop was the single
-							// most expensive thing in the frame.
-							glm::mat4 model =
-								previous[row].Frame.NLerp(transforms[row].Frame, alpha).ToMatrix();
-							// Scale on the right, so it applies before the rotation
-							// and stays a scale rather than a shear.
-							model[0] *= visuals[row].Size;
-							model[1] *= visuals[row].Size;
-							model[2] *= visuals[row].Size;
-
-							out[first + row] = engine::render::Instance{
-								model,
-								glm::vec4{
-									visuals[row].Colour.R, visuals[row].Colour.G, visuals[row].Colour.B, 1.0f
-								},
-							};
-						}
+				written = store.EachBatchParallel<
+					const Transform,
+					const PreviousTransform,
+					const Bounds,
+					const Visual>([out, capacity, alpha](
+									  size_t first,
+									  size_t rows,
+									  const Transform *transforms,
+									  const PreviousTransform *previous,
+									  const Bounds *bounds,
+									  const Visual *visuals
+								  ) {
+					// The count came from a different query than the one
+					// being walked. They agree, and this is what happens if
+					// they ever stop: instances go missing and the number on
+					// the panel drops, rather than a worker writing past the
+					// end of the buffer.
+					if (first >= capacity) {
+						return;
 					}
-				);
+					rows = std::min(rows, capacity - first);
+
+					for (size_t row = 0; row < rows; row++) {
+						// Interpolated, not the tick position. At 300 fps
+						// against a 60 Hz tick, drawing tick positions shows
+						// each one five times and then jumps — which reads as
+						// a frame-rate problem rather than as a tick-rate one.
+						//
+						// NLerp, not Lerp. The endpoints are one simulation
+						// tick apart — a few degrees at most — and over an arc
+						// that short the two agree to well inside a pixel.
+						// Lerp's constant angular speed costs an acos and
+						// three sin calls per entity, which on this loop was
+						// the single most expensive thing in the frame.
+						//
+						// A `CFrame` and a half-extent, not a matrix: this is
+						// what the world knows, and `render` is what turns it
+						// into something a GPU binds.
+						out[first + row] = DrawInstance{
+							previous[row].Frame.NLerp(transforms[row].Frame, alpha),
+							bounds[row].HalfExtent,
+							visuals[row].Tint,
+							visuals[row].Mesh,
+							visuals[row].Material,
+						};
+					}
+				});
 			}
 
 			{
@@ -228,6 +258,12 @@ namespace client {
 	}
 
 	void BuildDemoWorld(Store &store, Scheduler &scheduler, uint32_t count) {
+		// Before the first `Set`, on every path. An unregistered component is
+		// minted under whatever the compiler calls the type, which is a name a
+		// recording written by one build cannot be read back by another under.
+		// Idempotent, so a second world costs a hash lookup.
+		engine::scene::RegisterSceneComponents();
+
 		// Rings rather than a cube of cubes: a ring shows depth, occlusion and
 		// the shading model at a glance, and it makes the orbit motion legible.
 		constexpr uint32_t PER_RING = 64;
@@ -275,26 +311,45 @@ namespace client {
 					Random::Range(index, 17u, -1.2f, 1.2f),
 				}}
 			);
-			store.Set<Visual>(
-				entity,
-				Visual{
-					Color3::FromLinear(
-						Random::Range(index, 19u, 0.15f, 0.90f),
-						Random::Range(index, 23u, 0.20f, 0.80f),
-						Random::Range(index, 29u, 0.35f, 0.95f)
-					),
-					Random::Range(index, 31u, 0.6f, 1.4f),
-				}
+			// Half the edge length, because `Bounds` is a half-extent and the
+			// number this scene has always randomised is the edge. Halving in
+			// one place is what stops the two disagreeing by a factor of two.
+			const float halfEdge = Random::Range(index, 31u, 0.6f, 1.4f) * 0.5f;
+			store.Set<Bounds>(entity, Bounds{Vector3{halfEdge, halfEdge, halfEdge}});
+
+			Visual visual;
+			visual.Tint = Color3::FromLinear(
+				Random::Range(index, 19u, 0.15f, 0.90f),
+				Random::Range(index, 23u, 0.20f, 0.80f),
+				Random::Range(index, 29u, 0.35f, 0.95f)
 			);
+			// Mesh and material stay invalid: an invalid name means the
+			// consumer's own default, which is the unit cube the renderer
+			// carries. Naming one here would be this scene deciding what a
+			// presentation module's default is.
+			store.Set<Visual>(entity, visual);
 
 			extent = std::max(extent, radius);
 		}
 
+		// The camera is a row, not a resource holding a value. A world may hold
+		// several — a spectator, a cutscene — and `ActiveCamera` names the live
+		// one, so "where is the camera" stays a lookup rather than a search.
+		const Entity camera = store.Create();
+		store.Set<Transform>(camera, Transform{});
+		store.Set<engine::scene::Camera>(camera, engine::scene::Camera{});
+
 		// Every resource the systems below read, installed before any of them
 		// can run. A system that has to check whether its resource exists yet
 		// is a system with a branch for a state the world is never in.
-		store.SetResource(SceneBounds{extent});
-		store.SetResource(ActiveCamera{});
+		//
+		// `WorldBounds` is how far this scene reaches from the origin, which is
+		// what the camera frames from — the same resource the server's world
+		// bounces inside, because they are one idea and used to be two names.
+		store.SetResource(WorldBounds{extent});
+		ActiveCamera live;
+		live.Entity = camera;
+		store.SetResource(live);
 		store.SetResource(DrawList{});
 
 		// Reserved once rather than grown: the count is known, and the first

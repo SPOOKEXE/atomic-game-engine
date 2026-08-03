@@ -1,0 +1,173 @@
+#include "PipelineInternals.hpp"
+#include "WorldResource.hpp"
+
+#include <engine/core/FrameGraph.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
+#include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/physics/Contacts.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
+#include <engine/physics/Solver.hpp>
+#include <engine/scene/Components.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <span>
+#include <utility>
+#include <vector>
+
+namespace engine::physics {
+
+	namespace {
+		// Whether a pair that has left the manifold list is still really
+		// touching.
+		//
+		// **A body that falls asleep leaves the dynamic index**, and two
+		// anchored colliders are never a pair — so the tick a resting box
+		// sleeps, the contact holding it up disappears from the broad phase.
+		// Reporting that as `Ended` would tell a listener the box left the
+		// floor, which is the one thing it definitely did not do.
+		bool
+		StillRestingTogether(const ecs::Store &store, const PhysicsWorld &world, const CandidatePair &pair) {
+			if (!store.Alive(pair.A) || !store.Alive(pair.B)) {
+				return false;
+			}
+			return world.Sleeping(pair.A) || world.Sleeping(pair.B);
+		}
+
+		// The body at `entity`, or nothing.
+		//
+		// The array is sorted by entity, so this is a binary search. It is
+		// called from inside an `Each` over the dynamic rows, which is why the
+		// array being sorted was worth a sort in the first place.
+		const SolverBody *BodyOf(std::span<const SolverBody> bodies, ecs::Entity entity) {
+			const auto found = std::lower_bound(
+				bodies.begin(), bodies.end(), entity, [](const SolverBody &body, ecs::Entity target) {
+					return body.Owner.Id < target.Id;
+				}
+			);
+			if (found == bodies.end() || !(found->Owner == entity)) {
+				return nullptr;
+			}
+			return &*found;
+		}
+	}
+
+	void Publish(ecs::Store &store) {
+		ENGINE_PROFILE_CAT("physics.publish", core::ProfileCategory::ECS);
+
+		PhysicsWorld *world = PreparedWorldMutable(store);
+		if (world == nullptr) {
+			return;
+		}
+
+		// --- overlaps --------------------------------------------------------
+		//
+		// The correction velocity, added to the transforms and then dropped.
+		// This is the one place physics moves something outside
+		// `IntegrateMotion`, and it moves positions only — see
+		// `SolverBody::CorrectionLinear`, which is why there is no quaternion
+		// step here to keep in agreement with the integrator's.
+		//
+		// **Written through the reference an `Each` hands out, and never
+		// through `Store::Set`.** A write through `Set` stamps the row, and
+		// `SyncBroadphase` reads those stamps to decide whether *static*
+		// geometry moved — a stamp left on a body that later falls asleep, and
+		// therefore has no `Motion` to exclude it, rebuilds the static index
+		// every tick forever. `Store::Each` documents a write through the
+		// reference as a direct memory write, which is exactly what is wanted.
+		const float delta = store.Time().Delta;
+		const std::span<const SolverBody> bodies = world->Bodies();
+		if (!bodies.empty() && delta > 0.0f) {
+			store.Each<scene::Transform, const scene::Motion>(
+				[bodies, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
+					const SolverBody *body = BodyOf(bodies, entity);
+					if (body == nullptr || !body->Movable) {
+						return;
+					}
+					transform.Frame.Position = transform.Frame.Position + body->CorrectionLinear * delta;
+				}
+			);
+		}
+
+		// --- velocities ------------------------------------------------------
+		//
+		// The only writes the pipeline makes to a component after
+		// `SyncBroadphase`, and they are all here rather than spread through
+		// the solver's iteration. Eight sweeps writing through `Store::Set`
+		// would be eight sparse-set lookups per body per contact for a value
+		// only the last one is true.
+		for (const SolverBody &body : bodies) {
+			if (world->Sleeping(body.Owner)) {
+				// **The archetype move.** Losing `scene::Motion` takes the row
+				// out of `IntegrateMotion`'s query and out of the dynamic half
+				// of the broad phase — the query never visits it, which is what
+				// `v02v03v04.md`'s allocation table asks a sleeping tag to do
+				// and what a tag could not deliver without a "without this
+				// component" query term the ECS does not have.
+				if (store.Has<scene::Motion>(body.Owner)) {
+					store.Remove<scene::Motion>(body.Owner);
+				}
+				continue;
+			}
+
+			// A kinematic body and a piece of static geometry are both in the
+			// body array — they take part in every contact — and neither has a
+			// velocity the solver is allowed to have changed. Writing one back
+			// would overwrite whatever moves the platform.
+			if (!body.Movable) {
+				continue;
+			}
+
+			// `Set` rather than `GetMutable`, because a body that has just
+			// woken has no `scene::Motion` at all and this is the write that
+			// gives it one back.
+			store.Set<scene::Motion>(body.Owner, scene::Motion{body.LinearVelocity, body.AngularVelocity});
+		}
+
+		// --- events ----------------------------------------------------------
+		//
+		// A merge of this tick's manifolds against last tick's touching set,
+		// both sorted by `(min id, max id)`. A merge rather than a lookup per
+		// pair because the two lists are already in the same order, and because
+		// a set would be an unordered container in the middle of the one path
+		// §2.4 says must not hold one.
+		std::vector<ContactEvent> &events = PipelineInternals::Events(*world);
+		std::vector<CandidatePair> &last = PipelineInternals::TouchingLast(*world);
+		std::vector<CandidatePair> &now = PipelineInternals::TouchingNow(*world);
+		now.clear();
+
+		size_t previous = 0;
+		const auto retire = [&](const CandidatePair &limit, bool all) {
+			while (previous < last.size() && (all || last[previous] < limit)) {
+				const CandidatePair gone = last[previous];
+				previous++;
+
+				if (StillRestingTogether(store, *world, gone)) {
+					now.push_back(gone);
+					events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Persisted});
+					continue;
+				}
+				events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Ended});
+			}
+		};
+
+		for (const ContactManifold &manifold : world->Manifolds()) {
+			const CandidatePair pair{manifold.A, manifold.B};
+			retire(pair, false);
+
+			ContactPhase phase = ContactPhase::Began;
+			if (previous < last.size() && last[previous] == pair) {
+				phase = ContactPhase::Persisted;
+				previous++;
+			}
+			events.push_back(ContactEvent{pair.A, pair.B, phase});
+			now.push_back(pair);
+		}
+		retire(CandidatePair{}, true);
+
+		std::swap(last, now);
+	}
+}

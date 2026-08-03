@@ -20,7 +20,18 @@
     "staged server/ directory having no shaders/ folder is the same fact in a",
     "form anyone can see without a graph query.",
     "",
-    "The cdn program's row is the other one worth reading: repo_layout.md \u00a78",
+    "unified_server_client is the one row that links across a tier: a client-tier",
+  "target with `server` in it. That is the ALLOW_TIER_ESCAPE D00008 reserved,",
+  "declared in mono.unified_server_client/CMakeLists.txt with the reason beside",
+  "it, and this row is the second place it is visible. It is NOT single-player,",
+  "which is a different edge in mono.client/CMakeLists.txt and is still not",
+  "declared.",
+  "",
+  "Its `requires` is MONO_BUILD_CLIENT although it needs both programs. No",
+  "preset builds the client without the server, so the client option alone",
+  "decides whether it exists — and if one ever does, this row is what will fail.",
+  "",
+  "The cdn program's row is the other one worth reading: repo_layout.md \u00a78",
     "gives it core, parallel and assets and stops. It links core alone today",
     "because that is all it calls \u2014 a short row here is what makes",
     "`cmake --preset cdn` configure on a container with no Vulkan SDK, no SDL",
@@ -52,10 +63,35 @@
         "parallel"
       ]
     },
+    "spatial": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "scene": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "spatial"
+      ]
+    },
     "assets": {
       "tier": "shared",
       "links": [
         "core"
+      ]
+    },
+    "physics": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
       ]
     },
     "net": {
@@ -74,7 +110,11 @@
     "render": {
       "tier": "client",
       "links": [
-        "core"
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -88,6 +128,8 @@
         "parallel",
         "render",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -100,9 +142,29 @@
         "net",
         "parallel",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"
+    },
+    "unified_server_client": {
+      "tier": "client",
+      "links": [
+        "client",
+        "core",
+        "ecs",
+        "input",
+        "net",
+        "parallel",
+        "render",
+        "replication",
+        "scene",
+        "server",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
     },
     "cdn": {
       "tier": "shared",
@@ -147,6 +209,8 @@
         "parallel",
         "render",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -159,9 +223,29 @@
         "net",
         "parallel",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"
+    },
+    "unified_server_client": {
+      "tier": "client",
+      "links": [
+        "client",
+        "core",
+        "ecs",
+        "input",
+        "net",
+        "parallel",
+        "render",
+        "replication",
+        "scene",
+        "server",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
     },
     "cdn": {
       "tier": "shared",

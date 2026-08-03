@@ -5,10 +5,15 @@
 // comes from, so that "faster" is a figure rather than an adjective.
 //
 // The entity counts are chosen to sit either side of the decisions already made
-// in the code. `EachParallel`'s default grain is 4096 because parallel
-// iteration measured *slower* than serial below roughly 60k entities — so the
-// counts here bracket that, and the day somebody changes the grain this suite
-// says whether they were right.
+// in the code, so the day somebody changes the grain this suite says whether
+// they were right.
+//
+// **Two different questions live here and they are easy to confuse.** The
+// `EachParallel · N` rows call the path the way a system calls it, so below
+// `DEFAULT_GRAIN * MINIMUM_GRAINS` they measure the *inline* path and say
+// nothing at all about the pool. The `dispatched` ladder further down passes a
+// grain small enough to force a handover, which is the only way to ask where
+// the pool starts paying for itself.
 
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
@@ -72,6 +77,20 @@ namespace iteration_bench {
 		built.emplace_back(std::make_pair(entities, mixed), std::move(store));
 		return *built.back().second;
 	}
+
+	// The grain the `dispatched` ladder passes, and the reason it can.
+	//
+	// `Jobs::For` runs a span inline below `grain * MINIMUM_GRAINS`, so the
+	// default of 4096 refuses to dispatch anything under 32 768 rows and no
+	// count below that can be measured through the pool at all. 1024 puts the
+	// floor at 8192, which is where the ladder starts — so the smallest rung is
+	// exactly the marginal case `MINIMUM_GRAINS` describes: eight grains, one
+	// per range, and the whole wake cost paid to hand out eight of them.
+	//
+	// It also flatters the pool, deliberately. A grain of 4096 at 16k rows
+	// would give four ranges over twenty-three workers; 1024 gives sixteen. So
+	// where this ladder says parallel still loses, no grain would have saved it.
+	constexpr size_t DISPATCHED_GRAIN = 1024;
 
 	// Started once for the whole binary. Every parallel benchmark needs it, and
 	// starting a pool inside a measured body would measure the pool.
@@ -168,6 +187,26 @@ BENCH("Each · 500k entities", 2) {
 // worth anything is exactly the question this pair answers, and it is the
 // reason the batched path exists at all.
 
+BENCH("EachBatch · 10k entities", 100) {
+	// The size where a change to the *layout* is most likely to show. 10k rows of
+	// two twelve-byte components is 240 KB — it fits in L2, so the loop is issue
+	// bound rather than bandwidth bound, and that is the regime where a stride a
+	// compiler can vectorise is worth anything at all. At 500k the same loop is
+	// streaming from DRAM and a wider row is simply more bytes to move.
+	Store &store = WorldOf(10'000, false);
+	for (int pass = 0; pass < 100; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
 BENCH("EachBatch · 100k entities", 10) {
 	Store &store = WorldOf(100'000, false);
 	for (int pass = 0; pass < 10; pass++) {
@@ -198,11 +237,33 @@ BENCH("EachBatch · 500k entities", 2) {
 	}
 }
 
-// --- the parallel form, above and below the grain ----------------------------
+// --- the parallel form, as a system calls it ---------------------------------
 //
-// The default grain is 4096 because parallel measured slower than serial below
-// roughly 60k entities. These two counts bracket that, so the pair says whether
-// that is still true — on this machine, on this compiler, today.
+// **These three write one field where every `Each` row above writes three, and
+// that is not a fair pair.** Kept as they are because `docs/DEFERRED.md`
+// D00012 quotes their numbers, and a benchmark renamed or rebodied loses its
+// baseline and with it the ability to reproduce what was claimed. The control
+// directly below is the row to read `EachParallel · 10k` against; the
+// `dispatched` ladder is the one to read for the crossover.
+
+BENCH("Each · one field · 10k entities", 100) {
+	// The serial twin of `EachParallel · 10k entities`, body for body.
+	//
+	// **It exists because that row went 17.8% slower when the build moved to
+	// -O3 and the obvious reading of that is wrong.** 10k rows is under the
+	// dispatch floor, so no pool is involved and nothing about the job system
+	// changed; what changed is what the optimiser does with a body that writes
+	// one float of a twelve-byte row. Three adds are a contiguous span the
+	// vectoriser takes cleanly. One add is a stride-12 read-modify-write, and
+	// -O3 vectorises it into gathers that cost more than the scalar loop -O2
+	// emitted. This row and that one move together; neither moves with `Each`.
+	Store &store = WorldOf(10'000, false);
+	for (int pass = 0; pass < 100; pass++) {
+		store.Each<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+			position.X += velocity.X;
+		});
+	}
+}
 
 BENCH("EachParallel · 10k entities", 100) {
 	Store &store = WorldOf(10'000, false);
@@ -231,6 +292,364 @@ BENCH("EachParallel · 500k entities", 2) {
 		store.EachParallel<Position, const Velocity>(
 			[](Entity, Position &position, const Velocity &velocity) { position.X += velocity.X; }
 		);
+	}
+}
+
+// --- the dispatch crossover ---------------------------------------------------
+//
+// **Where the pool starts paying for itself, which is the number every grain
+// constant is a guess at.** Serial and dispatched at the same four counts, the
+// same three-add body on both sides, so the pair at each rung is the whole
+// answer for that count: the first rung where the dispatched row is smaller is
+// the crossover.
+//
+// Powers of two from 8192, because 8192 is the smallest count `DISPATCHED_GRAIN`
+// can hand to the pool at all. The three rungs below 32768 pass that grain
+// because the default refuses to dispatch there at all; 64k and up use the
+// default, which is both what a system gets and the better setting once it is
+// available. The existing 500k rows are the top of the same ladder.
+
+BENCH("Each · 8k entities", 200) {
+	Store &store = WorldOf(8'192, false);
+	for (int pass = 0; pass < 200; pass++) {
+		store.Each<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+			position.X += velocity.X;
+			position.Y += velocity.Y;
+			position.Z += velocity.Z;
+		});
+	}
+}
+
+BENCH("EachParallel dispatched · 8k entities", 200) {
+	Store &store = WorldOf(8'192, false);
+	for (int pass = 0; pass < 200; pass++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) {
+				position.X += velocity.X;
+				position.Y += velocity.Y;
+				position.Z += velocity.Z;
+			},
+			DISPATCHED_GRAIN
+		);
+	}
+}
+
+BENCH("Each · 16k entities", 100) {
+	Store &store = WorldOf(16'384, false);
+	for (int pass = 0; pass < 100; pass++) {
+		store.Each<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+			position.X += velocity.X;
+			position.Y += velocity.Y;
+			position.Z += velocity.Z;
+		});
+	}
+}
+
+BENCH("EachParallel dispatched · 16k entities", 100) {
+	Store &store = WorldOf(16'384, false);
+	for (int pass = 0; pass < 100; pass++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) {
+				position.X += velocity.X;
+				position.Y += velocity.Y;
+				position.Z += velocity.Z;
+			},
+			DISPATCHED_GRAIN
+		);
+	}
+}
+
+BENCH("Each · 32k entities", 50) {
+	Store &store = WorldOf(32'768, false);
+	for (int pass = 0; pass < 50; pass++) {
+		store.Each<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+			position.X += velocity.X;
+			position.Y += velocity.Y;
+			position.Z += velocity.Z;
+		});
+	}
+}
+
+BENCH("EachParallel dispatched · 32k entities", 50) {
+	Store &store = WorldOf(32'768, false);
+	for (int pass = 0; pass < 50; pass++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) {
+				position.X += velocity.X;
+				position.Y += velocity.Y;
+				position.Z += velocity.Z;
+			},
+			DISPATCHED_GRAIN
+		);
+	}
+}
+
+BENCH("Each · 64k entities", 25) {
+	Store &store = WorldOf(65'536, false);
+	for (int pass = 0; pass < 25; pass++) {
+		store.Each<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+			position.X += velocity.X;
+			position.Y += velocity.Y;
+			position.Z += velocity.Z;
+		});
+	}
+}
+
+BENCH("EachParallel · 64k entities", 25) {
+	// **The ladder switches to the default grain here and stays on it.** 64k is
+	// the first rung above `DEFAULT_GRAIN * MINIMUM_GRAINS`, so it is the first
+	// one a system reaches the pool at without asking, and the default is also
+	// the better setting from here up: a range costs about sixty-five
+	// nanoseconds to hand out whatever is in it, so 4096-row ranges pay that
+	// four times less often than 1024-row ones.
+	Store &store = WorldOf(65'536, false);
+	for (int pass = 0; pass < 25; pass++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) {
+				position.X += velocity.X;
+				position.Y += velocity.Y;
+				position.Z += velocity.Z;
+			}
+		);
+	}
+}
+
+BENCH("Each · 128k entities", 10) {
+	Store &store = WorldOf(131'072, false);
+	for (int pass = 0; pass < 10; pass++) {
+		store.Each<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+			position.X += velocity.X;
+			position.Y += velocity.Y;
+			position.Z += velocity.Z;
+		});
+	}
+}
+
+BENCH("EachParallel · 128k entities", 10) {
+	Store &store = WorldOf(131'072, false);
+	for (int pass = 0; pass < 10; pass++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) {
+				position.X += velocity.X;
+				position.Y += velocity.Y;
+				position.Z += velocity.Z;
+			}
+		);
+	}
+}
+
+BENCH("Each · 256k entities", 5) {
+	Store &store = WorldOf(262'144, false);
+	for (int pass = 0; pass < 5; pass++) {
+		store.Each<Position, const Velocity>([](Entity, Position &position, const Velocity &velocity) {
+			position.X += velocity.X;
+			position.Y += velocity.Y;
+			position.Z += velocity.Z;
+		});
+	}
+}
+
+BENCH("EachParallel · 256k entities", 5) {
+	Store &store = WorldOf(262'144, false);
+	for (int pass = 0; pass < 5; pass++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) {
+				position.X += velocity.X;
+				position.Y += velocity.Y;
+				position.Z += velocity.Z;
+			}
+		);
+	}
+}
+
+// --- the same crossover for the batched pair ----------------------------------
+//
+// Asked separately because the batched body is the one a compiler vectorises,
+// and a faster serial side moves the crossover up on its own. If the two
+// ladders disagree, one `DEFAULT_GRAIN` is already serving two different
+// answers inside one module.
+
+BENCH("EachBatch · 8k entities", 200) {
+	Store &store = WorldOf(8'192, false);
+	for (int pass = 0; pass < 200; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
+BENCH("EachBatchParallel dispatched · 8k entities", 200) {
+	Store &store = WorldOf(8'192, false);
+	for (int pass = 0; pass < 200; pass++) {
+		Consume(store.EachBatchParallel<Position, const Velocity>(
+			[](size_t, size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			},
+			DISPATCHED_GRAIN
+		));
+	}
+}
+
+BENCH("EachBatch · 16k entities", 100) {
+	Store &store = WorldOf(16'384, false);
+	for (int pass = 0; pass < 100; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
+BENCH("EachBatchParallel dispatched · 16k entities", 100) {
+	Store &store = WorldOf(16'384, false);
+	for (int pass = 0; pass < 100; pass++) {
+		Consume(store.EachBatchParallel<Position, const Velocity>(
+			[](size_t, size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			},
+			DISPATCHED_GRAIN
+		));
+	}
+}
+
+BENCH("EachBatch · 32k entities", 50) {
+	Store &store = WorldOf(32'768, false);
+	for (int pass = 0; pass < 50; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
+BENCH("EachBatchParallel dispatched · 32k entities", 50) {
+	Store &store = WorldOf(32'768, false);
+	for (int pass = 0; pass < 50; pass++) {
+		Consume(store.EachBatchParallel<Position, const Velocity>(
+			[](size_t, size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			},
+			DISPATCHED_GRAIN
+		));
+	}
+}
+
+BENCH("EachBatch · 64k entities", 25) {
+	Store &store = WorldOf(65'536, false);
+	for (int pass = 0; pass < 25; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
+BENCH("EachBatchParallel · 64k entities", 25) {
+	// The default grain from here up, for the reason `EachParallel · 64k` gives.
+	Store &store = WorldOf(65'536, false);
+	for (int pass = 0; pass < 25; pass++) {
+		Consume(store.EachBatchParallel<Position, const Velocity>(
+			[](size_t, size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		));
+	}
+}
+
+BENCH("EachBatch · 128k entities", 10) {
+	Store &store = WorldOf(131'072, false);
+	for (int pass = 0; pass < 10; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
+BENCH("EachBatchParallel · 128k entities", 10) {
+	Store &store = WorldOf(131'072, false);
+	for (int pass = 0; pass < 10; pass++) {
+		Consume(store.EachBatchParallel<Position, const Velocity>(
+			[](size_t, size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		));
+	}
+}
+
+BENCH("EachBatch · 256k entities", 5) {
+	Store &store = WorldOf(262'144, false);
+	for (int pass = 0; pass < 5; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
+BENCH("EachBatchParallel · 256k entities", 5) {
+	Store &store = WorldOf(262'144, false);
+	for (int pass = 0; pass < 5; pass++) {
+		Consume(store.EachBatchParallel<Position, const Velocity>(
+			[](size_t, size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		));
 	}
 }
 

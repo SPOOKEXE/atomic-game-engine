@@ -2,6 +2,9 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/Wire.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
@@ -12,6 +15,8 @@
 
 namespace server {
 
+	using engine::core::CFrame;
+	using engine::core::Color3;
 	using engine::core::Random;
 	using engine::core::Vector3;
 	using engine::ecs::Components;
@@ -19,6 +24,11 @@ namespace server {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::scene::Bounds;
+	using engine::scene::Motion;
+	using engine::scene::Transform;
+	using engine::scene::Visual;
+	using engine::scene::WorldBounds;
 
 	namespace {
 		// This used to be a copy of the mixer in mono.client/src/Demo.cpp, with
@@ -42,9 +52,14 @@ namespace server {
 		void Integrate(Store &store) {
 			const float delta = store.Time().Delta;
 
-			store.EachParallel<Position, const Velocity>(
-				[delta](Entity, Position &position, const Velocity &velocity) {
-					position.Value = position.Value + velocity.Value * delta;
+			// `Transform` is a whole `CFrame`, so only its position is written
+			// here: the placeholder world has no angular velocity to apply and
+			// touching the rotation would be inventing one. `Motion::Angular`
+			// is what a physics step at L8 will integrate, and it is deliberately
+			// left alone until that exists rather than half-implemented here.
+			store.EachParallel<Transform, const Motion>(
+				[delta](Entity, Transform &transform, const Motion &motion) {
+					transform.Frame.Position = transform.Frame.Position + motion.Linear * delta;
 				}
 			);
 
@@ -53,46 +68,46 @@ namespace server {
 			// replication delta built from the dirty bits would carry nothing at
 			// all — which is a client that joins, receives a snapshot, and then
 			// watches a frozen world. Costs nothing when nobody is observing
-			// `Position`, which is the case whenever `--listen` was not given.
-			store.MarkAllChanged<Position>();
+			// `Transform`, which is the case whenever `--listen` was not given.
+			store.MarkAllChanged<Transform>();
 		}
 
 		void Bounce(Store &store) {
-			// Read once for the whole world rather than once per entity. When
-			// this was a component it was the same four bytes on every row, and
-			// the loop paid a load for a number it already knew.
+			// Read once for the whole world rather than once per entity. This
+			// was a *component* before it was a resource, holding the same four
+			// bytes on every row — a column in the archetype and a load in this
+			// loop's inner body for a number the loop already knew.
 			const float halfExtent = store.Resource<WorldBounds>()->HalfExtent;
 
-			store.EachParallel<Position, Velocity>(
-				[halfExtent](Entity, Position &position, Velocity &velocity) {
-					// Reflect off each wall independently. The position is
-					// clamped as well as the velocity flipped, because
-					// flipping alone lets an entity that overshot on a long
-					// tick sit outside the box flipping every tick.
-					float *axis[] = {&position.Value.X, &position.Value.Y, &position.Value.Z};
-					float *speed[] = {&velocity.Value.X, &velocity.Value.Y, &velocity.Value.Z};
+			store.EachParallel<Transform, Motion>([halfExtent](Entity, Transform &transform, Motion &motion) {
+				// Reflect off each wall independently. The position is
+				// clamped as well as the velocity flipped, because
+				// flipping alone lets an entity that overshot on a long
+				// tick sit outside the box flipping every tick.
+				Vector3 &position = transform.Frame.Position;
+				float *axis[] = {&position.X, &position.Y, &position.Z};
+				float *speed[] = {&motion.Linear.X, &motion.Linear.Y, &motion.Linear.Z};
 
-					for (int index = 0; index < 3; index++) {
-						if (*axis[index] > halfExtent) {
-							*axis[index] = halfExtent;
-							*speed[index] = -std::abs(*speed[index]);
-						} else if (*axis[index] < -halfExtent) {
-							*axis[index] = -halfExtent;
-							*speed[index] = std::abs(*speed[index]);
-						}
+				for (int index = 0; index < 3; index++) {
+					if (*axis[index] > halfExtent) {
+						*axis[index] = halfExtent;
+						*speed[index] = -std::abs(*speed[index]);
+					} else if (*axis[index] < -halfExtent) {
+						*axis[index] = -halfExtent;
+						*speed[index] = std::abs(*speed[index]);
 					}
 				}
-			);
+			});
 
-			// Both, and both over-report: `Position` moved on every row anyway,
-			// and `Velocity` changed only on the few rows that hit a wall. A
+			// Both, and both over-report: `Transform` moved on every row anyway,
+			// and `Motion` changed only on the few rows that hit a wall. A
 			// system that could name those rows should mark those rows — the
 			// cost of marking all of them is a delta carrying values that
 			// already match at the other end, which is bandwidth rather than
 			// error. Under-reporting a bounce would be a client that watches an
 			// entity keep going through the wall until the next snapshot.
-			store.MarkAllChanged<Position>();
-			store.MarkAllChanged<Velocity>();
+			store.MarkAllChanged<Transform>();
+			store.MarkAllChanged<Motion>();
 		}
 
 		// PreRender on a headless server is where replication will hang:
@@ -105,15 +120,18 @@ namespace server {
 		// be asked and the second copy of the number is gone.
 		void Report(Store &store) {
 			engine::core::Metrics::Count(
-				"world.entities", static_cast<double>(store.CountMatching<Position>())
+				"world.entities", static_cast<double>(store.CountMatching<Transform>())
 			);
 		}
 	}
 
 	void RegisterPlaceholderComponents() {
-		Components::Register<Position>("server.Position");
-		Components::Register<Velocity>("server.Velocity");
-		Components::Register<WorldBounds>("server.WorldBounds");
+		// The shared set first, and under `scene`'s names rather than this
+		// program's. A client registers the same strings, which is what makes a
+		// snapshot resolve on the far side without a translation layer — there
+		// used to be one, and keeping two declarations of one wire type in step
+		// by hand is what it cost.
+		engine::scene::RegisterSceneComponents();
 
 		// `Chatter` holds a `core::Name`, which is a process-local id — writing
 		// it as an object representation would restore as whatever name
@@ -202,27 +220,70 @@ namespace server {
 	void BuildPlaceholderWorld(Store &store, Scheduler &scheduler, uint32_t count) {
 		constexpr float HALF_EXTENT = 64.0f;
 
+		// **The world's size and the replication wire's position grid are one
+		// decision made in two files**, and this is the line that keeps them
+		// together. A world authored past the grid does not fail to replicate —
+		// its entities are clamped and pile up against a wall that is not this
+		// one — so the size is checked where it is chosen rather than
+		// discovered per entity on a client. `scene/Wire.hpp` states the grid
+		// and the error it introduces.
+		static_assert(
+			engine::scene::WireCoversWorld(HALF_EXTENT),
+			"this world reaches further than the replication wire's position grid"
+		);
+
+		// Before the first `Set`, on every path. An unregistered component is
+		// minted under whatever the compiler calls the type, which is not a
+		// name a snapshot written by one build can be read back by another
+		// under. Idempotent, so calling it here as well as in `Server::Run`'s
+		// start-up costs a hash lookup.
+		RegisterPlaceholderComponents();
+
 		store.SetResource(WorldBounds{HALF_EXTENT});
 
 		for (uint32_t index = 0; index < count; index++) {
 			const Entity entity = store.Create();
 
-			store.Set<Position>(
+			store.Set<Transform>(
 				entity,
-				Position{Vector3{
+				Transform{CFrame{Vector3{
 					Random::Range(index, 2u, -HALF_EXTENT, HALF_EXTENT),
 					Random::Range(index, 3u, -HALF_EXTENT, HALF_EXTENT),
 					Random::Range(index, 5u, -HALF_EXTENT, HALF_EXTENT),
-				}}
+				}}}
 			);
-			store.Set<Velocity>(
+
+			// Linear only. The placeholder scene has never tumbled its
+			// entities, and giving them an angular velocity nothing integrates
+			// would be a field that reads as live and is not.
+			store.Set<Motion>(
 				entity,
-				Velocity{Vector3{
-					Random::Range(index, 7u, -10.0f, 10.0f),
-					Random::Range(index, 11u, -10.0f, 10.0f),
-					Random::Range(index, 13u, -10.0f, 10.0f),
-				}}
+				Motion{
+					Vector3{
+						Random::Range(index, 7u, -10.0f, 10.0f),
+						Random::Range(index, 11u, -10.0f, 10.0f),
+						Random::Range(index, 13u, -10.0f, 10.0f),
+					},
+					Vector3::Zero,
+				}
 			);
+
+			// **What a headless server is doing with a size and a colour.** It
+			// is not drawing them — this binary contains no renderer. It is
+			// describing what these things *are*, which is what a client
+			// replicating this world needs in order to draw it, and what the
+			// draw list a hosted world publishes would carry. Before v0.4 a
+			// joining client received two vectors and had nothing to make a
+			// scene out of.
+			store.Set<Bounds>(entity, Bounds{});
+
+			Visual visual;
+			visual.Tint = Color3::FromLinear(
+				Random::Range(index, 19u, 0.15f, 0.90f),
+				Random::Range(index, 23u, 0.20f, 0.80f),
+				Random::Range(index, 29u, 0.35f, 0.95f)
+			);
+			store.Set<Visual>(entity, visual);
 		}
 
 		ENGINE_INFO("placeholder world: {} entities", count);

@@ -1,15 +1,19 @@
 #pragma once
 
-// The two in-game debug panels.
+// The three in-game debug panels.
 //
 //   F3 — the statistics counter: FPS now, and the shape of the last twenty
 //        seconds. A number that only shows the current frame hides exactly the
 //        thing worth seeing, which is the occasional 40 ms one.
 //
+//   F4 — the network panel: what is crossing the link, what it costs per
+//        second, and how far behind the world being drawn is. Only when there
+//        is a link — see `NetworkStatistics::Connected`.
+//
 //   F5 — the frame graph: last frame's scope tree as a flamegraph, plus
 //        per-category totals, per-system costs and the metrics counters.
 //
-// Both draw into an OverlayImage and know nothing about the GPU.
+// All three draw into an OverlayImage and know nothing about the GPU.
 //
 // @tier L12 · client
 
@@ -62,6 +66,127 @@ namespace engine::render {
 		float Milliseconds = 0.0f;
 	};
 
+	// What is crossing a replication link, and what it costs.
+	//
+	// **Rates are per second and are the caller's to measure, not this
+	// module's.** Everything `net` counts is cumulative over a connection's
+	// life, and a panel that divided a lifetime total by a lifetime would show
+	// a number that stops moving after a minute — the figure worth reading is
+	// over the last second or so, and only the caller knows when it last
+	// sampled. `DebugPanels` reads no clock, which is what keeps it drawable
+	// from a test.
+	//
+	// @since v0.5
+	// @client
+	struct NetworkStatistics {
+		// Whether there is a link at all.
+		//
+		// **False switches the panel off rather than drawing zeroes.** A client
+		// with no `--connect` has no network to show, and a panel of zeroes
+		// reads as a link that is up and idle — which is a different and much
+		// more alarming thing than a client that was never asked to connect.
+		bool Connected = false;
+
+		// Whether the joining snapshot has arrived and been applied.
+		//
+		// Connected and not joined is the state worth seeing: the handshake
+		// finished and the world has not landed.
+		bool Joined = false;
+
+		// Payload bytes per second arriving, measured by the caller over its own
+		// recent window.
+		double ReceivedBytesPerSecond = 0.0;
+
+		// Payload bytes per second going out, over the same window.
+		double SentBytesPerSecond = 0.0;
+
+		// Packets per second arriving, over the same window.
+		double ReceivedPacketsPerSecond = 0.0;
+
+		// Packets per second going out, over the same window.
+		double SentPacketsPerSecond = 0.0;
+
+		// Payload bytes accepted over the connection's life.
+		uint64_t ReceivedBytes = 0;
+
+		// Payload bytes handed to the transport over the connection's life.
+		uint64_t SentBytes = 0;
+
+		// Round trip in milliseconds, smoothed by `net::Link`.
+		float RoundTripMilliseconds = 0.0f;
+
+		// Gaps in the far side's sequence numbers.
+		//
+		// An estimate: a late packet and a lost one are the same thing until
+		// one of them turns up. `net::ConnectionStats::PacketsLost`.
+		uint64_t PacketsLost = 0;
+
+		// Unreliable packets discarded because a newer one had already
+		// arrived. Near zero on a real network is the surprising reading.
+		uint64_t PacketsStale = 0;
+
+		// Sends refused because the byte budget for the tick was spent.
+		//
+		// **Not congestion.** This is the budget being enforced, and `D00007`
+		// was found by this number coming off zero.
+		uint64_t SendsOverBudget = 0;
+
+		// Ticks per second the replica is actually receiving.
+		//
+		// Measured from the stream rather than configured — the server's rate
+		// is not on the wire and the two programs do not share a default, so
+		// this is the only figure that is about the authority rather than about
+		// what this process was told. `replication::SnapshotBuffer`.
+		double TickRate = 0.0;
+
+		// The last tick applied in full.
+		uint64_t AppliedTick = 0;
+
+		// Snapshots applied. More than one means the server decided this client
+		// had fallen too far behind to catch up with deltas.
+		uint64_t Snapshots = 0;
+
+		// Deltas applied.
+		uint64_t Deltas = 0;
+
+		// Structural messages applied — creations, destroys and forgets.
+		uint64_t Structures = 0;
+
+		// Messages refused as malformed.
+		uint64_t Malformed = 0;
+
+		// Messages about a tick already passed. Ordinary on an unreliable
+		// transport, which reorders; a figure that climbs is a link delivering
+		// more late than useful.
+		uint64_t Stale = 0;
+
+		// How far behind the newest received tick the world is being drawn, in
+		// ticks. The snapshot buffer's jitter budget, as it stands right now.
+		double BehindTicks = 0.0;
+
+		// Frames the render clock could not advance because it had run out of
+		// received state.
+		//
+		// **The number that says the delay is too small for this link.**
+		uint64_t Stalls = 0;
+
+		// Poses answered by interpolating between two received ticks. Against
+		// `Held` below, this is the ratio that says whether the world is
+		// actually being smoothed.
+		uint64_t Interpolated = 0;
+
+		// Poses answered by holding a single tick. All held and none
+		// interpolated is a buffer doing nothing.
+		uint64_t Held = 0;
+
+		// Entities the replica holds.
+		uint64_t Entities = 0;
+
+		// Rows the draw pass produced from them. Below `Entities` is rows that
+		// arrived without something to draw them with.
+		uint64_t Drawn = 0;
+	};
+
 	// Everything the panels draw, gathered by the caller. Passed by reference
 	// and never stored: the spans point into the frame graph's published frame,
 	// which is only stable until the next EndFrame.
@@ -73,6 +198,16 @@ namespace engine::render {
 	struct DebugPanelData {
 		// Whether to draw the F3 statistics panel.
 		bool ShowStatistics = false;
+
+		// Whether to draw the F4 network panel.
+		//
+		// **Asking for it is not enough.** It is drawn only when
+		// `Network.Connected` is also true, so a build with no replication in
+		// it cannot be made to show an empty one. `DrawDebugPanels` enforces
+		// that rather than trusting the caller — the whole reason the panel
+		// exists is to answer "is anything crossing", and a panel of zeroes
+		// answers it wrongly.
+		bool ShowNetwork = false;
 
 		// Whether to draw the F5 profiler panel.
 		bool ShowFrameGraph = false;
@@ -163,6 +298,9 @@ namespace engine::render {
 
 		// Total simulation ticks discarded by the fixed-timestep catch-up limit.
 		uint64_t DroppedTicks = 0;
+
+		// What is crossing the replication link, when there is one.
+		NetworkStatistics Network;
 
 		// Positive integer pixel scale, raised on high-DPI displays to keep the panels legible.
 		int Scale = 2;

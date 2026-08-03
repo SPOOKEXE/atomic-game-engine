@@ -58,8 +58,29 @@ visible stall for every player. Do not add a "reliable by default" convenience.
 late is a resend that still has to be delivered in order; discarding it would
 silently drop an event the sender believes was acknowledged.
 
-**Each channel has its own sequence counter.** One shared counter would let a
-reliable resend make an unreliable packet look stale.
+**Each channel has its own sequence counter, in both directions.** One shared
+counter would let a reliable resend make an unreliable packet look stale — and
+so would one shared *high-water mark* on the receiving side, which is the half
+that was actually wrong until v0.4. `Link` keeps a window per channel and every
+one wraps on its own: `Packet::IsNewer` is a half-range comparison and answers
+nonsense when the two numbers come from different counters.
+
+**A channel's first packet is accepted, whatever its sequence.** Zero is a
+legitimate sequence — it is the first one `NextHeader` stamps — so no value can
+stand for "nothing yet" and the window carries a flag instead. Treating zero as
+"already seen sequence 0" reads a channel's opening packet as a repeat of one
+that never existed, and counts every sequence below the one it opened at as
+lost.
+
+**A `Handshake` packet has no window and moves none.** It is answered before
+there is a link to number it, so it belongs to no stream. It still proves the
+peer is alive.
+
+Because the acknowledgement fields report one sequence and there is now one
+space per channel, `Link::NextHeader` acknowledges the channel it stamps.
+Retiring a reliable payload needs an acknowledgement on *every* packet, and
+that is `ReliableReceiver::Acknowledging`'s job — the two are the same root
+cause, one window over two counters, seen from either end.
 
 ## Sequence comparison is wrap-aware, and this is not optional
 
@@ -83,8 +104,88 @@ a caller can get out of step, and the one that gets forgotten is the second.
 exactly that. A budget that silently drops traffic is indistinguishable from a
 network that silently drops traffic, and the two want completely different fixes.
 
+**A refusal is an answer, not a discard, and the caller has to read it.**
+`Reserve` returning false means the payload did not go; whether that costs a
+tick or costs a client is the caller's to know. `replication::Authority::Unsent`
+is the one that knows — see `replication/AGENTS.md`. This module deliberately
+keeps no outbox to retry from, because an outbox here would hold payloads whose
+meaning it is not allowed to understand.
+
 Budgets reset at the barrier with everything else per-tick. Resetting anywhere
 else lets a connection spend two ticks' worth inside one.
+
+## A challenge costs the responder nothing, and that is not an optimisation
+
+`Cookie` derives its answer from a secret this end already holds plus the bytes
+the peer already sent, and verifies it by deriving it again. **Never by looking
+it up.** A table of pending challenges — even a bounded one, even an LRU — has
+moved the exhaustion target rather than removed it: one datagram from a stranger
+would buy an entry, and the whole reason the challenge exists is that a stranger
+gets nothing.
+
+So the rule for anything added here: an unanswered challenge costs **zero
+bytes**, and it costs zero however many are outstanding. If a feature wants
+per-peer state before the peer has answered, that feature belongs after the
+answer.
+
+**The reply is the same size as the question.** A responder that answered a
+35-byte hello with something larger is a reflector somebody else's traffic can
+be bounced off, and the amplification factor is the whole of what makes that
+worth doing.
+
+What a returned cookie proves is exactly one thing: somebody at that address
+received a datagram this end sent there, recently. Not identity, not
+authorisation. Deciding who may connect belongs above this module —
+`replication::Listener::SetAdmission`.
+
+## The stream is sealed, and the nonce discipline is structural
+
+Every payload above the handshake is ChaCha20-Poly1305 with **the packet header
+as associated data**, so a rewritten channel, sequence or acknowledgement fails
+the tag rather than being acted on. The keys come out of `Handshake` and are
+held for the life of the connection by `replication::Session` — one `Sealer` and
+one `Opener` per direction, and holding them *is* the guarantee rather than a
+convenience.
+
+**A repeated nonce is the catastrophic failure and nothing here is allowed to
+make one possible.** Two frames under one key and one nonce leak the XOR of
+their plaintexts and hand over the material to forge tags. The three properties
+that make it impossible are in `Cipher.hpp` and none of them may be weakened to
+make plumbing convenient: the counter is private and only moves forward, a
+`Sealer` is move-only and a moved-from one is poisoned, and **there is no
+constructor from raw key material at all.** If holding one across a connection
+wants it copyable, the plumbing is wrong.
+
+**The counter is on the wire whole, in `PacketHeader::Counter`, and is not
+derived from the sequence.** The sequence is the obvious candidate and it is the
+wrong one: it is 16 bits and `IsNewer` exists precisely because it wraps every
+eighteen minutes at sixty packets a second. A nonce derived from a wrapping
+counter is a nonce that repeats. Eight bytes a packet is what that costs.
+
+**A resend is sealed again under a fresh counter, never replayed verbatim.**
+Both are safe against a repeat — a verbatim replay is the same frame rather than
+a second one — and they fail differently. The header is the associated data and
+it carries a live acknowledgement, so a verbatim replay would have to freeze the
+acknowledgement on the one packet a stalled stream most needs current, or stop
+covering the mutable header fields with the tag. `ReliableSender` therefore
+holds **plaintext**, and `Session::Flush` seals it again.
+
+**`Cipher` refuses a forgery and not a replay**, deliberately. A captured frame
+sent again is authentic by construction; discarding it is the sequence window's
+and `ReliableReceiver`'s job, because they are the layers that can tell an
+attack from an ordinary resend. Nothing in `Opener` remembers a counter — a
+dropped packet leaves a gap, a duplicate repeats one and a reorder lowers one,
+and an opener with a window would refuse genuine traffic on all three.
+
+**There is no downgrade because there is nothing to ask for.** No field on the
+wire says whether a packet is sealed, so a peer can only send plaintext and be
+refused. A `Session` with no keys sends nothing and accepts nothing.
+
+**The tag comes out of the payload budget and the number to size against is
+`Packet::MAXIMUM_MESSAGE_BYTES`, not `MAXIMUM_PAYLOAD_BYTES`.** `Link::Reserve`
+measures against the first. A budget left on the second produces a message that
+can never be sent and is indistinguishable at the call site from a busy link —
+which is the failure this module has already been bitten by three times.
 
 ## Every field of an inbound packet is hostile
 
@@ -116,6 +217,37 @@ That is also what makes `repo_layout.md` §16.6 honest: single-player rides a
 loopback with **real encoding**, so there is no configuration in which this path
 is skipped and no second lifecycle that only a socket exercises.
 
+## A link that loses things is part of this module, and it is deterministic
+
+`LossyTransport` wraps another `Transport` and discards some of what arrives at
+it. It is here rather than in a suite because `net`, `replication` and
+`mono.server` all need it, and this repository has no mechanism for a test-only
+library shared between modules — a module's `tests/` may reach its own `src/`
+and nothing else, so the alternatives were three copies or a fourth way to share
+code.
+
+**A wrapper, never a third implementation.** What it loses is real datagrams
+through real framing over the loopback or a real socket. A third implementation
+of the interface would be a third set of bugs, and the two cases only a routed
+network produces would have to be built again.
+
+**Loss is applied on arrival, not on the way out.** `Send` promises `Ok` means
+the datagram left and distinguishes that from `Full`, `TooLarge`, `Unreachable`
+and `Closed`; a wrapper deciding to lose one before offering it would have to
+invent one of those statuses or hide one the transport underneath would have
+given. So `Send` is pure delegation. Wrap the end that receives.
+
+**No clock and no `std::random_device`, which is not negotiable here.** Whether
+arrival *n* is lost is a pure function of *n* and a seed the caller states —
+`core::Random` is indexed rather than streamed for exactly this reason. A
+timeout in this module is something a suite states rather than waits for, and
+loss is the same: a failing case is reproducible from its seed alone, and
+nothing here can reach a recorded run.
+
+**Nominating one datagram is worth more than a percentage**, and `DropNext` is
+worth more than either — a test knows it has just made the server publish a
+creation and does not know which arrival that will be.
+
 ## No vendor type in a public header
 
 asio is `VENDOR`, never `VENDOR_PUBLIC`. No public header here names a socket, an
@@ -127,8 +259,14 @@ what stops asio reaching every module that links this.
 - **The transports.** A loopback and an asio UDP socket, both driving `Link`.
 - **Reliability.** The acknowledgement window is carried and recorded; nothing
   resends against it yet.
-- **Encryption.** X25519 agreement and ChaCha20-Poly1305, per
-  DATATYPES_LIBRARIES.md. Crypto++ is already vendored for it.
+- **Binding the agreement to a server identity.** The stream is encrypted and
+  the exchange is unauthenticated, and those are two different things: a peer
+  knows it is talking to *something* that completed X25519, not that it is
+  talking to this server. So the traffic is safe against a listener and not
+  against a relay, which can hold one exchange with each side and read
+  everything. `Handshake.hpp` carries the `TODO(v0.4)`. A static server key and
+  a signature over the transcript is the shape; where the key comes from and who
+  trusts it is a deployment question.
 - `upstream/`, `downstream/`, `predict/` — replication, v0.3's remaining items.
 - `http/`, `websocket/` — userland networking and the origin's asset serving,
   which is what `mono.cdn`'s streaming waits on.

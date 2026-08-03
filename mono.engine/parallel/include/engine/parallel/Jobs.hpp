@@ -133,30 +133,53 @@ namespace engine::parallel {
 		// @threadsafe
 		static BatchTiming LastBatch();
 
-		// Default pooled range size for cheap per-index work.
+		// Default pooled range size for cheap per-index work, and — through
+		// MINIMUM_GRAINS — the count below which nothing is dispatched at all.
 		//
-		// Measured with a three-multiply-add ECS integration step. Expensive work
-		// should pass a smaller grain selected from its own release-build profile.
+		// **Kept at 4096, having been re-measured at `-O3` and found wrong in
+		// both directions at once.** For the cheapest body there is, three float
+		// adds per row, `engine.ecs.bench.iteration` puts the crossover near
+		// 262,144 rows — this default's floor is 32,768, and at that count the
+		// dispatched loop measures 31 us against 5.5 us run serially. Raising the
+		// grain to 32,768 would move the floor to where that body wants it and
+		// break the only long-lived caller that takes the default:
+		// `mono.client/src/Replicated.cpp` writes a `CFrame`, two vectors and two
+		// ids per row where this body writes three floats, so its span is worth
+		// dispatching an order of magnitude sooner and a raised floor would
+		// refuse a handover that pays.
+		//
+		// **One number cannot move in two directions, and this one is two
+		// numbers wearing one name** — the range size once dispatched, and the
+		// count at which to dispatch. So it stays where it is, and a caller whose
+		// row cost is not this row's cost passes its own grain.
+		// `physics::INTEGRATE_GRAIN` is what that looks like, measured.
 		static constexpr size_t DEFAULT_GRAIN = 4096;
 
 		// How many grains of work a span must hold before the pool is woken.
 		//
-		// **Waking the pool costs the same whatever the work is.** Measured
-		// against the ECS integration step: a ten-thousand-row span costs about
-		// four microseconds serially and about twenty-two through the pool —
-		// five times worse — while a hundred thousand rows costs forty
-		// serially and twenty-eight through the pool. The fixed cost of the
-		// handover is roughly twenty microseconds, and a span that cannot repay
-		// it should never pay it.
+		// **Waking the pool costs the same whatever the work is, and it is
+		// bigger than it reads.** `engine.parallel.bench.dispatch` measures an
+		// empty dispatch at 31 us against 48 ns for the decision not to
+		// dispatch, and at 2.3 us against a pool of one — so the cost is about
+		// 1.3 us per *worker*, and only about 95 ns per range. It is linear in
+		// the pool because every worker decrements `Batch::Outstanding` under
+		// `Pool::Guard` whether it took a range or not; that join, not the
+		// notify, is what a short span cannot repay.
 		//
-		// Expressed in grains rather than as a row count so that the existing
-		// knob covers it: `grain` already means "how much work is worth handing
-		// over", so a caller with an expensive body passes a smaller grain and
-		// gets a proportionally smaller threshold. A cheap body at the default
-		// grain parallelises above about thirty-two thousand indices, which is
-		// where the measurement puts the crossover.
+		// **The crossover is an amount of time, and this expresses it as a row
+		// count.** Re-measured at `-O3`: three float adds per row cross near
+		// 262,144 rows, and `physics::IntegrateMotion`'s `CFrame` step near
+		// 8,000. Thirty-two times apart in rows; 49 us and 29 us in serial work,
+		// which is one handover either way. A row count can only be right for
+		// one row cost, and nothing in the signature can know that cost — which
+		// is why both callers that measured pass a grain of their own, and why
+		// `minimum` exists for the ones whose index is not a row at all.
 		//
-		// Eight also has a reason of its own: dispatching two or three chunks
+		// **Eight is kept rather than raised, because it multiplies every
+		// caller's floor and one of those was measured.** `physics` passes 1024
+		// and wants its floor at 8192; a MINIMUM_GRAINS of 64 would put it at
+		// 65,536 and hand back the 1.8x that module measures at 12,000 rows.
+		// Eight also has a reason of its own: dispatching two or three ranges
 		// leaves most of the pool idle and pays the whole wake cost anyway.
 		//
 		// **It is a default and not a law.** It infers the cost of one index

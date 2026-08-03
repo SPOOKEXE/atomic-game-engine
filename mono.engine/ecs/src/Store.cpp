@@ -1,4 +1,5 @@
 #include "Instances.hpp"
+#include "Promotion.hpp"
 #include "Snapshot.hpp"
 #include "StoreState.hpp"
 
@@ -84,25 +85,71 @@ namespace engine::ecs {
 
 	// --- entities ----------------------------------------------------------
 
+	bool Store::MayMintAuthoritative(const char *what) {
+		if (!State->AdoptOnly) {
+			return true;
+		}
+
+		// Once, not once per attempt. A system that creates in a loop would
+		// otherwise write a log line per entity, and the first one already said
+		// everything the rest would.
+		if (!State->WarnedAboutMinting) {
+			State->WarnedAboutMinting = true;
+			ENGINE_ERROR(
+				"store '{}': refusing {} in a replica. An authoritative index minted here collides "
+				"with one the authority minted, and nothing can tell them apart. Use CreatePredicted "
+				"for something this world is predicting.",
+				StoreName,
+				what
+			);
+		}
+		return false;
+	}
+
 	Entity Store::Create() {
 		RequireOwningThread("Create");
 
-		if (State->AdoptOnly) {
-			// Once, not once per attempt. A system that creates in a loop would
-			// otherwise write a log line per entity, and the first one already
-			// said everything the rest would.
-			if (!State->WarnedAboutMinting) {
-				State->WarnedAboutMinting = true;
-				ENGINE_ERROR(
-					"store '{}': refusing to create an entity in a replica. An index minted here "
-					"collides with one the authority minted, and nothing can tell them apart.",
-					StoreName
-				);
-			}
+		if (!MayMintAuthoritative("Create")) {
 			return NULL_ENTITY;
 		}
 
-		return CreateEntity(*State);
+		const Entity entity = CreateEntity(*State, EntityRange::Authoritative);
+		if (entity == NULL_ENTITY) {
+			ENGINE_ERROR(
+				"store '{}': the authoritative index range is exhausted at {} indices. Nothing wraps "
+				"into the predicted range, so this is a refusal rather than a collision.",
+				StoreName,
+				SparseSet::AUTHORITATIVE_INDICES
+			);
+		}
+		return entity;
+	}
+
+	Entity Store::CreatePredicted() {
+		RequireOwningThread("CreatePredicted");
+
+		// No adopt-only check, and that is the point of the range: a replica may
+		// mint here because the authority never allocates from it.
+		const Entity entity = CreateEntity(*State, EntityRange::Predicted);
+		if (entity == NULL_ENTITY) {
+			ENGINE_ERROR(
+				"store '{}': the predicted index range is exhausted at {} indices. Nothing wraps into "
+				"the authoritative range, so this is a refusal rather than a collision.",
+				StoreName,
+				SparseSet::PREDICTED_INDICES
+			);
+		}
+		return entity;
+	}
+
+	bool Store::IsPredicted(Entity entity) {
+		return entity != NULL_ENTITY && SparseSet::IsPredicted(EntityId::Of(entity).Index);
+	}
+
+	bool Store::Promote(Entity predicted, Entity authoritative) {
+		RequireOwningThread("Promote");
+
+		return PromoteEntity(*State, StoreName, predicted, authoritative);
 	}
 
 	void Store::SetAdoptOnly(bool adoptOnly) {
@@ -115,11 +162,9 @@ namespace engine::ecs {
 		return State->AdoptOnly;
 	}
 
-	Entity Store::Create(std::string_view name) {
-		RequireOwningThread("Create");
-
+	Entity Store::MintNamed(std::string_view name, bool predicted) {
 		if (name.empty()) {
-			return Create();
+			return predicted ? CreatePredicted() : Create();
 		}
 
 		const std::string key(name);
@@ -131,10 +176,28 @@ namespace engine::ecs {
 			return found->second;
 		}
 
-		const Entity entity = Create();
+		const Entity entity = predicted ? CreatePredicted() : Create();
+		if (entity == NULL_ENTITY) {
+			// A refused mint must not leave the name pointing at index zero,
+			// which is a real entity in every world that has one.
+			return NULL_ENTITY;
+		}
+
 		State->NamesByIndex.insert_or_assign(EntityId::Of(entity).Index, key);
 		State->EntitiesByName.insert_or_assign(key, entity);
 		return entity;
+	}
+
+	Entity Store::Create(std::string_view name) {
+		RequireOwningThread("Create");
+
+		return MintNamed(name, false);
+	}
+
+	Entity Store::CreatePredicted(std::string_view name) {
+		RequireOwningThread("CreatePredicted");
+
+		return MintNamed(name, true);
 	}
 
 	void Store::Destroy(Entity entity) {
@@ -157,10 +220,9 @@ namespace engine::ecs {
 
 		// The sender's index *and* generation. Matching on the index alone
 		// would let a recycled slot arrive wearing the old entity's identity.
-		State->Directory.Restore(key.Index, key.Generation, true);
-		State->Directory.FinishRestore(
-			std::max(State->Directory.Capacity(), static_cast<size_t>(key.Index) + 1)
-		);
+		// `Adopt` puts it in whichever region the index falls in, so an adopted
+		// handle does not have to say which one it came from.
+		State->Directory.Adopt(key.Index, key.Generation);
 		return true;
 	}
 
@@ -173,8 +235,22 @@ namespace engine::ecs {
 
 		// The directory rather than the tables, because an entity carrying no
 		// components at all is in no table and is still an entity.
+		//
+		// Both regions, authoritative first. Walking to `Capacity()` alone would
+		// miss every predicted entity — silently, since a directory with none
+		// behaves identically — which is exactly the shape of bug a second
+		// region introduces.
 		const size_t capacity = State->Directory.Capacity();
 		for (uint32_t index = 0; index < capacity; index++) {
+			if (!State->Directory.Live(index)) {
+				continue;
+			}
+			body(EntityId::Pack(index, State->Directory.Generation(index)));
+		}
+
+		const size_t predicted = State->Directory.PredictedCapacity();
+		for (uint32_t local = 0; local < predicted; local++) {
+			const uint32_t index = SparseSet::PREDICTED_BASE + local;
 			if (!State->Directory.Live(index)) {
 				continue;
 			}
@@ -200,6 +276,14 @@ namespace engine::ecs {
 
 	size_t Store::TableCount() const {
 		return State->Tables.size();
+	}
+
+	size_t Store::ResidentStorageBytes() const {
+		size_t bytes = State->Directory.ResidentBytes();
+		for (const Archetype &table : State->Tables) {
+			bytes += table.ResidentBytes();
+		}
+		return bytes;
 	}
 
 	// --- components --------------------------------------------------------
@@ -315,10 +399,10 @@ namespace engine::ecs {
 
 		// On the stack for the same reason the key is: a heap allocation per
 		// query per tick, to hold at most a handful of pointers.
-		void *inlineColumns[INLINE_QUERY_TERMS];
-		std::vector<void *> overflowColumns;
+		void *const *inlineColumns[INLINE_QUERY_TERMS];
+		std::vector<void *const *> overflowColumns;
 
-		void **columns = inlineColumns;
+		void *const **columns = inlineColumns;
 		if (terms.size() > INLINE_QUERY_TERMS) {
 			overflowColumns.resize(terms.size());
 			columns = overflowColumns.data();
@@ -330,8 +414,11 @@ namespace engine::ecs {
 				continue;
 			}
 
+			// The chunk directory rather than a base address. One slice still
+			// covers the whole table — see `TableSlice` on why that is not a
+			// detail — and the visitors index it by `Column::ChunkOf(row)`.
 			for (size_t term = 0; term < terms.size(); term++) {
-				columns[term] = table.ColumnAt(match.Positions[term]).Data();
+				columns[term] = table.ColumnAt(match.Positions[term]).ChunkData();
 			}
 
 			TableSlice slice;
@@ -353,6 +440,15 @@ namespace engine::ecs {
 
 	Entity Store::CreateInstance(ClassId id, std::string_view name) {
 		RequireOwningThread("CreateInstance");
+
+		// The same check `Create` makes, because this mints from the same
+		// authoritative range. It was missing, and `scene::MakePart` grew a copy
+		// of it to work around the gap — one minting path honouring the rule and
+		// one walking past it is worse than neither, because the one that
+		// honours it makes the other look covered.
+		if (!MayMintAuthoritative("CreateInstance")) {
+			return NULL_ENTITY;
+		}
 
 		return engine::ecs::CreateInstance(*State, id, name);
 	}
@@ -399,6 +495,12 @@ namespace engine::ecs {
 
 	Entity Store::CloneInstance(Entity source) {
 		RequireOwningThread("CloneInstance");
+
+		// A clone is a mint like any other, and it is the third path into the
+		// authoritative range.
+		if (!MayMintAuthoritative("CloneInstance")) {
+			return NULL_ENTITY;
+		}
 
 		return engine::ecs::CloneInstance(*State, source);
 	}
@@ -472,27 +574,40 @@ namespace engine::ecs {
 		VisitTables(terms, [&](const TableSlice &slice) {
 			// The bits are the second term, and the subject the first, because
 			// EachChanged names them in that order.
-			auto *bits = static_cast<DirtyBits *>(slice.Columns[1]);
-			auto *values = static_cast<std::byte *>(slice.Columns[0]);
+			void *const *bitChunks = slice.Columns[1];
+			void *const *valueChunks = slice.Columns[0];
 			const size_t stride = Components::Describe(subject).Size;
+			const size_t position = SubjectPosition(slice, subject);
 
-			// The position the subject occupies in this table, which is what
-			// its bit index is. Resolved once per table rather than per row.
-			size_t position = 0;
-			{
-				const EntityId key = EntityId::Of(slice.Entities[0]);
-				const EntityLocation *location = State->Directory.Locate(key.Index);
-				const std::span<const ComponentId> ids = State->Tables[location->Archetype].Set().Ids();
-				const auto at = std::lower_bound(ids.begin(), ids.end(), subject);
-				position = static_cast<size_t>(at - ids.begin());
-			}
+			// Chunk by chunk, because the two columns are only contiguous inside
+			// one. They share a row granularity, so their boundaries coincide
+			// and one chunk index serves both.
+			size_t row = 0;
+			while (row < slice.Rows) {
+				const size_t chunk = Column::ChunkOf(row);
+				const size_t start = Column::ChunkStart(chunk);
+				const size_t end = ChunkEnd(row, slice.Rows);
+				const auto *bits = static_cast<const DirtyBits *>(bitChunks[chunk]);
+				auto *values = static_cast<std::byte *>(valueChunks[chunk]);
 
-			for (size_t row = 0; row < slice.Rows; row++) {
-				if (bits[row].Test(position)) {
-					body(slice.Entities[row], values + row * stride);
+				for (; row < end; row++) {
+					const size_t offset = row - start;
+					if (bits[offset].Test(position)) {
+						body(slice.Entities[row], values + offset * stride);
+					}
 				}
 			}
 		});
+	}
+
+	size_t Store::SubjectPosition(const TableSlice &slice, ComponentId subject) const {
+		// The subject's bit index in this table, which is also where its column
+		// sits: resolved once per table rather than per row.
+		const EntityId key = EntityId::Of(slice.Entities[0]);
+		const EntityLocation *location = State->Directory.Locate(key.Index);
+		const std::span<const ComponentId> ids = State->Tables[location->Archetype].Set().Ids();
+		const auto at = std::lower_bound(ids.begin(), ids.end(), subject);
+		return static_cast<size_t>(at - ids.begin());
 	}
 
 	void Store::SetComponent(Entity entity, ComponentId component, const void *value) {
@@ -530,37 +645,45 @@ namespace engine::ecs {
 		const std::function<void(const Entity *, void *, size_t)> &body
 	) {
 		VisitTables(terms, [&](const TableSlice &slice) {
-			auto *bits = static_cast<DirtyBits *>(slice.Columns[1]);
-			auto *values = static_cast<std::byte *>(slice.Columns[0]);
+			void *const *bitChunks = slice.Columns[1];
+			void *const *valueChunks = slice.Columns[0];
 			const size_t stride = Components::Describe(subject).Size;
-
-			// The subject's bit index in this table, resolved once per table.
-			size_t position = 0;
-			{
-				const EntityId key = EntityId::Of(slice.Entities[0]);
-				const EntityLocation *location = State->Directory.Locate(key.Index);
-				const std::span<const ComponentId> ids = State->Tables[location->Archetype].Set().Ids();
-				const auto at = std::lower_bound(ids.begin(), ids.end(), subject);
-				position = static_cast<size_t>(at - ids.begin());
-			}
+			const size_t position = SubjectPosition(slice, subject);
 
 			// Runs of adjacent set bits. A system walks a table in order and
 			// writes as it goes, so the changed rows are usually one run or a
 			// few — which is what makes a delta a memcpy per run rather than a
 			// copy per entity.
+			//
+			// **A run stops at a chunk boundary even when the bits do not.** The
+			// contract this hands the callback is that `data + row * size` is
+			// the value for `entities[row]` over the whole run, and past a
+			// boundary that address is in the previous chunk's tail — so a
+			// delta would send entity A's id with entity B's bytes, which every
+			// test here would pass and a client would show as teleporting.
+			// `Archetype::Ids` stays one contiguous array, so only the value
+			// side needs clipping.
 			size_t row = 0;
 			while (row < slice.Rows) {
-				if (!bits[row].Test(position)) {
-					row++;
-					continue;
-				}
+				const size_t chunk = Column::ChunkOf(row);
+				const size_t base = Column::ChunkStart(chunk);
+				const size_t end = ChunkEnd(row, slice.Rows);
+				const auto *bits = static_cast<const DirtyBits *>(bitChunks[chunk]);
+				auto *values = static_cast<std::byte *>(valueChunks[chunk]);
 
-				const size_t start = row;
-				while (row < slice.Rows && bits[row].Test(position)) {
-					row++;
-				}
+				while (row < end) {
+					if (!bits[row - base].Test(position)) {
+						row++;
+						continue;
+					}
 
-				body(slice.Entities + start, values + start * stride, row - start);
+					const size_t start = row;
+					while (row < end && bits[row - base].Test(position)) {
+						row++;
+					}
+
+					body(slice.Entities + start, values + (start - base) * stride, row - start);
+				}
 			}
 		});
 	}
@@ -683,10 +806,20 @@ namespace engine::ecs {
 				continue;
 			}
 
+			// Per chunk. A column is only contiguous inside one, so marking
+			// `table.Rows()` bits from chunk zero's base would write past its
+			// end — and it is a write, so it corrupts whatever the pool handed
+			// to somebody else rather than merely reading rubbish.
 			const auto position = static_cast<size_t>(at - ids.begin());
-			auto *rows = static_cast<DirtyBits *>(bits->Data());
-			for (size_t row = 0; row < table.Rows(); row++) {
-				rows[row].Mark(position);
+			void *const *chunks = bits->ChunkData();
+			for (size_t row = 0; row < table.Rows();) {
+				const size_t chunk = Column::ChunkOf(row);
+				const size_t start = Column::ChunkStart(chunk);
+				auto *rows = static_cast<DirtyBits *>(chunks[chunk]);
+				const size_t end = ChunkEnd(row, table.Rows());
+				for (; row < end; row++) {
+					rows[row - start].Mark(position);
+				}
 			}
 
 			// The coarse counter moves by the number of rows, so a consumer
@@ -705,7 +838,17 @@ namespace engine::ecs {
 			if (bits == nullptr || bits->Empty()) {
 				continue;
 			}
-			std::memset(bits->Data(), 0, bits->Size() * sizeof(DirtyBits));
+			// One memset per chunk, over that chunk's live rows only. The whole
+			// row count from chunk zero's base is a heap overrun of everything
+			// past the first chunk, and a memset is the version of that which
+			// destroys somebody else's data rather than reading it.
+			void *const *chunks = bits->ChunkData();
+			const size_t rows = bits->Size();
+			for (size_t row = 0; row < rows;) {
+				const size_t end = ChunkEnd(row, rows);
+				std::memset(chunks[Column::ChunkOf(row)], 0, (end - row) * sizeof(DirtyBits));
+				row = end;
+			}
 		}
 	}
 

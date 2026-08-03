@@ -18,7 +18,7 @@ adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`
 | [shaderc](https://github.com/google/shaderc) | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | yes, once a caller exists — see below |
 | [Dear ImGui](https://github.com/ocornut/imgui) | MIT | editor and tooling UI | studio only |
 | [asio](https://github.com/chriskohlhoff/asio) | BSL-1.0 | networking, when `net` exists | yes, once linked |
-| [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | SHA-256 behind `core::Random`, and the test runner's cache | yes |
+| [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | X25519, HKDF-SHA256, ChaCha20-Poly1305 and HMAC-SHA256 in `net`; Ed25519 and HMAC-SHA256 in `assets`; SHA-256 behind `core::Random`; the test runner's cache | yes |
 | [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | BSD-3-Clause | the CMake build for Crypto++ | no — build system only |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` — chunk, asset, bundle and manifest addressing | yes, once linked |
 | [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
@@ -68,10 +68,25 @@ contains the `yes` rows and not the others:
   listed because the rule here is one entry per submodule, and because a licence
   review that finds an unlisted BSD-3-Clause submodule will stop.
 
-  Crypto++ itself **now ships in both the client and the server.**
-  `engine::core::Random` is SHA-256 underneath and `core` is linked by
-  everything, so unlike SDL this produces no tier split — there is no build of
-  this engine that carries the notice for one and not the other.
+  Crypto++ itself **now ships in both the client and the server**, so unlike
+  SDL this produces no tier split — there is no build of this engine that
+  carries the notice for one and not the other.
+
+  **The reason given here used to be `core::Random`, and that is no longer the
+  cause.** Measured per program on the `release` preset: the client and the
+  server each carry 43 of Crypto++'s 173 members, and **every one of them is
+  first pulled in by `net`** — the cipher, the handshake and the admission
+  cookie. `core::Random` on its own pulls 36, and those 36 are a strict subset,
+  so relinking either program against a `core` that does not use Crypto++ at
+  all changes the member count not at all. `assets` is a second independent
+  cause, through `Grant`'s HMAC and Ed25519, and it is what will put Crypto++
+  into `mono.cdn` the day `Origin` is wired into its main — today that program
+  links the archive and pulls **zero** members, because its main is a stub.
+
+  Worth stating because the wrong cause was load-bearing for a deferred item:
+  `D00004` was filed to ask whether `core` should stop linking Crypto++, on the
+  strength of this paragraph. The answer is that it would save every shipping
+  binary nothing.
 
   The obligation is still the lightest one in this file. BSL-1.0 exempts
   machine-executable object code from attribution, so a binary-only

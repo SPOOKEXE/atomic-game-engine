@@ -44,6 +44,8 @@ namespace engine::net {
 			return "unreliable";
 		case ChannelKind::Reliable:
 			return "reliable";
+		case ChannelKind::Handshake:
+			return "handshake";
 		}
 		return "?";
 	}

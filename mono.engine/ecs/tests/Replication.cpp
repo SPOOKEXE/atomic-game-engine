@@ -224,11 +224,12 @@ TEST_CASE("two stores allocate the same indices, and apply cannot tell them apar
 	// carries it with that trigger. This case pins the current behaviour so the
 	// day it changes, something says so.
 	//
-	// **What has changed is that a replica can no longer walk into this by
-	// accident** — `SetAdoptOnly` refuses to mint, and every store a
-	// `replication::Connector` writes into has it set. This case reaches the
-	// collision by *not* setting it, which is what makes it still the pinned
-	// behaviour of the storage rather than of a replica.
+	// **What has changed is that a replica no longer has to walk into this.**
+	// `SetAdoptOnly` refuses an authoritative mint, and `CreatePredicted` gives
+	// a replica a range of its own — the case below is the same scenario taken
+	// that way. This one reaches the collision by minting authoritatively in
+	// both stores, which is what makes it still the pinned behaviour of the
+	// storage rather than of a replica.
 	Store authority("authority");
 	const Entity theirs = authority.Create();
 	authority.Set<Spot>(theirs, Spot{1.0f});
@@ -246,6 +247,30 @@ TEST_CASE("two stores allocate the same indices, and apply cannot tell them apar
 	// there was only ever one entity.
 	REQUIRE(replica.Has<Spot>(mine));
 	REQUIRE_FALSE(replica.Has<Owned>(mine));
+}
+
+TEST_CASE("the same scenario through the predicted range keeps both entities", "[ecs]") {
+	// The case above, changed in exactly one place: the replica mints with
+	// `CreatePredicted` instead of `Create`. Kept beside it so the difference is
+	// one line rather than one file — `engine.ecs.prediction` covers the range
+	// itself, and this is the before-and-after.
+	Store authority("authority");
+	const Entity theirs = authority.Create();
+	authority.Set<Spot>(theirs, Spot{1.0f});
+
+	Store replica("replica");
+	const Entity mine = replica.CreatePredicted();
+	replica.Set<Owned>(mine, Owned{7});
+
+	REQUIRE(mine != theirs);
+
+	REQUIRE(ApplyTo(replica, SnapshotOf(authority), ApplyMode::Overlay));
+
+	// Two entities, each with what its own side gave it.
+	REQUIRE(replica.Has<Spot>(theirs));
+	REQUIRE_FALSE(replica.Has<Owned>(theirs));
+	REQUIRE(replica.Has<Owned>(mine));
+	REQUIRE_FALSE(replica.Has<Spot>(mine));
 }
 
 TEST_CASE("a component the sender dropped is dropped here too", "[ecs]") {
@@ -381,9 +406,9 @@ TEST_CASE("a replica converges however far it has drifted", "[ecs][fuzz]") {
 }
 
 TEST_CASE("an adopt-only store refuses to mint and still adopts", "[ecs]") {
-	// The guard standing in for the index range until v0.4 builds it. A replica
-	// that only adopts cannot collide with its authority, and this is what makes
-	// "only adopts" a property rather than a hope.
+	// A replica may not mint an *authoritative* entity, because that index is
+	// the authority's to hand out. `engine.ecs.prediction` covers the other half
+	// — that minting a predicted one stays legal here.
 	Store replica("replica");
 	replica.SetAdoptOnly(true);
 	REQUIRE(replica.AdoptOnly());

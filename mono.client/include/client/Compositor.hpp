@@ -26,7 +26,9 @@
 // @client
 
 #include <engine/core/Name.hpp>
-#include <engine/render/Renderer.hpp>
+#include <engine/core/types/CFrame.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/world/ViewChannel.hpp>
 #include <engine/world/World.hpp>
 
@@ -85,15 +87,17 @@ namespace client {
 		// has filled the draw list.
 		//
 		// @param id      The world publishing.
-		// @param camera  Where the view was taken from.
+		// @param frame   Where the view was taken from.
+		// @param camera  The live camera's field of view and clipping distances.
 		// @param list    What it drew.
 		// @param tick    The tick that produced it.
 		// @param alpha   The interpolation position it used.
 		// @return `false` for an untracked world, or a list too large.
 		bool Publish(
 			engine::world::WorldId id,
-			const engine::render::Camera &camera,
-			std::span<const engine::render::Instance> list,
+			const engine::core::CFrame &frame,
+			const engine::scene::Camera &camera,
+			std::span<const engine::scene::DrawInstance> list,
 			uint64_t tick,
 			float alpha
 		);
@@ -108,20 +112,31 @@ namespace client {
 		// What to draw, every tracked view together.
 		//
 		// @return The combined instances, valid until the next `Compose`.
-		std::span<const engine::render::Instance> Instances() const {
+		std::span<const engine::scene::DrawInstance> Instances() const {
 			return Combined;
 		}
 
-		// The camera to draw from.
+		// Where to draw from.
 		//
-		// The first tracked view's, pulled back far enough to hold the rest —
-		// a compositor with one camera and several worlds has to choose, and
+		// The first tracked view's, shifted far enough to hold the rest — a
+		// compositor with one camera and several worlds has to choose, and
 		// choosing the first and framing the row is the choice that shows
 		// something rather than nothing.
 		//
-		// @return The camera.
-		const engine::render::Camera &Camera() const {
-			return View;
+		// @return The camera's world-space placement.
+		const engine::core::CFrame &CameraFrame() const {
+			return ViewFrame;
+		}
+
+		// What to draw through.
+		//
+		// Separate from the placement because that is how a world holds it: a
+		// `scene::Transform` on the camera row and a `scene::Camera` beside it.
+		// Composing moves the placement and never the lens.
+		//
+		// @return The live camera's field of view and clipping distances.
+		const engine::scene::Camera &Camera() const {
+			return ViewCamera;
 		}
 
 		// The views being tracked.
@@ -171,7 +186,8 @@ namespace client {
 		// allocated inside its own render phase would pay the allocator once a
 		// frame per world.
 		std::vector<std::byte> Scratch;
-		std::vector<engine::render::Instance> Combined;
-		engine::render::Camera View;
+		std::vector<engine::scene::DrawInstance> Combined;
+		engine::core::CFrame ViewFrame;
+		engine::scene::Camera ViewCamera;
 	};
 }

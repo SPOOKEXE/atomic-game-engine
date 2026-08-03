@@ -27,9 +27,18 @@ server does not actually need it.
 genuinely has to be shared between the two programs — components, most likely —
 it becomes a `shared` engine module, not an include across two programs.
 
-`server/Simulation.hpp` and `client/Demo.hpp` both define placeholder
-components on purpose. They are not duplication to be factored out; they are
-two programs each owning their own until `scene` at L7 owns both.
+**That has happened, and the sharing is `mono.engine/scene` at L7.**
+`server/Simulation.hpp` used to declare a `Position`, a `Velocity` and a
+`WorldBounds` of its own, and the client declared a matching pair to receive
+them over the wire. All of them are gone: this program links `Engine::scene`,
+registers `scene`'s components under `scene`'s names, and a client registering
+the same names applies a snapshot from here with no translation layer at all.
+
+So **a component declared in this directory that means something a `scene`
+component already means is the change to refuse.** `Chatter` and `Heard` are the
+two that remain, and neither is a duplicate of anything — they exist to put
+traffic on a bus that would otherwise carry none, and they go when a game file
+brings traffic of its own.
 
 ## The tick is fixed, and the delta is not measured
 
@@ -50,9 +59,10 @@ the log line all read `Store.Time().Tick`. A second tally on the host is a fact
 that can disagree with itself the first time one of the two is advanced inside a
 branch, and the disagreement surfaces as a summary nobody trusts.
 
-Same reason `WorldBounds` is a resource rather than a component. It was the
-same four bytes on every entity — a property of the world stored 4096 times,
-which the bounce loop then loaded per row.
+Same reason `scene::WorldBounds` is a resource rather than a component. It was
+the same four bytes on every entity — a property of the world stored 4096 times,
+which the bounce loop then loaded per row. It lives in `scene` now, because the
+client's `SceneBounds` was the same idea under a second name.
 
 ## Pacing is against an absolute schedule
 

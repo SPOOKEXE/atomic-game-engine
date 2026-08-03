@@ -12,16 +12,43 @@
 // acknowledgement. `world::Driver` makes the same argument about there being one
 // router.
 //
-// **A client is admitted on its first datagram, and that is not
-// authentication.** Anybody who can reach the port can occupy a slot. `net`'s
-// `Handshake` exists — X25519 into HKDF into ChaCha20-Poly1305 — and is
-// deliberately not wired in here: doing it properly means a key exchange, a
-// challenge the client has to answer before a slot is reserved, and a policy for
-// who is allowed at all, and none of those are the thing this class is for. What
-// *is* here is the bound: `MaximumClients` slots, and datagrams from a stranger
-// past that are refused and counted rather than allocated for. That turns an
-// unbounded memory attack into a full server, which is the difference between a
-// gap and a hole. See `docs/DEFERRED.md`.
+// **A client is admitted after a key exchange it had to answer a challenge to
+// begin, and never on its first datagram.** `Admission.hpp` has the sequence;
+// what matters here is the order of the checks, because that order is the
+// protection:
+//
+// 1. A datagram from an address with no session, on any channel but
+//    `net::ChannelKind::Handshake`, is dropped. It used to be an admission.
+// 2. A `Hello` is answered with a cookie `net::Cookie` *derives* rather than
+//    stores. **An unanswered challenge costs zero bytes** — no slot, no
+//    session, no link, no reliability window, no map entry — and it costs zero
+//    however many are outstanding.
+// 3. An `Answer` is checked against the cookie, then against `MaximumClients`,
+//    then against the game's `SetAdmission` policy, then against the X25519
+//    agreement. Cheapest first, and every one of them is a reason to stop
+//    before anything is allocated.
+// 4. Only then is a slot taken.
+//
+// **The bound stays in front of the handshake, not behind it.**
+// `MaximumClients` is 64 and a peer past it is refused and counted in
+// `Statistics::Turned`, exactly as before. A handshake is defence in front of
+// that bound rather than a replacement for it: a slot still costs a session, a
+// link, two reliability windows and a per-client known set, so the number is
+// still not one to raise casually.
+//
+// **What the handshake proves, and what it does not.** The cookie proves the
+// peer can receive at the address it wrote. The agreement proves it can do
+// X25519 and gives forward secrecy for the keys it derives. Neither says who it
+// is: `net::Handshake`'s own header is explicit that an unauthenticated
+// agreement is safe against a listener and not against a relay, and the default
+// admission policy lets in anybody who completes it.
+//
+// **The stream after it is encrypted.** The derived ciphers move into the peer's
+// `Session` and stay there, so every payload in both directions is sealed with
+// the packet header as associated data. That is confidentiality against somebody
+// watching, and it is *not* authentication of who is at the other end — a relay
+// that held one exchange with each side would read everything, and closing that
+// is `net::Handshake`'s own outstanding item.
 //
 // **Time is passed in, never read** — `replication/AGENTS.md`, and the same
 // rule the two layers under this follow.
@@ -29,13 +56,18 @@
 // @tier L12 · shared
 
 #include <engine/ecs/Store.hpp>
+#include <engine/net/Cookie.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/replication/Admission.hpp>
 #include <engine/replication/Authority.hpp>
 #include <engine/replication/Session.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <vector>
 
 namespace engine::replication {
@@ -52,11 +84,15 @@ namespace engine::replication {
 
 		// The most clients that may be admitted at once.
 		//
-		// The bound that makes an unauthenticated admit a full server rather
-		// than an out-of-memory kill. Sized for a game rather than for a stress
+		// The bound that makes a flood of admissions a full server rather than
+		// an out-of-memory kill, and it sits in front of the key exchange
+		// rather than behind it. Sized for a game rather than for a stress
 		// test: a slot costs a session, a link, two reliability windows and a
 		// per-client known set, so this is not a number to raise casually.
 		size_t MaximumClients = 64;
+
+		// How long a challenge stays answerable.
+		net::CookieSettings Cookie;
 	};
 
 	// Serves the authoritative world to every connected client.
@@ -88,11 +124,48 @@ namespace engine::replication {
 			return Authority_;
 		}
 
+		// Decides who is allowed to connect at all.
+		//
+		// Asked once per peer, after its cookie has verified and before
+		// anything is allocated for it, with the address the cookie proved it
+		// can receive at. Answering `false` costs the peer nothing but a
+		// counted refusal — no slot is taken and nothing is sent back, because
+		// telling a stranger *why* it was refused is telling it what to change.
+		//
+		// **The default admits anybody who completes the handshake, and that is
+		// stated rather than implied.** With no policy set, a peer that can
+		// receive a datagram at the address it wrote and can do X25519 is let
+		// in. That is a much weaker property than it sounds: the exchange
+		// authenticates nobody, so this default is appropriate for a loopback,
+		// a LAN and a private match, and is not an answer for a public
+		// interface. A ban list, an allow list, a matchmaker's session token
+		// and "friends only" are all games' answers and none of them is this
+		// module's to invent — the same argument `Authority::SetInterest` is
+		// built on.
+		//
+		// @param policy Called as `policy(Applicant)`. An empty policy is the
+		//        default above.
+		void SetAdmission(AdmissionPolicy policy);
+
+		// Whether this listener can admit anybody at all.
+		//
+		// `false` when the operating system refused the entropy the challenge
+		// secret is drawn from, in which case every admission is refused and
+		// counted. Fail-closed: a listener that carried on with a guessable
+		// secret would report healthy admissions while the challenge protected
+		// nothing.
+		//
+		// @return `true` when the challenge secret was drawn.
+		bool Admitting() const {
+			return Cookie_.has_value();
+		}
+
 		// Takes everything waiting on the transport.
 		//
-		// Admits a client for an endpoint not seen before, up to
-		// `MaximumClients`. Call before `Publish`, so an acknowledgement that
-		// arrived this tick is counted before this tick's delta is built.
+		// Runs the admission exchange for an address with no session, and hands
+		// everything else to the session that owns it. Call before `Publish`,
+		// so an acknowledgement that arrived this tick is counted before this
+		// tick's delta is built.
 		//
 		// @param nowSeconds The current time.
 		void Poll(double nowSeconds);
@@ -155,8 +228,33 @@ namespace engine::replication {
 			// Clients dropped because their link ended.
 			uint64_t Dropped = 0;
 
-			// Datagrams from a stranger refused because every slot was taken.
+			// Peers refused because every slot was taken.
+			//
+			// The bound doing its job. Counted rather than logged per datagram:
+			// a peer that keeps trying would otherwise write a log line per
+			// packet, which is its own denial of service.
 			uint64_t Turned = 0;
+
+			// Challenges issued to a peer that had not answered one.
+			//
+			// **Each of these allocated nothing.** A number here that climbs
+			// without `Admitted` following it is somebody probing the port, and
+			// the honest reading is that it is costing this process one HMAC
+			// and one datagram each rather than a slot each.
+			uint64_t Challenged = 0;
+
+			// Admission datagrams refused: not a message, a wrong or expired
+			// cookie, a key exchange message this build will not agree with, or
+			// a server-to-client message arriving from a client.
+			uint64_t Refused = 0;
+
+			// Peers the game's admission policy turned away.
+			//
+			// Apart from `Refused` on purpose. A refusal is the protocol saying
+			// no and a rejection is the game saying no, and an operator reading
+			// one number for both cannot tell a broken client from a working
+			// ban list.
+			uint64_t Rejected = 0;
 		};
 
 		// What this listener has done.
@@ -173,20 +271,46 @@ namespace engine::replication {
 			net::Endpoint Where;
 			ClientId Client;
 			std::unique_ptr<Session> Wire;
+
+			// The key exchange message this peer was admitted on, so a repeated
+			// answer can be told from a different peer at the same address.
+			std::array<std::byte, net::Handshake::MESSAGE_BYTES> PublicKey{};
+
+			// The `Welcome` datagram, kept so a lost one can be sent again
+			// verbatim. It cannot be rebuilt: the ephemeral secret is gone by
+			// design and the `Sealer` has moved on to the stream, so sealing a
+			// second confirmation would spend a fresh counter on a message the
+			// client is expecting at the first one. Sending the same bytes again
+			// repeats no nonce — it is the same frame, not a second one.
+			std::vector<std::byte> Welcome;
 		};
 
 		Peer *Find(const net::Endpoint &from);
-		Peer *Admit(const net::Endpoint &from, double nowSeconds);
+		void Greet(const net::Endpoint &from, std::span<const std::byte> datagram, double nowSeconds);
+		void Challenge(const net::Endpoint &from, const replication::Hello &hello, double nowSeconds);
+		void Accept(const net::Endpoint &from, const replication::Answer &answer, double nowSeconds);
+		void Repeat(Peer &peer, const Admission &message);
 		void Drop(size_t index);
 
 		net::Transport *Transport_;
 		ListenerSettings Settings;
 		replication::Authority Authority_;
 
+		// The challenge secret, or nothing when the operating system refused
+		// entropy — in which case nobody is admitted. See `Admitting`.
+		std::optional<net::Cookie> Cookie_;
+
+		AdmissionPolicy Policy;
+
 		std::vector<Peer> Peers;
 
 		// Reused across ticks so a server polling every frame stops allocating.
 		std::vector<std::byte> Datagram;
+
+		// The challenge datagram being sent, reused for the same reason: under
+		// somebody probing the port this is the hot path, and it is the one path
+		// that must stay cheap.
+		std::vector<std::byte> Reply;
 
 		// The next connection index to hand a session, and the generation each
 		// slot is on. A connection id is `net`'s, not this module's, and it has

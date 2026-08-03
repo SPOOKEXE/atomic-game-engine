@@ -16,6 +16,8 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -30,6 +32,8 @@ TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.ecs.resources")
 TEST_DEPENDS("engine.render.debugpanels")
 TEST_DEPENDS("engine.core.framegraph")
+TEST_DEPENDS("engine.scene.components")
+TEST_DEPENDS("engine.scene.drawinstance")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -37,6 +41,13 @@ using engine::core::Metrics;
 using engine::ecs::Phase;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
+using engine::scene::ActiveCamera;
+using engine::scene::Camera;
+using engine::scene::DrawInstance;
+using engine::scene::PreviousTransform;
+using engine::scene::Transform;
+using engine::scene::Visual;
+using engine::scene::WorldBounds;
 
 namespace {
 	constexpr uint32_t ENTITIES = 512;
@@ -59,7 +70,7 @@ namespace {
 			}
 		}
 
-		const std::vector<engine::render::Instance> &Drawn() const {
+		const std::vector<DrawInstance> &Drawn() const {
 			return World.Resource<client::DrawList>()->Instances;
 		}
 	};
@@ -70,7 +81,11 @@ TEST_CASE("a built scene produces one instance per entity", "[demo]") {
 	session.Tick(1);
 
 	REQUIRE(session.Drawn().size() == ENTITIES);
-	REQUIRE(session.World.CountMatching<client::Transform, client::Visual>() == ENTITIES);
+
+	// The camera is a row too and carries a Transform, so the query that counts
+	// drawable things names Visual as well — a count of Transform alone would be
+	// one too many and would read as an off-by-one in the build loop.
+	REQUIRE(session.World.CountMatching<Transform, Visual>() == ENTITIES);
 }
 
 TEST_CASE("the world holds the scene's state, not a scene object", "[demo]") {
@@ -80,8 +95,8 @@ TEST_CASE("the world holds the scene's state, not a scene object", "[demo]") {
 	// the systems captured by pointer. A second world could not have its own,
 	// the affinity check did not cover them, and none of them would survive
 	// being serialised with the world.
-	REQUIRE(session.World.HasResource<client::SceneBounds>());
-	REQUIRE(session.World.HasResource<client::ActiveCamera>());
+	REQUIRE(session.World.HasResource<WorldBounds>());
+	REQUIRE(session.World.HasResource<ActiveCamera>());
 	REQUIRE(session.World.HasResource<client::DrawList>());
 
 	// And the clock, which every store has from birth.
@@ -104,7 +119,7 @@ TEST_CASE("two worlds tick independently", "[demo]") {
 
 	REQUIRE(first.Drawn().size() == ENTITIES);
 	REQUIRE(second.Drawn().size() == ENTITIES);
-	REQUIRE(first.Drawn()[0].Model[3][0] != Approx(second.Drawn()[0].Model[3][0]));
+	REQUIRE(first.Drawn()[0].Frame.Position.X != Approx(second.Drawn()[0].Frame.Position.X));
 }
 
 TEST_CASE("the instance buffer is rebuilt, not appended to", "[demo]") {
@@ -119,45 +134,54 @@ TEST_CASE("the instance buffer is rebuilt, not appended to", "[demo]") {
 TEST_CASE("entities actually move", "[demo]") {
 	Session session;
 	session.Tick(1);
-	const glm::mat4 before = session.Drawn()[0].Model;
+	const engine::core::Vector3 before = session.Drawn()[0].Frame.Position;
 
 	session.Tick(30);
-	const glm::mat4 after = session.Drawn()[0].Model;
+	const engine::core::Vector3 after = session.Drawn()[0].Frame.Position;
 
-	// Position lives in the fourth column.
-	const bool moved = before[3][0] != after[3][0] || before[3][2] != after[3][2];
+	const bool moved = before.X != after.X || before.Z != after.Z;
 	REQUIRE(moved);
 }
 
-TEST_CASE("the camera is placed by a system, into the world", "[demo]") {
+TEST_CASE("the camera is a row the systems move, not a resource holding a value", "[demo]") {
 	Session session;
 
-	const auto atRest = session.World.Resource<client::ActiveCamera>()->Value;
-	session.Tick(120);
-	const auto later = session.World.Resource<client::ActiveCamera>()->Value;
+	// A lookup, not a search: the resource names which of the world's cameras
+	// is live and the placement is a Transform on that entity.
+	const engine::ecs::Entity camera = session.World.Resource<ActiveCamera>()->Entity;
+	REQUIRE(session.World.Has<Camera>(camera));
 
-	const bool moved = atRest.Frame.Position.X != Approx(later.Frame.Position.X) ||
-					   atRest.Frame.Position.Z != Approx(later.Frame.Position.Z);
+	const auto atRest = session.World.Get<Transform>(camera)->Frame;
+	session.Tick(120);
+	const auto later = session.World.Get<Transform>(camera)->Frame;
+
+	const bool moved =
+		atRest.Position.X != Approx(later.Position.X) || atRest.Position.Z != Approx(later.Position.Z);
 	REQUIRE(moved);
 
-	// Far enough out to hold the scene. The camera reads SceneBounds rather
+	// Far enough out to hold the scene. The camera reads WorldBounds rather
 	// than a number it was built with, so a world with a different extent gets
 	// a camera that fits it.
-	const float extent = session.World.Resource<client::SceneBounds>()->Extent;
-	REQUIRE(later.FarPlane > extent);
+	const float extent = session.World.Resource<WorldBounds>()->HalfExtent;
+	REQUIRE(session.World.Get<Camera>(camera)->FarPlane > extent);
 }
 
 namespace {
 	// Simulation state, not render output. The two differ once interpolation
 	// exists, and most of what these tests are about is the former.
+	//
+	// Cubes only. The camera has a Transform as well, and a query that swept it
+	// up would compare the nth *row* rather than the nth cube.
 	engine::core::Vector3 PositionOf(Store &store, int nth) {
 		engine::core::Vector3 found;
 		int seen = 0;
-		store.Each<const client::Transform>([&](engine::ecs::Entity, const client::Transform &transform) {
-			if (seen++ == nth) {
-				found = transform.Frame.Position;
+		store.Each<const Transform, const Visual>(
+			[&](engine::ecs::Entity, const Transform &transform, const Visual &) {
+				if (seen++ == nth) {
+					found = transform.Frame.Position;
+				}
 			}
-		});
+		);
 		return found;
 	}
 }
@@ -193,7 +217,7 @@ TEST_CASE("rendering interpolates between the last two ticks", "[demo]") {
 	Session session;
 	session.Tick(4);
 
-	const auto previousTick = session.Drawn()[3].Model[3];
+	const auto previousTick = session.Drawn()[3].Frame.Position;
 
 	// Alpha only affects the PreRender phase, so setting it and re-running that
 	// phase alone moves the drawn position without advancing the simulation at
@@ -201,18 +225,18 @@ TEST_CASE("rendering interpolates between the last two ticks", "[demo]") {
 	// calls rather than a setter on a scene object.
 	session.World.SetFrame(0.0f, 1.0f);
 	session.Systems.RunPhases(session.World, Phase::PreRender, Phase::PreRender);
-	const auto currentTick = session.Drawn()[3].Model[3];
+	const auto currentTick = session.Drawn()[3].Frame.Position;
 
 	// At alpha 1 the render is at the tick it just simulated; at 0 it is a
 	// whole tick behind. That lag is inherent to interpolating — you can only
 	// draw between two states you already have — and it is what buys smooth
 	// motion at any frame rate.
-	REQUIRE(currentTick.x != Approx(previousTick.x));
+	REQUIRE(currentTick.X != Approx(previousTick.X));
 
 	// And it lands exactly on the simulation, not somewhere past it.
 	const auto simulated = PositionOf(session.World, 3);
-	REQUIRE(currentTick.x == Approx(simulated.X).margin(1e-4));
-	REQUIRE(currentTick.z == Approx(simulated.Z).margin(1e-4));
+	REQUIRE(currentTick.X == Approx(simulated.X).margin(1e-4));
+	REQUIRE(currentTick.Z == Approx(simulated.Z).margin(1e-4));
 }
 
 TEST_CASE("alpha zero draws the previous tick exactly", "[demo]") {
@@ -221,19 +245,18 @@ TEST_CASE("alpha zero draws the previous tick exactly", "[demo]") {
 
 	// Default alpha is 0, which is where a frame that lands exactly on a tick
 	// boundary sits.
-	const auto drawn = session.Drawn()[3].Model[3];
+	const auto drawn = session.Drawn()[3].Frame.Position;
 
 	engine::core::Vector3 previous;
 	int seen = 0;
-	session.World.Each<const client::PreviousTransform>([&](engine::ecs::Entity,
-															const client::PreviousTransform &transform) {
+	session.World.Each<const PreviousTransform>([&](engine::ecs::Entity, const PreviousTransform &transform) {
 		if (seen++ == 3) {
 			previous = transform.Frame.Position;
 		}
 	});
 
-	REQUIRE(drawn.x == Approx(previous.X).margin(1e-4));
-	REQUIRE(drawn.z == Approx(previous.Z).margin(1e-4));
+	REQUIRE(drawn.X == Approx(previous.X).margin(1e-4));
+	REQUIRE(drawn.Z == Approx(previous.Z).margin(1e-4));
 }
 
 TEST_CASE("a simulation system cannot reach the frame delta", "[demo]") {
@@ -267,9 +290,9 @@ TEST_CASE("two sessions built the same way stay identical", "[demo]") {
 	for (size_t index = 0; index < first.Drawn().size(); index++) {
 		const auto &a = first.Drawn()[index];
 		const auto &b = second.Drawn()[index];
-		REQUIRE(a.Colour.r == Approx(b.Colour.r));
-		REQUIRE(a.Model[3][0] == Approx(b.Model[3][0]));
-		REQUIRE(a.Model[3][2] == Approx(b.Model[3][2]));
+		REQUIRE(a.Tint.R == Approx(b.Tint.R));
+		REQUIRE(a.Frame.Position.X == Approx(b.Frame.Position.X));
+		REQUIRE(a.Frame.Position.Z == Approx(b.Frame.Position.Z));
 	}
 }
 
@@ -284,7 +307,7 @@ TEST_CASE("a tick with a job pool matches one without", "[demo]") {
 	serial.Tick(30);
 
 	for (size_t index = 0; index < serial.Drawn().size(); index += 37) {
-		REQUIRE(pooled.Drawn()[index].Model[3][0] == Approx(serial.Drawn()[index].Model[3][0]));
+		REQUIRE(pooled.Drawn()[index].Frame.Position.X == Approx(serial.Drawn()[index].Frame.Position.X));
 	}
 }
 

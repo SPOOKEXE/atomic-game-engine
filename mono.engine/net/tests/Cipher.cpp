@@ -227,11 +227,42 @@ TEST_CASE("the counter advances once per frame", "[net][cipher]") {
 	CHECK(ends.Responder.Receiving.Open(second->Counter, secondFrame, {}).has_value());
 }
 
+TEST_CASE("the counter can be read before it is spent", "[net][cipher]") {
+	// **Why reading one is safe when setting one would not be.** A frame's
+	// associated data is the packet header it travels under, and the header
+	// carries the counter — so the header has to be written before the frame is
+	// sealed, and the only way to write it correctly is to ask. A caller that
+	// asks and then does not seal skips one value out of 2^64 and repeats
+	// nothing.
+	auto ends = Agree(31, 32);
+
+	CHECK(ends.Initiator.Sending.NextCounter() == 0);
+
+	const auto first = ends.Initiator.Sending.Seal(Bytes("one"), {});
+	REQUIRE(first.has_value());
+	CHECK(first->Counter == 0);
+	CHECK(ends.Initiator.Sending.NextCounter() == 1);
+
+	// Reading it again does not move it. A getter that spent a counter would be
+	// a getter that could not be called twice.
+	CHECK(ends.Initiator.Sending.NextCounter() == 1);
+
+	const auto second = ends.Initiator.Sending.Seal(Bytes("two"), {});
+	REQUIRE(second.has_value());
+	CHECK(second->Counter == 1);
+	CHECK(ends.Initiator.Sending.NextCounter() == 2);
+}
+
 TEST_CASE("a moved-from sealer seals nothing", "[net][cipher]") {
 	auto ends = Agree(17, 18);
 
 	Cipher::Sealer moved = std::move(ends.Initiator.Sending);
 	const auto fromMoved = ends.Initiator.Sending.Seal(Bytes("after the move"), {});
+
+	// And it says so before it is asked to seal, so a caller stamping a header
+	// from the counter cannot stamp one a poisoned sealer would then refuse to
+	// match.
+	CHECK(ends.Initiator.Sending.NextCounter() == UINT64_MAX);
 
 	// Not an empty frame and not a zero-key frame: nothing at all. A second
 	// object counting from the same place under the same key is the only way a
