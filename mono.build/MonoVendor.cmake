@@ -459,3 +459,69 @@ unset(_luau_target)
 #   that reads paths would be a second way in that none of that covers.
 add_library(Vendor::luau_vm ALIAS Luau.VM)
 add_library(Vendor::luau_compiler ALIAS Luau.Compiler)
+
+# --- QuickJS-ng -------------------------------------------------------------
+# The second script VM, and the JavaScript/TypeScript half of the two-language
+# choice `v05.md` §5.7 records.
+#
+# Vendored alongside Luau rather than instead of it. `v05.md` argued for one
+# runtime and the decision went the other way deliberately — two languages, two
+# VMs, one binding surface — so what matters here is that the *engine* keeps one
+# tick and one determinism story across both. Three properties of this engine
+# are what make that possible, and each is an API rather than a hope:
+#
+# - **The host drives the microtask queue.** `JS_ExecutePendingJob` and
+#   `JS_IsJobPending` are called by us, in a drain loop, at a point we choose.
+#   That is the whole reason a JS engine can live under `world::Driver` at all:
+#   promise reactions run at the barrier, in a deterministic order, rather than
+#   whenever a runtime that thinks it owns the event loop decides to run them.
+#   An engine without this API would have to be rejected on rule 5 alone.
+# - **The host drives collection.** `JS_SetGCThreshold` and `JS_RunGC` mean the
+#   collector can be taken off automatic and run at a fixed point in the tick,
+#   so GC timing cannot differ between two runs of one recording.
+# - **The host can stop a script.** `JS_SetInterruptHandler`, `JS_SetMemoryLimit`
+#   and `JS_SetMaxStackSize` are what bound untrusted user code, which is the
+#   situation `repo_layout.md` §1 puts this engine in.
+#
+# No JIT: it is a bytecode interpreter, which is the same reason `Luau.CodeGen`
+# is left unaliased one block up. MIT, Bellard and Gordon, continued by the ng
+# fork after the two projects merged efforts. No external dependencies.
+#
+# **Nothing links it yet** — v0.6 is where a script runs — and EXCLUDE_FROM_ALL
+# is what keeps that free.
+if(NOT EXISTS "${MONO_VENDOR}/quickjs/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/quickjs is missing. Run `just setup`.")
+endif()
+
+# Off, and this is the load-bearing one rather than a tidy-up.
+#
+# `quickjs-libc` is upstream's `std` and `os` modules: file I/O, process spawn,
+# `setTimeout` against a wall clock. Every part of that is either a capability a
+# game script must not have or a source of non-determinism a recording cannot
+# replay — a script that sleeps on real time is precisely the desync rule 5
+# names. The engine supplies what a script may reach through its own bindings,
+# and this is the line where the alternative is refused rather than sandboxed
+# later.
+set(QJS_BUILD_LIBC OFF CACHE BOOL "" FORCE)
+
+# No CLI, no examples, no install rules, static only. Same line
+# ZSTD_BUILD_PROGRAMS and LUAU_BUILD_CLI are off on.
+set(QJS_BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
+set(QJS_BUILD_CLI_STATIC OFF CACHE BOOL "" FORCE)
+set(QJS_ENABLE_INSTALL   OFF CACHE BOOL "" FORCE)
+set(QJS_BUILD_WERROR     OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS    OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${MONO_VENDOR}/quickjs" EXCLUDE_FROM_ALL)
+
+# Same reason as Crypto++, BLAKE3, Zstd and Luau.
+get_target_property(_qjs_includes qjs INTERFACE_INCLUDE_DIRECTORIES)
+if(_qjs_includes)
+	set_target_properties(qjs PROPERTIES
+		INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_qjs_includes}")
+endif()
+unset(_qjs_includes)
+
+# Vendor:: to match the rest. `qjs` is upstream's own target name and keeps
+# working; this is the spelling the rest of the tree should use.
+add_library(Vendor::quickjs ALIAS qjs)

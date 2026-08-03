@@ -130,3 +130,20 @@
 	url = https://github.com/luau-lang/luau.git
 	branch = master
 	shallow = true
+; The second VM. Luau and JavaScript/TypeScript are two scripting choices over
+; one binding surface, so this is vendored alongside Luau rather than instead
+; of it.
+;
+; quickjs-ng rather than Bellard's original repository: the two merged efforts
+; after the original went dormant, and ng is where development continues. MIT
+; either way, and the licence file still carries Bellard's copyright.
+;
+; What made it the choice over the other embeddable engines is in
+; MonoVendor.cmake, and it is not size — it is that the *host* drives the
+; microtask queue, the collector and the interrupt, so a JS script can live
+; inside a deterministic tick.
+[submodule "mono.vendor/quickjs"]
+	path = mono.vendor/quickjs
+	url = https://github.com/quickjs-ng/quickjs.git
+	branch = master
+	shallow = true
