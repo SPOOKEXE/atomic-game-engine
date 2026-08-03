@@ -264,7 +264,7 @@ what stops asio reaching every module that links this.
   knows it is talking to *something* that completed X25519, not that it is
   talking to this server. So the traffic is safe against a listener and not
   against a relay, which can hold one exchange with each side and read
-  everything. `Handshake.hpp` carries the `TODO(v0.4)`. A static server key and
+  everything. `Handshake.hpp` carries the `TODO(D00006)`. A static server key and
   a signature over the transcript is the shape; where the key comes from and who
   trusts it is a deployment question.
 - `upstream/`, `downstream/`, `predict/` — replication, v0.3's remaining items.

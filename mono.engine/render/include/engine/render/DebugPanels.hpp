@@ -316,5 +316,24 @@ namespace engine::render {
 	// @param image CPU image to clear and draw into.
 	// @param data  Borrowed panel state and profiler data.
 	// @client
+	// The share of the frame's *busy* time each span accounts for.
+	//
+	// **Split out of the drawing so it can be checked**, which is the whole
+	// reason it exists as a function: the SHARE column read **2634%** on a
+	// vsynced frame and the arithmetic was doing exactly what it was told. A
+	// span's `Milliseconds` is inclusive, the denominator is the frame less its
+	// idle time, and `Renderer::Render` encloses the swapchain wait — so the
+	// column divided 16.385 ms of render by 0.622 ms of busy. Two real numbers,
+	// never the same measurement.
+	//
+	// This puts both sides on one basis by taking the waiting out of the
+	// numerator too. Every result is bounded by 100%, a parent still reads as
+	// its whole subtree, and a scope whose entire job is to block reads zero.
+	//
+	// @param spans            The published frame's spans, in open order.
+	// @param busyMilliseconds The frame less its idle time. Must be positive.
+	// @return One share per span, parallel to `spans`.
+	std::vector<float> BusyShares(std::span<const core::FrameSpan> spans, float busyMilliseconds);
+
 	void DrawDebugPanels(OverlayImage &image, const DebugPanelData &data);
 }

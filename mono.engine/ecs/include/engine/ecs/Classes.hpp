@@ -26,6 +26,13 @@
 // @tier L3 · shared
 
 #include <engine/core/Name.hpp>
+// The three value types a property can carry beyond the primitives. `ecs` is
+// storage and must not know what a `Transform` is — it still has to be able to
+// *name* the types userland holds, and these are `core/types` primitives rather
+// than anything about a scene. Nothing here reads a field of one.
+#include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/ComponentSet.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -59,30 +66,98 @@ namespace engine::ecs {
 
 		// `Entity` — a handle within this world, and meaningless outside it.
 		Reference,
+
+		// The `core/types` values a script actually holds. These describe what
+		// **userland** sees, not what a component stores — a property whose
+		// getter doubles a half-extent is a `Vector3` here and the storage is
+		// whatever `Bounds` says. That is why this list stays short no matter
+		// what the components grow: `spatial::LayerMask` will never need a case,
+		// because no property is one.
+		Vector3,
+		CFrame,
+		Color3,
 	};
 
-	// Where one property lives.
+	// How a property reaches the components underneath it.
 	//
-	// A component and a byte offset into it, which is all a runtime setter
-	// needs: `part.Size = x` resolves a name to one of these once and then
-	// writes at an address.
+	// Every property is a conversion — see `PropertyDescriptor` — so this does
+	// not select a *mechanism*. It tells a caller what a write is going to cost
+	// and whether it is allowed where they are standing.
+	//
+	// @since v0.5
+	enum class PropertyKind : uint8_t {
+		// The getter copies a field out and the setter copies one in. The
+		// conversion is generated rather than written.
+		Field,
+
+		// Arithmetic, a sub-range or a lookup. `Size` is a doubled half-extent;
+		// `Position` is the translation of a `CFrame` with the rotation kept.
+		Computed,
+
+		// The write changes which components the entity has, so it moves the row
+		// to another archetype. `Anchored` is the only one today. Cannot happen
+		// inline during iteration and goes through the deferral queue.
+		Structural,
+	};
+
+	class Store;
+
+	// How one property projects onto the components underneath it.
+	//
+	// **This used to be a component and a byte offset, and that was wrong** — it
+	// could describe `Visible` and could not describe `Size`, `Position` or
+	// `Anchored`, which is most of what a script reaches for. Roblox's `Size` is
+	// a full extent and `Bounds::HalfExtent` is half of one; a member pointer
+	// cannot express the doubling, so a member pointer was the wrong primitive.
+	//
+	// A property is a **conversion**: a getter that reads components and
+	// produces a userland value, and a setter that takes one and writes them
+	// back. A plain field is the degenerate case and its conversion is
+	// generated, so there is one mechanism rather than a fast path and a slow
+	// one — two would be two places to forget the change mark in.
+	//
+	// **The conversion cost is paid only by callers who arrived through a
+	// name.** `Each<Transform, const Motion>` never sees any of this; physics
+	// and render do not learn that a Roblox vocabulary exists.
 	//
 	// @since v0.2
 	struct PropertyDescriptor {
 		// The property's name, as scripts and files spell it.
 		core::Name Name;
 
-		// The component holding it.
-		ComponentId Component;
-
-		// The byte offset within that component's value.
-		uint32_t Offset = 0;
-
-		// How to interpret the bytes at that offset.
+		// The type of the value that crosses, not of anything stored.
 		PropertyType Type = PropertyType::Opaque;
 
-		// The number of bytes the property occupies.
+		// The size of that value, in bytes. Checked against what a caller
+		// passes, so a `Vector3` handed to a `CFrame` property fails rather
+		// than writing twelve bytes into twenty-eight and leaving the rest.
 		uint32_t Size = 0;
+
+		// What a write costs, and where it is legal.
+		PropertyKind Kind = PropertyKind::Field;
+
+		// False for a property that can be read and not written. None today;
+		// the field exists because the manifest has to be able to say it.
+		bool Writable = true;
+
+		// The components the getter reads and the setter touches.
+		//
+		// Not decoration. The manifest reports them, a future editor needs to
+		// know what dirties what, and v0.6's per-instance `.Changed` has to fan
+		// one component write out to every property name observing it — writing
+		// `Transform` fires `CFrame`, `Position` *and* `Orientation`.
+		const ComponentSet *Reads = nullptr;
+		const ComponentSet *Writes = nullptr;
+
+		// Reads the property into `out`, which holds `Size` bytes.
+		//
+		// @return `false` when the entity does not have what the getter needs.
+		bool (*Get)(const Store &store, Entity instance, void *out) = nullptr;
+
+		// Writes `value`, which holds `Size` bytes.
+		//
+		// @return `false` when the entity cannot take it.
+		bool (*Set)(Store &store, Entity instance, const void *value) = nullptr;
 	};
 
 	// Everything registered about one class.
@@ -136,30 +211,41 @@ namespace engine::ecs {
 		// @return The class id.
 		static ClassId Register(std::string_view name, std::span<const ComponentId> components);
 
-		// Declares a property, resolving its offset from a member pointer.
+		// Declares a plain field as a property, generating its conversion.
 		//
-		// The offset is measured rather than declared, so a field reordered in
-		// the struct does not silently point a binding at the wrong bytes.
+		// The member pointer is a **template argument** rather than a runtime
+		// one, which is what lets the generated getter and setter be ordinary
+		// function pointers with nothing captured. That is the whole reason the
+		// signature changed at v0.5: a captureless conversion is what makes one
+		// mechanism cover fields and computed properties alike.
 		//
-		// @param owner  The class exposing the property.
-		// @param name   The name scripts and files use.
-		// @param member A pointer to the member within its component type.
-		template <class Component, class Member>
-		static void Property(ClassId owner, std::string_view name, Member Component::*member) {
-			// Measured against a real object rather than a null pointer, which
-			// is the usual trick and is undefined. A default-constructed
-			// component costs nothing here — this runs once, at startup.
-			const Component probe{};
-			const auto *base = reinterpret_cast<const std::byte *>(&probe);
-			const auto *field = reinterpret_cast<const std::byte *>(&(probe.*member));
+		//     Classes::Property<&Visual::Visible>(part, "Visible");
+		//
+		// The field is reached through `Store::GetMutable`, so a write is
+		// **marked changed for free** — handing out a mutable pointer already
+		// counts as a write in `StoreState`. A setter that reached the bytes any
+		// other way would be a script write `replication` never sends.
+		//
+		// **Defined in `Property.hpp`, not here**, because the generated
+		// conversion calls `Store` and this header is below it — `Store.hpp`
+		// does not include this one and must not have to. Include
+		// `engine/ecs/Property.hpp` to declare a property; include this header
+		// to read one.
+		//
+		// @tparam Member A pointer-to-member of a registered component type.
+		// @param owner   The class exposing the property.
+		// @param name    The name scripts and files use.
+		template <auto Member> static void Property(ClassId owner, std::string_view name);
 
-			PropertyDescriptor descriptor;
-			descriptor.Name = core::Name(name);
-			descriptor.Component = Components::Of<Component>();
-			descriptor.Offset = static_cast<uint32_t>(field - base);
-			descriptor.Type = TypeOf<Member>();
-			descriptor.Size = static_cast<uint32_t>(sizeof(Member));
-
+		// Declares a property whose conversion is written rather than generated.
+		//
+		// For everything a field cannot express: a doubled half-extent, the
+		// translation of a `CFrame` with its rotation kept, a name over a bit
+		// mask, a flag that is really an archetype move.
+		//
+		// @param owner      The class exposing the property.
+		// @param descriptor The full description, conversions included.
+		static void Computed(ClassId owner, const PropertyDescriptor &descriptor) {
 			Declare(owner, descriptor);
 		}
 
@@ -223,12 +309,27 @@ namespace engine::ecs {
 		static bool Sealed();
 
 	  private:
+		// Splits a pointer-to-member into the class holding it and the type it
+		// has. Only needed because `Property` takes the member as a template
+		// argument, which is what makes its generated conversion captureless.
+		template <class T> struct MemberOf;
+		template <class C, class M> struct MemberOf<M C::*> {
+			using Class = C;
+			using Type = M;
+		};
+
 		// The property type for a C++ type, or Opaque when there is no better
 		// answer. Not a failure — a component may hold something userland never
 		// sees, and the storage still handles it.
 		template <class T> static constexpr PropertyType TypeOf() {
 			using Bare = std::remove_cv_t<T>;
-			if constexpr (std::is_same_v<Bare, bool>) {
+			if constexpr (std::is_same_v<Bare, core::Vector3>) {
+				return PropertyType::Vector3;
+			} else if constexpr (std::is_same_v<Bare, core::CFrame>) {
+				return PropertyType::CFrame;
+			} else if constexpr (std::is_same_v<Bare, core::Color3>) {
+				return PropertyType::Color3;
+			} else if constexpr (std::is_same_v<Bare, bool>) {
 				return PropertyType::Bool;
 			} else if constexpr (std::is_same_v<Bare, int32_t> || std::is_same_v<Bare, uint32_t>) {
 				return PropertyType::Int32;

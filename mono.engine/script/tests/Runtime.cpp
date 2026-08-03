@@ -1,0 +1,831 @@
+#include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/testing/Suite.hpp>
+#include <engine/world/Postbox.hpp>
+#include <engine/world/Universe.hpp>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include <memory>
+
+TEST_SUITE_ID("engine.script.runtime")
+// A script's whole vocabulary is the class tree and the property surface, so a
+// change to either has to re-run this.
+TEST_DEPENDS("engine.scene.part")
+
+using Catch::Approx;
+using engine::ecs::Entity;
+using engine::ecs::Store;
+using engine::scene::Bounds;
+using engine::scene::Collider;
+using engine::scene::PartClass;
+using engine::scene::RigidBody;
+using engine::scene::Transform;
+using engine::scene::Visual;
+using engine::script::Language;
+using engine::script::MakeRuntime;
+using engine::script::RuntimeLimits;
+
+namespace {
+	// Registers the class tree, which is what `Instance.new` resolves against.
+	// A `Store` is not movable, so this is a call rather than a factory.
+	void RegisterClasses() {
+		(void)PartClass();
+	}
+
+	// The one part a script made, found by walking rather than by being handed
+	// a handle — so these tests assert on the world and not on the binding's
+	// own bookkeeping.
+	Entity OnlyPart(Store &store) {
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.Each<const Transform, const Bounds>([&](Entity entity, const Transform &, const Bounds &) {
+			found = entity;
+		});
+		return found;
+	}
+}
+
+TEST_CASE("a script runs and can print", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run("print('hello from luau')"));
+	CHECK(runtime->LastError().empty());
+}
+
+TEST_CASE("a syntax error is reported rather than thrown", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run("this is not luau"));
+	CHECK_FALSE(runtime->LastError().empty());
+}
+
+TEST_CASE("Instance.new creates a real entity in the world", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run("local part = Instance.new('Part')"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// Not a scripting-only object: it is an instance of the same class the C++
+	// path creates, in the same archetype, with the same components.
+	CHECK(store.IsA(part, PartClass()));
+	CHECK(store.Get<Visual>(part) != nullptr);
+}
+
+TEST_CASE("Instance.new refuses a class nobody registered", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run("Instance.new('Sausage')"));
+	CHECK(runtime->LastError().find("Sausage") != std::string::npos);
+}
+
+TEST_CASE("a script writes properties through the descriptor table", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Position = Vector3.new(1, 2, 3)
+		part.Size = Vector3.new(4, 4, 4)
+		part.Color = Color3.new(0.25, 0.5, 0.75)
+		part.Visible = false
+	)"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(1.0f));
+	CHECK(store.Get<Transform>(part)->Frame.Position.Z == Approx(3.0f));
+
+	// Half of four, because `Size` is a full extent over a stored half. A
+	// binding that passed the number straight through would read 4 here.
+	CHECK(store.Get<Bounds>(part)->HalfExtent.X == Approx(2.0f));
+	CHECK(store.Get<Collider>(part)->Extent.X == Approx(2.0f));
+
+	CHECK(store.Get<Visual>(part)->Tint.G == Approx(0.5f));
+	CHECK_FALSE(store.Get<Visual>(part)->Visible);
+}
+
+TEST_CASE("a script reads back what it wrote", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// Round-tripped inside the VM, so this covers both directions of the
+	// marshalling as well as the conversions underneath.
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Size = Vector3.new(3, 5, 7)
+		assert(part.Size.X == 3, 'X')
+		assert(part.Size.Y == 5, 'Y')
+		assert(part.Size.Z == 7, 'Z')
+
+		part.Position = Vector3.new(-2, 0, 8)
+		assert(part.Position.X == -2, 'position')
+
+		part.Visible = false
+		assert(part.Visible == false, 'visible')
+	)"));
+}
+
+TEST_CASE("Orientation is degrees on both sides of the binding", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// The 57x error, asserted from the script side. Radians anywhere in the
+	// chain makes this read 0.785 instead of 45.
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Orientation = Vector3.new(0, 45, 0)
+		local back = part.Orientation
+		assert(math.abs(back.Y - 45) < 0.01, 'expected 45 degrees, got ' .. tostring(back.Y))
+	)"));
+}
+
+TEST_CASE("Position keeps the rotation, from the script side", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Orientation = Vector3.new(0, 90, 0)
+		part.Position = Vector3.new(5, 0, 0)
+		assert(math.abs(part.Orientation.Y - 90) < 0.01, 'rotation was lost')
+	)"));
+}
+
+TEST_CASE("Anchored moves the entity between archetypes", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Anchored = false
+	)"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<RigidBody>(part) != nullptr);
+
+	const auto second = MakeRuntime(store, Language::Luau);
+	REQUIRE(second->Run(R"(
+		local part = Instance.new('Part')
+		part.Anchored = true
+		assert(part.Anchored == true, 'anchored')
+	)"));
+}
+
+TEST_CASE("a property nobody declared is an error, not a silent nil", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// `Transparency` is the interesting name here: it is a real Roblox property
+	// that this engine has no field for yet, and it becomes a renderer feature
+	// at v0.6. Reading it must say so rather than hand back nil.
+	CHECK_FALSE(runtime->Run("Instance.new('Part').Transparency = 0.5"));
+	CHECK(runtime->LastError().find("Transparency") != std::string::npos);
+}
+
+TEST_CASE("a value of the wrong type is refused", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// Color3 and Vector3 are three floats each. Without the userdata tag this
+	// would write a colour into a position and look almost plausible.
+	CHECK_FALSE(runtime->Run(R"(
+		Instance.new('Part').Position = Color3.new(1, 0, 0)
+	)"));
+}
+
+TEST_CASE("os and debug are not reachable", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// A wall clock is what makes a run stop replaying. Asserted rather than
+	// assumed, because `luaL_openlibs` would have opened both.
+	REQUIRE(runtime->Run("assert(os == nil, 'os is reachable')"));
+	REQUIRE(runtime->Run("assert(debug == nil, 'debug is reachable')"));
+}
+
+TEST_CASE("the globals are frozen", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// One script rewriting the environment the next one runs in is the failure
+	// this prevents.
+	CHECK_FALSE(runtime->Run("math.floor = function() return 0 end"));
+}
+
+TEST_CASE("an endless loop is cut off rather than hanging the world", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+
+	RuntimeLimits limits;
+	limits.StepBudget = 100000;
+	const auto runtime = MakeRuntime(store, Language::Luau, limits);
+
+	// Counted rather than timed. A wall-clock deadline would make whether this
+	// script finished depend on how busy the machine was, and a recording would
+	// then replay differently on a slower one.
+	CHECK_FALSE(runtime->Run("while true do end"));
+	CHECK(runtime->LastError().find("step budget") != std::string::npos);
+}
+
+TEST_CASE("a replica refuses a script's writes", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const Entity part = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	store.SetAdoptOnly(true);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// The authority owns these rows. A script that appeared to write them would
+	// present as "my script works sometimes", which is the worst way to learn
+	// about replication.
+	CHECK_FALSE(runtime->Run(R"(
+		local part = Instance.new('Part')
+	)"));
+}
+
+// --- the second VM ----------------------------------------------------------
+//
+// The same assertions as the Luau suite above, because the point of two VMs
+// over one binding surface is that neither language is the real one. A
+// behaviour that held in Luau and not here would mean the surface had drifted
+// into two.
+
+TEST_CASE("javascript runs and can print", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	REQUIRE(runtime->Which() == Language::JavaScript);
+	REQUIRE(runtime->Run("print('hello from javascript')"));
+}
+
+TEST_CASE("javascript reports a syntax error rather than throwing", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	CHECK_FALSE(runtime->Run("function ( {"));
+	CHECK_FALSE(runtime->LastError().empty());
+}
+
+TEST_CASE("javascript creates the same entities luau does", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	REQUIRE(runtime->Run(R"(
+		const part = Instance.new('Part');
+		part.Position = Vector3.new(1, 2, 3);
+		part.Size = Vector3.new(4, 4, 4);
+		part.Color = Color3.new(0.25, 0.5, 0.75);
+		part.Visible = false;
+	)"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// Same class, same archetype, same components — not a JavaScript-flavoured
+	// entity.
+	CHECK(store.IsA(part, PartClass()));
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(1.0f));
+
+	// Half of four, because the conversion is the same one. A second binding
+	// that passed the number through would read 4 here.
+	CHECK(store.Get<Bounds>(part)->HalfExtent.X == Approx(2.0f));
+	CHECK(store.Get<Collider>(part)->Extent.X == Approx(2.0f));
+
+	CHECK(store.Get<Visual>(part)->Tint.G == Approx(0.5f));
+	CHECK_FALSE(store.Get<Visual>(part)->Visible);
+}
+
+TEST_CASE("javascript reads back what it wrote", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	REQUIRE(runtime->Run(R"(
+		const part = Instance.new('Part');
+		part.Size = Vector3.new(3, 5, 7);
+		if (part.Size.X !== 3) throw new Error('X');
+		if (part.Size.Y !== 5) throw new Error('Y');
+
+		part.Orientation = Vector3.new(0, 45, 0);
+		if (Math.abs(part.Orientation.Y - 45) > 0.01) {
+			throw new Error('expected 45 degrees, got ' + part.Orientation.Y);
+		}
+
+		part.Position = Vector3.new(5, 0, 0);
+		if (Math.abs(part.Orientation.Y - 45) > 0.01) throw new Error('rotation was lost');
+	)"));
+}
+
+TEST_CASE("javascript refuses an undeclared property", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	// The prototype carries exactly the declared properties, so `Transparency`
+	// is not there to assign to. Silently accepting it — which a plain object
+	// would — is what this asserts against.
+	CHECK_FALSE(runtime->Run(R"(
+		const part = Instance.new('Part');
+		part.Transparency = 0.5;
+		if (part.Transparency !== 0.5) throw new Error('not a real property');
+	)"));
+}
+
+TEST_CASE("javascript refuses a value of the wrong type", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	// Color3 and Vector3 are three floats each, and the class id is what
+	// catches this rather than the shape.
+	CHECK_FALSE(runtime->Run("Instance.new('Part').Position = Color3.new(1, 0, 0);"));
+}
+
+TEST_CASE("javascript has no wall clock", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	// `Date` is what makes a run stop replaying, and the context is built
+	// without it. Asserted rather than assumed, because it is one intrinsic
+	// call away from existing.
+	REQUIRE(runtime->Run("if (typeof Date !== 'undefined') throw new Error('Date is reachable');"));
+}
+
+TEST_CASE("an endless javascript loop is cut off", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+
+	RuntimeLimits limits;
+	limits.StepBudget = 100000;
+	const auto runtime = MakeRuntime(store, Language::JavaScript, limits);
+
+	CHECK_FALSE(runtime->Run("while (true) {}"));
+}
+
+TEST_CASE("a promise resolves inside the call that started it", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	// **The microtask queue is the host's**, so a reaction runs before `Run`
+	// returns rather than at some later point nobody chose. A pending job left
+	// outstanding here would be work crossing a tick boundary.
+	REQUIRE(runtime->Run(R"(
+		let built = null;
+		Promise.resolve().then(() => {
+			built = Instance.new('Part');
+			built.Size = Vector3.new(2, 2, 2);
+		});
+	)"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<Bounds>(part)->HalfExtent.X == Approx(1.0f));
+}
+
+TEST_CASE("the language is chosen by extension", "[script][js]") {
+	CHECK(engine::script::LanguageOf("scene.luau") == Language::Luau);
+	CHECK(engine::script::LanguageOf("scene.lua") == Language::Luau);
+	CHECK(engine::script::LanguageOf("/a/b/scene.js") == Language::JavaScript);
+	CHECK(engine::script::LanguageOf("scene.ts") == Language::JavaScript);
+
+	// Neither extension. Luau rather than a refusal, because failing a file for
+	// its name says nothing about what is in it.
+	CHECK(engine::script::LanguageOf("scene") == Language::Luau);
+}
+
+// --- RunService.Heartbeat ---------------------------------------------------
+//
+// The difference between a scene format and a scripting layer. Without a beat,
+// the most a script can do is describe a world and hand it to a C++ system to
+// animate.
+
+TEST_CASE("a luau script animates through Heartbeat", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		local travelled = 0
+		RunService.Heartbeat:Connect(function(delta)
+			travelled += delta
+			part.Position = Vector3.new(travelled, 0, 0)
+		end)
+	)"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// Nothing has moved until the world beats, which is the point: connecting
+	// registers behaviour, it does not run it.
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(0.0f));
+
+	REQUIRE(runtime->Heartbeat(0.5f));
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(0.5f));
+
+	REQUIRE(runtime->Heartbeat(0.25f));
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(0.75f));
+}
+
+TEST_CASE("a javascript script animates through Heartbeat", "[script][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	// The same behaviour, spelled the way JavaScript spells a method call.
+	REQUIRE(runtime->Run(R"(
+		const part = Instance.new('Part');
+		let travelled = 0;
+		RunService.Heartbeat.Connect((delta) => {
+			travelled += delta;
+			part.Position = Vector3.new(travelled, 0, 0);
+		});
+	)"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(0.0f));
+
+	REQUIRE(runtime->Heartbeat(0.5f));
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(0.5f));
+}
+
+TEST_CASE("a beat with no connections is not an error", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+
+	// The ordinary case for a scene that only describes. It must not be a
+	// failure a host has to special-case.
+	CHECK(MakeRuntime(store, Language::Luau)->Heartbeat(0.016f));
+	CHECK(MakeRuntime(store, Language::JavaScript)->Heartbeat(0.016f));
+}
+
+TEST_CASE("one raising connection does not stop the others", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		RunService.Heartbeat:Connect(function() error('first') end)
+		RunService.Heartbeat:Connect(function() part.Size = Vector3.new(6, 6, 6) end)
+	)"));
+
+	// The beat reports the failure and still runs what came after it. A script
+	// that threw once must not silently stop everything registered later — the
+	// symptom, half a scene animating, points nowhere near the cause.
+	CHECK_FALSE(runtime->Heartbeat(0.016f));
+	CHECK_FALSE(runtime->LastError().empty());
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<Bounds>(part)->HalfExtent.X == Approx(3.0f));
+}
+
+TEST_CASE("a script-created Part is drawable", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run("Instance.new('Part')"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// `CollectInstances` matches on <Transform, PreviousTransform, Bounds,
+	// Visual>. A part missing the previous transform is a complete, correct
+	// part that the renderer silently skips — which is what happened before
+	// `BasePart` carried it.
+	CHECK(store.Get<engine::scene::PreviousTransform>(part) != nullptr);
+	CHECK(store.Get<Transform>(part) != nullptr);
+	CHECK(store.Get<Bounds>(part) != nullptr);
+	CHECK(store.Get<Visual>(part) != nullptr);
+}
+
+// --- the Roblox surface -----------------------------------------------------
+//
+// A script that reads like Roblox needs the idioms Roblox scripts are built
+// out of. These are the ones the ring scene uses.
+
+TEST_CASE("CFrame composes, in both languages", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+
+	// `a * b` in Luau. Turning a quarter circle about Y and then stepping five
+	// units along local X puts the part on the Z axis, not the X axis — which
+	// is the whole reason an orbit needs no sine and no cosine.
+	const auto luau = MakeRuntime(store, Language::Luau);
+	REQUIRE(luau->Run(R"(
+		local part = Instance.new('Part')
+		part.CFrame = CFrame.Angles(0, math.rad(90), 0) * CFrame.new(5, 0, 0)
+	)"));
+
+	Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(0.0f).margin(1.0e-3));
+	CHECK(store.Get<Transform>(part)->Frame.Position.Z == Approx(-5.0f).margin(1.0e-3));
+}
+
+TEST_CASE("CFrame.Angles is radians, and Orientation is degrees", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// Roblox's own split, reproduced deliberately. A binding that took degrees
+	// in `CFrame.Angles` would make every `math.rad(90)` a rotation 57 times
+	// too small — and the scene would look wrong rather than fail.
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.CFrame = CFrame.Angles(0, math.rad(90), 0)
+		assert(math.abs(part.Orientation.Y - 90) < 0.01, 'got ' .. tostring(part.Orientation.Y))
+	)"));
+}
+
+TEST_CASE("game:GetService reaches RunService", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+
+	// The line every Roblox script opens with, and the same object either way
+	// round — two objects for one service would be two things to keep in step.
+	REQUIRE(MakeRuntime(store, Language::Luau)->Run("assert(game:GetService('RunService') == RunService)"));
+
+	REQUIRE(MakeRuntime(store, Language::JavaScript)
+				->Run("if (game.GetService('RunService') !== RunService) throw new Error('x');"));
+}
+
+TEST_CASE("a service nobody provides is an error", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// Naming it beats returning nil: a script that gets nil back fails one line
+	// later, somewhere that says nothing about the cause.
+	CHECK_FALSE(runtime->Run("game:GetService('Players')"));
+	CHECK(runtime->LastError().find("Players") != std::string::npos);
+}
+
+TEST_CASE("workspace is the world, not an instance in it", "[script]") {
+	RegisterClasses();
+	Store store("test.world");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// `game` is the universe and `workspace` is the world this script runs on.
+	// The world is what entities live *in*, so it is not one of them — making
+	// it an entity would put a phantom row in every scene, counted by nothing
+	// and drawn by nothing.
+	REQUIRE(runtime->Run(R"(
+		assert(workspace.Name == 'test.world', workspace.Name)
+
+		local part = Instance.new('Part')
+		part.Parent = workspace
+
+		-- Read back as the same value, not a second object that behaves alike.
+		assert(part.Parent == workspace, 'Parent did not round-trip')
+	)"));
+
+	// Nothing was created to stand for the world.
+	size_t instances = 0;
+	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
+		instances++;
+	});
+	CHECK(instances == 1);
+}
+
+TEST_CASE("javascript sees the same world", "[script][js]") {
+	RegisterClasses();
+	Store store("test.world");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	REQUIRE(runtime->Run(R"(
+		if (workspace.Name !== 'test.world') throw new Error(workspace.Name);
+
+		const part = Instance.new('Part');
+		part.Parent = workspace;
+		if (part.Parent !== workspace) throw new Error('Parent did not round-trip');
+	)"));
+}
+
+TEST_CASE("parenting to an instance still nests", "[script]") {
+	RegisterClasses();
+	Store store("test.world");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// A part under a part is a real edge in the hierarchy — the tree is
+	// organisational, so this decides nothing about drawing, but it is not a
+	// courtesy either.
+	REQUIRE(runtime->Run(R"(
+		local model = Instance.new('Part')
+		model.Name = 'Model'
+		local child = Instance.new('Part')
+		child.Parent = model
+		assert(child.Parent ~= workspace, 'a child of a part is not a root')
+		assert(child.Parent.Name == 'Model', child.Parent.Name)
+	)"));
+}
+
+TEST_CASE("Name is a declared property in both languages", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+
+	// It used to be special-cased in the Luau binding and absent from the
+	// JavaScript one, which is the drift a declared property prevents.
+	REQUIRE(MakeRuntime(store, Language::Luau)->Run(R"(
+		local part = Instance.new('Part')
+		part.Name = 'Orbiter'
+		assert(part.Name == 'Orbiter', part.Name)
+	)"));
+
+	REQUIRE(MakeRuntime(store, Language::JavaScript)->Run(R"(
+		const part = Instance.new('Part');
+		part.Name = 'Orbiter';
+		if (part.Name !== 'Orbiter') throw new Error(part.Name);
+	)"));
+}
+
+TEST_CASE("Color3.fromRGB takes 0-255", "[script]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Color = Color3.fromRGB(255, 128, 0)
+	)"));
+
+	const Entity part = OnlyPart(store);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<Visual>(part)->Tint.R == Approx(1.0f).margin(0.01));
+	CHECK(store.Get<Visual>(part)->Tint.B == Approx(0.0f).margin(0.01));
+}
+
+// --- the Universe's services ------------------------------------------------
+//
+// `game` is the universe and `workspace` is the world a script runs on. A
+// script holds one `Store` and no binding hands it another, so the only way out
+// of a world is a service that sits in the universe — which is rule 3 expressed
+// as an API: nothing crossing a world boundary is a pointer.
+
+TEST_CASE("MessagingService is reachable as a universe service", "[script]") {
+	RegisterClasses();
+	Store store("test.world");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local messaging = game:GetService('MessagingService')
+		assert(messaging == MessagingService)
+		assert(type(messaging.PublishAsync) == 'function')
+		assert(type(messaging.SubscribeAsync) == 'function')
+	)"));
+}
+
+TEST_CASE("a script has no route to another world", "[script]") {
+	RegisterClasses();
+	Store store("test.world");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// The invariant the whole arrangement rests on. `workspace` is *this*
+	// world, and there is no `game.Workspaces`, no `GetWorld`, no way to name
+	// another one. If one ever appears, rule 3 is what it has to answer to.
+	REQUIRE(runtime->Run(R"(
+		assert(workspace.Name == 'test.world')
+		assert(game.GetWorld == nil, 'a script can name another world')
+		assert(game.Workspaces == nil, 'a script can enumerate worlds')
+	)"));
+}
+
+TEST_CASE("nil is spelled nil in both languages", "[script]") {
+	RegisterClasses();
+	Store store("test.world");
+
+	// Luau has it as a keyword. JavaScript gets it as a global aliasing `null`,
+	// because this is a Roblox-shaped API and a Roblox author writes
+	// `part.Parent = nil`.
+	REQUIRE(MakeRuntime(store, Language::Luau)->Run(R"(
+		local part = Instance.new('Part')
+		part.Parent = nil
+		assert(part.Parent == workspace, 'nil parents to the world')
+	)"));
+
+	REQUIRE(MakeRuntime(store, Language::JavaScript)->Run(R"(
+		if (nil !== null) throw new Error('nil is not null');
+		const part = Instance.new('Part');
+		part.Parent = nil;
+		if (part.Parent !== workspace) throw new Error('nil parents to the world');
+	)"));
+}
+
+TEST_CASE("a publish crosses from one world to another", "[script]") {
+	RegisterClasses();
+
+	// `Universe::Tick` dispatches its worlds through `Jobs`, so the pool has to
+	// be up. Owned here rather than assumed: whether some earlier suite left
+	// one running is not something this test gets to depend on.
+	struct Pool {
+		Pool() {
+			engine::parallel::Jobs::Start(2);
+		}
+		~Pool() {
+			engine::parallel::Jobs::Stop();
+		}
+	} pool;
+
+	// Two worlds in one universe, which is the arrangement the whole design is
+	// for. Neither script can see the other's store.
+	engine::world::Universe universe;
+
+	engine::world::WorldSettings sending;
+	sending.Name = engine::core::Name("test.sender");
+	engine::world::WorldSettings listening;
+	listening.Name = engine::core::Name("test.listener");
+
+	const engine::world::WorldId sender = universe.Create(sending);
+	const engine::world::WorldId listener = universe.Create(listening);
+	REQUIRE(sender.IsValid());
+	REQUIRE(listener.IsValid());
+
+	std::unique_ptr<engine::script::Runtime> speaker;
+	std::unique_ptr<engine::script::Runtime> hearer;
+
+	universe.Enter(listener, [&](Store &store) {
+		hearer = MakeRuntime(store, Language::Luau);
+		// The subscriber writes into the *world* rather than into a global.
+		// Each chunk runs on its own sandboxed thread — one script cannot see
+		// another's globals, which is deliberate — so the world is the only
+		// place an assertion from C++ could read either way. It is also the
+		// stronger claim: the message did not merely arrive, it changed
+		// something.
+		REQUIRE(hearer->Run(R"(
+			MessagingService:SubscribeAsync('test.topic', function(message, topic)
+				local marker = Instance.new('Part')
+				marker.Name = message .. '/' .. topic
+			end)
+		)"));
+	});
+
+	// A subscription takes effect at the next barrier, so a message sent in the
+	// same tick is not received — the honest answer, since the subscription did
+	// not exist when it was sent.
+	universe.Tick(1.0f / 60.0f);
+
+	universe.Enter(sender, [&](Store &store) {
+		speaker = MakeRuntime(store, Language::Luau);
+		REQUIRE(speaker->Run("MessagingService:PublishAsync('test.topic', 'hello')"));
+	});
+
+	// The barrier that carries it across.
+	universe.Tick(1.0f / 60.0f);
+
+	bool received = false;
+	universe.Enter(listener, [&](Store &store) {
+		// Did the engine carry it? Checked apart from the binding so a failure
+		// says which half is wrong.
+		CHECK(engine::world::Postbox(store).Deliveries().size() == 1);
+
+		hearer->Heartbeat(1.0f / 60.0f);
+
+		store.Each<const engine::ecs::InstanceName>([&](Entity, const engine::ecs::InstanceName &name) {
+			received = received || name.Value == engine::core::Name("hello/test.topic");
+		});
+	});
+
+	// The message crossed a world boundary as bytes, which is the only way
+	// anything crosses one.
+	CHECK(received);
+
+	// Torn down before the universe that owns the stores they point at.
+	speaker.reset();
+	hearer.reset();
+}

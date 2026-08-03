@@ -22,6 +22,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
 #include <cstdint>
@@ -30,37 +31,16 @@
 namespace client {
 
 	// --- components: per-entity, and iterated ------------------------------
+	//
+	// `Orbit` and `Spin` used to be declared here, and they moved to
+	// `engine::examples` at v0.5 for the reason that module's CMakeLists gives:
+	// a scene is not a client-tier idea. A server authors the same world and
+	// replicates it, so a component only a client could name was a component
+	// only a client could ever build a scene out of. These are the same two
+	// types under `examples.Orbit` and `examples.Spin`.
 
-	// Radians per second about each local axis.
-	struct Spin {
-		// Radians per second about each local axis.
-		engine::core::Vector3 Rate;
-	};
-
-	// A circular path. Kept as parameters rather than integrated velocity so
-	// that the scene is a pure function of the world's clock: two runs at
-	// different frame rates put the cube in the same place, which is what makes
-	// a frame-time comparison mean anything.
-	struct Orbit {
-		// The point the path goes around, in world space.
-		engine::core::Vector3 Centre;
-
-		// Distance from Centre, in metres.
-		float Radius = 1.0f;
-
-		// Angular speed. Negative runs the other way round.
-		float RadiansPerSecond = 1.0f;
-
-		// Where on the ring this entity starts, in radians.
-		//
-		// The only thing separating entities that share a ring: they are
-		// otherwise identical, so without it the whole ring occupies one point.
-		float Phase = 0.0f;
-
-		// Offset above Centre, in metres, held for the life of the orbit. What
-		// makes a set of rings a volume rather than a disc.
-		float Height = 0.0f;
-	};
+	using engine::examples::Orbit;
+	using engine::examples::Spin;
 
 	// --- resources: one of each, for the whole world -----------------------
 
@@ -90,4 +70,23 @@ namespace client {
 	// After this returns, the world is self-contained — ticking it needs the
 	// store and the scheduler and nothing else.
 	void BuildDemoWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t count);
+
+	// Builds the scene by running a Luau file instead of a C++ loop.
+	//
+	// The entities, the components and the systems that move them all come from
+	// `engine::examples::LoadScene`, which every program shares. What this adds
+	// is the client's half and only that: a camera to look through and a draw
+	// list to fill. A server calls the same loader and adds neither.
+	//
+	// @param store     The world to build into.
+	// @param scheduler The systems to install.
+	// @param path      The `.luau` file to run.
+	// @param reserve   How much draw-list capacity to reserve up front.
+	// @return `false` when the script could not be read, compiled or run.
+	bool BuildScriptedWorld(
+		engine::ecs::Store &store,
+		engine::ecs::Scheduler &scheduler,
+		const std::string &path,
+		uint32_t reserve
+	);
 }

@@ -569,6 +569,9 @@ namespace engine::render {
 			// everything that did work as one per cent of it.
 			const float frameMilliseconds = std::max(data.FrameMilliseconds, 0.0001f);
 			const float busyMilliseconds = std::max(data.BusyMilliseconds(), 0.0001f);
+
+			const std::vector<float> shares = BusyShares(data.Spans, busyMilliseconds);
+			const auto busyShare = [&](size_t index) { return index < shares.size() ? shares[index] : 0.0f; };
 			const float timelineScale = static_cast<float>(timelineWidth) / frameMilliseconds;
 
 			// The column header, so the numbers are readable without knowing the
@@ -701,7 +704,7 @@ namespace engine::render {
 						name += " +";
 					}
 
-					const float share = span.Milliseconds / busyMilliseconds;
+					const float share = busyShare(row.Index);
 					text.push_back(
 						PadRight(std::move(name), NAME_FIELD) + " " +
 						PadLeft(Format("%.2f", static_cast<double>(span.Milliseconds)), VALUE_FIELD) + " " +
@@ -716,7 +719,7 @@ namespace engine::render {
 				// is the pass that scales with the font scale squared.
 				ENGINE_PROFILE_CAT("flame glyphs", core::ProfileCategory::Render);
 				for (size_t index = 0; index < rows.size(); index++) {
-					const float share = data.Spans[rows[index].Index].Milliseconds / busyMilliseconds;
+					const float share = busyShare(rows[index].Index);
 					const auto textColour = ColourForShare(share);
 					DebugText::Draw(
 						image,
@@ -1236,6 +1239,48 @@ namespace engine::render {
 	// cost. That is not a flaw to be corrected away: the observer is part of the
 	// frame while it is open, and hiding that would make closing the panel look
 	// like it fixed something.
+	std::vector<float> BusyShares(std::span<const core::FrameSpan> spans, float busyMilliseconds) {
+		const float denominator = std::max(busyMilliseconds, 0.0001f);
+
+		// How much of each span's inclusive time was spent waiting — its own
+		// and everything beneath it.
+		std::vector<float> idleInside(spans.size(), 0.0f);
+		for (size_t index = 0; index < spans.size(); index++) {
+			if (spans[index].Category != core::ProfileCategory::Idle) {
+				continue;
+			}
+
+			// Self time rather than inclusive, so a wait nested inside another
+			// wait is not counted twice.
+			const float waited = spans[index].SelfMilliseconds;
+			idleInside[index] += waited;
+
+			// Walked to the root rather than added to one parent: every
+			// ancestor contains this wait, not only the immediate one. Bounded
+			// by the span count as well as by depth, because a malformed parent
+			// chain must not hang the overlay drawing it.
+			size_t node = index;
+			for (size_t step = 0; step < spans.size(); step++) {
+				const size_t parent = spans[node].Parent;
+				if (parent == node || parent >= spans.size()) {
+					break;
+				}
+				node = parent;
+				idleInside[node] += waited;
+			}
+		}
+
+		std::vector<float> shares(spans.size(), 0.0f);
+		for (size_t index = 0; index < spans.size(); index++) {
+			// Clamped at zero because the two numbers come from different
+			// accumulators, and float error must not produce a negative
+			// percentage.
+			const float busy = spans[index].Milliseconds - idleInside[index];
+			shares[index] = std::max(busy, 0.0f) / denominator;
+		}
+		return shares;
+	}
+
 	void DrawDebugPanels(OverlayImage &image, const DebugPanelData &data) {
 		{
 			// A full-buffer write of the overlay every frame, whatever is drawn

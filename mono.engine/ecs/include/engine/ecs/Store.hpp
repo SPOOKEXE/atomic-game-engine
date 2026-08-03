@@ -51,6 +51,11 @@ namespace engine::ecs {
 
 	struct StoreState;
 
+	// Declared in `Classes.hpp`, which this header deliberately does not
+	// include: a property is a description and the storage only ever hands
+	// spans of them out. Include `Classes.hpp` to read one.
+	struct PropertyDescriptor;
+
 	// Owns every entity, component, resource, and clock value for one world.
 	//
 	// A Store starts bound to its construction thread. Checked storage mutations
@@ -747,6 +752,55 @@ namespace engine::ecs {
 		// @param id       The class to test against.
 		// @return `true` when the instance's class is `id` or descends from it.
 		bool IsA(Entity instance, ClassId id) const;
+
+		// --- properties by name ---------------------------------------------
+		//
+		// The runtime path a binding uses: a name learned at run time, a value
+		// whose type came with it, and no template in sight.
+		//
+		// **This is the first write into the storage that does not go through a
+		// typed `Set<T>`**, so every safety property the typed path gets from
+		// the compiler — right component, right size, right world — this one has
+		// to get from a check. The change mark is the exception and comes for
+		// free: a conversion reaches its component through `GetMutable`, which
+		// already counts as a write.
+		//
+		// Bytes and a size rather than a template, because the caller is a
+		// marshalling layer holding a value it typed at run time. The size is
+		// checked against the descriptor, so a `Vector3` handed to a `CFrame`
+		// property fails instead of writing twelve bytes into twenty-eight and
+		// leaving the rest of the rotation behind.
+
+		// Reads one property of an instance by name.
+		//
+		// @param instance The instance to read.
+		// @param property The property name, as a script spells it.
+		// @param out      Where to write the value.
+		// @param bytes    The size of `out`, which must match the descriptor.
+		// @return `false` when there is no such property, the size disagrees, or
+		//         the instance does not carry what the conversion reads.
+		bool GetProperty(Entity instance, core::Name property, void *out, size_t bytes) const;
+
+		// Writes one property of an instance by name.
+		//
+		// A structural property — `Anchored` — moves the row to another
+		// archetype, so inside iteration it is deferred by the same queue every
+		// other structural change uses.
+		//
+		// @param instance The instance to write.
+		// @param property The property name, as a script spells it.
+		// @param value    The value to write.
+		// @param bytes    The size of `value`, which must match the descriptor.
+		// @return `false` when there is no such property, the size disagrees,
+		//         the property is read-only, this store is adopt-only, or the
+		//         instance does not carry what the conversion writes.
+		bool SetProperty(Entity instance, core::Name property, const void *value, size_t bytes);
+
+		// The properties an instance's class exposes, merged with its bases'.
+		//
+		// @param instance The instance to describe.
+		// @return The descriptors, or an empty span when it is not an instance.
+		std::span<const PropertyDescriptor> PropertiesOf(Entity instance) const;
 
 		// Moves an instance under a new parent, or to no parent.
 		//

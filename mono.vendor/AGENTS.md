@@ -43,7 +43,7 @@ Two rules follow, both enforced in `mono_add_library`:
   keeps code out of a binary. That is the linker's job, and §1 has the numbers.
 - **`VENDOR_PUBLIC` is a deliberate widening,** for the cases where a vendor
   type genuinely appears in a public header — `spdlog` in `core/Log.hpp`, glm
-  in `core/types/CFrame.hpp`, flecs in `ecs/Store.hpp`. Every use of it
+  in `core/types/CFrame.hpp`. Every use of it
   enlarges what the rest of the engine can see, so each one should be
   defensible in review.
 

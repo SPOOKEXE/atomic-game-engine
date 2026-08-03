@@ -25,6 +25,7 @@ mono_add_library(unified_server_client
 		Engine::ecs
 		Engine::parallel
 		Engine::scene
+		Engine::examples
 		Engine::replication
 
 		# The seam under test. `BuildReplicatedWorld` and
