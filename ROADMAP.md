@@ -77,7 +77,7 @@ Deferred:
 
 ### v0.2
 
-Planned in [v02v03v04.md](v02v03v04.md). Userland gets Roblox-style instancing, tweaked; the engine underneath is full ECS. The order below is the order the steps land in, and each one leaves the tree building and passing.
+Planned in [v02v03v04.md](docs/retired/v02v03v04.md). Userland gets Roblox-style instancing, tweaked; the engine underneath is full ECS. The order below is the order the steps land in, and each one leaves the tree building and passing.
 
 Standing discipline for v0.2 and v0.4, in that document's own section: preallocate and reuse by default, take the better data structure without ceremony but attach a number to an algorithm swap, and allow async only for work the tick cannot observe finishing.
 
@@ -133,7 +133,7 @@ Deferred:
 
 ### v0.3
 
-Replication. The server has authority and a client simulates its own replica and syncs against it — decided while planning v0.2, which reserves the seam for it (see [v02v03v04.md](v02v03v04.md) §2.12) and builds nothing else. It sits here rather than later so that physics, scripting and rendering are all built against a replicated world instead of being retrofitted into one.
+Replication. The server has authority and a client simulates its own replica and syncs against it — decided while planning v0.2, which reserves the seam for it (see [v02v03v04.md](docs/retired/v02v03v04.md) §2.12) and builds nothing else. It sits here rather than later so that physics, scripting and rendering are all built against a replicated world instead of being retrofitted into one.
 
 **Where this version actually stands:** the two modules are built, covered and passing — `net` at L11 and `replication` at L12 — and **both programs now link them**: `mono.server --listen PORT` serves its world and `mono.client --connect HOST:PORT` replicates one beside its demo, over a real UDP socket between two real processes.
 
@@ -164,7 +164,7 @@ Deferred:
 
 ### v0.4
 
-Planned in [v02v03v04.md](v02v03v04.md) — written when this was v0.3, before replication took that slot.
+Planned in [v02v03v04.md](docs/retired/v02v03v04.md) — written when this was v0.3, before replication took that slot.
 
 **Where this version stands:** all eleven items below are resolved. `scene` at L7, `spatial` at L6 and `physics` at L8 are built, covered and passing; `core/types` has its value types; both programs are off their duplicated component definitions and onto `scene`; the entity directory has a reserved range; and the storage layout has been reopened and closed. The layer heights the plan inferred were confirmed rather than assumed — `physics` sharing L8 with `assets` is recorded as a decision in its `AGENTS.md`, with the reason it is safe (the two modules are disjoint, so there is no edge for the layer rule to adjudicate) and the condition that would break it.
 
@@ -217,7 +217,7 @@ Deferred:
 
 ### v0.5
 
-The engine has been full ECS since v0.2 and userland instancing is a façade over it — see [v02v03v04.md](v02v03v04.md). The test scene is still C++ at this point; v0.5 makes the façade reachable from script and v0.6 is where the scene actually moves.
+The engine has been full ECS since v0.2 and userland instancing is a façade over it — see [docs/retired/v02v03v04.md](docs/retired/v02v03v04.md) and [v05.md](v05.md). This version makes the façade reachable from script, and **the scene moved a version early**: `Rings.luau` and `Rings.js` build and animate it themselves. What v0.6 keeps is what a scene file cannot yet say — a camera, its own scripts, and the rendering they describe.
 
 - [x] **a property stopped being a component and an offset and became a conversion** — the item below assumed a manifest could be generated from the property lists, and **the property lists were empty and the model could not have described them.** `Classes::Property` was called zero times outside `ecs`'s own suites, and `PropertyDescriptor` was `{component, offset, type, size}`: enough for `Visible`, and incapable of `Size` (a doubled half-extent), `Position` (a sub-range of a `CFrame` whose rotation must survive) or `Anchored` (not stored anywhere — it is whether `RigidBody` and `Motion` exist). Roblox's `Size` is a full extent and `Bounds::HalfExtent` is half of one, so **a member pointer was the wrong primitive**, which is what `scene/AGENTS.md` had been saying under "do not add half of one". A descriptor is now a getter, a setter, the component sets it reads and writes, and a kind — `Field`, `Computed` or `Structural`. One mechanism: a plain field's conversion is generated from a member pointer taken as a *template* argument, which is what makes it captureless
 - [x] `PropertyType` gains `Vector3`, `CFrame` and `Color3` — and stays small permanently, because under conversions it describes the **userland value** rather than the storage. `spatial::LayerMask` will never need a case: no property is one, `CollisionGroup` is a `Name`
@@ -234,101 +234,39 @@ The engine has been full ECS since v0.2 and userland instancing is a façade ove
 - [x] **the `.d.ts` and Luau declarations**, generated from the same manifest so the two surfaces cannot drift into two APIs. The TypeScript one is a type root, which is the shape a toolchain consumes in place of `@rbxts/types`; the derived interfaces carry only what each class declares itself, because repeating an inherited property would be a second declaration of one fact that TypeScript would silently accept a narrowing of
 - [x] **the concurrency document** — [docs/SCRIPT_CONCURRENCY.md](docs/SCRIPT_CONCURRENCY.md), and it builds nothing: `Universe`, `ExecutionMode`, `Postbox` over four buses, `Ticket` and the barrier all exist. It settles the rule everything follows — **a script may only resume from something the barrier delivers in a deterministic order**, which is narrower than "no yielding" and stricter than "yield freely" — and then what falls out of it: `wait` in ticks with a recommendation to rename rather than redefine, a value-to-bytes codec that must sort keys and produce **identical bytes from both VMs** (one shared test, not two), a cross-world lock that is `MemoryStore::Update`'s versioned compare-and-swap because rule 3 leaves no shared memory to guard, and budgets and replica refusals as part of the contract rather than as implementation detail
 - [x] **QuickJS is linked, and JavaScript runs beside Luau.** `Runtime` is an interface; `LuauRuntime` and `JavaScriptRuntime` are two files in one module and adding the second changed no caller — which is what the module's `VENDOR`-not-`VENDOR_PUBLIC` row was for. The extension picks the VM, so `Rings.luau` and `Rings.js` build **the same world** through the same bindings and every program loads either. **Three things the tests caught rather than the design:** `JS_NewContext` adds `Date`, so the context is built from `JS_NewContextRaw` and an explicit intrinsic list; `JS_AddIntrinsicEval` turned out to be required by `JS_Eval` itself, so excluding it produced "eval is not supported" for every script rather than a sandbox, and the global `eval` is deleted afterwards instead; and `JS_AddIntrinsicBigInt` over a raw context leaves an object alive so `JS_FreeRuntime` asserts, reproduced against upstream in isolation. Instances are sealed and scripts run in strict mode, because in sloppy mode assigning to a non-extensible object **silently does nothing** — `part.Transparency = 0.5` would have looked like it worked
+- [x] **`Instance.new`, properties and the hierarchy bind to the class table — the same one C++ calls.** A calling convention rather than a second mechanism: `Instance.new` goes through `Store::CreateInstance`, `part.Size = v` through `Store::SetProperty`, and `part.Parent = workspace` through `Store::SetParent`. The marshalling switches on `PropertyType` and **never on a property's name**, so a property `scene` declares tomorrow is reachable from both languages today. **What is not bound yet is named in v0.6 rather than implied**: `.Changed`, `:IsA`, `:Destroy`, `:Clone` and `:GetChildren` all exist in C++ and none of them has a script spelling
+- [x] **`--script PATH` stops warning and starts loading**, which closes the oldest bullet in `D00001` — it had been accepted and ignored since v0.1. `--script` on the client, `--game` on the server (ignored since v0.3), `--scene` on the unified harness, and the extension picks the VM
+- [x] **the C++ test scene is a script, a version early** — `Rings.luau` and `Rings.js` build the 512-cube ring scene and **animate it themselves** off `RunService.Heartbeat`, composing `CFrame`s the way a Roblox script does. There is no `Orbit` component on that path and no engine system reading one: the engine does not know what an orbit is. `Demo.hpp`/`Demo.cpp` do **not** go away yet, because the C++ path is still what `--entities` builds and is the honest comparison — a scene format and a scripting layer, side by side, with the cost of each on the record
+- [x] **`game` is the universe and `workspace` is the world a script runs on**, which is the foundation the rest sits on. `game:GetService` reaches services; `workspace` is the world itself and **not an instance in it**, because a world is what entities live in and making it an entity would put a phantom row in every scene. A script holds one `Store` and no binding hands it another — asserted, not assumed — so **the only way out of a world is a service in the universe**: `MessagingService:PublishAsync` / `SubscribeAsync` over `world::Postbox`, proved across two worlds in one universe. Rule 3 as an API rather than a convention
+- [x] the datatypes and globals a scene actually needs: `Instance`, `Vector3`, `CFrame` (with `*` composition and `Angles` in **radians**, matching Roblox, while `Orientation` stays degrees — Roblox's own split, reproduced deliberately), `Color3` with `new` and `fromRGB`, `game`, `workspace`, `RunService.Heartbeat:Connect`, `MessagingService`, `print`, and `nil` as a JavaScript global so one idiom reads in both. The standard libraries a deterministic script may have — `bit32`, `buffer`, `coroutine`, `math`, `string`, `table`, `utf8`, `vector` — and **deliberately not `os` or `debug` in Luau, nor `Date`, `eval` or `Proxy` in JavaScript**, because each is either a wall clock or a way out of the sandbox
+
 
 ### v0.6
 
-Where the C++ test scene becomes a script. v0.4 rebuilt it on `scene`'s classes precisely so this is a port rather than a rewrite, and `Demo.hpp`/`Demo.cpp` go away here — `mono.client/AGENTS.md` has always said they die when there is a game file to load a scene from.
+Where a world *contains* its scripts rather than being handed one, and where the renderer catches up with what a script can already say. v0.5 made the façade real; what is left is the half a Roblox author reaches for next — signals, the instance methods, the datatype vocabulary — and the rendering those scripts describe.
 
-- [_] luau and typescript — `Instance.new`, properties, `.Changed`, the hierarchy and `:IsA` bind to v0.2's class table, the same one C++ calls. A calling convention, not a second mechanism
-- [_] camera
+**The rule everything script-side lands under is already written**: [docs/SCRIPT_CONCURRENCY.md](docs/SCRIPT_CONCURRENCY.md) §1 — a script may only resume from something the barrier delivers in a deterministic order. Every item below that yields answers to it.
+
+- [_] **scripts are instances in a world, loaded from it rather than from a flag.** `--script` runs one file against a world; a game has many, each parented somewhere, each with its own `script` global naming itself. This is what makes "scripts live under a world" structural instead of a fact about the command line — and it is the prerequisite for a save file, because a world that owns its scripts is a world that can be written out whole
+- [_] `.Changed` per instance, and the fan-out the projection model creates. `ecs/docs/TODO.md` has the engine half — `OnChanged<T>` is per *type* and Roblox's is per instance, so filtering a whole-world signal per script would walk every change for every connection. The half nothing has written down: **one component write maps to N property names**, so writing `Transform` must fire `CFrame`, `Position` *and* `Orientation`. `PropertyDescriptor::Reads` is exactly the map that needs, which is why it was declared rather than left to a conversion to know privately
+- [_] `RBXScriptSignal` and `RBXScriptConnection` as real types — `:Connect` returns nothing today, so nothing can `:Disconnect`. A handle whose only method did not exist would have been worse than no handle; now it needs the method
+- [_] the instance methods that exist in C++ and have no script spelling: `:IsA`, `:Destroy`, `:Clone`, `:GetChildren`, `:FindFirstChild`, and `Instance.new(class, parent)`'s second argument. `Store` already does every one of them
+- [_] **`task`, and the yield rule made real** — `task.wait`, `task.spawn`, `task.defer`. §2 of the concurrency document settles the unit (ticks, never seconds) and recommends *renaming rather than redefining*, so `wait(n)` in seconds fails with a message naming its replacement instead of silently meaning something else
+- [_] **the value ↔ bytes codec**, which unblocks the rest of the bus surface. `MessagingService` takes strings today because a table needs a codec that **sorts its keys** — a codec walking a hash map in memory order serialises differently on two runs and breaks `just determinism` far from the cause — and that produces **identical bytes from both VMs**, which is one shared test rather than two. §3
+- [_] `MemoryStoreService` and `DataStoreService`. Both want a reply, a reply lands at a later barrier, so a script has to *yield* on one — which is why they wait for `task` rather than for the buses, which already exist. §5's budgets and replica refusals are part of their contract, not an afterthought
+- [_] `RunService:IsServer()` / `IsClient()`, and what a script may do on a replica. `Store::SetProperty` already refuses a write on an adopt-only store and says why; a script needs to be able to ask *before* it tries
+- [_] **`Enum` as a property type.** `Material` is a `core::Name` today, which crosses a wire correctly and gives an author no completion and no validation. Roblox's is an enum, `scene/Enums.hpp` exists, and `PropertyType` deliberately has no case for one — adding it is a decision about what userland can hold, so it is an item rather than a detail
+- [_] `CollisionGroup`, which needs a name-to-layer registry that does not exist. `Collider::Layer` is 32 anonymous bits; Roblox has `PhysicsService` for the naming, and inventing a scheme inside `scene` would be that module deciding a physics policy
+- [_] the datatypes a game reaches for once it is past a scene: `Vector2`, `UDim`, `UDim2`, `Rect`, `Region3`, `NumberRange`, `NumberSequence`, `ColorSequence`, `TweenInfo`, `Ray`/`RaycastParams`/`RaycastResult` over `spatial`'s queries, and `Random` over `core::Random` — **which is the one that closes `D00004`**, because a script with a seeded generator is the consumer that item has been waiting for. Each is a shim over what the engine already holds, exactly as `Vector3` and `CFrame` are; none of them is a component
+- [_] `DateTime` and `tick`/`time`/`elapsedTime` — and the answer is probably "not the wall clock". A world's clock is `store.Time()` and it is simulated; a script that branched on real time would produce a run that does not replay. What ships is the simulated one under a name that does not lie about it
+- [_] `typeof`, `warn`, and the base-library gaps. Deliberately absent and staying absent: `loadstring`, `getfenv`/`setfenv`, `require` — each is a way to assemble or reach code no manifest describes
+- [_] camera from script — `scene::Camera` and `ActiveCamera` exist and the client installs its own; a script cannot make one, aim one or ask which is live
 - [_] surface camera (for mirrors, use previous frame as visual) — a view on v0.2's `ViewChannel` whose producer is the local world and whose consumer is a texture rather than the swapchain. The one-frame staleness is the latency that design already assumed
 - [_] basic rendering pipeline (color, shadows, basic fov cull, sequential for many worlds) — the graph of `RENDER_PIPELINE.md`, its stages 1 to 7. Needs `mono.engine/graph/` at L9 first, and that needs v0.2's `ChangeChannel`
-- [_] transparency — a `Transparency` float on `scene::Visual`, the same field on `scene::DrawInstance`, and the sorted pass that makes it mean anything. **Filed from v0.5's bindings work rather than from the renderer, and placed here rather than there on purpose**: Roblox parts have a `Transparency` and `Visual` has no field for it, so it is the one entry in [v05.md](v05.md) §5.4's property table with nothing to project onto. The component moves for rendering's sake and not for a binding's — a float nothing draws is a field that lies, and it would sit in a snapshot and a delta being read by nobody. **The cost is ordering, not the field.** Opaque geometry draws in any order and transparent geometry does not, so this is a second pass sorted back-to-front per view, which makes it the first thing the renderer does that depends on *which camera is looking* — `ViewChannel` already carries that. Two smaller things come with it: `Visual`'s explicit `Reserved[3]` is padding a float does not fit into, so the struct grows and the padding comment's warning applies to whatever replaces it; and a fully transparent part still has a collider, so `Visible` and `Transparency == 1` are different facts and the draw path must not conflate them
-- [_] `mono.engine/examples/Mirrors-1-world.luau` and `.ts` — the port of the C++ test scene, and the point where `D00001`'s `--script PATH` stops warning and starts loading. Both files exist in the tree and are **empty**, reserving the names and nothing else; docgen skips an empty page by content rather than by filename, so they cost the documentation site nothing while they wait
-- [_] the demo dying is `D00004`'s trigger: ask whether anything still needs `core::Random`, and either close the item or say what renewed it
-- [_] 'Universe' and 'World' setup for luau and typescript. foundation of everything. World containers contain scripts of which can cross-world communicate by services.
-- [_] Clone many of the roblox services, datatypes, etc. They are shims for entity with components, see how we did existing code. ```
-ColorSequence
-ColorSequenceKeypoint
-DateTime
-Enum
-EnumItem
-Enums
-Instance
-NumberRange
-NumberSequence
-NumberSequenceKeypoint
-Random
-Ray
-RaycastParams
-RaycastResult
-RBXScriptConnection
-RBXScriptSignal
-Rect
-Region3
-Region3int16
-SecurityCapabilities
-TweenInfo
-UDim
-UDim2
-Vector2
-Vector2int16
-Vector3
-Vector3int16
-Quaternion
----
-assert
-delay (redirect to task.delay)
-elapsedTime
-Enum
-error
-game
-gcinfo
-getfenv
-getmetatable
-loadstring
-newproxy
-next
-pcall
-print
-printidentity
-rawequal
-rawget
-rawlen
-rawset
-require
-script
-setfenv
-setmetatable
-spawn (redirect to task.spawn)
-tick
-time
-tonumber
-tostring
-type
-typeof
-unpack
-wait (redirect to task.wait)
-warn
-workspace
-xpcall
-ypcall
-task.spawn
-task.defer
-task.wait
----
-bit32
-buffer
-coroutine
-debug
-math
-os
-string
-table
-task
-utf8
-vector (support up to MAX_VECTOR_LENGTH constant, set to 8 by default which is 8 wide vector)
-```
+- [_] transparency — a `Transparency` float on `scene::Visual`, the same field on `scene::DrawInstance`, and the sorted pass that makes it mean anything. **The one entry in [v05.md](v05.md) §5.4's property table with nothing to project onto**, and the component moves for rendering's sake rather than a binding's: a float nothing draws is a field that lies, and it would sit in a snapshot and a delta being read by nobody. **The cost is ordering, not the field.** Opaque geometry draws in any order and transparent geometry does not, so this is a second pass sorted back-to-front per view — the first thing the renderer does that depends on *which camera is looking*, which `ViewChannel` already carries. Two smaller things come with it: `Visual`'s explicit `Reserved[3]` is padding a float does not fit into, so the struct grows and the padding comment's warning applies to whatever replaces it; and a fully transparent part still has a collider, so `Visible` and `Transparency == 1` are different facts the draw path must not conflate
+- [_] `mono.engine/examples/Mirrors-1-world.luau` and `.ts` — the mirrors scene, which is what actually needs the surface camera. Both files exist in the tree and are **empty**, reserving the names and nothing else; docgen skips an empty page by content rather than by filename, so they cost the documentation site nothing while they wait. `Rings.luau` and `Rings.js` already prove the loading path, so these prove the *rendering* one
+- [_] `Demo.hpp`/`Demo.cpp` die here, once a world can own its scripts and a scene file can carry a camera. `mono.client/AGENTS.md` has always said they go when there is a game file to load a scene from — and until a script can make a camera, there is not one
+- [_] **the second consumer for every binding, which is the point of having two VMs**: each item above lands in Luau *and* JavaScript, or it is not done. The marshalling is shared and the object models are not, so a surface that exists in one language is the drift the manifest was built to catch
 
 ### V0.7
 
