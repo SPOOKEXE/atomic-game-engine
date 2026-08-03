@@ -34,5 +34,7 @@ if(MONO_BUILD_CLIENT)
 	add_subdirectory(render)  # L12 RHI, render nodes        [client]
 endif()
 
-# TODO(v0.2+): the hosting half of L12 — orchestration — is a [server] module
-# and gets the mirror-image guard on MONO_BUILD_SERVER when it arrives.
+# TODO(D00017): the hosting half of L12 — orchestration — is a [server] module
+# and gets the mirror-image guard on MONO_BUILD_SERVER when it arrives. Filed
+# rather than versioned, because no version schedules it and `--worlds N` is a
+# harness rather than a caller.

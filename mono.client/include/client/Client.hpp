@@ -109,10 +109,13 @@ namespace client {
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path AssetsDirectory;
 
-		// TODO(v0.6): run this Luau script at startup. Parsed and reported now
-		// so that a command line written against the roadmap fails with a clear
-		// message rather than being silently ignored — there is no VM until
-		// L13 exists.
+		// The scene script to build the world from. Empty means `Rings.luau`.
+		//
+		// The extension picks the VM, so this is the only place either one is
+		// chosen — and since v0.6 it is the *only* way this program gets a
+		// world. The C++ scene it used to fall back to is deleted, because two
+		// ways to build one and only one of them exercising the bindings meant
+		// the bindings were the untested half.
 		std::string ScriptPath;
 
 		// `host:port` of a server to replicate from. Empty means run the local
