@@ -69,6 +69,9 @@ if(MSVC)
 	if(NOT MONO_OPTIMISE)
 		list(APPEND MONO_COMPILE_OPTIONS /Od)
 	endif()
+	# No /O3 exists. /O2 is already MSVC's maximum and the build type supplies
+	# it, so the optimised branch below has no MSVC counterpart rather than a
+	# missing one.
 else()
 	set(MONO_COMPILE_OPTIONS -Wall -Wextra -Wpedantic)
 	if(MONO_WERROR)
@@ -76,6 +79,34 @@ else()
 	endif()
 	if(NOT MONO_OPTIMISE)
 		list(APPEND MONO_COMPILE_OPTIONS -O0 -fno-omit-frame-pointer)
+	else()
+		# -O3, stated here rather than inherited from RelWithDebInfo's -O2.
+		#
+		# **Measured, and it is not a small difference.** The ECS iteration
+		# control runs 100k rows in 38.74 us at -O2 and 16.61 at -O3, and 500k
+		# in 196.38 against 85.63 — 2.4x, on the loop this engine spends most of
+		# its time in. It was invisible for as long as every measurement was
+		# taken at the same level as every other, and it was found sideways,
+		# while disproving v0.4's vectorisable-layout item: a twelve-byte
+		# component has no padding, so -O3's vectoriser fills every lane, and
+		# padding it to sixteen — which that item proposed — puts a dead lane in
+		# every vector and made the same loop 2.4x *slower*. The layout was
+		# already right; the flag was the thing holding it back.
+		#
+		# **Why this is safe to turn on here and nowhere else.** -O3 is more
+		# aggressive about vectorising and inlining, and the fear worth taking
+		# seriously in this repository is floating point: `just determinism`
+		# diffs two runs byte for byte and `just replay-check` diffs a replay
+		# against the run it replayed, so a reassociated float sum would fail a
+		# recipe rather than become a rumour. Both were run against this preset
+		# before the flag was committed and both are byte-identical. GCC does
+		# not enable -ffast-math or -funsafe-math-optimizations at any -O level,
+		# so IEEE semantics are unchanged; the guarantee that moved is none.
+		#
+		# Note what this does NOT claim: determinism here is same-binary, as
+		# ROADMAP.md v0.2 says. Two builds at different optimisation levels are
+		# two different binaries and were never promised to agree.
+		list(APPEND MONO_COMPILE_OPTIONS -O3)
 	endif()
 endif()
 
