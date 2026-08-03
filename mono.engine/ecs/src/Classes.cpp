@@ -326,6 +326,12 @@ namespace engine::ecs {
 			return "name";
 		case PropertyType::Reference:
 			return "reference";
+		case PropertyType::Vector3:
+			return "Vector3";
+		case PropertyType::CFrame:
+			return "CFrame";
+		case PropertyType::Color3:
+			return "Color3";
 		}
 		return "?";
 	}

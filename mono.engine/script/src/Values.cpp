@@ -1,0 +1,268 @@
+#include "Bindings.hpp"
+
+#include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Vector3.hpp>
+
+#include <cmath>
+#include <lualib.h>
+#include <numbers>
+
+namespace engine::script {
+
+	namespace {
+		using core::CFrame;
+		using core::Color3;
+		using core::Vector3;
+
+		constexpr float RADIANS_PER_DEGREE = std::numbers::pi_v<float> / 180.0f;
+
+		// --- Vector3 ---------------------------------------------------------
+
+		int Vector3New(lua_State *state) {
+			const auto x = static_cast<float>(luaL_optnumber(state, 1, 0.0));
+			const auto y = static_cast<float>(luaL_optnumber(state, 2, 0.0));
+			const auto z = static_cast<float>(luaL_optnumber(state, 3, 0.0));
+
+			*PushVector3(state) = Vector3{x, y, z};
+			return 1;
+		}
+
+		int Vector3Index(lua_State *state) {
+			const Vector3 &value = CheckVector3(state, 1);
+			const char *field = luaL_checkstring(state, 2);
+
+			// Roblox spells these upper case and a script author will type them
+			// that way. Lower case is accepted too rather than being a silent
+			// nil, because `v.x` is what every Lua habit reaches for first.
+			switch (field[0]) {
+			case 'X':
+			case 'x':
+				lua_pushnumber(state, value.X);
+				return 1;
+			case 'Y':
+			case 'y':
+				lua_pushnumber(state, value.Y);
+				return 1;
+			case 'Z':
+			case 'z':
+				lua_pushnumber(state, value.Z);
+				return 1;
+			default:
+				break;
+			}
+
+			luaL_errorL(state, "Vector3 has no member '%s'", field);
+		}
+
+		int Vector3ToString(lua_State *state) {
+			const Vector3 &value = CheckVector3(state, 1);
+			lua_pushfstring(state, "%f, %f, %f", value.X, value.Y, value.Z);
+			return 1;
+		}
+
+		// --- Color3 ----------------------------------------------------------
+
+		int Color3New(lua_State *state) {
+			const auto r = static_cast<float>(luaL_optnumber(state, 1, 0.0));
+			const auto g = static_cast<float>(luaL_optnumber(state, 2, 0.0));
+			const auto b = static_cast<float>(luaL_optnumber(state, 3, 0.0));
+
+			*PushColor3(state) = Color3::FromLinear(r, g, b);
+			return 1;
+		}
+
+		// 0-255, the way an author reads a colour off a palette. Roblox has both
+		// and `fromRGB` is the one that appears in real code.
+		int Color3FromRgb(lua_State *state) {
+			const auto r = static_cast<float>(luaL_optnumber(state, 1, 0.0));
+			const auto g = static_cast<float>(luaL_optnumber(state, 2, 0.0));
+			const auto b = static_cast<float>(luaL_optnumber(state, 3, 0.0));
+
+			*PushColor3(state) = Color3::FromLinear(r / 255.0f, g / 255.0f, b / 255.0f);
+			return 1;
+		}
+
+		int Color3Index(lua_State *state) {
+			const Color3 &value = CheckColor3(state, 1);
+			const char *field = luaL_checkstring(state, 2);
+
+			switch (field[0]) {
+			case 'R':
+			case 'r':
+				lua_pushnumber(state, value.R);
+				return 1;
+			case 'G':
+			case 'g':
+				lua_pushnumber(state, value.G);
+				return 1;
+			case 'B':
+			case 'b':
+				lua_pushnumber(state, value.B);
+				return 1;
+			default:
+				break;
+			}
+
+			luaL_errorL(state, "Color3 has no member '%s'", field);
+		}
+
+		// --- CFrame ----------------------------------------------------------
+
+		int CFrameNew(lua_State *state) {
+			const auto x = static_cast<float>(luaL_optnumber(state, 1, 0.0));
+			const auto y = static_cast<float>(luaL_optnumber(state, 2, 0.0));
+			const auto z = static_cast<float>(luaL_optnumber(state, 3, 0.0));
+
+			*PushCFrame(state) = CFrame{Vector3{x, y, z}};
+			return 1;
+		}
+
+		// **Radians, because Roblox's `CFrame.Angles` is radians** — and the
+		// `Orientation` property is degrees, because Roblox's is degrees.
+		//
+		// That looks like an inconsistency and it is Roblox's, reproduced
+		// deliberately. An author's fingers already type `CFrame.Angles(0,
+		// math.rad(90), 0)`; a binding that quietly took degrees here would
+		// turn every one of those into a rotation 57 times too small, and the
+		// scene would look wrong rather than fail.
+		int CFrameAngles(lua_State *state) {
+			const auto pitch = static_cast<float>(luaL_checknumber(state, 1));
+			const auto yaw = static_cast<float>(luaL_checknumber(state, 2));
+			const auto roll = static_cast<float>(luaL_checknumber(state, 3));
+
+			*PushCFrame(state) = CFrame::Angles(pitch, yaw, roll);
+			return 1;
+		}
+
+		// `a * b`, which is how a Roblox author composes a transform: an orbit
+		// is `CFrame.Angles(0, angle, 0) * CFrame.new(radius, 0, 0)` and a spin
+		// is `part.CFrame *= CFrame.Angles(...)`. Without this the idiom that
+		// every rotation tutorial opens with does not exist.
+		int CFrameMultiply(lua_State *state) {
+			const CFrame &left = CheckCFrame(state, 1);
+
+			// `CFrame * Vector3` transforms a point into the frame's space,
+			// which is the other half of the same idiom.
+			if (lua_touserdatatagged(state, 2, TAG_VECTOR3) != nullptr) {
+				*PushVector3(state) = left.PointToWorldSpace(CheckVector3(state, 2));
+				return 1;
+			}
+
+			*PushCFrame(state) = left * CheckCFrame(state, 2);
+			return 1;
+		}
+
+		int CFrameIndex(lua_State *state) {
+			const CFrame &value = CheckCFrame(state, 1);
+			const char *field = luaL_checkstring(state, 2);
+
+			if (std::string_view(field) == "Position" || std::string_view(field) == "p") {
+				*PushVector3(state) = value.Position;
+				return 1;
+			}
+
+			luaL_errorL(state, "CFrame has no member '%s'", field);
+		}
+
+		// Registers one value type: a metatable carrying `__index` and a global
+		// table carrying the constructors.
+		void Install(
+			lua_State *state,
+			const char *name,
+			lua_CFunction index,
+			lua_CFunction toString,
+			const luaL_Reg *constructors,
+			lua_CFunction multiply = nullptr
+		) {
+			luaL_newmetatable(state, name);
+
+			lua_pushcfunction(state, index, "__index");
+			lua_setfield(state, -2, "__index");
+
+			if (multiply != nullptr) {
+				lua_pushcfunction(state, multiply, "__mul");
+				lua_setfield(state, -2, "__mul");
+			}
+
+			if (toString != nullptr) {
+				lua_pushcfunction(state, toString, "__tostring");
+				lua_setfield(state, -2, "__tostring");
+			}
+
+			// A metatable a script can reach is a metatable a script can
+			// rewrite, and then every value of that type changes underneath
+			// everything else holding one.
+			lua_pushstring(state, name);
+			lua_setfield(state, -2, "__metatable");
+
+			lua_pop(state, 1);
+
+			lua_newtable(state);
+			luaL_register(state, nullptr, constructors);
+			lua_setglobal(state, name);
+		}
+	}
+
+	core::Vector3 *PushVector3(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::Vector3), TAG_VECTOR3);
+		auto *value = new (memory) core::Vector3();
+		luaL_getmetatable(state, "Vector3");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::Color3 *PushColor3(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::Color3), TAG_COLOR3);
+		auto *value = new (memory) core::Color3();
+		luaL_getmetatable(state, "Color3");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::CFrame *PushCFrame(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::CFrame), TAG_CFRAME);
+		auto *value = new (memory) core::CFrame();
+		luaL_getmetatable(state, "CFrame");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::Vector3 &CheckVector3(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_VECTOR3);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "Vector3");
+		}
+		return *static_cast<core::Vector3 *>(value);
+	}
+
+	core::Color3 &CheckColor3(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_COLOR3);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "Color3");
+		}
+		return *static_cast<core::Color3 *>(value);
+	}
+
+	core::CFrame &CheckCFrame(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_CFRAME);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "CFrame");
+		}
+		return *static_cast<core::CFrame *>(value);
+	}
+
+	void OpenValues(lua_State *state) {
+		static const luaL_Reg vectorConstructors[] = {{"new", Vector3New}, {nullptr, nullptr}};
+		static const luaL_Reg colorConstructors[] = {
+			{"new", Color3New}, {"fromRGB", Color3FromRgb}, {nullptr, nullptr}
+		};
+		static const luaL_Reg frameConstructors[] = {
+			{"new", CFrameNew}, {"Angles", CFrameAngles}, {nullptr, nullptr}
+		};
+
+		Install(state, "Vector3", Vector3Index, Vector3ToString, vectorConstructors);
+		Install(state, "Color3", Color3Index, nullptr, colorConstructors);
+		Install(state, "CFrame", CFrameIndex, nullptr, frameConstructors, CFrameMultiply);
+	}
+}

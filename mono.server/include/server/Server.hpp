@@ -286,6 +286,19 @@ namespace server {
 		engine::net::Endpoint ListeningOn() const;
 
 	  private:
+		// Builds one world, from a scene file when `--game` names one and from
+		// the placeholder otherwise.
+		//
+		// One place rather than the two call sites that used to build the
+		// placeholder directly: a locally hosted world and a remotely hosted
+		// one authoring different scenes is a divergence nothing would report,
+		// because each side is internally consistent.
+		//
+		// @param store     The world to build into.
+		// @param scheduler The systems to install.
+		// @return `false` when a named scene could not be loaded.
+		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+
 		// Builds the worlds a host was granted and announces itself.
 		//
 		// @return `false` when there is no link, or no worlds to hold.

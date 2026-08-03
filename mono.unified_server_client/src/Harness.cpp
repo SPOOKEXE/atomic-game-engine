@@ -1,4 +1,6 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Components.hpp>
 
@@ -7,6 +9,7 @@
 #include <client/Replicated.hpp>
 #include <cmath>
 #include <server/Simulation.hpp>
+#include <stdexcept>
 #include <unified/Harness.hpp>
 
 namespace unified {
@@ -65,7 +68,19 @@ namespace unified {
 		// snapshot crosses because both name `scene.Transform` the same way,
 		// not because they share a header.
 		server::RegisterPlaceholderComponents();
-		server::BuildPlaceholderWorld(Server, ServerSystems, Options.Entities);
+		if (Options.ScenePath.empty()) {
+			server::BuildPlaceholderWorld(Server, ServerSystems, Options.Entities);
+		} else {
+			// The same loader, the same file, no camera and no draw list — a
+			// server's half. What this harness checks is that the client ends
+			// up holding what the server authored, and a scene it could not
+			// author is the one case that would go unchecked.
+			std::string error;
+			if (!engine::examples::LoadScene(Server, ServerSystems, Options.ScenePath, error)) {
+				ENGINE_ERROR("--scene '{}' failed:\n{}", Options.ScenePath, error);
+				throw std::runtime_error("the scene script failed");
+			}
+		}
 
 		// The dirty bits a delta is built from. `Bounds` and `Visual` are
 		// deliberately not observed, for the reason `Server.cpp` gives: nothing

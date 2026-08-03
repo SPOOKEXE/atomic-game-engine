@@ -63,6 +63,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("quiet", "Print the summary only, not a line per tick");
 
 	arguments.Value("entities", "N", "Entities in the placeholder world (default 64)");
+	arguments.Value("scene", "PATH", "Author the server's world from a scene script");
 	arguments.Value("ticks", "N", "Ticks to run after the join (default 120)");
 	arguments.Value("tick-rate", "HZ", "The authority's tick rate (default 30)");
 	arguments.Value("frames-per-tick", "N", "Frames drawn per tick (default 4)");
@@ -85,6 +86,9 @@ int main(int argc, char **argv) {
 
 	unified::Settings settings;
 	settings.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", settings.Entities));
+	if (auto scene = arguments.Get("scene")) {
+		settings.ScenePath = std::string(*scene);
+	}
 	settings.TickRate = arguments.GetNumber("tick-rate", settings.TickRate);
 	settings.FramesPerTick =
 		static_cast<int>(arguments.GetInteger("frames-per-tick", settings.FramesPerTick));

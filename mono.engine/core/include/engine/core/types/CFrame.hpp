@@ -61,6 +61,24 @@ namespace engine::core {
 		// @param roll  Rotation about Z, in radians.
 		static CFrame Angles(float pitch, float yaw, float roll);
 
+		// Recovers the intrinsic Y-X-Z turns this rotation was built from.
+		//
+		// The inverse of `Angles`, and it has to be exactly that inverse: the
+		// script surface exposes an `Orientation` a caller can read, modify and
+		// assign back, so `part.Orientation = part.Orientation` must not drift.
+		// Any other Euler order round-trips to a different rotation.
+		//
+		// Translation is ignored; only the rotation is decomposed.
+		//
+		// **Gimbal lock is resolved rather than left to produce a NaN.** When
+		// pitch reaches ±90° the yaw and roll axes coincide and the split
+		// between them is arbitrary, so roll is taken as zero and the whole turn
+		// is attributed to yaw. That is a choice, not a recovery of lost
+		// information — the rotation is reproduced exactly either way.
+		//
+		// @return Rotation about X, Y and Z as `{pitch, yaw, roll}`, in radians.
+		Vector3 ToAngles() const;
+
 		// Constructs a frame at `from` whose -Z direction points toward `to`.
 		//
 		// Equal `from` and `to` positions produce identity rotation at `from` rather

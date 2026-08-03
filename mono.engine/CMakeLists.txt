@@ -16,6 +16,8 @@ add_subdirectory(spatial)   # L6 where things are            [shared]
 add_subdirectory(scene)     # L7 what a thing in a world is [shared]
 add_subdirectory(assets)    # L8 content addressing         [shared]
 add_subdirectory(physics)   # L8 shapes, integration, pairs [shared]
+add_subdirectory(script)    # L9 running a script           [shared]
+add_subdirectory(examples)  # L10 the example scene        [shared]
 add_subdirectory(net)       # L11 transport and authority   [shared]
 add_subdirectory(replication) # L12 what the wire means     [shared]
 

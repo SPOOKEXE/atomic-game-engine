@@ -36,13 +36,7 @@ namespace client {
 		}
 
 		if (!Settings.ScriptPath.empty()) {
-			// TODO(v0.6): hand this to the Luau host once L13 exists. Refusing
-			// loudly beats accepting a flag and doing nothing with it.
-			ENGINE_WARN(
-				"--script is accepted but has no effect until the scripting layer lands in "
-				"v0.6. Ignoring '{}'.",
-				Settings.ScriptPath
-			);
+			ENGINE_INFO("scene from {}", Settings.ScriptPath);
 		}
 
 		if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -91,9 +85,26 @@ namespace client {
 				return false;
 			}
 
-			Universe_->Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-				BuildDemoWorld(store, systems, Settings.Entities);
-			});
+			bool scripted = true;
+			Universe_->Enter(
+				id, [this, &scripted](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					if (Settings.ScriptPath.empty()) {
+						BuildDemoWorld(store, systems, Settings.Entities);
+						return;
+					}
+
+					// A script that fails leaves an empty world rather than a
+					// half-built one, so the failure is reported here and the
+					// client stops instead of presenting a black screen and
+					// letting somebody wonder why.
+					scripted = BuildScriptedWorld(store, systems, Settings.ScriptPath, Settings.Entities);
+				}
+			);
+
+			if (!scripted) {
+				ENGINE_ERROR("the scene script failed, so there is nothing to render");
+				return false;
+			}
 
 			// Sized at the world's entity count rather than at what it drew
 			// this frame, so publishing never allocates. A demo world draws at

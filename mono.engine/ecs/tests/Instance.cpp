@@ -2,6 +2,7 @@
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -80,11 +81,11 @@ namespace instance_test {
 			Classes::Default<Bounds>(built.BasePart, Bounds{2.5f});
 			Classes::Default<Visual>(built.Part, Visual{Name("test.mesh.cube"), true});
 
-			Classes::Property<Transform>(built.PVInstance, "X", &Transform::X);
-			Classes::Property<Transform>(built.PVInstance, "Y", &Transform::Y);
-			Classes::Property<Bounds>(built.BasePart, "HalfExtent", &Bounds::HalfExtent);
-			Classes::Property<Visual>(built.Part, "Visible", &Visual::Visible);
-			Classes::Property<Visual>(built.Part, "Mesh", &Visual::Mesh);
+			Classes::Property<&Transform::X>(built.PVInstance, "X");
+			Classes::Property<&Transform::Y>(built.PVInstance, "Y");
+			Classes::Property<&Bounds::HalfExtent>(built.BasePart, "HalfExtent");
+			Classes::Property<&Visual::Visible>(built.Part, "Visible");
+			Classes::Property<&Visual::Mesh>(built.Part, "Mesh");
 
 			return built;
 		}();
@@ -144,7 +145,7 @@ TEST_CASE("registering the same class name twice returns the same id", "[ecs]") 
 	REQUIRE(Classes::Register("test.Part", {}) == tree.Part);
 }
 
-TEST_CASE("properties resolve to a component and an offset", "[ecs]") {
+TEST_CASE("a field property generates a conversion that reads and writes it", "[ecs]") {
 	const Tree &tree = Classes_();
 	const auto properties = Classes::Describe(tree.Part).Properties;
 
@@ -158,14 +159,39 @@ TEST_CASE("properties resolve to a component and an offset", "[ecs]") {
 		return properties.front();
 	};
 
-	// Measured from a real object rather than declared, so a reordered field
-	// cannot point a binding at the wrong bytes.
 	const auto x = find("X");
-	const auto y = find("Y");
-	REQUIRE(x.Component == Components::Of<Transform>());
-	REQUIRE(x.Offset == 0);
-	REQUIRE(y.Offset == sizeof(float));
 	REQUIRE(x.Type == PropertyType::Float);
+	REQUIRE(x.Kind == engine::ecs::PropertyKind::Field);
+	REQUIRE(x.Size == sizeof(float));
+
+	// The components it touches are declared rather than inferred. v0.6's
+	// per-instance `.Changed` needs this to fan one component write out to
+	// every property name observing it.
+	REQUIRE(x.Reads->Contains(Components::Of<Transform>()));
+	REQUIRE(x.Writes->Contains(Components::Of<Transform>()));
+
+	// This is the assertion that used to be `Offset == 0`, and it is a stronger
+	// one: a generated conversion pointed at the wrong field passes an offset
+	// check and fails this.
+	Store store("test");
+	const Entity part = store.CreateInstance(tree.Part);
+
+	float read = -1.0f;
+	REQUIRE(x.Get(store, part, &read));
+	REQUIRE(read == 0.0f);
+
+	const float written = 4.5f;
+	REQUIRE(x.Set(store, part, &written));
+	REQUIRE(store.Get<Transform>(part)->X == 4.5f);
+	REQUIRE(store.Get<Transform>(part)->Y == 0.0f);
+
+	// The other field of the same component, so a conversion that ignored its
+	// member pointer and wrote the front of the struct would fail here.
+	const auto y = find("Y");
+	const float second = -2.25f;
+	REQUIRE(y.Set(store, part, &second));
+	REQUIRE(store.Get<Transform>(part)->Y == -2.25f);
+	REQUIRE(store.Get<Transform>(part)->X == 4.5f);
 
 	REQUIRE(find("Visible").Type == PropertyType::Bool);
 	REQUIRE(find("Mesh").Type == PropertyType::Name);

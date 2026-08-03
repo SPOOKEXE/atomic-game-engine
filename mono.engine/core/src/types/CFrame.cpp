@@ -3,6 +3,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+#include <algorithm>
+#include <cmath>
+
 namespace engine::core {
 
 	namespace {
@@ -24,6 +27,55 @@ namespace engine::core {
 		const glm::quat aroundZ = glm::angleAxis(roll, glm::vec3{0.0f, 0.0f, 1.0f});
 
 		return CFrame(Vector3::Zero, glm::normalize(aroundY * aroundX * aroundZ));
+	}
+
+	Vector3 CFrame::ToAngles() const {
+		// Derived from `Angles`' own composition rather than taken from a
+		// general Euler-extraction routine: R = Ry(yaw) * Rx(pitch) * Rz(roll),
+		// so the elements below are the ones that isolate each turn. A different
+		// order would extract angles that rebuild a different rotation, which is
+		// the failure this function exists to avoid.
+		//
+		// glm is column-major, so `matrix[column][row]`.
+		const glm::mat3 matrix = glm::mat3_cast(glm::normalize(Rotation()));
+
+		// Row 1, column 2 is -sin(pitch) and nothing else.
+		const float negativeSinePitch = std::clamp(matrix[2][1], -1.0f, 1.0f);
+		const float pitch = std::asin(-negativeSinePitch);
+
+		// cos(pitch) scales every term the yaw and roll extractions use, so near
+		// the pole both atan2 calls approach 0/0.
+		//
+		// **Measured from the terms themselves rather than from `cos(pitch)`,
+		// and the threshold is about conditioning rather than about dividing by
+		// zero.** atan2 is defined at the origin, so the failure is not a NaN —
+		// it is a confidently wrong angle. The first version of this tested
+		// `cos(pitch) < 1e-6` and was wrong for a reason worth keeping: at a
+		// true pole the quaternion round-trip leaves `sin(pitch)` at
+		// 0.99999994 rather than 1, so `cos(pitch)` reads 3.5e-4 — a thousand
+		// times the threshold — while the two elements below have already lost
+		// every significant bit. A test on the derived angle cannot see that;
+		// a test on the operands can.
+		//
+		// 1e-3 is where float noise in a normalised rotation stops being small
+		// against the values carrying the ratio. The nearest angle any caller
+		// is likely to sit at is one degree off the pole, where this reads
+		// 1.7e-2 — comfortably outside.
+		constexpr float NEAR_POLE = 1.0e-3f;
+		const float yawTermMagnitude = std::hypot(matrix[2][0], matrix[2][2]);
+
+		if (yawTermMagnitude < NEAR_POLE) {
+			// Roll folded into yaw. See the header: the rotation is reproduced
+			// exactly, but the split between the two coincident axes is a
+			// convention rather than a measurement.
+			return Vector3{pitch, std::atan2(-matrix[0][2], matrix[0][0]), 0.0f};
+		}
+
+		return Vector3{
+			pitch,
+			std::atan2(matrix[2][0], matrix[2][2]),
+			std::atan2(matrix[0][1], matrix[1][1]),
+		};
 	}
 
 	CFrame CFrame::LookAt(const Vector3 &from, const Vector3 &to, const Vector3 &up) {

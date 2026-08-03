@@ -3,6 +3,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/Components.hpp>
@@ -78,13 +79,7 @@ namespace server {
 		}
 
 		if (!Settings.GamePath.empty()) {
-			// TODO(v0.5+): hand this to gamefile::Reader. Refusing loudly beats
-			// accepting a path and hosting something else.
-			ENGINE_WARN(
-				"--game is accepted but has no effect until the game file format lands. "
-				"Hosting the placeholder world instead of '{}'.",
-				Settings.GamePath
-			);
+			ENGINE_INFO("hosting the scene in {}", Settings.GamePath);
 		}
 
 		if (Settings.TickRate <= 0.0) {
@@ -207,7 +202,9 @@ namespace server {
 		}
 
 		Worlds().Enter(PrimaryWorld, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-			BuildPlaceholderWorld(store, systems, Settings.Entities);
+			if (!BuildWorld(store, systems)) {
+				return;
+			}
 			if (Settings.Chatter) {
 				store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
 			}
@@ -227,6 +224,27 @@ namespace server {
 
 		Running = true;
 		ENGINE_INFO("server ready at {:.1f} Hz", Settings.TickRate);
+		return true;
+	}
+
+	bool Server::BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
+		if (Settings.GamePath.empty()) {
+			BuildPlaceholderWorld(store, scheduler, Settings.Entities);
+			return true;
+		}
+
+		// The same loader the client calls, over the same file. A server that
+		// authored the scene differently would be disagreeing with its own
+		// replicas once per tick, and every side would look self-consistent.
+		//
+		// What it does *not* install is the client's half — there is no camera
+		// and no draw list here, because a server draws nothing. That split is
+		// the reason the loader stops where it does.
+		std::string error;
+		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {
+			ENGINE_ERROR("--game '{}' failed:\n{}", Settings.GamePath, error);
+			return false;
+		}
 		return true;
 	}
 
@@ -399,7 +417,9 @@ namespace server {
 			}
 
 			Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-				BuildPlaceholderWorld(store, systems, Settings.Entities);
+				if (!BuildWorld(store, systems)) {
+					return;
+				}
 				if (Settings.Chatter) {
 					store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
 				}
