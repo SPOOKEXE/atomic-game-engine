@@ -4,6 +4,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
@@ -361,7 +362,20 @@ namespace engine::script {
 		//
 		// Each of the first three is one of §1's three legal resume sources, in
 		// the order the barrier produced them.
-		std::string firstError = PumpDeliveries(State, Store);
+		//
+		// **A span each, because one span over all four answers nothing.** The
+		// four do entirely different work — a bus drain, a signal fan-out, a
+		// coroutine resume and a script's own beat — and they fail differently:
+		// deliveries scale with traffic, changes with how much of the world
+		// moved, tasks with how many are due, and the beat with what the game
+		// wrote. A single `script heartbeat` bar that spikes says only that
+		// something did, which is where this was before a spike had to be found
+		// in `Mirrors-1-world` and nothing under it could be read.
+		std::string firstError;
+		{
+			ENGINE_PROFILE_CAT("script deliveries", core::ProfileCategory::Script);
+			firstError = PumpDeliveries(State, Store);
+		}
 
 		const auto note = [&](std::string message) {
 			if (firstError.empty()) {
@@ -369,9 +383,37 @@ namespace engine::script {
 			}
 		};
 
-		note(PumpChanges(State));
-		note(PumpTasks(State));
-		note(PumpHeartbeat(State, delta));
+		{
+			ENGINE_PROFILE_CAT("script changes", core::ProfileCategory::Script);
+			note(PumpChanges(State));
+		}
+		{
+			ENGINE_PROFILE_CAT("script tasks", core::ProfileCategory::Script);
+			note(PumpTasks(State));
+		}
+		{
+			ENGINE_PROFILE_CAT("script beat", core::ProfileCategory::Script);
+			note(PumpHeartbeat(State, delta));
+		}
+
+		// **The collector, on the host's clock rather than on an allocation's.**
+		//
+		// Luau collects incrementally when a script allocates, which puts the
+		// pause inside whichever `Vector3.new` happened to cross the threshold —
+		// so it lands *inside* the beat's span and is invisible as itself. A
+		// scene animating parts allocates hard: `Mirrors-1-world` builds two
+		// vectors and two CFrames per caster per frame, which at 24 casters and
+		// 60 Hz is thousands of objects a second, and the collector's cost shows
+		// up as a beat that is occasionally slow for no reason the beat can
+		// explain.
+		//
+		// Stepping it here does not stop the automatic collector — it means part
+		// of the debt is paid where it can be seen and named. What it costs is
+		// one span a tick.
+		{
+			ENGINE_PROFILE_CAT("script gc", core::ProfileCategory::Script);
+			lua_gc(State, LUA_GCSTEP, 1);
+		}
 
 		Error = firstError;
 		return Error.empty();
