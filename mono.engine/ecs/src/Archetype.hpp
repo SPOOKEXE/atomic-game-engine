@@ -86,6 +86,15 @@ namespace engine::ecs {
 			return Columns[position];
 		}
 
+		// Bytes this table's storage is holding, live rows or not.
+		//
+		// Every column plus the id array beside them, because the id array grows
+		// with the population exactly as a column does and is a quarter of a
+		// row's bytes at the shapes `ecs/docs/TODO.md` measures.
+		//
+		// @return The resident bytes.
+		size_t ResidentBytes() const;
+
 		// The entity ids, one per row, in row order.
 		//
 		// @return A view valid until the next structural change.
@@ -99,6 +108,20 @@ namespace engine::ecs {
 		// @return The entity.
 		Entity EntityAt(size_t row) const {
 			return Ids[row];
+		}
+
+		// Renames the entity a row belongs to, leaving the row where it is.
+		//
+		// **For promotion, and nothing else.** A predicted entity becoming a
+		// server one keeps every component value it had; what changes is the
+		// handle naming it, and the id array is the one copy of that handle the
+		// row itself carries. Moving the row instead would churn every column
+		// for a change that is one 64-bit write.
+		//
+		// @param row    The row to rename, which must be less than Rows().
+		// @param entity The handle the row now belongs to.
+		void Rename(size_t row, Entity entity) {
+			Ids[row] = entity;
 		}
 
 		// Appends a row for `entity`, default-constructing every component.
@@ -154,6 +177,9 @@ namespace engine::ecs {
 		bool Read(core::ByteReader &reader, size_t rows);
 
 	  private:
+		// Gives back the id array's capacity once it is far past the row count.
+		void TrimIds();
+
 		// The interned set, which lives for the process.
 		const ComponentSet *Members;
 

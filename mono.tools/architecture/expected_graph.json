@@ -52,10 +52,35 @@
         "parallel"
       ]
     },
+    "spatial": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "scene": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "spatial"
+      ]
+    },
     "assets": {
       "tier": "shared",
       "links": [
         "core"
+      ]
+    },
+    "physics": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
       ]
     },
     "net": {
@@ -74,7 +99,11 @@
     "render": {
       "tier": "client",
       "links": [
-        "core"
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -88,6 +117,8 @@
         "parallel",
         "render",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -100,6 +131,8 @@
         "net",
         "parallel",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"
@@ -147,6 +180,8 @@
         "parallel",
         "render",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -159,6 +194,8 @@
         "net",
         "parallel",
         "replication",
+        "scene",
+        "spatial",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"

@@ -152,6 +152,19 @@ namespace engine::replication {
 			return false;
 		}
 
+		if (packet->Header.Channel == net::ChannelKind::Handshake) {
+			// **Refused before `OnPacket`, which is the point.** A session
+			// exists because an admission already succeeded, so a second key
+			// exchange arriving on it is a replay or somebody at this address
+			// trying to take the connection from under whoever holds it —
+			// and letting it reach the link would let that somebody reset the
+			// idle timeout of a connection they do not own. The listener
+			// answers the one legitimate case, a `Welcome` that went missing,
+			// before a datagram ever gets here.
+			Stats_.Refused++;
+			return false;
+		}
+
 		if (!Link_.OnPacket(packet->Header, packet->Payload.size(), nowSeconds)) {
 			// Stale, or a link that is not accepting. Counted rather than
 			// treated as malformed: an unreliable transport reorders, and a

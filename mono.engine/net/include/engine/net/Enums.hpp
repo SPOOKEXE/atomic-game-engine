@@ -105,6 +105,22 @@ namespace engine::net {
 		// For the things a game cannot lose and cannot reorder: a door opened, a
 		// player joined, a script's remote call.
 		Reliable,
+
+		// Connection setup, before there is a connection.
+		//
+		// **Neither of the two above, and that is why it is a channel rather
+		// than a payload byte.** A handshake datagram is answered without a
+		// `Link` — the whole point is that a stranger's first datagram allocates
+		// nothing — so there is no sequence for it to be newer than and no
+		// reliable window for it to be ordered in. Marking it here means it is
+		// still a `Packet`: one magic, one version, one framing, and a router
+		// can tell "this is somebody trying to connect" from "this belongs to a
+		// connection" before it has decided whether the sender is either.
+		//
+		// Retransmission on this channel is the *initiator's*, on a timer, and
+		// nothing here holds anything for it. A responder that had to remember
+		// what it sent is exactly the state the challenge exists to avoid.
+		Handshake,
 	};
 
 	// Returns a stable, human-readable name for a connection state.

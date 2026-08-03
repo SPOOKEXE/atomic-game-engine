@@ -2,11 +2,15 @@
 
 // The v0.1 demo scene.
 //
-// Components and resources live here rather than in `ecs` because the ECS is
-// storage and does not know what a Transform is, and rather than in `render`
-// because a transform is not a presentation concept. They move to `scene` at L7
-// when v0.4 brings the real Basic Components set; until then the program that
-// uses them owns them, which is the smallest place they can live.
+// **The components are `mono.engine/scene`'s and nothing here declares one.**
+// This file used to carry a `Transform`, a `PreviousTransform`, a `Visual`, a
+// `SceneBounds` and an `ActiveCamera` of its own, because the ECS is storage
+// and does not know what a Transform is and there was nowhere shared to put
+// them. `scene` at L7 is that place, both programs register the same set under
+// the same names, and a snapshot now crosses between them with no translation
+// layer. What is left here is the demo: `Spin` and `Orbit`, which describe how
+// this scene moves and nothing else does, and `DrawList`, which is what one
+// world hands its compositor.
 //
 // **There is no scene object.** Building the world is a function, and
 // everything the tick touches is in the store: per-entity data as components,
@@ -15,12 +19,10 @@
 // the world, where the affinity check does not cover it, the profiler does not
 // see it, and a second world cannot have its own.
 
-#include <engine/core/types/CFrame.hpp>
-#include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/render/Renderer.hpp>
+#include <engine/scene/DrawInstance.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -28,30 +30,6 @@
 namespace client {
 
 	// --- components: per-entity, and iterated ------------------------------
-
-	// Where a thing is. One CFrame, no scale — scale belongs to what is being
-	// drawn, not to where it is.
-	struct Transform {
-		// Position and orientation together. No scale — scale belongs to what is
-		// being drawn, not to where it is.
-		engine::core::CFrame Frame;
-	};
-
-	// Where it was at the start of the current tick.
-	//
-	// Rendering runs faster than the simulation ticks, so drawing at tick
-	// positions makes everything judder at the beat frequency between the two.
-	// The render interpolates from here to Transform by the clock's alpha.
-	//
-	// Deliberately its own component rather than reusing a previous-frame
-	// matrix kept for velocity or temporal AA. RENDER_PIPELINE.md §14 flags
-	// that reuse as coupling two features that are independent, and it is
-	// cheaper to keep them apart now than to untangle them later.
-	struct PreviousTransform {
-		// Where Transform::Frame was when the current tick began. The render
-		// interpolates from here to there by the clock's alpha.
-		engine::core::CFrame Frame;
-	};
 
 	// Radians per second about each local axis.
 	struct Spin {
@@ -84,42 +62,9 @@ namespace client {
 		float Height = 0.0f;
 	};
 
-	// What an entity looks like: the two things the instanced pass needs per
-	// cube, and nothing else. A material is a v0.2 concern.
-	struct Visual {
-		// Flat albedo. There is no lighting model at v0.1, so this is the colour
-		// that reaches the screen rather than an input to one.
-		engine::core::Color3 Colour;
-
-		// Edge length of the cube, in metres. Here rather than on Transform
-		// because scale describes the thing being drawn, not where it is.
-		float Size = 1.0f;
-	};
-
 	// --- resources: one of each, for the whole world -----------------------
 
-	// How far the scene reaches from the origin. Written once while building,
-	// read by the camera system.
-	struct SceneBounds {
-		// Metres from the origin to the furthest thing in the scene. The camera
-		// system frames the world from it, so a larger scene pulls the camera
-		// back without anybody choosing a distance.
-		float Extent = 1.0f;
-	};
-
-	// Where the world is looked at from.
-	//
-	// A resource rather than a component on a camera entity: there is one, and
-	// nothing iterates it. Componentising it would buy an archetype, a query
-	// and a loop that runs once, and would turn "where is the camera" from a
-	// lookup into a search. GARG_ECS_Layout.md §5.
-	struct ActiveCamera {
-		// The camera the next frame is drawn from. One per world, replaced
-		// wholesale rather than edited in place.
-		engine::render::Camera Value;
-	};
-
-	// What to draw this frame, in the flat form the renderer wants.
+	// What to draw this frame, as the *world* describes it.
 	//
 	// In the world rather than beside it, because the alternative is the thing
 	// repo_layout.md §1 names outright: a module keeping a private vector for
@@ -128,9 +73,14 @@ namespace client {
 	struct DrawList {
 		// One entry per visible cube, rebuilt every frame.
 		//
+		// `scene::DrawInstance`, not a renderer's instance: a `server`-tier host
+		// publishes one of these too, so the payload cannot be a type only a
+		// client can name. The conversion into a matrix and an RGBA happens in
+		// `render`, once, at the point of upload.
+		//
 		// Cleared rather than reallocated, so the capacity survives from frame
 		// to frame and a steady scene stops allocating after the first one.
-		std::vector<engine::render::Instance> Instances;
+		std::vector<engine::scene::DrawInstance> Instances;
 	};
 
 	// Builds a scene of `count` orbiting, spinning cubes, registers the systems

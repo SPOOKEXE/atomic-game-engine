@@ -16,6 +16,13 @@ mono_add_library(client
 		Engine::input
 		Engine::render
 
+		# L7, `shared`. The component set both programs share: the demo world is
+		# built out of it, the replicated world arrives as it, and the draw list
+		# a world publishes is `scene::DrawInstance`. Before v0.4 this directory
+		# declared its own `Transform` and its own copy of the server's
+		# components, and the two had to be kept in step by hand.
+		Engine::scene
+
 		# `--connect` makes one of this client's worlds somebody else's
 		# authority. Both are `shared` tier, so neither widens what a client is
 		# allowed to link — the tier rule already permits `shared` here.

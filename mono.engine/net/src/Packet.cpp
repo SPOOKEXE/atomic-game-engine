@@ -48,7 +48,7 @@ namespace engine::net {
 		Inbound inbound;
 
 		const uint8_t channel = reader.ReadUInt8();
-		if (channel > static_cast<uint8_t>(ChannelKind::Reliable)) {
+		if (channel > static_cast<uint8_t>(ChannelKind::Handshake)) {
 			// A byte outside the enum. Casting it anyway would produce a
 			// `ChannelKind` no switch handles, and every `Describe` and every
 			// dispatch downstream would then be reading a value the type says
@@ -76,6 +76,25 @@ namespace engine::net {
 
 		core::Metrics::Count("net.packet.read", 1.0);
 		return inbound;
+	}
+
+	std::optional<ChannelKind> Packet::PeekChannel(std::span<const std::byte> datagram) {
+		core::ByteReader reader(datagram);
+
+		if (reader.ReadUInt32() != MAGIC || reader.ReadUInt16() != VERSION) {
+			return std::nullopt;
+		}
+
+		const uint8_t channel = reader.ReadUInt8();
+		if (reader.Failed() || channel > static_cast<uint8_t>(ChannelKind::Handshake)) {
+			// Range-checked before the cast, the same as `Read` does it. A
+			// router switching on a value outside the enum is the one place
+			// where a byte from a stranger picks a code path the type says
+			// cannot be reached.
+			return std::nullopt;
+		}
+
+		return static_cast<ChannelKind>(channel);
 	}
 
 	bool Packet::IsNewer(uint16_t sequence, uint16_t against) {

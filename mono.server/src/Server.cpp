@@ -5,6 +5,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/scene/Components.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -251,18 +252,41 @@ namespace server {
 
 		Replication = std::make_unique<engine::replication::Listener>(*Socket);
 
+		if (!Replication->Admitting()) {
+			// The admission challenge is drawn from operating system entropy and
+			// there was none. Refusing to start beats listening on a port that
+			// turns every client away, which reads from outside exactly like a
+			// firewall problem.
+			ENGINE_ERROR("the admission challenge could not be seeded, so this server can admit nobody.");
+			return false;
+		}
+
 		// **Opt in, by name.** A world holds components no client has any
 		// business receiving, and a default of "everything" makes leaking one
-		// the consequence of forgetting rather than of deciding. These three are
+		// the consequence of forgetting rather than of deciding. These four are
 		// the placeholder scene; a game file names its own at v0.5.
-		Replication->Authority().Replicate(engine::core::Name("server.Position"));
-		Replication->Authority().Replicate(engine::core::Name("server.Velocity"));
+		//
+		// They are `scene`'s names, which are the same strings a client
+		// registers. They used to be `server.Position` and `server.Velocity`,
+		// and the client declared a matching pair of its own to receive them.
+		Replication->Authority().Replicate(engine::core::Name("scene.Transform"));
+		Replication->Authority().Replicate(engine::core::Name("scene.Motion"));
+
+		// Sent once in the join snapshot and never again: nothing in this world
+		// resizes or recolours anything, so they are never dirty and no delta
+		// carries them. They are here because a client that received a position
+		// and no size has nothing to draw.
+		Replication->Authority().Replicate(engine::core::Name("scene.Bounds"));
+		Replication->Authority().Replicate(engine::core::Name("scene.Visual"));
 
 		// A delta is the third reader of the dirty bits, so the components that
-		// travel have to be observed or nothing ever looks changed.
+		// travel *and change* have to be observed or nothing ever looks
+		// changed. `Bounds` and `Visual` are deliberately not observed — a
+		// dirty column for something nothing writes is a column paid for per
+		// tick and read never.
 		Worlds().Enter(PrimaryWorld, [](engine::ecs::Store &store) {
-			store.Observe<Position>();
-			store.Observe<Velocity>();
+			store.Observe<engine::scene::Transform>();
+			store.Observe<engine::scene::Motion>();
 		});
 
 		ENGINE_INFO("replication listening on {}", Socket->Local().Text());

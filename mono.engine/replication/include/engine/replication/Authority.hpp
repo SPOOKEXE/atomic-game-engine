@@ -18,6 +18,21 @@
 // destroyed — a client that conflated the two would delete something still
 // there and then be wrong about it the moment it came back into view.
 //
+// **Interest says what a client may see; priority says what fits.** When a
+// tick's delta is larger than one client's per-tick budget, the order the
+// entities go in is decided here — by a score the game supplies and a rotation
+// this class owns — rather than by where a component happens to sit in a
+// vector. See `SetPriority` and `AuthoritySettings::StarvationTicks`.
+//
+// **The cap is per client, and that is a decision rather than an omission.**
+// The budget being spent is `net::Link`'s and there is one link per connection,
+// so a per-server cap would have to be divided among clients before anything
+// could enforce it — and that division is a per-client cap with an extra step.
+// Interest is per client too, so two clients are owed different worlds and a
+// shared ordering would spend one client's bandwidth on another's entities. A
+// machine-wide uplink is still a real limit; it is `MaximumClients` multiplied
+// by this budget, which is a deployment decision and not an ordering one.
+//
 // @tier L12 · shared
 
 #include <engine/core/Name.hpp>
@@ -91,6 +106,38 @@ namespace engine::replication {
 		//
 		// A client this far behind cannot be caught up by deltas it never got.
 		uint64_t ResnapshotAfterTicks = 120;
+
+		// The most delta messages one client is sent per tick.
+		//
+		// **Per client, not per server** — the note at the top of this file
+		// says why. What does not fit is held over rather than dropped, and
+		// `Statistics::Deferred` says how much.
+		//
+		// Keep it under `net::LinkSettings::PacketsPerTick` with room left for
+		// `ChunksPerTick` and for reliable retransmissions, because all three
+		// spend the same budget. `Listener` warns at construction when the
+		// numbers do not add up; past that point `Link::Reserve` refuses the
+		// excess and `net::ConnectionStats::SendsOverBudget` is what says so.
+		size_t MessagesPerTick = 32;
+
+		// The most delta bytes one client is sent per tick.
+		//
+		// The second half of `net`'s pair of budgets, for the same reason it
+		// keeps two: a message count bounds per-packet overhead and a byte
+		// count bounds bandwidth, and neither implies the other.
+		size_t BytesPerTick = 32 * 1024;
+
+		// Ticks one entity's component value may wait before it outranks every
+		// score there is.
+		//
+		// **This is what makes "nothing starves" a property rather than a
+		// hope.** A score summed with a staleness term still lets a
+		// permanently high score hold a low one off the wire forever, and the
+		// symptom is one component looking broken rather than one budget
+		// looking small. A value that has waited this long jumps the whole
+		// queue instead, so the longest anything waits is this plus the ticks
+		// it takes to drain the backlog that was already waiting.
+		uint64_t StarvationTicks = 30;
 	};
 
 	// What the server owes each client this tick.
@@ -121,13 +168,47 @@ namespace engine::replication {
 
 		// Decides what a client may see.
 		//
-		// Called once per entity per client per tick, so it must be cheap. An
-		// empty predicate means every entity is visible to everybody, which is
-		// the right answer while worlds are small and the wrong one to leave in
-		// place silently — `Statistics::Visible` is what says which you have.
+		// Called once per client per tick for every entity that has something
+		// to send, so it must be cheap. An empty predicate means every such
+		// entity is visible to everybody, which is the right answer while
+		// worlds are small and the wrong one to leave in place silently —
+		// `Statistics::Visible` is what says which you have.
+		//
+		// **An entity carrying no replicated component is never offered here.**
+		// There is nothing to decide about it: it cannot be sent, and it must
+		// not appear in a snapshot as an empty row, because a row with no data
+		// still leaks how many entities the world holds.
 		//
 		// @param predicate Called as `predicate(ClientId, ecs::Entity)`.
 		void SetInterest(std::function<bool(ClientId, ecs::Entity)> predicate);
+
+		// Scores which entities a client is sent first when not all of them
+		// fit.
+		//
+		// Higher goes earlier. Only the order changes: `Replicate` and
+		// `SetInterest` still decide what may be sent at all, and a score
+		// cannot put an entity on the wire that interest excluded.
+		//
+		// **The game supplies this because the engine cannot.** Distance to
+		// the client's viewpoint and whether the client is looking at
+		// something are the two scores worth having and both are read off a
+		// transform, which this module deliberately does not know about — it
+		// carries named components and has no idea which of them is a
+		// position. The same argument `SetInterest` is built on.
+		//
+		// Called once per entity per client on a tick where the budget is
+		// short, so it must be cheap. Non-finite results are read as zero: a
+		// NaN in a comparator is not a weak ordering and `std::sort` on one is
+		// undefined rather than merely wrong.
+		//
+		// **A score alone cannot starve anything.** A value that has waited
+		// `AuthoritySettings::StarvationTicks` outranks every score, which is
+		// what bounds the wait.
+		//
+		// @param score Called as `score(ClientId, ecs::Entity)`. Empty scores
+		//        everything the same, which leaves the rotation in sole charge
+		//        and is a plain round robin.
+		void SetPriority(std::function<float(ClientId, ecs::Entity)> score);
 
 		// Admits a client. It will be sent a full snapshot before any delta.
 		//
@@ -164,11 +245,33 @@ namespace engine::replication {
 
 		// What to send one client, each entry a whole message.
 		//
-		// Valid until the next `Publish`.
+		// Valid until the next `Publish`. **Send them in order and hand back
+		// what the transport refused** — see `Unsent`.
 		//
 		// @param client The client to ask about.
 		// @return The messages, in the order they should go.
 		std::span<const std::vector<std::byte>> Outgoing(ClientId client) const;
+
+		// Hands back a message from `Outgoing` that the transport would not
+		// take.
+		//
+		// **A refusal is ordinary backpressure for some of these messages and
+		// a permanent hole for the rest, and the two are indistinguishable at
+		// the call site — which is the whole reason this exists.** A component
+		// value carried by a refused delta is offered again next tick by the
+		// unconfirmed set, so there is nothing to undo. A snapshot chunk is
+		// not: the cursor moved when the chunk was *built*, so a refused chunk
+		// is a gap in a stream the receiver waits on forever, and the symptom
+		// is a client that streams 184 chunks of 192 and then refuses every
+		// delta that follows as stale. A creation, a destruction and a forget
+		// are each said exactly once and moved the known set when they were
+		// built, so they are the same shape of loss.
+		//
+		// Safe to call for any index, including one that needs nothing undone.
+		//
+		// @param client The client the message was for.
+		// @param index  Its position in `Outgoing`.
+		void Unsent(ClientId client, size_t index);
 
 		// Takes a message from a client.
 		//
@@ -227,6 +330,9 @@ namespace engine::replication {
 			// Entities visible, summed across clients. Compared against the
 			// world's own count, this is what says whether interest is
 			// filtering anything at all.
+			//
+			// Counts what a client is actually told about, so an entity with no
+			// replicated component is not in it — see `Bearing`.
 			size_t Visible = 0;
 
 			// Clients restarted from a snapshot because they fell too far
@@ -235,6 +341,26 @@ namespace engine::replication {
 
 			// Messages refused as malformed since the last reset.
 			size_t Refused = 0;
+
+			// Entity values the per-client cap held over to a later tick,
+			// summed across clients.
+			//
+			// **This is "the budget was exceeded", and it is deliberately not
+			// the same number as `net::ConnectionStats::SendsOverBudget`.**
+			// That one counts what the *link* refused, which after this cap
+			// exists means something went wrong — a retransmission storm, or a
+			// cap set above the link's own budget. This one counts what the
+			// authority chose to hold back, which is the ordinary answer to a
+			// world larger than a link and is the number to read before
+			// concluding that a component has stopped replicating.
+			size_t Deferred = 0;
+
+			// Ticks the longest-waiting held-over value has waited.
+			//
+			// Bounded by `AuthoritySettings::StarvationTicks` plus the ticks
+			// it takes to drain the backlog ahead of it. Growing without limit
+			// is the rotation not working, and there is no other symptom.
+			uint64_t Stalest = 0;
 		};
 
 		// What the last `Publish` did.
@@ -245,6 +371,56 @@ namespace engine::replication {
 		}
 
 	  private:
+		// The index that names no position, for a record that has none.
+		static constexpr size_t NOWHERE = static_cast<size_t>(-1);
+
+		// One entity's value for one component, from the sender's side.
+		//
+		// Three ticks rather than one, because the three questions they answer
+		// pulled apart the moment a value could be built and then held over.
+		struct Outstanding {
+			// The tick this value last actually went out on, or zero while it
+			// has changed and not been sent.
+			//
+			// **An acknowledgement may only retire a non-zero one.** Retiring
+			// on a tick the value never left confirms something the client was
+			// never told, and the entity is then wrong until a re-snapshot
+			// that nothing will ask for.
+			uint64_t SentAt = 0;
+
+			// The tick it started waiting, or zero while nothing is waiting.
+			// What the rotation measures — a value the budget held over keeps
+			// this, so its wait grows until it outranks everything.
+			uint64_t WaitingSince = 0;
+
+			// The tick it was last put into a delta being built, so the
+			// recovery walk does not add the same entity twice.
+			uint64_t ConsideredAt = 0;
+		};
+
+		// One entity leaving or entering a client's known set.
+		struct Edit {
+			uint64_t Entity = 0;
+
+			// Whether undoing this means putting the entity back in the known
+			// set. A destroy and a forget both took one out; a creation put
+			// one in.
+			bool Restore = false;
+		};
+
+		// What one outgoing message moved, so a refusal can move it back.
+		//
+		// **Only what cannot rebuild itself is here.** A component value in a
+		// refused delta is offered again next tick by the unconfirmed set.
+		struct Carried {
+			// Where in the snapshot a chunk started, or `NOWHERE`.
+			size_t SnapshotOffset = NOWHERE;
+
+			// The half-open range of `Client::Edits` this message announced.
+			uint32_t First = 0;
+			uint32_t Count = 0;
+		};
+
 		struct Client {
 			uint32_t Generation = 0;
 			bool Live = false;
@@ -259,6 +435,14 @@ namespace engine::replication {
 			std::unordered_set<uint64_t> Known;
 
 			uint64_t Applied = 0;
+
+			// The tick a delta last actually went out on.
+			//
+			// Paired with `Applied` to say whether a client is behind or merely
+			// watching a world where nothing is happening. Without it the two
+			// are indistinguishable and the second is re-snapshotted for ever.
+			uint64_t Streamed = 0;
+
 			std::vector<Input> Pending;
 			std::vector<std::vector<std::byte>> Outgoing;
 
@@ -279,17 +463,70 @@ namespace engine::replication {
 			// is replaced rather than appended when the same entity changes
 			// again, and the whole map is dropped when a client is
 			// re-snapshotted.
-			std::vector<std::unordered_map<uint64_t, uint64_t>> Unconfirmed;
+			std::vector<std::unordered_map<uint64_t, Outstanding>> Unconfirmed;
+
+			// What each entry of `Outgoing` moved when it was built, so that
+			// `Unsent` can move it back. Parallel to `Outgoing`.
+			std::vector<Carried> Carried_;
+
+			// The known-set edits the messages above are carrying, referenced
+			// by `Carried::First` and `Carried::Count`. One flat list rather
+			// than a vector per message, because a per-message vector is an
+			// allocation per message per tick for something almost always
+			// empty.
+			std::vector<Edit> Edits;
+		};
+
+		// One entity's value for one component, built and waiting for a place
+		// in a message.
+		//
+		// **Materialised before the order is decided**, so the priority pass
+		// permutes rows that are already in `Delta::Components` rather than
+		// reading the world a second time. That is also what keeps the
+		// unpressured path free: the values were copied run by run exactly as
+		// `EachChangedRuns` handed them over, and if everything fits, nothing
+		// looks at these again.
+		struct Candidate {
+			// Which entry of `Delta::Components` holds this value.
+			uint32_t Entry = 0;
+
+			// Which row of that entry.
+			uint32_t Row = 0;
+
+			ecs::Entity Entity;
+
+			// The tick this value started waiting.
+			uint64_t WaitingSince = 0;
+
+			// What `SetPriority` said, or zero.
+			float Hint = 0.0f;
+		};
+
+		// How much of a delta a packing pass got onto the wire.
+		struct Placement {
+			// Leading entries of `Delta::Created` that went.
+			size_t Created = 0;
+
+			// Leading entries of `Delta::Destroyed` that went.
+			size_t Destroyed = 0;
+
+			// Leading entries of `Order` that went.
+			size_t Values = 0;
 		};
 
 		Client *Reach(ClientId client);
 		const Client *Reach(ClientId client) const;
+		void Survey(ecs::Store &store);
 		void BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick);
 		void BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
-		void EmitDelta(Client &client, const Delta &delta);
+		void Prioritise(ClientId client, uint64_t tick);
+		Placement Pack(Client &client, const Delta &delta, size_t messageLimit);
+		void Record(Client &client, const Delta &delta, const Placement &placed, uint64_t tick);
+		void EmitForget(Client &client, const Forget &forget);
 
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity)> Interest;
+		std::function<float(ClientId, ecs::Entity)> Priority;
 		std::vector<core::Name> Components;
 		std::vector<Client> Clients;
 		Statistics Stats_;
@@ -297,6 +534,40 @@ namespace engine::replication {
 		// Reused between ticks so a server streaming every frame stops
 		// allocating.
 		std::vector<ecs::Entity> Visible;
-		std::vector<std::byte> Scratch;
+		std::vector<Candidate> Candidates;
+
+		// Entities carrying at least one replicated component, sorted, rebuilt
+		// once per `Publish`.
+		//
+		// **An entity with none of them is not sent at all, not even as an
+		// empty row.** A bare row in a join snapshot carries no data and still
+		// tells a client how many entities the server is holding, which is a
+		// count of a world it was told it may not see. It is one list rather
+		// than one per client because the answer does not depend on the client
+		// — interest does, this does not.
+		std::vector<uint64_t> Bearing;
+
+		// The replicated components, resolved to ids once per `Publish` instead
+		// of once per entity.
+		std::vector<ecs::ComponentId> Resolved;
+
+		// Indices into `Candidates`, in the order they should go out. The one
+		// place the priority decision lives.
+		std::vector<uint32_t> Order;
+
+		// Per entry of `Delta::Components`: the bytes one entity's value
+		// occupies, and which `Components` slot it came from.
+		std::vector<size_t> Strides;
+		std::vector<size_t> SourceSlot;
+
+		// Which entry of the message being packed is open for each entry of
+		// the delta, so a component's name is written once per message rather
+		// than once per entity.
+		std::vector<size_t> OpenEntry;
+
+		// Entities the recovery walk is about to consider, sorted — an
+		// unordered map is walked in whatever order it likes, and two runs of
+		// one server have to produce the same bytes.
+		std::vector<uint64_t> Recovering;
 	};
 }

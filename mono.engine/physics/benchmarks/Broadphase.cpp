@@ -1,0 +1,248 @@
+// What the broad phase costs per 1000 colliders.
+//
+// `v02v03v04.md` §3.6 asks for the figure and `spatial/benchmarks/HashGrid.cpp`
+// holds the half of it that belongs to the index — the rebuild alone, over bare
+// proxies. This is the other half: what a *world* pays, which is the pass that
+// derives every world box from a `Transform` and a `Collider`, the rebuild, and
+// then the pair walk over it.
+//
+// Everything is reported per iteration, so a scene of 1000 colliders and one of
+// 8000 are directly comparable and the per-thousand figure is a division
+// anybody can do in their head.
+//
+// The scene is a slab rather than a cube: colliders spread wide on X and Z and
+// thin on Y, which is what a world of rooms and floors looks like and is the
+// case a uniform grid is either good or bad at. The static/dynamic split is
+// four to one, because most of a world does not move — and the whole reason
+// there are two indexes is that the static four fifths are not re-measured.
+//
+// What it measured, in the `bench` preset, on a 24-thread machine. The figures
+// are the minimum sample per iteration, with the spread beside them:
+//
+// | Row, 4000 colliders at 4 m | Cost |
+// |---|---|
+// | Sync only | 27.8 us ± 2.2 |
+// | Sync with the static index rebuilt too | 163 us ± 5 |
+// | Pairs only | 194 us ± 9 |
+// | Sync + pairs | 232 us ± 45 |
+//
+// **The second index is worth 135 microseconds a tick at four thousand
+// colliders**, which is the whole of its justification and is five times the
+// cost of the sync that remains.
+//
+// Per thousand colliders the total is 16 us at 1000, 58 us at 4000 and 172 us
+// at 16000. That climbs because the scene volume is fixed, so the *density*
+// rises with the count and the pair walk is quadratic in it — a bigger world
+// with the same spacing would not.
+//
+// Cell size, over the same 4000: 515 us at 2 m, 232 us at 4 m, 185 us at 8 m.
+// `spatial::HashGrid::DEFAULT_CELL_SIZE` is 4 m, chosen against the index alone
+// over bare proxies, and this world would prefer 8. That is one scene and one
+// density, and changing a default that another module measured wants its own
+// measurement — `PreparePhysicsWorld` takes a cell size for exactly this
+// reason, and a world that has measured its own should pass it.
+
+#include <engine/core/Random.hpp>
+#include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/physics/Broadphase.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
+#include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/spatial/LayerMask.hpp>
+#include <engine/testing/Bench.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+
+TEST_SUITE_ID("engine.physics.bench.broadphase")
+
+using engine::core::CFrame;
+using engine::core::Random;
+using engine::core::Vector3;
+using engine::ecs::Entity;
+using engine::ecs::Store;
+using engine::physics::BroadPhase;
+using engine::physics::PhysicsWorld;
+using engine::physics::PreparePhysicsWorld;
+using engine::physics::SyncBroadphase;
+using engine::scene::Collider;
+using engine::scene::Motion;
+using engine::scene::Transform;
+using engine::spatial::LayerMask;
+using engine::testing::Consume;
+
+namespace broadphase_bench {
+	// Half the width of the slab the scene fills, in metres.
+	constexpr float SCENE_HALF_WIDTH = 128.0f;
+
+	// Half its height. A world is wide and shallow.
+	constexpr float SCENE_HALF_HEIGHT = 8.0f;
+
+	// Half the median collider's edge, so the median collider is two metres
+	// across — the same scene `spatial/benchmarks/HashGrid.cpp` measures the
+	// index against, so the two suites are readable side by side.
+	constexpr float MEDIAN_EXTENT = 1.0f;
+
+	// One in five colliders can move. The rest are the world.
+	constexpr size_t DYNAMIC_IN = 5;
+
+	// A world of `count` colliders, built once and reused.
+	//
+	// Deterministic through `core::Random`, which is indexed rather than
+	// streamed — so two runs measure the same scene and a difference between
+	// them is the code. Lazily rather than at static-initialisation time,
+	// because a store binds its owning thread on construction.
+	Store &WorldOf(size_t count, float cellSize) {
+		static std::vector<std::pair<std::pair<size_t, float>, std::unique_ptr<Store>>> built;
+
+		for (auto &[key, store] : built) {
+			if (key.first == count && key.second == cellSize) {
+				return *store;
+			}
+		}
+
+		auto store = std::make_unique<Store>("physics.bench.broadphase");
+		PreparePhysicsWorld(*store, cellSize);
+
+		for (size_t index = 0; index < count; index++) {
+			const auto seed = static_cast<uint32_t>(index);
+			const Vector3 centre{
+				Random::Range(seed, 3, -SCENE_HALF_WIDTH, SCENE_HALF_WIDTH),
+				Random::Range(seed, 5, -SCENE_HALF_HEIGHT, SCENE_HALF_HEIGHT),
+				Random::Range(seed, 7, -SCENE_HALF_WIDTH, SCENE_HALF_WIDTH),
+			};
+
+			const Entity entity = store->Create();
+			store->Set<Transform>(entity, Transform{CFrame{centre}});
+
+			// Spread around the median rather than all one size, so the index
+			// is not measured against colliders that all fit one cell exactly.
+			const float extent = MEDIAN_EXTENT * Random::Range(seed, 11, 0.4f, 2.5f);
+			Collider collider;
+			collider.Extent = Vector3{extent, extent, extent};
+			collider.Layer = LayerMask::Only(static_cast<uint32_t>(index % 4));
+			collider.Mask = LayerMask::All();
+			store->Set<Collider>(entity, collider);
+
+			if (index % DYNAMIC_IN == 0) {
+				store->Set<Motion>(entity, Motion{Vector3{1.0f, 0.0f, 0.0f}, Vector3::Zero});
+			}
+		}
+
+		// One sync before anything is measured, so the static index is already
+		// built and the rows below measure the steady state rather than the
+		// first tick.
+		SyncBroadphase(*store);
+		BroadPhase(*store);
+
+		built.emplace_back(std::make_pair(count, cellSize), std::move(store));
+		return *built.back().second;
+	}
+
+	size_t PairCount(const Store &store) {
+		return store.Resource<PhysicsWorld>()->Pairs().size();
+	}
+}
+
+using namespace broadphase_bench;
+
+// --- the whole per-tick cost, at three sizes ---------------------------------
+//
+// Sync plus pairs, which is what a world actually pays each tick. Divide by the
+// collider count for the figure §3.6 asks for.
+
+BENCH("Sync + pairs · 1000 colliders, 4m cells", 200) {
+	Store &store = WorldOf(1000, 4.0f);
+	for (int pass = 0; pass < 200; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 4000 colliders, 4m cells", 50) {
+	Store &store = WorldOf(4000, 4.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 16000 colliders, 4m cells", 20) {
+	Store &store = WorldOf(16000, 4.0f);
+	for (int pass = 0; pass < 20; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+// --- the two halves apart ----------------------------------------------------
+//
+// Which of the two is worth optimising is not obvious from the total: the sync
+// is a linear pass and a rebuild, and the pair walk is a query per dynamic
+// collider against two indexes plus a sort.
+
+BENCH("Sync only · 4000 colliders, 4m cells", 50) {
+	Store &store = WorldOf(4000, 4.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		Consume(store.Resource<PhysicsWorld>()->DynamicColliders());
+	}
+}
+
+BENCH("Pairs only · 4000 colliders, 4m cells", 50) {
+	Store &store = WorldOf(4000, 4.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+// --- what the static index is worth ------------------------------------------
+//
+// The same scene with the static set marked dirty every tick, which is what a
+// single index would cost — every anchored collider re-measured and re-hashed
+// for a world that did not move. The gap between this and "Sync only" above is
+// the whole justification for the second grid.
+
+BENCH("Sync with the static index rebuilt too · 4000 colliders", 50) {
+	Store &store = WorldOf(4000, 4.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		store.ResourceMutable<PhysicsWorld>()->MarkStaticDirty();
+		SyncBroadphase(store);
+		Consume(store.Resource<PhysicsWorld>()->StaticColliders());
+	}
+}
+
+// --- how the total moves with cell size --------------------------------------
+//
+// `spatial` chose four metres from the index alone, over bare proxies. This is
+// the same question asked by a world: smaller cells cost more to build and
+// return fewer candidates to reject, and the pair walk is where the second half
+// is paid.
+
+BENCH("Sync + pairs · 4000 colliders, 2m cells", 50) {
+	Store &store = WorldOf(4000, 2.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 4000 colliders, 8m cells", 50) {
+	Store &store = WorldOf(4000, 8.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}

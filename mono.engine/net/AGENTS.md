@@ -83,8 +83,39 @@ a caller can get out of step, and the one that gets forgotten is the second.
 exactly that. A budget that silently drops traffic is indistinguishable from a
 network that silently drops traffic, and the two want completely different fixes.
 
+**A refusal is an answer, not a discard, and the caller has to read it.**
+`Reserve` returning false means the payload did not go; whether that costs a
+tick or costs a client is the caller's to know. `replication::Authority::Unsent`
+is the one that knows — see `replication/AGENTS.md`. This module deliberately
+keeps no outbox to retry from, because an outbox here would hold payloads whose
+meaning it is not allowed to understand.
+
 Budgets reset at the barrier with everything else per-tick. Resetting anywhere
 else lets a connection spend two ticks' worth inside one.
+
+## A challenge costs the responder nothing, and that is not an optimisation
+
+`Cookie` derives its answer from a secret this end already holds plus the bytes
+the peer already sent, and verifies it by deriving it again. **Never by looking
+it up.** A table of pending challenges — even a bounded one, even an LRU — has
+moved the exhaustion target rather than removed it: one datagram from a stranger
+would buy an entry, and the whole reason the challenge exists is that a stranger
+gets nothing.
+
+So the rule for anything added here: an unanswered challenge costs **zero
+bytes**, and it costs zero however many are outstanding. If a feature wants
+per-peer state before the peer has answered, that feature belongs after the
+answer.
+
+**The reply is the same size as the question.** A responder that answered a
+35-byte hello with something larger is a reflector somebody else's traffic can
+be bounced off, and the amplification factor is the whole of what makes that
+worth doing.
+
+What a returned cookie proves is exactly one thing: somebody at that address
+received a datagram this end sent there, recently. Not identity, not
+authorisation. Deciding who may connect belongs above this module —
+`replication::Listener::SetAdmission`.
 
 ## Every field of an inbound packet is hostile
 
@@ -127,8 +158,14 @@ what stops asio reaching every module that links this.
 - **The transports.** A loopback and an asio UDP socket, both driving `Link`.
 - **Reliability.** The acknowledgement window is carried and recorded; nothing
   resends against it yet.
-- **Encryption.** X25519 agreement and ChaCha20-Poly1305, per
-  DATATYPES_LIBRARIES.md. Crypto++ is already vendored for it.
+- **Encryption of the stream.** The agreement is wired in and used —
+  `replication`'s admission exchange runs `Handshake` and proves the derived
+  keys agree — but **the traffic after it is still in the clear.** The two
+  `Cipher` halves confirm the exchange and are then destroyed, deliberately: a
+  `Sealer` kept somewhere that nothing seals with reads as though the wire were
+  protected. Sealing every payload means a counter on the wire, the header as
+  associated data, and the tag coming out of `MAXIMUM_PAYLOAD_BYTES`. That is a
+  wire format change and it is its own piece of work.
 - `upstream/`, `downstream/`, `predict/` — replication, v0.3's remaining items.
 - `http/`, `websocket/` — userland networking and the origin's asset serving,
   which is what `mono.cdn`'s streaming waits on.

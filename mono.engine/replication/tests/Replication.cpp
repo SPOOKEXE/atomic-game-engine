@@ -172,6 +172,71 @@ TEST_CASE("a big world joins over several ticks rather than one", "[replication]
 	REQUIRE(pair.Replica_.SnapshotOutstanding() == 0);
 }
 
+TEST_CASE("an entity with no replicated component is not in the snapshot", "[replication]") {
+	// **A row with nothing in it still says how many entities the world holds.**
+	// Interest filters entities and `Replicate` filters components, and the
+	// entity that passed the first and had nothing left after the second used to
+	// cross as a bare row — no data, and a count of a world the client was never
+	// told it could see.
+	//
+	// Counted rather than inspected: what is being asserted is the *number* of
+	// rows, because the number is the thing that leaked.
+	Pair pair;
+
+	std::vector<Entity> shown;
+	for (int index = 0; index < 6; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		shown.push_back(entity);
+	}
+
+	// Twelve with nothing replicated on them at all, and six carrying only a
+	// component nobody opted in to. Both are entities a client may not know
+	// about, and neither has a value to send.
+	for (int index = 0; index < 12; index++) {
+		pair.Server.Create();
+	}
+	for (int index = 0; index < 6; index++) {
+		pair.Server.Set<Secret>(pair.Server.Create(), Secret{index});
+	}
+
+	REQUIRE(pair.Join());
+
+	size_t rows = 0;
+	pair.Client.EachEntity([&rows](Entity) { rows++; });
+	CHECK(rows == shown.size());
+
+	// The server agrees about what it told them, which is what stops a later
+	// delta naming a row the client does not hold.
+	CHECK(pair.Authority_.StatusOf(pair.Handle).Known == shown.size());
+
+	for (const Entity entity : shown) {
+		CHECK(pair.Client.Alive(entity));
+	}
+}
+
+TEST_CASE("an entity becomes visible when it gains a replicated component", "[replication]") {
+	// The other half of the case above, and the reason it is not simply a
+	// filter on the join: an entity with nothing to send is *not yet* something
+	// to send, rather than something excluded for ever.
+	Pair pair;
+	pair.Server.Set<Spot>(pair.Server.Create(), Spot{0.0f, 0.0f});
+
+	const Entity later = pair.Server.Create();
+	REQUIRE(pair.Join());
+
+	size_t rows = 0;
+	pair.Client.EachEntity([&rows](Entity) { rows++; });
+	REQUIRE(rows == 1);
+	REQUIRE_FALSE(pair.Client.Alive(later));
+
+	pair.Server.Set<Spot>(later, Spot{9.0f, 0.0f});
+	pair.Tick();
+
+	CHECK(pair.Client.Alive(later));
+	CHECK(pair.Client.Get<Spot>(later)->X == 9.0f);
+}
+
 TEST_CASE("a client is not acknowledged before it has joined", "[replication]") {
 	// A client that acknowledged a tick it had not applied would stop the
 	// server sending the very thing it is still waiting for.
@@ -303,6 +368,41 @@ TEST_CASE("losing sight of an entity is a forget, never a destroy", "[replicatio
 	REQUIRE(pair.Replica_.Forgotten().size() == 1);
 	REQUIRE(pair.Replica_.Forgotten()[0] == watched);
 	REQUIRE(pair.Server.Alive(watched));
+}
+
+TEST_CASE("a forget too big for one datagram is split", "[replication]") {
+	// **The same rule as a snapshot and a delta, and the path that missed it.**
+	// A world going out of view all at once names every entity in one message,
+	// and three hundred handles is well past a datagram — which `Link::Reserve`
+	// refuses outright rather than fragmenting, so the one message that says
+	// "stop drawing these" would be the one that never arrives and the client
+	// would draw a world that is no longer there.
+	AuthoritySettings settings;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+
+	for (int index = 0; index < 300; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	bool visible = true;
+	pair.Authority_.SetInterest([&visible](ClientId, Entity) { return visible; });
+
+	REQUIRE(pair.Join(256));
+	REQUIRE(pair.Authority_.StatusOf(pair.Handle).Known == 300);
+
+	visible = false;
+	pair.Tick();
+
+	// Every handle arrived, and no message it arrived in could have been
+	// refused for being oversized.
+	REQUIRE(pair.Replica_.Forgotten().size() == 300);
+	for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+		REQUIRE(message.size() <= settings.ChunkBytes);
+	}
 }
 
 // --- what a hostile peer sends ---------------------------------------------------

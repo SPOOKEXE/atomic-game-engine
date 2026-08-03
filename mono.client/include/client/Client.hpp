@@ -17,6 +17,7 @@
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <client/Compositor.hpp>
@@ -224,9 +225,27 @@ namespace client {
 		// The world the server owns. Invalid when not connected.
 		engine::world::WorldId Replicated;
 
-		// Whether the join has been reported. A client logs "joined" once, not
-		// every frame at six hundred a second.
+		// Whether the join has been reported, and therefore whether the
+		// replicated world has a view channel yet. A client logs "joined" once,
+		// not every frame at six hundred a second.
 		bool ReportedJoin = false;
+
+		// Whether the key exchange's outcome has been reported.
+		//
+		// Separate from the join because the two now fail differently: an
+		// exchange that never completes and a world that never finishes
+		// arriving both look like "nothing happened" from outside, and they want
+		// completely different investigations.
+		bool ReportedAdmission = false;
+
+		// The camera the rendered world placed this frame.
+		//
+		// Held on the client rather than read twice because the replicated
+		// world is drawn through it and has no camera of its own: a camera is
+		// an entity, and a replica may not mint one until the predicted-entity
+		// index range exists.
+		engine::core::CFrame ComposedFrame;
+		engine::scene::Camera ComposedCamera;
 
 		// N views in, one frame out. The renderer draws what this composed
 		// rather than reaching into a store that somebody else is writing.

@@ -131,6 +131,34 @@ TEST_CASE("a channel outside the enum is refused", "[net][packet]") {
 	CHECK_FALSE(Packet::Read(reader).has_value());
 }
 
+TEST_CASE("a channel can be read before the rest of the packet", "[net][packet]") {
+	// For the router that has to decide where a datagram goes before it has a
+	// connection to hand it to. A handshake datagram comes from an address that
+	// is by definition not in the connection table yet.
+	auto frame = Framed(Header(), Bytes("payload"));
+	CHECK(Packet::PeekChannel(frame) == ChannelKind::Reliable);
+
+	// The same three refusals `Read` makes, because a router acting on a value
+	// outside the enum is the one place a byte from a stranger picks a code path
+	// the type says cannot exist.
+	auto badMagic = frame;
+	badMagic[0] = static_cast<std::byte>(0xFF);
+	CHECK_FALSE(Packet::PeekChannel(badMagic).has_value());
+
+	auto badVersion = frame;
+	badVersion[4] = static_cast<std::byte>(0x99);
+	CHECK_FALSE(Packet::PeekChannel(badVersion).has_value());
+
+	auto badChannel = frame;
+	badChannel[6] = static_cast<std::byte>(7);
+	CHECK_FALSE(Packet::PeekChannel(badChannel).has_value());
+
+	// And a datagram too short to hold a header at all, which is what a router
+	// sees before anything has checked a length.
+	CHECK_FALSE(Packet::PeekChannel(std::span<const std::byte>(frame).first(4)).has_value());
+	CHECK_FALSE(Packet::PeekChannel({}).has_value());
+}
+
 TEST_CASE("a length that runs past the buffer is refused", "[net][packet]") {
 	const auto frame = Framed(Header(), Bytes("payload"));
 

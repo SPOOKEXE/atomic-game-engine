@@ -1,53 +1,41 @@
 #pragma once
 
-// The components this client expects a server to send it.
+// What this client does with a world it does not own.
 //
-// **This is duplication, it is named as such, and it has an owner.** The server
-// declares `server.Position` and `server.Velocity` in its own
-// `Simulation.hpp`; a snapshot travels by component *name*, so the receiving
-// process has to have registered a type under the same name with the same
-// layout or the delta resolves to nothing. Two declarations of one wire type is
-// exactly the shape that drifts — one side gains a field, the other does not,
-// and the symptom is a component that silently stops arriving.
+// **This file used to be the duplication and is now the opposite of it.** It
+// declared a `ReplicatedPosition` and a `ReplicatedVelocity` registered under
+// `server.Position` and `server.Velocity`, because a snapshot travels by
+// component *name* and the two programs shared no component set — so the client
+// had to declare the server's types a second time and keep the layouts in step
+// by hand. `mono.engine/scene` at L7 ended that: both programs register the same
+// `scene` components under the same names, and a snapshot and a delta cross with
+// no translation layer at all.
 //
-// **v0.4 deletes this file.** `mono.engine/scene` at L7 is the item that owns
-// both programs' component definitions, and its roadmap line already names
-// `Position` and `Velocity` in `mono.server/include/server/Simulation.hpp` among
-// the definitions it removes. This header is the client's half of the same
-// removal, and the reason it can be written down now is that the wire made the
-// duplication load-bearing rather than merely untidy.
+// What is left is the half that is genuinely the client's own: a replicated
+// world arrives as rows and has to be *drawn*, and nothing about drawing it
+// crosses the wire. That is presentation over somebody else's simulation, which
+// is neither the demo scene nor the engine's business, so it lives here.
 //
-// Until then, the layouts here are checked against the server's by a
-// `static_assert` on size and by the join test, which fails if a component does
-// not arrive.
+// **A replica simulates nothing.** The only system registered below is a
+// `PreRender` one, which derives what to draw and mutates no simulation state.
+// A replica that ticked would be this process disagreeing with the authority
+// once per tick, which is the bug replication exists to avoid.
 
-#include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
 
 namespace client {
 
-	// Where a replicated entity is, as the server sees it.
+	// Installs the presentation half of a replicated world.
 	//
-	// Must match `server::Position`. Not the demo's `Transform`: the demo world
-	// is this process's own and the replicated world is somebody else's, and a
-	// single type used for both would be one type meaning two things.
-	struct ReplicatedPosition {
-		// Metres from the origin, in world space.
-		engine::core::Vector3 Value;
-	};
-
-	// How fast a replicated entity is going.
+	// Called once, when the world is created and before any snapshot is
+	// applied — a resource added later is still legal, but a draw list that
+	// appeared halfway through a join would leave the first frames with nothing
+	// to publish.
 	//
-	// Must match `server::Velocity`. Received rather than integrated here — a
-	// replica does not simulate what the server simulates, it is told.
-	struct ReplicatedVelocity {
-		// Metres per second.
-		engine::core::Vector3 Value;
-	};
-
-	// Registers the replicated components under the names the server sends.
+	// Registers no simulation system. Nothing here writes a component.
 	//
-	// The names are the server's, not this program's, because a name is the
-	// identity on the wire. Called before a connection is opened, since a
-	// snapshot that arrives before registration resolves to nothing.
-	void RegisterReplicatedComponents();
+	// @param store     The replicated world.
+	// @param scheduler Its scheduler, which gains one `PreRender` system.
+	void BuildReplicatedWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 }

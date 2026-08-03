@@ -168,6 +168,26 @@ BENCH("Each · 500k entities", 2) {
 // worth anything is exactly the question this pair answers, and it is the
 // reason the batched path exists at all.
 
+BENCH("EachBatch · 10k entities", 100) {
+	// The size where a change to the *layout* is most likely to show. 10k rows of
+	// two twelve-byte components is 240 KB — it fits in L2, so the loop is issue
+	// bound rather than bandwidth bound, and that is the regime where a stride a
+	// compiler can vectorise is worth anything at all. At 500k the same loop is
+	// streaming from DRAM and a wider row is simply more bytes to move.
+	Store &store = WorldOf(10'000, false);
+	for (int pass = 0; pass < 100; pass++) {
+		store.EachBatch<Position, const Velocity>(
+			[](size_t rows, Position *position, const Velocity *velocity) {
+				for (size_t row = 0; row < rows; row++) {
+					position[row].X += velocity[row].X;
+					position[row].Y += velocity[row].Y;
+					position[row].Z += velocity[row].Z;
+				}
+			}
+		);
+	}
+}
+
 BENCH("EachBatch · 100k entities", 10) {
 	Store &store = WorldOf(100'000, false);
 	for (int pass = 0; pass < 10; pass++) {

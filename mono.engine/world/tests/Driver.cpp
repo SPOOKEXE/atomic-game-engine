@@ -222,7 +222,8 @@ TEST_CASE("a local world hears a remote world's publish", "[world]") {
 
 	std::string heard;
 	rig.Machine->Worlds().Enter(listener, [&heard](Store &store) {
-		for (const Delivery &delivery : Postbox(store).Deliveries()) {
+		const Postbox box(store);
+		for (const Delivery &delivery : box.Deliveries()) {
 			heard += Text(delivery.Payload);
 		}
 	});
@@ -329,7 +330,8 @@ TEST_CASE("a remote world and a local world share one bus", "[world]") {
 
 	std::string got;
 	rig.Machine->Worlds().Enter(reader, [&got](Store &store) {
-		for (const Delivery &delivery : Postbox(store).Deliveries()) {
+		const Postbox box(store);
+		for (const Delivery &delivery : box.Deliveries()) {
 			got += Text(delivery.Payload);
 		}
 	});
@@ -513,7 +515,8 @@ TEST_CASE("routing is the same whether a world is local or remote", "[world][fuz
 
 			for (size_t index = 0; index < worlds.size(); index++) {
 				universe.Enter(worlds[index], [&allLocal, index](Store &store) {
-					for (const Delivery &delivery : Postbox(store).Deliveries()) {
+					const Postbox box(store);
+					for (const Delivery &delivery : box.Deliveries()) {
 						allLocal.push_back(std::to_string(index) + ":" + Text(delivery.Payload));
 					}
 				});
@@ -558,7 +561,8 @@ TEST_CASE("routing is the same whether a world is local or remote", "[world][fuz
 
 			for (size_t index = 0; index < local.size(); index++) {
 				rig.Machine->Worlds().Enter(local[index], [&split, index](Store &store) {
-					for (const Delivery &delivery : Postbox(store).Deliveries()) {
+					const Postbox box(store);
+					for (const Delivery &delivery : box.Deliveries()) {
 						split.push_back(std::to_string(index) + ":" + Text(delivery.Payload));
 					}
 				});

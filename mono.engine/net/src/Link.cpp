@@ -8,7 +8,11 @@ namespace engine::net {
 
 	namespace {
 		size_t ChannelSlot(ChannelKind channel) {
-			return channel == ChannelKind::Reliable ? 1 : 0;
+			// The enum's own order, and the array below is sized from the last
+			// value rather than from a literal — a channel added without a slot
+			// would index past the end, which is the one bug in this file that
+			// would not show up as a wrong number.
+			return static_cast<size_t>(channel);
 		}
 	}
 

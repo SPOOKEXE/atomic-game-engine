@@ -5,6 +5,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <set>
@@ -22,6 +23,7 @@ TEST_DEPENDS("engine.parallel.jobs")
 using Catch::Approx;
 using engine::ecs::Entity;
 using engine::ecs::Store;
+using engine::parallel::Jobs;
 
 namespace parallel_test {
 	struct Position {
@@ -154,6 +156,39 @@ TEST_CASE("work actually reaches more than one thread", "[parallel]") {
 		);
 
 		widest = std::max(widest, threads.size());
+	}
+
+	REQUIRE(widest > 1);
+}
+
+TEST_CASE("a table above the dispatch floor still wakes the pool", "[parallel]") {
+	// **The chunk split must never reach the dispatch decision.** `Jobs::For`
+	// refuses to hand over anything below `MINIMUM_GRAINS` grains — 32 768
+	// indices at the default — and it is handed `slice.Rows`. So a `VisitTables`
+	// that yielded one slice per chunk instead of one per table would put every
+	// dispatch under that floor, and a 500k parallel iteration would quietly run
+	// serially: a measured 3.5x, lost with every other case in this file still
+	// green. The chunk division belongs inside the worker body, and this is the
+	// case that says so.
+	Pool pool{4};
+	Store store("test");
+	Fill(store, Jobs::DEFAULT_GRAIN * Jobs::MINIMUM_GRAINS + Jobs::DEFAULT_GRAIN);
+
+	// Retried for the reason the case above is: the dispatching thread drains
+	// ranges too, so one attempt finishing before a worker wakes is allowed.
+	// Every attempt reporting one participant is the collapse.
+	constexpr int ATTEMPTS = 25;
+	uint32_t widest = 0;
+
+	for (int attempt = 0; attempt < ATTEMPTS && widest <= 1; attempt++) {
+		store.EachBatchParallel<Position, const Velocity>(
+			[](size_t, size_t rows, Position *positions, const Velocity *velocities) {
+				for (size_t row = 0; row < rows; row++) {
+					positions[row].X += velocities[row].X;
+				}
+			}
+		);
+		widest = std::max(widest, Jobs::LastBatch().Participants);
 	}
 
 	REQUIRE(widest > 1);

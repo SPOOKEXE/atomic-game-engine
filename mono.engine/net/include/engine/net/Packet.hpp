@@ -134,6 +134,25 @@ namespace engine::net {
 		// @return The packet, or nothing. Nothing means drop it and count it.
 		static std::optional<Inbound> Read(core::ByteReader &reader);
 
+		// Which channel a datagram claims, without parsing the rest of it.
+		//
+		// For the router that has to decide where a datagram goes *before* it
+		// has a connection to hand it to. A `ChannelKind::Handshake` datagram is
+		// answered without a `Link` and everything else belongs to one, and on a
+		// server the sender of the first kind is by definition not in the
+		// connection table yet.
+		//
+		// Reads the magic, the version and the channel byte, and stops. **It is
+		// not a substitute for `Read`** — nothing after the channel has been
+		// looked at, so a caller that acts on the payload without reading it has
+		// trusted a length nobody checked. It exists so that "which channel" is
+		// one function rather than a byte offset copied into two routers.
+		//
+		// @param datagram The bytes as they arrived.
+		// @return The channel, or nothing when this is not a packet this build
+		//         reads.
+		static std::optional<ChannelKind> PeekChannel(std::span<const std::byte> datagram);
+
 		// Whether `sequence` is newer than `against`, accounting for wrapping.
 		//
 		// **A 16-bit counter wraps every 65536 packets**, which at sixty packets

@@ -207,9 +207,14 @@ namespace engine::net {
 		double LastReceiveAt = 0.0;
 		double LastSendAt = 0.0;
 
-		// One counter per channel, because the two are ordered independently —
-		// a reliable resend must not make an unreliable packet look stale.
-		uint16_t OutgoingSequence[2]{};
+		// One counter per channel, because they are ordered independently — a
+		// reliable resend must not make an unreliable packet look stale.
+		//
+		// Sized from the enum rather than from a literal. The handshake slot is
+		// never advanced, because a handshake datagram is sent before there is a
+		// link to number it; it is here so that indexing by channel cannot run
+		// off the end the day another one is added.
+		uint16_t OutgoingSequence[static_cast<size_t>(ChannelKind::Handshake) + 1]{};
 
 		// The highest sequence seen from the far side, and the 32 before it.
 		uint16_t HighestSeen = 0;

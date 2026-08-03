@@ -119,6 +119,70 @@ It aborts rather than throwing. By the time the check runs, the race has already
 happened; unwinding would hand the corrupted state to whoever catches, and the
 stack at the moment of the violation is the only useful thing left.
 
+## The index space is two ranges, and only one of them is the authority's
+
+An entity is an index plus a generation, and two independently built stores both
+start at index 0 generation 1. So an entity a replica minted for itself used to
+collide *exactly* with one the authority minted, and `Store::Apply` was right to
+merge them — it had nothing to tell them apart.
+
+`SparseSet` now splits the index space in half:
+
+| Range | Indices | Minted by |
+|---|---|---|
+| Authoritative | `[0, 2³¹)` — 2 147 483 648 | `Create`, `CreateInstance`, `CloneInstance` |
+| Predicted | `[2³¹, 2³²−1)` — 2 147 483 647 | `CreatePredicted` |
+
+`0xFFFF'FFFF` is `SparseSet::NO_INDEX`, the value a refused allocation hands
+back, which is why the predicted side is one index shorter.
+
+**Neither side ever wraps into the other.** A range that has issued everything it
+owns refuses, `Create` returns `NULL_ENTITY` and says which range ran out.
+Wrapping would reintroduce the collision at the one moment nobody is watching.
+
+Three consequences worth knowing before touching this:
+
+- **The directory is two page regions**, not one. A reserved base at 2³¹ under a
+  single linear page list would allocate half a million pages to reach its first
+  index. Each region pages exactly as the single one did, so the small-first-page
+  rule holds for both — and a store that never predicts anything allocates
+  **nothing** for the second region. `tests/SparseSet.cpp` pins that on
+  `ResidentSlots`, in slots rather than pages, because the fee is bytes.
+- **A snapshot writes the directory as one run per region**, which is what
+  `SNAPSHOT_VERSION` 2 is. Anything walking `Capacity()` has to walk
+  `PredictedCapacity()` too; `Store::EachEntity` is the one that would otherwise
+  miss every prediction silently.
+- **`Apply` never destroys a predicted entity.** "The sender did not mention it"
+  is the definition of a prediction, so `ApplyMode::Authoritative`'s sweep skips
+  the predicted range. Retiring a prediction is a promotion or a deliberate
+  destroy.
+
+`SetAdoptOnly` did not go away and still does its job: a replica may not mint an
+*authoritative* entity, because that index is the authority's to hand out. What
+changed is that minting a *predicted* one is legal, and the two are different
+method names rather than a mode somewhere else.
+
+## `Store::Promote` is a primitive, and the policy is deliberately absent
+
+Promotion rewrites a predicted entity's identity to an authoritative one without
+moving the row. **Nothing in this module decides when it is called**, which
+authoritative handle it is called with, or what happens to a prediction the
+server never confirms. That is the layer that predicts, and there is none yet —
+the trigger is a projectile, which wants v0.4's physics and `Part`. `ROADMAP.md`
+says the design should not be guessed at before its consumer exists, so this is
+a convention rather than something the build checks: **do not add a promotion
+policy here.** It belongs in `replication` when there is something to promote.
+
+What promotion covers is the directory, the row's own copy of its handle, the
+store's name maps, and the instance hierarchy around it. What it does **not**
+cover is an `ecs::Entity` stored inside some other component: nothing in
+`TypeDescriptor` says which of a component's bytes are entity handles, and a
+byte-pattern search would rewrite an unrelated integer that happened to match.
+Such a handle keeps the predicted value and reads as **dead** — the predicted
+index's generation is bumped as it is freed — rather than naming a different
+entity. A caller holding one rewrites it itself, because it is the layer that
+knows the field is a handle.
+
 ## Phases are the ordering mechanism
 
 Two systems in the same phase have no guaranteed order relative to each other.
@@ -126,9 +190,64 @@ That is deliberate. If the order between two systems matters, they belong in
 different phases — adding "and register this one second" as a rule makes the
 order invisible at the point where somebody breaks it.
 
+## A column is chunks, and there is no whole-column base pointer
+
+`Column::Data()` is gone. It stated the invariant this layout gives up — *one
+base pointer and a stride reach every row* — and an API still offering it is how
+a caller ends up walking off the end of chunk zero. It was deleted rather than
+redefined so the compiler had to enumerate the callers; there were three, all in
+`Store.cpp`, and two of them were `memset` and a per-row `Mark` over
+`table.Rows()` from that base. Both are heap overruns the moment chunk zero stops
+being the whole column, and neither is a compile error.
+
+So: **anything reading a column as one buffer is wrong.** Walk the chunks —
+`Column::ChunkData()` indexed by `Column::ChunkOf(row)`, or `Column::At` for one
+row. The four `Visit*` templates in `Store.hpp` do it once per chunk and hoist
+the base out of the row loop, which is worth 92% on `Each` over 10k rows and is
+not decoration.
+
+Three rules that are load-bearing rather than stylistic:
+
+- **`VisitTables` yields one slice per table, never one per chunk.**
+  `VisitBatchParallel` weighs the pool handover against `slice.Rows`, and
+  `Jobs::For` refuses anything below `MINIMUM_GRAINS` grains — 32 768 indices at
+  the default. A slice that was one chunk would put every dispatch under the
+  floor and a large parallel iteration would silently run serially, a measured
+  3.5x with nothing failing. The chunk split belongs inside the visitor and
+  inside the worker body. `engine.ecs.parallel` has a case that goes red if it
+  moves.
+- **A run never crosses a chunk boundary.** `VisitChangedRuns` clips, because a
+  run's contract is that `data + row * size` is the value for `entities[row]`
+  across the whole run — and `Archetype::Ids` is one contiguous array while a
+  column is not. An unclipped run sends one entity's id with another's bytes:
+  every count still adds up and a client sees objects teleport.
+- **Chunk boundaries are a function of the row index alone**, so every column in
+  an archetype divides identically whatever its stride. That is what lets
+  `EachBatch<Transform, Motion>` hand out two pointers over the same rows.
+
+Chunks come from `ChunkPool` and go back to it as soon as the rows stop reaching
+into them. The pool is process-wide because the shape it exists for is a thousand
+worlds in one host, and it is **capped** because a pool that never trims holds the
+same bytes under a different name. `ecs/docs/TODO.md` carries the measurements.
+
+## The directory releases pages, and the epoch is why that is safe
+
+`SparseSet` gives back every trailing page holding nothing live, and `Clear`
+gives back all of them. `Free` itself still releases nothing on its own: dropping
+a page there needs that page's indices purged from the LIFO free list, which is
+an O(FreeList) pass inside the operation whose whole value is being O(1). Instead
+the high-water mark comes back down with the pages and a free-list entry naming a
+released index is discarded once, when it surfaces.
+
+**A released page takes its generations with it, and that is the hazard.** A
+recreated page starting again at `FIRST_GENERATION` would hand a reissued index
+back at exactly the generation the oldest handles were issued with, and every one
+of them would come alive. Each page index keeps an **epoch** — one past the
+highest generation it ever issued — for as long as the directory exists, and a
+recreated page starts every slot there. Do not remove it to save four bytes a
+page: it makes the revival impossible by construction rather than by care.
+
 ## Not here yet
 
-`Column`, `ComponentSet`, `SparseSet` and `ChangeChannel` are named in
-`repo_layout.md` §5.2 and are not in this module yet. They arrive with v0.2's
-multi-world work, where the storage layout has to be something the engine
-controls rather than something flecs decides. Do not add half of one now.
+`ComponentSet` and `ChangeChannel` were named in `repo_layout.md` §5.2 as things
+this module would grow; both are here. Nothing from that list is outstanding.

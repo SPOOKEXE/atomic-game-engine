@@ -1,9 +1,12 @@
+#include "ChunkPool.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Column.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -13,6 +16,7 @@ TEST_SUITE_ID("engine.ecs.column")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
+using engine::ecs::ChunkPool;
 using engine::ecs::Column;
 using engine::ecs::ComponentId;
 using engine::ecs::Components;
@@ -80,7 +84,8 @@ TEST_CASE("a default column holds nothing and has no type", "[ecs]") {
 	REQUIRE(column.Empty());
 	REQUIRE(column.Size() == 0);
 	REQUIRE_FALSE(column.Type().IsValid());
-	REQUIRE(column.Data() == nullptr);
+	REQUIRE(column.ChunkCount() == 0);
+	REQUIRE(column.At(0) == nullptr);
 }
 
 TEST_CASE("rows push, read back and count", "[ecs]") {
@@ -116,11 +121,15 @@ TEST_CASE("a default-pushed row is value-initialised", "[ecs]") {
 	REQUIRE(nonZero == 0);
 }
 
-TEST_CASE("rows stay contiguous as the column grows", "[ecs]") {
-	// The property every batch iterator depends on: one base pointer and a
-	// stride reach every row.
+TEST_CASE("rows stay contiguous inside a chunk and the directory reaches every one", "[ecs]") {
+	// The property every batch iterator depends on, in the form chunking leaves
+	// it: one base pointer and a stride reach every row *of one chunk*, and the
+	// directory reaches every chunk. A batch never crosses a boundary precisely
+	// so that the first half of that sentence stays true.
 	Column column(Components::Of<Point>());
 
+	// Deliberately several chunks and not a whole number of them, so the short
+	// trailing chunk is covered rather than only the full ones.
 	constexpr size_t COUNT = 1000;
 	for (size_t index = 0; index < COUNT; index++) {
 		const Point value{static_cast<float>(index), 0.0f};
@@ -128,38 +137,153 @@ TEST_CASE("rows stay contiguous as the column grows", "[ecs]") {
 	}
 
 	REQUIRE(column.Size() == COUNT);
+	REQUIRE(column.ChunkCount() == Column::ChunksFor(COUNT));
+	REQUIRE(column.ChunkCount() > 4);
 
-	const auto *base = static_cast<const Point *>(column.Data());
 	size_t mismatches = 0;
 	for (size_t index = 0; index < COUNT; index++) {
-		if (base[index].X != static_cast<float>(index)) {
+		const size_t chunk = Column::ChunkOf(index);
+		const size_t offset = index - Column::ChunkStart(chunk);
+		const auto *base = static_cast<const Point *>(column.ChunkData()[chunk]);
+		if (base[offset].X != static_cast<float>(index)) {
+			mismatches++;
+		}
+
+		// And the row accessor agrees with the arithmetic the iteration paths
+		// do by hand, which is the thing that would silently diverge.
+		if (column.At(index) != &base[offset]) {
 			mismatches++;
 		}
 	}
 	REQUIRE(mismatches == 0);
+
+	// The boundaries partition the rows: every chunk starts where the previous
+	// one ended, so no row is in two chunks and none is in none.
+	size_t gaps = 0;
+	for (size_t chunk = 1; chunk < column.ChunkCount(); chunk++) {
+		if (Column::ChunkStart(chunk) != Column::ChunkStart(chunk - 1) + Column::ChunkRows(chunk - 1)) {
+			gaps++;
+		}
+	}
+	REQUIRE(gaps == 0);
 }
 
-TEST_CASE("capacity grows geometrically and is never given back", "[ecs]") {
+TEST_CASE("a chunk keeps its address while later chunks come and go", "[ecs]") {
+	// What a batch body holding a pointer depends on. Growth links a new chunk
+	// rather than copying everything into a bigger allocation, so the rows
+	// already there never move — which is what took the copy out of the growth
+	// curve the column already had.
 	Column column(Components::Of<Point>());
-
-	for (int index = 0; index < 100; index++) {
+	for (size_t index = 0; index < Column::FIRST_CHUNK_ROWS; index++) {
 		column.PushDefault();
 	}
-	const size_t grown = column.Capacity();
-	REQUIRE(grown >= 100);
+	REQUIRE(column.ChunkCount() == 1);
+
+	void *first = column.ChunkData()[0];
+	for (size_t index = 0; index < 1000; index++) {
+		column.PushDefault();
+	}
+
+	REQUIRE(column.ChunkCount() > 4);
+	REQUIRE(column.ChunkData()[0] == first);
+}
+
+TEST_CASE("capacity is never more than twice the rows", "[ecs]") {
+	// The property doubling chunks buy, and the one a fixed chunk size cannot
+	// have: a column of a million rows is a handful of chunks with almost every
+	// row in the largest two, and a column of one row costs eight — which is
+	// exactly what the old first capacity charged, so nothing got worse for a
+	// world that never grows.
+	Column column(Components::Of<Point>());
+	size_t worst = 0;
+	for (size_t index = 1; index <= 5000; index++) {
+		column.PushDefault();
+		worst = std::max(worst, column.Capacity() * 8 / index);
+	}
+
+	// Eight rows minimum, so the ratio only settles once past it.
+	REQUIRE(column.Capacity() <= 2 * column.Size());
+	REQUIRE(worst <= 8 * Column::FIRST_CHUNK_ROWS);
+}
+
+TEST_CASE("capacity follows the population back down", "[ecs]") {
+	// **The item.** A column used to keep its high-water mark forever, so a
+	// world that peaked at ten thousand entities and settled at a hundred held
+	// the peak — a thousand of those measured 703 MB against 2.7 MB of live
+	// rows. A chunk goes back the moment the rows stop reaching into it.
+	Column column(Components::Of<Point>());
+
+	constexpr size_t PEAK = 10'000;
+	for (size_t index = 0; index < PEAK; index++) {
+		column.PushDefault();
+	}
+	const size_t atPeak = column.ResidentBytes();
+	REQUIRE(atPeak >= PEAK * sizeof(Point));
+
+	while (column.Size() > 100) {
+		column.RemoveSwapBack(column.Size() - 1);
+	}
+
+	REQUIRE(column.ChunkCount() == Column::ChunksFor(100));
+	REQUIRE(column.ResidentBytes() == column.Capacity() * sizeof(Point));
+	REQUIRE(column.Capacity() < 2 * 100 + Column::FIRST_CHUNK_ROWS);
+	REQUIRE(atPeak > 30 * column.ResidentBytes());
+}
+
+TEST_CASE("a population oscillating across a chunk boundary never reaches the allocator", "[ecs]") {
+	// The other half of the trade, and the reason the pool exists at all. Giving
+	// a chunk back on every dip would put eight times the allocations in front
+	// of a large world's columns, which is exactly the measurement that got a
+	// smaller `SparseSet` page rejected at 8-21% slower. The pool is what makes
+	// the release free; without it this test is what would go red.
+	//
+	// Emptied first because the pool is process-wide and capped: a suite that
+	// has just destroyed a large world can leave it at the cap, where the next
+	// release goes to the allocator and this case would fail for a reason that
+	// is not the one it is about.
+	ChunkPool::Trim();
+
+	Column column(Components::Of<Point>());
+	for (size_t index = 0; index < 1024; index++) {
+		column.PushDefault();
+	}
+
+	// Warm: whatever the boundary crossing needs has been taken from the
+	// allocator once by the time the count is read.
+	column.PushDefault();
+	column.RemoveSwapBack(column.Size() - 1);
+
+	const uint64_t allocated = ChunkPool::Allocations();
+	for (int cycle = 0; cycle < 200; cycle++) {
+		column.PushDefault();
+		column.RemoveSwapBack(column.Size() - 1);
+	}
+
+	REQUIRE(ChunkPool::Allocations() == allocated);
+}
+
+TEST_CASE("clearing hands every chunk back and refilling takes them from the pool", "[ecs]") {
+	ChunkPool::Trim();
+
+	Column column(Components::Of<Point>());
+	for (size_t index = 0; index < 1024; index++) {
+		column.PushDefault();
+	}
+	const size_t chunks = column.ChunkCount();
+	REQUIRE(chunks == Column::ChunksFor(1024));
 
 	column.Clear();
 	REQUIRE(column.Empty());
+	REQUIRE(column.ChunkCount() == 0);
+	REQUIRE(column.ResidentBytes() == 0);
 
-	// A world whose population oscillates must not reallocate on every
-	// oscillation, which is the entire reason Clear keeps the capacity.
-	REQUIRE(column.Capacity() == grown);
-
-	const void *before = column.Data();
-	for (int index = 0; index < 100; index++) {
+	const uint64_t allocated = ChunkPool::Allocations();
+	for (size_t index = 0; index < 1024; index++) {
 		column.PushDefault();
 	}
-	REQUIRE(column.Data() == before);
+
+	REQUIRE(column.ChunkCount() == chunks);
+	REQUIRE(ChunkPool::Allocations() == allocated);
 }
 
 TEST_CASE("reserve never shrinks", "[ecs]") {
@@ -236,8 +360,9 @@ TEST_CASE("a tag column counts rows and allocates nothing", "[ecs]") {
 	}
 
 	REQUIRE(column.Size() == 10);
-	REQUIRE(column.Data() == nullptr);
+	REQUIRE(column.ChunkCount() == 0);
 	REQUIRE(column.At(3) == nullptr);
+	REQUIRE(column.ResidentBytes() == 0);
 
 	column.RemoveSwapBack(2);
 	REQUIRE(column.Size() == 9);
@@ -246,16 +371,42 @@ TEST_CASE("a tag column counts rows and allocates nothing", "[ecs]") {
 	REQUIRE(column.Empty());
 }
 
+TEST_CASE("the pool stops retaining past its cap", "[ecs]") {
+	// **A pool that never trims relocates the leak and reports success.** The
+	// cap is the trim policy that does the work — `Trim` is for a host that
+	// knows it has stopped needing the spares — so it is the one that has to be
+	// pinned rather than described.
+	ChunkPool::Trim();
+	REQUIRE(ChunkPool::RetainedBytes() == 0);
+
+	// `Wide` is 64 bytes, so a column reaching a quarter of a million rows holds
+	// well past the cap in its largest chunks alone.
+	{
+		Column column(Components::Of<Wide>());
+		column.Reserve(4 * ChunkPool::RETAINED_BYTES_CAP / sizeof(Wide));
+		REQUIRE(column.ResidentBytes() > 2 * ChunkPool::RETAINED_BYTES_CAP);
+	}
+
+	REQUIRE(ChunkPool::RetainedBytes() <= ChunkPool::RETAINED_BYTES_CAP);
+	ChunkPool::Trim();
+	REQUIRE(ChunkPool::RetainedBytes() == 0);
+}
+
 // --- alignment -----------------------------------------------------------
 
-TEST_CASE("an over-aligned type is stored at its alignment", "[ecs]") {
+TEST_CASE("an over-aligned type is stored at its alignment in every chunk", "[ecs]") {
 	Column column(Components::Of<Wide>());
 	REQUIRE(column.Describe().Alignment == 64);
 
-	for (int index = 0; index < 40; index++) {
+	// Past several boundaries on purpose. This is the guard against a pool that
+	// hands back a chunk it allocated at the default alignment: the first chunk
+	// would very likely be aligned by luck, and every one after it would not.
+	const size_t count = 300;
+	for (size_t index = 0; index < count; index++) {
 		const Wide value{static_cast<double>(index)};
 		column.PushCopy(&value);
 	}
+	REQUIRE(column.ChunkCount() > 4);
 
 	// Every row, not only the base — a stride that ignored alignment would put
 	// the first row right and the rest wrong.
@@ -266,7 +417,7 @@ TEST_CASE("an over-aligned type is stored at its alignment", "[ecs]") {
 		}
 	}
 	REQUIRE(misaligned == 0);
-	REQUIRE(static_cast<const Wide *>(column.At(39))->Value == 39.0);
+	REQUIRE(static_cast<const Wide *>(column.At(count - 1))->Value == static_cast<double>(count - 1));
 }
 
 // --- non-trivial lifetimes -----------------------------------------------
@@ -368,7 +519,7 @@ TEST_CASE("a moved column leaves the source empty and typeless", "[ecs]") {
 
 	REQUIRE(source.Size() == 0);
 	REQUIRE_FALSE(source.Type().IsValid());
-	REQUIRE(source.Data() == nullptr);
+	REQUIRE(source.ChunkCount() == 0);
 
 	destination.Clear();
 	REQUIRE(Tracked::Live == before + 1);
@@ -429,7 +580,65 @@ TEST_CASE("a column round-trips through bytes", "[ecs]") {
 	REQUIRE(reader.AtEnd());
 
 	REQUIRE(restored.Size() == 16);
-	REQUIRE(std::memcmp(restored.Data(), source.Data(), 16 * sizeof(Point)) == 0);
+	size_t differing = 0;
+	for (size_t row = 0; row < 16; row++) {
+		if (std::memcmp(restored.At(row), source.At(row), sizeof(Point)) != 0) {
+			differing++;
+		}
+	}
+	REQUIRE(differing == 0);
+}
+
+TEST_CASE("a column of several chunks round-trips as one stream", "[ecs]") {
+	// The bytes are the same stream a single contiguous column produced, so the
+	// snapshot format did not change when the storage did. A `Write` that took
+	// the whole row count from chunk zero would read past its end and a `Read`
+	// that did the same would write past it.
+	Column source(Components::Of<Point>());
+	const size_t count = 1000;
+	for (size_t index = 0; index < count; index++) {
+		const Point value{static_cast<float>(index), static_cast<float>(-static_cast<int>(index))};
+		source.PushCopy(&value);
+	}
+
+	ByteWriter writer;
+	REQUIRE(source.Write(writer));
+	REQUIRE(writer.Size() == count * sizeof(Point));
+
+	Column restored(Components::Of<Point>());
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Read(reader, count));
+	REQUIRE(reader.AtEnd());
+	REQUIRE(restored.Size() == count);
+	REQUIRE(restored.ChunkCount() == Column::ChunksFor(count));
+
+	size_t differing = 0;
+	for (size_t row = 0; row < count; row++) {
+		if (static_cast<const Point *>(restored.At(row))->X != static_cast<float>(row)) {
+			differing++;
+		}
+	}
+	REQUIRE(differing == 0);
+}
+
+TEST_CASE("a non-trivial type spanning chunks is destroyed exactly once per row", "[ecs]") {
+	// `Destruct` takes a contiguous range, so a `Clear` that handed it the whole
+	// row count from chunk zero's base would destroy garbage past the first
+	// chunk and leak every string after it.
+	const int before = Tracked::Live;
+
+	{
+		Column column(Components::Of<Tracked>());
+		const size_t count = 300;
+		for (size_t index = 0; index < count; index++) {
+			const Tracked value(std::string("row-") + std::to_string(index));
+			column.PushCopy(&value);
+		}
+		REQUIRE(column.ChunkCount() > 4);
+		REQUIRE(Tracked::Live == before + static_cast<int>(count));
+	}
+
+	REQUIRE(Tracked::Live == before);
 }
 
 TEST_CASE("an empty column round-trips as nothing", "[ecs]") {

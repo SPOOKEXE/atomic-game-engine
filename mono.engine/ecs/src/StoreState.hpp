@@ -392,11 +392,14 @@ namespace engine::ecs {
 	// @param from  The row to drop. A location with no archetype does nothing.
 	void Vacate(StoreState &state, EntityLocation from);
 
-	// Takes a directory slot.
+	// Takes a directory slot from one half of the index space.
 	//
 	// @param state The world to allocate in.
-	// @return A live handle carrying no components and occupying no row.
-	Entity CreateEntity(StoreState &state);
+	// @param range Which half to mint from. Predicted is a replica minting
+	//              something the authority has not confirmed yet.
+	// @return A live handle carrying no components and occupying no row, or
+	//         NULL_ENTITY when that range has issued every index it owns.
+	Entity CreateEntity(StoreState &state, EntityRange range = EntityRange::Authoritative);
 
 	// Frees an entity's row, its name and its directory slot.
 	//

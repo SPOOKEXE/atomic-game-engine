@@ -20,18 +20,36 @@
 // `Input`, which is the only shape in which the server stays the one that
 // decided. `replication/AGENTS.md`.
 //
+// **Nothing flows until the key exchange has.** `Admission.hpp` has the
+// sequence; this end drives the initiator's half of it — a hello, a cookie sent
+// straight back, and a welcome whose tag has to verify before the link is
+// allowed to carry anything. A welcome that does not verify closes the link
+// rather than being accepted with a shrug, because a key exchange that half
+// worked is one where somebody rewrote a message in flight.
+//
+// **The retransmission is this end's**, on a timer, because the responder
+// deliberately remembers nothing about a peer that has not answered its
+// challenge. A handshake that never finishes is a link sitting in `Connecting`
+// until `net::LinkSettings::HandshakeTimeoutSeconds`, which `Advance` enforces.
+//
 // **Time is passed in, never read.**
 //
 // @tier L12 · shared
 
 #include <engine/ecs/Store.hpp>
+#include <engine/net/Cookie.hpp>
 #include <engine/net/Endpoint.hpp>
+#include <engine/net/Handshake.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/replication/Admission.hpp>
 #include <engine/replication/Prediction.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Session.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -46,6 +64,15 @@ namespace engine::replication {
 
 		// How much unacknowledged input prediction keeps.
 		PredictionSettings Prediction;
+
+		// How often to say the same thing again while the exchange is unfinished.
+		//
+		// A hello or an answer rides the unreliable channel and the responder
+		// keeps nothing to resend from, so this end is the only thing that can
+		// cover a lost one. Short enough that a drop costs a fraction of
+		// `net::LinkSettings::HandshakeTimeoutSeconds` rather than the whole of
+		// it, long enough that a slow round trip is not mistaken for a loss.
+		double RepeatEverySeconds = 0.25;
 	};
 
 	// One connection to an authoritative server, and the replica it feeds.
@@ -88,6 +115,28 @@ namespace engine::replication {
 		// @param nowSeconds The current time.
 		// @return `false` when the link refused it.
 		bool Submit(uint64_t tick, std::span<const std::byte> bytes, double nowSeconds);
+
+		// Whether the key exchange finished and the server let this client in.
+		//
+		// True from the moment the welcome's tag verified. Everything before
+		// that point is the exchange; nothing of the world has arrived yet.
+		//
+		// @return `true` once admitted.
+		bool Admitted() const {
+			return Phase == Stage::Admitted;
+		}
+
+		// Whether the exchange failed and this connector will not retry.
+		//
+		// A welcome whose tag did not verify, a key exchange message this build
+		// will not agree with, or no operating system entropy for an ephemeral
+		// key. All three are terminal on purpose: `net::Handshake` is
+		// single-use, so a second attempt is a second `Connector`.
+		//
+		// @return `true` when the exchange is over and failed.
+		bool Rejected() const {
+			return Phase == Stage::Refused;
+		}
 
 		// Whether the full snapshot has arrived and been applied.
 		//
@@ -159,6 +208,23 @@ namespace engine::replication {
 		}
 
 	  private:
+		// How far through the admission exchange this end is.
+		//
+		// Forward only, like every other lifecycle here. A refused exchange
+		// stays refused: `net::Handshake` is single-use by design, so retrying
+		// would mean a second ephemeral key pair, which is a second
+		// `Connector`.
+		enum class Stage : uint8_t {
+			Greeting,  ///< The hello is going out; no cookie yet.
+			Answering, ///< A cookie arrived; the answer is going out.
+			Admitted,  ///< The welcome verified. The link is `Connected`.
+			Refused,   ///< The exchange failed. Terminal.
+		};
+
+		void Repeat(double nowSeconds);
+		void Consume(std::span<const std::byte> datagram, double nowSeconds);
+		void Refuse();
+
 		// Held as well as handed to the session, because draining is this
 		// class's job: a `Session` is told about one datagram at a time and
 		// deliberately does not know where they come from.
@@ -167,6 +233,26 @@ namespace engine::replication {
 		Session Wire;
 		Replica Replica_;
 		Prediction Prediction_;
+
+		ConnectorSettings Settings;
+
+		// The key agreement, for the life of the exchange and no longer. Taken
+		// from once, in `Consume`, and empty afterwards.
+		std::optional<net::Handshake> Exchange;
+
+		// This end's key exchange message, copied out of `Exchange` so it
+		// outlives it. It is a public key; nothing here is secret.
+		std::array<std::byte, net::Handshake::MESSAGE_BYTES> Mine{};
+
+		// The cookie the server issued, repeated in every answer and bound into
+		// the welcome's tag.
+		std::array<std::byte, net::Cookie::COOKIE_BYTES> Cookie_{};
+
+		Stage Phase = Stage::Greeting;
+
+		// When the last hello or answer went out, and whether one ever has.
+		double SpokeAt = 0.0;
+		bool Spoken = false;
 
 		// Reused across ticks so a client polling every frame stops allocating.
 		std::vector<std::byte> Datagram;
