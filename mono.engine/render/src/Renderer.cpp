@@ -1382,7 +1382,7 @@ namespace engine::render {
 
 			SDL_GPUColorTargetInfo surfaceColour{};
 			surfaceColour.texture = State->SurfaceTexture[State->SurfaceSlot];
-			surfaceColour.clear_color = SDL_FColor{1.0f, 0.0f, 1.0f, 1.0f};  // TEMPORARY DEBUG
+			surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
 			surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
 			surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
 			surfaceColour.cycle = true;
@@ -1427,7 +1427,7 @@ namespace engine::render {
 				glm::vec4{
 					haveShadow ? 1.0f : 0.0f,
 					1.0f / static_cast<float>(SHADOW_RESOLUTION),
-					State->SurfaceReady ? 1.0f : 0.0f,
+					0.0f,
 					0.0f
 				},
 			};
