@@ -169,10 +169,31 @@ namespace engine::script {
 			return false;
 		}
 
+		// **Compared as text, not interned, and that is a measurement rather
+		// than a preference.**
+		//
+		// This used to build a `core::Name` from the field and compare ids. An
+		// id compare is an integer compare and looks like the cheap option — but
+		// *making* the id is a lock on the process-wide registry plus a hash
+		// lookup, paid on every property read and every property write. A script
+		// animating a scene does that constantly: `Mirrors-1-world` touches
+		// three properties on each of 24 parts every frame, so 72 lock
+		// acquisitions a frame at 60 Hz, on a registry shared with every worker
+		// thread in the job system.
+		//
+		// It showed up as `property lookup` costing about half of every
+		// `instance set` on F5, which is what a lock in the wrong place looks
+		// like from the outside: no spike anybody can point at, just a beat that
+		// is always slower than the work in it.
+		//
+		// A class carries a dozen or so properties, so the scan is a dozen short
+		// string compares over memory that is already hot — and `string_view`'s
+		// comparison rejects on length before it reads a byte. No lock, no hash,
+		// no allocation, and the interned id is never needed because nothing
+		// here stores the name.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, std::string_view name) {
-			const Name key(name);
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-				if (property.Name == key) {
+				if (property.Name.Text() == name) {
 					return &property;
 				}
 			}

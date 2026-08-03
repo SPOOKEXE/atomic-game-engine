@@ -220,10 +220,15 @@ namespace engine::script {
 
 		// --- instances -------------------------------------------------------
 
+		// Text, not an interned id, for the reason `Instances.cpp`'s twin gives
+		// at length: building the id takes a lock on the process-wide registry,
+		// and this is on the path of every property a script reads or writes.
+		// The two surfaces share rules rather than code, and this is one of the
+		// rules.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, const char *name) {
-			const Name key(name);
+			const std::string_view key(name);
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-				if (property.Name == key) {
+				if (property.Name.Text() == key) {
 					return &property;
 				}
 			}
