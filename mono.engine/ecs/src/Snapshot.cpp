@@ -133,11 +133,26 @@ namespace engine::ecs {
 		// The directory, exactly as it stands. Generations included, because a
 		// handle stored inside a component is only valid if its generation
 		// comes back too.
+		//
+		// **Two runs, one per index region.** The regions are 2³¹ indices apart
+		// and each is dense from its own base, so writing one run over the whole
+		// space would be two billion entries of nothing. Written as a count and
+		// a run each rather than as index/value pairs, because a run costs five
+		// bytes an entry against nine and the authoritative region is dense by
+		// construction. This split is what `SNAPSHOT_VERSION` 2 is.
 		const size_t issued = state.Directory.Capacity();
 		writer.WriteUInt64(issued);
 		for (size_t index = 0; index < issued; index++) {
 			writer.WriteUInt32(state.Directory.Generation(static_cast<uint32_t>(index)));
 			writer.WriteBool(state.Directory.Live(static_cast<uint32_t>(index)));
+		}
+
+		const size_t predicted = state.Directory.PredictedCapacity();
+		writer.WriteUInt64(predicted);
+		for (size_t local = 0; local < predicted; local++) {
+			const auto index = static_cast<uint32_t>(SparseSet::PREDICTED_BASE + local);
+			writer.WriteUInt32(state.Directory.Generation(index));
+			writer.WriteBool(state.Directory.Live(index));
 		}
 
 		writer.WriteRaw(body.Bytes().data(), body.Size());
@@ -192,17 +207,42 @@ namespace engine::ecs {
 			return ordinal < resolved.size() ? resolved[ordinal] : ComponentId{};
 		};
 
+		// Two runs, one per index region — see `SaveSnapshot`. Each count is
+		// checked against what its region can actually hold before anything is
+		// allocated: a corrupt or hostile stream claiming four billion entries
+		// would otherwise have the loop below walk to it one failed read at a
+		// time, and `FinishRestore` sweep the same range again afterwards.
 		const uint64_t issued = reader.ReadUInt64();
+		if (issued > SparseSet::AUTHORITATIVE_INDICES) {
+			ENGINE_ERROR("store '{}': snapshot claims {} authoritative entities.", name, issued);
+			ClearWorld(state);
+			return false;
+		}
 		for (uint64_t index = 0; index < issued && !reader.Failed(); index++) {
 			const uint32_t generation = reader.ReadUInt32();
 			const bool live = reader.ReadBool();
 			state.Directory.Restore(static_cast<uint32_t>(index), generation, live);
 		}
+
+		const uint64_t predicted = reader.ReadUInt64();
+		if (predicted > SparseSet::PREDICTED_INDICES) {
+			ENGINE_ERROR("store '{}': snapshot claims {} predicted entities.", name, predicted);
+			ClearWorld(state);
+			return false;
+		}
+		for (uint64_t local = 0; local < predicted && !reader.Failed(); local++) {
+			const uint32_t generation = reader.ReadUInt32();
+			const bool live = reader.ReadBool();
+			state.Directory.Restore(
+				static_cast<uint32_t>(SparseSet::PREDICTED_BASE + local), generation, live
+			);
+		}
+
 		if (reader.Failed()) {
 			ClearWorld(state);
 			return false;
 		}
-		state.Directory.FinishRestore(static_cast<size_t>(issued));
+		state.Directory.FinishRestore(static_cast<size_t>(issued), static_cast<size_t>(predicted));
 
 		const uint32_t tableCount = reader.ReadUInt32();
 		for (uint32_t index = 0; index < tableCount && !reader.Failed(); index++) {
@@ -315,6 +355,18 @@ namespace engine::ecs {
 			for (const Archetype &table : state.Tables) {
 				for (const Entity entity : table.Entities()) {
 					const EntityId key = EntityId::Of(entity);
+					if (SparseSet::IsPredicted(key.Index)) {
+						// **A predicted entity is never stale.** "The sender did
+						// not mention it" is the whole definition of a
+						// prediction — the authority allocates nothing from this
+						// range, so its snapshot cannot mention one, and
+						// destroying it here would delete every prediction on
+						// the first correction. Whether a prediction has outlived
+						// its usefulness is the predicting layer's call, made
+						// through `Promote` or a destroy; it is not something a
+						// snapshot's silence decides.
+						continue;
+					}
 					if (!scratch.Directory.Alive(key.Index, key.Generation)) {
 						stale.push_back(entity);
 					}
@@ -340,10 +392,7 @@ namespace engine::ecs {
 				// Restored at the sender's index *and* generation, so a handle
 				// held anywhere — including inside another component — still
 				// names the same entity on both sides.
-				state.Directory.Restore(key.Index, key.Generation, true);
-				state.Directory.FinishRestore(
-					std::max(state.Directory.Capacity(), static_cast<size_t>(key.Index) + 1)
-				);
+				state.Directory.Adopt(key.Index, key.Generation);
 			}
 
 			// The components the sender says it has, and only those: a component

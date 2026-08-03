@@ -1,0 +1,177 @@
+#include "GridInternals.hpp"
+
+#include <engine/spatial/HashGrid.hpp>
+
+#include <cstdint>
+
+namespace engine::spatial {
+
+	namespace {
+		// The fewest buckets a grid ever has.
+		//
+		// Small enough that an almost-empty grid costs nothing to hold, large
+		// enough that a handful of proxies do not all land in one bucket and
+		// turn every query into a scan of the whole index.
+		constexpr size_t MINIMUM_BUCKET_COUNT = 64;
+
+		// The most it ever has. Four megabytes of bucket offsets, which is
+		// where a wider table stops paying for itself against the cost of
+		// touching it.
+		constexpr size_t MAXIMUM_BUCKET_COUNT = size_t{1} << 20;
+
+		// A power of two at least as large as the entry count.
+		//
+		// A power of two so that selecting a bucket is a mask rather than a
+		// remainder. Not micro-optimisation for its own sake: selection happens
+		// once per cell per query, and an integer division costs many times
+		// what an AND does.
+		size_t ChooseBucketCount(size_t entries) {
+			size_t buckets = MINIMUM_BUCKET_COUNT;
+			while (buckets < entries && buckets < MAXIMUM_BUCKET_COUNT) {
+				buckets <<= 1;
+			}
+			return buckets;
+		}
+
+		// Every cell of an inclusive range, in the ascending order the query
+		// walk uses.
+		//
+		// Both build passes go through here, so the counting pass and the
+		// filling pass cannot disagree about which cells a proxy occupies —
+		// which would corrupt the bucket offsets rather than merely misplace
+		// something. A range whose maximum is below its minimum yields nothing,
+		// and that is how an oversized proxy is kept out of the cells.
+		template <class Visit>
+		void ForEachCell(
+			int32_t minimumX,
+			int32_t minimumY,
+			int32_t minimumZ,
+			int32_t maximumX,
+			int32_t maximumY,
+			int32_t maximumZ,
+			Visit &&visit
+		) {
+			for (int32_t cellZ = minimumZ; cellZ <= maximumZ; cellZ++) {
+				for (int32_t cellY = minimumY; cellY <= maximumY; cellY++) {
+					for (int32_t cellX = minimumX; cellX <= maximumX; cellX++) {
+						visit(cellX, cellY, cellZ);
+					}
+				}
+			}
+		}
+	}
+
+	HashGrid::HashGrid(float cellSize) {
+		// A zero or negative spacing makes the reciprocal an infinity or flips
+		// every cell coordinate, and both reach every later query as a wrong
+		// answer rather than as a failure. Falling back is louder than it
+		// sounds: the grid keeps working and the caller's own cell-size
+		// experiment stops changing anything, which is the symptom that gets
+		// investigated.
+		Spacing = cellSize > 0.0f ? cellSize : DEFAULT_CELL_SIZE;
+		InverseSpacing = 1.0f / Spacing;
+	}
+
+	void HashGrid::Clear() {
+		// Cleared, not freed. A grid rebuilt every tick over a steady scene
+		// allocates on the first tick and never again.
+		Proxies.clear();
+		Ranges.clear();
+		BucketStart.clear();
+		BucketCursor.clear();
+		Entries.clear();
+		Oversized.clear();
+	}
+
+	void HashGrid::Rebuild(std::span<const Proxy> proxies) {
+		Clear();
+
+		Proxies.assign(proxies.begin(), proxies.end());
+		Ranges.resize(Proxies.size());
+
+		// Pass one: each proxy's cell range, and how many entries the whole set
+		// needs. The ranges are kept rather than recomputed, because the two
+		// passes below and every later query all want them, and six floors per
+		// proxy repeated three times costs more than the bytes.
+		size_t entryCount = 0;
+		for (size_t index = 0; index < Proxies.size(); index++) {
+			const core::AABB &bounds = Proxies[index].Bounds;
+			CellRange &range = Ranges[index];
+
+			range.MinimumX = CellCoordinateOf(bounds.Minimum.X, InverseSpacing);
+			range.MinimumY = CellCoordinateOf(bounds.Minimum.Y, InverseSpacing);
+			range.MinimumZ = CellCoordinateOf(bounds.Minimum.Z, InverseSpacing);
+			range.MaximumX = CellCoordinateOf(bounds.Maximum.X, InverseSpacing);
+			range.MaximumY = CellCoordinateOf(bounds.Maximum.Y, InverseSpacing);
+			range.MaximumZ = CellCoordinateOf(bounds.Maximum.Z, InverseSpacing);
+
+			const int64_t spanX = static_cast<int64_t>(range.MaximumX) - range.MinimumX + 1;
+			const int64_t spanY = static_cast<int64_t>(range.MaximumY) - range.MinimumY + 1;
+			const int64_t spanZ = static_cast<int64_t>(range.MaximumZ) - range.MinimumZ + 1;
+
+			// A box built the wrong way round covers no cells and can still
+			// satisfy AABB::Overlaps against a large enough box, so it joins
+			// the oversized list where the exact test answers it — rather than
+			// being dropped here, which would make the index disagree with the
+			// type.
+			const bool inverted = spanX <= 0 || spanY <= 0 || spanZ <= 0;
+			const int64_t cells = inverted ? 0 : spanX * spanY * spanZ;
+
+			if (inverted || cells > static_cast<int64_t>(MAXIMUM_CELLS_PER_PROXY)) {
+				Oversized.push_back(static_cast<uint32_t>(index));
+
+				// Emptied so that both build passes skip it without consulting
+				// the list, and so that nothing later mistakes a huge range for
+				// one somebody meant.
+				range.MaximumX = range.MinimumX - 1;
+				continue;
+			}
+			entryCount += static_cast<size_t>(cells);
+		}
+
+		const size_t buckets = ChooseBucketCount(entryCount);
+		BucketStart.assign(buckets + 1, 0);
+
+		// Pass two: how many entries each bucket owns, counted one slot to the
+		// right so the prefix sum turns the counts into starts in place.
+		for (const CellRange &range : Ranges) {
+			ForEachCell(
+				range.MinimumX,
+				range.MinimumY,
+				range.MinimumZ,
+				range.MaximumX,
+				range.MaximumY,
+				range.MaximumZ,
+				[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
+					BucketStart[(HashCell(cellX, cellY, cellZ) & (buckets - 1)) + 1]++;
+				}
+			);
+		}
+		for (size_t bucket = 0; bucket < buckets; bucket++) {
+			BucketStart[bucket + 1] += BucketStart[bucket];
+		}
+
+		// Pass three: place. The cursor is a second array rather than
+		// `BucketStart` advanced in place, because the starts are what a query
+		// reads and reconstructing them afterwards is a second chance to be
+		// wrong.
+		BucketCursor.assign(BucketStart.begin(), BucketStart.end() - 1);
+		Entries.resize(entryCount);
+		for (size_t index = 0; index < Ranges.size(); index++) {
+			const CellRange &range = Ranges[index];
+			ForEachCell(
+				range.MinimumX,
+				range.MinimumY,
+				range.MinimumZ,
+				range.MaximumX,
+				range.MaximumY,
+				range.MaximumZ,
+				[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
+					const size_t bucket = HashCell(cellX, cellY, cellZ) & (buckets - 1);
+					Entries[BucketCursor[bucket]++] =
+						Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
+				}
+			);
+		}
+	}
+}

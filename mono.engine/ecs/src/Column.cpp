@@ -1,6 +1,8 @@
-#include <engine/core/Log.hpp>
+#include "ChunkPool.hpp"
+
 #include <engine/ecs/Column.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -9,14 +11,6 @@
 namespace engine::ecs {
 
 	namespace {
-		// The capacity a column jumps to on its first growth.
-		//
-		// Small, because most archetypes in a scene hold a handful of entities
-		// and paying a kilobyte for each of them adds up faster than the
-		// reallocations it saves. The ones that matter grow geometrically past
-		// this within a few pushes.
-		constexpr size_t FIRST_CAPACITY = 8;
-
 		// Whether this column stores bytes at all.
 		//
 		// A tag has a descriptor and an id but nothing to hold, and every path
@@ -35,13 +29,13 @@ namespace engine::ecs {
 
 	Column::~Column() {
 		Clear();
-		Release();
 	}
 
 	Column::Column(Column &&other) noexcept
 		: ComponentType(other.ComponentType), Stride(other.Stride), Alignment(other.Alignment),
-		  Trivial(other.Trivial), Storage(other.Storage), Rows(other.Rows), Capacity_(other.Capacity_) {
-		other.Storage = nullptr;
+		  Trivial(other.Trivial), Chunks(std::move(other.Chunks)), Rows(other.Rows),
+		  Capacity_(other.Capacity_) {
+		other.Chunks.clear();
 		other.Rows = 0;
 		other.Capacity_ = 0;
 		other.ComponentType = ComponentId{};
@@ -53,17 +47,16 @@ namespace engine::ecs {
 		}
 
 		Clear();
-		Release();
 
 		ComponentType = other.ComponentType;
 		Stride = other.Stride;
 		Alignment = other.Alignment;
 		Trivial = other.Trivial;
-		Storage = other.Storage;
+		Chunks = std::move(other.Chunks);
 		Rows = other.Rows;
 		Capacity_ = other.Capacity_;
 
-		other.Storage = nullptr;
+		other.Chunks.clear();
 		other.Rows = 0;
 		other.Capacity_ = 0;
 		other.ComponentType = ComponentId{};
@@ -75,65 +68,94 @@ namespace engine::ecs {
 		return Components::Describe(ComponentType);
 	}
 
-	void Column::Release() {
-		if (Storage != nullptr) {
-			::operator delete(Storage, std::align_val_t(Alignment));
-			Storage = nullptr;
-		}
-		Capacity_ = 0;
-	}
-
-	void Column::Reallocate(size_t rows) {
+	void Column::GrowToChunks(size_t chunks) {
 		if (!HoldsBytes(Stride)) {
-			// A tag column tracks a count and owns no memory, so capacity is
-			// whatever it is asked for and no allocation happens.
-			Capacity_ = rows;
 			return;
 		}
 
-		void *replacement = ::operator new(rows * Stride, std::align_val_t(Alignment));
+		// Reserved up front so that a throwing directory growth cannot leave a
+		// chunk acquired and unrecorded — the pool would never see it again.
+		Chunks.reserve(chunks);
+		while (Chunks.size() < chunks) {
+			Chunks.push_back(ChunkPool::Acquire(ChunkBytes(Chunks.size()), Alignment));
+		}
+		Capacity_ = Chunks.empty() ? 0 : ChunkStart(Chunks.size() - 1) + ChunkRows(Chunks.size() - 1);
+	}
 
-		if (Rows > 0) {
-			if (Trivial) {
-				std::memcpy(replacement, Storage, Rows * Stride);
-			} else {
-				const TypeDescriptor &descriptor = Describe();
-				descriptor.MoveConstruct(replacement, Storage, Rows);
-				descriptor.Destruct(Storage, Rows);
-			}
+	void Column::ReleaseChunksFrom(size_t chunks) {
+		if (!HoldsBytes(Stride) || Chunks.size() <= chunks) {
+			// One compare on the path a removal takes every time. Recomputing
+			// the capacity below costs a branch and a shift, and paying it per
+			// removal to arrive at the number it already held is the shape
+			// `docs/CODE_QUALITY.md` calls out.
+			return;
 		}
 
-		if (Storage != nullptr) {
-			::operator delete(Storage, std::align_val_t(Alignment));
+		while (Chunks.size() > chunks) {
+			ChunkPool::Release(Chunks.back(), ChunkBytes(Chunks.size() - 1), Alignment);
+			Chunks.pop_back();
 		}
-
-		Storage = replacement;
-		Capacity_ = rows;
+		Capacity_ = Chunks.empty() ? 0 : ChunkStart(Chunks.size() - 1) + ChunkRows(Chunks.size() - 1);
 	}
 
 	void Column::Reserve(size_t rows) {
-		if (rows <= Capacity_) {
+		if (!HoldsBytes(Stride)) {
+			// A tag column tracks a count and owns no memory, so capacity is
+			// whatever it is asked for and no allocation happens.
+			Capacity_ = std::max(Capacity_, rows);
 			return;
 		}
-		Reallocate(rows);
+
+		GrowToChunks(std::max(ChunksFor(rows), Chunks.size()));
 	}
 
 	void Column::GrowIfFull() {
 		if (Rows < Capacity_) {
 			return;
 		}
-		Reallocate(Capacity_ == 0 ? FIRST_CAPACITY : Capacity_ * 2);
-	}
 
-	void Column::Clear() {
-		if (Rows == 0) {
+		if (!HoldsBytes(Stride)) {
+			Capacity_ = Rows + 1;
 			return;
 		}
 
-		if (!Trivial && HoldsBytes(Stride)) {
-			Describe().Destruct(Storage, Rows);
+		// One chunk, never a doubling. Geometric growth existed to amortise a
+		// copy of everything already there, and there is no copy any more — a
+		// chunk is acquired and linked, and the rows before it never move.
+		GrowToChunks(Chunks.size() + 1);
+	}
+
+	void Column::Clear() {
+		if (Rows > 0 && !Trivial && HoldsBytes(Stride)) {
+			DestroyRows(0, Rows);
 		}
+
 		Rows = 0;
+
+		// Every chunk, not merely the ones past the row count. A world whose
+		// population oscillates is protected by the pool rather than by holding
+		// the peak, which is the trade this whole item is.
+		ReleaseChunksFrom(0);
+		if (!HoldsBytes(Stride)) {
+			Capacity_ = 0;
+		}
+	}
+
+	void Column::DestroyRows(size_t from, size_t to) {
+		const TypeDescriptor &descriptor = Describe();
+
+		// Per chunk, because `Destruct` takes a count and a contiguous range and
+		// a column is only contiguous inside one chunk. Handing it the whole row
+		// count from chunk zero's base would destroy garbage past the first
+		// chunk and leak everything after it.
+		size_t row = from;
+		while (row < to) {
+			const size_t chunk = ChunkOf(row);
+			const size_t offset = row - ChunkStart(chunk);
+			const size_t count = std::min(to, ChunkLimit(row)) - row;
+			descriptor.Destruct(static_cast<std::byte *>(Chunks[chunk]) + offset * Stride, count);
+			row += count;
+		}
 	}
 
 	size_t Column::PushDefault() {
@@ -221,6 +243,19 @@ namespace engine::ecs {
 		}
 
 		Rows--;
+
+		// The trailing chunk goes back the moment the rows stop reaching into
+		// it. This is the release the whole item is about, and it is affordable
+		// only because the pool is between here and the allocator — a population
+		// oscillating across a boundary would otherwise allocate and free on
+		// every oscillation.
+		//
+		// Guarded by a compare against the last chunk's first row rather than by
+		// recomputing the chunk count: a removal that did not empty a chunk is
+		// the overwhelmingly common one, and it is on the structural-change path.
+		if (!Chunks.empty() && Rows <= ChunkStart(Chunks.size() - 1)) {
+			ReleaseChunksFrom(ChunksFor(Rows));
+		}
 	}
 
 	size_t Column::PushMovedFrom(Column &source, size_t sourceRow) {
@@ -255,8 +290,13 @@ namespace engine::ecs {
 		if (!descriptor.Serialisable) {
 			return false;
 		}
-		if (Rows > 0) {
-			descriptor.Write(writer, Storage, Rows);
+
+		// One call per chunk, appended in row order, so the bytes are the same
+		// stream a single contiguous column produced and no snapshot format
+		// changed when the storage did.
+		for (size_t chunk = 0; chunk < ChunksFor(Rows); chunk++) {
+			const size_t start = ChunkStart(chunk);
+			descriptor.Write(writer, Chunks[chunk], std::min(Rows, start + ChunkRows(chunk)) - start);
 		}
 		return true;
 	}
@@ -266,6 +306,7 @@ namespace engine::ecs {
 
 		if (!HoldsBytes(Stride)) {
 			Rows = rows;
+			Capacity_ = std::max(Capacity_, rows);
 			return true;
 		}
 
@@ -276,6 +317,7 @@ namespace engine::ecs {
 		}
 
 		Reserve(rows);
+		Rows = rows;
 
 		// Construct first, then read into constructed objects. Reading into raw
 		// storage would hand a half-initialised object to a destructor if the
@@ -285,13 +327,21 @@ namespace engine::ecs {
 		// overwrites every byte anyway, and a value-initialising pass over a
 		// column that is about to be memcpy'd is the whole restore cost paid
 		// twice.
-		if (rows > 0 && !Trivial) {
-			std::memset(Storage, 0, rows * Stride);
-			descriptor.DefaultConstruct(Storage, rows);
+		const size_t chunks = ChunksFor(rows);
+		if (!Trivial) {
+			for (size_t chunk = 0; chunk < chunks; chunk++) {
+				const size_t start = ChunkStart(chunk);
+				const size_t count = std::min(rows, start + ChunkRows(chunk)) - start;
+				std::memset(Chunks[chunk], 0, count * Stride);
+				descriptor.DefaultConstruct(Chunks[chunk], count);
+			}
 		}
-		Rows = rows;
 
-		descriptor.Read(reader, Storage, rows);
+		for (size_t chunk = 0; chunk < chunks; chunk++) {
+			const size_t start = ChunkStart(chunk);
+			descriptor.Read(reader, Chunks[chunk], std::min(rows, start + ChunkRows(chunk)) - start);
+		}
+
 		if (reader.Failed()) {
 			Clear();
 			return false;

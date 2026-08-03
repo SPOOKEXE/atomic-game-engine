@@ -683,7 +683,8 @@ TEST_CASE("a replica still receives everything sent to it", "[world]") {
 
 	std::string heard;
 	universe.Enter(client, [&heard](Store &store) {
-		for (const Delivery &delivery : Postbox(store).Deliveries()) {
+		const Postbox box(store);
+		for (const Delivery &delivery : box.Deliveries()) {
 			heard += Text(delivery.Payload);
 		}
 	});

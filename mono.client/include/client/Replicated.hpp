@@ -1,53 +1,78 @@
 #pragma once
 
-// The components this client expects a server to send it.
+// What this client does with a world it does not own.
 //
-// **This is duplication, it is named as such, and it has an owner.** The server
-// declares `server.Position` and `server.Velocity` in its own
-// `Simulation.hpp`; a snapshot travels by component *name*, so the receiving
-// process has to have registered a type under the same name with the same
-// layout or the delta resolves to nothing. Two declarations of one wire type is
-// exactly the shape that drifts — one side gains a field, the other does not,
-// and the symptom is a component that silently stops arriving.
+// **This file used to be the duplication and is now the opposite of it.** It
+// declared a `ReplicatedPosition` and a `ReplicatedVelocity` registered under
+// `server.Position` and `server.Velocity`, because a snapshot travels by
+// component *name* and the two programs shared no component set — so the client
+// had to declare the server's types a second time and keep the layouts in step
+// by hand. `mono.engine/scene` at L7 ended that: both programs register the same
+// `scene` components under the same names, and a snapshot and a delta cross with
+// no translation layer at all.
 //
-// **v0.4 deletes this file.** `mono.engine/scene` at L7 is the item that owns
-// both programs' component definitions, and its roadmap line already names
-// `Position` and `Velocity` in `mono.server/include/server/Simulation.hpp` among
-// the definitions it removes. This header is the client's half of the same
-// removal, and the reason it can be written down now is that the wire made the
-// duplication load-bearing rather than merely untidy.
+// What is left is the half that is genuinely the client's own: a replicated
+// world arrives as rows and has to be *drawn*, and nothing about drawing it
+// crosses the wire. That is presentation over somebody else's simulation, which
+// is neither the demo scene nor the engine's business, so it lives here.
 //
-// Until then, the layouts here are checked against the server's by a
-// `static_assert` on size and by the join test, which fails if a component does
-// not arrive.
+// **It is interpolated, and the buffer that does it is not in this file.**
+// `engine::replication::SnapshotBuffer` holds the received ticks and decides
+// where along them the world is drawn, because the decision is about the link
+// rather than about drawing. What is here is the two halves that need this
+// process's own knowledge: which component carries a pose, and when the store
+// holds a tick in full.
+//
+// **A replica simulates nothing.** The only system registered below is a
+// `PreRender` one, which derives what to draw and mutates no simulation state.
+// A replica that ticked would be this process disagreeing with the authority
+// once per tick, which is the bug replication exists to avoid.
 
-#include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/replication/SnapshotBuffer.hpp>
+
+#include <cstdint>
 
 namespace client {
 
-	// Where a replicated entity is, as the server sees it.
+	// Installs the presentation half of a replicated world.
 	//
-	// Must match `server::Position`. Not the demo's `Transform`: the demo world
-	// is this process's own and the replicated world is somebody else's, and a
-	// single type used for both would be one type meaning two things.
-	struct ReplicatedPosition {
-		// Metres from the origin, in world space.
-		engine::core::Vector3 Value;
-	};
+	// Called once, when the world is created and before any snapshot is
+	// applied — a resource added later is still legal, but a draw list that
+	// appeared halfway through a join would leave the first frames with nothing
+	// to publish.
+	//
+	// Registers no simulation system. Nothing here writes a component.
+	//
+	// @param store        The replicated world. Gains a `DrawList` and a
+	//        `engine::replication::SnapshotBuffer` resource.
+	// @param scheduler    Its scheduler, which gains one `PreRender` system.
+	// @param interpolation How far behind the newest received tick to draw, and
+	//        the rate that delay is measured against. The tick rate must be the
+	//        authority's, not this client's frame rate.
+	void BuildReplicatedWorld(
+		engine::ecs::Store &store,
+		engine::ecs::Scheduler &scheduler,
+		const engine::replication::InterpolationSettings &interpolation = {}
+	);
 
-	// How fast a replicated entity is going.
+	// Records where everything in a replicated world is, at the tick that put it
+	// there.
 	//
-	// Must match `server::Velocity`. Received rather than integrated here — a
-	// replica does not simulate what the server simulates, it is told.
-	struct ReplicatedVelocity {
-		// Metres per second.
-		engine::core::Vector3 Value;
-	};
-
-	// Registers the replicated components under the names the server sends.
+	// **Called straight after the connection has applied its inbound messages,
+	// not from a render system.** That instant is the one where the store holds
+	// the tick the server described; a render pass reads the same rows, but a
+	// pass that only ran when a frame was drawn would miss a tick whenever the
+	// frame rate dipped below the tick rate, and the buffer would then be
+	// interpolating across gaps that the network never produced.
 	//
-	// The names are the server's, not this program's, because a name is the
-	// identity on the wire. Called before a connection is opened, since a
-	// snapshot that arrives before registration resolves to nothing.
-	void RegisterReplicatedComponents();
+	// Cheap to call on a tick already recorded — it asks the buffer first and
+	// walks nothing.
+	//
+	// @param store The replicated world, after the connection wrote into it.
+	// @param tick  The last tick applied in full, from
+	//        `engine::replication::Connector::Applied`. Zero does nothing:
+	//        the snapshot has not landed and there is no state to record.
+	void RecordReplicatedTick(engine::ecs::Store &store, uint64_t tick);
 }

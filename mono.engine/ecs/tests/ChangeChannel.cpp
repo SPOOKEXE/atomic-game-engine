@@ -10,6 +10,8 @@
 
 TEST_SUITE_ID("engine.ecs.changechannel")
 
+using engine::ecs::Column;
+using engine::ecs::Components;
 using engine::ecs::DirtyBits;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -375,11 +377,14 @@ TEST_CASE("changed runs arrive as contiguous blocks", "[ecs]") {
 	}
 	store.ClearChanges();
 
-	// Two separate runs, so the batching has something to get wrong.
-	for (int index = 4; index < 9; index++) {
+	// Two separate runs, so the batching has something to get wrong. Both sit
+	// inside one chunk on purpose: a run is clipped at a chunk boundary, so
+	// what is being measured here is the coalescing rather than the storage's
+	// division, and the clipping has a case of its own below.
+	for (int index = 17; index < 22; index++) {
 		store.GetMutable<Quiet>(entities[static_cast<size_t>(index)])->Value = 100 + index;
 	}
-	for (int index = 20; index < 23; index++) {
+	for (int index = 25; index < 28; index++) {
 		store.GetMutable<Quiet>(entities[static_cast<size_t>(index)])->Value = 200 + index;
 	}
 
@@ -392,9 +397,9 @@ TEST_CASE("changed runs arrive as contiguous blocks", "[ecs]") {
 
 	REQUIRE(runs.size() == 2);
 	REQUIRE(runs[0].first == 5);
-	REQUIRE(runs[0].second == 104);
+	REQUIRE(runs[0].second == 117);
 	REQUIRE(runs[1].first == 3);
-	REQUIRE(runs[1].second == 220);
+	REQUIRE(runs[1].second == 225);
 	REQUIRE(total == 8);
 }
 
@@ -424,6 +429,105 @@ TEST_CASE("a run's entities and values line up", "[ecs]") {
 	size_t seen = 0;
 	store.EachChangedBatch<Quiet>([&seen](const Entity *, Quiet *, size_t rows) { seen += rows; });
 	REQUIRE(seen == 8);
+}
+
+TEST_CASE("a run stops at a chunk boundary and never straddles one", "[ecs]") {
+	// **The clip that keeps a delta honest.** A run hands the callback one base
+	// pointer and a row count, and `data + row * size` has to be the value for
+	// `entities[row]` over the whole run. A column is only contiguous inside one
+	// chunk, so a run allowed to grow past a boundary walks into the previous
+	// chunk's tail — and the entity array does *not*, because `Archetype::Ids`
+	// is one allocation. The result is entity A's id sent with entity B's bytes:
+	// every count still adds up, nothing crashes, and a client shows objects
+	// teleporting.
+	Store store("runs");
+	store.Observe<Quiet>();
+
+	// Deliberately several chunks and not a whole number of them.
+	const size_t count = 2348;
+	std::vector<Entity> entities;
+	entities.reserve(count);
+	for (size_t index = 0; index < count; index++) {
+		const Entity entity = store.Create();
+		store.Set<Quiet>(entity, Quiet{static_cast<int>(index)});
+		entities.push_back(entity);
+	}
+
+	// Everything dirty, so the runs are as long as the storage will let them be.
+	store.MarkAllChanged<Quiet>();
+
+	size_t wrongValue = 0;
+	size_t straddling = 0;
+	size_t seen = 0;
+	store.EachChangedBatch<Quiet>([&](const Entity *found, Quiet *values, size_t rows) {
+		for (size_t row = 0; row < rows; row++) {
+			// Each entity holds its own creation index, so this is only true
+			// when the two arrays are still in step.
+			const Quiet *held = store.Get<Quiet>(found[row]);
+			if (held == nullptr || held->Value != values[row].Value) {
+				wrongValue++;
+			}
+		}
+
+		// And the run itself never crosses a boundary, which is the property
+		// that makes the check above hold rather than merely happen to pass.
+		const auto first = reinterpret_cast<uintptr_t>(values);
+		const auto last = reinterpret_cast<uintptr_t>(values + rows - 1);
+		if ((last - first) / sizeof(Quiet) != rows - 1) {
+			straddling++;
+		}
+		seen += rows;
+	});
+
+	REQUIRE(seen == count);
+	REQUIRE(wrongValue == 0);
+	REQUIRE(straddling == 0);
+
+	// And clearing reaches every chunk. Both `MarkAllChanged` and
+	// `ClearChanges` used to take the whole row count from chunk zero's base —
+	// a write past the end of the first chunk, so the bits past it were left
+	// alone and somebody else's chunk was overwritten.
+	store.ClearChanges();
+	size_t stillDirty = 0;
+	store.EachChangedBatch<Quiet>([&stillDirty](const Entity *, Quiet *, size_t rows) {
+		stillDirty += rows;
+	});
+	REQUIRE(stillDirty == 0);
+}
+
+TEST_CASE("the runtime-keyed run form clips where the typed one does", "[ecs]") {
+	// `EachChangedRuns` is the form `replication::Authority` uses, because it
+	// resolves a component off a wire and cannot name a type at compile time.
+	// It shares `VisitChangedRuns` with the typed form, and this is what says so
+	// rather than assuming it.
+	Store store("runs");
+	store.Observe<Quiet>();
+
+	const size_t count = 1088;
+	std::vector<Entity> entities;
+	entities.reserve(count);
+	for (size_t index = 0; index < count; index++) {
+		const Entity entity = store.Create();
+		store.Set<Quiet>(entity, Quiet{static_cast<int>(index)});
+		entities.push_back(entity);
+	}
+	store.MarkAllChanged<Quiet>();
+
+	size_t wrongValue = 0;
+	size_t seen = 0;
+	store.EachChangedRuns(Components::Of<Quiet>(), [&](const Entity *found, void *data, size_t rows) {
+		const auto *values = static_cast<const Quiet *>(data);
+		for (size_t row = 0; row < rows; row++) {
+			const Quiet *held = store.Get<Quiet>(found[row]);
+			if (held == nullptr || held->Value != values[row].Value) {
+				wrongValue++;
+			}
+		}
+		seen += rows;
+	});
+
+	REQUIRE(seen == count);
+	REQUIRE(wrongValue == 0);
 }
 
 TEST_CASE("nothing changed means no runs at all", "[ecs]") {

@@ -28,6 +28,8 @@
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -39,6 +41,7 @@
 #include <vector>
 
 TEST_SUITE_ID("server.replication")
+TEST_DEPENDS("engine.scene.registration")
 
 using engine::core::Name;
 using engine::ecs::Entity;
@@ -48,31 +51,26 @@ using engine::net::MakeUdpTransport;
 using engine::net::Transport;
 using engine::parallel::Process;
 using engine::replication::Connector;
+using engine::scene::Bounds;
+using engine::scene::Motion;
+using engine::scene::Transform;
+using engine::scene::Visual;
 
 namespace server_replication_test {
-	// The components the server sends, registered here under the server's
-	// names.
+	// The components the server sends — `scene`'s, and the same call the server
+	// itself makes.
 	//
-	// The same duplication `mono.client/include/client/Replicated.hpp` carries
-	// and for the same reason — a component crosses by name, so a receiver has
-	// to have registered one. Declared again rather than included from the
-	// client, because a `server`-tier test may not reach a `client`-tier header
-	// and the tier rule is right about that. v0.4's `scene` deletes all three
-	// copies.
-	struct Position {
-		engine::core::Vector3 Value;
-	};
-	struct Velocity {
-		engine::core::Vector3 Value;
-	};
-
+	// **This file used to declare its own `Position` and `Velocity` under the
+	// server's wire names**, because a component crosses by name and there was
+	// no shared set to name. That was a third copy beside the server's and the
+	// client's, and it was worse than untidy: this binary already contained
+	// `server::Position`, so registering a second type under the same string
+	// aborted whenever both suites ran in one process. `testrunner` runs suites
+	// separately and never saw it; `ctest` runs the binary whole and failed
+	// every time. Registering the shared set is what removes the second
+	// declaration rather than renaming around the collision.
 	void RegisterTypes() {
-		static bool once = [] {
-			engine::ecs::Components::Register<Position>("server.Position");
-			engine::ecs::Components::Register<Velocity>("server.Velocity");
-			return true;
-		}();
-		(void)once;
+		engine::scene::RegisterSceneComponents();
 	}
 
 	std::filesystem::path ServerProgram() {
@@ -224,12 +222,20 @@ TEST_CASE("the replicated world holds the components the server sent", "[server]
 	REQUIRE(remote.Start(32));
 	REQUIRE(remote.Join(400));
 
-	// Both replicated components resolved by name in a process that never saw
+	// Every replicated component resolved by name in a process that never saw
 	// the server's header. A name that failed to resolve is a component that
 	// silently does not arrive, which is why this is asserted rather than
 	// assumed from the entity count.
-	REQUIRE(remote.World.CountMatching<Position>() == 32);
-	REQUIRE(remote.World.CountMatching<Velocity>() == 32);
+	REQUIRE(remote.World.CountMatching<Transform>() == 32);
+	REQUIRE(remote.World.CountMatching<Motion>() == 32);
+
+	// The two that are sent once in the snapshot and never again, because
+	// nothing in that world resizes or recolours anything. A client that
+	// received a position and no size has a scene it cannot draw, and this is
+	// the assertion that says they arrived rather than being assumed from the
+	// two above.
+	REQUIRE(remote.World.CountMatching<Bounds>() == 32);
+	REQUIRE(remote.World.CountMatching<Visual>() == 32);
 }
 
 TEST_CASE("the world keeps moving after the join", "[server][replication]") {
@@ -310,5 +316,5 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	// Every entity carries what it was sent, not merely the first datagram's
 	// worth. A split that dropped its tail would show as a short count here and
 	// as nothing at all anywhere else.
-	REQUIRE(remote.World.CountMatching<Position>() == 2000);
+	REQUIRE(remote.World.CountMatching<Transform>() == 2000);
 }

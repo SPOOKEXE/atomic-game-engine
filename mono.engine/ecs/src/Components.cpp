@@ -38,9 +38,20 @@ namespace engine::ecs {
 			bool Closed = false;
 		};
 
+		// Never destroyed, deliberately.
+		//
+		// A `Column` reaches its descriptor to destroy its rows, and a store held
+		// in a static outlives this registry under reverse destruction order —
+		// the registry is built on the first *registration*, which happens after
+		// whatever static owns the store was constructed. The result is a
+		// destructor reading a freed `std::deque` and calling whatever the bytes
+		// there look like: it showed up as a benchmark binary that printed its
+		// whole report and then segfaulted, and it depends on which static was
+		// touched first, so it appears and disappears with unrelated changes.
+		// The process reclaims the memory.
 		Registry &Get() {
-			static Registry registry;
-			return registry;
+			static Registry *registry = new Registry();
+			return *registry;
 		}
 
 		// Returned for an id nobody registered, so that a caller reading a

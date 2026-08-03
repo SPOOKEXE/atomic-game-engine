@@ -13,17 +13,20 @@ namespace client {
 		// Copied as object representations, which is legal here and nowhere
 		// near a wire: both ends of this channel are this process, and
 		// `ViewChannel`'s payload is opaque bytes precisely so that the two
-		// ends can agree on a layout the layer between them never learns. A
-		// view crossing a process boundary needs a real encoding, and that
-		// arrives with the draw list becoming `scene::DrawInstance` at L7.
+		// ends can agree on a layout the layer between them never learns. The
+		// instances are `scene::DrawInstance` now, which is the `shared` type a
+		// host of any tier can write — but a view crossing a *process* boundary
+		// still needs a real encoding rather than this memcpy, because the
+		// `core::Name`s inside a draw instance are process-local ids.
 		struct Prefix {
-			engine::render::Camera Camera;
+			engine::core::CFrame Frame;
+			engine::scene::Camera Camera;
 			uint32_t Instances = 0;
 			uint32_t Reserved = 0;
 		};
 
 		size_t PayloadFor(size_t instances) {
-			return sizeof(Prefix) + instances * sizeof(engine::render::Instance);
+			return sizeof(Prefix) + instances * sizeof(engine::scene::DrawInstance);
 		}
 	}
 
@@ -51,8 +54,9 @@ namespace client {
 
 	bool Compositor::Publish(
 		engine::world::WorldId id,
-		const engine::render::Camera &camera,
-		std::span<const engine::render::Instance> list,
+		const engine::core::CFrame &frame,
+		const engine::scene::Camera &camera,
+		std::span<const engine::scene::DrawInstance> list,
 		uint64_t tick,
 		float alpha
 	) {
@@ -79,6 +83,7 @@ namespace client {
 		Scratch.resize(bytes);
 
 		Prefix prefix;
+		prefix.Frame = frame;
 		prefix.Camera = camera;
 		prefix.Instances = static_cast<uint32_t>(list.size());
 		std::memcpy(Scratch.data(), &prefix, sizeof(Prefix));
@@ -91,7 +96,7 @@ namespace client {
 		header.World = slot->State.World;
 		header.SourceTick = tick;
 		header.Alpha = alpha;
-		header.Camera = camera.Frame;
+		header.Camera = frame;
 		header.PayloadBytes = static_cast<uint32_t>(bytes);
 
 		return slot->Channel->Publish(header, Scratch);
@@ -131,12 +136,13 @@ namespace client {
 			// process, but a count read back out of a buffer is still a count
 			// that decides how far a memcpy runs.
 			const size_t available =
-				(slot.Payload.size() - sizeof(Prefix)) / sizeof(engine::render::Instance);
+				(slot.Payload.size() - sizeof(Prefix)) / sizeof(engine::scene::DrawInstance);
 			const size_t count = std::min<size_t>(prefix.Instances, available);
 			slot.State.Instances = count;
 
 			if (index == 0) {
-				View = prefix.Camera;
+				ViewFrame = prefix.Frame;
+				ViewCamera = prefix.Camera;
 			}
 
 			const size_t before = Combined.size();
@@ -145,7 +151,7 @@ namespace client {
 				std::memcpy(
 					Combined.data() + before,
 					slot.Payload.data() + sizeof(Prefix),
-					count * sizeof(engine::render::Instance)
+					count * sizeof(engine::scene::DrawInstance)
 				);
 			}
 
@@ -155,7 +161,7 @@ namespace client {
 			if (index > 0 && spacing != 0.0f) {
 				const float offset = spacing * static_cast<float>(index);
 				for (size_t at = before; at < Combined.size(); at++) {
-					Combined[at].Model[3][0] += offset;
+					Combined[at].Frame.Position.X += offset;
 				}
 			}
 		}
@@ -165,8 +171,8 @@ namespace client {
 		// showing something beats showing the first world and a black gap.
 		if (Slots.size() > 1 && spacing != 0.0f) {
 			const float span = spacing * static_cast<float>(Slots.size() - 1);
-			View.Frame.Position.X += span * 0.5f;
-			View.Frame.Position.Z += span * 0.5f;
+			ViewFrame.Position.X += span * 0.5f;
+			ViewFrame.Position.Z += span * 0.5f;
 		}
 
 		for (size_t index = 0; index < Slots.size(); index++) {

@@ -14,6 +14,7 @@
 TEST_SUITE_ID("engine.ecs.archetype")
 
 using engine::ecs::Archetype;
+using engine::ecs::Column;
 using engine::ecs::ComponentId;
 using engine::ecs::Components;
 using engine::ecs::ComponentSet;
@@ -311,13 +312,28 @@ TEST_CASE("reserve grows every column at once", "[ecs]") {
 	REQUIRE(table.Find(P())->Capacity() >= 512);
 	REQUIRE(table.Find(S())->Capacity() >= 512);
 
-	// And the base pointers hold across the appends the reservation covered,
-	// which is what a system caching a column pointer for a batch depends on.
-	const void *place = table.Find(P())->Data();
+	// And a chunk holds its address across the appends the reservation covered,
+	// which is the version of "the base pointer holds" that survives chunking: a
+	// batch is a run inside one chunk, so what a system caching a pointer for a
+	// batch depends on is that *that* chunk does not move. The whole-column base
+	// it used to depend on no longer exists.
+	const Column *reserved = table.Find(P());
+	REQUIRE(reserved->ChunkCount() == Column::ChunksFor(512));
+	const std::vector<void *> before(reserved->ChunkData(), reserved->ChunkData() + reserved->ChunkCount());
+
 	for (uint64_t index = 1; index <= 512; index++) {
 		table.Append(Entity{index});
 	}
-	REQUIRE(table.Find(P())->Data() == place);
+
+	const Column *grown = table.Find(P());
+	REQUIRE(grown->ChunkCount() == before.size());
+	size_t moved = 0;
+	for (size_t chunk = 0; chunk < before.size(); chunk++) {
+		if (grown->ChunkData()[chunk] != before[chunk]) {
+			moved++;
+		}
+	}
+	REQUIRE(moved == 0);
 }
 
 TEST_CASE("a column position is the same for every table sharing a set", "[ecs]") {

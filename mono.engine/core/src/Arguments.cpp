@@ -28,13 +28,43 @@ namespace engine::core {
 	}
 
 	Arguments &Arguments::Flag(std::string_view name, std::string_view description) {
-		Options.push_back(Option{name, {}, description, false, false, {}});
+		// Every field named, and named designators rather than a run of empty
+		// braces, so the two booleans cannot be read the wrong way round.
+		//
+		// All of them, including the ones an aggregate would have
+		// value-initialised anyway: the `ci` preset turns
+		// `-Wmissing-field-initializers` into an error, and GCC counts a
+		// designator left out the same as a positional one left off the end. So
+		// "say every field" is the rule here rather than "say the interesting
+		// ones" — and a field added to `Option` later then fails the build
+		// instead of silently defaulting at two call sites.
+		Options.push_back(
+			Option{
+				.Name = name,
+				.ValueName = {},
+				.Description = description,
+				.TakesValue = false,
+				.Present = false,
+				.Given = {},
+				.All = {},
+			}
+		);
 		return *this;
 	}
 
 	Arguments &
 	Arguments::Value(std::string_view name, std::string_view valueName, std::string_view description) {
-		Options.push_back(Option{name, valueName, description, true, false, {}});
+		Options.push_back(
+			Option{
+				.Name = name,
+				.ValueName = valueName,
+				.Description = description,
+				.TakesValue = true,
+				.Present = false,
+				.Given = {},
+				.All = {},
+			}
+		);
 		return *this;
 	}
 

@@ -124,8 +124,14 @@ namespace engine::ecs {
 		}
 	}
 
-	Entity CreateEntity(StoreState &state) {
-		const uint32_t index = state.Directory.Allocate();
+	Entity CreateEntity(StoreState &state, EntityRange range) {
+		const uint32_t index = state.Directory.Allocate(range);
+		if (index == SparseSet::NO_INDEX) {
+			// The range is full. Handed back as the null handle so that every
+			// caller's existing "did this work" check covers it, rather than as
+			// an index from the other range that would silently collide.
+			return NULL_ENTITY;
+		}
 		return EntityId::Pack(index, state.Directory.Generation(index));
 	}
 

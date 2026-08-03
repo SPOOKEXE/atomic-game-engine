@@ -49,6 +49,11 @@ namespace engine::net {
 		// position update that arrives after a newer one would move the world
 		// backwards. A rate near zero on a real network is the surprising
 		// reading, not a high one.
+		//
+		// Judged against the unreliable channel's own high-water mark, which is
+		// the only sequence space this counter has ever claimed to be about. It
+		// used to be judged against a mark the reliable channel could move, and
+		// the packets that inflated it were not stale at all.
 		uint64_t PacketsStale = 0;
 
 		// Sends refused this tick because the byte budget was spent.
@@ -63,6 +68,10 @@ namespace engine::net {
 		// An estimate rather than a count, because a packet that is merely late
 		// is indistinguishable from one that is lost until it either turns up or
 		// does not.
+		//
+		// Each channel's gaps are found in that channel's own numbering and
+		// summed here. A gap measured across two counters that advance at
+		// different rates is not a gap.
 		uint64_t PacketsLost = 0;
 
 		// Round trip in milliseconds, smoothed.

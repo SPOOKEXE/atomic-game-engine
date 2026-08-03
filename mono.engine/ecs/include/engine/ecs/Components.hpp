@@ -77,6 +77,24 @@ namespace engine::ecs {
 			return Adopt(key, descriptor, Slot<T>(), false);
 		}
 
+		// Registers `T` under an explicit name with a compact wire form.
+		//
+		// The form to use for a component big enough that sending its object
+		// representation to every client every tick is the bandwidth. `wire`
+		// is what `replication` puts on a datagram; the file serialisation is
+		// unchanged and stays lossless, which is what keeps a recording able to
+		// reproduce the run it recorded.
+		//
+		// @param name The stable name to register under.
+		// @param wire The compact, lossy form for a replication wire.
+		// @return The dense id for `T`.
+		template <class T> static ComponentId Register(std::string_view name, const WireFormat &wire) {
+			const core::Name key(name);
+			TypeDescriptor descriptor = DescribeType<T>(key);
+			descriptor.Wire = wire;
+			return Adopt(key, descriptor, Slot<T>(), false);
+		}
+
 		// The id for `T`, registering it under its compiler-spelled name if it
 		// is not registered yet.
 		//

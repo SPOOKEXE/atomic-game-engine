@@ -41,6 +41,7 @@ namespace {
 		header.Sequence = 1234;
 		header.Acknowledge = 1200;
 		header.AcknowledgeBits = 0xDEADBEEF;
+		header.Counter = 0x0123456789ABCDEFull;
 		return header;
 	}
 }
@@ -57,8 +58,57 @@ TEST_CASE("a packet round-trips", "[net][packet]") {
 	CHECK(inbound->Header.Sequence == 1234);
 	CHECK(inbound->Header.Acknowledge == 1200);
 	CHECK(inbound->Header.AcknowledgeBits == 0xDEADBEEF);
+	CHECK(inbound->Header.Counter == 0x0123456789ABCDEFull);
 	REQUIRE(inbound->Payload.size() == payload.size());
 	CHECK(std::equal(payload.begin(), payload.end(), inbound->Payload.begin()));
+}
+
+TEST_CASE("the header comes back as the bytes that arrived", "[net][packet]") {
+	// **What the tag is computed over, and why it is handed back rather than
+	// rebuilt.** A reader that re-serialised the parsed fields would agree with
+	// the sender until the day it did not, and that day every packet is refused
+	// and it reads as a dead network.
+	const auto payload = Bytes("a door opened");
+	const auto frame = Framed(Header(), payload);
+
+	ByteReader reader(frame);
+	const auto inbound = Packet::Read(reader);
+	REQUIRE(inbound.has_value());
+
+	REQUIRE(inbound->HeaderBytes.size() == Packet::HEADER_BYTES);
+	CHECK(std::equal(inbound->HeaderBytes.begin(), inbound->HeaderBytes.end(), frame.begin()));
+
+	// The two views are the whole datagram between them, with nothing counted
+	// twice and nothing left out.
+	CHECK(inbound->HeaderBytes.size() + inbound->Payload.size() == frame.size());
+	CHECK(inbound->HeaderBytes.data() + inbound->HeaderBytes.size() == inbound->Payload.data());
+}
+
+TEST_CASE("a header written on its own is the header of a whole packet", "[net][packet]") {
+	// The sender has to serialise the header before it has a payload, because
+	// the payload is sealed *over* the header. The two paths must not be able to
+	// drift apart, so this pins that they produce the same bytes.
+	const auto payload = Bytes("a door opened");
+
+	ByteWriter split;
+	REQUIRE(Packet::WriteHeader(split, Header(), payload.size()));
+	CHECK(split.Size() == Packet::HEADER_BYTES);
+	split.WriteRaw(payload.data(), payload.size());
+
+	const auto whole = Framed(Header(), payload);
+	REQUIRE(split.Size() == whole.size());
+	CHECK(std::equal(whole.begin(), whole.end(), split.Bytes().begin()));
+}
+
+TEST_CASE("the message limit is the payload limit less the tag", "[net][packet]") {
+	// **The number every budget above this module is sized against.** A caller
+	// hands over a message and a tag is added to it, so the two limits differ by
+	// sixteen bytes — and a budget measured against the wrong one produces a
+	// message that can never be sent and looks exactly like a busy link.
+	CHECK(
+		Packet::MAXIMUM_MESSAGE_BYTES + engine::net::Cipher::OVERHEAD_BYTES == Packet::MAXIMUM_PAYLOAD_BYTES
+	);
+	CHECK(Packet::HEADER_BYTES + Packet::MAXIMUM_PAYLOAD_BYTES == 1200);
 }
 
 TEST_CASE("the header is the size the constant claims", "[net][packet]") {
@@ -129,6 +179,34 @@ TEST_CASE("a channel outside the enum is refused", "[net][packet]") {
 	frame[6] = static_cast<std::byte>(7);
 	ByteReader reader(frame);
 	CHECK_FALSE(Packet::Read(reader).has_value());
+}
+
+TEST_CASE("a channel can be read before the rest of the packet", "[net][packet]") {
+	// For the router that has to decide where a datagram goes before it has a
+	// connection to hand it to. A handshake datagram comes from an address that
+	// is by definition not in the connection table yet.
+	auto frame = Framed(Header(), Bytes("payload"));
+	CHECK(Packet::PeekChannel(frame) == ChannelKind::Reliable);
+
+	// The same three refusals `Read` makes, because a router acting on a value
+	// outside the enum is the one place a byte from a stranger picks a code path
+	// the type says cannot exist.
+	auto badMagic = frame;
+	badMagic[0] = static_cast<std::byte>(0xFF);
+	CHECK_FALSE(Packet::PeekChannel(badMagic).has_value());
+
+	auto badVersion = frame;
+	badVersion[4] = static_cast<std::byte>(0x99);
+	CHECK_FALSE(Packet::PeekChannel(badVersion).has_value());
+
+	auto badChannel = frame;
+	badChannel[6] = static_cast<std::byte>(7);
+	CHECK_FALSE(Packet::PeekChannel(badChannel).has_value());
+
+	// And a datagram too short to hold a header at all, which is what a router
+	// sees before anything has checked a length.
+	CHECK_FALSE(Packet::PeekChannel(std::span<const std::byte>(frame).first(4)).has_value());
+	CHECK_FALSE(Packet::PeekChannel({}).has_value());
 }
 
 TEST_CASE("a length that runs past the buffer is refused", "[net][packet]") {

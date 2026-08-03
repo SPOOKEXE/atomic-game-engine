@@ -31,6 +31,8 @@ namespace engine::input {
 
 		// Toggles the statistics panel.
 		ToggleStatistics,
+		// Toggles the network panel.
+		ToggleNetwork,
 		// Toggles the frame graph panel.
 		ToggleFrameGraph,
 		// Selects the previous profiler tab.

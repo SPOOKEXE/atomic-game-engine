@@ -33,6 +33,13 @@ namespace engine::ecs {
 			const ComponentSet &set = state.Tables[from.Archetype].Set();
 
 			const Entity copy = CreateEntity(state);
+			if (copy == NULL_ENTITY) {
+				// The range is full. Reported by whoever asked; there is no
+				// half-made instance to unwind because nothing has been written
+				// yet.
+				return NULL_ENTITY;
+			}
+
 			const EntityId copyKey = EntityId::Of(copy);
 			const uint32_t table = TableFor(state, set);
 			Relocate(state, copyKey.Index, EntityLocation{}, table);
@@ -64,6 +71,10 @@ namespace engine::ecs {
 		}
 
 		const Entity entity = CreateEntity(state);
+		if (entity == NULL_ENTITY) {
+			return NULL_ENTITY;
+		}
+
 		const EntityId key = EntityId::Of(entity);
 
 		// Straight into the class's archetype rather than one component at a

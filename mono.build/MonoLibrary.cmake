@@ -347,9 +347,18 @@ function(mono_add_benchmarks name)
 	# that has no relationship to the one anybody ships, and the danger is not
 	# that it is slower — it is that the *ratios* between two implementations
 	# invert.
+	#
+	# **-O3, matching `release`, and the two must not drift.** This line said
+	# -O2 while `release` inherited -O2 from RelWithDebInfo, so they agreed by
+	# coincidence rather than by construction — and when `release` moved to -O3
+	# this became the one place that would have gone on reporting the old
+	# number. A benchmark compiled differently from the thing it is a benchmark
+	# of measures a binary nobody ships, which is the same failure as measuring
+	# a debug build and is harder to notice. If `release` changes level again,
+	# change it here in the same commit.
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 	if(NOT MSVC)
-		target_compile_options(${target} PRIVATE -O2 -g)
+		target_compile_options(${target} PRIVATE -O3 -g)
 	endif()
 
 	# A module's own benchmarks may reach its src/ directory, for the same

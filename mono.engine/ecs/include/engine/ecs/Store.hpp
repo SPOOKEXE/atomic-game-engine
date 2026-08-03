@@ -29,6 +29,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/ChangeChannel.hpp>
+#include <engine/ecs/Column.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -119,42 +120,128 @@ namespace engine::ecs {
 		// given one. That is not a special case to work around: an entity is a
 		// directory slot, and a row is what a component buys.
 		//
-		// Refused, and `NULL_ENTITY`, in an adopt-only store — see
-		// `SetAdoptOnly`.
+		// **Authoritative**: the index comes from the low half of the index
+		// space, which is the half a replica never mints from. Refused, and
+		// `NULL_ENTITY`, in an adopt-only store — see `SetAdoptOnly` — and also
+		// when the authoritative range has issued all 2³¹ of its indices, which
+		// is a refusal rather than a wrap into the predicted range.
 		//
 		// @return A live entity handle, or `NULL_ENTITY`.
 		Entity Create();
 
-		// Refuses to mint entities in this store, allowing only adopted ones.
+		// Creates an entity a replica predicted, from the reserved high range.
 		//
-		// **For a replica, and it closes a hole that is otherwise silent.** An
-		// entity is an index plus a generation, and two independently built
-		// stores both start at index 0 generation 1 — so an entity a replica
-		// mints for itself collides *exactly* with one the authority minted, and
-		// `Apply` is right to treat them as the same entity because nothing
-		// tells them apart. The failure is not a crash: it is two different
-		// things quietly becoming one, discovered later and somewhere else.
+		// **The safe way for a replica to own something the server has not
+		// confirmed.** An index minted here is 2³¹ or higher and the authority
+		// never allocates one, so a predicted projectile cannot collide with an
+		// entity the server made — which is what `SetAdoptOnly` had to forbid
+		// minting outright to avoid.
 		//
-		// Set, `Create` returns `NULL_ENTITY` and says so once. `CreateAt` is
-		// unaffected, because adopting a handle somebody else issued is the
-		// whole point — this refuses *minting*, not receiving. That matches what
-		// a replica is for: an operation a client wants performed goes up as an
-		// input and comes back as state, which is the same shape
-		// `world::Postbox` enforces for bus writes.
+		// Legal in an adopt-only store, and that is the whole difference between
+		// this and `Create`: a replica still may not mint an *authoritative*
+		// entity, because that index is the authority's to hand out.
 		//
-		// **This is a guard, not the fix.** The fix is an index range the
-		// authority never allocates from, so a replica *can* mint predicted
-		// entities safely; it is a v0.4 item because it changes how the entity
-		// directory is laid out and therefore how a snapshot writes it. Until
-		// then a replica that only adopts is safe, and this is what makes
-		// "only adopts" a property rather than a hope.
+		// A predicted entity is local. It is never sent, and the authority never
+		// mentions one, so nothing in a snapshot from a server can name it. When
+		// the server does answer with the real entity, `Promote` is the explicit
+		// step that makes the local row that entity.
 		//
-		// @param adoptOnly Whether to refuse minting.
+		// @return A live entity handle, or `NULL_ENTITY` when the predicted
+		//         range has issued all of its indices.
+		Entity CreatePredicted();
+
+		// Creates a named entity a replica predicted.
+		//
+		// The named counterpart of `CreatePredicted`, with `Create`'s name
+		// semantics: an empty name creates an unnamed entity, and a name already
+		// in use hands back the entity holding it. Present so that the two mint
+		// paths have the same shape — a predicted entity that could not be named
+		// would make `Promote`'s name fix-up a branch nothing could reach, and a
+		// branch nothing reaches is one that is wrong by the time it is needed.
+		//
+		// @param name The name to copy and associate with the entity.
+		// @return A live entity handle, or `NULL_ENTITY`.
+		Entity CreatePredicted(std::string_view name);
+
+		// Reports whether a handle names a locally predicted entity.
+		//
+		// A property of the handle rather than of any store, so it answers for a
+		// handle read out of a component without a directory lookup. `Store`
+		// rather than `Entity` because the index layout is deliberately not part
+		// of the handle's public surface.
+		//
+		// @param entity The handle to classify.
+		// @return `true` when its index falls in the predicted range.
+		static bool IsPredicted(Entity entity);
+
+		// Rewrites a predicted entity's identity to an authoritative one.
+		//
+		// **The explicit step that a predicted entity becoming a server one
+		// is.** The row does not move: every component value, the archetype and
+		// the row index stay exactly as they were, and only the handle naming
+		// them changes. Rebuilding the entity instead would throw away what the
+		// client predicted, which is the state the prediction existed to have.
+		//
+		// **This is the primitive, and the policy is deliberately not here.**
+		// *When* to promote, which authoritative handle to promote to, and what
+		// to do with a prediction the server never confirms belong to whatever
+		// predicts — and nothing does yet, because that wants a projectile,
+		// which wants v0.4's physics and `Part`. Guessing the rule before its
+		// consumer exists is what `ROADMAP.md` says not to do here, so this
+		// operation exists and no caller decides for a future one. See
+		// `ecs/AGENTS.md`.
+		//
+		// **An `ecs::Entity` stored inside another component is not rewritten.**
+		// The directory, the row's own id, this store's name maps and the
+		// instance hierarchy around it all follow the new handle; a handle in
+		// some other component does not, because nothing in `TypeDescriptor`
+		// says which of a component's bytes are entity handles. Those keep the
+		// predicted value and read as **dead** — the predicted index's
+		// generation is bumped as it is freed — rather than as a different
+		// entity. A caller holding such a field rewrites it itself, since it is
+		// the layer that knows the field is a handle.
+		//
+		// Refused from inside `Each`, because the id array an iteration is
+		// holding a pointer into is exactly what this rewrites.
+		//
+		// @param predicted     A live handle from `CreatePredicted`.
+		// @param authoritative The handle it should answer to, in the
+		//                      authoritative range and not already live here.
+		// @return `false` when either handle is in the wrong range, the
+		//         predicted one is not live, the authoritative one already is,
+		//         or the call came from inside an iteration.
+		bool Promote(Entity predicted, Entity authoritative);
+
+		// Refuses to mint *authoritative* entities in this store.
+		//
+		// **For a replica.** An entity is an index plus a generation, and the
+		// authoritative half of the index space belongs to whoever owns the
+		// simulation — so an authoritative entity a replica minted for itself
+		// would collide *exactly* with one the authority minted, and `Apply`
+		// would be right to treat them as the same entity because nothing tells
+		// them apart. The failure is not a crash: it is two different things
+		// quietly becoming one, discovered later and somewhere else.
+		//
+		// Set, `Create` and `CreateInstance` return `NULL_ENTITY` and say so
+		// once. Two things are deliberately unaffected:
+		//
+		//   - **`CreatePredicted`**, because the predicted range is exactly the
+		//     range a replica may mint from and the authority never allocates
+		//     one. That is the difference this flag now draws, and it is drawn
+		//     at the call site rather than by a mode somewhere else.
+		//   - **`CreateAt`**, because adopting a handle somebody else issued is
+		//     the whole point — this refuses *minting*, not receiving. Which is
+		//     the same shape `world::Postbox` enforces for a replica's bus
+		//     writes: an operation a client wants performed goes up as an input
+		//     and comes back as state.
+		//
+		// @param adoptOnly Whether to refuse minting authoritative entities.
 		void SetAdoptOnly(bool adoptOnly);
 
-		// Whether this store refuses to mint entities.
+		// Whether this store refuses to mint authoritative entities.
 		//
-		// @return `true` when only adopted entities may exist here.
+		// @return `true` when only adopted and predicted entities may exist
+		//         here.
 		bool AdoptOnly() const;
 
 		// Creates a named entity owned by this store.
@@ -210,11 +297,12 @@ namespace engine::ecs {
 		// outside the class would mean two places that know how the directory
 		// is laid out.
 		//
-		// **This can collide.** Two stores allocate the same indices, so a
-		// world that creates entities of its own *and* adopts them from
-		// somebody else will eventually be told to adopt one it already has.
-		// See `ecs/docs/TODO.md` on the index range that fixes it. A replica
-		// that only adopts is safe today, which is what a replica is.
+		// **Receiving, not minting**, so `SetAdoptOnly` does not apply. A world
+		// that mints authoritative entities of its own *and* adopts them from
+		// somebody else will still eventually be told to adopt one it already
+		// has — the index ranges separate an authority from a replica, not two
+		// authorities from each other. A replica mints from the predicted range
+		// and adopts everything else, and that pair does not collide.
 		//
 		// @param entity The exact handle to bring into being.
 		// @return `false` when that handle is already live here.
@@ -528,22 +616,33 @@ namespace engine::ecs {
 		// that is a storage-layout problem rather than something more threads
 		// would fix.
 		//
-		// **This is slower than Each below a crossover, and the crossover is
-		// higher than it looks.** Measured on a 24-core machine over an
-		// integration step of three float multiply-adds per row, against the
-		// previous storage:
+		// **This is slower than Each below a crossover, and the crossover is far
+		// higher than it looks.** Re-measured by `engine.ecs.bench.iteration` in
+		// the `bench` preset at `-O3`, on a 24-thread machine, over three float
+		// adds per row — the cheapest body there is:
 		//
-		//     entities     Each      EachParallel
-		//        20 000    0.050 ms      0.102 ms   2.0x slower
-		//       100 000    0.259 ms      0.195 ms   1.3x faster
-		//       500 000    1.204 ms      0.347 ms   3.5x faster
-		//     2 000 000    5.925 ms      1.704 ms   3.5x faster
+		//     entities       Each   EachParallel
+		//        8 192    1.45 us      25.9 us     18x slower
+		//       32 768    5.54 us      31.5 us      5.7x slower
+		//      131 072    23.3 us      36.1 us      1.5x slower
+		//      262 144    49.1 us      48.6 us     the crossover
+		//      500 000    96.1 us      72.1 us      1.3x faster
 		//
-		// So for a cheap body the crossover was somewhere near 60-80k rows, and
-		// the ceiling about 3.5x rather than the core count — memory bandwidth,
-		// not threads. **Those numbers were taken against the previous backing
-		// store and have not been re-measured against this one.** Expect the
-		// crossover to move; do not expect it to vanish.
+		// **Below 262,144 rows this call is a loss, and the default grain lets
+		// it be made from 32,768.** Two things moved it there and only one of
+		// them is this module's: the serial loop halved when the build went to
+		// `-O3`, and it had already fallen by half again with the chunked
+		// storage. The pool's handover did not move — about 31 us, measured
+		// empty by `engine.parallel.bench.dispatch` — so the row count that
+		// repays it went up by the same factor the loop came down.
+		//
+		// The ceiling past the crossover is about 1.3x rather than the core
+		// count, and that is memory bandwidth rather than threads: at 500k rows
+		// both paths are streaming twelve megabytes out of DRAM.
+		//
+		// **A body more expensive than three adds crosses far sooner and should
+		// pass a grain.** `physics::IntegrateMotion` carries a `CFrame` per row
+		// and crosses near 8,000; it passes 1024 and says why at the constant.
 		//
 		// @param body  Called concurrently as `body(Entity, Ts &...)` for each match.
 		// @param grain The minimum table-row range worth handing to a worker.
@@ -594,12 +693,23 @@ namespace engine::ecs {
 		// A column copy per component rather than a constructor call, which is
 		// also what makes `Clone` need no separate machinery.
 		//
+		// Mints an **authoritative** entity, so an adopt-only store refuses it
+		// exactly as it refuses `Create`. That check used to be missing here,
+		// and `scene::MakePart` carried a copy of it because this path walked
+		// straight past the flag — one minting path honouring the rule and one
+		// not is worse than neither, because the one that does makes the other
+		// look covered.
+		//
 		// @param id   The class to instantiate.
 		// @param name The instance's name, which need not be unique.
-		// @return The new instance, or NULL_ENTITY for an invalid class.
+		// @return The new instance, NULL_ENTITY for an invalid class, or
+		//         NULL_ENTITY in an adopt-only store.
 		Entity CreateInstance(ClassId id, std::string_view name = {});
 
 		// Copies one instance, its components and its whole subtree.
+		//
+		// Mints an authoritative entity, so an adopt-only store refuses it for
+		// the same reason it refuses `Create`.
 		//
 		// The copy is parented nowhere, exactly as `:Clone()` leaves it — a
 		// clone that appeared in the world at the moment it was made would run
@@ -1000,6 +1110,13 @@ namespace engine::ecs {
 		// sender destroyed and recreated is a different entity here too rather
 		// than the old one wearing new values.
 		//
+		// **A locally predicted entity survives `Authoritative` mode.** "The
+		// sender did not mention it" is the definition of a prediction — the
+		// authority allocates nothing from the predicted range and so cannot
+		// mention one — and destroying them here would delete every prediction
+		// on the first correction. Retiring a prediction is `Promote`, or a
+		// destroy the predicting layer makes on purpose.
+		//
 		// On failure the live world is **left as it was** — not cleared, and not
 		// half-merged. A replica that lost its world to a corrupt packet would
 		// be worse off than one that ignored it.
@@ -1020,7 +1137,15 @@ namespace engine::ecs {
 		// A reader refuses anything else outright. A format that tries to be
 		// tolerant of versions it has never seen is one that restores a world
 		// nobody can reason about.
-		static constexpr uint32_t SNAPSHOT_VERSION = 1;
+		//
+		// **2 — the entity directory is two runs rather than one.** The
+		// directory is written as a run of `Capacity()` entries, and the index
+		// space now has two regions with 2³¹ indices between them, so a version
+		// 1 reader handed a version 2 stream would read the predicted run's
+		// generations as authoritative slots and silently produce a world with
+		// entities nothing named. Bumped rather than sniffed, because the two
+		// layouts are indistinguishable from the bytes alone.
+		static constexpr uint32_t SNAPSHOT_VERSION = 2;
 
 		// The number of tables this world holds.
 		//
@@ -1031,15 +1156,43 @@ namespace engine::ecs {
 		// @return The archetype count.
 		size_t TableCount() const;
 
+		// Bytes this world's row storage is holding, live rows or not.
+		//
+		// **The number the chunked-storage item is about.** A column never gives
+		// capacity back, so a world that peaked at ten thousand entities and
+		// settled at a hundred still holds the peak — invisible with one world
+		// and the entire footprint with a thousand of them in one host. A
+		// diagnostic: nothing acts on it at runtime, and it is here so that a fee
+		// is pinned by a test rather than described in a comment, exactly as
+		// `SparseSet::ResidentSlots` is.
+		//
+		// Covers the columns, the per-table entity id arrays and the entity
+		// directory's pages. Excludes resources, names and query plans, which do
+		// not grow with the population.
+		//
+		// @return The resident bytes.
+		size_t ResidentStorageBytes() const;
+
 	  private:
 		// One table's rows, resolved for one term list.
+		//
+		// **One slice per table, never one per chunk**, and that is load-bearing
+		// rather than incidental: `VisitBatchParallel` decides whether to wake
+		// the pool from `slice.Rows`, and `Jobs::For` refuses anything below
+		// `MINIMUM_GRAINS` grains. A slice that was one chunk would put every
+		// dispatch under the floor, and a 500k parallel iteration would quietly
+		// become a serial one — a measured 3.5x, lost with nothing failing. The
+		// chunk division happens *inside* the visitors and inside the worker
+		// body, where it cannot reach the dispatch decision.
 		struct TableSlice {
 			size_t Rows = 0;
 			const Entity *Entities = nullptr;
 
-			// One base pointer per term, in the order the caller named them.
-			// Null for a component with no data.
-			void *const *Columns = nullptr;
+			// One chunk directory per term, in the order the caller named them:
+			// `Columns[term][Column::ChunkOf(row)]` is the base of the chunk that
+			// row falls in. Null for a component with no data, which is why the
+			// row accessors below resolve an empty type without indexing it.
+			void *const *const *Columns = nullptr;
 		};
 
 		// Collects structural changes for the length of a scope.
@@ -1054,45 +1207,91 @@ namespace engine::ecs {
 			}
 		};
 
-		// One row of one column, as the requested reference type.
+		// One row of a run, given the run's base pointer.
 		//
 		// A component with no data has no bytes to point at, so every instance
 		// of it is the same instance — which is exactly true, since an empty
 		// type has no state to tell two of them apart. Handing back a shared
 		// object keeps a tag usable as a query term without giving a column of
 		// nothing a pointer nobody could dereference.
-		template <class T> static T &Row(void *base, size_t row) {
+		template <class T> static T &RowAt(T *base, size_t offset) {
 			if constexpr (std::is_empty_v<std::remove_const_t<T>>) {
-				static std::remove_const_t<T> shared;
-				return shared;
+				return *base;
 			} else {
-				return *(static_cast<T *>(base) + row);
+				return base[offset];
 			}
 		}
 
-		// One row of one column, as a pointer for the batch paths.
-		template <class T> static T *Rows(void *base) {
+		// The rows of one chunk, one call to `body` each.
+		//
+		// **The bases are parameters, not looked up in the loop.** Resolving
+		// `chunks[chunk]` per row per term costs two extra loads on the hottest
+		// path in the engine, and the compiler cannot hoist them because the
+		// body may alias the directory — measured at **+92% on `Each` over 10k
+		// rows** before the lookup was pulled out here.
+		template <class... Ts, class Body>
+		static void RunRows(const Entity *entities, size_t rows, Body &body, Ts *...bases) {
+			for (size_t row = 0; row < rows; row++) {
+				body(entities[row], RowAt<Ts>(bases, row)...);
+			}
+		}
+
+		// The first row of a run, as a pointer the batch paths hand out.
+		//
+		// The shared instance again for an empty type, and **not** shifted by
+		// the offset: a body handed a tag pointer has one object and no array,
+		// and `&shared + offset` is arithmetic past the end of an object even
+		// when nobody dereferences it.
+		template <class T> static T *RunBase(void *const *chunks, size_t chunk, size_t offset) {
 			if constexpr (std::is_empty_v<std::remove_const_t<T>>) {
 				static std::remove_const_t<T> shared;
 				return &shared;
 			} else {
-				return static_cast<T *>(base);
+				return static_cast<T *>(chunks[chunk]) + offset;
 			}
+		}
+
+		// The end of the chunk `row` falls in, clipped to `rows`.
+		//
+		// Every visitor below walks by chunk rather than by row so that the
+		// chunk base is hoisted out of the inner loop: resolving the directory
+		// per row per term would be paid on the hottest path in the engine to
+		// recompute an address that only changes at a boundary.
+		static size_t ChunkEnd(size_t row, size_t rows) {
+			const size_t boundary = Column::ChunkLimit(row);
+			return boundary < rows ? boundary : rows;
 		}
 
 		template <class... Ts, class Body, size_t... Indices>
 		void VisitRows(const TableSlice &slice, Body &body, std::index_sequence<Indices...>) {
-			for (size_t row = 0; row < slice.Rows; row++) {
-				body(slice.Entities[row], Row<Ts>(slice.Columns[Indices], row)...);
+			size_t row = 0;
+			while (row < slice.Rows) {
+				const size_t chunk = Column::ChunkOf(row);
+				const size_t offset = row - Column::ChunkStart(chunk);
+				const size_t end = ChunkEnd(row, slice.Rows);
+				RunRows<Ts...>(
+					slice.Entities + row,
+					end - row,
+					body,
+					RunBase<Ts>(slice.Columns[Indices], chunk, offset)...
+				);
+				row = end;
 			}
 		}
 
 		template <class... Ts, class Body, size_t... Indices>
 		void VisitBatch(const TableSlice &slice, Body &body, std::index_sequence<Indices...>) {
-			if (slice.Rows == 0) {
-				return;
+			// One call per chunk. `EachBatch` promises nothing about where a
+			// batch ends, and the constraint the other way — that rows inside
+			// one batch are adjacent — is exactly what a chunk boundary is.
+			size_t row = 0;
+			while (row < slice.Rows) {
+				const size_t chunk = Column::ChunkOf(row);
+				const size_t offset = row - Column::ChunkStart(chunk);
+				const size_t end = ChunkEnd(row, slice.Rows);
+				body(end - row, RunBase<Ts>(slice.Columns[Indices], chunk, offset)...);
+				row = end;
 			}
-			body(slice.Rows, Rows<Ts>(slice.Columns[Indices])...);
 		}
 
 		template <class... Ts, class Body, size_t... Indices>
@@ -1103,8 +1302,18 @@ namespace engine::ecs {
 				return 0;
 			}
 
+			// The whole table in one dispatch, so the pool sees the row count it
+			// has to weigh the handover against. The chunk split is below,
+			// inside the worker.
 			parallel::Jobs::For(slice.Rows, grain, [&](size_t begin, size_t end) {
-				body(base + begin, end - begin, (Rows<Ts>(slice.Columns[Indices]) + begin)...);
+				size_t row = begin;
+				while (row < end) {
+					const size_t chunk = Column::ChunkOf(row);
+					const size_t offset = row - Column::ChunkStart(chunk);
+					const size_t stop = ChunkEnd(row, end);
+					body(base + row, stop - row, RunBase<Ts>(slice.Columns[Indices], chunk, offset)...);
+					row = stop;
+				}
 			});
 
 			return slice.Rows;
@@ -1119,8 +1328,18 @@ namespace engine::ecs {
 			}
 
 			parallel::Jobs::For(slice.Rows, grain, [&](size_t begin, size_t end) {
-				for (size_t row = begin; row < end; row++) {
-					body(slice.Entities[row], Row<Ts>(slice.Columns[Indices], row)...);
+				size_t row = begin;
+				while (row < end) {
+					const size_t chunk = Column::ChunkOf(row);
+					const size_t offset = row - Column::ChunkStart(chunk);
+					const size_t stop = ChunkEnd(row, end);
+					RunRows<Ts...>(
+						slice.Entities + row,
+						stop - row,
+						body,
+						RunBase<Ts>(slice.Columns[Indices], chunk, offset)...
+					);
+					row = stop;
 				}
 			});
 		}
@@ -1162,8 +1381,26 @@ namespace engine::ecs {
 			const std::function<void(const Entity *, void *, size_t)> &body
 		);
 
+		// Where `subject` sits in a slice's table, which is also its dirty bit.
+		size_t SubjectPosition(const TableSlice &slice, ComponentId subject) const;
+
 		void BeginDefer();
 		void EndDefer();
+
+		// Whether this world may mint from the authoritative range, complaining
+		// once when it may not.
+		//
+		// One place rather than three: `Create`, `CreateInstance` and
+		// `CloneInstance` all mint the same kind of index, and the version of
+		// this that lived inside `Create` alone is why `CreateInstance` walked
+		// past the rule for a whole version.
+		bool MayMintAuthoritative(const char *what);
+
+		// The body of both named-create paths.
+		//
+		// A `bool` rather than the directory's own range type, so this header
+		// stays clear of the storage layout it deliberately does not expose.
+		Entity MintNamed(std::string_view name, bool predicted);
 
 		void RequireOwningThread(const char *what) const;
 

@@ -4,6 +4,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <SDL3/SDL.h>
@@ -173,11 +174,6 @@ namespace client {
 			return false;
 		}
 
-		// Before the socket, and before any datagram can arrive: a snapshot
-		// names its components and a process that has not registered them
-		// resolves the names to nothing and applies an empty world.
-		RegisterReplicatedComponents();
-
 		// Port zero: the client does not need a known address, only the server
 		// does. Binding a fixed one would stop two clients sharing a machine.
 		Socket = engine::net::MakeUdpTransport(0);
@@ -196,16 +192,30 @@ namespace client {
 			return false;
 		}
 
-		Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
+		Universe_->Enter(Replicated, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 			// The v0.2 refusal, used for what it was reserved for. A replica
-			// that published to a bus would be telling the universe something
-			// the server never said; the inbox still delivers, which is how it
-			// receives.
+			// that published to a bus would be telling the universe
+			// something the server never said; the inbox still delivers,
+			// which is how it receives.
 			store.SetResource(engine::world::Replica{true});
 
-			// A replicated world runs no systems of its own. Everything in it
-			// arrived, and simulating it here would be this process disagreeing
-			// with the authority once per tick.
+			// A replicated world runs no *simulation* system: everything in
+			// it arrived, and simulating it here would be this process
+			// disagreeing with the authority once per tick. What this
+			// installs is the `PreRender` half — the draw list and the
+			// system that fills it — which derives what to draw and writes
+			// no component.
+			//
+			// **The rate the snapshot buffer measures its delay against is the
+			// server's, and nothing on the wire carries it.** What is passed is
+			// the rate this process was told to run at, which is the same
+			// default both programs take. A disagreement is absorbed by the
+			// buffer's own correction up to a few percent, and past that shows
+			// as `replica.stalls` rather than as something mysterious.
+			engine::replication::InterpolationSettings interpolation;
+			interpolation.TickRate = Settings.TickRate;
+
+			BuildReplicatedWorld(store, systems, interpolation);
 		});
 
 		Connection = std::make_unique<engine::replication::Connector>(
@@ -223,10 +233,38 @@ namespace client {
 
 		Universe_->Enter(Replicated, [this, nowSeconds](engine::ecs::Store &store) {
 			Connection->Poll(store, nowSeconds);
+
+			// **Here, not in the render pass.** This instant is the one where
+			// the store holds the tick the server described; a pass that only
+			// ran when a frame was drawn would miss a received tick whenever
+			// the frame rate dipped below the tick rate, and the buffer would
+			// then be interpolating across gaps the network never produced.
+			RecordReplicatedTick(store, Connection->Applied());
 		});
+
+		// The exchange, before the world. A client that sat there with an empty
+		// scene used to have one explanation; it now has two, and the log has to
+		// say which — the handshake never finished, or it finished and the
+		// snapshot has not arrived.
+		if (!ReportedAdmission && (Connection->Admitted() || Connection->Rejected())) {
+			ReportedAdmission = true;
+			if (Connection->Admitted()) {
+				ENGINE_INFO("admitted by {}, waiting for the world", Settings.ConnectAddress);
+			} else {
+				ENGINE_ERROR("the server at {} did not admit this client", Settings.ConnectAddress);
+			}
+		}
 
 		// Once, on the tick it becomes true. A client that logged this every
 		// frame would write six hundred lines a second saying the same thing.
+		//
+		// This is also where the replicated world starts being drawn, and the
+		// reason it waits for the join is the channel's size: a view channel
+		// allocates its slots once so that publishing never allocates, and the
+		// only number this process has to size one with is what actually
+		// arrived. Doubled, so a world that grows a little afterwards still
+		// publishes; past that `Compositor::Publish` refuses and says so, which
+		// beats a frame with holes in it.
 		if (!ReportedJoin && Connection->Joined()) {
 			ReportedJoin = true;
 
@@ -235,17 +273,10 @@ namespace client {
 				store.EachEntity([&entities](engine::ecs::Entity) { entities++; });
 			});
 
+			Views.Track(Replicated, engine::core::Name("client.replica"), entities * 2);
+
 			ENGINE_INFO("joined: {} entities at tick {}", entities, Connection->Applied());
 		}
-
-		// **The replicated world is not drawn yet, and that is a stated gap
-		// rather than an oversight.** What arrives is `server.Position` and
-		// `server.Velocity`; what the renderer needs is `Transform`, `Visual`
-		// and a `DrawList`, and the two programs declare none of those in
-		// common. `mono.engine/scene` at v0.4 is the item that gives both halves
-		// one set of components, and drawing this is the first thing that falls
-		// out of it. Bridging it here would mean a translation system this
-		// program would then have to delete.
 
 		Connection->Advance(nowSeconds);
 	}
@@ -268,6 +299,22 @@ namespace client {
 
 		if (Actions.Fired(Action::ToggleStatistics)) {
 			Settings.ShowStatistics = !Settings.ShowStatistics;
+		}
+
+		if (Actions.Fired(Action::ToggleNetwork)) {
+			// **Refused rather than toggled when there is nothing to show.**
+			// A client run without `--connect` has no link, and a network panel
+			// full of zeroes reads as a link that is up and idle. Saying so once
+			// beats a key that silently does nothing, which reads as a broken
+			// binding.
+			if (Connection == nullptr) {
+				if (!ReportedNoNetwork) {
+					ReportedNoNetwork = true;
+					ENGINE_INFO("F4: no network panel — this client was not given --connect");
+				}
+			} else {
+				Settings.ShowNetwork = !Settings.ShowNetwork;
+			}
 		}
 
 		if (Actions.Fired(Action::ToggleFrameGraph)) {
@@ -389,12 +436,62 @@ namespace client {
 				// where they were produced; what leaves is a copy in a buffer
 				// the renderer owns the other end of.
 				Universe_->Enter(id, [this, id](engine::ecs::Store &store) {
-					const auto *camera = store.Resource<ActiveCamera>();
+					const auto *active = store.Resource<engine::scene::ActiveCamera>();
 					const auto *list = store.Resource<DrawList>();
-					if (camera == nullptr || list == nullptr) {
+					if (active == nullptr || list == nullptr) {
 						return;
 					}
-					Views.Publish(id, camera->Value, list->Instances, store.Time().Tick, store.Time().Alpha);
+
+					// The live camera is a row: `ActiveCamera` names which
+					// entity it is and the placement and the lens are the
+					// components on it.
+					const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
+					const auto *lens = store.Get<engine::scene::Camera>(active->Entity);
+					if (placement == nullptr || lens == nullptr) {
+						return;
+					}
+
+					if (id == Rendered) {
+						// Kept for the replicated view below, which has no
+						// camera of its own.
+						ComposedFrame = placement->Frame;
+						ComposedCamera = *lens;
+					}
+
+					Views.Publish(
+						id, placement->Frame, *lens, list->Instances, store.Time().Tick, store.Time().Alpha
+					);
+				});
+			}
+
+			// The replicated world, once it has joined and been given a
+			// channel. Presented like any other world — `PreRender` is where
+			// deriving what to draw belongs, whoever owns the simulation.
+			//
+			// **It is looked at through this client's own camera**, because a
+			// replica has none: a camera is an entity, and an authoritative
+			// entity minted in a replica collides exactly with one the server
+			// minted, which is what `Store::SetAdoptOnly` refuses. A local row
+			// in a replicated world is safe now — `Store::CreatePredicted`
+			// mints from a range the server never allocates from — but who owns
+			// the replicated view's camera is a decision for whoever gives that
+			// world a camera, and nothing does yet.
+			if (ReportedJoin) {
+				Universe_->Present(Replicated, delta, Universe_->AlphaOf(Replicated));
+
+				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
+					const auto *list = store.Resource<DrawList>();
+					if (list == nullptr) {
+						return;
+					}
+					Views.Publish(
+						Replicated,
+						ComposedFrame,
+						ComposedCamera,
+						list->Instances,
+						store.Time().Tick,
+						store.Time().Alpha
+					);
 				});
 			}
 		}
@@ -440,7 +537,7 @@ namespace client {
 			// feels broken: pressing F6 and waiting fifty milliseconds for the
 			// tab to change reads as a dropped input.
 			const bool settingsChanged =
-				PanelsShown != (Settings.ShowStatistics || Settings.ShowFrameGraph) ||
+				PanelsShown != (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph) ||
 				PanelTab != Settings.Tab || PanelScroll != ProfilerScroll || PanelDepth != ProfilerDepth ||
 				PanelWidth != pixelWidth || PanelHeight != pixelHeight;
 
@@ -448,7 +545,7 @@ namespace client {
 
 			if (redraw) {
 				PanelsDrawn = Clock.Now();
-				PanelsShown = Settings.ShowStatistics || Settings.ShowFrameGraph;
+				PanelsShown = Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph;
 				PanelTab = Settings.Tab;
 				PanelScroll = ProfilerScroll;
 				PanelDepth = ProfilerDepth;
@@ -461,7 +558,7 @@ namespace client {
 				// frame that does not draw them still has to drain them or the
 				// next panel shows several frames added together.
 				Metrics::Clear();
-			} else if (Settings.ShowStatistics || Settings.ShowFrameGraph) {
+			} else if (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph) {
 				SystemTimings.clear();
 				Universe_->Enter(Rendered, [this](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
 					for (const auto &timing : systems.Timings()) {
@@ -475,6 +572,7 @@ namespace client {
 
 				engine::render::DebugPanelData panels;
 				panels.ShowStatistics = Settings.ShowStatistics;
+				panels.ShowNetwork = Settings.ShowNetwork;
 				panels.ShowFrameGraph = Settings.ShowFrameGraph;
 				panels.Tab = Settings.Tab;
 				panels.Scroll = ProfilerScroll;
@@ -497,7 +595,16 @@ namespace client {
 				panels.Entities = 0;
 				for (const engine::world::WorldId id : Simulated) {
 					Universe_->Enter(id, [&panels](engine::ecs::Store &store) {
-						panels.Entities += store.CountMatching<Transform, Visual>();
+						panels.Entities +=
+							store.CountMatching<engine::scene::Transform, engine::scene::Visual>();
+					});
+				}
+				if (ReportedJoin) {
+					// The replica counts too. A number that ignored it would
+					// say the client is drawing fewer things than it is.
+					Universe_->Enter(Replicated, [&panels](engine::ecs::Store &store) {
+						panels.Entities +=
+							store.CountMatching<engine::scene::Transform, engine::scene::Visual>();
 					});
 				}
 				panels.TickRate = Settings.TickRate;
@@ -506,6 +613,7 @@ namespace client {
 				panels.DrawCalls = LastFrame.DrawCalls;
 				panels.Triangles = LastFrame.Triangles;
 				panels.Backend = Renderer.BackendName();
+				panels.Network = SampleNetwork();
 				// One logical pixel of the font per two physical, so the panels
 				// stay the same apparent size on a high-DPI display.
 				panels.Scale = pixelWidth >= 2400 ? 3 : 2;
@@ -527,8 +635,11 @@ namespace client {
 		// reading something somebody else is writing. Between them sits three
 		// slots and an atomic index, which is what lets a slow frame drop
 		// rather than throttle a simulation.
-		Views.Compose(Settings.Worlds > 1 ? Settings.ViewSpacing : 0.0f);
-		LastFrame = Renderer.Render(Views.Camera(), Views.Instances(), Overlay);
+		// Counted rather than read off the option, because `--connect` adds a
+		// view the option does not know about. Two views drawn on top of each
+		// other is two scenes inside one, which reads as a rendering fault.
+		Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
+		LastFrame = Renderer.Render(Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay);
 
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();
@@ -575,6 +686,151 @@ namespace client {
 			);
 		}
 
+		ReportReplica();
 		return 0;
+	}
+
+	engine::render::NetworkStatistics Client::SampleNetwork() {
+		engine::render::NetworkStatistics network;
+		if (Connection == nullptr) {
+			// Not connected stays not connected, and every field below stays
+			// zero. `DrawDebugPanels` draws nothing at all for this.
+			return network;
+		}
+
+		network.Connected = true;
+		network.Joined = Connection->Joined();
+		network.AppliedTick = Connection->Applied();
+
+		const engine::net::ConnectionStats &link = Connection->Link().Stats();
+		network.ReceivedBytes = link.BytesReceived;
+		network.SentBytes = link.BytesSent;
+		network.RoundTripMilliseconds = link.RoundTripMilliseconds;
+		network.PacketsLost = link.PacketsLost;
+		network.PacketsStale = link.PacketsStale;
+		network.SendsOverBudget = link.SendsOverBudget;
+
+		// **Rates are a derivative and `net` only keeps the integral.** Every
+		// counter above is cumulative over the connection's life, so a rate has
+		// to come from two readings and the time between them. Taken here
+		// rather than in `net` because a counter that had to be sampled on a
+		// clock would be a counter that read one, and this module's whole
+		// discipline is that it does not.
+		//
+		// The window is however long it has been since the last panel redraw —
+		// a twentieth of a second at the panel's own rate. Short enough to
+		// follow a stream that starts and stops, long enough that it is not one
+		// packet's worth of noise.
+		const double now = Clock.Now();
+		const double elapsed = now - NetworkSampledAt;
+		if (NetworkSampled && elapsed > 0.0) {
+			network.ReceivedBytesPerSecond =
+				static_cast<double>(link.BytesReceived - NetworkLastReceivedBytes) / elapsed;
+			network.SentBytesPerSecond = static_cast<double>(link.BytesSent - NetworkLastSentBytes) / elapsed;
+			network.ReceivedPacketsPerSecond =
+				static_cast<double>(link.PacketsReceived - NetworkLastReceivedPackets) / elapsed;
+			network.SentPacketsPerSecond =
+				static_cast<double>(link.PacketsSent - NetworkLastSentPackets) / elapsed;
+		}
+
+		NetworkSampled = true;
+		NetworkSampledAt = now;
+		NetworkLastReceivedBytes = link.BytesReceived;
+		NetworkLastSentBytes = link.BytesSent;
+		NetworkLastReceivedPackets = link.PacketsReceived;
+		NetworkLastSentPackets = link.PacketsSent;
+
+		const engine::replication::Replica::Statistics &replica = Connection->ReplicaStats();
+		network.Snapshots = replica.Snapshots;
+		network.Deltas = replica.Deltas;
+		network.Structures = replica.Structures;
+		network.Malformed = replica.Malformed;
+		network.Stale = replica.Stale;
+
+		// The interpolation half, and the row count that says whether any of it
+		// reached a draw list. Only once the world exists — before the join
+		// there is no replicated store to enter.
+		if (ReportedJoin) {
+			Universe_->Enter(Replicated, [&network](engine::ecs::Store &store) {
+				network.Entities = store.CountMatching<engine::scene::Transform>();
+
+				if (const auto *drawList = store.Resource<DrawList>()) {
+					network.Drawn = drawList->Instances.size();
+				}
+				if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>()) {
+					network.TickRate = buffer->MeasuredTickRate();
+					network.BehindTicks = buffer->Behind();
+					network.Stalls = buffer->Stats().Stalls;
+					network.Interpolated = buffer->Stats().Interpolated;
+					network.Held = buffer->Stats().Held;
+				}
+			});
+		}
+
+		return network;
+	}
+
+	void Client::ReportReplica() {
+		if (Connection == nullptr) {
+			return;
+		}
+
+		// **A replica that joined and drew nothing reads from outside exactly
+		// like a replica that never joined**, and the difference is four
+		// numbers this process already has. Printed at exit rather than left in
+		// the F3 panel, because the reported symptom — "nothing appears in the
+		// scene" — is one somebody hits on a machine where they are looking at
+		// the window rather than at a counter, and a run with `--frames`
+		// produces no window to look at at all.
+		//
+		// Read in this order, and the first one that is wrong is the answer:
+		// rows arrived, rows were drawn, the world moved between ticks.
+		size_t entities = 0;
+		size_t drawn = 0;
+		double behind = 0.0;
+		uint64_t stalls = 0;
+		uint64_t interpolated = 0;
+		uint64_t held = 0;
+		double rate = 0.0;
+
+		Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
+			store.EachEntity([&entities](engine::ecs::Entity) { entities++; });
+
+			if (const auto *drawList = store.Resource<DrawList>()) {
+				drawn = drawList->Instances.size();
+			}
+			if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>()) {
+				behind = buffer->Behind();
+				stalls = buffer->Stats().Stalls;
+				interpolated = buffer->Stats().Interpolated;
+				held = buffer->Stats().Held;
+				rate = buffer->MeasuredTickRate();
+			}
+		});
+
+		ENGINE_INFO(
+			"replica: {} entities · {} drawn · {:.2f} ticks behind · {} stall(s) · {} interpolated / {} held "
+			"· {:.1f} Hz measured",
+			entities,
+			drawn,
+			behind,
+			stalls,
+			interpolated,
+			held,
+			rate
+		);
+
+		// **Drawn and never seen is the third case, and it is a framing
+		// problem rather than a replication one.** The composited camera is the
+		// demo world's: it is placed from *that* world's bounds and its far
+		// plane follows the same distance, so a replicated world larger than
+		// the demo is drawn outside a frustum sized for something else.
+		// `mono.client/AGENTS.md` records the camera of its own that fixes it.
+		if (drawn > 0) {
+			ENGINE_INFO(
+				"replica: drawn through the demo world's camera — `--view-spacing 0` overlays the two if the "
+				"replicated world is not on screen"
+			);
+		}
 	}
 }

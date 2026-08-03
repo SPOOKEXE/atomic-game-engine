@@ -9,6 +9,7 @@
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/net/Packet.hpp>
 #include <engine/replication/Authority.hpp>
 #include <engine/replication/Prediction.hpp>
 #include <engine/replication/Replica.hpp>
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -172,6 +174,71 @@ TEST_CASE("a big world joins over several ticks rather than one", "[replication]
 	REQUIRE(pair.Replica_.SnapshotOutstanding() == 0);
 }
 
+TEST_CASE("an entity with no replicated component is not in the snapshot", "[replication]") {
+	// **A row with nothing in it still says how many entities the world holds.**
+	// Interest filters entities and `Replicate` filters components, and the
+	// entity that passed the first and had nothing left after the second used to
+	// cross as a bare row — no data, and a count of a world the client was never
+	// told it could see.
+	//
+	// Counted rather than inspected: what is being asserted is the *number* of
+	// rows, because the number is the thing that leaked.
+	Pair pair;
+
+	std::vector<Entity> shown;
+	for (int index = 0; index < 6; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		shown.push_back(entity);
+	}
+
+	// Twelve with nothing replicated on them at all, and six carrying only a
+	// component nobody opted in to. Both are entities a client may not know
+	// about, and neither has a value to send.
+	for (int index = 0; index < 12; index++) {
+		pair.Server.Create();
+	}
+	for (int index = 0; index < 6; index++) {
+		pair.Server.Set<Secret>(pair.Server.Create(), Secret{index});
+	}
+
+	REQUIRE(pair.Join());
+
+	size_t rows = 0;
+	pair.Client.EachEntity([&rows](Entity) { rows++; });
+	CHECK(rows == shown.size());
+
+	// The server agrees about what it told them, which is what stops a later
+	// delta naming a row the client does not hold.
+	CHECK(pair.Authority_.StatusOf(pair.Handle).Known == shown.size());
+
+	for (const Entity entity : shown) {
+		CHECK(pair.Client.Alive(entity));
+	}
+}
+
+TEST_CASE("an entity becomes visible when it gains a replicated component", "[replication]") {
+	// The other half of the case above, and the reason it is not simply a
+	// filter on the join: an entity with nothing to send is *not yet* something
+	// to send, rather than something excluded for ever.
+	Pair pair;
+	pair.Server.Set<Spot>(pair.Server.Create(), Spot{0.0f, 0.0f});
+
+	const Entity later = pair.Server.Create();
+	REQUIRE(pair.Join());
+
+	size_t rows = 0;
+	pair.Client.EachEntity([&rows](Entity) { rows++; });
+	REQUIRE(rows == 1);
+	REQUIRE_FALSE(pair.Client.Alive(later));
+
+	pair.Server.Set<Spot>(later, Spot{9.0f, 0.0f});
+	pair.Tick();
+
+	CHECK(pair.Client.Alive(later));
+	CHECK(pair.Client.Get<Spot>(later)->X == 9.0f);
+}
+
 TEST_CASE("a client is not acknowledged before it has joined", "[replication]") {
 	// A client that acknowledged a tick it had not applied would stop the
 	// server sending the very thing it is still waiting for.
@@ -305,6 +372,41 @@ TEST_CASE("losing sight of an entity is a forget, never a destroy", "[replicatio
 	REQUIRE(pair.Server.Alive(watched));
 }
 
+TEST_CASE("a forget too big for one datagram is split", "[replication]") {
+	// **The same rule as a snapshot and a delta, and the path that missed it.**
+	// A world going out of view all at once names every entity in one message,
+	// and three hundred handles is well past a datagram — which `Link::Reserve`
+	// refuses outright rather than fragmenting, so the one message that says
+	// "stop drawing these" would be the one that never arrives and the client
+	// would draw a world that is no longer there.
+	AuthoritySettings settings;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+
+	for (int index = 0; index < 300; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	bool visible = true;
+	pair.Authority_.SetInterest([&visible](ClientId, Entity) { return visible; });
+
+	REQUIRE(pair.Join(256));
+	REQUIRE(pair.Authority_.StatusOf(pair.Handle).Known == 300);
+
+	visible = false;
+	pair.Tick();
+
+	// Every handle arrived, and no message it arrived in could have been
+	// refused for being oversized.
+	REQUIRE(pair.Replica_.Forgotten().size() == 300);
+	for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+		REQUIRE(message.size() <= settings.ChunkBytes);
+	}
+}
+
 // --- what a hostile peer sends ---------------------------------------------------
 
 TEST_CASE("a malformed message is refused rather than partly applied", "[replication]") {
@@ -337,18 +439,344 @@ TEST_CASE("a client cannot tell the server what the world is", "[replication]") 
 	REQUIRE_FALSE(pair.Authority_.Receive(pair.Handle, writer.Bytes()));
 }
 
+TEST_CASE("no message fits a datagram only by luck", "[replication]") {
+	// **Five separate bugs in this module have been a message that did not
+	// fit**, and every one of them looked like a busy link at the call site
+	// because `Link::Reserve` refuses an oversized message with the same answer
+	// it gives ordinary backpressure. So the largest thing this can build is
+	// measured rather than reasoned about, against the number `Reserve` actually
+	// compares with — the plaintext limit, not the sealed one.
+	//
+	// `ChunkBytes` is asked for above what can ever fit, so what is being
+	// measured is the cap rather than a value that happened to be small.
+	AuthoritySettings settings;
+	settings.ChunkBytes = engine::net::Packet::MAXIMUM_MESSAGE_BYTES * 2;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+
+	std::vector<Entity> all;
+	for (int index = 0; index < 600; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+
+	// The join, a tick of structure and a tick of values, which between them are
+	// every kind of message this builds.
+	size_t largest = 0;
+	const auto measure = [&]() {
+		for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+			largest = std::max(largest, message.size());
+			REQUIRE(message.size() <= engine::net::Packet::MAXIMUM_MESSAGE_BYTES);
+		}
+	};
+
+	for (int tick = 0; tick < 64 && !pair.Replica_.Joined(); tick++) {
+		pair.Now++;
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		measure();
+		for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+			pair.Replica_.Receive(pair.Client, message);
+		}
+		pair.Server.ClearChanges();
+		pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge());
+	}
+	REQUIRE(pair.Replica_.Joined());
+
+	for (const Entity entity : all) {
+		pair.Server.GetMutable<Spot>(entity)->X = 1.0f;
+	}
+	pair.Now++;
+	pair.Authority_.Publish(pair.Server, pair.Now);
+	measure();
+
+	// And the messages really were being filled, or the bound above is a bound
+	// on nothing.
+	REQUIRE(largest > engine::net::Packet::MAXIMUM_MESSAGE_BYTES / 2);
+}
+
+TEST_CASE("a re-snapshot is not counted as a tick short of a part", "[replication]") {
+	// **A rejoin is the server giving up on the delta stream, not a part going
+	// missing**, and `Statistics::Incomplete` is the number an operator reads to
+	// decide which of those is happening. It has to stay honest across the one
+	// sequence where the two meet.
+	//
+	// The sequence is real rather than contrived: while a snapshot is streaming,
+	// `Publish` sends chunks and no delta at all, so the last delta before a
+	// re-snapshot is very often one that never completed and that nothing newer
+	// ever superseded.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 256;
+	settings.ResnapshotAfterTicks = 3;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+
+	std::vector<Entity> all;
+	for (int index = 0; index < 40; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(pair.Join(512));
+
+	// One tick short of a part, and nothing newer to supersede it: everything
+	// after it is lost outright, which is what leaves the record standing when
+	// the snapshot arrives.
+	for (const Entity entity : all) {
+		pair.Server.GetMutable<Spot>(entity)->X = 9.0f;
+	}
+	pair.Tick([](size_t index) { return index == 1; });
+	REQUIRE(pair.Replica_.Stats().Incomplete == 0);
+
+	size_t restarts = 0;
+	for (int tick = 0; tick < 6; tick++) {
+		pair.Tick([](size_t) { return true; });
+		restarts += pair.Authority_.Stats().Resnapshots;
+	}
+	REQUIRE(restarts > 0);
+
+	// The snapshot lands, and then an ordinary tick.
+	for (int tick = 0; tick < 32 && pair.Replica_.Stats().Snapshots < 2; tick++) {
+		pair.Tick();
+	}
+	REQUIRE(pair.Replica_.Stats().Snapshots == 2);
+
+	pair.Server.GetMutable<Spot>(all[0])->X = 11.0f;
+	pair.Tick();
+	REQUIRE(pair.Replica_.Applied() == pair.Now);
+
+	// One tick was short of a part and it was never superseded by a newer one,
+	// so nothing ever abandoned it — and a rejoin must not be recorded as
+	// having done so.
+	REQUIRE(pair.Replica_.Stats().Incomplete == 0);
+	REQUIRE(pair.Client.Get<Spot>(all[0])->X == 11.0f);
+}
+
+TEST_CASE("a part number past the bound is refused", "[replication]") {
+	// **Every field of an inbound message is hostile, and this one decides how
+	// much a receiver remembers.** The completeness record is indexed by part,
+	// so an unbounded number is two bytes from a peer choosing the size of an
+	// allocation. Refused at the read, before anything is kept.
+	const auto encode = [](uint16_t part) {
+		engine::core::ByteWriter writer;
+		engine::replication::Delta delta;
+		delta.Tick = 4;
+		delta.Part = part;
+		WriteMessage(writer, delta);
+		return std::vector<std::byte>(writer.Bytes().begin(), writer.Bytes().end());
+	};
+
+	engine::replication::Message message;
+
+	const std::vector<std::byte> allowed = encode(engine::replication::MAXIMUM_PARTS - 1);
+	engine::core::ByteReader inside(allowed);
+	REQUIRE(ReadMessage(inside, message));
+
+	// And the first number past it, so the bound is asserted at its edge rather
+	// than at some value comfortably beyond it.
+	const std::vector<std::byte> refused = encode(engine::replication::MAXIMUM_PARTS);
+	engine::core::ByteReader outside(refused);
+	REQUIRE_FALSE(ReadMessage(outside, message));
+}
+
+TEST_CASE("a message limit past what a part number can carry is capped", "[replication]") {
+	// **A part a receiver refuses is a part that never arrives**, and a tick
+	// missing a part is never acknowledged — so a limit above `MAXIMUM_PARTS`
+	// would not merely waste the excess, it would stall the stream outright.
+	// Capped at construction for the same reason `ChunkBytes` is.
+	//
+	// One entity per message, which is the cheapest way to a world that wants
+	// more parts than the numbering allows.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 176;
+	settings.ChunksPerTick = 64;
+	settings.MessagesPerTick = 4096;
+	settings.BytesPerTick = 4 * 1024 * 1024;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+
+	std::vector<Entity> all;
+	for (int index = 0; index < 1400; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(pair.Join(512));
+
+	for (const Entity entity : all) {
+		pair.Server.GetMutable<Spot>(entity)->X = 6.0f;
+	}
+	pair.Tick();
+
+	// More parts than the world has entities is impossible, so the only way
+	// every one of them was numbered inside the bound is the cap.
+	REQUIRE(pair.Replica_.Stats().Malformed == 0);
+	REQUIRE(pair.Replica_.Applied() == pair.Now);
+	REQUIRE(pair.Replica_.Stats().Incomplete == 0);
+}
+
 TEST_CASE("a truncated message is refused at every length", "[replication]") {
-	engine::core::ByteWriter writer;
+	// Both shapes, because they truncate differently: a structure is three
+	// counted entity lists and a delta is a counted list of named entries. A
+	// case over one of them would leave the other's length arithmetic
+	// unexercised.
+	engine::core::ByteWriter structure;
+	engine::replication::Structure said;
+	said.Tick = 7;
+	said.Created.push_back(Entity{123});
+	said.Forgotten.push_back(Entity{456});
+	WriteMessage(structure, said);
+
+	engine::core::ByteWriter values;
 	engine::replication::Delta delta;
 	delta.Tick = 7;
-	delta.Created.push_back(Entity{123});
-	WriteMessage(writer, delta);
+	engine::replication::ComponentDelta moved;
+	moved.Component = Name("replication_test.Spot");
+	moved.Entities.push_back(Entity{123});
+	moved.Values.assign(sizeof(Spot), std::byte{0});
+	delta.Components.push_back(std::move(moved));
+	WriteMessage(values, delta);
 
-	const std::span<const std::byte> whole = writer.Bytes();
-	for (size_t length = 0; length < whole.size(); length++) {
-		engine::core::ByteReader reader(whole.subspan(0, length));
-		engine::replication::Message message;
-		REQUIRE_FALSE(ReadMessage(reader, message));
+	for (const std::span<const std::byte> whole : {structure.Bytes(), values.Bytes()}) {
+		for (size_t length = 0; length < whole.size(); length++) {
+			engine::core::ByteReader reader(whole.subspan(0, length));
+			engine::replication::Message message;
+			REQUIRE_FALSE(ReadMessage(reader, message));
+		}
+	}
+}
+
+TEST_CASE("a tick's parts complete it in any order and however often", "[replication]") {
+	// **A part number is a position, not an arrival order**, and this is the
+	// case that says so. Parts ride the unreliable channel, which delivers out
+	// of order and twice as readily as once and in order — so a receiver that
+	// counted arrivals would read a duplicate as progress and acknowledge a tick
+	// it is a part short of, which is D00013 with an extra step.
+	//
+	// Handed over directly rather than through a link, because a `net::Link`
+	// discards an unreliable packet older than the newest it has seen: the
+	// reorder this has to survive would never reach a `Replica` over one, and
+	// the rule still has to hold without it.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 256;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+
+	std::vector<Entity> all;
+	for (int index = 0; index < 40; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(pair.Join(512));
+
+	for (const Entity entity : all) {
+		pair.Server.GetMutable<Spot>(entity)->X = 12.0f;
+	}
+
+	pair.Now++;
+	pair.Authority_.Publish(pair.Server, pair.Now);
+
+	const std::span<const std::vector<std::byte>> outgoing = pair.Authority_.Outgoing(pair.Handle);
+	const std::vector<std::vector<std::byte>> parts(outgoing.begin(), outgoing.end());
+	pair.Server.ClearChanges();
+
+	// Several messages, or the ordering below proves nothing.
+	REQUIRE(parts.size() > 2);
+
+	// Backwards, and every one of them twice.
+	for (size_t index = parts.size(); index > 0; index--) {
+		REQUIRE(pair.Replica_.Receive(pair.Client, parts[index - 1]) == ApplyStatus::Ok);
+		REQUIRE(pair.Replica_.Receive(pair.Client, parts[index - 1]) == ApplyStatus::Ok);
+	}
+
+	REQUIRE(pair.Replica_.Applied() == pair.Now);
+	REQUIRE(pair.Replica_.Stats().Incomplete == 0);
+	for (const Entity entity : all) {
+		REQUIRE(pair.Client.Get<Spot>(entity)->X == 12.0f);
+	}
+}
+
+TEST_CASE("a tick missing one of its parts is not acknowledged", "[replication]") {
+	// The other half, and the one that decides whether the case above is
+	// measuring anything: with the same messages and the same scrambling, one
+	// held back has to leave the tick unacknowledged.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 256;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+
+	std::vector<Entity> all;
+	for (int index = 0; index < 40; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(pair.Join(512));
+
+	const uint64_t before = pair.Replica_.Applied();
+
+	// A middle part, not the first and not the last. The first is what a
+	// receiver stopping at the first hole would have, and the last is the one
+	// carrying the marker — so a hole in the middle is the case that needs the
+	// whole set rather than a high-water mark.
+	for (const Entity entity : all) {
+		pair.Server.GetMutable<Spot>(entity)->X = 3.0f;
+	}
+	pair.Now++;
+	pair.Authority_.Publish(pair.Server, pair.Now);
+
+	const std::span<const std::vector<std::byte>> outgoing = pair.Authority_.Outgoing(pair.Handle);
+	const std::vector<std::vector<std::byte>> parts(outgoing.begin(), outgoing.end());
+	pair.Server.ClearChanges();
+	REQUIRE(parts.size() > 2);
+
+	// **Every survivor twice, which is what makes this case discriminating.**
+	// A receiver counting arrivals rather than positions would have as many
+	// deltas as the tick had parts and read the hole as filled — and the hole is
+	// filled by duplicates of the wrong parts, which is the D00013 bug with a
+	// receiver that looks like it is checking.
+	for (size_t index = 0; index < parts.size(); index++) {
+		if (index == 1) {
+			continue;
+		}
+		REQUIRE(pair.Replica_.Receive(pair.Client, parts[index]) == ApplyStatus::Ok);
+		REQUIRE(pair.Replica_.Receive(pair.Client, parts[index]) == ApplyStatus::Ok);
+	}
+
+	const std::vector<std::byte> ack = pair.Replica_.Acknowledge();
+	if (!ack.empty()) {
+		pair.Authority_.Receive(pair.Handle, ack);
+	}
+
+	REQUIRE(pair.Replica_.Stats().Deltas > parts.size());
+	REQUIRE(pair.Replica_.Applied() == before);
+
+	// And it is passed over rather than waited for: the next whole tick is
+	// acknowledged, and the tick with the hole is counted once.
+	pair.Tick();
+	REQUIRE(pair.Replica_.Applied() == pair.Now);
+	REQUIRE(pair.Replica_.Stats().Incomplete == 1);
+
+	// Including the rows that were only ever in the part that was dropped, which
+	// is the repair D00013 was open for.
+	for (const Entity entity : all) {
+		REQUIRE(pair.Client.Get<Spot>(entity)->X == 3.0f);
 	}
 }
 

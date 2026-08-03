@@ -7,9 +7,30 @@ L12, `client` tier. Absent from the server binary entirely.
 `Renderer.hpp` names `struct SDL_Window;` as a forward declaration and nothing
 else. Everything else is behind the pimpl in `Renderer.cpp`.
 
-That is what lets `Instance` and `Camera` be plain data that the client fills
-without acquiring a graphics API, and it is what will let the L9 render graph
-sit on top of this without inheriting SDL's vocabulary.
+That is what lets a caller hand this module a frame without acquiring a graphics
+API, and it is what will let the L9 render graph sit on top of this without
+inheriting SDL's vocabulary.
+
+## What crosses into this module is `scene`, and the conversion happens here
+
+`Renderer::Render` takes `scene::DrawInstance` and `scene::Camera`. It used to
+take a `render::Instance` and a `render::Camera` of its own, and both are gone:
+a `server`-tier host publishes a draw list and a `client`-tier consumer reads
+it, so the payload cannot be a type only this tier can name. `v02v03v04.md`
+§2.11 is the argument.
+
+Two rules follow, and neither is checkable by the build:
+
+- **The device layout is private and stays private.** `GpuInstance` in
+  `Renderer.cpp` is the `mat4` and the RGBA the pipeline binds, and it is built
+  straight into the mapped transfer buffer. Promoting it to a public header
+  would put a vertex layout back in front of a caller and would be
+  `render::Instance` again under a new name.
+- **The view-projection comes from `scene::ResolveCamera`.** Building one here
+  is what this module did before, and it was a second answer to handedness, clip
+  depth and the order of the product — a disagreement that reads as z-fighting
+  rather than as a matrix mistake. The aspect ratio is the swapchain's, because
+  that is the image the frame is drawn into.
 
 ## The design being followed is RENDER_PIPELINE.md
 

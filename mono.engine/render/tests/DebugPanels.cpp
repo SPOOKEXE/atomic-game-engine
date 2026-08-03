@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.debugpanels")
@@ -681,4 +682,121 @@ TEST_CASE("every tab has a name", "[panels]") {
 	for (uint8_t index = 0; index < static_cast<uint8_t>(ProfilerTab::Count); index++) {
 		REQUIRE(engine::render::GetProfilerTabName(static_cast<ProfilerTab>(index)) != "?");
 	}
+}
+
+TEST_CASE("the network panel is off when there is no network", "[panels][network]") {
+	// **The claim the panel is built on, stated as a test.** A client run
+	// without `--connect` has no link, and a panel of zeroes reads as a link
+	// that is up and idle — which is a different and much more alarming thing
+	// than a client that was never asked to connect. So asking for the panel is
+	// not enough; `NetworkStatistics::Connected` is what draws it, and that is
+	// enforced here rather than left to the caller.
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowNetwork = true;
+	data.Network.Connected = false;
+
+	// Not merely absent — asked for, with numbers in it, and still refused. A
+	// panel that only checked `Connected` when every counter was zero would
+	// pass this with the check removed.
+	data.Network.ReceivedBytesPerSecond = 4096.0;
+	data.Network.Entities = 512;
+
+	DrawDebugPanels(image, data);
+
+	REQUIRE_FALSE(image.IsDirty());
+	REQUIRE_FALSE(AnyPixelSet(image));
+}
+
+TEST_CASE("the network panel draws once there is a link", "[panels][network]") {
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowNetwork = true;
+	data.Network.Connected = true;
+
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+	REQUIRE(AnyPixelSet(image));
+}
+
+TEST_CASE("a connected link with the panel closed draws nothing", "[panels][network]") {
+	// The other half of the same switch. `Connected` is a fact about the
+	// program; `ShowNetwork` is what somebody pressed. Both are needed, and a
+	// test for only the first would pass with the key binding ignored.
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowNetwork = false;
+	data.Network.Connected = true;
+
+	DrawDebugPanels(image, data);
+	REQUIRE_FALSE(image.IsDirty());
+	REQUIRE_FALSE(AnyPixelSet(image));
+}
+
+TEST_CASE("the network panel does not overlap the statistics panel", "[panels][network]") {
+	// F3 is top-left and F4 is top-right, so a person can read both at once.
+	// They are drawn into one image, and the only thing keeping them apart is
+	// the width of the one on the right — which changes whenever a line in it
+	// gets longer. So: draw each alone, and require that the columns one
+	// touches are columns the other does not.
+	DebugPanelData statisticsOnly;
+	statisticsOnly.ShowStatistics = true;
+
+	DebugPanelData networkOnly;
+	networkOnly.ShowNetwork = true;
+	networkOnly.Network.Connected = true;
+
+	constexpr int WIDTH = 1280;
+	constexpr int HEIGHT = 720;
+
+	const auto rightmostColumn = [](const OverlayImage &image) {
+		int rightmost = -1;
+		for (int y = 0; y < image.GetHeight(); y++) {
+			for (int x = 0; x < image.GetWidth(); x++) {
+				const size_t at = (static_cast<size_t>(y) * static_cast<size_t>(image.GetWidth()) +
+								   static_cast<size_t>(x)) *
+								  4;
+				if (image.GetPixels()[at + 3] != 0) {
+					rightmost = std::max(rightmost, x);
+				}
+			}
+		}
+		return rightmost;
+	};
+
+	const auto leftmostColumn = [](const OverlayImage &image) {
+		int leftmost = image.GetWidth();
+		for (int y = 0; y < image.GetHeight(); y++) {
+			for (int x = 0; x < image.GetWidth(); x++) {
+				const size_t at = (static_cast<size_t>(y) * static_cast<size_t>(image.GetWidth()) +
+								   static_cast<size_t>(x)) *
+								  4;
+				if (image.GetPixels()[at + 3] != 0) {
+					leftmost = std::min(leftmost, x);
+				}
+			}
+		}
+		return leftmost;
+	};
+
+	OverlayImage statisticsImage;
+	statisticsImage.Resize(WIDTH, HEIGHT);
+	DrawDebugPanels(statisticsImage, statisticsOnly);
+
+	OverlayImage networkImage;
+	networkImage.Resize(WIDTH, HEIGHT);
+	DrawDebugPanels(networkImage, networkOnly);
+
+	const int statisticsRight = rightmostColumn(statisticsImage);
+	const int networkLeft = leftmostColumn(networkImage);
+
+	REQUIRE(statisticsRight > 0);
+	REQUIRE(networkLeft < WIDTH);
+	REQUIRE(statisticsRight < networkLeft);
 }

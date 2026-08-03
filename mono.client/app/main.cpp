@@ -41,6 +41,7 @@ int main(int argc, char **argv) {
 	engine::core::Arguments arguments("client", "atomic — runs a game.");
 
 	arguments.Flag("stats", "Open the F3 statistics panel at startup");
+	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Flag("verbose", "Log at trace level");
@@ -83,6 +84,7 @@ int main(int argc, char **argv) {
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	options.ShowStatistics = arguments.Has("stats");
+	options.ShowNetwork = arguments.Has("net");
 	options.ShowFrameGraph = arguments.Has("graph");
 	options.Uncapped = arguments.Has("uncapped");
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);

@@ -15,14 +15,16 @@
 // the next one is already on its way and is more correct than the one being
 // waited for.
 //
-// **The acknowledgement is about the reliable channel alone.** `Link` keeps one
-// window across both channels, which is fine for its loss estimate and useless
-// for this: the unreliable counter runs at sixty a second and the reliable one
-// at the rate events happen, so within seconds every reliable sequence is
-// thousands behind the shared high-water mark and outside a 33-wide window
-// forever. `ReliableReceiver::Acknowledging` therefore rewrites the two
-// acknowledgement fields of an outgoing header, and `ReliableSender` reads them
-// back. Nothing in `Link` consumes those fields, so nothing is lost by it.
+// **The acknowledgement is about the reliable channel alone, and it has to ride
+// every packet whatever channel that packet is on.** `Link` keeps a window per
+// channel — it has to, or a reliable resend makes an unreliable packet look
+// stale — and `Link::NextHeader` can therefore only report the window of the
+// channel it is stamping. A game is mostly one-way and mostly unreliable, so a
+// reliable stream acknowledged only by reliable traffic coming back would hardly
+// be acknowledged at all, and the sender would resend payloads that arrived.
+// `ReliableReceiver::Acknowledging` therefore rewrites the two acknowledgement
+// fields of every outgoing header, and `ReliableSender` reads them back. Nothing
+// in `Link` consumes those fields, so nothing is lost by it.
 //
 // **This does no I/O, for the same reason `Link` does not.** It says what should
 // be sent again; something above it sends. That is also why a resend is not

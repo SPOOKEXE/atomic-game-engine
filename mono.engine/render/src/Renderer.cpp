@@ -3,11 +3,13 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/render/Primitives.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_video.h>
-#include <glm/gtc/matrix_transform.hpp>
+#include <glm/mat4x4.hpp>
+#include <glm/vec4.hpp>
 
 #include <array>
 #include <cstring>
@@ -18,6 +20,39 @@ namespace engine::render {
 	namespace {
 
 		using Vertex = MeshVertex;
+
+		// One instance as the vertex shader reads it.
+		//
+		// The device layout, and the reason it is private: a `mat4` and a packed
+		// RGBA are what a GPU wants and are exactly what may not appear in the
+		// `shared` type a headless world publishes. `scene::DrawInstance` is that
+		// type; this is what it becomes, once, on the way into the transfer
+		// buffer.
+		struct GpuInstance {
+			glm::mat4 Model{1.0f};
+			glm::vec4 Colour{1.0f, 1.0f, 1.0f, 1.0f};
+		};
+
+		// A draw instance in the layout the opaque pipeline binds.
+		//
+		// The half-extent is folded into the matrix rather than sent beside it:
+		// the cube in `Primitives.hpp` is a unit cube about its own origin, so
+		// scaling its columns is what turns one mesh into every box size in the
+		// scene. Scale on the right of the rotation, so it stays a scale rather
+		// than becoming a shear.
+		GpuInstance ToGpu(const scene::DrawInstance &instance) {
+			GpuInstance gpu;
+			gpu.Model = instance.Frame.ToMatrix();
+
+			// Twice the half-extent, because the mesh is one metre across and
+			// the field is half of what the box measures.
+			gpu.Model[0] *= instance.HalfExtent.X * 2.0f;
+			gpu.Model[1] *= instance.HalfExtent.Y * 2.0f;
+			gpu.Model[2] *= instance.HalfExtent.Z * 2.0f;
+
+			gpu.Colour = glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f};
+			return gpu;
+		}
 
 		struct FrameUniforms {
 			glm::mat4 ViewProjection;
@@ -134,7 +169,7 @@ namespace engine::render {
 			{0, sizeof(Vertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0},
 			// One step per instance: the same 36 indices are replayed for every
 			// entity, and only the matrix and colour change.
-			{1, sizeof(Instance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
+			{1, sizeof(GpuInstance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
 		};
 
 		const SDL_GPUVertexAttribute attributes[] = {
@@ -146,7 +181,7 @@ namespace engine::render {
 			{3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 4},
 			{4, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 8},
 			{5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 12},
-			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Instance, Colour)},
+			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuInstance, Colour)},
 		};
 
 		SDL_GPUColorTargetDescription opaqueTarget{};
@@ -289,7 +324,7 @@ namespace engine::render {
 			SDL_ReleaseGPUTransferBuffer(Device, InstanceTransfer);
 		}
 
-		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(Instance));
+		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(GpuInstance));
 
 		SDL_GPUBufferCreateInfo bufferInfo{};
 		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
@@ -529,8 +564,12 @@ namespace engine::render {
 		*State = Impl{};
 	}
 
-	FrameResult
-	Renderer::Render(const Camera &camera, std::span<const Instance> instances, OverlayImage &overlay) {
+	FrameResult Renderer::Render(
+		const core::CFrame &cameraFrame,
+		const scene::Camera &camera,
+		std::span<const scene::DrawInstance> instances,
+		OverlayImage &overlay
+	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
 		FrameResult result;
@@ -630,11 +669,23 @@ namespace engine::render {
 					mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
 				}
 				{
-					// Eighty bytes an entity, straight into write-combined
-					// memory. This is the other half of the traffic that made
-					// collect-instances memory-bound, paid a second time.
-					ENGINE_PROFILE_CAT("copy instances", core::ProfileCategory::Render);
-					std::memcpy(mapped, instances.data(), instances.size() * sizeof(Instance));
+					// Converted straight into the mapped buffer rather than
+					// into a vector that is then memcpy'd. Eighty bytes an
+					// entity go into write-combined memory either way, and the
+					// staging copy would be that traffic paid a third time —
+					// once by the world filling its draw list, once here, and
+					// once again on the way out.
+					//
+					// This is where a `CFrame` and a `Color3` become a `mat4`
+					// and an RGBA, and it is the only place in the engine that
+					// happens. A world produces scene data; a device layout is
+					// this module's business.
+					ENGINE_PROFILE_CAT("convert instances", core::ProfileCategory::Render);
+
+					auto *out = static_cast<GpuInstance *>(mapped);
+					for (size_t index = 0; index < instances.size(); index++) {
+						out[index] = ToGpu(instances[index]);
+					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 				haveInstances = true;
@@ -657,7 +708,7 @@ namespace engine::render {
 				const SDL_GPUBufferRegion destination{
 					State->InstanceBuffer,
 					0,
-					instanceCount * static_cast<uint32_t>(sizeof(Instance)),
+					instanceCount * static_cast<uint32_t>(sizeof(GpuInstance)),
 				};
 				// Cycling hands back a fresh allocation rather than stalling on
 				// the copy the previous frame may still be reading.
@@ -778,21 +829,22 @@ namespace engine::render {
 
 				const float aspect = static_cast<float>(width) / static_cast<float>(height);
 
-				// No Y flip. Vulkan's clip space does point down, but SDL's
-				// Vulkan backend already submits a negative-height viewport
-				// "for consistency with other backends", so what reaches a
-				// shader here is Y-up on every backend. Correcting it again
-				// turns the scene upside down and inverts the lighting with
-				// it — which reads as a shading bug rather than an orientation
-				// one, and is why this comment is longer than the code.
+				// `scene::ResolveCamera`, not a projection built here. It is the
+				// one place the engine decides what a camera's matrices are, and
+				// a second copy is a second chance to disagree about handedness,
+				// clip depth or the order of the product — a disagreement that
+				// reads as z-fighting rather than as a matrix mistake.
 				//
-				// GLM_FORCE_DEPTH_ZERO_TO_ONE is still required: the depth
-				// range is 0..1 everywhere SDL's GPU API runs.
-				const glm::mat4 projection =
-					glm::perspective(camera.FieldOfViewRadians, aspect, camera.NearPlane, camera.FarPlane);
-
+				// The Y convention that used to need a comment here lives there
+				// too: no flip, because SDL's Vulkan backend already submits a
+				// negative-height viewport "for consistency with other
+				// backends".
+				//
+				// The aspect ratio is the swapchain's rather than a caller's, so
+				// a frame taken mid-resize is projected for the image it is
+				// actually drawn into.
 				const FrameUniforms frame{
-					projection * glm::inverse(camera.Frame.ToMatrix()),
+					scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection,
 				};
 				SDL_PushGPUVertexUniformData(command, 0, &frame, sizeof(frame));
 
