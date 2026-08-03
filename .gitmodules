@@ -9,11 +9,6 @@
 	url = https://github.com/libsdl-org/SDL.git
 	branch = release-3.2.x
 	shallow = true
-[submodule "mono.vendor/flecs"]
-	path = mono.vendor/flecs
-	url = https://github.com/SanderMertens/flecs.git
-	branch = master
-	shallow = true
 [submodule "mono.vendor/glm"]
 	path = mono.vendor/glm
 	url = https://github.com/g-truc/glm.git
@@ -104,7 +99,7 @@
 ; recorded in THIRD_PARTY_NOTICES.md.
 ;
 ; master on both, because neither publishes a release branch — the same
-; situation as flecs and glm above, and the superproject pins the SHA regardless.
+; situation as glm above, and the superproject pins the SHA regardless.
 [submodule "mono.vendor/cryptopp-cmake"]
 	path = mono.vendor/cryptopp-cmake
 	url = https://github.com/abdes/cryptopp-cmake.git
@@ -128,8 +123,8 @@
 ; abstract.
 ;
 ; master, because Luau tags releases rather than publishing a release branch —
-; the same situation as flecs, glm and the cryptopp pair above, and the
-; superproject pins the SHA regardless.
+; the same situation as glm and the cryptopp pair above, and the superproject
+; pins the SHA regardless.
 [submodule "mono.vendor/luau"]
 	path = mono.vendor/luau
 	url = https://github.com/luau-lang/luau.git

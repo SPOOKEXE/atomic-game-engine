@@ -4,7 +4,7 @@ This engine is MPL-2.0. It builds against the projects below, each under its own
 licence. Every one of them lives in `mono.vendor/` as a git submodule, so the
 full licence text ships with the source in `mono.vendor/<name>/`.
 
-All fifteen are permissive and compatible with MPL-2.0. **Nothing here is
+All fourteen are permissive and compatible with MPL-2.0. **Nothing here is
 copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
 adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`.
 

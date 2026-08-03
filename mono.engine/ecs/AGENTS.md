@@ -112,16 +112,20 @@ each program — makes agreement a discipline repeated in every program and ever
 test, and the failure mode of forgetting one is a receiver decoding ten bytes as
 twenty-eight.
 
-## `Store::Native()` is a debt, not a pattern
+## There is no escape hatch out of `Store`, and there used to be
 
-Wrapping the whole of flecs was not v0.1's job, so `Native()` exists and flecs
-appears in the templates in `Store.hpp`. Two consequences:
+`Store::Native()` was v0.1's debt: flecs was the backing store, wrapping all of
+it was not that version's job, so an accessor existed that handed the underlying
+world out and let a caller reach around the API. **It is gone — v0.2's storage
+rewrite made the storage first-party, and flecs stopped being a dependency at
+all.** There is no `Native()`, no vendored ECS, and nothing outside this module
+can reach a row except through `Store`.
 
-- **Do not call `Native()` from another module.** Add the operation you need to
-  `Store` instead. Every direct flecs call outside this module is one more
-  thing the binding generator cannot see.
-- **Search for it before adding one.** The name is deliberately awkward so that
-  a grep finds every shortcut that was taken.
+Recorded rather than deleted because the rule it existed to bound is the one
+that still applies: **add the operation you need to `Store`.** The reason has
+outlived the hatch — an access path the module does not own is one the binding
+generator cannot see, which now means `v05.md`'s manifest rather than a
+hypothetical one.
 
 ## There is no Count() of everything
 
