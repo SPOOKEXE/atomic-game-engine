@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -101,6 +102,25 @@ namespace engine::core {
 		// the frame go" answer is made of, and what the category totals sum.
 		float SelfMilliseconds = 0.0f;
 
+		// Of `Milliseconds`, how much was spent waiting — this span's own idle
+		// time and every idle span beneath it.
+		//
+		// **Because an inclusive duration is not a cost.** `Renderer::Render`
+		// on a vsynced frame reads 16 ms, and 15.9 of that is one child
+		// blocking on the display. A reader looking at the biggest number goes
+		// and optimises the renderer, which is what happened — twice — before
+		// this field existed. `Milliseconds - IdleMilliseconds` is the part
+		// anybody can do something about, and it is the number the overlay
+		// leads with.
+		//
+		// Idle *self* time is what accumulates, so a wait nested inside another
+		// wait is counted once, and it is added to every ancestor rather than
+		// to the immediate parent alone — every span that contains a wait
+		// contains it.
+		//
+		// @since v0.6
+		float IdleMilliseconds = 0.0f;
+
 		// Broad owner used when accumulating category self time.
 		ProfileCategory Category = ProfileCategory::Engine;
 
@@ -119,6 +139,25 @@ namespace engine::core {
 		// knows which bars are concurrent.
 		bool Reported = false;
 	};
+
+	// Fills in `FrameSpan::IdleMilliseconds` across a frame's spans.
+	//
+	// **Public because two callers need the same answer and one of them is a
+	// test.** `EndFrame` runs it before publishing so the overlay and the RMAX
+	// history agree; the panel suite runs it over hand-built spans so the
+	// invariants it checks — a share never above 100%, a wait inside a wait
+	// counted once — stay properties of this arithmetic rather than of a
+	// number a test wrote down.
+	//
+	// Idle *self* time is what accumulates, added to the span itself and to
+	// every ancestor. Safe on a malformed parent chain: the walk is bounded by
+	// the span count as well as by depth.
+	//
+	// @param spans A frame's spans in open order, with `Parent` set. Their
+	//              `IdleMilliseconds` are added to rather than replaced, so
+	//              call once per frame.
+	// @since v0.6
+	void AccumulateIdleMilliseconds(std::span<FrameSpan> spans);
 
 	// Collects one thread's nested scopes into a bounded per-frame tree and
 	// short spike history for the in-game overlay.
