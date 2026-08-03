@@ -240,16 +240,28 @@ namespace engine::render {
 		// Where a `SurfaceView` renders. Colour and depth, because a view is a
 		// view: the geometry it draws needs sorting by depth exactly as the
 		// swapchain's does.
-		// **Two of them, ping-ponged, and that is what makes a mirror visible
-		// inside a mirror.** The surface pass writes one and samples the other,
-		// so a mirror it draws shows the *previous* frame's reflection instead
-		// of nothing — which is the recursion a real mirror has, one bounce per
-		// frame deep.
+		// **Two of them, ping-ponged, for one reason and not the two this
+		// comment used to claim.** With a single texture the surface pass bound
+		// its own render target as a sampler, which is undefined behaviour on
+		// every backend that checks. Writing one and binding the other makes
+		// that legal.
 		//
-		// It also fixes something that was simply illegal: with one texture the
-		// surface pass bound its own render target as a sampler. The shader
-		// never read it, but the binding is undefined behaviour on every
-		// backend that checks.
+		// **It does not buy a mirror inside a mirror, and saying it did was
+		// wrong for as long as it was written here.** Surface instances are
+		// partitioned out of the surface pass — `sceneReflected` excludes them,
+		// because a mirror sits between its own reflection camera and the world
+		// and would otherwise fill its texture with itself. So no mirror is ever
+		// drawn into a mirror's texture and there is no recursion to be one
+		// bounce deep. What the claim actually produced was a bug: the flag that
+		// says "sample the surface texture" was set for the *whole* surface
+		// pass, so the floor sampled the previous frame's reflection and came
+		// out as its clear colour wherever that projection landed on untouched
+		// texels. A black wedge in the mirror, found by eye and not by a test.
+		//
+		// Real recursion needs the pass to exclude only the surface being
+		// rendered *for* rather than every surface, which is a per-view
+		// exclusion this pipeline has no shape for. It is the render-node
+		// system's, along with everything else about several views.
 		SDL_GPUTexture *SurfaceTexture[2] = {nullptr, nullptr};
 		SDL_GPUTexture *SurfaceDepth = nullptr;
 		SDL_GPUSampler *SurfaceSampler = nullptr;
@@ -1415,12 +1427,24 @@ namespace engine::render {
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &surfaceFrame, sizeof(surfaceFrame));
 
-			// **Shadowed, and surfaced from the other texture.** The mirror's
-			// own view gets the shadow map, so what it reflects is lit the same
-			// way — and it samples the *previous* frame's surface, which is what
-			// puts a mirror inside a mirror. One bounce per frame, which is what
-			// a real mirror does and what the reference render graph calls
-			// breaking the cycle by reading last frame.
+			// **Shadowed, and pointedly not surfaced.** The mirror's own view
+			// gets the shadow map, so what it reflects is lit the way the screen
+			// lights it.
+			//
+			// **`Flags.z` is zero, and it has to be.** It means "this draw
+			// samples the surface texture instead of its own tint", and the
+			// screen pass sets it for exactly one draw — the instances that
+			// carry a `Surface`. This pass has none: `sceneReflected` partitions
+			// them out. Setting it here therefore cannot reach a mirror; it can
+			// only reach everything that is *not* one, and that is what it did.
+			// Every object in the reflection sampled the previous frame's
+			// surface texture, projected from this camera, and the floor came
+			// out as the clear colour wherever that landed on texels the last
+			// frame never wrote — a black wedge in the mirror that survived
+			// deleting every caster, the frame and the near-plane hack, and
+			// moved when the camera was re-aimed but not when the floor was.
+			// It was pinned to a projected texture coordinate, and this uniform
+			// is the only thing in this pass that has one.
 			const LightingUniforms surfaceLighting{
 				glm::vec4{SUN_DIRECTION, 0.0f},
 				SUN_AMBIENT,
