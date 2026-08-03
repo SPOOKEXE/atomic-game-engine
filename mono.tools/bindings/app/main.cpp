@@ -19,7 +19,9 @@
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/script/Instances.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -59,6 +61,8 @@ namespace {
 			return "double";
 		case PropertyType::Name:
 			return "Name";
+		case PropertyType::Enum:
+			return "enum";
 		case PropertyType::Reference:
 			return "Instance";
 		case PropertyType::Vector3:
@@ -86,8 +90,21 @@ namespace {
 	}
 
 	// The script type a property's value appears as, per language.
-	const char *LuauType(PropertyType type) {
-		switch (type) {
+	//
+	// **Takes the descriptor rather than the type**, because an `Enum` property
+	// has no single answer: its script type is the enum it names, and that is
+	// carried on the descriptor. A function of the type alone could only have
+	// said `EnumItem`, which is the shape and not the type — and would have
+	// given an author completion for every enum in the engine at once.
+	std::string LuauType(const PropertyDescriptor &property) {
+		if (property.Type == PropertyType::Enum) {
+			// The alias, not `Enum.Material` — that is a *value*, and a type
+			// position needs a type. The alias is what both declaration files
+			// emit above.
+			return std::string("Enum_") + property.EnumName.Text().data();
+		}
+
+		switch (property.Type) {
 		case PropertyType::Bool:
 			return "boolean";
 		case PropertyType::Int32:
@@ -105,14 +122,19 @@ namespace {
 			return "Color3";
 		case PropertyType::Reference:
 			return "Instance";
+		case PropertyType::Enum:
 		case PropertyType::Opaque:
 			break;
 		}
 		return "unknown";
 	}
 
-	const char *TypeScriptType(PropertyType type) {
-		switch (type) {
+	std::string TypeScriptType(const PropertyDescriptor &property) {
+		if (property.Type == PropertyType::Enum) {
+			return std::string("Enum_") + property.EnumName.Text().data();
+		}
+
+		switch (property.Type) {
 		case PropertyType::Bool:
 			return "boolean";
 		case PropertyType::Int32:
@@ -130,6 +152,7 @@ namespace {
 			return "Color3";
 		case PropertyType::Reference:
 			return "Instance";
+		case PropertyType::Enum:
 		case PropertyType::Opaque:
 			break;
 		}
@@ -240,6 +263,12 @@ namespace {
 				out << "\"kind\": \"" << KindName(described.Kind) << "\", ";
 				out << "\"bytes\": " << described.Size << ", ";
 				out << "\"writable\": " << (described.Writable ? "true" : "false") << ", ";
+				if (described.Type == PropertyType::Enum) {
+					// Only on an enum property, so the shape of every other row
+					// is unchanged and the diff of this file reads as what
+					// actually moved.
+					out << "\"enum\": \"" << described.EnumName.Text() << "\", ";
+				}
 				out << "\"reads\": ";
 				WriteStrings(out, ComponentNames(described.Reads));
 				out << ", \"writes\": ";
@@ -251,9 +280,48 @@ namespace {
 			out << "\t\t}" << (index + 1 == ids.size() ? "" : ",") << "\n";
 		}
 
+		out << "\t],\n";
+
+		// **The enums, listed after the classes that name them.** A binding
+		// generator that emitted a property typed `Enum.Material` without
+		// saying what `Material` holds would be describing half a contract, and
+		// an editor reading this file could offer no completion at all.
+		//
+		// Members in registration order rather than sorted: the order an author
+		// reads them in should be the order they were declared, which is usually
+		// meaningful — `Static`, `Kinematic`, `Dynamic` is a progression and
+		// alphabetical is not. The enum *names* are sorted, because those come
+		// from whichever translation unit ran first.
+		out << "\t\"enums\": [\n";
+
+		std::vector<engine::core::Name> enums = engine::ecs::EnumTable::Names();
+		std::sort(enums.begin(), enums.end(), [](engine::core::Name left, engine::core::Name right) {
+			return left.Text() < right.Text();
+		});
+
+		for (size_t index = 0; index < enums.size(); index++) {
+			std::vector<std::string> members;
+			for (const engine::core::Name member : engine::ecs::EnumTable::MembersOf(enums[index])) {
+				members.emplace_back(member.Text());
+			}
+
+			out << "\t\t{\"name\": \"" << enums[index].Text() << "\", \"members\": ";
+			WriteStrings(out, members);
+			out << "}" << (index + 1 == enums.size() ? "" : ",") << "\n";
+		}
+
 		out << "\t]\n";
 		out << "}\n";
 		return out.str();
+	}
+
+	// Every registered enum, sorted by name.
+	std::vector<engine::core::Name> SortedEnums() {
+		std::vector<engine::core::Name> enums = engine::ecs::EnumTable::Names();
+		std::sort(enums.begin(), enums.end(), [](engine::core::Name left, engine::core::Name right) {
+			return left.Text() < right.Text();
+		});
+		return enums;
 	}
 
 	// The Luau declaration file.
@@ -269,6 +337,31 @@ namespace {
 		out << "export type Vector3 = { X: number, Y: number, Z: number }\n";
 		out << "export type Color3 = { R: number, G: number, B: number }\n";
 		out << "export type CFrame = { Position: Vector3 }\n\n";
+
+		// **The enums, declared before the classes that name them.** A property
+		// typed `Enum.Material` with no declaration of `Material` would be half
+		// a contract, and `--!strict` would reject the file outright.
+		//
+		// A member is a *singleton table type* rather than a string literal, so
+		// `part.Material = "Plastic"` is a type error at authoring time even
+		// though the binding accepts it at run time. That gap is deliberate: the
+		// run-time acceptance exists for scripts being migrated, and the type
+		// error exists so new code does not acquire the habit.
+		out << "export type EnumItem = { Name: string, EnumType: string }\n";
+		for (const engine::core::Name enumName : SortedEnums()) {
+			out << "export type Enum_" << enumName.Text() << " = EnumItem\n";
+		}
+		out << "\n";
+
+		out << "declare Enum: {\n";
+		for (const engine::core::Name enumName : SortedEnums()) {
+			out << "\t" << enumName.Text() << ": {\n";
+			for (const engine::core::Name member : engine::ecs::EnumTable::MembersOf(enumName)) {
+				out << "\t\t" << member.Text() << ": Enum_" << enumName.Text() << ",\n";
+			}
+			out << "\t},\n";
+		}
+		out << "}\n\n";
 
 		for (const ClassId id : AllClasses()) {
 			const ClassInfo &info = Classes::Describe(id);
@@ -290,7 +383,7 @@ namespace {
 				}
 			);
 			for (const PropertyDescriptor &property : properties) {
-				out << "\t" << property.Name.Text() << ": " << LuauType(property.Type) << ",\n";
+				out << "\t" << property.Name.Text() << ": " << LuauType(property) << ",\n";
 			}
 			out << "}\n\n";
 		}
@@ -314,6 +407,31 @@ namespace {
 		out << "declare const Vector3: { new(x?: number, y?: number, z?: number): Vector3 };\n";
 		out << "declare const Color3: { new(r?: number, g?: number, b?: number): Color3 };\n";
 		out << "declare function print(...values: unknown[]): void;\n\n";
+
+		// The enums, for the reason the Luau file declares them: a property
+		// typed `Enum.Material` needs `Material` to exist.
+		//
+		// **A branded interface per enum**, so `Enum.Material.Plastic` and
+		// `Enum.EasingStyle.Linear` are not assignable to one another. Without
+		// the brand every `EnumItem` would be interchangeable, and the wrong-enum
+		// mistake the run time refuses would compile.
+		out << "declare interface EnumItem { readonly Name: string; readonly EnumType: string; ";
+		out << "Equals(other: EnumItem): boolean; }\n";
+		for (const engine::core::Name enumName : SortedEnums()) {
+			out << "declare interface Enum_" << enumName.Text() << " extends EnumItem { ";
+			out << "readonly __enum: \"" << enumName.Text() << "\"; }\n";
+		}
+		out << "\n";
+
+		out << "declare namespace Enum {\n";
+		for (const engine::core::Name enumName : SortedEnums()) {
+			out << "\tconst " << enumName.Text() << ": {\n";
+			for (const engine::core::Name member : engine::ecs::EnumTable::MembersOf(enumName)) {
+				out << "\t\treadonly " << member.Text() << ": Enum_" << enumName.Text() << ";\n";
+			}
+			out << "\t};\n";
+		}
+		out << "}\n\n";
 
 		for (const ClassId id : AllClasses()) {
 			const ClassInfo &info = Classes::Describe(id);
@@ -356,7 +474,7 @@ namespace {
 				if (!property.Writable) {
 					out << "readonly ";
 				}
-				out << property.Name.Text() << ": " << TypeScriptType(property.Type) << ";\n";
+				out << property.Name.Text() << ": " << TypeScriptType(property) << ";\n";
 			}
 			out << "}\n\n";
 		}
@@ -416,6 +534,11 @@ int main(int argc, char **argv) {
 	// from an empty table would be a valid file describing nothing, and its
 	// drift check would pass forever.
 	(void)engine::scene::PartClass();
+
+	// The script classes too. A manifest that described `Part` and not `Script`
+	// would be describing what a script can *build* and not what a world can
+	// *hold*, and the second is the half a save file needs.
+	(void)engine::script::ScriptClass();
 
 	const std::filesystem::path directory = arguments.Get("out").has_value()
 												? std::filesystem::path(*arguments.Get("out"))

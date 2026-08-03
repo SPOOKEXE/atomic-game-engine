@@ -19,6 +19,8 @@ namespace engine::script {
 
 		bool Run(std::string_view source, std::string_view name) override;
 
+		bool RunInstance(ecs::Entity instance) override;
+
 		bool Heartbeat(float delta) override;
 
 		Language Which() const override {

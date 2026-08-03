@@ -57,10 +57,17 @@ namespace server {
 		// measuring the simulation rather than the sleep between ticks.
 		bool Unpaced = false;
 
-		// TODO(v0.2+): deserialize and host this game file. Parsed and reported
-		// now so that a command line written against the roadmap fails with a
-		// clear message rather than being silently ignored — `gamefile` arrives
-		// with the game file format.
+		// The scene to host. Empty means the placeholder world.
+		//
+		// **A scene script, not yet a game file.** Since v0.3 this runs through
+		// the same loader the client's `--script` does, over the same file, so
+		// both ends author the world identically — a server that built it its
+		// own way would disagree with its replicas once a tick and every side
+		// would look self-consistent while doing it.
+		//
+		// The flag keeps the name it will have when `mono.gamefile` lands and a
+		// universe of worlds is what this points at, rather than being renamed
+		// twice. Until then a game is one scene.
 		std::string GamePath;
 
 		// Read assets from here instead of from beside the binary. Empty means

@@ -13,6 +13,31 @@ declare const Vector3: { new(x?: number, y?: number, z?: number): Vector3 };
 declare const Color3: { new(r?: number, g?: number, b?: number): Color3 };
 declare function print(...values: unknown[]): void;
 
+declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
+declare interface Enum_Material extends EnumItem { readonly __enum: "Material"; }
+
+declare namespace Enum {
+	const Material: {
+		readonly Plastic: Enum_Material;
+		readonly SmoothPlastic: Enum_Material;
+		readonly Wood: Enum_Material;
+		readonly WoodPlanks: Enum_Material;
+		readonly Metal: Enum_Material;
+		readonly CorrodedMetal: Enum_Material;
+		readonly DiamondPlate: Enum_Material;
+		readonly Concrete: Enum_Material;
+		readonly Brick: Enum_Material;
+		readonly Cobblestone: Enum_Material;
+		readonly Grass: Enum_Material;
+		readonly Sand: Enum_Material;
+		readonly Slate: Enum_Material;
+		readonly Ice: Enum_Material;
+		readonly Glass: Enum_Material;
+		readonly Neon: Enum_Material;
+		readonly ForceField: Enum_Material;
+	};
+}
+
 declare interface Instance {
 	readonly Name: string;
 	Name: string;
@@ -28,14 +53,35 @@ declare interface PVInstance extends Instance {
 declare interface BasePart extends PVInstance {
 	Anchored: boolean;
 	CanCollide: boolean;
+	CollisionGroup: string;
 	Color: Color3;
-	Material: string;
+	Material: Enum_Material;
 	Mesh: string;
 	Size: Vector3;
+	Surface: number;
+	Transparency: number;
 	Visible: boolean;
 }
 
 declare interface Part extends BasePart {
+}
+
+declare interface Camera extends PVInstance {
+	FarPlaneZ: number;
+	FieldOfView: number;
+	NearPlaneZ: number;
+	SurfaceSize: Vector3;
+}
+
+declare interface LuaSourceContainer extends Instance {
+	Disabled: boolean;
+	Source: string;
+}
+
+declare interface Script extends LuaSourceContainer {
+}
+
+declare interface LocalScript extends LuaSourceContainer {
 }
 
 declare const Instance: {
@@ -43,4 +89,8 @@ declare const Instance: {
 	new(className: "PVInstance"): PVInstance;
 	new(className: "BasePart"): BasePart;
 	new(className: "Part"): Part;
+	new(className: "Camera"): Camera;
+	new(className: "LuaSourceContainer"): LuaSourceContainer;
+	new(className: "Script"): Script;
+	new(className: "LocalScript"): LocalScript;
 };

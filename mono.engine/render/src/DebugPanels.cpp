@@ -104,11 +104,20 @@ namespace engine::render {
 		// past names of different lengths.
 		constexpr size_t NAME_FIELD = 26;
 		constexpr size_t VALUE_FIELD = 6; // 999.99
-		// Beside MS and in the same units, because the pair is the point: read
+		// **Beside BUSY rather than replacing it**, because an inclusive
+		// duration is not a cost and the two are worth reading together. A
+		// vsynced `Renderer::Render` is 0.15 busy and 15.9 idle: the first says
+		// what the renderer did, the second says what it waited for, and the
+		// sum is the wall time that used to be the only number here — which
+		// sent two separate investigations at the renderer for work it was not
+		// doing.
+		constexpr size_t IDLE_FIELD = 6;
+		// Beside BUSY and in the same units, because the pair is the point: read
 		// together they say "costs this much, except when it costs that much".
 		constexpr size_t RMAX_FIELD = 6;
 		constexpr size_t SHARE_FIELD = 6; // 100.0%
-		constexpr size_t ROW_CHARS = NAME_FIELD + 1 + VALUE_FIELD + 1 + RMAX_FIELD + 1 + SHARE_FIELD;
+		constexpr size_t ROW_CHARS =
+			NAME_FIELD + 1 + VALUE_FIELD + 1 + IDLE_FIELD + 1 + RMAX_FIELD + 1 + SHARE_FIELD;
 
 		// The colour chip that starts every row, and what separates one line
 		// from the next at a glance.
@@ -580,8 +589,9 @@ namespace engine::render {
 				image,
 				textLeft,
 				y,
-				PadRight("SPAN", NAME_FIELD) + " " + PadLeft("MS", VALUE_FIELD) + " " +
-					PadLeft("RMAX", RMAX_FIELD) + " " + PadLeft("SHARE", SHARE_FIELD),
+				PadRight("SPAN", NAME_FIELD) + " " + PadLeft("BUSY", VALUE_FIELD) + " " +
+					PadLeft("IDLE", IDLE_FIELD) + " " + PadLeft("RMAX", RMAX_FIELD) + " " +
+					PadLeft("SHARE", SHARE_FIELD),
 				TEXT_DIM.R,
 				TEXT_DIM.G,
 				TEXT_DIM.B,
@@ -603,7 +613,11 @@ namespace engine::render {
 				const std::string row =
 					PadRight("(unmarked)", NAME_FIELD) + " " +
 					PadLeft(Format("%.2f", static_cast<double>(data.UnmarkedMilliseconds)), VALUE_FIELD) +
-					" " + PadLeft("-", RMAX_FIELD) + " " +
+					// Unmarked time is by definition uncategorised, so none of it
+					// is known to be a wait. Dashed rather than zeroed: this
+					// column says "measured no waiting", and here nothing was
+					// measured at all.
+					" " + PadLeft("-", IDLE_FIELD) + " " + PadLeft("-", RMAX_FIELD) + " " +
 					PadLeft(Format("%.1f%%", static_cast<double>(share) * 100.0), SHARE_FIELD);
 
 				// Coloured by how much of the frame it is, the same as any other
@@ -705,9 +719,18 @@ namespace engine::render {
 					}
 
 					const float share = busyShare(row.Index);
+
+					// A dash rather than 0.00 for a span that never waited, so
+					// the column reads as "these are the ones that blocked"
+					// instead of a wall of zeroes with the answer buried in it.
+					const std::string idle = span.IdleMilliseconds > 0.005f
+												 ? Format("%.2f", static_cast<double>(span.IdleMilliseconds))
+												 : std::string("-");
+
 					text.push_back(
 						PadRight(std::move(name), NAME_FIELD) + " " +
-						PadLeft(Format("%.2f", static_cast<double>(span.Milliseconds)), VALUE_FIELD) + " " +
+						PadLeft(Format("%.2f", static_cast<double>(BusyMillisecondsOf(span))), VALUE_FIELD) +
+						" " + PadLeft(idle, IDLE_FIELD) + " " +
 						PadLeft(Format("%.2f", static_cast<double>(row.RecentMaximum)), RMAX_FIELD) + " " +
 						PadLeft(Format("%.1f%%", static_cast<double>(share) * 100.0), SHARE_FIELD)
 					);
@@ -1242,41 +1265,13 @@ namespace engine::render {
 	std::vector<float> BusyShares(std::span<const core::FrameSpan> spans, float busyMilliseconds) {
 		const float denominator = std::max(busyMilliseconds, 0.0001f);
 
-		// How much of each span's inclusive time was spent waiting — its own
-		// and everything beneath it.
-		std::vector<float> idleInside(spans.size(), 0.0f);
-		for (size_t index = 0; index < spans.size(); index++) {
-			if (spans[index].Category != core::ProfileCategory::Idle) {
-				continue;
-			}
-
-			// Self time rather than inclusive, so a wait nested inside another
-			// wait is not counted twice.
-			const float waited = spans[index].SelfMilliseconds;
-			idleInside[index] += waited;
-
-			// Walked to the root rather than added to one parent: every
-			// ancestor contains this wait, not only the immediate one. Bounded
-			// by the span count as well as by depth, because a malformed parent
-			// chain must not hang the overlay drawing it.
-			size_t node = index;
-			for (size_t step = 0; step < spans.size(); step++) {
-				const size_t parent = spans[node].Parent;
-				if (parent == node || parent >= spans.size()) {
-					break;
-				}
-				node = parent;
-				idleInside[node] += waited;
-			}
-		}
-
+		// The walk that used to be here now happens once in `FrameGraph`, where
+		// `RecordHistory` needs the same answer — a share taken from busy time
+		// beside an RMAX taken from wall time is two numbers on one row that
+		// contradict each other.
 		std::vector<float> shares(spans.size(), 0.0f);
 		for (size_t index = 0; index < spans.size(); index++) {
-			// Clamped at zero because the two numbers come from different
-			// accumulators, and float error must not produce a negative
-			// percentage.
-			const float busy = spans[index].Milliseconds - idleInside[index];
-			shares[index] = std::max(busy, 0.0f) / denominator;
+			shares[index] = BusyMillisecondsOf(spans[index]) / denominator;
 		}
 		return shares;
 	}

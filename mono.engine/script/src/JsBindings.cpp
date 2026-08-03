@@ -1,7 +1,10 @@
 #include "JsBindings.hpp"
 
+#include "JsContext.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <string>
@@ -10,48 +13,29 @@
 
 namespace engine::script {
 
+	// The entity an instance object stands for.
+	//
+	// Free rather than file-local because `JsSurface.cpp` binds `:Destroy` and
+	// friends, and every one of them starts here.
+	ecs::Entity JsEntityOf(JSContext *context, JSValueConst object) {
+		void *opaque = JS_GetOpaque2(context, object, JsOf(context).InstanceClass);
+		if (opaque == nullptr) {
+			// The class check throws when the object is of another class.
+			// Cleared: a caller asking "is this an instance" is entitled to a
+			// no rather than a pending exception.
+			JS_FreeValue(context, JS_GetException(context));
+			return ecs::NULL_ENTITY;
+		}
+		return *static_cast<ecs::Entity *>(opaque);
+	}
+
 	namespace {
 		using core::Name;
 		using ecs::Entity;
+		JSValue PrototypeFor(JSContext *context, ecs::ClassId id, Entity sample);
 		using ecs::PropertyDescriptor;
 		using ecs::PropertyType;
 		using ecs::Store;
-
-		// Everything one JS runtime needs to reach the world, hung off the
-		// context rather than a static — two runtimes over two worlds must not
-		// be able to reach each other's storage.
-		struct Context {
-			Store *World = nullptr;
-
-			JSClassID InstanceClass = 0;
-			JSClassID Vector3Class = 0;
-			JSClassID Color3Class = 0;
-			JSClassID CFrameClass = 0;
-
-			// One prototype per ECS class, built the first time an instance of
-			// it is made. **Accessors live on the prototype, not the object**:
-			// a scene of five hundred parts would otherwise define five
-			// thousand properties, and every one of them would be the same
-			// closure over the same name.
-			std::unordered_map<uint32_t, JSValue> Prototypes;
-
-			// Kept so the prototypes can be freed with the context.
-			std::vector<JSValue> Owned;
-
-			// What `RunService.Heartbeat.Connect` was given.
-			std::vector<JSValue> Heartbeat;
-
-			// The world object, kept so `Parent` hands back the same value a
-			// script assigned rather than a second object that behaves alike.
-			JSValue Workspace = JS_UNDEFINED;
-
-			// Topic to callbacks, one list per topic.
-			std::unordered_map<std::string, std::vector<JSValue>> Subscriptions;
-		};
-
-		Context &Of(JSContext *context) {
-			return *static_cast<Context *>(JS_GetContextOpaque(context));
-		}
 
 		// --- value types -----------------------------------------------------
 
@@ -73,31 +57,32 @@ namespace engine::script {
 	// --- the pieces the runtime needs ---------------------------------------
 
 	JSValue MakeVector3(JSContext *context, const core::Vector3 &value) {
-		return MakeValue(context, Of(context).Vector3Class, value);
+		return MakeValue(context, JsOf(context).Vector3Class, value);
 	}
 
 	JSValue MakeColor3(JSContext *context, const core::Color3 &value) {
-		return MakeValue(context, Of(context).Color3Class, value);
+		return MakeValue(context, JsOf(context).Color3Class, value);
 	}
 
 	JSValue MakeCFrame(JSContext *context, const core::CFrame &value) {
-		return MakeValue(context, Of(context).CFrameClass, value);
+		return MakeValue(context, JsOf(context).CFrameClass, value);
 	}
 
 	core::Vector3 *AsVector3(JSContext *context, JSValueConst value) {
-		return ValueOf<core::Vector3>(context, value, Of(context).Vector3Class);
+		return ValueOf<core::Vector3>(context, value, JsOf(context).Vector3Class);
 	}
 
 	core::Color3 *AsColor3(JSContext *context, JSValueConst value) {
-		return ValueOf<core::Color3>(context, value, Of(context).Color3Class);
+		return ValueOf<core::Color3>(context, value, JsOf(context).Color3Class);
 	}
 
 	core::CFrame *AsCFrame(JSContext *context, JSValueConst value) {
-		return ValueOf<core::CFrame>(context, value, Of(context).CFrameClass);
+		return ValueOf<core::CFrame>(context, value, JsOf(context).CFrameClass);
 	}
 
 	namespace {
-		JSValue MakeInstance(JSContext *context, Entity instance);
+		JSValue MakeEnumItem(JSContext *context, const Name &enumName, const Name &member);
+		bool ReadEnumValueImpl(JSContext *context, JSValueConst value, const Name &enumName, Name &out);
 
 		// --- marshalling -----------------------------------------------------
 		//
@@ -121,6 +106,12 @@ namespace engine::script {
 				// Text, never the interned id — the number means a different
 				// string in the next process.
 				return JS_NewString(context, static_cast<const Name *>(bytes)->Text().data());
+			case PropertyType::Enum:
+				// An `EnumItem`, not a string — the same value the Luau side
+				// hands back, so a property declared once behaves the same in
+				// both languages. The storage is an interned `Name` either way;
+				// what the type buys is that a wrong member is refused.
+				return MakeEnumItem(context, property.EnumName, *static_cast<const Name *>(bytes));
 			case PropertyType::Vector3:
 				return MakeVector3(context, *static_cast<const core::Vector3 *>(bytes));
 			case PropertyType::Color3:
@@ -134,9 +125,9 @@ namespace engine::script {
 				// back, and the two would disagree about one fact.
 				const Entity referenced = *static_cast<const Entity *>(bytes);
 				if (referenced == ecs::NULL_ENTITY) {
-					return JS_DupValue(context, Of(context).Workspace);
+					return JS_DupValue(context, JsOf(context).Workspace);
 				}
-				return MakeInstance(context, referenced);
+				return MakeJsInstance(context, referenced);
 			}
 			case PropertyType::Opaque:
 				break;
@@ -174,6 +165,12 @@ namespace engine::script {
 				JS_FreeCString(context, text);
 				return true;
 			}
+			case PropertyType::Enum:
+				// A string is accepted as well as an `EnumItem`, because
+				// `part.Material = "Plastic"` is what a migrating script
+				// already contains. A member of the *wrong* enum is refused,
+				// which is the error a bare string could never have caught.
+				return ReadEnumValueImpl(context, value, property.EnumName, *static_cast<Name *>(out));
 			case PropertyType::Vector3: {
 				const core::Vector3 *vector = AsVector3(context, value);
 				if (vector == nullptr) {
@@ -203,12 +200,12 @@ namespace engine::script {
 				// arrives as its object; `null` detaches, which is what
 				// Roblox's `Parent = nil` means.
 				if (JS_IsNull(value) || JS_IsUndefined(value) ||
-					JS_IsStrictEqual(context, value, Of(context).Workspace)) {
+					JS_IsStrictEqual(context, value, JsOf(context).Workspace)) {
 					*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
 					return true;
 				}
 
-				void *opaque = JS_GetOpaque2(context, value, Of(context).InstanceClass);
+				void *opaque = JS_GetOpaque2(context, value, JsOf(context).InstanceClass);
 				if (opaque == nullptr) {
 					return false;
 				}
@@ -223,15 +220,15 @@ namespace engine::script {
 
 		// --- instances -------------------------------------------------------
 
-		Entity EntityOf(JSContext *context, JSValueConst object) {
-			void *opaque = JS_GetOpaque2(context, object, Of(context).InstanceClass);
-			return opaque == nullptr ? ecs::NULL_ENTITY : *static_cast<Entity *>(opaque);
-		}
-
+		// Text, not an interned id, for the reason `Instances.cpp`'s twin gives
+		// at length: building the id takes a lock on the process-wide registry,
+		// and this is on the path of every property a script reads or writes.
+		// The two surfaces share rules rather than code, and this is one of the
+		// rules.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, const char *name) {
-			const Name key(name);
+			const std::string_view key(name);
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-				if (property.Name == key) {
+				if (property.Name.Text() == key) {
 					return &property;
 				}
 			}
@@ -243,8 +240,8 @@ namespace engine::script {
 		// them and none of them is written by hand.
 		JSValue
 		PropertyGet(JSContext *context, JSValueConst self, int, JSValueConst *, int, JSValueConst *data) {
-			Context &bound = Of(context);
-			const Entity instance = EntityOf(context, self);
+			JsContext &bound = JsOf(context);
+			const Entity instance = JsEntityOf(context, self);
 			if (instance == ecs::NULL_ENTITY) {
 				return JS_ThrowTypeError(context, "not an instance");
 			}
@@ -268,8 +265,8 @@ namespace engine::script {
 		JSValue PropertySet(
 			JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int, JSValueConst *data
 		) {
-			Context &bound = Of(context);
-			const Entity instance = EntityOf(context, self);
+			JsContext &bound = JsOf(context);
+			const Entity instance = JsEntityOf(context, self);
 			if (instance == ecs::NULL_ENTITY || argc < 1) {
 				return JS_ThrowTypeError(context, "not an instance");
 			}
@@ -303,14 +300,26 @@ namespace engine::script {
 
 		// The prototype for one ECS class, built once and cached.
 		JSValue PrototypeFor(JSContext *context, ecs::ClassId id, Entity sample) {
-			Context &bound = Of(context);
+			JsContext &bound = JsOf(context);
 
 			const auto cached = bound.Prototypes.find(id.Index);
 			if (cached != bound.Prototypes.end()) {
 				return JS_DupValue(context, cached->second);
 			}
 
-			JSValue proto = JS_NewObject(context);
+			// **Behind the shared method prototype**, so `part.Destroy()`
+			// resolves up the chain rather than being copied onto every class.
+			// Installed by `OpenJsSurface`, which runs after this file's own
+			// `Open` — so a prototype built before it falls back to a plain
+			// object rather than failing.
+			JSValue global = JS_GetGlobalObject(context);
+			JSValue methods = JS_GetPropertyStr(context, global, "__instanceMethods");
+			JS_FreeValue(context, global);
+
+			JSValue proto =
+				JS_IsObject(methods) ? JS_NewObjectProto(context, methods) : JS_NewObject(context);
+			JS_FreeValue(context, methods);
+
 			for (const PropertyDescriptor &property : bound.World->PropertiesOf(sample)) {
 				JSValue name = JS_NewString(context, property.Name.Text().data());
 
@@ -328,37 +337,136 @@ namespace engine::script {
 			return proto;
 		}
 
-		// One instance object for an entity, prototype and all.
+		// --- enums -----------------------------------------------------------
 		//
-		// Shared by `Instance.new`, by `workspace` and by every `Reference`
-		// property that hands one back — three call sites that had grown three
-		// copies of the same six lines before this existed.
-		JSValue MakeInstance(JSContext *context, Entity instance) {
-			Context &bound = Of(context);
-			if (instance == ecs::NULL_ENTITY) {
-				return JS_NULL;
+		// **`Enum` is a getter on the global rather than a table built at
+		// open.** A game registers its own materials at load time, so a table
+		// snapshotted when the VM opened would have missed every one of them —
+		// and the Luau side solves this with an `__index` metamethod, which
+		// JavaScript has no equivalent of without `Proxy`. `Proxy` is
+		// deliberately excluded (a script could wrap an instance and intercept
+		// the property surface), so a getter that rebuilds from the registry is
+		// what remains. It costs a walk of the enum table per access to `Enum`,
+		// which is a setup-time operation.
+
+		// One member of one enum: two interned names and nothing else.
+		//
+		// No `Value`, exactly as the Luau side has none: **the number is not the
+		// format**, and an author who reads one will eventually write it into a
+		// save file.
+		struct EnumItemPayload {
+			Name Enum;
+			Name Member;
+		};
+
+		JSValue EnumItemGet(JSContext *context, JSValueConst self, int magic) {
+			const auto *item =
+				static_cast<EnumItemPayload *>(JS_GetOpaque2(context, self, JsOf(context).EnumItemClass));
+			if (item == nullptr) {
+				return JS_ThrowTypeError(context, "not an EnumItem");
+			}
+			return JS_NewString(context, (magic == 0 ? item->Member : item->Enum).Text().data());
+		}
+
+		JSValue EnumItemToString(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const auto *item =
+				static_cast<EnumItemPayload *>(JS_GetOpaque2(context, self, JsOf(context).EnumItemClass));
+			if (item == nullptr) {
+				return JS_ThrowTypeError(context, "not an EnumItem");
 			}
 
-			const ecs::ClassId id = bound.World->ClassOf(instance);
-			if (!id.IsValid()) {
-				return JS_NULL;
+			const std::string text =
+				std::string("Enum.") + item->Enum.Text().data() + "." + item->Member.Text().data();
+			return JS_NewString(context, text.c_str());
+		}
+
+		// `a.Equals(b)`, because JavaScript's `===` compares object identity and
+		// cannot be overloaded. The Luau side spells this `a == b` through
+		// `__eq`; this is the same comparison under the name the language leaves
+		// available, and it is the `a.mul(b)` situation exactly.
+		JSValue EnumItemEquals(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			JsContext &bound = JsOf(context);
+			const auto *left =
+				static_cast<EnumItemPayload *>(JS_GetOpaque2(context, self, bound.EnumItemClass));
+			if (left == nullptr || argc < 1) {
+				return JS_ThrowTypeError(context, "Equals needs an EnumItem");
 			}
 
-			JSValue proto = PrototypeFor(context, id, instance);
-			JSValue object = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound.InstanceClass));
-			JS_FreeValue(context, proto);
+			const auto *right =
+				static_cast<EnumItemPayload *>(JS_GetOpaque2(context, argv[0], bound.EnumItemClass));
+			if (right == nullptr) {
+				JS_FreeValue(context, JS_GetException(context));
+				return JS_NewBool(context, 0);
+			}
+			return JS_NewBool(context, left->Enum == right->Enum && left->Member == right->Member);
+		}
 
+		JSValue MakeEnumItem(JSContext *context, const Name &enumName, const Name &member) {
+			JsContext &bound = JsOf(context);
+
+			JSValue object = JS_NewObjectClass(context, static_cast<int>(bound.EnumItemClass));
 			if (JS_IsException(object)) {
 				return object;
 			}
 
-			JS_SetOpaque(object, new Entity(instance));
+			JS_SetOpaque(object, new EnumItemPayload{enumName, member});
 			JS_PreventExtensions(context, object);
 			return object;
 		}
 
+		bool ReadEnumValueImpl(JSContext *context, JSValueConst value, const Name &enumName, Name &out) {
+			JsContext &bound = JsOf(context);
+
+			if (auto *item =
+					static_cast<EnumItemPayload *>(JS_GetOpaque2(context, value, bound.EnumItemClass));
+				item != nullptr) {
+				if (item->Enum != enumName) {
+					return false;
+				}
+				out = item->Member;
+				return true;
+			}
+
+			// The class check above throws when the object is of another class.
+			// Cleared, because a bare string is a legitimate second form rather
+			// than a failure.
+			JS_FreeValue(context, JS_GetException(context));
+
+			const char *text = JS_ToCString(context, value);
+			if (text == nullptr) {
+				return false;
+			}
+			out = Name(text);
+			JS_FreeCString(context, text);
+			return true;
+		}
+
+		// `Enum` — rebuilt from the registry on every read.
+		JSValue EnumGet(JSContext *context, JSValueConst) {
+			JSValue table = JS_NewObject(context);
+
+			for (const Name enumName : ecs::EnumTable::Names()) {
+				JSValue set = JS_NewObject(context);
+				for (const Name member : ecs::EnumTable::MembersOf(enumName)) {
+					JS_SetPropertyStr(
+						context, set, member.Text().data(), MakeEnumItem(context, enumName, member)
+					);
+				}
+
+				// Sealed, so a script cannot add a member that no property would
+				// ever accept — the storage checks against `EnumTable`, and a
+				// value only userland knew about would be refused on write with
+				// nothing explaining where it came from.
+				JS_PreventExtensions(context, set);
+				JS_SetPropertyStr(context, table, enumName.Text().data(), set);
+			}
+
+			JS_PreventExtensions(context, table);
+			return table;
+		}
+
 		JSValue InstanceNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			Context &bound = Of(context);
+			JsContext &bound = JsOf(context);
 			if (argc < 1) {
 				return JS_ThrowTypeError(context, "Instance.new needs a class name");
 			}
@@ -380,6 +488,21 @@ namespace engine::script {
 
 			if (instance == ecs::NULL_ENTITY) {
 				return JS_ThrowTypeError(context, "could not create the instance");
+			}
+
+			// **The second argument, which Roblox has and v0.5 did not.**
+			// `Instance.new('Part', workspace)` is one call rather than two, and
+			// the difference is not only brevity: a part created and parented in
+			// one statement is never briefly a root of the world, so nothing
+			// that walks roots can observe the half-built state.
+			if (argc > 1 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
+				const Entity parent = JS_IsStrictEqual(context, argv[1], bound.Workspace)
+										  ? ecs::NULL_ENTITY
+										  : JsEntityOf(context, argv[1]);
+
+				if (!bound.World->SetParent(instance, parent)) {
+					return JS_ThrowTypeError(context, "could not parent the new instance");
+				}
 			}
 
 			JSValue proto = PrototypeFor(context, id, instance);
@@ -444,6 +567,13 @@ namespace engine::script {
 		}
 
 		JSValue CFrameNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			// A `Vector3` or three numbers, for the reason the Luau side gives.
+			if (argc > 0) {
+				if (const core::Vector3 *position = AsVector3(context, argv[0]); position != nullptr) {
+					return MakeCFrame(context, core::CFrame{*position});
+				}
+			}
+
 			double x = 0.0;
 			double y = 0.0;
 			double z = 0.0;
@@ -483,6 +613,25 @@ namespace engine::script {
 				core::CFrame::Angles(
 					static_cast<float>(pitch), static_cast<float>(yaw), static_cast<float>(roll)
 				)
+			);
+		}
+
+		// `CFrame.lookAt(from, to, up)` — see the Luau side for why a camera
+		// needs it and what its absence cost.
+		JSValue CFrameLookAt(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			if (argc < 2) {
+				return JS_ThrowTypeError(context, "lookAt needs a from and a to");
+			}
+
+			const core::Vector3 *from = AsVector3(context, argv[0]);
+			const core::Vector3 *to = AsVector3(context, argv[1]);
+			if (from == nullptr || to == nullptr) {
+				return JS_ThrowTypeError(context, "lookAt needs two Vector3s");
+			}
+
+			const core::Vector3 *up = argc > 2 ? AsVector3(context, argv[2]) : nullptr;
+			return MakeCFrame(
+				context, core::CFrame::LookAt(*from, *to, up != nullptr ? *up : core::Vector3::YAxis)
 			);
 		}
 
@@ -561,10 +710,16 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "Connect needs a function");
 			}
 
-			// Duplicated so the connection survives the script that made it.
-			// The context owns it from here and frees it in CloseJsBindings.
-			Of(context).Heartbeat.push_back(JS_DupValue(context, argv[0]));
-			return JS_UNDEFINED;
+			// **A real connection, through the shared table.** v0.5 pushed the
+			// function onto a vector and returned nothing, so nothing could be
+			// disconnected; the ordering rules and the handle both come from
+			// `SignalTable` now, which is the same table the Luau side fires.
+			return MakeJsConnection(
+				context,
+				JsOf(context).Signals.Connect(
+					SignalKind::Heartbeat, ecs::NULL_ENTITY, Retain(context, argv[0])
+				)
+			);
 		}
 
 		// MessagingService.PublishAsync(topic, message)
@@ -577,25 +732,47 @@ namespace engine::script {
 			}
 
 			const char *topic = JS_ToCString(context, argv[0]);
-			size_t length = 0;
-			const char *message = JS_ToCStringLen(context, &length, argv[1]);
-			if (topic == nullptr || message == nullptr) {
-				JS_FreeCString(context, topic);
-				JS_FreeCString(context, message);
+			if (topic == nullptr) {
 				return JS_EXCEPTION;
 			}
 
-			world::Postbox box(*Of(context).World);
-			const auto *bytes = reinterpret_cast<const std::byte *>(message);
-			const bool sent = box.Publish(topic, {bytes, length});
+			// **Through the codec, not `JS_ToCString`.** v0.5 stringified the
+			// message because the codec did not exist, which meant an object
+			// crossed as `"[object Object]"` and a function crossed as its own
+			// source — both accepted, both meaningless on the far side. The
+			// codec refuses each by name instead, and an object crosses as the
+			// map a Luau subscriber receives.
+			ScriptValue tree;
+			CodecStatus why = CodecStatus::Ok;
+
+			if (!ToScriptValue(context, argv[1], tree, 0, why)) {
+				JSValue error =
+					JS_ThrowTypeError(context, "the value cannot cross a world boundary: %s", Describe(why));
+				JS_FreeCString(context, topic);
+				return error;
+			}
+
+			std::vector<std::byte> payload;
+			if (const CodecStatus status = Encode(tree, payload); status != CodecStatus::Ok) {
+				JSValue error = JS_ThrowTypeError(
+					context, "the value cannot cross a world boundary: %s", Describe(status)
+				);
+				JS_FreeCString(context, topic);
+				return error;
+			}
+
+			world::Postbox box(*JsOf(context).World);
+			const bool sent = box.Publish(topic, payload);
 
 			JSValue error = JS_UNDEFINED;
 			if (!sent) {
+				// Over budget. Named rather than silent: each bus gives a world
+				// an allowance per tick, and a publish that vanished would look
+				// like a subscriber that never fired.
 				error = JS_ThrowTypeError(context, "PublishAsync: over this world's budget for '%s'", topic);
 			}
 
 			JS_FreeCString(context, topic);
-			JS_FreeCString(context, message);
 			return sent ? JS_UNDEFINED : error;
 		}
 
@@ -609,7 +786,7 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
-			Context &bound = Of(context);
+			JsContext &bound = JsOf(context);
 			world::Postbox box(*bound.World);
 			if (!box.Subscribe(topic)) {
 				JSValue error =
@@ -618,7 +795,7 @@ namespace engine::script {
 				return error;
 			}
 
-			bound.Subscriptions[topic].push_back(JS_DupValue(context, argv[1]));
+			bound.Subscriptions[topic].push_back(Retain(context, argv[1]));
 			JS_FreeCString(context, topic);
 			return JS_UNDEFINED;
 		}
@@ -648,6 +825,80 @@ namespace engine::script {
 			return JS_NewFloat64(context, magic == 0 ? value->X : magic == 1 ? value->Y : value->Z);
 		}
 
+		// **Arithmetic as methods, because JavaScript has no operator
+		// overloading.** Luau writes `a + b` through `__add`; this is the same
+		// operation under the name the language leaves available, and it is the
+		// `a.mul(b)` situation `CFrame` already had. Without these a JavaScript
+		// author cannot move a part relative to where it is, which is most of
+		// what a scene script does.
+		JSValue Vector3Add(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *right = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			if (left == nullptr || right == nullptr) {
+				return JS_ThrowTypeError(context, "add needs a Vector3");
+			}
+			return MakeVector3(context, *left + *right);
+		}
+
+		JSValue Vector3Sub(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *right = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			if (left == nullptr || right == nullptr) {
+				return JS_ThrowTypeError(context, "sub needs a Vector3");
+			}
+			return MakeVector3(context, *left - *right);
+		}
+
+		JSValue Vector3Mul(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			if (left == nullptr || argc < 1) {
+				return JS_ThrowTypeError(context, "mul needs a number or a Vector3");
+			}
+
+			// Component-wise against another vector, matching Roblox — and not
+			// a dot product, which is the confusion `Vector3::operator*`
+			// already carries a comment about.
+			if (const core::Vector3 *right = AsVector3(context, argv[0]); right != nullptr) {
+				return MakeVector3(context, *left * *right);
+			}
+
+			double scalar = 1.0;
+			JS_ToFloat64(context, &scalar, argv[0]);
+			return MakeVector3(context, *left * static_cast<float>(scalar));
+		}
+
+		JSValue Vector3Equals(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *right = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			return JS_NewBool(context, left != nullptr && right != nullptr && *left == *right);
+		}
+
+		JSValue Vector3Derived(JSContext *context, JSValueConst self, int magic) {
+			const core::Vector3 *value = AsVector3(context, self);
+			if (value == nullptr) {
+				return JS_ThrowTypeError(context, "not a Vector3");
+			}
+
+			if (magic == 0) {
+				return JS_NewFloat64(context, value->Magnitude());
+			}
+			return MakeVector3(context, value->Unit());
+		}
+
+		JSValue Color3Equals(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Color3 *left = AsColor3(context, self);
+			const core::Color3 *right = argc > 0 ? AsColor3(context, argv[0]) : nullptr;
+
+			return JS_NewBool(
+				context,
+				left != nullptr && right != nullptr && left->R == right->R && left->G == right->G &&
+					left->B == right->B
+			);
+		}
+
 		JSValue Color3Get(JSContext *context, JSValueConst self, int magic) {
 			const core::Color3 *value = AsColor3(context, self);
 			if (value == nullptr) {
@@ -658,9 +909,86 @@ namespace engine::script {
 
 	}
 
-	void OpenJsBindings(JSContext *context, ecs::Store &store) {
-		auto *bound = new Context();
+	bool ReadJsEnumValue(JSContext *context, JSValueConst value, core::Name enumName, core::Name &out) {
+		return ReadEnumValueImpl(context, value, enumName, out);
+	}
+
+	JsContext &JsOf(JSContext *context) {
+		return *static_cast<JsContext *>(JS_GetContextOpaque(context));
+	}
+
+	CallbackRef Retain(JSContext *context, JSValueConst value) {
+		JsContext &bound = JsOf(context);
+
+		// A recycled slot when there is one. Without this a game that connects
+		// and disconnects every frame grows `Callables` by one index per frame
+		// for the life of the world — which is not a leak of the *values*, but
+		// is an unbounded vector nobody would think to look at.
+		if (!bound.FreeRefs.empty()) {
+			const CallbackRef reference = bound.FreeRefs.back();
+			bound.FreeRefs.pop_back();
+			bound.Callables[static_cast<size_t>(reference)] = JS_DupValue(context, value);
+			return reference;
+		}
+
+		bound.Callables.push_back(JS_DupValue(context, value));
+		return static_cast<CallbackRef>(bound.Callables.size() - 1);
+	}
+
+	void Release(JSContext *context, CallbackRef reference) {
+		JsContext &bound = JsOf(context);
+		const auto slot = static_cast<size_t>(reference);
+
+		if (slot >= bound.Callables.size() || JS_IsUndefined(bound.Callables[slot])) {
+			return;
+		}
+
+		JS_FreeValue(context, bound.Callables[slot]);
+		bound.Callables[slot] = JS_UNDEFINED;
+		bound.FreeRefs.push_back(reference);
+	}
+
+	JSValueConst Held(JSContext *context, CallbackRef reference) {
+		JsContext &bound = JsOf(context);
+		const auto slot = static_cast<size_t>(reference);
+
+		return slot < bound.Callables.size() ? bound.Callables[slot] : JS_UNDEFINED;
+	}
+
+	// One instance object for an entity, prototype and all.
+	//
+	// Shared by `Instance.new`, by `workspace` and by every `Reference`
+	// property that hands one back — three call sites that had grown three
+	// copies of the same six lines before this existed.
+	JSValue MakeJsInstance(JSContext *context, Entity instance) {
+		JsContext &bound = JsOf(context);
+		if (instance == ecs::NULL_ENTITY) {
+			return JS_NULL;
+		}
+
+		const ecs::ClassId id = bound.World->ClassOf(instance);
+		if (!id.IsValid()) {
+			return JS_NULL;
+		}
+
+		JSValue proto = PrototypeFor(context, id, instance);
+		JSValue object = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound.InstanceClass));
+		JS_FreeValue(context, proto);
+
+		if (JS_IsException(object)) {
+			return object;
+		}
+
+		JS_SetOpaque(object, new Entity(instance));
+		JS_PreventExtensions(context, object);
+		return object;
+	}
+
+	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role) {
+		auto *bound = new JsContext();
 		bound->World = &store;
+		bound->Role = role;
+		bound->Js = context;
 		JS_SetContextOpaque(context, bound);
 
 		JSRuntime *runtime = JS_GetRuntime(context);
@@ -716,6 +1044,20 @@ namespace engine::script {
 			nullptr
 		};
 
+		static const JSClassDef enumItemClass = {
+			"EnumItem",
+			[](JSRuntime *, JSValue value) {
+				JSClassID id = 0;
+				delete static_cast<EnumItemPayload *>(JS_GetAnyOpaque(value, &id));
+			},
+			nullptr,
+			nullptr,
+			nullptr
+		};
+
+		JS_NewClassID(runtime, &bound->EnumItemClass);
+		JS_NewClass(runtime, bound->EnumItemClass, &enumItemClass);
+
 		JS_NewClassID(runtime, &bound->InstanceClass);
 		JS_NewClassID(runtime, &bound->Vector3Class);
 		JS_NewClassID(runtime, &bound->Color3Class);
@@ -735,8 +1077,14 @@ namespace engine::script {
 				JS_CGETSET_MAGIC_DEF("X", Vector3Get, nullptr, 0),
 				JS_CGETSET_MAGIC_DEF("Y", Vector3Get, nullptr, 1),
 				JS_CGETSET_MAGIC_DEF("Z", Vector3Get, nullptr, 2),
+				JS_CGETSET_MAGIC_DEF("Magnitude", Vector3Derived, nullptr, 0),
+				JS_CGETSET_MAGIC_DEF("Unit", Vector3Derived, nullptr, 1),
+				JS_CFUNC_DEF("add", 1, Vector3Add),
+				JS_CFUNC_DEF("sub", 1, Vector3Sub),
+				JS_CFUNC_DEF("mul", 1, Vector3Mul),
+				JS_CFUNC_DEF("Equals", 1, Vector3Equals),
 			};
-			JS_SetPropertyFunctionList(context, proto, fields, 3);
+			JS_SetPropertyFunctionList(context, proto, fields, 9);
 			JS_SetClassProto(context, bound->Vector3Class, proto);
 
 			JSValue table = JS_NewObject(context);
@@ -751,8 +1099,9 @@ namespace engine::script {
 				JS_CGETSET_MAGIC_DEF("R", Color3Get, nullptr, 0),
 				JS_CGETSET_MAGIC_DEF("G", Color3Get, nullptr, 1),
 				JS_CGETSET_MAGIC_DEF("B", Color3Get, nullptr, 2),
+				JS_CFUNC_DEF("Equals", 1, Color3Equals),
 			};
-			JS_SetPropertyFunctionList(context, proto, fields, 3);
+			JS_SetPropertyFunctionList(context, proto, fields, 4);
 			JS_SetClassProto(context, bound->Color3Class, proto);
 
 			JSValue table = JS_NewObject(context);
@@ -776,6 +1125,7 @@ namespace engine::script {
 			JSValue table = JS_NewObject(context);
 			JS_SetPropertyStr(context, table, "new", JS_NewCFunction(context, CFrameNew, "new", 3));
 			JS_SetPropertyStr(context, table, "Angles", JS_NewCFunction(context, CFrameAngles, "Angles", 3));
+			JS_SetPropertyStr(context, table, "lookAt", JS_NewCFunction(context, CFrameLookAt, "lookAt", 3));
 			JS_SetPropertyStr(context, global, "CFrame", table);
 		}
 
@@ -813,6 +1163,45 @@ namespace engine::script {
 			JS_SetPropertyStr(context, global, "game", table);
 		}
 
+		// EnumItem's prototype, and `Enum` as a getter.
+		{
+			JSValue proto = JS_NewObject(context);
+			static const JSCFunctionListEntry fields[] = {
+				JS_CGETSET_MAGIC_DEF("Name", EnumItemGet, nullptr, 0),
+				JS_CGETSET_MAGIC_DEF("EnumType", EnumItemGet, nullptr, 1),
+			};
+			JS_SetPropertyFunctionList(context, proto, fields, 2);
+			JS_SetPropertyStr(
+				context, proto, "Equals", JS_NewCFunction(context, EnumItemEquals, "Equals", 1)
+			);
+			JS_SetPropertyStr(
+				context, proto, "toString", JS_NewCFunction(context, EnumItemToString, "toString", 0)
+			);
+			JS_SetClassProto(context, bound->EnumItemClass, proto);
+
+			// A **getter**, not a value, and the cast is how QuickJS spells one:
+			// `JS_CFUNC_getter` takes `(ctx, this)` rather than the generic
+			// argc/argv form, so the pointer is reinterpreted at registration
+			// exactly as the header's own `JS_CGETSET_DEF` macro does.
+			const JSAtom name = JS_NewAtom(context, "Enum");
+			JS_DefinePropertyGetSet(
+				context,
+				global,
+				name,
+				JS_NewCFunction2(
+					context,
+					reinterpret_cast<JSCFunction *>(reinterpret_cast<void *>(EnumGet)),
+					"Enum",
+					0,
+					JS_CFUNC_getter,
+					0
+				),
+				JS_UNDEFINED,
+				JS_PROP_CONFIGURABLE
+			);
+			JS_FreeAtom(context, name);
+		}
+
 		// Instance
 		{
 			JSValue table = JS_NewObject(context);
@@ -844,6 +1233,10 @@ namespace engine::script {
 			JS_SetPropertyStr(
 				context, world, "Name", JS_NewString(context, std::string(store.Name()).c_str())
 			);
+			// **Before the seal**, because a sealed object cannot take a method.
+			// `OpenJsSurface` runs after this and would find the world closed.
+			InstallJsQueries(context, global, world);
+
 			JS_PreventExtensions(context, world);
 
 			bound->Workspace = JS_DupValue(context, world);
@@ -856,7 +1249,7 @@ namespace engine::script {
 	}
 
 	void CloseJsBindings(JSContext *context) {
-		auto *bound = static_cast<Context *>(JS_GetContextOpaque(context));
+		auto *bound = static_cast<JsContext *>(JS_GetContextOpaque(context));
 		if (bound == nullptr) {
 			return;
 		}
@@ -867,14 +1260,21 @@ namespace engine::script {
 		for (auto &entry : bound->Prototypes) {
 			JS_FreeValue(context, entry.second);
 		}
-		for (JSValue &connection : bound->Heartbeat) {
-			JS_FreeValue(context, connection);
-		}
 		JS_FreeValue(context, bound->Workspace);
-		for (auto &entry : bound->Subscriptions) {
-			for (JSValue &callback : entry.second) {
-				JS_FreeValue(context, callback);
-			}
+
+		// **The store's change listeners go before the VM does.** They capture
+		// the queue, and a store that outlives the runtime would otherwise call
+		// into freed memory at its next barrier — which is the ordinary case,
+		// because a world is destroyed after the scripts that built it.
+		if (bound->World != nullptr) {
+			bound->Changes.Detach(*bound->World);
+		}
+
+		// Every retained callable, whatever holds its reference. One loop
+		// because `Callables` is where they all actually live; the tables above
+		// hold integers into it.
+		for (JSValue &callable : bound->Callables) {
+			JS_FreeValue(context, callable);
 		}
 
 		JS_SetContextOpaque(context, nullptr);
@@ -882,48 +1282,107 @@ namespace engine::script {
 	}
 
 	std::string PumpJsHeartbeat(JSContext *context, float delta) {
-		auto *bound = static_cast<Context *>(JS_GetContextOpaque(context));
+		JSValue argument = JS_NewFloat64(context, delta);
+		const std::string failure =
+			FireJsSignal(context, SignalKind::Heartbeat, ecs::NULL_ENTITY, 1, &argument);
+		JS_FreeValue(context, argument);
+		return failure;
+	}
+
+	namespace {
+		// A stable, human-readable name for a bus refusal.
+		//
+		// §5: "Named, not swallowed." Each of these is something a script author
+		// has to be able to see and handle, so each arrives as a string beside
+		// the value rather than as a null that could mean three things.
+		const char *DescribeStatus(world::BusStatus status) {
+			switch (status) {
+			case world::BusStatus::Ok:
+				return "Ok";
+			case world::BusStatus::NotFound:
+				return "NotFound";
+			case world::BusStatus::Conflict:
+				return "Conflict";
+			case world::BusStatus::OverBudget:
+				return "OverBudget";
+			case world::BusStatus::NoSuchWorld:
+				return "NoSuchWorld";
+			case world::BusStatus::Unsupported:
+				return "Unsupported";
+			}
+			return "Unknown";
+		}
+	}
+
+	std::string PumpJsDeliveries(JSContext *context, ecs::Store &store) {
+		auto *bound = static_cast<JsContext *>(JS_GetContextOpaque(context));
 		if (bound == nullptr) {
 			return {};
 		}
 
-		std::string firstError;
-		JSValue argument = JS_NewFloat64(context, delta);
-
-		// Every connection runs even when one throws, for the reason the Luau
-		// side gives: half a scene animating points nowhere near the cause.
-		for (JSValue &connection : bound->Heartbeat) {
-			JSValue result = JS_Call(context, connection, JS_UNDEFINED, 1, &argument);
-			if (JS_IsException(result)) {
-				if (firstError.empty()) {
-					JSValue thrown = JS_GetException(context);
-					if (const char *text = JS_ToCString(context, thrown); text != nullptr) {
-						firstError = text;
-						JS_FreeCString(context, text);
-					}
-					JS_FreeValue(context, thrown);
-				} else {
-					JS_FreeValue(context, JS_GetException(context));
-				}
-			}
-			JS_FreeValue(context, result);
-		}
-
-		JS_FreeValue(context, argument);
-		return firstError;
-	}
-
-	std::string PumpJsDeliveries(JSContext *context, ecs::Store &store) {
-		auto *bound = static_cast<Context *>(JS_GetContextOpaque(context));
-		if (bound == nullptr || bound->Subscriptions.empty()) {
+		const world::Postbox box(store);
+		const auto deliveries = box.Deliveries();
+		if (deliveries.empty()) {
 			return {};
 		}
 
-		const world::Postbox box(store);
 		std::string firstError;
 
-		for (const world::Delivery &delivery : box.Deliveries()) {
-			if (delivery.Bus != world::BusKind::Messaging) {
+		for (const world::Delivery &delivery : deliveries) {
+			// **A reply first**, because a suspended script is waiting on it and
+			// a subscriber is not. Both are barrier deliveries and both are legal
+			// resume sources; the order is stated so a world whose script both
+			// published and awaited sees them the same way twice.
+			if (delivery.Reply.Expected()) {
+				const auto waiting = bound->AwaitedTickets.find(delivery.Reply.Value);
+				if (waiting == bound->AwaitedTickets.end()) {
+					continue;
+				}
+
+				const CallbackRef resolver = waiting->second;
+				bound->AwaitedTickets.erase(waiting);
+
+				// `{ Value, Status, Version }` in one object, because a promise
+				// resolves with a single value. §5's rule is that each refusal
+				// has to be something a script can see, so the status rides
+				// beside the value rather than being swallowed.
+				JSValue reply = JS_NewObject(context);
+
+				JSValue value = JS_NULL;
+				if (delivery.Status == world::BusStatus::Ok && !delivery.Payload.empty()) {
+					ScriptValue decoded;
+					if (Decode(delivery.Payload, decoded) == CodecStatus::Ok) {
+						value = FromScriptValue(context, decoded);
+					}
+				}
+
+				JS_SetPropertyStr(context, reply, "Value", value);
+				JS_SetPropertyStr(
+					context, reply, "Status", JS_NewString(context, DescribeStatus(delivery.Status))
+				);
+				JS_SetPropertyStr(
+					context, reply, "Version", JS_NewFloat64(context, static_cast<double>(delivery.Version))
+				);
+
+				JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &reply);
+				if (JS_IsException(result)) {
+					JSValue thrown = JS_GetException(context);
+					if (firstError.empty()) {
+						if (const char *text = JS_ToCString(context, thrown); text != nullptr) {
+							firstError = text;
+							JS_FreeCString(context, text);
+						}
+					}
+					JS_FreeValue(context, thrown);
+				}
+
+				JS_FreeValue(context, result);
+				JS_FreeValue(context, reply);
+				Release(context, resolver);
+				continue;
+			}
+
+			if (delivery.Bus != world::BusKind::Messaging || bound->Subscriptions.empty()) {
 				continue;
 			}
 
@@ -933,13 +1392,18 @@ namespace engine::script {
 			}
 
 			JSValue arguments[2];
-			arguments[0] = JS_NewStringLen(
-				context, reinterpret_cast<const char *>(delivery.Payload.data()), delivery.Payload.size()
-			);
+
+			// **Decoded through the shared codec**, so a table published from
+			// Luau arrives as an object here. v0.5 handed over a raw string
+			// because the codec did not exist.
+			ScriptValue decoded;
+			arguments[0] = Decode(delivery.Payload, decoded) == CodecStatus::Ok
+							   ? FromScriptValue(context, decoded)
+							   : JS_NULL;
 			arguments[1] = JS_NewString(context, delivery.Key.Text().data());
 
-			for (JSValue &callback : found->second) {
-				JSValue result = JS_Call(context, callback, JS_UNDEFINED, 2, arguments);
+			for (const CallbackRef callback : found->second) {
+				JSValue result = JS_Call(context, Held(context, callback), JS_UNDEFINED, 2, arguments);
 				if (JS_IsException(result)) {
 					JSValue thrown = JS_GetException(context);
 					if (firstError.empty()) {

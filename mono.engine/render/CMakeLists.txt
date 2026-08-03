@@ -16,6 +16,11 @@ mono_add_library(render
 		# where they arrive. The alternative was a `render::Instance` the client
 		# converted into — which is two descriptions of one frame, and the debt
 		# `scene` exists to pay off.
+		# L9. **What is drawn, decided before anything is bound.** The frustum
+		# and the cull are arithmetic over a `shared` type, so they live where
+		# a headless host can also reach them — this module owns the device and
+		# not the decisions.
+		Engine::graph
 		Engine::scene
 
 	# Both private. SDL's GPU types are behind the pimpl in Renderer.cpp — only

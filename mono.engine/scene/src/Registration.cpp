@@ -122,6 +122,7 @@ namespace engine::scene {
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);
 		ecs::Components::Register<Visual>("scene.Visual", WriteVisuals, ReadVisuals);
+		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 		ecs::Components::Register<Camera>("scene.Camera");
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
 

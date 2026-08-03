@@ -22,6 +22,7 @@
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Overlay.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -334,6 +335,24 @@ namespace engine::render {
 	// @param busyMilliseconds The frame less its idle time. Must be positive.
 	// @return One share per span, parallel to `spans`.
 	std::vector<float> BusyShares(std::span<const core::FrameSpan> spans, float busyMilliseconds);
+
+	// A span's inclusive time less the waiting inside it.
+	//
+	// **The number the overlay leads with, and the reason the BUSY and IDLE
+	// columns are a pair.** `Milliseconds` alone made `Renderer::Render` read
+	// 16 ms on a vsynced frame when 15.9 of it was one child blocking on the
+	// display, and a reader going after the biggest number went after the
+	// renderer — twice, for work it was not doing. This is the half somebody
+	// can act on; `FrameSpan::IdleMilliseconds` is the half they cannot.
+	//
+	// Clamped at zero: the two figures come from separate accumulators and
+	// float error must not produce a negative cost.
+	//
+	// @param span The span.
+	// @return Its busy milliseconds.
+	inline float BusyMillisecondsOf(const core::FrameSpan &span) {
+		return std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
+	}
 
 	void DrawDebugPanels(OverlayImage &image, const DebugPanelData &data);
 }

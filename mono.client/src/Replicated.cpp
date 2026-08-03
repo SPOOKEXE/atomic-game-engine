@@ -3,8 +3,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 
-#include <client/Demo.hpp>
 #include <client/Replicated.hpp>
+#include <client/Scene.hpp>
 #include <optional>
 
 namespace client {

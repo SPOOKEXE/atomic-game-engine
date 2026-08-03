@@ -88,6 +88,15 @@ bench-all *args: (bench "--all" args)
 # something else was compiling makes every later run look like an improvement.
 bench-accept *args: (bench "--all" "--accept" args)
 
+# How much of the repository is code, comment and blank, as markdown.
+#
+# `just linecount` walks everything except mono.vendor and the dot-directories;
+# `just linecount mono.engine/render --files` narrows it and lists every file.
+# Redirect it somewhere to keep it: the tool writes to stdout and nothing else,
+# so a report that gets checked in is one somebody decided to check in.
+linecount *args: (build "linecount")
+    @./{{build}}/tools/linecount {{args}}
+
 # The architecture test on its own — the target graph against the expectation.
 # Needs a configure, not a build: it reads what CMake emitted.
 test-architecture:

@@ -843,7 +843,8 @@ namespace {
 }
 
 TEST_CASE("a span enclosing the vsync wait does not exceed 100%", "[panels]") {
-	const std::vector<FrameSpan> spans = VsyncedFrame();
+	std::vector<FrameSpan> spans = VsyncedFrame();
+	engine::core::AccumulateIdleMilliseconds(spans);
 	const std::vector<float> shares = engine::render::BusyShares(spans, 0.622f);
 
 	REQUIRE(shares.size() == spans.size());
@@ -861,7 +862,8 @@ TEST_CASE("a span enclosing the vsync wait does not exceed 100%", "[panels]") {
 }
 
 TEST_CASE("no span's share exceeds the whole busy frame", "[panels]") {
-	const std::vector<FrameSpan> spans = VsyncedFrame();
+	std::vector<FrameSpan> spans = VsyncedFrame();
+	engine::core::AccumulateIdleMilliseconds(spans);
 	const std::vector<float> shares = engine::render::BusyShares(spans, 0.622f);
 
 	for (const float share : shares) {
@@ -894,12 +896,69 @@ TEST_CASE("nested waits are not counted twice", "[panels]") {
 	spans[2].SelfMilliseconds = 5.0f;
 	spans[2].Category = ProfileCategory::Idle;
 
+	engine::core::AccumulateIdleMilliseconds(spans);
 	const std::vector<float> shares = engine::render::BusyShares(spans, 2.0f);
 
 	// 10 inclusive less 8 of waiting is 2, which is the whole busy frame.
 	CHECK(shares[0] == Approx(1.0f).margin(0.001));
 	CHECK(shares[1] == Approx(0.0f).margin(0.001));
 	CHECK(shares[2] == Approx(0.0f).margin(0.001));
+}
+
+TEST_CASE("busy and idle split an inclusive duration in two", "[panels]") {
+	// **The pair the BUSY and IDLE columns print.** The share arithmetic above
+	// checks a ratio, which stays right even if both halves are wrong together.
+	// These are the two numbers a reader acts on, so they are checked as
+	// numbers: what the renderer did, and what it waited for.
+	std::vector<FrameSpan> spans = VsyncedFrame();
+	engine::core::AccumulateIdleMilliseconds(spans);
+
+	// The enclosing render span: 16.385 inclusive, 16.115 of it the wait.
+	CHECK(spans[0].IdleMilliseconds == Approx(16.115f).margin(0.001));
+	CHECK(engine::render::BusyMillisecondsOf(spans[0]) == Approx(0.270f).margin(0.001));
+
+	// The wait itself is all idle and no work, which is what makes it legible
+	// as the answer rather than as another expensive-looking row.
+	CHECK(spans[1].IdleMilliseconds == Approx(16.115f).margin(0.001));
+	CHECK(engine::render::BusyMillisecondsOf(spans[1]) == Approx(0.0f).margin(0.001));
+
+	// A sibling that never waited reports no idle at all — the column has to
+	// distinguish "did not wait" from "was not measured".
+	CHECK(spans[2].IdleMilliseconds == Approx(0.0f).margin(0.001));
+	CHECK(engine::render::BusyMillisecondsOf(spans[2]) == Approx(0.231f).margin(0.001));
+
+	// Busy plus idle is the inclusive time, for every span. The split loses
+	// nothing, which is why the wall clock is still recoverable from the panel.
+	for (const FrameSpan &span : spans) {
+		CHECK(
+			engine::render::BusyMillisecondsOf(span) + span.IdleMilliseconds ==
+			Approx(span.Milliseconds).margin(0.001)
+		);
+	}
+}
+
+TEST_CASE("busy is never negative when a child reports more than its parent", "[panels]") {
+	// A `Reported` child carries time measured on another thread, so a parent
+	// can legitimately contain more idle than it has wall clock. The columns
+	// must not print a negative cost when that happens.
+	std::vector<FrameSpan> spans(2);
+	spans[0].Depth = 0;
+	spans[0].Parent = 0;
+	spans[0].Milliseconds = 1.0f;
+	spans[0].SelfMilliseconds = 1.0f;
+	spans[0].Category = ProfileCategory::Render;
+
+	spans[1].Depth = 1;
+	spans[1].Parent = 0;
+	spans[1].Milliseconds = 5.0f;
+	spans[1].SelfMilliseconds = 5.0f;
+	spans[1].Category = ProfileCategory::Idle;
+	spans[1].Reported = true;
+
+	engine::core::AccumulateIdleMilliseconds(spans);
+
+	CHECK(engine::render::BusyMillisecondsOf(spans[0]) >= 0.0f);
+	CHECK(engine::render::BusyShares(spans, 1.0f)[0] >= 0.0f);
 }
 
 TEST_CASE("a frame with no idle is unchanged by the correction", "[panels]") {
@@ -930,6 +989,7 @@ TEST_CASE("a parent chain that points at itself terminates", "[panels]") {
 	// A cycle is not something the frame graph should produce, and the overlay
 	// must not hang if it ever does — a profiler that freezes the frame it is
 	// profiling is worse than a wrong number.
+	engine::core::AccumulateIdleMilliseconds(spans);
 	const std::vector<float> shares = engine::render::BusyShares(spans, 1.0f);
 	CHECK(shares.size() == 2);
 }

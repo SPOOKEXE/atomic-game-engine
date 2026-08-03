@@ -148,7 +148,7 @@ Three cases depart from the default deliberately:
   `Entity.hpp` is a handle, and `Store.cpp` exercises it.
 - A program's own headers are covered by the suite that drives them, because
   testing them apart from the loop that runs them tests nothing. `Client.hpp`
-  and `Demo.hpp` are covered by `DemoTick.cpp`; `Simulation.hpp` by
+  and `Scene.hpp` are covered by `SceneTick.cpp`; `Simulation.hpp` by
   `Server.cpp`.
 - **A header needing a GPU has no unit suite.** `Renderer.hpp` is the only one,
   and it is checked by running the client rather than by a test. Do not add a
