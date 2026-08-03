@@ -118,6 +118,66 @@ namespace engine::render {
 			SDL_free(data);
 			return bytes;
 		}
+
+		// Walks `PassOrder()` as the frame is submitted.
+		//
+		// **Two things are checked and they are checked by different means.**
+		// That this list matches `graph::StandardPipeline` is a *test* — it is
+		// arithmetic over names and needs no device, so it belongs in one.
+		// That `Render`'s body submits in this order is a *runtime* check,
+		// because the body is the one thing a headless test cannot look at.
+		//
+		// Skips are allowed and are the normal case: every pass here is
+		// conditional, and `graph::Stage::Optional` already says so. What is
+		// refused is going backwards — a pass submitted before one that
+		// preceded it in the list. That is not pedantry about bookkeeping: the
+		// order *is* the correctness. The colour pass samples the shadow map,
+		// so a shadow pass moved below it draws a frame lit by whatever was in
+		// that memory, which on a GPU is a plausible image rather than an
+		// error. `Pipeline::Validate` catches that in the description; this
+		// catches it in the submission.
+		//
+		// Logged rather than fatal. A renderer that kills the process over its
+		// own bookkeeping is worse than the bug it found, and the mismatch is
+		// visible in `FrameResult::Passes` either way.
+		struct PassRecorder {
+			uint8_t Ran = 0;
+			uint8_t Furthest = 0;
+			bool Complained = false;
+
+			void Enter(Pass pass) {
+				const auto index = static_cast<uint8_t>(pass);
+
+				if (index < Furthest && !Complained) {
+					ENGINE_ERROR(
+						"render pass '{}' submitted after '{}', which PassOrder puts before it",
+						PassOrder()[index].Text(),
+						PassOrder()[Furthest].Text()
+					);
+					Complained = true;
+				}
+
+				if (index > Furthest) {
+					Furthest = index;
+				}
+
+				Ran |= static_cast<uint8_t>(1u << index);
+			}
+		};
+	}
+
+	std::span<const core::Name> PassOrder() {
+		// Function-local rather than a namespace-scope array, because a
+		// `core::Name` interns on construction and interning before `main` is
+		// how a static initialisation order bug is written.
+		static const std::array<core::Name, static_cast<size_t>(Pass::Count)> order{
+			core::Name("shadow"),
+			core::Name("surface"),
+			core::Name("opaque"),
+			core::Name("transparent"),
+			core::Name("overlay"),
+		};
+		return order;
 	}
 
 	// -----------------------------------------------------------------------
@@ -1257,6 +1317,9 @@ namespace engine::render {
 			SDL_EndGPUCopyPass(copy);
 		}
 
+		// The passes below, recorded as they are submitted. See `PassRecorder`.
+		PassRecorder passes;
+
 		// --- shadow pass ----------------------------------------------------
 		//
 		// **The scene range, not the camera's**, and no colour target at all.
@@ -1265,6 +1328,7 @@ namespace engine::render {
 
 		if (haveShadow) {
 			ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
+			passes.Enter(Pass::Shadow);
 
 			SDL_GPUDepthStencilTargetInfo shadowTarget{};
 			shadowTarget.texture = State->ShadowTexture;
@@ -1311,13 +1375,14 @@ namespace engine::render {
 		// and what it reflects.
 		if (wantSurface && haveInstances && sceneCount > 0) {
 			ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
+			passes.Enter(Pass::Surface);
 
 			// Flipped before the pass, so what it writes is not what it reads.
 			State->SurfaceSlot ^= 1u;
 
 			SDL_GPUColorTargetInfo surfaceColour{};
 			surfaceColour.texture = State->SurfaceTexture[State->SurfaceSlot];
-			surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+			surfaceColour.clear_color = SDL_FColor{1.0f, 0.0f, 1.0f, 1.0f};  // TEMPORARY DEBUG
 			surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
 			surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
 			surfaceColour.cycle = true;
@@ -1429,6 +1494,13 @@ namespace engine::render {
 
 		{
 			ENGINE_PROFILE_CAT("opaque pass", core::ProfileCategory::Render);
+
+			// Entered unconditionally, and that is the honest reading rather
+			// than a convenience: the stage clears colour and depth, so a frame
+			// with nothing in it still ran this pass — the background is what it
+			// drew. `Validate` sees the same thing, because the stage's writes
+			// are marked `Clear`.
+			passes.Enter(Pass::Opaque);
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 
@@ -1556,6 +1628,12 @@ namespace engine::render {
 					// would have to reload the depth buffer, and the whole point
 					// is that these fragments are tested against what the opaque
 					// pass already wrote.
+					//
+					// Still its own stage, sharing a render pass. What the list
+					// describes is what is drawn and in what order, not how many
+					// times a target is bound.
+					passes.Enter(Pass::Transparent);
+
 					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
 					SDL_DrawGPUIndexedPrimitives(
 						pass,
@@ -1578,6 +1656,7 @@ namespace engine::render {
 
 		if (haveOverlay) {
 			ENGINE_PROFILE_CAT("overlay pass", core::ProfileCategory::Render);
+			passes.Enter(Pass::Overlay);
 
 			// Load rather than clear: the scene is already in the swapchain and
 			// the overlay blends on top of it.
@@ -1599,6 +1678,10 @@ namespace engine::render {
 
 			result.DrawCalls++;
 		}
+
+		// Before the submit rather than after it, so a frame that fails to
+		// submit still reports what it built.
+		result.Passes = passes.Ran;
 
 		{
 			// Hands the whole buffer over and queues the present. The passes

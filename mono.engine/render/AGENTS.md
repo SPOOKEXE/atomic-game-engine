@@ -140,9 +140,19 @@ buffer, an offscreen target and the swapchain, and that is all it claims to be.
 **`mono.engine/graph` describes that order and does not execute it.**
 `graph::StandardPipeline` is the same five stages as data, and
 `Pipeline::Validate` catches the one mistake that matters — a stage reading a
-target nothing earlier wrote. Keeping the two in step is manual today, which is
-a convention rather than a check: rule 6, said out loud. **If you add a pass
-here, add its stage there in the same change.**
+target nothing earlier wrote.
+
+**Keeping the two in step is a check, not a convention.** `render::Pass` and
+`PassOrder()` name this module's five in submission order, and
+`tests/Passes.cpp` compares them against that pipeline's stage names, in order,
+with no device. A sixth stage on one side and not the other fails the build.
+`PassRecorder` walks the same list as `Render` submits and refuses to go
+backwards, which is the half a headless test cannot see.
+
+**So: enter every pass through `PassRecorder`, and add its stage to
+`StandardPipeline` in the same change.** The first is what the check hangs on —
+a pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to all of
+the above, and that is the one hole left. See `D00016`.
 
 The render-node system is where passes become nodes and the description becomes
 the execution. When it arrives, this class becomes the backend those nodes
