@@ -146,7 +146,12 @@ namespace engine::core {
 					state.FrameSeen[id] = 1;
 					state.FrameTouched.push_back(id);
 				}
-				state.FrameMaximums[id] = std::max(state.FrameMaximums[id], span.Milliseconds);
+				// **The busy part, matching the column it sits beside.** RMAX taken
+				// from inclusive time would put 20 ms next to a span whose readable
+				// cost is 0.15, and the worst frame of a vsync wait is a worse
+				// vsync wait rather than anything to act on.
+				const float busy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
+				state.FrameMaximums[id] = std::max(state.FrameMaximums[id], busy);
 			}
 
 			// Every tracked span gets a slot this frame, not only the ones that
@@ -301,6 +306,33 @@ namespace engine::core {
 		}
 	}
 
+	void AccumulateIdleMilliseconds(std::span<FrameSpan> spans) {
+		for (size_t index = 0; index < spans.size(); index++) {
+			if (spans[index].Category != ProfileCategory::Idle) {
+				continue;
+			}
+
+			// Self time rather than inclusive, so a wait nested inside another
+			// wait is not counted twice.
+			const float waited = spans[index].SelfMilliseconds;
+			spans[index].IdleMilliseconds += waited;
+
+			// Walked to the root rather than added to one parent: every
+			// ancestor contains this wait, not only the immediate one. Bounded
+			// by the span count as well as by depth, because a malformed parent
+			// chain must not hang the frame that produced it.
+			size_t node = index;
+			for (size_t step = 0; step < spans.size(); step++) {
+				const size_t parent = spans[node].Parent;
+				if (parent == node || parent >= spans.size()) {
+					break;
+				}
+				node = parent;
+				spans[node].IdleMilliseconds += waited;
+			}
+		}
+	}
+
 	void FrameGraph::EndFrame() {
 		auto &state = Get();
 		if (!state.Recording) {
@@ -343,6 +375,14 @@ namespace engine::core {
 			}
 			span.SelfMilliseconds = span.Milliseconds - children;
 		}
+
+		// Idle inside: what part of each span's inclusive time was waiting.
+		//
+		// Here rather than in the overlay because two consumers need it and one
+		// of them is `RecordHistory` below — an RMAX taken from wall time and a
+		// share taken from busy time are two numbers on one row that disagree,
+		// which is exactly the confusion this was added to end.
+		AccumulateIdleMilliseconds(state.Building);
 
 		for (auto &accumulated : state.PublishedCategories) {
 			accumulated = 0.0f;
@@ -630,15 +670,21 @@ namespace engine::core {
 		const uint32_t parent = state.Open.empty() ? NO_PARENT : static_cast<uint32_t>(state.Open.back());
 
 		const size_t index = state.Building.size();
+		// Named rather than positional. This was seven bare values in
+		// declaration order, and adding `IdleMilliseconds` in the middle of the
+		// struct silently handed a `ProfileCategory` to a float — caught by the
+		// compiler here, and only because the types happened not to convert.
+		// The next field added between two floats would not be.
 		state.Building.push_back(
 			FrameSpan{
-				name,
-				state.Depth,
-				parent,
-				MillisecondsSince(state.FrameStartNanoseconds),
-				0.0f,
-				0.0f,
-				category,
+				.Name = name,
+				.Depth = state.Depth,
+				.Parent = parent,
+				.StartMilliseconds = MillisecondsSince(state.FrameStartNanoseconds),
+				.Milliseconds = 0.0f,
+				.SelfMilliseconds = 0.0f,
+				.IdleMilliseconds = 0.0f,
+				.Category = category,
 			}
 		);
 		state.Open.push_back(index);

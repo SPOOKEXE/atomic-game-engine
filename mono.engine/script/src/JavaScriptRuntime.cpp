@@ -3,9 +3,14 @@
 #include "JsBindings.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Paths.hpp>
+#include <engine/script/Instances.hpp>
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <quickjs.h>
+#include <sstream>
 
 namespace engine::script {
 
@@ -60,7 +65,8 @@ namespace engine::script {
 		}
 	}
 
-	JavaScriptRuntime::JavaScriptRuntime(ecs::Store &store, const RuntimeLimits &limits) : Runtime(store) {
+	JavaScriptRuntime::JavaScriptRuntime(ecs::Store &store, const RuntimeLimits &limits)
+		: Runtime(store, limits.Role) {
 		Vm = JS_NewRuntime();
 
 		// A hard ceiling rather than a hope. Allocation past it fails inside
@@ -117,7 +123,8 @@ namespace engine::script {
 		// arbitrary precision. Revisit when one does, and check the teardown
 		// again rather than assuming it was fixed.
 
-		OpenJsBindings(Context, Store);
+		OpenJsBindings(Context, Store, limits.Role);
+		OpenJsSurface(Context);
 
 		// `eval` removed after the fact, because the intrinsic that provides
 		// `JS_Eval` provides the global too and they cannot be separated at
@@ -220,15 +227,71 @@ namespace engine::script {
 		return true;
 	}
 
+	bool JavaScriptRuntime::RunInstance(ecs::Entity instance) {
+		Error.clear();
+
+		const Source *source = Store.Get<Source>(instance);
+		if (source == nullptr || !source->Path.IsValid()) {
+			return true;
+		}
+
+		// An absolute `Source` is used as it stands. `operator/` already drops
+		// the left side for an absolute right side, so this is what the standard
+		// does anyway — said out loud because a reader checking whether
+		// `--script /tmp/x.luau` works should not have to know that.
+		const std::filesystem::path named(source->Path.Text());
+		const std::filesystem::path path = named.is_absolute() ? named : core::Paths::Assets() / named;
+
+		std::ifstream file(path, std::ios::binary);
+		if (!file) {
+			Error = "could not open " + path.string();
+			return false;
+		}
+
+		std::ostringstream contents;
+		contents << file.rdbuf();
+
+		// `script` names the instance, for the reason the Luau side gives.
+		//
+		// **A global rather than a per-chunk scope, and that difference is
+		// real**: `JS_Eval` with `JS_EVAL_TYPE_GLOBAL` shares one global object
+		// across every chunk, where `luaL_sandboxthread` gives each Luau chunk
+		// its own. So `script` is rebound before each and cleared after, and two
+		// JavaScript scripts in one world can see each other's globals — which
+		// is JavaScript's own model rather than something this engine chose.
+		{
+			JSValue global = JS_GetGlobalObject(Context);
+			JS_SetPropertyStr(Context, global, "script", MakeJsInstance(Context, instance));
+			JS_FreeValue(Context, global);
+		}
+
+		const bool ok = Run(contents.str(), std::string(source->Path.Text()));
+
+		{
+			JSValue global = JS_GetGlobalObject(Context);
+			JS_SetPropertyStr(Context, global, "script", JS_NULL);
+			JS_FreeValue(Context, global);
+		}
+		return ok;
+	}
+
 	bool JavaScriptRuntime::Heartbeat(float delta) {
-		// Deliveries first, then the beat — the same order the Luau side uses,
-		// and for the same reason.
+		// **The same four steps in the same order as the Luau side**, because a
+		// world scripted in either language must see one sequence: the
+		// barrier's deliveries, then what changed, then the resumes due, then
+		// the beat. Each of the first three is one of
+		// `docs/SCRIPT_CONCURRENCY.md` §1's legal resume sources.
 		Error = PumpJsDeliveries(Context, Store);
 
-		const std::string beat = PumpJsHeartbeat(Context, delta);
-		if (Error.empty()) {
-			Error = beat;
-		}
+		const auto note = [&](std::string message) {
+			if (Error.empty()) {
+				Error = std::move(message);
+			}
+		};
+
+		note(PumpJsChanges(Context));
+		note(PumpJsTasks(Context));
+		note(PumpJsHeartbeat(Context, delta));
 
 		// A connection may have created a promise. Drained here for the same
 		// reason `Run` drains: a reaction left outstanding is work crossing a

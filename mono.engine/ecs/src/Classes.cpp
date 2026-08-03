@@ -324,6 +324,8 @@ namespace engine::ecs {
 			return "double";
 		case PropertyType::Name:
 			return "name";
+		case PropertyType::Enum:
+			return "enum";
 		case PropertyType::Reference:
 			return "reference";
 		case PropertyType::Vector3:

@@ -17,7 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <client/Demo.hpp>
+#include <client/Scene.hpp>
 #include <cmath>
 #include <cstdint>
 #include <unified/Harness.hpp>

@@ -64,6 +64,21 @@ namespace engine::ecs {
 		// `core::Name` — written as text, never as its process-local id.
 		Name,
 
+		// A `core::Name` that must be one of a registered set.
+		//
+		// **The storage is identical to `Name` and the contract is not.** A
+		// `Name` property takes any string at all, so `part.Material =
+		// "Plsatic"` lands in the component and surfaces as a part rendering
+		// with the default material for reasons nobody can see. An `Enum`
+		// property is checked against `EnumTable`, so the typo is refused where
+		// it was made, and a binding can offer completion because the set is
+		// readable at run time.
+		//
+		// Which set is named by `PropertyDescriptor::EnumName`. Adding this was
+		// a decision about what userland can hold rather than an implementation
+		// detail, which is exactly why `PropertyType` is a closed list.
+		Enum,
+
 		// `Entity` — a handle within this world, and meaningless outside it.
 		Reference,
 
@@ -139,6 +154,14 @@ namespace engine::ecs {
 		// False for a property that can be read and not written. None today;
 		// the field exists because the manifest has to be able to say it.
 		bool Writable = true;
+
+		// Which set an `Enum` property's value must belong to.
+		//
+		// Invalid for every other type. Named rather than pointed at, so the
+		// enum can be registered after the property that uses it — a class tree
+		// is built by several files in whatever order the linker ran them, which
+		// is the same reason `Classes` merges inherited properties lazily.
+		core::Name EnumName;
 
 		// The components the getter reads and the setter touches.
 		//

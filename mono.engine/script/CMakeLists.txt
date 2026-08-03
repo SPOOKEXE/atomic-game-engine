@@ -37,6 +37,18 @@ mono_add_library(script
 		# A thin view over two resources rather than a subsystem, so this buys
 		# the seam and no machinery.
 		Engine::world
+
+		# L8. **`WorldRoot:Raycast` is why.** `RaycastParams` and
+		# `RaycastResult` are the one part of the datatype vocabulary that is not
+		# a value type — they are a *query*, and the query that answers them is
+		# `physics::Raycast` against the exact shapes rather than
+		# `spatial::Raycast` against the proxy boxes. A ray that reported the
+		# bounding box of a rotated part would be plausible and wrong, which is
+		# the failure `physics/Query.hpp` says that function exists for.
+		#
+		# The only edge from `script` to a simulation module, and it is one-way:
+		# nothing in `physics` knows a script exists.
+		Engine::physics
 	VENDOR
 		Vendor::luau_vm
 		Vendor::luau_compiler

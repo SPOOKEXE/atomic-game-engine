@@ -29,7 +29,8 @@ it a decision instead of a precedent.
 
 **The components are shared now, and the sharing is `mono.engine/scene` at
 L7** — an engine module both programs link, not an include across two programs.
-`Demo.hpp` used to declare a `Transform`, a `PreviousTransform`, a `Visual`, a
+`Scene.hpp` — `Demo.hpp` as was — used to declare a `Transform`, a
+`PreviousTransform`, a `Visual`, a
 `SceneBounds` and an `ActiveCamera`, and `Replicated.hpp` used to declare the
 server's two components a second time under the server's wire names so a
 snapshot could resolve. All of that is gone. Both programs register the same
@@ -37,9 +38,10 @@ snapshot could resolve. All of that is gone. Both programs register the same
 translation layer.
 
 So **a component declared in this directory that means something a `scene`
-component already means is the change to refuse.** `Spin`, `Orbit` and
-`DrawList` are what is left, and none of them is a duplicate: the first two are
-how the demo scene moves, and the third is what one world hands its compositor.
+component already means is the change to refuse.** `DrawList` is what is left,
+and it is not a duplicate: it is what one world hands its compositor. `Spin` and
+`Orbit` are gone with the C++ demo — a scripted scene writes `CFrame` directly
+and needs neither.
 
 `Replicated.hpp` survives its own reason for existing because it acquired a
 better one — a replicated world still has to be *drawn*, nothing about drawing
@@ -64,27 +66,34 @@ the parsed options. None of it is world state and none of it belongs in the
 store. The test is whether a second world in this process would want its own —
 a draw list yes, a window no.
 
-## The demo scene is a placeholder with a real job
+## The demo scene is gone, and what replaced it
 
-`Demo.hpp` and `Demo.cpp` go away when there is a game file to load a scene
-from. Until then they are the only thing exercising the renderer, so two
-properties are worth keeping:
+`Demo.hpp` and `Demo.cpp` were to go away when there was a game file to load a
+scene from. **There is one now**: `mono.engine/examples/Rings.luau` builds the
+ring scene through the same class table `Instance.new("Part")` resolves against,
+and `--script` loads it. The C++ `BuildDemoWorld` is deleted and the files are
+`Scene.hpp` and `Scene.cpp`, which is what they now hold — the client's own half
+of loading a world, and no scene of their own.
 
-- **It is a function of elapsed time, not of frame count.** Orbits are derived
-  from accumulated time rather than integrated per frame, so two runs at
-  different frame rates put the same cube in the same place. Without that, a
-  frame-time comparison between two runs compares two different scenes.
-- **It is deterministic.** `engine::core::Random` rather than `std::mt19937`,
-  because a seeded standard generator may differ between standard libraries —
-  `std::uniform_real_distribution` is not specified, so the same seed gives
-  different numbers on different ones. `Random` is SHA-256 underneath and
-  indexed rather than streamed: `Random::Float(index, salt)` is a pure function,
-  so spawning one entity gives the value it would have had in a loop from zero.
-  This was a mixer written out here and copied into `mono.server`; both are gone.
+**There is one path, and that is the point.** Keeping the C++ scene beside the
+Luau one would have been two ways to do one job, which is the most expensive
+kind of debt in a monorepo because both accumulate callers — and only one of
+them exercises the bindings. `--script` with no argument falls back to the
+example rather than to a second implementation.
 
-The scene's radius band is fixed rather than growing with the entity count. If
-it grew, the camera would pull back to fit it and every cube would shrink —
-`--entities 20000` would look *less* like a 3D scene than 500 does.
+What survives here is the client's half and nothing more:
+
+- `DrawList`, which is what one world hands its compositor.
+- `MoveCamera`, which is a placeholder and says so — a script can make and aim a
+  camera at v0.6, so this exists only until an example does.
+- `CollectInstances`, which turns simulation state into a draw list. Not a
+  demo's job: every world a client draws needs it.
+- `BuildScriptedWorld`, which is the loader plus the two systems above.
+
+The two properties the demo scene was kept for are now the *script's* to hold,
+and `Rings.luau` holds them: it is a function of accumulated simulated time
+rather than of frame count, and it draws its randomness from a hash of an index
+rather than from a stream. Both are stated in that file, beside the code.
 
 ## A replicated world is presented, never simulated
 

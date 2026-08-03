@@ -3,7 +3,9 @@
 #include "Snapshot.hpp"
 #include "StoreState.hpp"
 
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
@@ -538,6 +540,24 @@ namespace engine::ecs {
 			return false;
 		}
 
+		// **The check `PropertyType::Enum` exists for.** The storage is a
+		// `core::Name` either way, so without this an unregistered member is
+		// written and surfaces later as a part that renders with a default
+		// nobody asked for. Refused here rather than in each binding, so both
+		// VMs and a future editor get one answer.
+		if (descriptor->Type == PropertyType::Enum) {
+			const auto member = *static_cast<const core::Name *>(value);
+			if (!EnumTable::Has(descriptor->EnumName, member)) {
+				ENGINE_ERROR(
+					"store '{}': '{}' is not a member of Enum.{}",
+					Name(),
+					member.IsValid() ? member.Text() : std::string_view("(none)"),
+					descriptor->EnumName.Text()
+				);
+				return false;
+			}
+		}
+
 		return descriptor->Set(*this, instance, value);
 	}
 
@@ -555,6 +575,39 @@ namespace engine::ecs {
 
 	Entity Store::FindFirstChild(Entity instance, std::string_view name) const {
 		return engine::ecs::FindFirstChild(*State, instance, name);
+	}
+
+	void Store::EachRoot(const std::function<void(Entity)> &body) const {
+		// Collected and sorted rather than visited in place. The walk is over
+		// archetypes, and a row's position in one moves whenever anything
+		// changes its component set — so visiting in place would report the
+		// world's roots in an order that depends on what happened to the scene
+		// rather than on the scene. A recording made in one order and replayed
+		// in another diverges the first time a script reads `GetChildren()`.
+		std::vector<Entity> roots;
+		const_cast<Store *>(this)->Each<const Hierarchy>([&](Entity entity, const Hierarchy &node) {
+			if (node.Parent == NULL_ENTITY) {
+				roots.push_back(entity);
+			}
+		});
+
+		std::sort(roots.begin(), roots.end(), [](Entity left, Entity right) { return left.Id < right.Id; });
+
+		for (const Entity root : roots) {
+			body(root);
+		}
+	}
+
+	Entity Store::FindFirstRoot(std::string_view name) const {
+		const core::Name wanted(name);
+
+		Entity found = NULL_ENTITY;
+		EachRoot([&](Entity root) {
+			if (found == NULL_ENTITY && InstanceNameOf(root) == wanted) {
+				found = root;
+			}
+		});
+		return found;
 	}
 
 	bool Store::IsDescendantOf(Entity instance, Entity ancestor) const {

@@ -5,8 +5,8 @@
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
-#include <client/Demo.hpp>
 #include <client/Replicated.hpp>
+#include <client/Scene.hpp>
 #include <cmath>
 #include <server/Simulation.hpp>
 #include <stdexcept>

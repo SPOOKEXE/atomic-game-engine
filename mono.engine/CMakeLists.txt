@@ -17,6 +17,7 @@ add_subdirectory(scene)     # L7 what a thing in a world is [shared]
 add_subdirectory(assets)    # L8 content addressing         [shared]
 add_subdirectory(physics)   # L8 shapes, integration, pairs [shared]
 add_subdirectory(script)    # L9 running a script           [shared]
+add_subdirectory(graph)     # L9 what is drawn, before binding [shared]
 add_subdirectory(examples)  # L10 the example scene        [shared]
 add_subdirectory(net)       # L11 transport and authority   [shared]
 add_subdirectory(replication) # L12 what the wire means     [shared]
@@ -33,5 +34,7 @@ if(MONO_BUILD_CLIENT)
 	add_subdirectory(render)  # L12 RHI, render nodes        [client]
 endif()
 
-# TODO(v0.2+): the hosting half of L12 — orchestration — is a [server] module
-# and gets the mirror-image guard on MONO_BUILD_SERVER when it arrives.
+# TODO(D00017): the hosting half of L12 — orchestration — is a [server] module
+# and gets the mirror-image guard on MONO_BUILD_SERVER when it arrives. Filed
+# rather than versioned, because no version schedules it and `--worlds N` is a
+# harness rather than a caller.

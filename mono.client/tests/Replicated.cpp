@@ -24,8 +24,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <client/Demo.hpp>
 #include <client/Replicated.hpp>
+#include <client/Scene.hpp>
 #include <cstdint>
 #include <vector>
 

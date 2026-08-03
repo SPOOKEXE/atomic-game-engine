@@ -1,9 +1,10 @@
 #pragma once
 
-// The RHI, such as it is at v0.1.
+// The RHI, such as it is at v0.6.
 //
-// One instanced opaque pass and one overlay pass. That is enough to prove the
-// staged-shader path, the depth buffer and the swapchain, and it is where the
+// Five passes — shadow, surface, opaque, transparent, overlay — over a
+// frustum-culled draw list. That is enough to prove the staged-shader path, the
+// depth buffer, an offscreen target and the swapchain, and it is where the
 // render graph at L9 will attach — the passes below become nodes, and this
 // class becomes the backend they compile to.
 //
@@ -25,6 +26,7 @@
 // @tier L12 · client
 
 #include <engine/core/types/CFrame.hpp>
+#include <engine/graph/Frustum.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -38,12 +40,89 @@ struct SDL_Window;
 
 namespace engine::render {
 
+	// The stages `Render` submits, in submission order.
+	//
+	// **This exists so that the two descriptions of a frame can be compared.**
+	// `graph::StandardPipeline` is the same five stages as data and
+	// `Pipeline::Validate` checks them for a stage reading what nothing wrote —
+	// but until v0.6 nothing tied that list to the function that actually draws,
+	// so keeping them in step was a sentence in `AGENTS.md`. A sentence is
+	// documentation; `tests/Passes.cpp` compares this enum's names against that
+	// pipeline's, in order, and fails the build when they disagree.
+	//
+	// **What it does not do is make the frame run from data.** That is the
+	// render-node system, and this is deliberately not a small version of it —
+	// two competing executors would be worse than the one hand-rolled list. What
+	// is checked is the *description*: a sixth stage added to the pipeline and
+	// not to this enum, or the reverse, stops the build. Adding a pass without
+	// entering it through `PassRecorder` is still possible and is the hole this
+	// leaves open, named here rather than implied. See `D00016`.
+	//
+	// @since v0.6
+	enum class Pass : uint8_t {
+		// Depth from the light, over the whole scene rather than the culled set.
+		Shadow,
+
+		// The surface camera's view, into a texture a mirror samples.
+		Surface,
+
+		// The screen, with depth written.
+		Opaque,
+
+		// Blended, depth-tested and not depth-written. **Its own stage even
+		// though it shares a render pass with `Opaque`** — a separate pass would
+		// have to reload the depth buffer — because what the list describes is
+		// what is drawn and in what order, not how many times a target is bound.
+		Transparent,
+
+		// The overlay texture, loaded over the frame rather than clearing it.
+		Overlay,
+
+		// Not a pass. The count, for the bitmask below.
+		Count,
+	};
+
+	// The names of those stages, in the same order.
+	//
+	// `core::Name` rather than `const char *` for rule 4's reason and for the
+	// comparison's: `graph::Stage::Name` is a `core::Name`, and comparing two of
+	// them is an integer compare rather than a string one.
+	//
+	// @return The five names, valid for the life of the program.
+	std::span<const core::Name> PassOrder();
+
 	// Work encoded by one Render call.
 	//
 	// A default result means no frame was presented, including while the window
 	// is minimised or resizing and when the renderer is unavailable.
 	//
 	// @client
+	// A second view, rendered into a texture instead of the swapchain.
+	//
+	// **`world::ViewChannel`'s shape, with a texture on the far end.** v0.2
+	// built the seam for a hosted world publishing a view to a client; this is
+	// the same idea with the consumer inside the process — and the one-frame
+	// staleness that design already assumed is what makes a mirror cheap: the
+	// surface shows the frame *before* the one being drawn, so there is no
+	// dependency cycle between a mirror and what it reflects.
+	//
+	// One per frame. Several would be several passes and a texture array, which
+	// is the render-node system's job rather than this pipeline's.
+	//
+	// @since v0.6
+	struct SurfaceView {
+		// Where the surface camera is, in world space.
+		core::CFrame Frame;
+
+		// Its field of view and clipping distances.
+		scene::Camera Lens;
+
+		// How big the texture is. Square is not required; a wide mirror wants a
+		// wide target, and giving it a square one wastes half the texels.
+		uint32_t Width = 1024;
+		uint32_t Height = 1024;
+	};
+
 	struct FrameResult {
 		// Whether SDL accepted a command buffer for presentation.
 		bool Presented = false;
@@ -53,6 +132,38 @@ namespace engine::render {
 
 		// Number of opaque mesh triangles submitted for this frame.
 		uint64_t Triangles = 0;
+
+		// How many instances showed a surface texture.
+		uint32_t SurfaceInstances = 0;
+
+		// How many instances the frustum rejected.
+		//
+		// **Reported rather than inferred**, because the interesting number is
+		// the ratio and the denominator is the caller's draw list — which the
+		// caller has and this does not need to repeat. A camera framing its own
+		// scene culls almost nothing and a camera inside a large world culls
+		// almost everything; a reading that never moves means the frustum is
+		// wrong, not that the scene is small.
+		uint32_t Culled = 0;
+
+		// One bit per `Pass` that submitted work this frame.
+		//
+		// **Every pass is skippable and most of them usually are**, so "the
+		// shadow pass exists" and "the shadow pass ran" are different questions,
+		// and only the second one explains a frame with no shadows in it. The
+		// draw-call count cannot answer it — the shadow pass and the overlay
+		// pass are one draw each and look identical from there.
+		//
+		// @since v0.6
+		uint8_t Passes = 0;
+
+		// Whether one pass submitted work this frame.
+		//
+		// @param pass Which one.
+		// @return True when it ran.
+		bool Ran(Pass pass) const {
+			return (Passes & static_cast<uint8_t>(1u << static_cast<uint8_t>(pass))) != 0;
+		}
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.
@@ -142,7 +253,8 @@ namespace engine::render {
 			const core::CFrame &cameraFrame,
 			const scene::Camera &camera,
 			std::span<const scene::DrawInstance> instances,
-			OverlayImage &overlay
+			OverlayImage &overlay,
+			const SurfaceView *surface = nullptr
 		);
 
 	  private:

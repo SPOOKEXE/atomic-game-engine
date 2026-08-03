@@ -10,10 +10,33 @@
 // VMs with different object models — Luau has metatables, JavaScript has
 // prototypes and accessors — so a common implementation would be an abstraction
 // over two runtimes' internals. What is actually shared is the thing that
-// matters: one class table, one descriptor list, one set of conversions.
+// matters: one class table, one descriptor list, one set of conversions, and —
+// since v0.6 — one `SignalTable`, one `ChangeQueue`, one `TaskQueue` and one
+// codec. Everything about *ordering* is shared, because ordering is what a
+// recording depends on.
+//
+// ## Where the two surfaces differ, and why each difference is the language
+//
+// - **`a.mul(b)` rather than `a * b`**, and `a.Equals(b)` rather than `a == b`.
+//   JavaScript has no operator overloading, and `===` on two objects is
+//   identity.
+// - **`game.GetService` rather than `game:GetService`.** No colon call.
+// - **`typeOf(v)` rather than `typeof v`.** `typeof` is a *keyword* in
+//   JavaScript and cannot be rebound; in Luau it is an ordinary global that
+//   reads a `__type` metafield.
+// - **A `Promise` rather than a coroutine.** `task.wait` suspends by returning
+//   a promise an `await` consumes, because that is JavaScript's own suspension
+//   primitive — and `JS_ExecutePendingJob` means the *host* decides when a
+//   reaction runs, which is what makes it legal under rule 5 at all.
+//
+// None of those is one language pretending to be the other.
+
+#include "Codec.hpp"
+#include "JsContext.hpp"
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/TweenInfo.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
 
@@ -22,24 +45,48 @@
 
 namespace engine::script {
 
-	// Installs `Instance`, `Vector3`, `Color3` and `print` on the global object,
-	// and hangs this runtime's world off the context.
+	// Installs the property surface: `Instance`, the value types, `Enum`,
+	// `game`, `workspace`, `MessagingService` and `print`.
 	//
 	// @param context The JS context.
 	// @param store   The world instances are created in.
-	void OpenJsBindings(JSContext *context, ecs::Store &store);
+	// @param role    Where scripts under this runtime are standing.
+	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role);
 
-	// Releases what `OpenJsBindings` attached. Called before the context is
-	// freed.
+	// Installs v0.6's surface: signals, the instance methods, `task`, the
+	// datatype vocabulary, the clock, `typeOf`/`warn` and the store services.
+	//
+	// A second function rather than more of the first, because the two halves
+	// are reviewed differently — one is the property surface and the other is
+	// everything an author reaches for after it.
+	void OpenJsSurface(JSContext *context);
+
+	// Releases what the two `Open` calls attached. Before the context is freed.
 	void CloseJsBindings(JSContext *context);
 
 	// Calls every connected Heartbeat function with `delta`.
-	//
-	// @return An error message when one threw, or empty.
 	std::string PumpJsHeartbeat(JSContext *context, float delta);
 
-	// Dispatches this tick's deliveries to their subscribers.
+	// Dispatches this tick's deliveries, and resolves the promises waiting on
+	// replies.
 	std::string PumpJsDeliveries(JSContext *context, ecs::Store &store);
+
+	// Fires `.Changed` for everything the last barrier recorded.
+	std::string PumpJsChanges(JSContext *context);
+
+	// Resolves every task due at the world's current tick.
+	std::string PumpJsTasks(JSContext *context);
+
+	// Calls everything connected to one signal.
+	//
+	// @return An error message when a handler threw, or empty.
+	std::string FireJsSignal(
+		JSContext *context, SignalKind kind, ecs::Entity subject, int count, JSValueConst *arguments
+	);
+
+	// A signal handle, and a connection handle.
+	JSValue MakeJsSignal(JSContext *context, SignalKind kind, ecs::Entity subject, core::Name property = {});
+	JSValue MakeJsConnection(JSContext *context, ConnectionId id);
 
 	// Wrapping and unwrapping the value types.
 	JSValue MakeVector3(JSContext *context, const core::Vector3 &value);
@@ -49,4 +96,45 @@ namespace engine::script {
 	core::Vector3 *AsVector3(JSContext *context, JSValueConst value);
 	core::Color3 *AsColor3(JSContext *context, JSValueConst value);
 	core::CFrame *AsCFrame(JSContext *context, JSValueConst value);
+
+	// One instance object for an entity, prototype and all.
+	JSValue MakeJsInstance(JSContext *context, ecs::Entity instance);
+
+	// The entity an instance object stands for, or `NULL_ENTITY`.
+	ecs::Entity JsEntityOf(JSContext *context, JSValueConst object);
+
+	// The datatype vocabulary and the bus services, installed on the global.
+	//
+	// Their own file for the reason `OpenJsSurface` is separate from
+	// `OpenJsBindings`: these are value types and a wire, reviewed against
+	// `core/types/` and `world::Postbox` rather than against the class table.
+	void InstallJsDatatypes(JSContext *context, JSValueConst global);
+	void InstallJsServices(JSContext *context, JSValueConst global);
+
+	// `RaycastParams` and `workspace.Raycast`.
+	//
+	// Takes the world object because that is where the method goes, and it has
+	// to be installed before `OpenJsBindings` seals it.
+	void InstallJsQueries(JSContext *context, JSValueConst global, JSValueConst workspace);
+
+	// An `EnumItem`, and reading one back — the JavaScript spellings.
+	bool ReadJsEnumValue(JSContext *context, JSValueConst value, core::Name enumName, core::Name &out);
+
+	// The easing enums, converted between their C++ form and their member name.
+	//
+	// Declared here as well as in `Bindings.hpp` because both bindings need
+	// them and neither header may include the other's VM.
+	core::EasingStyle EasingStyleOf(core::Name member);
+	core::Name NameOf(core::EasingStyle style);
+	core::EasingDirection EasingDirectionOf(core::Name member);
+	core::Name NameOf(core::EasingDirection direction);
+
+	// A JavaScript value to the shared tree, and back.
+	//
+	// **The same tree the Luau side builds**, which is what makes "identical
+	// bytes from both VMs" a property of the format rather than of either
+	// binding.
+	bool
+	ToScriptValue(JSContext *context, JSValueConst value, ScriptValue &out, uint32_t depth, CodecStatus &why);
+	JSValue FromScriptValue(JSContext *context, const ScriptValue &value);
 }

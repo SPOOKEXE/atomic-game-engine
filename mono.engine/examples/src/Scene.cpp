@@ -8,11 +8,13 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <memory>
 
 namespace engine::examples {
@@ -113,8 +115,34 @@ namespace engine::examples {
 		// the last reference and drops it with the world.
 		std::shared_ptr<script::Runtime> runtime = script::MakeRuntime(store, script::LanguageOf(path));
 
-		if (!runtime->RunFile(path)) {
-			error = runtime->LastError();
+		// **The scene's script is an instance in the scene**, which is what v0.6
+		// made structural. `RunFile` still exists and still works; what this
+		// buys is that the world now *contains* what animates it, so a save file
+		// could write the pair out together — and the chunk gets a `script`
+		// global naming itself, which is the difference between one file that
+		// builds a world and a game made of many.
+		// **Relative to the assets root when it is under it, absolute when it is
+		// not.** `std::filesystem::relative` happily produces `../../../..` for a
+		// file outside the root, and re-joining that to the root works by
+		// accident rather than by design — until a `--script` naming somewhere
+		// else entirely resolves to a path that does not exist. A `Source` that
+		// is already absolute is left alone, which is what makes a script loaded
+		// from anywhere behave the same as one staged.
+		const std::filesystem::path absolute = std::filesystem::absolute(path);
+		const std::filesystem::path relative = std::filesystem::relative(absolute, core::Paths::Assets());
+
+		const bool underAssets = !relative.empty() && relative.native().rfind("..", 0) != 0;
+
+		const ecs::Entity program = script::MakeScript(
+			store, underAssets ? relative.string() : absolute.string(), absolute.stem().string()
+		);
+		if (program == ecs::NULL_ENTITY) {
+			error = "the world refused a script instance";
+			return false;
+		}
+
+		if (runtime->RunWorldScripts() == 0) {
+			error = runtime->LastError().empty() ? "the scene script did not run" : runtime->LastError();
 			return false;
 		}
 
@@ -177,9 +205,33 @@ namespace engine::examples {
 	}
 
 	std::string ExamplePath(const std::string &name) {
-		// Under the assets root rather than beside the binary, so `--assets`
-		// moves the examples with everything else and a program started from
-		// any directory finds the same file.
-		return (core::Paths::Assets() / "examples" / name).string();
+		// Under the assets root, so `--assets` moves the examples with
+		// everything else and a program started from any directory finds the
+		// same file.
+		const std::filesystem::path preferred = core::Paths::Assets() / "examples" / name;
+		if (std::filesystem::exists(preferred)) {
+			return preferred.string();
+		}
+
+		// **The staged sibling, and this fallback is a layout mismatch rather
+		// than a convenience.** Shaders stage into each *program's* directory —
+		// `client/shaders/render/` — and `Paths::Assets()` defaults to that same
+		// directory, so those line up. The example scenes stage into
+		// `<stage>/assets/examples/` instead, which is a sibling of it, so they
+		// do not.
+		//
+		// Making them agree means either staging the scenes per program the way
+		// shaders are, or changing what `Paths::Assets()` defaults to — and both
+		// are changes to how every program finds its data, which is more than
+		// this function gets to decide. So it looks in both and says why.
+		const std::filesystem::path sibling =
+			core::Paths::Base().parent_path() / "assets" / "examples" / name;
+		if (std::filesystem::exists(sibling)) {
+			return sibling.string();
+		}
+
+		// Neither exists. The preferred one is returned so the error names the
+		// path somebody meant rather than the fallback they have never heard of.
+		return preferred.string();
 	}
 }

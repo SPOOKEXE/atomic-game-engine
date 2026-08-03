@@ -130,16 +130,62 @@ frame pacing. One texture upload per frame, and only while a panel is open.
 
 Do not reimplement them over an immediate-mode UI library.
 
-## One pass is not an architecture
+## Five passes are not an architecture either
 
-`Renderer::Render` is one instanced opaque pass and one overlay pass. It is
-enough to prove the staged-shader path, the depth buffer and the swapchain, and
-that is all it claims to be.
+`Renderer::Render` is a shadow pass, a surface pass, an opaque pass, a
+transparent pass and an overlay pass, submitted in that order by a function that
+knows all five by name. It is enough to prove the staged-shader path, the depth
+buffer, an offscreen target and the swapchain, and that is all it claims to be.
 
-The render graph at L9 is where passes become nodes. When it arrives, this class
-becomes the backend those nodes compile to — so do not grow a hand-rolled pass
-list here in the meantime. Two competing ways to describe a frame is worse than
-either.
+**`mono.engine/graph` describes that order and does not execute it.**
+`graph::StandardPipeline` is the same five stages as data, and
+`Pipeline::Validate` catches the one mistake that matters — a stage reading a
+target nothing earlier wrote.
+
+**Keeping the two in step is a check, not a convention.** `render::Pass` and
+`PassOrder()` name this module's five in submission order, and
+`tests/Passes.cpp` compares them against that pipeline's stage names, in order,
+with no device. A sixth stage on one side and not the other fails the build.
+`PassRecorder` walks the same list as `Render` submits and refuses to go
+backwards, which is the half a headless test cannot see.
+
+**So: enter every pass through `PassRecorder`, and add its stage to
+`StandardPipeline` in the same change.** The first is what the check hangs on —
+a pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to all of
+the above, and that is the one hole left. See `D00016`.
+
+The render-node system is where passes become nodes and the description becomes
+the execution. When it arrives, this class becomes the backend those nodes
+compile to — so do not grow the hand-rolled list further in the meantime. Two
+competing ways to describe a frame is worse than either.
+
+## The two textures this module owns, and what each pass may assume
+
+- **The shadow map** is written by the shadow pass and read by every pass that
+  shades. It is `SAMPLER | DEPTH_STENCIL_TARGET`, and both usages are required:
+  a depth attachment that is only a target cannot be read, and a shadow map that
+  cannot be read is a pass that costs a draw and changes nothing.
+- **The surface texture** is written by the surface pass and read by the opaque
+  one, both in the same frame and in that order — so a mirror shows *this*
+  frame, not the one before it. `SurfaceReady` is what stops the first frame
+  sampling whatever the driver handed back.
+- **There are two of them and the pair is not a recursion trick.** Binding a
+  render target as its own sampler is undefined behaviour; writing one and
+  binding the other is what makes the surface pass legal. It does **not** give a
+  mirror inside a mirror, because `sceneReflected` partitions surface instances
+  out of that pass — no mirror is ever drawn into a mirror's texture. This file
+  and two comments claimed otherwise, and the claim was not harmless: it is why
+  `Flags.z` was set for the entire surface pass instead of for the mirrors in
+  it, which made the floor sample the previous reflection and show the clear
+  colour as a black wedge in the pane. **Nothing in the surface pass may set
+  `Flags.z`.** Real recursion needs a per-view exclusion this pipeline has no
+  shape for, and belongs with the render-node system.
+
+**The shadow and surface passes draw the whole scene; the screen passes draw the
+culled set.** A caster outside the camera's frustum still shadows into it and a
+mirror shows what is behind the viewer, so culling either to the eye is the
+classic version of that bug — shadows that vanish as their casters leave the
+screen. That is why the instance buffer holds two ranges rather than one.
 
 ## Winding is counter-clockwise seen from outside
 
