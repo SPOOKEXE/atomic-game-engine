@@ -32,6 +32,36 @@ namespace engine::replication {
 		// opening if something can follow it.
 		constexpr size_t ENTRY_OVERHEAD = 96;
 
+		// Bytes one value of a component occupies on the wire.
+		//
+		// **A component may carry a second, compact serialisation, and this and
+		// `WriteValue` are the only two places that choose between them.**
+		// `TypeDescriptor::Wire` is lossy — a quantised position, a rotation as
+		// smallest-three — and it exists as a *second* pair rather than as a
+		// codec over `TypeDescriptor::Write` so that `Store::Save` does not
+		// become lossy with it. That would make every recording lossy and leave
+		// `just replay-check` comparing one lossy file against another, which
+		// is a check that passes and means nothing.
+		//
+		// @param descriptor The component's registration.
+		// @return The compact size when it has one, and `sizeof` otherwise.
+		size_t WireBytes(const ecs::TypeDescriptor &descriptor) {
+			return descriptor.Wire.Present() ? descriptor.Wire.Size : descriptor.Size;
+		}
+
+		// Appends one value in whatever form it crosses in.
+		//
+		// @param writer     Where the bytes go.
+		// @param descriptor The component's registration.
+		// @param value      The value to write.
+		void WriteValue(core::ByteWriter &writer, const ecs::TypeDescriptor &descriptor, const void *value) {
+			if (descriptor.Wire.Present()) {
+				descriptor.Wire.Write(writer, value, 1);
+				return;
+			}
+			descriptor.Write(writer, value, 1);
+		}
+
 		// The largest `ChunkBytes` that still produces a message which fits.
 		//
 		// **The number to compare against is the plaintext limit, not the
@@ -65,6 +95,23 @@ namespace engine::replication {
 				LARGEST_CHUNK
 			);
 			Settings_.ChunkBytes = LARGEST_CHUNK;
+		}
+
+		if (Settings_.MessagesPerTick > MAXIMUM_PARTS) {
+			// **A part a receiver refuses is a part that never arrives**, and a
+			// tick missing a part is a tick the client will not acknowledge —
+			// so a limit above what `Delta::Part` may carry would stall the
+			// stream rather than merely waste the excess. Capped here for the
+			// same reason `ChunkBytes` is: the alternative is a setting that
+			// looks accepted and produces a client which joins and then watches
+			// a frozen world.
+			ENGINE_WARN(
+				"replication: {} delta messages a tick is more than the {} parts a tick may be split "
+				"into, so it is capped.",
+				Settings_.MessagesPerTick,
+				MAXIMUM_PARTS
+			);
+			Settings_.MessagesPerTick = MAXIMUM_PARTS;
 		}
 	}
 
@@ -222,6 +269,23 @@ namespace engine::replication {
 			scratch.CreateAt(entity);
 		}
 
+		// **The snapshot carries what a delta would have carried, and that is a
+		// decision rather than an accident of where the copy happens.** A join
+		// snapshot is built from this scratch world and a delta is built from
+		// the dirty bits, so a component with a compact wire form would reach a
+		// client at full precision through one path and quantised through the
+		// other — and the same entity would hold a different value depending on
+		// how that client learned it. That difference never shows as a failure;
+		// it shows as drift between two clients that joined at different
+		// moments. So every value with a wire form is put *through* it here,
+		// and the snapshot writes the value the far side would have decoded.
+		//
+		// The scratch world is the only place this is safe. Round-tripping the
+		// authoritative store would be quantising the server's own simulation,
+		// which is what `just determinism` exists to catch.
+		core::ByteWriter compact;
+		std::vector<std::byte> decoded;
+
 		for (const core::Name name : Components) {
 			const ecs::ComponentId id = ecs::Components::Find(name);
 			if (!id.IsValid()) {
@@ -229,10 +293,29 @@ namespace engine::replication {
 				continue;
 			}
 
+			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
+			const bool quantised = descriptor.Wire.Present() && descriptor.Size > 0;
+			decoded.assign(quantised ? descriptor.Size : 0, std::byte{0});
+
 			for (const ecs::Entity entity : Visible) {
-				if (const void *value = store.GetComponent(entity, id); value != nullptr) {
-					scratch.SetComponent(entity, id, value);
+				const void *value = store.GetComponent(entity, id);
+				if (value == nullptr) {
+					continue;
 				}
+
+				if (!quantised) {
+					scratch.SetComponent(entity, id, value);
+					continue;
+				}
+
+				compact.Clear();
+				descriptor.Wire.Write(compact, value, 1);
+
+				core::ByteReader reader(compact.Bytes());
+				descriptor.DefaultConstruct(decoded.data(), 1);
+				descriptor.Wire.Read(reader, decoded.data(), 1);
+				scratch.SetComponent(entity, id, decoded.data());
+				descriptor.Destruct(decoded.data(), 1);
 			}
 		}
 
@@ -335,11 +418,21 @@ namespace engine::replication {
 		// only ever checked the join.
 		//
 		// So a tick's delta goes out as however many messages it takes, each
-		// under `ChunkBytes` and **each independently applicable**. Not a
-		// numbered sequence to reassemble: this is the unreliable channel, and a
-		// reassembly that waits for a part which was dropped is a stall on a
-		// path whose whole premise is that the next tick is already on its way.
-		// Losing a piece costs those entities one tick.
+		// under `ChunkBytes` and **each independently applicable**. Still not a
+		// reassembly: this is the unreliable channel, and holding a part back
+		// until its siblings arrive is a stall on a path whose whole premise is
+		// that the next tick is already on its way. Every part is applied the
+		// moment it lands.
+		//
+		// **What the parts are numbered for is the acknowledgement, not the
+		// application.** `Applied` names the last tick applied *in full*, and
+		// the server retires every value a tick carried once the client says so
+		// — so a client that acknowledged a tick it received five parts of six
+		// of retired the sixth part's values unsent, and anything in it that
+		// then stopped moving was wrong until a re-snapshot nothing would ask
+		// for. D00013. The numbering below is what lets the client tell the two
+		// apart; the marker is set once the packing has finished, at the bottom
+		// of this function.
 		//
 		// The pieces all carry the same tick, which is why `Replica` treats a
 		// delta at the tick it has already applied as another part rather than
@@ -363,11 +456,23 @@ namespace engine::replication {
 		piece.Baseline = delta.Baseline;
 		OpenEntry.assign(delta.Components.size(), NOWHERE);
 
+		// The last part that actually went, and where it sits in `Outgoing`, so
+		// the final marker can be put on it once it is known to be the last.
+		Delta emitted;
+		size_t emittedAt = NOWHERE;
+
 		// Sends the message being built, unless doing so would spend more than
 		// this client's tick is worth. Everything after a refusal stays
 		// unbuilt, which is what makes `Placement` a prefix.
 		const auto flush = [&]() -> bool {
 			if (!piece.Components.empty()) {
+				// Numbered by how many parts of this tick have actually gone,
+				// so the numbers a receiver sees are 0, 1, 2 with no holes —
+				// a part counted before the budget refused it would be a hole
+				// the receiver waits on for a message that was never built.
+				piece.Part = static_cast<uint16_t>(messages);
+				piece.Final = false;
+
 				std::vector<std::byte> encoded = Encode(piece);
 				if (messages >= messageLimit || bytes + encoded.size() > Settings_.BytesPerTick) {
 					return false;
@@ -381,8 +486,13 @@ namespace engine::replication {
 				// entity in or out of the known set — that is `EmitStructure`'s
 				// — and a component value in a refused delta is offered again
 				// next tick by the unconfirmed set.
+				emittedAt = client.Outgoing.size();
 				client.Outgoing.push_back(std::move(encoded));
-				client.Carried_.push_back(Carried{});
+
+				Carried carried;
+				carried.Values = true;
+				client.Carried_.push_back(carried);
+				emitted = std::move(piece);
 			}
 
 			piece = Delta{};
@@ -436,6 +546,29 @@ namespace engine::replication {
 		if (room) {
 			flush();
 		}
+
+		// **"All of tick N" is the parts this pass emitted, and nothing else.**
+		// Written here rather than while a part is being built because until
+		// the packing has finished nothing knows which part was the last — the
+		// loop above stops on a full message, a full budget or a full tick, and
+		// only the third of those is visible from inside `flush`.
+		//
+		// This is also the whole reason the byte budget cannot make a tick look
+		// incomplete. Everything the cap held over was never part of tick N: it
+		// keeps its unconfirmed entry, comes back on a later tick, and the
+		// client is told this tick ended here. A marker meaning "nothing else
+		// changed" would leave every trimmed tick unacknowledged, which is a
+		// stalled stream on exactly the servers the cap exists for.
+		//
+		// Re-encoded rather than patched at an offset. The two fields are fixed
+		// width, so the size is unchanged and the byte accounting above stays
+		// exact; an offset would be a second place that has to agree with
+		// `WriteMessage` about the layout.
+		if (emittedAt != NOWHERE) {
+			emitted.Final = true;
+			client.Outgoing[emittedAt] = Encode(emitted);
+		}
+
 		return placed;
 	}
 
@@ -543,15 +676,18 @@ namespace engine::replication {
 				continue;
 			}
 
-			if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + descriptor.Size >
-				Settings_.ChunkBytes) {
+			// Against the form it actually crosses in, not against `sizeof`. A
+			// component with a compact wire form that fits and a stored size
+			// that does not would otherwise be refused for a size nothing sends.
+			const size_t crossing = WireBytes(descriptor);
+			if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + crossing > Settings_.ChunkBytes) {
 				// One entity of this component does not fit an empty message.
 				// Nothing can be done about it here and dropping it quietly
 				// would be a component that never arrives.
 				ENGINE_WARN(
-					"replication: '{}' is {} bytes and cannot fit a delta message.",
+					"replication: '{}' is {} bytes on the wire and cannot fit a delta message.",
 					name.Text(),
-					descriptor.Size
+					crossing
 				);
 				continue;
 			}
@@ -605,8 +741,8 @@ namespace engine::replication {
 
 					offer(entity);
 					if (descriptor.Size > 0) {
-						descriptor.Write(
-							values, static_cast<const std::byte *>(data) + row * descriptor.Size, 1
+						WriteValue(
+							values, descriptor, static_cast<const std::byte *>(data) + row * descriptor.Size
 						);
 					}
 				}
@@ -651,7 +787,7 @@ namespace engine::replication {
 
 				offer(entity);
 				if (descriptor.Size > 0) {
-					descriptor.Write(values, static_cast<const std::byte *>(value), 1);
+					WriteValue(values, descriptor, value);
 				}
 			}
 
@@ -681,6 +817,12 @@ namespace engine::replication {
 		// entities come and go and nothing moves, and re-snapshot a client that
 		// is in perfect agreement. The same argument as the quiet world above.
 		if (placed.Values > 0) {
+			// Kept so `Unsent` can put it back. A tick whose parts the
+			// transport would not all take is a tick the client cannot
+			// acknowledge — every part of it has to arrive before `Applied` may
+			// name it — so it must not be the tick the client's silence is
+			// measured against.
+			client.StreamedBefore = client.Streamed;
 			client.Streamed = tick;
 		}
 
@@ -968,6 +1110,25 @@ namespace engine::replication {
 		}
 
 		const Carried &carried = found->Carried_[index];
+
+		if (carried.Values) {
+			// **The values still need nothing undone; the tick does.** They are
+			// offered again next tick by the unconfirmed set and they are not
+			// retired in the meantime, because a client only acknowledges a tick
+			// it holds every part of — and a part the transport would not take
+			// is a part that never arrives, so this tick will never be
+			// acknowledged.
+			//
+			// Which is exactly why it must stop counting as a tick that
+			// streamed. Left alone, a link whose packet budget is below
+			// `MessagesPerTick` cuts every tick short, `Streamed` runs away from
+			// an `Applied` that cannot follow it, and the client is
+			// re-snapshotted every `ResnapshotAfterTicks` for ever — the whole
+			// world, twice a minute, over the link that was already refusing a
+			// delta. `ConnectionStats::SendsOverBudget` is what says this is
+			// happening; a re-snapshot loop is not.
+			found->Streamed = found->StreamedBefore;
+		}
 
 		if (carried.SnapshotOffset != NOWHERE) {
 			// **Back to the earliest byte that did not go**, not to this

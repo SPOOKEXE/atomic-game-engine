@@ -136,6 +136,37 @@ starts appearing beside components nothing writes in bulk, it has spread** — a
 the fix is to delete it there, not to make the hash cheaper. A reviewer adding
 one should be able to name the batch writer.
 
+## The wire grid is beside `WorldBounds` because it is the same decision
+
+`Wire.hpp` is what `Transform` and `Motion` look like on a replication
+datagram: a position as three fixed-point axes, a rotation as smallest-three,
+twenty-eight bytes as ten. **How coarse that grid is depends entirely on how far
+the world reaches** — two millimetres over 128 metres is a different figure over
+four kilometres — so the extent it covers is stated in the same terms as
+`WorldBounds::HalfExtent` and the error is stated in metres rather than left to
+be worked out.
+
+Three things a reviewer should refuse:
+
+- **A wire form on a component that does not replicate.** `PreviousTransform`
+  has none deliberately: it is render-side history and never reaches a wire, so
+  declaring a compact form for it would be declaring a format nothing uses and
+  nothing tests.
+- **A stated bound without a case that measures it.** `engine.scene.wire`
+  asserts both that nothing exceeds the bound and that something comes close to
+  it. A bound only the first half of that guards is one a widened grid slips
+  under.
+- **Wrapping instead of clamping outside the extent.** A clamped entity piles up
+  against a wall somebody can see; a wrapped one appears at the far side of the
+  world and is indistinguishable from a teleport the server meant. Every decode
+  clamps as well as every encode, because the bits arriving from a peer are not
+  the bits an encoder wrote.
+
+**A world larger than the grid is a decision made where the world is authored**,
+not inside the encoder — which sees one component and not a world.
+`WireCoversWorld` is the check and `mono.server`'s placeholder world holds it as
+a `static_assert`.
+
 ## There is no transform hierarchy, and there is not going to be one here
 
 `Transform` is world space. Parenting is organisational, exactly as Roblox's is:

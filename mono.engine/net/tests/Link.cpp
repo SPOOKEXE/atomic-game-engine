@@ -191,6 +191,91 @@ TEST_CASE("a late reliable packet is still delivered", "[net][link]") {
 	CHECK(link.Stats().PacketsStale == 0);
 }
 
+TEST_CASE("a reliable resend does not make a later unreliable packet stale", "[net][link]") {
+	Link link = Connected();
+
+	// A join: several reliable packets, then the first unreliable delta. One
+	// high-water mark for the whole link would have been dragged to 20 by the
+	// reliable traffic, and every unreliable packet below that thrown away —
+	// which is the failure the per-channel counters exist to prevent, and it
+	// was live until v0.4 as a warm-up `replication`'s loss suite worked around.
+	for (uint16_t sequence = 0; sequence <= 20; sequence++) {
+		CHECK(link.OnPacket(Arrival(sequence, ChannelKind::Reliable), 8, 1.0));
+	}
+
+	CHECK(link.OnPacket(Arrival(0), 8, 2.0));
+	CHECK(link.OnPacket(Arrival(1), 8, 2.0));
+	CHECK(link.OnPacket(Arrival(2), 8, 2.0));
+	CHECK(link.Stats().PacketsStale == 0);
+}
+
+TEST_CASE("a channel's first packet is not a duplicate", "[net][link]") {
+	Link link = Connected();
+
+	// Zero is a legitimate sequence — it is the first one `NextHeader` stamps —
+	// so no value can stand for "nothing has arrived". A mark that started at
+	// zero and was trusted would read this as a repeat of a packet that never
+	// existed.
+	CHECK(link.OnPacket(Arrival(0), 8, 1.0));
+	CHECK(link.Stats().PacketsStale == 0);
+	CHECK(link.Stats().PacketsLost == 0);
+
+	// And a stream that opens partway through its range has lost nothing.
+	Link late = Connected();
+	CHECK(late.OnPacket(Arrival(5000), 8, 1.0));
+	CHECK(late.Stats().PacketsLost == 0);
+	CHECK(late.OnPacket(Arrival(4999), 8, 1.0) == false);
+	CHECK(late.Stats().PacketsStale == 1);
+}
+
+TEST_CASE("one channel wrapping does not disturb another", "[net][link]") {
+	Link link = Connected();
+
+	// The unreliable channel is about to wrap; the reliable one is nowhere
+	// near. Each mark has to wrap-compare against its own, because `IsNewer` is
+	// a half-range comparison and 0 against 65534 means "newer" while 0 against
+	// 3 means "older" — one shared mark answers one of those two questions for
+	// both channels.
+	CHECK(link.OnPacket(Arrival(65534), 8, 1.0));
+	CHECK(link.OnPacket(Arrival(3, ChannelKind::Reliable), 8, 1.0));
+
+	CHECK(link.OnPacket(Arrival(65535), 8, 1.0));
+	CHECK(link.OnPacket(Arrival(0), 8, 1.0));
+	CHECK(link.OnPacket(Arrival(1), 8, 1.0));
+	CHECK(link.Stats().PacketsStale == 0);
+
+	// Still ordered across the wrap: 65535 is behind the mark that is now 1.
+	CHECK_FALSE(link.OnPacket(Arrival(65535), 8, 1.0));
+	CHECK(link.Stats().PacketsStale == 1);
+
+	// And the reliable channel, four sequences in, was never touched by any of
+	// it — a late one is still delivered.
+	CHECK(link.OnPacket(Arrival(4, ChannelKind::Reliable), 8, 1.0));
+	CHECK(link.OnPacket(Arrival(2, ChannelKind::Reliable), 8, 1.0));
+	CHECK(link.Stats().PacketsStale == 1);
+}
+
+TEST_CASE("a handshake packet is judged against no window", "[net][link]") {
+	Link link = Connected();
+
+	CHECK(link.OnPacket(Arrival(9), 8, 1.0));
+
+	// Answered before there is a link to number it, so nobody assigned these
+	// sequences and nothing may read an ordering into them. A window of its own
+	// would count twenty thousand packets lost between these two; a window
+	// shared with the unreliable channel would drag that channel's mark up to
+	// 20000 and refuse everything it was about to receive.
+	CHECK(link.OnPacket(Arrival(0, ChannelKind::Handshake), 8, 1.0));
+	CHECK(link.OnPacket(Arrival(20000, ChannelKind::Handshake), 8, 1.0));
+	CHECK(link.Stats().PacketsLost == 0);
+	CHECK(link.Stats().PacketsStale == 0);
+
+	// And the unreliable stream carries on from where it was.
+	CHECK(link.OnPacket(Arrival(10), 8, 1.0));
+	CHECK(link.Stats().PacketsStale == 0);
+	CHECK(link.Stats().PacketsLost == 0);
+}
+
 TEST_CASE("a gap in sequences is counted as loss", "[net][link]") {
 	Link link = Connected();
 
@@ -293,6 +378,7 @@ TEST_CASE("an outgoing header carries the acknowledgement", "[net][link]") {
 
 	CHECK(link.OnPacket(Arrival(40), 8, 1.0));
 	CHECK(link.OnPacket(Arrival(42), 8, 1.0));
+	CHECK(link.OnPacket(Arrival(3, ChannelKind::Reliable), 8, 1.0));
 
 	// Rides every packet rather than travelling as its own message: an
 	// acknowledgement needing a packet of its own doubles the packet rate of a
@@ -300,6 +386,12 @@ TEST_CASE("an outgoing header carries the acknowledgement", "[net][link]") {
 	const auto header = link.NextHeader(ChannelKind::Unreliable);
 	CHECK(header.Acknowledge == 42);
 	CHECK((header.AcknowledgeBits & 0x2u) != 0);
+
+	// **Of the channel it is stamping**, because there is one sequence space
+	// per channel and one field to name a sequence in. Naming 42 on a reliable
+	// packet would point the far side's reliable sender at a sequence out of
+	// its own counter's reach.
+	CHECK(link.NextHeader(ChannelKind::Reliable).Acknowledge == 3);
 }
 
 TEST_CASE("a quiet connection asks for a keep-alive", "[net][link]") {

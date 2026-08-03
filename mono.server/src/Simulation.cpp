@@ -4,6 +4,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Wire.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
@@ -218,6 +219,18 @@ namespace server {
 
 	void BuildPlaceholderWorld(Store &store, Scheduler &scheduler, uint32_t count) {
 		constexpr float HALF_EXTENT = 64.0f;
+
+		// **The world's size and the replication wire's position grid are one
+		// decision made in two files**, and this is the line that keeps them
+		// together. A world authored past the grid does not fail to replicate —
+		// its entities are clamped and pile up against a wall that is not this
+		// one — so the size is checked where it is chosen rather than
+		// discovered per entity on a client. `scene/Wire.hpp` states the grid
+		// and the error it introduces.
+		static_assert(
+			engine::scene::WireCoversWorld(HALF_EXTENT),
+			"this world reaches further than the replication wire's position grid"
+		);
 
 		// Before the first `Set`, on every path. An unregistered component is
 		// minted under whatever the compiler calls the type, which is not a

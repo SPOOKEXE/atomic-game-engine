@@ -301,6 +301,14 @@ namespace engine::scene {
 	// and is derived per entity; this is authored, it is one per world, and
 	// nothing recomputes it.
 	//
+	// **The replication wire's position grid is the other half of this
+	// number.** `Wire.hpp` quantises a `Transform` over a stated extent, and
+	// how coarse that grid is depends entirely on how far the world reaches —
+	// two millimetres over 128 metres is a different figure over four
+	// kilometres. `WireCoversWorld` is the check, and it belongs beside
+	// whatever authors this value rather than inside the encoder, which sees
+	// one component and not a world.
+	//
 	// @since v0.4
 	struct WorldBounds {
 		// Metres from the origin to the edge, on each axis, so the world spans

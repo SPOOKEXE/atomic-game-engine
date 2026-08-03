@@ -10,12 +10,15 @@
 // Headless, and one worker, so a run of this agrees with the run before it.
 
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Wire.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <client/Demo.hpp>
+#include <cmath>
 #include <cstdint>
 #include <unified/Harness.hpp>
 #include <vector>
@@ -24,6 +27,7 @@ TEST_SUITE_ID("unified.harness")
 TEST_DEPENDS("client.replicated")
 TEST_DEPENDS("engine.replication.snapshotbuffer")
 TEST_DEPENDS("engine.scene.components")
+TEST_DEPENDS("engine.scene.wire")
 TEST_DEPENDS("server.simulation")
 
 using Catch::Approx;
@@ -179,4 +183,64 @@ TEST_CASE("the probe is the same entity between two runs", "[unified]") {
 		REQUIRE(left.DrawnX == right.DrawnX);
 		REQUIRE(left.Bytes == right.Bytes);
 	}
+}
+
+TEST_CASE("the world crosses quantised and the server's copy does not", "[unified]") {
+	// **The whole of D00015(a), end to end, with the real components and no
+	// network in the way.** `engine.replication.quantisation` proves the seam
+	// with a component of its own and `engine.scene.wire` proves the grid; this
+	// is the only place the two meet over `scene::Transform` itself, which is
+	// the thing the change was for.
+	//
+	// Both halves are asserted, because each alone is satisfied by the bug the
+	// other one catches: a client agreeing exactly would mean nothing was
+	// quantised, and a server that had drifted onto the grid would mean the
+	// authority had been quantised along with the wire.
+	Settings settings;
+	settings.Entities = 64;
+
+	Harness harness(settings);
+	REQUIRE(harness.Join());
+
+	for (int step = 0; step < 30; step++) {
+		harness.Step();
+	}
+
+	size_t compared = 0;
+	size_t differing = 0;
+	float worst = 0.0f;
+	bool serverOffGrid = false;
+
+	const float step =
+		engine::scene::WIRE_POSITION_HALF_EXTENT_METRES / static_cast<float>(engine::scene::WIRE_STEPS);
+
+	harness.ServerWorld().Each<const Transform>([&](engine::ecs::Entity entity,
+													const Transform &authoritative) {
+		const Transform *replicated = harness.ClientWorld().Get<Transform>(entity);
+		if (replicated == nullptr) {
+			return;
+		}
+
+		compared++;
+		const float difference = std::abs(replicated->Frame.Position.X - authoritative.Frame.Position.X);
+		worst = std::max(worst, difference);
+		if (difference > 0.0f) {
+			differing++;
+		}
+
+		// The server's own value sits between grid points, which it could
+		// not do if anything had round-tripped it.
+		const float offset = std::abs(std::remainder(authoritative.Frame.Position.X, step));
+		if (offset > step * 0.1f) {
+			serverOffGrid = true;
+		}
+	});
+
+	REQUIRE(compared == 64);
+	CHECK(worst <= engine::scene::WIRE_POSITION_ERROR_METRES);
+
+	// And something really was rounded, or the bound above is a bound on
+	// nothing happening.
+	CHECK(differing > compared / 2);
+	CHECK(serverOffGrid);
 }

@@ -165,14 +165,21 @@ namespace engine::replication {
 		//
 		// **A pose per entity per tick, taken from the world after the tick was
 		// applied.** That is deliberately what the store holds rather than what
-		// the tick's messages carried: a tick whose delta was split across
-		// several datagrams and lost one of them leaves the rows in that
-		// datagram at their previous value, and recording the previous value is
-		// recording the truth about what this client knows. The entity then
-		// reads as having stood still for one tick and moved twice as far on the
-		// next, which the interpolation smooths across two segments rather than
-		// one — it does not invent motion the server never sent. `D00013` is why
-		// that case exists and is not fixed here.
+		// the tick's messages carried.
+		//
+		// **And the caller feeds it `Replica::Applied`, which is why a tick that
+		// arrived in pieces and lost one is never recorded at all.** `Applied`
+		// names the last tick held in full — every part of it and every row it
+		// named — so the store this reads is never a mixture of the rows one
+		// datagram carried and the previous values of the rows another was going
+		// to. A pose taken from that mixture would be interpolated through and
+		// then contradicted a tick later when the missing values arrive, which is
+		// a visible snap on entities that never moved. D00013.
+		//
+		// A tick skipped this way leaves a wider gap between two samples, which
+		// is a longer segment to interpolate across and not a hole: the clock is
+		// on the tick axis and the arithmetic does not care that the two are two
+		// ticks apart rather than one.
 		//
 		// An entity in the predicted index range is ignored, and so is the
 		// entity named by `Predict`. Both are this client's own run-ahead and

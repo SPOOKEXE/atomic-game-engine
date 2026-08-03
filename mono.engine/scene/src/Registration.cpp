@@ -5,6 +5,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/Wire.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -102,10 +103,21 @@ namespace engine::scene {
 		// the order rows are visited across the whole engine, so a
 		// floating-point sum over them can come out differently. Add at the
 		// end.
-		ecs::Components::Register<Transform>("scene.Transform");
+		// **The two that carry a wire form are the two that dominate a delta**,
+		// and this is the only place either half of the engine says so — a
+		// server and a client cannot disagree about how a `Transform` crosses
+		// without disagreeing about what a `Transform` is. The file
+		// serialisation is untouched and stays lossless; `Wire.hpp` says what
+		// the compact one costs and `ecs/TypeDescriptor.hpp` says why it is a
+		// second pair rather than a replacement.
+		//
+		// `PreviousTransform` deliberately has none. It is a render-side
+		// history nothing replicates, and giving it one would be declaring a
+		// wire form for something that never reaches a wire.
+		ecs::Components::Register<Transform>("scene.Transform", TransformWire());
 		ecs::Components::Register<PreviousTransform>("scene.PreviousTransform");
 		ecs::Components::Register<Bounds>("scene.Bounds");
-		ecs::Components::Register<Motion>("scene.Motion");
+		ecs::Components::Register<Motion>("scene.Motion", MotionWire());
 		ecs::Components::Register<RigidBody>("scene.RigidBody");
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);

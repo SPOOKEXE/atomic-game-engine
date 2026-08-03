@@ -79,6 +79,16 @@ namespace engine::replication {
 
 		// The last tick applied in full.
 		//
+		// **In full means two things and both are checked.** Every part of the
+		// tick's delta arrived — see `Delta::Part` — and every value in them
+		// reached a row this client holds. The server retires everything a tick
+		// carried the moment this is acknowledged, so a tick that was short of
+		// either is not one this may name.
+		//
+		// It skips rather than stalls. A tick with a part missing is passed
+		// over as soon as a later complete one lands, because everything the
+		// missing part carried is still unconfirmed and rides that later tick.
+		//
 		// Zero before the snapshot has finished arriving — a client that
 		// acknowledged a tick it had not applied would stop the server sending
 		// the thing it is still waiting for.
@@ -140,6 +150,23 @@ namespace engine::replication {
 			// announced.
 			uint64_t Partial = 0;
 
+			// Ticks a part of never arrived, so they were never acknowledged.
+			//
+			// **The number that says D00013's hole is being hit rather than
+			// argued about.** A tick's delta goes out as however many
+			// independently applicable messages it takes; losing one leaves the
+			// tick short of a part, and a tick with a part missing is not
+			// acknowledged — so every value it carried stays unconfirmed on the
+			// server and comes back on the next tick. One of these costs one
+			// tick of acknowledgement and nothing else.
+			//
+			// A figure that tracks the tick count is a link losing more than
+			// the delta path can absorb: no tick ever completes, nothing is
+			// acknowledged, and the server re-snapshots this client after
+			// `AuthoritySettings::ResnapshotAfterTicks`. That is the bound on
+			// the wait and it is deliberately the one that already existed.
+			uint64_t Incomplete = 0;
+
 			// Structural messages applied.
 			//
 			// Counts resends too, and deliberately: a figure well above the
@@ -168,6 +195,44 @@ namespace engine::replication {
 		ApplyStatus Apply(ecs::Store &store, const replication::Delta &delta);
 		ApplyStatus Apply(ecs::Store &store, const replication::Structure &structure);
 
+		// Which parts of one tick's delta have arrived.
+		//
+		// **One tick rather than a ring, and that is a decision.** A tick that
+		// never completes is superseded rather than waited for: the values its
+		// missing part carried are still unconfirmed on the server, so they are
+		// offered again on the next tick, and finishing the older tick
+		// afterwards would confirm nothing newer than finishing the newer one.
+		// A ring would be a second thing to keep in step for an answer that is
+		// never fresher.
+		struct Parts {
+			// The tick being counted, and whether one is being counted at all.
+			uint64_t Tick = 0;
+			bool Counting = false;
+
+			// Which parts have arrived, indexed by `Delta::Part` and bounded by
+			// `MAXIMUM_PARTS`. A set of positions rather than a count of
+			// arrivals, because the unreliable channel delivers a part twice as
+			// readily as once and a count would read the second copy as
+			// progress.
+			std::vector<bool> Held;
+
+			// The part that carried `Delta::Final`, and whether one has.
+			uint16_t Last = 0;
+			bool Ended = false;
+
+			// Whether every part from zero to `Last` is in `Held`. Kept so that
+			// abandoning this tick can tell a lost part from a tick that was
+			// complete and merely named a row this client does not hold.
+			bool Whole = false;
+		};
+
+		// Notes one part's arrival and says whether its tick is now held whole.
+		//
+		// @param delta The part that has just been applied.
+		// @return `true` when every part the sender emitted for that tick is
+		//         here, so the tick may be acknowledged.
+		bool Count(const replication::Delta &delta);
+
 		// The snapshot being reassembled. Sized from the total the first chunk
 		// declares, and every later chunk is checked against it.
 		std::vector<std::byte> Snapshot;
@@ -177,6 +242,7 @@ namespace engine::replication {
 		bool Assembling = false;
 
 		std::vector<ecs::Entity> Forgotten_;
+		Parts Counting;
 		uint64_t Applied_ = 0;
 		bool Joined_ = false;
 		Statistics Stats_;

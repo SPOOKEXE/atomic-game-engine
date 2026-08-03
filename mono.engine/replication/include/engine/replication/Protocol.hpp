@@ -84,7 +84,19 @@ namespace engine::replication {
 	// 2 at v0.5: creations and destructions moved out of `Delta` and joined
 	// forgets in `Structure`, so a version 1 peer would read a delta's component
 	// count out of the bytes that used to be its creation list.
-	inline constexpr uint16_t PROTOCOL_VERSION = 2;
+	//
+	// 3 at v0.5: `Delta` gained a part number and a final marker, three bytes
+	// between the baseline and the component count, so a version 2 peer would
+	// read the first three bytes of that count out of them.
+	//
+	// 4 at v0.5: a component may cross in a compact, lossy form —
+	// `ecs::TypeDescriptor::Wire` — so `ComponentDelta::Values` is a different
+	// number of bytes per entity for the same component. No field moved and no
+	// field was added; a version 3 peer would read a `scene.Transform` of ten
+	// bytes as the first ten of twenty-eight and take the next entity's value
+	// for the rest of it. That is the worst kind of format change to leave
+	// undeclared, because it parses.
+	inline constexpr uint16_t PROTOCOL_VERSION = 4;
 
 	// One piece of a snapshot.
 	//
@@ -139,6 +151,36 @@ namespace engine::replication {
 		// The tick the sender believes the receiver last applied. Carried so a
 		// client can tell a gap from a reorder without keeping its own history.
 		uint64_t Baseline = 0;
+
+		// Which part of this tick's delta this message is, counted from zero.
+		//
+		// **A position, not an arrival order.** A tick's delta goes out as
+		// however many messages it takes and every one of them carries the same
+		// `Tick`, so without a number the receiver cannot tell three parts from
+		// the same part three times — and the unreliable channel delivers twice
+		// and out of order as readily as once and in order. Counting arrivals
+		// would read a duplicate as progress and a reorder as a hole.
+		//
+		// @since v0.5
+		uint16_t Part = 0;
+
+		// Whether this is the last part of this tick the sender emitted.
+		//
+		// **Authored by the sender when the tick is packed, and it means "that
+		// is all of tick N" rather than "nothing else changed".** A tick the
+		// per-client budget deliberately trimmed is *complete*: what was held
+		// back was never part of this tick, it is still unconfirmed, and it
+		// comes back on a later one. A marker derived from what changed instead
+		// would make every trimmed tick look like a tick with a part missing,
+		// and a receiver that waits for those parts would stop acknowledging on
+		// the one path — a world larger than a link — where trimming is the
+		// ordinary case rather than a fault.
+		//
+		// True by default, because a delta that is the only message of its tick
+		// is the whole of that tick.
+		//
+		// @since v0.5
+		bool Final = true;
 
 		// What moved, per component.
 		std::vector<ComponentDelta> Components;
@@ -280,4 +322,18 @@ namespace engine::replication {
 	// any real tick's traffic and far below anything that would hurt — without
 	// it, four bytes from a peer are an out-of-memory kill.
 	inline constexpr uint32_t MAXIMUM_ENTRIES = 1u << 20u;
+
+	// The most parts one tick's delta may be split into.
+	//
+	// The same kind of bound as `MAXIMUM_ENTRIES` and for the same reason: a
+	// receiver remembers which parts of a tick have arrived, indexed by
+	// `Delta::Part`, so an unbounded part number is two bytes from a peer
+	// choosing how much this process remembers.
+	//
+	// Far above `AuthoritySettings::MessagesPerTick`, which `Authority` caps
+	// against this number so that a sender cannot build a part a receiver will
+	// refuse.
+	//
+	// @since v0.5
+	inline constexpr uint16_t MAXIMUM_PARTS = 1024;
 }

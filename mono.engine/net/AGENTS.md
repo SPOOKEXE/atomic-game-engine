@@ -58,8 +58,29 @@ visible stall for every player. Do not add a "reliable by default" convenience.
 late is a resend that still has to be delivered in order; discarding it would
 silently drop an event the sender believes was acknowledged.
 
-**Each channel has its own sequence counter.** One shared counter would let a
-reliable resend make an unreliable packet look stale.
+**Each channel has its own sequence counter, in both directions.** One shared
+counter would let a reliable resend make an unreliable packet look stale — and
+so would one shared *high-water mark* on the receiving side, which is the half
+that was actually wrong until v0.4. `Link` keeps a window per channel and every
+one wraps on its own: `Packet::IsNewer` is a half-range comparison and answers
+nonsense when the two numbers come from different counters.
+
+**A channel's first packet is accepted, whatever its sequence.** Zero is a
+legitimate sequence — it is the first one `NextHeader` stamps — so no value can
+stand for "nothing yet" and the window carries a flag instead. Treating zero as
+"already seen sequence 0" reads a channel's opening packet as a repeat of one
+that never existed, and counts every sequence below the one it opened at as
+lost.
+
+**A `Handshake` packet has no window and moves none.** It is answered before
+there is a link to number it, so it belongs to no stream. It still proves the
+peer is alive.
+
+Because the acknowledgement fields report one sequence and there is now one
+space per channel, `Link::NextHeader` acknowledges the channel it stamps.
+Retiring a reliable payload needs an acknowledgement on *every* packet, and
+that is `ReliableReceiver::Acknowledging`'s job — the two are the same root
+cause, one window over two counters, seen from either end.
 
 ## Sequence comparison is wrap-aware, and this is not optional
 

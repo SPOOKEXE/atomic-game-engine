@@ -119,6 +119,42 @@ separate one.** The server's `Sealer` seals the `Welcome` tag at counter zero
 and carries on from one, so the admission and the traffic share a single nonce
 sequence rather than two that could overlap.
 
+## A value crosses in its compact form, and the store never sees one
+
+`ecs::TypeDescriptor::Wire` is a second, lossy serialisation a component may
+carry — `scene::Transform` is twenty-eight bytes in a store and ten on a
+datagram, `scene::Motion` twenty-four and twelve, which is a measured 25 entity
+values a datagram becoming 50. Three rules, and the build checks none of them.
+
+**It happens on the wire and never in the store.** The server is authoritative
+and a quantised value must not feed back into its own simulation, or
+`just determinism` and `just replay-check` stop being byte-identical. The
+natural implementation is a codec per component and the natural mistake is to
+round-trip the authority's own values through it, after which the server is
+simulating the client's approximation of its world.
+`engine.replication.quantisation` ticks a served world beside an unserved one
+and requires the two to save to the same bytes, which is exactly the comparison
+those two recipes make.
+
+**The snapshot path and the delta path have to agree, and they are two places.**
+A delta is built from the dirty bits and a join snapshot is built from a scratch
+store, so `BeginSnapshot` puts every value with a wire form *through* it before
+copying — the snapshot then carries what the far side would have decoded. If one
+path quantised and the other did not, a client's world would depend on when it
+joined, which never shows as a failure and always shows as drift between two
+clients. The scratch store is the only place that round trip is safe.
+
+**A decode has to be exact on both ends, and that is why (a) came before (b).**
+Every grid step is a whole number over a power of two and a decode is one
+correctly-rounded division, so the value a client holds is a value the server
+can predict bit for bit. D00015(b)'s group signatures hash exactly that; a
+decode that only nearly agreed would force a tolerance, and a hash with a
+tolerance is not a hash.
+
+`WireBytes` and `WriteValue` in `Authority.cpp` and the one branch in
+`Replica::Apply` are the only three places that choose between a type's two
+serialisations. A fourth is a place that can disagree with the other three.
+
 ## Deltas come from the dirty bits, not from a diff
 
 `ecs::ChangeChannel` already records what moved, for `.Changed` and for render
@@ -191,11 +227,47 @@ ordinary backpressure and a message that can never fit looks exactly like one. A
 world of thirty-two entities already built one.
 
 `Authority::Pack` splits a tick's delta into however many messages it takes,
-each under `ChunkBytes` and **each independently applicable** — not a numbered
-sequence to reassemble, because this is the unreliable channel and waiting for a
-part that was dropped is a stall on a path whose premise is that the next tick
-is already on its way. That is why `Replica` treats a delta at the tick it has
-already applied as another part rather than as stale.
+each under `ChunkBytes` and **each independently applicable** — never a
+reassembly, because this is the unreliable channel and holding a part back until
+its siblings arrive is a stall on a path whose premise is that the next tick is
+already on its way. Every part is applied the moment it lands. That is why
+`Replica` treats a delta at the tick it has already applied as another part
+rather than as stale.
+
+**The parts are numbered for the acknowledgement, not for the application, and
+that distinction is the whole of D00013.** `Delta::Part` and `Delta::Final` say
+where a message sits in its tick and which one ended it; `Applied` may name a
+tick only once the client holds every part of it. Without that the client
+acknowledged on the strength of the parts that arrived and the server retired
+the values in the one that did not — self-healing for a tick that fits one
+datagram and not for one that does not.
+
+Three things about the marker, and each of them is a way to get this wrong:
+
+- **It is authored by the sender when the tick is packed, and it means "that is
+  all of tick N".** Not "nothing else changed". The priority rotation
+  deliberately holds values back under a budget, and what it held back was never
+  part of this tick — it keeps its unconfirmed entry and comes back on a later
+  one. A marker derived from what changed would leave every trimmed tick
+  unacknowledged, on exactly the servers the cap exists for.
+- **A part number is a position, not an arrival order.** Parts arrive out of
+  order, twice, or not at all, so the receiver keeps a set of positions and a
+  contiguity check up to the final one. A count of arrivals reads a duplicate as
+  progress.
+- **An incomplete tick is passed over, never waited for.** The unreliable
+  channel does not resend, so a part that is gone is gone; the next tick
+  re-offers everything the missing one carried and acknowledging *that* tick
+  confirms it. One lost part costs one tick of acknowledgement. The bound on the
+  case where no tick ever completes is `ResnapshotAfterTicks`, which is this
+  module's existing answer to a client that cannot be caught up by deltas — and
+  `Replica::Statistics::Incomplete` is what says it is happening.
+
+**A part the transport refused is not a part that went out**, so `Unsent` rolls
+`Client::Streamed` back for a tick whose delta was cut short. The client cannot
+acknowledge a tick it holds only some of, so counting one against its silence
+measures it against something it was never given the chance to answer — and on a
+link whose packet budget is below `MessagesPerTick` that is every tick, for ever.
+Same argument as the quiet world and the held-back budget, one layer down.
 
 **A `Structure` message is split too**, and the forget was the third path to be
 missed. A world leaving view all at once names every entity in one message, and
@@ -252,12 +324,13 @@ way a delta is rightly judged is how a destroy never happens. And it carries no
 values, so treating it as a tick applied would confirm every value of that tick
 without one of them having arrived.
 
-**`Applied` means the last tick applied *in full*, and `Replica` now enforces
-it.** A delta naming a row this client does not hold yet — which is exactly what
-a creation still in flight looks like — is applied as far as it can be and does
-not move `Applied`. Without that, a creation arrived reliably some ticks late
-and the entity held none of its components, because the tick its values were in
-had already been acknowledged.
+**`Applied` means the last tick applied *in full*, and `Replica` enforces it in
+two ways.** A delta naming a row this client does not hold yet — which is
+exactly what a creation still in flight looks like — is applied as far as it can
+be and does not move `Applied`. Without that, a creation arrived reliably some
+ticks late and the entity held none of its components, because the tick its
+values were in had already been acknowledged. And a tick short of one of its
+parts does not move it either; see the section above.
 
 ## An entity coming into view has not moved
 
@@ -337,16 +410,6 @@ through two different sequences of insertions.
   without knowing which of them is a position. The same argument
   `SetInterest` is built on. Until a game supplies one the rotation is in sole
   charge, which is a plain round robin.
-- **A value lost from a tick that took several messages.** A tick's delta is
-  split into as many independently applicable messages as it takes, the client
-  applies whichever arrive and acknowledges the tick, and the server retires
-  every value that tick carried — including the ones in the message that never
-  came. So the v0.3 unconfirmed-entry resend is self-healing for a tick that
-  fits one datagram and not for one that does not. What is stranded is narrow —
-  a value that moves once and then never again, since anything that changes
-  arrives on its own merits next tick — and closing it needs the client to know
-  a tick had more parts than it received, which is a field on the wire.
-  `replication/tests/Loss.cpp` pins it.
 - **Authenticating a client, and authenticating the server.** The exchange is
   wired in, the stream that follows it is encrypted, and a stranger no longer
   gets a slot for a datagram — but the agreement still binds to no identity, so

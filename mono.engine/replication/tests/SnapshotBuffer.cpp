@@ -312,20 +312,23 @@ TEST_CASE("an entity this client minted is never buffered", "[replication][inter
 	REQUIRE(buffer.Sample(MOVER).has_value());
 }
 
-TEST_CASE(
-	"an incomplete tick records what the client holds and invents no motion", "[replication][interpolation]"
-) {
-	// **D00013's case, and this says what this buffer does with it rather than
-	// fixing it.** A tick whose delta took several datagrams and lost one leaves
-	// the rows in the lost one at their previous value, and that value is what a
-	// walk of the store finds. So the entity reads as having stood still for a
-	// tick and moved twice as far on the next — which is smoothed across two
-	// segments instead of one, and is never a pose between two values the server
-	// did not send in that order.
+TEST_CASE("a tick that repeats a value invents no motion", "[replication][interpolation]") {
+	// **The tick a value did not arrive on, which since D00013 is the tick the
+	// per-client budget held it over on rather than a tick a datagram was lost
+	// from.** A tick short of one of its parts is never acknowledged and
+	// therefore never reaches this buffer at all — `Record` is fed
+	// `Replica::Applied`. A tick the *budget* trimmed is complete, is
+	// acknowledged, and does leave the rows it held over at their previous
+	// value, which is what a walk of the store then finds.
+	//
+	// Either way the entity reads as having stood still for a tick and moved
+	// twice as far on the next, and that is smoothed across two segments instead
+	// of one — never a pose between two values the server did not send in that
+	// order.
 	SnapshotBuffer buffer(Steady());
 
-	// Ticks 1 to 4 arrive. Tick 5's value for this entity is in the datagram
-	// that went missing, so the store still holds tick 4's. Tick 6 arrives.
+	// Ticks 1 to 4 arrive. Tick 5 carried nothing for this entity, so the store
+	// still holds tick 4's value. Tick 6 arrives.
 	const double values[] = {1.0, 2.0, 3.0, 4.0, 4.0, 6.0, 7.0, 8.0, 9.0, 10.0};
 
 	double previous = 0.0;
@@ -341,13 +344,13 @@ TEST_CASE(
 
 		const double render = buffer.RenderTick();
 		if (render > 4.1 && render < 4.9) {
-			// Between tick 4 and the stale tick 5, both of which say 4.0. The
+			// Between tick 4 and tick 5, both of which say 4.0. The
 			// entity stands still, because that is what this client knows.
 			REQUIRE(x == Approx(4.0).margin(1e-4));
 			sawTheStall = true;
 		}
 		if (render > 5.4 && render < 5.6) {
-			// Between the stale 4.0 and tick 6's 6.0, so halfway is 5.0. The
+			// Between the repeated 4.0 and tick 6's 6.0, so halfway is 5.0. The
 			// motion is spread across the whole span rather than snapped at its
 			// end.
 			REQUIRE(x == Approx(5.0).margin(0.15));

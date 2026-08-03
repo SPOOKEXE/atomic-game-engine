@@ -33,6 +33,64 @@ namespace engine::replication {
 		Forgotten_.clear();
 	}
 
+	bool Replica::Count(const replication::Delta &delta) {
+		if (!Counting.Counting || delta.Tick > Counting.Tick) {
+			// **A newer tick supersedes an older one that never completed, and
+			// nothing waits for the part that did not come.** Waiting would be
+			// the regression this fix could easily have been: the unreliable
+			// channel does not resend, so a part that is gone is gone, and a
+			// client that stopped acknowledging until it arrived would stall
+			// for ever and earn a re-snapshot — a whole world to repair one
+			// value. It is safe to skip because every value the missing part
+			// carried is still unconfirmed on the server, so the next tick
+			// offers it again and acknowledging *that* tick confirms it.
+			if (Counting.Counting && !Counting.Whole) {
+				Stats_.Incomplete++;
+			}
+
+			Counting = Parts{};
+			Counting.Tick = delta.Tick;
+			Counting.Counting = true;
+		} else if (delta.Tick < Counting.Tick) {
+			// A part of a tick already passed over. Its values were still worth
+			// applying; its completeness is not, because nothing will
+			// acknowledge that tick now.
+			return false;
+		}
+
+		if (delta.Part >= Counting.Held.size()) {
+			// Bounded by `MAXIMUM_PARTS`, which `ReadMessage` has already
+			// refused anything above.
+			Counting.Held.resize(static_cast<size_t>(delta.Part) + 1, false);
+		}
+
+		// A set, so a duplicate sets a bit that is already set rather than
+		// counting as a second part.
+		Counting.Held[delta.Part] = true;
+
+		if (delta.Final) {
+			Counting.Last = delta.Part;
+			Counting.Ended = true;
+		}
+
+		if (!Counting.Ended) {
+			return false;
+		}
+
+		// Every position up to the final one, rather than "as many as the final
+		// one says". A sender is not trusted to be self-consistent, and a peer
+		// that sent parts five and six and then a final part two would
+		// otherwise have three arrivals read as parts nought, one and two.
+		for (size_t part = 0; part <= Counting.Last; part++) {
+			if (part >= Counting.Held.size() || !Counting.Held[part]) {
+				return false;
+			}
+		}
+
+		Counting.Whole = true;
+		return true;
+	}
+
 	ApplyStatus Replica::Apply(ecs::Store &store, const SnapshotChunk &chunk) {
 		// A later snapshot supersedes one still arriving. The server only sends
 		// a second when it has decided this client cannot be caught up, so
@@ -88,6 +146,12 @@ namespace engine::replication {
 		Snapshot.clear();
 		Snapshot.shrink_to_fit();
 		Received.clear();
+
+		// A snapshot *is* the tick it describes, so whatever parts of an older
+		// tick were being counted are about a world this client no longer
+		// holds. Dropped rather than counted as a loss: a re-snapshot is the
+		// server having given up on the delta stream, not a part going missing.
+		Counting = Parts{};
 
 		Applied_ = SnapshotTick;
 		Joined_ = true;
@@ -159,8 +223,21 @@ namespace engine::replication {
 					continue;
 				}
 
+				// **Through the compact form when the type has one**, which is
+				// the same choice `Authority` made when it wrote these bytes.
+				// The two are the same registration — `ecs::Components` installs
+				// the wire form beside the name — so a build that can resolve
+				// the component can decode it, and there is no third state in
+				// which one end quantises and the other does not.
+				//
+				// Never `TypeDescriptor::Read`: that is the file serialisation,
+				// it is what a recording is made of, and it must stay lossless.
 				descriptor.DefaultConstruct(scratch.data(), 1);
-				descriptor.Read(values, scratch.data(), 1);
+				if (descriptor.Wire.Present()) {
+					descriptor.Wire.Read(values, scratch.data(), 1);
+				} else {
+					descriptor.Read(values, scratch.data(), 1);
+				}
 				if (values.Failed()) {
 					descriptor.Destruct(scratch.data(), 1);
 					return ApplyStatus::Malformed;
@@ -181,20 +258,34 @@ namespace engine::replication {
 			}
 		}
 
+		// Counted after the values have been applied, because a part is worth
+		// applying whether or not its siblings ever turn up — the numbering
+		// decides what is acknowledged and never what is written.
+		const bool complete = Count(delta);
+
 		Stats_.Deltas++;
 
-		// **`Applied` means the last tick applied in full, and this is what makes
-		// that true.** The server retires an unconfirmed value once the client
-		// says it applied a tick at or after the one the value went out on, so
-		// acknowledging a tick whose values were dropped for want of the row
-		// confirms something that never landed — and the entity then carries the
-		// value it had before, for as long as it does not move again. That is how
-		// a creation that arrived late left an entity in the world with none of
-		// its components: the creation was resent by the reliable channel and the
-		// values were not, because the tick they were in had already been
-		// acknowledged.
+		// **`Applied` means the last tick applied in full, and these two checks
+		// are the whole of what makes that true.** The server retires an
+		// unconfirmed value once the client says it applied a tick at or after
+		// the one the value went out on, so a tick acknowledged short of
+		// anything confirms something that never landed — and the entity then
+		// carries the value it had before, for as long as it does not move
+		// again.
+		//
+		// Short of a row: a creation resent on the reliable channel arrived late
+		// and the entity held none of its components, because the tick its
+		// values were in had already been acknowledged.
+		//
+		// Short of a part: a tick's delta is as many messages as it takes, and
+		// acknowledging on the strength of the ones that arrived retired the
+		// values in the one that did not. Measured on the reproduction, that was
+		// eighteen of forty entities stranded and still eighteen forty ticks
+		// later. D00013.
 		if (!whole) {
 			Stats_.Partial++;
+		}
+		if (!whole || !complete) {
 			return ApplyStatus::Ok;
 		}
 

@@ -13,11 +13,13 @@
 #include "Wire.hpp"
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/net/LossyTransport.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -28,8 +30,10 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.replication.loss")
+TEST_DEPENDS("engine.core.types.cframe")
 TEST_DEPENDS("engine.net.lossytransport")
 TEST_DEPENDS("engine.replication.endtoend")
+TEST_DEPENDS("engine.replication.snapshotbuffer")
 
 using engine::ecs::Entity;
 using engine::net::LossSettings;
@@ -224,23 +228,23 @@ TEST_CASE("a forget whose datagram is lost still reaches the client", "[replicat
 	REQUIRE(wire.Replica_.Forgotten()[0] == watched);
 }
 
-TEST_CASE("a value lost from a tick that took several messages is not repaired", "[replication][loss]") {
-	// **A finding the sweep turned up and this change does not close.** A tick's
-	// delta is split into as many independently applicable messages as it takes;
-	// the client applies whichever arrive and acknowledges the tick, and the
-	// server then retires every value that tick carried — including the ones in
-	// the message that never came. The unconfirmed-entry resend added at v0.3 is
-	// therefore self-healing for a tick that fits one datagram and not for one
-	// that does not.
+TEST_CASE("a value lost from a tick that took several messages is repaired", "[replication][loss]") {
+	// **D00013, and this case was written to fail.** A tick's delta is split
+	// into as many independently applicable messages as it takes; the client
+	// used to apply whichever arrived and acknowledge the tick anyway, and the
+	// server then retired every value that tick carried — including the ones in
+	// the message that never came. Measured here before the fix: eighteen of
+	// forty entities stranded, and still eighteen forty ticks later.
 	//
-	// Closing it needs the client to know that a tick had more parts than it
-	// received, which is a field on the wire and a piece of work of its own. It
-	// is narrower than D00011 was: a value that changes again arrives on its own
-	// merits next tick, so what is stranded is a value that moves once and then
-	// never again.
+	// What closed it is a part number and a final marker on `Delta`, and a
+	// client that names a tick in `Applied` only once it holds every part the
+	// sender emitted. Nothing else moved: the unconfirmed-entry resend from v0.3
+	// is what actually carries the value back, and it works because the tick it
+	// was lost from is never acknowledged.
 	//
-	// **When this case starts failing, the hole has been closed. Update it
-	// rather than deleting it.**
+	// Same world and the same nominated datagram as the case that pinned the
+	// hole, so a failure here is the hole reopening rather than a different
+	// world being measured.
 	engine::replication::AuthoritySettings authority;
 	authority.ChunkBytes = 256;
 
@@ -253,28 +257,255 @@ TEST_CASE("a value lost from a tick that took several messages is not repaired",
 	}
 	REQUIRE(wire.Join(1024));
 
+	const uint64_t before = wire.Replica_.Applied();
+
 	for (const Entity entity : all) {
 		wire.Server.GetMutable<Spot>(entity)->X = 99.0f;
 	}
 	wire.ClientEnd->DropNext(1);
 	wire.Tick();
 
+	const uint64_t lostAt = wire.Tick_;
+	REQUIRE(wire.ClientEnd->Stats().Dropped == 1);
+
+	// The tick really did take several messages, so this is the split case and
+	// not a single-datagram tick that would have healed anyway.
+	REQUIRE(wire.Replica_.Stats().Deltas > 1);
+
+	// And it was not acknowledged, which is the whole of the fix. Every value
+	// it carried is therefore still unconfirmed on the server.
+	REQUIRE(wire.Replica_.Applied() == before);
+
+	// **The bound, asserted rather than described: one tick.** The very next
+	// tick re-offers everything that was still unconfirmed, arrives whole, and
+	// is acknowledged — so a part lost for ever costs one tick of
+	// acknowledgement and nothing more. Nothing waits for the datagram that
+	// never came, because nothing can: the unreliable channel does not resend.
+	wire.Tick();
+	REQUIRE(wire.Replica_.Applied() == lostAt + 1);
+	REQUIRE(wire.Replica_.Stats().Incomplete == 1);
+
 	// Nothing moves again, so nothing but the unconfirmed set can repair these.
 	for (int tick = 0; tick < 40; tick++) {
 		wire.Tick();
 	}
 
-	size_t stranded = 0;
 	for (const Entity entity : all) {
-		if (wire.Client.Get<Spot>(entity)->X != 99.0f) {
-			stranded++;
-		}
+		REQUIRE(wire.Client.Get<Spot>(entity)->X == 99.0f);
 	}
-	REQUIRE(stranded > 0);
 
-	// The rows the surviving messages carried did arrive, so this is a lost
-	// message rather than a stream that stopped.
-	REQUIRE(stranded < all.size());
+	// **Repaired by being told again, not by being sent the world again**, and
+	// exactly one tick was ever left short of a part.
+	REQUIRE(wire.Replica_.Stats().Incomplete == 1);
+	REQUIRE(wire.Authority_.Stats().Resnapshots == 0);
+	REQUIRE(wire.Replica_.Stats().Snapshots == 1);
+}
+
+TEST_CASE("a tick the budget trimmed is complete rather than short of a part", "[replication][loss]") {
+	// **The case most likely to be got wrong, and the reason the final marker is
+	// authored by the sender when the tick is packed.** The per-client cap
+	// deliberately holds values back, so a marker meaning "nothing else changed"
+	// would be false on every tick of a world larger than its link — and a
+	// client waiting for parts that were never emitted would stop acknowledging
+	// on precisely the servers the cap exists for, then be re-snapshotted for
+	// it. What was held over was never part of this tick: it keeps its
+	// unconfirmed entry and comes back on a later one.
+	//
+	// No loss at all here. The only thing trimming these ticks is the budget.
+	engine::replication::AuthoritySettings authority;
+	authority.MessagesPerTick = 1;
+	authority.ChunkBytes = 256;
+	authority.StarvationTicks = 5;
+
+	Wire wire({}, authority);
+	std::vector<Entity> all;
+	for (int index = 0; index < 30; index++) {
+		const Entity entity = wire.Server.Create();
+		wire.Server.Set<Spot>(entity, Spot{0.0f, 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(wire.Join(4096));
+
+	for (int round = 1; round <= 120; round++) {
+		for (const Entity entity : all) {
+			wire.Server.GetMutable<Spot>(entity)->X = 7.0f;
+		}
+		wire.Tick();
+
+		// Acknowledged, tick after tick, with a message limit of one against a
+		// world that needs several.
+		//
+		// **From the first tick, and it used to take ten.** `net::Link` kept one
+		// high-water sequence for the whole link rather than one per channel, so
+		// the first unreliable deltas after a join that spent several reliable
+		// packets were discarded as stale before anything here saw them. The
+		// warm-up this case carried was that bug's fingerprint; asserting from
+		// round one is what stops it coming back unnoticed.
+		REQUIRE(wire.Replica_.Applied() == wire.Tick_);
+	}
+
+	// The budget really was short, and not one trimmed tick read as a tick with
+	// a part missing.
+	REQUIRE(wire.Authority_.Stats().Deferred > 0);
+	REQUIRE(wire.Replica_.Stats().Incomplete == 0);
+	REQUIRE(wire.Authority_.Stats().Resnapshots == 0);
+
+	for (const Entity entity : all) {
+		REQUIRE(wire.Client.Get<Spot>(entity)->X == 7.0f);
+	}
+}
+
+TEST_CASE("a part lost from every tick costs the acknowledgement and nothing else", "[replication][loss]") {
+	// **The give-up rule under sustained loss, and the half that says it does
+	// not stall.** An incomplete tick is passed over rather than waited for, so
+	// twenty ticks in a row losing a part cost twenty acknowledgements and no
+	// values: everything each missing part carried is still unconfirmed and
+	// rides the next tick. Waiting instead would be a stall no resend ends —
+	// the unreliable channel does not redeliver — and the server would give up
+	// on a client whose link is merely lossy.
+	engine::replication::AuthoritySettings authority;
+	authority.ChunkBytes = 256;
+
+	Wire wire({}, authority);
+	std::vector<Entity> all;
+	for (int index = 0; index < 40; index++) {
+		const Entity entity = wire.Server.Create();
+		wire.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(wire.Join(1024));
+
+	// A value that moves once and then never again, which is exactly what
+	// D00013 stranded, against a link losing one datagram of every tick.
+	for (const Entity entity : all) {
+		wire.Server.GetMutable<Spot>(entity)->X = 71.0f;
+	}
+	for (int tick = 0; tick < 20; tick++) {
+		wire.ClientEnd->DropNext(1);
+		wire.Tick();
+	}
+
+	REQUIRE(wire.ClientEnd->Stats().Dropped == 20);
+	REQUIRE(wire.Replica_.Stats().Incomplete >= 15);
+
+	// Well inside `ResnapshotAfterTicks`, so the server has not given up — the
+	// client is a tick behind over and over, not adrift.
+	REQUIRE(wire.Authority_.Stats().Resnapshots == 0);
+	REQUIRE(wire.Replica_.Stats().Snapshots == 1);
+
+	// And the moment the link stops losing things, one whole tick repairs the
+	// lot: nothing was ever retired, because nothing was ever acknowledged.
+	const uint64_t before = wire.Replica_.Applied();
+	for (int tick = 0; tick < 10; tick++) {
+		wire.Tick();
+	}
+
+	REQUIRE(wire.Replica_.Applied() > before);
+	for (const Entity entity : all) {
+		REQUIRE(wire.Client.Get<Spot>(entity)->X == 71.0f);
+	}
+}
+
+TEST_CASE("a client that can never complete a tick is re-snapshotted", "[replication][loss]") {
+	// **The bound on the wait, and it is deliberately the one that already
+	// existed.** A client which cannot receive a whole tick cannot honestly
+	// acknowledge one, so `Applied` stops moving — and `ResnapshotAfterTicks`
+	// is this module's answer to a client that cannot be caught up by deltas it
+	// never got. That is what makes the wait bounded rather than open-ended,
+	// and it is the price of never acknowledging a tick a value is missing
+	// from.
+	//
+	// Thirty ticks rather than the default hundred and twenty, stated here so
+	// the case is short and so the number being asserted is visible.
+	engine::replication::AuthoritySettings authority;
+	authority.ChunkBytes = 256;
+	authority.ResnapshotAfterTicks = 30;
+
+	Wire wire({}, authority);
+	std::vector<Entity> all;
+	for (int index = 0; index < 40; index++) {
+		const Entity entity = wire.Server.Create();
+		wire.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(wire.Join(1024));
+
+	for (const Entity entity : all) {
+		wire.Server.GetMutable<Spot>(entity)->X = 88.0f;
+	}
+
+	// One datagram of every single tick, for four times the bound.
+	size_t restarts = 0;
+	for (int tick = 0; tick < 120; tick++) {
+		wire.ClientEnd->DropNext(1);
+		wire.Tick();
+		restarts += wire.Authority_.Stats().Resnapshots;
+	}
+
+	REQUIRE(wire.Replica_.Stats().Incomplete > 0);
+	REQUIRE(restarts > 0);
+
+	// Expensive and correct, which is the trade this bound makes. The link
+	// stops losing things and the world is right — by the snapshot if not by the
+	// deltas.
+	for (int tick = 0; tick < 40; tick++) {
+		wire.Tick();
+	}
+	for (const Entity entity : all) {
+		REQUIRE(wire.Client.Get<Spot>(entity)->X == 88.0f);
+	}
+}
+
+TEST_CASE("the snapshot buffer never holds a tick that was short of a part", "[replication][loss]") {
+	// **What `client::RecordReplicatedTick` does, in the module that owns the
+	// rule.** The buffer is fed with `Replica::Applied`, so a tick held back for
+	// want of a part produces no pose at all — which is the only honest answer:
+	// the store at that moment holds the rows the surviving parts carried and
+	// the previous values of the rows the lost one did, and a pose recorded from
+	// it would be interpolated through and then contradicted by the repair a
+	// tick later.
+	engine::replication::AuthoritySettings authority;
+	authority.ChunkBytes = 256;
+
+	Wire wire({}, authority);
+	std::vector<Entity> all;
+	for (int index = 0; index < 40; index++) {
+		const Entity entity = wire.Server.Create();
+		wire.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		all.push_back(entity);
+	}
+	REQUIRE(wire.Join(1024));
+
+	// Exactly what the client's own seam does: record the applied tick, once,
+	// after every poll. `Spot` stands in for a transform — what is being
+	// asserted is which ticks reach the buffer at all.
+	engine::replication::SnapshotBuffer buffer;
+	const auto record = [&]() {
+		const uint64_t applied = wire.Replica_.Applied();
+		if (applied == 0 || buffer.Holds(applied)) {
+			return;
+		}
+		for (const Entity entity : all) {
+			buffer.Record(applied, entity, engine::core::CFrame());
+		}
+	};
+
+	for (const Entity entity : all) {
+		wire.Server.GetMutable<Spot>(entity)->X = 99.0f;
+	}
+	wire.ClientEnd->DropNext(1);
+	wire.Tick();
+	record();
+
+	const uint64_t lostAt = wire.Tick_;
+	REQUIRE(wire.ClientEnd->Stats().Dropped == 1);
+	REQUIRE(buffer.Newest() < lostAt);
+
+	// And the tick after it is recorded, so the buffer stepped over the
+	// incomplete tick rather than stopping at it.
+	wire.Tick();
+	record();
+	REQUIRE(buffer.Newest() == lostAt + 1);
 }
 
 TEST_CASE("a join survives a link that is dropping datagrams", "[replication][loss]") {

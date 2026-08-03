@@ -270,7 +270,12 @@ namespace engine::replication {
 		// a permanent hole for the rest, and the two are indistinguishable at
 		// the call site — which is the whole reason this exists.** A component
 		// value carried by a refused delta is offered again next tick by the
-		// unconfirmed set, so there is nothing to undo. A snapshot chunk is
+		// unconfirmed set, so the value itself needs nothing undone — but the
+		// *tick* does: a refused part is a part that never arrives, so the
+		// client will never acknowledge that tick, so it must stop counting as
+		// a tick that streamed. Without that, a link whose packet budget is
+		// below `MessagesPerTick` re-snapshots its client every
+		// `ResnapshotAfterTicks` for ever. A snapshot chunk is
 		// not: the cursor moved when the chunk was *built*, so a refused chunk
 		// is a gap in a stream the receiver waits on forever, and the symptom
 		// is a client that streams 184 chunks of 192 and then refuses every
@@ -435,6 +440,14 @@ namespace engine::replication {
 			// The half-open range of `Client::Edits` this message announced.
 			uint32_t First = 0;
 			uint32_t Count = 0;
+
+			// Whether this message is one of a tick's delta parts.
+			//
+			// Stated rather than inferred from the two fields above being
+			// empty. They are empty for a delta today and the day a fourth kind
+			// of message is added with nothing to undo is the day that
+			// inference starts naming it too.
+			bool Values = false;
 		};
 
 		struct Client {
@@ -460,6 +473,18 @@ namespace engine::replication {
 			// A structural message does not move it, because `Replica` does not
 			// move `Applied` for one either.
 			uint64_t Streamed = 0;
+
+			// What `Streamed` was before this tick moved it.
+			//
+			// **A tick the transport cut short is not a tick that streamed**,
+			// and this is what lets `Unsent` say so. A client cannot
+			// acknowledge a tick it holds only some of the parts of, so
+			// counting one against its silence is measuring it against
+			// something it was never given the chance to answer — and on a link
+			// whose budget is below `MessagesPerTick`, that is every tick, for
+			// ever. The same argument as the quiet world and the held-back
+			// budget, one layer down: this refusal is the *link's*.
+			uint64_t StreamedBefore = 0;
 
 			std::vector<Input> Pending;
 			std::vector<std::vector<std::byte>> Outgoing;

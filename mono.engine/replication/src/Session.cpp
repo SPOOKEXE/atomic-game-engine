@@ -130,10 +130,11 @@ namespace engine::replication {
 		net::PacketHeader header = Link_.NextHeader(channel);
 
 		// The reliable stream's own acknowledgement, written over the link's.
-		// `Link` keeps one window across both channels, and the unreliable
-		// counter runs so much faster that a reliable sequence falls outside it
-		// within seconds — so the ack that can retire a reliable payload has to
-		// come from the receiver that is tracking them.
+		// `Link`'s windows are per channel, so the header it stamps carries the
+		// acknowledgement of whichever channel this packet is going on — and
+		// this stream is mostly unreliable deltas, so a reliable payload would
+		// almost never be acknowledged. The ack that retires one has to ride
+		// every packet, and only the receiver tracking them can put it there.
 		header = Receiver.Acknowledging(header);
 
 		// Refused here when this session holds no keys — see `Transmit`, which

@@ -85,6 +85,33 @@ changes it is a user migration rather than a refactor.
 Keep the public surface small. If a thing is only needed by this module, it goes
 in `src/` where nothing outside can reach it.
 
+## A type has two serialisations, and `Save` may only ever see one of them
+
+`TypeDescriptor::Write` and `Read` are the file format: a snapshot, a save, a
+recording. `TypeDescriptor::Wire` is a second, **lossy** pair — a quantised
+position, a rotation as smallest-three — that exists so a replication delta can
+be a third of its size.
+
+**Nothing in this module calls `Wire`, and `Store::Save` and `Store::Load` must
+never start.** The build cannot check that, so by rule 6 it is written here.
+What it costs to get wrong is specific rather than vague: a recording made
+through a lossy codec still replays into an identical recording, so
+`just replay-check` goes on passing while comparing one lossy file against
+another — a check that is green and means nothing. `replication` is the only
+caller, and `engine.replication.quantisation` asserts that a component with a
+wire form saves and restores exactly.
+
+The two are separate slots rather than one replaceable pair for the same reason,
+and installing a codec *over* `Write` is the change to refuse however tidy it
+looks.
+
+**A wire form is installed by the same registration that names the type**, which
+is what makes a server and a client agree about it without either being told.
+The alternative — a table `replication` keeps by component name, filled in by
+each program — makes agreement a discipline repeated in every program and every
+test, and the failure mode of forgetting one is a receiver decoding ten bytes as
+twenty-eight.
+
 ## `Store::Native()` is a debt, not a pattern
 
 Wrapping the whole of flecs was not v0.1's job, so `Native()` exists and flecs

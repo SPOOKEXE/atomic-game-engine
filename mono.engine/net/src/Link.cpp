@@ -96,24 +96,28 @@ namespace engine::net {
 		}
 	}
 
-	void Link::Observe(uint16_t sequence) {
-		if (!SeenAnything) {
-			SeenAnything = true;
-			HighestSeen = sequence;
-			SeenBits = 0;
+	void Link::Observe(ChannelWindow &window, uint16_t sequence) {
+		if (!window.Seen) {
+			// A channel's first packet opens its window wherever the far side
+			// happens to have got to. It is judged against nothing, because
+			// there is nothing yet to be older than, and it counts no loss —
+			// a stream that opens at 5000 has not lost 5000 packets.
+			window.Seen = true;
+			window.Highest = sequence;
+			window.Bits = 0;
 			return;
 		}
 
-		if (Packet::IsNewer(sequence, HighestSeen)) {
-			const uint16_t shift = static_cast<uint16_t>(sequence - HighestSeen);
+		if (Packet::IsNewer(sequence, window.Highest)) {
+			const uint16_t shift = static_cast<uint16_t>(sequence - window.Highest);
 
 			// A jump wider than the window means everything the window held is
 			// now older than the 32 sequences before this one, so it is cleared
 			// rather than shifted into nonsense.
 			if (shift >= 32) {
-				SeenBits = 0;
+				window.Bits = 0;
 			} else {
-				SeenBits = (SeenBits << shift) | (1u << (shift - 1));
+				window.Bits = (window.Bits << shift) | (1u << (shift - 1));
 			}
 
 			// Anything between the old high-water mark and the new one that is
@@ -122,17 +126,17 @@ namespace engine::net {
 			if (shift > 1) {
 				Totals.PacketsLost += shift - 1;
 			}
-			HighestSeen = sequence;
+			window.Highest = sequence;
 			return;
 		}
 
 		// Older than the high-water mark. Record it in the window when it is
 		// still inside it, so a late-but-not-lost packet is not counted twice.
-		const uint16_t behind = static_cast<uint16_t>(HighestSeen - sequence);
+		const uint16_t behind = static_cast<uint16_t>(window.Highest - sequence);
 		if (behind >= 1 && behind <= 32) {
 			const uint32_t bit = 1u << (behind - 1);
-			if ((SeenBits & bit) == 0) {
-				SeenBits |= bit;
+			if ((window.Bits & bit) == 0) {
+				window.Bits |= bit;
 				if (Totals.PacketsLost > 0) {
 					// It was counted lost when the gap opened. It arrived after
 					// all, so the estimate is corrected rather than left to
@@ -158,18 +162,36 @@ namespace engine::net {
 		++Totals.PacketsReceived;
 		Totals.BytesReceived += payloadBytes;
 
-		// The stale rule, and only for unreliable traffic. A reliable packet
-		// arriving late is a resend that still has to be delivered in order —
-		// discarding it here would silently drop an event the sender believes
-		// was acknowledged.
-		if (header.Channel == ChannelKind::Unreliable && SeenAnything &&
-			!Packet::IsNewer(header.Sequence, HighestSeen) && header.Sequence != HighestSeen) {
+		if (header.Channel == ChannelKind::Handshake) {
+			// No window, and deliberately none. A handshake datagram is answered
+			// before there is a link to number it, so its sequence belongs to no
+			// stream — judging it against a mark, or letting it move one, would
+			// be inventing a numbering the sender never used. It still proves
+			// the peer is alive, which the lines above have already recorded.
+			return true;
+		}
+
+		ChannelWindow &window = Incoming[ChannelSlot(header.Channel)];
+
+		// The stale rule: unreliable traffic only, against **this channel's own
+		// high-water mark**. A reliable packet arriving late is a resend that
+		// still has to be delivered in order — discarding it here would silently
+		// drop an event the sender believes was acknowledged. And judging an
+		// unreliable packet against the reliable channel's mark is the same
+		// mistake from the other side: the two counters advance at completely
+		// different rates, so a join that spends several reliable packets would
+		// leave every unreliable one behind a number it never counted against.
+		//
+		// A repeat of the newest sequence is not *older* than what has been
+		// seen, so it is not stale and is not counted as one.
+		if (header.Channel == ChannelKind::Unreliable && window.Seen &&
+			!Packet::IsNewer(header.Sequence, window.Highest) && header.Sequence != window.Highest) {
 			++Totals.PacketsStale;
-			Observe(header.Sequence);
+			Observe(window, header.Sequence);
 			return false;
 		}
 
-		Observe(header.Sequence);
+		Observe(window, header.Sequence);
 		return true;
 	}
 
@@ -206,11 +228,17 @@ namespace engine::net {
 	}
 
 	PacketHeader Link::NextHeader(ChannelKind channel) {
+		const ChannelWindow &window = Incoming[ChannelSlot(channel)];
+
 		PacketHeader header;
 		header.Channel = channel;
 		header.Sequence = OutgoingSequence[ChannelSlot(channel)]++;
-		header.Acknowledge = HighestSeen;
-		header.AcknowledgeBits = SeenBits;
+
+		// This channel's window, because there is one sequence space per channel
+		// and one field to report a sequence in. A window shared across channels
+		// would name a sequence the far side's counters cannot place.
+		header.Acknowledge = window.Highest;
+		header.AcknowledgeBits = window.Bits;
 		return header;
 	}
 

@@ -91,6 +91,13 @@ namespace engine::replication {
 		writer.WriteUInt64(delta.Tick);
 		writer.WriteUInt64(delta.Baseline);
 
+		// Three bytes on every part of every tick, which is what it costs to
+		// let a receiver tell "that is all of tick N" from "that is all of tick
+		// N that arrived". Fixed width, so re-encoding a part to set the marker
+		// cannot change the size the packing already budgeted for.
+		writer.WriteUInt16(delta.Part);
+		writer.WriteBool(delta.Final);
+
 		writer.WriteUInt32(static_cast<uint32_t>(delta.Components.size()));
 		for (const ComponentDelta &component : delta.Components) {
 			// By name. An id is a dense counter assigned in registration order
@@ -159,7 +166,13 @@ namespace engine::replication {
 		case MessageKind::Delta: {
 			read.Delta.Tick = reader.ReadUInt64();
 			read.Delta.Baseline = reader.ReadUInt64();
-			if (reader.Failed()) {
+			read.Delta.Part = reader.ReadUInt16();
+			read.Delta.Final = reader.ReadBool();
+
+			// Bounded before anything is remembered about it. A receiver keeps
+			// one bit per part of the tick it is counting, so an unbounded part
+			// number is a peer deciding how large that record is.
+			if (reader.Failed() || read.Delta.Part >= MAXIMUM_PARTS) {
 				return false;
 			}
 
