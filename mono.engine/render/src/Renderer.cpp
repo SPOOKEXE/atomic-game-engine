@@ -1448,12 +1448,7 @@ namespace engine::render {
 			const LightingUniforms surfaceLighting{
 				glm::vec4{SUN_DIRECTION, 0.0f},
 				SUN_AMBIENT,
-				glm::vec4{
-					haveShadow ? 1.0f : 0.0f,
-					1.0f / static_cast<float>(SHADOW_RESOLUTION),
-					0.0f,
-					0.0f
-				},
+				glm::vec4{haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f},
 			};
 			SDL_PushGPUFragmentUniformData(command, 0, &surfaceLighting, sizeof(surfaceLighting));
 
