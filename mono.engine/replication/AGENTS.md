@@ -96,6 +96,29 @@ the peer can receive where it says it can and can do arithmetic; it does not
 prove the peer is welcome, and `net::Handshake`'s own header is explicit that an
 unauthenticated agreement is safe against a listener and not against a relay.
 
+## Everything after the handshake is sealed, and the budget shrank for it
+
+`Session` holds the two ciphers the exchange produced for the life of the
+connection and seals every payload with the packet header as associated data.
+The rules are `net/AGENTS.md`'s; what belongs here is what it costs this module.
+
+**The tag comes out of the payload, so every budget is sized against
+`net::Packet::MAXIMUM_MESSAGE_BYTES`.** `AuthoritySettings::ChunkBytes` is
+capped at construction, loudly, because a chunk that cannot fit is refused by
+`Link::Reserve` and a refusal is also what ordinary backpressure looks like —
+which is the same shape as the v0.3 delta, the snapshot-chunk cursor and the
+oversized forget, three times over.
+
+**A session with no keys carries nothing in either direction.** `Listener` and
+`Connector` each adopt them in the same breath as `CompleteHandshake`, and
+nothing else may. There is no plaintext path to fall back to and no field on the
+wire a peer could use to ask for one.
+
+**The exchange's own confirmation is the first frame of the stream, not a
+separate one.** The server's `Sealer` seals the `Welcome` tag at counter zero
+and carries on from one, so the admission and the traffic share a single nonce
+sequence rather than two that could overlap.
+
 ## Deltas come from the dirty bits, not from a diff
 
 `ecs::ChangeChannel` already records what moved, for `.Changed` and for render
@@ -126,6 +149,35 @@ Everything else is interpolated authoritative state. Predicting a second entity
 means predicting what another player will do, which is wrong more often than it
 is right and is visible as rubber-banding when it is wrong.
 
+## The two halves pull opposite ways, and `SnapshotBuffer` is the other one
+
+Prediction runs the local player *ahead* so input feels immediate.
+`SnapshotBuffer` draws everything else *behind* — at a fixed delay from the
+newest received tick, interpolating between the two that bracket it — so that a
+world arriving at 30 Hz does not judder at 30 Hz on a screen running at 240.
+
+**They must never be applied to the same entity.** Delaying the predicted row by
+the jitter budget puts back exactly the lag prediction exists to remove, and the
+player feels it as their own character lagging their own keys. The exclusion is
+structural rather than a caller's discipline: `SnapshotBuffer::Record` refuses
+the nominated entity *and* anything in `Store::CreatePredicted`'s index range,
+before it records anything at all — so a tick offered nothing but predicted rows
+is a tick the buffer never saw.
+
+**The delay is the one number that matters**, it is `InterpolationSettings::DelayTicks`,
+and the reasoning for both ends of its range is written at the constant rather
+than here.
+
+**It buffers per-entity poses, not snapshots of the world.** A tick's worth of
+world is what `Replica` already applied; what interpolation needs is where each
+entity was at each of the last few ticks, which is one `CFrame` per entity per
+buffered tick and nothing else.
+
+**Nothing it produces may reach a component.** The interpolated pose is returned
+by value to whoever is filling a draw list. A render-rate quantity written back
+into the store would make a simulation depend on the frame rate of whoever
+happened to be watching it — the rule `world`'s `ViewChannel` already follows.
+
 **Reconciliation needs no cross-machine determinism.** The client drifting is
 expected; correcting the drift is the mechanism, not a fallback. Nothing here
 may assume a client and server compute the same floats.
@@ -145,11 +197,11 @@ part that was dropped is a stall on a path whose premise is that the next tick
 is already on its way. That is why `Replica` treats a delta at the tick it has
 already applied as another part rather than as stale.
 
-**A forget is split too**, and it was the third path to be missed. A world
-leaving view all at once names every entity in one message, and three hundred
-handles is already past a datagram — which `Link::Reserve` refuses outright
-rather than fragmenting, so the message saying "stop drawing these" would be the
-one that never arrives.
+**A `Structure` message is split too**, and the forget was the third path to be
+missed. A world leaving view all at once names every entity in one message, and
+three hundred handles is already past a datagram — which `Link::Reserve` refuses
+outright rather than fragmenting, so the message saying "stop drawing these"
+would be the one that never arrives.
 
 ## A refusal is backpressure for some messages and a hole for the rest
 
@@ -163,11 +215,61 @@ is *built*, so a refused chunk is a gap in a stream the receiver waits on for
 ever. The observed failure was a client that applied 184 of 192 chunks, never
 reached the last byte, never joined, and then refused every delta that followed
 as stale: `applied=184 refused=17865`, which reads like a protocol error and was
-a cursor. A creation, a destruction and a forget are the same shape — each is
-said exactly once and each moved the known set when it was built.
+a cursor. A `Structure` message is the same shape — a creation, a destruction and
+a forget are each said exactly once and each moved the known set when it was
+built.
+
+**`Unsent` covers a refusal and not a loss.** A message the transport accepted
+and the network then dropped is a different problem and has a different answer;
+see the next section.
 
 The buffer is therefore released **one tick after** the cursor reaches the end,
 because `Unsent` is called after `Publish` has returned.
+
+## Structure goes on the reliable channel, and values do not
+
+`Delta` carries what moved. `Structure` carries which entities the client holds
+— created, destroyed, forgotten — and `Session::ChannelFor` puts it on the
+reliable channel while the delta stays unreliable. That split is the whole of
+D00011's answer and it is not an exception to `net/AGENTS.md`'s "unreliable by
+default": a value is superseded by the next tick and a structural change never
+is, so they are the two sides that rule already draws.
+
+**A tick acknowledgement cannot repair a lost structural change, and this is the
+reasoning worth keeping.** `Applied` names a tick, not a message. The server's
+known set moves when a creation is *said*, so a lost one leaves the server
+certain the client holds an entity it has never heard of — and the client goes
+on acknowledging, is not behind, and is never re-snapshotted for it. Nothing
+that counts ticks can see that; the only thing in the tree that counts messages
+is `net::ReliableSender`, so that is what redelivers it. Adding a second
+acknowledgement channel for structure beside a working one is the second way to
+do one job that `docs/CODE_QUALITY.md` asks about.
+
+**A structural message is deliberately not tick-gated on arrival, and is
+deliberately not an applied tick.** It is resent a hundred milliseconds later,
+which is six ticks of a world that has moved on, so judging it by its tick the
+way a delta is rightly judged is how a destroy never happens. And it carries no
+values, so treating it as a tick applied would confirm every value of that tick
+without one of them having arrived.
+
+**`Applied` means the last tick applied *in full*, and `Replica` now enforces
+it.** A delta naming a row this client does not hold yet — which is exactly what
+a creation still in flight looks like — is applied as far as it can be and does
+not move `Applied`. Without that, a creation arrived reliably some ticks late
+and the entity held none of its components, because the tick its values were in
+had already been acknowledged.
+
+## An entity coming into view has not moved
+
+A delta is built from the dirty bits, and an entity entering a client's interest
+did not change — it was always there and that client could not see it. So the
+run walk finds nothing for it and it used to arrive as a bare row with none of
+its components, for as long as it stood still.
+
+`Authority` seeds an unconfirmed entry for every entity it has just told a
+client about, which puts it through the recovery walk that already reads current
+values and already keeps offering until the client confirms. A second path that
+did the same job is the second one that would rot.
 
 ## A quiet world is not a client falling behind
 
@@ -177,6 +279,12 @@ out on, not against the tick number. A client acknowledges the last tick it
 in perfect agreement with a still world stopped acknowledging new ticks and was
 re-snapshotted for it, every hundred and twenty-one ticks, for as long as the
 world stayed quiet.
+
+**Values only, for the same reason.** A tick that sent nothing but a `Structure`
+message produced nothing for the client to apply and therefore no new
+acknowledgement, so counting it as a tick that streamed is the same bug one step
+along. So is a tick whose every message the byte budget refused: nothing went
+out, and `Statistics::Deferred` is the number that says what is happening.
 
 ## Priority decides the order, and only the order
 
@@ -229,18 +337,23 @@ through two different sequences of insertions.
   without knowing which of them is a position. The same argument
   `SetInterest` is built on. Until a game supplies one the rotation is in sole
   charge, which is a plain round robin.
-- **A creation lost on the wire.** `Unsent` covers a creation this end refused
-  to send; a datagram that left and never arrived is not covered, because a
-  creation rides the unreliable channel and nothing acknowledges it entity by
-  entity. The client is repaired by the re-snapshot it eventually earns, which
-  works and costs the whole world. Fixing it properly means acknowledging
-  structure, which is a protocol change.
-- **Authenticating a client.** The exchange is wired in and a stranger no longer
-  gets a slot for a datagram, but the agreement still binds to no identity: a
-  peer on the path can hold one exchange with each side and neither would know.
-  Closing it means binding the transcript to a server identity — the Ed25519 key
+- **A value lost from a tick that took several messages.** A tick's delta is
+  split into as many independently applicable messages as it takes, the client
+  applies whichever arrive and acknowledges the tick, and the server retires
+  every value that tick carried — including the ones in the message that never
+  came. So the v0.3 unconfirmed-entry resend is self-healing for a tick that
+  fits one datagram and not for one that does not. What is stranded is narrow —
+  a value that moves once and then never again, since anything that changes
+  arrives on its own merits next tick — and closing it needs the client to know
+  a tick had more parts than it received, which is a field on the wire.
+  `replication/tests/Loss.cpp` pins it.
+- **Authenticating a client, and authenticating the server.** The exchange is
+  wired in, the stream that follows it is encrypted, and a stranger no longer
+  gets a slot for a datagram — but the agreement still binds to no identity, so
+  a peer on the path can hold one exchange with each side and read everything.
+  **Encryption without that binding is protection against a listener and not
+  against a relay**, and the two are worth keeping apart in one's head. Closing
+  it means binding the transcript to a server identity — the Ed25519 key
   `assets` already verifies manifests with — which `net/Handshake.hpp` marks as
   its own item. Until then the honest statement is the one in `Listener.hpp`:
   the default admits anybody who completes the handshake.
-- **Encrypting what follows the handshake.** The derived keys prove the exchange
-  and are then destroyed. See `net/AGENTS.md`.

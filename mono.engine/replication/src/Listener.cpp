@@ -215,6 +215,24 @@ namespace engine::replication {
 		// unconditional on a stranger's first datagram.
 		peer.Wire->Link().CompleteHandshake(nowSeconds);
 
+		// **The ciphers move into the session and stay there for the life of the
+		// connection.** The sending half has already sealed the confirmation
+		// above, at counter zero, so this connection's first payload goes out at
+		// one — the exchange and the stream share one nonce sequence rather than
+		// two that could overlap. Nothing here reads a key or a counter; holding
+		// the `Sealer` *is* the guarantee, because it is the only object that
+		// can produce a nonce under this key and there is no way to make a
+		// second one.
+		if (!peer.Wire->AdoptKeys(std::move(*keys))) {
+			// Only reachable if a session were handed keys twice, which cannot
+			// happen for one built four lines ago. Refused rather than carried
+			// on with, because the alternative is a connection that is admitted
+			// and cannot say anything.
+			Authority_.Remove(peer.Client);
+			Stats_.Refused++;
+			return;
+		}
+
 		// Kept, because it cannot be rebuilt: the `Sealer` that produced the tag
 		// dies at the end of this function and a second agreement for a live
 		// connection is precisely what must not happen. A lost welcome is
@@ -232,10 +250,6 @@ namespace engine::replication {
 		Stats_.Admitted++;
 
 		ENGINE_INFO("replication: admitted {} ({} connected)", from.Text(), Peers.size());
-
-		// `keys` goes out of scope here and both ciphers wipe themselves. The
-		// stream is not encrypted — see the header — and holding a `Sealer`
-		// nothing seals with would read as though it were.
 	}
 
 	void Listener::Repeat(Peer &peer, const Admission &message) {

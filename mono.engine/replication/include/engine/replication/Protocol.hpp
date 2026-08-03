@@ -46,13 +46,17 @@ namespace engine::replication {
 		// Server to client: what changed in one tick.
 		Delta,
 
-		// Server to client: an entity the client can no longer see.
+		// Server to client: which entities a client holds at all.
 		//
-		// Distinct from a destroy, and the distinction matters: a client that
-		// treated "you cannot see this any more" as "this no longer exists"
-		// would delete an entity that is still there, and then be wrong about
-		// the world the moment it came back into view.
-		Forget,
+		// **Its own kind because it is the only thing said exactly once.** A
+		// component value that goes missing is offered again next tick by the
+		// unconfirmed set; an entity that was created, destroyed or forgotten is
+		// announced once and the server's known set has moved on — so a lost one
+		// is a client permanently out of step with a server that is content. A
+		// kind of its own is what puts it on the reliable channel, which is the
+		// one thing here that redelivers until the far side has it. See
+		// `ChannelFor`.
+		Structure,
 
 		// Client to server: what the player did, and the tick it was for.
 		Input,
@@ -76,7 +80,11 @@ namespace engine::replication {
 	// `net::Packet` states, for the same reason: a server speaking an old
 	// version to an old client is a server running two protocols, and the
 	// second one is the one nobody tests.
-	inline constexpr uint16_t PROTOCOL_VERSION = 1;
+	//
+	// 2 at v0.5: creations and destructions moved out of `Delta` and joined
+	// forgets in `Structure`, so a version 1 peer would read a delta's component
+	// count out of the bytes that used to be its creation list.
+	inline constexpr uint16_t PROTOCOL_VERSION = 2;
 
 	// One piece of a snapshot.
 	//
@@ -116,7 +124,11 @@ namespace engine::replication {
 		std::vector<std::byte> Values;
 	};
 
-	// What changed in one tick.
+	// What moved in one tick.
+	//
+	// **Values only.** Which entities exist is `Structure`'s, because the two
+	// need different delivery: a value is superseded by the next tick and a
+	// structural change never is.
 	//
 	// @since v0.3
 	struct Delta {
@@ -128,28 +140,38 @@ namespace engine::replication {
 		// client can tell a gap from a reorder without keeping its own history.
 		uint64_t Baseline = 0;
 
-		// Entities created since the baseline, with the class they were made
-		// from — a client rebuilds from its own class table rather than being
-		// sent a component set it would have to trust.
-		std::vector<ecs::Entity> Created;
-
-		// Entities destroyed since the baseline.
-		std::vector<ecs::Entity> Destroyed;
-
 		// What moved, per component.
 		std::vector<ComponentDelta> Components;
 	};
 
-	// Entities a client may no longer see.
+	// Which entities a client holds, and the three ways that changes.
 	//
-	// @since v0.3
-	struct Forget {
-		// The tick this was decided at.
+	// **Carries no tick gate on the receiving side, and that is the point.** It
+	// rides the reliable channel, so it arrives in the order it was sent and a
+	// resend of one whose datagram was lost turns up long after the tick it was
+	// decided at. Refusing that as stale is exactly how a creation goes missing
+	// for the life of a connection.
+	//
+	// @since v0.5
+	struct Structure {
+		// The tick this was decided at. Carried for logs and for the order the
+		// three lists were computed in; it is not what decides whether the
+		// message is applied.
 		uint64_t Tick = 0;
 
-		// The entities to stop drawing and stop simulating. **Not destroyed** —
-		// see `MessageKind::Forget`.
-		std::vector<ecs::Entity> Entities;
+		// Entities the client does not have yet and should create, at the
+		// sender's exact index and generation.
+		std::vector<ecs::Entity> Created;
+
+		// Entities that no longer exist anywhere.
+		std::vector<ecs::Entity> Destroyed;
+
+		// Entities the client may no longer see.
+		//
+		// **Not destroyed**, and the distinction matters: a client that
+		// conflated the two would delete an entity that is still there and then
+		// be wrong about the world the moment it came back into view.
+		std::vector<ecs::Entity> Forgotten;
 	};
 
 	// What a player did in one tick.
@@ -188,12 +210,12 @@ namespace engine::replication {
 	// @since v0.3
 	void WriteMessage(core::ByteWriter &writer, const Delta &delta);
 
-	// Writes a forget.
+	// Writes a structural change.
 	//
-	// @param writer Where the bytes go.
-	// @param forget The entities to forget.
-	// @since v0.3
-	void WriteMessage(core::ByteWriter &writer, const Forget &forget);
+	// @param writer    Where the bytes go.
+	// @param structure What the client should now hold.
+	// @since v0.5
+	void WriteMessage(core::ByteWriter &writer, const Structure &structure);
 
 	// Writes an input.
 	//
@@ -226,8 +248,8 @@ namespace engine::replication {
 		// Meaningful when `Kind` is `Delta`.
 		replication::Delta Delta;
 
-		// Meaningful when `Kind` is `Forget`.
-		replication::Forget Forget;
+		// Meaningful when `Kind` is `Structure`.
+		replication::Structure Structure;
 
 		// Meaningful when `Kind` is `Input`.
 		replication::Input Input;

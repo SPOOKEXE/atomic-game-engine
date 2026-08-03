@@ -616,22 +616,33 @@ namespace engine::ecs {
 		// that is a storage-layout problem rather than something more threads
 		// would fix.
 		//
-		// **This is slower than Each below a crossover, and the crossover is
-		// higher than it looks.** Measured on a 24-core machine over an
-		// integration step of three float multiply-adds per row, against the
-		// previous storage:
+		// **This is slower than Each below a crossover, and the crossover is far
+		// higher than it looks.** Re-measured by `engine.ecs.bench.iteration` in
+		// the `bench` preset at `-O3`, on a 24-thread machine, over three float
+		// adds per row — the cheapest body there is:
 		//
-		//     entities     Each      EachParallel
-		//        20 000    0.050 ms      0.102 ms   2.0x slower
-		//       100 000    0.259 ms      0.195 ms   1.3x faster
-		//       500 000    1.204 ms      0.347 ms   3.5x faster
-		//     2 000 000    5.925 ms      1.704 ms   3.5x faster
+		//     entities       Each   EachParallel
+		//        8 192    1.45 us      25.9 us     18x slower
+		//       32 768    5.54 us      31.5 us      5.7x slower
+		//      131 072    23.3 us      36.1 us      1.5x slower
+		//      262 144    49.1 us      48.6 us     the crossover
+		//      500 000    96.1 us      72.1 us      1.3x faster
 		//
-		// So for a cheap body the crossover was somewhere near 60-80k rows, and
-		// the ceiling about 3.5x rather than the core count — memory bandwidth,
-		// not threads. **Those numbers were taken against the previous backing
-		// store and have not been re-measured against this one.** Expect the
-		// crossover to move; do not expect it to vanish.
+		// **Below 262,144 rows this call is a loss, and the default grain lets
+		// it be made from 32,768.** Two things moved it there and only one of
+		// them is this module's: the serial loop halved when the build went to
+		// `-O3`, and it had already fallen by half again with the chunked
+		// storage. The pool's handover did not move — about 31 us, measured
+		// empty by `engine.parallel.bench.dispatch` — so the row count that
+		// repays it went up by the same factor the loop came down.
+		//
+		// The ceiling past the crossover is about 1.3x rather than the core
+		// count, and that is memory bandwidth rather than threads: at 500k rows
+		// both paths are streaming twelve megabytes out of DRAM.
+		//
+		// **A body more expensive than three adds crosses far sooner and should
+		// pass a grain.** `physics::IntegrateMotion` carries a `CFrame` per row
+		// and crosses near 8,000; it passes 1024 and says why at the constant.
 		//
 		// @param body  Called concurrently as `body(Entity, Ts &...)` for each match.
 		// @param grain The minimum table-row range worth handing to a worker.

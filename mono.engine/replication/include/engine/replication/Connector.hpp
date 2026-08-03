@@ -20,12 +20,15 @@
 // `Input`, which is the only shape in which the server stays the one that
 // decided. `replication/AGENTS.md`.
 //
-// **Nothing flows until the key exchange has.** `Admission.hpp` has the
-// sequence; this end drives the initiator's half of it — a hello, a cookie sent
-// straight back, and a welcome whose tag has to verify before the link is
-// allowed to carry anything. A welcome that does not verify closes the link
-// rather than being accepted with a shrug, because a key exchange that half
-// worked is one where somebody rewrote a message in flight.
+// **Nothing flows until the key exchange has, and everything after it is
+// sealed.** `Admission.hpp` has the sequence; this end drives the initiator's
+// half of it — a hello, a cookie sent straight back, and a welcome whose tag has
+// to verify before the link is allowed to carry anything. A welcome that does
+// not verify closes the link rather than being accepted with a shrug, because a
+// key exchange that half worked is one where somebody rewrote a message in
+// flight. The ciphers it produced then move into the `Session` and stay there,
+// and a session with no ciphers sends nothing at all — there is no clear path to
+// fall back to.
 //
 // **The retransmission is this end's**, on a timer, because the responder
 // deliberately remembers nothing about a peer that has not answered its
@@ -205,6 +208,20 @@ namespace engine::replication {
 		// @return The statistics.
 		const Statistics &Stats() const {
 			return Stats_;
+		}
+
+		// What the replica underneath has seen.
+		//
+		// **Separate from `Stats` and not folded into it.** This class counts
+		// what it decided — a message refused, a message applied — and the
+		// replica counts what the *stream* was, which is snapshots against
+		// deltas against structural messages. A client showing "why is the
+		// world not arriving" needs the second breakdown, and adding six fields
+		// here that only ever forward would be two counters to keep in step.
+		//
+		// @return The replica's statistics.
+		const Replica::Statistics &ReplicaStats() const {
+			return Replica_.Stats();
 		}
 
 	  private:

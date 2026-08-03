@@ -75,6 +75,12 @@ namespace client {
 		// somebody to press F3.
 		bool ShowStatistics = false;
 
+		// Open the F4 network panel at startup.
+		//
+		// **Ignored without `--connect`.** There is no link to report on, and
+		// the panel refuses to draw zeroes rather than claiming an idle one.
+		bool ShowNetwork = false;
+
 		// Open the F5 frame graph at startup.
 		//
 		// Worth setting deliberately: collection only runs while the panel is
@@ -186,6 +192,26 @@ namespace client {
 		// @param nowSeconds The current time.
 		void PollServer(double nowSeconds);
 
+		// Gathers what the F4 panel shows, and moves the rate window on.
+		//
+		// **Not `const`, and not idempotent.** A byte *rate* is a derivative and
+		// `net` only keeps the integral, so this reads the cumulative counters,
+		// subtracts what it read last time, and remembers the new reading —
+		// calling it twice in one frame would report the second call's window as
+		// zero seconds long. Called once per panel redraw and nowhere else.
+		//
+		// @return The panel's view of the link, all zero and `Connected` false
+		//         when this client was never given `--connect`.
+		engine::render::NetworkStatistics SampleNetwork();
+
+		// Logs what the replicated world received, drew and interpolated.
+		//
+		// Nothing when this client never connected. See the body for why it is
+		// four numbers rather than one — "joined and drew nothing" and "never
+		// joined" look identical from outside, and telling them apart is the
+		// whole reason this exists.
+		void ReportReplica();
+
 		Options Settings;
 
 		SDL_Window *Window = nullptr;
@@ -237,6 +263,21 @@ namespace client {
 		// arriving both look like "nothing happened" from outside, and they want
 		// completely different investigations.
 		bool ReportedAdmission = false;
+
+		// Whether F4 has already said there is no network to show. Once, not
+		// once per press.
+		bool ReportedNoNetwork = false;
+
+		// The previous reading of the link's cumulative counters, and when it
+		// was taken. `SampleNetwork` differences against these to turn totals
+		// into rates — see its declaration for why the differencing lives here
+		// rather than in `net`.
+		bool NetworkSampled = false;
+		double NetworkSampledAt = 0.0;
+		uint64_t NetworkLastReceivedBytes = 0;
+		uint64_t NetworkLastSentBytes = 0;
+		uint64_t NetworkLastReceivedPackets = 0;
+		uint64_t NetworkLastSentPackets = 0;
 
 		// The camera the rendered world placed this frame.
 		//

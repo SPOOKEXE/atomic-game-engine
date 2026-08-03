@@ -41,10 +41,14 @@
 // X25519 and gives forward secrecy for the keys it derives. Neither says who it
 // is: `net::Handshake`'s own header is explicit that an unauthenticated
 // agreement is safe against a listener and not against a relay, and the default
-// admission policy lets in anybody who completes it. **The stream is also still
-// in the clear** — the derived keys confirm the exchange and are then destroyed,
-// because encrypting the traffic is `net`'s outstanding item and a `Sealer` kept
-// here that nothing seals with would read as though it were not.
+// admission policy lets in anybody who completes it.
+//
+// **The stream after it is encrypted.** The derived ciphers move into the peer's
+// `Session` and stay there, so every payload in both directions is sealed with
+// the packet header as associated data. That is confidentiality against somebody
+// watching, and it is *not* authentication of who is at the other end — a relay
+// that held one exchange with each side would read everything, and closing that
+// is `net::Handshake`'s own outstanding item.
 //
 // **Time is passed in, never read** — `replication/AGENTS.md`, and the same
 // rule the two layers under this follow.
@@ -273,10 +277,11 @@ namespace engine::replication {
 			std::array<std::byte, net::Handshake::MESSAGE_BYTES> PublicKey{};
 
 			// The `Welcome` datagram, kept so a lost one can be sent again
-			// verbatim. It cannot be rebuilt: the ephemeral secret and the
-			// `Sealer` that produced the tag are both gone by design, and a
-			// second exchange for a live connection is the thing this must not
-			// do.
+			// verbatim. It cannot be rebuilt: the ephemeral secret is gone by
+			// design and the `Sealer` has moved on to the stream, so sealing a
+			// second confirmation would spend a fresh counter on a message the
+			// client is expecting at the first one. Sending the same bytes again
+			// repeats no nonce — it is the same frame, not a second one.
 			std::vector<std::byte> Welcome;
 		};
 

@@ -137,16 +137,11 @@ namespace engine::replication {
 			resolved.push_back(id);
 		}
 
-		// Created before destroyed, and both before any component is written:
-		// a delta's component values are for the rows it just said exist, and
-		// writing them into a world that has not made them yet drops every one.
-		for (const ecs::Entity entity : delta.Created) {
-			store.CreateAt(entity);
-		}
-
-		for (const ecs::Entity entity : delta.Destroyed) {
-			store.Destroy(entity);
-		}
+		// Whether every value in this message reached a row. A value for an
+		// entity this client does not hold cannot be applied, and the tick it
+		// belongs to is therefore not applied *in full* — see the acknowledgement
+		// below.
+		bool whole = true;
 
 		for (size_t index = 0; index < delta.Components.size(); index++) {
 			const ComponentDelta &component = delta.Components[index];
@@ -172,19 +167,76 @@ namespace engine::replication {
 				}
 
 				// An entity the server named but this client does not hold is
-				// dropped rather than created. The server sends creations in
-				// `Created`, so one turning up only here is a reorder or a
-				// forgery, and inventing a row for it would put an entity in
-				// the world that the server does not believe exists.
+				// dropped rather than created. Creations arrive in a
+				// `Structure` message, so one turning up only here is a
+				// reorder or a forgery, and inventing a row for it would put
+				// an entity in the world that the server does not believe
+				// exists.
 				if (store.Alive(entity)) {
 					store.SetComponent(entity, id, scratch.data());
+				} else {
+					whole = false;
 				}
 				descriptor.Destruct(scratch.data(), 1);
 			}
 		}
 
-		Applied_ = delta.Tick;
 		Stats_.Deltas++;
+
+		// **`Applied` means the last tick applied in full, and this is what makes
+		// that true.** The server retires an unconfirmed value once the client
+		// says it applied a tick at or after the one the value went out on, so
+		// acknowledging a tick whose values were dropped for want of the row
+		// confirms something that never landed — and the entity then carries the
+		// value it had before, for as long as it does not move again. That is how
+		// a creation that arrived late left an entity in the world with none of
+		// its components: the creation was resent by the reliable channel and the
+		// values were not, because the tick they were in had already been
+		// acknowledged.
+		if (!whole) {
+			Stats_.Partial++;
+			return ApplyStatus::Ok;
+		}
+
+		Applied_ = delta.Tick;
+		return ApplyStatus::Ok;
+	}
+
+	ApplyStatus Replica::Apply(ecs::Store &store, const replication::Structure &structure) {
+		// Nothing before the world exists. The snapshot *is* the structure at the
+		// tick it describes, so anything said before it arrived is either already
+		// in it or about a world this client does not have.
+		if (!Joined_) {
+			Stats_.Stale++;
+			return ApplyStatus::Stale;
+		}
+
+		// **No tick gate, and that is the whole reason this is not part of a
+		// delta.** A structural change rides the reliable channel, so it arrives
+		// in the order it was sent and is redelivered until it does — which means
+		// the copy that finally lands may be describing a tick the replica passed
+		// several hundred milliseconds ago. Refusing it as stale is exactly how a
+		// creation whose datagram was lost stays lost for the life of the
+		// connection, with the server's known set saying the client was told.
+		// D00011.
+		//
+		// A resend that has already been applied is harmless in a way a stale
+		// value is not: an entity is created once and destroyed once, and the
+		// order those reach here is the order they were decided in.
+		for (const ecs::Entity entity : structure.Created) {
+			store.CreateAt(entity);
+		}
+		for (const ecs::Entity entity : structure.Destroyed) {
+			store.Destroy(entity);
+		}
+		Forgotten_.insert(Forgotten_.end(), structure.Forgotten.begin(), structure.Forgotten.end());
+
+		// **`Applied_` is deliberately not moved.** It names the last tick whose
+		// *state* was applied, which is what the server retires unconfirmed
+		// values against; a structural message carries no values, so treating it
+		// as an applied tick would confirm every value of that tick without one
+		// of them having arrived.
+		Stats_.Structures++;
 		return ApplyStatus::Ok;
 	}
 
@@ -204,13 +256,8 @@ namespace engine::replication {
 		case MessageKind::Delta:
 			return Apply(store, read.Delta);
 
-		case MessageKind::Forget:
-			if (!Joined_ || read.Forget.Tick <= Applied_) {
-				Stats_.Stale++;
-				return ApplyStatus::Stale;
-			}
-			Forgotten_.insert(Forgotten_.end(), read.Forget.Entities.begin(), read.Forget.Entities.end());
-			return ApplyStatus::Ok;
+		case MessageKind::Structure:
+			return Apply(store, read.Structure);
 
 		case MessageKind::Input:
 		case MessageKind::Applied:

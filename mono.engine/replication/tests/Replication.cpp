@@ -438,17 +438,33 @@ TEST_CASE("a client cannot tell the server what the world is", "[replication]") 
 }
 
 TEST_CASE("a truncated message is refused at every length", "[replication]") {
-	engine::core::ByteWriter writer;
+	// Both shapes, because they truncate differently: a structure is three
+	// counted entity lists and a delta is a counted list of named entries. A
+	// case over one of them would leave the other's length arithmetic
+	// unexercised.
+	engine::core::ByteWriter structure;
+	engine::replication::Structure said;
+	said.Tick = 7;
+	said.Created.push_back(Entity{123});
+	said.Forgotten.push_back(Entity{456});
+	WriteMessage(structure, said);
+
+	engine::core::ByteWriter values;
 	engine::replication::Delta delta;
 	delta.Tick = 7;
-	delta.Created.push_back(Entity{123});
-	WriteMessage(writer, delta);
+	engine::replication::ComponentDelta moved;
+	moved.Component = Name("replication_test.Spot");
+	moved.Entities.push_back(Entity{123});
+	moved.Values.assign(sizeof(Spot), std::byte{0});
+	delta.Components.push_back(std::move(moved));
+	WriteMessage(values, delta);
 
-	const std::span<const std::byte> whole = writer.Bytes();
-	for (size_t length = 0; length < whole.size(); length++) {
-		engine::core::ByteReader reader(whole.subspan(0, length));
-		engine::replication::Message message;
-		REQUIRE_FALSE(ReadMessage(reader, message));
+	for (const std::span<const std::byte> whole : {structure.Bytes(), values.Bytes()}) {
+		for (size_t length = 0; length < whole.size(); length++) {
+			engine::core::ByteReader reader(whole.subspan(0, length));
+			engine::replication::Message message;
+			REQUIRE_FALSE(ReadMessage(reader, message));
+		}
 	}
 }
 

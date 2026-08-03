@@ -98,16 +98,35 @@ Three things about it are deliberate and each hides a real failure:
 - **Only a `PreRender` system.** Everything in that world arrived. A simulation
   system there would be this process disagreeing with the authority once per
   tick, and the disagreement grows rather than corrects.
-- **It is not interpolated.** The demo interpolates between `PreviousTransform`
-  and `Transform` because it owns both ends of its own tick. A replica owns
-  neither; the two states worth interpolating between are two *received* ticks,
-  which is snapshot buffering and belongs in `replication`. It judders at the
-  server's tick rate, and that is the honest version.
+- **It is interpolated, and not by a `PreviousTransform`.** The demo
+  interpolates between `PreviousTransform` and `Transform` because it owns both
+  ends of its own tick. A replica owns neither, so the two states worth
+  interpolating between are two *received* ticks — held in
+  `replication::SnapshotBuffer`, which decides where between them the world is
+  drawn. `Replicated.cpp` only asks. **Nothing interpolated reaches a
+  component**: the pose goes into a `DrawInstance` and nowhere else, because a
+  render-rate quantity written to a `Transform` would make the world this
+  process replicates depend on the frame rate of whoever was watching it.
+  `D00010`.
 - **It has no camera of its own and is looked at through the demo's.** A camera
   is an entity, and an entity minted in a replica collides exactly with one the
   authority minted — the collision `Store::SetAdoptOnly` refuses. A local row in
   a replicated world is safe once the predicted-entity index range exists, and
   not before.
+
+  **This is why a replicated world can be fully drawn and still not visible,
+  and it has cost somebody an afternoon.** The composited camera is world zero's
+  and is placed from *that* world's `WorldBounds`: the demo scene is about
+  twenty-four metres across, so the camera orbits roughly ten to twenty-four
+  metres out with a far plane of three times that. The server's placeholder
+  world is a hundred and twenty-eight metres across of one-metre cubes, offset
+  along X by `--view-spacing`. Most of it is past the far plane and the rest is
+  sub-pixel. `--view-spacing 0` overlays the two and brings it into view, which
+  is a workaround rather than the fix; the fix is the camera above.
+
+  The F4 panel and the `replica:` line at exit exist so this is one reading
+  rather than an afternoon: rows arrived, rows were drawn, and the scene is
+  still empty means it is being drawn and not being looked at.
 
 Its view channel is tracked at the join rather than at connect, because a
 channel allocates its slots once and the only size this process has is what

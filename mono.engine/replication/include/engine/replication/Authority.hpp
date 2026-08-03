@@ -88,10 +88,15 @@ namespace engine::replication {
 	struct AuthoritySettings {
 		// The most snapshot bytes put in one chunk.
 		//
-		// Sized under `net::Packet::MAXIMUM_PAYLOAD_BYTES` with room for this
-		// layer's own header. A chunk that did not fit would be refused by the
-		// transport, and a snapshot that never finished arriving is a client
-		// that never joins.
+		// Sized under `net::Packet::MAXIMUM_MESSAGE_BYTES` — the payload limit
+		// less the sixteen-byte tag every message is sealed with — and with room
+		// for this layer's own header on top. A chunk that did not fit would be
+		// refused by the transport, and a snapshot that never finished arriving
+		// is a client that never joins.
+		//
+		// **Capped at construction, loudly.** Anything larger cannot be sent at
+		// all, and a message that can never be sent looks exactly like a link
+		// that is momentarily busy.
 		size_t ChunkBytes = 1024;
 
 		// How many chunks of a joining client's snapshot go out per tick.
@@ -112,6 +117,12 @@ namespace engine::replication {
 		// **Per client, not per server** — the note at the top of this file
 		// says why. What does not fit is held over rather than dropped, and
 		// `Statistics::Deferred` says how much.
+		//
+		// **Values only.** Structural messages are not counted against it: an
+		// entity is created once and destroyed once, so holding one over would
+		// be holding it over against a link that will be no less busy next
+		// tick, and the link's own refusal already sends it back through
+		// `Unsent`.
 		//
 		// Keep it under `net::LinkSettings::PacketsPerTick` with room left for
 		// `ChunksPerTick` and for reliable retransmissions, because all three
@@ -263,9 +274,14 @@ namespace engine::replication {
 		// not: the cursor moved when the chunk was *built*, so a refused chunk
 		// is a gap in a stream the receiver waits on forever, and the symptom
 		// is a client that streams 184 chunks of 192 and then refuses every
-		// delta that follows as stale. A creation, a destruction and a forget
-		// are each said exactly once and moved the known set when they were
-		// built, so they are the same shape of loss.
+		// delta that follows as stale. A `Structure` message is the same shape:
+		// a creation, a destruction and a forget are each said exactly once and
+		// moved the known set when they were built.
+		//
+		// **This covers a refusal and not a loss.** A structural message the
+		// transport accepted and the network then dropped is covered by the
+		// reliable channel `Session` puts it on, which is where D00011 was
+		// closed — see `ChannelFor`.
 		//
 		// Safe to call for any index, including one that needs nothing undone.
 		//
@@ -430,17 +446,19 @@ namespace engine::replication {
 			size_t Sent = 0;
 			uint64_t SnapshotTick = 0;
 
-			// Entities this client has been told about. What `Created`,
-			// `Destroyed` and `Forget` are all differences against.
+			// Entities this client has been told about. What `Structure`'s three
+			// lists are all differences against.
 			std::unordered_set<uint64_t> Known;
 
 			uint64_t Applied = 0;
 
-			// The tick a delta last actually went out on.
+			// The tick a delta's *values* last actually went out on.
 			//
 			// Paired with `Applied` to say whether a client is behind or merely
 			// watching a world where nothing is happening. Without it the two
 			// are indistinguishable and the second is re-snapshotted for ever.
+			// A structural message does not move it, because `Replica` does not
+			// move `Applied` for one either.
 			uint64_t Streamed = 0;
 
 			std::vector<Input> Pending;
@@ -504,13 +522,9 @@ namespace engine::replication {
 
 		// How much of a delta a packing pass got onto the wire.
 		struct Placement {
-			// Leading entries of `Delta::Created` that went.
-			size_t Created = 0;
-
-			// Leading entries of `Delta::Destroyed` that went.
-			size_t Destroyed = 0;
-
-			// Leading entries of `Order` that went.
+			// Leading entries of `Order` that went. Structure is not here: it
+			// is not ranked and not budgeted, and goes whole in its own
+			// messages.
 			size_t Values = 0;
 		};
 
@@ -521,8 +535,8 @@ namespace engine::replication {
 		void BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
 		void Prioritise(ClientId client, uint64_t tick);
 		Placement Pack(Client &client, const Delta &delta, size_t messageLimit);
-		void Record(Client &client, const Delta &delta, const Placement &placed, uint64_t tick);
-		void EmitForget(Client &client, const Forget &forget);
+		void Record(Client &client, const Placement &placed, uint64_t tick);
+		void EmitStructure(Client &client, const Structure &structure);
 
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity)> Interest;
@@ -569,5 +583,10 @@ namespace engine::replication {
 		// unordered map is walked in whatever order it likes, and two runs of
 		// one server have to produce the same bytes.
 		std::vector<uint64_t> Recovering;
+
+		// Entities this client has just been told about, which are owed their
+		// current value for every replicated component rather than only what the
+		// dirty bits say moved. Rebuilt per client per `Publish`.
+		std::vector<uint64_t> Appearing;
 	};
 }

@@ -29,30 +29,34 @@ namespace engine::physics {
 	//
 	// | entities | `Each` | `IntegrateMotion` | |
 	// |---|---|---|---|
-	// | 1 000 | 4.1 us | 3.8 us | runs inline |
-	// | 4 000 | 16.0 us | 14.9 us | runs inline |
-	// | **20 000** | **80.2 us** | **28.5 us** | 2.8x faster |
-	// | 100 000 | 403 us | 64.6 us | 6.2x faster |
+	// | 1 000 | 3.7 us | 3.8 us | runs inline |
+	// | 4 000 | 14.7 us | 14.8 us | runs inline |
+	// | 8 000 | 29.3 us | 29.5 us | runs inline — the crossover |
+	// | **12 000** | **44.0 us** | **23.9 us** | 1.8x faster |
+	// | 20 000 | 73.0 us | 27.9 us | 2.6x faster |
+	// | 100 000 | 365 us | 65.7 us | 5.6x faster |
 	//
-	// **The old number does not carry forward.** `Store::EachParallel` records
-	// a crossover near sixty to eighty thousand rows for a body of three float
-	// multiply-adds. This body carries a `CFrame` and the crossover is at four
-	// thousand — the row got expensive enough to repay the handover more than
-	// an order of magnitude sooner. `parallel/AGENTS.md` says a default grain is
-	// a guess about how expensive one row is, and this is the row that stopped
-	// being cheap.
+	// **512 was the number at `-O2` and it is 1024 at `-O3`, which is the whole
+	// argument for re-taking a crossover rather than inheriting one.** The
+	// serial column halved when the build changed level; the pool's handover —
+	// 31 us, measured empty by `engine.parallel.bench.dispatch` — did not move,
+	// so the row count that repays it doubled. At 512 the floor sat at 4096 rows
+	// and a six-thousand-row world dispatched into a 1.3x loss. The wider range
+	// is worth something of its own above the floor: every figure from 12 000 up
+	// is 9 to 18 per cent better than the same run at 512, because a range costs
+	// about 95 ns to hand out whatever is in it.
 	//
 	// `Jobs::MINIMUM_GRAINS` is 8, so a grain also sets the count below which
-	// the whole span runs inline whatever the pool is doing: 512 times 8 is
-	// 4096 rows, which is where the crossover measured. The two numbers are the
-	// same number on purpose, and the first two rows above are inline runs —
+	// the whole span runs inline whatever the pool is doing: 1024 times 8 is
+	// 8192 rows, which is where the crossover measured. The two numbers are the
+	// same number on purpose, and the first three rows above are inline runs —
 	// they are the serial figure, and the difference is the measurement.
 	//
 	// The default grain of 4096 would put that floor at 32768 rows and refuse
 	// to dispatch anything below it. Measured at twenty thousand entities, that
-	// is 79.2 us against this grain's 30.6 us, for the same body: the whole
+	// is 73.5 us against this grain's 27.3 us, for the same body: the whole
 	// difference is a dispatch that the default declined to make.
-	inline constexpr size_t INTEGRATE_GRAIN = 512;
+	inline constexpr size_t INTEGRATE_GRAIN = 1024;
 
 	// Advances every transform by its velocity, over one fixed tick.
 	//

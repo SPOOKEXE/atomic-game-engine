@@ -194,6 +194,29 @@ TEST_CASE("a table above the dispatch floor still wakes the pool", "[parallel]")
 	REQUIRE(widest > 1);
 }
 
+TEST_CASE("ten thousand rows at the default grain never reach the pool", "[parallel]") {
+	// **The size `engine.ecs.bench.iteration` measures `EachParallel` at, pinned
+	// here so that suite's numbers cannot be misread.** 10k rows is under
+	// `DEFAULT_GRAIN * MINIMUM_GRAINS`, so that benchmark times the inline path
+	// and any movement in it is the optimiser or the storage — never the job
+	// system. D00012 nearly concluded the opposite from it.
+	//
+	// Not a retry loop, unlike the cases above: those allow one participant and
+	// look for more, and this one requires exactly one every single time.
+	Pool pool{4};
+	Store store("test");
+	Fill(store, 10'000);
+
+	REQUIRE(10'000 < Jobs::DEFAULT_GRAIN * Jobs::MINIMUM_GRAINS);
+
+	for (int attempt = 0; attempt < 25; attempt++) {
+		store.EachParallel<Position, const Velocity>(
+			[](Entity, Position &position, const Velocity &velocity) { position.X += velocity.X; }
+		);
+		REQUIRE(Jobs::LastBatch().Participants == 1);
+	}
+}
+
 TEST_CASE("a small set runs inline rather than paying for a handover", "[parallel]") {
 	Pool pool{4};
 	Store store("test");

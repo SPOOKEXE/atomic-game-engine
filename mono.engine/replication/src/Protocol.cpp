@@ -67,8 +67,8 @@ namespace engine::replication {
 			return "snapshot chunk";
 		case MessageKind::Delta:
 			return "delta";
-		case MessageKind::Forget:
-			return "forget";
+		case MessageKind::Structure:
+			return "structure";
 		case MessageKind::Input:
 			return "input";
 		case MessageKind::Applied:
@@ -91,9 +91,6 @@ namespace engine::replication {
 		writer.WriteUInt64(delta.Tick);
 		writer.WriteUInt64(delta.Baseline);
 
-		WriteEntities(writer, delta.Created);
-		WriteEntities(writer, delta.Destroyed);
-
 		writer.WriteUInt32(static_cast<uint32_t>(delta.Components.size()));
 		for (const ComponentDelta &component : delta.Components) {
 			// By name. An id is a dense counter assigned in registration order
@@ -104,10 +101,12 @@ namespace engine::replication {
 		}
 	}
 
-	void WriteMessage(core::ByteWriter &writer, const Forget &forget) {
-		WriteFront(writer, MessageKind::Forget);
-		writer.WriteUInt64(forget.Tick);
-		WriteEntities(writer, forget.Entities);
+	void WriteMessage(core::ByteWriter &writer, const Structure &structure) {
+		WriteFront(writer, MessageKind::Structure);
+		writer.WriteUInt64(structure.Tick);
+		WriteEntities(writer, structure.Created);
+		WriteEntities(writer, structure.Destroyed);
+		WriteEntities(writer, structure.Forgotten);
 	}
 
 	void WriteMessage(core::ByteWriter &writer, const Input &input) {
@@ -163,9 +162,6 @@ namespace engine::replication {
 			if (reader.Failed()) {
 				return false;
 			}
-			if (!ReadEntities(reader, read.Delta.Created) || !ReadEntities(reader, read.Delta.Destroyed)) {
-				return false;
-			}
 
 			const uint32_t components = reader.ReadUInt32();
 			if (reader.Failed() || components > MAXIMUM_ENTRIES) {
@@ -187,9 +183,11 @@ namespace engine::replication {
 			break;
 		}
 
-		case MessageKind::Forget:
-			read.Forget.Tick = reader.ReadUInt64();
-			if (reader.Failed() || !ReadEntities(reader, read.Forget.Entities)) {
+		case MessageKind::Structure:
+			read.Structure.Tick = reader.ReadUInt64();
+			if (reader.Failed() || !ReadEntities(reader, read.Structure.Created) ||
+				!ReadEntities(reader, read.Structure.Destroyed) ||
+				!ReadEntities(reader, read.Structure.Forgotten)) {
 				return false;
 			}
 			break;

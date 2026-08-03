@@ -392,6 +392,142 @@ namespace engine::render {
 		}
 
 		// -----------------------------------------------------------------
+		// F4 — the network panel
+		// -----------------------------------------------------------------
+
+		// A byte rate, in whichever unit keeps it three digits wide.
+		//
+		// Both units, because the two questions are different: kilobytes per
+		// second is what a bandwidth budget is written in, and bytes per second
+		// is what a per-tick message count is checked against. A panel that
+		// only showed the first turns a 900 B/s stream into "0.9" and hides the
+		// difference between that and 90.
+		std::string FormatRate(double bytesPerSecond) {
+			if (bytesPerSecond >= 1024.0) {
+				return Format("%.1f KB/S (%.0f B/S)", bytesPerSecond / 1024.0, bytesPerSecond);
+			}
+			return Format("%.0f B/S", bytesPerSecond);
+		}
+
+		// Top-right, and deliberately not below the statistics panel.
+		//
+		// The other two are top-left and stacked: F5's height is worked out from
+		// F3's so they cannot overlap, and adding a third to that column would
+		// make every one of those numbers depend on two others. The right edge
+		// has nothing on it, so this panel's position depends on nothing but the
+		// image width — and its background blends rather than fills, so if a
+		// wide flamegraph ever does reach this far the result is a translucent
+		// overlap rather than a hole punched in the panel underneath.
+		void DrawNetwork(OverlayImage &image, const DebugPanelData &data) {
+			const NetworkStatistics &net = data.Network;
+			const int scale = data.Scale;
+			const int padding = 4 * scale;
+
+			// Sized from the widest line this can produce, so the box does not
+			// change width as the numbers do.
+			const int width = DebugText::Measure("DOWN 1000.0 KB/S (100000 B/S)", scale) + padding * 2;
+			const int lines = 12;
+			const int height = lines * DebugText::LineHeight(scale) + padding * 2;
+			const int left = std::max(0, image.GetWidth() - width);
+
+			{
+				ENGINE_PROFILE_CAT("network background", core::ProfileCategory::Render);
+				image.Blend(
+					left,
+					0,
+					width,
+					height,
+					PANEL_BACKGROUND.R,
+					PANEL_BACKGROUND.G,
+					PANEL_BACKGROUND.B,
+					PANEL_ALPHA
+				);
+				image.Blend(left, 0, width, 1, 90, 100, 120, 255);
+			}
+
+			ENGINE_PROFILE_CAT("network text", core::ProfileCategory::Render);
+			Writer writer{image, left + padding, padding, scale};
+
+			writer.Line("NETWORK", TEXT);
+
+			if (!net.Joined) {
+				// Connected and not joined. Worth a line of its own, because
+				// this is the state where every other number below is honestly
+				// zero and a reader needs to know that is expected.
+				writer.Line("JOINING", TEXT_WARN);
+			} else {
+				writer.Line(Format("TICK %llu", static_cast<unsigned long long>(net.AppliedTick)), TEXT_DIM);
+			}
+
+			writer.Line(Format("DOWN %s", FormatRate(net.ReceivedBytesPerSecond).c_str()), TEXT);
+			writer.Line(Format("UP   %s", FormatRate(net.SentBytesPerSecond).c_str()), TEXT_DIM);
+			writer.Line(
+				Format("PPS  %.0f DN  %.0f UP", net.ReceivedPacketsPerSecond, net.SentPacketsPerSecond),
+				TEXT_DIM
+			);
+
+			// The rate the *authority* runs at, which is not the rate this
+			// process was configured with and is the number a mismatch shows up
+			// in first.
+			writer.Line(Format("RATE %.1f HZ", net.TickRate), TEXT_DIM);
+
+			// Round trip and loss together: a link is bad in one of those two
+			// ways and they need different answers.
+			writer.Line(
+				Format("RTT  %.1f MS", static_cast<double>(net.RoundTripMilliseconds)),
+				net.RoundTripMilliseconds > 150.0f ? TEXT_WARN : TEXT_DIM
+			);
+			writer.Line(
+				Format(
+					"LOST %llu  STALE %llu",
+					static_cast<unsigned long long>(net.PacketsLost),
+					static_cast<unsigned long long>(net.PacketsStale)
+				),
+				net.PacketsLost > 0 ? TEXT_WARN : TEXT_DIM
+			);
+
+			// **The budget, which is not congestion.** `D00007` was found by
+			// this coming off zero, so it is on the panel rather than in a log.
+			writer.Line(
+				Format("BUDGET %llu REFUSED", static_cast<unsigned long long>(net.SendsOverBudget)),
+				net.SendsOverBudget > 0 ? TEXT_BAD : TEXT_DIM
+			);
+
+			writer.Line(
+				Format(
+					"MSGS %llu SNAP %llu DELTA %llu STRUCT",
+					static_cast<unsigned long long>(net.Snapshots),
+					static_cast<unsigned long long>(net.Deltas),
+					static_cast<unsigned long long>(net.Structures)
+				),
+				TEXT_DIM
+			);
+
+			// The interpolation half. `BEHIND` sits at the configured delay on a
+			// healthy link and falls toward zero as a late packet eats it;
+			// `STALL` is what it costs when it runs out.
+			writer.Line(
+				Format(
+					"BEHIND %.2f T  STALL %llu", net.BehindTicks, static_cast<unsigned long long>(net.Stalls)
+				),
+				net.BehindTicks < 0.25 ? TEXT_WARN : TEXT_DIM
+			);
+
+			// **Rows arrived against rows drawn, and it is the line to read
+			// when the scene is empty.** Equal and non-zero means the world is
+			// being drawn and the camera is the problem; unequal means rows
+			// arrived without a size or a colour to draw them with.
+			writer.Line(
+				Format(
+					"ENT %llu  DRAWN %llu",
+					static_cast<unsigned long long>(net.Entities),
+					static_cast<unsigned long long>(net.Drawn)
+				),
+				(net.Joined && net.Drawn == 0) ? TEXT_BAD : TEXT_DIM
+			);
+		}
+
+		// -----------------------------------------------------------------
 		// F5 — the flamegraph
 		// -----------------------------------------------------------------
 
@@ -1116,6 +1252,15 @@ namespace engine::render {
 		if (data.ShowStatistics) {
 			ENGINE_PROFILE_CAT("statistics panel", core::ProfileCategory::Render);
 			DrawStatistics(image, data);
+		}
+		// **`Connected` and not merely `ShowNetwork`.** A client with no
+		// `--connect` has no link, and a panel of zeroes says "the link is up
+		// and idle" — which is a different and far more alarming reading than
+		// "there is no link". Enforced here rather than left to the caller,
+		// because there is one place to get it wrong and this is it.
+		if (data.ShowNetwork && data.Network.Connected) {
+			ENGINE_PROFILE_CAT("network panel", core::ProfileCategory::Render);
+			DrawNetwork(image, data);
 		}
 		if (data.ShowFrameGraph) {
 			ENGINE_PROFILE_CAT("profiler panel", core::ProfileCategory::Render);

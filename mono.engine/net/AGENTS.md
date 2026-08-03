@@ -117,6 +117,55 @@ received a datagram this end sent there, recently. Not identity, not
 authorisation. Deciding who may connect belongs above this module —
 `replication::Listener::SetAdmission`.
 
+## The stream is sealed, and the nonce discipline is structural
+
+Every payload above the handshake is ChaCha20-Poly1305 with **the packet header
+as associated data**, so a rewritten channel, sequence or acknowledgement fails
+the tag rather than being acted on. The keys come out of `Handshake` and are
+held for the life of the connection by `replication::Session` — one `Sealer` and
+one `Opener` per direction, and holding them *is* the guarantee rather than a
+convenience.
+
+**A repeated nonce is the catastrophic failure and nothing here is allowed to
+make one possible.** Two frames under one key and one nonce leak the XOR of
+their plaintexts and hand over the material to forge tags. The three properties
+that make it impossible are in `Cipher.hpp` and none of them may be weakened to
+make plumbing convenient: the counter is private and only moves forward, a
+`Sealer` is move-only and a moved-from one is poisoned, and **there is no
+constructor from raw key material at all.** If holding one across a connection
+wants it copyable, the plumbing is wrong.
+
+**The counter is on the wire whole, in `PacketHeader::Counter`, and is not
+derived from the sequence.** The sequence is the obvious candidate and it is the
+wrong one: it is 16 bits and `IsNewer` exists precisely because it wraps every
+eighteen minutes at sixty packets a second. A nonce derived from a wrapping
+counter is a nonce that repeats. Eight bytes a packet is what that costs.
+
+**A resend is sealed again under a fresh counter, never replayed verbatim.**
+Both are safe against a repeat — a verbatim replay is the same frame rather than
+a second one — and they fail differently. The header is the associated data and
+it carries a live acknowledgement, so a verbatim replay would have to freeze the
+acknowledgement on the one packet a stalled stream most needs current, or stop
+covering the mutable header fields with the tag. `ReliableSender` therefore
+holds **plaintext**, and `Session::Flush` seals it again.
+
+**`Cipher` refuses a forgery and not a replay**, deliberately. A captured frame
+sent again is authentic by construction; discarding it is the sequence window's
+and `ReliableReceiver`'s job, because they are the layers that can tell an
+attack from an ordinary resend. Nothing in `Opener` remembers a counter — a
+dropped packet leaves a gap, a duplicate repeats one and a reorder lowers one,
+and an opener with a window would refuse genuine traffic on all three.
+
+**There is no downgrade because there is nothing to ask for.** No field on the
+wire says whether a packet is sealed, so a peer can only send plaintext and be
+refused. A `Session` with no keys sends nothing and accepts nothing.
+
+**The tag comes out of the payload budget and the number to size against is
+`Packet::MAXIMUM_MESSAGE_BYTES`, not `MAXIMUM_PAYLOAD_BYTES`.** `Link::Reserve`
+measures against the first. A budget left on the second produces a message that
+can never be sent and is indistinguishable at the call site from a busy link —
+which is the failure this module has already been bitten by three times.
+
 ## Every field of an inbound packet is hostile
 
 There is no trusted direction. `repo_layout.md` §1 says anyone can run a server,
@@ -147,6 +196,37 @@ That is also what makes `repo_layout.md` §16.6 honest: single-player rides a
 loopback with **real encoding**, so there is no configuration in which this path
 is skipped and no second lifecycle that only a socket exercises.
 
+## A link that loses things is part of this module, and it is deterministic
+
+`LossyTransport` wraps another `Transport` and discards some of what arrives at
+it. It is here rather than in a suite because `net`, `replication` and
+`mono.server` all need it, and this repository has no mechanism for a test-only
+library shared between modules — a module's `tests/` may reach its own `src/`
+and nothing else, so the alternatives were three copies or a fourth way to share
+code.
+
+**A wrapper, never a third implementation.** What it loses is real datagrams
+through real framing over the loopback or a real socket. A third implementation
+of the interface would be a third set of bugs, and the two cases only a routed
+network produces would have to be built again.
+
+**Loss is applied on arrival, not on the way out.** `Send` promises `Ok` means
+the datagram left and distinguishes that from `Full`, `TooLarge`, `Unreachable`
+and `Closed`; a wrapper deciding to lose one before offering it would have to
+invent one of those statuses or hide one the transport underneath would have
+given. So `Send` is pure delegation. Wrap the end that receives.
+
+**No clock and no `std::random_device`, which is not negotiable here.** Whether
+arrival *n* is lost is a pure function of *n* and a seed the caller states —
+`core::Random` is indexed rather than streamed for exactly this reason. A
+timeout in this module is something a suite states rather than waits for, and
+loss is the same: a failing case is reproducible from its seed alone, and
+nothing here can reach a recorded run.
+
+**Nominating one datagram is worth more than a percentage**, and `DropNext` is
+worth more than either — a test knows it has just made the server publish a
+creation and does not know which arrival that will be.
+
 ## No vendor type in a public header
 
 asio is `VENDOR`, never `VENDOR_PUBLIC`. No public header here names a socket, an
@@ -158,14 +238,14 @@ what stops asio reaching every module that links this.
 - **The transports.** A loopback and an asio UDP socket, both driving `Link`.
 - **Reliability.** The acknowledgement window is carried and recorded; nothing
   resends against it yet.
-- **Encryption of the stream.** The agreement is wired in and used —
-  `replication`'s admission exchange runs `Handshake` and proves the derived
-  keys agree — but **the traffic after it is still in the clear.** The two
-  `Cipher` halves confirm the exchange and are then destroyed, deliberately: a
-  `Sealer` kept somewhere that nothing seals with reads as though the wire were
-  protected. Sealing every payload means a counter on the wire, the header as
-  associated data, and the tag coming out of `MAXIMUM_PAYLOAD_BYTES`. That is a
-  wire format change and it is its own piece of work.
+- **Binding the agreement to a server identity.** The stream is encrypted and
+  the exchange is unauthenticated, and those are two different things: a peer
+  knows it is talking to *something* that completed X25519, not that it is
+  talking to this server. So the traffic is safe against a listener and not
+  against a relay, which can hold one exchange with each side and read
+  everything. `Handshake.hpp` carries the `TODO(v0.4)`. A static server key and
+  a signature over the transcript is the shape; where the key comes from and who
+  trusts it is a deployment question.
 - `upstream/`, `downstream/`, `predict/` — replication, v0.3's remaining items.
 - `http/`, `websocket/` — userland networking and the origin's asset serving,
   which is what `mono.cdn`'s streaming waits on.

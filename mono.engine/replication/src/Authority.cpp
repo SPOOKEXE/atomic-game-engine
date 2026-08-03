@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/net/Packet.hpp>
 #include <engine/replication/Authority.hpp>
 
 #include <algorithm>
@@ -30,9 +31,42 @@ namespace engine::replication {
 		// A component name is written per entry, so an entry is only worth
 		// opening if something can follow it.
 		constexpr size_t ENTRY_OVERHEAD = 96;
+
+		// The largest `ChunkBytes` that still produces a message which fits.
+		//
+		// **The number to compare against is the plaintext limit, not the
+		// payload limit**: every message this builds is sealed by `Session`
+		// before it goes, so the Poly1305 tag is sixteen bytes of the datagram
+		// that a chunk does not get to spend.
+		//
+		// Less the message overhead on top of that, because the two readers of
+		// `ChunkBytes` read it differently: `Pack` and `EmitStructure` treat it
+		// as the whole message budget, and the snapshot streamer treats it as
+		// the payload with the message's own fields still to be added. Taking
+		// the overhead off covers both, and the overhead is deliberately
+		// generous for the same reason it always was.
+		constexpr size_t LARGEST_CHUNK = net::Packet::MAXIMUM_MESSAGE_BYTES - MESSAGE_OVERHEAD;
 	}
 
-	Authority::Authority(const AuthoritySettings &settings) : Settings_(settings) {}
+	Authority::Authority(const AuthoritySettings &settings) : Settings_(settings) {
+		if (Settings_.ChunkBytes > LARGEST_CHUNK) {
+			// **Clamped rather than left to be refused later, and this is the
+			// one place in this module where that is the right answer.** A
+			// message over the limit is refused by `Link::Reserve`, and a
+			// refusal is what ordinary backpressure looks like — so a chunk size
+			// that can never fit produces a client that joins and then watches a
+			// frozen world, with `SendsOverBudget` as the only clue and "the
+			// link is busy" as the reading everybody takes from it. That exact
+			// bug has been found here three times: the v0.3 delta, the snapshot
+			// chunk cursor and the oversized forget.
+			ENGINE_WARN(
+				"replication: a chunk of {} bytes cannot fit a sealed datagram, so it is capped at {}.",
+				Settings_.ChunkBytes,
+				LARGEST_CHUNK
+			);
+			Settings_.ChunkBytes = LARGEST_CHUNK;
+		}
+	}
 
 	void Authority::Replicate(core::Name component) {
 		if (!component.IsValid()) {
@@ -333,7 +367,7 @@ namespace engine::replication {
 		// this client's tick is worth. Everything after a refusal stays
 		// unbuilt, which is what makes `Placement` a prefix.
 		const auto flush = [&]() -> bool {
-			if (!piece.Created.empty() || !piece.Destroyed.empty() || !piece.Components.empty()) {
+			if (!piece.Components.empty()) {
 				std::vector<std::byte> encoded = Encode(piece);
 				if (messages >= messageLimit || bytes + encoded.size() > Settings_.BytesPerTick) {
 					return false;
@@ -341,25 +375,14 @@ namespace engine::replication {
 
 				bytes += encoded.size();
 				messages++;
-				placed.Created += piece.Created.size();
-				placed.Destroyed += piece.Destroyed.size();
 				placed.Values += rows;
 
-				// What this message moved in the known set, so a refusal can
-				// move it back. A creation put an entity in and a destruction
-				// took one out, and either one is said exactly once.
-				Carried carried;
-				carried.First = static_cast<uint32_t>(client.Edits.size());
-				carried.Count = static_cast<uint32_t>(piece.Created.size() + piece.Destroyed.size());
-				for (const ecs::Entity entity : piece.Created) {
-					client.Edits.push_back(Edit{entity.Id, false});
-				}
-				for (const ecs::Entity entity : piece.Destroyed) {
-					client.Edits.push_back(Edit{entity.Id, true});
-				}
-
+				// **Nothing to undo, so nothing is recorded.** A delta moves no
+				// entity in or out of the known set — that is `EmitStructure`'s
+				// — and a component value in a refused delta is offered again
+				// next tick by the unconfirmed set.
 				client.Outgoing.push_back(std::move(encoded));
-				client.Carried_.push_back(carried);
+				client.Carried_.push_back(Carried{});
 			}
 
 			piece = Delta{};
@@ -371,31 +394,7 @@ namespace engine::replication {
 			return true;
 		};
 
-		// Structure first, and in its own messages when it needs them. A
-		// component value for a row the receiver has not created yet is
-		// dropped, so creations lead.
-		//
-		// **Structure is not rotated, and does not need to be.** An entity is
-		// created once and destroyed once, so a creation this tick's budget
-		// could not carry is carried by the next one and cannot recur — where
-		// a component value changes every tick and starves for good if it is
-		// always last.
 		bool room = true;
-		const auto place = [&](std::vector<ecs::Entity> &into, const std::vector<ecs::Entity> &from) {
-			for (const ecs::Entity entity : from) {
-				if (used + sizeof(uint64_t) > budget && !(room = flush())) {
-					return;
-				}
-				into.push_back(entity);
-				used += sizeof(uint64_t);
-			}
-		};
-
-		place(piece.Created, delta.Created);
-		if (room) {
-			place(piece.Destroyed, delta.Destroyed);
-		}
-
 		for (size_t position = 0; room && position < Order.size(); position++) {
 			const Candidate &candidate = Candidates[Order[position]];
 			const size_t stride = Strides[candidate.Entry];
@@ -440,39 +439,62 @@ namespace engine::replication {
 		return placed;
 	}
 
-	void Authority::EmitForget(Client &client, const Forget &forget) {
-		// **Split for the same reason a delta is.** A forget naming every
-		// entity of a world that went out of view is tens of kilobytes against
-		// a twelve-hundred-byte payload, and `Link::Reserve` refuses an
-		// oversized message rather than fragmenting it — so the one message
-		// that says "stop drawing these" is the one that never arrives, and
-		// the client draws them for the rest of the connection.
-		// At least one, whatever `ChunkBytes` was set to. A subtraction that
-		// underflowed would put the whole list in one message again, and a zero
-		// would never advance the offset.
+	void Authority::EmitStructure(Client &client, const Structure &structure) {
+		// **Split for the same reason a delta is.** A world going out of view
+		// all at once names every entity in one message, and three hundred
+		// handles is tens of kilobytes against a twelve-hundred-byte payload —
+		// which `Link::Reserve` refuses outright rather than fragmenting, so the
+		// one message that says "stop drawing these" is the one that never
+		// arrives.
+		//
+		// At least one entity per message, whatever `ChunkBytes` was set to. A
+		// subtraction that underflowed would put the whole list in one message
+		// again, and a zero would never advance the offset.
 		const size_t room =
 			Settings_.ChunkBytes > MESSAGE_OVERHEAD ? Settings_.ChunkBytes - MESSAGE_OVERHEAD : 0;
 		const size_t perMessage = std::max<size_t>(1, room / sizeof(uint64_t));
 
-		for (size_t offset = 0; offset < forget.Entities.size(); offset += perMessage) {
-			const size_t take = std::min(perMessage, forget.Entities.size() - offset);
+		// Created, then destroyed, then forgotten, each in its own messages.
+		// Creations lead because a component value for a row the receiver has
+		// not made yet is dropped, and the delta follows all of these.
+		const std::array<const std::vector<ecs::Entity> *, 3> lists{
+			&structure.Created, &structure.Destroyed, &structure.Forgotten
+		};
 
-			Forget piece;
-			piece.Tick = forget.Tick;
-			piece.Entities.assign(
-				forget.Entities.begin() + static_cast<ptrdiff_t>(offset),
-				forget.Entities.begin() + static_cast<ptrdiff_t>(offset + take)
-			);
+		// Whether undoing the message means putting the entity back in the known
+		// set. A creation put one in; a destroy and a forget each took one out.
+		const std::array<bool, 3> restores{false, true, true};
 
-			Carried carried;
-			carried.First = static_cast<uint32_t>(client.Edits.size());
-			carried.Count = static_cast<uint32_t>(take);
-			for (const ecs::Entity entity : piece.Entities) {
-				client.Edits.push_back(Edit{entity.Id, true});
+		for (size_t list = 0; list < lists.size(); list++) {
+			const std::vector<ecs::Entity> &from = *lists[list];
+
+			for (size_t offset = 0; offset < from.size(); offset += perMessage) {
+				const size_t take = std::min(perMessage, from.size() - offset);
+				const auto first = from.begin() + static_cast<ptrdiff_t>(offset);
+				const auto last = from.begin() + static_cast<ptrdiff_t>(offset + take);
+
+				Structure piece;
+				piece.Tick = structure.Tick;
+				if (list == 0) {
+					piece.Created.assign(first, last);
+				} else if (list == 1) {
+					piece.Destroyed.assign(first, last);
+				} else {
+					piece.Forgotten.assign(first, last);
+				}
+
+				// What this message moved in the known set, so a refusal can
+				// move it back. Each of the three is said exactly once.
+				Carried carried;
+				carried.First = static_cast<uint32_t>(client.Edits.size());
+				carried.Count = static_cast<uint32_t>(take);
+				for (auto entity = first; entity != last; ++entity) {
+					client.Edits.push_back(Edit{entity->Id, restores[list]});
+				}
+
+				client.Outgoing.push_back(Encode(piece));
+				client.Carried_.push_back(carried);
 			}
-
-			client.Outgoing.push_back(Encode(piece));
-			client.Carried_.push_back(carried);
 		}
 	}
 
@@ -488,6 +510,23 @@ namespace engine::replication {
 		for (size_t slot = 0; slot < Components.size(); slot++) {
 			const core::Name name = Components[slot];
 			std::unordered_map<uint64_t, Outstanding> &unconfirmed = client.Unconfirmed[slot];
+
+			// **Every value of an entity the client has just been told about,
+			// whether or not it changed this tick.** The dirty bits describe
+			// what *moved*, and an entity entering a client's interest has not
+			// moved — it was always there and this client could not see it. So
+			// the run walk below finds nothing for it and the entity used to
+			// come into view as a bare row holding none of its components, for
+			// as long as it stood still.
+			//
+			// Seeding an unconfirmed entry rather than offering it here on
+			// purpose: the recovery walk already reads the current value,
+			// already skips an entity that has no such component, and already
+			// keeps offering until the client confirms. A second path that did
+			// the same thing is the second one that would rot.
+			for (const uint64_t appearing : Appearing) {
+				unconfirmed.emplace(appearing, Outstanding{});
+			}
 
 			const ecs::ComponentId id = ecs::Components::Find(name);
 			if (!id.IsValid()) {
@@ -632,22 +671,17 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::Record(Client &client, const Delta &delta, const Placement &placed, uint64_t tick) {
-		if (placed.Created + placed.Destroyed + placed.Values > 0) {
-			// The tick something last went out on, which is what the
-			// re-snapshot decision is measured against — see `Publish`.
+	void Authority::Record(Client &client, const Placement &placed, uint64_t tick) {
+		// **Values only, and that is a change rather than an omission.** This is
+		// what the re-snapshot decision is measured against, and a client
+		// acknowledges the last tick whose *state* it applied — a structural
+		// message carries none and `Replica` deliberately does not move
+		// `Applied` for it. Counting a structure-only tick as streamed would
+		// leave `Streamed` permanently ahead of `Applied` in a world where
+		// entities come and go and nothing moves, and re-snapshot a client that
+		// is in perfect agreement. The same argument as the quiet world above.
+		if (placed.Values > 0) {
 			client.Streamed = tick;
-		}
-
-		// Known only for the creations that actually went out. An entity marked
-		// known but never announced is one whose component values are then sent
-		// for a row the client does not hold — and `Replica` drops those,
-		// silently, for as long as the entity lives.
-		for (size_t index = placed.Created; index < delta.Created.size(); index++) {
-			client.Known.erase(delta.Created[index].Id);
-		}
-		for (size_t index = placed.Destroyed; index < delta.Destroyed.size(); index++) {
-			client.Known.insert(delta.Destroyed[index].Id);
 		}
 
 		for (size_t position = 0; position < Order.size(); position++) {
@@ -793,25 +827,29 @@ namespace engine::replication {
 				continue;
 			}
 
-			// --- the delta ---
-			Delta delta;
-			delta.Tick = tick;
-			delta.Baseline = client.Applied;
+			// --- the structure ---
+			//
+			// Which entities the client holds, in one reliable message rather
+			// than riding the delta. **A creation is said exactly once and the
+			// known set moves when it is said**, so a lost one leaves the server
+			// certain the client was told about something it has never heard of
+			// — and nothing above notices, because the client goes on
+			// acknowledging ticks. D00011.
+			Structure structure;
+			structure.Tick = tick;
 
-			// Created: visible now, not known before. Also the set that has to
-			// carry full values rather than only what changed, because a client
-			// has never seen these rows at all.
+			// Created: visible now, not known before. Their values follow in the
+			// delta, because the known set moves below and `BuildComponents`
+			// filters by exactly it.
 			for (const ecs::Entity entity : Visible) {
 				if (client.Known.find(entity.Id) == client.Known.end()) {
-					delta.Created.push_back(entity);
+					structure.Created.push_back(entity);
 				}
 			}
 
 			// Destroyed and forgotten, told apart deliberately. An entity that
 			// went out of view still exists, and a client that deleted it would
 			// be wrong about the world the moment it came back.
-			Forget forget;
-			forget.Tick = tick;
 			{
 				std::vector<uint64_t> visible;
 				visible.reserve(Visible.size());
@@ -825,9 +863,9 @@ namespace engine::replication {
 						continue;
 					}
 					if (store.Alive(ecs::Entity{known})) {
-						forget.Entities.push_back(ecs::Entity{known});
+						structure.Forgotten.push_back(ecs::Entity{known});
 					} else {
-						delta.Destroyed.push_back(ecs::Entity{known});
+						structure.Destroyed.push_back(ecs::Entity{known});
 					}
 				}
 			}
@@ -835,38 +873,51 @@ namespace engine::replication {
 			// Deterministic, because two runs of one server must produce the
 			// same bytes — the same rule a snapshot follows, for the same
 			// reason. An unordered set is walked in whatever order it likes.
-			std::sort(delta.Created.begin(), delta.Created.end(), [](ecs::Entity left, ecs::Entity right) {
-				return left.Id < right.Id;
-			});
-			std::sort(
-				delta.Destroyed.begin(), delta.Destroyed.end(), [](ecs::Entity left, ecs::Entity right) {
-					return left.Id < right.Id;
-				}
-			);
-			std::sort(
-				forget.Entities.begin(), forget.Entities.end(), [](ecs::Entity left, ecs::Entity right) {
-					return left.Id < right.Id;
-				}
-			);
+			const auto byHandle = [](ecs::Entity left, ecs::Entity right) { return left.Id < right.Id; };
+			std::sort(structure.Created.begin(), structure.Created.end(), byHandle);
+			std::sort(structure.Destroyed.begin(), structure.Destroyed.end(), byHandle);
+			std::sort(structure.Forgotten.begin(), structure.Forgotten.end(), byHandle);
 
 			// The known set moves before the delta is built, because a
-			// creation's component values belong in the same delta as the
+			// creation's component values belong in the same tick as the
 			// creation and `BuildComponents` filters by exactly this set.
-			// `Record` puts back whatever the budget then could not carry.
-			for (const ecs::Entity entity : delta.Created) {
+			// `Unsent` puts back whatever the transport then would not take.
+			for (const ecs::Entity entity : structure.Created) {
 				client.Known.insert(entity.Id);
 			}
-			for (const ecs::Entity entity : delta.Destroyed) {
+			for (const ecs::Entity entity : structure.Destroyed) {
 				client.Known.erase(entity.Id);
 			}
-			for (const ecs::Entity entity : forget.Entities) {
+			for (const ecs::Entity entity : structure.Forgotten) {
 				client.Known.erase(entity.Id);
 			}
+
+			if (!structure.Created.empty() || !structure.Destroyed.empty() || !structure.Forgotten.empty()) {
+				EmitStructure(client, structure);
+			}
+
+			// What `BuildComponents` owes a full value rather than a delta. See
+			// the note there.
+			Appearing.clear();
+			for (const ecs::Entity entity : structure.Created) {
+				Appearing.push_back(entity.Id);
+			}
+
+			// --- the delta ---
+			//
+			// Everything before this belongs to the client's known set and must
+			// survive the re-pack below, so the structure's messages are counted
+			// and the repack rewinds only to here.
+			const size_t structureMessages = client.Outgoing.size();
+			const size_t structureEdits = client.Edits.size();
+
+			Delta delta;
+			delta.Tick = tick;
+			delta.Baseline = client.Applied;
 
 			BuildComponents(store, client, delta, tick);
 
-			const bool quiet = delta.Created.empty() && delta.Destroyed.empty() && delta.Components.empty();
-			if (!quiet) {
+			if (!delta.Components.empty()) {
 				// **Natural order first: component by component and run by
 				// run, exactly as the dirty bits handed them over.** When the
 				// whole tick fits, that is the end of it — the priority pass
@@ -880,27 +931,22 @@ namespace engine::replication {
 				}
 
 				Placement placed = Pack(client, delta, Settings_.MessagesPerTick);
-				const bool overBudget = placed.Created < delta.Created.size() ||
-										placed.Destroyed < delta.Destroyed.size() ||
-										placed.Values < Candidates.size();
 
-				if (overBudget) {
+				if (placed.Values < Candidates.size()) {
 					// It did not fit, so *which* of it goes is a decision now
 					// rather than an accident of where a component sits in a
-					// vector. D00007.
-					client.Outgoing.clear();
-					client.Carried_.clear();
-					client.Edits.clear();
+					// vector. D00007. The structure's messages stay: they are
+					// not ranked, and re-encoding them would mint a second copy
+					// of an edit the known set has already moved for.
+					client.Outgoing.resize(structureMessages);
+					client.Carried_.resize(structureMessages);
+					client.Edits.resize(structureEdits);
 
 					Prioritise(handle, tick);
 					placed = Pack(client, delta, Settings_.MessagesPerTick);
 				}
 
-				Record(client, delta, placed, tick);
-			}
-
-			if (!forget.Entities.empty()) {
-				EmitForget(client, forget);
+				Record(client, placed, tick);
 			}
 
 			for (const std::vector<std::byte> &message : client.Outgoing) {
@@ -985,7 +1031,7 @@ namespace engine::replication {
 
 		case MessageKind::SnapshotChunk:
 		case MessageKind::Delta:
-		case MessageKind::Forget:
+		case MessageKind::Structure:
 			// Server to client only. A client sending one is a client trying to
 			// tell the server what the world is, which is the whole thing
 			// authority means it may not do.

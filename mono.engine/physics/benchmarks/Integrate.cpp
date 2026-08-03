@@ -124,6 +124,30 @@ BENCH("Each · 4000 entities", 200) {
 	}
 }
 
+BENCH("Each · 6000 entities", 200) {
+	Store &store = WorldOf(6000);
+	for (int pass = 0; pass < 200; pass++) {
+		Serial(store);
+		Consume(store.Time().Delta);
+	}
+}
+
+BENCH("Each · 8000 entities", 100) {
+	Store &store = WorldOf(8000);
+	for (int pass = 0; pass < 100; pass++) {
+		Serial(store);
+		Consume(store.Time().Delta);
+	}
+}
+
+BENCH("Each · 12000 entities", 100) {
+	Store &store = WorldOf(12000);
+	for (int pass = 0; pass < 100; pass++) {
+		Serial(store);
+		Consume(store.Time().Delta);
+	}
+}
+
 BENCH("Each · 20000 entities", 50) {
 	Store &store = WorldOf(20000);
 	for (int pass = 0; pass < 50; pass++) {
@@ -158,6 +182,34 @@ BENCH("IntegrateMotion · 1000 entities", 500) {
 BENCH("IntegrateMotion · 4000 entities", 200) {
 	Store &store = WorldOf(4000);
 	for (int pass = 0; pass < 200; pass++) {
+		IntegrateMotion(store);
+		Consume(store.Time().Delta);
+	}
+}
+
+BENCH("IntegrateMotion · 6000 entities", 200) {
+	// The first rung above the floor. `INTEGRATE_GRAIN` is 512, so
+	// `Jobs::For` runs anything under 4096 rows inline and 4000 above is the
+	// same code as `Each` — the crossover cannot be below this row, only at or
+	// above it.
+	Store &store = WorldOf(6000);
+	for (int pass = 0; pass < 200; pass++) {
+		IntegrateMotion(store);
+		Consume(store.Time().Delta);
+	}
+}
+
+BENCH("IntegrateMotion · 8000 entities", 100) {
+	Store &store = WorldOf(8000);
+	for (int pass = 0; pass < 100; pass++) {
+		IntegrateMotion(store);
+		Consume(store.Time().Delta);
+	}
+}
+
+BENCH("IntegrateMotion · 12000 entities", 100) {
+	Store &store = WorldOf(12000);
+	for (int pass = 0; pass < 100; pass++) {
 		IntegrateMotion(store);
 		Consume(store.Time().Delta);
 	}

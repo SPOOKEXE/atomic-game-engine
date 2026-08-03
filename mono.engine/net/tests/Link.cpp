@@ -17,6 +17,7 @@ TEST_DEPENDS("engine.core.metrics")
 using engine::core::FrameGraph;
 using engine::core::Metrics;
 using engine::net::ChannelKind;
+using engine::net::Cipher;
 using engine::net::ConnectionId;
 using engine::net::ConnectionState;
 using engine::net::DisconnectReason;
@@ -250,8 +251,16 @@ TEST_CASE("an oversized send is refused rather than fragmented", "[net][link]") 
 
 	// A fragmented datagram is lost entirely when any one fragment is, which
 	// multiplies the loss rate the unreliable channel is designed around.
-	CHECK(link.Reserve(Packet::MAXIMUM_PAYLOAD_BYTES));
-	CHECK_FALSE(link.Reserve(Packet::MAXIMUM_PAYLOAD_BYTES + 1));
+	CHECK(link.Reserve(Packet::MAXIMUM_MESSAGE_BYTES));
+	CHECK_FALSE(link.Reserve(Packet::MAXIMUM_MESSAGE_BYTES + 1));
+
+	// **The tag is the difference between the two limits, and this is the
+	// assertion that keeps the budget honest.** A payload that fits the wire
+	// once sealed is smaller than the wire, and a `Reserve` measured against
+	// the wire would book a message the framing then refuses — which is a
+	// message that can never be sent and reads at the call site as a busy link.
+	CHECK(Packet::MAXIMUM_MESSAGE_BYTES + Cipher::OVERHEAD_BYTES == Packet::MAXIMUM_PAYLOAD_BYTES);
+	CHECK_FALSE(link.Reserve(Packet::MAXIMUM_PAYLOAD_BYTES));
 }
 
 TEST_CASE("nothing may be sent before or after the connection", "[net][link]") {

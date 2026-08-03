@@ -158,6 +158,14 @@ if(MONO_BUILD_SERVER)
 	add_subdirectory(mono.server)
 endif()
 
+# Both halves of replication in one process, with `net` cut out of the middle.
+# A diagnostic product: it needs the client's draw seam and the server's world,
+# so it configures only where both exist. Under the `server` preset there is no
+# client to link and this is absent rather than stubbed.
+if(MONO_BUILD_CLIENT AND MONO_BUILD_SERVER)
+	add_subdirectory(mono.unified_server_client)
+endif()
+
 # The content origin. `shared` tier rather than `server`, so the tier rule
 # itself — not a guard here — is what keeps a graphics stack off its link line.
 # repo_layout.md §11.

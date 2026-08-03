@@ -25,15 +25,18 @@
 // X25519 agreement, and only then the slot. Every step is cheaper than the one
 // after it and each is a reason to stop.
 //
-// **The `Welcome`'s tag is the exchange proving itself.** Both sides derive
-// `net::Cipher` keys from the agreement; the server seals an empty frame over
-// the transcript — client key, server key, cookie — and the client opens it.
-// A tampered key in either direction produces different keys and the tag does
-// not verify, so the exchange fails *here* rather than being half-accepted and
-// noticed later. The two ciphers are destroyed immediately afterwards: **this
-// engine does not encrypt the stream yet**, and saying so plainly beats keeping
-// a `Sealer` around that nothing seals with. Stream encryption is `net`'s own
-// outstanding item, not something this file quietly implies.
+// **The `Welcome`'s tag is the exchange proving itself, and it is also the
+// stream's first frame.** Both sides derive `net::Cipher` keys from the
+// agreement; the server seals an empty frame over the transcript — client key,
+// server key, cookie — and the client opens it. A tampered key in either
+// direction produces different keys and the tag does not verify, so the exchange
+// fails *here* rather than being half-accepted and noticed later.
+//
+// The two ciphers then move into the `Session` and stay there for the life of
+// the connection, which is what encrypts the traffic. The server's sealing half
+// has spent counter zero on the tag above and carries on from one, so the
+// admission and the stream are one nonce sequence rather than two that could
+// overlap.
 //
 // **What none of this proves is who the peer is.** The cookie proves it can
 // receive at the address it wrote, and the agreement proves it can do
@@ -126,8 +129,9 @@ namespace engine::replication {
 		std::array<std::byte, net::Handshake::MESSAGE_BYTES> PublicKey{};
 
 		// The nonce counter the tag below was sealed under. Zero in practice,
-		// since the `Sealer` is used once and destroyed, but carried rather
-		// than assumed — an `Opener` is told the counter, never left to guess.
+		// since this is the first thing the server's `Sealer` seals, but carried
+		// rather than assumed — an `Opener` is told the counter, never left to
+		// guess.
 		uint64_t Counter = 0;
 
 		// The tag over an empty frame, with the transcript as associated data.

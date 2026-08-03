@@ -3,9 +3,8 @@
 
 namespace engine::net {
 
-	bool
-	Packet::Write(core::ByteWriter &writer, const PacketHeader &header, std::span<const std::byte> payload) {
-		if (payload.size() > MAXIMUM_PAYLOAD_BYTES) {
+	bool Packet::WriteHeader(core::ByteWriter &writer, const PacketHeader &header, size_t payloadBytes) {
+		if (payloadBytes > MAXIMUM_PAYLOAD_BYTES) {
 			// Nothing written, rather than a truncated packet. A frame that says
 			// one length and carries another is the exact shape the reader below
 			// exists to refuse, and producing one locally would be a bug that
@@ -19,7 +18,16 @@ namespace engine::net {
 		writer.WriteUInt16(header.Sequence);
 		writer.WriteUInt16(header.Acknowledge);
 		writer.WriteUInt32(header.AcknowledgeBits);
-		writer.WriteUInt16(static_cast<uint16_t>(payload.size()));
+		writer.WriteUInt64(header.Counter);
+		writer.WriteUInt16(static_cast<uint16_t>(payloadBytes));
+		return true;
+	}
+
+	bool
+	Packet::Write(core::ByteWriter &writer, const PacketHeader &header, std::span<const std::byte> payload) {
+		if (!WriteHeader(writer, header, payload.size())) {
+			return false;
+		}
 		if (!payload.empty()) {
 			writer.WriteRaw(payload.data(), payload.size());
 		}
@@ -35,19 +43,29 @@ namespace engine::net {
 			return std::nullopt;
 		};
 
-		if (reader.ReadUInt32() != MAGIC) {
+		// Borrowed whole and then parsed, so that the bytes the tag was computed
+		// over are the bytes that arrived rather than a re-serialisation of what
+		// they parsed into. The two would agree today; the day they stop, every
+		// packet is refused and it reads as a dead network.
+		Inbound inbound;
+		inbound.HeaderBytes = reader.ReadRawView(HEADER_BYTES);
+		if (reader.Failed()) {
 			return refuse();
 		}
-		if (reader.ReadUInt16() != VERSION) {
+
+		core::ByteReader head(inbound.HeaderBytes);
+
+		if (head.ReadUInt32() != MAGIC) {
+			return refuse();
+		}
+		if (head.ReadUInt16() != VERSION) {
 			// Refused rather than negotiated downward. A server speaking an old
 			// version to an old client is a server running two protocols, and
 			// the second one is the one nobody tests.
 			return refuse();
 		}
 
-		Inbound inbound;
-
-		const uint8_t channel = reader.ReadUInt8();
+		const uint8_t channel = head.ReadUInt8();
 		if (channel > static_cast<uint8_t>(ChannelKind::Handshake)) {
 			// A byte outside the enum. Casting it anyway would produce a
 			// `ChannelKind` no switch handles, and every `Describe` and every
@@ -57,11 +75,12 @@ namespace engine::net {
 		}
 		inbound.Header.Channel = static_cast<ChannelKind>(channel);
 
-		inbound.Header.Sequence = reader.ReadUInt16();
-		inbound.Header.Acknowledge = reader.ReadUInt16();
-		inbound.Header.AcknowledgeBits = reader.ReadUInt32();
+		inbound.Header.Sequence = head.ReadUInt16();
+		inbound.Header.Acknowledge = head.ReadUInt16();
+		inbound.Header.AcknowledgeBits = head.ReadUInt32();
+		inbound.Header.Counter = head.ReadUInt64();
 
-		const uint16_t length = reader.ReadUInt16();
+		const uint16_t length = head.ReadUInt16();
 		if (length > MAXIMUM_PAYLOAD_BYTES) {
 			return refuse();
 		}

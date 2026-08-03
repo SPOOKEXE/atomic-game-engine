@@ -89,9 +89,13 @@ namespace engine::net {
 			// **It has to reach the peer**, because the receiver cannot derive
 			// it: frames are lost and reordered on the unreliable channel, so a
 			// counter the receiver maintained itself would drift out of step with
-			// the sender's on the first drop. It is not a secret and it is not
-			// authenticated by itself — pass it as associated data if the framing
-			// above wants it covered.
+			// the sender's on the first drop. `PacketHeader::Counter` is where it
+			// goes, whole rather than truncated against anything that wraps.
+			//
+			// It is not a secret and it does not need authenticating on its own:
+			// rewriting it changes the nonce the receiver derives, so the tag
+			// fails. It is covered anyway, because the framing above passes the
+			// whole header as associated data.
 			uint64_t Counter = 0;
 
 			// Ciphertext followed by the 16-byte tag.
@@ -129,6 +133,24 @@ namespace engine::net {
 			// Moves the key and the counter, zeroing both this Sealer's old key
 			// and the source's.
 			Sealer &operator=(Sealer &&other) noexcept;
+
+			// The counter the next Seal will use.
+			//
+			// **Reading a counter cannot make one repeat**, which is why this
+			// exists while there is still no way to set, reset or reach one. A
+			// frame's associated data is the packet header it travels under and
+			// that header carries the counter, so the header has to be written
+			// before the frame is sealed — and this is the only way to write it
+			// under the counter the seal will actually use. A caller that reads
+			// this and then does not seal has skipped one value out of 2^64 and
+			// repeated nothing.
+			//
+			// @return The next counter, or UINT64_MAX for a Sealer that has been
+			//         moved from or has exhausted its counter — both of which
+			//         make the next Seal refuse.
+			uint64_t NextCounter() const {
+				return Counter;
+			}
 
 			// Seals a frame under the next counter.
 			//

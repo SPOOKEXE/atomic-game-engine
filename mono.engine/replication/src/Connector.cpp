@@ -3,6 +3,7 @@
 #include <engine/replication/Connector.hpp>
 
 #include <algorithm>
+#include <utility>
 
 namespace engine::replication {
 
@@ -161,13 +162,26 @@ namespace engine::replication {
 				return;
 			}
 
+			// **The ciphers move into the session and stay there.** From here
+			// every payload in both directions is sealed, and the session
+			// refuses to send or accept anything that is not — a client that
+			// reached this line and then fell back to plaintext would be doing
+			// the downgrade itself.
+			//
+			// This end's sending half has sealed nothing yet, so its first
+			// payload goes out at counter zero; the server's is at one, because
+			// the welcome above spent its zero. The two directions have
+			// different keys and their counters are unrelated.
+			if (!Wire.AdoptKeys(std::move(*keys))) {
+				ENGINE_ERROR("replication: the session already held keys, so nothing connects.");
+				Stats_.Refused++;
+				Refuse();
+				return;
+			}
+
 			Phase = Stage::Admitted;
 			Exchange.reset();
 			Wire.Link().CompleteHandshake(nowSeconds);
-
-			// `keys` dies here and both ciphers wipe themselves. The stream is
-			// not encrypted yet — `Admission.hpp` says so plainly rather than
-			// leaving a `Sealer` around that nothing seals with.
 			return;
 		}
 

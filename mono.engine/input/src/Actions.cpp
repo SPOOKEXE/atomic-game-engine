@@ -17,6 +17,7 @@ namespace engine::input {
 		constexpr Binding BINDINGS[] = {
 			{Action::Quit, SDLK_ESCAPE, "Esc"},
 			{Action::ToggleStatistics, SDLK_F3, "F3"},
+			{Action::ToggleNetwork, SDLK_F4, "F4"},
 			{Action::ToggleFrameGraph, SDLK_F5, "F5"},
 			{Action::NextProfilerTab, SDLK_F6, "F6"},
 			{Action::PreviousProfilerTab, SDLK_F7, "F7"},
@@ -34,6 +35,8 @@ namespace engine::input {
 			return "quit";
 		case Action::ToggleStatistics:
 			return "toggle statistics";
+		case Action::ToggleNetwork:
+			return "toggle network";
 		case Action::ToggleFrameGraph:
 			return "toggle frame graph";
 		case Action::PreviousProfilerTab:

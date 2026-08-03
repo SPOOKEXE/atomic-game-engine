@@ -158,10 +158,11 @@ namespace engine::net {
 		// did" is two calls a caller can get out of step, and the one that gets
 		// forgotten is the second.
 		//
-		// @param payloadBytes The payload about to be sent.
+		// @param payloadBytes The payload about to be sent, before it is sealed.
 		// @return False when the link is not `Connected`, the payload is over
-		//         `Packet::MAXIMUM_PAYLOAD_BYTES`, or a budget is spent. A
-		//         refusal is counted in `ConnectionStats::SendsOverBudget`.
+		//         `Packet::MAXIMUM_MESSAGE_BYTES` — the limit less the tag it
+		//         will grow by — or a budget is spent. A refusal is counted in
+		//         `ConnectionStats::SendsOverBudget`.
 		bool Reserve(size_t payloadBytes);
 
 		// Stamps the header for the next outgoing packet on a channel.

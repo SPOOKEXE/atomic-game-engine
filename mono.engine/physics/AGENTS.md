@@ -200,10 +200,18 @@ Refuse a change that splits them back into two registered systems in one phase
 
 ## The grain is measured and the default is wrong for this body
 
-`INTEGRATE_GRAIN` is 512, from `benchmarks/Integrate.cpp` in the `bench` preset.
-`Jobs::DEFAULT_GRAIN` is 4096 and, through `Jobs::MINIMUM_GRAINS`, would refuse
-to dispatch anything below 32768 rows — measured at twenty thousand entities
-that is 79.2 microseconds against 30.6 for the same body.
+`INTEGRATE_GRAIN` is 1024, from `benchmarks/Integrate.cpp` in the `bench`
+preset. `Jobs::DEFAULT_GRAIN` is 4096 and, through `Jobs::MINIMUM_GRAINS`, would
+refuse to dispatch anything below 32768 rows — measured at twenty thousand
+entities that is 73.5 microseconds against 27.3 for the same body.
+
+**It was 512 until the build moved to `-O3`, and the reason it moved is the
+reason this section exists.** A grain is a ratio between the cost of a row and
+the cost of a handover, and only the first of those changed: the serial column
+halved and the handover stayed at about 31 microseconds, so the crossover went
+from ~4096 rows to ~8000 and the grain that puts the floor there doubled.
+Nothing in the build noticed. `docs/DEFERRED.md` D00012 is the entry about that
+failure mode.
 
 Changing it is a measurement, not an opinion, and the numbers in
 `Integrate.hpp` are re-taken from that suite rather than adjusted to match a

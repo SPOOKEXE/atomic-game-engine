@@ -110,7 +110,7 @@ namespace engine::replication {
 		// **Not destroyed.** They are out of view, not gone — a client that
 		// destroyed them would be wrong about the world the moment they came
 		// back. The caller decides what stopping drawing them means; this only
-		// says which.
+		// says which. See `Structure::Forgotten`.
 		//
 		// @return The entities, valid until the next `Receive`.
 		std::span<const ecs::Entity> Forgotten() const {
@@ -131,6 +131,22 @@ namespace engine::replication {
 			// Deltas applied.
 			uint64_t Deltas = 0;
 
+			// Deltas applied in part, because a value named a row this client
+			// does not hold yet.
+			//
+			// Ordinary while a creation is in flight on the reliable channel and
+			// the values that follow it are not. A figure that keeps climbing on
+			// a link losing nothing is a server naming entities it never
+			// announced.
+			uint64_t Partial = 0;
+
+			// Structural messages applied.
+			//
+			// Counts resends too, and deliberately: a figure well above the
+			// number of entities that came and went is the reliable channel
+			// covering real loss, which is the one place that shows.
+			uint64_t Structures = 0;
+
 			// Messages refused as malformed.
 			uint64_t Malformed = 0;
 
@@ -150,6 +166,7 @@ namespace engine::replication {
 	  private:
 		ApplyStatus Apply(ecs::Store &store, const SnapshotChunk &chunk);
 		ApplyStatus Apply(ecs::Store &store, const replication::Delta &delta);
+		ApplyStatus Apply(ecs::Store &store, const replication::Structure &structure);
 
 		// The snapshot being reassembled. Sized from the total the first chunk
 		// declares, and every later chunk is checked against it.

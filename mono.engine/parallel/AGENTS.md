@@ -44,11 +44,49 @@ Two consequences:
 - **A default grain is a guess about how expensive one row is.** 4096 suits a
   body that does almost nothing. A body that raycasts wants a grain in the tens.
   Pass it explicitly whenever the work per row is real.
-- **Parallel is not free, and below a crossover it is negative.** For the
-  cheapest possible body that crossover was near 60-80k rows, and the ceiling
-  past it was about 3.5x rather than the core count — memory bandwidth, not
-  threads. Neither number is knowable in advance. Measure the system you are
-  writing, in `release`, and put the number in a comment.
+- **Parallel is not free, and below a crossover it is negative.** Measure the
+  system you are writing, in `bench`, and put the number in a comment.
+
+## The crossover is a duration, and every constant here states it in rows
+
+Re-measured at `-O3` on 24 threads, and the two answers are thirty-two times
+apart:
+
+| body | crossover | serial work at the crossover |
+|---|---|---|
+| three float adds per row | ~262,144 rows | 49 us |
+| `physics::IntegrateMotion`, a `CFrame` per row | ~8,000 rows | 29 us |
+
+In rows they share nothing. In microseconds they are the same number, and that
+number is one handover. **So the threshold every caller actually wants is
+"about thirty microseconds of work", and `grain * MINIMUM_GRAINS` can only ever
+express it for one row cost.** Neither constant is going to be right for a
+caller it was not measured on; both callers that measured pass a grain of their
+own, and `Jobs::For`'s `minimum` is there for the ones whose index is not a row
+at all.
+
+Ceilings, while the numbers are here: past the crossover the cheap body tops out
+near 1.3x and the `CFrame` body near 5.6x. The cheap one is bandwidth bound
+rather than thread bound — at 500k rows both paths stream twelve megabytes.
+
+## What a handover costs, and where it goes
+
+`engine.parallel.bench.dispatch` measures an empty `For` and nothing else:
+
+| | |
+|---|---|
+| the decision not to dispatch | 48 ns |
+| dispatched, 8 empty ranges, 23 workers | 31 us |
+| dispatched, 8 empty ranges, **one** worker | 2.3 us |
+| each further empty range | ~95 ns |
+
+**It is linear in the pool, not in the work.** Every worker wakes, finds
+nothing left to claim, and then queues on `Pool::Guard` to decrement
+`Batch::Outstanding` — so a batch cannot finish until all twenty-three have
+taken one mutex in turn. That serialised join, not the `notify_all`, is why a
+short span cannot repay a dispatch, and it is what to attack if the crossover
+ever has to come down. Doing so is a rewrite of the join, not a change to a
+constant.
 
 ## The calling thread works
 

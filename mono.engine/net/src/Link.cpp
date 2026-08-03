@@ -177,7 +177,14 @@ namespace engine::net {
 		if (Phase != ConnectionState::Connected) {
 			return false;
 		}
-		if (payloadBytes > Packet::MAXIMUM_PAYLOAD_BYTES) {
+		if (payloadBytes > Packet::MAXIMUM_MESSAGE_BYTES) {
+			// **The message limit, not the payload limit.** What a caller hands
+			// over is sealed before it goes, so the tag is sixteen bytes of the
+			// datagram that this number does not get to spend. Measuring against
+			// the sealed size instead would pass a message here and fail it at
+			// the framing, which is a message that can never be sent and is
+			// indistinguishable at the call site from a busy link.
+			//
 			// Refused rather than fragmented. A fragmented datagram is lost
 			// entirely when any one of its fragments is, which multiplies the
 			// loss rate the unreliable channel is designed around.
