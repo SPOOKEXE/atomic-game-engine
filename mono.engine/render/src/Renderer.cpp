@@ -437,7 +437,10 @@ namespace engine::render {
 		// The same, into whichever depth texture the caller owns. See
 		// `SceneSlot::Depth` for why a viewport keeps its own.
 		bool EnsureDepthIn(
-			SDL_GPUTexture *&texture, uint32_t &haveWidth, uint32_t &haveHeight, uint32_t width,
+			SDL_GPUTexture *&texture,
+			uint32_t &haveWidth,
+			uint32_t &haveHeight,
+			uint32_t width,
 			uint32_t height
 		);
 		bool EnsureScene(uint32_t width, uint32_t height);
@@ -862,8 +865,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::EnsureDepthIn(
-		SDL_GPUTexture *&texture, uint32_t &haveWidth, uint32_t &haveHeight, uint32_t width,
-		uint32_t height
+		SDL_GPUTexture *&texture, uint32_t &haveWidth, uint32_t &haveHeight, uint32_t width, uint32_t height
 	) {
 		if (texture && width == haveWidth && height == haveHeight) {
 			return true;
@@ -1691,6 +1693,41 @@ namespace engine::render {
 		}
 		const auto sceneReflected = static_cast<uint32_t>(sceneOpaque) - sceneSurfaces;
 
+		// **Casters to the front of each of those two runs, not of the opaque
+		// head as a whole.** The surface pass needs the non-surface instances
+		// contiguous from zero and the shadow pass needs the casters
+		// contiguous; one partition cannot give both, so this one nests inside
+		// the one above rather than replacing it. The shadow pass then draws
+		// two ranges instead of one, and the second is empty in every scene
+		// without a mirror in it.
+		//
+		// Stable, for the reason every other ordering here is: an opaque scene
+		// must come out of this exactly as it went in, or a recording stops
+		// replaying.
+		//
+		// Only the opaque head is considered at all. A transparent caster is
+		// already excluded by the pass drawing the opaque range alone — glass
+		// writing full depth into the shadow map casts a solid shadow, which is
+		// the most obviously wrong thing glass can do.
+		uint32_t reflectedCasters = 0;
+		uint32_t surfaceCasters = 0;
+		if (sceneOpaque > 0) {
+			ENGINE_PROFILE_CAT("partition casters", core::ProfileCategory::Render);
+
+			const auto begin = State->SceneOrder.begin();
+			const auto casts = [&](uint32_t index) { return State->SceneInstances[index].CastShadow; };
+
+			const auto reflectedEnd = begin + static_cast<ptrdiff_t>(sceneReflected);
+			reflectedCasters = static_cast<uint32_t>(
+				std::distance(begin, std::stable_partition(begin, reflectedEnd, casts))
+			);
+
+			const auto opaqueEnd = begin + static_cast<ptrdiff_t>(sceneOpaque);
+			surfaceCasters = static_cast<uint32_t>(
+				std::distance(reflectedEnd, std::stable_partition(reflectedEnd, opaqueEnd, casts))
+			);
+		}
+
 		{
 			// Allocation, on the frame an overlay first appears or changes size.
 			// Zero on every other frame, which is what makes a reading here
@@ -1869,7 +1906,13 @@ namespace engine::render {
 		//
 		// **The scene range, not the camera's**, and no colour target at all.
 		// Every caster casts, whether or not the eye can see it.
-		const bool haveShadow = haveInstances && sceneCount > 0 && State->EnsureShadow();
+		//
+		// A scene whose opaque geometry all opted out of casting skips the pass
+		// rather than clearing a depth target nothing writes to — and the
+		// colour pass then samples a shadow map that was never rendered, which
+		// is what `FrameResult::Ran` exists to make visible.
+		const bool haveShadow = haveInstances && sceneCount > 0 &&
+								(reflectedCasters > 0 || surfaceCasters > 0) && State->EnsureShadow();
 
 		if (haveShadow) {
 			ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
@@ -1901,15 +1944,30 @@ namespace engine::render {
 
 			SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
 
-			// **Only the opaque part of the scene casts.** A transparent pane
-			// writing full depth into the shadow map would cast a solid shadow,
-			// which is the most obviously wrong thing glass can do.
-			SDL_DrawGPUIndexedPrimitives(
-				pass, static_cast<uint32_t>(CUBE_INDICES.size()), static_cast<uint32_t>(sceneOpaque), 0, 0, 0
-			);
+			// **Only the opaque part of the scene casts**, and of that only what
+			// `Visual::CastShadow` left switched on. A transparent pane writing
+			// full depth into the shadow map would cast a solid shadow, which is
+			// the most obviously wrong thing glass can do; an opaque thing that
+			// should not occlude is the case the author decides, and it arrives
+			// here as the caster runs `partition casters` produced.
+			//
+			// Two draws because the two runs are not adjacent — the surface
+			// partition sits between them. The second is empty in every scene
+			// with no mirror in it, which is almost all of them.
+			if (reflectedCasters > 0) {
+				SDL_DrawGPUIndexedPrimitives(
+					pass, static_cast<uint32_t>(CUBE_INDICES.size()), reflectedCasters, 0, 0, 0
+				);
+				result.DrawCalls++;
+			}
+			if (surfaceCasters > 0) {
+				SDL_DrawGPUIndexedPrimitives(
+					pass, static_cast<uint32_t>(CUBE_INDICES.size()), surfaceCasters, 0, 0, sceneReflected
+				);
+				result.DrawCalls++;
+			}
 
 			SDL_EndGPURenderPass(pass);
-			result.DrawCalls++;
 		}
 
 		// --- surface pass ----------------------------------------------------
@@ -2063,8 +2121,7 @@ namespace engine::render {
 		// The one `EnsureDepth` above filled: this slot's when the world is going
 		// into a texture, the shared window one when it is going to the
 		// swapchain. See `SceneSlot::Depth`.
-		depthTarget.texture =
-			offscreen ? State->SlotAt(targetSlot).Depth : State->DepthTexture;
+		depthTarget.texture = offscreen ? State->SlotAt(targetSlot).Depth : State->DepthTexture;
 		depthTarget.clear_depth = 1.0f;
 		depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 		// Nothing reads depth after the pass, so there is no reason to write it

@@ -139,10 +139,11 @@ namespace studio {
 
 		const float height = ImGui::GetContentRegionAvail().y - engine::ui::Scaled(engine::ui::Size::Bar);
 
-		if (ImGui::BeginTable("##keybinds", 3, FLAGS, ImVec2(0.0f, std::max(height, 0.0f)))) {
-			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.32f);
-			ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthStretch, 0.26f);
-			ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+		if (ImGui::BeginTable("##keybinds", 4, FLAGS, ImVec2(0.0f, std::max(height, 0.0f)))) {
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.26f);
+			ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthStretch, 0.22f);
+			ImGui::TableSetupColumn("Where", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+			ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch, 0.36f);
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableHeadersRow();
 
@@ -178,9 +179,25 @@ namespace studio {
 					if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
 						RebindingAction = -1;
 					} else if (const Chord pressed = Keybinds::Pressed(); pressed.IsBound()) {
+						// **Says what it is about to take, before taking it.**
+						// `Set` unbinds the loser either way; without this the
+						// only evidence is a shortcut that quietly stopped
+						// working somewhere else in the editor.
+						const Action holder = Keybinds::Holder(pressed, binding.Bound);
+
 						Keybinds::Set(binding.Bound, pressed);
 						RebindingAction = -1;
-						Say(std::string(binding.Name) + " is now " + pressed.Text());
+
+						std::string said = std::string(binding.Name) + " is now " + pressed.Text();
+						if (holder != Action::Count) {
+							for (const Keybind &other : Keybinds::All()) {
+								if (other.Bound == holder) {
+									said += " — taken from " + std::string(other.Name);
+									break;
+								}
+							}
+						}
+						Say(said);
 					}
 				} else {
 					const std::string text = binding.Keys.Text();
@@ -207,7 +224,29 @@ namespace studio {
 					}
 				}
 
+				// **Where it applies, shown rather than left to be discovered.**
+				// A binding scoped to the tree that does nothing in a viewport
+				// reads as a broken shortcut unless the table says why. See
+				// `Keybinds::Scope`.
 				ImGui::TableSetColumnIndex(2);
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				switch (binding.Where) {
+					case Scope::Global:
+						ImGui::TextUnformatted("anywhere");
+						break;
+					case Scope::Viewport:
+						ImGui::TextUnformatted("viewport");
+						break;
+					case Scope::Tree:
+						ImGui::TextUnformatted("explorer");
+						break;
+					case Scope::Script:
+						ImGui::TextUnformatted("scripts");
+						break;
+				}
+				ImGui::PopStyleColor();
+
+				ImGui::TableSetColumnIndex(3);
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 				ImGui::TextUnformatted(binding.Description);
 				ImGui::PopStyleColor();

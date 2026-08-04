@@ -91,11 +91,23 @@ namespace engine::scene {
 		// or a screen-space trace, and neither belongs in a pipeline this size.
 		int8_t Surface = -1;
 
+		// Whether this instance is drawn into the shadow map.
+		//
+		// **Carried rather than derived, because the renderer cannot work it
+		// out.** Transparency it can — a blended fragment must not write full
+		// depth — but "this opaque thing should not occlude" is an authoring
+		// decision that exists nowhere in the geometry. See
+		// `Visual::CastShadow`, which is where it is authored.
+		bool CastShadow = true;
+
 		// Explicit padding, for the reason every other `Reserved` in the engine
 		// exists: this type crosses as its object representation the day a world
 		// is a process, and uninitialised bytes make two runs of one scene
 		// produce different files.
-		uint8_t Reserved[3] = {};
+		//
+		// Two now, not three. `CastShadow` took one of them, and the type is the
+		// size it was.
+		uint8_t Reserved[2] = {};
 	};
 
 	// Produces the order a draw list should be submitted in.

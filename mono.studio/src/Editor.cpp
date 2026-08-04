@@ -1,7 +1,5 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
-
-#include <spdlog/sinks/base_sink.h>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -19,12 +17,14 @@
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL.h>
+#include <spdlog/sinks/base_sink.h>
 
 #include <algorithm>
-#include <mutex>
 #include <client/Scene.hpp>
 #include <imgui.h>
+#include <mutex>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -89,16 +89,16 @@ namespace studio {
 			line.Text.assign(message.payload.data(), message.payload.size());
 
 			switch (message.level) {
-				case spdlog::level::err:
-				case spdlog::level::critical:
-					line.Level = LogLevel::Error;
-					break;
-				case spdlog::level::warn:
-					line.Level = LogLevel::Warning;
-					break;
-				default:
-					line.Level = LogLevel::Info;
-					break;
+			case spdlog::level::err:
+			case spdlog::level::critical:
+				line.Level = LogLevel::Error;
+				break;
+			case spdlog::level::warn:
+				line.Level = LogLevel::Warning;
+				break;
+			default:
+				line.Level = LogLevel::Info;
+				break;
 			}
 
 			std::lock_guard lock(Guard);
@@ -120,12 +120,12 @@ namespace studio {
 
 	const char *Describe(RunMode mode) {
 		switch (mode) {
-			case RunMode::Edit:
-				return "Edit";
-			case RunMode::Server:
-				return "Run";
-			case RunMode::Play:
-				return "Play";
+		case RunMode::Edit:
+			return "Edit";
+		case RunMode::Server:
+			return "Run";
+		case RunMode::Play:
+			return "Play";
 		}
 		return "?";
 	}
@@ -198,6 +198,17 @@ namespace studio {
 		// editor forgetting it.
 		interfaceSettings.LayoutPath = (engine::core::Paths::Base() / "studio-layout.ini").string();
 
+		// **Beside the layout, for the layout's reason.** Keys are a thing
+		// somebody sets once and expects to find again; a table forgotten on
+		// exit is a rebinding page that does not really rebind anything. Every
+		// action ships unbound, so a fresh install reads nothing and the menus
+		// are the whole interface until somebody says otherwise. See
+		// `Keybinds::Load`.
+		KeybindPath = engine::core::Paths::Base() / "studio-keybinds.ini";
+		if (Keybinds::Load(KeybindPath)) {
+			ENGINE_INFO("keybinds from {}", KeybindPath.string());
+		}
+
 		// **The interface runs headless, and that is the point.** Its backends
 		// need a window and are not started without one — but the context is, so
 		// every panel's code executes, every layout is computed and every action
@@ -256,8 +267,17 @@ namespace studio {
 
 		// After the game is loaded and the camera is placed, because starting a
 		// run needs worlds to start it in.
+		// **Every world, because a command line means the game and not a
+		// scene.** `--run play` is how a build server and a capture drive the
+		// editor; there is no focused viewport to scope it to, and starting one
+		// scene would leave the others silent in a check that means to exercise
+		// all of them. A person picks a scene; a flag takes the lot.
 		if (Settings.StartIn != RunMode::Edit) {
-			SetRunMode(Settings.StartIn);
+			for (const WorldId id : Universe->Worlds()) {
+				if (!Universe->IsRemote(id)) {
+					SetRunMode(id, Settings.StartIn);
+				}
+			}
 		}
 
 		Running = true;
@@ -276,13 +296,17 @@ namespace studio {
 			}
 		}
 
-		if (Mode != RunMode::Edit) {
-			// Runtimes hold a `Store &`, and the stores are the universe's. Let
-			// go of them before it goes away.
-			EndRun();
+		// **Written on the way out rather than on every edit.** The page changes
+		// a binding as somebody types it, and a file rewritten per keystroke is
+		// a file that records half a chord. See `Keybinds::Save`.
+		if (!KeybindPath.empty() && !Keybinds::Save(KeybindPath)) {
+			ENGINE_WARN("could not write {}", KeybindPath.string());
 		}
 
-		Runtimes.clear();
+		// Runtimes hold a `Store &`, and the stores are the universe's. Let go
+		// of every one of them before it goes away.
+		EndAllRuns();
+		Runs.clear();
 		Universe.reset();
 
 		// Detached before the sink is dropped. The logger is process-wide and
@@ -352,16 +376,35 @@ namespace studio {
 	}
 
 	void Editor::Simulate(float frameSeconds) {
-		if (Mode == RunMode::Edit) {
+		if (!AnyRunning()) {
 			// **A world being edited does not tick, and that is deliberate.**
 			// A universe that simulated while somebody was authoring would
 			// settle physics under their hands — a part placed in the air would
 			// be on the floor by the time they looked away, and nothing would
 			// tell them why.
+			//
+			// Nothing running means nothing ticks at all; the worlds that *are*
+			// running are kept apart from the ones that are not by
+			// `SyncWorldStates`, which suspends the rest.
 			return;
 		}
 
-		if (Paused) {
+		// **Paused when every running scene is paused.** `Universe::Tick`
+		// advances the universe rather than a world, so a half-paused universe
+		// is expressed by suspending the paused worlds — which is what the loop
+		// below does — rather than by skipping the tick.
+		bool anyLive = false;
+		for (const WorldRun &run : Runs) {
+			if (!run.Paused) {
+				anyLive = true;
+			}
+			Universe->SetState(
+				run.World,
+				run.Paused ? engine::world::WorldState::Suspended : engine::world::WorldState::Active
+			);
+		}
+
+		if (!anyLive) {
 			// **The clock stops and nothing else does.** The runtimes are
 			// still alive, their connections still exist and the snapshot Stop
 			// restores is untouched — a paused run resumes rather than
@@ -415,9 +458,7 @@ namespace studio {
 		PresentWorld(frameSeconds);
 	}
 
-	void Editor::InstallExampleScript(
-		Store &store, std::string_view file, std::string_view instanceName
-	) {
+	void Editor::InstallExampleScript(Store &store, std::string_view file, std::string_view instanceName) {
 		// **A `Script` in the tree, not a scene built behind somebody's back.**
 		// `examples::LoadScene` would run the file right now and leave the
 		// mirror's parts in the world as though an author had placed them —
@@ -463,8 +504,7 @@ namespace studio {
 		cache.Set(PATH, text);
 		store.SetResource(cache);
 
-		const Entity script =
-			store.CreateInstance(engine::script::ScriptClass(), std::string(instanceName));
+		const Entity script = store.CreateInstance(engine::script::ScriptClass(), std::string(instanceName));
 		if (script == NULL_ENTITY) {
 			return;
 		}
@@ -619,6 +659,12 @@ namespace studio {
 		// that turns state into something to draw, and an edited world's state
 		// changes without a tick.
 		if (shown.IsValid()) {
+			// **The render gate rides along with it**, because
+			// `client::InstallPresentation` registers `sync-rendered` in this
+			// same phase. That is what makes an edited world work at all: it
+			// never ticks, so a gate maintained by the simulation would leave a
+			// part dragged into `Workspace` invisible until somebody pressed
+			// play. See `scene/Visibility.hpp`.
 			Universe->Present(shown, frameSeconds, Universe->AlphaOf(shown));
 		}
 
@@ -634,6 +680,20 @@ namespace studio {
 					// exists to keep closed.
 					drawn = list->Instances;
 				}
+
+				// **The surface camera, which the studio was never asking
+				// for.** `Renderer::Render` takes a `SurfaceView` and the
+				// editor passed `nullptr` for it — so the surface pass never
+				// ran, no texture was ever written for surface 0, and a `Part`
+				// naming it sampled nothing. The mirror example looked like a
+				// bug in the mirror: the frame was there, the pane was empty,
+				// and the world behind it was rendering perfectly.
+				//
+				// `client::FindSurfaceCamera` is the same call the client makes
+				// at `Client.cpp:549`; a second way of finding the scene's
+				// surface camera would be a second thing to keep in step with
+				// what `Camera.SurfaceSize` means.
+				HaveSurface = client::FindSurfaceCamera(store, Surface);
 			});
 			instances = &drawn;
 		}
@@ -699,7 +759,7 @@ namespace studio {
 			instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 								 : std::span<const engine::scene::DrawInstance>{},
 			Overlay,
-			nullptr,
+			HaveSurface ? &Surface : nullptr,
 			&Interface,
 			target.IsValid() ? &target : nullptr,
 			DrawingViewport
@@ -764,7 +824,7 @@ namespace studio {
 	// --- the game ----------------------------------------------------------
 
 	void Editor::NewGame() {
-		EndRun();
+		EndAllRuns();
 		Scripts.clear();
 		ActiveScript = -1;
 		ClearSelection();
@@ -851,7 +911,7 @@ namespace studio {
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
-		EndRun();
+		EndAllRuns();
 
 		engine::game::GameInfo info;
 		std::string error;
@@ -1119,19 +1179,37 @@ namespace studio {
 		}
 
 		Entity created = NULL_ENTITY;
+		Entity landed = NULL_ENTITY;
+
 		Universe->Enter(world, [&](Store &store) {
 			const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(klass);
 			created = store.CreateInstance(klass, Label(info.Name));
+			if (created == NULL_ENTITY) {
+				return;
+			}
 
-			if (created != NULL_ENTITY && parent != NULL_ENTITY && store.Alive(parent)) {
-				store.SetParent(created, parent);
+			// **Nothing selected means `Workspace`, and since v0.7 it has to.**
+			// An instance with no parent is an orphan: it is not in the scene,
+			// nothing draws it, and `Insert Object` with an empty selection
+			// would have quietly produced something invisible. It used to be
+			// drawn, because an unparented instance was a root of the world and
+			// roots were what the renderer collected — see
+			// `scene/Visibility.hpp` for why that is no longer the rule.
+			//
+			// Studio does the same thing, and for an author it is the only
+			// sensible reading of "insert a Part" with nothing highlighted.
+			landed =
+				parent != NULL_ENTITY && store.Alive(parent) ? parent : engine::scene::WorkspaceOf(store);
+
+			if (landed != NULL_ENTITY) {
+				store.SetParent(created, landed);
 			}
 		});
 
 		if (created != NULL_ENTITY) {
 			Select(world, created, false);
-			if (parent != NULL_ENTITY) {
-				Expanded.push_back(parent.Id);
+			if (landed != NULL_ENTITY) {
+				Expanded.push_back(landed.Id);
 			}
 			MarkModified();
 		}
@@ -1205,58 +1283,132 @@ namespace studio {
 
 	// --- running --------------------------------------------------------------
 
-	void Editor::SetRunMode(RunMode mode) {
-		if (mode == Mode) {
+	Editor::WorldRun *Editor::RunOf(WorldId world) {
+		for (WorldRun &run : Runs) {
+			if (run.World == world) {
+				return &run;
+			}
+		}
+		return nullptr;
+	}
+
+	const Editor::WorldRun *Editor::RunOf(WorldId world) const {
+		for (const WorldRun &run : Runs) {
+			if (run.World == world) {
+				return &run;
+			}
+		}
+		return nullptr;
+	}
+
+	RunMode Editor::ModeOf(WorldId world) const {
+		const WorldRun *run = RunOf(world);
+		return run != nullptr ? run->Mode : RunMode::Edit;
+	}
+
+	bool Editor::IsRunning(WorldId world) const {
+		return RunOf(world) != nullptr;
+	}
+
+	bool Editor::IsPaused(WorldId world) const {
+		const WorldRun *run = RunOf(world);
+		return run != nullptr && run->Paused;
+	}
+
+	bool Editor::AnyRunning() const {
+		return !Runs.empty();
+	}
+
+	void Editor::SyncWorldStates() {
+		// **`Universe::Tick` advances every world it holds**, so "not running"
+		// has to be spelled out to the universe rather than merely meant. A
+		// scene left alone while another runs would settle its physics and fire
+		// its heartbeats, which is running by any name an author would use.
+		//
+		// With nothing running there is no tick at all, so everything goes back
+		// to active — otherwise an author would return to Edit and find half
+		// their scenes marked suspended for no reason they could see.
+		const bool anything = AnyRunning();
+
+		for (const WorldId id : Universe->Worlds()) {
+			if (Universe->IsRemote(id)) {
+				continue;
+			}
+
+			const bool wanted = !anything || IsRunning(id);
+			Universe->SetState(
+				id, wanted ? engine::world::WorldState::Active : engine::world::WorldState::Suspended
+			);
+		}
+	}
+
+	void Editor::SetRunMode(WorldId world, RunMode mode) {
+		if (!world.IsValid() || ModeOf(world) == mode) {
 			return;
 		}
 
-		if (Mode != RunMode::Edit) {
-			EndRun();
+		const Name name = Universe->NameOf(world);
+		const std::string label = name.IsValid() ? std::string(Label(name)) : std::string("that scene");
+
+		// **Stopped first, whatever the destination.** Switching a running world
+		// from Run to Play is a restore followed by a start, not a mode swapped
+		// underneath a live VM — the scripts have already changed the scene and
+		// the author's content is in the snapshot.
+		if (IsRunning(world)) {
+			EndRun(world);
 		}
 
 		if (mode == RunMode::Edit) {
-			Say("stopped — the scene is back as it was");
+			Say("stopped '" + label + "' — the scene is back as it was");
+			SyncWorldStates();
 			return;
 		}
 
-		if (!BeginRun(mode)) {
-			Say("could not start: the universe would not snapshot", LogLevel::Error);
+		if (!BeginRun(world, mode)) {
+			Say("could not start '" + label + "': the scene would not snapshot", LogLevel::Error);
 			return;
 		}
 
-		Say(std::string(Describe(mode)) + " started");
+		Say(std::string(Describe(mode)) + " started in '" + label + "'");
 	}
 
-	bool Editor::BeginRun(RunMode mode) {
+	bool Editor::BeginRun(WorldId world, RunMode mode) {
+		if (!world.IsValid() || Universe->IsRemote(world)) {
+			return false;
+		}
+
 		// **Script buffers first, and the order is the whole point.** What is
 		// on screen has to be in the world before the snapshot is taken —
-		// otherwise Stop restores a universe from *before* the author's code
-		// was filed, and pressing Play deletes whatever they had just typed.
-		// That is not a subtle failure and it is not recoverable; it was the
-		// first thing this function got wrong.
+		// otherwise Stop restores a scene from *before* the author's code was
+		// filed, and pressing Play deletes whatever they had just typed. That is
+		// not a subtle failure and it is not recoverable; it was the first thing
+		// this function got wrong.
+		//
+		// Only this world's tabs: another scene's unsaved edits are not part of
+		// this run and flushing them would file code the author had not finished.
 		for (OpenScript &tab : Scripts) {
-			if (tab.Modified) {
+			if (tab.World == world && tab.Modified) {
 				SaveScriptTab(tab);
 			}
 		}
 
-		// **The snapshot Stop restores.** Roblox's model, and the part people
-		// forget: pressing Play must not leave an author's scene as whatever
-		// their scripts made of it. `Universe::Save` and `Load` are exactly
-		// that operation and have existed since v0.2 with no caller that needed
-		// them.
-		EditSnapshot.clear();
-
-		engine::core::ByteWriter writer;
-		if (!Universe->Save(writer)) {
-			// A universe holding a component with no serialisation cannot be
-			// snapshotted, and starting anyway would mean a Stop that cannot
-			// put the scene back. Refusing to start is the honest failure.
+		// **The snapshot Stop restores, as a world document.** Roblox's model,
+		// and the part people forget: pressing Play must not leave an author's
+		// scene as whatever their scripts made of it.
+		//
+		// `WriteWorldDocument` rather than `Universe::Save`, because the
+		// universe snapshot is *every* world at once — which is exactly what
+		// made Stop restore scenes nobody had run. This is the same call
+		// Duplicate and Rename already make.
+		std::string error;
+		std::string document = engine::game::WriteWorldDocument(*Universe, world, error);
+		if (document.empty()) {
+			// A world holding a component with no serialisation cannot be
+			// written, and starting anyway would mean a Stop that cannot put the
+			// scene back. Refusing to start is the honest failure.
+			ENGINE_ERROR("snapshot of world for run: {}", error);
 			return false;
 		}
-
-		const auto bytes = writer.Bytes();
-		EditSnapshot.assign(bytes.begin(), bytes.end());
 
 		engine::script::RuntimeLimits limits;
 		limits.Role.Server = true;
@@ -1269,104 +1421,141 @@ namespace studio {
 		// optimistic.
 		limits.Role.Studio = true;
 
-		Runtimes.clear();
-		Mode = mode;
+		WorldRun run;
+		run.World = world;
+		run.Mode = mode;
 
 		// A run always starts running. Carrying a pause across Stop and Play
 		// would be a game that came up frozen for a reason nobody could see.
-		Paused = false;
+		run.Paused = false;
+		run.Snapshot = std::move(document);
 
-		// **The player starts in the world being looked at.** A run whose
-		// player was nowhere would have every world idle from the first frame,
-		// and the lifecycle would close all but one of them before anybody had
-		// pressed anything.
-		PlayerWorld = Active;
-		Lives.clear();
+		std::string failure;
 
-		for (const WorldId id : Universe->Worlds()) {
-			if (Universe->IsRemote(id)) {
-				continue;
-			}
+		// **Through `game::StartWorldScripts`, which is the same call a
+		// dedicated server makes.** What "running a game" means has to be one
+		// function or the studio's Play and the server's hosting drift — and the
+		// first thing to drift would be the heartbeat's delta.
+		Universe->Enter(world, [&](Store &store, Scheduler &systems) {
+			run.Runtime = engine::game::StartWorldScripts(store, systems, limits, failure);
+		});
 
-			std::shared_ptr<engine::script::Runtime> runtime;
-			std::string failure;
-
-			// **Through `game::StartWorldScripts`, which is the same call a
-			// dedicated server makes.** What "running a game" means has to be
-			// one function or the studio's Play and the server's hosting drift
-			// — and the first thing to drift would be the heartbeat's delta.
-			Universe->Enter(id, [&](Store &store, Scheduler &systems) {
-				runtime = engine::game::StartWorldScripts(store, systems, limits, failure);
-			});
-
-			if (!failure.empty()) {
-				Say("script error: " + failure, LogLevel::Error);
-			}
-
-			Runtimes.push_back(std::move(runtime));
+		if (!failure.empty()) {
+			Say("script error: " + failure, LogLevel::Error);
 		}
 
+		Runs.push_back(std::move(run));
+
+		// **The player goes to the first world started.** A run whose player was
+		// nowhere would have the lifecycle close scenes before anybody had
+		// pressed anything; one that moved the player on every start would
+		// teleport them out of the scene they were watching.
+		if (Runs.size() == 1 || !PlayerWorld.IsValid()) {
+			PlayerWorld = world;
+			Lives.clear();
+		}
+
+		SyncWorldStates();
 		return true;
 	}
 
-	void Editor::EndRun() {
-		if (Mode == RunMode::Edit) {
+	void Editor::EndRun(WorldId world) {
+		WorldRun *record = RunOf(world);
+		if (record == nullptr) {
 			return;
 		}
 
-		// **Runtimes before the restore.** Each holds a `Store &` and the
-		// stores are the universe's; `Universe::Load` destroys every world, so
-		// a runtime still alive across it holds a reference to freed storage.
-		Runtimes.clear();
-		Mode = RunMode::Edit;
-		Paused = false;
+		// **The runtime goes before the restore.** It holds a `Store &` and the
+		// store is the universe's; the world is about to be destroyed, so a
+		// runtime still alive across it holds a reference to freed storage.
+		const std::string document = std::move(record->Snapshot);
+		record->Runtime.reset();
 
-		if (EditSnapshot.empty()) {
+		Runs.erase(
+			std::remove_if(
+				Runs.begin(), Runs.end(), [world](const WorldRun &run) { return run.World == world; }
+			),
+			Runs.end()
+		);
+
+		if (document.empty()) {
+			SyncWorldStates();
 			return;
 		}
 
-		engine::core::ByteReader reader(EditSnapshot);
-		if (!Universe->Load(reader)) {
-			// `Universe::Load` leaves the universe empty rather than half
-			// restored, which is the right failure and a terrible surprise. Say
-			// so loudly — the alternative is an author looking at an empty
-			// explorer and concluding the editor deleted their game.
-			Say("the scene could not be restored — the universe is empty", LogLevel::Error);
-			EditSnapshot.clear();
-			Active = WorldId{};
+		// Script tabs first: their entity handles do not survive the world being
+		// rebuilt, and a tab that saved afterwards would write into storage that
+		// had been freed. Only this world's — another scene's tabs are untouched
+		// by this restore, which is the whole point of running one scene.
+		for (size_t index = Scripts.size(); index > 0; index--) {
+			if (Scripts[index - 1].World == world) {
+				CloseScriptTab(index - 1);
+			}
+		}
+
+		const Name name = Universe->NameOf(world);
+		const bool wasActive = world == Active;
+
+		// **Destroyed and rebuilt, because `ReadWorldDocument` creates a scene
+		// rather than restoring into one.** `Universe::Adopt` reuses the hole a
+		// destroy leaves, so the handle survives and a viewport pinned to this
+		// world still points at it — the same trick `RenameWorld` depends on.
+		Universe->Destroy(world);
+
+		std::string error;
+		const WorldId restored = engine::game::ReadWorldDocument(*Universe, document, name, error);
+		if (!restored.IsValid()) {
+			// The world is gone and the replacement was refused. Loud, because
+			// an author whose scene disappeared needs to know it was this and
+			// not something they did.
+			Say("the scene was lost while stopping it: " + error, LogLevel::Error);
+			InstanceCounts.clear();
 			ClearSelection();
+			Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
+			SelectionWorld = Active;
+			SyncWorldStates();
 			return;
 		}
 
-		EditSnapshot.clear();
+		// The scheduler went with the world, so the presentation systems have to
+		// be installed again. A restored world with no draw list renders as an
+		// empty frame, which reads as Stop having broken the renderer.
+		Universe->Enter(restored, [](Store &store, Scheduler &systems) {
+			client::InstallPresentation(store, systems, 256);
+		});
+
+		// **Everything that held the old handle, repointed.** `Adopt` normally
+		// hands back the same slot, but nothing promises it — and a viewport
+		// pinned to a stale id draws nothing with no way to say why.
+		if (wasActive) {
+			Active = restored;
+		}
+		if (PlayerWorld == world) {
+			PlayerWorld = restored;
+		}
+		for (ViewportState &viewport : Extras) {
+			if (viewport.World == world) {
+				viewport.World = restored;
+			}
+		}
+
 		InstanceCounts.clear();
 
-		// The schedulers went with the worlds, so the presentation systems have
-		// to be installed again. A restored world with no draw list renders as
-		// an empty frame, which reads as Stop having broken the renderer.
-		for (const WorldId id : Universe->Worlds()) {
-			Universe->Enter(id, [](Store &store, Scheduler &systems) {
-				client::InstallPresentation(store, systems, 256);
-			});
+		// Entity handles do not survive the rebuild as the same rows in the same
+		// generations, so anything holding one is stale.
+		if (SelectionWorld == world || !SelectionWorld.IsValid()) {
+			SelectionWorld = Active;
+			ClearSelection();
 		}
-
-		const auto worlds = Universe->Worlds();
-		const Name previous = GameName;
-		(void)previous;
-
-		if (std::find(worlds.begin(), worlds.end(), Active) == worlds.end()) {
-			Active = worlds.empty() ? WorldId{} : worlds.front();
-		}
-
-		SelectionWorld = Active;
-
-		// Entity handles do not survive a snapshot restore as the same rows in
-		// the same generations, so anything holding one is stale.
-		ClearSelection();
 		Expanded.clear();
 
-		for (size_t index = Scripts.size(); index > 0; index--) {
-			CloseScriptTab(index - 1);
+		SyncWorldStates();
+	}
+
+	void Editor::EndAllRuns() {
+		// By value and from the front, because `EndRun` erases from `Runs`.
+		while (!Runs.empty()) {
+			EndRun(Runs.front().World);
 		}
 	}
 
@@ -1470,15 +1659,15 @@ namespace studio {
 		// one list in the order they actually happened. Pushing here as well
 		// would show every editor message twice.
 		switch (level) {
-			case LogLevel::Error:
-				ENGINE_ERROR("{}", text);
-				break;
-			case LogLevel::Warning:
-				ENGINE_WARN("{}", text);
-				break;
-			default:
-				ENGINE_INFO("{}", text);
-				break;
+		case LogLevel::Error:
+			ENGINE_ERROR("{}", text);
+			break;
+		case LogLevel::Warning:
+			ENGINE_WARN("{}", text);
+			break;
+		default:
+			ENGINE_INFO("{}", text);
+			break;
 		}
 	}
 
@@ -1491,9 +1680,9 @@ namespace studio {
 		if (Modified) {
 			title += " *";
 		}
-		if (Mode != RunMode::Edit) {
+		if (AnyRunning()) {
 			title += "  [";
-			title += Describe(Mode);
+			title += Runs.size() == 1 ? Describe(Runs.front().Mode) : "Running";
 			title += "]";
 		}
 		return title;

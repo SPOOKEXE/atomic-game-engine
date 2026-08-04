@@ -53,6 +53,7 @@ declare interface PVInstance extends Instance {
 declare interface BasePart extends PVInstance {
 	Anchored: boolean;
 	CanCollide: boolean;
+	CastShadow: boolean;
 	CollisionGroup: string;
 	Color: Color3;
 	Material: Enum_Material;

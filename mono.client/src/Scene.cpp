@@ -13,6 +13,7 @@
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Visibility.hpp>
 
 #include <algorithm>
 #include <client/Scene.hpp>
@@ -33,6 +34,7 @@ namespace client {
 	using engine::scene::Bounds;
 	using engine::scene::DrawInstance;
 	using engine::scene::PreviousTransform;
+	using engine::scene::Rendered;
 	using engine::scene::Transform;
 	using engine::scene::Visual;
 	using engine::scene::WorldBounds;
@@ -96,6 +98,29 @@ namespace client {
 			}
 		}
 
+		// Brings the render gate in step with the tree.
+		//
+		// **`PreRender`, and registered before `collect-instances` in the same
+		// phase**, because what it produces is presentation state and this is
+		// the phase that derives presentation state. Registration order carries
+		// no ordering contract — `Scheduler` says so — but these two are
+		// independent in the only way that matters: a gate one frame stale
+		// would be a part that appears a frame after it was parented, and the
+		// phase runs them in the order they were added.
+		//
+		// **It is the one thing here that is structural**, which is worth
+		// naming rather than hiding: adding or removing `Rendered` moves a row
+		// to another archetype. That is acceptable because nothing in the
+		// simulation reads `Rendered` — it exists to be a query term for the
+		// draw list and for nothing else — and because every host derives it
+		// the same way, so two runs of one scene still agree. The alternative
+		// was `PostSimulation`, and it fails a world that presents without
+		// ticking: the studio edits a suspended world, and it would have shown
+		// nothing until somebody pressed play.
+		void SyncVisibility(Store &store) {
+			(void)engine::scene::SyncRendered(store);
+		}
+
 		// The one phase that turns simulation state into something to draw. It
 		// reads the simulation and writes only the draw list, which is what
 		// "PreRender never mutates simulation state" means in practice.
@@ -119,7 +144,7 @@ namespace client {
 			size_t matching = 0;
 			{
 				ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-				matching = store.CountMatching<Transform, PreviousTransform, Bounds, Visual>();
+				matching = store.CountMatching<Transform, PreviousTransform, Bounds, Visual, Rendered>();
 			}
 
 			{
@@ -158,18 +183,28 @@ namespace client {
 				DrawInstance *const out = drawList->Instances.data();
 				const size_t capacity = drawList->Instances.size();
 
+				// **`Rendered` is in the signature and nothing reads it**, which
+				// is the point of a tag: it is a term in the query, so the
+				// archetype walk never reaches a row that has not been marked as
+				// a visible descendant of `Workspace`. A branch here could not
+				// have done the same job — this loop writes `out[first + row]`
+				// so that no two workers touch the same bytes, and skipping a
+				// row would leave a hole in the draw list and make `written` a
+				// lie. `scene/Visibility.hpp` has the whole argument.
 				written = store.EachBatchParallel<
 					const Transform,
 					const PreviousTransform,
 					const Bounds,
-					const Visual>([out, capacity, alpha](
-									  size_t first,
-									  size_t rows,
-									  const Transform *transforms,
-									  const PreviousTransform *previous,
-									  const Bounds *bounds,
-									  const Visual *visuals
-								  ) {
+					const Visual,
+					const Rendered>([out, capacity, alpha](
+										size_t first,
+										size_t rows,
+										const Transform *transforms,
+										const PreviousTransform *previous,
+										const Bounds *bounds,
+										const Visual *visuals,
+										const Rendered *
+									) {
 					// The count came from a different query than the one
 					// being walked. They agree, and this is what happens if
 					// they ever stop: instances go missing and the number on
@@ -210,6 +245,7 @@ namespace client {
 							// from several views.
 							visuals[row].Transparency,
 							visuals[row].Surface,
+							visuals[row].CastShadow,
 						};
 					}
 				});
@@ -328,6 +364,7 @@ namespace client {
 			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		}
 
+		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 		return true;
 	}
@@ -399,6 +436,7 @@ namespace client {
 		// two copies of a system that writes `PreviousTransform` can both be
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 	}
 }

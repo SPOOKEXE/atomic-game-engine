@@ -1,6 +1,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -26,6 +27,7 @@ using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::PreviousTransform;
 using engine::scene::QuickHash;
+using engine::scene::Rendered;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
@@ -77,22 +79,31 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 		sizeof(Collider) ==
 		sizeof(Vector3) + 2 * sizeof(LayerMask) + sizeof(ShapeKind) + sizeof(bool) + sizeof(uint16_t)
 	);
-	// **Two v0.6 fields, and only one of them widened the struct.**
-	// `Transparency` is a float and needed four-byte alignment, so it could not
-	// live in the three named bytes after `Visible` and the row got wider.
-	// `Surface` is an `int8_t` and fits, so it took one of those bytes and cost
-	// nothing — which is what named padding is *for*, and what this check is
-	// here to keep honest.
+	// **Three fields added since v0.6, and only one of them widened the
+	// struct.** `Transparency` is a float and needed four-byte alignment, so it
+	// could not live in the three named bytes after `Visible` and the row got
+	// wider. `Surface` is an `int8_t` and `CastShadow` is a `bool`, so each took
+	// one of those bytes and cost nothing — which is what named padding is
+	// *for*, and what this check is here to keep honest. One byte is left.
 	CHECK(
 		sizeof(Visual) ==
-		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + 2
+		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + sizeof(bool) + 1
 	);
+
+	CHECK(sizeof(Rendered) == sizeof(uint8_t) + 3);
 
 	// The named padding is the last thing in each, so a member appended after
 	// it would reopen the hole silently.
-	CHECK(offsetof(RigidBody, Reserved) + 3 == sizeof(RigidBody));
-	CHECK(offsetof(Collider, Reserved) + sizeof(uint16_t) == sizeof(Collider));
-	CHECK(offsetof(Visual, Reserved) + 2 == sizeof(Visual));
+	//
+	// Written as `sizeof(T::Reserved)` rather than as a literal, because the
+	// literal is the thing that goes stale: `Visual::Reserved` shrank from two
+	// bytes to one when `CastShadow` moved into the hole, and a hand-written 2
+	// here would have failed for a struct that was in fact still exactly
+	// packed.
+	CHECK(offsetof(RigidBody, Reserved) + sizeof(RigidBody::Reserved) == sizeof(RigidBody));
+	CHECK(offsetof(Collider, Reserved) + sizeof(Collider::Reserved) == sizeof(Collider));
+	CHECK(offsetof(Visual, Reserved) + sizeof(Visual::Reserved) == sizeof(Visual));
+	CHECK(offsetof(Rendered, Reserved) + sizeof(Rendered::Reserved) == sizeof(Rendered));
 }
 
 TEST_CASE("a default transform is the identity at the origin", "[scene][components]") {

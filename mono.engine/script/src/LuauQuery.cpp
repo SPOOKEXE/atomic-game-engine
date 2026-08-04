@@ -174,9 +174,11 @@ namespace engine::script {
 		lua_setfield(state, -2, "new");
 		lua_setglobal(state, "RaycastParams");
 
-		// On the world's method table, because `workspace:Raycast` is where
-		// Roblox puts it — a query is against a world and not against a part.
-		lua_getfield(state, LUA_REGISTRYINDEX, "engine.world.methods");
+		// On the Workspace's own method table, because `workspace:Raycast` is
+		// where Roblox puts it — a query is against a scene and not against a
+		// part, so it must not appear on every instance. `OpenWorkspace`
+		// creates that table and `Bindings.hpp` states that this runs after it.
+		lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");
 		lua_pushlightuserdata(state, &context);
 		lua_pushcclosure(state, WorkspaceRaycast, "Raycast", 1);
 		lua_setfield(state, -2, "Raycast");

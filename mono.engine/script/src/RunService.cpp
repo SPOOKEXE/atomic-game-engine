@@ -52,6 +52,19 @@ namespace engine::script {
 		int GetService(lua_State *state) {
 			const char *name = luaL_checkstring(state, 2);
 
+			// **`Workspace` before the globals, because its global is spelled
+			// differently.** Roblox's is `workspace`, lowercase, and a script
+			// asking for it by its class name is asking for the same object —
+			// which it did not get, because `lua_getglobal("Workspace")` finds
+			// nothing and this refused a service the engine plainly provides.
+			//
+			// From the registry, so this and `game.Workspace` and the global
+			// are one instance rather than three handles that compare equal.
+			if (std::string_view(name) == "Workspace") {
+				lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+				return 1;
+			}
+
 			lua_getglobal(state, name);
 			if (lua_isnil(state, -1)) {
 				luaL_errorL(state, "'%s' is not a service this engine provides", name);

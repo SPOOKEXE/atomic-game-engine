@@ -43,7 +43,10 @@ namespace studio {
 		// is how a script reaches them; this shows them as a list because that
 		// is how an author manages them. Same objects, not two models kept in
 		// step.
-		const bool editing = Mode == RunMode::Edit;
+		// **Structural changes need every scene stopped, not just one.** New and
+		// Import add worlds to a universe that a running scene's snapshot does
+		// not know about — see `WorldRun`.
+		const bool editing = !AnyRunning();
 
 		ImGui::BeginDisabled(!editing);
 		if (ImGui::Button("New")) {
@@ -139,7 +142,21 @@ namespace studio {
 			// which is the right shape, because the interesting question about a
 			// scene is what it is doing rather than what it was asked for.
 
+			// **Two different claims, and both belong here.** The run state is
+			// what the author did — Play, Run, paused, or editing. The world
+			// state is what the universe is doing with it — active, suspended,
+			// faulted. They disagree exactly when something interesting has
+			// happened, and a panel showing only one of them cannot say why a
+			// scene stopped moving. See `Editor::WorldRun`.
 			ImGui::TableSetColumnIndex(1);
+
+			if (const WorldRun *run = RunOf(world); run != nullptr) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+				ImGui::TextUnformatted(run->Paused ? "paused" : Describe(run->Mode));
+				ImGui::PopStyleColor();
+				ImGui::SameLine();
+			}
+
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::TextUnformatted(engine::world::Describe(Universe->StateOf(world)));
 			ImGui::PopStyleColor();
@@ -177,11 +194,36 @@ namespace studio {
 	}
 
 	void Editor::DrawWorldActions(WorldId world) {
-		const bool editing = Mode == RunMode::Edit;
+		// **This scene's state, not the program's.** Renaming a world rebuilds
+		// it, which a *running* world cannot survive — but a world sitting in
+		// edit beside one that runs is renameable, and that is the whole point
+		// of scenes running independently. See `WorldRun`.
+		const bool editing = !IsRunning(world);
 		const bool local = !Universe->IsRemote(world);
 
 		if (ImGui::MenuItem("Set Active", nullptr, false, world != Active)) {
 			PendingActivate = world;
+		}
+
+		ImGui::Separator();
+
+		// **The transport, per scene, where the scenes are listed.** The toolbar
+		// runs whatever the focused viewport shows; this runs the row you are
+		// pointing at, which is what makes a universe of scenes manageable
+		// without opening a viewport onto each one first.
+		const RunMode mode = ModeOf(world);
+
+		if (ImGui::MenuItem("Play", nullptr, mode == RunMode::Play, local)) {
+			PendingRunWorld = world;
+			PendingRunMode = mode == RunMode::Play ? RunMode::Edit : RunMode::Play;
+		}
+		if (ImGui::MenuItem("Run", nullptr, mode == RunMode::Server, local)) {
+			PendingRunWorld = world;
+			PendingRunMode = mode == RunMode::Server ? RunMode::Edit : RunMode::Server;
+		}
+		if (ImGui::MenuItem("Stop", nullptr, false, mode != RunMode::Edit)) {
+			PendingRunWorld = world;
+			PendingRunMode = RunMode::Edit;
 		}
 
 		// **Teleport is not Set Active, and the difference is what the
@@ -301,13 +343,22 @@ namespace studio {
 		// **Only while something is running.** In Edit no world ticks, so
 		// suspending one changes nothing an author can see and leaves a state
 		// they have to put back by hand.
-		if (Mode == RunMode::Edit || !AutoManageWorlds) {
+		if (!AnyRunning() || !AutoManageWorlds) {
 			return;
 		}
 
 		const double now = Clock.Now();
 
 		for (const WorldId world : Universe->Worlds()) {
+			// **A scoped run's suspended worlds are not the lifecycle's to
+			// wake.** Occupancy says an empty world should idle and a visited
+			// one should resume — but a world outside the run scope is empty
+			// *because* it was deliberately stopped, and resuming it would
+			// restart the scene the author chose not to run. See `WorldRun`.
+			if (!IsRunning(world)) {
+				continue;
+			}
+
 			if (Universe->IsRemote(world)) {
 				continue;
 			}
@@ -446,6 +497,16 @@ namespace studio {
 				SelectionWorld = world;
 				ClearSelection();
 			}
+		}
+
+		// **Queued like every other world action.** `SetRunMode` destroys and
+		// rebuilds the world, and doing that from inside the popup drawing the
+		// row would pull the list out from under the loop walking it.
+		if (PendingRunWorld.IsValid()) {
+			const WorldId world = PendingRunWorld;
+			const RunMode mode = PendingRunMode;
+			PendingRunWorld = WorldId{};
+			SetRunMode(world, mode);
 		}
 
 		if (PendingDuplicateWorld.IsValid()) {

@@ -56,16 +56,44 @@ namespace client {
 			drawList->Instances.clear();
 			drawList->Instances.reserve(store.CountMatching<Transform, Bounds, Visual>());
 
+			// **No `Rendered` term here, and a replica is the one world where
+			// its absence is right.** The gate is an ancestry test, and ancestry
+			// is the one thing the wire does not carry: `Server.cpp` replicates
+			// `Transform`, `Motion`, `Bounds` and `Visual`, and `Hierarchy`
+			// holds `Entity` handles that would have to be remapped between two
+			// processes' directories before they meant anything. A replica
+			// therefore has no tree to test against, and testing an empty one
+			// would draw nothing at all.
+			//
+			// It does not need one. **The authority already applied the
+			// filter** — it replicates what is in its own scene — so for a
+			// replica the wire *is* the visibility test, and re-deriving it here
+			// would be re-deriving a conclusion from premises this process was
+			// never sent. That is the same argument `RegisterSceneComponents`
+			// makes for giving `Rendered` no wire form.
+			//
+			// `Visible` is a different matter and is honoured below: it rides
+			// inside `Visual`, so this process genuinely was told.
 			store.Each<const Transform, const Bounds, const Visual>(
 				[drawList, buffer](
 					Entity entity, const Transform &transform, const Bounds &bounds, const Visual &visual
 				) {
+					if (!visual.Visible) {
+						return;
+					}
+
 					// Nothing for an entity the buffer has never seen, and
 					// nothing for the predicted one — the first has only its
 					// received pose to draw and the second must not be delayed
 					// at all.
 					const std::optional<CFrame> interpolated = buffer->Sample(entity);
 
+					// **Every field of the `Visual`, not the first five.** The
+					// tail of this list used to be left at its defaults, so a
+					// glass pane replicated as solid and a mirror replicated as
+					// a plain part — the same class of silent loss the
+					// `WriteVisuals` comment records, arriving through a
+					// different door.
 					drawList->Instances.push_back(
 						DrawInstance{
 							interpolated.value_or(transform.Frame),
@@ -73,6 +101,9 @@ namespace client {
 							visual.Tint,
 							visual.Mesh,
 							visual.Material,
+							visual.Transparency,
+							visual.Surface,
+							visual.CastShadow,
 						}
 					);
 				}
@@ -108,6 +139,16 @@ namespace client {
 		// the server's types because they are nobody's types — both programs
 		// register the same set, which is the whole of what v0.4 bought here.
 		engine::scene::RegisterSceneComponents();
+
+		// **And this module's own, before the `SetResource` below reaches for
+		// one.** `Components::Of<T>` caches its answer per type per process, so
+		// the first mention of `DrawList` anywhere decides its name — and the
+		// line below was that first mention. A world built this way then made
+		// `client.DrawList` unregisterable, and the abort landed in whichever
+		// *other* world was built next, naming a type this function never
+		// mentions. `BuildScriptedWorld` and `InstallPresentation` both open
+		// with this call for the same reason; this one was the gap.
+		RegisterClientComponents();
 
 		store.SetResource(DrawList{});
 

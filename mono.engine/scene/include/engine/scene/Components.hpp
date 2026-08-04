@@ -250,18 +250,41 @@ namespace engine::scene {
 		// means and why it is a mirror feature rather than a general one.
 		int8_t Surface = -1;
 
+		// Whether this entity is drawn into the shadow map.
+		//
+		// **A third distinct question, and the three must not be collapsed into
+		// one.** `Visible` decides whether the entity is submitted at all,
+		// `Transparency` decides which camera pass it lands in, and this decides
+		// whether it occludes the sun. They come apart constantly: a glass pane
+		// is submitted, sorted back-to-front, and casts nothing; a collision
+		// volume is invisible and still needs its physics; a decorative shell
+		// inside a building is drawn and would only double-shadow the wall
+		// around it.
+		//
+		// **Only opaque geometry reaches the shadow pass anyway** — a blended
+		// fragment writing full depth would cast a solid shadow, which is the
+		// most obviously wrong thing glass can do, and the renderer already
+		// draws the opaque head alone. So this is the switch for the case the
+		// transparency rule does not already cover: an *opaque* thing that
+		// should not occlude.
+		//
+		// Defaults to true, because the surprising default is the one where
+		// authored geometry silently stops casting.
+		bool CastShadow = true;
+
 		// Explicit padding. `Visual` is registered with an explicit writer
 		// because it holds names, so these bytes do not reach a snapshot today
 		// — they are named anyway, because the day somebody re-registers this
 		// type without one is the day three uninitialised bytes start ending up
 		// in a recording.
 		//
-		// **Two now, not three.** `Surface` took one of them, which is what
-		// named padding is for: a field that fits goes in the hole rather than
-		// widening the row. `Transparency` did not fit — a float needs
-		// four-byte alignment and these are the tail after a `bool` — so the
-		// struct grew by four for that one and by nothing for this one.
-		uint8_t Reserved[2] = {};
+		// **One now, not two.** `CastShadow` took another, which is what named
+		// padding is for: a field that fits goes in the hole rather than
+		// widening the row. `Surface` took the first the same way, and
+		// `Transparency` did not fit — a float needs four-byte alignment and
+		// these are the tail after a `bool` — so the struct grew by four for
+		// that one and by nothing for the other two.
+		uint8_t Reserved[1] = {};
 	};
 
 	// A point of view on a world.

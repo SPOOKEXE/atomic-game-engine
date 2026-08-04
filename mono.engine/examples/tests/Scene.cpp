@@ -14,6 +14,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -21,6 +22,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 TEST_SUITE_ID("engine.examples.scene")
 TEST_DEPENDS("engine.script.scripting")
@@ -38,6 +40,29 @@ using engine::scene::Visual;
 using engine::scene::WorldBounds;
 
 namespace {
+
+	// Where a script's content lives now.
+	//
+	// **`part.Parent = workspace` used to make a root and now makes a child of
+	// the `Workspace` service**, so a lookup by root finds nothing. See
+	// `script/Bindings.hpp`'s `OpenWorkspace` for why the two notions of "the
+	// workspace" were collapsed, and `scene/Visibility.hpp` for what the tree
+	// now decides.
+	//
+	// Falls back to a root, because some of these scripts deliberately leave an
+	// instance unparented — an orphan is still reachable from C++ through
+	// `EachRoot`, and only a *script* is unable to list one. A test about
+	// signals or tasks should not have to care which of the two its fixture is.
+	Entity InScene(Store &store, std::string_view name) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		if (workspace != engine::ecs::NULL_ENTITY) {
+			if (const Entity child = store.FindFirstChild(workspace, name);
+				child != engine::ecs::NULL_ENTITY) {
+				return child;
+			}
+		}
+		return store.FindFirstRoot(name);
+	}
 	// The staged assets root, not the test binary's own directory.
 	//
 	// `Paths::Assets` defaults to where the running executable sits, and a test
@@ -100,7 +125,7 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 
 	// A surface camera, with the size the scene asked for. Without one the
 	// surface pass does not run and the mirror draws as its own tint.
-	const Entity reflection = store.FindFirstRoot("Reflection");
+	const Entity reflection = InScene(store, "Reflection");
 	REQUIRE(reflection != engine::ecs::NULL_ENTITY);
 
 	const auto *surface = store.Get<SurfaceCamera>(reflection);
@@ -109,7 +134,7 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 	CHECK(surface->Height == 1024);
 
 	// A pane that shows it.
-	const Entity mirror = store.FindFirstRoot("Mirror");
+	const Entity mirror = InScene(store, "Mirror");
 	REQUIRE(mirror != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Visual>(mirror)->Surface == 0);
 
@@ -118,12 +143,12 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 	// the scene from inside the mirror.
 	const auto *active = store.Resource<ActiveCamera>();
 	REQUIRE(active != nullptr);
-	CHECK(active->Entity == store.FindFirstRoot("Viewer"));
+	CHECK(active->Entity == InScene(store, "Viewer"));
 	CHECK(active->Entity != reflection);
 
 	// A floor, because a shadow needs something to fall on — a scene of
 	// floating cubes has nothing, and the shadow pass would look broken.
-	CHECK(store.FindFirstRoot("Floor") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Floor") != engine::ecs::NULL_ENTITY);
 	CHECK(CountNamed(store, "Caster") == 24);
 	CHECK(CountNamed(store, "Frame") == 4);
 }
@@ -141,9 +166,9 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 	std::string error;
 	REQUIRE(LoadScene(store, systems, ExamplePath("Mirrors-1-world.luau"), error));
 
-	const auto *viewer = store.Get<engine::scene::Transform>(store.FindFirstRoot("Viewer"));
-	const auto *reflected = store.Get<engine::scene::Transform>(store.FindFirstRoot("Reflection"));
-	const auto *pane = store.Get<engine::scene::Transform>(store.FindFirstRoot("Mirror"));
+	const auto *viewer = store.Get<engine::scene::Transform>(InScene(store, "Viewer"));
+	const auto *reflected = store.Get<engine::scene::Transform>(InScene(store, "Reflection"));
+	const auto *pane = store.Get<engine::scene::Transform>(InScene(store, "Mirror"));
 	REQUIRE(viewer != nullptr);
 	REQUIRE(reflected != nullptr);
 	REQUIRE(pane != nullptr);

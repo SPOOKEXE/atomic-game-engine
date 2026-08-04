@@ -91,7 +91,9 @@ namespace studio {
 							SaveScriptTab(tab);
 						}
 
-						if (Mode != RunMode::Edit) {
+						// This tab's own scene: a script in a world being edited is
+						// just text, whatever another scene is doing.
+						if (ModeOf(tab.World) != RunMode::Edit) {
 							ImGui::SameLine();
 							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 							// **Said plainly, because the alternative is a

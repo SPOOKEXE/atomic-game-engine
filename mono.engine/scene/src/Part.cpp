@@ -666,6 +666,13 @@ namespace engine::scene {
 			// would have sat in a snapshot and a delta being read by nobody.
 			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
 
+			// **The third of the three, and they are three questions rather
+			// than one.** `Visible` decides whether the part is submitted at
+			// all, `Transparency` decides which pass it lands in, and this
+			// decides whether it occludes the sun. `Visual::CastShadow` carries
+			// the whole argument for why collapsing any two of them is wrong.
+			ecs::Classes::Property<&Visual::CastShadow>(basePart, "CastShadow");
+
 			// Which surface texture this part shows, or -1 for none. An `int32`
 			// rather than a reference to the camera: the renderer indexes a
 			// small fixed set, and a handle would have to be resolved back to an

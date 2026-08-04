@@ -48,9 +48,16 @@ namespace engine::script {
 		TAG_CFRAME = 3,
 		TAG_INSTANCE = 4,
 
-		// The world a script is running on. Not an instance: a world is the
-		// container entities live in, not one of them.
-		TAG_WORLD = 5,
+		// **Retired at v0.7, and the number is held down rather than reused.**
+		// This tagged `workspace`, back when `workspace` was the world itself
+		// rather than an instance in it. It is a `TAG_INSTANCE` now — see
+		// `OpenWorkspace` for why the two notions were collapsed.
+		//
+		// Not deleted, because the paragraph above this enum gives the reason:
+		// a tag is compared against userdata created earlier in the same
+		// process, and handing 5 to a new type is how a type confusion nothing
+		// reports gets introduced.
+		TAG_WORLD_RETIRED = 5,
 
 		// v0.6's datatype vocabulary.
 		TAG_VECTOR2 = 6,
@@ -312,22 +319,31 @@ namespace engine::script {
 	// @return An error message when a resumed thread raised, or empty.
 	std::string PumpTasks(lua_State *state);
 
-	// Installs `workspace` — **the world this script is running on**.
-	//
-	// Roblox's `Workspace` is a service inside the `DataModel` holding
-	// everything with a position. Here the mapping is one step more direct:
+	// Installs `workspace` — **this world's `Workspace` service**.
 	//
 	//     game      -> the universe
-	//     workspace -> the world this script runs on
+	//     workspace -> the `Workspace` instance in the world this script runs on
 	//
-	// **It is not an instance**, and that is the honest shape rather than a
-	// simplification. A world is what entities live *in*; making it an entity
-	// would have put a phantom row in every scene, counted by nothing and drawn
-	// by nothing, so that one property could have something to point at.
+	// **It is an instance, and until v0.7 it was not.** The old mapping made
+	// `workspace` stand for the world itself, so `part.Parent = workspace` meant
+	// `SetParent(part, NULL_ENTITY)` — "a root of this world" — and reading
+	// `.Parent` back on a root handed `workspace` over. That was the honest
+	// shape while a world had no `Workspace` in it. `scene::InstallServices`
+	// changed that: a world now has a real `Workspace` instance, and keeping
+	// both meant the engine held two answers to "what is in the scene" and the
+	// renderer listened to neither.
 	//
-	// `part.Parent = workspace` therefore means "a root instance of this
-	// world", which is what `Store::SetParent(part, NULL_ENTITY)` already
-	// means, and reading `part.Parent` back on a root hands `workspace` over.
+	// Collapsing them is what lets a null parent mean **nil**. An instance with
+	// no parent is now an orphan rather than a root: nothing draws it, no walk
+	// of the tree reaches it, and it becomes visible when a script says where it
+	// goes. `scene/Visibility.hpp` is the other half — it is what makes
+	// "under `Workspace`" the thing the renderer actually tests.
+	//
+	// Calls `InstallServices`, so a world that has none gets them here. That is
+	// idempotent and finds before it creates.
+	//
+	// **Run before `OpenQueries`**, which fills in the Workspace's own method
+	// table with `Raycast`.
 	//
 	// @param state The VM.
 	// @param store The world this script runs on.

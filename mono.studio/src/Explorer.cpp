@@ -431,11 +431,11 @@ namespace studio {
 
 			ImGui::Separator();
 
-			if (ImGui::MenuItem("New World...", nullptr, false, Mode == RunMode::Edit)) {
+			if (ImGui::MenuItem("New World...", nullptr, false, !AnyRunning())) {
 				AskingNewWorld = true;
 				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
 			}
-			if (ImGui::MenuItem("Import World...", nullptr, false, Mode == RunMode::Edit)) {
+			if (ImGui::MenuItem("Import World...", nullptr, false, !AnyRunning())) {
 				AskingImport = true;
 				PathBuffer.clear();
 			}

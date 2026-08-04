@@ -21,6 +21,7 @@
 // live in.
 
 #include <cstdint>
+#include <filesystem>
 #include <imgui.h>
 #include <span>
 #include <string>
@@ -55,6 +56,31 @@ namespace studio {
 		Count,
 	};
 
+	// Where a binding applies.
+	//
+	// **A shortcut that fires everywhere is a shortcut that fires in the wrong
+	// place.** Delete belongs to the tree and to the viewport, not to the
+	// script editor where it is a character; F5 belongs to the transport
+	// wherever you are. Without a scope the only guard available is
+	// `io.WantCaptureKeyboard`, which answers "is a text field focused" and not
+	// "does this key mean anything here" — so a binding on a plain letter could
+	// never be added safely at all.
+	//
+	// @since v0.7
+	enum class Scope : uint8_t {
+		// Fires wherever the editor has focus. The file and transport commands.
+		Global,
+
+		// Only while a viewport is the panel being worked in.
+		Viewport,
+
+		// Only while the explorer is. Selection and tree commands.
+		Tree,
+
+		// Only while the script editor is, where most keys are text.
+		Script,
+	};
+
 	// A key and the modifiers held with it.
 	//
 	// @since v0.7
@@ -87,9 +113,19 @@ namespace studio {
 	struct Keybind {
 		Action Bound = Action::Count;
 
+		// **The name in the file, and it is not the display name.** A saved
+		// binding has to survive an action being renamed for the page, and it
+		// has to survive `Action`'s members being reordered — which an enum
+		// value cannot, because the number would then name a different command.
+		// This is the only thing written to disk.
+		const char *Id = "";
+
 		// What the Keybinds page calls it, and what it says underneath.
 		const char *Name = "";
 		const char *Description = "";
+
+		// Where it applies. See `Scope`.
+		Scope Where = Scope::Global;
 
 		// What it is bound to now, which is not necessarily the default.
 		Chord Keys;
@@ -137,6 +173,53 @@ namespace studio {
 
 		// Puts every binding back to the built-in default.
 		static void Reset();
+
+		// Which panel the editor is working in, for this frame.
+		//
+		// **Set once per frame before anything asks `Fired`.** A binding scoped
+		// to the tree must not fire while the pointer is in a viewport, and the
+		// only thing that knows which panel is in front is the interface layer.
+		//
+		// @param scope Where the keyboard currently is.
+		static void SetScope(Scope scope);
+
+		// Where the keyboard currently is.
+		//
+		// @return The scope set for this frame.
+		static Scope CurrentScope();
+
+		// Whether any other action holds this chord.
+		//
+		// **For the page, so a conflict is shown before it is committed rather
+		// than discovered as a key that does the wrong thing.** `Set` already
+		// unbinds the loser; this is what lets the page say so first.
+		//
+		// @param chord  The chord to look for.
+		// @param ignore An action to skip, normally the row being edited.
+		// @return The action holding it, or `Count` when it is free.
+		static Action Holder(Chord chord, Action ignore = Action::Count);
+
+		// Reads bindings from a file, leaving unnamed actions alone.
+		//
+		// **Missing is not an error.** A fresh install has no file and every
+		// action keeps its default; an action the file has never heard of keeps
+		// its default too, which is what lets a build add a command without
+		// invalidating everybody's saved keys.
+		//
+		// @param path Where to read from.
+		// @return `true` when a file was read.
+		static bool Load(const std::filesystem::path &path);
+
+		// Writes every bound action to a file.
+		//
+		// One `id = chord` line each, in table order, so a person can read it
+		// and a diff means something. Unbound actions are written too — as an
+		// empty chord — because "I cleared this on purpose" has to survive a
+		// restart just as a binding does.
+		//
+		// @param path Where to write.
+		// @return `true` when it was written.
+		static bool Save(const std::filesystem::path &path);
 
 		// Whether this action's chord was pressed this frame.
 		//

@@ -304,6 +304,15 @@ namespace studio {
 		void DrawViewport(size_t index);
 		void DrawExplorer();
 		void DrawWorlds();
+
+		// Decides which viewport the toolbar reports on, once per frame.
+		//
+		// **Called after every viewport has drawn, from `DrawInterface`.** Focus
+		// cannot be resolved inside a panel: `SetWindowFocus` lands at the end
+		// of a frame, so a panel drawn later still sees the old focused window
+		// and overwrites whatever an earlier one concluded. See
+		// `FocusedViewport`.
+		void ResolveFocusedViewport();
 		void DrawProperties();
 		void DrawScripts();
 		void DrawOutput();
@@ -575,16 +584,45 @@ namespace studio {
 
 		// --- running -----------------------------------------------------------
 
-		void SetRunMode(RunMode mode);
-
-		// Takes the snapshot Stop restores, and starts a runtime per world.
+		// Puts one world into a mode, starting or stopping it as needed.
 		//
-		// @return `false` when the universe could not be written, which is a
-		//         refusal to start rather than a run that cannot be undone.
-		bool BeginRun(RunMode mode);
+		// **The transport, and it names a world because the transport does.**
+		// Play with Viewport 2 focused runs the scene Viewport 2 is showing and
+		// nothing else. Passing `Edit` stops that world and restores it.
+		//
+		// @param world The scene to change.
+		// @param mode What it should be doing.
+		void SetRunMode(WorldId world, RunMode mode);
 
-		// Destroys the runtimes and restores the snapshot.
-		void EndRun();
+		// Takes the snapshot Stop restores, and starts this world's runtime.
+		//
+		// @param world The scene to start.
+		// @param mode Server-only or server-and-client.
+		// @return `false` when the scene could not be written, which is a
+		//         refusal to start rather than a run that cannot be undone.
+		bool BeginRun(WorldId world, RunMode mode);
+
+		// Destroys this world's runtime and restores it from its snapshot.
+		//
+		// **The world is rebuilt rather than overwritten**, because
+		// `ReadWorldDocument` creates a scene rather than restoring into one.
+		// `Universe::Adopt` reuses the hole a destroy leaves, so the handle
+		// survives — the same trick `RenameWorld` depends on, and the reason a
+		// viewport pinned to this world still points at it afterwards.
+		//
+		// @param world The scene to stop. Not running is not an error.
+		void EndRun(WorldId world);
+
+		// Stops every running world. For shutdown, New Game and Open.
+		void EndAllRuns();
+
+		// Suspends the worlds that are not running, and wakes the ones that are.
+		//
+		// **Because `Universe::Tick` advances every world it holds.** A scene
+		// left alone while another runs would settle its physics and fire its
+		// heartbeats — running by any name an author would use. With nothing
+		// running at all there is no tick, so everything goes back to active.
+		void SyncWorldStates();
 
 		// --- state ------------------------------------------------------------
 
@@ -652,31 +690,111 @@ namespace studio {
 		// panel is already in front, so asking again changes nothing.
 		int FocusWorlds = 0;
 
-		RunMode Mode = RunMode::Edit;
-
-		// Whether a run is held still.
+		// The scene's surface camera, when it has one.
 		//
-		// **Not a fourth `RunMode`, and the distinction is load-bearing.** The
-		// mode decides which scripts are running and what `IsServer` answers;
-		// pausing changes neither. It stops the clock — `Simulate` returns
-		// early — so the world keeps its runtimes, its connections and its
-		// snapshot, and unpausing carries on rather than starting again.
-		//
-		// Stop still restores the edit snapshot, so pausing is not a way to
-		// keep what a run built.
-		bool Paused = false;
+		// **What makes a mirror appear in the editor.** A `Camera` with a
+		// `SurfaceSize` renders the world into a texture that a `Part` with a
+		// matching `Surface` samples; the renderer only runs that pass when it
+		// is handed a view, and the editor handed it nothing. Found per frame
+		// rather than cached, because a script can create, move or delete the
+		// camera at any point during a run. See `PresentWorld`.
+		engine::render::SurfaceView Surface;
+		bool HaveSurface = false;
 
-		// The universe as it was when Run was pressed. Restored by Stop.
-		std::vector<std::byte> EditSnapshot;
-
-		// One VM per world while running, in `Universe::Worlds()` order.
+		// One world's run, for as long as it is running.
 		//
-		// **Shared rather than unique**, because the heartbeat system installed
-		// into a world's scheduler captures it — the same arrangement
-		// `examples::LoadScene` uses, and for the same reason: a script that
-		// connects to `RunService.Heartbeat` *is* the simulation for what it
-		// built, so the VM has to outlive the call that started it.
-		std::vector<std::shared_ptr<engine::script::Runtime>> Runtimes;
+		// **A universe is a collection of scenes, so running is per scene.**
+		// This replaced a single editor-wide `RunMode` plus a `Paused` flag plus
+		// a one-world scope, and the three of them together could not express
+		// the thing a studio with several viewports is for: run the server's
+		// world, leave the client's in edit, and author one while the other
+		// plays. A global mode forced every world into the same answer, so the
+		// scene you were not looking at ran too — and Stop restored a snapshot
+		// over both of them.
+		//
+		// A world with no record is being edited. That is the whole of the
+		// "stopped" state: there is no `RunMode::Edit` record, because a record
+		// exists precisely to hold what a run needs to be undone.
+		//
+		// @since v0.7
+		struct WorldRun {
+			// Which scene this is the run of.
+			WorldId World;
+
+			// Server-only or server-and-client. Never `Edit` — see above.
+			RunMode Mode = RunMode::Server;
+
+			// Whether the clock is stopped for this world alone.
+			//
+			// **Not a third mode, and the distinction is load-bearing.** The
+			// mode decides which scripts run and what `IsServer` answers;
+			// pausing changes neither. It stops this world's clock and leaves
+			// its runtime, its connections and its snapshot alone, so
+			// unpausing carries on rather than starting again.
+			bool Paused = false;
+
+			// The scene as it was when the run started, as a world document.
+			//
+			// **`WriteWorldDocument`, not `Universe::Save`.** The universe
+			// snapshot is every world at once, which is exactly the thing that
+			// made Stop restore scenes nobody had run. A document is one
+			// scene's authored content, and it is the same call Duplicate and
+			// Rename already make.
+			std::string Snapshot;
+
+			// The VM, for as long as the world runs.
+			//
+			// **Shared rather than unique**, because the heartbeat system
+			// installed into the world's scheduler captures it — the same
+			// arrangement `examples::LoadScene` uses, and for the same reason:
+			// a script that connects to `RunService.Heartbeat` *is* the
+			// simulation for what it built, so the VM has to outlive the call
+			// that started it.
+			std::shared_ptr<engine::script::Runtime> Runtime;
+		};
+
+		// Every world currently running. Worlds absent from this are in edit.
+		std::vector<WorldRun> Runs;
+
+		// This world's run, or null when it is being edited.
+		//
+		// @param world The scene to ask about.
+		// @return The record, or null.
+		WorldRun *RunOf(WorldId world);
+		const WorldRun *RunOf(WorldId world) const;
+
+		// What a world is doing right now.
+		//
+		// **The replacement for reading `Mode`, and every old call site had to
+		// answer a new question to use it: running *for which world*.** A menu
+		// item that disabled itself during a run now disables itself during a
+		// run *of the scene it would change*, which is the behaviour a studio
+		// with independent scenes has to have.
+		//
+		// @param world The scene to ask about.
+		// @return Its mode, or `Edit` when it is not running.
+		RunMode ModeOf(WorldId world) const;
+
+		// Whether a world is running at all.
+		//
+		// @param world The scene to ask about.
+		// @return `true` when it has a run record.
+		bool IsRunning(WorldId world) const;
+
+		// Whether a world's clock is stopped.
+		//
+		// @param world The scene to ask about.
+		// @return `true` when it is running and paused.
+		bool IsPaused(WorldId world) const;
+
+		// Whether anything at all is running.
+		//
+		// **For the few places that genuinely mean the program rather than a
+		// scene** — the window title, and the guard on saving a game file while
+		// something is live. Everything else wants `ModeOf`.
+		//
+		// @return `true` when at least one world is running.
+		bool AnyRunning() const;
 
 		std::vector<OpenScript> Scripts;
 		int ActiveScript = -1;
@@ -810,6 +928,15 @@ namespace studio {
 		// Not saved: it follows the mouse and re-establishes itself on the first
 		// click of a session.
 		size_t FocusedViewport = 0;
+
+		// Whether a viewport claimed focus from a click during this frame.
+		//
+		// **A click has to outrank `IsWindowFocused`, and only for one frame.**
+		// `SetWindowFocus` takes effect at the end of the frame, so every panel
+		// drawn after the clicked one still sees the *old* focused window and
+		// would overwrite the claim. Reset in `DrawInterface` before any panel
+		// draws. See `FocusedViewport`.
+		bool ViewportClaimed = false;
 
 		// The world a viewport is showing.
 		//
@@ -975,7 +1102,21 @@ namespace studio {
 		PendingMoveAction PendingMove;
 		PendingScriptAction PendingOpenScript;
 		WorldId PendingRemoveWorld;
+		// Where the keybind table is read from and written back to.
+		//
+		// Beside the binary with the layout ini, so a launcher's working
+		// directory cannot move somebody's keys. See `Keybinds::Load`.
+		std::filesystem::path KeybindPath;
+
 		WorldId PendingActivate;
+
+		// A run change asked for from the Worlds panel, applied after it draws.
+		//
+		// **Queued because `SetRunMode` rebuilds the world.** Starting or stopping
+		// a scene from inside the popup drawn for its own row would destroy the
+		// world while the loop listing it still held its handle.
+		WorldId PendingRunWorld;
+		RunMode PendingRunMode = RunMode::Edit;
 		WorldId PendingDuplicateWorld;
 		WorldId PendingTeleport;
 

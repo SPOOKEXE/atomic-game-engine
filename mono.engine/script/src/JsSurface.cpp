@@ -359,11 +359,11 @@ namespace engine::script {
 
 			JsContext &bound = JsOf(context);
 
-			// The world is every root's ancestor, so `part.IsDescendantOf(
-			// workspace)` is true for anything parented into it.
-			if (JS_IsStrictEqual(context, argv[0], bound.Workspace)) {
-				return JS_NewBool(context, bound.World->Alive(instance));
-			}
+			// No case for the workspace any more, and losing it is the point:
+			// this used to be true for every live instance in the world, because
+			// the world was every root's ancestor. It is now the real subtree
+			// question — the same one the render gate asks — so a script and the
+			// renderer cannot disagree about whether something is in the scene.
 			return JS_NewBool(context, bound.World->IsDescendantOf(instance, JsEntityOf(context, argv[0])));
 		}
 

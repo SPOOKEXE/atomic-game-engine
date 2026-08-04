@@ -158,9 +158,17 @@ namespace studio {
 			}
 		}
 
+		// Reset before any panel draws: the claim is a within-frame fact, not
+		// state that carries. See `ViewportClaimed`.
+		ViewportClaimed = false;
+
 		for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
 			DrawViewport(index);
 		}
+
+		// **After every viewport, never inside one.** See the note in
+		// `DrawViewport` for why asking per panel could not work.
+		ResolveFocusedViewport();
 		DrawExplorer();
 		DrawWorlds();
 		DrawProperties();
@@ -441,9 +449,17 @@ namespace studio {
 		// viewports at once and the last one drawn wins. It was written that
 		// way first and the toolbar reported "Viewport 2" no matter which panel
 		// was clicked. This flag stays inside the panel and its own children.
-		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
-			FocusedViewport = index;
-		}
+		// **Focus is not decided here, and two attempts to decide it here is why
+		// it is not.** Every panel asking "am I focused?" as it draws is a race:
+		// `SetWindowFocus` applies at the *end* of a frame, so a click on
+		// Viewport 1 leaves Viewport 2 still reporting focus when it draws
+		// moments later, and whichever panel drew last won. Guarding the query
+		// with a click flag just moved which panel got stuck.
+		//
+		// `ResolveFocusedViewport` settles it once, after every panel has
+		// drawn, from the single window imgui actually considers focused. The
+		// only thing claimed here is the click, below — because a click has to
+		// take effect on the frame it happened rather than the frame after.
 
 		// **The size in pixels, which is not the size in imgui's points.** The
 		// texture is real pixels and a high-DPI display makes those different
@@ -532,30 +548,23 @@ namespace studio {
 						ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
 			FocusedViewport = index;
+
+			// Held for the rest of the frame so a later panel's stale
+			// `IsWindowFocused` cannot take it back. See the note above.
+			ViewportClaimed = true;
 		}
 
-		// **The second panel picks its own world.** Without this both viewports
-		// show the active one, which is one view drawn twice at half the rate —
-		// strictly worse than a single viewport. In Play the two are naturally
-		// the server's world and the world a client is standing in.
-		if (second) {
-			ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
-			ImGui::SetNextItemWidth(engine::ui::Scaled(170.0f));
-
-			const Name chosen = Universe->NameOf(extra->World.IsValid() ? extra->World : Active);
-			if (ImGui::BeginCombo("##view", chosen.IsValid() ? Label(chosen) : "(no scene)")) {
-				for (const WorldId id : Universe->Worlds()) {
-					const Name name = Universe->NameOf(id);
-					if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == extra->World)) {
-						extra->World = id;
-					}
-				}
-				ImGui::EndCombo();
-			}
-
-			ImGui::End();
-			return;
-		}
+		// **An extra viewport used to stop here, behind a scene dropdown drawn
+		// over its own picture, and both halves of that were wrong.** The
+		// dropdown duplicated the toolbar's scene selector — which now retargets
+		// whichever viewport you are in, so one control does the job from a
+		// place that is not covering the image. And returning early meant an
+		// extra panel never reached the readout below: no scene name, no draw
+		// count, no triangle count, no warning that a run is in progress. The
+		// panel you opened to compare two worlds was the one that could not tell
+		// you anything about either.
+		//
+		// Both panels fall through to the same readout now. See `DrawToolbar`.
 
 		// The readout, drawn back over the top-left of the image.
 		ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
@@ -584,13 +593,14 @@ namespace studio {
 		);
 		ImGui::PopStyleColor();
 
-		if (Mode != RunMode::Edit) {
-			// **The one thing that must be visible without reading anything.**
-			// An author who has forgotten they are in Play will make edits Stop
-			// throws away, and "why did my change vanish" is the worst question
-			// an editor can produce.
+		// **This panel's world, not "the" mode.** With scenes running
+		// independently, a viewport showing an edited world must not warn that
+		// Stop will throw the edits away — and one showing a running world must,
+		// whatever the other panels are doing. An author who has forgotten which
+		// of two scenes is live is exactly who this line is for.
+		if (const RunMode panelMode = ModeOf(ViewportWorld(index)); panelMode != RunMode::Edit) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::Text("%s - Stop restores the scene", Describe(Mode));
+			ImGui::Text("%s - Stop restores this scene", Describe(panelMode));
 			ImGui::PopStyleColor();
 		}
 
@@ -778,14 +788,32 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("Run")) {
-			if (ImGui::MenuItem("Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(), Mode == RunMode::Play)) {
-				SetRunMode(Mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
+			// The scene in the viewport being worked in, exactly as the
+			// toolbar's buttons. A menu that ran something else would be a
+			// second answer to "which scene does Play mean".
+			const WorldId scope = ViewportWorld(FocusedViewport);
+			const RunMode mode = ModeOf(scope);
+
+			if (ImGui::MenuItem(
+					"Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(),
+					mode == RunMode::Play
+				)) {
+				SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 			}
-			if (ImGui::MenuItem("Run (server only)", Keybinds::Of(Action::RunServer).Text().c_str(), Mode == RunMode::Server)) {
-				SetRunMode(Mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
+			if (ImGui::MenuItem(
+					"Run (server only)", Keybinds::Of(Action::RunServer).Text().c_str(),
+					mode == RunMode::Server
+				)) {
+				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
 			}
-			if (ImGui::MenuItem("Stop", Keybinds::Of(Action::Stop).Text().c_str(), false, Mode != RunMode::Edit)) {
-				SetRunMode(RunMode::Edit);
+			if (ImGui::MenuItem(
+					"Stop", Keybinds::Of(Action::Stop).Text().c_str(), false, mode != RunMode::Edit
+				)) {
+				SetRunMode(scope, RunMode::Edit);
+			}
+			if (ImGui::MenuItem("Stop All", nullptr, false, AnyRunning())) {
+				EndAllRuns();
+				Say("stopped every scene");
 			}
 			ImGui::EndMenu();
 		}
@@ -862,14 +890,19 @@ namespace studio {
 		// matches modifiers exactly, so the two cannot both fire — but the
 		// order says which is meant to win if somebody binds them to the same
 		// chord anyway.
+		// Same scene the toolbar and the Run menu act on, so a keyboard and a
+		// click cannot disagree about which world F5 starts.
+		const WorldId transport = ViewportWorld(FocusedViewport);
+		const RunMode transportMode = ModeOf(transport);
+
 		if (Keybinds::Fired(Action::Stop)) {
-			SetRunMode(RunMode::Edit);
+			SetRunMode(transport, RunMode::Edit);
 		} else if (Keybinds::Fired(Action::Play)) {
-			SetRunMode(Mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
+			SetRunMode(transport, transportMode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 		}
 
 		if (Keybinds::Fired(Action::RunServer)) {
-			SetRunMode(Mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
+			SetRunMode(transport, transportMode == RunMode::Server ? RunMode::Edit : RunMode::Server);
 		}
 
 		if (Keybinds::Fired(Action::ShowStatistics)) {
@@ -879,6 +912,66 @@ namespace studio {
 		if (Keybinds::Fired(Action::ShowFrameGraph)) {
 			ShowFrameGraph = !ShowFrameGraph;
 		}
+	}
+
+	void Editor::ResolveFocusedViewport() {
+		// **Read from imgui's own idea of the focused window, once.** This is
+		// the fact every per-panel `IsWindowFocused` call was trying and failing
+		// to reconstruct: there is exactly one focused window, it is known here,
+		// and reading it after all the panels have drawn means no panel can
+		// overwrite another's answer.
+		//
+		// A click inside a viewport has already set `FocusedViewport` directly,
+		// because `SetWindowFocus` does not land until the end of the frame and
+		// the transport should not lag a click by one. From the next frame on,
+		// this agrees with it.
+		const ImGuiContext *context = ImGui::GetCurrentContext();
+		if (context == nullptr || context->NavWindow == nullptr) {
+			return;
+		}
+
+		// The panel that owns the focused window, which is the window itself
+		// unless focus landed on a child of it — a combo or a popup inside the
+		// viewport is still the viewport for this purpose.
+		const ImGuiWindow *focused = context->NavWindow->RootWindow != nullptr
+										 ? context->NavWindow->RootWindow
+										 : context->NavWindow;
+
+		// **Which panel the keyboard is in, decided in the same place and from
+		// the same window.** A binding scoped to the tree must not fire while
+		// the pointer is in a viewport, and this is the one function that knows
+		// which panel is in front. See `Keybinds::Scope`.
+		const auto isWindow = [&](const char *title) {
+			const ImGuiWindow *window = ImGui::FindWindowByName(title);
+			return window != nullptr && (window == focused || window == context->NavWindow);
+		};
+
+		if (isWindow(EXPLORER) || isWindow(WORLDS)) {
+			Keybinds::SetScope(Scope::Tree);
+		} else if (isWindow(SCRIPTS)) {
+			Keybinds::SetScope(Scope::Script);
+		} else {
+			Keybinds::SetScope(Scope::Viewport);
+		}
+
+		static const char *const TITLES[] = {"Viewport", "Viewport 2", "Viewport 3", "Viewport 4"};
+
+		for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
+			const ImGuiWindow *window = ImGui::FindWindowByName(TITLES[index]);
+			if (window == nullptr) {
+				continue;
+			}
+
+			if (window == focused || window == context->NavWindow) {
+				FocusedViewport = index;
+				return;
+			}
+		}
+
+		// **Focus somewhere else leaves the last viewport standing**, and that
+		// is deliberate: clicking the explorer or a property field should not
+		// blank the transport's readout. It keeps describing the viewport you
+		// were last in, which is the one you are still looking at.
 	}
 
 	void Editor::DrawToolbar() {
@@ -904,32 +997,41 @@ namespace studio {
 			return;
 		}
 
-		const bool running = Mode != RunMode::Edit;
+		// **The transport is about one scene: the one in the viewport you are
+		// in.** Every button below reads and writes that world's run record, so
+		// switching viewports genuinely swaps the transport rather than
+		// relabelling it. A universe is a collection of scenes and each of them
+		// runs, pauses and stops on its own — see `Editor::WorldRun`.
+		const WorldId scope = ViewportWorld(FocusedViewport);
+		const RunMode mode = ModeOf(scope);
+		const bool running = mode != RunMode::Edit;
+		const bool paused = IsPaused(scope);
 
-		if (RunButton("Play", Mode == RunMode::Play, engine::ui::AccentColour())) {
-			SetRunMode(Mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
+		if (RunButton("Play", mode == RunMode::Play, engine::ui::AccentColour())) {
+			SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 		}
 		ImGui::SameLine();
-		if (RunButton("Run", Mode == RunMode::Server, engine::ui::AccentColour())) {
-			SetRunMode(Mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
+		if (RunButton("Run", mode == RunMode::Server, engine::ui::AccentColour())) {
+			SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
 		}
 		ImGui::SameLine();
 
-		// **Pause between Run and Stop, and only while something runs.** It is
+		// **Pause between Run and Stop, and only while this scene runs.** It is
 		// the transport a person reaches for mid-run, so it sits where a
 		// transport does; disabled in Edit because there is no clock to stop —
 		// a button that could be pressed and did nothing would read as a
 		// pause that failed.
 		ImGui::BeginDisabled(!running);
-		if (RunButton(Paused ? "Resume" : "Pause", Paused, engine::ui::WarningColour())) {
-			Paused = !Paused;
-			Say(Paused ? "paused — the clock is stopped, the run is not"
-					   : "resumed");
+		if (RunButton(paused ? "Resume" : "Pause", paused, engine::ui::WarningColour())) {
+			if (WorldRun *record = RunOf(scope); record != nullptr) {
+				record->Paused = !record->Paused;
+				Say(record->Paused ? "paused — the clock is stopped, the run is not" : "resumed");
+			}
 		}
 		ImGui::SameLine();
 
 		if (ImGui::Button("Stop")) {
-			SetRunMode(RunMode::Edit);
+			SetRunMode(scope, RunMode::Edit);
 		}
 		ImGui::EndDisabled();
 
@@ -1091,9 +1193,18 @@ namespace studio {
 			return;
 		}
 
+		// **How many scenes are live, not "the" mode.** With runs per world the
+		// status bar cannot name one, and naming the focused viewport's would
+		// hide a scene running behind you. A count is the honest summary; the
+		// toolbar and the Worlds panel say which.
+		const size_t live = Runs.size();
+		const std::string state = live == 0	 ? std::string("Edit")
+								  : live == 1 ? std::string(Describe(Runs.front().Mode)) + " (1 scene)"
+											  : std::to_string(live) + " scenes running";
+
 		ImGui::Text(
 			"%s  |  %.0f fps  |  %u draw calls, %llu triangles, %u culled  |  camera %.0f u/s",
-			Describe(Mode),
+			state.c_str(),
 			ImGui::GetIO().Framerate,
 			LastFrame.DrawCalls,
 			static_cast<unsigned long long>(LastFrame.Triangles),

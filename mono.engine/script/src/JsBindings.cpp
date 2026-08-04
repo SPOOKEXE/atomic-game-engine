@@ -5,6 +5,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <string>
@@ -119,13 +120,34 @@ namespace engine::script {
 			case PropertyType::CFrame:
 				return MakeCFrame(context, *static_cast<const core::CFrame *>(bytes));
 			case PropertyType::Reference: {
-				// A root instance's parent is the world, and the world is
-				// `workspace`. Handing back null would make
-				// `part.Parent = workspace` a write a script could not read
-				// back, and the two would disagree about one fact.
+				// **Null, and it means nil rather than "a root".** This handed
+				// back `workspace` before v0.7, because `workspace` *was* the
+				// world and a root therefore belonged to it. `workspace` is now
+				// the `Workspace` instance, so having no parent is an ordinary
+				// state a script can produce and read back — and an instance in
+				// that state is drawn by nothing and listed by nothing. The Luau
+				// side says the same thing in `PushValue`; one property
+				// declaration, two languages, one answer.
 				const Entity referenced = *static_cast<const Entity *>(bytes);
 				if (referenced == ecs::NULL_ENTITY) {
-					return JS_DupValue(context, JsOf(context).Workspace);
+					return JS_NULL;
+				}
+
+				// **The stored object for the Workspace, not a fresh one.**
+				// `MakeJsInstance` mints a new JS object per call, and
+				// JavaScript's `===` is object identity with no `__eq` to
+				// override — so `part.Parent === workspace` would be false for
+				// the one comparison every script makes. Luau has no such
+				// problem: its `Instance` metatable carries `__eq` and compares
+				// entities.
+				//
+				// Narrow on purpose. This does not give instances identity in
+				// general — `child.Parent === model` is still false — and
+				// pretending otherwise would need every live instance interned
+				// in the context. What it does is keep the one object a script
+				// is handed as a global comparable with itself.
+				if (JsContext &bound = JsOf(context); referenced == JsEntityOf(context, bound.Workspace)) {
+					return JS_DupValue(context, bound.Workspace);
 				}
 				return MakeJsInstance(context, referenced);
 			}
@@ -196,11 +218,12 @@ namespace engine::script {
 				return true;
 			}
 			case PropertyType::Reference: {
-				// `part.Parent = workspace` — a root of this world. An instance
-				// arrives as its object; `null` detaches, which is what
-				// Roblox's `Parent = nil` means.
-				if (JS_IsNull(value) || JS_IsUndefined(value) ||
-					JS_IsStrictEqual(context, value, JsOf(context).Workspace)) {
+				// An instance arrives as its object; `null` detaches, which is
+				// what Roblox's `Parent = nil` means. `workspace` needs no case
+				// of its own any more — it is an instance object like any other,
+				// which is the whole of what collapsing the two notions of "the
+				// workspace" bought.
+				if (JS_IsNull(value) || JS_IsUndefined(value)) {
 					*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
 					return true;
 				}
@@ -493,14 +516,14 @@ namespace engine::script {
 			// **The second argument, which Roblox has and v0.5 did not.**
 			// `Instance.new('Part', workspace)` is one call rather than two, and
 			// the difference is not only brevity: a part created and parented in
-			// one statement is never briefly a root of the world, so nothing
-			// that walks roots can observe the half-built state.
+			// one statement is never briefly an orphan, so nothing that walks
+			// the tree can observe the half-built state.
+			//
+			// Omitting it leaves the instance parented to nothing, which is now
+			// a real state: fully formed, drawn by nothing, reached by no walk
+			// of the tree until a script says where it goes.
 			if (argc > 1 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
-				const Entity parent = JS_IsStrictEqual(context, argv[1], bound.Workspace)
-										  ? ecs::NULL_ENTITY
-										  : JsEntityOf(context, argv[1]);
-
-				if (!bound.World->SetParent(instance, parent)) {
+				if (!bound.World->SetParent(instance, JsEntityOf(context, argv[1]))) {
 					return JS_ThrowTypeError(context, "could not parent the new instance");
 				}
 			}
@@ -1225,16 +1248,37 @@ namespace engine::script {
 			JS_SetPropertyStr(context, global, "RunService", service);
 		}
 
-		// workspace — the world this script runs on, not an instance in it.
-		// See `Bindings.hpp`: a world is what entities live in, and making it
-		// an entity would put a phantom row in every scene.
+		// workspace — **this world's `Workspace` service**, and until v0.7 it
+		// was a plain object standing for the world itself. `Bindings.hpp`
+		// carries the whole reason the two were collapsed; the short version is
+		// that a world now has a real `Workspace` instance, keeping both meant
+		// two answers to "what is in the scene", and the renderer listened to
+		// neither.
 		{
-			JSValue world = JS_NewObject(context);
-			JS_SetPropertyStr(
-				context, world, "Name", JS_NewString(context, std::string(store.Name()).c_str())
-			);
+			// Idempotent, and here so that a world always has one. See the Luau
+			// `OpenWorkspace`, which does the same for the same reason.
+			Entity workspace = scene::InstallServices(store);
+			if (workspace == ecs::NULL_ENTITY) {
+				workspace = scene::WorkspaceOf(store);
+			}
+
+			// Built out rather than through `MakeJsInstance`, which seals the
+			// object before returning it — and this one takes `Raycast` first.
+			// Everything else about it is an ordinary instance: same class,
+			// same prototype, same opaque entity, so `IsA`, `GetChildren` and
+			// every declared property arrive through the chain rather than
+			// being listed again here.
+			JSValue world = JS_NULL;
+			if (const ecs::ClassId id = bound->World->ClassOf(workspace); id.IsValid()) {
+				JSValue proto = PrototypeFor(context, id, workspace);
+				world = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound->InstanceClass));
+				JS_FreeValue(context, proto);
+				JS_SetOpaque(world, new Entity(workspace));
+			} else {
+				world = JS_NewObject(context);
+			}
+
 			// **Before the seal**, because a sealed object cannot take a method.
-			// `OpenJsSurface` runs after this and would find the world closed.
 			InstallJsQueries(context, global, world);
 
 			JS_PreventExtensions(context, world);

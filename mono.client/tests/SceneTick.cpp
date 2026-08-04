@@ -404,10 +404,12 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	for (const auto &timing : session.Systems.Timings()) {
 		timings.push_back({timing.Name, timing.Milliseconds});
 	}
-	// capture-previous, script-heartbeat, move-camera, collect-instances. Four
-	// rather than the five the C++ demo ran: one scripted heartbeat replaced
-	// `orbit` and `spin`.
-	REQUIRE(timings.size() == 4);
+	// capture-previous, script-heartbeat, move-camera, sync-rendered,
+	// collect-instances. `sync-rendered` arrived at v0.7 with the render gate:
+	// it is what keeps `scene::Rendered` in step with the `Workspace` subtree,
+	// and it runs in `PostSimulation` rather than beside `collect-instances`
+	// because it is structural. See `scene/Visibility.hpp`.
+	REQUIRE(timings.size() == 5);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

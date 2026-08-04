@@ -6,6 +6,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
 #include <cstddef>
@@ -59,6 +60,11 @@ namespace engine::scene {
 				// that would have caught it, and now does.
 				writer.WriteFloat(visual.Transparency);
 				writer.WriteInt8(visual.Surface);
+
+				// Added at v0.7 beside the shadow pass that reads it, and
+				// written here in the same breath rather than a release later —
+				// which is the whole lesson of the paragraph above.
+				writer.WriteBool(visual.CastShadow);
 			}
 		}
 
@@ -74,6 +80,7 @@ namespace engine::scene {
 				visual.Visible = reader.ReadBool();
 				visual.Transparency = reader.ReadFloat();
 				visual.Surface = reader.ReadInt8();
+				visual.CastShadow = reader.ReadBool();
 			}
 		}
 
@@ -153,6 +160,17 @@ namespace engine::scene {
 		ecs::Components::Register<TransientComponent>("scene.Transient");
 		ecs::Components::Register<ServiceComponent>("scene.Service");
 		ecs::Components::Register<LightingServiceComponent>("scene.LightingService");
+
+		// The render gate, at the end for the reason this list opens with.
+		//
+		// **No wire form, and it is not an oversight.** This is a conclusion
+		// drawn from the tree, and a conclusion is the thing least worth
+		// sending: an authority replicates what is in its own scene, so a
+		// replica's draw list is already filtered by what arrived. Putting this
+		// on the wire would give a replica a second opinion about visibility
+		// that could disagree with the first. `client::CollectReplicated`
+		// carries the same argument from the receiving end.
+		ecs::Components::Register<Rendered>("scene.Rendered");
 
 		// The resources. A resource is keyed by a component id too, so one that
 		// is never registered here would be minted by the first

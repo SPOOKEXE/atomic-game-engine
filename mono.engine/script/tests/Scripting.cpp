@@ -14,6 +14,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
@@ -28,6 +29,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.script.scripting")
@@ -46,6 +48,29 @@ using engine::script::Runtime;
 using engine::script::RuntimeLimits;
 
 namespace {
+
+	// Where a script's content lives now.
+	//
+	// **`part.Parent = workspace` used to make a root and now makes a child of
+	// the `Workspace` service**, so a lookup by root finds nothing. See
+	// `script/Bindings.hpp`'s `OpenWorkspace` for why the two notions of "the
+	// workspace" were collapsed, and `scene/Visibility.hpp` for what the tree
+	// now decides.
+	//
+	// Falls back to a root, because some of these scripts deliberately leave an
+	// instance unparented — an orphan is still reachable from C++ through
+	// `EachRoot`, and only a *script* is unable to list one. A test about
+	// signals or tasks should not have to care which of the two its fixture is.
+	Entity InScene(Store &store, std::string_view name) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		if (workspace != engine::ecs::NULL_ENTITY) {
+			if (const Entity child = store.FindFirstChild(workspace, name);
+				child != engine::ecs::NULL_ENTITY) {
+				return child;
+			}
+		}
+		return store.FindFirstRoot(name);
+	}
 	void RegisterClasses() {
 		(void)PartClass();
 	}
@@ -130,7 +155,7 @@ TEST_CASE("a disconnected handler stops being called", "[scripting]") {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
 
-	const Entity counter = store.FindFirstRoot("Counter");
+	const Entity counter = InScene(store, "Counter");
 	REQUIRE(counter != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Transform>(counter)->Frame.Position.X == Approx(2.0f));
 }
@@ -154,7 +179,7 @@ TEST_CASE("Once retires after one call", "[scripting]") {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
 
-	const Entity once = store.FindFirstRoot("Once");
+	const Entity once = InScene(store, "Once");
 	CHECK(store.Get<Transform>(once)->Frame.Position.X == Approx(1.0f));
 }
 
@@ -214,7 +239,7 @@ TEST_CASE("one component write fires every property name reading it", "[scriptin
 	Barrier(store);
 	Beat(store, *runtime);
 
-	const Entity seen = store.FindFirstRoot("Seen");
+	const Entity seen = InScene(store, "Seen");
 	REQUIRE(seen != engine::ecs::NULL_ENTITY);
 
 	CHECK(store.FindFirstChild(seen, "Position") != engine::ecs::NULL_ENTITY);
@@ -251,7 +276,7 @@ TEST_CASE("GetPropertyChangedSignal fires for one name only", "[scripting]") {
 	Beat(store, *runtime);
 
 	// A `Transform` write must not fire a `Bounds` listener.
-	const Entity marker = store.FindFirstRoot("Marker");
+	const Entity marker = InScene(store, "Marker");
 	CHECK(store.Get<Transform>(marker)->Frame.Position.X == Approx(0.0f));
 }
 
@@ -295,7 +320,12 @@ TEST_CASE("the instance methods reach what Store already did", "[scripting]") {
 
 		local copy = child:Clone()
 		assert(copy ~= child, 'a clone is the original')
-		assert(copy.Parent == workspace, 'a clone arrived parented')
+
+		-- **Nil, and this line used to read `== workspace` and mean the same
+		-- thing.** A clone arrives unparented in Roblox and it does here; what
+		-- changed at v0.7 is how "unparented" is spelled, because a null parent
+		-- is no longer "a root of this world".
+		assert(copy.Parent == nil, 'a clone arrived parented')
 	)");
 }
 
@@ -312,7 +342,7 @@ TEST_CASE("Destroy takes the row and the listeners with it", "[scripting]") {
 		part:Destroy()
 	)");
 
-	CHECK(store.FindFirstRoot("Doomed") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Doomed") == engine::ecs::NULL_ENTITY);
 
 	// The listener must not fire against a dead handle, which is what this
 	// beat would surface as a crash or an error.
@@ -382,7 +412,7 @@ TEST_CASE("task.wait resumes at a tick boundary", "[scripting]") {
 		end)
 	)");
 
-	const Entity waiter = store.FindFirstRoot("Waiter");
+	const Entity waiter = InScene(store, "Waiter");
 	REQUIRE(waiter != engine::ecs::NULL_ENTITY);
 
 	// Nothing yet: `task.wait(0)` is the *next* tick, never this one.
@@ -411,7 +441,7 @@ TEST_CASE("a top-level script may yield, and the load still succeeds", "[scripti
 		part.Position = Vector3.new(9, 0, 0)
 	)");
 
-	const Entity yielded = store.FindFirstRoot("Yielded");
+	const Entity yielded = InScene(store, "Yielded");
 	CHECK(store.Get<Transform>(yielded)->Frame.Position.X == Approx(0.0f));
 
 	Beat(store, *runtime);
@@ -437,7 +467,7 @@ TEST_CASE("task.wait counts in ticks, rounding up", "[scripting]") {
 		end)
 	)");
 
-	const Entity timed = store.FindFirstRoot("Timed");
+	const Entity timed = InScene(store, "Timed");
 
 	Beat(store, *runtime);
 	Beat(store, *runtime);
@@ -472,7 +502,7 @@ TEST_CASE("task.spawn runs now and task.defer runs at the end of the beat", "[sc
 
 	Beat(store, *runtime);
 
-	const Entity order = store.FindFirstRoot("Order");
+	const Entity order = InScene(store, "Order");
 	CHECK(store.Get<Transform>(order)->Frame.Position.X == Approx(2.0f));
 }
 
@@ -495,7 +525,7 @@ TEST_CASE("task.cancel unschedules a resume", "[scripting]") {
 	Beat(store, *runtime);
 	Beat(store, *runtime);
 
-	const Entity cancelled = store.FindFirstRoot("Cancelled");
+	const Entity cancelled = InScene(store, "Cancelled");
 	CHECK(store.Get<Transform>(cancelled)->Frame.Position.X == Approx(0.0f));
 }
 
@@ -727,7 +757,7 @@ TEST_CASE("javascript sees transparency and collision groups too", "[scripting][
 		if (part.CollisionGroup !== 'Players') throw new Error('the group did not take');
 	)");
 
-	const Entity glass = store.FindFirstRoot("JsGlass");
+	const Entity glass = InScene(store, "JsGlass");
 	REQUIRE(glass != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Visual>(glass)->Transparency == Approx(0.5f));
 
@@ -747,7 +777,7 @@ TEST_CASE("javascript reads the camera class", "[scripting][js]") {
 		if (Math.abs(camera.FieldOfView - 90) > 1e-3) throw new Error('FieldOfView did not round-trip');
 	)");
 
-	const Entity camera = store.FindFirstRoot("JsCamera");
+	const Entity camera = InScene(store, "JsCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
 }
@@ -878,7 +908,7 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 	)");
 
 	// Degrees out, radians stored — the same split `Orientation` makes.
-	const Entity camera = store.FindFirstRoot("Main");
+	const Entity camera = InScene(store, "Main");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
 }
@@ -915,7 +945,7 @@ TEST_CASE("Transparency is a real property and Visible is a different one", "[sc
 		assert(part.Visible, 'Transparency = 1 cleared Visible')
 	)");
 
-	const Entity glass = store.FindFirstRoot("Glass");
+	const Entity glass = InScene(store, "Glass");
 	CHECK(store.Get<Visual>(glass)->Transparency == Approx(1.0f));
 	CHECK(store.Get<Visual>(glass)->Visible);
 }
@@ -981,7 +1011,7 @@ TEST_CASE("javascript signals connect and disconnect", "[scripting][js]") {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
 
-	const Entity counter = store.FindFirstRoot("JsCounter");
+	const Entity counter = InScene(store, "JsCounter");
 	REQUIRE(counter != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Transform>(counter)->Frame.Position.X == Approx(2.0f));
 }
@@ -1004,7 +1034,7 @@ TEST_CASE("javascript Once retires after one call", "[scripting][js]") {
 	for (int beat = 0; beat < 4; beat++) {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
-	CHECK(store.Get<Transform>(store.FindFirstRoot("JsOnce"))->Frame.Position.X == Approx(1.0f));
+	CHECK(store.Get<Transform>(InScene(store, "JsOnce"))->Frame.Position.X == Approx(1.0f));
 }
 
 TEST_CASE("javascript .Changed fans one write out to every name", "[scripting][js]") {
@@ -1033,7 +1063,7 @@ TEST_CASE("javascript .Changed fans one write out to every name", "[scripting][j
 	Barrier(store);
 	Beat(store, *runtime);
 
-	const Entity seen = store.FindFirstRoot("JsSeen");
+	const Entity seen = InScene(store, "JsSeen");
 	REQUIRE(seen != engine::ecs::NULL_ENTITY);
 
 	CHECK(store.FindFirstChild(seen, "Position") != engine::ecs::NULL_ENTITY);
@@ -1071,7 +1101,7 @@ TEST_CASE("javascript has the instance methods", "[scripting][js]") {
 		function JsEquals(a, b) { return a !== null && b !== null && a.Name === b.Name; }
 	)");
 
-	CHECK(store.FindFirstRoot("JsModel") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "JsModel") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("javascript Destroy takes the row and the listeners", "[scripting][js]") {
@@ -1087,7 +1117,7 @@ TEST_CASE("javascript Destroy takes the row and the listeners", "[scripting][js]
 		part.Destroy();
 	)");
 
-	CHECK(store.FindFirstRoot("JsDoomed") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "JsDoomed") == engine::ecs::NULL_ENTITY);
 
 	Beat(store, *runtime);
 	Beat(store, *runtime);
@@ -1116,7 +1146,7 @@ TEST_CASE("javascript task.wait resumes at a tick boundary", "[scripting][js]") 
 		});
 	)");
 
-	const Entity waiter = store.FindFirstRoot("JsWaiter");
+	const Entity waiter = InScene(store, "JsWaiter");
 	REQUIRE(waiter != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Transform>(waiter)->Frame.Position.X == Approx(0.0f));
 
@@ -1145,7 +1175,7 @@ TEST_CASE("javascript task.defer runs at the end of the beat", "[scripting][js]"
 	)");
 
 	Beat(store, *runtime);
-	CHECK(store.Get<Transform>(store.FindFirstRoot("JsOrder"))->Frame.Position.X == Approx(2.0f));
+	CHECK(store.Get<Transform>(InScene(store, "JsOrder"))->Frame.Position.X == Approx(2.0f));
 }
 
 TEST_CASE("javascript task.cancel unschedules a resume", "[scripting][js]") {
@@ -1164,7 +1194,7 @@ TEST_CASE("javascript task.cancel unschedules a resume", "[scripting][js]") {
 
 	Beat(store, *runtime);
 	Beat(store, *runtime);
-	CHECK(store.Get<Transform>(store.FindFirstRoot("JsCancelled"))->Frame.Position.X == Approx(0.0f));
+	CHECK(store.Get<Transform>(InScene(store, "JsCancelled"))->Frame.Position.X == Approx(0.0f));
 }
 
 TEST_CASE("javascript has the clock and refuses the wall one", "[scripting][js]") {
@@ -1295,8 +1325,8 @@ TEST_CASE("javascript Random matches Luau for one seed", "[scripting][js]") {
 		part.Position = Vector3.new(stream.NextNumber(), stream.NextNumber(), stream.NextNumber());
 	)");
 
-	const auto *left = store.Get<Transform>(store.FindFirstRoot("LuauDraws"));
-	const auto *right = store.Get<Transform>(store.FindFirstRoot("JsDraws"));
+	const auto *left = store.Get<Transform>(InScene(store, "LuauDraws"));
+	const auto *right = store.Get<Transform>(InScene(store, "JsDraws"));
 	REQUIRE(left != nullptr);
 	REQUIRE(right != nullptr);
 
@@ -1347,8 +1377,8 @@ TEST_CASE("a table published from Luau arrives as an object in JavaScript", "[sc
 		part.Parent = workspace;
 	)");
 
-	CHECK(store.FindFirstRoot("Sender") != engine::ecs::NULL_ENTITY);
-	CHECK(store.FindFirstRoot("Receiver") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Sender") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Receiver") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("javascript refuses to send what cannot cross a world boundary", "[scripting][js]") {
@@ -1409,7 +1439,7 @@ TEST_CASE("a script is an instance with a class and a source", "[scripting][inst
 		assert(program.Disabled, 'Disabled did not take')
 	)");
 
-	const Entity holder = store.FindFirstRoot("Holder");
+	const Entity holder = InScene(store, "Holder");
 	REQUIRE(holder != engine::ecs::NULL_ENTITY);
 
 	const Entity program = store.FindFirstChild(holder, "Behaviour");
@@ -1553,8 +1583,8 @@ TEST_CASE("two scripts each see themselves and not each other", "[scripting][ins
 	INFO(runtime->LastError());
 	CHECK(ran == 2);
 
-	CHECK(store.FindFirstRoot("First") != engine::ecs::NULL_ENTITY);
-	CHECK(store.FindFirstRoot("Second") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "First") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Second") != engine::ecs::NULL_ENTITY);
 
 	engine::core::Paths::SetAssetsOverride(previous);
 	std::filesystem::remove_all(directory);
@@ -1624,9 +1654,7 @@ TEST_CASE("a MemoryStore write and read round-trips through the barrier", "[scri
 	});
 
 	// Nothing yet: the reply lands at a later barrier by design.
-	universe.Enter(world, [&](Store &store) {
-		CHECK(store.FindFirstRoot("Set:Ok") == engine::ecs::NULL_ENTITY);
-	});
+	universe.Enter(world, [&](Store &store) { CHECK(InScene(store, "Set:Ok") == engine::ecs::NULL_ENTITY); });
 
 	// Each barrier carries one reply, and each resume issues the next call — so
 	// the round trip takes as many ticks as it takes calls.
@@ -1637,12 +1665,12 @@ TEST_CASE("a MemoryStore write and read round-trips through the barrier", "[scri
 
 	universe.Enter(world, [&](Store &store) {
 		// The write was accepted...
-		CHECK(store.FindFirstRoot("Set:Ok") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "Set:Ok") != engine::ecs::NULL_ENTITY);
 
 		// ...and the read brought back the table, through the codec, with its
 		// number intact. A string would have come back as a string; this is the
 		// map the codec exists for.
-		CHECK(store.FindFirstRoot("Get:Ok:7") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "Get:Ok:7") != engine::ecs::NULL_ENTITY);
 	});
 }
 
@@ -1681,7 +1709,7 @@ TEST_CASE("a MemoryStore read of nothing is NotFound rather than silence", "[scr
 	}
 
 	universe.Enter(world, [&](Store &store) {
-		CHECK(store.FindFirstRoot("NotFound:nil") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "NotFound:nil") != engine::ecs::NULL_ENTITY);
 	});
 }
 
@@ -1724,7 +1752,7 @@ TEST_CASE("javascript awaits a store reply as a promise", "[scripting][stores][j
 	}
 
 	universe.Enter(world, [&](Store &store) {
-		CHECK(store.FindFirstRoot("Js:Ok:11") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "Js:Ok:11") != engine::ecs::NULL_ENTITY);
 	});
 }
 
@@ -1908,7 +1936,7 @@ TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scr
 		assert(camera.SurfaceSize == Vector3.new(0, 0, 0), 'clearing did not take')
 	)");
 
-	const Entity camera = store.FindFirstRoot("Reflection");
+	const Entity camera = InScene(store, "Reflection");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::SurfaceCamera>(camera) == nullptr);
 
@@ -1936,7 +1964,7 @@ TEST_CASE("a part names which surface it shows", "[scripting][surface]") {
 		assert(pane.Surface == 0, 'the surface did not round-trip')
 	)");
 
-	const Entity pane = store.FindFirstRoot("Pane");
+	const Entity pane = InScene(store, "Pane");
 	CHECK(store.Get<Visual>(pane)->Surface == 0);
 }
 
@@ -1957,10 +1985,10 @@ TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]
 		pane.Parent = workspace;
 	)");
 
-	const auto *surface = store.Get<engine::scene::SurfaceCamera>(store.FindFirstRoot("JsReflection"));
+	const auto *surface = store.Get<engine::scene::SurfaceCamera>(InScene(store, "JsReflection"));
 	REQUIRE(surface != nullptr);
 	CHECK(surface->Width == 512);
 	CHECK(surface->Height == 256);
 
-	CHECK(store.Get<Visual>(store.FindFirstRoot("JsPane"))->Surface == 0);
+	CHECK(store.Get<Visual>(InScene(store, "JsPane"))->Surface == 0);
 }
