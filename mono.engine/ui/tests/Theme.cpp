@@ -154,8 +154,10 @@ TEST_CASE("a palette chosen before a context survives to it", "[ui][theme]") {
 
 	const Context context;
 	engine::ui::ApplyEditorTheme();
-	CHECK(ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_SliderGrab]) ==
-		  engine::ui::AccentColour());
+	CHECK(
+		ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_SliderGrab]) ==
+		engine::ui::AccentColour()
+	);
 
 	engine::ui::SetPalette(engine::ui::Palette::Dark);
 }

@@ -41,6 +41,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <thread>
 
 struct SDL_Window;
 
@@ -357,6 +358,30 @@ namespace engine::render {
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
 
+		// Reports whether the caller is the thread that owns this renderer.
+		//
+		// **Recording is single-threaded by contract, and this is the contract
+		// rather than a note about it.** v0.7 decided that a studio with several
+		// viewports draws them one after another — the passes share one command
+		// buffer and one device, so parallel recording would serialise at submit
+		// and buy nothing, and it would cost the property that makes a viewport
+		// correct: the world pass writes a scene target before the interface pass
+		// samples it *in the same buffer*. That decision was written down and
+		// nothing enforced it, which is the state this engine has twice found a
+		// stale claim in.
+		//
+		// The owner is the thread that called `Initialise`, or the constructing
+		// thread before that — a renderer is often built by whoever owns the
+		// object and initialised by whoever owns the window, and it is the
+		// device rather than the C++ object that this is about. There is
+		// deliberately no `BindToCallingThread` beside `ecs::Store`'s: a store
+		// is picked up by a different worker every tick and a device is not, so
+		// a public rebind would be a seam for exactly what the contract forbids.
+		//
+		// @return `true` when the current thread may record and submit.
+		// @threadsafe
+		bool IsOnOwningThread() const;
+
 		// Reports whether Initialise completed and a GPU device is available.
 		bool IsInitialised() const;
 
@@ -489,7 +514,22 @@ namespace engine::render {
 		BackendHandles Backend() const;
 
 	  private:
+		// Aborts when the caller is not the owning thread. See `IsOnOwningThread`.
+		//
+		// @param what The call being refused, for the message.
+		void RequireOwningThread(const char *what) const;
+
 		struct Impl;
 		std::unique_ptr<Impl> State;
+
+		// The thread that called `Initialise`, and the only one that may record.
+		//
+		// Not atomic, unlike `ecs::Store::Owner`, and the difference is the
+		// point: a store's owner is written every tick by whichever worker
+		// picked the world up, so that write races other threads' reads. This is
+		// written by the constructor and again by `Initialise`, then only read —
+		// so any thread that could observe a torn value is a thread already
+		// violating the contract this exists to state.
+		std::thread::id Owner;
 	};
 }

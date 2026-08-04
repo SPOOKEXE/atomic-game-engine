@@ -22,6 +22,49 @@ namespace engine::replication {
 			return {writer.Bytes().begin(), writer.Bytes().end()};
 		}
 
+		// A component value's identity, for `ChangeDetection::Signature`.
+		//
+		// **The object representation, and not the form it crosses in.** The
+		// wire form is the more obviously correct identity — "send it when what
+		// would be sent differs" — and it was the first thing tried. It is the
+		// wrong answer here for a reason that only shows up on a profile: a
+		// component holding a `core::Name` writes it as *text*, so signing
+		// `scene::Visual` that way is two name lookups per entity per tick on a
+		// registry shared with every worker in the job system. That is the same
+		// lock in the same wrong place that `script/Instances.cpp` documents
+		// finding, and it would be paid for the whole world rather than for
+		// what changed.
+		//
+		// **The bytes are a faithful identity here, and two tests are what make
+		// that true rather than hoped.** `engine.scene.components` asserts every
+		// component is trivially copyable and that none carries unnamed padding
+		// — so there are no uninitialised bytes to make one value hash two ways,
+		// and no pointer whose target could change behind a stable address.
+		// `Resign` refuses to sign a non-trivial type rather than assuming it.
+		//
+		// **The consequence, stated rather than hidden**: a change too small to
+		// survive a quantised wire form still counts as a change, so a
+		// `Signature` component with a compact form may resend bytes the client
+		// already has. That is the wrong detector for such a component, which is
+		// what `ChangeDetection::Signature`'s own comment says.
+		//
+		// FNV-1a. Not for its distribution — a collision means one update is
+		// missed and stays missed — but because it is a byte-at-a-time loop over
+		// a few dozen bytes with no table and no allocation, which is what runs
+		// once per replicated value per tick.
+		uint64_t HashBytes(const void *bytes, size_t count) {
+			constexpr uint64_t OFFSET = 1469598103934665603ull;
+			constexpr uint64_t PRIME = 1099511628211ull;
+
+			const auto *cursor = static_cast<const unsigned char *>(bytes);
+			uint64_t hash = OFFSET;
+			for (size_t index = 0; index < count; index++) {
+				hash ^= cursor[index];
+				hash *= PRIME;
+			}
+			return hash;
+		}
+
 		// What a message costs before any payload: the kind, the version, the
 		// tick, the baseline and four counts. Deliberately generous — the
 		// consequence of underestimating is a message that does not fit, which
@@ -115,17 +158,36 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::Replicate(core::Name component) {
+	void Authority::Replicate(core::Name component, ChangeDetection detection) {
 		if (!component.IsValid()) {
 			return;
 		}
-		if (std::find(Components.begin(), Components.end(), component) == Components.end()) {
-			Components.push_back(component);
+
+		const auto at = std::find(Components.begin(), Components.end(), component);
+		if (at != Components.end()) {
+			// **The later call wins rather than being ignored.** A caller
+			// naming a component twice with two detectors has changed its mind,
+			// and silently keeping the first would be a component that does not
+			// replicate for a reason nothing reports.
+			Detection[static_cast<size_t>(std::distance(Components.begin(), at))] = detection;
+			return;
 		}
+
+		Components.push_back(component);
+		Detection.push_back(detection);
+		Signatures.emplace_back();
 	}
 
 	bool Authority::Replicated(core::Name component) const {
 		return std::find(Components.begin(), Components.end(), component) != Components.end();
+	}
+
+	ChangeDetection Authority::DetectionFor(core::Name component) const {
+		const auto at = std::find(Components.begin(), Components.end(), component);
+		if (at == Components.end()) {
+			return ChangeDetection::Observed;
+		}
+		return Detection[static_cast<size_t>(std::distance(Components.begin(), at))];
 	}
 
 	void Authority::SetInterest(std::function<bool(ClientId, ecs::Entity)> predicate) {
@@ -239,6 +301,93 @@ namespace engine::replication {
 		// Sorted so the per-client filter is a binary search rather than a
 		// scan, and so two runs of one server ask in the same order.
 		std::sort(Bearing.begin(), Bearing.end());
+
+		Resign(store);
+	}
+
+	void Authority::Resign(ecs::Store &store) {
+		// **Once per `Publish`, not once per client.** Whether a value moved
+		// has one answer for the whole server; which client has *received* it
+		// is `Client::Unconfirmed`'s separate question.
+		for (size_t slot = 0; slot < Components.size(); slot++) {
+			if (Detection[slot] != ChangeDetection::Signature) {
+				continue;
+			}
+
+			Signature &signature = Signatures[slot];
+			signature.Changed.clear();
+
+			const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
+			if (!id.IsValid()) {
+				continue;
+			}
+
+			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
+			if (descriptor.Size == 0) {
+				// A tag has no value to hash and therefore nothing that can
+				// change while it is present. Its arrival and departure are
+				// structural and are already said by `Created` and `Destroyed`.
+				continue;
+			}
+
+			if (!descriptor.Trivial) {
+				// **The identity below is the object representation**, so a
+				// type that owns anything would be hashing a pointer — stable
+				// while the value behind it changed, which is a component that
+				// silently stops replicating. Refused rather than approximated.
+				ENGINE_WARN(
+					"replication: '{}' is not trivially copyable and cannot be signed; "
+					"observe it instead.",
+					Components[slot].Text()
+				);
+				continue;
+			}
+
+			// **Walked in `Bearing` order**, which is sorted — so `Changed`
+			// comes out sorted without a second pass, and two runs of one
+			// server produce the same bytes.
+			size_t present = 0;
+			for (const uint64_t id64 : Bearing) {
+				const void *value = store.GetComponent(ecs::Entity{id64}, id);
+				if (value == nullptr) {
+					continue;
+				}
+				present++;
+
+				const uint64_t hash = HashBytes(value, descriptor.Size);
+				const auto [entry, fresh] = signature.Hashes.try_emplace(id64, hash);
+				if (fresh) {
+					// First sight. Offered rather than assumed known: the row
+					// may have been created this tick, and a client that
+					// already knows the entity is owed the value.
+					signature.Changed.push_back(id64);
+					continue;
+				}
+				if (entry->second != hash) {
+					entry->second = hash;
+					signature.Changed.push_back(id64);
+				}
+			}
+
+			// **Swept only when the count disagrees.** A steady world walks
+			// this map once per tick and never erases from it; paying for a
+			// second pass every tick to find nothing would be the cost this
+			// detector is already accused of.
+			if (signature.Hashes.size() == present) {
+				continue;
+			}
+
+			for (auto entry = signature.Hashes.begin(); entry != signature.Hashes.end();) {
+				const ecs::Entity entity{entry->first};
+				if (!store.Alive(entity) || store.GetComponent(entity, id) == nullptr) {
+					// Dropped, so the component coming back later reads as a
+					// change rather than as the value it had when it left.
+					entry = signature.Hashes.erase(entry);
+					continue;
+				}
+				++entry;
+			}
+		}
 	}
 
 	void Authority::BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick) {
@@ -724,29 +873,59 @@ namespace engine::replication {
 				component.Entities.push_back(entity);
 			};
 
-			// Runs, not rows. `EachChangedBatch` hands over adjacent changed
-			// rows as a block precisely so a delta is a memcpy per run rather
-			// than a copy per entity.
 			core::ByteWriter values;
-			store.EachChangedRuns(id, [&](const ecs::Entity *entities, void *data, size_t rows) {
-				// Filtered to what this client knows. A row it has never
-				// been told about arrives in `Created` with its whole
-				// value; sending a delta for it too would be sending it
-				// twice.
-				for (size_t row = 0; row < rows; row++) {
-					const ecs::Entity entity = entities[row];
-					if (client.Known.find(entity.Id) == client.Known.end()) {
+
+			if (Detection[slot] == ChangeDetection::Signature) {
+				// **What `Resign` found, which is the same list for every
+				// client** — it was computed once per `Publish` from the values
+				// themselves rather than per client from the dirty bits.
+				//
+				// Read one at a time through `GetComponent`, as the recovery
+				// walk below does and for the same reason: what is wanted is
+				// the value now, and this list names entities rather than runs.
+				// There is no run to memcpy — the whole point of this detector
+				// is that it serves components which change a few rows at a
+				// time and not a column at a time.
+				for (const uint64_t changed : Signatures[slot].Changed) {
+					const ecs::Entity entity{changed};
+					if (client.Known.find(changed) == client.Known.end()) {
+						continue;
+					}
+
+					const void *value = store.GetComponent(entity, id);
+					if (value == nullptr) {
 						continue;
 					}
 
 					offer(entity);
-					if (descriptor.Size > 0) {
-						WriteValue(
-							values, descriptor, static_cast<const std::byte *>(data) + row * descriptor.Size
-						);
-					}
+					WriteValue(values, descriptor, value);
 				}
-			});
+			} else {
+				// Runs, not rows. `EachChangedBatch` hands over adjacent changed
+				// rows as a block precisely so a delta is a memcpy per run rather
+				// than a copy per entity.
+				store.EachChangedRuns(id, [&](const ecs::Entity *entities, void *data, size_t rows) {
+					// Filtered to what this client knows. A row it has never
+					// been told about arrives in `Created` with its whole
+					// value; sending a delta for it too would be sending it
+					// twice.
+					for (size_t row = 0; row < rows; row++) {
+						const ecs::Entity entity = entities[row];
+						if (client.Known.find(entity.Id) == client.Known.end()) {
+							continue;
+						}
+
+						offer(entity);
+						if (descriptor.Size > 0) {
+							WriteValue(
+								values,
+								descriptor,
+								static_cast<const std::byte *>(data) + row * descriptor.Size
+							);
+						}
+					}
+				});
+			}
 
 			// **Everything sent earlier and not yet confirmed, again.** The run
 			// walk above is the fast path and covers what moved this tick; this

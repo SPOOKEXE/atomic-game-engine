@@ -12,8 +12,8 @@
 namespace engine::scene {
 
 	namespace {
-		using ecs::ClassId;
 		using ecs::Classes;
+		using ecs::ClassId;
 		using ecs::Entity;
 		using ecs::NULL_ENTITY;
 		using ecs::PropertyDescriptor;
@@ -162,9 +162,7 @@ namespace engine::scene {
 			Classes::Property<&LightingServiceComponent::ClockTime>(lighting, "ClockTime");
 			Classes::Property<&LightingServiceComponent::FogStart>(lighting, "FogStart");
 			Classes::Property<&LightingServiceComponent::FogEnd>(lighting, "FogEnd");
-			Classes::Property<&LightingServiceComponent::GeographicLatitude>(
-				lighting, "GeographicLatitude"
-			);
+			Classes::Property<&LightingServiceComponent::GeographicLatitude>(lighting, "GeographicLatitude");
 
 			return service;
 		}

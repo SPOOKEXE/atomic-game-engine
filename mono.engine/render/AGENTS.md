@@ -237,3 +237,32 @@ target and bound to another.
 **Headless with no scene target draws nothing rather than pretending to.** Every
 pass would run and its result would be discarded, which is a caller mistake
 worth reporting rather than a state to tolerate.
+
+## A frame is recorded by one thread, and that is a contract
+
+`Render` and `Shutdown` abort when called from a thread other than the one that
+called `Initialise`. Draw several viewports one after another; do not record two
+frames at once.
+
+This is a design decision rather than a limitation nobody got round to lifting.
+The passes share **one command buffer and one device**, so parallel recording
+would serialise at submit and buy nothing — and it would cost the property that
+makes a viewport correct, which is that the world pass writes a scene target
+*before* the interface pass samples it in the same buffer. An editor's imgui
+draw lists are recorded before the renderer runs and bind whatever texture
+exists at that moment, so the ordering inside one buffer is the whole reason a
+docked viewport shows this frame instead of the last one.
+
+**It is checked rather than written down, because this repository has twice
+found a claim that had quietly stopped being true.** v0.7 recorded the
+sequential-drawing decision in `ROADMAP.md` and enforced nothing; a sentence in
+a document is not a constraint, and the failure it guards against — a second
+viewport recording from a worker — produces a driver validation error or a frame
+of somebody else's geometry, neither of which points back at the thread that
+caused it.
+
+There is deliberately **no handoff**, unlike `ecs::Store::BindToCallingThread`.
+A store is picked up by a different worker every tick and a device is not, so a
+public rebind here would be a seam for exactly the thing the contract forbids.
+Revisit when a viewport's *record* is measurable; at the sizes measured it is
+not.

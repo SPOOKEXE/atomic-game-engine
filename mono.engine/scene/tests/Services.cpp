@@ -56,8 +56,14 @@ TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
 	CHECK(workspace == WorkspaceOf(store));
 
 	for (const std::string_view name :
-		 {"Workspace", "Lighting", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService",
-		  "ServerStorage", "StarterGui", "StarterPlayer"}) {
+		 {"Workspace",
+		  "Lighting",
+		  "ReplicatedFirst",
+		  "ReplicatedStorage",
+		  "ServerScriptService",
+		  "ServerStorage",
+		  "StarterGui",
+		  "StarterPlayer"}) {
 		CHECK(services_test::RootsNamed(store, name) == 1);
 	}
 

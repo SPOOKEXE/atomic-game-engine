@@ -173,8 +173,9 @@ namespace engine::game {
 	//                 it a root.
 	// @param error    Filled in with why, on failure.
 	// @return The rebuilt instance, or a null entity.
-	ecs::Entity
-	ReadInstanceDocument(ecs::Store &store, std::string_view document, ecs::Entity parent, std::string &error);
+	ecs::Entity ReadInstanceDocument(
+		ecs::Store &store, std::string_view document, ecs::Entity parent, std::string &error
+	);
 
 	// Writes one world as a standalone document, without touching a disk.
 	//

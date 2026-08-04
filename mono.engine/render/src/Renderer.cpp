@@ -14,6 +14,7 @@
 #include <glm/vec4.hpp>
 
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -1076,7 +1077,7 @@ namespace engine::render {
 
 	// -----------------------------------------------------------------------
 
-	Renderer::Renderer() : State(std::make_unique<Impl>()) {}
+	Renderer::Renderer() : State(std::make_unique<Impl>()), Owner(std::this_thread::get_id()) {}
 
 	Renderer::~Renderer() {
 		Shutdown();
@@ -1116,7 +1117,42 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::IsOnOwningThread() const {
+		return Owner == std::this_thread::get_id();
+	}
+
+	void Renderer::RequireOwningThread(const char *what) const {
+		if (IsOnOwningThread()) {
+			return;
+		}
+
+		// Abort rather than return, for `ecs::Store::RequireOwningThread`'s
+		// reason and one of this module's own. By the time a second thread is
+		// inside here it has already recorded into a command buffer another
+		// thread is filling, so there is nothing left to decline — and the
+		// symptom on the far side is a driver validation error or a frame of
+		// somebody else's geometry, neither of which points back here. The stack
+		// at the violation is the whole value.
+		ENGINE_ERROR(
+			"renderer: {} called from a thread that does not own it. "
+			"Passes share one command buffer and one device, so a frame is "
+			"recorded by the thread that initialised the renderer and by no "
+			"other. Draw viewports one after another.",
+			what
+		);
+		std::abort();
+	}
+
 	bool Renderer::Initialise(SDL_Window *window) {
+		// **Re-bound here, and the constructor's claim is what makes the check
+		// testable without a device.** A renderer is legitimately constructed by
+		// whoever owns the object and initialised by whoever owns the window —
+		// it is the device, not the C++ object, that the contract is about — so
+		// this is the authoritative claim and the constructor's is a default
+		// that costs nothing to be wrong about, because being wrong about it
+		// means nothing has been created yet.
+		Owner = std::this_thread::get_id();
+
 		// **A null window is headless and is not an error.** A renderer with
 		// nowhere to present still draws: into a `SceneTarget`, which is what a
 		// capture, a CI comparison and an automated editor all read. Refusing it
@@ -1216,6 +1252,11 @@ namespace engine::render {
 	}
 
 	void Renderer::Shutdown() {
+		// Checked here as well as in `Render`, because releasing a device while
+		// another thread holds a command buffer against it is the same violation
+		// arriving at the end of the frame instead of the middle.
+		RequireOwningThread("Shutdown");
+
 		auto *device = State->Device;
 		if (!device) {
 			return;
@@ -1407,6 +1448,12 @@ namespace engine::render {
 		size_t targetSlot
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
+
+		// **The single-threaded recording contract, checked rather than
+		// described.** A studio draws one viewport after another; a second one
+		// recording from another thread is the failure this refuses. See
+		// `IsOnOwningThread` for why that is the design and not a limitation.
+		RequireOwningThread("Render");
 
 		// **Which target this frame draws into, read by `EnsureScene`.** Passed
 		// through a member rather than an argument because `EnsureScene` is

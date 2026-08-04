@@ -413,8 +413,7 @@ namespace engine::game {
 		}
 
 		// `WriteSources`, restricted to a set of paths.
-		void
-		WriteSourcesFor(XmlWriter &writer, const Store &store, const std::vector<core::Name> &paths) {
+		void WriteSourcesFor(XmlWriter &writer, const Store &store, const std::vector<core::Name> &paths) {
 			if (paths.empty()) {
 				return;
 			}
@@ -1020,8 +1019,7 @@ namespace engine::game {
 		return writer.Finish();
 	}
 
-	Entity
-	ReadInstanceDocument(Store &store, std::string_view document, Entity parent, std::string &error) {
+	Entity ReadInstanceDocument(Store &store, std::string_view document, Entity parent, std::string &error) {
 		RegisterGameClasses();
 
 		XmlDocument parsed;

@@ -44,11 +44,21 @@ namespace unified {
 		// nothing being drawn, which is exactly the symptom that sent somebody
 		// looking at the network. Sharing the list would hide the class of bug
 		// this exists to find.
-		const char *const REPLICATED[] = {
-			"scene.Transform",
-			"scene.Motion",
-			"scene.Bounds",
-			"scene.Visual",
+		// **What crosses, and how each one's changes are noticed.** The two
+		// detectors are not interchangeable and the pairing is the thing worth
+		// stating: a transform moves every tick and its dirty bit is free, and
+		// a size or a colour moves once in a session and has no bit at all
+		// because nothing observes it. See `replication::ChangeDetection`.
+		struct Replicated {
+			const char *Name;
+			engine::replication::ChangeDetection Detection;
+		};
+
+		const Replicated REPLICATED[] = {
+			{"scene.Transform", engine::replication::ChangeDetection::Observed},
+			{"scene.Motion", engine::replication::ChangeDetection::Observed},
+			{"scene.Bounds", engine::replication::ChangeDetection::Signature},
+			{"scene.Visual", engine::replication::ChangeDetection::Signature},
 		};
 	}
 
@@ -84,8 +94,10 @@ namespace unified {
 
 		// The dirty bits a delta is built from. `Bounds` and `Visual` are
 		// deliberately not observed, for the reason `Server.cpp` gives: nothing
-		// writes them, so a dirty column for them is paid for per tick and read
-		// never. They cross once, in the snapshot.
+		// writes them per tick, so a dirty column for them is paid for every
+		// tick and read never. They are signed instead — see `REPLICATED` — so
+		// a write to one still crosses rather than being lost until the next
+		// snapshot.
 		Server.Observe<Transform>();
 		Server.Observe<engine::scene::Motion>();
 
@@ -94,8 +106,8 @@ namespace unified {
 		}
 		client::BuildReplicatedWorld(Client, ClientSystems, Options.Interpolation);
 
-		for (const char *component : REPLICATED) {
-			Authority_.Replicate(engine::core::Name(component));
+		for (const Replicated &component : REPLICATED) {
+			Authority_.Replicate(engine::core::Name(component.Name), component.Detection);
 		}
 
 		Handle = Authority_.Admit();

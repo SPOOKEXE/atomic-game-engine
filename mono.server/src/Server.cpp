@@ -380,18 +380,27 @@ namespace server {
 		Replication->Authority().Replicate(engine::core::Name("scene.Transform"));
 		Replication->Authority().Replicate(engine::core::Name("scene.Motion"));
 
-		// Sent once in the join snapshot and never again: nothing in this world
-		// resizes or recolours anything, so they are never dirty and no delta
-		// carries them. They are here because a client that received a position
-		// and no size has nothing to draw.
-		Replication->Authority().Replicate(engine::core::Name("scene.Bounds"));
-		Replication->Authority().Replicate(engine::core::Name("scene.Visual"));
+		// **Signed rather than observed, and until v0.7 they crossed once and
+		// never again.** The placeholder world resizes and recolours nothing,
+		// so observing them would buy a dirty column paid for every tick and
+		// read never — which is why they were left unobserved. The cost of that
+		// only appeared once a *script* could write one: a part recoloured at
+		// runtime kept its old colour on every client for ever, because no
+		// delta could carry a component with no dirty bits, and nothing said
+		// so. `ChangeDetection::Signature` notices the write itself instead of
+		// waiting to be told about it.
+		//
+		// They are here at all because a client that received a position and no
+		// size has nothing to draw.
+		using engine::replication::ChangeDetection;
+		Replication->Authority().Replicate(engine::core::Name("scene.Bounds"), ChangeDetection::Signature);
+		Replication->Authority().Replicate(engine::core::Name("scene.Visual"), ChangeDetection::Signature);
 
 		// A delta is the third reader of the dirty bits, so the components that
-		// travel *and change* have to be observed or nothing ever looks
-		// changed. `Bounds` and `Visual` are deliberately not observed — a
-		// dirty column for something nothing writes is a column paid for per
-		// tick and read never.
+		// travel *and change every tick* have to be observed or nothing ever
+		// looks changed. The two above are signed instead — a hash of a value
+		// that moves every tick is a pass over the world to learn what a bit
+		// already knew.
 		Worlds().Enter(PrimaryWorld, [](engine::ecs::Store &store) {
 			store.Observe<engine::scene::Transform>();
 			store.Observe<engine::scene::Motion>();
