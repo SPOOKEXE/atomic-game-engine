@@ -766,6 +766,28 @@ namespace engine::game {
 		writer.Close();
 
 		for (const world::WorldId id : universe.Worlds()) {
+			// **A replica is not authored here, so it is not written here.**
+			// A game file is authored content — that is the whole reason it is a
+			// different format from a snapshot — and a world whose rows arrived
+			// from somebody else's authority is a *view* of a game rather than
+			// part of one. Writing it would put a second copy of the same scene
+			// in the file under a second name, and loading that file would give
+			// an author two scenes to edit where they had made one.
+			//
+			// Asked of the store rather than of the caller, because the store
+			// already knows: `Store::AdoptOnly` is set on every world a
+			// `replication::Connector` or the studio's own client view writes
+			// into, and it is set for a reason that is exactly this one — the
+			// rows are not this process's to mint. A flag passed in by each
+			// caller would be the same fact recorded in three programs.
+			if (!universe.IsRemote(id)) {
+				bool replica = false;
+				universe.Enter(id, [&replica](Store &store) { replica = store.AdoptOnly(); });
+				if (replica) {
+					continue;
+				}
+			}
+
 			// **What the world is, not what a default-constructed one would
 			// be.** This used to build a fresh `WorldSettings` and fill in only
 			// the name, so every `<World>` in every file claimed 60Hz — a scene

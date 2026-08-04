@@ -352,6 +352,165 @@ namespace engine::render {
 			RetiredScenes.clear();
 		}
 
+		// --- the frame that has been waited for but not yet recorded ----------
+		//
+		// **A frame is claimed before the caller reads its input, and that is the
+		// whole point of holding this here.** `SDL_WaitAndAcquireGPUSwapchainTexture`
+		// blocks until the display is ready; a loop that pumps events and *then*
+		// waits builds every frame out of input that is already one frame old,
+		// because the wait sits between reading the input and showing what it
+		// produced. Waiting first turns that dead time into time the input has
+		// not happened yet.
+		//
+		// Held rather than passed because the two halves are now two calls and
+		// SDL's own handles are not something a public header may name.
+		SDL_GPUCommandBuffer *PendingCommand = nullptr;
+		SDL_GPUTexture *PendingSwapchain = nullptr;
+		uint32_t PendingWidth = 0;
+		uint32_t PendingHeight = 0;
+
+		// Whether `BeginFrame` has claimed this frame and `Render` has not yet
+		// consumed it.
+		bool FrameClaimed = false;
+
+		// Claims this frame: drains what the last one retired, takes a command
+		// buffer, and waits for a swapchain image unless there is no window.
+		//
+		// **Idempotent within a frame**, so a caller that waits explicitly and a
+		// `Render` that would have waited for itself cannot acquire twice. That
+		// matters more than it looks: two swapchain acquisitions in one frame is
+		// two frames in flight consumed for one presented, which reads as the
+		// frame rate halving for no reason a profile can show.
+		//
+		// @return `false` when there was nothing to acquire — minimised or
+		//         mid-resize, which is not an error.
+		bool BeginFrame() {
+			if (FrameClaimed) {
+				return true;
+			}
+			if (Device == nullptr) {
+				return false;
+			}
+
+			// **Before anything this frame records or binds.** Whatever a
+			// previous frame retired is unreferenced now: its draw lists have
+			// been replayed and thrown away, and nothing has yet recorded a bind
+			// for this frame. Doing it here rather than in `Render` is what keeps
+			// that true once the wait moved ahead of the interface — an editor
+			// records its draw lists between the two calls.
+			DrainRetiredScenes();
+
+			SDL_GPUCommandBuffer *command = nullptr;
+			{
+				ENGINE_PROFILE_CAT("acquire command buffer", core::ProfileCategory::Render);
+				command = SDL_AcquireGPUCommandBuffer(Device);
+			}
+			if (command == nullptr) {
+				ENGINE_ERROR("SDL_AcquireGPUCommandBuffer: {}", SDL_GetError());
+				return false;
+			}
+
+			// **Headless waits for nothing and is not a failure.** There is no
+			// swapchain to acquire and nothing to present; the frame is finished
+			// when the world has been drawn into its target.
+			if (Headless()) {
+				PendingCommand = command;
+				PendingSwapchain = nullptr;
+				PendingWidth = 0;
+				PendingHeight = 0;
+				FrameClaimed = true;
+				return true;
+			}
+
+			SDL_GPUTexture *swapchain = nullptr;
+			uint32_t width = 0;
+			uint32_t height = 0;
+			bool acquired = false;
+			{
+				// Where the frame waits, and the reason this one has a span of
+				// its own. "WaitAnd" is not decoration: with vertical sync on
+				// this blocks until the display is ready, and with it off it
+				// blocks until the GPU hands back a swapchain image. Either way
+				// the time is real, the CPU is idle for it, and it is not a cost
+				// anything above this can do anything about.
+				//
+				// A frame that looks slow with everything else on the panel
+				// adding up to nothing is a frame that is waiting here — which
+				// means the GPU is the limit, not the code above it.
+				//
+				// Idle, not Render. Nothing is being rendered here — the thread
+				// is asleep until the display is ready for another image, and
+				// counting that as rendering work makes the renderer look like
+				// the most expensive thing in a frame it spent waiting.
+				ENGINE_PROFILE_CAT("acquire swapchain", core::ProfileCategory::Idle);
+				acquired =
+					SDL_WaitAndAcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height);
+			}
+
+			if (!acquired || swapchain == nullptr) {
+				// Minimised, or mid-resize. Not an error, and not a reason to
+				// stop ticking — the simulation carries on and the next frame
+				// presents.
+				//
+				// **Cancelled rather than submitted, which is what SDL's own
+				// example does here.** No swapchain texture was acquired, so
+				// there is nothing to present and nothing recorded worth
+				// executing; submitting an empty buffer sends it through the
+				// whole submit path and consumes a frame in flight for no work.
+				// Cancel is only legal *because* the acquire failed —
+				// `SDL_CancelGPUCommandBuffer` is documented as an error once a
+				// swapchain texture has been acquired, which is why every later
+				// bail-out submits instead.
+				SDL_CancelGPUCommandBuffer(command);
+				return false;
+			}
+
+			PendingCommand = command;
+			PendingSwapchain = swapchain;
+			PendingWidth = width;
+			PendingHeight = height;
+			FrameClaimed = true;
+			return true;
+		}
+
+		// Hands the claimed frame to whoever is about to record it.
+		void TakeFrame(
+			SDL_GPUCommandBuffer *&command, SDL_GPUTexture *&swapchain, uint32_t &width, uint32_t &height
+		) {
+			command = PendingCommand;
+			swapchain = PendingSwapchain;
+			width = PendingWidth;
+			height = PendingHeight;
+
+			PendingCommand = nullptr;
+			PendingSwapchain = nullptr;
+			PendingWidth = 0;
+			PendingHeight = 0;
+			FrameClaimed = false;
+		}
+
+		// Gets rid of a frame that was claimed and will never be recorded.
+		//
+		// **Submitted and not cancelled**, because a swapchain texture has been
+		// acquired by the time this can be reached and SDL documents cancelling
+		// after that as an error. An empty submit presents nothing and costs one
+		// trip through the submit path, which is the correct price for a caller
+		// that waited for a frame and then decided to quit.
+		void AbandonFrame() {
+			if (!FrameClaimed) {
+				return;
+			}
+			if (PendingCommand != nullptr) {
+				SDL_SubmitGPUCommandBuffer(PendingCommand);
+			}
+
+			PendingCommand = nullptr;
+			PendingSwapchain = nullptr;
+			PendingWidth = 0;
+			PendingHeight = 0;
+			FrameClaimed = false;
+		}
+
 		// Where the next capture goes, or empty for none. See
 		// `Renderer::RequestSceneCapture`.
 		std::filesystem::path CapturePath;
@@ -1117,6 +1276,16 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::WaitForFrame() {
+		RequireOwningThread("WaitForFrame");
+
+		if (State->Device == nullptr) {
+			return false;
+		}
+
+		return State->BeginFrame();
+	}
+
 	bool Renderer::IsOnOwningThread() const {
 		return Owner == std::this_thread::get_id();
 	}
@@ -1256,6 +1425,14 @@ namespace engine::render {
 		// another thread holds a command buffer against it is the same violation
 		// arriving at the end of the frame instead of the middle.
 		RequireOwningThread("Shutdown");
+
+		// **A frame waited for and never drawn, which is what quitting during
+		// the event pump produces.** The loop's usual shape makes this
+		// unreachable — pump, simulate, present, and only then test whether to
+		// stop — but "usual" is not a guarantee, and a swapchain image held past
+		// the device's destruction is a crash inside the backend rather than an
+		// error here. See `Impl::AbandonFrame` for why it submits.
+		State->AbandonFrame();
 
 		auto *device = State->Device;
 		if (!device) {
@@ -1466,31 +1643,22 @@ namespace engine::render {
 			return result;
 		}
 
-		// **Before anything this frame records or binds.** Whatever a previous
-		// frame retired is unreferenced now: its draw lists have been replayed
-		// and thrown away, and nothing has yet recorded a bind for this frame.
-		// See `Impl::RetiredScenes`.
-		State->DrainRetiredScenes();
-
-		SDL_GPUCommandBuffer *command = nullptr;
-		{
-			ENGINE_PROFILE_CAT("acquire command buffer", core::ProfileCategory::Render);
-			command = SDL_AcquireGPUCommandBuffer(State->Device);
-		}
-		if (!command) {
-			ENGINE_ERROR("SDL_AcquireGPUCommandBuffer: {}", SDL_GetError());
+		// **Claimed here only if the caller did not claim it first.** `WaitForFrame`
+		// is what a latency-sensitive loop calls before it reads its input; a
+		// caller that does not is no worse off than before, because this is the
+		// same acquisition at the same point in the frame. See `Impl::BeginFrame`.
+		if (!State->BeginFrame()) {
 			return result;
 		}
 
+		SDL_GPUCommandBuffer *command = nullptr;
 		SDL_GPUTexture *swapchain = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;
-		bool acquired = false;
+		State->TakeFrame(command, swapchain, width, height);
 
-		// **Headless skips the swapchain entirely and is not a failure.** There
-		// is nothing to acquire, nothing to present, and the frame is finished
-		// when the world has been drawn into its target. The size then comes
-		// from that target, because nothing else has an opinion about it.
+		// **Headless has no swapchain, so its size comes from the target** —
+		// nothing else has an opinion about it.
 		if (State->Headless()) {
 			if (sceneTarget == nullptr || !sceneTarget->IsValid()) {
 				// A headless renderer with nowhere to draw is a caller mistake
@@ -1502,40 +1670,6 @@ namespace engine::render {
 
 			width = sceneTarget->Width;
 			height = sceneTarget->Height;
-		} else {
-			// Where the frame waits, and the reason this one has a span of its
-			// own before anything else does. "WaitAnd" is not decoration: with
-			// vertical sync on this blocks until the display is ready, and with
-			// it off it blocks until the GPU has finished with a swapchain image
-			// to hand back. Either way the time is real, the CPU is idle for it,
-			// and it is not a cost anything above this can do anything about.
-			//
-			// A frame that looks slow with everything else on the panel adding
-			// up to nothing is a frame that is waiting here — which means the
-			// GPU is the limit, not the code above it.
-			// Idle, not Render. Nothing is being rendered here — the thread is
-			// asleep until the display is ready for another image, and counting
-			// that as rendering work makes the renderer look like the most
-			// expensive thing in a frame it spent waiting.
-			ENGINE_PROFILE_CAT("acquire swapchain", core::ProfileCategory::Idle);
-			acquired =
-				SDL_WaitAndAcquireGPUSwapchainTexture(command, State->Window, &swapchain, &width, &height);
-		}
-
-		if (!State->Headless() && (!acquired || !swapchain)) {
-			// Minimised, or mid-resize. Not an error, and not a reason to stop
-			// ticking — the simulation carries on and the next frame presents.
-			//
-			// **Cancelled rather than submitted, which is what SDL's own example
-			// does here.** No swapchain texture was acquired, so there is
-			// nothing to present and nothing recorded worth executing;
-			// submitting an empty buffer sends it through the whole submit path
-			// and consumes a frame in flight for no work. Cancel is only legal
-			// *because* the acquire failed — `SDL_CancelGPUCommandBuffer` is
-			// documented as an error to call once a swapchain texture has been
-			// acquired, which is why the later bail-outs still submit.
-			SDL_CancelGPUCommandBuffer(command);
-			return result;
 		}
 
 		// --- where the world goes -------------------------------------------

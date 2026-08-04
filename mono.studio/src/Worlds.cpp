@@ -125,6 +125,41 @@ namespace studio {
 				ImGui::PopStyleColor();
 			}
 
+			// **What a client would be holding, and how far behind it is.**
+			// A client view drawn beside the server's is a comparison somebody
+			// makes with their eyes, which is the right tool for "the box is in
+			// the wrong place" and no use at all for "nothing has arrived since
+			// tick 400". These are the two numbers that say which of those it is
+			// — how much world each side holds, and what the last complete tick
+			// was — and they belong on the row rather than in a panel of their
+			// own, because the question is always about *this* world.
+			if (const WorldRun *owner = RunForReplica(world); owner != nullptr) {
+				const LinkReport &report = owner->Link->Report();
+
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::TextUnformatted("(client view)");
+				ImGui::PopStyleColor();
+
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"a replica of '%s', served in this process\n"
+						"tick %llu, applied %llu\n"
+						"%zu of %zu entities\n"
+						"%zu message(s) last step, largest %zu bytes\n"
+						"%llu total",
+						Label(Universe->NameOf(owner->World)),
+						static_cast<unsigned long long>(report.Tick),
+						static_cast<unsigned long long>(report.Applied),
+						report.ClientEntities,
+						report.ServerEntities,
+						report.Messages,
+						report.LargestMessage,
+						static_cast<unsigned long long>(report.TotalBytes)
+					);
+				}
+			}
+
 			// Where the player is, which is the fact that decides whether this
 			// world stays open. Shown rather than inferred from the state
 			// column: "active" and "occupied" are different claims.
@@ -198,8 +233,19 @@ namespace studio {
 		// it, which a *running* world cannot survive — but a world sitting in
 		// edit beside one that runs is renameable, and that is the whole point
 		// of scenes running independently. See `WorldRun`.
-		const bool editing = !IsRunning(world);
-		const bool local = !Universe->IsRemote(world);
+		// **A client view is not a scene, so nothing that authors one applies to
+		// it.** It exists between Play and Stop, its rows are somebody else's,
+		// and it is never written to a game file — so renaming, duplicating,
+		// exporting, removing and running it are all offers the editor should
+		// not make. Stop is what takes it away, and Stop belongs to the world it
+		// is a view of.
+		//
+		// Left *visible* rather than hidden, and greyed instead: a world in the
+		// list with no menu at all reads as the panel being broken, and the
+		// disabled entries say what kind of thing this is.
+		const bool replica = IsReplicaWorld(world);
+		const bool editing = !IsRunning(world) && !replica;
+		const bool local = !Universe->IsRemote(world) && !replica;
 
 		if (ImGui::MenuItem("Set Active", nullptr, false, world != Active)) {
 			PendingActivate = world;

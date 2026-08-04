@@ -39,6 +39,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/world/Universe.hpp>
+#include <studio/PlayLink.hpp>
 
 #include <cstdint>
 #include <array>
@@ -751,6 +752,19 @@ namespace studio {
 			// simulation for what it built, so the VM has to outlive the call
 			// that started it.
 			std::shared_ptr<engine::script::Runtime> Runtime;
+
+			// The client half, for a `Play` run only.
+			//
+			// **Null for `RunMode::Server`, and that is the difference between
+			// the two modes made real.** Run is a dedicated server: there is no
+			// client anywhere, so there is nothing to replicate to. Play is both
+			// halves, which until this was a claim about which scripts ran
+			// rather than something a viewport could show. See `PlayLink`.
+			//
+			// Held by pointer because `PlayLink` owns an `Authority` and a
+			// `Replica`, neither of which is movable in the way a vector of
+			// runs needs — and a run is moved whenever another one starts.
+			std::unique_ptr<PlayLink> Link;
 		};
 
 		// Every world currently running. Worlds absent from this are in edit.
@@ -780,6 +794,28 @@ namespace studio {
 		// @param world The scene to ask about.
 		// @return `true` when it has a run record.
 		bool IsRunning(WorldId world) const;
+
+		// Whether a world is a `Play` run's client view rather than a scene.
+		//
+		// **Asked by everything that treats a world as authored content**: the
+		// worlds panel refuses to rename, remove, duplicate or export one, the
+		// lifecycle never idle-closes one, and it is never written to a game
+		// file. A replica is a *view of a run*, and it exists between Play and
+		// Stop and at no other time.
+		//
+		// A linear scan over the runs, which is the same shape `RunOf` already
+		// is and for the same reason: there is one run per scene being played
+		// and a map would be a second place for that list to be wrong.
+		//
+		// @param world The scene to ask about.
+		// @return `true` when some run owns it as a replica.
+		bool IsReplicaWorld(WorldId world) const;
+
+		// The run whose client view this world is, or null.
+		//
+		// @param world The scene to ask about.
+		// @return The run that produced it, or null.
+		const WorldRun *RunForReplica(WorldId world) const;
 
 		// Whether a world's clock is stopped.
 		//

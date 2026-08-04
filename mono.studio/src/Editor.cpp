@@ -336,6 +336,21 @@ namespace studio {
 
 	int Editor::Run() {
 		while (Running) {
+			// **The wait comes first, and that is the whole of the input-latency
+			// fix.** `Renderer::Render` blocks the better part of a frame waiting
+			// for the display, and it used to do so *after* the events had been
+			// read — so every frame was built from input that was already a frame
+			// old, and no amount of speed between the two would have closed it.
+			// The editor was measured at 0.8 ms of CPU work in a 16.67 ms frame:
+			// the delay was never the work, it was where the sleeping happened.
+			//
+			// Nothing is done with the result. A frame that could not be acquired
+			// is minimised or mid-resize, and `Render` reaches the same
+			// conclusion for itself a few lines later — checking it twice would
+			// mean deciding here what to skip, which is exactly the knowledge
+			// this loop does not have.
+			Renderer.WaitForFrame();
+
 			const float delta = Clock.Tick();
 
 			engine::core::FrameGraph::BeginFrame();
@@ -426,6 +441,31 @@ namespace studio {
 		// subworlds are already simulated alongside each other rather than one
 		// after another, and suspending the empty ones is what keeps that
 		// affordable.
+		// **Before the tick, not after it — and a server publishes after.** The
+		// difference is the editor, and it cost a failing test to find.
+		//
+		// A world clears its change bits at the *start* of a tick, so bits set
+		// during the tick's own phases survive until the next one begins.
+		// `mono.server` therefore publishes straight after ticking and loses
+		// nothing, because on a server every write happens inside a system.
+		//
+		// **In a studio they do not.** Dragging a part in the viewport, typing a
+		// number into the properties panel, deleting an instance — every one of
+		// those is a write between two ticks, and a publish that ran before them
+		// and a `ClearChanges` that ran after would drop the bit without anyone
+		// being told. The author would watch the server view move and the client
+		// view sit still, which reads as replication being broken rather than as
+		// an ordering mistake.
+		//
+		// Publishing here catches both: the previous tick's system writes are
+		// still marked, and so is everything done to the world since. The tick
+		// below then clears exactly what was just sent.
+		for (WorldRun &run : Runs) {
+			if (run.Link != nullptr && !run.Paused) {
+				run.Link->Step(*Universe);
+			}
+		}
+
 		Universe->Tick(frameSeconds);
 	}
 
@@ -1315,6 +1355,23 @@ namespace studio {
 		return run != nullptr && run->Paused;
 	}
 
+	const Editor::WorldRun *Editor::RunForReplica(WorldId world) const {
+		if (!world.IsValid()) {
+			return nullptr;
+		}
+
+		for (const WorldRun &run : Runs) {
+			if (run.Link != nullptr && run.Link->ReplicaWorld() == world) {
+				return &run;
+			}
+		}
+		return nullptr;
+	}
+
+	bool Editor::IsReplicaWorld(WorldId world) const {
+		return RunForReplica(world) != nullptr;
+	}
+
 	bool Editor::AnyRunning() const {
 		return !Runs.empty();
 	}
@@ -1335,7 +1392,14 @@ namespace studio {
 				continue;
 			}
 
-			const bool wanted = !anything || IsRunning(id);
+			// **A client view is part of its run, not a scene being left
+			// alone.** It carries no simulation system, so keeping it active
+			// costs a barrier and buys the thing that matters: it is presented
+			// and drawn every frame, exactly like the world it is a view of. A
+			// suspended one would still draw — `Present` does not consult the
+			// state — which is worse than either alternative, because it would
+			// be marked stopped in the Worlds panel while visibly running.
+			const bool wanted = !anything || IsRunning(id) || IsReplicaWorld(id);
 			Universe->SetState(
 				id, wanted ? engine::world::WorldState::Active : engine::world::WorldState::Suspended
 			);
@@ -1444,6 +1508,61 @@ namespace studio {
 			Say("script error: " + failure, LogLevel::Error);
 		}
 
+		// **The client half, and only for Play.** Run is a dedicated server:
+		// there is no client in the process, so there is nothing to replicate to
+		// and a replica world would be a view of nobody. Play is both halves,
+		// which this is what makes true — until now the difference between the
+		// two modes was which scripts ran and what `IsServer()` answered, and a
+		// property that never crossed a wire looked exactly like one that did.
+		//
+		// **Started after the scripts**, so the join snapshot describes a world
+		// that has been built rather than an empty one. It would converge either
+		// way — the snapshot is re-sent until it is acknowledged — but a client
+		// view that opens blank and fills in reads as a bug in the link.
+		if (mode == RunMode::Play) {
+			auto link = std::make_unique<PlayLink>();
+
+			std::string linkError;
+			if (link->Start(*Universe, world, Settings.TickRate, linkError)) {
+				// **A viewport pinned to it, or the whole thing is invisible.**
+				// The point of a client view is the *difference* between it and
+				// the server's, and a difference nobody is shown is a feature
+				// that exists in a log line. An extra viewport with no world of
+				// its own draws whatever is being edited, so pinning is what
+				// stops the second panel showing the server's scene twice.
+				//
+				// The first free panel, and one that is already pinned somewhere
+				// is left alone: somebody who put a viewport on another scene
+				// meant it, and taking that panel would be the editor
+				// rearranging their layout when they pressed Play.
+				const WorldId replica = link->ReplicaWorld();
+				for (ViewportState &view : Extras) {
+					if (!view.World.IsValid() || view.World == replica) {
+						view.World = replica;
+						view.Open = true;
+
+						// Where the main camera is, so the two panels start
+						// looking at the same thing from the same place. Two
+						// views of one game from different angles is a
+						// comparison somebody has to do in their head.
+						view.Frame = CameraFrame;
+						view.Yaw = CameraYaw;
+						view.Pitch = CameraPitch;
+						break;
+					}
+				}
+
+				run.Link = std::move(link);
+			} else {
+				// **Not fatal, and the run goes on without it.** A Play that
+				// refused to start because its client view could not be made
+				// would be a studio you cannot use to fix whatever broke it —
+				// and the server half is exactly what Run already gives, so
+				// there is a working thing to fall back to.
+				Say("no client view: " + linkError, LogLevel::Warning);
+			}
+		}
+
 		Runs.push_back(std::move(run));
 
 		// **The player goes to the first world started.** A run whose player was
@@ -1463,6 +1582,29 @@ namespace studio {
 		WorldRun *record = RunOf(world);
 		if (record == nullptr) {
 			return;
+		}
+
+		// **The client view goes first of all.** It owns a world in this same
+		// universe, and every viewport, the worlds panel and the lifecycle ask
+		// `IsReplicaWorld` about it — so a link left alive across the restore
+		// below would have each of them answering about a world that is being
+		// rebuilt underneath them. It also holds no reference to the authority's
+		// store, which is why it can go before the runtime rather than after.
+		if (record->Link != nullptr) {
+			// Any viewport pinned to the client view is unpinned before the
+			// world under it disappears. A pin naming a destroyed world would
+			// leave the panel following the active scene with no way to tell
+			// that it had stopped showing what it was opened for.
+			const WorldId replica = record->Link->ReplicaWorld();
+			for (ViewportState &view : Extras) {
+				if (view.World == replica) {
+					view.World = WorldId{};
+					view.Follow = engine::ecs::NULL_ENTITY;
+				}
+			}
+
+			record->Link->Stop(*Universe);
+			record->Link.reset();
 		}
 
 		// **The runtime goes before the restore.** It holds a `Store &` and the

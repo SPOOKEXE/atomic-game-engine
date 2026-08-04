@@ -468,6 +468,16 @@ namespace client {
 	}
 
 	void Client::Step() {
+		// **The display is waited for before the input is read**, for the reason
+		// `Editor::Run` gives at length: the swapchain wait is most of a frame
+		// with vertical sync on, and doing it after the pump means every frame is
+		// drawn from input that is already a frame old. The client has the same
+		// shape as the studio and had the same frame of delay in it.
+		//
+		// It costs a frame of nothing when it fails — minimised, or mid-resize —
+		// and `Render` reaches the same conclusion for itself below.
+		Renderer.WaitForFrame();
+
 		const float delta = Clock.Tick();
 
 		// Everything from here to EndFrame is one frame's worth of spans. The

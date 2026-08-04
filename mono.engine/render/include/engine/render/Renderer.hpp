@@ -358,6 +358,33 @@ namespace engine::render {
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
 
+		// Waits for the display and claims this frame's image, before the caller
+		// has read a single event.
+		//
+		// **Optional, and the reason to call it is latency rather than
+		// throughput.** `Render` waits for the swapchain itself when this was not
+		// called, so an existing loop is correct without it and measures the same.
+		// What it cannot be is *responsive*: the wait is the better part of a
+		// frame with vertical sync on, and a loop that pumps events and then
+		// waits has already read its input by the time it starts waiting — so
+		// every frame is drawn from input one frame old, no matter how fast the
+		// code between them is. Calling this first moves the dead time to before
+		// the input is read.
+		//
+		// The frame is held until the next `Render` consumes it. Calling this
+		// twice in one frame is safe and acquires once; not calling `Render`
+		// afterwards submits an empty frame at `Shutdown` rather than leaking it.
+		//
+		// **This is why the split exists at all rather than `Render` simply
+		// waiting later**: a swapchain image cannot be acquired without a command
+		// buffer, and the wait is the acquisition. There is no ordering inside
+		// one call that puts it after the caller's input.
+		//
+		// @return `false` when there was nothing to acquire — minimised or
+		//         mid-resize, which is not an error and not a reason to stop
+		//         ticking. Headless always succeeds; it waits for nothing.
+		bool WaitForFrame();
+
 		// Reports whether the caller is the thread that owns this renderer.
 		//
 		// **Recording is single-threaded by contract, and this is the contract
