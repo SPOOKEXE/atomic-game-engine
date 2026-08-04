@@ -78,14 +78,23 @@ namespace studio {
 	void Editor::DrawInterface() {
 		const ImGuiViewport *viewport = ImGui::GetMainViewport();
 
-		// **`PassthruCentralNode` is what makes the viewport a hole rather than
-		// a panel.** The dockspace host covers the whole window; without this
-		// flag its central node is drawn opaque and paints over the world the
-		// editor exists to show. `ui::Theme` keeps `DockingEmptyBg` transparent
-		// for the same reason, and `ui/tests/Theme.cpp` checks it.
-		const ImGuiID dockspace = ImGui::DockSpaceOverViewport(
-			ImGui::GetID(DOCKSPACE), viewport, ImGuiDockNodeFlags_PassthruCentralNode
-		);
+		// **No `PassthruCentralNode`, and that flag is why the viewport used to
+		// be a hole.** It punches a transparent rectangle through the dockspace
+		// so the swapchain shows through — but `imgui.cpp`'s `central_node_hole`
+		// requires the central node to be *empty*, so docking a panel into it
+		// fills the whole dockspace with `ImGuiCol_WindowBg` instead. The world
+		// vanished the moment the viewport was docked, which is exactly what it
+		// looked like.
+		//
+		// The world goes into a texture now and the viewport is an ordinary
+		// panel showing it, so there is nothing to see through and no hole to
+		// punch. See `render::SceneTarget`.
+		const ImGuiID dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
+
+		if (ResetLayout) {
+			ResetLayout = false;
+			BuildDefaultLayout(dockspace);
+		}
 
 		static bool built = false;
 		if (!built) {
@@ -186,74 +195,78 @@ namespace studio {
 	}
 
 	void Editor::DrawViewport() {
-		// **A window with no background, and that is the whole trick.** The
-		// world is already in the swapchain by the time imgui's draw lists are
-		// recorded — `render::Pass::Interface` is last — so a panel that paints
-		// nothing lets it through. What that buys over the bare hole this used
-		// to be is everything a panel has: a name, a tab, a dock target, a
-		// rectangle somebody can drag, and somewhere to put the readout below.
-		//
-		// The alternative is rendering the world into a texture and showing it
-		// as an image. That is the honest way to have several viewports at once
-		// and it is the render-node system's job — this pipeline draws one
-		// screen pass, and building a second path for it here would be the
-		// small-version-of-a-big-thing `render/Renderer.hpp` argues against.
+		if (!ShowViewport) {
+			// Nothing asks for a texture, so the renderer releases the one it
+			// had. A closed panel should not go on costing its pixels.
+			WorldTarget = engine::render::SceneTarget{};
+			return;
+		}
+
+		// No padding, so the image is the panel rather than a picture inside it.
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-
 		const bool open = ImGui::Begin(
-			"Viewport", nullptr, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar |
-									 ImGuiWindowFlags_NoScrollWithMouse
+			"Viewport", &ShowViewport, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
 		);
-
 		ImGui::PopStyleVar();
 
 		if (!open) {
-			// Collapsed or tabbed behind something. The world is drawn into
-			// nothing rather than into wherever the panel last was — a stale
-			// rectangle would leave the previous frame's image sitting under a
-			// panel that is no longer there.
-			WorldViewport = engine::render::Viewport{};
+			// Collapsed or behind another tab. The target is dropped rather than
+			// left at its last size — rendering a texture nobody shows is a
+			// frame's work thrown away every frame.
+			WorldTarget = engine::render::SceneTarget{};
 			ImGui::End();
 			return;
 		}
 
-		// **The content rectangle, in pixels rather than in imgui's logical
-		// points.** The swapchain is sized in pixels and a high-DPI display
-		// makes those different numbers — a viewport handed logical points on a
-		// 2x display would draw the world into the top-left quarter of the
-		// panel and leave the rest showing the clear colour.
+		// **The size in pixels, which is not the size in imgui's points.** The
+		// texture is real pixels and a high-DPI display makes those different
+		// numbers — a target sized in points on a 2x display is a quarter-scale
+		// image stretched back up, which reads as a blurry renderer.
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		const ImVec2 size = ImGui::GetContentRegionAvail();
 		const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
 		const float horizontal = scale.x > 0.0f ? scale.x : 1.0f;
 		const float vertical = scale.y > 0.0f ? scale.y : 1.0f;
 
-		const ImGuiViewport *host = ImGui::GetMainViewport();
-		WorldViewport.X = static_cast<int>((origin.x - host->Pos.x) * horizontal);
-		WorldViewport.Y = static_cast<int>((origin.y - host->Pos.y) * vertical);
-		WorldViewport.Width = static_cast<int>(size.x * horizontal);
-		WorldViewport.Height = static_cast<int>(size.y * vertical);
+		WorldTarget.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * horizontal);
+		WorldTarget.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * vertical);
 
-		// An invisible button over the whole rectangle, so the panel has an
-		// item to be hovered and a drag to be captured. Without one, imgui
-		// reports the window hovered only while the cursor is over its
-		// decoration — and the camera would stop turning the moment the drag
-		// left the title bar.
-		ImGui::InvisibleButton("##surface", size, ImGuiButtonFlags_MouseButtonRight);
+		// **Last frame's texture, and the one-frame lag is the design rather
+		// than a bug.** imgui records its draw lists before the renderer runs,
+		// so the only texture that exists when this executes is the one the
+		// previous frame produced. `world::ViewChannel` made the same trade for
+		// a hosted world and `SurfaceView` makes it for a mirror: a consumer a
+		// frame behind is what removes the dependency cycle between "how big is
+		// the panel" and "what is in the texture".
+		if (void *texture = Renderer.SceneTexture(); texture != nullptr) {
+			ImGui::Image(reinterpret_cast<ImTextureID>(texture), size);
+		} else {
+			// The first frame, and any frame after a resize the renderer has not
+			// caught up with. An invisible button keeps the panel hoverable so
+			// the camera does not stop working for a frame.
+			ImGui::InvisibleButton("##surface", size, ImGuiButtonFlags_MouseButtonRight);
+		}
+
 		ViewportHovered = ImGui::IsItemHovered();
 		ViewportActive = ImGui::IsItemActive();
 
-		// The readout, drawn back at the top-left over the world.
+		// The image is not a button, so a right-drag over it has to be claimed
+		// explicitly or the panel behind would get it.
+		if (ViewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+			ImGui::SetWindowFocus();
+		}
+
+		// The readout, drawn back over the top-left of the image.
 		ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
 		ImGui::BeginGroup();
 
 		const engine::core::Name scene = Universe->NameOf(Active);
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		ImGui::Text(
-			"%s   %d x %d   %u draw   %llu tris   %u culled",
+			"%s   %u x %u   %u draw   %llu tris   %u culled",
 			scene.IsValid() ? Label(scene) : "(no scene)",
-			WorldViewport.Width,
-			WorldViewport.Height,
+			WorldTarget.Width,
+			WorldTarget.Height,
 			LastFrame.DrawCalls,
 			static_cast<unsigned long long>(LastFrame.Triangles),
 			LastFrame.Culled
@@ -262,11 +275,11 @@ namespace studio {
 
 		if (Mode != RunMode::Edit) {
 			// **The one thing that must be visible without reading anything.**
-			// An author who has forgotten they are in Play will make edits that
-			// Stop throws away, and "why did my change vanish" is the worst
-			// question an editor can produce.
+			// An author who has forgotten they are in Play will make edits Stop
+			// throws away, and "why did my change vanish" is the worst question
+			// an editor can produce.
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::Text("%s — Stop restores the scene", Describe(Mode));
+			ImGui::Text("%s - Stop restores the scene", Describe(Mode));
 			ImGui::PopStyleColor();
 		}
 
@@ -278,6 +291,31 @@ namespace studio {
 
 		ImGui::EndGroup();
 		ImGui::End();
+	}
+
+	void Editor::DrawViewMenu() {
+		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
+		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
+		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
+		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
+		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
+		ImGui::MenuItem("Output", nullptr, &ShowOutput);
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Show Every Panel")) {
+			ShowViewport = ShowExplorer = ShowWorlds = true;
+			ShowProperties = ShowScripts = ShowOutput = true;
+		}
+
+		if (ImGui::MenuItem("Reset Layout")) {
+			// **Rebuilt on the next frame rather than here**, because the
+			// dockspace is mid-frame and rearranging its nodes from inside a
+			// menu is rearranging the tree that is being walked.
+			ResetLayout = true;
+			ShowViewport = ShowExplorer = ShowWorlds = true;
+			ShowProperties = ShowScripts = ShowOutput = true;
+		}
 	}
 
 	void Editor::DrawMenuBar() {
@@ -380,6 +418,11 @@ namespace studio {
 					ClearSelection();
 				}
 			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("View")) {
+			DrawViewMenu();
 			ImGui::EndMenu();
 		}
 
@@ -538,7 +581,11 @@ namespace studio {
 	}
 
 	void Editor::DrawOutput() {
-		if (!ImGui::Begin(OUTPUT)) {
+		if (!ShowOutput) {
+			return;
+		}
+
+		if (!ImGui::Begin(OUTPUT, &ShowOutput)) {
 			ImGui::End();
 			return;
 		}

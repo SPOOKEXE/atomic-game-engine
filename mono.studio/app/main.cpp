@@ -24,6 +24,7 @@ int main(int argc, char **argv) {
 	arguments.Value("scale", "FACTOR", "Interface scale (default 1.0)");
 	arguments.Value("tick-rate", "HZ", "Simulation ticks per second while running (default 60)");
 	arguments.Value("frames", "N", "Exit after N presented frames");
+	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -49,6 +50,9 @@ int main(int argc, char **argv) {
 
 	if (auto game = arguments.Get("game")) {
 		options.Game = std::filesystem::path(*game);
+	}
+	if (auto capture = arguments.Get("capture")) {
+		options.Capture = std::filesystem::path(*capture);
 	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.Assets = std::filesystem::path(*assets);

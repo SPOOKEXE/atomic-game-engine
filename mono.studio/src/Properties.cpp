@@ -70,7 +70,11 @@ namespace studio {
 	}
 
 	void Editor::DrawProperties() {
-		if (!ImGui::Begin("Properties")) {
+		if (!ShowProperties) {
+			return;
+		}
+
+		if (!ImGui::Begin("Properties", &ShowProperties)) {
 			ImGui::End();
 			return;
 		}

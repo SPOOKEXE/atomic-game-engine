@@ -13,7 +13,11 @@ namespace studio {
 	using engine::ecs::Store;
 
 	void Editor::DrawScripts() {
-		if (!ImGui::Begin("Script Editor")) {
+		if (!ShowScripts) {
+			return;
+		}
+
+		if (!ImGui::Begin("Script Editor", &ShowScripts)) {
 			ImGui::End();
 			return;
 		}

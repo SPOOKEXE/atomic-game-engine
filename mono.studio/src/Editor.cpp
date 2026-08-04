@@ -355,12 +355,28 @@ namespace studio {
 			Overlay,
 			nullptr,
 			&Interface,
-			WorldViewport.IsValid() ? &WorldViewport : nullptr
+			WorldTarget.IsValid() ? &WorldTarget : nullptr
 		);
 
 		if (LastFrame.Presented) {
 			FramesDrawn++;
 		}
+
+		// **After the frame rather than before it**, so the capture is of a
+		// frame that has a scene texture — the first frame has none, because the
+		// viewport panel only learns its size once it has been laid out.
+		if (!Settings.Capture.empty() && FramesDrawn == CaptureAtFrame()) {
+			Renderer.RequestSceneCapture(Settings.Capture);
+		}
+	}
+
+	int64_t Editor::CaptureAtFrame() const {
+		// The frame before the last, so the capture is requested on one frame
+		// and written by the next — and the run still ends when it was told to.
+		// With no budget, a handful of frames in: enough for the layout to
+		// settle and the first scene to be presented.
+		constexpr int64_t SETTLED = 4;
+		return Settings.MaximumFrames > SETTLED ? Settings.MaximumFrames - 2 : SETTLED;
 	}
 
 	// --- selection ---------------------------------------------------------

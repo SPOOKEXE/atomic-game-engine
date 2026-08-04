@@ -117,9 +117,17 @@ namespace studio {
 		float Scale = 1.0f;
 
 		// -1 runs until the window is closed. A frame budget is what makes the
-		// editor usable from a test or a CI job — and what lets a screenshot be
+		// editor usable from a test or a CI job — and what lets a capture be
 		// taken of a known frame rather than of whenever somebody looked.
 		int64_t MaximumFrames = -1;
+
+		// Write the world the viewport is showing to this file, then carry on.
+		//
+		// **Taken on the last frame of a `--frames` budget**, so a run that asks
+		// for both produces exactly one image of a known frame. On its own it is
+		// taken once, a few frames in — early enough to be useful and late
+		// enough that the layout and the first scene have settled.
+		std::filesystem::path Capture;
 	};
 
 	// One open script tab.
@@ -177,6 +185,11 @@ namespace studio {
 	  private:
 		// --- the frame ------------------------------------------------------
 
+		// Which frame `--capture` is taken on. See the body.
+		//
+		// @return The frame number to request a capture on.
+		int64_t CaptureAtFrame() const;
+
 		void PumpEvents();
 		void Simulate(float frameSeconds);
 		void Present(float frameSeconds);
@@ -194,6 +207,13 @@ namespace studio {
 		void DrawOutput();
 		void DrawStatusBar();
 		void DrawDialogs();
+
+		// The View menu, and the only way back to a panel somebody closed.
+		//
+		// **Every panel is closable and every panel is dockable**, which is what
+		// makes the layout theirs rather than ours — and a closable panel with
+		// no way back is a panel somebody loses permanently.
+		void DrawViewMenu();
 
 		// Keyboard shortcuts, read after every panel has drawn.
 		//
@@ -379,9 +399,9 @@ namespace studio {
 		float CameraPitch = 0.0f;
 		float CameraSpeed = 24.0f;
 
-		// The rectangle the world is drawn into, from the dockspace's central
-		// node. See `render::Viewport`.
-		engine::render::Viewport WorldViewport;
+		// How big a texture the world is drawn into, from the viewport panel's
+		// content rectangle. See `render::SceneTarget`.
+		engine::render::SceneTarget WorldTarget;
 
 		// --- dialogs -----------------------------------------------------------
 		//
@@ -431,6 +451,22 @@ namespace studio {
 		// turning quickly.
 		bool ViewportHovered = false;
 		bool ViewportActive = false;
+
+		// Which panels are open. Not saved here — imgui's ini remembers it, and
+		// a second copy would be the drift rule 2 is about. These are the
+		// current frame's answer, passed to `ImGui::Begin` and read back.
+		bool ShowViewport = true;
+		bool ShowExplorer = true;
+		bool ShowWorlds = true;
+		bool ShowProperties = true;
+		bool ShowScripts = true;
+		bool ShowOutput = true;
+
+		// Whether the next frame rebuilds the default arrangement. Set from the
+		// View menu and acted on at the top of the frame, because rearranging a
+		// dockspace's nodes from inside a menu is rearranging the tree that is
+		// being walked.
+		bool ResetLayout = false;
 
 		PendingInsertAction PendingInsert;
 		PendingReparentAction PendingReparent;

@@ -37,6 +37,7 @@
 #include <engine/scene/DrawInstance.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -134,43 +135,36 @@ namespace engine::render {
 		uint32_t Height = 1024;
 	};
 
-	// Where in the window the world is drawn.
+	// An offscreen colour target the world is drawn into instead of the window.
 	//
-	// **The editor's requirement, and it is a projection decision rather than a
-	// crop.** A studio puts panels down the sides and along the bottom, so the
-	// world occupies a rectangle that is neither the window's size nor its
-	// shape. Drawing it full-window and letting the panels cover the edges
-	// would project for an aspect ratio nothing is displayed at — a scene
-	// stretched by however wide the explorer happens to be, changing every time
-	// somebody drags a splitter.
+	// **The editor's requirement, and the transparent-window trick it replaced
+	// could not work.** A studio wants the world inside a dockable panel, and
+	// the obvious cheap answer — draw the world to the swapchain and put a
+	// background-less imgui window over it — fails the moment that window is
+	// actually docked. `imgui.cpp`'s `central_node_hole` is only punched while
+	// the central node is *empty*, so docking a panel into it makes the
+	// dockspace fill its whole rectangle with `ImGuiCol_WindowBg` and paint over
+	// the frame. The hole is a hole, not a panel.
 	//
-	// So the rectangle is passed in, the viewport and scissor are set from it,
-	// and **the aspect ratio and the cull frustum both come from it** rather
-	// than from the swapchain. Those two travelling together is the whole
-	// point: `Renderer::Render`'s existing contract is that the frustum and the
-	// projection are resolved once from one aspect, because two copies is two
-	// chances to disagree and the symptom is geometry popping at the screen
-	// edge on one machine and not another.
+	// So the world goes into a texture and the panel shows it. That is what
+	// every editor does, and it buys more than the fix: the viewport becomes an
+	// ordinary window that docks, floats, resizes and closes like every other,
+	// and several views become a matter of several targets rather than a second
+	// arrangement of the window.
 	//
-	// Pixels from the top-left of the swapchain, matching every other
-	// coordinate in this module. A default-constructed one is empty and means
-	// the whole swapchain — which is what a game passes, by passing nothing.
+	// The texture is the swapchain's format, because the pipelines that draw
+	// into it were built against that format, and it is sampleable, because
+	// something has to show it.
 	//
 	// @since v0.7
-	struct Viewport {
-		// Left edge in pixels.
-		int X = 0;
+	struct SceneTarget {
+		// How wide the texture is, in pixels. Zero draws to the window instead.
+		uint32_t Width = 0;
 
-		// Top edge in pixels.
-		int Y = 0;
+		// How tall the texture is, in pixels. Zero draws to the window instead.
+		uint32_t Height = 0;
 
-		// Width in pixels. Zero means the whole swapchain.
-		int Width = 0;
-
-		// Height in pixels. Zero means the whole swapchain.
-		int Height = 0;
-
-		// Reports whether this names a rectangle at all.
+		// Reports whether this asks for an offscreen target at all.
 		//
 		// @return `true` when both dimensions are positive.
 		bool IsValid() const {
@@ -377,9 +371,10 @@ namespace engine::render {
 		// @param surface     The offscreen view to render first, or null.
 		// @param interfaceHook An editor's chrome, drawn last, or null. See
 		//                    `FrameOverlayHook` for why this is not imgui.
-		// @param viewport    Where in the window the world is drawn, or null for
-		//                    all of it. Decides the aspect ratio and the cull
-		//                    frustum as well as the scissor — see `Viewport`.
+		// @param sceneTarget Draw the world into an offscreen texture of this
+		//                    size instead of into the window, or null for the
+		//                    window. Decides the aspect ratio and the cull
+		//                    frustum as well as the target — see `SceneTarget`.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,
@@ -388,8 +383,36 @@ namespace engine::render {
 			OverlayImage &overlay,
 			const SurfaceView *surface = nullptr,
 			FrameOverlayHook *interfaceHook = nullptr,
-			const Viewport *viewport = nullptr
+			const SceneTarget *sceneTarget = nullptr
 		);
+
+		// The texture the most recent `Render` drew the world into.
+		//
+		// **Valid until the next `Render` with a different size**, which is when
+		// the target is reallocated. An interface layer hands it straight to
+		// whatever draws it — for Dear ImGui's SDL_GPU backend that is an
+		// `ImTextureID`, which is an `SDL_GPUTexture *` and therefore this
+		// pointer unchanged.
+		//
+		// @return The texture, or `nullptr` when the last frame drew to the
+		//         window.
+		void *SceneTexture() const;
+
+		// Writes the next offscreen frame's world to a file, once.
+		//
+		// **What makes an editor checkable without a screen.** Driving a window
+		// and photographing a display is a test that depends on nobody else
+		// using the machine and on the compositor cooperating; this reads the
+		// texture the frame was actually drawn into. It costs a fence wait, so
+		// it happens on the frames a caller asks for and no others.
+		//
+		// Only the world, and deliberately: the chrome is drawn onto the window
+		// and the window is the swapchain, which SDL does not promise is
+		// readable. What this answers is "did the scene render", which is the
+		// question a renderer is asked.
+		//
+		// @param path Where to write a BMP. Empty cancels a pending request.
+		void RequestSceneCapture(std::filesystem::path path);
 
 		// The device and swapchain format a `FrameOverlayHook` builds against.
 		//

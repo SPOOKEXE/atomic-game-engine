@@ -16,7 +16,11 @@ namespace studio {
 	using engine::world::WorldId;
 
 	void Editor::DrawWorlds() {
-		if (!ImGui::Begin("Worlds")) {
+		if (!ShowWorlds) {
+			return;
+		}
+
+		if (!ImGui::Begin("Worlds", &ShowWorlds)) {
 			ImGui::End();
 			return;
 		}

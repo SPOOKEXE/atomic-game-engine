@@ -227,6 +227,20 @@ namespace engine::render {
 		uint32_t DepthWidth = 0;
 		uint32_t DepthHeight = 0;
 
+		// --- the offscreen scene target ---------------------------------------
+		//
+		// Where the world goes when a caller asks for a texture instead of the
+		// window. See `render::SceneTarget` for why an editor needs one.
+		SDL_GPUTexture *SceneTexture = nullptr;
+		uint32_t SceneWidth = 0;
+		uint32_t SceneHeight = 0;
+
+		// Where the next capture goes, or empty for none. See
+		// `Renderer::RequestSceneCapture`.
+		std::filesystem::path CapturePath;
+
+		bool WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const;
+
 		// --- the shadow map -------------------------------------------------
 		//
 		// A depth texture and the pipeline that fills it. The **same instance
@@ -303,6 +317,7 @@ namespace engine::render {
 		bool CreateGeometry();
 		bool EnsureInstanceCapacity(uint32_t count);
 		bool EnsureDepth(uint32_t width, uint32_t height);
+		bool EnsureScene(uint32_t width, uint32_t height);
 		bool EnsureOverlay(int width, int height);
 	};
 
@@ -600,6 +615,51 @@ namespace engine::render {
 		}
 
 		InstanceCapacity = capacity;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureScene(uint32_t width, uint32_t height) {
+		if (SceneTexture && width == SceneWidth && height == SceneHeight) {
+			return true;
+		}
+
+		if (SceneTexture) {
+			SDL_ReleaseGPUTexture(Device, SceneTexture);
+			SceneTexture = nullptr;
+		}
+
+		SceneWidth = width;
+		SceneHeight = height;
+
+		if (width == 0 || height == 0) {
+			return false;
+		}
+
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+
+		// **The swapchain's format, and that is a requirement rather than a
+		// convenience.** The opaque and transparent pipelines were built with
+		// the swapchain's colour format; a target in another format is a
+		// validation error at bind time on the backends that check and a
+		// corrupt image on the ones that do not.
+		info.format = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+
+		// Sampled as well as drawn into, because the whole point is that
+		// something shows it afterwards.
+		info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		info.width = width;
+		info.height = height;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+
+		SceneTexture = SDL_CreateGPUTexture(Device, &info);
+		if (!SceneTexture) {
+			ENGINE_ERROR("SDL_CreateGPUTexture (scene target): {}", SDL_GetError());
+			SceneWidth = 0;
+			SceneHeight = 0;
+			return false;
+		}
 		return true;
 	}
 
@@ -930,6 +990,11 @@ namespace engine::render {
 		if (State->SurfaceSampler) {
 			SDL_ReleaseGPUSampler(device, State->SurfaceSampler);
 		}
+		if (State->SceneTexture) {
+			SDL_ReleaseGPUTexture(device, State->SceneTexture);
+			State->SceneTexture = nullptr;
+		}
+
 		if (State->OverlayPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OverlayPipeline);
 		}
@@ -966,6 +1031,70 @@ namespace engine::render {
 		*State = Impl{};
 	}
 
+	bool Renderer::Impl::WriteCapture(
+		SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height
+	) const {
+		void *mapped = SDL_MapGPUTransferBuffer(Device, from, false);
+		if (mapped == nullptr) {
+			ENGINE_ERROR("SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+			return false;
+		}
+
+		// The swapchain's format decides the channel order, and getting it
+		// wrong writes a picture with red and blue swapped — which looks like a
+		// shader bug rather than like a file-writing bug, so it is worth
+		// asking rather than assuming.
+		const SDL_GPUTextureFormat format = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+
+		SDL_PixelFormat pixels = SDL_PIXELFORMAT_UNKNOWN;
+		switch (format) {
+			case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM:
+			case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB:
+				pixels = SDL_PIXELFORMAT_BGRA32;
+				break;
+			case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM:
+			case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
+				pixels = SDL_PIXELFORMAT_RGBA32;
+				break;
+			default:
+				break;
+		}
+
+		if (pixels == SDL_PIXELFORMAT_UNKNOWN) {
+			ENGINE_ERROR("capture: swapchain format {} has no BMP mapping", static_cast<int>(format));
+			SDL_UnmapGPUTransferBuffer(Device, from);
+			return false;
+		}
+
+		SDL_Surface *surface = SDL_CreateSurfaceFrom(
+			static_cast<int>(width),
+			static_cast<int>(height),
+			pixels,
+			mapped,
+			static_cast<int>(width * 4)
+		);
+
+		bool wrote = false;
+		if (surface != nullptr) {
+			wrote = SDL_SaveBMP(surface, CapturePath.string().c_str());
+			if (!wrote) {
+				ENGINE_ERROR("SDL_SaveBMP: {}", SDL_GetError());
+			}
+			SDL_DestroySurface(surface);
+		}
+
+		SDL_UnmapGPUTransferBuffer(Device, from);
+		return wrote;
+	}
+
+	void Renderer::RequestSceneCapture(std::filesystem::path path) {
+		State->CapturePath = std::move(path);
+	}
+
+	void *Renderer::SceneTexture() const {
+		return State->SceneTexture;
+	}
+
 	BackendHandles Renderer::Backend() const {
 		BackendHandles handles;
 		if (State->Device != nullptr) {
@@ -983,7 +1112,7 @@ namespace engine::render {
 		OverlayImage &overlay,
 		const SurfaceView *surface,
 		FrameOverlayHook *interfaceHook,
-		const Viewport *viewport
+		const SceneTarget *sceneTarget
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
@@ -1033,38 +1162,47 @@ namespace engine::render {
 			return result;
 		}
 
-		{
-			// Nothing at all on a steady window, and a texture allocation on the
-			// frame after a resize. Worth telling apart from the pass that uses
-			// it, because one is every frame and the other is one frame.
-			ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
-			if (!State->EnsureDepth(width, height)) {
-				SDL_SubmitGPUCommandBuffer(command);
-				return result;
-			}
-		}
-
 		// --- where the world goes -------------------------------------------
 		//
 		// Resolved once, here, and everything downstream reads `sceneWidth` and
 		// `sceneHeight` rather than the swapchain's. That is the whole reason
-		// this is four lines in one place instead of a conditional at each use:
-		// the cull frustum and the projection have to be built from the same
-		// aspect ratio, and they are built six hundred lines apart.
+		// this is a few lines in one place instead of a conditional at each use:
+		// the cull frustum, the projection and the depth buffer all have to
+		// agree about how big the image is, and they are decided hundreds of
+		// lines apart.
 		//
-		// Clamped rather than trusted. A window shrunk below the panels' minimum
-		// size hands over a rectangle wider than the swapchain, and a viewport
-		// past the target's edge is a validation error rather than a clip.
-		const bool haveViewport = viewport != nullptr && viewport->IsValid();
+		// A target that cannot be allocated falls back to the window rather than
+		// dropping the frame. A caller asking for a texture and getting a frame
+		// it did not expect can see that something is wrong; one that gets no
+		// frame at all sees a frozen editor.
+		const bool offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
+							   State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
 
-		const uint32_t sceneX = haveViewport ? std::min(static_cast<uint32_t>(viewport->X), width) : 0u;
-		const uint32_t sceneY = haveViewport ? std::min(static_cast<uint32_t>(viewport->Y), height) : 0u;
-		const uint32_t sceneWidth =
-			haveViewport ? std::max(std::min(static_cast<uint32_t>(viewport->Width), width - sceneX), 1u)
-						 : width;
-		const uint32_t sceneHeight =
-			haveViewport ? std::max(std::min(static_cast<uint32_t>(viewport->Height), height - sceneY), 1u)
-						 : height;
+		if (!offscreen && State->SceneTexture != nullptr) {
+			// Nothing asked for a texture this frame, so last frame's is
+			// released rather than kept against a caller who might come back. A
+			// viewport panel that was closed should not go on costing its
+			// pixels.
+			State->EnsureScene(0, 0);
+		}
+
+		const uint32_t sceneWidth = offscreen ? sceneTarget->Width : width;
+		const uint32_t sceneHeight = offscreen ? sceneTarget->Height : height;
+
+		{
+			// Nothing at all on a steady window, and a texture allocation on the
+			// frame after a resize. Worth telling apart from the pass that uses
+			// it, because one is every frame and the other is one frame.
+			//
+			// **Sized to the scene rather than to the swapchain.** Depth is
+			// tested against the colour target the pass is drawing into, and a
+			// mismatched pair is a validation error rather than a clipped image.
+			ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
+			if (!State->EnsureDepth(sceneWidth, sceneHeight)) {
+				SDL_SubmitGPUCommandBuffer(command);
+				return result;
+			}
+		}
 
 		// --- uploads --------------------------------------------------------
 
@@ -1540,11 +1678,25 @@ namespace engine::render {
 
 		// --- opaque pass ----------------------------------------------------
 
+		// **The world's target, which is the offscreen texture or the window.**
+		// Everything after this pass draws onto the *window* regardless — the
+		// debug overlay is in window pixels and the editor's chrome is the
+		// window — so this is the one target that moves.
 		SDL_GPUColorTargetInfo colourTarget{};
-		colourTarget.texture = swapchain;
+		colourTarget.texture = offscreen ? State->SceneTexture : swapchain;
 		colourTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
 		colourTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 		colourTarget.store_op = SDL_GPU_STOREOP_STORE;
+
+		// What the overlay and the interface draw onto. When the world went
+		// offscreen the window has never been touched this frame, so the first
+		// pass to reach it clears — otherwise it is whatever the driver handed
+		// back, which is last frame's image or uninitialised memory.
+		SDL_GPUColorTargetInfo windowTarget{};
+		windowTarget.texture = swapchain;
+		windowTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+		windowTarget.load_op = offscreen ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+		windowTarget.store_op = SDL_GPU_STOREOP_STORE;
 
 		SDL_GPUDepthStencilTargetInfo depthTarget{};
 		depthTarget.texture = State->DepthTexture;
@@ -1568,36 +1720,6 @@ namespace engine::render {
 			passes.Enter(Pass::Opaque);
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
-
-			// **After the pass begins and before anything is bound**, because a
-			// viewport is render-pass state and SDL resets it to the whole
-			// target every time one is opened. The clear is not affected — a
-			// load op covers the attachment rather than the viewport — so the
-			// background still fills the window behind the editor's panels,
-			// which is what makes a window with no world in it look deliberate.
-			if (haveViewport) {
-				const SDL_GPUViewport region{
-					static_cast<float>(sceneX),
-					static_cast<float>(sceneY),
-					static_cast<float>(sceneWidth),
-					static_cast<float>(sceneHeight),
-					0.0f,
-					1.0f,
-				};
-				SDL_SetGPUViewport(pass, &region);
-
-				// The scissor as well as the viewport. A viewport transforms and
-				// does not clip: a triangle whose vertices land outside it is
-				// still rasterised across the rest of the target, so a large part
-				// near the camera would spill over the explorer.
-				const SDL_Rect scissor{
-					static_cast<int>(sceneX),
-					static_cast<int>(sceneY),
-					static_cast<int>(sceneWidth),
-					static_cast<int>(sceneHeight),
-				};
-				SDL_SetGPUScissor(pass, &scissor);
-			}
 
 			if (haveInstances) {
 				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
@@ -1755,11 +1877,11 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("overlay pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Overlay);
 
-			// Load rather than clear: the scene is already in the swapchain and
-			// the overlay blends on top of it.
-			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
 
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, nullptr);
+			// Whoever got here first has cleared it; everything after loads.
+			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
+
 			SDL_BindGPUGraphicsPipeline(pass, State->OverlayPipeline);
 
 			const SDL_GPUTextureSamplerBinding binding{
@@ -1782,14 +1904,11 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Interface);
 
-			// Loads, like the overlay pass, and for the same reason: the world
-			// is already in the swapchain and the chrome goes on top of it.
-			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
-
 			// No depth attachment. Panels are drawn in the order the interface
 			// submitted them and testing them against the world's depth would
 			// hide a window behind a wall.
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, nullptr);
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
+			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			interfaceHook->Record(command, pass);
 			SDL_EndGPURenderPass(pass);
 
@@ -1798,6 +1917,50 @@ namespace engine::render {
 			// "what did the engine draw", and a widget count is the editor's
 			// business rather than the renderer's.
 			result.DrawCalls++;
+		}
+
+		// --- the capture ----------------------------------------------------
+		//
+		// After the world's passes and before the window's, because what is
+		// wanted is the scene as it was drawn rather than the scene with the
+		// editor's panels over it. A copy pass, so it cannot be inside one of
+		// the render passes above.
+		SDL_GPUTransferBuffer *capture = nullptr;
+		if (offscreen && !State->CapturePath.empty()) {
+			SDL_GPUTransferBufferCreateInfo info{};
+			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+			info.size = sceneWidth * sceneHeight * 4;
+
+			capture = SDL_CreateGPUTransferBuffer(State->Device, &info);
+			if (capture != nullptr) {
+				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+
+				SDL_GPUTextureRegion source{};
+				source.texture = State->SceneTexture;
+				source.w = sceneWidth;
+				source.h = sceneHeight;
+				source.d = 1;
+
+				SDL_GPUTextureTransferInfo destination{};
+				destination.transfer_buffer = capture;
+				destination.pixels_per_row = sceneWidth;
+				destination.rows_per_layer = sceneHeight;
+
+				SDL_DownloadFromGPUTexture(copy, &source, &destination);
+				SDL_EndGPUCopyPass(copy);
+			} else {
+				ENGINE_ERROR("capture: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
+			}
+		}
+
+		// **The window, when nothing else touched it.** With the world drawn
+		// offscreen and neither the overlay nor the interface open, no pass has
+		// reached the swapchain — and presenting a texture the driver handed
+		// back without writing to it shows last frame's image or uninitialised
+		// memory. One clear costs nothing and removes the whole case.
+		if (windowTarget.load_op == SDL_GPU_LOADOP_CLEAR) {
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
+			SDL_EndGPURenderPass(pass);
 		}
 
 		// Before the submit rather than after it, so a frame that fails to
@@ -1810,7 +1973,34 @@ namespace engine::render {
 			// them is measured by their spans — this is where the driver gets
 			// the work, and where any cost of building it lands.
 			ENGINE_PROFILE_CAT("submit", core::ProfileCategory::Render);
-			if (!SDL_SubmitGPUCommandBuffer(command)) {
+
+			if (capture != nullptr) {
+				// **A fence, and the stall is the point.** The pixels are not
+				// there until the GPU has run the copy, so a capture has to wait
+				// for it. That is a frame's worth of latency on the frames a
+				// caller asked to capture and on no others.
+				SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+				if (fence == nullptr) {
+					ENGINE_ERROR("SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError());
+					SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+					return result;
+				}
+
+				SDL_WaitForGPUFences(State->Device, true, &fence, 1);
+				SDL_ReleaseGPUFence(State->Device, fence);
+
+				if (State->WriteCapture(capture, sceneWidth, sceneHeight)) {
+					ENGINE_INFO(
+						"captured {} x {} to {}", sceneWidth, sceneHeight, State->CapturePath.string()
+					);
+				}
+
+				SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+
+				// Once. A request that repeated would write a file every frame
+				// and stall every one of them.
+				State->CapturePath.clear();
+			} else if (!SDL_SubmitGPUCommandBuffer(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				return result;
 			}

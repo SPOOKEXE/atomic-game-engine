@@ -325,7 +325,11 @@ namespace studio {
 	}
 
 	void Editor::DrawExplorer() {
-		if (!ImGui::Begin("Explorer")) {
+		if (!ShowExplorer) {
+			return;
+		}
+
+		if (!ImGui::Begin("Explorer", &ShowExplorer)) {
 			ImGui::End();
 			return;
 		}
