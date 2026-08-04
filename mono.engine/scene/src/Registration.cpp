@@ -150,6 +150,7 @@ namespace engine::scene {
 		// engine is visited in. Neither carries a wire form — a service is
 		// authored content that a snapshot moves, not per-tick state a delta
 		// does.
+		ecs::Components::Register<TransientComponent>("scene.Transient");
 		ecs::Components::Register<ServiceComponent>("scene.Service");
 		ecs::Components::Register<LightingServiceComponent>("scene.LightingService");
 

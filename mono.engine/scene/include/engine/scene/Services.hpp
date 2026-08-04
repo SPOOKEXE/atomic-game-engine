@@ -1,6 +1,6 @@
 #pragma once
 
-// The fixtures every world has: a workspace, a camera, and the services.
+// The fixtures every world has: a workspace and the services.
 //
 // **A service is an instance, for the same reason a camera is one.** Roblox's
 // `game:GetService("Lighting")` hands back a thing in the tree — it has a
@@ -56,6 +56,31 @@ namespace engine::scene {
 		// The client only. The `Starter*` services, which are templates a
 		// client copies rather than content a server simulates.
 		Client,
+	};
+
+	// Marks an instance as made by whoever is looking, not by an author.
+	//
+	// **A camera is the reason this exists, and Team Create is the reason it is
+	// a component rather than a special case in the writer.** The camera in
+	// `Workspace` is the *viewer's*: the editor makes one to show its own point
+	// of view, a client makes one for the player, and when several people edit
+	// one game they each make their own. None of them is content — a game file
+	// that carried somebody's camera would hand their viewpoint to everyone who
+	// opened it, and a second person joining would add a second one to the file
+	// forever.
+	//
+	// So this is skipped by `game::WriteWorldBody` and everything under it. The
+	// instance is real in every other way: it is in the tree, scripts see it,
+	// the properties panel edits it. It simply does not survive being written
+	// out, because it was never the file's to keep.
+	//
+	// @since v0.7
+	struct TransientComponent {
+		// Explicit padding, so the object representation a snapshot writes holds
+		// no uninitialised bytes. A snapshot *does* carry these — Stop has to
+		// put the editor's camera back exactly as it was, and that is a
+		// different question from what a game file holds.
+		uint32_t Reserved = 0;
 	};
 
 	// What every service has, and nothing else does.
@@ -136,8 +161,11 @@ namespace engine::scene {
 	// which is what lets the studio run it after every load without checking
 	// which kind of file it got.
 	//
-	// The arrangement is Roblox's: `Camera` under `Workspace`, and
-	// `StarterPlayerScripts` under `StarterPlayer` rather than beside it.
+	// The arrangement is Roblox's: `StarterPlayerScripts` under `StarterPlayer`
+	// rather than beside it.
+	//
+	// **No camera.** A camera belongs to whoever is looking rather than to the
+	// game — see `TransientComponent` — so the viewer makes its own.
 	//
 	// @param store The world to furnish.
 	// @return The `Workspace`, which is the one callers usually want next.

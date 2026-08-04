@@ -95,6 +95,13 @@ namespace studio {
 
 			ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
 			ImGui::DockBuilderDockWindow(VIEWPORT2, rightHalf);
+
+			// Three and four share the halves rather than splitting further:
+			// four quarters of a centre pane are four pictures too small to
+			// judge anything by, and a panel can be dragged wherever somebody
+			// actually wants it.
+			ImGui::DockBuilderDockWindow("Viewport 3", leftHalf);
+			ImGui::DockBuilderDockWindow("Viewport 4", rightHalf);
 			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
 			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
@@ -151,8 +158,9 @@ namespace studio {
 			}
 		}
 
-		DrawViewport(0);
-		DrawViewport(1);
+		for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
+			DrawViewport(index);
+		}
 		DrawExplorer();
 		DrawWorlds();
 		DrawProperties();
@@ -222,10 +230,13 @@ namespace studio {
 		// panels rather than two copies: the rules — right-drag to look,
 		// middle-drag to pan, wheel to dolly, F to frame — are the same in
 		// both, and a second copy is a second place for them to drift.
-		if (Second.Open && (Second.Hovered || Second.Active || Second.Panning)) {
-			DriveCameraFor(Second.Frame, Second.Yaw, Second.Pitch, Second.Speed, Second.Hovered,
-						   Second.Active, Second.Panning);
-			return;
+		for (ViewportState &view : Extras) {
+			if (view.Open && (view.Hovered || view.Active || view.Panning)) {
+				DriveCameraFor(
+					view.Frame, view.Yaw, view.Pitch, view.Speed, view.Hovered, view.Active, view.Panning
+				);
+				return;
+			}
 		}
 
 		DriveCameraFor(CameraFrame, CameraYaw, CameraPitch, CameraSpeed, ViewportHovered, ViewportActive,
@@ -246,8 +257,22 @@ namespace studio {
 		// going once it has started: a drag that leaves the panel is still that
 		// drag, and a camera that stopped at the edge of the rectangle would be
 		// unusable at exactly the moment somebody is turning quickly.
-		const bool looking =
-			(active || (hovered && !io.WantCaptureMouse)) && ImGui::IsMouseDown(ImGuiMouseButton_Right);
+		// **`hovered` alone, not `hovered && !io.WantCaptureMouse`.** The
+		// viewport is an imgui window, so hovering it sets `WantCaptureMouse` —
+		// the second half was therefore false exactly when the first was true,
+		// and the two together could never be satisfied. `IsItemHovered`
+		// already refuses when a popup or another window is over the panel,
+		// which is the case that test was reaching for.
+		const bool looking = (active || hovered) && ImGui::IsMouseDown(ImGuiMouseButton_Right);
+
+		// **Flying detaches from a followed camera.** Otherwise a right-drag
+		// would turn a camera nobody asked it to turn — or worse, appear to do
+		// nothing because the scene's camera keeps overriding the eye every
+		// frame. Discoverable without a menu: you fly, you are flying.
+		if (looking && FollowCamera != engine::ecs::NULL_ENTITY) {
+			FollowCamera = engine::ecs::NULL_ENTITY;
+			Say("back to the editor camera");
+		}
 
 		if (looking) {
 			const float sensitivity = 0.0035f;
@@ -302,7 +327,7 @@ namespace studio {
 		// These are Studio's, and they work whether or not the right button is
 		// down.
 
-		const bool overViewport = hovered && !io.WantCaptureMouse;
+		const bool overViewport = hovered || active;
 
 		// Middle-drag slides the camera across its own plane, so the thing
 		// under the pointer stays roughly under the pointer.
@@ -349,15 +374,21 @@ namespace studio {
 	}
 
 	void Editor::DrawViewport(size_t index) {
-		const bool second = index == 1;
+		ViewportState *extra = ExtraAt(index);
+		const bool second = extra != nullptr;
+
+		// imgui remembers a window by its title, so the titles are fixed rather
+		// than built per call — a name that changed would be a panel the saved
+		// layout has never heard of.
+		static const char *const TITLES[] = {"Viewport", "Viewport 2", "Viewport 3", "Viewport 4"};
 
 		// **The second panel is a different world by default and says which.**
 		// Two viewports both showing the active world is one view drawn twice;
 		// the reason to open the second is to watch the server's world beside
 		// the client's, or one subarea beside another while both tick.
-		const char *title = second ? "Viewport 2" : "Viewport";
-		bool *open = second ? &Second.Open : &ShowViewport;
-		engine::render::SceneTarget &target = second ? Second.Target : WorldTarget;
+		const char *title = TITLES[index < 4 ? index : 0];
+		bool *open = second ? &extra->Open : &ShowViewport;
+		engine::render::SceneTarget &target = second ? extra->Target : WorldTarget;
 
 		if (!*open) {
 			// Nothing asks for a texture, so the renderer releases the one it
@@ -380,6 +411,23 @@ namespace studio {
 			target = engine::render::SceneTarget{};
 			ImGui::End();
 			return;
+		}
+
+		// **What the toolbar reports on, claimed here rather than from a click
+		// on the image.** Focus is true for the panel a person is working in
+		// whether they got there by clicking the picture, the tab or the title
+		// bar — a click on the image alone would leave the transport describing
+		// a panel nobody is in, which is the whole failure this is fixing. See
+		// `FocusedViewport`.
+		//
+		// **`ChildWindows` and emphatically not `RootAndChildWindows`.** A
+		// docked window's *root* is the dockspace host, which every docked
+		// panel shares — so the root-walking flag is true for all four
+		// viewports at once and the last one drawn wins. It was written that
+		// way first and the toolbar reported "Viewport 2" no matter which panel
+		// was clicked. This flag stays inside the panel and its own children.
+		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
+			FocusedViewport = index;
 		}
 
 		// **The size in pixels, which is not the size in imgui's points.** The
@@ -417,23 +465,58 @@ namespace studio {
 			);
 		} else {
 			// The first frame, and any frame after a resize the renderer has not
-			// caught up with. An invisible button keeps the panel hoverable so
-			// the camera does not stop working for a frame.
-			ImGui::InvisibleButton("##surface", size, ImGuiButtonFlags_MouseButtonRight);
+			// caught up with. Nothing to show yet; the button below still makes
+			// the panel drivable.
+			ImGui::Dummy(size);
 		}
 
+		// **The thing the camera is actually driven from, and its absence was
+		// why the camera could not be driven at all.** `ImGui::Image` is not an
+		// interactive item: it has no id, it is never hovered *as an item* in a
+		// way that survives, and `IsItemActive` is false for it forever. So the
+		// look condition — "the viewport is active, or hovered and imgui does
+		// not want the mouse" — could only ever be satisfied by the fallback
+		// path that ran on the first frame after a resize.
+		//
+		// A button laid over the image gives the panel an id, so a right-drag
+		// *captures*: `IsItemActive` stays true while the button is held even
+		// when the pointer leaves the panel, which is what makes a fast turn
+		// keep turning instead of stopping at the edge.
+		//
+		// Right and middle only. Left is deliberately not claimed — it belongs
+		// to selecting things in the world, and a button that swallowed it
+		// would be in the way of the first feature added here.
+		ImGui::SetCursorScreenPos(origin);
+		ImGui::InvisibleButton(
+			"##surface", size, ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle
+		);
+
 		if (second) {
-			Second.Hovered = ImGui::IsItemHovered();
-			Second.Active = ImGui::IsItemActive();
+			extra->Hovered = ImGui::IsItemHovered();
+			extra->Active = ImGui::IsItemActive();
 		} else {
 			ViewportHovered = ImGui::IsItemHovered();
 			ViewportActive = ImGui::IsItemActive();
 		}
 
-		// The image is not a button, so a right-drag over it has to be claimed
-		// explicitly or the panel behind would get it.
-		if (ViewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+		// **This panel's hover, not the first panel's.** Reading
+		// `ViewportHovered` here made an extra viewport's claim below depend on
+		// whether the *main* one was hovered, so a right-drag over Viewport 2
+		// was handed to whatever sat behind it and the camera did not turn.
+		const bool hovered = second ? extra->Hovered : ViewportHovered;
+
+		// **The image is not a button, so a click over it has to be claimed
+		// explicitly** or the panel behind would get it. Right was always
+		// claimed, because a right-drag is how the camera is aimed. Left is
+		// claimed for one more reason: clicking a picture is how a person says
+		// "this is the viewport I am working in", and imgui does not focus a
+		// window from a click on a non-interactive item — so without this the
+		// toolbar went on describing whichever panel imgui happened to focus
+		// last, which is exactly what it did. See `FocusedViewport`.
+		if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+						ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
+			FocusedViewport = index;
 		}
 
 		// **The second panel picks its own world.** Without this both viewports
@@ -444,12 +527,12 @@ namespace studio {
 			ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
 			ImGui::SetNextItemWidth(engine::ui::Scaled(170.0f));
 
-			const Name chosen = Universe->NameOf(Second.World.IsValid() ? Second.World : Active);
-			if (ImGui::BeginCombo("##view2", chosen.IsValid() ? Label(chosen) : "(no scene)")) {
+			const Name chosen = Universe->NameOf(extra->World.IsValid() ? extra->World : Active);
+			if (ImGui::BeginCombo("##view", chosen.IsValid() ? Label(chosen) : "(no scene)")) {
 				for (const WorldId id : Universe->Worlds()) {
 					const Name name = Universe->NameOf(id);
-					if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == Second.World)) {
-						Second.World = id;
+					if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == extra->World)) {
+						extra->World = id;
 					}
 				}
 				ImGui::EndCombo();
@@ -473,7 +556,7 @@ namespace studio {
 			);
 
 		const engine::core::Name scene =
-			Universe->NameOf(second ? (Second.World.IsValid() ? Second.World : Active) : Active);
+			Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		ImGui::Text(
 			"%s   %u x %u   %u draw   %llu tris   %u culled",
@@ -514,7 +597,10 @@ namespace studio {
 		// of.** Off by default: a second viewport halves the refresh rate of
 		// both, so it is a thing somebody opens when they want it rather than
 		// a cost everybody pays.
-		ImGui::MenuItem("Viewport 2", nullptr, &Second.Open);
+		for (size_t index = 0; index < EXTRA_VIEWPORTS; index++) {
+			const char *names[] = {"Viewport 2", "Viewport 3", "Viewport 4"};
+			ImGui::MenuItem(names[index], nullptr, &Extras[index].Open);
+		}
 		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
@@ -836,20 +922,65 @@ namespace studio {
 		ImGui::TextDisabled("|");
 		ImGui::SameLine();
 
+		// **Everything from here reports on the viewport you are in, not on
+		// "the" world.** With two panels showing two worlds ticking in
+		// parallel, a transport that always described the active world was
+		// describing the wrong one half the time — you would be looking at the
+		// mirror and reading the skygrid's state. See `FocusedViewport`.
+		const size_t reporting = FocusedViewport;
+		const WorldId shown = ViewportWorld(reporting);
+		ViewportState *reported = ExtraAt(reporting);
+
+		// Which panel is being described, so the readout is never ambiguous
+		// about *whose* state it is showing.
+		if (reporting > 0) {
+			ImGui::TextDisabled("Viewport %zu", reporting + 1);
+			ImGui::SameLine();
+		}
+
 		// The scene selector, because a universe with several worlds needs one
 		// click to switch and a menu is two.
+		//
+		// **It retargets the focused panel rather than always the active
+		// world.** Picking a scene while looking at Viewport 2 moves *that*
+		// panel — the alternative is a selector that appears to be about the
+		// picture in front of you and silently changes a different one.
 		ImGui::SetNextItemWidth(180.0f * Settings.Scale);
-		const Name activeName = Universe->NameOf(Active);
-		if (ImGui::BeginCombo("##scene", activeName.IsValid() ? Label(activeName) : "(no scene)")) {
+		const Name shownName = Universe->NameOf(shown);
+		if (ImGui::BeginCombo("##scene", shownName.IsValid() ? Label(shownName) : "(no scene)")) {
 			for (const WorldId id : Universe->Worlds()) {
 				const Name name = Universe->NameOf(id);
-				if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == Active)) {
-					Active = id;
-					SelectionWorld = id;
-					ClearSelection();
+				if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == shown)) {
+					if (reported != nullptr) {
+						reported->World = id;
+					} else {
+						Active = id;
+						SelectionWorld = id;
+						ClearSelection();
+					}
 				}
 			}
 			ImGui::EndCombo();
+		}
+
+		ImGui::SameLine();
+
+		// **The world's own state, which is not the same claim as the mode.**
+		// The mode is the universe's — Play runs every world — while this is
+		// whether *this* world is ticking, and the two disagree exactly when
+		// something interesting has happened: a world suspended for being empty
+		// during a run, or faulted because its tick threw. That is the reading
+		// somebody switches viewports to get.
+		if (shown.IsValid()) {
+			const engine::world::WorldState state = Universe->StateOf(shown);
+			const bool healthy = state == engine::world::WorldState::Active;
+			ImGui::PushStyleColor(
+				ImGuiCol_Text, healthy ? engine::ui::MutedColour() : engine::ui::WarningColour()
+			);
+			ImGui::TextUnformatted(engine::world::Describe(state));
+			ImGui::PopStyleColor();
+		} else {
+			ImGui::TextDisabled("no scene");
 		}
 
 		ImGui::SameLine();

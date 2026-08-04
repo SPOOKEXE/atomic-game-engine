@@ -3,6 +3,7 @@
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 
@@ -34,6 +35,16 @@ namespace engine::game {
 		// One instance and its subtree, on its own. See
 		// `WriteInstanceDocument`.
 		constexpr std::string_view INSTANCE_ROOT = "Instance";
+
+		// Whether an instance belongs to the viewer rather than to the game.
+		//
+		// See `scene::TransientComponent`. Asked here rather than by class,
+		// because "is this a camera" is the wrong question — a script may make
+		// a camera that *is* content, and a viewer may make something that is
+		// not a camera.
+		bool IsTransient(const Store &store, Entity instance) {
+			return store.Get<scene::TransientComponent>(instance) != nullptr;
+		}
 
 		// Written as an attribute and never as a property, because the tree
 		// carries it. A `Parent` property in the file would be a second answer
@@ -115,6 +126,10 @@ namespace engine::game {
 			uint32_t Next = 1;
 
 			void Walk(const Store &store, Entity instance) {
+				if (IsTransient(store, instance)) {
+					return;
+				}
+
 				Ids.emplace(Key(instance), Next++);
 				store.EachChild(instance, [&](Entity child) { Walk(store, child); });
 			}
@@ -137,6 +152,16 @@ namespace engine::game {
 		void WriteInstance(
 			XmlWriter &writer, Store &store, Entity instance, const Numbering &numbering, Defaults &defaults
 		) {
+			// **The viewer's own instances are not the file's.** A camera is
+			// made by whoever is looking — the editor for its viewport, a client
+			// for its player, one each when several people edit together — and
+			// writing one out would put somebody's point of view into everyone
+			// else's copy. Skipped with its whole subtree, because anything
+			// parented to a camera belongs to that camera.
+			if (IsTransient(store, instance)) {
+				return;
+			}
+
 			const ClassId id = store.ClassOf(instance);
 			if (!id.IsValid()) {
 				// Not every entity is an instance — a resource-carrying row, a

@@ -170,9 +170,22 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	std::string error;
 	Universe plain;
 	AddWorld(plain, "Lobby");
+	plain.Enter(plain.Find(Name("Lobby")), [](Store &store) {
+		const Entity workspace = engine::scene::InstallServices(store);
+		const Entity baseplate = store.CreateInstance(engine::scene::PartClass(), "Baseplate");
+		store.SetParent(baseplate, workspace);
+	});
+
 	const std::string exported = engine::game::WriteWorldDocument(plain, plain.Find(Name("Lobby")), error);
 
 	CHECK(exported.find(R"(<World format="2" name="Lobby">)") != std::string::npos);
+
+	// **No camera in the example either.** `scripts/Lobby.aworld` is the worked
+	// example of this format and it carried one until the viewer's camera
+	// stopped being content; a file with somebody's viewpoint in it is exactly
+	// what a reader would copy.
+	CHECK(exported.find(R"(class="Camera")") == std::string::npos);
+	CHECK(exported.find(R"(class="Workspace")") != std::string::npos);
 	CHECK(
 		exported.find("\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" faultLimit=\"3\" />") !=
 		std::string::npos
@@ -225,7 +238,8 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 		const Entity workspace = store.FindFirstRoot("Workspace");
 		REQUIRE(workspace != NULL_ENTITY);
 		CHECK(ChildNamed(store, workspace, "Baseplate") != NULL_ENTITY);
-		CHECK(ChildNamed(store, workspace, "Camera") != NULL_ENTITY);
+		// The viewer's camera is not in the file — see the transient case below.
+		CHECK(ChildNamed(store, workspace, "Camera") == NULL_ENTITY);
 
 		const Entity starter = store.FindFirstRoot("StarterPlayer");
 		REQUIRE(starter != NULL_ENTITY);
@@ -332,6 +346,55 @@ TEST_CASE("an instance moves between two worlds", "[game][roundtrip]") {
 		// And the program that was not referenced stayed behind. A miss is a
 		// null pointer here rather than an empty string, deliberately.
 		CHECK(cache->Find(Name("scripts/stays.luau")) == nullptr);
+	});
+}
+
+TEST_CASE("a viewer's own instances are not written into the file", "[game][roundtrip]") {
+	// **The camera belongs to whoever is looking, not to the game.** The editor
+	// makes one to show its viewport, a client makes one for its player, and
+	// several people editing one game make one each. Writing any of them out
+	// would hand one person's viewpoint to everybody who opened the file — and
+	// with several editors, would add one per person per save, forever.
+	RegisterEverything();
+
+	Universe universe;
+	const WorldId world = AddWorld(universe, "Start");
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::InstallServices(store);
+
+		// Content: stays.
+		store.SetParent(store.CreateInstance(engine::scene::PartClass(), "Floor"), workspace);
+
+		// The viewer's: goes.
+		const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "Camera");
+		store.SetParent(camera, workspace);
+		store.Set(camera, engine::scene::TransientComponent{});
+
+		// **A child of a transient instance is transient too**, without needing
+		// its own mark: it belongs to the thing that owns it, and half a subtree
+		// in the file would be a parent that does not exist.
+		const Entity rig = store.CreateInstance(engine::scene::PartClass(), "CameraRig");
+		store.SetParent(rig, camera);
+	});
+
+	std::string error;
+	const std::string document = engine::game::WriteWorldDocument(universe, world, error);
+	REQUIRE_FALSE(document.empty());
+
+	CHECK(document.find("Floor") != std::string::npos);
+	CHECK(document.find("\"Camera\"") == std::string::npos);
+	CHECK(document.find("CameraRig") == std::string::npos);
+
+	// And it reads back without them, rather than with a hole where they were.
+	const WorldId copy = engine::game::ReadWorldDocument(universe, document, Name("Copy"), error);
+	REQUIRE(copy.IsValid());
+
+	universe.Enter(copy, [](Store &store) {
+		const Entity workspace = store.FindFirstRoot("Workspace");
+		REQUIRE(workspace != NULL_ENTITY);
+		CHECK(ChildNamed(store, workspace, "Floor") != NULL_ENTITY);
+		CHECK(ChildNamed(store, workspace, "Camera") == NULL_ENTITY);
 	});
 }
 

@@ -225,6 +225,18 @@ namespace studio {
 				}
 			}
 
+			// **Only for a camera, and only for the world being viewed.**
+			// Looking through a camera in a world the viewport is not showing
+			// would move the eye to somewhere the panel cannot draw.
+			const ClassId cameraClass = Classes::Find(Name("Camera"));
+			if (cameraClass.IsValid() && store.IsA(instance, cameraClass) && world == Active) {
+				const bool following = FollowCamera == instance;
+				if (ImGui::MenuItem(following ? "Stop Looking Through" : "Look Through Camera")) {
+					PendingLookThrough = following ? NULL_ENTITY : instance;
+					PendingLookThroughSet = true;
+				}
+			}
+
 			if (ImGui::MenuItem("Unparent")) {
 				PendingReparent.World = world;
 				PendingReparent.Instance = instance;
@@ -445,6 +457,16 @@ namespace studio {
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
 				if (world == Active) {
 					flags |= ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected;
+				}
+
+				// The same consume-once request `DrawTreeNode` honours for an
+				// instance, in its own set because a world index and an entity
+				// id are different key spaces. See `ExpandedWorlds`.
+				if (const auto found =
+						std::find(ExpandedWorlds.begin(), ExpandedWorlds.end(), world.Index);
+					found != ExpandedWorlds.end()) {
+					ImGui::SetNextItemOpen(true);
+					ExpandedWorlds.erase(found);
 				}
 
 				ImGui::PushID(static_cast<int>(world.Index));
@@ -725,6 +747,15 @@ namespace studio {
 			const PendingMoveAction move = PendingMove;
 			PendingMove = PendingMoveAction{};
 			MoveInstanceToWorld(move.Source, move.Instance, move.Target, move.Parent);
+		}
+
+		if (PendingLookThroughSet) {
+			PendingLookThroughSet = false;
+			FollowCamera = PendingLookThrough;
+			PendingLookThrough = NULL_ENTITY;
+
+			Say(FollowCamera == NULL_ENTITY ? "back to the editor camera"
+											: "looking through the scene's camera — right-drag to fly");
 		}
 
 		if (PendingOpenScript.World.IsValid()) {

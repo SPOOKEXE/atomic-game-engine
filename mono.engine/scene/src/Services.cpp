@@ -227,20 +227,16 @@ namespace engine::scene {
 			}
 		}
 
-		// **The camera lives under the workspace, and it is the game's rather
-		// than the editor's.** `studio::Editor` holds its own camera as a
-		// `CFrame` and deliberately not as an entity — a camera that lived in
-		// the scene would be saved, replicated and reset by Stop. This one is
-		// the opposite: it is what a script aims, it is in the file, and
-		// `ActiveCamera` is what decides whether anything looks through it.
-		// Nothing points `ActiveCamera` at it here, so adding it changes no
-		// view until something asks.
-		if (workspace != NULL_ENTITY && store.FindFirstChild(workspace, "Camera") == NULL_ENTITY) {
-			const Entity camera = store.CreateInstance(CameraClass(), "Camera");
-			if (camera != NULL_ENTITY) {
-				store.SetParent(camera, workspace);
-			}
-		}
+		// **No camera here, and that is the correction.** A camera belongs to
+		// whoever is looking, not to the world: the editor makes one to show its
+		// viewport, a client makes one for its player, and several people editing
+		// one game make one each. `InstallServices` furnishes a world with what
+		// the *game* has, and a viewpoint is not that — putting one here wrote
+		// somebody's camera into every game file, which is what
+		// `TransientComponent` now exists to prevent.
+		//
+		// The viewer creates its own and marks it transient. See
+		// `studio::Editor::EnsureViewerCamera`.
 
 		return workspace;
 	}

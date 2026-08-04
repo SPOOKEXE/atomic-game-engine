@@ -69,9 +69,13 @@ TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
 	REQUIRE(starterPlayer != NULL_ENTITY);
 	CHECK(store.FindFirstChild(starterPlayer, "StarterPlayerScripts") != NULL_ENTITY);
 
-	// The camera is the game's, under the workspace. The studio's own camera is
-	// deliberately not an entity at all — see `studio::Editor::CameraFrame`.
-	CHECK(store.FindFirstChild(workspace, "Camera") != NULL_ENTITY);
+	// **No camera, and its absence is the contract.** A camera belongs to
+	// whoever is looking rather than to the game: the editor makes one for its
+	// viewport, a client makes one for its player, and several people editing
+	// one game make one each. Furnishing a world with one would write somebody's
+	// viewpoint into every file made from it — see `scene::TransientComponent`,
+	// and `studio::Editor::EnsureViewerCamera` for who does make it.
+	CHECK(store.FindFirstChild(workspace, "Camera") == NULL_ENTITY);
 }
 
 TEST_CASE("installing twice furnishes nothing twice", "[scene][services]") {
@@ -91,15 +95,14 @@ TEST_CASE("installing twice furnishes nothing twice", "[scene][services]") {
 	CHECK(services_test::RootsNamed(store, "Lighting") == 1);
 	CHECK(store.FindFirstChild(first, "Floor") != NULL_ENTITY);
 
-	// And exactly one camera, which is the child the second pass would have
-	// added had it looked only at whether it had run before.
+	// And still no camera: the viewer's, not the world's.
 	size_t cameras = 0;
 	store.EachChild(first, [&](Entity child) {
 		if (store.InstanceNameOf(child) == Name("Camera")) {
 			cameras++;
 		}
 	});
-	CHECK(cameras == 1);
+	CHECK(cameras == 0);
 }
 
 TEST_CASE("a service carries its scope and Lighting carries more", "[scene][services]") {

@@ -1081,6 +1081,26 @@ namespace engine::render {
 			return false;
 		}
 
+		// **One frame queued rather than SDL's two, and the frame rate is not
+		// what this buys.** The default lets the CPU submit a second frame
+		// before the GPU has finished the first, so what a display is showing is
+		// up to two frames behind the input that produced it — 33 ms at 60 Hz
+		// before the compositor takes its turn. SDL's own wording is that higher
+		// values "increase throughput at the expense of visual latency", and an
+		// editor is the case where that trade is backwards: nobody drags a
+		// splitter to reach a frame rate, and every millisecond between the
+		// mouse and the picture is felt by the hand holding it.
+		//
+		// What it costs is the throughput it was buying. A frame that would have
+		// overlapped now waits, so a GPU-bound scene loses some of its rate —
+		// which is why the measurement that matters here is the one taken by
+		// hand, not the one the profiler reports.
+		if (window != nullptr && !SDL_SetGPUAllowedFramesInFlight(State->Device, 1)) {
+			// Not fatal. The default is a working configuration and the only
+			// thing lost is the latency this was trying to save.
+			ENGINE_WARN("SDL_SetGPUAllowedFramesInFlight: {}", SDL_GetError());
+		}
+
 		const char *driver = SDL_GetGPUDeviceDriver(State->Device);
 		State->Backend = driver ? driver : "unknown";
 

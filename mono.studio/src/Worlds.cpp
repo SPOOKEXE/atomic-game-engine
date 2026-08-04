@@ -21,6 +21,17 @@ namespace studio {
 			return;
 		}
 
+		// **Before `Begin`, and it is the only place it can go.**
+		// `SetNextWindowFocus` applies to the next window submitted, and
+		// focusing a window that shares a dock node with another is what selects
+		// its tab — which is the whole point here: the Worlds panel is docked
+		// beside the Explorer and a new game wants it in front. See
+		// `FocusWorlds`.
+		if (FocusWorlds > 0) {
+			FocusWorlds--;
+			ImGui::SetNextWindowFocus();
+		}
+
 		if (!ImGui::Begin("Worlds", &ShowWorlds)) {
 			ImGui::End();
 			return;
@@ -335,9 +346,15 @@ namespace studio {
 			// caught.** With two panels open on two worlds, the one that was
 			// not the active scene was closed under the panel showing it —
 			// which looks exactly like the second viewport being broken.
-			const bool watchedSecond = Second.Open && Second.World == world;
+			bool watched = false;
+			for (const ViewportState &view : Extras) {
+				if (view.Open && view.World == world) {
+					watched = true;
+					break;
+				}
+			}
 
-			if (world == PlayerWorld || world == Active || watchedSecond) {
+			if (world == PlayerWorld || world == Active || watched) {
 				Touch(world);
 				continue;
 			}

@@ -51,6 +51,11 @@ namespace studio {
 		// The name a brand-new game and its first world take.
 		constexpr std::string_view DEFAULT_GAME = "Untitled";
 		constexpr std::string_view DEFAULT_WORLD = "Start";
+
+		// The two worlds a new game opens with. See `Editor::NewGame` for why
+		// there are two of them and why they are these two.
+		constexpr std::string_view SKYGRID_WORLD = "SkyGrid";
+		constexpr std::string_view MIRROR_WORLD = "Mirrors";
 	}
 
 	// The engine log, teed into the Output panel.
@@ -141,7 +146,7 @@ namespace studio {
 		ShowStatistics = Settings.ShowStatistics;
 		ShowFrameGraph = Settings.ShowFrameGraph;
 		IdleCloseSeconds = Settings.IdleCloseSeconds;
-		Second.Open = Settings.ShowSecondViewport;
+		Extras[0].Open = Settings.ShowSecondViewport;
 
 		// Before anything reads a file. Changing it later would leave whatever
 		// had already loaded pointing at the old tree.
@@ -243,9 +248,11 @@ namespace studio {
 		// identity it sits at the origin looking down an axis, which is inside
 		// or past whatever the world holds — a panel that opens showing nothing
 		// reads as a panel that does not work, and that is exactly how it read.
-		Second.Yaw = CameraYaw;
-		Second.Pitch = CameraPitch;
-		Second.Frame = CameraFrame;
+		for (ViewportState &view : Extras) {
+			view.Yaw = CameraYaw;
+			view.Pitch = CameraPitch;
+			view.Frame = CameraFrame;
+		}
 
 		// After the game is loaded and the camera is placed, because starting a
 		// run needs worlds to start it in.
@@ -408,7 +415,9 @@ namespace studio {
 		PresentWorld(frameSeconds);
 	}
 
-	void Editor::InstallExampleScript(Store &store) {
+	void Editor::InstallExampleScript(
+		Store &store, std::string_view file, std::string_view instanceName
+	) {
 		// **A `Script` in the tree, not a scene built behind somebody's back.**
 		// `examples::LoadScene` would run the file right now and leave the
 		// mirror's parts in the world as though an author had placed them —
@@ -429,8 +438,8 @@ namespace studio {
 		// bridge — so finding the file needs its fallback. What goes *into* the
 		// world is the short name, because an absolute path from this machine
 		// would be written into the save file.
-		static const Name PATH("examples/Mirrors-1-world.luau");
-		const Name located(engine::examples::ExamplePath("Mirrors-1-world.luau"));
+		const Name PATH(std::string("examples/") + std::string(file));
+		const Name located(engine::examples::ExamplePath(std::string(file)));
 
 		// **Read now and filed into the world**, rather than left as a path for
 		// the runtime to resolve later. `ReadSource` looks in the cache before
@@ -454,13 +463,80 @@ namespace studio {
 		cache.Set(PATH, text);
 		store.SetResource(cache);
 
-		const Entity script = store.CreateInstance(engine::script::ScriptClass(), "MirrorScene");
+		const Entity script =
+			store.CreateInstance(engine::script::ScriptClass(), std::string(instanceName));
 		if (script == NULL_ENTITY) {
 			return;
 		}
 
 		store.SetParent(script, service);
 		store.SetProperty(script, Name("Source"), &PATH, sizeof(PATH));
+	}
+
+	void Editor::ExpandWorldTree(WorldId world) {
+		Universe->Enter(world, [this](Store &store) {
+			// Every entity, not only the ones with children. A leaf in the set
+			// costs one comparison the first time the tree draws and is then
+			// dropped; filtering them out here would mean walking the children
+			// of everything, which is the work the explorer is about to do
+			// anyway.
+			store.EachEntity([this](Entity instance) { Expanded.push_back(instance.Id); });
+		});
+
+		ExpandedWorlds.push_back(world.Index);
+	}
+
+	void Editor::EnsureViewerCamera(
+		WorldId world, const engine::core::CFrame &eye, const engine::scene::Camera &lens
+	) {
+		if (!world.IsValid() || Universe->IsRemote(world)) {
+			return;
+		}
+
+		Universe->Enter(world, [&](Store &store) {
+			const Entity workspace = engine::scene::WorkspaceOf(store);
+			if (workspace == NULL_ENTITY) {
+				return;
+			}
+
+			Entity camera = store.FindFirstChild(workspace, "Camera");
+
+			if (camera == NULL_ENTITY) {
+				camera = store.CreateInstance(engine::scene::CameraClass(), "Camera");
+				if (camera == NULL_ENTITY) {
+					return;
+				}
+
+				store.SetParent(camera, workspace);
+
+				// **Marked before anything can save it.** A save between
+				// creating it and marking it would put this editor's viewpoint
+				// into the game file, which is the whole thing this component
+				// exists to stop.
+				store.Set(camera, engine::scene::TransientComponent{});
+
+				// The world's live camera, so a script asking what it is
+				// looking through gets this rather than nothing.
+				engine::scene::ActiveCamera active;
+				active.Entity = camera;
+				store.SetResource(active);
+			}
+
+			// **Followed, not driven, when somebody is looking through it.**
+			// Writing the eye into the camera every frame would fight an author
+			// dragging its CFrame in the properties panel — the view would
+			// snap back on the next frame and the field would look broken.
+			if (FollowCamera == camera) {
+				return;
+			}
+
+			if (auto *transform = store.GetMutable<engine::scene::Transform>(camera)) {
+				transform->Frame = eye;
+			}
+			if (auto *component = store.GetMutable<engine::scene::Camera>(camera)) {
+				*component = lens;
+			}
+		});
 	}
 
 	void Editor::SampleFrame(float frameSeconds) {
@@ -490,10 +566,37 @@ namespace studio {
 		// half the frame rate. Drawing both in one frame means `Render` taking
 		// a list of views, which is a change to the shared renderer and is
 		// tracked separately.
-		const bool bothOpen = ShowViewport && Second.Open;
-		DrawingViewport = bothOpen ? (DrawingViewport ^ 1u) : (ShowViewport ? 0u : (Second.Open ? 1u : 0u));
+		// **Round-robin over whatever is open.** `Renderer::Render` owns the
+		// whole frame — swapchain, interface, present — so it draws one world
+		// per call, and N open panels therefore take turns. Each keeps its own
+		// target and shows the last texture drawn into it.
+		//
+		// Skipping the closed ones matters: rotating through four slots with
+		// one panel open would redraw it every fourth frame for no reason.
+		size_t candidates[1 + EXTRA_VIEWPORTS];
+		size_t candidateCount = 0;
 
-		const bool drawingSecond = DrawingViewport == 1;
+		if (ShowViewport) {
+			candidates[candidateCount++] = 0;
+		}
+		for (size_t index = 0; index < EXTRA_VIEWPORTS; index++) {
+			if (Extras[index].Open) {
+				candidates[candidateCount++] = index + 1;
+			}
+		}
+
+		if (candidateCount == 0) {
+			// Nothing to draw into. The frame still runs — the chrome is drawn
+			// and presented — so the editor does not freeze when every viewport
+			// is closed.
+			DrawingViewport = 0;
+		} else {
+			RoundRobin = (RoundRobin + 1) % candidateCount;
+			DrawingViewport = candidates[RoundRobin];
+		}
+
+		ViewportState *extra = ExtraAt(DrawingViewport);
+		const bool drawingSecond = extra != nullptr;
 
 		// **The second panel defaults to a *different* world, not to the active
 		// one.** Two viewports showing the same world is one view drawn twice
@@ -501,17 +604,16 @@ namespace studio {
 		// thing somebody opening the second one would see. Where there is only
 		// one world it follows the active one, because a blank panel is worse
 		// than a duplicate.
-		if (drawingSecond && !Second.World.IsValid()) {
+		if (drawingSecond && !extra->World.IsValid()) {
 			for (const WorldId id : Universe->Worlds()) {
 				if (id != Active) {
-					Second.World = id;
+					extra->World = id;
 					break;
 				}
 			}
 		}
 
-		const WorldId shown =
-			drawingSecond ? (Second.World.IsValid() ? Second.World : Active) : Active;
+		const WorldId shown = drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active;
 
 		// PreRender runs whether or not the simulation did: it is the phase
 		// that turns state into something to draw, and an edited world's state
@@ -536,12 +638,60 @@ namespace studio {
 			instances = &drawn;
 		}
 
-		const engine::core::CFrame &eye = drawingSecond ? Second.Frame : CameraFrame;
-		const float reach = drawingSecond ? Second.Speed : CameraSpeed;
-		engine::render::SceneTarget &target = drawingSecond ? Second.Target : WorldTarget;
+		// **The scene's camera when one is being looked through.** The free
+		// camera is what an editor flies; a `Camera` instance is content, and
+		// moving content should move what a viewport showing it draws — which
+		// it did not, and which is why the instance looked broken.
+		engine::core::CFrame eye = drawingSecond ? extra->Frame : CameraFrame;
+		float reach = drawingSecond ? extra->Speed : CameraSpeed;
+
+		const Entity follow = drawingSecond ? extra->Follow : FollowCamera;
+		if (follow != NULL_ENTITY && shown.IsValid()) {
+			bool followed = false;
+			Universe->Enter(shown, [&](Store &store) {
+				if (!store.Alive(follow)) {
+					return;
+				}
+				if (const auto *transform = store.Get<engine::scene::Transform>(follow)) {
+					eye = transform->Frame;
+					followed = true;
+				}
+			});
+
+			if (!followed) {
+				// The camera was deleted, or the viewport was pointed at another
+				// world. Dropped rather than left pointing at a dead handle,
+				// which would freeze the view where the camera used to be.
+				if (drawingSecond) {
+					extra->Follow = NULL_ENTITY;
+				} else {
+					FollowCamera = NULL_ENTITY;
+				}
+			}
+		}
+		engine::render::SceneTarget &target = drawingSecond ? extra->Target : WorldTarget;
 
 		engine::scene::Camera lens;
 		lens.FarPlane = std::max(lens.FarPlane, reach * 40.0f);
+
+		// A followed camera brings its own field of view and clip planes: those
+		// are its properties, and looking through it while ignoring them would
+		// be looking through something else.
+		if (follow != NULL_ENTITY && shown.IsValid()) {
+			Universe->Enter(shown, [&](Store &store) {
+				if (store.Alive(follow)) {
+					if (const auto *component = store.Get<engine::scene::Camera>(follow)) {
+						lens = *component;
+					}
+				}
+			});
+		}
+
+		// **The viewer's camera, kept in step with the eye.** It is what a
+		// script sees as the current camera and what the explorer shows; the
+		// editor's free camera is still what decides the view unless somebody
+		// is looking through this one.
+		EnsureViewerCamera(shown, eye, lens);
 
 		LastFrame = Renderer.Render(
 			eye,
@@ -628,15 +778,46 @@ namespace studio {
 		GamePath.clear();
 		Modified = false;
 		InstanceCounts.clear();
+		ExpandedWorlds.clear();
 
-		Active = AddWorld(Name(DEFAULT_WORLD));
+		// **Two worlds, and the pair is the point rather than a bigger sample.**
+		// A one-world template is a template for the thing this engine is not:
+		// the universe holds subworlds, they tick *alongside* each other under
+		// `ExecutionMode::WorldParallel`, and a viewport per world is what makes
+		// that visible instead of asserted. A new game that opened one world
+		// taught everybody the single-scene habit, and the second world was a
+		// menu item nobody had a reason to click.
+		//
+		// They are also two different kinds of scene on purpose. The skygrid is
+		// sparse geometry over empty sky — mostly background, nothing to hide a
+		// culling or projection mistake behind. The mirror is the opposite: a
+		// surface camera, a texture sampled back, and a floor under it. One
+		// template exercises both halves of the renderer.
+		const WorldId grid = AddWorld(Name(SKYGRID_WORLD));
+		const WorldId mirrors = AddWorld(Name(MIRROR_WORLD));
+
+		Active = grid;
 		SelectionWorld = Active;
+
+		// **Explicit, though it is also the default.** A universe that had
+		// loaded a game which set something else keeps that setting, and the
+		// whole reason this template has two worlds is to show them running
+		// together. See `world::ExecutionMode`.
+		Universe->SetMode(engine::world::ExecutionMode::WorldParallel);
+
+		// **No floor here, and the example says why in its header.** A skygrid
+		// with a baseplate under it is a baseplate with decoration above it: the
+		// frustum fills with floor, nothing is culled, and the scene stops being
+		// the thing it was written to be.
+		Universe->Enter(grid, [this](Store &store) {
+			InstallExampleScript(store, "SkyGrid.luau", "SkyGridScene");
+		});
 
 		// A floor, because an empty world is a black frame and a black frame
 		// looks like a broken renderer. This is the one piece of content the
 		// editor authors on a user's behalf, and it is a `Part` like any other
 		// — deletable, renameable, and written into the save file.
-		Universe->Enter(Active, [this](Store &store) {
+		Universe->Enter(mirrors, [this](Store &store) {
 			const Entity baseplate = store.CreateInstance(engine::scene::PartClass(), "Baseplate");
 
 			// **Under the workspace, because that is what a workspace is for.**
@@ -660,10 +841,30 @@ namespace studio {
 			const engine::core::Color3 grey{0.32f, 0.34f, 0.36f};
 			store.SetProperty(baseplate, Name("Color"), &grey, sizeof(grey));
 
-			InstallExampleScript(store);
+			InstallExampleScript(store, "Mirrors-1-world.luau", "MirrorScene");
 		});
 
-		Say("new game");
+		// **A viewport each, pinned rather than left following the active
+		// world.** An extra viewport with no world of its own draws whatever is
+		// being edited, so two panels would show one scene twice and the
+		// template would demonstrate nothing.
+		if (ViewportState *second = ExtraAt(1); second != nullptr) {
+			second->World = mirrors;
+			second->Open = true;
+		}
+		ShowViewport = true;
+
+		// Open in the tree, both of them, and the Worlds panel in front. A
+		// template whose second world is behind a collapsed arrow and an
+		// unselected tab is a template nobody finds.
+		ExpandWorldTree(grid);
+		ExpandWorldTree(mirrors);
+
+		// Enough frames to outlast a first-run layout rebuild. See
+		// `FocusWorlds`.
+		FocusWorlds = 4;
+
+		Say("new game: two worlds, skygrid and mirrors, ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {

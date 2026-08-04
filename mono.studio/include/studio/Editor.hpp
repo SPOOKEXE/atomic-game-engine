@@ -33,6 +33,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/script/Runtime.hpp>
@@ -40,6 +41,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
+#include <array>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -544,7 +546,21 @@ namespace studio {
 		// and undone by Stop.
 		//
 		// @param store The world to install it into.
-		void InstallExampleScript(engine::ecs::Store &store);
+		// @param file The staged example's file name, e.g. `SkyGrid.luau`.
+		// @param instanceName What the `Script` is called in the tree.
+		void InstallExampleScript(
+			engine::ecs::Store &store, std::string_view file, std::string_view instanceName
+		);
+
+		// Marks every instance in a world as expanded in the explorer.
+		//
+		// **A request rather than a state, which is what `Expanded` already
+		// is.** The set is consumed the first time the tree draws, so this says
+		// "open these once" and imgui owns what is open from then on — a tree
+		// that re-expanded every frame could not be collapsed.
+		//
+		// @param world The world whose instances to open.
+		void ExpandWorldTree(WorldId world);
 
 		WorldId AddWorld(engine::core::Name name);
 		void RemoveWorld(WorldId world);
@@ -613,6 +629,29 @@ namespace studio {
 		// anything is harmless and is dropped the next time the tree is walked.
 		std::vector<uint64_t> Expanded;
 
+		// Worlds the explorer has been told to expand, by world index.
+		//
+		// **Apart from `Expanded` because the key spaces are different.** A
+		// world is identified by a small index and an instance by a 64-bit id,
+		// and putting both in one set would have world 3 open whatever instance
+		// happened to be entity 3.
+		std::vector<uint32_t> ExpandedWorlds;
+
+		// How many more frames the Worlds panel should ask for its dock tab.
+		//
+		// **A count rather than a flag, and one frame is not enough.** Focus is
+		// an imgui operation that only means anything between `NewFrame` and
+		// `Render`, so `NewGame` — reachable from a menu, a keybind or the
+		// command line — has to leave a request behind. One frame's worth was
+		// tried: on a first run the default layout is rebuilt during that same
+		// frame, and `DockBuilderDockWindow` decides the tab order after the
+		// focus request has already been spent, so the panel docked first wins
+		// and the request is silently lost.
+		//
+		// A few frames outlast the rebuild and cost nothing afterwards — the
+		// panel is already in front, so asking again changes nothing.
+		int FocusWorlds = 0;
+
 		RunMode Mode = RunMode::Edit;
 
 		// Whether a run is held still.
@@ -663,6 +702,39 @@ namespace studio {
 		// Where the eye is. Not an entity in any world: a camera that lived in
 		// the scene would be saved into the game file, replicated, and reset by
 		// Stop — three things an editor camera must not do.
+		// Makes this viewer's own camera in a world, and keeps it where the eye
+		// is.
+		//
+		// **The camera is the viewer's, not the game's.** The editor makes one
+		// to show its point of view, a client makes one for its player, and when
+		// several people edit one game they each make their own — so it carries
+		// `scene::TransientComponent` and is never written into a game file.
+		// Everything else about it is ordinary: it is in `Workspace`, the
+		// explorer shows it, the properties panel edits it, and a script sees it
+		// where it expects the current camera to be.
+		//
+		// @param world The world being viewed.
+		// @param eye   Where this viewport is looking from.
+		// @param lens  Its field of view and clip planes.
+		void EnsureViewerCamera(WorldId world, const engine::core::CFrame &eye, const engine::scene::Camera &lens);
+
+		// A `Camera` instance the main viewport looks through, or null.
+		//
+		// **Because "I moved the Camera and nothing happened" is the obvious
+		// complaint and the answer used to be a design note.** The editor's own
+		// camera is deliberately not an entity — one that lived in the scene
+		// would be saved into the game file, replicated, and reset by Stop. The
+		// consequence was that the `Camera` instance in the tree looked like the
+		// thing driving the viewport and drove nothing at all: an author could
+		// edit its CFrame all day and watch the view sit still.
+		//
+		// Looking through one is the reconciliation. The free camera is still
+		// what an editor flies; a followed camera is the scene's, and moving it
+		// moves the view because that is what it means to look through it.
+		// Right-dragging to fly detaches, which is how somebody gets back
+		// without finding a menu.
+		Entity FollowCamera;
+
 		engine::core::CFrame CameraFrame;
 		float CameraYaw = 0.0f;
 		float CameraPitch = 0.0f;
@@ -699,11 +771,62 @@ namespace studio {
 			bool Panning = false;
 
 			bool Open = false;
+
+			// A `Camera` instance this view looks through, or null for the free
+			// camera. See `Editor::FollowCamera`.
+			Entity Follow;
 		};
 
-		// The second viewport. The first is the fields above, which predate it
+		// The extra viewports. The first is the fields above, which predate them
 		// and which every other panel already reads.
-		ViewportState Second;
+		//
+		// **Three of them, so a universe of subareas can be watched at once.**
+		// A fixed array rather than a vector: the panels are named windows imgui
+		// remembers by title, so they cannot be created on demand without the
+		// saved layout having a name it has never seen — and a studio with an
+		// unbounded number of viewports is one where the frame rate divides by a
+		// number nobody chose.
+		static constexpr size_t EXTRA_VIEWPORTS = 3;
+		std::array<ViewportState, EXTRA_VIEWPORTS> Extras;
+
+		// Which viewport a panel index refers to, or null for the main one.
+		//
+		// @param index 0 is the main viewport, 1..EXTRA_VIEWPORTS the others.
+		// @return The state, or null when the index is the main viewport.
+		ViewportState *ExtraAt(size_t index) {
+			return index == 0 || index > EXTRA_VIEWPORTS ? nullptr : &Extras[index - 1];
+		}
+
+		// Which viewport the toolbar is reporting on.
+		//
+		// **The one you last clicked in, so the transport is about the picture
+		// you are looking at.** With one viewport this is always zero and
+		// nothing about the toolbar changes. With two it is the difference
+		// between a scene selector that says what you are editing and one that
+		// says what some other panel happens to be pinned to — and with two
+		// worlds ticking in parallel, a readout naming the wrong one is worse
+		// than no readout.
+		//
+		// Not saved: it follows the mouse and re-establishes itself on the first
+		// click of a session.
+		size_t FocusedViewport = 0;
+
+		// The world a viewport is showing.
+		//
+		// **An extra viewport with no pin follows the active world**, which is
+		// what makes a freshly opened panel show something rather than nothing.
+		// The main viewport is always the active world; it has no pin of its own
+		// because "the world being edited" is what it means.
+		//
+		// @param index 0 is the main viewport, 1..EXTRA_VIEWPORTS the others.
+		// @return The world it draws, which may be invalid if there is none.
+		WorldId ViewportWorld(size_t index) {
+			const ViewportState *extra = ExtraAt(index);
+			if (extra != nullptr && extra->World.IsValid()) {
+				return extra->World;
+			}
+			return Active;
+		}
 
 		// **Which viewport the renderer draws this frame.** `Renderer::Render`
 		// owns the whole frame — it acquires the swapchain, records the
@@ -711,11 +834,16 @@ namespace studio {
 		// therefore take turns: each keeps its own target and its own texture,
 		// and shows the most recent frame drawn into it.
 		//
-		// The cost is that two open viewports refresh at half the frame rate
-		// each. That is honest for an editor watching two worlds and it is not
-		// the end state: drawing both in one frame is a change to `Render` to
-		// take a list of views, which is task #17.
+		// The cost is that N open viewports refresh at a *fraction* of the frame
+		// rate each — a sixtieth of a second still goes by, but any one panel
+		// is redrawn every N frames. That is honest for an editor watching
+		// several worlds tick and it is not the end state: drawing them all in
+		// one frame is a change to `Render` to take a list of views.
 		size_t DrawingViewport = 0;
+
+		// Where the rotation is up to, over the *open* panels rather than over
+		// all of them.
+		size_t RoundRobin = 0;
 
 		// --- dialogs -----------------------------------------------------------
 		//
@@ -858,6 +986,11 @@ namespace studio {
 		engine::world::WorldState PendingWorldStateTo = engine::world::WorldState::Active;
 		WorldId PendingRenameWorld;
 		std::string PendingRenameTo;
+		// A camera to look through, and whether the menu asked at all — the two
+		// are separate because "look through nothing" is a real request.
+		Entity PendingLookThrough;
+		bool PendingLookThroughSet = false;
+
 		bool PendingDuplicate = false;
 		bool PendingDelete = false;
 
