@@ -65,4 +65,55 @@ namespace engine::scene {
 
 		return opaque;
 	}
+
+	size_t PartitionCasters(std::span<const DrawInstance> instances, std::span<uint32_t> order) {
+		const auto casts = [instances](uint32_t index) {
+			return index < instances.size() && instances[index].CastShadow;
+		};
+
+		return static_cast<size_t>(
+			std::distance(order.begin(), std::stable_partition(order.begin(), order.end(), casts))
+		);
+	}
+
+	ScenePlan OrderScene(
+		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
+	) {
+		ScenePlan plan;
+
+		const size_t opaque = OrderForDrawing(instances, eye, order);
+		plan.Opaque = static_cast<uint32_t>(opaque);
+		plan.Transparent = static_cast<uint32_t>(instances.size() - opaque);
+
+		if (opaque == 0) {
+			return plan;
+		}
+
+		// **Mirrors to the back of the opaque head, so the surface pass can
+		// skip them.** A mirror sits between its own reflection camera and the
+		// world — the camera is *behind* the plane looking through it — so
+		// drawing the pane into its own reflection fills the texture with the
+		// pane, and the mirror then shows itself. That reads as a mirror which
+		// is not working at all rather than as an ordering mistake.
+		//
+		// Physically right as well as necessary: nothing sees itself in its own
+		// reflection.
+		const std::span<uint32_t> head(order.data(), opaque);
+		const auto boundary = std::stable_partition(head.begin(), head.end(), [instances](uint32_t index) {
+			return index < instances.size() && instances[index].Surface < 0;
+		});
+
+		plan.Surfaces = static_cast<uint32_t>(std::distance(boundary, head.end()));
+		plan.Reflected = plan.Opaque - plan.Surfaces;
+
+		// Casters within each of those two runs. Nested rather than replacing
+		// the partition above, for the reason `ScenePlan::SurfaceCasters`
+		// gives.
+		plan.ReflectedCasters =
+			static_cast<uint32_t>(PartitionCasters(instances, head.subspan(0, plan.Reflected)));
+		plan.SurfaceCasters =
+			static_cast<uint32_t>(PartitionCasters(instances, head.subspan(plan.Reflected, plan.Surfaces)));
+
+		return plan;
+	}
 }

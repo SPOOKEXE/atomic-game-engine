@@ -7,8 +7,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -183,4 +185,162 @@ TEST_CASE("an empty list orders to nothing", "[scene][drawinstance]") {
 	std::vector<uint32_t> order;
 	CHECK(engine::scene::OrderForDrawing({}, Vector3::Zero, order) == 0);
 	CHECK(order.empty());
+}
+
+namespace {
+	// A draw list where each entry is identified by its index, so an assertion
+	// about an *order* can name what it expects.
+	std::vector<DrawInstance> Casters(const std::vector<bool> &casts) {
+		std::vector<DrawInstance> instances(casts.size());
+		for (size_t index = 0; index < casts.size(); index++) {
+			instances[index].CastShadow = casts[index];
+			instances[index].Frame = CFrame(Vector3(static_cast<float>(index), 0.0f, 0.0f));
+		}
+		return instances;
+	}
+
+	std::vector<uint32_t> Identity(size_t count) {
+		std::vector<uint32_t> order(count);
+		for (size_t index = 0; index < count; index++) {
+			order[index] = static_cast<uint32_t>(index);
+		}
+		return order;
+	}
+}
+
+TEST_CASE("a scene where everything casts is left alone", "[scene][drawinstance]") {
+	// The common case by a long way, and the one where a partition that
+	// reordered anything would be a recording that stopped replaying for a
+	// feature nobody used.
+	const std::vector<DrawInstance> instances = Casters({true, true, true, true});
+	std::vector<uint32_t> order = Identity(instances.size());
+
+	CHECK(engine::scene::PartitionCasters(instances, order) == 4);
+	CHECK(order == std::vector<uint32_t>{0, 1, 2, 3});
+}
+
+TEST_CASE("a scene where nothing casts partitions to nothing", "[scene][drawinstance]") {
+	const std::vector<DrawInstance> instances = Casters({false, false, false});
+	std::vector<uint32_t> order = Identity(instances.size());
+
+	// Zero, which is what tells the renderer to skip the shadow pass outright
+	// rather than clear a depth target nothing writes into.
+	CHECK(engine::scene::PartitionCasters(instances, order) == 0);
+	CHECK(order == std::vector<uint32_t>{0, 1, 2});
+}
+
+TEST_CASE("casters move to the front and keep world order", "[scene][drawinstance]") {
+	const std::vector<DrawInstance> instances = Casters({false, true, false, true, true});
+	std::vector<uint32_t> order = Identity(instances.size());
+
+	CHECK(engine::scene::PartitionCasters(instances, order) == 3);
+
+	// **Stable on both sides.** The casters keep the order the world produced
+	// them in and so do the ones left behind — an unstable partition would
+	// shuffle them from frame to frame as the comparison fell either way, which
+	// is a determinism failure arriving through a renderer.
+	CHECK(order == std::vector<uint32_t>{1, 3, 4, 0, 2});
+}
+
+TEST_CASE("an empty range partitions to nothing", "[scene][drawinstance]") {
+	// The range the renderer passes for the mirror run in a scene with no
+	// mirror in it, which is almost every scene.
+	const std::vector<DrawInstance> instances = Casters({true, false});
+	std::vector<uint32_t> order;
+
+	CHECK(engine::scene::PartitionCasters(instances, order) == 0);
+}
+
+// **The arithmetic the shadow pass actually performs**, exercised through the
+// function the renderer calls rather than reproduced here.
+//
+// That distinction is the whole value of the test. Every field of `ScenePlan`
+// becomes a `first_instance` and a count on a draw call, and those are the part
+// of a render pass that is easy to get wrong by one and impossible to see in a
+// screenshot — a shadow range short by one loses a caster somewhere off screen
+// and the frame still looks right. A test that recomputed the offsets would
+// only check that the author of the test agreed with themselves.
+TEST_CASE("the scene plan divides a view into the runs its passes draw", "[scene][drawinstance]") {
+	std::vector<DrawInstance> instances(6);
+
+	// 0: plain opaque caster
+	// 1: opaque, does not cast
+	// 2: mirror, casts
+	// 3: transparent — never reaches the shadow pass whatever it says
+	// 4: plain opaque caster
+	// 5: mirror, does not cast
+	instances[0].CastShadow = true;
+	instances[1].CastShadow = false;
+	instances[2].CastShadow = true;
+	instances[2].Surface = 0;
+	instances[3].CastShadow = true;
+	instances[3].Transparency = 0.5f;
+	instances[4].CastShadow = true;
+	instances[5].CastShadow = false;
+	instances[5].Surface = 0;
+
+	std::vector<uint32_t> order;
+	const engine::scene::ScenePlan plan = engine::scene::OrderScene(instances, Vector3::Zero, order);
+
+	CHECK(plan.Opaque == 5);
+	CHECK(plan.Transparent == 1);
+	CHECK(plan.Reflected == 3);
+	CHECK(plan.Surfaces == 2);
+	CHECK(plan.ReflectedCasters == 2);
+	CHECK(plan.SurfaceCasters == 1);
+
+	// What the shadow pass's two draws would submit, gathered as the GPU would
+	// from `first_instance` and a count.
+	std::vector<uint32_t> shadowed;
+	for (uint32_t at = 0; at < plan.ReflectedCasters; at++) {
+		shadowed.push_back(order[at]);
+	}
+	for (uint32_t at = 0; at < plan.SurfaceCasters; at++) {
+		shadowed.push_back(order[plan.Reflected + at]);
+	}
+	std::sort(shadowed.begin(), shadowed.end());
+
+	// Instances 0, 2 and 4: every opaque caster, and neither the opaque
+	// non-caster, the mirror that does not cast, nor the transparent one that
+	// claims to.
+	CHECK(shadowed == std::vector<uint32_t>{0, 2, 4});
+
+	// And the surface pass's single range holds no mirror, which is what stops
+	// a mirror from filling its own reflection with itself.
+	for (uint32_t at = 0; at < plan.Reflected; at++) {
+		INFO(at);
+		CHECK(instances[order[at]].Surface < 0);
+	}
+}
+
+// A scene with nothing in it, and a scene with nothing opaque in it. Both reach
+// the renderer — a world of glass is a world somebody will build — and both
+// would divide by the wrong count if the plan were derived rather than
+// returned.
+TEST_CASE("a scene plan copes with nothing to draw", "[scene][drawinstance]") {
+	std::vector<uint32_t> order;
+
+	const engine::scene::ScenePlan empty = engine::scene::OrderScene({}, Vector3::Zero, order);
+	CHECK(empty.Opaque == 0);
+	CHECK(empty.Transparent == 0);
+	CHECK(empty.Reflected == 0);
+	CHECK(empty.Surfaces == 0);
+	CHECK(empty.ReflectedCasters == 0);
+	CHECK(empty.SurfaceCasters == 0);
+
+	std::vector<DrawInstance> glass(3);
+	for (DrawInstance &pane : glass) {
+		pane.Transparency = 0.5f;
+		pane.CastShadow = true;
+	}
+
+	const engine::scene::ScenePlan blended = engine::scene::OrderScene(glass, Vector3::Zero, order);
+	CHECK(blended.Opaque == 0);
+	CHECK(blended.Transparent == 3);
+
+	// **No casters, though every one of them says it casts.** Glass writing
+	// full depth into the shadow map would cast a solid shadow; the pass draws
+	// the opaque runs alone, and this is where that is decided.
+	CHECK(blended.ReflectedCasters == 0);
+	CHECK(blended.SurfaceCasters == 0);
 }

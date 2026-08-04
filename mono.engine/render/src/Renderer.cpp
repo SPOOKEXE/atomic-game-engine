@@ -1664,69 +1664,24 @@ namespace engine::render {
 
 		State->SceneInstances.assign(instances.begin(), instances.end());
 
-		size_t sceneOpaque = 0;
+		// **Every range the three scene passes submit, from one call.** The
+		// ordering, the mirror partition and the caster partition are arithmetic
+		// over a `shared` type and they live in `scene::OrderScene` — where a
+		// headless suite can get at them. A renderer is the one module a test
+		// cannot exercise, so the counts it hands to a draw call are the last
+		// place they should be computed. See `scene::ScenePlan` for the runs.
+		scene::ScenePlan plan;
 		{
 			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
-			sceneOpaque = scene::OrderForDrawing(State->SceneInstances, sceneEye, State->SceneOrder);
+			plan = scene::OrderScene(State->SceneInstances, sceneEye, State->SceneOrder);
 		}
+
 		const auto sceneCount = static_cast<uint32_t>(State->SceneInstances.size());
-		const auto sceneTransparent = static_cast<uint32_t>(sceneCount - sceneOpaque);
-
-		// **Surface instances to the back of the scene's opaque head, so the
-		// surface pass can skip them.** A mirror sits between its own reflection
-		// camera and the world — the camera is *behind* the plane looking
-		// through it — so drawing the pane into its own reflection fills the
-		// texture with the pane. The mirror then shows itself, which reads as a
-		// mirror that is not working at all.
-		//
-		// Physically right as well as necessary: nothing sees itself in its own
-		// reflection.
-		uint32_t sceneSurfaces = 0;
-		if (sceneOpaque > 0) {
-			const auto opaqueEnd = State->SceneOrder.begin() + static_cast<ptrdiff_t>(sceneOpaque);
-			const auto boundary =
-				std::stable_partition(State->SceneOrder.begin(), opaqueEnd, [&](uint32_t index) {
-					return State->SceneInstances[index].Surface < 0;
-				});
-
-			sceneSurfaces = static_cast<uint32_t>(std::distance(boundary, opaqueEnd));
-		}
-		const auto sceneReflected = static_cast<uint32_t>(sceneOpaque) - sceneSurfaces;
-
-		// **Casters to the front of each of those two runs, not of the opaque
-		// head as a whole.** The surface pass needs the non-surface instances
-		// contiguous from zero and the shadow pass needs the casters
-		// contiguous; one partition cannot give both, so this one nests inside
-		// the one above rather than replacing it. The shadow pass then draws
-		// two ranges instead of one, and the second is empty in every scene
-		// without a mirror in it.
-		//
-		// Stable, for the reason every other ordering here is: an opaque scene
-		// must come out of this exactly as it went in, or a recording stops
-		// replaying.
-		//
-		// Only the opaque head is considered at all. A transparent caster is
-		// already excluded by the pass drawing the opaque range alone — glass
-		// writing full depth into the shadow map casts a solid shadow, which is
-		// the most obviously wrong thing glass can do.
-		uint32_t reflectedCasters = 0;
-		uint32_t surfaceCasters = 0;
-		if (sceneOpaque > 0) {
-			ENGINE_PROFILE_CAT("partition casters", core::ProfileCategory::Render);
-
-			const auto begin = State->SceneOrder.begin();
-			const auto casts = [&](uint32_t index) { return State->SceneInstances[index].CastShadow; };
-
-			const auto reflectedEnd = begin + static_cast<ptrdiff_t>(sceneReflected);
-			reflectedCasters = static_cast<uint32_t>(
-				std::distance(begin, std::stable_partition(begin, reflectedEnd, casts))
-			);
-
-			const auto opaqueEnd = begin + static_cast<ptrdiff_t>(sceneOpaque);
-			surfaceCasters = static_cast<uint32_t>(
-				std::distance(reflectedEnd, std::stable_partition(reflectedEnd, opaqueEnd, casts))
-			);
-		}
+		const auto sceneOpaque = static_cast<size_t>(plan.Opaque);
+		const uint32_t sceneTransparent = plan.Transparent;
+		const uint32_t sceneReflected = plan.Reflected;
+		const uint32_t reflectedCasters = plan.ReflectedCasters;
+		const uint32_t surfaceCasters = plan.SurfaceCasters;
 
 		{
 			// Allocation, on the frame an overlay first appears or changes size.

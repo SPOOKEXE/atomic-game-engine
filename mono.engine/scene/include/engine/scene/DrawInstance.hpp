@@ -156,4 +156,103 @@ namespace engine::scene {
 	// @param instance The instance to classify.
 	// @return `true` when it belongs in the transparent pass.
 	bool IsTransparent(const DrawInstance &instance);
+
+	// Moves the shadow casters to the front of an order, in place.
+	//
+	// **A run of one order rather than the whole of it**, because the renderer
+	// has already divided the opaque head into what a mirror may see and what it
+	// may not — and one partition cannot serve both passes. The surface pass
+	// wants the non-surface instances contiguous from zero; the shadow pass
+	// wants the casters contiguous. So this is applied to each of those runs
+	// separately and the shadow pass draws two ranges, the second of which is
+	// empty in every scene with no mirror in it.
+	//
+	// **Stable**, for the reason every ordering in this file is: an opaque scene
+	// must come out exactly as it went in, or a recording stops replaying.
+	//
+	// Here rather than in `render` for `OrderForDrawing`'s reason — it is
+	// arithmetic over a `shared` type, and it is the piece of the shadow pass
+	// that can be checked without a GPU. The pass itself is index arithmetic
+	// over what this returns, which is exactly the part that is easy to get
+	// wrong by one and impossible to see in a screenshot.
+	//
+	// Only meaningful over opaque instances. A blended fragment writing full
+	// depth would cast a solid shadow, so the renderer never offers this the
+	// transparent tail — this does not re-check that, because a caller that
+	// passed the tail has already made a different mistake.
+	//
+	// @param instances The draw list the indices refer to.
+	// @param order     Indices into `instances`, reordered in place.
+	// @return How many at the front of `order` cast a shadow.
+	size_t PartitionCasters(std::span<const DrawInstance> instances, std::span<uint32_t> order);
+
+	// Where each pass over the scene range starts, and how long it is.
+	//
+	// **The index arithmetic three passes share, in one place that can be
+	// checked without a GPU.** Each field is an offset or a count into the order
+	// `OrderScene` produced, and every one of them is a `first_instance` and a
+	// count handed to a draw call. That is the part of a render pass that is
+	// easiest to get wrong by one and impossible to see in a screenshot: a
+	// shadow range short by one loses a caster somewhere off screen, and the
+	// frame looks fine.
+	//
+	// The runs, in the order they sit in the buffer:
+	//
+	//     [0,                 ReflectedCasters)  opaque, no mirror, casts
+	//     [ReflectedCasters,  Reflected)         opaque, no mirror, no shadow
+	//     [Reflected,         Reflected + SurfaceCasters)  mirror, casts
+	//     [Reflected + SurfaceCasters, Opaque)   mirror, no shadow
+	//     [Opaque,            Opaque + Transparent)  blended, far to near
+	//
+	// @since v0.7
+	struct ScenePlan {
+		// How many at the front of the order are opaque. The blended tail is
+		// everything after it.
+		uint32_t Opaque = 0;
+
+		// How many are blended, sorted back to front from the eye.
+		uint32_t Transparent = 0;
+
+		// Opaque instances that are *not* mirrors, contiguous from zero.
+		//
+		// What the surface pass draws: a mirror must not appear in its own
+		// reflection, because it sits between its reflection camera and the
+		// world and would fill the texture with itself.
+		uint32_t Reflected = 0;
+
+		// Opaque mirrors, sitting at the back of the opaque head.
+		uint32_t Surfaces = 0;
+
+		// Shadow casters among `Reflected`, contiguous from zero.
+		uint32_t ReflectedCasters = 0;
+
+		// Shadow casters among `Surfaces`, contiguous from `Reflected`.
+		//
+		// **The reason the shadow pass draws two ranges and not one.** The
+		// surface pass needs the non-mirrors contiguous from zero and the shadow
+		// pass needs the casters contiguous; one partition cannot give both, so
+		// the casters are partitioned within each run and the mirror half is
+		// reached separately. It is zero in every scene with no mirror in it.
+		uint32_t SurfaceCasters = 0;
+	};
+
+	// Divides one view's draw list into the runs its passes submit.
+	//
+	// Orders the list — opaque in world order, blended back to front from `eye`
+	// — then moves mirrors to the back of the opaque head, then moves shadow
+	// casters to the front of each of the two runs that leaves.
+	//
+	// **Here rather than in `render` for `OrderForDrawing`'s reason**, and with
+	// more force: this is where the counts a draw call is given come from, and a
+	// renderer is the one module a headless suite cannot exercise. Keeping the
+	// arithmetic in `shared` is what lets it be wrong in a test rather than on
+	// somebody's screen.
+	//
+	// @param instances The draw list.
+	// @param eye       Where the view is, for the blended sort.
+	// @param order     Filled with indices into `instances`. Resized first.
+	// @return Where each pass starts and how long it is.
+	ScenePlan OrderScene(
+		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
+	);
 }
