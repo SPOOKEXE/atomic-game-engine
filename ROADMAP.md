@@ -304,6 +304,8 @@ Deferred:
 - [x] **every panel is a panel.** Dockable, tear-off, resizable, closable, with a View menu to bring back what was closed and a Reset Layout for when it has gone wrong. The dockspace id carries a version, because imgui owns the layout once it has written its ini — which is right, and means a panel added later is a window the saved layout has never heard of and opens floating in a corner. Both new panels did exactly that before the version existed
 - [x] **headless rendering, and it is a device with no window rather than a hidden one.** `Renderer::Initialise(nullptr)` claims nothing: no swapchain, nothing presented, no overlay and no interface pass — and the world still drawn, into the scene target. A hidden window still owns a swapchain, and whether one can be acquired for a window nobody can see is a per-platform answer nobody should have to know. The colour format then has two answers, so it gained exactly one asker — `Impl::ColourFormat` — because a second call to `SDL_GetGPUSwapchainTextureFormat` is a pipeline built for one target and bound to another
 - [x] **`studio --headless --frames N --run play --capture PATH`**, which is the editor driven by something that is not a person. `Renderer::RequestSceneCapture` downloads the scene texture through a fence and writes a BMP. `just studio-smoke` loads a game, starts it, renders it and writes the result with **no display at all** — which is how the run cycle above was verified while the machine's screen was busy. Deliberately not part of `just check`: it needs a GPU, and a build container without one would fail a check about the editor for a reason that is not about the editor
+- [_] for server/client play, create two different scenes for Server-view and Client-view as two separate viewports. Also allow running subworlds together and teleporting between worlds in studio.
+- [_] in studio, add automatic startup and closing of worlds when player teleports between them (e.g. 5 minutes no activity in empty world => closes, teleport to world that is not loaded => load it)
 
 Found while building this, and fixed here rather than filed:
 
@@ -408,8 +410,6 @@ The rendering and camera work this version already carried, unchanged:
 - [_] put infront mirrors to see if it works with texture rendering
 - [_] scripts that create MeshPart and set mesh properties (surfaceappearance equivalent but as components).
 - [_] finish replication for server/client, server authoritative
-- [_] for server/client play, create two different scenes for Server-view and Client-view as two separate viewports. Also allow running subworlds together and teleporting between worlds in studio.
-- [_] in studio, add automatic startup and closing of worlds when player teleports between them (e.g. 5 minutes no activity in empty world => closes, teleport to world that is not loaded => load it)
 
 ### v0.10
 
