@@ -234,25 +234,95 @@ namespace studio {
 	}
 
 	void Editor::DriveCamera() {
-		// **Whichever viewport the pointer is over.** One camera driver for two
-		// panels rather than two copies: the rules — right-drag to look,
-		// middle-drag to pan, wheel to dolly, F to frame — are the same in
-		// both, and a second copy is a second place for them to drift.
-		for (ViewportState &view : Extras) {
+		// **The pointer decides first, and focus decides when the pointer is
+		// nowhere.** One camera driver for every panel rather than a copy each:
+		// the rules — right-drag to look, middle-drag to pan, wheel to dolly, F
+		// to frame, WASD to fly — are the same in all of them.
+		//
+		// The order is the whole of it. A viewport under the pointer is the one
+		// a mouse gesture means, whichever panel was last clicked; a viewport
+		// with the keyboard in it is the one WASD means, wherever the pointer
+		// has wandered off to. Asking the pointer first and falling back to
+		// focus gives both without either overriding the other, because a
+		// gesture and a keypress cannot arrive at the same panel by different
+		// routes.
+		for (size_t index = 1; index <= EXTRA_VIEWPORTS; index++) {
+			ViewportState &view = Extras[index - 1];
 			if (view.Open && (view.Hovered || view.Active || view.Panning)) {
 				DriveCameraFor(
-					view.Frame, view.Yaw, view.Pitch, view.Speed, view.Hovered, view.Active, view.Panning
+					view.Frame,
+					view.Yaw,
+					view.Pitch,
+					view.Speed,
+					view.Hovered,
+					view.Active,
+					view.Panning,
+					FocusedIsViewport && FocusedViewport == index
 				);
 				return;
 			}
 		}
 
-		DriveCameraFor(CameraFrame, CameraYaw, CameraPitch, CameraSpeed, ViewportHovered, ViewportActive,
-					   ViewportPanning);
+		if (ViewportHovered || ViewportActive || ViewportPanning) {
+			DriveCameraFor(
+				CameraFrame,
+				CameraYaw,
+				CameraPitch,
+				CameraSpeed,
+				ViewportHovered,
+				ViewportActive,
+				ViewportPanning,
+				FocusedIsViewport && FocusedViewport == 0
+			);
+			return;
+		}
+
+		// Nothing under the pointer, so the keyboard's panel gets the frame —
+		// but only if the keyboard is genuinely in a viewport. `FocusedViewport`
+		// alone still names one after a click into the properties panel, which
+		// is right for the transport readout and wrong here. Both are resolved
+		// earlier this frame; see `ResolveFocusedViewport`.
+		if (!FocusedIsViewport) {
+			return;
+		}
+
+		if (ViewportState *focused = ExtraAt(FocusedViewport); focused != nullptr) {
+			if (focused->Open) {
+				DriveCameraFor(
+					focused->Frame,
+					focused->Yaw,
+					focused->Pitch,
+					focused->Speed,
+					focused->Hovered,
+					focused->Active,
+					focused->Panning,
+					true
+				);
+			}
+			return;
+		}
+
+		DriveCameraFor(
+			CameraFrame,
+			CameraYaw,
+			CameraPitch,
+			CameraSpeed,
+			ViewportHovered,
+			ViewportActive,
+			ViewportPanning,
+			true
+		);
 	}
 
 	void Editor::DriveCameraFor(
-		CFrame &frame, float &yaw, float &pitch, float &speed, bool hovered, bool active, bool &panning
+		CFrame &frame,
+		float &yaw,
+		float &pitch,
+		float &speed,
+		bool hovered,
+		bool active,
+		bool &panning,
+		bool focused
 	) {
 		ImGuiIO &io = ImGui::GetIO();
 
@@ -315,11 +385,31 @@ namespace studio {
 		// whenever the pointer crossed it would be unusable; only the
 		// translation is freed here.
 		//
-		// **`WantCaptureKeyboard` is what keeps this out of the script
-		// editor.** imgui raises it while any text field has focus, so typing
-		// `while` in a script does not fly the camera four ways. That guard was
-		// already here and is why this is safe to widen.
-		const bool driving = (active || hovered) && !io.WantCaptureKeyboard;
+		// **`WantTextInput`, not `WantCaptureKeyboard` — and that swap is the
+		// bug, not a tidy-up.** The claim above it was that imgui raises
+		// `WantCaptureKeyboard` "while any text field has focus". It does not.
+		// `imgui.cpp` raises it while *navigation* is active:
+		//
+		//     else if (io.NavActive && (ConfigFlags & NavEnableKeyboard) &&
+		//              io.ConfigNavCaptureKeyboard)
+		//         io.WantCaptureKeyboard = true;
+		//
+		// `ui::Interface` sets `NavEnableKeyboard` and `ConfigNavCaptureKeyboard`
+		// defaults to true, so **clicking a viewport to focus it set the very
+		// flag that switched its camera off**. WASD worked until you clicked on
+		// the picture, which is the first thing anybody does.
+		//
+		// **This is the keyboard twin of the bug fixed twelve lines above**, and
+		// it survived that fix: `hovered && !io.WantCaptureMouse` could never be
+		// satisfied because hovering an imgui window is what raises
+		// `WantCaptureMouse`. Same mistake, same file, other device — a
+		// "does imgui want this" flag used to answer "is a widget eating this".
+		//
+		// `WantTextInput` is the question that was meant: it is raised only by an
+		// active text field, so typing `while` in the script editor still does
+		// not fly the camera four ways. `DrawShortcuts` already guards on this
+		// one, for the same reason.
+		const bool driving = (active || hovered || focused) && !io.WantTextInput;
 
 		if (driving) {
 			if (ImGui::IsKeyDown(ImGuiKey_W)) {
@@ -377,8 +467,11 @@ namespace studio {
 		}
 
 		// F frames the selection, which is the one navigation command that
-		// needs no aim at all.
-		if (overViewport && !io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+		// needs no aim at all — so it follows the keyboard rather than the
+		// pointer, and carries the same `WantTextInput` correction as `driving`.
+		// It had the identical `WantCaptureKeyboard` guard and was dead in
+		// exactly the same circumstances.
+		if ((overViewport || focused) && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
 			FocusSelection(position, yaw, pitch);
 		}
 
@@ -964,6 +1057,7 @@ namespace studio {
 
 			if (window == focused || window == context->NavWindow) {
 				FocusedViewport = index;
+				FocusedIsViewport = true;
 				return;
 			}
 		}
@@ -972,6 +1066,13 @@ namespace studio {
 		// is deliberate: clicking the explorer or a property field should not
 		// blank the transport's readout. It keeps describing the viewport you
 		// were last in, which is the one you are still looking at.
+		//
+		// **The camera must not read it that way, which is why there are two
+		// facts here rather than one.** "Which viewport is being reported on"
+		// survives a click into the properties panel; "is the keyboard in a
+		// viewport" does not, and a camera driven by the first would fly while
+		// somebody typed a number into a field. See `FocusedIsViewport`.
+		FocusedIsViewport = false;
 	}
 
 	void Editor::DrawToolbar() {

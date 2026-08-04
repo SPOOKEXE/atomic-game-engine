@@ -376,6 +376,16 @@ namespace studio {
 		// **One driver rather than one per panel.** Right-drag to look,
 		// middle-drag to pan, wheel to dolly, F to frame — the same in both
 		// views, and a second copy is a second place for them to drift apart.
+		//
+		// **The mouse follows the pointer and the keyboard follows focus**, which
+		// is one function and two rules because they are two different questions.
+		// Turning a view the pointer is not over would be a camera swinging in a
+		// panel somebody is not looking at; refusing to fly a panel that has been
+		// clicked into, because the pointer has since moved off it, is the bug
+		// this parameter was added for.
+		//
+		// @param focused Whether this is the panel the keyboard is in. Frees WASD
+		//        and F from needing the pointer over the rectangle.
 		void DriveCameraFor(
 			engine::core::CFrame &frame,
 			float &yaw,
@@ -383,7 +393,8 @@ namespace studio {
 			float &speed,
 			bool hovered,
 			bool active,
-			bool &panning
+			bool &panning,
+			bool focused
 		);
 
 		// One instance and its subtree, in the explorer.
@@ -964,6 +975,19 @@ namespace studio {
 		// Not saved: it follows the mouse and re-establishes itself on the first
 		// click of a session.
 		size_t FocusedViewport = 0;
+
+		// Whether the keyboard is actually in that viewport right now.
+		//
+		// **Not the same question as `FocusedViewport`, and conflating them
+		// flies the camera while somebody types in a property field.** That one
+		// keeps naming the last viewport when focus moves to the explorer or the
+		// properties panel — deliberately, so the transport readout does not
+		// blank every time you click something. This one goes false, because the
+		// camera must not answer to a keyboard that is somewhere else.
+		//
+		// Both are resolved together in `ResolveFocusedViewport`, from the same
+		// window, which is what stops them disagreeing.
+		bool FocusedIsViewport = false;
 
 		// Whether a viewport claimed focus from a click during this frame.
 		//

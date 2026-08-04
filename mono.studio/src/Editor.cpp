@@ -1535,8 +1535,25 @@ namespace studio {
 				// is left alone: somebody who put a viewport on another scene
 				// meant it, and taking that panel would be the editor
 				// rearranging their layout when they pressed Play.
+				//
+				// **At most one, and this was over-reach when it was written.**
+				// `--run play` starts every world in the game, so a rule of "one
+				// panel per run" opened a viewport per *world* — three or four
+				// pictures nobody asked for, each one a slice of the centre pane
+				// and a turn in `PresentWorld`'s round robin, so every view also
+				// refreshed a third as often. One client view is the feature;
+				// the rest are reachable from the scene selector like any other
+				// world.
+				const bool alreadyShown = std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
+					return other.Link != nullptr && other.Link->IsRunning();
+				});
+
 				const WorldId replica = link->ReplicaWorld();
 				for (ViewportState &view : Extras) {
+					if (alreadyShown) {
+						break;
+					}
+
 					if (!view.World.IsValid() || view.World == replica) {
 						view.World = replica;
 						view.Open = true;
