@@ -783,6 +783,24 @@ namespace studio {
 			});
 		}
 
+		// **And the same for a world that is not a replica, which is the half
+		// the rule above was written for and did not cover.** `AimReplicaViewer`
+		// and `EnsureViewerCamera` are the two ways this editor names an eye —
+		// one per world kind — and only the first was on this side of `Present`.
+		// The second ran after it, so `aim-surface-cameras` reflected through
+		// whatever `ActiveCamera` had been left pointing at.
+		//
+		// With one viewport that is last frame's eye, which reads as a mirror
+		// lagging by a frame. **With two it is the other viewport's camera**,
+		// because each panel calls this in turn and the last one to run wins: a
+		// mirror in one panel then tracks the camera somebody is flying in the
+		// other, and stops moving when they stop. That is what a mirror aimed
+		// from the wrong eye looks like, and the projection it produces does not
+		// line up with the pane it is projected onto.
+		if (shown.IsValid() && !IsReplicaWorld(shown)) {
+			EnsureViewerCamera(shown, eye, lens);
+		}
+
 		if (shown.IsValid()) {
 			// **The render gate rides along with it**, because
 			// `client::InstallPresentation` registers `sync-rendered` in this
@@ -830,11 +848,17 @@ namespace studio {
 			instances = &drawn;
 		}
 
-		// **The viewer's camera, kept in step with the eye.** It is what a
-		// script sees as the current camera and what the explorer shows; the
-		// editor's free camera is still what decides the view unless somebody
-		// is looking through this one.
-		EnsureViewerCamera(shown, eye, lens);
+		// **The viewer's camera for a replica, which the call above skipped.**
+		// The non-replica case has already run — before `Present`, because
+		// `aim-surface-cameras` reads what it writes — and doing it twice would
+		// be a second write of the same eye in the same frame.
+		//
+		// It is what a script sees as the current camera and what the explorer
+		// shows; the editor's free camera is still what decides the view unless
+		// somebody is looking through this one.
+		if (shown.IsValid() && IsReplicaWorld(shown)) {
+			EnsureViewerCamera(shown, eye, lens);
+		}
 
 		LastFrame = Renderer.Render(
 			eye,

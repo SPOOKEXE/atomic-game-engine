@@ -250,3 +250,50 @@ TEST_CASE("a world with no active camera has nothing to reflect", "[scene][surfa
 
 	CHECK(AimSurfaceCameras(mirror.World) == 0);
 }
+
+TEST_CASE("the reflection follows the eye that is live when it is aimed", "[scene][surfacecameras]") {
+	// **The contract a caller has to order itself around, and the one that had
+	// no test.** This pass reads `ActiveCamera` at the moment it runs, so a host
+	// that moves its eye *after* aiming gets a mirror reflecting where the eye
+	// used to be. `mono.studio` did exactly that: `EnsureViewerCamera` wrote the
+	// viewport's eye after `Universe::Present`, which is the phase
+	// `aim-surface-cameras` runs in.
+	//
+	// With one viewport that is a reflection one frame stale. **With two it is
+	// the other viewport's camera** — each panel writes the same `ActiveCamera`
+	// in turn, so the last to run decides what every mirror reflects, and a
+	// mirror in one panel tracks a camera being flown in the other.
+	//
+	// The pass is right and the caller was wrong, so what is pinned here is the
+	// pass's half: aim, move, aim again, and the answer moves with the eye.
+	Mirror mirror;
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	// The face is at z = -0.2 and the eye at z = 20, so the reflection lands at
+	// 2 * -0.2 - 20.
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-20.4f, TOLERANCE));
+
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 8.0f});
+
+	// **Still the old answer**, because nothing has re-aimed. This is the state
+	// a caller leaves itself in by writing the eye too late, and it is worth
+	// asserting rather than assuming: it is what makes the stale reflection a
+	// property of the ordering rather than of the arithmetic.
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-20.4f, TOLERANCE));
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-8.4f, TOLERANCE));
+
+	// And a second eye entirely, which is the two-viewport shape: whichever
+	// entity `ActiveCamera` names when this runs is the one every mirror in the
+	// world reflects through. There is one reflection per surface, not one per
+	// viewer, so a host showing a world twice has to aim between the two draws.
+	const Entity second =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Camera")), "Second");
+	mirror.World.Set<Transform>(second, Transform{CFrame(Vector3{0.0f, 0.0f, 40.0f})});
+	mirror.World.SetResource(ActiveCamera{second, 16.0f / 9.0f});
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-40.4f, TOLERANCE));
+}
