@@ -1,5 +1,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <imgui.h>
@@ -105,11 +106,14 @@ namespace studio {
 
 						ImGui::Separator();
 
-						// Monospace would be better and imgui's default font is
-						// not one. Loading a font is a file this repository does
-						// not have and a licence somebody has to choose, so the
-						// default is used and the gap is named here rather than
-						// left to be noticed.
+						// **The monospace face, which is what makes this a code
+						// editor rather than a text box.** Columns line up, an
+						// `l` is not an `I`, and indentation is a width rather
+						// than a guess. `mono.studio/AGENTS.md` listed the
+						// absence of one as a deferred gap with the reason being
+						// a font this repository did not have; it has four now.
+						const engine::ui::ScopedFont code(engine::ui::Typeface::Monospace);
+
 						if (CodeField("##text", tab.Text, -1.0f, -1.0f)) {
 							tab.Modified = true;
 						}

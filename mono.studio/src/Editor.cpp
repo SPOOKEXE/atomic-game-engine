@@ -12,6 +12,7 @@
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/ui/Theme.hpp>
@@ -165,6 +166,8 @@ namespace studio {
 		engine::ui::InterfaceSettings interfaceSettings;
 		interfaceSettings.Scale = Settings.Scale;
 		interfaceSettings.Docking = true;
+		interfaceSettings.DisplayWidth = Settings.Width;
+		interfaceSettings.DisplayHeight = Settings.Height;
 
 		// Beside the binary rather than in the working directory, which is
 		// wherever the launcher happened to be. A layout that moved every time
@@ -172,17 +175,18 @@ namespace studio {
 		// editor forgetting it.
 		interfaceSettings.LayoutPath = (engine::core::Paths::Base() / "studio-layout.ini").string();
 
-		// **The interface still runs headless, and that is the point.** Its
-		// backends need a window, so they are not started — but the imgui
-		// context is, so every panel's code executes, every layout is computed
-		// and every action a script or an agent triggers goes through exactly
-		// the path a person's click would. What is missing is the drawing.
+		// **The interface runs headless, and that is the point.** Its backends
+		// need a window and are not started without one — but the context is, so
+		// every panel's code executes, every layout is computed and every action
+		// a script or an agent triggers goes through exactly the path a person's
+		// click would. What is missing is the drawing.
 		if (!Interface.Initialise(Renderer, Window, interfaceSettings)) {
-			if (!Settings.Headless) {
-				ENGINE_ERROR("the editor interface would not start");
-				return false;
-			}
-			ENGINE_INFO("headless: the interface runs without its backends");
+			ENGINE_ERROR("the editor interface would not start");
+			return false;
+		}
+
+		if (!Interface.IsDrawable()) {
+			ENGINE_INFO("headless: the panels run and nothing draws them");
 		}
 
 		// Attached before anything else runs, so a failure during start-up is
@@ -318,18 +322,6 @@ namespace studio {
 	}
 
 	void Editor::Present(float frameSeconds) {
-		if (Settings.Headless) {
-			// **No panels and no imgui frame.** Its backends were never started,
-			// so `Begin` would be a frame nothing can end. What a headless run
-			// exercises is everything below the drawing: the universe, the
-			// scripts, the world's presentation phase and the render into a
-			// target somebody can look at afterwards.
-			WorldTarget.Width = static_cast<uint32_t>(Settings.Width);
-			WorldTarget.Height = static_cast<uint32_t>(Settings.Height);
-
-			PresentWorld(frameSeconds);
-			return;
-		}
 
 		// Drained once per frame, before anything draws it. The sink collects
 		// from whatever thread logged; this is the only place the panel's own
@@ -464,6 +456,7 @@ namespace studio {
 		GameName = Name(DEFAULT_GAME);
 		GamePath.clear();
 		Modified = false;
+		InstanceCounts.clear();
 
 		Active = AddWorld(Name(DEFAULT_WORLD));
 		SelectionWorld = Active;
@@ -474,6 +467,15 @@ namespace studio {
 		// — deletable, renameable, and written into the save file.
 		Universe->Enter(Active, [](Store &store) {
 			const Entity baseplate = store.CreateInstance(engine::scene::PartClass(), "Baseplate");
+
+			// **Under the workspace, because that is what a workspace is for.**
+			// `AddWorld` installed the fixtures before this ran, so the parent
+			// exists; the guard is for the case where it did not, and a floor
+			// at the root is a better answer there than no floor at all.
+			if (const Entity workspace = engine::scene::WorkspaceOf(store);
+				workspace != engine::ecs::NULL_ENTITY) {
+				store.SetParent(baseplate, workspace);
+			}
 
 			const Vector3 size{128.0f, 1.0f, 128.0f};
 			store.SetProperty(baseplate, Name("Size"), &size, sizeof(size));
@@ -510,6 +512,7 @@ namespace studio {
 		GameName = info.Name;
 		GamePath = path;
 		Modified = false;
+		InstanceCounts.clear();
 
 		// The client's half, on every world the file brought. A world with no
 		// draw list renders as an empty frame, which reads as a broken renderer
@@ -517,6 +520,14 @@ namespace studio {
 		for (const WorldId id : Universe->Worlds()) {
 			Universe->Enter(id, [](Store &store, Scheduler &systems) {
 				client::InstallPresentation(store, systems, 256);
+
+				// **Idempotent, which is what lets it run on every file
+				// whatever its age.** A game saved before services existed has
+				// none and gets them here; one saved after has them all and
+				// gets nothing back. Branching on the file's format version
+				// instead would be a version test that has to stay right
+				// forever.
+				engine::scene::InstallServices(store);
 			});
 		}
 
@@ -565,6 +576,39 @@ namespace studio {
 		return true;
 	}
 
+	bool Editor::ExportUniverse(const std::filesystem::path &path) {
+		// **The universe and every world under it, which is what an `.agame`
+		// already is** — so this shares `SaveGame`'s writer and differs from
+		// Save As in what it does to the editor afterwards, which is nothing.
+		//
+		// That difference is the whole reason it is a separate action rather
+		// than a second name for Save As. Save As *adopts* the path: the title
+		// bar changes, the modified marker clears, and Ctrl+S from then on
+		// writes there. Exporting is handing a copy to somebody — a build
+		// server, a teammate, a backup — and an author who exported a copy and
+		// then pressed Ctrl+S expecting to save their own file would have
+		// written over the copy instead. `ExportActiveWorld` has always drawn
+		// the same line one level down.
+		for (OpenScript &tab : Scripts) {
+			// Same order as `SaveGame`, and for the same reason: an export
+			// taken before the buffers were flushed is the game minus whatever
+			// is currently being typed.
+			if (tab.Modified) {
+				SaveScriptTab(tab);
+			}
+		}
+
+		std::string error;
+		if (!engine::game::SaveGame(*Universe, GameName, path, error)) {
+			Say("export failed: " + error, LogLevel::Error);
+			return false;
+		}
+
+		Say("exported the universe — " + std::to_string(Universe->Count()) + " world(s) — to " +
+			path.string());
+		return true;
+	}
+
 	bool Editor::ImportWorldFile(const std::filesystem::path &path) {
 		std::string error;
 
@@ -589,6 +633,7 @@ namespace studio {
 
 		Universe->Enter(imported, [](Store &store, Scheduler &systems) {
 			client::InstallPresentation(store, systems, 256);
+			engine::scene::InstallServices(store);
 		});
 
 		Active = imported;
@@ -614,7 +659,19 @@ namespace studio {
 
 		Universe->Enter(id, [](Store &store, Scheduler &systems) {
 			client::InstallPresentation(store, systems, 256);
+
+			// **The fixtures, on every world this program makes.** A world
+			// with no `Workspace` is one where `game:GetService` fails and
+			// where an author has nowhere obvious to put a part — and the one
+			// place that would be discovered is a script that already ran.
+			engine::scene::InstallServices(store);
 		});
+
+		// **`WorldId` is a reused slot**, so a cached count keyed by one can
+		// outlive the world it counted and be shown for the next world to take
+		// that slot. Cheaper to drop the lot on a change than to key the cache
+		// on something that survives.
+		InstanceCounts.clear();
 
 		MarkModified();
 		return id;
@@ -643,6 +700,7 @@ namespace studio {
 			ClearSelection();
 		}
 
+		InstanceCounts.clear();
 		MarkModified();
 		Say("removed world '" + name + "'");
 	}
@@ -863,6 +921,7 @@ namespace studio {
 		}
 
 		EditSnapshot.clear();
+		InstanceCounts.clear();
 
 		// The schedulers went with the worlds, so the presentation systems have
 		// to be installed again. A restored world with no draw list renders as

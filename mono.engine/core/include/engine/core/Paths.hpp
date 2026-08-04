@@ -37,5 +37,15 @@ namespace engine::core {
 		// <assets>/shaders/<module>/. A module stages its own SPIR-V under its
 		// own name so that two modules cannot collide on fullscreen.vert.
 		static std::filesystem::path Shaders(std::string_view module);
+
+		// Where the vendored typefaces are staged.
+		//
+		// Under the assets root rather than beside the binary, so
+		// `--override-assets-directory` moves the fonts with everything else —
+		// a tree that had the shaders relocated and the fonts not would be half
+		// an override.
+		//
+		// @return `Assets() / "fonts"`.
+		static std::filesystem::path Fonts();
 	};
 }

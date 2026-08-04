@@ -232,6 +232,14 @@ namespace studio {
 		void DrawProperties();
 		void DrawScripts();
 		void DrawOutput();
+
+		// The colour theme and the interface scale.
+		//
+		// **A panel rather than a modal**, because choosing a theme means
+		// looking at the editor while it changes — and a modal is a rectangle
+		// over the thing being judged.
+		void DrawSettings();
+
 		void DrawStatusBar();
 		void DrawDialogs();
 
@@ -265,6 +273,19 @@ namespace studio {
 		// same actions is how "Duplicate is on one of them" happens.
 		void DrawInstanceActions(engine::ecs::Store &store, WorldId world, Entity instance);
 
+		// The searchable Insert Object submenu, for every menu that offers one.
+		//
+		// **Takes no `Store`, which is what lets a world's menu have one.** An
+		// instance's menu is drawn from inside `Universe::Enter`; a world's row
+		// and the universe root are drawn from outside it. A helper that needed
+		// a store could only serve the first, and that asymmetry is exactly why
+		// Insert Object used to be missing from the other two.
+		//
+		// @param id     Distinguishes this menu's search box from the others.
+		// @param world  The world the new instance goes into.
+		// @param parent What to parent it to, or a null entity for a root.
+		void DrawInsertMenu(const char *id, WorldId world, Entity parent);
+
 		// The searchable class list. Returns the class chosen, or an invalid id.
 		engine::ecs::ClassId DrawClassPicker(const char *id);
 
@@ -275,6 +296,33 @@ namespace studio {
 
 		// Applies what the Worlds panel queued, from outside `Universe::Enter`.
 		void ApplyPendingWorldActions();
+
+		// The world with this slot index, or an invalid handle.
+		//
+		// **A `WorldId` cannot be rebuilt from an index alone** — the handle
+		// carries more than the slot, and `Universe::Adopt` reuses slots — so
+		// the drag payload carries the index and this resolves it against the
+		// live list rather than reconstructing one.
+		//
+		// @param index The slot a drag payload carried.
+		// @return The handle, or an invalid one when no world holds that slot.
+		WorldId WorldFor(uint32_t index) const;
+
+		// Moves an instance and its subtree into another world.
+		//
+		// **Written out and rebuilt, because a handle does not cross.** The
+		// subtree goes through `game::WriteInstanceDocument`, is read into the
+		// destination and is destroyed in the source — so what survives is
+		// exactly what a save file preserves, and a property pointing at
+		// something left behind comes back at its default with a warning.
+		//
+		// @param source   The world it is in.
+		// @param instance The subtree's root.
+		// @param target   The world it is going to.
+		// @param parent   What to parent it to there, or null for a root.
+		// @return `false` when it could not be written, rebuilt, or either
+		//         world is remote. The source is left untouched on failure.
+		bool MoveInstanceToWorld(WorldId source, Entity instance, WorldId target, Entity parent);
 
 		// How many instances a scene holds, recounted on a clock.
 		//
@@ -322,6 +370,18 @@ namespace studio {
 		bool OpenGame(const std::filesystem::path &path);
 		bool SaveGame(const std::filesystem::path &path);
 		bool ExportActiveWorld(const std::filesystem::path &path);
+
+		// Writes the universe and every world in it, without adopting the path.
+		//
+		// **Separate from Save As rather than a second name for it.** Save As
+		// adopts: the title changes, the modified marker clears and Ctrl+S
+		// writes there from then on. An export is a copy handed to somebody
+		// else, and an author who exported one and then pressed Ctrl+S would
+		// otherwise have overwritten the copy instead of their own file.
+		//
+		// @param path Where to write.
+		// @return `false` when the file would not be written.
+		bool ExportUniverse(const std::filesystem::path &path);
 		bool ImportWorldFile(const std::filesystem::path &path);
 
 		WorldId AddWorld(engine::core::Name name);
@@ -439,6 +499,7 @@ namespace studio {
 		bool AskingSaveAs = false;
 		bool AskingOpen = false;
 		bool AskingExport = false;
+		bool AskingExportUniverse = false;
 		bool AskingImport = false;
 		bool AskingNewWorld = false;
 		std::string PathBuffer;
@@ -466,6 +527,25 @@ namespace studio {
 			Entity Parent;
 		};
 
+		// A reparent whose two ends are in different worlds.
+		//
+		// **A separate action from `PendingReparentAction`, because it is a
+		// separate operation.** Within a world a move is a `SetParent` and the
+		// instance keeps its handle. Across two it cannot: an `ecs::Entity` is
+		// an index into one store, so the subtree is described, rebuilt on the
+		// far side and the original destroyed. The handle changes, which means
+		// selection, open script tabs and anything else holding one have to be
+		// told — and a single struct covering both would make that
+		// "sometimes".
+		struct PendingMoveAction {
+			WorldId Source;
+			WorldId Target;
+			Entity Instance;
+
+			// What to parent it to in `Target`, or null for a root there.
+			Entity Parent;
+		};
+
 		struct PendingScriptAction {
 			WorldId World;
 			Entity Instance;
@@ -489,6 +569,9 @@ namespace studio {
 		bool ShowScripts = true;
 		bool ShowOutput = true;
 
+		// Closed by default: it is a panel somebody opens to change one thing.
+		bool ShowSettings = false;
+
 		// Whether the next frame rebuilds the default arrangement. Set from the
 		// View menu and acted on at the top of the frame, because rearranging a
 		// dockspace's nodes from inside a menu is rearranging the tree that is
@@ -497,6 +580,7 @@ namespace studio {
 
 		PendingInsertAction PendingInsert;
 		PendingReparentAction PendingReparent;
+		PendingMoveAction PendingMove;
 		PendingScriptAction PendingOpenScript;
 		WorldId PendingRemoveWorld;
 		WorldId PendingActivate;

@@ -322,7 +322,70 @@ Deferred, and named rather than discovered:
 
 ### v0.8
 
-- [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
+**The scripted interface**, which is v0.7's last question answered rather than
+deferred. The ask was: should the studio's own UI be authored in TypeScript,
+with the Roblox `GuiObject` tree as the widget set and React as an option? The
+answer is yes, and **not by writing fifty class registrations first**.
+
+Those classes are shims until three things exist underneath them, and a shim
+that nothing draws is an API with no caller — which is the thing this repository
+refuses everywhere else. In order:
+
+- [_] **`core` gains the value types the tree is made of.** `UDim`, `UDim2`,
+  `Vector2` and `Rect` are already in `core/types` and **none of them is a
+  `PropertyType`** — so a component holding a `UDim2` cannot be a property, cannot
+  be saved, cannot appear in the properties panel and cannot be set from a
+  script. `ecs::PropertyType` is a closed list that grows when userland gains a
+  value, and this is that. Four cases in `game::Values`, four widgets in the
+  properties panel, four in each binding. Small, and everything below needs it
+- [_] **`mono.engine/gui` at L7 `shared` — what a 2D thing *is*.** The class tree
+  as `ecs::Classes` registrations over real components, exactly as `scene` does
+  for `Part`: `GuiBase` → `GuiBase2d` → `GuiObject` → `Frame`, `CanvasGroup`,
+  `GuiButton`(`TextButton`, `ImageButton`), `GuiLabel`(`TextLabel`,
+  `ImageLabel`), `ScrollingFrame`, `TextBox`, `ViewportFrame`, `VideoFrame`;
+  `LayerCollector` → `ScreenGui`, `BillboardGui`, `SurfaceGui`, `PluginGui` →
+  `DockWidgetPluginGui`. **`shared`, not `client`** — a server authors a
+  `ScreenGui` and replicates it, so a type only a client could name would be a
+  type only a client could build one out of. That is `scene`'s argument and it
+  is the same one
+- [_] **Layout, which is arithmetic and belongs beside the tree.** `UDim2`
+  against a parent's absolute rect, `AnchorPoint`, `SizeConstraint`, and the
+  `UIListLayout`/`UIGridLayout`/`UIPadding`/`UIAspectRatioConstraint` modifiers.
+  One pass, parent before child, producing an `AbsolutePosition` and an
+  `AbsoluteSize` per node — which is a component, so the renderer reads it with
+  a query and nothing walks the tree twice
+- [_] **`gui` rendering at L12, as a render pass.** Rectangles, nine-slice,
+  text and clipping — which is a batched quad pipeline plus a glyph atlas. The
+  atlas is the part with a decision in it: `ui` already owns four faces for Dear
+  ImGui, and a second rasteriser for the same four files would be two answers to
+  "what does this glyph look like". `Pass::Interface` is the seam it attaches to
+- [_] **Input routing.** Hit testing back to front, `ZIndex`, `Active`,
+  `Selectable`, and the `InputBegan`/`InputEnded`/`Activated` signals — which is
+  `script::Signals`' shape applied to a tree rather than a new mechanism
+- [_] **`GuiBase3d` and the adornments** — `SelectionBox`, `Handles`,
+  `ArcHandles`, `BoxHandleAdornment` and the rest. **This is what gives the
+  editor gizmos and viewport selection**, which v0.7 deferred, and it is worth
+  doing after the 2D branch rather than before: an adornment is a 3D thing drawn
+  with the 2D tree's input model
+- [_] **`GuiService`, `Path2D`, `GuidRegistryService`** — the services around
+  the tree, once there is a tree for them to be around
+- [_] **The studio's own panels, authored in TypeScript.** This is the point of
+  all of it and it is the *last* step, not the first. `mono.studio` keeps Dear
+  ImGui until the engine's own UI can draw a property grid — because an editor
+  half on each is two widget sets, and the rule against two ways to do one job
+  applies hardest to the thing you look at all day. React is a reconciler over
+  the tree once the tree exists; `react-lua` or a hand-written reconciler are
+  both reasonable and neither is a decision that has to be made yet
+
+**Why not do the shims now, stated so nobody re-asks.** Fifty registered classes
+with no layout, no rendering and no input would put `TextLabel` in the insert
+palette, let somebody parent one under a `Part`, save it into a game file — and
+then draw nothing, forever, with no error. That is worse than not having it: it
+is a feature that looks present and is not. The order above is the order in
+which each step has a caller.
+
+The rendering and camera work this version already carried, unchanged:
+
 - [_] `mono.engine/examples/Mirrors-4-worlds.luau` and `.ts` — split-screen across worlds running in parallel via multi-process. Four `ViewChannel` producers and one compositor, which v0.2 already built and `--worlds N` already drives with a synthetic scene. This demo is what proves the cross-process view path end to end. Both files exist and are empty, same as the v0.6 pair. **Four rather than the two this line used to say**, because the names in the tree are the ones the ports will take and two of anything is the count at which a bug in the placement loop still looks like correct behaviour
 - [_] CurrentCamera
 - [_] basic character controls
@@ -353,7 +416,7 @@ Deferred, and named rather than discovered:
 
 ### v0.10
 
-- [_] ...
+- [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
 
 ### v0.11
 

@@ -21,3 +21,4 @@ out/
 __pycache__/
 *.pyc
 .opencode/
+*.aworld

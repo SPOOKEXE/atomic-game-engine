@@ -12,6 +12,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
@@ -116,6 +117,259 @@ TEST_CASE("a universe of worlds survives a save and a load", "[game][roundtrip]"
 		found = ChildNamed(store, model, "Child") != NULL_ENTITY;
 	});
 	CHECK(found);
+
+	std::filesystem::remove(path);
+}
+
+TEST_CASE("a world's settings are an element and survive the trip", "[game][roundtrip]") {
+	// **What `<WorldProperties>` is for, checked from both ends.** The settings
+	// used to be attributes on `<World>` *and* were written from a
+	// default-constructed `WorldSettings`, so every file claimed 60Hz whatever
+	// the world was authored at. Moving them into an element is the visible
+	// half; writing the world's real numbers is the half that was a bug.
+	RegisterEverything();
+
+	Universe source;
+	AddWorld(source, "Slow", 30.0);
+
+	const std::string document = WriteGame(source, Name("Settings"));
+
+	// The element exists and the numbers are in it, not on `<World>`.
+	XmlDocument parsed;
+	REQUIRE(ParseXml(document, parsed) == XmlStatus::Ok);
+	REQUIRE(parsed.Root() != nullptr);
+	CHECK(parsed.Root()->Attribute("format") == "2");
+
+	const engine::game::XmlElement *world = nullptr;
+	for (const uint32_t index : parsed.Root()->Children) {
+		const engine::game::XmlElement *child = parsed.At(index);
+		if (child != nullptr && child->Name == "World") {
+			world = child;
+		}
+	}
+	REQUIRE(world != nullptr);
+	CHECK(world->Attribute("name") == "Slow");
+	CHECK(world->Attribute("tickRate").empty());
+
+	const engine::game::XmlElement *properties = nullptr;
+	for (const uint32_t index : world->Children) {
+		const engine::game::XmlElement *child = parsed.At(index);
+		if (child != nullptr && child->Name == "WorldProperties") {
+			properties = child;
+		}
+	}
+	REQUIRE(properties != nullptr);
+	CHECK(properties->Attribute("tickRate") == "30");
+	CHECK(properties->Attribute("idleTickRate") == "2");
+	CHECK(properties->Attribute("faultLimit") == "3");
+
+	// **The exported world document has the same section**, spelled out as
+	// text rather than re-parsed. `scripts/Lobby.aworld` is checked in as the
+	// worked example of this format, and a test that only parsed its own
+	// output would let the two drift until somebody opened the file.
+	std::string error;
+	Universe plain;
+	AddWorld(plain, "Lobby");
+	const std::string exported = engine::game::WriteWorldDocument(plain, plain.Find(Name("Lobby")), error);
+
+	CHECK(exported.find(R"(<World format="2" name="Lobby">)") != std::string::npos);
+	CHECK(
+		exported.find("\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" faultLimit=\"3\" />") !=
+		std::string::npos
+	);
+
+	// And it reads back as 30 rather than as the default, which is the whole
+	// point of writing it.
+	const auto path = ScratchFile("engine-game-settings.agame");
+	REQUIRE(SaveGame(source, Name("Settings"), path, error));
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+
+	const WorldId restored = loaded.Find(Name("Slow"));
+	REQUIRE(restored.IsValid());
+	CHECK(loaded.SettingsOf(restored).TickRate == 30.0);
+
+	std::filesystem::remove(path);
+}
+
+TEST_CASE("a world's services are in the file like anything else", "[game][roundtrip]") {
+	// **A service is an instance, so the format needed nothing added for it.**
+	// That is the point of making them entities rather than a side table: they
+	// are written by the same walk that writes a part, they resolve by the same
+	// class lookup, and the only thing that had to be true was that
+	// `RegisterGameClasses` reaches them — which it does, through
+	// `RegisterSceneClasses`.
+	RegisterEverything();
+
+	Universe source;
+	const WorldId world = AddWorld(source, "Lobby");
+	source.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::InstallServices(store);
+		store.SetParent(store.CreateInstance(engine::scene::PartClass(), "Baseplate"), workspace);
+	});
+
+	const auto path = ScratchFile("engine-game-services.agame");
+	std::string error;
+	REQUIRE(SaveGame(source, Name("Serviced"), path, error));
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+
+	const WorldId restored = loaded.Find(Name("Lobby"));
+	REQUIRE(restored.IsValid());
+
+	loaded.Enter(restored, [](Store &store) {
+		const Entity workspace = store.FindFirstRoot("Workspace");
+		REQUIRE(workspace != NULL_ENTITY);
+		CHECK(ChildNamed(store, workspace, "Baseplate") != NULL_ENTITY);
+		CHECK(ChildNamed(store, workspace, "Camera") != NULL_ENTITY);
+
+		const Entity starter = store.FindFirstRoot("StarterPlayer");
+		REQUIRE(starter != NULL_ENTITY);
+		CHECK(ChildNamed(store, starter, "StarterPlayerScripts") != NULL_ENTITY);
+
+		// **The scope survives, and it is the one that would not have.** It is
+		// a computed property over a `uint8_t`, so it is written as a word and
+		// read back through a setter — the path a plain field never takes. A
+		// `ServerStorage` that loaded as `Shared` is a container that stops
+		// being server-only, which is the kind of thing nobody checks.
+		const Entity storage = store.FindFirstRoot("ServerStorage");
+		REQUIRE(storage != NULL_ENTITY);
+		const auto *service = store.Get<engine::scene::ServiceComponent>(storage);
+		REQUIRE(service != nullptr);
+		CHECK(service->Scope == engine::scene::ServiceScope::Server);
+	});
+
+	std::filesystem::remove(path);
+}
+
+TEST_CASE("an instance moves between two worlds", "[game][roundtrip]") {
+	// **What the explorer's cross-world drag is made of.** An `ecs::Entity` is
+	// an index into one store, so a subtree cannot be handed across — it is
+	// described by the same writer a save file uses and rebuilt on the far
+	// side. The properties, the children and the script text all have to come
+	// with it, and the script text is the one that would not have: a `Script`
+	// carries a *path*, and the program itself lives in the source world's
+	// `SourceCache`.
+	RegisterEverything();
+
+	Universe universe;
+	const WorldId from = AddWorld(universe, "From");
+	const WorldId to = AddWorld(universe, "To");
+
+	std::string document;
+	universe.Enter(from, [&](Store &store) {
+		const Entity model = store.CreateInstance(engine::scene::PartClass(), "Model");
+
+		const Vector3 size{4.0f, 8.0f, 4.0f};
+		store.SetProperty(model, Name("Size"), &size, sizeof(size));
+
+		const Entity child = store.CreateInstance(engine::scene::PartClass(), "Child");
+		store.SetParent(child, model);
+
+		const Entity script = store.CreateInstance(engine::script::ScriptClass(), "Behaviour");
+		store.SetParent(script, model);
+
+		const Name path("scripts/behaviour.luau");
+		store.SetProperty(script, Name("Source"), &path, sizeof(path));
+
+		engine::script::SourceCache cache;
+		cache.Set(path, "print('moved')");
+
+		// A second program the move must *not* drag along: writing the whole
+		// source cache would carry every script in the world across.
+		cache.Set(Name("scripts/stays.luau"), "print('stays')");
+		store.SetResource(cache);
+
+		document = engine::game::WriteInstanceDocument(store, model);
+	});
+
+	REQUIRE_FALSE(document.empty());
+
+	std::string error;
+	Entity rebuilt = NULL_ENTITY;
+	universe.Enter(to, [&](Store &store) {
+		// The destination already has something in it, which is the case
+		// `ReadWorldBody` refuses and this one has to allow.
+		store.CreateInstance(engine::scene::PartClass(), "Existing");
+
+		engine::script::SourceCache cache;
+		cache.Set(Name("scripts/local.luau"), "print('local')");
+		store.SetResource(cache);
+
+		rebuilt = engine::game::ReadInstanceDocument(store, document, NULL_ENTITY, error);
+	});
+
+	REQUIRE(rebuilt != NULL_ENTITY);
+	CHECK(error.empty());
+
+	universe.Enter(to, [&](Store &store) {
+		CHECK(store.InstanceNameOf(rebuilt) == Name("Model"));
+		CHECK(ChildNamed(store, rebuilt, "Child") != NULL_ENTITY);
+		CHECK(store.FindFirstRoot("Existing") != NULL_ENTITY);
+
+		Vector3 size;
+		REQUIRE(store.GetProperty(rebuilt, Name("Size"), &size, sizeof(size)));
+		CHECK(size.Y == 8.0f);
+
+		// **The destination's own scripts survive the merge.** `ReadSources`
+		// replaces the resource outright, which is right for an empty world
+		// and would have deleted this one.
+		const auto *cache = store.Resource<engine::script::SourceCache>();
+		REQUIRE(cache != nullptr);
+
+		const std::string *local = cache->Find(Name("scripts/local.luau"));
+		REQUIRE(local != nullptr);
+		CHECK(*local == "print('local')");
+
+		const std::string *moved = cache->Find(Name("scripts/behaviour.luau"));
+		REQUIRE(moved != nullptr);
+		CHECK(*moved == "print('moved')");
+
+		// And the program that was not referenced stayed behind. A miss is a
+		// null pointer here rather than an empty string, deliberately.
+		CHECK(cache->Find(Name("scripts/stays.luau")) == nullptr);
+	});
+}
+
+TEST_CASE("a format 1 file keeps its own settings", "[game][roundtrip]") {
+	// **The compatibility that makes the move safe.** A file written before
+	// the settings became an element has them on `<World>`, and a reader that
+	// only looked in the child would load somebody's 30Hz scene at 60 without
+	// saying anything. Read from the child when it is there and from the
+	// element when it is not — no branch on the version number, because the
+	// shape is what is being read.
+	RegisterEverything();
+
+	const auto path = ScratchFile("engine-game-format1.agame");
+	{
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		file << R"(<?xml version="1.0" encoding="UTF-8"?>
+			<Game format="1" name="Old">
+				<World name="Legacy" tickRate="15" idleTickRate="5" faultLimit="9">
+					<Item class="Part" name="Survivor" />
+				</World>
+			</Game>)";
+	}
+
+	Universe loaded;
+	GameInfo info;
+	std::string error;
+	REQUIRE(LoadGame(loaded, path, info, error));
+	CHECK(error.empty());
+
+	const WorldId world = loaded.Find(Name("Legacy"));
+	REQUIRE(world.IsValid());
+
+	const WorldSettings settings = loaded.SettingsOf(world);
+	CHECK(settings.TickRate == 15.0);
+	CHECK(settings.IdleTickRate == 5.0);
+	CHECK(settings.FaultLimit == 9);
+
+	loaded.Enter(world, [](Store &store) { CHECK(store.FindFirstRoot("Survivor") != NULL_ENTITY); });
 
 	std::filesystem::remove(path);
 }

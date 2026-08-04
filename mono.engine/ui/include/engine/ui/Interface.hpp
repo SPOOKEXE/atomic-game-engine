@@ -64,6 +64,18 @@ namespace engine::ui {
 		// mouse clicks.
 		bool Docking = true;
 
+		// How big the interface believes the display is, when there is no
+		// window to ask.
+		//
+		// **Only read headless.** With a window the platform backend reports the
+		// real size every frame; without one imgui has nothing to go on, and a
+		// zero-sized display clips every panel to nothing — which looks exactly
+		// like the panels not running at all.
+		int DisplayWidth = 1600;
+
+		// How tall, when there is no window to ask. See `DisplayWidth`.
+		int DisplayHeight = 900;
+
 		// Where the layout, the window sizes and the open panels are kept
 		// between runs, or empty to keep nothing.
 		//
@@ -91,16 +103,24 @@ namespace engine::ui {
 		Interface(const Interface &) = delete;
 		Interface &operator=(const Interface &) = delete;
 
-		// Creates the context and both backends against a live renderer.
+		// Creates the context and, when there is a window, both backends.
 		//
-		// The renderer must already be initialised: the SDL_GPU backend builds
-		// its pipeline against the device and the swapchain's colour format,
-		// and neither exists before `Renderer::Initialise` has run.
+		// **A null window is headless and still builds the context.** That is
+		// what makes the panels runnable without a display: every widget's code
+		// executes, every layout is computed, and every action a script or an
+		// agent triggers goes through the path a person's click would. What is
+		// missing is the drawing — `Prepare` reports nothing to draw and the
+		// renderer skips its interface pass.
+		//
+		// With a window the renderer must already be initialised: the SDL_GPU
+		// backend builds its pipeline against the device and the swapchain's
+		// colour format, and neither exists before `Renderer::Initialise` has
+		// run.
 		//
 		// @param renderer The renderer whose frames this will record into.
-		// @param window   The window the renderer claimed.
-		// @param settings Scale, docking and where the layout is kept.
-		// @return `false` when the renderer has no device or a backend refused.
+		// @param window   The window the renderer claimed, or null for headless.
+		// @param settings Scale, docking, display size and layout path.
+		// @return `false` when a backend refused. Headless does not fail.
 		bool
 		Initialise(render::Renderer &renderer, SDL_Window *window, const InterfaceSettings &settings = {});
 
@@ -111,6 +131,13 @@ namespace engine::ui {
 		//
 		// @return `true` when `Begin` may be called.
 		bool IsInitialised() const;
+
+		// Whether the platform and renderer backends are running.
+		//
+		// False headless, where the context exists and nothing draws it.
+		//
+		// @return `true` when this interface can be drawn.
+		bool IsDrawable() const;
 
 		// Offers one SDL event to the interface.
 		//
@@ -162,6 +189,9 @@ namespace engine::ui {
 		void Record(void *commandBuffer, void *renderPass) override;
 
 	  private:
+		// Tears down the two backends. Only called when they were started.
+		void ShutdownBackends();
+
 		struct Impl;
 		std::unique_ptr<Impl> State;
 	};

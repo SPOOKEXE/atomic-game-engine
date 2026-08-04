@@ -1,6 +1,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
@@ -31,7 +32,12 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// — every bump costs everybody their layout.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v2";
+		// **v3 because Settings is a panel the saved layout has never heard
+		// of**, and a panel a layout does not know about opens floating in a
+		// corner. Bumping costs everybody the arrangement they dragged into
+		// place, which is why `mono.studio/AGENTS.md` says to do it when a
+		// panel is added and not otherwise.
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v3";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *EXPLORER = "Explorer";
@@ -39,6 +45,7 @@ namespace studio {
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *SCRIPTS = "Script Editor";
 		constexpr const char *OUTPUT = "Output";
+		constexpr const char *SETTINGS = "Settings";
 
 		// The first-run layout, built once and then owned by the ini file.
 		//
@@ -70,6 +77,11 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
 			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
+
+			// Beside the properties rather than in the centre: it is a panel
+			// somebody opens, changes one thing in, and leaves — and the
+			// centre belongs to the world.
+			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
@@ -113,11 +125,19 @@ namespace studio {
 		DrawProperties();
 		DrawScripts();
 		DrawOutput();
+		DrawSettings();
 		DrawStatusBar();
 		DrawDialogs();
 
 		DriveCamera();
 		DrawShortcuts();
+
+		// **Once, here, after every panel and whether or not any of them
+		// drew.** Panels are closable and every one of them returns early when
+		// closed, so an action queued from a menu in one panel and applied at
+		// the end of another is an action that silently does nothing the moment
+		// somebody closes the wrong window.
+		ApplyPendingActions();
 	}
 
 	void Editor::DriveCamera() {
@@ -258,7 +278,16 @@ namespace studio {
 
 		// The readout, drawn back over the top-left of the image.
 		ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
+
+		// **Scoped to the readout and not to the function.** A pushed font that
+		// is still pushed when `ImGui::End` runs is imgui's "Missing PopFont()"
+		// assertion — which fires at the *end of the frame*, naming neither the
+		// window nor the font, and was exactly what this cost once.
 		ImGui::BeginGroup();
+		{
+			const engine::ui::ScopedFont small(
+				engine::ui::Typeface::Interface, engine::ui::TextSize::Small
+			);
 
 		const engine::core::Name scene = Universe->NameOf(Active);
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
@@ -288,6 +317,7 @@ namespace studio {
 			ImGui::Text("WASD / QE   %.0f u/s   wheel to change", static_cast<double>(CameraSpeed));
 			ImGui::PopStyleColor();
 		}
+		}
 
 		ImGui::EndGroup();
 		ImGui::End();
@@ -300,12 +330,13 @@ namespace studio {
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
 		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
+		ImGui::MenuItem("Settings", nullptr, &ShowSettings);
 
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Show Every Panel")) {
 			ShowViewport = ShowExplorer = ShowWorlds = true;
-			ShowProperties = ShowScripts = ShowOutput = true;
+			ShowProperties = ShowScripts = ShowOutput = ShowSettings = true;
 		}
 
 		if (ImGui::MenuItem("Reset Layout")) {
@@ -360,6 +391,16 @@ namespace studio {
 				AskingExport = true;
 				PathBuffer = std::string(Label(Universe->NameOf(Active))) +
 							 std::string(engine::game::WORLD_EXTENSION);
+			}
+
+			// **Beside the world export rather than beside Save As**, because
+			// the pair an author is choosing between is "this scene" and "all
+			// of them" — not "write it" and "write it somewhere else". The
+			// extension is what tells them apart afterwards.
+			if (ImGui::MenuItem("Export Universe...", nullptr, false, Universe->Count() > 0)) {
+				AskingExportUniverse = true;
+				PathBuffer =
+					std::string(Label(GameName, "Game")) + std::string(engine::game::GAME_EXTENSION);
 			}
 
 			ImGui::Separator();
@@ -598,6 +639,13 @@ namespace studio {
 		ImGui::Separator();
 
 		if (ImGui::BeginChild("##lines", ImVec2(0, 0), ImGuiChildFlags_None)) {
+			// **Monospace, because this is a log.** A stack trace, a table of
+			// numbers and a printed table all line up in one and none of them do
+			// in a proportional face.
+			const engine::ui::ScopedFont code(
+				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small
+			);
+
 			for (const Message &message : Output) {
 				const unsigned int colour = message.Level == LogLevel::Error ? engine::ui::ErrorColour()
 										  : message.Level == LogLevel::Warning ? engine::ui::WarningColour()
@@ -670,6 +718,9 @@ namespace studio {
 		if (AskingExport) {
 			ImGui::OpenPopup("Export World");
 		}
+		if (AskingExportUniverse) {
+			ImGui::OpenPopup("Export Universe");
+		}
 		if (AskingImport) {
 			ImGui::OpenPopup("Import World");
 		}
@@ -699,6 +750,18 @@ namespace studio {
 			AskingExport = false;
 		} else if (!ImGui::IsPopupOpen("Export World")) {
 			AskingExport = false;
+		}
+
+		// **The universe, which is a different document from a world and not a
+		// bigger one.** `<Game>` and `<World>` are separate roots and the
+		// reader refuses each in the other's place, so the two exports write
+		// different extensions and say which they are — see
+		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
+		if (PathPrompt("Export Universe", "File", PathBuffer, "Export")) {
+			ExportUniverse(std::filesystem::path(PathBuffer));
+			AskingExportUniverse = false;
+		} else if (!ImGui::IsPopupOpen("Export Universe")) {
+			AskingExportUniverse = false;
 		}
 
 		if (PathPrompt("Import World", "File", PathBuffer, "Import")) {

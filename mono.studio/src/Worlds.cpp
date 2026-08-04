@@ -1,4 +1,3 @@
-#include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
@@ -7,7 +6,6 @@
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
-#include <vector>
 
 namespace studio {
 
@@ -152,8 +150,6 @@ namespace studio {
 
 		ImGui::EndTable();
 		ImGui::End();
-
-		ApplyPendingWorldActions();
 	}
 
 	void Editor::DrawWorldActions(WorldId world) {
@@ -238,9 +234,9 @@ namespace studio {
 	}
 
 	void Editor::ApplyPendingWorldActions() {
-		// Outside the table and outside any `Universe::Enter`, for the reason
-		// `ApplyPendingActions` gives: the panel above enters worlds to count
-		// their instances, and every action here enters one itself.
+		// Called by `ApplyPendingActions`, which is called once from
+		// `DrawInterface`. See that function for why neither of them runs where
+		// it was asked for.
 
 		if (PendingActivate.IsValid()) {
 			const WorldId world = PendingActivate;
@@ -279,15 +275,29 @@ namespace studio {
 		// A free name derived from the original, rather than refusing and making
 		// somebody invent one. Two worlds cannot share a name, and being told so
 		// is a worse answer than being given a name that works.
+		//
+		// **The name is found first and the document read once.** Reading it in
+		// a loop until one is accepted would retry a malformed document ninety
+		// times and report the last failure, which is the same message as the
+		// first with the cause a hundred lines further away.
 		const std::string base(Label(Universe->NameOf(source), "World"));
-		WorldId copy;
 
-		for (int attempt = 2; attempt < 100 && !copy.IsValid(); attempt++) {
-			copy = engine::game::ReadWorldDocument(
-				*Universe, document, Name(base + " " + std::to_string(attempt)), error
-			);
+		Name wanted;
+		for (int attempt = 2; attempt < 1000; attempt++) {
+			const Name candidate(base + " " + std::to_string(attempt));
+			if (!Universe->Find(candidate).IsValid()) {
+				wanted = candidate;
+				break;
+			}
 		}
 
+		if (!wanted.IsValid()) {
+			Say("could not find a free name to copy '" + base + "' under",
+				engine::core::LogLevel::Warning);
+			return false;
+		}
+
+		const WorldId copy = engine::game::ReadWorldDocument(*Universe, document, wanted, error);
 		if (!copy.IsValid()) {
 			Say("could not copy that scene: " + error, engine::core::LogLevel::Error);
 			return false;

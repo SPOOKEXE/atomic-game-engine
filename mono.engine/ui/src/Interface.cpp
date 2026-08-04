@@ -1,9 +1,11 @@
 #include <engine/core/Log.hpp>
+#include <engine/ui/Fonts.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL_gpu.h>
 
+#include <algorithm>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
 #include <imgui.h>
@@ -13,6 +15,13 @@ namespace engine::ui {
 
 	struct Interface::Impl {
 		ImGuiContext *Context = nullptr;
+
+		// Whether the backends are running. False headless, where the context
+		// exists and nothing draws it.
+		bool Drawable = false;
+
+		// What the display size is, when there is no window to ask.
+		ImVec2 Display{0.0f, 0.0f};
 
 		// Held for the lifetime of the context. imgui stores the pointer rather
 		// than the string and writes the file from its own timer, so a
@@ -41,10 +50,9 @@ namespace engine::ui {
 			return true;
 		}
 
-		if (window == nullptr) {
-			ENGINE_ERROR("ui::Interface needs a window");
-			return false;
-		}
+		// A window decides whether anything is *drawn*. Everything else — the
+		// context, the fonts, the theme, every panel's code — happens either way.
+		const bool drawable = window != nullptr;
 
 		const render::BackendHandles backend = renderer.Backend();
 		if (backend.Device == nullptr) {
@@ -83,16 +91,52 @@ namespace engine::ui {
 			io.IniFilename = State->LayoutPath.c_str();
 		}
 
-		// The font atlas is rebuilt from this rather than scaled as a texture,
-		// so text at 1.5x is sharp instead of blurry. Set before the backend
-		// initialises, because that is when the atlas is first built.
+		// **Before the first frame, which is the whole requirement.** imgui
+		// loads the ini lazily on the first `NewFrame`, so a settings handler
+		// registered any later has already had its lines skipped as belonging
+		// to nobody — and the chosen palette would then silently reset on
+		// every start.
+		InstallThemeSettings();
+
+		// **Real faces, rasterised at the scale rather than stretched.** imgui's
+		// built-in font is a 13px bitmap: proportional, unhinted, and with no
+		// monospace companion — fine for a debug overlay and wrong for something
+		// somebody reads all day. `ui::LoadFonts` is the table of what is
+		// vendored; a missing file leaves the built-in in place and says so
+		// once, because an editor that refused to open over a font would be
+		// worse than one that opens ugly.
 		const float scale = settings.Scale > 0.0f ? settings.Scale : 1.0f;
 		io.FontGlobalScale = 1.0f;
-		ImFontConfig font;
-		font.SizePixels = 13.0f * scale;
-		io.Fonts->AddFontDefault(&font);
+
+		if (!LoadFonts(scale)) {
+			ImFontConfig font;
+			font.SizePixels = 13.0f * scale;
+			io.Fonts->AddFontDefault(&font);
+		}
 
 		ApplyEditorTheme(scale);
+
+		State->Display = ImVec2(
+			static_cast<float>(std::max(settings.DisplayWidth, 1)),
+			static_cast<float>(std::max(settings.DisplayHeight, 1))
+		);
+
+		if (!drawable) {
+			// The context is live and nothing will draw it. The display size the
+			// platform backend would have reported is supplied here and in
+			// `Begin`, because a zero-sized display clips every panel to nothing
+			// — which looks exactly like the panels not running.
+			io.DisplaySize = State->Display;
+			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+
+			// The atlas is normally built by the renderer backend. Nothing will,
+			// and `NewFrame` asserts on an atlas that has not been.
+			io.Fonts->Build();
+
+			State->Ready = true;
+			State->Drawable = false;
+			return true;
+		}
 
 		if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
 			ENGINE_ERROR("ImGui_ImplSDL3_InitForSDLGPU failed");
@@ -115,6 +159,7 @@ namespace engine::ui {
 		}
 
 		State->Ready = true;
+		State->Drawable = true;
 		return true;
 	}
 
@@ -123,6 +168,21 @@ namespace engine::ui {
 			return;
 		}
 
+		if (State->Drawable) {
+			// Only what was started. Shutting down a backend that never
+			// initialised is an assertion inside imgui rather than a no-op.
+			ShutdownBackends();
+		}
+
+		ImGui::DestroyContext(State->Context);
+
+		State->Context = nullptr;
+		State->Draw = nullptr;
+		State->Ready = false;
+		State->Drawable = false;
+	}
+
+	void Interface::ShutdownBackends() {
 		// Renderer backend first, platform backend second, context last. The
 		// reverse of construction, and it matters: the renderer backend
 		// releases GPU objects it registered with the context, so destroying
@@ -130,19 +190,18 @@ namespace engine::ui {
 		// told nothing about them.
 		ImGui_ImplSDLGPU3_Shutdown();
 		ImGui_ImplSDL3_Shutdown();
-		ImGui::DestroyContext(State->Context);
-
-		State->Context = nullptr;
-		State->Draw = nullptr;
-		State->Ready = false;
 	}
 
 	bool Interface::IsInitialised() const {
 		return State->Ready;
 	}
 
+	bool Interface::IsDrawable() const {
+		return State->Drawable;
+	}
+
 	void Interface::ProcessEvent(const SDL_Event &event) {
-		if (!State->Ready) {
+		if (!State->Ready || !State->Drawable) {
 			return;
 		}
 		ImGui_ImplSDL3_ProcessEvent(&event);
@@ -153,8 +212,17 @@ namespace engine::ui {
 			return;
 		}
 
-		ImGui_ImplSDLGPU3_NewFrame();
-		ImGui_ImplSDL3_NewFrame();
+		if (State->Drawable) {
+			ImGui_ImplSDLGPU3_NewFrame();
+			ImGui_ImplSDL3_NewFrame();
+		} else {
+			// What the platform backend would have supplied. Held rather than
+			// recomputed, so a headless run's layout is the same every frame and
+			// therefore the same on two runs.
+			ImGuiIO &headless = ImGui::GetIO();
+			headless.DisplaySize = State->Display;
+			headless.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+		}
 
 		// **The delta is overwritten after `NewFrame`, not before it.** The
 		// SDL3 backend reads a wall clock and assigns `io.DeltaTime` itself, so
@@ -183,7 +251,7 @@ namespace engine::ui {
 	}
 
 	bool Interface::Prepare(void *commandBuffer) {
-		if (!State->Ready || State->Draw == nullptr || commandBuffer == nullptr) {
+		if (!State->Ready || !State->Drawable || State->Draw == nullptr || commandBuffer == nullptr) {
 			return false;
 		}
 

@@ -1,3 +1,5 @@
+#include <engine/ui/Metrics.hpp>
+
 #include <cctype>
 #include <imgui.h>
 #include <studio/Widgets.hpp>
@@ -84,9 +86,13 @@ namespace studio {
 
 		// Centred, because a modal that opens wherever the mouse last was is a
 		// modal people miss.
+		//
+		// **No `SetNextWindowSize` to go with it.** The window measures itself
+		// from its contents below; asking for a width as well meant the two
+		// disagreed on the appearing frame and the auto-size won every frame
+		// after, which is a starting width that lasted exactly one frame.
 		const ImVec2 centre = ImGui::GetMainViewport()->GetCenter();
 		ImGui::SetNextWindowPos(centre, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-		ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
 
 		if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			return false;
@@ -100,7 +106,18 @@ namespace studio {
 			ImGui::SetKeyboardFocusHere();
 		}
 
-		ImGui::SetNextItemWidth(-1.0f);
+		// **An explicit width, because this window auto-resizes.** `-1` is
+		// "fill the content region", and the content region of an
+		// `AlwaysAutoResize` window comes from the width it measured last
+		// frame. So the field asked for one pixel less than the window, the
+		// window resized to fit the field, and the field asked for one less
+		// again — a few pixels a frame until the modal had deflated to the
+		// widest thing that was not elastic, which is the two buttons at the
+		// bottom. It looked like an animation and was a feedback loop.
+		//
+		// One fixed number breaks the cycle: the field decides the width and
+		// the window follows it, rather than each following the other.
+		ImGui::SetNextItemWidth(engine::ui::Scaled(engine::ui::Size::Prompt));
 		const bool entered = ImGui::InputText(
 			"##value",
 			buffer.data(),
@@ -119,13 +136,18 @@ namespace studio {
 
 		ImGui::Separator();
 
-		if (ImGui::Button(accept, ImVec2(120.0f, 0.0f)) || entered) {
+		// Scaled like everything else. These were the one pair of raw pixel
+		// sizes left in the editor, which is why they were also the floor the
+		// deflating modal settled on.
+		const ImVec2 button(engine::ui::Scaled(120.0f), 0.0f);
+
+		if (ImGui::Button(accept, button) || entered) {
 			confirmed = true;
 			ImGui::CloseCurrentPopup();
 		}
 
 		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+		if (ImGui::Button("Cancel", button) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
 			ImGui::CloseCurrentPopup();
 		}
 

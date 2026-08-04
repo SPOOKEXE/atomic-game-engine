@@ -4,6 +4,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Wire.hpp>
 
@@ -142,6 +143,16 @@ namespace engine::scene {
 		ecs::Components::Register<Camera>("scene.Camera");
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
 
+		// The service fixtures, added at the end because that is the rule this
+		// list opens with: registration order decides component ids, ids decide
+		// the order archetypes iterate their columns, and inserting one of
+		// these above `Transform` would change the order every row in the
+		// engine is visited in. Neither carries a wire form — a service is
+		// authored content that a snapshot moves, not per-tick state a delta
+		// does.
+		ecs::Components::Register<ServiceComponent>("scene.Service");
+		ecs::Components::Register<LightingServiceComponent>("scene.LightingService");
+
 		// The resources. A resource is keyed by a component id too, so one that
 		// is never registered here would be minted by the first
 		// `Store::SetResource` — under the compiler's spelling of the type, and
@@ -156,5 +167,12 @@ namespace engine::scene {
 		// first call, so this is the same registration under the name a caller
 		// looks for rather than a second one.
 		(void)PartClass();
+
+		// The services, through the same door. A game file naming `Lighting`
+		// has to resolve it, and a reader that depended on the studio having
+		// registered these first would fail with "no class named 'Lighting'" on
+		// a perfectly good file — which is exactly the failure
+		// `game::RegisterGameClasses` exists to prevent for `Part`.
+		(void)ServiceClass();
 	}
 }

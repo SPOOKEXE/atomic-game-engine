@@ -1,5 +1,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
@@ -52,6 +53,15 @@ namespace studio {
 
 				const ClassId instanceClass = Classes::Find(Name("Instance"));
 
+				// **Services are excluded as a category, not as nine names.** A
+				// world has exactly one of each and `scene::InstallServices`
+				// is what puts them there, so offering `ServerStorage` in the
+				// palette offers a second one that nothing resolves and every
+				// `GetService` ignores. Asking `IsA` rather than listing them
+				// is what keeps a tenth service out of this function — the same
+				// property the `Instance` filter above already has.
+				const ClassId serviceClass = Classes::Find(Name("Service"));
+
 				std::vector<std::pair<int, ClassId>> scored;
 				for (size_t index = 0; index < KnownClasses; index++) {
 					const ClassId id{static_cast<uint32_t>(index)};
@@ -66,6 +76,10 @@ namespace studio {
 					// other module for its own storage is not one of those and
 					// is not offered.
 					if (instanceClass.IsValid() && !Classes::IsA(id, instanceClass)) {
+						continue;
+					}
+
+					if (serviceClass.IsValid() && Classes::IsA(id, serviceClass)) {
 						continue;
 					}
 
@@ -161,22 +175,35 @@ namespace studio {
 		return chosen;
 	}
 
+	void Editor::DrawInsertMenu(const char *id, WorldId world, engine::ecs::Entity parent) {
+		// **No `Store` parameter, and that is what lets three call sites share
+		// it.** An instance's menu is drawn from inside `Universe::Enter` and a
+		// world's menu is drawn from outside it — the world row is above the
+		// `Enter` that walks its tree. A helper that took a store could only
+		// ever be called from the first, which is how "Insert Object is on the
+		// tree but not on the world" happens.
+		if (!ImGui::BeginMenu("Insert Object")) {
+			return;
+		}
+
+		if (const ClassId chosen = DrawClassPicker(id); chosen.IsValid()) {
+			// Queued rather than applied here: `InsertInstance` enters the
+			// world, and a tree's menu is already running inside `Enter` for
+			// the world it is drawing. Entering twice is what
+			// `Universe::Enter`'s affinity check exists to catch.
+			PendingInsert.World = world;
+			PendingInsert.Class = chosen;
+			PendingInsert.Parent = parent;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndMenu();
+	}
+
 	void Editor::DrawInstanceActions(Store &store, WorldId world, engine::ecs::Entity instance) {
 		const bool haveInstance = instance != NULL_ENTITY && store.Alive(instance);
 
-		if (ImGui::BeginMenu("Insert Object")) {
-			if (const ClassId chosen = DrawClassPicker("insert-context"); chosen.IsValid()) {
-				// Queued rather than applied here: `InsertInstance` enters the
-				// world, and this code is already running inside `Enter` for
-				// the world the tree is drawing. Entering twice is what
-				// `Universe::Enter`'s affinity check exists to catch.
-				PendingInsert.World = world;
-				PendingInsert.Class = chosen;
-				PendingInsert.Parent = haveInstance ? instance : NULL_ENTITY;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndMenu();
-		}
+		DrawInsertMenu("insert-context", world, haveInstance ? instance : NULL_ENTITY);
 
 		ImGui::Separator();
 
@@ -282,13 +309,27 @@ namespace studio {
 			if (const ImGuiPayload *dropped = ImGui::AcceptDragDropPayload(DRAG_TYPE)) {
 				const auto *moved = static_cast<const DragPayload *>(dropped->Data);
 
-				// **Same world only.** An `Entity` is a handle inside one store
-				// and means nothing in another, so accepting one across worlds
-				// would reparent whatever row happens to hold that number.
+				// **Two different operations, and the payload's world is what
+				// picks between them.** Within one store a move is a
+				// `SetParent` and the instance keeps its handle, its id and
+				// everything pointing at it. Across two stores none of that is
+				// possible — an `Entity` means nothing in another world — so
+				// the subtree is written out, rebuilt on the other side and the
+				// original destroyed. Same gesture, and the cost is not the
+				// same, which is why they are not one code path pretending to
+				// be.
+				PendingReparent.World = WorldId{};
+				PendingMove.Source = WorldId{};
+
 				if (moved->World == world.Index) {
 					PendingReparent.World = world;
 					PendingReparent.Instance = moved->Instance;
 					PendingReparent.Parent = instance;
+				} else {
+					PendingMove.Source = WorldFor(moved->World);
+					PendingMove.Instance = moved->Instance;
+					PendingMove.Target = world;
+					PendingMove.Parent = instance;
 				}
 			}
 			ImGui::EndDragDropTarget();
@@ -302,10 +343,18 @@ namespace studio {
 		// The class name, dimmed, on the same row. Roblox puts an icon here; an
 		// icon set is a texture atlas and a lot of art, and the class name
 		// carries the same information in the space available.
+		// Smaller as well as dimmer. A class name is an annotation on the row
+		// rather than a second name on it, and two things at the same size read
+		// as two names however different their colours are.
 		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-		ImGui::TextUnformatted(className);
-		ImGui::PopStyleColor();
+		{
+			const engine::ui::ScopedFont small(
+				engine::ui::Typeface::Interface, engine::ui::TextSize::Small
+			);
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted(className);
+			ImGui::PopStyleColor();
+		}
 
 		if (open && hasChildren) {
 			// Collected first, then walked. `DrawTreeNode` can queue a
@@ -344,13 +393,52 @@ namespace studio {
 		// script runs on; drawing the same shape means what an author sees in
 		// the tree and what a script reaches through `game` are one object
 		// rather than two models kept in step.
+		//
+		// **Tagged "(universe)" rather than "(game)", and the worlds below are
+		// each "(world)".** The two words were doing one job badly: the root
+		// said "game" and a world said nothing, except the active one, which
+		// said "(workspace)" — so the tag on a row changed as somebody clicked
+		// around, and `Workspace` is now a real instance *inside* a world,
+		// which made that word mean two things one line apart. What a row is
+		// does not depend on which row is selected; selection is what the
+		// highlight is for.
 		const std::string universeLabel =
-			std::string(GameName.IsValid() ? Label(GameName) : "Game") + "  (game)";
+			std::string(GameName.IsValid() ? Label(GameName) : "Game") + "  (universe)";
 
-		if (ImGui::TreeNodeEx(
-				universeLabel.c_str(),
-				ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth
-			)) {
+		const bool universeOpen = ImGui::TreeNodeEx(
+			universeLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth
+		);
+
+		// Immediately after the node, before anything else is submitted. See
+		// the note in `DrawTreeNode`: imgui has exactly one "last item".
+		if (ImGui::BeginPopupContextItem("##universe-actions")) {
+			// Insert lands in the active world, because a universe holds worlds
+			// and not instances — there is no other honest answer, and refusing
+			// outright would make the root the one row with no menu.
+			DrawInsertMenu("insert-universe", Active, NULL_ENTITY);
+
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("New World...", nullptr, false, Mode == RunMode::Edit)) {
+				AskingNewWorld = true;
+				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
+			}
+			if (ImGui::MenuItem("Import World...", nullptr, false, Mode == RunMode::Edit)) {
+				AskingImport = true;
+				PathBuffer.clear();
+			}
+
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Export Universe...")) {
+				AskingExportUniverse = true;
+				PathBuffer = std::string(GameName.IsValid() ? Label(GameName) : "Game") +
+							 std::string(engine::game::GAME_EXTENSION);
+			}
+			ImGui::EndPopup();
+		}
+
+		if (universeOpen) {
 			for (const WorldId world : Universe->Worlds()) {
 				const Name worldName = Universe->NameOf(world);
 
@@ -362,8 +450,7 @@ namespace studio {
 				ImGui::PushID(static_cast<int>(world.Index));
 
 				const std::string label =
-					std::string(worldName.IsValid() ? Label(worldName) : "?") +
-					(world == Active ? "  (workspace)" : "");
+					std::string(worldName.IsValid() ? Label(worldName) : "?") + "  (world)";
 
 				const bool open = ImGui::TreeNodeEx("##world", flags, "%s", label.c_str());
 
@@ -373,7 +460,41 @@ namespace studio {
 					ClearSelection();
 				}
 
+				// **A world row takes a drop too**, and it means "a root of
+				// this world". Without it the only way to move something
+				// between worlds would be to drop it onto an instance that
+				// happened to already be there — which is impossible for the
+				// case somebody reaches for first, an empty world.
+				if (ImGui::BeginDragDropTarget()) {
+					if (const ImGuiPayload *dropped = ImGui::AcceptDragDropPayload(DRAG_TYPE)) {
+						const auto *moved = static_cast<const DragPayload *>(dropped->Data);
+						if (moved->World != world.Index) {
+							PendingMove.Source = WorldFor(moved->World);
+							PendingMove.Instance = moved->Instance;
+							PendingMove.Target = world;
+							PendingMove.Parent = NULL_ENTITY;
+						} else {
+							// Same world, so it is an unparent rather than a
+							// move: the instance becomes a root where it is.
+							PendingReparent.World = world;
+							PendingReparent.Instance = moved->Instance;
+							PendingReparent.Parent = NULL_ENTITY;
+						}
+					}
+					ImGui::EndDragDropTarget();
+				}
+
 				if (ImGui::BeginPopupContextItem("##world-actions")) {
+					// **Insert at the world's root**, which is the parent a
+					// right-click on the world itself means. This is the menu
+					// that did not have it: the tree rows and the blank space
+					// below them both offered Insert Object and the row
+					// between them did not, so the way to make a root was to
+					// find the empty part of a panel that is rarely empty.
+					DrawInsertMenu("insert-world", world, NULL_ENTITY);
+
+					ImGui::Separator();
+
 					if (ImGui::MenuItem("Set Active")) {
 						Active = world;
 						SelectionWorld = world;
@@ -435,17 +556,132 @@ namespace studio {
 		}
 
 		ImGui::End();
+	}
 
-		ApplyPendingActions();
+	WorldId Editor::WorldFor(uint32_t index) const {
+		for (const WorldId id : Universe->Worlds()) {
+			if (id.Index == index) {
+				return id;
+			}
+		}
+		return WorldId{};
+	}
+
+	bool Editor::MoveInstanceToWorld(
+		WorldId source, engine::ecs::Entity instance, WorldId target, engine::ecs::Entity parent
+	) {
+		if (!source.IsValid() || !target.IsValid() || source == target) {
+			return false;
+		}
+
+		// **Refused rather than half-done for a remote world.** A world held by
+		// a host has no store in this process, so there is nothing to read the
+		// subtree out of and nothing to build it into.
+		if (Universe->IsRemote(source) || Universe->IsRemote(target)) {
+			Say("a world held by another host cannot take or give instances",
+				engine::core::LogLevel::Warning);
+			return false;
+		}
+
+		// **Read first, in its own `Enter`.** Two worlds cannot be entered at
+		// once — the affinity check aborts on re-entry — so the subtree becomes
+		// a document while the source is open, and the document is what crosses.
+		std::string document;
+		Name moved;
+		Universe->Enter(source, [&](Store &store) {
+			if (!store.Alive(instance)) {
+				return;
+			}
+			moved = store.InstanceNameOf(instance);
+			document = engine::game::WriteInstanceDocument(store, instance);
+		});
+
+		if (document.empty()) {
+			Say("that instance could not be written out, so it was not moved",
+				engine::core::LogLevel::Error);
+			return false;
+		}
+
+		std::string error;
+		engine::ecs::Entity rebuilt = NULL_ENTITY;
+		Universe->Enter(target, [&](Store &store) {
+			// A parent that died between the drop and here leaves the subtree
+			// at the world's root, which is where a drop onto a world row puts
+			// it anyway.
+			const engine::ecs::Entity into = parent != NULL_ENTITY && store.Alive(parent) ? parent
+																						 : NULL_ENTITY;
+			rebuilt = engine::game::ReadInstanceDocument(store, document, into, error);
+		});
+
+		if (rebuilt == NULL_ENTITY) {
+			// **The original is still there**, which is the whole reason the
+			// destroy is last. A move that deleted first and then failed to
+			// rebuild would be a delete somebody did not ask for, with no undo
+			// to reach for — see `mono.studio/AGENTS.md`.
+			Say("could not move '" + std::string(Label(moved)) + "': " + error,
+				engine::core::LogLevel::Error);
+			return false;
+		}
+
+		// Script tabs first, for `RenameWorld`'s reason: a tab holds an entity
+		// handle in the world being left, and one that saved afterwards would
+		// write into storage that had been freed.
+		for (size_t index = Scripts.size(); index > 0; index--) {
+			if (Scripts[index - 1].World == source) {
+				bool inside = false;
+				Universe->Enter(source, [&](Store &store) {
+					for (engine::ecs::Entity at = Scripts[index - 1].Instance;
+						 at != NULL_ENTITY && store.Alive(at);
+						 at = store.ParentOf(at)) {
+						if (at == instance) {
+							inside = true;
+							break;
+						}
+					}
+				});
+
+				if (inside) {
+					CloseScriptTab(index - 1);
+				}
+			}
+		}
+
+		Universe->Enter(source, [&](Store &store) {
+			if (store.Alive(instance)) {
+				store.Destroy(instance);
+			}
+		});
+
+		InstanceCounts.clear();
+
+		// The selection follows the instance, which is what makes the move feel
+		// like a move rather than like a delete and a paste somewhere else.
+		SelectionWorld = target;
+		Selection.assign(1, rebuilt);
+		if (parent != NULL_ENTITY) {
+			Expanded.push_back(parent.Id);
+		}
+
+		MarkModified();
+		Say("moved '" + std::string(Label(moved)) + "' to '" +
+			std::string(Label(Universe->NameOf(target))) + "'");
+		return true;
 	}
 
 	void Editor::ApplyPendingActions() {
-		// **Everything the tree queued, applied outside `Universe::Enter`.**
-		// Drawing a world's tree happens inside `Enter`, and every action here
-		// enters a world itself — `Enter` aborts on re-entry rather than
-		// silently allowing it, which is the affinity check doing its job. So
-		// the panel records what was asked for and this applies it, once, from
-		// the outside.
+		// **Everything any panel queued, applied outside `Universe::Enter` and
+		// outside every panel.**
+		//
+		// Two reasons, and the second was a bug. Drawing a world's tree happens
+		// inside `Enter` and every action here enters a world itself, so it
+		// cannot run where it was asked for — `Enter` aborts on re-entry rather
+		// than allowing it, which is the affinity check doing its job.
+		//
+		// And it cannot run at the end of the panel that asked, either, because
+		// panels are closable: this used to be called from `DrawExplorer` and
+		// its world half from `DrawWorlds`, so closing the explorer made
+		// "Remove" in the *Worlds* panel silently do nothing. One call, from
+		// `DrawInterface`, every frame.
 
 		if (PendingInsert.Class.IsValid()) {
 			InsertInstance(PendingInsert.World, PendingInsert.Class, PendingInsert.Parent);
@@ -485,6 +721,12 @@ namespace studio {
 			}
 		}
 
+		if (PendingMove.Source.IsValid()) {
+			const PendingMoveAction move = PendingMove;
+			PendingMove = PendingMoveAction{};
+			MoveInstanceToWorld(move.Source, move.Instance, move.Target, move.Parent);
+		}
+
 		if (PendingOpenScript.World.IsValid()) {
 			OpenScriptTab(PendingOpenScript.World, PendingOpenScript.Instance);
 			PendingOpenScript = PendingScriptAction{};
@@ -505,5 +747,7 @@ namespace studio {
 			PendingRemoveWorld = WorldId{};
 			RemoveWorld(world);
 		}
+
+		ApplyPendingWorldActions();
 	}
 }

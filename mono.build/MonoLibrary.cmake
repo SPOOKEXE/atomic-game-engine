@@ -467,6 +467,32 @@ function(mono_add_program name)
 		add_dependencies(${target} ${name}_stage_shaders)
 	endif()
 
+	# The vendored typefaces, for a program that draws an interface.
+	#
+	# Same rule as SDL below: staged because the program links the thing that
+	# reads them, not because somebody remembered. A program with no `ui` on its
+	# link line has nothing that opens a .ttf, and staging three megabytes of
+	# fonts into a dedicated server would be three megabytes of a claim that it
+	# draws.
+	list(FIND all_deps engine_ui links_ui)
+	if(links_ui GREATER_EQUAL 0)
+		file(GLOB _mono_fonts "${CMAKE_SOURCE_DIR}/mono.vendor/fonts/*.ttf")
+
+		# The directory first. `copy_if_different` given a destination that does
+		# not exist writes a *file* under that name, so without this the staged
+		# tree grows a file called `fonts` holding one typeface and the next copy
+		# overwrites it — which fails as "not a directory" a long way from here.
+		add_custom_command(TARGET ${target} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${stage}/fonts"
+			VERBATIM)
+
+		foreach(_font IN LISTS _mono_fonts)
+			add_custom_command(TARGET ${target} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_font}" "${stage}/fonts/"
+				VERBATIM)
+		endforeach()
+	endif()
+
 	# SDL3 is a shared library; it has to sit beside the binary that loads it.
 	if(TARGET SDL3-shared)
 		list(FIND all_deps SDL3-shared links_sdl)

@@ -25,6 +25,34 @@ applies it once, outside.
 Adding an action means adding a `Pending*` field. It does not mean calling
 `Enter` from inside a tree node, however tempting the call site looks.
 
+## A world is furnished, and furnishing it twice does nothing
+
+`scene::InstallServices` puts `Workspace`, `Lighting` and the rest into a world,
+and it runs on every world this program **makes** *and* every world it
+**loads**. That is only safe because it is idempotent: a game saved before
+services existed has none and gets them, one saved after has them all and gets
+nothing back.
+
+Branching on the file's format version instead would be a version test that has
+to stay right forever. Finding each service before creating it is a lookup that
+cannot go stale.
+
+The services are per world rather than per universe, which is Roblox's
+arrangement: an entity is a row in one `ecs::Store` and a store is a world.
+
+## Moving an instance between worlds is not a reparent
+
+Within a world it is `SetParent` and the instance keeps its handle. Across two
+it cannot: an `ecs::Entity` is an index into one store. So
+`MoveInstanceToWorld` writes the subtree out with
+`game::WriteInstanceDocument`, rebuilds it on the far side, and destroys the
+original **last** — a move that deleted first and then failed to rebuild would
+be a delete nobody asked for, and there is no undo to reach for.
+
+The handle changes, so anything holding one has to be told: the selection is
+repointed and script tabs inside the moved subtree are closed. A single code
+path covering both operations would make that "sometimes".
+
 ## `RunService:IsStudio()` is set here and nowhere else
 
 `script::HostRole::Studio` defaults to false and `script/Runtime.hpp` says why:

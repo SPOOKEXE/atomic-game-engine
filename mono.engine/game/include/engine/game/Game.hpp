@@ -54,7 +54,18 @@ namespace engine::game {
 	// A number in the file rather than a guess from its shape. A reader that
 	// inferred the version from which elements were present would accept a
 	// truncated file from the future as an old one.
-	inline constexpr uint32_t FORMAT_VERSION = 1;
+	//
+	// **2 moved a world's settings into a `<WorldProperties>` element.** They
+	// were attributes on `<World>` in format 1, which put three tunables and
+	// the world's identity on one line and left nowhere for a fourth to go
+	// without making that line longer. `<Universe>` was already an element for
+	// exactly this reason; this is the per-world half of the same shape.
+	//
+	// **Format 1 still reads.** The settings are looked for in the child and
+	// fall back to the attributes, so a file written before this change loads
+	// with its own numbers rather than with the defaults — a migration that
+	// silently substituted 60 for somebody's 30 would be worse than a refusal.
+	inline constexpr uint32_t FORMAT_VERSION = 2;
 
 	// The extension a whole game takes.
 	inline constexpr std::string_view GAME_EXTENSION = ".agame";
@@ -127,6 +138,43 @@ namespace engine::game {
 	bool ReadWorldBody(
 		const XmlDocument &document, const XmlElement &element, ecs::Store &store, std::string &error
 	);
+
+	// --- one instance ------------------------------------------------------
+
+	// Writes one instance and everything under it as a standalone document.
+	//
+	// **What makes an instance movable between two worlds.** An `ecs::Entity`
+	// is a handle inside one store and means nothing in another, so a subtree
+	// cannot be handed across — it has to be described and rebuilt. This is the
+	// describing half, and it is the same writer a game file uses, so an
+	// instance that survives a save survives a move.
+	//
+	// Carries only the script text the subtree actually names, rather than the
+	// whole world's: moving one part should not drag every program in the
+	// source world along with it.
+	//
+	// @param store    The world it lives in.
+	// @param instance The root of the subtree.
+	// @return The document, or empty when the entity is dead or is not an
+	//         instance.
+	std::string WriteInstanceDocument(ecs::Store &store, ecs::Entity instance);
+
+	// Rebuilds an instance document into a world, under a parent.
+	//
+	// **References out of the subtree do not survive**, and are warned about
+	// rather than refused. A property pointing at something that stayed behind
+	// is a handle into the world being left; leaving it at its default is what
+	// a missing target already means everywhere else in this format.
+	//
+	// @param store    The world to build into. Need not be empty — unlike
+	//                 `ReadWorldBody`, this merges, which is the whole point.
+	// @param document The document, as `WriteInstanceDocument` produced it.
+	// @param parent   What to parent the subtree to, or a null entity to make
+	//                 it a root.
+	// @param error    Filled in with why, on failure.
+	// @return The rebuilt instance, or a null entity.
+	ecs::Entity
+	ReadInstanceDocument(ecs::Store &store, std::string_view document, ecs::Entity parent, std::string &error);
 
 	// Writes one world as a standalone document, without touching a disk.
 	//

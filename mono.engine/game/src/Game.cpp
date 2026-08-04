@@ -6,6 +6,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <fstream>
 #include <sstream>
@@ -26,6 +27,13 @@ namespace engine::game {
 
 		constexpr std::string_view GAME_ROOT = "Game";
 		constexpr std::string_view WORLD_ROOT = "World";
+
+		// A world's settings, as of format 2. See `WriteWorldProperties`.
+		constexpr std::string_view WORLD_PROPERTIES = "WorldProperties";
+
+		// One instance and its subtree, on its own. See
+		// `WriteInstanceDocument`.
+		constexpr std::string_view INSTANCE_ROOT = "Instance";
 
 		// Written as an attribute and never as a property, because the tree
 		// carries it. A `Parent` property in the file would be a second answer
@@ -359,6 +367,91 @@ namespace engine::game {
 			writer.Close();
 		}
 
+		// Every script path a subtree names, in walk order.
+		//
+		// Asked through the property surface rather than by reaching for the
+		// `Source` component, so a class that grows a second way to carry a
+		// program is covered by declaring the property rather than by editing
+		// this.
+		void CollectSourcePaths(const Store &store, Entity instance, std::vector<core::Name> &out) {
+			static const core::Name SOURCE("Source");
+
+			const ClassId container = Classes::Find(core::Name("LuaSourceContainer"));
+			if (container.IsValid() && store.IsA(instance, container)) {
+				core::Name path;
+				if (store.GetProperty(instance, SOURCE, &path, sizeof(path)) && path.IsValid()) {
+					out.push_back(path);
+				}
+			}
+
+			store.EachChild(instance, [&](Entity child) { CollectSourcePaths(store, child, out); });
+		}
+
+		// `WriteSources`, restricted to a set of paths.
+		void
+		WriteSourcesFor(XmlWriter &writer, const Store &store, const std::vector<core::Name> &paths) {
+			if (paths.empty()) {
+				return;
+			}
+
+			const auto *cache = store.Resource<script::SourceCache>();
+			if (cache == nullptr || cache->Count() == 0) {
+				return;
+			}
+
+			bool opened = false;
+			for (const script::SourceRow &row : cache->Rows) {
+				if (std::find(paths.begin(), paths.end(), row.Path) == paths.end()) {
+					continue;
+				}
+
+				if (!opened) {
+					writer.Open("Sources");
+					opened = true;
+				}
+
+				writer.Open("Source");
+				writer.Attribute("path", row.Path.IsValid() ? row.Path.Text() : "");
+				writer.Verbatim(row.Text);
+				writer.Close();
+			}
+
+			if (opened) {
+				writer.Close();
+			}
+		}
+
+		// `ReadSources`, into a world that already has scripts of its own.
+		void MergeSources(const XmlDocument &document, const XmlElement &element, Store &store) {
+			script::SourceCache cache;
+			if (const auto *existing = store.Resource<script::SourceCache>(); existing != nullptr) {
+				cache = *existing;
+			}
+
+			for (const uint32_t index : element.Children) {
+				const XmlElement *source = document.At(index);
+				if (source == nullptr || source->Name != "Source") {
+					continue;
+				}
+
+				const std::string_view path = source->Attribute("path");
+				if (path.empty()) {
+					continue;
+				}
+
+				// **The incoming text wins a collision**, because the thing
+				// being moved is the thing being asked for. Two worlds holding
+				// different programs at one path is already a name clash the
+				// author has to resolve; silently keeping the old one would
+				// move a script whose body changed on arrival.
+				cache.Set(core::Name(path), source->Text);
+			}
+
+			if (cache.Count() > 0) {
+				store.SetResource(cache);
+			}
+		}
+
 		void ReadSources(const XmlDocument &document, const XmlElement &element, Store &store) {
 			script::SourceCache cache;
 
@@ -409,19 +502,60 @@ namespace engine::game {
 			return value;
 		}
 
+		// The first child of an element with a given name, or null.
+		const XmlElement *
+		ChildNamed(const XmlDocument &document, const XmlElement &element, std::string_view name) {
+			for (const uint32_t index : element.Children) {
+				const XmlElement *child = document.At(index);
+				if (child != nullptr && child->Name == name) {
+					return child;
+				}
+			}
+			return nullptr;
+		}
+
+		// **What a world *is*, and it stays on the element.** A name is the
+		// world's identity — it is what a bus envelope, a subscription and a
+		// teleport carry, and what `<World>` is looked up by while reading a
+		// game — so it reads as part of the tag rather than as one of the
+		// settings underneath it. The same split `<Item name=... >` already
+		// makes against its `<Property>` children.
 		void WriteWorldAttributes(XmlWriter &writer, const world::WorldSettings &settings) {
 			writer.Attribute("name", settings.Name.IsValid() ? settings.Name.Text() : "");
+		}
+
+		// **What a world is *configured like*, and it is an element.**
+		// `<Universe>` has carried the universe's settings this way since the
+		// format existed; three tunables crammed onto the `<World>` tag was the
+		// odd one out, and it was the version with nowhere to put a fourth.
+		void WriteWorldProperties(XmlWriter &writer, const world::WorldSettings &settings) {
+			writer.Open(WORLD_PROPERTIES);
 			writer.Attribute("tickRate", FormatNumber(settings.TickRate));
 			writer.Attribute("idleTickRate", FormatNumber(settings.IdleTickRate));
 			writer.Attribute("faultLimit", std::to_string(settings.FaultLimit));
+			writer.Close();
 		}
 
-		world::WorldSettings ReadWorldAttributes(const XmlElement &element) {
+		world::WorldSettings ReadWorldAttributes(const XmlDocument &document, const XmlElement &element) {
 			world::WorldSettings settings;
 			settings.Name = core::Name(TextOf(element, "name", "World"));
-			settings.TickRate = NumberOf(element, "tickRate", 60.0);
-			settings.IdleTickRate = NumberOf(element, "idleTickRate", 2.0);
-			settings.FaultLimit = CountOf(element, "faultLimit", 3);
+
+			// **The child if it is there, the element if it is not.** That one
+			// line is the whole of format 1 compatibility: an old file has the
+			// numbers on `<World>` and a new one has them under
+			// `<WorldProperties>`, and both are read by pointing the same three
+			// lookups at whichever element carried them.
+			//
+			// Not keyed off the format number, deliberately. A reader that
+			// branched on `format == 1` would be a reader that breaks on a file
+			// somebody hand-edited into the new shape without touching the
+			// version — and the shape is the thing being read either way.
+			const XmlElement *properties = ChildNamed(document, element, WORLD_PROPERTIES);
+			const XmlElement &source = properties != nullptr ? *properties : element;
+
+			settings.TickRate = NumberOf(source, "tickRate", 60.0);
+			settings.IdleTickRate = NumberOf(source, "idleTickRate", 2.0);
+			settings.FaultLimit = CountOf(source, "faultLimit", 3);
 			return settings;
 		}
 
@@ -608,23 +742,37 @@ namespace engine::game {
 		writer.Close();
 
 		for (const world::WorldId id : universe.Worlds()) {
-			world::WorldSettings worldSettings;
-			worldSettings.Name = universe.NameOf(id);
+			// **What the world is, not what a default-constructed one would
+			// be.** This used to build a fresh `WorldSettings` and fill in only
+			// the name, so every `<World>` in every file claimed 60Hz — a scene
+			// authored at 30 saved as 60 and loaded as 60, and the number that
+			// was lost was one nobody would think to check. `SettingsOf` exists
+			// because moving these into an element made the lie legible.
+			const world::WorldSettings worldSettings = universe.SettingsOf(id);
 
 			writer.Open(WORLD_ROOT);
 			WriteWorldAttributes(writer, worldSettings);
 
-			if (universe.IsRemote(id)) {
+			// **Every attribute before the first child element**, which is now
+			// a rule this loop has to keep rather than a thing it got for free.
+			// `WriteWorldProperties` opens a child, and an `Attribute` call
+			// after that lands on the child instead of on `<World>` — so the
+			// host of a remote world is written here, above it.
+			const bool remote = universe.IsRemote(id);
+			if (remote) {
 				// **A name and a host, not content.** A world held by a
 				// supervised host has no store here, so its instances are not
 				// this process's to write — and an empty `<World>` would be a
 				// save file that quietly deleted somebody's scene.
 				writer.Attribute("host", universe.HostOf(id).Text());
-				writer.Close();
-				continue;
 			}
 
-			universe.Enter(id, [&](Store &store) { WriteWorldBody(writer, store); });
+			WriteWorldProperties(writer, worldSettings);
+
+			if (!remote) {
+				universe.Enter(id, [&](Store &store) { WriteWorldBody(writer, store); });
+			}
+
 			writer.Close();
 		}
 
@@ -696,7 +844,7 @@ namespace engine::game {
 				continue;
 			}
 
-			const world::WorldSettings settings = ReadWorldAttributes(*child);
+			const world::WorldSettings settings = ReadWorldAttributes(document, *child);
 
 			world::WorldStatus status = world::WorldStatus::Ok;
 			const world::WorldId id = universe.Create(settings, &status);
@@ -729,6 +877,100 @@ namespace engine::game {
 		return true;
 	}
 
+	std::string WriteInstanceDocument(Store &store, Entity instance) {
+		RegisterGameClasses();
+
+		if (!store.Alive(instance) || !store.ClassOf(instance).IsValid()) {
+			return {};
+		}
+
+		XmlWriter writer;
+		writer.Open(INSTANCE_ROOT);
+		writer.Attribute("format", std::to_string(FORMAT_VERSION));
+
+		// **Only the scripts this subtree actually names.** `WriteWorldBody`
+		// writes the whole `SourceCache` because it is writing the whole world;
+		// doing that here would carry every program in the source world into
+		// the destination on a move that took one part with it.
+		std::vector<core::Name> paths;
+		CollectSourcePaths(store, instance, paths);
+		WriteSourcesFor(writer, store, paths);
+
+		Numbering numbering;
+		numbering.Walk(store, instance);
+
+		Defaults defaults;
+		WriteInstance(writer, store, instance, numbering, defaults);
+
+		writer.Close();
+		return writer.Finish();
+	}
+
+	Entity
+	ReadInstanceDocument(Store &store, std::string_view document, Entity parent, std::string &error) {
+		RegisterGameClasses();
+
+		XmlDocument parsed;
+		if (!Parse(std::string(document), INSTANCE_ROOT, parsed, error)) {
+			return NULL_ENTITY;
+		}
+
+		const XmlElement &root = *parsed.Root();
+
+		std::unordered_map<uint32_t, Entity> byId;
+		std::vector<PendingReference> pending;
+		uint32_t rootId = 0;
+
+		for (const uint32_t index : root.Children) {
+			const XmlElement *child = parsed.At(index);
+			if (child == nullptr) {
+				continue;
+			}
+
+			if (child->Name == "Sources") {
+				// **Merged rather than set.** `ReadSources` replaces the
+				// resource outright, which is right when it is filling an empty
+				// world and catastrophic here — pasting one part into a world
+				// would delete every script that world already had.
+				MergeSources(parsed, *child, store);
+				continue;
+			}
+
+			if (child->Name != "Item") {
+				continue;
+			}
+
+			if (!ReadInstance(parsed, *child, store, parent, byId, pending, error)) {
+				return NULL_ENTITY;
+			}
+
+			rootId = CountOf(*child, "id", 0);
+		}
+
+		for (const PendingReference &reference : pending) {
+			const auto found = byId.find(reference.Target);
+			if (found == byId.end()) {
+				// **A reference out of the subtree, and it dangles.** Moving a
+				// part that something outside it pointed at cannot carry that
+				// pointer across — the target is a handle in the world being
+				// left. Left at its default and said out loud, which is the
+				// same answer `ReadWorldBody` gives a dangling id.
+				ENGINE_WARN(
+					"instance document: reference '{}' names instance {} which is not in this subtree",
+					reference.Property.Text(),
+					reference.Target
+				);
+				continue;
+			}
+
+			const Entity target = found->second;
+			store.SetProperty(reference.Instance, reference.Property, &target, sizeof(Entity));
+		}
+
+		const auto found = byId.find(rootId);
+		return found == byId.end() ? NULL_ENTITY : found->second;
+	}
+
 	std::string WriteWorldDocument(world::Universe &universe, world::WorldId world, std::string &error) {
 		error.clear();
 
@@ -747,9 +989,12 @@ namespace engine::game {
 		writer.Open(WORLD_ROOT);
 		writer.Attribute("format", std::to_string(FORMAT_VERSION));
 
-		world::WorldSettings settings;
-		settings.Name = name;
+		// The world's own settings, for `WriteGame`'s reason: an exported world
+		// that came back at a tick rate it was never authored at is a scene
+		// that behaves differently on the round trip.
+		const world::WorldSettings settings = universe.SettingsOf(world);
 		WriteWorldAttributes(writer, settings);
+		WriteWorldProperties(writer, settings);
 
 		const world::WorldStatus status =
 			universe.Enter(world, [&](Store &store) { WriteWorldBody(writer, store); });
@@ -771,7 +1016,7 @@ namespace engine::game {
 		}
 
 		const XmlElement &root = *parsed.Root();
-		world::WorldSettings settings = ReadWorldAttributes(root);
+		world::WorldSettings settings = ReadWorldAttributes(parsed, root);
 		if (rename.IsValid()) {
 			settings.Name = rename;
 		}
