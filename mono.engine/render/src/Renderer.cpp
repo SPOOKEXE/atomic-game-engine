@@ -235,6 +235,35 @@ namespace engine::render {
 		uint32_t SceneWidth = 0;
 		uint32_t SceneHeight = 0;
 
+		// Scene targets that have been replaced but may still be referenced.
+		//
+		// **A resized viewport used to be a use-after-free, and this is the
+		// grace period that fixes it.** An interface hook records
+		// `ImGui::Image(SceneTexture())` — last frame's texture, deliberately,
+		// because imgui builds its draw lists before the renderer runs. So on
+		// the frame a panel changes size the order is: the hook records a bind
+		// of the *old* texture, then `EnsureScene` notices the new size, and
+		// then those draw lists are replayed. Releasing the old texture in the
+		// middle of that hands SDL a freed `TextureContainer` to bind, which
+		// segfaults inside the Vulkan backend rather than anywhere near here.
+		//
+		// One frame of grace is exactly enough: draw lists never outlive the
+		// frame that recorded them, and `SDL_ReleaseGPUTexture` already defers
+		// the GPU-side destruction until the commands using it have retired —
+		// what it does *not* do is keep the container addressable, and that is
+		// the half this covers.
+		std::vector<SDL_GPUTexture *> RetiredScenes;
+
+		// Frees what the previous frame retired. Called once at the top of a
+		// frame, which is the only point at which no draw list can still name
+		// one of them.
+		void DrainRetiredScenes() {
+			for (SDL_GPUTexture *texture : RetiredScenes) {
+				SDL_ReleaseGPUTexture(Device, texture);
+			}
+			RetiredScenes.clear();
+		}
+
 		// Where the next capture goes, or empty for none. See
 		// `Renderer::RequestSceneCapture`.
 		std::filesystem::path CapturePath;
@@ -647,7 +676,12 @@ namespace engine::render {
 		}
 
 		if (SceneTexture) {
-			SDL_ReleaseGPUTexture(Device, SceneTexture);
+			// **Retired rather than released.** An interface hook has already
+			// recorded a bind of this texture for the frame in progress — that
+			// is what "the image is last frame's texture" means — so freeing it
+			// here is a use-after-free that lands inside SDL's Vulkan backend.
+			// `DrainRetiredScenes` frees it at the top of the next frame.
+			RetiredScenes.push_back(SceneTexture);
 			SceneTexture = nullptr;
 		}
 
@@ -671,6 +705,7 @@ namespace engine::render {
 		// Sampled as well as drawn into, because the whole point is that
 		// something shows it afterwards.
 		info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
 		info.width = width;
 		info.height = height;
 		info.layer_count_or_depth = 1;
@@ -1018,6 +1053,11 @@ namespace engine::render {
 			State->SceneTexture = nullptr;
 		}
 
+		// Anything a resize retired and no frame came along to free. Shutting
+		// down is the one path where the next frame never arrives, so leaving
+		// this to `DrainRetiredScenes` would leak a texture per resize on exit.
+		State->DrainRetiredScenes();
+
 		if (State->OverlayPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OverlayPipeline);
 		}
@@ -1116,6 +1156,7 @@ namespace engine::render {
 		return State->SceneTexture;
 	}
 
+
 	BackendHandles Renderer::Backend() const {
 		BackendHandles handles;
 		if (State->Device != nullptr) {
@@ -1140,6 +1181,12 @@ namespace engine::render {
 		if (!State->Device) {
 			return result;
 		}
+
+		// **Before anything this frame records or binds.** Whatever a previous
+		// frame retired is unreferenced now: its draw lists have been replayed
+		// and thrown away, and nothing has yet recorded a bind for this frame.
+		// See `Impl::RetiredScenes`.
+		State->DrainRetiredScenes();
 
 		SDL_GPUCommandBuffer *command = nullptr;
 		{

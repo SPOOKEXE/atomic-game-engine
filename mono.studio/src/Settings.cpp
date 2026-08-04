@@ -1,8 +1,10 @@
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <algorithm>
 #include <imgui.h>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -45,16 +47,7 @@ namespace studio {
 		}
 	}
 
-	void Editor::DrawSettings() {
-		if (!ShowSettings) {
-			return;
-		}
-
-		if (!ImGui::Begin("Settings", &ShowSettings)) {
-			ImGui::End();
-			return;
-		}
-
+	void Editor::DrawAppearanceSettings() {
 		ImGui::SeparatorText("Theme");
 
 		// **Applied on the click and not on an OK button.** A theme is judged
@@ -71,6 +64,7 @@ namespace studio {
 			ImGui::PushID(static_cast<int>(index));
 
 			const float row = engine::ui::Scaled(engine::ui::Size::Row);
+
 			// `SetPalette` restyles and marks the layout dirty itself, so this
 			// is the whole of choosing a theme.
 			if (ImGui::Selectable("##palette", chosen, ImGuiSelectableFlags_AllowOverlap, ImVec2(0.0f, row))) {
@@ -106,14 +100,149 @@ namespace studio {
 			Say("interface scale is now " + std::to_string(Settings.Scale) +
 				"x — restart to rasterise the fonts at it");
 		}
+	}
 
-		ImGui::SeparatorText("Simulation");
+	void Editor::DrawKeybindSettings() {
+		// **The table is the source of truth, not a picture of one.**
+		// `DrawShortcuts` reads exactly these rows, so a key changed here is
+		// changed everywhere — including the labels in the menus, which ask the
+		// same table what to print. A settings page that listed keys some other
+		// code had hard-coded would be a page that lies the first time somebody
+		// edits one of them.
+		ImGui::SetNextItemWidth(-1.0f);
+		TextField("##keybind-filter", KeybindFilter, "Search Actions");
 
-		// Read-only here on purpose: a world's tick rate is `WorldSettings` and
-		// is decided when the world is created, so a control that looked
-		// editable and changed nothing would be worse than a number.
-		ImGui::Text("tick rate: %.0f Hz", Settings.TickRate);
-		ImGui::TextDisabled("a world's rate is set when it is created");
+		ImGui::Spacing();
+
+		constexpr ImGuiTableFlags FLAGS = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+										  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+
+		const float height = ImGui::GetContentRegionAvail().y - engine::ui::Scaled(engine::ui::Size::Bar);
+
+		if (ImGui::BeginTable("##keybinds", 3, FLAGS, ImVec2(0.0f, std::max(height, 0.0f)))) {
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.32f);
+			ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthStretch, 0.26f);
+			ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableHeadersRow();
+
+			for (Keybind &binding : Keybinds::All()) {
+				int score = 0;
+				if (!FuzzyMatch(KeybindFilter, binding.Name, score) &&
+					!FuzzyMatch(KeybindFilter, binding.Description, score)) {
+					continue;
+				}
+
+				const auto index = static_cast<int>(binding.Bound);
+				const bool rebinding = RebindingAction == index;
+
+				ImGui::PushID(index);
+				ImGui::TableNextRow();
+
+				ImGui::TableSetColumnIndex(0);
+				ImGui::TextUnformatted(binding.Name);
+
+				// --- the shortcut ---------------------------------------------
+
+				ImGui::TableSetColumnIndex(1);
+
+				if (rebinding) {
+					// **Captured from the next key, not typed into a field.**
+					// Nobody knows how to spell `Ctrl+Shift+S` in a way a
+					// parser would accept, and asking them to is how a
+					// rebinding UI becomes one nobody uses.
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+					ImGui::TextUnformatted("press a key…");
+					ImGui::PopStyleColor();
+
+					if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+						RebindingAction = -1;
+					} else if (const Chord pressed = Keybinds::Pressed(); pressed.IsBound()) {
+						Keybinds::Set(binding.Bound, pressed);
+						RebindingAction = -1;
+						Say(std::string(binding.Name) + " is now " + pressed.Text());
+					}
+				} else {
+					const std::string text = binding.Keys.Text();
+					const bool bound = binding.Keys.IsBound();
+
+					if (!bound) {
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+					}
+
+					if (ImGui::Selectable(bound ? text.c_str() : "unbound##none", false)) {
+						RebindingAction = index;
+					}
+
+					if (!bound) {
+						ImGui::PopStyleColor();
+					}
+
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("click to rebind, right-click to clear");
+					}
+
+					if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+						Keybinds::Set(binding.Bound, Chord{});
+					}
+				}
+
+				ImGui::TableSetColumnIndex(2);
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::TextUnformatted(binding.Description);
+				ImGui::PopStyleColor();
+
+				ImGui::PopID();
+			}
+
+			ImGui::EndTable();
+		}
+
+		if (ImGui::Button("Reset to Defaults")) {
+			Keybinds::Reset();
+			RebindingAction = -1;
+			Say("keybinds are back to their defaults");
+		}
+
+		ImGui::SameLine();
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+
+		// Said out loud rather than discovered. See `Keybinds::Set`.
+		ImGui::TextUnformatted("not saved yet — bindings last for this run");
+		ImGui::PopStyleColor();
+	}
+
+	void Editor::DrawSettings() {
+		if (!ShowSettings) {
+			return;
+		}
+
+		if (!ImGui::Begin("Studio Settings", &ShowSettings)) {
+			ImGui::End();
+			return;
+		}
+
+		// **Pages rather than one long panel.** Appearance is read once and
+		// forgotten; keybinds are a table somebody searches. Stacking them
+		// would put a scroll bar between a person and whichever one they came
+		// for.
+		if (ImGui::BeginTabBar("##settings")) {
+			if (ImGui::BeginTabItem("Appearance")) {
+				DrawAppearanceSettings();
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Keybinds")) {
+				DrawKeybindSettings();
+				ImGui::EndTabItem();
+			} else {
+				// A rebind left half-finished on a page nobody is looking at is
+				// a key that binds itself to whatever is typed next.
+				RebindingAction = -1;
+			}
+
+			ImGui::EndTabBar();
+		}
 
 		ImGui::End();
 	}

@@ -1,0 +1,159 @@
+#pragma once
+
+// What every key in the editor does, in one table.
+//
+// **The same shape `input::Actions` gives the client, and for the same
+// reason.** That header's first line is "the one table in the engine that names
+// a key; everything else asks for an action" — and the editor had drifted from
+// it: F5 was spelled out in `DrawShortcuts`, again in the Run menu's label, and
+// a third time in a comment. Three copies of a binding are three places to
+// change it and two places to forget.
+//
+// The editor cannot use `input::Actions` itself. That table is SDL keycodes
+// read through `input::ActionState`, which is a polled input system a game
+// loop drives; the editor's keys are read through imgui, which owns the
+// keyboard while a text field has focus and must go on owning it. So this is
+// the same idea over `ImGuiKey`, and the two tables are deliberately separate
+// — see `Action` for the one binding they disagree about.
+//
+// **Rebinding is why this exists rather than a `switch`.** A key nobody can
+// change is a key that is wrong for somebody, and an editor is a program people
+// live in.
+
+#include <cstdint>
+#include <imgui.h>
+#include <span>
+#include <string>
+
+namespace studio {
+
+	// Something the editor can be asked to do with a key.
+	//
+	// @since v0.7
+	enum class Action : uint8_t {
+		NewGame,
+		OpenGame,
+		Save,
+		SaveAs,
+
+		Play,
+		RunServer,
+		Stop,
+
+		Duplicate,
+		Delete,
+		SelectNone,
+
+		// **The two panels the client puts on F3 and F5.** They are unbound
+		// here rather than bound to a different pair: F5 is Play in an editor
+		// and always will be, and inventing a second set of function keys for
+		// the editor is a decision better made by whoever wants them — which is
+		// what the Keybinds page is for.
+		ShowStatistics,
+		ShowFrameGraph,
+
+		Count,
+	};
+
+	// A key and the modifiers held with it.
+	//
+	// @since v0.7
+	struct Chord {
+		ImGuiKey Key = ImGuiKey_None;
+		bool Ctrl = false;
+		bool Shift = false;
+		bool Alt = false;
+
+		// Whether this chord names a key at all.
+		//
+		// @return `false` for an action nobody has bound.
+		bool IsBound() const {
+			return Key != ImGuiKey_None;
+		}
+
+		// How the chord reads in a menu: `Ctrl+Shift+S`.
+		//
+		// @return The text, or an empty string when unbound.
+		std::string Text() const;
+
+		bool operator==(const Chord &other) const {
+			return Key == other.Key && Ctrl == other.Ctrl && Shift == other.Shift && Alt == other.Alt;
+		}
+	};
+
+	// One row of the table.
+	//
+	// @since v0.7
+	struct Keybind {
+		Action Bound = Action::Count;
+
+		// What the Keybinds page calls it, and what it says underneath.
+		const char *Name = "";
+		const char *Description = "";
+
+		// What it is bound to now, which is not necessarily the default.
+		Chord Keys;
+	};
+
+	// The editor's bindings.
+	//
+	// **Process-wide, like `input::Actions`.** Two editors in one process would
+	// share them, which is a thing a test does and not a thing a person does —
+	// and the alternative is threading a binding table through every panel that
+	// wants to draw a shortcut in a menu.
+	//
+	// @since v0.7
+	class Keybinds {
+	  public:
+		// Every binding, in the order the Keybinds page lists them.
+		//
+		// Mutable, because the page edits them in place.
+		//
+		// @return The table.
+		static std::span<Keybind> All();
+
+		// What an action is bound to.
+		//
+		// @param action The action.
+		// @return Its chord, which may be unbound.
+		static Chord Of(Action action);
+
+		// Binds an action, unbinding anything else that held the same chord.
+		//
+		// **A chord belongs to one action.** Two actions on one key is a key
+		// that does two things at once, and the one somebody notices is
+		// whichever happens to be checked first — a bug that reads as the
+		// editor being haunted.
+		//
+		// TODO: file persistence. These live for the run and are forgotten on
+		// exit. They belong beside the palette in the layout ini — see
+		// `ui::InstallThemeSettings`, which is the same job done for one value
+		// — but a whole table wants a format that survives an action being
+		// renamed, and that is a decision rather than a line of code.
+		//
+		// @param action The action to bind.
+		// @param chord  The chord, or an unbound one to clear it.
+		static void Set(Action action, Chord chord);
+
+		// Puts every binding back to the built-in default.
+		static void Reset();
+
+		// Whether this action's chord was pressed this frame.
+		//
+		// **Modifiers are checked exactly**, so `Ctrl+S` does not fire on
+		// `Ctrl+Shift+S`. Save and Save As were the pair that made this
+		// necessary.
+		//
+		// @param action The action to test.
+		// @return `true` on the frame it fired.
+		static bool Fired(Action action);
+
+		// The chord being pressed right now, for the rebinding row.
+		//
+		// Ignores the modifier keys themselves, so holding Ctrl to type
+		// `Ctrl+D` does not immediately bind `Ctrl`.
+		//
+		// @return The chord, or an unbound one when nothing usable is down.
+		static Chord Pressed();
+	};
+}

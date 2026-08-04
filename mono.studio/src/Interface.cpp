@@ -9,6 +9,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -37,7 +38,7 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v3";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v4";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *EXPLORER = "Explorer";
@@ -45,7 +46,9 @@ namespace studio {
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *SCRIPTS = "Script Editor";
 		constexpr const char *OUTPUT = "Output";
-		constexpr const char *SETTINGS = "Settings";
+		constexpr const char *SETTINGS = "Studio Settings";
+		constexpr const char *STATISTICS = "Statistics";
+		constexpr const char *FRAMEGRAPH = "Frame Graph";
 
 		// The first-run layout, built once and then owned by the ini file.
 		//
@@ -78,10 +81,12 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
 
-			// Beside the properties rather than in the centre: it is a panel
-			// somebody opens, changes one thing in, and leaves — and the
-			// centre belongs to the world.
+			// Beside the properties rather than in the centre: they are panels
+			// somebody opens, reads or changes one thing in, and leaves — and
+			// the centre belongs to the world.
 			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
+			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
+			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
@@ -126,6 +131,8 @@ namespace studio {
 		DrawScripts();
 		DrawOutput();
 		DrawSettings();
+		DrawStatistics();
+		DrawFrameGraph();
 		DrawStatusBar();
 		DrawDialogs();
 
@@ -334,9 +341,19 @@ namespace studio {
 
 		ImGui::Separator();
 
+		// **In the View menu like every other panel**, because that is this
+		// program's rule: a thing that can be toggled and has no menu entry is
+		// a thing somebody turns on by accident and cannot turn off. No
+		// shortcuts of their own — the Keybinds page is where keys are decided
+		// now, and two places to bind a key is one too many.
+		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
+		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
+
+		ImGui::Separator();
+
 		if (ImGui::MenuItem("Show Every Panel")) {
 			ShowViewport = ShowExplorer = ShowWorlds = true;
-			ShowProperties = ShowScripts = ShowOutput = ShowSettings = true;
+			ShowProperties = ShowScripts = ShowOutput = true;
 		}
 
 		if (ImGui::MenuItem("Reset Layout")) {
@@ -355,17 +372,17 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("File")) {
-			if (ImGui::MenuItem("New Game", "Ctrl+N")) {
+			if (ImGui::MenuItem("New Game", Keybinds::Of(Action::NewGame).Text().c_str())) {
 				NewGame();
 			}
-			if (ImGui::MenuItem("Open Game...", "Ctrl+O")) {
+			if (ImGui::MenuItem("Open Game...", Keybinds::Of(Action::OpenGame).Text().c_str())) {
 				AskingOpen = true;
 				PathBuffer = GamePath.string();
 			}
 
 			ImGui::Separator();
 
-			if (ImGui::MenuItem("Save", "Ctrl+S")) {
+			if (ImGui::MenuItem("Save", Keybinds::Of(Action::Save).Text().c_str())) {
 				if (GamePath.empty()) {
 					AskingSaveAs = true;
 					PathBuffer = std::string(Label(GameName)) + std::string(engine::game::GAME_EXTENSION);
@@ -373,7 +390,7 @@ namespace studio {
 					SaveGame(GamePath);
 				}
 			}
-			if (ImGui::MenuItem("Save As...")) {
+			if (ImGui::MenuItem("Save As...", Keybinds::Of(Action::SaveAs).Text().c_str())) {
 				AskingSaveAs = true;
 				PathBuffer =
 					GamePath.empty()
@@ -412,14 +429,14 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("Edit")) {
-			if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, !Selection.empty())) {
+			if (ImGui::MenuItem("Duplicate", Keybinds::Of(Action::Duplicate).Text().c_str(), false, !Selection.empty())) {
 				DuplicateSelection();
 			}
-			if (ImGui::MenuItem("Delete", "Del", false, !Selection.empty())) {
+			if (ImGui::MenuItem("Delete", Keybinds::Of(Action::Delete).Text().c_str(), false, !Selection.empty())) {
 				DeleteSelection();
 			}
 			ImGui::Separator();
-			if (ImGui::MenuItem("Select None", "Esc", false, !Selection.empty())) {
+			if (ImGui::MenuItem("Select None", Keybinds::Of(Action::SelectNone).Text().c_str(), false, !Selection.empty())) {
 				ClearSelection();
 			}
 			ImGui::EndMenu();
@@ -468,13 +485,13 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("Run")) {
-			if (ImGui::MenuItem("Play (server + client)", "F5", Mode == RunMode::Play)) {
+			if (ImGui::MenuItem("Play (server + client)", Keybinds::Of(Action::Play).Text().c_str(), Mode == RunMode::Play)) {
 				SetRunMode(Mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 			}
-			if (ImGui::MenuItem("Run (server only)", "F6", Mode == RunMode::Server)) {
+			if (ImGui::MenuItem("Run (server only)", Keybinds::Of(Action::RunServer).Text().c_str(), Mode == RunMode::Server)) {
 				SetRunMode(Mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
 			}
-			if (ImGui::MenuItem("Stop", "Shift+F5", false, Mode != RunMode::Edit)) {
+			if (ImGui::MenuItem("Stop", Keybinds::Of(Action::Stop).Text().c_str(), false, Mode != RunMode::Edit)) {
 				SetRunMode(RunMode::Edit);
 			}
 			ImGui::EndMenu();
@@ -503,7 +520,13 @@ namespace studio {
 			return;
 		}
 
-		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+		// **Every key comes from `Keybinds`, and none is spelled out here.**
+		// That table is what the Keybinds page edits, so a binding changed
+		// there changes what this does on the next frame — and the menus print
+		// their shortcut labels from the same rows. Three copies of "F5" was
+		// what this looked like before, and two of them were comments.
+
+		if (Keybinds::Fired(Action::Save)) {
 			if (GamePath.empty()) {
 				AskingSaveAs = true;
 				PathBuffer = std::string(Label(GameName, "Untitled")) +
@@ -513,32 +536,55 @@ namespace studio {
 			}
 		}
 
-		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_N)) {
+		if (Keybinds::Fired(Action::SaveAs)) {
+			AskingSaveAs = true;
+			PathBuffer = GamePath.empty() ? std::string(Label(GameName, "Untitled")) +
+												std::string(engine::game::GAME_EXTENSION)
+										  : GamePath.string();
+		}
+
+		if (Keybinds::Fired(Action::NewGame)) {
 			NewGame();
 		}
 
-		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D) && !Selection.empty()) {
+		if (Keybinds::Fired(Action::OpenGame)) {
+			AskingOpen = true;
+			PathBuffer = GamePath.string();
+		}
+
+		if (Keybinds::Fired(Action::Duplicate) && !Selection.empty()) {
 			DuplicateSelection();
 		}
 
-		if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !Selection.empty()) {
+		if (Keybinds::Fired(Action::Delete) && !Selection.empty()) {
 			DeleteSelection();
 		}
 
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !Selection.empty()) {
+		if (Keybinds::Fired(Action::SelectNone) && !Selection.empty()) {
 			ClearSelection();
 		}
 
-		// Shift+F5 stops, F5 toggles Play — Studio's bindings, including the part
-		// where Shift+F5 stops rather than doing nothing when already stopped.
-		if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
-			const bool stopping = ImGui::IsKeyDown(ImGuiKey_LeftShift) ||
-								  ImGui::IsKeyDown(ImGuiKey_RightShift) || Mode == RunMode::Play;
-			SetRunMode(stopping ? RunMode::Edit : RunMode::Play);
+		// **Stop is tested before Play**, because their defaults share a key:
+		// F5 plays and Shift+F5 stops, which is Studio's arrangement. `Fired`
+		// matches modifiers exactly, so the two cannot both fire — but the
+		// order says which is meant to win if somebody binds them to the same
+		// chord anyway.
+		if (Keybinds::Fired(Action::Stop)) {
+			SetRunMode(RunMode::Edit);
+		} else if (Keybinds::Fired(Action::Play)) {
+			SetRunMode(Mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 		}
 
-		if (ImGui::IsKeyPressed(ImGuiKey_F6)) {
+		if (Keybinds::Fired(Action::RunServer)) {
 			SetRunMode(Mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
+		}
+
+		if (Keybinds::Fired(Action::ShowStatistics)) {
+			ShowStatistics = !ShowStatistics;
+		}
+
+		if (Keybinds::Fired(Action::ShowFrameGraph)) {
+			ShowFrameGraph = !ShowFrameGraph;
 		}
 	}
 

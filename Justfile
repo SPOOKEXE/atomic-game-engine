@@ -173,6 +173,20 @@ studio-smoke game="" out=".cache/studio-smoke.bmp": (build "studio")
     @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
     @echo "studio ok — loaded, played and rendered with no display, into {{out}}"
 
+# Drag the editor's window and check it is still alive afterwards.
+#
+# **The one bug class a headless run cannot reach.** The viewport shows last
+# frame's scene texture, so resizing the panel means the renderer frees a
+# texture the interface has already recorded a bind of — a use-after-free
+# inside SDL's Vulkan backend, with nothing of ours on the stack. It needs a
+# real window, a real swapchain and a window manager, which is exactly what
+# `--headless` does not have.
+#
+# Not part of `just check`, for `studio-smoke`'s reason plus one more: it needs
+# a display and `xdotool`, not only a GPU.
+studio-resize: (build "studio")
+    ./scripts/studio-resize-test.sh ./{{build}}/studio/studio
+
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")
     ./{{build}}/server/server {{args}}

@@ -19,6 +19,10 @@ int main(int argc, char **argv) {
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Flag("headless", "Run with no window (needs --frames)");
 
+	// The client's names for the same two panels. See `Options::ShowStatistics`.
+	arguments.Flag("stats", "Open the statistics panel (F7)");
+	arguments.Flag("graph", "Open the frame graph (F8)");
+
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
 	arguments.Value("width", "PX", "Window width (default 1600)");
 	arguments.Value("height", "PX", "Window height (default 900)");
@@ -50,6 +54,8 @@ int main(int argc, char **argv) {
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	options.Headless = arguments.Has("headless");
+	options.ShowStatistics = arguments.Has("stats");
+	options.ShowFrameGraph = arguments.Has("graph");
 
 	// A headless run has no window to close, so without a budget it would never
 	// stop. Refused rather than given a default, because a default here is a

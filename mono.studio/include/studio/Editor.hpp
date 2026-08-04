@@ -32,6 +32,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/script/Runtime.hpp>
@@ -129,6 +130,16 @@ namespace studio {
 		// worlds and draws the result — which is the half a capture can check.
 		RunMode StartIn = RunMode::Edit;
 
+		// Open the statistics and frame-graph panels at start-up.
+		//
+		// **The client's two flags, spelled the same.** `client --stats
+		// --graph` is how the demo is run with both panels open, and an editor
+		// that needed a different pair of words for the same two panels would
+		// be a second thing to remember. They also make the panels reachable
+		// without a keyboard, which is what lets a capture prove they draw.
+		bool ShowStatistics = false;
+		bool ShowFrameGraph = false;
+
 		// Run with no window at all.
 		//
 		// **What makes the editor drivable by something that is not a person.**
@@ -214,6 +225,21 @@ namespace studio {
 		void Simulate(float frameSeconds);
 		void Present(float frameSeconds);
 
+		// The frame rate, and where the frame went.
+		//
+		// **Ordinary panels rather than the client's overlay.**
+		// `render::DrawDebugPanels` writes into a `render::OverlayImage`, which
+		// the dockspace is drawn over — so panels written there are painted
+		// out by imgui every frame. They read the same `core::FrameGraph` the
+		// client's overlay does; only the drawing differs.
+		void DrawStatistics();
+		void DrawFrameGraph();
+
+		// Records the frame time and turns span collection on or off.
+		//
+		// @param frameSeconds The frame just measured.
+		void SampleFrame(float frameSeconds);
+
 		// The half of a frame that is the world rather than the editor.
 		//
 		// Split out when headless arrived: a run with no window still presents
@@ -233,12 +259,20 @@ namespace studio {
 		void DrawScripts();
 		void DrawOutput();
 
-		// The colour theme and the interface scale.
+		// The editor's own settings, in pages.
 		//
 		// **A panel rather than a modal**, because choosing a theme means
 		// looking at the editor while it changes — and a modal is a rectangle
 		// over the thing being judged.
 		void DrawSettings();
+
+		// The theme picker and the interface scale.
+		void DrawAppearanceSettings();
+
+		// The searchable list of what every key does, and where they are
+		// changed. See `studio::Keybinds` — this page edits that table
+		// directly, so it cannot drift from what the keys actually do.
+		void DrawKeybindSettings();
 
 		void DrawStatusBar();
 		void DrawDialogs();
@@ -505,9 +539,18 @@ namespace studio {
 		std::string PathBuffer;
 		std::string NameBuffer;
 
-		// What the explorer's and the properties panel's filter boxes hold.
+		// What the explorer's, the properties panel's and the keybind page's
+		// filter boxes hold.
 		std::string ExplorerFilter;
 		std::string PropertyFilter;
+		std::string KeybindFilter;
+
+		// Which action is waiting for a key, as a `studio::Action` cast to int,
+		// or -1 for none.
+		//
+		// An `int` rather than the enum so that `Keybinds.hpp` — and through it
+		// imgui — stays out of this header.
+		int RebindingAction = -1;
 
 		// --- queued actions -------------------------------------------------
 		//
@@ -571,6 +614,26 @@ namespace studio {
 
 		// Closed by default: it is a panel somebody opens to change one thing.
 		bool ShowSettings = false;
+
+		// --- the debug panels -------------------------------------------------
+		//
+		// **Drawn into the overlay rather than as imgui windows, and reused
+		// rather than rebuilt.** `render::DrawDebugPanels` is what the client
+		// draws with, so the editor's frame graph is the same panel with the
+		// same columns — an fps figure that meant something slightly different
+		// in two programs is worse than not having one in the editor.
+		//
+		// **No keys of their own.** They are panels like every other panel:
+		// opened from the View menu, docked where somebody wants them, closed
+		// with their own button. The client's F3/F5 could not be reused here —
+		// F5 is Play — and inventing a second set of function keys for the
+		// editor was a decision worth not making twice.
+		bool ShowStatistics = false;
+		bool ShowFrameGraph = false;
+
+		// Frame times, sampled every frame so the panel has history the moment
+		// it is opened rather than starting empty.
+		engine::render::FrameStatistics Statistics;
 
 		// Whether the next frame rebuilds the default arrangement. Set from the
 		// View menu and acted on at the top of the frame, because rearranging a

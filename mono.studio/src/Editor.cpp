@@ -133,6 +133,13 @@ namespace studio {
 	bool Editor::Initialise(const Options &options) {
 		Settings = options;
 
+		// The panels the command line asked for. Held as editor state rather
+		// than read from `Settings` each frame, because F7 and F8 toggle them
+		// and a flag that could be turned on from two places and off from one
+		// is a flag that gets stuck.
+		ShowStatistics = Settings.ShowStatistics;
+		ShowFrameGraph = Settings.ShowFrameGraph;
+
 		// Before anything reads a file. Changing it later would leave whatever
 		// had already loaded pointing at the old tree.
 		if (!Settings.Assets.empty()) {
@@ -322,6 +329,10 @@ namespace studio {
 	}
 
 	void Editor::Present(float frameSeconds) {
+		// **Before the panels draw, so the numbers they show are this frame's.**
+		// Sampling afterwards would put the frame-rate history one frame behind
+		// the graph it is drawn beside.
+		SampleFrame(frameSeconds);
 
 		// Drained once per frame, before anything draws it. The sink collects
 		// from whatever thread logged; this is the only place the panel's own
@@ -344,6 +355,21 @@ namespace studio {
 		Interface.End();
 
 		PresentWorld(frameSeconds);
+	}
+
+	void Editor::SampleFrame(float frameSeconds) {
+		// **Sampled every frame, whether or not a panel is open.** A frame-rate
+		// panel that started collecting when it was opened would show an empty
+		// graph for its first second — which is exactly the second somebody
+		// opened it to look at, because they opened it when the editor
+		// stuttered.
+		Statistics.Record(Clock.Now(), frameSeconds);
+
+		// **The frame graph is only collected while it is being read.**
+		// Recording every span of every frame costs real time, and the whole
+		// reason to look at that panel is that time is scarce. The client's
+		// overlay makes the same trade.
+		engine::core::FrameGraph::SetEnabled(ShowFrameGraph);
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {
