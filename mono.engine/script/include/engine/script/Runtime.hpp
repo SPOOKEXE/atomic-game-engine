@@ -244,10 +244,21 @@ namespace engine::script {
 		}
 
 	  protected:
+		// Binds a runtime to the world it builds into and the role it believes
+		// it is on.
+		//
+		// @param store The world. Outlives the runtime.
+		// @param role  Where scripts under this runtime are standing.
 		Runtime(ecs::Store &store, const HostRole &role) : Store(store), HostRoleValue(role) {}
 
+		// The world this runtime builds into. A reference rather than a handle,
+		// because a VM is created for one world and dies with it.
 		ecs::Store &Store;
+
+		// Where scripts under this runtime believe they are standing.
 		HostRole HostRoleValue;
+
+		// The last failure, or empty. Read through `LastError`.
 		std::string Error;
 	};
 

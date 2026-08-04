@@ -35,6 +35,12 @@ mono_add_library(server
 		# `check-server-is-headless` still passes with them on the line.
 		Engine::net
 		Engine::replication
+
+		# L10, `shared`. What a game file is. `--game FILE.agame` hosts a
+		# universe of worlds authored in the studio; the same module the studio
+		# wrote it with reads it back, which is what keeps one description of
+		# the format.
+		Engine::game
 )
 
 mono_add_program(server

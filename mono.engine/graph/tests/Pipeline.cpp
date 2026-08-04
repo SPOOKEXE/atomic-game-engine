@@ -32,9 +32,9 @@ TEST_CASE("the standard pipeline validates", "[graph][pipeline]") {
 	CHECK_FALSE(offender.IsValid());
 }
 
-TEST_CASE("the standard pipeline is the four stages v0.6 ships", "[graph][pipeline]") {
+TEST_CASE("the standard pipeline is the six stages v0.7 ships", "[graph][pipeline]") {
 	const Pipeline pipeline = StandardPipeline();
-	REQUIRE(pipeline.Count() == 5);
+	REQUIRE(pipeline.Count() == 6);
 
 	const auto stages = pipeline.Stages();
 	CHECK(stages[0].Name == Name("shadow"));
@@ -42,6 +42,13 @@ TEST_CASE("the standard pipeline is the four stages v0.6 ships", "[graph][pipeli
 	CHECK(stages[2].Name == Name("opaque"));
 	CHECK(stages[3].Name == Name("transparent"));
 	CHECK(stages[4].Name == Name("overlay"));
+
+	// The editor's, added at v0.7. **Last, and the position is the assertion
+	// worth making** — `interface` before `overlay` would put the debug panels
+	// on top of the studio's own windows, which is the one arrangement in which
+	// the profiler you opened to explain a slow frame is the thing you cannot
+	// see.
+	CHECK(stages[5].Name == Name("interface"));
 }
 
 TEST_CASE("the surface pass reads the shadow map and the opaque pass reads both", "[graph][pipeline]") {

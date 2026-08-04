@@ -176,6 +176,7 @@ namespace engine::render {
 			core::Name("opaque"),
 			core::Name("transparent"),
 			core::Name("overlay"),
+			core::Name("interface"),
 		};
 		return order;
 	}
@@ -965,12 +966,24 @@ namespace engine::render {
 		*State = Impl{};
 	}
 
+	BackendHandles Renderer::Backend() const {
+		BackendHandles handles;
+		if (State->Device != nullptr) {
+			handles.Device = State->Device;
+			handles.ColourFormat =
+				static_cast<uint32_t>(SDL_GetGPUSwapchainTextureFormat(State->Device, State->Window));
+		}
+		return handles;
+	}
+
 	FrameResult Renderer::Render(
 		const core::CFrame &cameraFrame,
 		const scene::Camera &camera,
 		std::span<const scene::DrawInstance> instances,
 		OverlayImage &overlay,
-		const SurfaceView *surface
+		const SurfaceView *surface,
+		FrameOverlayHook *interfaceHook,
+		const Viewport *viewport
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
@@ -1031,6 +1044,28 @@ namespace engine::render {
 			}
 		}
 
+		// --- where the world goes -------------------------------------------
+		//
+		// Resolved once, here, and everything downstream reads `sceneWidth` and
+		// `sceneHeight` rather than the swapchain's. That is the whole reason
+		// this is four lines in one place instead of a conditional at each use:
+		// the cull frustum and the projection have to be built from the same
+		// aspect ratio, and they are built six hundred lines apart.
+		//
+		// Clamped rather than trusted. A window shrunk below the panels' minimum
+		// size hands over a rectangle wider than the swapchain, and a viewport
+		// past the target's edge is a validation error rather than a clip.
+		const bool haveViewport = viewport != nullptr && viewport->IsValid();
+
+		const uint32_t sceneX = haveViewport ? std::min(static_cast<uint32_t>(viewport->X), width) : 0u;
+		const uint32_t sceneY = haveViewport ? std::min(static_cast<uint32_t>(viewport->Y), height) : 0u;
+		const uint32_t sceneWidth =
+			haveViewport ? std::max(std::min(static_cast<uint32_t>(viewport->Width), width - sceneX), 1u)
+						 : width;
+		const uint32_t sceneHeight =
+			haveViewport ? std::max(std::min(static_cast<uint32_t>(viewport->Height), height - sceneY), 1u)
+						 : height;
+
 		// --- uploads --------------------------------------------------------
 
 		const auto totalCount = static_cast<uint32_t>(instances.size());
@@ -1068,7 +1103,7 @@ namespace engine::render {
 		{
 			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
 
-			const float aspect = static_cast<float>(width) / static_cast<float>(height);
+			const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 			const graph::Frustum frustum = graph::Frustum::FromViewProjection(
 				scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
 			);
@@ -1492,6 +1527,17 @@ namespace engine::render {
 			State->SurfaceReady = true;
 		}
 
+		// --- the interface's uploads ----------------------------------------
+		//
+		// **Here, and not beside the pass that draws them.** Dear ImGui's
+		// backend copies its vertex and index buffers through a copy pass, and
+		// SDL refuses to open one while a render pass is in flight — so an
+		// upload issued from `Record` works right up until the first frame with
+		// enough widgets to grow a buffer, which is a bug that arrives months
+		// after the code that caused it. The split is `FrameOverlayHook`'s
+		// contract for exactly that reason.
+		const bool drawInterface = interfaceHook != nullptr && interfaceHook->Prepare(command);
+
 		// --- opaque pass ----------------------------------------------------
 
 		SDL_GPUColorTargetInfo colourTarget{};
@@ -1523,6 +1569,36 @@ namespace engine::render {
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 
+			// **After the pass begins and before anything is bound**, because a
+			// viewport is render-pass state and SDL resets it to the whole
+			// target every time one is opened. The clear is not affected — a
+			// load op covers the attachment rather than the viewport — so the
+			// background still fills the window behind the editor's panels,
+			// which is what makes a window with no world in it look deliberate.
+			if (haveViewport) {
+				const SDL_GPUViewport region{
+					static_cast<float>(sceneX),
+					static_cast<float>(sceneY),
+					static_cast<float>(sceneWidth),
+					static_cast<float>(sceneHeight),
+					0.0f,
+					1.0f,
+				};
+				SDL_SetGPUViewport(pass, &region);
+
+				// The scissor as well as the viewport. A viewport transforms and
+				// does not clip: a triangle whose vertices land outside it is
+				// still rasterised across the rest of the target, so a large part
+				// near the camera would spill over the explorer.
+				const SDL_Rect scissor{
+					static_cast<int>(sceneX),
+					static_cast<int>(sceneY),
+					static_cast<int>(sceneWidth),
+					static_cast<int>(sceneHeight),
+				};
+				SDL_SetGPUScissor(pass, &scissor);
+			}
+
 			if (haveInstances) {
 				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
@@ -1535,7 +1611,7 @@ namespace engine::render {
 				const SDL_GPUBufferBinding indexBinding{State->IndexBuffer, 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
 
-				const float aspect = static_cast<float>(width) / static_cast<float>(height);
+				const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 
 				// `scene::ResolveCamera`, not a projection built here. It is the
 				// one place the engine decides what a camera's matrices are, and
@@ -1548,9 +1624,11 @@ namespace engine::render {
 				// negative-height viewport "for consistency with other
 				// backends".
 				//
-				// The aspect ratio is the swapchain's rather than a caller's, so
-				// a frame taken mid-resize is projected for the image it is
-				// actually drawn into.
+				// The aspect ratio is the rectangle the world is drawn into
+				// rather than anything a caller computed, so a frame taken
+				// mid-resize is projected for the image it actually lands in.
+				// Without a `Viewport` that rectangle is the swapchain, which is
+				// what every non-editor caller gets and what this used to say.
 				const FrameUniforms frame{
 					scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection,
 					lightViewProjection,
@@ -1695,6 +1773,30 @@ namespace engine::render {
 			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 			SDL_EndGPURenderPass(pass);
 
+			result.DrawCalls++;
+		}
+
+		// --- interface pass -------------------------------------------------
+
+		if (drawInterface) {
+			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
+			passes.Enter(Pass::Interface);
+
+			// Loads, like the overlay pass, and for the same reason: the world
+			// is already in the swapchain and the chrome goes on top of it.
+			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
+
+			// No depth attachment. Panels are drawn in the order the interface
+			// submitted them and testing them against the world's depth would
+			// hide a window behind a wall.
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, nullptr);
+			interfaceHook->Record(command, pass);
+			SDL_EndGPURenderPass(pass);
+
+			// One, whatever the interface submitted. What this counter is for is
+			// the frame's shape — the panel that reads it is trying to answer
+			// "what did the engine draw", and a widget count is the editor's
+			// business rather than the renderer's.
 			result.DrawCalls++;
 		}
 

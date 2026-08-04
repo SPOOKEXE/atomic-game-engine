@@ -18,6 +18,7 @@
 #include <engine/render/Renderer.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <client/Compositor.hpp>
@@ -118,6 +119,20 @@ namespace client {
 		// the bindings were the untested half.
 		std::string ScriptPath;
 
+		// A game file to play, single-player. Empty means the demo scene.
+		//
+		// **Single-player, and not a server in this process.** Loading a game
+		// file and running its scripts with `HostRole::OfBoth` needs
+		// `Engine::game` and nothing else — no `Mono::server`, no socket, no
+		// replication. The tier escape this program's CMakeLists reserves for
+		// hosting a *real* server in-process is still not declared, because
+		// this is not that.
+		//
+		// **Takes precedence over `--script`.** A game file is a universe of
+		// worlds and a script is one scene; a run given both would have to
+		// choose, and choosing silently is worse than choosing loudly.
+		std::filesystem::path GameFile;
+
 		// `host:port` of a server to replicate from. Empty means run the local
 		// demo alone.
 		//
@@ -179,6 +194,28 @@ namespace client {
 		}
 
 	  private:
+		// Builds the demo worlds `--script`/`--worlds` describe.
+		//
+		// @return `false` when a world could not be created or its scene script
+		//         failed. A client that presented a black screen instead would
+		//         leave somebody wondering why.
+		bool BuildDemoWorlds();
+
+		// Loads `--game` and starts its scripts in both roles.
+		//
+		// @return `false` when the file would not load or holds no worlds.
+		bool LoadGameFile();
+
+		// Everything after the worlds exist: the profiler wait, and the flag
+		// that says the frame loop may begin.
+		//
+		// **Split out when `--game` arrived**, because two ways of building the
+		// worlds sharing one tail is one tail; two copies of it is where the
+		// profiler wait ends up on one path and not the other.
+		//
+		// @return `true` when the client is ready to run.
+		bool FinishStartup();
+
 		void PumpEvents();
 		void Step();
 		void WriteSnapshot();
@@ -238,6 +275,12 @@ namespace client {
 		// construction, and that thread is decided in Initialise rather than
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
+
+		// One VM per world, while a game file is being played. Held here as
+		// well as by each world's scheduler, for the reason
+		// `game::StartWorldScripts` gives: the scheduler's copy is a capture
+		// inside a lambda and nothing else names it.
+		std::vector<std::shared_ptr<engine::script::Runtime>> Runtimes;
 
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;

@@ -7,6 +7,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -315,21 +316,15 @@ namespace engine::script {
 			return true;
 		}
 
-		// An absolute `Source` is used as it stands. `operator/` already drops
-		// the left side for an absolute right side, so this is what the standard
-		// does anyway — said out loud because a reader checking whether
-		// `--script /tmp/x.luau` works should not have to know that.
-		const std::filesystem::path named(source->Path.Text());
-		const std::filesystem::path path = named.is_absolute() ? named : core::Paths::Assets() / named;
-
-		std::ifstream file(path, std::ios::binary);
-		if (!file) {
-			Error = "could not open " + path.string();
+		// **The world's `SourceCache` before the filesystem**, through the one
+		// function that knows both. A studio's unsaved edit lives in that table
+		// and a game file's scripts arrive in it, so a second resolver here
+		// would be a second place to forget it — and the symptom would be
+		// edited code that runs from one entry point and not another.
+		std::string program;
+		if (!ReadSource(Store, source->Path, program, Error)) {
 			return false;
 		}
-
-		std::ostringstream contents;
-		contents << file.rdbuf();
 
 		// **`script` names the instance, and it is set before the chunk runs.**
 		// That is the whole difference from `RunFile`: a chunk run this way can
@@ -341,7 +336,7 @@ namespace engine::script {
 		// invisible to the next, which is exactly the scoping an author expects.
 		ContextOf(State).PendingScript = instance;
 
-		const bool ok = Run(contents.str(), source->Path.Text());
+		const bool ok = Run(program, source->Path.Text());
 		ContextOf(State).PendingScript = ecs::NULL_ENTITY;
 		return ok;
 	}

@@ -56,6 +56,7 @@ int main(int argc, char **argv) {
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems or counters");
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
+	arguments.Value("game", "PATH", "Game file to play single-player (.agame)");
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
@@ -100,6 +101,17 @@ int main(int argc, char **argv) {
 
 	if (auto script = arguments.Get("script")) {
 		options.ScriptPath = std::string(*script);
+	}
+	if (auto game = arguments.Get("game")) {
+		options.GameFile = std::filesystem::path(*game);
+
+		// Loudly rather than silently. A run given both a game file and a scene
+		// script has to choose, and a choice nobody was told about is a run
+		// that did something other than what was asked.
+		if (!options.ScriptPath.empty()) {
+			ENGINE_WARN("--game and --script were both given; playing the game file");
+			options.ScriptPath.clear();
+		}
 	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);

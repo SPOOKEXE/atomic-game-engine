@@ -1,0 +1,38 @@
+# L12 [client]. The editor's toolkit, and the only target in the repository that
+# links Dear ImGui.
+#
+# **`render` deliberately does not depend on this and never should.** The edge
+# runs the other way: this module implements `render::FrameOverlayHook`, which
+# is two virtual calls and an opaque handle, so a shipped client links a
+# renderer that knows an interface layer *could* exist and pays nothing for the
+# one it does not have. Reversing that edge would put an atlas, three pipelines
+# and a font into every game binary to be initialised and never drawn.
+#
+# imgui is VENDOR_PUBLIC because a consumer builds panels: `mono.studio` calls
+# `ImGui::Begin` directly, which is the whole point of vendoring a widget
+# toolkit rather than wrapping one. Wrapping every widget this editor needs
+# would be a second UI library maintained by us, which is the thing vendoring
+# was supposed to avoid.
+
+mono_add_library(ui
+	TIER client
+	DEPS
+		Engine::core
+
+		# L12, `client`. `render::FrameOverlayHook` is the base class this
+		# module implements and `render::Renderer::Backend` is where the device
+		# and the swapchain format come from. Sideways within a layer rather
+		# than upward — repo_layout.md §6 allows it and the tier check agrees,
+		# because both are `client`.
+		Engine::render
+
+	# SDL_Window and SDL_Event appear in the public header as forward
+	# declarations only, exactly as `render` declares SDL_Window. The GPU types
+	# are behind the pimpl.
+	VENDOR SDL3::SDL3
+
+	# Public: `Interface.hpp` exposes no imgui type, but `mono.studio` includes
+	# <imgui.h> to build its panels and gets it from here rather than from a
+	# second declaration of the same target.
+	VENDOR_PUBLIC Vendor::imgui
+)

@@ -4,12 +4,14 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
@@ -191,24 +193,34 @@ namespace server {
 			return true;
 		}
 
-		engine::world::WorldSettings world;
-		world.Name = engine::core::Name(PRIMARY);
-		world.TickRate = Settings.TickRate;
+		// **A game file brings its own worlds, and there may be several.** This
+		// is the promise `Options::GamePath` has carried since v0.3 — the flag
+		// was named for the file it would eventually point at rather than being
+		// renamed twice — and v0.7 is when it comes due.
+		if (IsGameFile(Settings.GamePath)) {
+			if (!HostGameFile()) {
+				return false;
+			}
+		} else {
+			engine::world::WorldSettings world;
+			world.Name = engine::core::Name(PRIMARY);
+			world.TickRate = Settings.TickRate;
 
-		PrimaryWorld = Worlds().Create(world);
-		if (!PrimaryWorld.IsValid()) {
-			ENGINE_ERROR("could not create the primary world");
-			return false;
+			PrimaryWorld = Worlds().Create(world);
+			if (!PrimaryWorld.IsValid()) {
+				ENGINE_ERROR("could not create the primary world");
+				return false;
+			}
+
+			Worlds().Enter(PrimaryWorld, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				if (!BuildWorld(store, systems)) {
+					return;
+				}
+				if (Settings.Chatter) {
+					store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+				}
+			});
 		}
-
-		Worlds().Enter(PrimaryWorld, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-			if (!BuildWorld(store, systems)) {
-				return;
-			}
-			if (Settings.Chatter) {
-				store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-			}
-		});
 
 		if (!StartHosts()) {
 			return false;
@@ -224,6 +236,84 @@ namespace server {
 
 		Running = true;
 		ENGINE_INFO("server ready at {:.1f} Hz", Settings.TickRate);
+		return true;
+	}
+
+	bool Server::IsGameFile(const std::string &path) {
+		// **By extension, and that is the whole discriminator.** `--game` has
+		// accepted a scene *script* since v0.3 and every recipe and test that
+		// uses it still passes one; refusing those to make room for the new
+		// format would break the working half to add the missing one. A
+		// `.agame` is a universe of worlds and anything else is one scene, and
+		// `game::GAME_EXTENSION` is the single place that spelling lives.
+		if (path.empty()) {
+			return false;
+		}
+		return std::filesystem::path(path).extension() == engine::game::GAME_EXTENSION;
+	}
+
+	bool Server::HostGameFile() {
+		engine::game::GameInfo info;
+		std::string error;
+
+		if (!engine::game::LoadGame(Worlds(), Settings.GamePath, info, error)) {
+			ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, error);
+			return false;
+		}
+
+		const auto worlds = Worlds().Worlds();
+		if (worlds.empty()) {
+			ENGINE_ERROR("--game '{}' holds no worlds", Settings.GamePath);
+			return false;
+		}
+
+		// **Every world runs, and the first one is what a client joins.**
+		// Replication is one world per connection today — `Session` binds a
+		// client to a world — so a game of several scenes simulates all of them
+		// and streams one. Said in the log rather than left to be discovered:
+		// a player who joined and saw the lobby instead of the arena has no way
+		// to tell which world they got.
+		PrimaryWorld = worlds.front();
+
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfServer();
+
+		for (const engine::world::WorldId id : worlds) {
+			if (Worlds().IsRemote(id)) {
+				continue;
+			}
+
+			std::string failure;
+			Worlds().Enter(
+				id,
+				[this, &limits, &failure, id](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					// The same call the studio's Play makes. What "running a
+					// game" means is one function, or the two drift and the
+					// first thing to drift is the heartbeat's delta.
+					Runtimes.push_back(engine::game::StartWorldScripts(store, systems, limits, failure));
+
+					if (id == PrimaryWorld && Settings.Chatter) {
+						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+					}
+				}
+			);
+
+			if (!failure.empty()) {
+				// Reported and not fatal, for the reason `RunWorldScripts`
+				// runs every script even when one fails: a game where half the
+				// scripts silently did not start is a bug report with nothing
+				// in it, and refusing to host at all is worse than hosting a
+				// game with one broken script in it.
+				ENGINE_ERROR("world '{}': {}", Worlds().NameOf(id).Text(), failure);
+			}
+		}
+
+		ENGINE_INFO(
+			"hosting '{}' — {} world(s), serving '{}'",
+			info.Name.IsValid() ? info.Name.Text() : "game",
+			worlds.size(),
+			Worlds().NameOf(PrimaryWorld).Text()
+		);
 		return true;
 	}
 

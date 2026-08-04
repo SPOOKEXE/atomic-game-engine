@@ -1,12 +1,17 @@
 #pragma once
 
-// The RHI, such as it is at v0.6.
+// The RHI, such as it is at v0.7.
 //
-// Five passes — shadow, surface, opaque, transparent, overlay — over a
-// frustum-culled draw list. That is enough to prove the staged-shader path, the
-// depth buffer, an offscreen target and the swapchain, and it is where the
+// Six passes — shadow, surface, opaque, transparent, overlay, interface — over
+// a frustum-culled draw list. That is enough to prove the staged-shader path,
+// the depth buffer, an offscreen target and the swapchain, and it is where the
 // render graph at L9 will attach — the passes below become nodes, and this
 // class becomes the backend they compile to.
+//
+// **The sixth draws nothing this module owns.** `interface` is a
+// `FrameOverlayHook`, which is what lets `mono.engine/ui` record an editor's
+// chrome into this frame without Dear ImGui appearing anywhere in the engine.
+// A game runs five.
 //
 // SDL's GPU API is the backend rather than Vulkan directly. The API can target
 // Vulkan, Metal and D3D12, but v0.1 supplies SPIR-V and therefore requests the
@@ -43,7 +48,7 @@ namespace engine::render {
 	// The stages `Render` submits, in submission order.
 	//
 	// **This exists so that the two descriptions of a frame can be compared.**
-	// `graph::StandardPipeline` is the same five stages as data and
+	// `graph::StandardPipeline` is the same six stages as data and
 	// `Pipeline::Validate` checks them for a stage reading what nothing wrote —
 	// but until v0.6 nothing tied that list to the function that actually draws,
 	// so keeping them in step was a sentence in `AGENTS.md`. A sentence is
@@ -78,6 +83,16 @@ namespace engine::render {
 		// The overlay texture, loaded over the frame rather than clearing it.
 		Overlay,
 
+		// Whatever a `FrameOverlayHook` records — the editor's chrome, and
+		// nothing a game ships with.
+		//
+		// **Last, and it has to be.** Everything above it draws the world; this
+		// draws the thing you look at the world *through*. A pass that put
+		// panels underneath geometry would be a window you cannot read.
+		//
+		// @since v0.7
+		Interface,
+
 		// Not a pass. The count, for the bitmask below.
 		Count,
 	};
@@ -88,15 +103,9 @@ namespace engine::render {
 	// comparison's: `graph::Stage::Name` is a `core::Name`, and comparing two of
 	// them is an integer compare rather than a string one.
 	//
-	// @return The five names, valid for the life of the program.
+	// @return The six names, valid for the life of the program.
 	std::span<const core::Name> PassOrder();
 
-	// Work encoded by one Render call.
-	//
-	// A default result means no frame was presented, including while the window
-	// is minimised or resizing and when the renderer is unavailable.
-	//
-	// @client
 	// A second view, rendered into a texture instead of the swapchain.
 	//
 	// **`world::ViewChannel`'s shape, with a texture on the far end.** v0.2
@@ -117,12 +126,129 @@ namespace engine::render {
 		// Its field of view and clipping distances.
 		scene::Camera Lens;
 
-		// How big the texture is. Square is not required; a wide mirror wants a
+		// How wide the texture is. Square is not required; a wide mirror wants a
 		// wide target, and giving it a square one wastes half the texels.
 		uint32_t Width = 1024;
+
+		// How tall the texture is.
 		uint32_t Height = 1024;
 	};
 
+	// Where in the window the world is drawn.
+	//
+	// **The editor's requirement, and it is a projection decision rather than a
+	// crop.** A studio puts panels down the sides and along the bottom, so the
+	// world occupies a rectangle that is neither the window's size nor its
+	// shape. Drawing it full-window and letting the panels cover the edges
+	// would project for an aspect ratio nothing is displayed at — a scene
+	// stretched by however wide the explorer happens to be, changing every time
+	// somebody drags a splitter.
+	//
+	// So the rectangle is passed in, the viewport and scissor are set from it,
+	// and **the aspect ratio and the cull frustum both come from it** rather
+	// than from the swapchain. Those two travelling together is the whole
+	// point: `Renderer::Render`'s existing contract is that the frustum and the
+	// projection are resolved once from one aspect, because two copies is two
+	// chances to disagree and the symptom is geometry popping at the screen
+	// edge on one machine and not another.
+	//
+	// Pixels from the top-left of the swapchain, matching every other
+	// coordinate in this module. A default-constructed one is empty and means
+	// the whole swapchain — which is what a game passes, by passing nothing.
+	//
+	// @since v0.7
+	struct Viewport {
+		// Left edge in pixels.
+		int X = 0;
+
+		// Top edge in pixels.
+		int Y = 0;
+
+		// Width in pixels. Zero means the whole swapchain.
+		int Width = 0;
+
+		// Height in pixels. Zero means the whole swapchain.
+		int Height = 0;
+
+		// Reports whether this names a rectangle at all.
+		//
+		// @return `true` when both dimensions are positive.
+		bool IsValid() const {
+			return Width > 0 && Height > 0;
+		}
+	};
+
+	// The backend handles a hook needs to build its own pipelines.
+	//
+	// **Opaque on purpose.** `Device` is an `SDL_GPUDevice *` and `ColourFormat`
+	// is an `SDL_GPUTextureFormat`, and neither name appears here — this header
+	// says it holds no SDL GPU type and that sentence is load-bearing. A hook
+	// casts them back, which is a cast a caller writes once in a file that
+	// already includes SDL, rather than SDL appearing on the include line of
+	// everything that draws.
+	//
+	// @since v0.7
+	struct BackendHandles {
+		// The GPU device, as an `SDL_GPUDevice *`. Null before Initialise.
+		void *Device = nullptr;
+
+		// The swapchain's colour format, as an `SDL_GPUTextureFormat`.
+		//
+		// A pipeline built against the wrong one is a validation error at
+		// creation on some drivers and a corrupt image on others, which is why
+		// it is handed over rather than guessed.
+		uint32_t ColourFormat = 0;
+	};
+
+	// A layer that records into this renderer's frame.
+	//
+	// **This exists so that Dear ImGui is not in the engine.** An editor needs
+	// its chrome inside the same command buffer as the world — SDL's GPU API
+	// acquires a swapchain texture once per command buffer, so a second pass in
+	// a second buffer is not an option — and the two ways to arrange that are
+	// both worse than this one. Putting imgui in `render` puts it on every
+	// shipping client's link line to draw nothing. Exposing `SDL_GPUCommandBuffer`
+	// on `Render` breaks the rule at the top of this file.
+	//
+	// So the renderer hands over its command buffer and render pass as `void *`,
+	// and `mono.engine/ui` is the only module in the repository that knows what
+	// Dear ImGui is. The lost type safety is real and is the price; it is paid
+	// at exactly two call sites, both inside one file.
+	//
+	// **`Prepare` is outside every render pass and `Record` is inside the last
+	// one.** That split is not stylistic: uploading vertices is a copy pass, and
+	// a copy pass cannot be started while a render pass is open. A hook that
+	// uploaded from `Record` would work until the first frame with enough
+	// widgets to grow its buffer.
+	//
+	// @since v0.7
+	// @client
+	class FrameOverlayHook {
+	  public:
+		virtual ~FrameOverlayHook() = default;
+
+		// Uploads whatever this frame needs, before any render pass is open.
+		//
+		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
+		// @return `false` to skip `Record` — nothing to draw, which is not an
+		//         error and not a reason to fail the frame.
+		virtual bool Prepare(void *commandBuffer) = 0;
+
+		// Records draw commands into the swapchain.
+		//
+		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
+		// @param renderPass    An open `SDL_GPURenderPass *` bound to the
+		//                      swapchain with no depth attachment.
+		virtual void Record(void *commandBuffer, void *renderPass) = 0;
+	};
+
+	// What one `Render` call submitted, and whether it reached the display.
+	//
+	// A default result means no frame was presented, including while the window
+	// is minimised or resizing and when the renderer is unavailable.
+	//
+	// @since v0.1
+	// @client
 	struct FrameResult {
 		// Whether SDL accepted a command buffer for presentation.
 		bool Presented = false;
@@ -248,14 +374,27 @@ namespace engine::render {
 		// @param overlay     CPU premultiplied RGBA8 overlay. Uploaded only when
 		//                    it has a pending region, drawn whenever it has
 		//                    content, and marked uploaded on the way out.
+		// @param surface     The offscreen view to render first, or null.
+		// @param interfaceHook An editor's chrome, drawn last, or null. See
+		//                    `FrameOverlayHook` for why this is not imgui.
+		// @param viewport    Where in the window the world is drawn, or null for
+		//                    all of it. Decides the aspect ratio and the cull
+		//                    frustum as well as the scissor — see `Viewport`.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,
 			const scene::Camera &camera,
 			std::span<const scene::DrawInstance> instances,
 			OverlayImage &overlay,
-			const SurfaceView *surface = nullptr
+			const SurfaceView *surface = nullptr,
+			FrameOverlayHook *interfaceHook = nullptr,
+			const Viewport *viewport = nullptr
 		);
+
+		// The device and swapchain format a `FrameOverlayHook` builds against.
+		//
+		// @return The handles, both empty before Initialise.
+		BackendHandles Backend() const;
 
 	  private:
 		struct Impl;

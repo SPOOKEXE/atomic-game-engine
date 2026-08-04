@@ -34,6 +34,12 @@ mono_add_library(client
 		# module — nothing here compiles against Luau — so this row says "the
 		# client can run a game file" and nothing about which language it is in.
 		Engine::examples
+
+		# L10, `shared`. `--game FILE.agame` plays a universe authored in the
+		# studio, single-player. **Not `Mono::server`**: loading a game file and
+		# running its scripts as both roles needs the format and the VM and
+		# nothing else, so the tier escape reserved below is still not declared.
+		Engine::game
 	VENDOR SDL3::SDL3
 )
 

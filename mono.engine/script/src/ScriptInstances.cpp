@@ -4,6 +4,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 
 #include <algorithm>
 #include <array>
@@ -59,8 +60,13 @@ namespace engine::script {
 			// rather than prevented one.
 			scene::PartClass();
 
-			ecs::Components::Register<Source>("script.Source");
-			ecs::Components::Register<Disabled>("script.Disabled");
+			// Through the one function, so a caller that registers the class
+			// tree cannot end up with a `SourceCache` the snapshot writer
+			// refuses — a resource keyed by an unregistered type is minted
+			// under the compiler's spelling and aborts once the table is
+			// sealed, which is a crash at the first world rather than at the
+			// line that caused it.
+			RegisterScriptComponents();
 
 			const ecs::ClassId instance = ecs::Classes::Find(core::Name("Instance"));
 

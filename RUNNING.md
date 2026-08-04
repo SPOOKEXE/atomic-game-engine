@@ -17,6 +17,7 @@ cd atomic-game-engine
 just setup                  # submodules, and shaderc's own DEPS
 just build                  # everything, dev preset
 just run --stats --graph    # the client, both debug panels open
+just edit                   # the editor, on a new game
 just test                   # only the suites your change could have affected
 ```
 
@@ -183,6 +184,7 @@ mains over the parts of it they need.
 | You want to | Run | Adds, over the engine |
 |---|---|---|
 | Run a script with nothing else in the way | `atomic` *(v0.6)* | nothing |
+| Build a game | `studio` *(v0.7)* | the editor: explorer, properties, script editor, run and play |
 | See something on screen | `client` | window, input, renderer, and the client half of networking |
 | Host a simulation with no window | `server` | the tick loop, and the hosting half of networking |
 | Serve a game's content | `cdn` | a content root, and later the manifest and the origin's HTTP layer |
@@ -196,8 +198,128 @@ hosting, the session — plus, on the client, presentation. A script that needs
 none of that does not need either program, which is what the standalone runtime
 is for.
 
-`client --help` and `server --help` print their own options, generated from the
-option declarations, so they cannot drift from what the program accepts.
+`client --help`, `server --help` and `studio --help` print their own options,
+generated from the option declarations, so they cannot drift from what the
+program accepts.
+
+---
+
+# The editor *(v0.7)*
+
+```sh
+just edit                       # a new game, one world, a baseplate
+just edit --game My.agame       # open one
+```
+
+The one program where `RunService:IsStudio()` is true. It writes a `.agame`,
+which is the file the other two programs read:
+
+```sh
+just host --game My.agame       # a dedicated server hosting every world in it
+just run  --game My.agame       # single-player, both roles in one process
+```
+
+### The window
+
+A menu bar, a toolbar, and three docked panels around a hole in the middle that
+the world is drawn into. The layout is yours after the first run — it is written
+to `studio-layout.ini` beside the binary, and the built-in arrangement is only
+used when that file does not exist.
+
+| Panel | What it is |
+|---|---|
+| Explorer | the universe, its worlds, and every instance in the active one |
+| Properties | whatever is selected, grouped by which class declares each property |
+| Script Editor | a tab per open script |
+| Output | the engine log, including what your scripts `print` |
+
+**The tree is the mapping `game` and `workspace` already had.** The root is the
+universe, which is what a script calls `game`; each world under it is a scene,
+and the active one is what a script running in it calls `workspace`. That is not
+a resemblance — `script/src/Services.cpp` established the mapping at v0.6 and the
+explorer draws the same objects.
+
+### Getting around
+
+| | |
+|---|---|
+| Right mouse, held | look |
+| `W` `A` `S` `D`, while looking | move |
+| `Q` `E`, while looking | down and up |
+| Wheel, while looking | how fast, not how far |
+
+The camera is not an entity in any world, which is why it is not saved, not
+replicated and not reset by Stop.
+
+### Editing
+
+Insert Object on the toolbar, or right-click in the tree. The list is every
+class registered under `Instance` — it is read from `ecs::Classes` rather than
+written down, so a class added by any module appears in it with nothing in the
+editor changing. The same is true of the properties panel: it walks the class's
+declared properties, and an `Enum` property is a list of its registered members
+rather than a text field, so a mistyped material is impossible rather than
+caught.
+
+Drag a row onto another to reparent it. `Ctrl+D` duplicates, `Del` deletes,
+`Ctrl+S` saves.
+
+### Run, Play and Stop
+
+| | |
+|---|---|
+| **Run** (`F6`) | the server's scripts — `Script`, not `LocalScript` |
+| **Play** (`F5`) | both, which is what single-player is |
+| **Stop** (`Shift+F5`) | ends it, and *puts the scene back* |
+
+Stop is a snapshot restore, exactly as it is in Roblox: what your scripts did to
+the world is undone, and what you authored before pressing Play is not. Edits
+made to a script while the game is running apply on the next run, and the editor
+says so rather than leaving you to find out.
+
+**Nothing ticks in edit mode.** A world that simulated while you were building it
+would settle physics under your hands — a part placed in the air would be on the
+floor by the time you looked away.
+
+### Options
+
+| Option | Default | What it does |
+|---|---|---|
+| `--game PATH` | — | open a game file at startup |
+| `--width`, `--height` | 1600×900 | window size |
+| `--scale FACTOR` | 1.0 | multiplies every font and padding |
+| `--tick-rate HZ` | 60 | simulation rate while running |
+| `--frames N` | — | exit after N frames, for a script or a screenshot |
+| `--override-assets-directory DIR` | — | read staged data from here |
+
+### The file it writes
+
+A `.agame` is one XML document holding the universe, every world, every
+instance and every script's text. It is meant to be read:
+
+```xml
+<Game format="1" name="Untitled">
+	<Universe mode="WorldParallel" catchUp="8" busBudget="64" />
+	<World name="Start" tickRate="60" idleTickRate="2" faultLimit="3">
+		<Sources>
+			<Source path="Scripts/Script.luau"><![CDATA[print("hello")]]></Source>
+		</Sources>
+		<Item class="Part" name="Baseplate" id="1">
+			<Property name="Size" type="Vector3">128, 1, 128</Property>
+		</Item>
+	</World>
+</Game>
+```
+
+Only properties that differ from their class default are written, which is what
+keeps a scene of a thousand parts a file you can read a diff of. A single world
+exports on its own as a `.aworld` — File ▸ Export Active World — and imports
+back into any universe.
+
+**It is not a snapshot and does not replace one.** `--record` still writes the
+binary format, which carries a *running* universe including tick counters and
+bus state and is same-build only. A game file is content: it survives an engine
+version, and that is what it is for.
 
 ---
 
@@ -298,6 +420,7 @@ v0.6.
 --height PX                      Window height (default 720)
 --profiler-tab NAME              frame, categories, systems or counters
 --script PATH                    Luau or TypeScript script to run at startup (v0.6)
+--game PATH                      Game file to play single-player (.agame) (v0.7)
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
 --override-assets-directory DIR  Read shaders and data from here
@@ -306,6 +429,12 @@ v0.6.
 
 Naming a `--profiler-tab` opens the graph, and `--profile-seconds` turns
 collection on — asking to see something is not a separate flag from showing it.
+
+`--game` plays a `.agame` written by the editor: every world in it is
+simulated, its scripts run with both roles true, and there is no socket and no
+server library involved — single-player is the format and a VM, not a server
+hosted in this process. Given both `--game` and `--script`, the game file wins
+and the client says so rather than choosing quietly.
 
 ### Benchmarks
 
@@ -463,7 +592,7 @@ just host --ticks 300 --entities 20000
 --entities N                     Entities in the placeholder world (default 4096)
 --ticks N                        Exit after N ticks
 --seconds N                      Exit after N seconds
---game PATH                      Script or game file to host (v0.2+)
+--game PATH                      Scene script, or a .agame universe to host (v0.7)
 --record PATH                    Write a recording of this run
 --replay PATH                    Replay a recording instead of simulating
 --override-assets-directory DIR  Read staged data from here

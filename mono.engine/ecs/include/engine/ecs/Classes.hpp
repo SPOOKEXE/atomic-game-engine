@@ -170,6 +170,11 @@ namespace engine::ecs {
 		// one component write out to every property name observing it — writing
 		// `Transform` fires `CFrame`, `Position` *and* `Orientation`.
 		const ComponentSet *Reads = nullptr;
+
+		// The components the setter touches. The same set as `Reads` for a
+		// plain field, and deliberately a separate pointer: a computed property
+		// may read more than it writes, and a caller asking what a write
+		// dirties must not be told what a read needed.
 		const ComponentSet *Writes = nullptr;
 
 		// Reads the property into `out`, which holds `Size` bytes.

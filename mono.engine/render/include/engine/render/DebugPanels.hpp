@@ -307,16 +307,6 @@ namespace engine::render {
 		int Scale = 2;
 	};
 
-	// Clears the image and draws whatever is switched on. Draws nothing, and
-	// leaves the image clean, when both panels are off — which is what lets the
-	// renderer skip the upload.
-	//
-	// An empty image, such as one for a minimised window, is cleared safely and
-	// remains clean. No data from `data` is retained after the call.
-	//
-	// @param image CPU image to clear and draw into.
-	// @param data  Borrowed panel state and profiler data.
-	// @client
 	// The share of the frame's *busy* time each span accounts for.
 	//
 	// **Split out of the drawing so it can be checked**, which is the whole
@@ -354,5 +344,15 @@ namespace engine::render {
 		return std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
 	}
 
+	// Clears the image and draws whatever is switched on. Draws nothing, and
+	// leaves the image clean, when both panels are off — which is what lets the
+	// renderer skip the upload.
+	//
+	// An empty image, such as one for a minimised window, is cleared safely and
+	// remains clean. No data from `data` is retained after the call.
+	//
+	// @param image CPU image to clear and draw into.
+	// @param data  Borrowed panel state and profiler data.
+	// @client
 	void DrawDebugPanels(OverlayImage &image, const DebugPanelData &data);
 }

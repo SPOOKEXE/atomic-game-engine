@@ -18,6 +18,7 @@ add_subdirectory(assets)    # L8 content addressing         [shared]
 add_subdirectory(physics)   # L8 shapes, integration, pairs [shared]
 add_subdirectory(script)    # L9 running a script           [shared]
 add_subdirectory(graph)     # L9 what is drawn, before binding [shared]
+add_subdirectory(game)      # L10 what a game file is      [shared]
 add_subdirectory(examples)  # L10 the example scene        [shared]
 add_subdirectory(net)       # L11 transport and authority   [shared]
 add_subdirectory(replication) # L12 what the wire means     [shared]
@@ -32,6 +33,7 @@ add_subdirectory(replication) # L12 what the wire means     [shared]
 if(MONO_BUILD_CLIENT)
 	add_subdirectory(input)   # L12 devices, action mapping  [client]
 	add_subdirectory(render)  # L12 RHI, render nodes        [client]
+	add_subdirectory(ui)      # L12 the editor's toolkit     [client]
 endif()
 
 # TODO(D00017): the hosting half of L12 — orchestration — is a [server] module

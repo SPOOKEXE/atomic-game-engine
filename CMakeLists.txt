@@ -164,6 +164,11 @@ endif()
 # client to link and this is absent rather than stubbed.
 if(MONO_BUILD_CLIENT AND MONO_BUILD_SERVER)
 	add_subdirectory(mono.unified_server_client)
+
+	# The editor. Needs the renderer to draw with and the server library to host
+	# with, so like the harness above it configures only where both exist —
+	# under the `server` preset there is nothing here to build.
+	add_subdirectory(mono.studio)
 endif()
 
 # The content origin. `shared` tier rather than `server`, so the tier rule

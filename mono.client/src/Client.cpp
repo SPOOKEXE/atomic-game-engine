@@ -2,6 +2,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -66,6 +67,80 @@ namespace client {
 
 		Universe_ = std::make_unique<engine::world::Universe>();
 
+		if (!Settings.GameFile.empty()) {
+			if (!LoadGameFile()) {
+				return false;
+			}
+		} else if (!BuildDemoWorlds()) {
+			return false;
+		}
+
+		// The first is the one the panels report on and the one the composed
+		// camera comes from. A client draws one world's worth of camera however
+		// many it composites.
+		Rendered = Simulated.front();
+
+		if (!BeginConnecting()) {
+			return false;
+		}
+
+		if (Simulated.size() > 1) {
+			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", Simulated.size(), Settings.ViewSpacing);
+		}
+
+		FrameGraph::SetEnabled(Settings.ShowFrameGraph);
+		return FinishStartup();
+	}
+
+	bool Client::LoadGameFile() {
+		engine::game::GameInfo info;
+		std::string error;
+
+		if (!engine::game::LoadGame(*Universe_, Settings.GameFile, info, error)) {
+			ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
+			return false;
+		}
+
+		const auto worlds = Universe_->Worlds();
+		if (worlds.empty()) {
+			ENGINE_ERROR("--game '{}' holds no worlds", Settings.GameFile.string());
+			return false;
+		}
+
+		// **Both halves, in one process.** A single-player run is a server and
+		// a client at once — `HostRole::OfBoth` says so and `RunService.hpp`
+		// argues that both being true is a legal answer rather than a bug — so
+		// a game's `Script` and its `LocalScript` both run here.
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+
+		for (const engine::world::WorldId id : worlds) {
+			std::string failure;
+
+			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				InstallPresentation(store, systems, Settings.Entities);
+
+				// The scripts before the camera, so a scene that aimed one of
+				// its own keeps it — see `InstallDefaultCamera`.
+				Runtimes.push_back(engine::game::StartWorldScripts(store, systems, limits, failure));
+				InstallDefaultCamera(store, systems);
+			});
+
+			if (!failure.empty()) {
+				ENGINE_ERROR("world '{}': {}", Universe_->NameOf(id).Text(), failure);
+			}
+
+			Views.Track(id, Universe_->NameOf(id), Settings.Entities);
+			Simulated.push_back(id);
+		}
+
+		ENGINE_INFO(
+			"playing '{}' — {} world(s)", info.Name.IsValid() ? info.Name.Text() : "game", worlds.size()
+		);
+		return true;
+	}
+
+	bool Client::BuildDemoWorlds() {
 		const uint32_t worlds = std::max(1u, Settings.Worlds);
 		for (uint32_t index = 0; index < worlds; index++) {
 			engine::world::WorldSettings world;
@@ -122,21 +197,10 @@ namespace client {
 			Simulated.push_back(id);
 		}
 
-		// The first is the one the panels report on and the one the composed
-		// camera comes from. A client draws one world's worth of camera however
-		// many it composites.
-		Rendered = Simulated.front();
+		return true;
+	}
 
-		if (!BeginConnecting()) {
-			return false;
-		}
-
-		if (worlds > 1) {
-			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", worlds, Settings.ViewSpacing);
-		}
-
-		FrameGraph::SetEnabled(Settings.ShowFrameGraph);
-
+	bool Client::FinishStartup() {
 		// Tracy is on-demand: it collects nothing until a profiler attaches, so
 		// a short run with nothing listening produces an empty capture. Waiting
 		// makes that an explicit choice rather than a surprise.

@@ -1,13 +1,16 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 
@@ -288,6 +291,12 @@ namespace client {
 	}
 
 	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
+		// Before anything mints an automatic id for `DrawList`. See
+		// `RegisterClientComponents`: `Components::Of<T>` caches its answer per
+		// type per process, so an explicit registration that arrives second
+		// aborts rather than quietly leaving two names for one thing.
+		RegisterClientComponents();
+
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
 		std::string error;
@@ -323,4 +332,73 @@ namespace client {
 		return true;
 	}
 
+	bool InstallDefaultCamera(Store &store, Scheduler &scheduler) {
+		const auto *existing = store.Resource<ActiveCamera>();
+		if (existing != nullptr && existing->Entity != engine::ecs::NULL_ENTITY &&
+			store.Alive(existing->Entity)) {
+			return false;
+		}
+
+		ActiveCamera live;
+		live.Entity = InstallCamera(store);
+		store.SetResource(live);
+
+		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
+		return true;
+	}
+
+	void RegisterClientComponents() {
+		// **A `DrawList` is derived state, and its serialisation says so by
+		// writing nothing.**
+		//
+		// It had no registration at all before v0.7, which meant
+		// `Store::SetResource` minted one under the compiler's spelling of the
+		// type — rule 4's exact failure, sitting unnoticed because nothing had
+		// ever tried to snapshot a world that had one. The studio's Stop does:
+		// it saves the universe when Play is pressed and restores it when Stop
+		// is, and `Store::Save` refuses a resource with no serialisation rather
+		// than writing bytes that cannot be read back. That refusal is correct
+		// and this is the fix for it.
+		//
+		// Nothing is written and nothing is read because the list is rebuilt by
+		// `collect-instances` in `PreRender`, every frame, before anything
+		// looks at it. Writing a frame's worth of interpolated cubes into every
+		// save file would be storing an answer that is recomputed before it is
+		// ever used.
+		engine::ecs::Components::Register<DrawList>(
+			"client.DrawList",
+			[](engine::core::ByteWriter &, const void *, size_t) {},
+			[](engine::core::ByteReader &, void *destination, size_t count) {
+				auto *lists = static_cast<DrawList *>(destination);
+				for (size_t index = 0; index < count; index++) {
+					lists[index].Instances.clear();
+				}
+			}
+		);
+	}
+
+	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {
+		RegisterClientComponents();
+
+		if (!store.HasResource<DrawList>()) {
+			store.SetResource(DrawList{});
+			store.ResourceMutable<DrawList>()->Instances.reserve(reserve);
+		}
+
+		if (!store.HasResource<WorldBounds>()) {
+			// A default rather than nothing. `WorldBounds` is what the
+			// replication wire quantises against and what a camera would frame,
+			// and a world opened in an editor has authored no such number — so
+			// it gets the type's own default instead of a missing resource
+			// somebody later reads through a null pointer.
+			store.SetResource(WorldBounds{});
+		}
+
+		// **The same system `engine::examples` installs, from the same place.**
+		// It moved into `scene` at v0.7 precisely so this call site could exist:
+		// two copies of a system that writes `PreviousTransform` can both be
+		// installed into one world, and the second wins silently every tick.
+		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+	}
 }

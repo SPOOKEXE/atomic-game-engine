@@ -1,0 +1,261 @@
+#pragma once
+
+// What a game file is.
+//
+// **A game is a universe and every world in it.** v0.7's roadmap line says the
+// save file for a game contains the universe plus all subworlds, and that
+// sentence is this module: `world::Universe` is the container, a world is a
+// scene, and the file carries the lot in one document. There is deliberately no
+// per-world file format that a game file is a list of — a game split across
+// files is a game somebody ships half of.
+//
+// **Text, and specifically XML, for a reason that is not taste.**
+// `world::Universe::Save` already writes a binary snapshot and keeps working;
+// this is a different job. A snapshot is a running universe frozen mid-tick,
+// including entity ids, tick counters and bus state — restoring one into a
+// different build is not promised and never was. A game file is *authored
+// content*: it has to survive an engine version, be reviewable in a diff, be
+// mergeable by two people, and be repairable by hand when something goes wrong.
+// Those are text's properties, and they are worth the bytes.
+//
+// **Which means nothing here writes an entity id.** Instances carry a
+// document-local `id` attribute used only to resolve references within the same
+// file, exactly as `.rbxlx` does — rule 4, arriving at a save format: a name
+// crosses and a number does not.
+//
+// **Properties equal to their class default are not written.** A `Part` exposes
+// fifteen properties and a scene sets three of them; writing all fifteen turns
+// a readable file into a wall and a one-property change into a diff nobody can
+// read. The consequence is stated rather than hidden: a file written by one
+// build and loaded by a later one picks up that build's defaults for anything
+// it did not name. That is the behaviour you want — a default that improves
+// should improve existing content — and it is the same choice Roblox made.
+//
+// @tier L10 · shared
+
+#include <engine/core/Name.hpp>
+#include <engine/ecs/Scheduler.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/game/Xml.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/world/Universe.hpp>
+#include <engine/world/World.hpp>
+
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace engine::game {
+
+	// The format this build writes and accepts.
+	//
+	// A number in the file rather than a guess from its shape. A reader that
+	// inferred the version from which elements were present would accept a
+	// truncated file from the future as an old one.
+	inline constexpr uint32_t FORMAT_VERSION = 1;
+
+	// The extension a whole game takes.
+	inline constexpr std::string_view GAME_EXTENSION = ".agame";
+
+	// The extension one exported world takes.
+	//
+	// **A different extension from a whole game, because they are different
+	// documents and confusing them is a lost afternoon.** Opening a world as a
+	// game gets you a universe with no worlds; importing a game as a world gets
+	// you nothing. The root element says which, so the reader refuses either
+	// mistake rather than half-reading it — the extension is the courtesy.
+	inline constexpr std::string_view WORLD_EXTENSION = ".aworld";
+
+	// What a game file says about itself, and the settings behind it.
+	//
+	// @since v0.7
+	struct GameInfo {
+		// The universe's name, as the studio shows it and a file remembers it.
+		core::Name Name;
+
+		// How the universe spends its workers.
+		world::UniverseSettings Universe;
+
+		// Every world the file carried, in document order.
+		//
+		// Names rather than handles: this is what a file said, and resolving it
+		// to a `WorldId` is the caller's business after `LoadGame` has run.
+		std::vector<core::Name> Worlds;
+	};
+
+	// Registers every class a document can name.
+	//
+	// **Called by every entry point in this module rather than left to a
+	// caller.** `game`'s CMakeLists names `Engine::scene` and `Engine::script`
+	// for exactly this reason: a reader that depended on somebody else having
+	// registered `Part` first fails with "no class named 'Part'" on a perfectly
+	// good file, which sends whoever reads the message looking at the file
+	// instead of at the program. A dedicated server hosting its first game file
+	// found it that way.
+	//
+	// Idempotent and process-wide, like every other registration.
+	void RegisterGameClasses();
+
+	// --- one world ---------------------------------------------------------
+
+	// Writes one world's instance tree and script text into an open element.
+	//
+	// The element is expected to be open and is not closed here — a caller
+	// writing a whole game has a `<World>` open, and a caller exporting one
+	// world has a `<World>` open too. One function, so the two documents cannot
+	// describe a world differently.
+	//
+	// @param writer The document being built.
+	// @param store  The world to write. Not `const`: reading properties walks
+	//               the store, and `Store::Each` caches a query plan.
+	void WriteWorldBody(XmlWriter &writer, ecs::Store &store);
+
+	// Reads one world's instance tree and script text into an empty store.
+	//
+	// **The store must be empty.** Merging into a populated world is a
+	// different operation with different answers about name collisions, and
+	// pretending one function does both is how the wrong one gets called.
+	//
+	// @param document The parsed document, for resolving child indices.
+	// @param element  The `<World>` element.
+	// @param store    The world to build into.
+	// @param error    Filled in with why, on failure.
+	// @return `false` when the document names a class or property this build
+	//         does not have, or when the store refused an instance.
+	bool ReadWorldBody(
+		const XmlDocument &document, const XmlElement &element, ecs::Store &store, std::string &error
+	);
+
+	// Writes one world as a standalone document, without touching a disk.
+	//
+	// **The half of `ExportWorld` an editor needs on its own.** Duplicating a
+	// world and renaming one are both a write followed by a read — and going
+	// through a temporary file to do it would make two ordinary editor actions
+	// depend on somewhere being writable.
+	//
+	// @param universe The universe holding it.
+	// @param world    Which world.
+	// @param error    Filled in with why, on failure.
+	// @return The document, or empty when the world is unknown or remote.
+	std::string WriteWorldDocument(world::Universe &universe, world::WorldId world, std::string &error);
+
+	// Reads a standalone world document, creating a world for it.
+	//
+	// @param universe The universe to create it in.
+	// @param document The document, as `WriteWorldDocument` produced it.
+	// @param rename   A name to use instead of the document's, or an invalid
+	//                 Name to keep what the document said.
+	// @param error    Filled in with why, on failure.
+	// @return The new world, or an invalid handle.
+	world::WorldId ReadWorldDocument(
+		world::Universe &universe, std::string_view document, core::Name rename, std::string &error
+	);
+
+	// Exports one world as a standalone document.
+	//
+	// @param universe The universe holding it.
+	// @param world    Which world.
+	// @param path     Where to write.
+	// @param error    Filled in with why, on failure.
+	// @return `false` when the world is unknown, remote, or the file would not
+	//         be written.
+	bool ExportWorld(
+		world::Universe &universe, world::WorldId world, const std::filesystem::path &path, std::string &error
+	);
+
+	// Imports a standalone world document, creating a world for it.
+	//
+	// @param universe The universe to create it in.
+	// @param path     The document to read.
+	// @param rename   A name to use instead of the document's, or an invalid
+	//                 Name to keep what the file said. **The parameter exists
+	//                 because importing the same world twice is a real thing an
+	//                 author does**, and two worlds cannot share a name.
+	// @param error    Filled in with why, on failure.
+	// @return The new world, or an invalid handle.
+	world::WorldId ImportWorld(
+		world::Universe &universe, const std::filesystem::path &path, core::Name rename, std::string &error
+	);
+
+	// Starts every script a world holds, and keeps them running.
+	//
+	// **The one place three programs agree about what "running a game" means.**
+	// The studio's Play, a dedicated server hosting a game file, and a client
+	// playing one single-player all need the same four steps: open a VM over
+	// the world, run the scripts the host's role selects, install the heartbeat
+	// on the fixed tick delta, and keep the VM alive for as long as the world
+	// is. Three copies of that would be three places for the heartbeat's delta
+	// to become wall time, which is the desync rule 5 names arriving through
+	// the call a script uses most.
+	//
+	// **The runtime is returned as a `shared_ptr` and the scheduler holds one
+	// too.** A script that connects to `RunService.Heartbeat` *is* the
+	// simulation for what it built, so the VM has to outlive the call that
+	// started it — the same arrangement `examples::LoadScene` uses and for the
+	// same reason. A caller that drops its copy leaves the world holding the
+	// last one.
+	//
+	// **Luau, and a world whose scripts are JavaScript runs nothing.** The
+	// runtime is per world and `script::LanguageOf` picks per file;
+	// reconciling those is a design decision rather than an oversight, and it
+	// is stated here rather than discovered.
+	//
+	// @param store     The world.
+	// @param scheduler The systems to install the heartbeat into.
+	// @param limits    What bounds a script, including the host's role.
+	// @param error     Filled in with the first script failure, if any. A
+	//                  failure does not stop the others — a world where half
+	//                  the scripts silently did not start is a bug report with
+	//                  nothing in it.
+	// @return The runtime, which is never null.
+	std::shared_ptr<script::Runtime> StartWorldScripts(
+		ecs::Store &store, ecs::Scheduler &scheduler, const script::RuntimeLimits &limits, std::string &error
+	);
+
+	// --- the whole game ----------------------------------------------------
+
+	// Writes a universe and every local world in it.
+	//
+	// **A remote world is written as a name and a setting, not as content.** A
+	// world held by a supervised host has no store here, so its instances are
+	// not this process's to save — and writing an empty one would be a save
+	// file that quietly deleted somebody's scene.
+	//
+	// @param universe The universe to write.
+	// @param name     The game's name.
+	// @param path     Where to write.
+	// @param error    Filled in with why, on failure.
+	// @return `false` when the file would not be written.
+	bool SaveGame(
+		world::Universe &universe, core::Name name, const std::filesystem::path &path, std::string &error
+	);
+
+	// Replaces a universe's worlds with a game file's.
+	//
+	// **Every existing world is destroyed first**, for `ecs::Store::Load`'s
+	// reason: a universe that is partly one game and partly another looks like
+	// it works, right up until two scripts named the same thing disagree about
+	// which world they are in.
+	//
+	// @param universe The universe to build into.
+	// @param path     The document to read.
+	// @param out      Filled in with what the file said.
+	// @param error    Filled in with why, on failure.
+	// @return `false` when the file would not be read or parsed. On failure the
+	//         universe is left **empty** rather than half loaded.
+	bool
+	LoadGame(world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error);
+
+	// Builds the document a `SaveGame` would write, without touching a disk.
+	//
+	// For a test, and for a studio comparing what is on screen against what was
+	// last saved — which is how the title bar knows to show a modified marker
+	// without keeping a second copy of the world to diff against.
+	//
+	// @param universe The universe to write.
+	// @param name     The game's name.
+	// @return The document.
+	std::string WriteGame(world::Universe &universe, core::Name name);
+}

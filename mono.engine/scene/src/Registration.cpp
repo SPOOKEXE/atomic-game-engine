@@ -44,6 +44,20 @@ namespace engine::scene {
 				writer.WriteName(visual.Mesh);
 				writer.WriteName(visual.Material);
 				writer.WriteBool(visual.Visible);
+
+				// **Added at v0.7, and the reason it was missing is the reason
+				// a custom serialiser is dangerous.** A field added to a type
+				// with a generated serialiser crosses for free; a field added to
+				// one with a hand-written pair crosses only if somebody
+				// remembers, and nothing in the build checks. `Transparency` and
+				// `Surface` both landed after this function was written and
+				// both silently reset to their defaults on every load —
+				// invisible for a part that was opaque anyway, and a glass pane
+				// that turned solid the first time a world was saved and
+				// reopened. `mono.client/tests/Presentation.cpp` is the check
+				// that would have caught it, and now does.
+				writer.WriteFloat(visual.Transparency);
+				writer.WriteInt8(visual.Surface);
 			}
 		}
 
@@ -57,6 +71,8 @@ namespace engine::scene {
 				visual.Mesh = reader.ReadName();
 				visual.Material = reader.ReadName();
 				visual.Visible = reader.ReadBool();
+				visual.Transparency = reader.ReadFloat();
+				visual.Surface = reader.ReadInt8();
 			}
 		}
 

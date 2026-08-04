@@ -18,6 +18,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Recording.hpp>
@@ -306,6 +307,21 @@ namespace server {
 		// @return `false` when a named scene could not be loaded.
 		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
+		// Whether `--game` names a game file rather than a scene script.
+		//
+		// By extension. `--game` has accepted a `.luau` since v0.3 and every
+		// recipe that uses it still passes one, so the new format is added
+		// beside the old rather than in place of it.
+		//
+		// @param path What `--game` was given.
+		// @return `true` for a `.agame`.
+		static bool IsGameFile(const std::string &path);
+
+		// Loads a game file's universe and starts every world's scripts.
+		//
+		// @return `false` when the file would not load or holds no worlds.
+		bool HostGameFile();
+
 		// Builds the worlds a host was granted and announces itself.
 		//
 		// @return `false` when there is no link, or no worlds to hold.
@@ -371,6 +387,15 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+
+		// One VM per world, while a game file is being hosted.
+		//
+		// **Held here as well as by each world's scheduler**, because the
+		// scheduler's copy is a capture inside a lambda and nothing else names
+		// it. A server that dropped its own would still work and would be one
+		// refactor away from not, which is the kind of lifetime nobody wants to
+		// re-derive.
+		std::vector<std::shared_ptr<engine::script::Runtime>> Runtimes;
 
 		std::unique_ptr<engine::world::Recorder> Recorder_;
 		std::unique_ptr<engine::world::Replayer> Replayer_;

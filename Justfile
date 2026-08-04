@@ -45,6 +45,7 @@ build target="":
 client: (build "client")
 server: (build "server")
 cdn: (build "cdn")
+studio: (build "studio")
 
 # Only the suites a change could have affected, by cascading signature hash.
 test: build
@@ -146,6 +147,16 @@ run *args: (build "client")
 # Run the ECS demo scene with both debug panels open.
 demo: (build "client")
     ./{{build}}/client/client --stats --graph
+
+# Run the editor. `just edit --game My.agame` passes flags straight through.
+#
+# The only program in the repository where `RunService:IsStudio()` is true, and
+# the one that writes a `.agame`. `just host --game X.agame` and
+# `just run --game X.agame` read the same file back — a dedicated server and a
+# single-player client respectively, which is what makes the format a module
+# rather than something the editor owns.
+edit *args: (build "studio")
+    ./{{build}}/studio/studio {{args}}
 
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")
