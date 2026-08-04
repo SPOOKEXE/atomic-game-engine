@@ -50,6 +50,41 @@ lives in one function.
 A class added by any module appears in the palette with nothing here changing.
 That is the same property the properties panel has, for the same reason.
 
+## The viewport is a texture in a panel, not a hole in the dockspace
+
+The cheap version — draw the world to the swapchain and put a
+background-less imgui window over it — works right up until that window is
+*docked*, which is the only way anybody uses it. `imgui.cpp`'s
+`central_node_hole` is only punched while the central node is **empty**, so
+docking a panel into it makes the dockspace fill its whole rectangle with
+`ImGuiCol_WindowBg` and paint over the frame.
+
+So the world goes into a `render::SceneTarget` and the panel shows it with
+`ImGui::Image`. Do not reintroduce `ImGuiDockNodeFlags_PassthruCentralNode`;
+there is nothing to see through any more, and it would silently bring the bug
+back the moment somebody undocked the viewport to test it.
+
+The image is **last frame's texture**, because imgui records its draw lists
+before the renderer runs. That one-frame lag is the same trade
+`world::ViewChannel` and `SurfaceView` already make, and it is what removes the
+cycle between "how big is the panel" and "what is in the texture".
+
+## Every panel is closable, and the View menu is the only way back
+
+A closable panel with no way back is a panel somebody loses permanently.
+Anything added to the layout goes in `DrawViewMenu` in the same change.
+
+## Bump the dockspace version when you add a panel
+
+imgui owns the layout once it has written its ini, which is right — an editor
+that threw away where somebody dragged a panel would be unusable. The cost is
+that a panel added later is a window the saved layout has never heard of, and it
+opens floating in a corner.
+
+`DOCKSPACE` carries a version for that reason. Bump it when a panel is added or
+the default arrangement changes, and **not otherwise** — every bump costs
+everybody their layout.
+
 ## imgui's "last item" is whatever was submitted most recently
 
 `BeginDragDropSource`, `IsItemClicked`, `BeginPopupContextItem` and friends all
@@ -70,6 +105,12 @@ stable — the instance, not the text.
 - **One VM per world, and it is Luau.** A world whose scripts are JavaScript
   runs nothing. `script::LanguageOf` picks per file and the runtime is per
   world; reconciling those is a design decision, not an oversight to patch.
+- **Headless runs no interface backends.** `--headless` starts the imgui
+  context but not its platform or renderer backends, so panel *drawing* is
+  skipped entirely — what a headless run exercises is the universe, the scripts,
+  the presentation phase and the render. Driving the panels themselves without a
+  window needs the backends replaced rather than skipped, and that is the shape
+  a scripted or agent-driven editor will need.
 - **No undo.** Every action is applied straight to the store. Undo needs a
   command log, and a half-undo that covered property edits and not deletions
   would be worse than none.

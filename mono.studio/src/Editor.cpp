@@ -144,17 +144,20 @@ namespace studio {
 			return false;
 		}
 
-		Window = SDL_CreateWindow(
-			"atomic studio",
-			Settings.Width,
-			Settings.Height,
-			SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
-		);
-		if (!Window) {
-			ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
-			return false;
+		if (!Settings.Headless) {
+			Window = SDL_CreateWindow(
+				"atomic studio",
+				Settings.Width,
+				Settings.Height,
+				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+			);
+			if (!Window) {
+				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
+				return false;
+			}
 		}
 
+		// Null when headless, which is what puts the renderer in that mode.
 		if (!Renderer.Initialise(Window)) {
 			return false;
 		}
@@ -169,9 +172,17 @@ namespace studio {
 		// editor forgetting it.
 		interfaceSettings.LayoutPath = (engine::core::Paths::Base() / "studio-layout.ini").string();
 
+		// **The interface still runs headless, and that is the point.** Its
+		// backends need a window, so they are not started — but the imgui
+		// context is, so every panel's code executes, every layout is computed
+		// and every action a script or an agent triggers goes through exactly
+		// the path a person's click would. What is missing is the drawing.
 		if (!Interface.Initialise(Renderer, Window, interfaceSettings)) {
-			ENGINE_ERROR("the editor interface would not start");
-			return false;
+			if (!Settings.Headless) {
+				ENGINE_ERROR("the editor interface would not start");
+				return false;
+			}
+			ENGINE_INFO("headless: the interface runs without its backends");
 		}
 
 		// Attached before anything else runs, so a failure during start-up is
@@ -205,6 +216,12 @@ namespace studio {
 		CameraYaw = -0.6f;
 		CameraPitch = -0.45f;
 		CameraFrame = CFrame(Vector3{18.0f, 14.0f, 18.0f});
+
+		// After the game is loaded and the camera is placed, because starting a
+		// run needs worlds to start it in.
+		if (Settings.StartIn != RunMode::Edit) {
+			SetRunMode(Settings.StartIn);
+		}
 
 		Running = true;
 		return true;
@@ -301,6 +318,19 @@ namespace studio {
 	}
 
 	void Editor::Present(float frameSeconds) {
+		if (Settings.Headless) {
+			// **No panels and no imgui frame.** Its backends were never started,
+			// so `Begin` would be a frame nothing can end. What a headless run
+			// exercises is everything below the drawing: the universe, the
+			// scripts, the world's presentation phase and the render into a
+			// target somebody can look at afterwards.
+			WorldTarget.Width = static_cast<uint32_t>(Settings.Width);
+			WorldTarget.Height = static_cast<uint32_t>(Settings.Height);
+
+			PresentWorld(frameSeconds);
+			return;
+		}
+
 		// Drained once per frame, before anything draws it. The sink collects
 		// from whatever thread logged; this is the only place the panel's own
 		// list is written, which is what keeps the panel free of a lock.
@@ -321,6 +351,10 @@ namespace studio {
 		DrawInterface();
 		Interface.End();
 
+		PresentWorld(frameSeconds);
+	}
+
+	void Editor::PresentWorld(float frameSeconds) {
 		// PreRender runs whether or not the simulation did: it is the phase
 		// that turns state into something to draw, and an edited world's state
 		// changes without a tick.
@@ -358,7 +392,11 @@ namespace studio {
 			WorldTarget.IsValid() ? &WorldTarget : nullptr
 		);
 
-		if (LastFrame.Presented) {
+		// **Presented, or simply drawn when there is nowhere to present.**
+		// A headless renderer never presents by design, so counting presents
+		// would leave `--frames` unreachable and the run would never end — which
+		// is the one failure mode a build server cannot recover from.
+		if (LastFrame.Presented || Settings.Headless) {
 			FramesDrawn++;
 		}
 

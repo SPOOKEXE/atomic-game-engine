@@ -40,6 +40,13 @@ backend uploads vertices through a copy pass. A hook that uploaded from
 `Record` works until the first frame whose widget count grows a buffer, which
 is months after the code that caused it.
 
+## `Initialise` failing is not always an error
+
+It needs a window, and a headless program does not have one. `mono.studio`
+treats the refusal as fatal with a window and as expected without one. Do not
+turn the refusal into an abort — a caller that legitimately has no display is
+the case this module has to survive rather than the case it should stop.
+
 ## The interface holds no world state
 
 Selection, expansion, scroll, splitter positions, which panels are open — none

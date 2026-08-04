@@ -228,10 +228,24 @@ used when that file does not exist.
 
 | Panel | What it is |
 |---|---|
+| Viewport | the world, drawn into the panel |
 | Explorer | the universe, its worlds, and every instance in the active one |
+| Worlds | every scene: which is active, what state it is in, how much is in it |
 | Properties | whatever is selected, grouped by which class declares each property |
 | Script Editor | a tab per open script |
 | Output | the engine log, including what your scripts `print` |
+
+**Every panel is a panel** — dock it, tear it off, resize it, close it. The
+Viewport is one of them and not a hole in the middle: the world is rendered into
+a texture and the panel shows it, so it moves and docks like the rest. **View**
+brings back anything you closed, and **View ▸ Reset Layout** puts everything
+back where it started.
+
+**The Worlds panel is where scenes are managed.** New, Duplicate, Rename,
+Export and Remove, plus a click to choose which one you are working on. Renaming
+and duplicating go through the save format — a scene is written out and read
+back — so both are refused while a game is running, when a world's name is
+carrying live bus traffic.
 
 **The tree is the mapping `game` and `workspace` already had.** The root is the
 universe, which is what a script calls `game`; each world under it is a scene,
@@ -290,7 +304,34 @@ floor by the time you looked away.
 | `--scale FACTOR` | 1.0 | multiplies every font and padding |
 | `--tick-rate HZ` | 60 | simulation rate while running |
 | `--frames N` | — | exit after N frames, for a script or a screenshot |
+| `--capture PATH` | — | write the viewport's world to a BMP and carry on |
+| `--headless` | off | run with no window at all; needs `--frames` |
+| `--run MODE` | `edit` | start in `edit`, `server` or `play` |
 | `--override-assets-directory DIR` | — | read staged data from here |
+
+### Driving it with no display
+
+```sh
+just studio-smoke                      # loads, plays, renders, writes a capture
+just edit --headless --frames 12 --run play --capture shot.bmp
+```
+
+**`--headless` is a renderer with no window rather than a hidden one.** There is
+no swapchain, nothing is presented, and the overlay and editor chrome do not
+draw — but the game loads, the panels lay themselves out, `--run play` starts the
+scripts, the worlds tick and the world is drawn into an offscreen target that
+`--capture` writes out. A hidden window would still own a swapchain, and whether
+one can be acquired for a window nobody can see is a per-platform answer nobody
+should have to know.
+
+That is what makes the editor checkable by a build server, by a golden-image
+comparison, or by something driving it that is not a person — none of which
+should depend on a display being free.
+
+`--capture` works with a window too, and captures the world rather than the
+whole editor: the chrome is drawn onto the swapchain, and SDL does not promise
+that is readable. What it answers is "did the scene render", which is the
+question a renderer is asked.
 
 ### The file it writes
 

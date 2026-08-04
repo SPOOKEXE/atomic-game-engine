@@ -318,6 +318,29 @@ namespace engine::render {
 		bool EnsureInstanceCapacity(uint32_t count);
 		bool EnsureDepth(uint32_t width, uint32_t height);
 		bool EnsureScene(uint32_t width, uint32_t height);
+
+		// Whether this renderer has a window at all.
+		//
+		// **Headless is a device with nothing claimed**, not a hidden window. A
+		// hidden window still owns a swapchain, and whether one can be acquired
+		// for a window nobody can see is a per-platform answer nobody should
+		// have to know. With no window there is no swapchain and no question.
+		bool Headless() const {
+			return Window == nullptr;
+		}
+
+		// The colour format every pipeline and the scene target are built
+		// against.
+		//
+		// **One answer, asked in five places.** Headless has no swapchain to
+		// ask, so it takes a fixed format — and the format has to be the *same*
+		// fixed one everywhere, or a pipeline is built for one target and bound
+		// to another. That is the whole reason this is a function rather than a
+		// call to SDL at each use.
+		SDL_GPUTextureFormat ColourFormat() const {
+			return Headless() ? SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM
+							  : SDL_GetGPUSwapchainTextureFormat(Device, Window);
+		}
 		bool EnsureOverlay(int width, int height);
 	};
 
@@ -369,7 +392,7 @@ namespace engine::render {
 			return false;
 		}
 
-		const SDL_GPUTextureFormat swapchainFormat = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+		const SDL_GPUTextureFormat swapchainFormat = ColourFormat();
 
 		// --- opaque ---------------------------------------------------------
 
@@ -643,7 +666,7 @@ namespace engine::render {
 		// the swapchain's colour format; a target in another format is a
 		// validation error at bind time on the backends that check and a
 		// corrupt image on the ones that do not.
-		info.format = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+		info.format = ColourFormat();
 
 		// Sampled as well as drawn into, because the whole point is that
 		// something shows it afterwards.
@@ -763,7 +786,7 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+		colour.format = ColourFormat();
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = width;
 		colour.height = height;
@@ -908,11 +931,11 @@ namespace engine::render {
 	}
 
 	bool Renderer::Initialise(SDL_Window *window) {
-		if (!window) {
-			ENGINE_ERROR("Renderer::Initialise called with no window");
-			return false;
-		}
-
+		// **A null window is headless and is not an error.** A renderer with
+		// nowhere to present still draws: into a `SceneTarget`, which is what a
+		// capture, a CI comparison and an automated editor all read. Refusing it
+		// was right while an offscreen target did not exist and stopped being
+		// right at v0.7.
 		State->Window = window;
 
 		// SPIR-V only. Metal needs the cross-compile step the module's
@@ -925,7 +948,7 @@ namespace engine::render {
 			return false;
 		}
 
-		if (!SDL_ClaimWindowForGPUDevice(State->Device, window)) {
+		if (window != nullptr && !SDL_ClaimWindowForGPUDevice(State->Device, window)) {
 			ENGINE_ERROR("SDL_ClaimWindowForGPUDevice: {}", SDL_GetError());
 			Shutdown();
 			return false;
@@ -1031,9 +1054,7 @@ namespace engine::render {
 		*State = Impl{};
 	}
 
-	bool Renderer::Impl::WriteCapture(
-		SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height
-	) const {
+	bool Renderer::Impl::WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const {
 		void *mapped = SDL_MapGPUTransferBuffer(Device, from, false);
 		if (mapped == nullptr) {
 			ENGINE_ERROR("SDL_MapGPUTransferBuffer: {}", SDL_GetError());
@@ -1044,20 +1065,20 @@ namespace engine::render {
 		// wrong writes a picture with red and blue swapped — which looks like a
 		// shader bug rather than like a file-writing bug, so it is worth
 		// asking rather than assuming.
-		const SDL_GPUTextureFormat format = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+		const SDL_GPUTextureFormat format = ColourFormat();
 
 		SDL_PixelFormat pixels = SDL_PIXELFORMAT_UNKNOWN;
 		switch (format) {
-			case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM:
-			case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB:
-				pixels = SDL_PIXELFORMAT_BGRA32;
-				break;
-			case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM:
-			case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
-				pixels = SDL_PIXELFORMAT_RGBA32;
-				break;
-			default:
-				break;
+		case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM:
+		case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB:
+			pixels = SDL_PIXELFORMAT_BGRA32;
+			break;
+		case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM:
+		case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
+			pixels = SDL_PIXELFORMAT_RGBA32;
+			break;
+		default:
+			break;
 		}
 
 		if (pixels == SDL_PIXELFORMAT_UNKNOWN) {
@@ -1067,11 +1088,7 @@ namespace engine::render {
 		}
 
 		SDL_Surface *surface = SDL_CreateSurfaceFrom(
-			static_cast<int>(width),
-			static_cast<int>(height),
-			pixels,
-			mapped,
-			static_cast<int>(width * 4)
+			static_cast<int>(width), static_cast<int>(height), pixels, mapped, static_cast<int>(width * 4)
 		);
 
 		bool wrote = false;
@@ -1091,6 +1108,10 @@ namespace engine::render {
 		State->CapturePath = std::move(path);
 	}
 
+	bool Renderer::IsHeadless() const {
+		return State->Headless();
+	}
+
 	void *Renderer::SceneTexture() const {
 		return State->SceneTexture;
 	}
@@ -1099,8 +1120,7 @@ namespace engine::render {
 		BackendHandles handles;
 		if (State->Device != nullptr) {
 			handles.Device = State->Device;
-			handles.ColourFormat =
-				static_cast<uint32_t>(SDL_GetGPUSwapchainTextureFormat(State->Device, State->Window));
+			handles.ColourFormat = static_cast<uint32_t>(State->ColourFormat());
 		}
 		return handles;
 	}
@@ -1135,7 +1155,23 @@ namespace engine::render {
 		uint32_t width = 0;
 		uint32_t height = 0;
 		bool acquired = false;
-		{
+
+		// **Headless skips the swapchain entirely and is not a failure.** There
+		// is nothing to acquire, nothing to present, and the frame is finished
+		// when the world has been drawn into its target. The size then comes
+		// from that target, because nothing else has an opinion about it.
+		if (State->Headless()) {
+			if (sceneTarget == nullptr || !sceneTarget->IsValid()) {
+				// A headless renderer with nowhere to draw is a caller mistake
+				// rather than a state to tolerate: every pass would run and its
+				// result would be discarded.
+				SDL_SubmitGPUCommandBuffer(command);
+				return result;
+			}
+
+			width = sceneTarget->Width;
+			height = sceneTarget->Height;
+		} else {
 			// Where the frame waits, and the reason this one has a span of its
 			// own before anything else does. "WaitAnd" is not decoration: with
 			// vertical sync on this blocks until the display is ready, and with
@@ -1155,7 +1191,7 @@ namespace engine::render {
 				SDL_WaitAndAcquireGPUSwapchainTexture(command, State->Window, &swapchain, &width, &height);
 		}
 
-		if (!acquired || !swapchain) {
+		if (!State->Headless() && (!acquired || !swapchain)) {
 			// Minimised, or mid-resize. Not an error, and not a reason to stop
 			// ticking — the simulation carries on and the next frame presents.
 			SDL_SubmitGPUCommandBuffer(command);
@@ -1177,6 +1213,13 @@ namespace engine::render {
 		// frame at all sees a frozen editor.
 		const bool offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
 							   State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+
+		if (State->Headless() && !offscreen) {
+			// The target could not be allocated. Headless has no window to fall
+			// back to, so the frame ends here rather than drawing into nothing.
+			SDL_SubmitGPUCommandBuffer(command);
+			return result;
+		}
 
 		if (!offscreen && State->SceneTexture != nullptr) {
 			// Nothing asked for a texture this frame, so last frame's is
@@ -1674,7 +1717,8 @@ namespace engine::render {
 		// enough widgets to grow a buffer, which is a bug that arrives months
 		// after the code that caused it. The split is `FrameOverlayHook`'s
 		// contract for exactly that reason.
-		const bool drawInterface = interfaceHook != nullptr && interfaceHook->Prepare(command);
+		const bool drawInterface =
+			!State->Headless() && interfaceHook != nullptr && interfaceHook->Prepare(command);
 
 		// --- opaque pass ----------------------------------------------------
 
@@ -1873,7 +1917,7 @@ namespace engine::render {
 
 		// --- overlay pass ---------------------------------------------------
 
-		if (haveOverlay) {
+		if (haveOverlay && !State->Headless()) {
 			ENGINE_PROFILE_CAT("overlay pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Overlay);
 
@@ -1900,7 +1944,7 @@ namespace engine::render {
 
 		// --- interface pass -------------------------------------------------
 
-		if (drawInterface) {
+		if (drawInterface && !State->Headless()) {
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Interface);
 
@@ -1958,7 +2002,7 @@ namespace engine::render {
 		// reached the swapchain — and presenting a texture the driver handed
 		// back without writing to it shows last frame's image or uninitialised
 		// memory. One clear costs nothing and removes the whole case.
-		if (windowTarget.load_op == SDL_GPU_LOADOP_CLEAR) {
+		if (!State->Headless() && windowTarget.load_op == SDL_GPU_LOADOP_CLEAR) {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
 			SDL_EndGPURenderPass(pass);
 		}
@@ -2006,7 +2050,11 @@ namespace engine::render {
 			}
 		}
 
-		result.Presented = true;
+		// **Not presented, because there is nowhere to present to.** A caller
+		// counting presented frames gets zero from a headless renderer, which is
+		// the honest answer — what it should count instead is captures, or its
+		// own loop.
+		result.Presented = !State->Headless();
 		return result;
 	}
 }

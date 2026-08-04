@@ -158,6 +158,21 @@ demo: (build "client")
 edit *args: (build "studio")
     ./{{build}}/studio/studio {{args}}
 
+# The editor, driven with no display at all.
+#
+# **What makes the studio checkable by something that is not a person.** It
+# loads a game, starts it, renders the world into an offscreen target and writes
+# the result — no window, no compositor, no machine that has to be left alone.
+# A scripted control or an agent reads the image instead of a screen.
+#
+# Not part of `just check`: it needs a GPU, and a build container that has none
+# would fail a check about the editor for a reason that is not about the editor.
+studio-smoke game="" out=".cache/studio-smoke.bmp": (build "studio")
+    @rm -f {{out}}
+    ./{{build}}/studio/studio --headless --frames 12 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
+    @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
+    @echo "studio ok — loaded, played and rendered with no display, into {{out}}"
+
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")
     ./{{build}}/server/server {{args}}

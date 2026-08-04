@@ -121,6 +121,26 @@ namespace studio {
 		// taken of a known frame rather than of whenever somebody looked.
 		int64_t MaximumFrames = -1;
 
+		// Which mode to start in, rather than Edit.
+		//
+		// **What makes the run cycle testable without a person.** A headless run
+		// that could only sit in Edit mode would exercise loading and rendering
+		// and nothing else; starting in Play runs the game's scripts, ticks its
+		// worlds and draws the result — which is the half a capture can check.
+		RunMode StartIn = RunMode::Edit;
+
+		// Run with no window at all.
+		//
+		// **What makes the editor drivable by something that is not a person.**
+		// The whole state machine still runs — the game loads, the panels lay
+		// themselves out, Play starts the scripts, the world renders — and none
+		// of it needs a display, a compositor or an unattended machine to be
+		// left alone. A scripted control or an agent gets the same editor and
+		// reads `--capture` instead of a screen.
+		//
+		// Needs `--frames`, because a headless run has no window to close.
+		bool Headless = false;
+
 		// Write the world the viewport is showing to this file, then carry on.
 		//
 		// **Taken on the last frame of a `--frames` budget**, so a run that asks
@@ -193,6 +213,13 @@ namespace studio {
 		void PumpEvents();
 		void Simulate(float frameSeconds);
 		void Present(float frameSeconds);
+
+		// The half of a frame that is the world rather than the editor.
+		//
+		// Split out when headless arrived: a run with no window still presents
+		// its worlds, collects their draw lists and renders them into a target
+		// — it just has no panels to draw over the top.
+		void PresentWorld(float frameSeconds);
 
 		// --- the interface ---------------------------------------------------
 

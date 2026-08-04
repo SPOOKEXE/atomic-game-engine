@@ -67,6 +67,12 @@ namespace {
 	Entity ChildNamed(const Store &store, Entity parent, std::string_view name) {
 		return store.FindFirstChild(parent, name);
 	}
+
+	void AddPart(Universe &universe, WorldId world, std::string_view name) {
+		universe.Enter(world, [name](Store &store) {
+			store.CreateInstance(engine::scene::PartClass(), name);
+		});
+	}
 }
 
 TEST_CASE("a universe of worlds survives a save and a load", "[game][roundtrip]") {
@@ -377,4 +383,67 @@ TEST_CASE("a load that fails leaves the universe empty", "[game][roundtrip]") {
 	CHECK(universe.Count() == 0);
 
 	std::filesystem::remove(path);
+}
+
+TEST_CASE("a world copies and renames without touching a disk", "[game][roundtrip]") {
+	// **What the studio's Duplicate and Rename are made of.** Both are a write
+	// followed by a read, and going through a temporary file to do them would
+	// make two ordinary editor actions depend on somewhere being writable.
+	RegisterEverything();
+
+	Universe universe;
+	const WorldId original = AddWorld(universe, "Arena");
+	AddPart(universe, original, "Pillar");
+
+	std::string error;
+	const std::string document = engine::game::WriteWorldDocument(universe, original, error);
+	REQUIRE_FALSE(document.empty());
+	CHECK(error.empty());
+
+	// Duplicate: the same document, read back under a free name.
+	const WorldId copy = engine::game::ReadWorldDocument(universe, document, Name("Arena 2"), error);
+	REQUIRE(copy.IsValid());
+	CHECK(universe.Count() == 2);
+
+	universe.Enter(copy, [](Store &store) { CHECK(store.FindFirstRoot("Pillar") != NULL_ENTITY); });
+
+	// The original is untouched. A copy that moved what it copied would be a
+	// rename wearing a duplicate's name.
+	universe.Enter(original, [](Store &store) { CHECK(store.FindFirstRoot("Pillar") != NULL_ENTITY); });
+
+	// Reading it back under a name already in use is refused rather than
+	// producing two worlds nothing can tell apart.
+	CHECK_FALSE(engine::game::ReadWorldDocument(universe, document, Name("Arena"), error).IsValid());
+	CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("a renamed world keeps its handle and its place", "[game][roundtrip]") {
+	// **The property that stops a rename reordering the save file.** The studio
+	// renames by destroying the world and reading it straight back;
+	// `Universe::Adopt` reuses the hole a destroyed world leaves, so the scene
+	// keeps its `WorldId` and its position among the others. Checked here
+	// because it is a fact about `world::Universe` that the editor depends on
+	// and neither module states in code.
+	RegisterEverything();
+
+	Universe universe;
+	AddWorld(universe, "First");
+	const WorldId middle = AddWorld(universe, "Middle");
+	AddWorld(universe, "Last");
+
+	std::string error;
+	const std::string document = engine::game::WriteWorldDocument(universe, middle, error);
+	REQUIRE_FALSE(document.empty());
+
+	universe.Destroy(middle);
+	const WorldId renamed = engine::game::ReadWorldDocument(universe, document, Name("Centre"), error);
+
+	REQUIRE(renamed.IsValid());
+	CHECK(renamed == middle);
+
+	const auto worlds = universe.Worlds();
+	REQUIRE(worlds.size() == 3);
+	CHECK(universe.NameOf(worlds[0]) == Name("First"));
+	CHECK(universe.NameOf(worlds[1]) == Name("Centre"));
+	CHECK(universe.NameOf(worlds[2]) == Name("Last"));
 }

@@ -221,3 +221,19 @@ first row of the image, to clip `y = +1`.
 `GLM_FORCE_DEPTH_ZERO_TO_ONE` **is** still required and is set in `core`. Depth
 runs 0..1 on every backend SDL's GPU API targets; only the Y convention is
 already handled.
+
+## A null window is headless, and every format question goes through one function
+
+`Initialise(nullptr)` is a device with nothing claimed: no swapchain, nothing
+presented, no overlay and no interface pass — and the world still drawn, into
+the `SceneTarget` the caller passes to `Render`.
+
+That makes the colour format a question with two answers, so it has exactly one
+asker: `Impl::ColourFormat`. Every pipeline and the scene target are built
+against whatever it returns, and a second call to
+`SDL_GetGPUSwapchainTextureFormat` anywhere else is a pipeline built for one
+target and bound to another.
+
+**Headless with no scene target draws nothing rather than pretending to.** Every
+pass would run and its result would be discarded, which is a caller mistake
+worth reporting rather than a state to tolerate.

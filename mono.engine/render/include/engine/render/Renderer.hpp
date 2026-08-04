@@ -310,9 +310,22 @@ namespace engine::render {
 		// The renderer does not own `window`; it must remain alive until Shutdown
 		// or destruction releases the GPU claim.
 		//
-		// @param window SDL window to claim for the GPU device; must not be null.
-		// @return True when the device, pipelines, geometry, and window claim are ready.
+		// **A null window is headless, and is not an error.** There is then no
+		// swapchain, nothing is presented, and the overlay and interface passes
+		// do not run — but the world is still drawn, into the `SceneTarget` a
+		// caller passes to `Render`. That is what makes a build server, a golden
+		// image comparison and a scripted editor possible without a display,
+		// and a headless `Render` with no scene target draws nothing rather than
+		// pretending to.
+		//
+		// @param window SDL window to claim, or null for headless.
+		// @return True when the device, pipelines and geometry are ready.
 		bool Initialise(SDL_Window *window);
+
+		// Whether this renderer has a window to present to.
+		//
+		// @return `true` when `Initialise` was given none.
+		bool IsHeadless() const;
 
 		// Waits for GPU work, releases the window claim and resources, and becomes uninitialised.
 		//
