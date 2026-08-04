@@ -15,6 +15,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -123,19 +124,29 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 	INFO(error);
 	REQUIRE(loaded);
 
-	// A surface camera, with the size the scene asked for. Without one the
-	// surface pass does not run and the mirror draws as its own tint.
-	const Entity reflection = InScene(store, "Reflection");
+	// A pane, and the surface camera **parented to it** rather than standing
+	// beside it in the workspace. That is the arrangement `SurfaceCamera` is
+	// for: the camera is placed off a face of its parent, so it is a child of
+	// the thing it reflects.
+	const Entity mirror = InScene(store, "Mirror");
+	REQUIRE(mirror != engine::ecs::NULL_ENTITY);
+
+	const Entity reflection = store.FindFirstChild(mirror, "Reflection");
 	REQUIRE(reflection != engine::ecs::NULL_ENTITY);
 
 	const auto *surface = store.Get<SurfaceCamera>(reflection);
 	REQUIRE(surface != nullptr);
 	CHECK(surface->Width == 1024);
 	CHECK(surface->Height == 1024);
+	CHECK(surface->Face == engine::scene::NormalId::Front);
 
-	// A pane that shows it.
-	const Entity mirror = InScene(store, "Mirror");
-	REQUIRE(mirror != engine::ecs::NULL_ENTITY);
+	// **The pane is told what it shows by the aiming pass, not by the script.**
+	// Before it runs there is nothing to sample, which is why this asserts
+	// either side of the call rather than only after: a scene that arrived with
+	// `Surface` already set would pass the second check while proving nothing
+	// about the mechanism.
+	CHECK(store.Get<Visual>(mirror)->Surface == -1);
+	REQUIRE(engine::scene::AimSurfaceCameras(store) == 1);
 	CHECK(store.Get<Visual>(mirror)->Surface == 0);
 
 	// **Two cameras, and the live one is not the surface one.** That is the
@@ -166,14 +177,32 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 	std::string error;
 	REQUIRE(LoadScene(store, systems, ExamplePath("Mirrors-1-world.luau"), error));
 
+	// **Placed by the engine now, so the pass has to run first.** The script
+	// used to compute this itself and the assertion held straight after
+	// loading; moving the arithmetic into `scene` is what made the reflection
+	// follow a moving viewer, and it means the camera is wherever it was left
+	// until something aims it.
+	REQUIRE(engine::scene::AimSurfaceCameras(store) == 1);
+
+	const Entity pane_ = InScene(store, "Mirror");
 	const auto *viewer = store.Get<engine::scene::Transform>(InScene(store, "Viewer"));
-	const auto *reflected = store.Get<engine::scene::Transform>(InScene(store, "Reflection"));
-	const auto *pane = store.Get<engine::scene::Transform>(InScene(store, "Mirror"));
+	const auto *reflected = store.Get<engine::scene::Transform>(store.FindFirstChild(pane_, "Reflection"));
+	const auto *pane = store.Get<engine::scene::Transform>(pane_);
 	REQUIRE(viewer != nullptr);
 	REQUIRE(reflected != nullptr);
 	REQUIRE(pane != nullptr);
 
-	const float plane = pane->Frame.Position.Z;
+	// **The plane is the face, not the middle of the slab** — and that moved
+	// this number by the pane's half thickness when the arithmetic left the
+	// script. The hand-written version mirrored through the part's *centre*,
+	// which is the centre of a 0.4-thick box rather than the surface anybody
+	// sees; the engine reflects through the face the camera names, so the image
+	// lines up with the glass instead of with a plane a fifth of a unit inside
+	// it. Small, and exactly the sort of small that reads as a projection bug.
+	const auto *bounds = store.Get<engine::scene::Bounds>(pane_);
+	REQUIRE(bounds != nullptr);
+	const float plane = pane->Frame.Position.Z - bounds->HalfExtent.Z;
+
 	CHECK(reflected->Frame.Position.Z == Approx(2.0f * plane - viewer->Frame.Position.Z));
 
 	// And the two axes the plane does not mirror are unchanged.

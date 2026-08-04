@@ -8,6 +8,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
+#include <algorithm>
 #include <array>
 #include <numbers>
 #include <string_view>
@@ -478,6 +479,137 @@ namespace engine::scene {
 		//
 		// A `Vector2` rather than two properties: a width without a height is
 		// half a target, and two writes means a frame where the two disagree.
+		// Transparency, clamped to what it can mean.
+		//
+		// **A plain field binding could not do this, which is why it stopped
+		// being one.** `Transparency` is a fraction: below zero and above one
+		// both describe nothing, and the renderer does not defend itself against
+		// either — a negative value makes a blend factor greater than one and the
+		// pane comes out brighter than the world behind it, while a value above
+		// one silently behaves like one. Neither is an error anybody could trace
+		// back to the assignment that caused it.
+		//
+		// Clamped rather than refused, because this is a continuous quantity
+		// somebody arrived at by arithmetic: a fade driven off a sine or a
+		// distance overshoots by a hair at the ends, and refusing the write would
+		// make a smooth fade stutter at exactly the two values it is aiming for.
+		// An enum is refused because a wrong name means nothing; a number out of
+		// range has an obvious nearest meaning.
+		PropertyDescriptor TransparencyProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Transparency");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Visual *visual = store.Get<Visual>(instance);
+				if (visual == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = visual->Transparency;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Visual *visual = store.GetMutable<Visual>(instance);
+				if (visual == nullptr) {
+					return false;
+				}
+				visual->Transparency = std::clamp(*static_cast<const float *>(value), 0.0f, 1.0f);
+				return true;
+			};
+
+			return property;
+		}
+
+		// The projected image's own opacity, clamped for `Transparency`'s reason.
+		//
+		// **Two opacities, because a mirror is two things.** The part's
+		// `Transparency` is how much of the world shows through the glass; this
+		// is how much of the glass shows through the reflection. One number
+		// cannot say both, and until this there was only one — so fading a mirror
+		// faded its reflection with it and there was no way to author a
+		// transparent pane that still reflects.
+		PropertyDescriptor ImageTransparencyProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("ImageTransparency");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceCamera *surface = store.Get<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = surface->ImageTransparency;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				SurfaceCamera *surface = store.GetMutable<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+				surface->ImageTransparency = std::clamp(*static_cast<const float *>(value), 0.0f, 1.0f);
+				return true;
+			};
+
+			return property;
+		}
+
+		// Which face of the parent part the surface camera projects off.
+		//
+		// An enum rather than a number, so `camera.Face = "Frnot"` is refused
+		// where it was written instead of landing in the component as a face
+		// nobody chose. Membership is `EnumTable`'s, and the storage is the
+		// ordinal — Roblox's ordinal, so a game file carrying a number means the
+		// same thing in both engines.
+		PropertyDescriptor FaceProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Face");
+			property.Type = PropertyType::Enum;
+			property.EnumName = core::Name("NormalId");
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceCamera *surface = store.Get<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(core::Name("NormalId"), static_cast<size_t>(surface->Face));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				SurfaceCamera *surface = store.GetMutable<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						core::Name("NormalId"), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				surface->Face = static_cast<NormalId>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor SurfaceSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("SurfaceSize");
@@ -564,6 +696,29 @@ namespace engine::scene {
 			};
 			ecs::EnumTable::Register("Material", MATERIALS);
 
+			// The faces of a box, for `SurfaceCamera::Face`.
+			//
+			// **Roblox's names *and* Roblox's order.** The order is not
+			// cosmetic: `EnumTable` ordinals are registration order and
+			// `SurfaceCamera::Face` stores the ordinal, so this list is what
+			// makes a saved `Face` of 1 mean `Top` in both engines. Registering
+			// them alphabetically would have been a game file that loaded
+			// silently wrong.
+			//
+			// `Top` and `Bottom` rather than Up and Down, which is Roblox's
+			// spelling — a script written against `Enum.NormalId.Top` has to
+			// find it here, and a second name for one face is the duplicate
+			// `scene/AGENTS.md` calls the most expensive kind of debt.
+			static const std::string_view NORMALS[] = {
+				"Right",
+				"Top",
+				"Back",
+				"Left",
+				"Bottom",
+				"Front",
+			};
+			ecs::EnumTable::Register("NormalId", NORMALS);
+
 			// The default collision group, so `CollisionGroup` reads back
 			// something a script can compare rather than an invalid name on a
 			// part nobody configured.
@@ -619,6 +774,27 @@ namespace engine::scene {
 			const std::array camera{ecs::Components::Of<Camera>()};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
 
+			// **A surface camera is a camera you parent to a part**, and that is
+			// the whole of the class.
+			//
+			// It derives from `Camera` rather than standing beside it, because
+			// it *is* one — it has a field of view, clip planes and a place in
+			// the world, and `workspace.CurrentCamera` is a question anybody may
+			// ask of it. What it adds is a texture to render into and a face to
+			// project off.
+			//
+			// **The component is in the class set, so `Instance.new` makes a
+			// working one.** On `Camera` the surface component is structural —
+			// `SurfaceSize` adds and removes it — which is right there, because
+			// an ordinary camera that acquired a render target by being asked
+			// its size would be a surprise. Here it is what the class is for, so
+			// a `SurfaceCamera` that had to be given a size before it became one
+			// would be a class with a footnote. Same argument
+			// `PreviousTransform` on `BasePart` settles.
+			const std::array surface{ecs::Components::Of<SurfaceCamera>()};
+			const ecs::ClassId surfaceCameraClass =
+				ecs::Classes::Register("SurfaceCamera", cameraClass, surface);
+
 			// --- properties, declared where the component arrives ------------
 			//
 			// Each on the class that first holds what it projects, so a derived
@@ -664,7 +840,7 @@ namespace engine::scene {
 			// with the sorted pass that makes it mean something rather than
 			// ahead of it. A float nothing draws is a field that lies, and it
 			// would have sat in a snapshot and a delta being read by nobody.
-			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
+			ecs::Classes::Computed(basePart, TransparencyProperty());
 
 			// **The third of the three, and they are three questions rather
 			// than one.** `Visible` decides whether the part is submitted at
@@ -692,6 +868,11 @@ namespace engine::scene {
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
+
+			// The surface camera's two. `SurfaceSize` above is inherited, so a
+			// `SurfaceCamera` can still be resized like any other.
+			ecs::Classes::Computed(surfaceCameraClass, ImageTransparencyProperty());
+			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.

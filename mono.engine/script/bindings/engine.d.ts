@@ -15,6 +15,7 @@ declare function print(...values: unknown[]): void;
 
 declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
 declare interface Enum_Material extends EnumItem { readonly __enum: "Material"; }
+declare interface Enum_NormalId extends EnumItem { readonly __enum: "NormalId"; }
 
 declare namespace Enum {
 	const Material: {
@@ -36,10 +37,17 @@ declare namespace Enum {
 		readonly Neon: Enum_Material;
 		readonly ForceField: Enum_Material;
 	};
+	const NormalId: {
+		readonly Right: Enum_NormalId;
+		readonly Top: Enum_NormalId;
+		readonly Back: Enum_NormalId;
+		readonly Left: Enum_NormalId;
+		readonly Bottom: Enum_NormalId;
+		readonly Front: Enum_NormalId;
+	};
 }
 
 declare interface Instance {
-	readonly Name: string;
 	Name: string;
 	Parent: Instance;
 }
@@ -74,6 +82,11 @@ declare interface Camera extends PVInstance {
 	SurfaceSize: Vector3;
 }
 
+declare interface SurfaceCamera extends Camera {
+	Face: Enum_NormalId;
+	ImageTransparency: number;
+}
+
 declare interface LuaSourceContainer extends Instance {
 	Disabled: boolean;
 	Source: string;
@@ -91,6 +104,7 @@ declare const Instance: {
 	new(className: "BasePart"): BasePart;
 	new(className: "Part"): Part;
 	new(className: "Camera"): Camera;
+	new(className: "SurfaceCamera"): SurfaceCamera;
 	new(className: "LuaSourceContainer"): LuaSourceContainer;
 	new(className: "Script"): Script;
 	new(className: "LocalScript"): LocalScript;

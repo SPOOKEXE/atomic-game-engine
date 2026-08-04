@@ -134,6 +134,19 @@ namespace engine::render {
 
 		// How tall the texture is.
 		uint32_t Height = 1024;
+
+		// How opaque the projected image is, 0 transparent to 1 solid.
+		//
+		// **The image's own opacity and not the part's**, which is the whole
+		// distinction `scene::SurfaceCamera::ImageTransparency` exists to make:
+		// how much of the world shows through the glass and how much of the glass
+		// shows through the reflection are two facts, and writing the image with
+		// the part's alpha meant fading a mirror faded its reflection to nothing.
+		//
+		// Carried as opacity rather than as transparency because that is what the
+		// shader multiplies by; the flip happens once, where the component is
+		// read, rather than in a shader nobody can put a breakpoint in.
+		float ImageOpacity = 1.0f;
 	};
 
 	// An offscreen colour target the world is drawn into instead of the window.

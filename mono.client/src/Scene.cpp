@@ -13,6 +13,7 @@
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 
 #include <algorithm>
@@ -119,6 +120,19 @@ namespace client {
 		// nothing until somebody pressed play.
 		void SyncVisibility(Store &store) {
 			(void)engine::scene::SyncRendered(store);
+		}
+
+		// Places every surface camera parented to a part. See
+		// `scene/SurfaceCameras.hpp` for the reflection and why it lives in
+		// `scene` rather than in a script.
+		//
+		// **Before the draw list is collected, and that ordering matters here.**
+		// Aiming a camera also writes its part's `Visual::Surface`, so a pass
+		// that ran afterwards would publish a draw list built from last frame's
+		// answer — a mirror would be one frame late to start showing anything,
+		// which is invisible in a still scene and a flicker in a moving one.
+		void AimSurfaces(Store &store) {
+			(void)engine::scene::AimSurfaceCameras(store);
 		}
 
 		// The one phase that turns simulation state into something to draw. It
@@ -321,6 +335,14 @@ namespace client {
 				surface.Lens = lens;
 				surface.Width = target.Width;
 				surface.Height = target.Height;
+
+				// **Opacity here, transparency in the component**, and the flip
+				// happens once. `scene::SurfaceCamera::ImageTransparency` is
+				// authored the way a script thinks — 0 is solid, like every
+				// other transparency in this engine — and the shader multiplies
+				// by the opposite, so converting at the boundary beats one
+				// subtraction in a shader nobody can put a breakpoint in.
+				surface.ImageOpacity = 1.0f - std::clamp(target.ImageTransparency, 0.0f, 1.0f);
 			}
 		);
 		return found;
@@ -365,6 +387,7 @@ namespace client {
 		}
 
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
+		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 		return true;
 	}

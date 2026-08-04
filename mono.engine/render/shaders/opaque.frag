@@ -18,7 +18,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: 1 when a shadow map was rendered this frame, 0 otherwise.
 	// y: one texel of the shadow map, for the sample offsets.
 	// z: 1 when this draw samples the surface texture rather than its own tint.
-	// w: unused, and named so the struct's size is stated rather than implied.
+	// w: how opaque the projected image is, 0 to 1. See the composite below.
 	vec4 Flags;
 } lighting;
 
@@ -90,6 +90,11 @@ void main() {
 
 	vec3 albedo = inColour.rgb;
 
+	// Ambient is unshadowed and direct light is not, which is what makes a
+	// shadow dark rather than black.
+	float shadow = ShadowFactor(normal, toLight);
+	vec3 lit = albedo * (lighting.Ambient.rgb + vec3(lambert * shadow + bounce));
+
 	// **The surface texture, projected from the camera that rendered it.** A
 	// planar projection is exactly right for a flat mirror and exactly wrong
 	// for anything else, which is why this is a mirror feature rather than a
@@ -104,17 +109,31 @@ void main() {
 		if (surfaceUv.x >= 0.0 && surfaceUv.x <= 1.0 && surfaceUv.y >= 0.0 && surfaceUv.y <= 1.0) {
 			// Tinted rather than replaced, so a coloured mirror is possible and
 			// a white one is unchanged.
-			albedo = texture(surfaceMap, surfaceUv).rgb * inColour.rgb;
-
+			//
 			// A mirror is not lit by the scene: what it shows is already lit.
-			outColour = vec4(albedo, inColour.a);
+			vec3 image = texture(surfaceMap, surfaceUv).rgb * inColour.rgb;
+			float imageAlpha = lighting.Flags.w;
+
+			// **Composited over the part rather than replacing it, and the
+			// alphas are combined rather than one winning.** This is the fix for
+			// a mirror that vanished when it was faded: the image used to be
+			// written with the *part's* alpha, so a pane at `Transparency = 0.9`
+			// drew its reflection at one tenth strength and a fully transparent
+			// pane showed no reflection at all — which is not what glass does.
+			//
+			// The two are independent facts. `inColour.a` is how much of the
+			// world behind shows through the pane; `imageAlpha` is how much of
+			// the pane shows through the reflection. Taking the max means the
+			// image is as solid as it was authored to be **whatever the part's
+			// own transparency is**, so a reflection on invisible glass is a
+			// floating reflection — which is exactly what a mirror is.
+			//
+			// The colour is mixed in the same proportion, so a half-opaque image
+			// on a tinted pane is half of each rather than one or the other.
+			outColour = vec4(mix(lit, image, imageAlpha), max(inColour.a, imageAlpha));
 			return;
 		}
 	}
 
-	// Ambient is unshadowed and direct light is not, which is what makes a
-	// shadow dark rather than black.
-	float shadow = ShadowFactor(normal, toLight);
-	vec3 lit = albedo * (lighting.Ambient.rgb + vec3(lambert * shadow + bounce));
 	outColour = vec4(lit, inColour.a);
 }

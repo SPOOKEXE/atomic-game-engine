@@ -1830,6 +1830,36 @@ namespace engine::render {
 		}
 		const auto plainOpaque = static_cast<uint32_t>(opaqueCount) - surfaceInCamera;
 
+		// **And the same split at the end of the blended tail, which is what
+		// makes a faded mirror still a mirror.** A part leaves the opaque head
+		// the moment its `Transparency` goes above zero — and the head is where
+		// the mirror flag was set, so the reflection did not dim, it vanished.
+		// That reads as the surface camera having stopped rather than as an
+		// ordering rule, and it is the bug this run exists to fix.
+		//
+		// They go *last* of everything, so they draw over the blended geometry
+		// as well as the opaque. Stable, so the back-to-front sort survives
+		// inside each run — see `scene::ScenePlan::TransparentSurfaces` for what
+		// is given up across the two.
+		uint32_t transparentSurfaces = 0;
+		if (transparentCount > 0) {
+			ENGINE_PROFILE_CAT("partition blended surfaces", core::ProfileCategory::Render);
+
+			const auto tailBegin = State->DrawOrder.begin() + static_cast<ptrdiff_t>(opaqueCount);
+			const auto tailEnd = tailBegin + static_cast<ptrdiff_t>(transparentCount);
+			const auto boundary = std::stable_partition(tailBegin, tailEnd, [&](uint32_t index) {
+				return State->VisibleInstances[index].Surface < 0;
+			});
+
+			transparentSurfaces = static_cast<uint32_t>(std::distance(boundary, tailEnd));
+		}
+		const uint32_t plainTransparent = transparentCount - transparentSurfaces;
+
+		// How solid the projected image is. One surface today, so one number;
+		// the flip from transparency to opacity happens here, once, rather than
+		// in a shader nobody can put a breakpoint in.
+		const float imageOpacity = surface != nullptr ? std::clamp(surface->ImageOpacity, 0.0f, 1.0f) : 1.0f;
+
 		// **A second range holding everything, for the two passes that are not
 		// the camera's.** A caster outside the camera's frustum still shadows
 		// into it, and a mirror shows what is behind the viewer — so culling to
@@ -2350,6 +2380,25 @@ namespace engine::render {
 				};
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 
+				// The same, for the runs that sample the surface texture.
+				//
+				// **Declared beside the ordinary one because two runs push it
+				// now**, not one: the opaque mirrors and, since a faded mirror
+				// stopped vanishing, the blended ones at the very end of the
+				// tail. `Flags.w` is the image's own opacity and was unused
+				// until a mirror had to be legible on a pane that is itself
+				// transparent — see `SurfaceView::ImageOpacity`.
+				const LightingUniforms mirrored{
+					glm::vec4{SUN_DIRECTION, 0.0f},
+					SUN_AMBIENT,
+					glm::vec4{
+						haveShadow ? 1.0f : 0.0f,
+						1.0f / static_cast<float>(SHADOW_RESOLUTION),
+						1.0f,
+						imageOpacity
+					},
+				};
+
 				// Both samplers, every draw. A shadow map that was not rendered
 				// binds the surface texture in its place rather than nothing:
 				// the flag above is what stops it being read, and an unbound
@@ -2393,13 +2442,6 @@ namespace engine::render {
 				// ordering below, so this is one contiguous run rather than a
 				// per-instance branch.
 				if (surfaceInCamera > 0 && State->SurfaceReady) {
-					const LightingUniforms mirrored{
-						glm::vec4{SUN_DIRECTION, 0.0f},
-						SUN_AMBIENT,
-						glm::vec4{
-							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 1.0f, 0.0f
-						},
-					};
 					SDL_PushGPUFragmentUniformData(command, 0, &mirrored, sizeof(mirrored));
 
 					SDL_DrawGPUIndexedPrimitives(
@@ -2432,15 +2474,55 @@ namespace engine::render {
 					passes.Enter(Pass::Transparent);
 
 					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
-					SDL_DrawGPUIndexedPrimitives(
-						pass,
-						static_cast<uint32_t>(CUBE_INDICES.size()),
-						transparentCount,
-						0,
-						0,
-						sceneCount + static_cast<uint32_t>(opaqueCount)
-					);
-					result.DrawCalls++;
+
+					if (plainTransparent > 0) {
+						SDL_DrawGPUIndexedPrimitives(
+							pass,
+							static_cast<uint32_t>(CUBE_INDICES.size()),
+							plainTransparent,
+							0,
+							0,
+							sceneCount + static_cast<uint32_t>(opaqueCount)
+						);
+						result.DrawCalls++;
+					}
+
+					// **The blended mirrors, last of everything.** Same pipeline
+					// and same sort, different uniform: this run is the one that
+					// samples the surface texture, so a pane at any transparency
+					// still shows its reflection at the image's own opacity.
+					if (transparentSurfaces > 0 && State->SurfaceReady) {
+						SDL_PushGPUFragmentUniformData(command, 0, &mirrored, sizeof(mirrored));
+
+						SDL_DrawGPUIndexedPrimitives(
+							pass,
+							static_cast<uint32_t>(CUBE_INDICES.size()),
+							transparentSurfaces,
+							0,
+							0,
+							sceneCount + static_cast<uint32_t>(opaqueCount) + plainTransparent
+						);
+
+						result.DrawCalls++;
+						result.SurfaceInstances += transparentSurfaces;
+
+						SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
+					} else if (transparentSurfaces > 0) {
+						// No surface texture this frame — the first frame, or a
+						// scene whose camera has not rendered yet. Drawn plainly
+						// rather than skipped: a pane that disappears until the
+						// mirror warms up is worse than one that is briefly its
+						// own colour.
+						SDL_DrawGPUIndexedPrimitives(
+							pass,
+							static_cast<uint32_t>(CUBE_INDICES.size()),
+							transparentSurfaces,
+							0,
+							0,
+							sceneCount + static_cast<uint32_t>(opaqueCount) + plainTransparent
+						);
+						result.DrawCalls++;
+					}
 				}
 
 				result.Triangles = static_cast<uint64_t>(CUBE_INDICES.size() / 3) * instanceCount;

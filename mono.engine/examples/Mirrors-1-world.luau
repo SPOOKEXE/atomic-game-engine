@@ -13,6 +13,10 @@
 -- projected from where the camera was standing. Point the camera at the mirror
 -- from the reflected position and what the mirror shows is what is behind you.
 --
+-- **Three lines is now two.** Parent a `SurfaceCamera` to a part, pick a face,
+-- and the engine does the reflection — see `scene/SurfaceCameras.hpp`. What
+-- follows keeps the geometry it always had and has lost the vector maths.
+--
 -- **It is a frame stale, and that is the design rather than a limitation.** The
 -- surface is rendered before the main pass and shows the world as it was on the
 -- previous frame — which is what breaks the dependency cycle between a mirror
@@ -34,8 +38,9 @@ local MIRROR_WIDTH = 16
 local MIRROR_HEIGHT = 9
 local MIRROR_Z = -6
 
--- Where the viewer stands. The reflected camera is this position mirrored
--- through the plane, which is what makes the image line up with the pane.
+-- Where the viewer stands. **Only the viewer's position now** — the reflection
+-- is worked out from wherever this camera is, every frame, so moving it moves
+-- the image with it instead of leaving the mirror correct for one spot.
 local EYE = Vector3.new(0, 5, 22)
 
 local mirror = Instance.new("Part")
@@ -45,11 +50,11 @@ mirror.Size = Vector3.new(MIRROR_WIDTH, MIRROR_HEIGHT, 0.4)
 mirror.Position = Vector3.new(0, MIRROR_HEIGHT / 2, MIRROR_Z)
 mirror.Color = Color3.new(1, 1, 1)
 
--- **This is the whole of it.** Surface 0 is what the surface camera writes, and
--- a part that names it samples that texture instead of its own tint. The tint
--- still multiplies, so a coloured mirror is a colour here and a plain one is
--- white.
-mirror.Surface = 0
+-- The tint still multiplies whatever the reflection carries, so a coloured
+-- mirror is a colour here and a plain one is white.
+--
+-- **No `Surface` line.** Parenting a `SurfaceCamera` to this part is what tells
+-- it which texture to show — see the camera below.
 mirror.Parent = workspace
 
 -- A frame around it, so the pane reads as a mirror rather than as a hole.
@@ -120,36 +125,38 @@ for index = 0, 23 do
 	})
 end
 
--- **The surface camera.** Setting `SurfaceSize` is what turns an ordinary
--- camera into one that renders to a texture: the property is structural, so the
--- component appears and the client's `FindSurfaceCamera` starts finding it.
-local reflection = Instance.new("Camera")
+-- **The surface camera, as one instance parented to the pane.** Everything
+-- below used to be arithmetic in this file: mirror the eye through the plane,
+-- aim back at the pane, push the near plane out to the glass. All of it is
+-- `scene::AimSurfaceCameras` now, run every frame from wherever the viewer
+-- actually is.
+--
+-- That last part is the difference that matters. The hand-written version was
+-- correct only for the frame it was written for, which is why this example used
+-- to pin its viewer in place: a moving eye made the reflection wrong, and the
+-- mirror looked broken rather than fixed to one position.
+--
+-- `Face` picks which side of the pane it projects off. `Enum.NormalId.Front` is
+-- -Z, which is the side the pane's own front faces.
+local reflection = Instance.new("SurfaceCamera")
 reflection.Name = "Reflection"
 reflection.SurfaceSize = Vector3.new(1024, 1024)
-
--- Mirrored through the plane: the same distance behind it as the eye is in
--- front, looking the other way. That is the whole of planar reflection, and it
--- is why the projection lines up with the pane rather than sliding across it.
-local reflected = Vector3.new(EYE.X, EYE.Y, 2 * MIRROR_Z - EYE.Z)
-
--- **Aimed, not just placed.** `CFrame.new` carries identity rotation, which
--- looks down -Z — so a camera put behind the mirror faces *away* from it and
--- renders empty space. That was the first version of this line, and the mirror
--- came out showing the clear colour.
-reflection.CFrame = CFrame.lookAt(reflected, Vector3.new(0, MIRROR_HEIGHT / 2, MIRROR_Z))
+reflection.Face = "Front"
 reflection.FieldOfView = 70
 
--- **The near plane sits at the mirror**, which is the poor-man's oblique clip.
--- The reflection camera is behind the pane looking through it, so everything
--- between the two — the frame, the back of the pane, anything the viewer is
--- standing behind — would occlude the reflection. Clipping at the plane removes
--- exactly that half of the world.
---
--- A real planar reflection skews the projection's near plane onto the mirror
--- instead, which handles a camera looking at the pane from an angle. This is
--- the head-on case done correctly and the oblique case done approximately.
-reflection.NearPlaneZ = math.abs(reflected.Z - MIRROR_Z) + 0.3
-reflection.Parent = workspace
+-- **The image's own opacity, which is not the pane's.** At 0 the reflection is
+-- solid whatever the pane's `Transparency` is — so a sheet of glass you can see
+-- through still carries a mirror image, which is what glass does and what one
+-- shared number could never express. Raise it towards 1 and the reflection
+-- fades while the pane stays exactly as transparent as it was.
+reflection.ImageTransparency = 0
+
+-- Parenting is the whole of the setup: the engine places the camera off this
+-- face and tells the pane which surface to show, so there is no `mirror.Surface`
+-- line here any more. Setting it by hand as well would be one fact recorded
+-- twice, and forgetting it rendered a perfect reflection into a texture nothing
+-- sampled.
+reflection.Parent = mirror
 
 -- The camera the scene is *watched* through. Not the surface one: a world has
 -- several cameras and `workspace.CurrentCamera` names the live one, which is

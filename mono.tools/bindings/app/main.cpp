@@ -372,8 +372,19 @@ namespace {
 			}
 			out << "\n";
 			out << "export type " << info.Name.Text() << " = {\n";
-			out << "\tName: string,\n";
 
+			// **No hand-written `Name` line, and removing it was a fix rather
+			// than a tidy-up.** `Name` was special-cased here because it *was* a
+			// special case: until v0.5 it was not a declared property at all, so
+			// the generator had to know about it. The moment
+			// `Classes::Property<&InstanceName::Value>` landed it started coming
+			// out of the loop below as well, and every class in this file
+			// carried the field twice.
+			//
+			// A duplicate key in a Luau table type is not an error the way a
+			// missing one is — which is exactly why it survived: nothing failed,
+			// the file just quietly said one thing twice. See the TypeScript
+			// half, where the same leftover was worse.
 			std::vector<PropertyDescriptor> properties(info.Properties.begin(), info.Properties.end());
 			std::sort(
 				properties.begin(),
@@ -442,9 +453,18 @@ namespace {
 			}
 			out << " {\n";
 
-			if (!info.Parent.IsValid()) {
-				out << "\treadonly Name: string;\n";
-			}
+			// **The root's `Name` is not written by hand either, and this one was
+			// actively wrong rather than merely redundant.** It emitted
+			// `readonly Name: string;` on `Instance` — which then declared
+			// `Name: string;` again from the property loop, because `Name` has
+			// been a real property since v0.5. Two declarations of one member
+			// that *disagree about whether it can be assigned*, in the file whose
+			// whole job is to tell an author what they may write.
+			//
+			// A Roblox script sets `.Name`, so the property's own answer —
+			// writable — is the right one, and it is the one that survives now
+			// that nothing competes with it. The Luau half carried the same
+			// leftover as a plain duplicate.
 
 			// Only what this class declares itself. A derived interface extends
 			// its base, so repeating an inherited property here would be a

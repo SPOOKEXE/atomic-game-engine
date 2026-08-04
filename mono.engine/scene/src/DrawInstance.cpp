@@ -85,6 +85,21 @@ namespace engine::scene {
 		plan.Opaque = static_cast<uint32_t>(opaque);
 		plan.Transparent = static_cast<uint32_t>(instances.size() - opaque);
 
+		// **Mirrors to the back of the blended tail, keeping their sort.** A
+		// `stable_partition` preserves the back-to-front order inside each run,
+		// so what changes is only which run a pane is in — see
+		// `ScenePlan::TransparentSurfaces` for why they go last and what that
+		// costs.
+		if (plan.Transparent > 0) {
+			const std::span<uint32_t> tail(order.data() + opaque, plan.Transparent);
+			const auto boundary =
+				std::stable_partition(tail.begin(), tail.end(), [instances](uint32_t index) {
+					return index >= instances.size() || instances[index].Surface < 0;
+				});
+
+			plan.TransparentSurfaces = static_cast<uint32_t>(std::distance(boundary, tail.end()));
+		}
+
 		if (opaque == 0) {
 			return plan;
 		}

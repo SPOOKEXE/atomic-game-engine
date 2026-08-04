@@ -11,6 +11,7 @@ export type CFrame = { Position: Vector3 }
 
 export type EnumItem = { Name: string, EnumType: string }
 export type Enum_Material = EnumItem
+export type Enum_NormalId = EnumItem
 
 declare Enum: {
 	Material: {
@@ -32,18 +33,24 @@ declare Enum: {
 		Neon: Enum_Material,
 		ForceField: Enum_Material,
 	},
+	NormalId: {
+		Right: Enum_NormalId,
+		Top: Enum_NormalId,
+		Back: Enum_NormalId,
+		Left: Enum_NormalId,
+		Bottom: Enum_NormalId,
+		Front: Enum_NormalId,
+	},
 }
 
 -- Instance
 export type Instance = {
-	Name: string,
 	Name: string,
 	Parent: Instance,
 }
 
 -- PVInstance : Instance
 export type PVInstance = {
-	Name: string,
 	CFrame: CFrame,
 	Name: string,
 	Orientation: Vector3,
@@ -53,7 +60,6 @@ export type PVInstance = {
 
 -- BasePart : PVInstance
 export type BasePart = {
-	Name: string,
 	Anchored: boolean,
 	CFrame: CFrame,
 	CanCollide: boolean,
@@ -74,7 +80,6 @@ export type BasePart = {
 
 -- Part : BasePart
 export type Part = {
-	Name: string,
 	Anchored: boolean,
 	CFrame: CFrame,
 	CanCollide: boolean,
@@ -95,7 +100,6 @@ export type Part = {
 
 -- Camera : PVInstance
 export type Camera = {
-	Name: string,
 	CFrame: CFrame,
 	FarPlaneZ: number,
 	FieldOfView: number,
@@ -107,9 +111,23 @@ export type Camera = {
 	SurfaceSize: Vector3,
 }
 
+-- SurfaceCamera : Camera
+export type SurfaceCamera = {
+	CFrame: CFrame,
+	Face: Enum_NormalId,
+	FarPlaneZ: number,
+	FieldOfView: number,
+	ImageTransparency: number,
+	Name: string,
+	NearPlaneZ: number,
+	Orientation: Vector3,
+	Parent: Instance,
+	Position: Vector3,
+	SurfaceSize: Vector3,
+}
+
 -- LuaSourceContainer : Instance
 export type LuaSourceContainer = {
-	Name: string,
 	Disabled: boolean,
 	Name: string,
 	Parent: Instance,
@@ -118,7 +136,6 @@ export type LuaSourceContainer = {
 
 -- Script : LuaSourceContainer
 export type Script = {
-	Name: string,
 	Disabled: boolean,
 	Name: string,
 	Parent: Instance,
@@ -127,7 +144,6 @@ export type Script = {
 
 -- LocalScript : LuaSourceContainer
 export type LocalScript = {
-	Name: string,
 	Disabled: boolean,
 	Name: string,
 	Parent: Instance,

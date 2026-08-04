@@ -226,6 +226,24 @@ namespace engine::scene {
 		// Shadow casters among `Reflected`, contiguous from zero.
 		uint32_t ReflectedCasters = 0;
 
+		// Blended instances that show a surface, contiguous at the very end.
+		//
+		// **The last run of the whole list, so a faded mirror still reflects.**
+		// A part with a surface used to leave the opaque head the moment its
+		// `Transparency` went above zero — which is where the mirror flag is set
+		// — so the reflection did not dim, it disappeared, and the pane fell back
+		// to its own tint. That reads as the surface camera having stopped rather
+		// than as an ordering rule.
+		//
+		// They sort back-to-front among themselves and are drawn after every
+		// other blended instance, which is the "always draws on top" the feature
+		// asks for. **Across the two runs the depth order is therefore not
+		// strictly back-to-front**: a blended pane in front of a mirror is drawn
+		// before it. Stated rather than hidden, and the trade is deliberate —
+		// one sorted run per flag is what lets the mirror flag be a uniform
+		// instead of a per-fragment branch on data the shader does not have.
+		uint32_t TransparentSurfaces = 0;
+
 		// Shadow casters among `Surfaces`, contiguous from `Reflected`.
 		//
 		// **The reason the shadow pass draws two ranges and not one.** The

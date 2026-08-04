@@ -325,6 +325,55 @@ namespace engine::scene {
 	// from the start.
 	//
 	// @since v0.6
+	// Which face of a box a thing points out of.
+	//
+	// **Roblox's `Enum.NormalId`, including its names.** `Top` and `Bottom`
+	// rather than Up and Down, for the reason `Part.cpp` gives about the class
+	// tree: a script written against Roblox says `Enum.NormalId.Top`, and a
+	// second spelling of one face is the duplicate `scene/AGENTS.md` calls the
+	// most expensive kind of debt.
+	//
+	// The values are Roblox's ordinals too, so a saved game file carrying a
+	// number means the same thing in both places.
+	//
+	// @since v0.7
+	enum class NormalId : uint8_t {
+		Right = 0,
+		Top = 1,
+		Back = 2,
+		Left = 3,
+		Bottom = 4,
+		Front = 5,
+	};
+
+	// The outward unit normal of a face, in the box's own space.
+	//
+	// **`Front` is -Z, which is the one entry worth checking rather than
+	// assuming.** Roblox's front face looks down negative Z and so does this
+	// engine's camera, so a mirror on the front of a pane faces the same way an
+	// unrotated camera does. Getting it backwards puts the reflection behind the
+	// pane, which renders the clear colour and reads as a broken mirror.
+	//
+	// @param face Which face.
+	// @return The outward normal, in local space.
+	constexpr core::Vector3 NormalOf(NormalId face) {
+		switch (face) {
+		case NormalId::Right:
+			return core::Vector3{1.0f, 0.0f, 0.0f};
+		case NormalId::Top:
+			return core::Vector3{0.0f, 1.0f, 0.0f};
+		case NormalId::Back:
+			return core::Vector3{0.0f, 0.0f, 1.0f};
+		case NormalId::Left:
+			return core::Vector3{-1.0f, 0.0f, 0.0f};
+		case NormalId::Bottom:
+			return core::Vector3{0.0f, -1.0f, 0.0f};
+		case NormalId::Front:
+			return core::Vector3{0.0f, 0.0f, -1.0f};
+		}
+		return core::Vector3{0.0f, 0.0f, -1.0f};
+	}
+
 	struct SurfaceCamera {
 		// How big the texture is, in pixels.
 		//
@@ -335,6 +384,22 @@ namespace engine::scene {
 		// The other axis.
 		uint16_t Height = 1024;
 
+		// How much of the part behind shows through the projected image, 0 to 1.
+		//
+		// **A second opacity, and the reason there are two is that they are two
+		// different things.** `Visual::Transparency` is how much of the *world*
+		// shows through the pane; this is how much of the *pane* shows through
+		// the reflection. A mirror is a transparent sheet of glass with an
+		// opaque image on it, and one number cannot say both — which is exactly
+		// what went wrong: fading a mirror faded its reflection with it, so
+		// there was no way to author glass that reflects.
+		//
+		// At 0 the image is solid and covers whatever the part would have drawn,
+		// **whatever the part's own transparency is** — a fully transparent pane
+		// still shows its reflection, which is what a mirror is. At 1 the image
+		// is gone and the part draws as itself.
+		float ImageTransparency = 0.0f;
+
 		// Which surface index this camera writes.
 		//
 		// One today, and the field exists because the pipeline that replaces
@@ -342,8 +407,21 @@ namespace engine::scene {
 		// add a second mirror would be a stage list that encoded the count.
 		int8_t Surface = 0;
 
+		// Which face of the parent part this camera projects off.
+		//
+		// **Only meaningful when this camera is parented to a `BasePart`**, which
+		// is the arrangement `AimSurfaceCameras` exists for: the camera is placed
+		// by the engine, mirrored through that face's plane, rather than by a
+		// script computing the reflection itself. A camera parented to the world
+		// keeps whatever `CFrame` it was given, because there is no face to
+		// project off.
+		//
+		// Stored as the enum's underlying type so the component stays trivially
+		// copyable and the row stays the size it was.
+		NormalId Face = NormalId::Front;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// A content hash of what a consumer last saw, for consumers that cannot

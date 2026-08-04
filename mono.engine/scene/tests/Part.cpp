@@ -6,6 +6,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -30,6 +31,7 @@ using engine::scene::MakePart;
 using engine::scene::Motion;
 using engine::scene::PartClass;
 using engine::scene::PartDesc;
+using engine::scene::RegisterSceneClasses;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
@@ -352,4 +354,86 @@ TEST_CASE("a replica refuses a property write", "[scene][part]") {
 	// those apart from inside the script.
 	CHECK_FALSE(Write(store, part, "Position", Vector3{9.0f, 9.0f, 9.0f}));
 	CHECK(store.Get<Transform>(part)->Frame.Position.X == 0.0f);
+}
+
+// --- the two opacities ------------------------------------------------------
+
+TEST_CASE("Transparency is clamped to what it can mean", "[scene][part]") {
+	Store store("transparency_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	// **Clamped rather than refused, and the distinction is deliberate.** A
+	// transparency is a continuous quantity somebody usually arrives at by
+	// arithmetic — a fade driven off a sine or a distance overshoots by a hair
+	// at both ends — so refusing the write would make a smooth fade stutter at
+	// exactly the two values it is aiming for. An enum is refused because a
+	// wrong name means nothing; a number out of range has an obvious nearest
+	// meaning.
+	REQUIRE(Write(store, part, "Transparency", 2.5f));
+	CHECK(Read<float>(store, part, "Transparency") == 1.0f);
+
+	REQUIRE(Write(store, part, "Transparency", -3.0f));
+	CHECK(Read<float>(store, part, "Transparency") == 0.0f);
+
+	// The ends themselves are legal, which is what makes the clamp a clamp
+	// rather than an exclusive range: 0 is an ordinary opaque part and 1 is a
+	// pane you can still collide with.
+	REQUIRE(Write(store, part, "Transparency", 1.0f));
+	CHECK(Read<float>(store, part, "Transparency") == 1.0f);
+
+	REQUIRE(Write(store, part, "Transparency", 0.25f));
+	CHECK(Read<float>(store, part, "Transparency") == 0.25f);
+}
+
+TEST_CASE("a surface camera has its own opacity, clamped the same way", "[scene][part]") {
+	Store store("image_transparency_test");
+	RegisterSceneClasses();
+
+	const Entity camera =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+
+	// **Two opacities, because a mirror is two things.** The part's
+	// `Transparency` is how much of the world shows through the glass; this is
+	// how much of the glass shows through the reflection. Until there were two,
+	// fading a mirror faded its reflection with it and there was no way to
+	// author a transparent pane that still reflects.
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
+
+	REQUIRE(Write(store, camera, "ImageTransparency", 0.5f));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.5f);
+
+	REQUIRE(Write(store, camera, "ImageTransparency", 4.0f));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 1.0f);
+
+	REQUIRE(Write(store, camera, "ImageTransparency", -1.0f));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
+}
+
+TEST_CASE("Face is an enum, so a misspelling is refused where it was written", "[scene][part]") {
+	Store store("face_test");
+	RegisterSceneClasses();
+
+	const Entity camera =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
+
+	// The default reads back as a name rather than as a number, which is what
+	// having an `EnumTable` ordinal in the component buys: the storage is one
+	// byte and the surface is a name a script can compare.
+	CHECK(Read<Name>(store, camera, "Face") == Name("Front"));
+
+	REQUIRE(Write(store, camera, "Face", Name("Top")));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Top"));
+
+	// **Refused rather than defaulted.** A face nobody chose is a mirror
+	// projecting off the wrong side of a pane, which looks like a broken
+	// reflection rather than like a typo — the same argument `Material` makes
+	// about `"Plsatic"`.
+	CHECK_FALSE(Write(store, camera, "Face", Name("Frnot")));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Top"));
+
+	// Roblox's spelling, which is the one a ported script will use.
+	CHECK_FALSE(Write(store, camera, "Face", Name("Up")));
+	REQUIRE(Write(store, camera, "Face", Name("Bottom")));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Bottom"));
 }

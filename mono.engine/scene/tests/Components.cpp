@@ -25,6 +25,7 @@ using engine::scene::Bounds;
 using engine::scene::Camera;
 using engine::scene::Collider;
 using engine::scene::Motion;
+using engine::scene::NormalId;
 using engine::scene::PreviousTransform;
 using engine::scene::QuickHash;
 using engine::scene::Rendered;
@@ -71,8 +72,18 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(Surface) == sizeof(Name));
 	CHECK(sizeof(QuickHash) == sizeof(uint64_t));
 	CHECK(sizeof(Camera) == 3 * sizeof(float));
-	CHECK(sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(int8_t) + 3);
-	CHECK(offsetof(SurfaceCamera, Reserved) + 3 == sizeof(SurfaceCamera));
+	// **`ImageTransparency` widened this one and the two bytes it needed came
+	// out of the named padding**, which is the same trade `Visual` records
+	// above: a float needs four-byte alignment, so it could not sit in the three
+	// bytes after `Surface` — the struct grew — while `Face` is a byte-wide enum
+	// and took one of them for nothing. Two are left.
+	CHECK(
+		sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(float) + sizeof(int8_t) + sizeof(NormalId) + 2
+	);
+	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
+
+	// A face is one byte, so a component can hold one without the row noticing.
+	CHECK(sizeof(NormalId) == sizeof(uint8_t));
 
 	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + sizeof(BodyKind) + 3);
 	CHECK(

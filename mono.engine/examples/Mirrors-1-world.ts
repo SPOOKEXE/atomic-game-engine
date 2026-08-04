@@ -10,10 +10,10 @@
 //   - `a.mul(b)` and `a.add(b)` — methods, because JavaScript has no operator
 //     overloading. The transform being composed is identical.
 //
-// How a mirror works here is in the Luau file and is not repeated: a `Camera`
-// with a `SurfaceSize` renders into a texture, a `Part` with `Surface = 0`
-// samples it, and the image is a frame stale because that is what breaks the
-// dependency cycle between a mirror and what it reflects.
+// How a mirror works here is in the Luau file and is not repeated: a
+// `SurfaceCamera` parented to a part renders into a texture and the part shows
+// it, and the image is a frame stale because that is what breaks the dependency
+// cycle between a mirror and what it reflects.
 
 const RunService = game.GetService("RunService");
 
@@ -29,7 +29,9 @@ mirror.Anchored = true;
 mirror.Size = Vector3.new(MIRROR_WIDTH, MIRROR_HEIGHT, 0.4);
 mirror.Position = Vector3.new(0, MIRROR_HEIGHT / 2, MIRROR_Z);
 mirror.Color = Color3.new(1, 1, 1);
-mirror.Surface = 0;
+
+// No `Surface` line: parenting the camera below is what tells this part which
+// texture to show.
 mirror.Parent = workspace;
 
 const frameThickness = 0.5;
@@ -110,27 +112,19 @@ for (let index = 0; index < 24; index++) {
 	});
 }
 
-// The surface camera. `SurfaceSize` is structural, so setting it is what makes
-// this a camera that renders to a texture rather than one that does not.
-const reflection = Instance.new("Camera");
+// The surface camera, parented to the pane. The engine mirrors it through the
+// face every frame — see `scene/SurfaceCameras.hpp` — so the vector maths that
+// used to be here is gone, and the reflection now follows a viewer that moves.
+const reflection = Instance.new("SurfaceCamera");
 reflection.Name = "Reflection";
 reflection.SurfaceSize = Vector3.new(1024, 1024);
-
-// Mirrored through the plane: the same distance behind it as the eye is in
-// front. That is the whole of planar reflection.
-// Aimed, not just placed: `CFrame.new` carries identity rotation, which looks
-// down -Z, so a camera behind the mirror would face away from it.
-reflection.CFrame = CFrame.lookAt(
-	Vector3.new(EYE.X, EYE.Y, 2 * MIRROR_Z - EYE.Z),
-	Vector3.new(0, MIRROR_HEIGHT / 2, MIRROR_Z)
-);
+reflection.Face = "Front";
 reflection.FieldOfView = 70;
 
-// The near plane sits at the mirror — the poor-man's oblique clip. See the Luau
-// file for why: the reflection camera is behind the pane looking through it, so
-// everything between the two would occlude the reflection.
-reflection.NearPlaneZ = Math.abs(2 * MIRROR_Z - EYE.Z - MIRROR_Z) + 0.3;
-reflection.Parent = workspace;
+// The image's own opacity, which is not the pane's: at 0 the reflection is
+// solid whatever the pane's transparency is.
+reflection.ImageTransparency = 0;
+reflection.Parent = mirror;
 
 const view = Instance.new("Camera");
 view.Name = "Viewer";
