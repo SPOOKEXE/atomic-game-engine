@@ -50,6 +50,28 @@ namespace studio {
 			{"scene.Motion", ChangeDetection::Observed},
 			{"scene.Bounds", ChangeDetection::Signature},
 			{"scene.Visual", ChangeDetection::Signature},
+
+			// **The mirror, and the tree that says what it is a mirror of.** A
+			// `SurfaceCamera` names a face; which part's face it is comes from
+			// the parent link and nowhere else, so replicating the camera
+			// without `ecs.Hierarchy` puts a camera on the client that cannot
+			// find its pane. That is what a replica's mirrors being plain white
+			// parts was: `client::CollectSurfaceViews` found nothing to render
+			// because `AimSurfaceCameras` had no parent to project off.
+			//
+			// **Aim is not among them and must not be.** `scene.Transform` is
+			// replicated, so the authority's placement for a surface camera does
+			// arrive — and `aim-surface-cameras` overwrites it in `PreRender`
+			// from this client's own eye, every frame, before anything reads it.
+			// A reflection is of the viewer, and the viewer is here.
+			//
+			// `Signature`, because none of the three changes on a steady mirror:
+			// a face, a lens and a parent are authored once and then sit still,
+			// and observing them would pay a comparison per mirror per tick to
+			// discover that.
+			{"scene.SurfaceCamera", ChangeDetection::Signature},
+			{"scene.Camera", ChangeDetection::Signature},
+			{"ecs.Hierarchy", ChangeDetection::Signature},
 		};
 
 		// Entities carrying a pose, which is what "how much world is there"

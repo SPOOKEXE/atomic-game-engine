@@ -56,8 +56,10 @@
 // @tier L7 · shared
 
 #include <engine/ecs/Entity.hpp>
+#include <engine/scene/DrawInstance.hpp>
 
 #include <cstddef>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -84,4 +86,35 @@ namespace engine::scene {
 	// @return How many surface cameras were placed. Zero is the ordinary case in
 	//         a scene with no mirror in it, and is not a failure.
 	size_t AimSurfaceCameras(ecs::Store &store);
+
+	// Appends a thin translucent bar lying on each face a surface camera
+	// projects off.
+	//
+	// **Because "which face" is the one thing about a mirror you cannot see.**
+	// Everything else this file computes shows up in the image: a camera aimed
+	// wrongly reflects the wrong thing, a near plane set wrongly clips. `Face`
+	// is different — the wrong one gives a pane that reflects what is *behind*
+	// it, which looks exactly like a pane that reflects nothing, and the only
+	// way to tell those apart was to read the script. The bar marks the side the
+	// projection comes off, so the answer is in the frame.
+	//
+	// **A draw instance rather than an entity**, and that is what keeps it a
+	// marker instead of content. Nothing is added to the world: it does not
+	// serialise, it cannot be selected in an explorer, a script cannot find it,
+	// and it disappears the moment the caller stops asking. An entity per mirror
+	// would be a part every author has to know to ignore, and one somebody would
+	// eventually save into a game file.
+	//
+	// Translucent and un-shadowed for the same reason: it must not change what
+	// it is there to show you. **The translucency also keeps it out of the
+	// mirrors**, which is load-bearing rather than incidental: the surface pass
+	// draws `ScenePlan::Reflected` — the opaque head — so a blended instance
+	// never reaches a surface texture, and a bar drawn opaque would appear
+	// across the glass in the reflection of every other mirror in the scene.
+	//
+	// @param store The world.
+	// @param out   The draw list to append to. Nothing already in it is touched.
+	// @return How many markers were appended, which is one per surface camera
+	//         that is parented to a part.
+	size_t AppendSurfaceFaceMarkers(ecs::Store &store, std::vector<DrawInstance> &out);
 }

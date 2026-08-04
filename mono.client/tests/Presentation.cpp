@@ -7,7 +7,9 @@
 // headless test over the same sequence is where that gets cornered.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -17,6 +19,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <client/Scene.hpp>
 #include <string_view>
 #include <vector>
@@ -357,5 +360,82 @@ TEST_CASE("what a part looks like reaches the draw list whole", "[client][presen
 
 		CHECK(list->Instances[0].Transparency == 0.5f);
 		CHECK_FALSE(list->Instances[0].CastShadow);
+	});
+}
+
+// **A mirror, in a world built the way every host except `--scene` builds
+// one.** This is the regression that made the studio's mirror world a plain
+// white rectangle: `aim-surface-cameras` was registered only by
+// `BuildScriptedWorld`, so the studio, `--game` and an imported world all
+// presented a mirror that was never aimed.
+//
+// The visible half of that is not the camera. Aiming is also what writes
+// `Visual::Surface` onto the pane — step 4 of `scene/SurfaceCameras.hpp` — so
+// without the system the pane keeps the default of -1, samples no texture, and
+// draws as its own flat tint. A white pane looks like a broken surface pass,
+// which is why it went to the renderer twice before it came here.
+//
+// Asserted through `Universe::Present` rather than by calling
+// `AimSurfaceCameras` directly, because what was wrong was the registration and
+// nothing else: `scene/tests/SurfaceCameras.cpp` already proves the arithmetic,
+// and it passed the whole time the mirror was white.
+TEST_CASE("a world that only presents still aims its mirrors", "[client][presentation]") {
+	Universe universe;
+	const WorldId world = AddWorld(universe, "presentation.mirror");
+	AddPart(universe, world, "Pane");
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		const Entity pane = store.FindFirstChild(workspace, "Pane");
+
+		// The viewer, which is what there is a reflection *of*. Without one a
+		// mirror has nothing to compute rather than a default.
+		const Entity eye = store.CreateInstance(engine::scene::CameraClass(), "Eye");
+		store.SetParent(eye, workspace);
+		store.Set(eye, engine::scene::Transform{engine::core::CFrame(Vector3{0.0f, 0.0f, 20.0f})});
+		store.SetResource(engine::scene::ActiveCamera{eye, 16.0f / 9.0f});
+
+		// Parented to the pane and given a face, which is the whole of the
+		// setup this feature exists to make sufficient.
+		const Entity reflection =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
+		store.Set(reflection, engine::scene::SurfaceCamera{});
+		REQUIRE(store.SetParent(reflection, pane));
+
+		REQUIRE(store.Get<engine::scene::Visual>(pane)->Surface == -1);
+	});
+
+	// The pane, plus the marker the surface camera now draws on the face it
+	// projects off. The `Camera` is not a part and publishes nothing.
+	CHECK(Drawn(universe, world) == 2);
+
+	universe.Enter(world, [](Store &store) {
+		const Entity pane = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Pane");
+
+		// The assertion the white rectangle was: a pane told which texture it
+		// shows, by nothing more than a camera being parented to it.
+		CHECK(store.Get<engine::scene::Visual>(pane)->Surface == 0);
+
+		const auto *list = store.Resource<client::DrawList>();
+		REQUIRE(list != nullptr);
+
+		// And it reaches the draw list, which is the half `Visual` alone does
+		// not prove — the renderer reads the copy, not the component.
+		const auto pane_drawn = std::find_if(
+			list->Instances.begin(), list->Instances.end(), [](const engine::scene::DrawInstance &instance) {
+				return instance.Surface == 0;
+			}
+		);
+		CHECK(pane_drawn != list->Instances.end());
+
+		// The marker is blended and shows no surface of its own, which is what
+		// keeps it out of the surface pass and therefore out of every mirror.
+		const auto marker = std::find_if(
+			list->Instances.begin(), list->Instances.end(), [](const engine::scene::DrawInstance &instance) {
+				return instance.Surface < 0 && instance.Transparency > 0.0f;
+			}
+		);
+		REQUIRE(marker != list->Instances.end());
+		CHECK_FALSE(marker->CastShadow);
 	});
 }

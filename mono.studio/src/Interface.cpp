@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -162,17 +163,40 @@ namespace studio {
 		// state that carries. See `ViewportClaimed`.
 		ViewportClaimed = false;
 
-		for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
-			DrawViewport(index);
+		// **One span per panel, so the interface bar has something under it.**
+		// Without these the whole build is a single wide block and the only
+		// question it can answer is "is the interface slow" — which is the one
+		// question you already know the answer to by the time you have opened
+		// the graph. A closed panel returns immediately and costs a span of
+		// almost nothing, which is the correct reading rather than an absence.
+		{
+			ENGINE_PROFILE_CAT("viewports", engine::core::ProfileCategory::Render);
+			for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
+				DrawViewport(index);
+			}
 		}
 
 		// **After every viewport, never inside one.** See the note in
 		// `DrawViewport` for why asking per panel could not work.
 		ResolveFocusedViewport();
-		DrawExplorer();
-		DrawWorlds();
-		DrawProperties();
-		DrawScripts();
+
+		{
+			ENGINE_PROFILE_CAT("explorer", engine::core::ProfileCategory::Render);
+			DrawExplorer();
+		}
+		{
+			ENGINE_PROFILE_CAT("worlds", engine::core::ProfileCategory::Render);
+			DrawWorlds();
+		}
+		{
+			ENGINE_PROFILE_CAT("properties", engine::core::ProfileCategory::Render);
+			DrawProperties();
+		}
+		{
+			ENGINE_PROFILE_CAT("scripts", engine::core::ProfileCategory::Render);
+			DrawScripts();
+		}
+
 		DrawOutput();
 		DrawSettings();
 		DrawStatistics();

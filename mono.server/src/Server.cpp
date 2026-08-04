@@ -396,6 +396,16 @@ namespace server {
 		Replication->Authority().Replicate(engine::core::Name("scene.Bounds"), ChangeDetection::Signature);
 		Replication->Authority().Replicate(engine::core::Name("scene.Visual"), ChangeDetection::Signature);
 
+		// The mirror and the tree that says what it is a mirror of. See the
+		// same three lines in `studio/PlayLink.cpp` for why the *aim* is not
+		// among them: a reflection is of the viewer, and every client has its
+		// own. `client::AimReplicaViewer` is the other half.
+		Replication->Authority().Replicate(
+			engine::core::Name("scene.SurfaceCamera"), ChangeDetection::Signature
+		);
+		Replication->Authority().Replicate(engine::core::Name("scene.Camera"), ChangeDetection::Signature);
+		Replication->Authority().Replicate(engine::core::Name("ecs.Hierarchy"), ChangeDetection::Signature);
+
 		// A delta is the third reader of the dirty bits, so the components that
 		// travel *and change every tick* have to be observed or nothing ever
 		// looks changed. The two above are signed instead — a hash of a value

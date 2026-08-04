@@ -210,6 +210,95 @@ namespace engine::scene {
 	// @return How many at the *back* of `order` show a surface.
 	size_t PartitionSurfaces(std::span<const DrawInstance> instances, std::span<uint32_t> order);
 
+	// How many surfaces may be live at once.
+	//
+	// **A cap rather than a growable set, because each index costs a texture
+	// pair on the device.** A surface is ping-ponged — written this frame,
+	// sampled next — so an index in use is two colour targets and a depth
+	// buffer, and at the wide targets a wall wants that is megabytes each. A
+	// scene may name any index it likes; one at or above this is dropped from
+	// the view list with a line in the log rather than silently rendering
+	// nothing, which is the failure that reads as a broken mirror.
+	//
+	// Sixteen because a room has four walls and a hall of them has more, and
+	// because the arrays this sizes are indexed by `int8_t` — the type
+	// `Visual::Surface` already is.
+	//
+	// @since v0.8
+	constexpr uint8_t MAX_SURFACES = 16;
+
+	// Where one surface's instances sit in an ordered draw list.
+	//
+	// **One run per surface, because a mirror is no longer one texture.** Until
+	// v0.8 every pane sampled the same target, so "the mirrors" was a single
+	// range and a single sampler binding. With a texture per surface the passes
+	// have to bind and project *per index*, which means each index's instances
+	// must be contiguous — this is where that contiguity is recorded.
+	//
+	// Empty runs are the ordinary case: a scene with two mirrors leaves fourteen
+	// of these zeroed, and a zero count is a draw call not issued rather than a
+	// state to check for.
+	//
+	// @since v0.8
+	struct SurfaceRun {
+		// Where this surface's opaque instances start, as an index into the
+		// order.
+		uint32_t OpaqueFirst = 0;
+
+		// How many there are.
+		uint32_t OpaqueCount = 0;
+
+		// Shadow casters among them, contiguous from `OpaqueFirst`.
+		//
+		// **Partitioned inside the run rather than across all mirrors**, which
+		// is the change per-surface grouping forced. One range cannot be both
+		// grouped by index and split by caster, and the shadow pass is the one
+		// that can afford several draw calls: it draws a handful of mirrors,
+		// while the grouping is what every surface pass depends on.
+		uint32_t OpaqueCasters = 0;
+
+		// Where this surface's blended instances start.
+		uint32_t BlendedFirst = 0;
+
+		// How many there are.
+		uint32_t BlendedCount = 0;
+	};
+
+	// Groups an already-partitioned run of mirrors by the surface each shows,
+	// and records where each index lands.
+	//
+	// **Exported because there are two ordered lists and only one of them is
+	// `OrderScene`'s.** The scene range — what the shadow and surface passes
+	// draw — is the whole draw list. The camera range is the frustum-culled
+	// survivors, ordered from the eye, and the renderer builds it separately
+	// because culling to the eye is exactly what the other two passes must not
+	// do. Both need their mirrors grouped by index now that each index owns a
+	// texture, and a second copy of this grouping in the renderer is the fourth
+	// copy of a partition `PartitionSurfaces` exists to have prevented.
+	//
+	// The run must already hold only instances that show a surface;
+	// `PartitionSurfaces` is what produces one.
+	//
+	// @param instances The draw list the order refers to.
+	// @param order     The mirror run, sorted in place.
+	// @param base      Where that run starts in the whole order, because what a
+	//                  pass submits is an offset into the instance buffer and
+	//                  not into this span.
+	// @param opaque    Whether this is the opaque run. Opaque runs are also
+	//                  split by shadow casting and fill `OpaqueFirst`; blended
+	//                  runs fill `BlendedFirst` and never reach the shadow pass.
+	// @param runs      Filled for the indices that appear, left alone for the
+	//                  ones that do not. An index at or above `MAX_SURFACES` is
+	//                  dropped rather than written past the end.
+	// @since v0.8
+	void GroupSurfaces(
+		std::span<const DrawInstance> instances,
+		std::span<uint32_t> order,
+		uint32_t base,
+		bool opaque,
+		SurfaceRun (&runs)[MAX_SURFACES]
+	);
+
 	// Where each pass over the scene range starts, and how long it is.
 	//
 	// **The index arithmetic three passes share, in one place that can be
@@ -224,9 +313,12 @@ namespace engine::scene {
 	//
 	//     [0,                 ReflectedCasters)  opaque, no mirror, casts
 	//     [ReflectedCasters,  Reflected)         opaque, no mirror, no shadow
-	//     [Reflected,         Reflected + SurfaceCasters)  mirror, casts
-	//     [Reflected + SurfaceCasters, Opaque)   mirror, no shadow
+	//     [Reflected,         Opaque)            mirror, grouped by surface
 	//     [Opaque,            Opaque + Transparent)  blended, far to near
+	//
+	// The mirror run is subdivided by `Runs`, one entry per surface index, and
+	// the casters sit at the front of each of those rather than at the front of
+	// the mirror run as a whole.
 	//
 	// @since v0.7
 	struct ScenePlan {
@@ -268,15 +360,86 @@ namespace engine::scene {
 		// instead of a per-fragment branch on data the shader does not have.
 		uint32_t TransparentSurfaces = 0;
 
-		// Shadow casters among `Surfaces`, contiguous from `Reflected`.
+		// Shadow casters among `Surfaces`, summed over every surface.
 		//
-		// **The reason the shadow pass draws two ranges and not one.** The
-		// surface pass needs the non-mirrors contiguous from zero and the shadow
-		// pass needs the casters contiguous; one partition cannot give both, so
-		// the casters are partitioned within each run and the mirror half is
-		// reached separately. It is zero in every scene with no mirror in it.
+		// **A total now, and no longer a range.** It was "the casters, contiguous
+		// from `Reflected`" while every mirror shared one texture; grouping the
+		// mirror run by surface index took that contiguity away, because one run
+		// cannot be both grouped by index and split by caster. The per-index
+		// ranges are in `Runs` and the shadow pass walks them. This survives as
+		// the count, which is what a statistic and a test want.
 		uint32_t SurfaceCasters = 0;
+
+		// Where each surface's instances are, indexed by surface number.
+		//
+		// **Indexed rather than packed, so a lookup is not a search.** Both
+		// passes that draw mirrors already know which index they are drawing —
+		// the surface pass because it is excluding its own, the screen pass
+		// because it walks the views it was given — and a packed list would make
+		// every one of those a linear scan for a number that is already an
+		// array subscript.
+		SurfaceRun Runs[MAX_SURFACES];
 	};
+
+	// Folds one more value into a signature.
+	//
+	// **Exported so there is one mixing function rather than two.** The renderer
+	// has to add its own terms — a surface camera's projection matrix and the
+	// opacity it composites with, neither of which is a `shared` idea — and a
+	// second mixer written beside this one would make the combined number depend
+	// on which file computed which half.
+	//
+	// @param hash The signature so far. Any value; there is no reserved one.
+	// @param word What to fold in.
+	// @return The new signature.
+	// @since v0.8
+	uint64_t MixSignature(uint64_t hash, uint64_t word);
+
+	// What a draw list looks like, as one number.
+	//
+	// **The question this answers is "would drawing this again produce the same
+	// image", and it is asked because nothing cheaper can be.** A draw list is
+	// written through `ecs::Store::EachBatchParallel`, which sets no dirty bit by
+	// design, so there is no record of what moved — the same hole
+	// `replication::ChangeDetection::Signature` exists to close for components,
+	// and this is that idea applied to a render target.
+	//
+	// `render::Renderer` uses it to skip a surface pass that would redraw the
+	// texture its slot already holds: a room of mirrors costs a pass per mirror
+	// on the frames something moves and none on the frames nothing does.
+	//
+	// **Field by field, never over the object's bytes**, and this is the one
+	// choice here worth defending because today it buys nothing. `DrawInstance`
+	// is packed as it stands — `core::Name` is a four-byte id, `Color3` ends
+	// four-aligned, nothing pads — so a byte-wise hash would agree with this one
+	// on every list anybody can currently build.
+	//
+	// It is a property of the current field order and not a guarantee. One
+	// `double`, one pointer, or one reordering opens an interior hole, and a
+	// byte hash would then be folding in whatever the draw list's allocation
+	// last held. The consequence is not a crash: the signature simply never
+	// matches, every surface renders every frame, and the skip quietly stops
+	// working with nothing to notice. `Reserved` is the same argument already
+	// made — it exists so the object representation is deterministic across a
+	// process boundary, and it says nothing about what is drawn, so a signature
+	// that depended on it would be depending on padding by name.
+	//
+	// **What an instance shows is deliberately not in it.** A pane's index,
+	// placement, size and tint all change what another mirror sees of it and are
+	// all here. Its rendered *image* also changes what another mirror sees of it,
+	// and including that would make every surface dirty every other one every
+	// frame — A's image moves, so B must redraw, which moves B's image, so A must
+	// redraw — a cycle that never settles and skips nothing. The cost of leaving
+	// it out is that in a scene where the only thing moving is a reflection, the
+	// recursion freezes rather than propagating another bounce. Anything moving
+	// in the world thaws it on the next frame.
+	//
+	// @param instances The draw list.
+	// @return A signature. Equal signatures mean equal lists; unequal ones
+	//         mean the lists differ, or collided, and a collision costs a
+	//         skipped redraw rather than a wrong one.
+	// @since v0.8
+	uint64_t SignatureOf(std::span<const DrawInstance> instances);
 
 	// Divides one view's draw list into the runs its passes submit.
 	//

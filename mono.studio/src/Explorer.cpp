@@ -254,8 +254,12 @@ namespace studio {
 		const ClassId klass = store.ClassOf(instance);
 		const char *className = klass.IsValid() ? Label(Classes::Describe(klass).Name) : "Entity";
 
-		bool hasChildren = false;
-		store.EachChild(instance, [&](engine::ecs::Entity) { hasChildren = true; });
+		// **O(1), and it used to be a full walk of the sibling list.** This asks
+		// whether to draw an expander, and answering it with `EachChild` cost two
+		// hundred steps on the root of a two-hundred-part scene — every frame,
+		// for a bool the first child settles. `bench_studio` measured the probe
+		// alone at 2.40 us on that shape.
+		const bool hasChildren = store.HasChildren(instance);
 
 		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
 								   ImGuiTreeNodeFlags_OpenOnDoubleClick;
@@ -288,6 +292,38 @@ namespace studio {
 		// a `Text` with no id. That is an assertion rather than a subtle bug,
 		// which is the good version of this mistake, and it cost one run to
 		// find.
+
+		// **Everything below this point is skipped for a row nobody can see**,
+		// and on a long tree that is most of them. imgui already declines to
+		// *render* a clipped item, but every question asked about it and every
+		// scope opened around it still costs — the two drag-and-drop scopes, the
+		// context popup, and the dimmed class name with its own font push, which
+		// is glyph layout for text that is off screen.
+		//
+		// None of it can do anything for an invisible row: an item outside the
+		// clip rect cannot be hovered, clicked or dragged, so every one of these
+		// answers false anyway. The row still submits its node, so the scrollbar
+		// and the layout are unchanged — what goes is only the work whose result
+		// was already known.
+		if (!ImGui::IsItemVisible()) {
+			if (open && hasChildren) {
+				const size_t first = ChildScratch.size();
+				store.EachChild(instance, [&](engine::ecs::Entity child) {
+					ChildScratch.push_back(child);
+				});
+				const size_t last = ChildScratch.size();
+
+				for (size_t index = first; index < last; index++) {
+					DrawTreeNode(store, world, ChildScratch[index]);
+				}
+
+				ChildScratch.resize(first);
+				ImGui::TreePop();
+			}
+
+			ImGui::PopID();
+			return;
+		}
 
 		const bool toggled = ImGui::IsItemToggledOpen();
 		const bool hovered = ImGui::IsItemHovered();
@@ -373,12 +409,29 @@ namespace studio {
 			// reparent, and reading the sibling list while something is about
 			// to change it is the iteration hazard `EachChild` warns about from
 			// the other side.
-			std::vector<engine::ecs::Entity> children;
-			store.EachChild(instance, [&](engine::ecs::Entity child) { children.push_back(child); });
+			//
+			// **One buffer for the whole recursion rather than a vector per
+			// node.** This was a `std::vector` constructed inside the body, so
+			// an open tree of two hundred rows was two hundred heap allocations
+			// and frees per frame, in a panel that rebuilds every frame because
+			// imgui is immediate mode.
+			//
+			// The recursion shares it by range: each level appends its children,
+			// remembers where its own run starts and ends, and truncates back to
+			// that mark on the way out. Indices rather than iterators, because a
+			// deeper level appending can reallocate — which is exactly the bug
+			// this shape would have if it held references.
+			const size_t first = ChildScratch.size();
+			store.EachChild(instance, [&](engine::ecs::Entity child) {
+				ChildScratch.push_back(child);
+			});
+			const size_t last = ChildScratch.size();
 
-			for (const engine::ecs::Entity child : children) {
-				DrawTreeNode(store, world, child);
+			for (size_t index = first; index < last; index++) {
+				DrawTreeNode(store, world, ChildScratch[index]);
 			}
+
+			ChildScratch.resize(first);
 			ImGui::TreePop();
 		}
 

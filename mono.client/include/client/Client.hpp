@@ -333,8 +333,12 @@ namespace client {
 		// index range exists.
 		// The surface camera this frame renders an offscreen view from, and
 		// whether the world had one. See `FindSurfaceCamera`.
-		engine::render::SurfaceView Surface;
-		bool HaveSurface = false;
+		// **Every surface camera the drawn world holds, rebuilt each frame.**
+		// A vector rather than one view and a flag: the pipeline renders a
+		// surface per index since v0.8, and rebuilding is also how a mirror that
+		// was deleted stops being drawn — a list assembled from what is in the
+		// world cannot outlive what is in the world.
+		std::vector<engine::render::SurfaceView> Surfaces;
 
 		engine::core::CFrame ComposedFrame;
 		engine::scene::Camera ComposedCamera;

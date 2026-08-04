@@ -573,6 +573,10 @@ namespace engine::ecs {
 		engine::ecs::EachChild(*State, instance, body);
 	}
 
+	bool Store::HasChildren(Entity instance) const {
+		return engine::ecs::HasChildren(*State, instance);
+	}
+
 	Entity Store::FindFirstChild(Entity instance, std::string_view name) const {
 		return engine::ecs::FindFirstChild(*State, instance, name);
 	}

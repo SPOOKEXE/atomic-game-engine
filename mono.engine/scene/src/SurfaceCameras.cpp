@@ -1,4 +1,5 @@
 #include <engine/core/Profiling.hpp>
+#include <engine/core/types/Color3.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -63,6 +64,122 @@ namespace engine::scene {
 			static thread_local std::vector<Aim> pending;
 			return pending;
 		}
+
+		// How thick the face marker is, in studs, on the two axes it is not
+		// spanning. Absolute rather than a fraction of the pane: a marker scaled
+		// to its part is invisible on a small one and a plank on a large one,
+		// and what it has to be is legible at whatever size the pane happens to
+		// be.
+		constexpr float MARKER_THICKNESS = 0.03f;
+
+		// How much of the face's longer in-plane half-axis the bar covers.
+		// **A third rather than all of it**, because a bar spanning the whole
+		// face reads as a frame around the mirror — which is the one thing in
+		// `Mirrors-1-world.luau` it must not be mistaken for.
+		constexpr float MARKER_SPAN = 0.35f;
+
+		// The marker's own half-extent, in the part's local axes.
+		//
+		// **Along the longer of the two axes that lie in the face.** A 16x9 pane
+		// has a long axis and a short one, and a bar across the short one is a
+		// dash somebody has to look for; across the long one it is a line. Which
+		// two axes those are follows from the face's own — the normal is
+		// axis-aligned and unit, so the component above a half picks it and the
+		// other two are what is left.
+		Vector3 MarkerExtent(const Vector3 &local, const Vector3 &half) {
+			constexpr float THIN = MARKER_THICKNESS;
+
+			if (std::abs(local.X) > 0.5f) {
+				const bool tall = half.Y >= half.Z;
+				return Vector3{THIN, tall ? half.Y * MARKER_SPAN : THIN, tall ? THIN : half.Z * MARKER_SPAN};
+			}
+			if (std::abs(local.Y) > 0.5f) {
+				const bool wide = half.X >= half.Z;
+				return Vector3{wide ? half.X * MARKER_SPAN : THIN, THIN, wide ? THIN : half.Z * MARKER_SPAN};
+			}
+			const bool wide = half.X >= half.Y;
+			return Vector3{wide ? half.X * MARKER_SPAN : THIN, wide ? THIN : half.Y * MARKER_SPAN, THIN};
+		}
+
+		// The face a surface camera projects off, in the world.
+		//
+		// **One derivation, because there are two readers of it.** The aim pass
+		// needs the plane to mirror the eye through and the marker pass needs
+		// the same plane to lay a bar on; two walks that each worked out where
+		// a face is would be `ReachOf`'s complaint one level up — a marker
+		// drawn on a face the camera was not actually projecting off is a
+		// debugging aid that lies, which is worse than none.
+		struct Face {
+			// The part the face belongs to, which is what gets told which
+			// surface it shows.
+			Entity Part;
+
+			// The part's own placement, for the marker's rotation.
+			CFrame Placement;
+
+			// The face's outward normal, rotated into the world. Unit.
+			Vector3 Normal;
+
+			// The middle of the face, in the world.
+			Vector3 Centre;
+
+			// The part's half-extent, in its own axes.
+			Vector3 HalfExtent;
+		};
+
+		// Finds it, or says there is not one.
+		//
+		// @param store  The world.
+		// @param camera The surface camera.
+		// @param face   Which side of the parent it projects off.
+		// @param out    Filled when this returns true; untouched otherwise.
+		// @return Whether the camera is parented to something with a face.
+		bool FaceOf(Store &store, Entity camera, NormalId face, Face &out) {
+			const Entity parent = store.ParentOf(camera);
+			if (parent == NULL_ENTITY) {
+				// Parented to the world rather than to a part. Left exactly
+				// where it was put, which is the script-authored arrangement
+				// and still a legal way to build a mirror.
+				return false;
+			}
+
+			const Transform *placement = store.Get<Transform>(parent);
+			const Bounds *bounds = store.Get<Bounds>(parent);
+			if (placement == nullptr || bounds == nullptr) {
+				// A parent that is not a part in space — a `Model`, a
+				// service, a folder. There is no face to project off, so
+				// this is not an error either.
+				return false;
+			}
+
+			// The face, rotated into the world, so a rotated pane reflects
+			// along the direction it actually faces.
+			//
+			// **`VectorToWorldSpace`, not a `CFrame` composition.** This
+			// was `(frame * CFrame(local)).Position - frame.Position`, which
+			// runs a whole quaternion multiply and a discarded normalise to
+			// reach what one rotate gives — and loses precision for a pane
+			// far from the origin, by adding the position and subtracting it
+			// again. `RightVector`/`UpVector`/`LookVector` in the same header
+			// are this call.
+			//
+			// The result is already unit: `NormalOf` returns unit vectors and
+			// a `CFrame`'s quaternion is kept normalised on construction. The
+			// `sqrt`, the zero-length guard and the reciprocal multiply that
+			// used to follow could never change the answer.
+			const CFrame &frame = placement->Frame;
+			const Vector3 unit = frame.VectorToWorldSpace(NormalOf(face));
+
+			out.Part = parent;
+			out.Placement = frame;
+			out.Normal = unit;
+
+			// The middle of the face: the part's centre pushed out to the
+			// surface along that normal.
+			out.Centre = frame.Position + unit * ReachOf(*bounds, face);
+			out.HalfExtent = bounds->HalfExtent;
+			return true;
+		}
 	}
 
 	size_t AimSurfaceCameras(Store &store) {
@@ -87,44 +204,13 @@ namespace engine::scene {
 
 		store.Each<const SurfaceCamera, const Camera, const Transform>(
 			[&](Entity entity, const SurfaceCamera &target, const Camera &, const Transform &) {
-				const Entity parent = store.ParentOf(entity);
-				if (parent == NULL_ENTITY) {
-					// Parented to the world rather than to a part. Left exactly
-					// where it was put, which is the script-authored arrangement
-					// and still a legal way to build a mirror.
+				Face face;
+				if (!FaceOf(store, entity, target.Face, face)) {
 					return;
 				}
 
-				const Transform *placement = store.Get<Transform>(parent);
-				const Bounds *bounds = store.Get<Bounds>(parent);
-				if (placement == nullptr || bounds == nullptr) {
-					// A parent that is not a part in space — a `Model`, a
-					// service, a folder. There is no face to project off, so
-					// this is not an error either.
-					return;
-				}
-
-				// The face, rotated into the world, so a rotated pane reflects
-				// along the direction it actually faces.
-				//
-				// **`VectorToWorldSpace`, not a `CFrame` composition.** This
-				// was `(frame * CFrame(local)).Position - frame.Position`, which
-				// runs a whole quaternion multiply and a discarded normalise to
-				// reach what one rotate gives — and loses precision for a pane
-				// far from the origin, by adding the position and subtracting it
-				// again. `RightVector`/`UpVector`/`LookVector` in the same header
-				// are this call.
-				//
-				// The result is already unit: `NormalOf` returns unit vectors and
-				// a `CFrame`'s quaternion is kept normalised on construction. The
-				// `sqrt`, the zero-length guard and the reciprocal multiply that
-				// used to follow could never change the answer.
-				const CFrame &frame = placement->Frame;
-				const Vector3 unit = frame.VectorToWorldSpace(NormalOf(target.Face));
-
-				// The middle of the face: the part's centre pushed out to the
-				// surface along that normal.
-				const Vector3 centre = frame.Position + unit * ReachOf(*bounds, target.Face);
+				const Vector3 unit = face.Normal;
+				const Vector3 centre = face.Centre;
 
 				// **Mirrored through the plane.** The same distance behind the
 				// face as the eye is in front, on the other side — which is the
@@ -140,7 +226,7 @@ namespace engine::scene {
 				// colour.
 				Aim aim;
 				aim.Camera = entity;
-				aim.Part = parent;
+				aim.Part = face.Part;
 				aim.Frame = CFrame::LookAt(reflected, centre);
 				aim.Surface = target.Surface;
 
@@ -196,5 +282,60 @@ namespace engine::scene {
 		}
 
 		return pending.size();
+	}
+
+	size_t AppendSurfaceFaceMarkers(Store &store, std::vector<DrawInstance> &out) {
+		ENGINE_PROFILE("mark surface faces");
+
+		size_t appended = 0;
+
+		store.Each<const SurfaceCamera, const Camera, const Transform>(
+			[&](Entity entity, const SurfaceCamera &target, const Camera &, const Transform &) {
+				Face face;
+				if (!FaceOf(store, entity, target.Face, face)) {
+					return;
+				}
+
+				DrawInstance marker;
+
+				// **The part's rotation with the face's position**, so the bar
+				// lies in the plane of the face rather than axis-aligned beside
+				// it. `MarkerExtent` is written in the part's own axes for the
+				// same reason: a half-extent means nothing without the frame it
+				// is measured in, and taking both from the part is what keeps a
+				// tilted pane's marker tilted with it.
+				//
+				// Pushed a thickness clear of the glass, because a marker
+				// exactly on the surface z-fights it — the same margin, for the
+				// same reason, as the near plane above.
+				marker.Frame =
+					CFrame(face.Centre + face.Normal * MARKER_THICKNESS, face.Placement.Rotation());
+				marker.HalfExtent = MarkerExtent(NormalOf(target.Face), face.HalfExtent);
+
+				// Cyan, which is the one hue `Mirrors-1-world.luau` has nothing
+				// else in: the pane is white, the frame is brown, the floor is
+				// grey and the casters are a scatter that avoids the corner of
+				// the cube this sits in. A marker the colour of something else
+				// in the scene is a marker somebody has to hunt for.
+				marker.Tint = core::Color3{0.1f, 0.9f, 1.0f};
+
+				// Half-transparent, and both halves of that matter. It has to be
+				// see-through so it does not hide the reflection it is pointing
+				// at, and it has to be *blended* so the surface pass — which
+				// draws only the opaque head — never puts it inside a mirror.
+				marker.Transparency = 0.5f;
+
+				// Not a mirror itself, and it does not occlude the sun. A
+				// debugging aid that cast a shadow would put a bar on the floor
+				// of the scene it is describing.
+				marker.Surface = -1;
+				marker.CastShadow = false;
+
+				out.push_back(marker);
+				appended++;
+			}
+		);
+
+		return appended;
 	}
 }

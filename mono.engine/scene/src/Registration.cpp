@@ -1,5 +1,6 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -138,6 +139,31 @@ namespace engine::scene {
 		// `PreviousTransform` deliberately has none. It is a render-side
 		// history nothing replicates, and giving it one would be declaring a
 		// wire form for something that never reaches a wire.
+		// **The tree, and it is registered here for want of an earlier place
+		// that every host already calls.** `ecs::Hierarchy` is the ECS's own
+		// type and had only the automatic name `Components::Of<T>` mints from
+		// the compiler's spelling — which is unusable on a wire, because the two
+		// processes have to agree on it and nothing makes them.
+		//
+		// It has to happen before anything creates an instance:
+		// `Components::Of<T>` caches its answer per type per process, and
+		// `Adopt` aborts on an explicit registration that arrives after an
+		// automatic one under a different name. This function is the earliest
+		// call every program makes, which is why it is here rather than beside
+		// the type.
+		//
+		// **The default POD wire form, and that is safe because a `Hierarchy` is
+		// five entity handles and nothing else.** A replica adopts the
+		// authority's indices — `Store::SetAdoptOnly` exists to guarantee it —
+		// so the handles mean the same thing on both ends without remapping.
+		//
+		// A child whose parent has not arrived yet holds a handle to a row that
+		// does not exist. `Instances.cpp` resolves every link through
+		// `MutableNodeOf`, which returns null for a missing row, so the walk
+		// stops early and resumes when the next delta fills the gap. Transient,
+		// and stated because the alternative reading is a corrupted tree.
+		ecs::Components::Register<ecs::Hierarchy>("ecs.Hierarchy");
+
 		ecs::Components::Register<Transform>("scene.Transform", TransformWire());
 		ecs::Components::Register<PreviousTransform>("scene.PreviousTransform");
 		ecs::Components::Register<Bounds>("scene.Bounds");

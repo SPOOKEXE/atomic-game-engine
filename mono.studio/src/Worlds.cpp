@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
@@ -87,6 +88,12 @@ namespace studio {
 		ImGui::TableSetupColumn("objects", ImGuiTableColumnFlags_WidthStretch, 0.20f);
 		ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 0.16f);
 		ImGui::TableHeadersRow();
+
+		// **Inside `Begin`, so the rows are separable from the window.** The
+		// panel measured 24 us in a real frame while the same widgets in a
+		// benchmark measured 4 — and the question that gap asks is whether the
+		// cost is what the panel draws or what it costs to *be* the panel.
+		ENGINE_PROFILE("world rows");
 
 		for (const WorldId world : Universe->Worlds()) {
 			const Name name = Universe->NameOf(world);
@@ -503,6 +510,12 @@ namespace studio {
 				return entry.Count;
 			}
 		}
+
+		// **A span, because a periodic full scan is exactly the kind of cost
+		// that hides in a mean.** It runs twice a second rather than every
+		// frame, so it shows up as a spike in a panel that is otherwise flat —
+		// which is unreadable without a name on it.
+		ENGINE_PROFILE("count instances");
 
 		size_t counted = 0;
 		Universe->Enter(world, [&counted](Store &store) {

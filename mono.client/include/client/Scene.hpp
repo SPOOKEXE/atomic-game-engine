@@ -64,19 +64,32 @@ namespace client {
 		std::vector<engine::scene::DrawInstance> Instances;
 	};
 
-	// The world's first surface camera, if it has one.
+	// Every surface camera in the world, as views the renderer takes.
 	//
-	// **First rather than all**, and this pipeline renders one offscreen view.
-	// A world with two surface cameras gets the first by entity id — which is
-	// creation order — and the second is ignored. Said here rather than left to
-	// be discovered: the render-node system that replaces this pipeline is where
-	// several belong, and a silent pick would make its absence look like a bug
-	// in the mirror rather than a limit of the pipeline.
+	// **All of them since v0.8, and it used to be the first by entity id.** The
+	// pipeline rendered one offscreen view, so a world with four mirrored walls
+	// got one working mirror and three panes projecting that one camera's image
+	// across themselves — which looked like a bug in the mirror rather than the
+	// limit of the pipeline it was. `render::SurfaceView::Index` and
+	// `scene::MAX_SURFACES` are what replaced it.
 	//
-	// @param store   The world to search.
-	// @param surface Filled in when one is found.
-	// @return `false` when the world has no surface camera.
-	bool FindSurfaceCamera(engine::ecs::Store &store, engine::render::SurfaceView &surface);
+	// **Ordered by entity id, which is creation order**, so a world loaded the
+	// same way twice produces the same list. An archetype walk would return
+	// whichever row happened to be first, and that moves when anything changes a
+	// component set.
+	//
+	// **Reads what a camera *is*, never where it should be.** Aiming is
+	// `scene::AimSurfaceCameras` in `PreRender`, and this runs after it — so a
+	// view carries the frame that system computed. Two things deriving a
+	// reflection would be two answers to one question, and the one on screen
+	// would be whichever ran last.
+	//
+	// @param store The world to search.
+	// @param views Cleared and filled. Kept capacity, so a steady scene stops
+	//              allocating after the first frame.
+	// @return How many views were written. Zero is the ordinary case in a scene
+	//         with no mirror in it, and is not a failure.
+	size_t CollectSurfaceViews(engine::ecs::Store &store, std::vector<engine::render::SurfaceView> &views);
 
 	// Builds the scene by running a Luau file instead of a C++ loop.
 	//

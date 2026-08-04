@@ -1,10 +1,13 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
+#include <cstring>
 #include <optional>
 
 namespace client {
@@ -36,6 +39,13 @@ namespace client {
 		// `DrawInstance` and nowhere else — a render-rate quantity that reached
 		// `Transform` would make the world this process replicates depend on the
 		// frame rate of whoever was watching it.
+		// Places every surface camera the wire brought, from this client's eye.
+		// See `AimReplicaViewer` for why the aim is derived here and not
+		// received.
+		void AimReplicatedSurfaces(Store &store) {
+			(void)engine::scene::AimSurfaceCameras(store);
+		}
+
 		void CollectReplicated(Store &store) {
 			auto *drawList = store.ResourceMutable<DrawList>();
 			auto *buffer = store.ResourceMutable<SnapshotBuffer>();
@@ -159,7 +169,62 @@ namespace client {
 
 		// `PreRender` only. Everything in this world arrived; the one thing this
 		// process is allowed to derive from it is what to draw.
+		//
+		// **And the mirrors, which are derived and not received.** A reflection
+		// depends on where the viewer stands, so the authority's answer is the
+		// authority's — a client applying it would see the room reflected for
+		// somebody else's eye, which slides across the glass as *this* client
+		// moves and reads as a broken mirror rather than as the wrong camera.
+		//
+		// What arrives is the mirror itself: `scene.SurfaceCamera`, `scene.Camera`
+		// and `ecs.Hierarchy`, which together say "this camera projects off that
+		// pane's face". `AimSurfaceCameras` turns that into a placement here,
+		// against `AimReplicaViewer`'s camera. It writes `Transform` onto rows the
+		// authority owns and the next delta may overwrite them — which is
+		// harmless and deliberate, because this runs in `PreRender` after the
+		// delta was applied and before anything reads the result.
+		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimReplicatedSurfaces);
 		scheduler.Add("collect-replicated", Phase::PreRender, CollectReplicated);
+	}
+
+	Entity AimReplicaViewer(Store &store, const CFrame &frame, const engine::scene::Camera &lens) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		Entity camera = active != nullptr ? active->Entity : engine::ecs::NULL_ENTITY;
+
+		if (camera == engine::ecs::NULL_ENTITY || !store.Alive(camera)) {
+			// **Predicted, not authoritative.** The high range is the client's
+			// own and the authority never allocates from it, so this camera
+			// cannot become the same entity as something the server made.
+			camera = store.CreatePredicted("ReplicaViewer");
+			if (camera == engine::ecs::NULL_ENTITY) {
+				return camera;
+			}
+
+			store.Set(camera, engine::scene::Transform{frame});
+			store.Set(camera, lens);
+
+			engine::scene::ActiveCamera live;
+			live.Entity = camera;
+			store.SetResource(live);
+			return camera;
+		}
+
+		// Guarded on the value differing, for `AimSurfaceCameras`' reason: a
+		// `Set` marks the row dirty, and a viewer that has not moved is not a
+		// write. A replica observes nothing today and that is not a reason to
+		// emit changes it would have to.
+		if (const auto *placement = store.Get<engine::scene::Transform>(camera);
+			placement == nullptr || std::memcmp(&placement->Frame, &frame, sizeof(CFrame)) != 0) {
+			store.Set(camera, engine::scene::Transform{frame});
+		}
+
+		if (const auto *current = store.Get<engine::scene::Camera>(camera);
+			current == nullptr || current->FieldOfViewRadians != lens.FieldOfViewRadians ||
+			current->NearPlane != lens.NearPlane || current->FarPlane != lens.FarPlane) {
+			store.Set(camera, lens);
+		}
+
+		return camera;
 	}
 
 	void RecordReplicatedTick(Store &store, uint64_t tick) {

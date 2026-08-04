@@ -538,6 +538,56 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Which surface index a camera renders into.
+		//
+		// **The camera's, and distinct from `BasePart::Surface` above even
+		// though they hold the same number.** One says "this pane samples that
+		// texture" and the other says "this camera writes it"; they agree
+		// because `AimSurfaceCameras` copies the camera's onto the pane it is
+		// parented to, and that copy is the whole reason a mirror is a camera
+		// parented to a part and nothing else.
+		//
+		// Authored rather than handed out by the engine, because the number is
+		// what pairs the two across a wire that carries no tree — and a derived
+		// one would move whenever creation order did.
+		PropertyDescriptor SurfaceIndexProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Surface");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceCamera *target = store.Get<SurfaceCamera>(instance);
+				if (target == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = target->Surface;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const auto index = *static_cast<const int32_t *>(value);
+
+				SurfaceCamera *target = store.GetMutable<SurfaceCamera>(instance);
+				if (target == nullptr) {
+					return false;
+				}
+
+				// **Clamped into the renderer's range rather than refused**, for
+				// `BasePart::Surface`'s reason: a script computing an index that
+				// came out wrong should get a mirror that visibly renders
+				// nothing, not a scene that stopped building half way through.
+				// The renderer says so in the log when it drops the view.
+				target->Surface = index >= 0 && index < 127 ? static_cast<int8_t>(index) : int8_t{0};
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor SurfaceSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("SurfaceSize");
@@ -806,12 +856,13 @@ namespace engine::scene {
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
 
-			// The surface camera's two. `SurfaceSize` above is inherited, so a
+			// The surface camera's three. `SurfaceSize` above is inherited, so a
 			// `SurfaceCamera` can still be resized like any other.
 			ecs::Classes::ClampedProperty<&SurfaceCamera::ImageTransparency, 0.0f, 1.0f>(
 				surfaceCameraClass, "ImageTransparency"
 			);
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
+			ecs::Classes::Computed(surfaceCameraClass, SurfaceIndexProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.

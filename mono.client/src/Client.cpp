@@ -522,6 +522,13 @@ namespace client {
 			// is composited but not presented would publish the frame it built
 			// last time it was, which is a world that appears frozen for a
 			// reason nothing reports.
+			// **Cleared once, before any world is asked.** `CollectSurfaceViews`
+			// clears as well, but only the drawn world reaches it — a world that
+			// returns early for want of a camera would otherwise leave the
+			// previous frame's mirrors in the list, and the surface pass would
+			// go on rendering a camera that is no longer in the scene.
+			Surfaces.clear();
+
 			for (const engine::world::WorldId id : Simulated) {
 				Universe_->Present(id, delta, Universe_->AlphaOf(id));
 
@@ -551,12 +558,12 @@ namespace client {
 						ComposedFrame = placement->Frame;
 						ComposedCamera = *lens;
 
-						// **The surface camera, read from the world that owns
-						// it.** One per frame: the pipeline renders one offscreen
-						// view, and a world with two surface cameras uses the
-						// first — which `FindSurfaceCamera` says plainly rather
-						// than picking one silently.
-						HaveSurface = FindSurfaceCamera(store, Surface);
+						// **The surface cameras, read from the world that owns
+						// them.** All of them: the pipeline renders one offscreen
+						// view per surface index since v0.8, so a room of
+						// mirrored walls gets a working mirror per wall rather
+						// than one wall's image projected across all four.
+						(void)CollectSurfaceViews(store, Surfaces);
 					}
 
 					Views.Publish(
@@ -573,11 +580,20 @@ namespace client {
 			// replica has none: a camera is an entity, and an authoritative
 			// entity minted in a replica collides exactly with one the server
 			// minted, which is what `Store::SetAdoptOnly` refuses. A local row
-			// in a replicated world is safe now — `Store::CreatePredicted`
-			// mints from a range the server never allocates from — but who owns
-			// the replicated view's camera is a decision for whoever gives that
-			// world a camera, and nothing does yet.
+			// in a replicated world is safe — `Store::CreatePredicted` mints
+			// from a range the server never allocates from — and since v0.8
+			// something does own it: `AimReplicaViewer` puts a predicted camera
+			// in the replica and names it `ActiveCamera`.
+			//
+			// **Before `Present`, because `PreRender` is where the mirrors are
+			// aimed.** `aim-surface-cameras` reads `ActiveCamera` and reflects
+			// through it, so setting the eye afterwards would aim every mirror
+			// at where the client stood last frame.
 			if (ReportedJoin) {
+				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
+					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
+				});
+
 				Universe_->Present(Replicated, delta, Universe_->AlphaOf(Replicated));
 
 				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
@@ -740,9 +756,8 @@ namespace client {
 		// view the option does not know about. Two views drawn on top of each
 		// other is two scenes inside one, which reads as a rendering fault.
 		Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
-		LastFrame = Renderer.Render(
-			Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, HaveSurface ? &Surface : nullptr
-		);
+		LastFrame =
+			Renderer.Render(Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, Surfaces);
 
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();
@@ -774,12 +789,14 @@ namespace client {
 				// draw calls are the cheapest honest evidence that the passes
 				// are being submitted at all.
 				ENGINE_INFO(
-					"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced",
+					"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced, "
+					"{} surface pass(es)",
 					Clock.Now(),
 					FramesDrawn,
 					LastFrame.DrawCalls,
 					LastFrame.Culled,
-					LastFrame.SurfaceInstances
+					LastFrame.SurfaceInstances,
+					LastFrame.SurfacePasses
 				);
 				break;
 			}

@@ -277,6 +277,18 @@ namespace client {
 					"render.instances", static_cast<double>(drawList->Instances.size())
 				);
 			}
+
+			// **After the metric, deliberately.** `render.instances` answers
+			// "how much scene is there", and a number that moved when somebody
+			// turned a debugging aid on would stop being comparable across the
+			// runs it exists to compare.
+			//
+			// The markers are appended rather than written by the loop above
+			// because they are not entities: nothing in the world matches the
+			// query, so there is no row to size the list against. `push_back`
+			// past the shrink costs one reallocation on the frame a mirror is
+			// created and nothing after it — the capacity stays.
+			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 		}
 	}
 
@@ -311,30 +323,37 @@ namespace client {
 
 	}
 
-	bool FindSurfaceCamera(Store &store, engine::render::SurfaceView &surface) {
-		bool found = false;
-		Entity chosen = engine::ecs::NULL_ENTITY;
+	namespace {
+		// A surface camera's view beside the entity id it came from, which is
+		// the only thing the sort below needs and the one thing a `SurfaceView`
+		// must not grow a field for.
+		using OrderedView = std::pair<uint32_t, engine::render::SurfaceView>;
 
-		// By entity id, which is creation order, so a world loaded the same way
-		// twice picks the same camera. An archetype walk would pick whichever
-		// row happened to be first, and that moves when anything changes a
-		// component set.
+		// Scratch, kept between frames so a steady scene stops allocating. The
+		// same argument `scene::SurfaceCameras.cpp` makes for its own.
+		std::vector<OrderedView> &Ordered() {
+			static thread_local std::vector<OrderedView> ordered;
+			return ordered;
+		}
+	}
+
+	size_t CollectSurfaceViews(Store &store, std::vector<engine::render::SurfaceView> &views) {
+		views.clear();
+		Ordered().clear();
+
 		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
-			[&](Entity entity,
+			[&views](
+				Entity entity,
 				const engine::scene::SurfaceCamera &target,
 				const engine::scene::Camera &lens,
-				const Transform &placement) {
-				if (found && entity.Id >= chosen.Id) {
-					return;
-				}
-
-				chosen = entity;
-				found = true;
-
-				surface.Frame = placement.Frame;
-				surface.Lens = lens;
-				surface.Width = target.Width;
-				surface.Height = target.Height;
+				const Transform &placement
+			) {
+				engine::render::SurfaceView view;
+				view.Index = target.Surface;
+				view.Frame = placement.Frame;
+				view.Lens = lens;
+				view.Width = target.Width;
+				view.Height = target.Height;
 
 				// **Opacity here, transparency in the component**, and the flip
 				// happens once. `scene::SurfaceCamera::ImageTransparency` is
@@ -347,10 +366,32 @@ namespace client {
 				// `SurfaceView` is a public struct any host fills — a third copy
 				// in between makes none of the three read as the authority, and
 				// a future widening of the range has to find all of them.
-				surface.ImageOpacity = 1.0f - target.ImageTransparency;
+				view.ImageOpacity = 1.0f - target.ImageTransparency;
+
+				// **Kept beside its entity id, because `SurfaceView` does not
+				// carry one and should not.** It is what the renderer takes, and
+				// an entity handle in it would be a world's identifier in a type
+				// the device layer reads.
+				//
+				// The order matters: two cameras claiming one index is a scene
+				// mistake the renderer refuses by keeping the *first*, and
+				// without a stable order there is no first. `Each` walks
+				// archetypes in an order that moves whenever anything changes a
+				// component set.
+				Ordered().push_back({entity.Id, view});
 			}
 		);
-		return found;
+
+		std::sort(Ordered().begin(), Ordered().end(), [](const OrderedView &left, const OrderedView &right) {
+			return left.first < right.first;
+		});
+
+		views.reserve(Ordered().size());
+		for (const OrderedView &ordered : Ordered()) {
+			views.push_back(ordered.second);
+		}
+
+		return views.size();
 	}
 
 	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
@@ -465,6 +506,25 @@ namespace client {
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
+
+		// **And the mirrors, which only `BuildScriptedWorld` was installing.**
+		// That is why a mirror worked under `--scene` and was a plain white
+		// rectangle everywhere else: the studio, `--game` and an imported world
+		// all come through here, and none of them was aiming anything.
+		//
+		// The visible half of that failure is not the camera at all — it is
+		// step 4 of `scene/SurfaceCameras.hpp`. Aiming a camera is also what
+		// writes `Visual::Surface` on the pane it is parented to, so without
+		// this system the pane keeps the component's default of -1, samples no
+		// texture, and draws as its own flat `Tint`. `Mirrors-1-world.luau`
+		// tints its pane white, so the symptom was a white part beside a frame
+		// that was rendering perfectly — which reads as a broken surface pass
+		// rather than as a missing system.
+		//
+		// **Between the two, not beside them.** `sync-rendered` decides what is
+		// drawn at all and `collect-instances` reads the `Visual` this writes,
+		// so a mirror aimed after collection would publish last frame's answer.
+		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 	}
 }

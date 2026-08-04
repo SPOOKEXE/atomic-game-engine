@@ -20,6 +20,7 @@
 #include <spdlog/sinks/base_sink.h>
 
 #include <algorithm>
+#include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <imgui.h>
 #include <mutex>
@@ -491,9 +492,22 @@ namespace studio {
 		// what the world is projected for — and a frame that drew the world
 		// against last frame's rectangle would stretch for one frame after
 		// every splitter drag.
-		Interface.Begin(frameSeconds);
-		DrawInterface();
-		Interface.End();
+		//
+		// **Profiled, and it was not.** Building the panels is most of an
+		// editor's frame — every window, every table, every widget's layout —
+		// and it had no span at all, so it appeared in the frame graph as a wide
+		// blank between the simulation and `Renderer::Render`. The panel was
+		// telling the truth twice over and neither reading was legible: the gap
+		// *was* the interface, and `unmarked` was already counting it. A hole in
+		// a flame graph reads as a broken widget, which is exactly how it was
+		// reported.
+		{
+			ENGINE_PROFILE_CAT("build interface", engine::core::ProfileCategory::Render);
+
+			Interface.Begin(frameSeconds);
+			DrawInterface();
+			Interface.End();
+		}
 
 		PresentWorld(frameSeconds);
 	}
@@ -695,49 +709,11 @@ namespace studio {
 
 		const WorldId shown = drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active;
 
-		// PreRender runs whether or not the simulation did: it is the phase
-		// that turns state into something to draw, and an edited world's state
-		// changes without a tick.
-		if (shown.IsValid()) {
-			// **The render gate rides along with it**, because
-			// `client::InstallPresentation` registers `sync-rendered` in this
-			// same phase. That is what makes an edited world work at all: it
-			// never ticks, so a gate maintained by the simulation would leave a
-			// part dragged into `Workspace` invisible until somebody pressed
-			// play. See `scene/Visibility.hpp`.
-			Universe->Present(shown, frameSeconds, Universe->AlphaOf(shown));
-		}
-
-		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
-		std::vector<engine::scene::DrawInstance> drawn;
-
-		if (shown.IsValid()) {
-			Universe->Enter(shown, [&](Store &store) {
-				if (const auto *list = store.Resource<client::DrawList>()) {
-					// Copied out rather than borrowed. The renderer's call
-					// happens outside `Enter`, and a span into a store nobody
-					// is inside is a pointer across a boundary that rule 3
-					// exists to keep closed.
-					drawn = list->Instances;
-				}
-
-				// **The surface camera, which the studio was never asking
-				// for.** `Renderer::Render` takes a `SurfaceView` and the
-				// editor passed `nullptr` for it — so the surface pass never
-				// ran, no texture was ever written for surface 0, and a `Part`
-				// naming it sampled nothing. The mirror example looked like a
-				// bug in the mirror: the frame was there, the pane was empty,
-				// and the world behind it was rendering perfectly.
-				//
-				// `client::FindSurfaceCamera` is the same call the client makes
-				// at `Client.cpp:549`; a second way of finding the scene's
-				// surface camera would be a second thing to keep in step with
-				// what `Camera.SurfaceSize` means.
-				HaveSurface = client::FindSurfaceCamera(store, Surface);
-			});
-			instances = &drawn;
-		}
-
+		// **Resolved before anything presents, because `PreRender` reads it.**
+		// It used to be worked out after the present call, which was harmless
+		// while nothing in that phase cared where the viewport was looking from.
+		// `aim-surface-cameras` does: a mirror reflects the eye, so a phase that
+		// ran before the eye was known would reflect through last frame's.
 		// **The scene's camera when one is being looked through.** The free
 		// camera is what an editor flies; a `Camera` instance is content, and
 		// moving content should move what a viewport showing it draws — which
@@ -787,6 +763,73 @@ namespace studio {
 			});
 		}
 
+
+		// PreRender runs whether or not the simulation did: it is the phase
+		// that turns state into something to draw, and an edited world's state
+		// changes without a tick.
+		// **A replica is given this viewport's eye before it presents.** It has
+		// no camera of its own — an authoritative entity minted in a replica
+		// would collide with one the authority minted — so `AimReplicaViewer`
+		// puts a predicted one there and names it `ActiveCamera`.
+		//
+		// Before `Present`, because `aim-surface-cameras` runs in `PreRender`
+		// and reflects through whatever `ActiveCamera` names. Setting the eye
+		// afterwards aims every mirror at where the viewport was last frame,
+		// which is a reflection that lags the camera by one frame and reads as
+		// a mirror that is not tracking.
+		if (shown.IsValid() && IsReplicaWorld(shown)) {
+			Universe->Enter(shown, [&](Store &store) {
+				(void)client::AimReplicaViewer(store, eye, lens);
+			});
+		}
+
+		if (shown.IsValid()) {
+			// **The render gate rides along with it**, because
+			// `client::InstallPresentation` registers `sync-rendered` in this
+			// same phase. That is what makes an edited world work at all: it
+			// never ticks, so a gate maintained by the simulation would leave a
+			// part dragged into `Workspace` invisible until somebody pressed
+			// play. See `scene/Visibility.hpp`.
+			Universe->Present(shown, frameSeconds, Universe->AlphaOf(shown));
+		}
+
+		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
+		std::vector<engine::scene::DrawInstance> drawn;
+
+		// **Cleared before the world is asked, not inside the ask.** A viewport
+		// with no world would otherwise keep whatever the last world it drew
+		// held — a mirror in a scene that is no longer on screen, rendering into
+		// a texture nothing samples, and a surface pass paid for every frame the
+		// panel is empty.
+		Surfaces.clear();
+
+		if (shown.IsValid()) {
+			Universe->Enter(shown, [&](Store &store) {
+				if (const auto *list = store.Resource<client::DrawList>()) {
+					// Copied out rather than borrowed. The renderer's call
+					// happens outside `Enter`, and a span into a store nobody
+					// is inside is a pointer across a boundary that rule 3
+					// exists to keep closed.
+					drawn = list->Instances;
+				}
+
+				// **The surface cameras, which the studio was never asking
+				// for.** `Renderer::Render` takes them and the editor passed
+				// nothing — so the surface pass never ran, no texture was ever
+				// written, and a `Part` naming one sampled nothing. The mirror
+				// example looked like a bug in the mirror: the frame was there,
+				// the pane was empty, and the world behind it was rendering
+				// perfectly.
+				//
+				// `client::CollectSurfaceViews` is the same call the client
+				// makes; a second way of finding a scene's surface cameras would
+				// be a second thing to keep in step with what `SurfaceSize` and
+				// `Surface` mean.
+				(void)client::CollectSurfaceViews(store, Surfaces);
+			});
+			instances = &drawn;
+		}
+
 		// **The viewer's camera, kept in step with the eye.** It is what a
 		// script sees as the current camera and what the explorer shows; the
 		// editor's free camera is still what decides the view unless somebody
@@ -799,7 +842,7 @@ namespace studio {
 			instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 								 : std::span<const engine::scene::DrawInstance>{},
 			Overlay,
-			HaveSurface ? &Surface : nullptr,
+			Surfaces,
 			&Interface,
 			target.IsValid() ? &target : nullptr,
 			DrawingViewport

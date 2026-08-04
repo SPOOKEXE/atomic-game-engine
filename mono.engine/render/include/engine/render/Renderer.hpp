@@ -117,11 +117,35 @@ namespace engine::render {
 	// surface shows the frame *before* the one being drawn, so there is no
 	// dependency cycle between a mirror and what it reflects.
 	//
-	// One per frame. Several would be several passes and a texture array, which
-	// is the render-node system's job rather than this pipeline's.
+	// **Several per frame since v0.8, one per surface index.** It was one, and
+	// the sentence here used to say that several were the render-node system's
+	// job. What several actually needed was a texture pair per index and a
+	// sampler binding per draw — the mirror runs are grouped by index in
+	// `scene::ScenePlan::Runs`, so each is one contiguous draw — and none of
+	// that needed a render graph to arrive first.
+	//
+	// A mirror seen in another mirror shows that other mirror's **previous**
+	// frame. That is not an approximation to be fixed later: a surface pass that
+	// sampled this frame's textures would depend on an order of surfaces that
+	// does not exist, because each is being rendered for the others. One frame
+	// of staleness per bounce is what makes the cycle a line, and it is the same
+	// staleness `world::ViewChannel` was built around at v0.2.
 	//
 	// @since v0.6
 	struct SurfaceView {
+		// Which surface index this renders, matching `scene::Visual::Surface` on
+		// whatever samples it.
+		//
+		// **The pairing is by number and nothing else**, which is what lets a
+		// replica reflect at all: the wire carries components and not the tree,
+		// so "the camera belonging to this pane" cannot be a parent link on the
+		// far end. `scene::AimSurfaceCameras` is what makes the two numbers
+		// agree, by writing the camera's index onto the pane it is parented to.
+		//
+		// At or above `scene::MAX_SURFACES` the view is dropped with a line in
+		// the log, rather than silently rendering nothing.
+		int8_t Index = 0;
+
 		// Where the surface camera is, in world space.
 		core::CFrame Frame;
 
@@ -294,6 +318,24 @@ namespace engine::render {
 
 		// How many instances showed a surface texture.
 		uint32_t SurfaceInstances = 0;
+
+		// How many surface cameras re-rendered this frame.
+		//
+		// **Not how many exist**, which is the whole reason it is worth
+		// reporting. A surface whose scene has not changed keeps the texture it
+		// has and runs no pass, so a room with four mirrors in it costs four
+		// passes on the frames something moves and none on the frames nothing
+		// does. Those two frames are indistinguishable from the draw-call count
+		// — a skipped surface pass and one that ran and changed nothing look
+		// identical from there — and this is the number that tells them apart.
+		//
+		// Zero with mirrors on screen is the ordinary case for a still scene and
+		// is not a failure. Equal to the mirror count on every frame means the
+		// signature is never matching, which usually means something in the draw
+		// list is moving that nobody thinks is moving.
+		//
+		// @since v0.8
+		uint32_t SurfacePasses = 0;
 
 		// How many instances the frustum rejected.
 		//
@@ -471,7 +513,8 @@ namespace engine::render {
 		// @param overlay     CPU premultiplied RGBA8 overlay. Uploaded only when
 		//                    it has a pending region, drawn whenever it has
 		//                    content, and marked uploaded on the way out.
-		// @param surface     The offscreen view to render first, or null.
+		// @param surfaces    The offscreen views to render first, one per surface
+		//                    index. Empty for a scene with no mirror in it.
 		// @param interfaceHook An editor's chrome, drawn last, or null. See
 		//                    `FrameOverlayHook` for why this is not imgui.
 		// @param sceneTarget Draw the world into an offscreen texture of this
@@ -484,7 +527,7 @@ namespace engine::render {
 			const scene::Camera &camera,
 			std::span<const scene::DrawInstance> instances,
 			OverlayImage &overlay,
-			const SurfaceView *surface = nullptr,
+			std::span<const SurfaceView> surfaces = {},
 			FrameOverlayHook *interfaceHook = nullptr,
 			const SceneTarget *sceneTarget = nullptr,
 			size_t targetSlot = 0

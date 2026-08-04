@@ -128,6 +128,11 @@ namespace engine::ecs {
 		return node == nullptr ? NULL_ENTITY : node->Parent;
 	}
 
+	bool HasChildren(const StoreState &state, Entity instance) {
+		const Hierarchy *node = NodeOf(state, instance);
+		return node != nullptr && node->FirstChild != NULL_ENTITY;
+	}
+
 	void EachChild(const StoreState &state, Entity instance, const std::function<void(Entity)> &body) {
 		const Hierarchy *node = NodeOf(state, instance);
 		if (node == nullptr) {

@@ -710,8 +710,10 @@ namespace studio {
 		// is handed a view, and the editor handed it nothing. Found per frame
 		// rather than cached, because a script can create, move or delete the
 		// camera at any point during a run. See `PresentWorld`.
-		engine::render::SurfaceView Surface;
-		bool HaveSurface = false;
+		// Every surface camera the drawn world holds, rebuilt each frame. See
+		// `client::CollectSurfaceViews`; a list assembled from what is in the
+		// world is also what makes a deleted mirror stop being drawn.
+		std::vector<engine::render::SurfaceView> Surfaces;
 
 		// One world's run, for as long as it is running.
 		//
@@ -1200,6 +1202,19 @@ namespace studio {
 		// the action is applied on exactly one.
 		WorldId RenamingWorld;
 		bool AskingRenameWorld = false;
+
+		// The explorer's recursion buffer, shared by every level of one walk.
+		//
+		// **A member rather than a local, because a local was a heap allocation
+		// per node per frame.** `DrawTreeNode` collects a node's children before
+		// walking them — it has to, since drawing one can queue a reparent — and
+		// doing that with a `std::vector` inside the body meant an open tree of
+		// two hundred rows allocated and freed two hundred times every frame.
+		//
+		// Each level appends its own run and truncates back to its mark on the
+		// way out, so the buffer is empty between frames and reaches the depth of
+		// the deepest open path exactly once.
+		std::vector<Entity> ChildScratch;
 
 		// One cached instance count per scene. See `InstanceCountOf`.
 		struct InstanceCount {

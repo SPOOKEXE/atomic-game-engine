@@ -193,6 +193,52 @@ TEST_CASE("a rotated pane reflects along the way it actually faces", "[scene][su
 	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(20.0f, TOLERANCE));
 }
 
+TEST_CASE("the face marker lies on the face the camera projects off", "[scene][surfacecameras]") {
+	Mirror mirror;
+
+	std::vector<engine::scene::DrawInstance> list;
+	REQUIRE(engine::scene::AppendSurfaceFaceMarkers(mirror.World, list) == 1);
+	REQUIRE(list.size() == 1);
+
+	// The same plane the reflection is computed through — face at z = -0.2 —
+	// pushed one thickness clear of it so the two do not z-fight. **The sign is
+	// the whole assertion**: a marker at z = +0.2 would be sitting on the back
+	// of the pane, which is a debugging aid that points at the wrong face and is
+	// worse than none at all.
+	const engine::scene::DrawInstance &marker = list.front();
+	CHECK_THAT(marker.Frame.Position.X, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+	CHECK_THAT(marker.Frame.Position.Y, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
+	CHECK(marker.Frame.Position.Z < -0.2f);
+
+	// Along the pane's *longer* in-plane axis — 8 wide against 4.5 tall — and
+	// thin on the other two. A bar across the short axis is a dash somebody has
+	// to look for.
+	CHECK(marker.HalfExtent.X > marker.HalfExtent.Y);
+	CHECK(marker.HalfExtent.X > marker.HalfExtent.Z);
+	CHECK(marker.HalfExtent.X < 8.0f);
+
+	// Blended, and that is load-bearing rather than cosmetic: the surface pass
+	// draws only the opaque head, so an opaque marker would appear across the
+	// glass inside every other mirror in the scene. It casts nothing for the
+	// matching reason — a bar on the floor describes the scene it is meant to be
+	// describing.
+	CHECK(marker.Transparency > 0.0f);
+	CHECK(marker.Surface == -1);
+	CHECK_FALSE(marker.CastShadow);
+}
+
+TEST_CASE("a camera with no face gets no marker", "[scene][surfacecameras]") {
+	Mirror mirror;
+	mirror.World.SetParent(mirror.Reflection, engine::ecs::NULL_ENTITY);
+
+	// The same answer `AimSurfaceCameras` gives for the same arrangement, and it
+	// has to be: a marker drawn for a camera that is not projecting off anything
+	// would be describing a face that does not exist.
+	std::vector<engine::scene::DrawInstance> list;
+	CHECK(engine::scene::AppendSurfaceFaceMarkers(mirror.World, list) == 0);
+	CHECK(list.empty());
+}
+
 TEST_CASE("a world with no active camera has nothing to reflect", "[scene][surfacecameras]") {
 	Mirror mirror;
 

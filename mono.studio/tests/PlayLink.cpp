@@ -21,6 +21,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <client/Replicated.hpp>
+#include <client/Scene.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/render/Renderer.hpp>
+#include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <studio/PlayLink.hpp>
 
 #include <optional>
@@ -298,4 +305,99 @@ TEST_CASE("a link refuses to start twice and refuses a world that is not there",
 	CHECK_FALSE(other.Start(fixture.Worlds, WorldId{}, TICK_RATE, otherError));
 	CHECK_FALSE(otherError.empty());
 	CHECK_FALSE(other.IsRunning());
+}
+
+// **A mirror crossing the wire, which is the whole of what a replica was
+// missing.** `REPLICATED` carried `Transform`, `Motion`, `Bounds` and `Visual`,
+// so a pane arrived with its `Surface` set and nothing on the client could
+// render into that surface: the camera was not replicated and neither was the
+// parent link that says which pane it projects off. Every mirror in a played
+// world was a plain white part, and it looked like the renderer.
+//
+// The three components below are what closed it. The *aim* is deliberately not
+// among them — see `client::AimReplicaViewer` — because a reflection is of the
+// viewer and every client has its own.
+TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
+	Fixture fixture;
+
+	engine::scene::RegisterSceneClasses();
+
+	Entity pane;
+	Entity reflection;
+	fixture.Worlds.Enter(fixture.Authority, [&pane, &reflection](Store &store) {
+		pane = store.CreateInstance(engine::scene::PartClass(), "Pane");
+		store.Set<Transform>(pane, Transform{CFrame(Vector3::Zero)});
+		store.Set<Bounds>(pane, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+		store.Set<Visual>(pane, Visual{});
+
+		reflection = store.CreateInstance(
+			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection"
+		);
+
+		engine::scene::SurfaceCamera target;
+		target.Face = engine::scene::NormalId::Front;
+		target.Surface = 2;
+		store.Set(reflection, target);
+		store.Set(reflection, engine::scene::Camera{});
+
+		REQUIRE(store.SetParent(reflection, pane));
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	fixture.Step(link, 32);
+
+	fixture.Worlds.Enter(link.ReplicaWorld(), [pane, reflection](Store &store) {
+		// The camera itself, with the face it projects off and the index that
+		// pairs it with the pane.
+		const auto *target = store.Get<engine::scene::SurfaceCamera>(reflection);
+		REQUIRE(target != nullptr);
+		CHECK(target->Face == engine::scene::NormalId::Front);
+		CHECK(target->Surface == 2);
+
+		// Its lens, without which there is no projection to render with.
+		CHECK(store.Get<engine::scene::Camera>(reflection) != nullptr);
+
+		// **And the tree, which is the one the old list had no way to carry.**
+		// `SurfaceCamera` names a face; *whose* face comes from the parent link
+		// and nowhere else, so a camera that arrived without one could not be
+		// aimed at all. `ecs.Hierarchy` had only the automatic name
+		// `Components::Of` mints from the compiler's spelling until v0.8, which
+		// is unusable on a wire because nothing makes two processes agree on it.
+		CHECK(store.ParentOf(reflection) == pane);
+	});
+
+	// **Aimed from a camera the client made for itself.** A replica may not mint
+	// an authoritative entity, so this comes out of the predicted range — and it
+	// has to exist before `AimSurfaceCameras` will do anything, because a mirror
+	// with no viewer has no reflection to compute rather than a default one.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		CHECK(engine::scene::AimSurfaceCameras(store) == 0);
+
+		const Entity viewer =
+			client::AimReplicaViewer(store, CFrame(Vector3{0.0f, 0.0f, 20.0f}), engine::scene::Camera{});
+		REQUIRE(viewer != engine::ecs::NULL_ENTITY);
+
+		CHECK(engine::scene::AimSurfaceCameras(store) == 1);
+	});
+
+	// The pane is told what it shows, on the client, by the client. The face is
+	// at z = -0.2 and the eye at z = 20, so the reflection lands at z = -20.4 —
+	// the same arithmetic `scene/tests/SurfaceCameras.cpp` pins, reached here
+	// through the wire rather than through a parent set in this process.
+	fixture.Worlds.Enter(link.ReplicaWorld(), [pane, reflection](Store &store) {
+		CHECK(store.Get<Visual>(pane)->Surface == 2);
+
+		const Vector3 placed = store.Get<Transform>(reflection)->Frame.Position;
+		CHECK_THAT(placed.Z, Catch::Matchers::WithinAbs(-20.4f, 0.001f));
+	});
+
+	std::vector<engine::render::SurfaceView> views;
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&views](Store &store) {
+		CHECK(client::CollectSurfaceViews(store, views) == 1);
+	});
+
+	REQUIRE(views.size() == 1);
+	CHECK(views.front().Index == 2);
 }
