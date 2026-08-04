@@ -883,7 +883,47 @@ namespace studio {
 		// @param world The world being viewed.
 		// @param eye   Where this viewport is looking from.
 		// @param lens  Its field of view and clip planes.
-		void EnsureViewerCamera(WorldId world, const engine::core::CFrame &eye, const engine::scene::Camera &lens);
+		// Puts this panel's own camera in the world it is showing, and names it
+		// the world's live one.
+		//
+		// **One per panel, not one per world, and that is the whole point.** A
+		// single shared `Camera` instance was written by whichever panel drew
+		// last — the studio round-robins one viewport per frame — so its `CFrame`
+		// flickered between viewpoints every frame, the properties panel showed
+		// a field nobody could edit, and `workspace.CurrentCamera` meant "the
+		// panel that happened to draw most recently".
+		//
+		// **`ActiveCamera` is set every frame rather than at creation.** It used
+		// to be named once, when the instance was minted, so a script assigning
+		// `workspace.CurrentCamera` took the world's eye away from the editor
+		// permanently — and `scene::AimSurfaceCameras` reflects through whatever
+		// that names, so every mirror in the scene quietly started reflecting
+		// from a camera the viewport was not looking through.
+		//
+		// @param viewport 0 is the main panel, 1..EXTRA_VIEWPORTS the others.
+		// @param world    The world this panel is showing.
+		// @param eye      Where the panel is looking from.
+		// @param lens     Its field of view and clip planes.
+		// @param follow   The instance being looked through, or null. Its camera
+		//                 is followed rather than driven, so dragging its
+		//                 `CFrame` in the properties panel is not fought.
+		void EnsureViewerCamera(
+			size_t viewport,
+			WorldId world,
+			const engine::core::CFrame &eye,
+			const engine::scene::Camera &lens,
+			Entity follow
+		);
+
+		// Destroys a panel's camera, if it has one.
+		//
+		// **Closing a panel has to take its camera with it**, or a studio that
+		// has had four viewports open over a session leaves four cameras in the
+		// world — none of them driven, all of them in the explorer, and one of
+		// them still named as the world's active one.
+		//
+		// @param viewport Which panel.
+		void ReleaseViewerCamera(size_t viewport);
 
 		// A `Camera` instance the main viewport looks through, or null.
 		//
@@ -955,6 +995,22 @@ namespace studio {
 		// number nobody chose.
 		static constexpr size_t EXTRA_VIEWPORTS = 3;
 		std::array<ViewportState, EXTRA_VIEWPORTS> Extras;
+
+		// A panel's own camera instance, and the world it was minted in.
+		//
+		// **The world is held beside the entity because an entity handle alone
+		// cannot say where it lives.** A panel can be repointed at another
+		// world, and the camera it made in the old one has to be destroyed
+		// there — `Universe::Enter` needs the id to do it, and by then the panel
+		// is already showing something else.
+		struct ViewerCamera {
+			WorldId World;
+			Entity Instance;
+		};
+
+		// Indexed the way `DrawingViewport` is: 0 is the main panel, 1.. are the
+		// extras, so a panel index is a subscript rather than a branch.
+		std::array<ViewerCamera, 1 + EXTRA_VIEWPORTS> Viewers;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//

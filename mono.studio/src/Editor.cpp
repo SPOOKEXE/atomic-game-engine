@@ -580,11 +580,69 @@ namespace studio {
 		ExpandedWorlds.push_back(world.Index);
 	}
 
-	void Editor::EnsureViewerCamera(
-		WorldId world, const engine::core::CFrame &eye, const engine::scene::Camera &lens
-	) {
+	void Editor::ReleaseViewerCamera(size_t viewport) {
+		if (viewport >= Viewers.size()) {
+			return;
+		}
+
+		ViewerCamera &viewer = Viewers[viewport];
+		if (viewer.Instance == NULL_ENTITY) {
+			viewer.World = WorldId{};
+			return;
+		}
+
+		// **Cleared before the destroy rather than after**, so a world that has
+		// already gone — closed, or never valid — still leaves the record empty.
+		// Leaving the handle behind would make the next `Ensure` believe it
+		// already has a camera in a world that cannot produce one.
+		const WorldId world = viewer.World;
+		const Entity instance = viewer.Instance;
+		viewer = ViewerCamera{};
+
 		if (!world.IsValid() || Universe->IsRemote(world)) {
 			return;
+		}
+
+		Universe->Enter(world, [&](Store &store) {
+			if (!store.Alive(instance)) {
+				return;
+			}
+
+			// **The world's live camera is dropped with it when it was this
+			// one.** A resource naming a destroyed entity is a dangling handle
+			// that `AimSurfaceCameras` checks for and every other reader does
+			// not, and the symptom would be a world that renders from nothing
+			// after a panel is closed.
+			if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+				active != nullptr && active->Entity == instance) {
+				store.SetResource(engine::scene::ActiveCamera{});
+			}
+
+			store.Destroy(instance);
+		});
+	}
+
+	void Editor::EnsureViewerCamera(
+		size_t viewport,
+		WorldId world,
+		const engine::core::CFrame &eye,
+		const engine::scene::Camera &lens,
+		Entity follow
+	) {
+		if (viewport >= Viewers.size()) {
+			return;
+		}
+
+		if (!world.IsValid() || Universe->IsRemote(world)) {
+			ReleaseViewerCamera(viewport);
+			return;
+		}
+
+		// **Repointing a panel destroys the camera it left behind.** A viewport
+		// switched between worlds all session would otherwise seed one in each,
+		// and every one of them would still be named that world's active camera.
+		if (Viewers[viewport].World != world) {
+			ReleaseViewerCamera(viewport);
 		}
 
 		Universe->Enter(world, [&](Store &store) {
@@ -593,11 +651,29 @@ namespace studio {
 				return;
 			}
 
-			Entity camera = store.FindFirstChild(workspace, "Camera");
+			ViewerCamera &viewer = Viewers[viewport];
 
-			if (camera == NULL_ENTITY) {
-				camera = store.CreateInstance(engine::scene::CameraClass(), "Camera");
+			// A world can drop it without this editor knowing — a snapshot
+			// restore replaces every entity, and the handle this held names a
+			// row that is no longer there.
+			if (viewer.Instance != NULL_ENTITY && !store.Alive(viewer.Instance)) {
+				viewer = ViewerCamera{};
+			}
+
+			if (viewer.Instance == NULL_ENTITY) {
+				// **Named per panel, because they share a workspace.** Four
+				// instances called `Camera` in one explorer is four rows nobody
+				// can tell apart, and `FindFirstChild` would hand every panel
+				// the first of them — which is the shared camera this replaces,
+				// reached by a different route.
+				const std::string name =
+					viewport == 0 ? std::string("Camera") : "Camera" + std::to_string(viewport + 1);
+
+				const Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
 				if (camera == NULL_ENTITY) {
+					// A replica refuses to mint an authoritative entity. That is
+					// not a failure here — `client::AimReplicaViewer` is the path
+					// for those, and it puts a predicted camera in instead.
 					return;
 				}
 
@@ -609,25 +685,33 @@ namespace studio {
 				// exists to stop.
 				store.Set(camera, engine::scene::TransientComponent{});
 
-				// The world's live camera, so a script asking what it is
-				// looking through gets this rather than nothing.
-				engine::scene::ActiveCamera active;
-				active.Entity = camera;
-				store.SetResource(active);
+				viewer.World = world;
+				viewer.Instance = camera;
 			}
+
+			// **Named every frame, not once at creation.** It used to be set
+			// only when the instance was minted, so a script assigning
+			// `workspace.CurrentCamera` took the world's eye away for good — and
+			// `scene::AimSurfaceCameras` reflects through whatever this names,
+			// so every mirror in the scene started reflecting from a camera the
+			// viewport was not looking through, with nothing on screen to say
+			// why.
+			engine::scene::ActiveCamera active;
+			active.Entity = viewer.Instance;
+			store.SetResource(active);
 
 			// **Followed, not driven, when somebody is looking through it.**
 			// Writing the eye into the camera every frame would fight an author
 			// dragging its CFrame in the properties panel — the view would
 			// snap back on the next frame and the field would look broken.
-			if (FollowCamera == camera) {
+			if (follow == viewer.Instance) {
 				return;
 			}
 
-			if (auto *transform = store.GetMutable<engine::scene::Transform>(camera)) {
+			if (auto *transform = store.GetMutable<engine::scene::Transform>(viewer.Instance)) {
 				transform->Frame = eye;
 			}
-			if (auto *component = store.GetMutable<engine::scene::Camera>(camera)) {
+			if (auto *component = store.GetMutable<engine::scene::Camera>(viewer.Instance)) {
 				*component = lens;
 			}
 		});
@@ -676,6 +760,24 @@ namespace studio {
 		for (size_t index = 0; index < EXTRA_VIEWPORTS; index++) {
 			if (Extras[index].Open) {
 				candidates[candidateCount++] = index + 1;
+			}
+		}
+
+		// **A closed panel gives its camera back, every frame rather than on an
+		// event.** There is no close callback to hang this on — a panel is open
+		// because imgui says its window is, and it can be shut by the title bar,
+		// by a menu item or by a saved layout arriving from disk. Reconciling
+		// against the list that was just built covers all three, and costs a
+		// walk of four entries on a frame where nothing changed.
+		//
+		// Without it a session that has opened and closed panels leaves a camera
+		// in the world for each one: undriven, listed in the explorer, saved
+		// nowhere but visible everywhere, and one of them still named the
+		// world's active camera.
+		for (size_t index = 0; index < Viewers.size(); index++) {
+			const bool live = index == 0 ? ShowViewport : Extras[index - 1].Open;
+			if (!live) {
+				ReleaseViewerCamera(index);
 			}
 		}
 
@@ -792,13 +894,11 @@ namespace studio {
 		//
 		// With one viewport that is last frame's eye, which reads as a mirror
 		// lagging by a frame. **With two it is the other viewport's camera**,
-		// because each panel calls this in turn and the last one to run wins: a
-		// mirror in one panel then tracks the camera somebody is flying in the
-		// other, and stops moving when they stop. That is what a mirror aimed
-		// from the wrong eye looks like, and the projection it produces does not
-		// line up with the pane it is projected onto.
+		// because the studio round-robins one panel per frame and the last to
+		// run wins: a mirror in one panel then tracks the camera somebody is
+		// flying in the other, and stops moving when they stop.
 		if (shown.IsValid() && !IsReplicaWorld(shown)) {
-			EnsureViewerCamera(shown, eye, lens);
+			EnsureViewerCamera(DrawingViewport, shown, eye, lens, follow);
 		}
 
 		if (shown.IsValid()) {
@@ -848,17 +948,12 @@ namespace studio {
 			instances = &drawn;
 		}
 
-		// **The viewer's camera for a replica, which the call above skipped.**
-		// The non-replica case has already run — before `Present`, because
-		// `aim-surface-cameras` reads what it writes — and doing it twice would
-		// be a second write of the same eye in the same frame.
-		//
-		// It is what a script sees as the current camera and what the explorer
-		// shows; the editor's free camera is still what decides the view unless
-		// somebody is looking through this one.
-		if (shown.IsValid() && IsReplicaWorld(shown)) {
-			EnsureViewerCamera(shown, eye, lens);
-		}
+		// **Nothing here.** The viewer camera is placed before `Present`, above,
+		// because `aim-surface-cameras` runs in that phase and reflects through
+		// what it names. A replica gets `client::AimReplicaViewer` instead, for
+		// the same reason and in the same place — a replica may not mint an
+		// authoritative entity, so its viewpoint comes out of the predicted
+		// range.
 
 		LastFrame = Renderer.Render(
 			eye,
