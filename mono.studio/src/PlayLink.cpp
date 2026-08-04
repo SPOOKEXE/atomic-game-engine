@@ -27,11 +27,19 @@ namespace studio {
 		// part recoloured by a script kept its old colour on every client until
 		// something happened to re-snapshot it.
 		//
-		// A fifth copy of this table would be a fifth chance for one of them to
-		// disagree about what a client is owed. It is written here rather than
-		// shared because the two that exist are both in programs and neither
-		// module owns the policy — moving it is a change to `replication`'s
-		// surface and wants its own argument.
+		// **This is the third copy, and that is filed rather than excused —
+		// `D00018`.** `mono.server` and `mono.unified_server_client` each carry
+		// the same four, and all three agree today. Three copies of a policy is
+		// three chances for one to drift, which is the failure this repository
+		// has already paid for more than once.
+		//
+		// It is written here anyway because there is nowhere correct to put it
+		// yet, and the constraint is a layer rather than an opinion: the table
+		// pairs a component name with a `replication::ChangeDetection`, and
+		// `replication` is L12 while `scene` is L7 — so `scene` cannot name the
+		// enum, and `replication` naming `scene`'s components would couple the
+		// generic module to one component module. The real answer is a game file
+		// declaring its own replicated set, which is what the entry is against.
 		struct Replicated {
 			const char *Component;
 			ChangeDetection Detection;
