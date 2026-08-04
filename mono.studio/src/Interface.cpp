@@ -4,6 +4,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/ui/Fonts.hpp>
+#include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
@@ -42,9 +43,10 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v4";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v5";
 
 		constexpr const char *VIEWPORT = "Viewport";
+		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";
 		constexpr const char *WORLDS = "Worlds";
@@ -78,7 +80,21 @@ namespace studio {
 			const ImGuiID rightUpper =
 				ImGui::DockBuilderSplitNode(rightLower, ImGuiDir_Up, 0.45f, nullptr, &rightLower);
 
-			ImGui::DockBuilderDockWindow(VIEWPORT, centre);
+			// **A split, not the same node.** Docking both viewports into
+			// `centre` makes them *tabs*, so the second is a background window
+			// — `ImGui::Begin` returns false for it, the panel drops its target
+			// and the renderer never draws it. That is not a subtle failure
+			// either: the second view is simply never there, and the first
+			// looks exactly as it always did.
+			//
+			// Two views stacked as tabs would also be one view you have to
+			// click between, which is the thing having two of them is for.
+			ImGuiID rightHalf = centre;
+			const ImGuiID leftHalf =
+				ImGui::DockBuilderSplitNode(rightHalf, ImGuiDir_Left, 0.5f, nullptr, &rightHalf);
+
+			ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
+			ImGui::DockBuilderDockWindow(VIEWPORT2, rightHalf);
 			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
 			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
@@ -135,7 +151,8 @@ namespace studio {
 			}
 		}
 
-		DrawViewport();
+		DrawViewport(0);
+		DrawViewport(1);
 		DrawExplorer();
 		DrawWorlds();
 		DrawProperties();
@@ -158,7 +175,7 @@ namespace studio {
 		ApplyPendingActions();
 	}
 
-	void Editor::FocusSelection(Vector3 &position) {
+	void Editor::FocusSelection(Vector3 &position, float yaw, float pitch) {
 		if (Selection.empty() || !SelectionWorld.IsValid()) {
 			return;
 		}
@@ -196,13 +213,28 @@ namespace studio {
 		// is a constant rather than a function of the selection's size for the
 		// same reason the centre is a mean of positions: without bounds there
 		// is nothing to measure, and a fixed step is honest about that.
-		const CFrame rotation = CFrame::Angles(CameraPitch, CameraYaw, 0.0f);
+		const CFrame rotation = CFrame::Angles(pitch, yaw, 0.0f);
 		position = centre - rotation.LookVector() * 18.0f;
-
-		CameraSpeed = 24.0f;
 	}
 
 	void Editor::DriveCamera() {
+		// **Whichever viewport the pointer is over.** One camera driver for two
+		// panels rather than two copies: the rules — right-drag to look,
+		// middle-drag to pan, wheel to dolly, F to frame — are the same in
+		// both, and a second copy is a second place for them to drift.
+		if (Second.Open && (Second.Hovered || Second.Active || Second.Panning)) {
+			DriveCameraFor(Second.Frame, Second.Yaw, Second.Pitch, Second.Speed, Second.Hovered,
+						   Second.Active, Second.Panning);
+			return;
+		}
+
+		DriveCameraFor(CameraFrame, CameraYaw, CameraPitch, CameraSpeed, ViewportHovered, ViewportActive,
+					   ViewportPanning);
+	}
+
+	void Editor::DriveCameraFor(
+		CFrame &frame, float &yaw, float &pitch, float &speed, bool hovered, bool active, bool &panning
+	) {
 		ImGuiIO &io = ImGui::GetIO();
 
 		// **Right button held, and only over the viewport panel.** A camera that
@@ -214,32 +246,32 @@ namespace studio {
 		// going once it has started: a drag that leaves the panel is still that
 		// drag, and a camera that stopped at the edge of the rectangle would be
 		// unusable at exactly the moment somebody is turning quickly.
-		const bool looking = (ViewportActive || (ViewportHovered && !io.WantCaptureMouse)) &&
-							 ImGui::IsMouseDown(ImGuiMouseButton_Right);
+		const bool looking =
+			(active || (hovered && !io.WantCaptureMouse)) && ImGui::IsMouseDown(ImGuiMouseButton_Right);
 
 		if (looking) {
 			const float sensitivity = 0.0035f;
-			CameraYaw -= io.MouseDelta.x * sensitivity;
-			CameraPitch -= io.MouseDelta.y * sensitivity;
+			yaw -= io.MouseDelta.x * sensitivity;
+			pitch -= io.MouseDelta.y * sensitivity;
 
 			// Clamped short of straight up and straight down. At exactly
 			// vertical the yaw axis and the view direction are parallel and the
 			// frame flips, which reads as the camera snapping.
 			constexpr float LIMIT = 1.5533f;
-			CameraPitch = std::clamp(CameraPitch, -LIMIT, LIMIT);
+			pitch = std::clamp(pitch, -LIMIT, LIMIT);
 		}
 
 		// The scroll wheel changes how fast, not how far. A wheel that dollied
 		// the camera would make the speed control something you cannot find.
 		if (looking && io.MouseWheel != 0.0f) {
-			CameraSpeed = std::clamp(CameraSpeed * (io.MouseWheel > 0.0f ? 1.25f : 0.8f), 1.0f, 4096.0f);
+			speed = std::clamp(speed * (io.MouseWheel > 0.0f ? 1.25f : 0.8f), 1.0f, 4096.0f);
 		}
 
-		const CFrame rotation = CFrame::Angles(CameraPitch, CameraYaw, 0.0f);
+		const CFrame rotation = CFrame::Angles(pitch, yaw, 0.0f);
 		const Vector3 forward = rotation.LookVector();
 		const Vector3 right = rotation.RightVector();
 
-		Vector3 position = CameraFrame.Position;
+		Vector3 position = frame.Position;
 		Vector3 move;
 		if (looking && !io.WantCaptureKeyboard) {
 			if (ImGui::IsKeyDown(ImGuiKey_W)) {
@@ -270,22 +302,22 @@ namespace studio {
 		// These are Studio's, and they work whether or not the right button is
 		// down.
 
-		const bool overViewport = ViewportHovered && !io.WantCaptureMouse;
+		const bool overViewport = hovered && !io.WantCaptureMouse;
 
 		// Middle-drag slides the camera across its own plane, so the thing
 		// under the pointer stays roughly under the pointer.
-		if ((overViewport || ViewportPanning) && ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
-			ViewportPanning = true;
+		if ((overViewport || panning) && ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+			panning = true;
 
 			// Scaled by distance-independent speed rather than by depth: there
 			// is no picked point to measure against, and a pan that changed
 			// pace with whatever happened to be in front of it is worse than
 			// one that is merely constant.
-			const float pace = CameraSpeed * 0.0016f;
+			const float pace = speed * 0.0016f;
 			position = position - right * (io.MouseDelta.x * pace);
 			position = position + rotation.UpVector() * (io.MouseDelta.y * pace);
 		} else if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
-			ViewportPanning = false;
+			panning = false;
 		}
 
 		// **The wheel dollies when not looking and changes speed when it is.**
@@ -293,13 +325,13 @@ namespace studio {
 		// the `looking` branch above already claimed the second — so this is
 		// the other half rather than a conflict.
 		if (overViewport && !looking && io.MouseWheel != 0.0f) {
-			position = position + forward * (io.MouseWheel * CameraSpeed * 0.12f);
+			position = position + forward * (io.MouseWheel * speed * 0.12f);
 		}
 
 		// F frames the selection, which is the one navigation command that
 		// needs no aim at all.
 		if (overViewport && !io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
-			FocusSelection(position);
+			FocusSelection(position, yaw, pitch);
 		}
 
 		const float length = std::sqrt(move.X * move.X + move.Y * move.Y + move.Z * move.Z);
@@ -309,33 +341,43 @@ namespace studio {
 			// the same rate whether or not the game is running, and tying it to
 			// a fixed tick would freeze it in Edit mode where nothing ticks at
 			// all.
-			const float step = CameraSpeed * io.DeltaTime / length;
+			const float step = speed * io.DeltaTime / length;
 			position = position + move * step;
 		}
 
-		CameraFrame = CFrame(position, rotation.Rotation());
+		frame = CFrame(position, rotation.Rotation());
 	}
 
-	void Editor::DrawViewport() {
-		if (!ShowViewport) {
+	void Editor::DrawViewport(size_t index) {
+		const bool second = index == 1;
+
+		// **The second panel is a different world by default and says which.**
+		// Two viewports both showing the active world is one view drawn twice;
+		// the reason to open the second is to watch the server's world beside
+		// the client's, or one subarea beside another while both tick.
+		const char *title = second ? "Viewport 2" : "Viewport";
+		bool *open = second ? &Second.Open : &ShowViewport;
+		engine::render::SceneTarget &target = second ? Second.Target : WorldTarget;
+
+		if (!*open) {
 			// Nothing asks for a texture, so the renderer releases the one it
 			// had. A closed panel should not go on costing its pixels.
-			WorldTarget = engine::render::SceneTarget{};
+			target = engine::render::SceneTarget{};
 			return;
 		}
 
 		// No padding, so the image is the panel rather than a picture inside it.
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		const bool open = ImGui::Begin(
-			"Viewport", &ShowViewport, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
+		const bool shown = ImGui::Begin(
+			title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
 		);
 		ImGui::PopStyleVar();
 
-		if (!open) {
+		if (!shown) {
 			// Collapsed or behind another tab. The target is dropped rather than
 			// left at its last size — rendering a texture nobody shows is a
 			// frame's work thrown away every frame.
-			WorldTarget = engine::render::SceneTarget{};
+			target = engine::render::SceneTarget{};
 			ImGui::End();
 			return;
 		}
@@ -350,18 +392,29 @@ namespace studio {
 		const float horizontal = scale.x > 0.0f ? scale.x : 1.0f;
 		const float vertical = scale.y > 0.0f ? scale.y : 1.0f;
 
-		WorldTarget.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * horizontal);
-		WorldTarget.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * vertical);
+		target.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * horizontal);
+		target.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * vertical);
 
-		// **Last frame's texture, and the one-frame lag is the design rather
-		// than a bug.** imgui records its draw lists before the renderer runs,
-		// so the only texture that exists when this executes is the one the
-		// previous frame produced. `world::ViewChannel` made the same trade for
-		// a hosted world and `SurfaceView` makes it for a mirror: a consumer a
-		// frame behind is what removes the dependency cycle between "how big is
-		// the panel" and "what is in the texture".
-		if (void *texture = Renderer.SceneTexture(); texture != nullptr) {
-			ImGui::Image(reinterpret_cast<ImTextureID>(texture), size);
+		// **The texture the renderer holds now, and it is usually this frame's
+		// picture rather than the last one's.** imgui records its draw lists
+		// before the renderer runs, so what is bound here is whatever texture
+		// exists at this moment — but the world pass and the interface pass go
+		// into the same command buffer with the world first, so a texture that
+		// keeps its identity across the frame is written before it is sampled.
+		// Targets are allocated in blocks precisely so that identity survives a
+		// resize; see `render::SceneExtent`.
+		//
+		// **Sampled to its extent rather than whole.** The texture is rounded up
+		// to a block and the world fills the corner, so drawing all of it would
+		// show the unwritten border down two edges.
+		if (void *texture = Renderer.SceneTexture(index); texture != nullptr) {
+			const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
+			ImGui::Image(
+				reinterpret_cast<ImTextureID>(texture),
+				size,
+				ImVec2(0.0f, 0.0f),
+				ImVec2(extent.U, extent.V)
+			);
 		} else {
 			// The first frame, and any frame after a resize the renderer has not
 			// caught up with. An invisible button keeps the panel hoverable so
@@ -369,13 +422,41 @@ namespace studio {
 			ImGui::InvisibleButton("##surface", size, ImGuiButtonFlags_MouseButtonRight);
 		}
 
-		ViewportHovered = ImGui::IsItemHovered();
-		ViewportActive = ImGui::IsItemActive();
+		if (second) {
+			Second.Hovered = ImGui::IsItemHovered();
+			Second.Active = ImGui::IsItemActive();
+		} else {
+			ViewportHovered = ImGui::IsItemHovered();
+			ViewportActive = ImGui::IsItemActive();
+		}
 
 		// The image is not a button, so a right-drag over it has to be claimed
 		// explicitly or the panel behind would get it.
 		if (ViewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
 			ImGui::SetWindowFocus();
+		}
+
+		// **The second panel picks its own world.** Without this both viewports
+		// show the active one, which is one view drawn twice at half the rate —
+		// strictly worse than a single viewport. In Play the two are naturally
+		// the server's world and the world a client is standing in.
+		if (second) {
+			ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
+			ImGui::SetNextItemWidth(engine::ui::Scaled(170.0f));
+
+			const Name chosen = Universe->NameOf(Second.World.IsValid() ? Second.World : Active);
+			if (ImGui::BeginCombo("##view2", chosen.IsValid() ? Label(chosen) : "(no scene)")) {
+				for (const WorldId id : Universe->Worlds()) {
+					const Name name = Universe->NameOf(id);
+					if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == Second.World)) {
+						Second.World = id;
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			ImGui::End();
+			return;
 		}
 
 		// The readout, drawn back over the top-left of the image.
@@ -391,13 +472,14 @@ namespace studio {
 				engine::ui::Typeface::Interface, engine::ui::TextSize::Small
 			);
 
-		const engine::core::Name scene = Universe->NameOf(Active);
+		const engine::core::Name scene =
+			Universe->NameOf(second ? (Second.World.IsValid() ? Second.World : Active) : Active);
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		ImGui::Text(
 			"%s   %u x %u   %u draw   %llu tris   %u culled",
 			scene.IsValid() ? Label(scene) : "(no scene)",
-			WorldTarget.Width,
-			WorldTarget.Height,
+			target.Width,
+			target.Height,
 			LastFrame.DrawCalls,
 			static_cast<unsigned long long>(LastFrame.Triangles),
 			LastFrame.Culled
@@ -427,6 +509,12 @@ namespace studio {
 
 	void Editor::DrawViewMenu() {
 		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
+
+		// **The second view, and it is what "server beside client" is made
+		// of.** Off by default: a second viewport halves the refresh rate of
+		// both, so it is a thing somebody opens when they want it rather than
+		// a cost everybody pays.
+		ImGui::MenuItem("Viewport 2", nullptr, &Second.Open);
 		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);

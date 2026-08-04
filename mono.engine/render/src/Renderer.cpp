@@ -105,6 +105,34 @@ namespace engine::render {
 		// the stair-stepping becomes visible on a cube edge.
 		constexpr uint32_t SHADOW_RESOLUTION = 2048;
 
+		// **What a scene target's size is rounded up to, and 64 is the number
+		// that makes a drag free.** A target allocated to the panel's exact size
+		// changes identity on every frame the panel changes size, and a viewport
+		// being dragged changes size every frame — so the interface, which
+		// recorded its bind before the renderer ran, spends the whole drag
+		// showing the previous frame's image stretched onto a rectangle it was
+		// not drawn for. That is what "laggy while resizing" looks like from the
+		// outside, and no amount of frame time explains it: the measurement is a
+		// flat 16.7 ms throughout.
+		//
+		// Rounding up means the texture survives 64 pixels of drag rather than
+		// one, so the panel samples the image *this* frame drew. What it costs
+		// is a border nothing draws into — at 1600x900 the allocation becomes
+		// 1600x960, under a megabyte — and one `SDL_SetGPUViewport` so the pass
+		// fills the corner rather than the texture.
+		//
+		// Bigger blocks buy fewer reallocations and waste more; 64 is one drag
+		// second at a comfortable pointer speed, which is where the returns stop.
+		constexpr uint32_t SCENE_TARGET_BLOCK = 64;
+
+		// Rounds up to the next whole block, saturating rather than wrapping.
+		uint32_t BlockUp(uint32_t value) {
+			if (value > UINT32_MAX - (SCENE_TARGET_BLOCK - 1)) {
+				return value;
+			}
+			return ((value + SCENE_TARGET_BLOCK - 1) / SCENE_TARGET_BLOCK) * SCENE_TARGET_BLOCK;
+		}
+
 		std::vector<uint8_t> ReadFile(const std::filesystem::path &path) {
 			size_t size = 0;
 			void *data = SDL_LoadFile(path.string().c_str(), &size);
@@ -231,9 +259,39 @@ namespace engine::render {
 		//
 		// Where the world goes when a caller asks for a texture instead of the
 		// window. See `render::SceneTarget` for why an editor needs one.
-		SDL_GPUTexture *SceneTexture = nullptr;
-		uint32_t SceneWidth = 0;
-		uint32_t SceneHeight = 0;
+		// One offscreen target per viewport asking for one.
+		//
+		// **A vector rather than a single texture, and the editor is why.** Two
+		// viewports are two different sizes, so one shared target would be
+		// destroyed and recreated twice a frame as each panel asked for its
+		// own — a colour and a depth texture per frame, which is exactly the
+		// cost `RetiredScenes` exists to avoid paying even once.
+		struct SceneSlot {
+			SDL_GPUTexture *Texture = nullptr;
+
+			// What was allocated, which is the panel's size rounded up to a
+			// block. See `SCENE_TARGET_BLOCK`.
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+
+			// The rectangle inside it the world is drawn into, which is the
+			// panel's size exactly. What the pass sets its viewport to and what
+			// `SceneTextureExtent` reports. See `render::SceneExtent`.
+			uint32_t DrawnWidth = 0;
+			uint32_t DrawnHeight = 0;
+		};
+
+		std::vector<SceneSlot> SceneSlots;
+
+		// The slot the frame in progress is drawing into.
+		size_t ActiveSlot = 0;
+
+		SceneSlot &SlotAt(size_t slot) {
+			if (SceneSlots.size() <= slot) {
+				SceneSlots.resize(slot + 1);
+			}
+			return SceneSlots[slot];
+		}
 
 		// Scene targets that have been replaced but may still be referenced.
 		//
@@ -671,26 +729,55 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::EnsureScene(uint32_t width, uint32_t height) {
-		if (SceneTexture && width == SceneWidth && height == SceneHeight) {
-			return true;
+		SceneSlot &target = SlotAt(ActiveSlot);
+
+		// **Recorded before anything decides whether to allocate.** This is the
+		// rectangle the pass draws and the rectangle `SceneTextureExtent`
+		// reports, and it is the panel's size whether or not the texture under
+		// it changed — which is the whole point of keeping the two apart.
+		target.DrawnWidth = width;
+		target.DrawnHeight = height;
+
+		if (width == 0 || height == 0) {
+			// Nobody wants a picture. Retired rather than released for the
+			// reason below: an interface hook may already have recorded a bind
+			// of it for the frame in progress.
+			if (target.Texture) {
+				RetiredScenes.push_back(target.Texture);
+				target.Texture = nullptr;
+			}
+			target.Width = 0;
+			target.Height = 0;
+			return false;
 		}
 
-		if (SceneTexture) {
+		const uint32_t wantWidth = BlockUp(width);
+		const uint32_t wantHeight = BlockUp(height);
+
+		// **Kept when it is big enough, and only replaced when it is far too
+		// big.** Growing is forced — a texture smaller than the rectangle would
+		// clip the world — but shrinking is not, and refusing to shrink for a
+		// factor of two is what stops a drag from reallocating on the way back
+		// down as well as on the way up. See `SCENE_TARGET_BLOCK`.
+		if (target.Texture && wantWidth <= target.Width && wantHeight <= target.Height) {
+			const bool wasteful = target.Width >= wantWidth * 2 || target.Height >= wantHeight * 2;
+			if (!wasteful) {
+				return true;
+			}
+		}
+
+		if (target.Texture) {
 			// **Retired rather than released.** An interface hook has already
 			// recorded a bind of this texture for the frame in progress — that
 			// is what "the image is last frame's texture" means — so freeing it
 			// here is a use-after-free that lands inside SDL's Vulkan backend.
 			// `DrainRetiredScenes` frees it at the top of the next frame.
-			RetiredScenes.push_back(SceneTexture);
-			SceneTexture = nullptr;
+			RetiredScenes.push_back(target.Texture);
+			target.Texture = nullptr;
 		}
 
-		SceneWidth = width;
-		SceneHeight = height;
-
-		if (width == 0 || height == 0) {
-			return false;
-		}
+		target.Width = wantWidth;
+		target.Height = wantHeight;
 
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -706,16 +793,21 @@ namespace engine::render {
 		// something shows it afterwards.
 		info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
-		info.width = width;
-		info.height = height;
+		info.width = wantWidth;
+		info.height = wantHeight;
 		info.layer_count_or_depth = 1;
 		info.num_levels = 1;
 
-		SceneTexture = SDL_CreateGPUTexture(Device, &info);
-		if (!SceneTexture) {
+		target.Texture = SDL_CreateGPUTexture(Device, &info);
+		if (!target.Texture) {
 			ENGINE_ERROR("SDL_CreateGPUTexture (scene target): {}", SDL_GetError());
-			SceneWidth = 0;
-			SceneHeight = 0;
+			target.Width = 0;
+			target.Height = 0;
+
+			// The drawn rectangle goes with it. Leaving it set would have
+			// `SceneTextureExtent` divide by a texture that does not exist.
+			target.DrawnWidth = 0;
+			target.DrawnHeight = 0;
 			return false;
 		}
 		return true;
@@ -1048,9 +1140,11 @@ namespace engine::render {
 		if (State->SurfaceSampler) {
 			SDL_ReleaseGPUSampler(device, State->SurfaceSampler);
 		}
-		if (State->SceneTexture) {
-			SDL_ReleaseGPUTexture(device, State->SceneTexture);
-			State->SceneTexture = nullptr;
+		for (Impl::SceneSlot &slot : State->SceneSlots) {
+			if (slot.Texture) {
+				SDL_ReleaseGPUTexture(device, slot.Texture);
+				slot.Texture = nullptr;
+			}
 		}
 
 		// Anything a resize retired and no frame came along to free. Shutting
@@ -1152,10 +1246,30 @@ namespace engine::render {
 		return State->Headless();
 	}
 
-	void *Renderer::SceneTexture() const {
-		return State->SceneTexture;
+	void *Renderer::SceneTexture(size_t slot) const {
+		return slot < State->SceneSlots.size() ? State->SceneSlots[slot].Texture : nullptr;
 	}
 
+	SceneExtent Renderer::SceneTextureExtent(size_t slot) const {
+		if (slot >= State->SceneSlots.size()) {
+			return {};
+		}
+
+		const Impl::SceneSlot &target = State->SceneSlots[slot];
+
+		// **The whole texture when nothing has been drawn yet**, which is the
+		// honest answer rather than a safe one: a caller sampling a texture no
+		// pass has written is showing uninitialised memory whatever the
+		// coordinates say, and a fraction of it is not better than all of it.
+		if (target.Width == 0 || target.Height == 0) {
+			return {};
+		}
+
+		return SceneExtent{
+			static_cast<float>(target.DrawnWidth) / static_cast<float>(target.Width),
+			static_cast<float>(target.DrawnHeight) / static_cast<float>(target.Height),
+		};
+	}
 
 	BackendHandles Renderer::Backend() const {
 		BackendHandles handles;
@@ -1173,9 +1287,16 @@ namespace engine::render {
 		OverlayImage &overlay,
 		const SurfaceView *surface,
 		FrameOverlayHook *interfaceHook,
-		const SceneTarget *sceneTarget
+		const SceneTarget *sceneTarget,
+		size_t targetSlot
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
+
+		// **Which target this frame draws into, read by `EnsureScene`.** Passed
+		// through a member rather than an argument because `EnsureScene` is
+		// called from two places and threading a slot through both would put
+		// the same value in two signatures that must agree.
+		State->ActiveSlot = targetSlot;
 
 		FrameResult result;
 		if (!State->Device) {
@@ -1268,7 +1389,7 @@ namespace engine::render {
 			return result;
 		}
 
-		if (!offscreen && State->SceneTexture != nullptr) {
+		if (!offscreen && State->SlotAt(targetSlot).Texture != nullptr) {
 			// Nothing asked for a texture this frame, so last frame's is
 			// released rather than kept against a caller who might come back. A
 			// viewport panel that was closed should not go on costing its
@@ -1279,16 +1400,27 @@ namespace engine::render {
 		const uint32_t sceneWidth = offscreen ? sceneTarget->Width : width;
 		const uint32_t sceneHeight = offscreen ? sceneTarget->Height : height;
 
+		// **What the pass is drawing *onto*, which is not what it draws.** An
+		// offscreen target is allocated in blocks, so the attachment is at least
+		// as big as the world's rectangle and usually bigger; the world fills
+		// the corner and the viewport below is what confines it there. See
+		// `SCENE_TARGET_BLOCK`.
+		const uint32_t targetWidth = offscreen ? State->SlotAt(targetSlot).Width : width;
+		const uint32_t targetHeight = offscreen ? State->SlotAt(targetSlot).Height : height;
+
 		{
 			// Nothing at all on a steady window, and a texture allocation on the
 			// frame after a resize. Worth telling apart from the pass that uses
 			// it, because one is every frame and the other is one frame.
 			//
-			// **Sized to the scene rather than to the swapchain.** Depth is
-			// tested against the colour target the pass is drawing into, and a
-			// mismatched pair is a validation error rather than a clipped image.
+			// **Sized to the attachment rather than to the world.** SDL wants a
+			// depth target whose dimensions match the colour target it is bound
+			// beside, and the colour target is the block-rounded allocation —
+			// not the rectangle the world is drawn into. Sizing this to the
+			// world instead is a validation failure on the frames where the two
+			// differ, which is nearly all of them.
 			ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
-			if (!State->EnsureDepth(sceneWidth, sceneHeight)) {
+			if (!State->EnsureDepth(targetWidth, targetHeight)) {
 				SDL_SubmitGPUCommandBuffer(command);
 				return result;
 			}
@@ -1774,7 +1906,7 @@ namespace engine::render {
 		// debug overlay is in window pixels and the editor's chrome is the
 		// window — so this is the one target that moves.
 		SDL_GPUColorTargetInfo colourTarget{};
-		colourTarget.texture = offscreen ? State->SceneTexture : swapchain;
+		colourTarget.texture = offscreen ? State->SlotAt(targetSlot).Texture : swapchain;
 		colourTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
 		colourTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 		colourTarget.store_op = SDL_GPU_STOREOP_STORE;
@@ -1811,6 +1943,26 @@ namespace engine::render {
 			passes.Enter(Pass::Opaque);
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+
+			// **The world's rectangle inside an attachment that is larger than
+			// it.** Without this the pass inherits a viewport covering the whole
+			// texture, and a block-rounded target would draw the world into
+			// 1600x960 while the panel shows the 1600x900 corner — the image
+			// squashed by the rounding. Set once here and inherited by the
+			// transparent draws in the same pass. See `SCENE_TARGET_BLOCK`.
+			//
+			// Correct on the window path too, where the two sizes are equal and
+			// this restates the default rather than changing it.
+			const SDL_GPUViewport view{
+				0.0f, 0.0f, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight), 0.0f, 1.0f
+			};
+			SDL_SetGPUViewport(pass, &view);
+
+			// The scissor goes with it. A viewport shrinks what is drawn but
+			// does not clip what a pipeline with no depth test could still
+			// scribble outside it, and the border is memory nothing owns.
+			const SDL_Rect scissor{0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)};
+			SDL_SetGPUScissor(pass, &scissor);
 
 			if (haveInstances) {
 				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
@@ -2027,7 +2179,7 @@ namespace engine::render {
 				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
 				SDL_GPUTextureRegion source{};
-				source.texture = State->SceneTexture;
+				source.texture = State->SlotAt(targetSlot).Texture;
 				source.w = sceneWidth;
 				source.h = sceneHeight;
 				source.d = 1;

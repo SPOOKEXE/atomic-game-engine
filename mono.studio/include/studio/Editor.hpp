@@ -140,6 +140,14 @@ namespace studio {
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
 
+		// Open the second viewport at start-up.
+		//
+		// **Reachable without a person, for `Headless`'s reason.** The panels
+		// run headless and only the drawing is skipped, so a flag is what lets
+		// a capture prove that two viewports really do draw two worlds — a
+		// thing no screenshot can show on a machine somebody else is using.
+		bool ShowSecondViewport = false;
+
 		// Write a frame-graph snapshot here when the run ends.
 		//
 		// **What makes the editor's own frame profilable without a person
@@ -154,6 +162,14 @@ namespace studio {
 		// reading it.
 		std::filesystem::path ProfileSnapshot;
 
+		// How long a world with nobody in it keeps ticking before it closes.
+		//
+		// **On the command line because five minutes is untestable.** The
+		// default is a person's idea of "a while"; a check that a world closes
+		// at all cannot wait for it, and neither can somebody demonstrating the
+		// lifecycle.
+		float IdleCloseSeconds = 300.0f;
+
 		// Run with no window at all.
 		//
 		// **What makes the editor drivable by something that is not a person.**
@@ -165,6 +181,20 @@ namespace studio {
 		//
 		// Needs `--frames`, because a headless run has no window to close.
 		bool Headless = false;
+
+		// Present without waiting for vblank.
+		//
+		// **The client's flag, and an editor wants it for a reason a game does
+		// not.** A game uncaps to measure the frame instead of the display; an
+		// editor uncaps because the hands doing the work feel every millisecond
+		// between the mouse and the viewport. Paced to a 60 Hz panel that floor
+		// is 16.7 ms before the compositor has its turn, and on a machine whose
+		// other display runs at 165 Hz the difference is the whole complaint.
+		//
+		// Off by default, because a viewport spinning as fast as the GPU allows
+		// is a laptop with its fans up for a still picture. See
+		// `render::Renderer::SetVerticalSync`.
+		bool Uncapped = false;
 
 		// Write the world the viewport is showing to this file, then carry on.
 		//
@@ -266,7 +296,10 @@ namespace studio {
 		void DrawInterface();
 		void DrawMenuBar();
 		void DrawToolbar();
-		void DrawViewport();
+		// The world, as one viewport sees it.
+		//
+		// @param index 0 is the main viewport, 1 the second.
+		void DrawViewport(size_t index);
 		void DrawExplorer();
 		void DrawWorlds();
 		void DrawProperties();
@@ -317,7 +350,7 @@ namespace studio {
 		// from a stray keypress loses the view somebody had.
 		//
 		// @param position The camera position to adjust, in place.
-		void FocusSelection(engine::core::Vector3 &position);
+		void FocusSelection(engine::core::Vector3 &position, float yaw, float pitch);
 
 		// The editor camera, driven from the mouse and the keyboard.
 		//
@@ -325,6 +358,21 @@ namespace studio {
 		// whether a click belongs to the world or to a panel is a question only
 		// imgui can answer and only while a frame is open.
 		void DriveCamera();
+
+		// The camera rules, over whichever viewport the pointer is in.
+		//
+		// **One driver rather than one per panel.** Right-drag to look,
+		// middle-drag to pan, wheel to dolly, F to frame — the same in both
+		// views, and a second copy is a second place for them to drift apart.
+		void DriveCameraFor(
+			engine::core::CFrame &frame,
+			float &yaw,
+			float &pitch,
+			float &speed,
+			bool hovered,
+			bool active,
+			bool &panning
+		);
 
 		// One instance and its subtree, in the explorer.
 		void DrawTreeNode(engine::ecs::Store &store, WorldId world, Entity instance);
@@ -385,6 +433,36 @@ namespace studio {
 		// @return `false` when it could not be written, rebuilt, or either
 		//         world is remote. The source is left untouched on failure.
 		bool MoveInstanceToWorld(WorldId source, Entity instance, WorldId target, Entity parent);
+
+		// Opens and closes worlds as a player moves between them.
+		//
+		// **Roblox's place lifecycle, in one process.** A universe of a hundred
+		// subareas cannot tick all hundred: the ones nobody is in should cost
+		// their storage and nothing else, and the one somebody teleports into
+		// has to be running by the time they arrive. `world::WorldState` already
+		// has the vocabulary — Active, Idle, Suspended — and this is the policy
+		// that drives it.
+		//
+		// **Only while running.** In Edit nothing ticks anyway, so suspending a
+		// world there would be a state change with no effect that an author
+		// would then have to undo by hand.
+		void UpdateWorldLifecycle();
+
+		// Records that a world had a reason to be running, now.
+		//
+		// @param world The world to keep open.
+		void Touch(WorldId world);
+
+		// Moves the studio's player into a world, waking it if it is closed.
+		//
+		// **Wakes before it sends, not after.** A teleport routed to a
+		// suspended world is delivered — the directory still knows it — and
+		// then sits in an inbox nothing is draining, because a suspended world
+		// does not tick. Waking first is what makes arrival mean arrival.
+		//
+		// @param target The world to move to.
+		// @return `false` when the world is unknown or remote.
+		bool TeleportPlayer(WorldId target);
 
 		// How many instances a scene holds, recounted on a clock.
 		//
@@ -592,7 +670,52 @@ namespace studio {
 
 		// How big a texture the world is drawn into, from the viewport panel's
 		// content rectangle. See `render::SceneTarget`.
+		// One per viewport panel, indexed by `ViewportState::Slot`.
+		//
+		// **Separate targets rather than one shared**, because the two panels
+		// are different sizes: a single target would be reallocated twice a
+		// frame as each asked for its own dimensions.
 		engine::render::SceneTarget WorldTarget;
+
+		// What a viewport panel is looking at, and from where.
+		//
+		// **A camera per panel, and neither is world state.** Two panels
+		// sharing one camera would be one view drawn twice; the whole point of
+		// the second is to watch a different world, or the same world from
+		// somewhere else, while the first stays where it was put.
+		struct ViewportState {
+			// Which world it draws, or invalid to follow the active one.
+			WorldId World;
+
+			engine::render::SceneTarget Target;
+
+			engine::core::CFrame Frame;
+			float Yaw = 0.0f;
+			float Pitch = 0.0f;
+			float Speed = 24.0f;
+
+			bool Hovered = false;
+			bool Active = false;
+			bool Panning = false;
+
+			bool Open = false;
+		};
+
+		// The second viewport. The first is the fields above, which predate it
+		// and which every other panel already reads.
+		ViewportState Second;
+
+		// **Which viewport the renderer draws this frame.** `Renderer::Render`
+		// owns the whole frame — it acquires the swapchain, records the
+		// interface and presents — so it draws one world per call. Two panels
+		// therefore take turns: each keeps its own target and its own texture,
+		// and shows the most recent frame drawn into it.
+		//
+		// The cost is that two open viewports refresh at half the frame rate
+		// each. That is honest for an editor watching two worlds and it is not
+		// the end state: drawing both in one frame is a change to `Render` to
+		// take a list of views, which is task #17.
+		size_t DrawingViewport = 0;
 
 		// --- dialogs -----------------------------------------------------------
 		//
@@ -726,6 +849,13 @@ namespace studio {
 		WorldId PendingRemoveWorld;
 		WorldId PendingActivate;
 		WorldId PendingDuplicateWorld;
+		WorldId PendingTeleport;
+
+		// A world whose state a menu asked to change, and what to. Both, so
+		// that Open and Close are one queued action rather than two flags that
+		// can disagree.
+		WorldId PendingWorldState;
+		engine::world::WorldState PendingWorldStateTo = engine::world::WorldState::Active;
 		WorldId PendingRenameWorld;
 		std::string PendingRenameTo;
 		bool PendingDuplicate = false;
@@ -750,6 +880,45 @@ namespace studio {
 		};
 
 		std::vector<InstanceCount> InstanceCounts;
+
+		// --- the world lifecycle ----------------------------------------------
+
+		// When a world last had a reason to be running.
+		struct WorldLife {
+			WorldId World;
+
+			// Frame-clock time of the last activity: an arrival, an occupant,
+			// or somebody looking at it.
+			double LastActivity = 0.0;
+		};
+
+		std::vector<WorldLife> Lives;
+
+		// Whether worlds close themselves when nobody is in them.
+		//
+		// Off would mean a universe of subareas ticking all of them forever,
+		// which is the thing `WorldState::Suspended` exists to prevent — but it
+		// is a policy, and an author debugging a world that keeps closing under
+		// them needs a way to stop it.
+		bool AutoManageWorlds = true;
+
+		// How long a world with nobody in it keeps ticking before it closes.
+		//
+		// Five minutes by default, which is Roblox's own place-shutdown grace
+		// and long enough that an author who walked away from one subarea to
+		// build in another does not come back to a stopped clock. Set from
+		// `Options::IdleCloseSeconds`.
+		float IdleCloseSeconds = 300.0f;
+
+		// Which world the studio's player token is in.
+		//
+		// **The editor's own notion of "where somebody is", and it is not a
+		// character.** There is no player instance in this program; what the
+		// lifecycle needs is one authoritative answer to "is this world
+		// occupied", and a token the editor moves is one it cannot get wrong.
+		// A script's own teleports are picked up separately, through the
+		// destination's inbox.
+		WorldId PlayerWorld;
 
 		bool Running = false;
 		int64_t FramesDrawn = 0;

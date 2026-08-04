@@ -140,6 +140,8 @@ namespace studio {
 		// is a flag that gets stuck.
 		ShowStatistics = Settings.ShowStatistics;
 		ShowFrameGraph = Settings.ShowFrameGraph;
+		IdleCloseSeconds = Settings.IdleCloseSeconds;
+		Second.Open = Settings.ShowSecondViewport;
 
 		// Before anything reads a file. Changing it later would leave whatever
 		// had already loaded pointing at the old tree.
@@ -169,6 +171,14 @@ namespace studio {
 		// Null when headless, which is what puts the renderer in that mode.
 		if (!Renderer.Initialise(Window)) {
 			return false;
+		}
+
+		// **After the renderer and only with a window**, because the present
+		// mode belongs to a swapchain and a headless run has none. The client
+		// makes the same call for `--uncapped`; see `Options::Uncapped` for why
+		// an editor wants it for a different reason.
+		if (Settings.Uncapped && !Settings.Headless && !Renderer.SetVerticalSync(false)) {
+			ENGINE_WARN("--uncapped had no effect; frames stay paced by the display");
 		}
 
 		engine::ui::InterfaceSettings interfaceSettings;
@@ -228,6 +238,14 @@ namespace studio {
 		CameraYaw = -0.6f;
 		CameraPitch = -0.45f;
 		CameraFrame = CFrame(Vector3{18.0f, 14.0f, 18.0f});
+
+		// **The second viewport starts where the first does.** Left at the
+		// identity it sits at the origin looking down an axis, which is inside
+		// or past whatever the world holds — a panel that opens showing nothing
+		// reads as a panel that does not work, and that is exactly how it read.
+		Second.Yaw = CameraYaw;
+		Second.Pitch = CameraPitch;
+		Second.Frame = CameraFrame;
 
 		// After the game is loaded and the camera is placed, because starting a
 		// run needs worlds to start it in.
@@ -345,7 +363,19 @@ namespace studio {
 			return;
 		}
 
+		// **Before the tick, so a world woken this frame ticks this frame.**
+		// Opening a world and then not running it until the next frame is a
+		// teleport that arrives one frame late for no reason anybody could
+		// find.
+		UpdateWorldLifecycle();
+
 		ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
+
+		// **Every world, together.** `Universe::Tick` runs them under the
+		// universe's `ExecutionMode`, which is `WorldParallel` by default — so
+		// subworlds are already simulated alongside each other rather than one
+		// after another, and suspending the empty ones is what keeps that
+		// affordable.
 		Universe->Tick(frameSeconds);
 	}
 
@@ -453,18 +483,48 @@ namespace studio {
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {
+		// **Which panel this frame draws.** `Renderer::Render` owns the whole
+		// frame — swapchain, interface, present — so it draws one world per
+		// call. With both viewports open they take turns: each holds its own
+		// target and shows the last texture drawn into it, so each refreshes at
+		// half the frame rate. Drawing both in one frame means `Render` taking
+		// a list of views, which is a change to the shared renderer and is
+		// tracked separately.
+		const bool bothOpen = ShowViewport && Second.Open;
+		DrawingViewport = bothOpen ? (DrawingViewport ^ 1u) : (ShowViewport ? 0u : (Second.Open ? 1u : 0u));
+
+		const bool drawingSecond = DrawingViewport == 1;
+
+		// **The second panel defaults to a *different* world, not to the active
+		// one.** Two viewports showing the same world is one view drawn twice
+		// at half the rate — strictly worse than one viewport, and the first
+		// thing somebody opening the second one would see. Where there is only
+		// one world it follows the active one, because a blank panel is worse
+		// than a duplicate.
+		if (drawingSecond && !Second.World.IsValid()) {
+			for (const WorldId id : Universe->Worlds()) {
+				if (id != Active) {
+					Second.World = id;
+					break;
+				}
+			}
+		}
+
+		const WorldId shown =
+			drawingSecond ? (Second.World.IsValid() ? Second.World : Active) : Active;
+
 		// PreRender runs whether or not the simulation did: it is the phase
 		// that turns state into something to draw, and an edited world's state
 		// changes without a tick.
-		if (Active.IsValid()) {
-			Universe->Present(Active, frameSeconds, Universe->AlphaOf(Active));
+		if (shown.IsValid()) {
+			Universe->Present(shown, frameSeconds, Universe->AlphaOf(shown));
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
 		std::vector<engine::scene::DrawInstance> drawn;
 
-		if (Active.IsValid()) {
-			Universe->Enter(Active, [&](Store &store) {
+		if (shown.IsValid()) {
+			Universe->Enter(shown, [&](Store &store) {
 				if (const auto *list = store.Resource<client::DrawList>()) {
 					// Copied out rather than borrowed. The renderer's call
 					// happens outside `Enter`, and a span into a store nobody
@@ -476,18 +536,23 @@ namespace studio {
 			instances = &drawn;
 		}
 
+		const engine::core::CFrame &eye = drawingSecond ? Second.Frame : CameraFrame;
+		const float reach = drawingSecond ? Second.Speed : CameraSpeed;
+		engine::render::SceneTarget &target = drawingSecond ? Second.Target : WorldTarget;
+
 		engine::scene::Camera lens;
-		lens.FarPlane = std::max(lens.FarPlane, CameraSpeed * 40.0f);
+		lens.FarPlane = std::max(lens.FarPlane, reach * 40.0f);
 
 		LastFrame = Renderer.Render(
-			CameraFrame,
+			eye,
 			lens,
 			instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 								 : std::span<const engine::scene::DrawInstance>{},
 			Overlay,
 			nullptr,
 			&Interface,
-			WorldTarget.IsValid() ? &WorldTarget : nullptr
+			target.IsValid() ? &target : nullptr,
+			DrawingViewport
 		);
 
 		// **Presented, or simply drawn when there is nowhere to present.**
@@ -1026,6 +1091,13 @@ namespace studio {
 		// A run always starts running. Carrying a pause across Stop and Play
 		// would be a game that came up frozen for a reason nobody could see.
 		Paused = false;
+
+		// **The player starts in the world being looked at.** A run whose
+		// player was nowhere would have every world idle from the first frame,
+		// and the lifecycle would close all but one of them before anybody had
+		// pressed anything.
+		PlayerWorld = Active;
+		Lives.clear();
 
 		for (const WorldId id : Universe->Worlds()) {
 			if (Universe->IsRemote(id)) {

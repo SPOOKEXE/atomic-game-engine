@@ -83,6 +83,26 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::TextDisabled("remembered in the layout file, beside the panel positions");
 
+		ImGui::SeparatorText("Worlds");
+
+		// **The lifecycle is a policy, so it has a switch.** A universe of
+		// subareas cannot tick all of them, which is what closing empty worlds
+		// is for — but an author debugging a world that keeps closing under
+		// them needs to be able to stop it happening rather than work out why.
+		ImGui::Checkbox("Close empty worlds automatically", &AutoManageWorlds);
+
+		ImGui::BeginDisabled(!AutoManageWorlds);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+
+		float minutes = IdleCloseSeconds / 60.0f;
+		if (ImGui::SliderFloat("Close after", &minutes, 0.5f, 30.0f, "%.1f min")) {
+			IdleCloseSeconds = minutes * 60.0f;
+		}
+		ImGui::EndDisabled();
+
+		ImGui::TextDisabled("a world with no player and nobody looking at it stops ticking;");
+		ImGui::TextDisabled("teleporting into a closed world opens it first");
+
 		ImGui::SeparatorText("Interface");
 
 		// The scale the whole interface is built from. Not applied live on

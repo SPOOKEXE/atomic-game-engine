@@ -172,6 +172,31 @@ namespace engine::render {
 		}
 	};
 
+	// How much of a slot's texture the world was actually drawn into.
+	//
+	// **The texture is bigger than the panel on purpose, and this is how a
+	// caller finds the part that is the picture.** A target allocated to the
+	// panel's exact size has to be destroyed and created again on every frame
+	// of a drag — and worse than the allocation, the *new* texture is not the
+	// one the interface already recorded a bind of, so the panel spends the
+	// whole drag showing the previous frame's image stretched to a rectangle it
+	// was never drawn for. Rounding the allocation up to a block keeps one
+	// texture alive across the whole drag, which means the image the panel
+	// samples is the one this frame drew.
+	//
+	// What that costs is a border of pixels nothing draws into, and what it
+	// needs is for whoever shows the texture to sample only the corner that is
+	// the world. These are those coordinates: `(0, 0)` to `(U, V)`.
+	//
+	// @since v0.7
+	struct SceneExtent {
+		// The right edge of the drawn region, as a fraction of the texture.
+		float U = 1.0f;
+
+		// The bottom edge of the drawn region, as a fraction of the texture.
+		float V = 1.0f;
+	};
+
 	// The backend handles a hook needs to build its own pipelines.
 	//
 	// **Opaque on purpose.** `Device` is an `SDL_GPUDevice *` and `ColourFormat`
@@ -396,20 +421,51 @@ namespace engine::render {
 			OverlayImage &overlay,
 			const SurfaceView *surface = nullptr,
 			FrameOverlayHook *interfaceHook = nullptr,
-			const SceneTarget *sceneTarget = nullptr
+			const SceneTarget *sceneTarget = nullptr,
+			size_t targetSlot = 0
 		);
 
-		// The texture the most recent `Render` drew the world into.
+		// The texture the most recent `Render` drew that slot's world into.
 		//
-		// **Valid until the next `Render` with a different size**, which is when
-		// the target is reallocated. An interface layer hands it straight to
+		// **Slots exist because an editor has more than one viewport.** A game
+		// draws one view of one world and only ever uses slot 0. A studio
+		// showing a server's world beside a client's keeps a target per panel —
+		// and they must be *separate* targets, because the panels are different
+		// sizes and a single shared one would be reallocated twice a frame as
+		// each panel asked for its own dimensions. That reallocation is
+		// measurable: it is a colour and a depth texture destroyed and created
+		// per frame.
+		//
+		// **Valid until the next `Render` into that slot with a different
+		// size**, which is when the target is reallocated. An interface layer hands it straight to
 		// whatever draws it — for Dear ImGui's SDL_GPU backend that is an
 		// `ImTextureID`, which is an `SDL_GPUTexture *` and therefore this
 		// pointer unchanged.
 		//
-		// @return The texture, or `nullptr` when the last frame drew to the
-		//         window.
-		void *SceneTexture() const;
+		// @param slot Which offscreen target to ask about. A program with one
+		//             viewport uses 0 and never passes this.
+		// @return The texture, or `nullptr` when nothing has been drawn into
+		//         that slot.
+		void *SceneTexture(size_t slot = 0) const;
+
+		// Which corner of that slot's texture the world is in.
+		//
+		// **It describes the texture `SceneTexture` returns right now**, which
+		// is the one an interface recording a bind right now will sample — so
+		// the two are read together and stay a matched pair through a resize.
+		// On the frame a target is reallocated the interface binds the outgoing
+		// texture, and this reports the outgoing texture's rectangle with it.
+		//
+		// While a panel is merely being dragged the allocation does not change,
+		// so this trails the rectangle the frame is about to draw by one frame's
+		// worth of drag — under a pixel of scale, against a whole stale frame
+		// stretched to the wrong shape before targets were allocated in blocks.
+		// See `SceneExtent`.
+		//
+		// @param slot Which offscreen target to ask about.
+		// @return The drawn fraction, or the whole texture when that slot has
+		//         never been drawn into.
+		SceneExtent SceneTextureExtent(size_t slot = 0) const;
 
 		// Writes the next offscreen frame's world to a file, once.
 		//

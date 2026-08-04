@@ -1,7 +1,10 @@
 #include <engine/game/Game.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
+#include <engine/world/Postbox.hpp>
 
+#include <algorithm>
+#include <cstdio>
 #include <client/Scene.hpp>
 #include <imgui.h>
 #include <studio/Editor.hpp>
@@ -108,6 +111,16 @@ namespace studio {
 				ImGui::PopStyleColor();
 			}
 
+			// Where the player is, which is the fact that decides whether this
+			// world stays open. Shown rather than inferred from the state
+			// column: "active" and "occupied" are different claims.
+			if (world == PlayerWorld) {
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+				ImGui::TextUnformatted("(player)");
+				ImGui::PopStyleColor();
+			}
+
 			// --- what it is doing ----------------------------------------------
 			//
 			// **State rather than tick rate.** A world's configured rate is a
@@ -160,6 +173,35 @@ namespace studio {
 			PendingActivate = world;
 		}
 
+		// **Teleport is not Set Active, and the difference is what the
+		// lifecycle turns on.** Set Active moves the *viewport*: it decides
+		// which world is drawn and edited, and costs nothing. Teleport moves
+		// the player: it opens the destination if it is closed, and starts the
+		// clock on the world being left. One is where you are looking; the
+		// other is where somebody is standing.
+		if (ImGui::MenuItem("Teleport Player Here", nullptr, world == PlayerWorld, local && world != PlayerWorld)) {
+			PendingTeleport = world;
+		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem(
+				"Close", nullptr, false,
+				local && Universe->StateOf(world) != engine::world::WorldState::Suspended &&
+					world != PlayerWorld && Universe->Count() > 1
+			)) {
+			PendingWorldState = world;
+			PendingWorldStateTo = engine::world::WorldState::Suspended;
+		}
+
+		if (ImGui::MenuItem(
+				"Open", nullptr, false,
+				local && Universe->StateOf(world) == engine::world::WorldState::Suspended
+			)) {
+			PendingWorldState = world;
+			PendingWorldStateTo = engine::world::WorldState::Active;
+		}
+
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Rename...", nullptr, false, editing && local)) {
@@ -188,6 +230,146 @@ namespace studio {
 		// no way back is worse than a menu item that is greyed out.
 		if (ImGui::MenuItem("Remove", nullptr, false, editing && Universe->Count() > 1)) {
 			PendingRemoveWorld = world;
+		}
+	}
+
+	bool Editor::TeleportPlayer(WorldId target) {
+		if (!target.IsValid() || Universe->NameOf(target) == Name{}) {
+			return false;
+		}
+
+		if (Universe->IsRemote(target)) {
+			Say("that world is held by another host", engine::core::LogLevel::Warning);
+			return false;
+		}
+
+		// **Woken before anything is sent to it.** A teleport addressed to a
+		// suspended world routes and is delivered — the directory still knows
+		// the world exists — and then sits in an inbox nothing drains, because
+		// a suspended world does not tick. The arrival would happen whenever
+		// somebody happened to resume it, which is not arrival.
+		if (Universe->StateOf(target) == engine::world::WorldState::Suspended) {
+			Universe->SetState(target, engine::world::WorldState::Active);
+			Say("opened '" + std::string(Label(Universe->NameOf(target))) + "'");
+		}
+
+		const WorldId from = PlayerWorld;
+		PlayerWorld = target;
+
+		// The destination is busy from this instant rather than from its first
+		// tick, so the idle timer cannot close it in the gap between being
+		// woken and being arrived in.
+		Touch(target);
+
+		if (from.IsValid() && from != target) {
+			// The world being left starts its clock now. It is not closed here
+			// — somebody may teleport straight back, and a world that shut the
+			// moment its last occupant stepped out would spend its life
+			// starting and stopping.
+			Touch(from);
+			Say("teleported from '" + std::string(Label(Universe->NameOf(from))) + "' to '" +
+				std::string(Label(Universe->NameOf(target))) + "'");
+		} else {
+			Say("player is in '" + std::string(Label(Universe->NameOf(target))) + "'");
+		}
+
+		return true;
+	}
+
+	void Editor::Touch(WorldId world) {
+		for (WorldLife &life : Lives) {
+			if (life.World == world) {
+				life.LastActivity = Clock.Now();
+				return;
+			}
+		}
+		Lives.push_back(WorldLife{world, Clock.Now()});
+	}
+
+	void Editor::UpdateWorldLifecycle() {
+		// **Only while something is running.** In Edit no world ticks, so
+		// suspending one changes nothing an author can see and leaves a state
+		// they have to put back by hand.
+		if (Mode == RunMode::Edit || !AutoManageWorlds) {
+			return;
+		}
+
+		const double now = Clock.Now();
+
+		for (const WorldId world : Universe->Worlds()) {
+			if (Universe->IsRemote(world)) {
+				continue;
+			}
+
+			const engine::world::WorldState state = Universe->StateOf(world);
+
+			// **A suspended world's inbox is the one queue nothing drains**,
+			// which is exactly what makes this reliable rather than a poll that
+			// races the tick. A running world replaces its inbox every barrier,
+			// so a message can come and go between two frames; a suspended one
+			// holds whatever arrived until it runs again. So anything sitting
+			// here is a teleport — or a message — waiting on a world that is
+			// closed, and the answer is to open it.
+			if (state == engine::world::WorldState::Suspended) {
+				bool waiting = false;
+				Universe->Enter(world, [&waiting](Store &store) {
+					if (const auto *inbox = store.Resource<engine::world::Inbox>()) {
+						waiting = !inbox->Arrived.empty();
+					}
+				});
+
+				if (waiting) {
+					Universe->SetState(world, engine::world::WorldState::Active);
+					Touch(world);
+					Say("opened '" + std::string(Label(Universe->NameOf(world))) +
+						"' — something arrived for it");
+				}
+				continue;
+			}
+
+			// Occupied, or being looked at *in either viewport*. Any of those is
+			// a reason to keep running: closing a world somebody is watching
+			// would freeze it in front of them with no visible cause.
+			//
+			// **The second viewport counts, and forgetting it was a bug this
+			// caught.** With two panels open on two worlds, the one that was
+			// not the active scene was closed under the panel showing it —
+			// which looks exactly like the second viewport being broken.
+			const bool watchedSecond = Second.Open && Second.World == world;
+
+			if (world == PlayerWorld || world == Active || watchedSecond) {
+				Touch(world);
+				continue;
+			}
+
+			const auto found = std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
+				return life.World == world;
+			});
+
+			if (found == Lives.end()) {
+				// First seen. Its clock starts now rather than at zero, so a
+				// world created during a run is not immediately eligible.
+				Lives.push_back(WorldLife{world, now});
+				continue;
+			}
+
+			if (now - found->LastActivity < static_cast<double>(IdleCloseSeconds)) {
+				continue;
+			}
+
+			// **Never the last one.** A universe with every world suspended is
+			// a game that has stopped without saying so.
+			if (Universe->Count() <= 1) {
+				continue;
+			}
+
+			Universe->SetState(world, engine::world::WorldState::Suspended);
+			// Formatted rather than truncated: an integer cast turns the 0.3
+			// somebody passed to `--idle-close` into "empty for 0s", which
+			// reads as a world that closed for no reason.
+			char elapsed[32];
+			std::snprintf(elapsed, sizeof(elapsed), "%.4g", static_cast<double>(IdleCloseSeconds));
+			Say("closed '" + std::string(Label(Universe->NameOf(world))) + "' — empty for " + elapsed + "s");
 		}
 	}
 
@@ -253,6 +435,23 @@ namespace studio {
 			const WorldId source = PendingDuplicateWorld;
 			PendingDuplicateWorld = WorldId{};
 			DuplicateWorld(source);
+		}
+
+		if (PendingTeleport.IsValid()) {
+			const WorldId target = PendingTeleport;
+			PendingTeleport = WorldId{};
+			TeleportPlayer(target);
+		}
+
+		if (PendingWorldState.IsValid()) {
+			const WorldId world = PendingWorldState;
+			const engine::world::WorldState to = PendingWorldStateTo;
+			PendingWorldState = WorldId{};
+
+			Universe->SetState(world, to);
+			Touch(world);
+			Say(std::string(to == engine::world::WorldState::Suspended ? "closed '" : "opened '") +
+				std::string(Label(Universe->NameOf(world))) + "'");
 		}
 
 		if (PendingRenameWorld.IsValid()) {

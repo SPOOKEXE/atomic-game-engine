@@ -18,10 +18,12 @@ int main(int argc, char **argv) {
 
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Flag("headless", "Run with no window (needs --frames)");
+	arguments.Flag("uncapped", "Present without waiting for vblank");
 
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
 	arguments.Flag("stats", "Open the statistics panel (F7)");
 	arguments.Flag("graph", "Open the frame graph (F8)");
+	arguments.Flag("viewport2", "Open the second viewport");
 
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
 	arguments.Value("width", "PX", "Window width (default 1600)");
@@ -31,6 +33,7 @@ int main(int argc, char **argv) {
 	arguments.Value("frames", "N", "Exit after N presented frames");
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
+	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 
@@ -55,8 +58,10 @@ int main(int argc, char **argv) {
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	options.Headless = arguments.Has("headless");
+	options.Uncapped = arguments.Has("uncapped");
 	options.ShowStatistics = arguments.Has("stats");
 	options.ShowFrameGraph = arguments.Has("graph");
+	options.ShowSecondViewport = arguments.Has("viewport2");
 
 	// A headless run has no window to close, so without a budget it would never
 	// stop. Refused rather than given a default, because a default here is a
@@ -90,6 +95,7 @@ int main(int argc, char **argv) {
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
 	}
+	options.IdleCloseSeconds = static_cast<float>(arguments.GetNumber("idle-close", options.IdleCloseSeconds));
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.Assets = std::filesystem::path(*assets);
 	}
