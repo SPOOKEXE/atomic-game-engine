@@ -1544,17 +1544,22 @@ namespace studio {
 				// refreshed a third as often. One client view is the feature;
 				// the rest are reachable from the scene selector like any other
 				// world.
-				const bool alreadyShown = std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
-					return other.Link != nullptr && other.Link->IsRunning();
-				});
+				const bool anotherIsShown =
+					std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
+						return other.Link != nullptr && other.Link->IsRunning();
+					});
 
-				const WorldId replica = link->ReplicaWorld();
-				for (ViewportState &view : Extras) {
-					if (alreadyShown) {
-						break;
-					}
+				// **Hoisted out of the loop it disables.** It cannot change
+				// across iterations, so testing it inside the body made a reader
+				// check every iteration for a mutation that is not there.
+				if (!anotherIsShown) {
+					const WorldId replica = link->ReplicaWorld();
 
-					if (!view.World.IsValid() || view.World == replica) {
+					for (ViewportState &view : Extras) {
+						if (view.World.IsValid() && view.World != replica) {
+							continue;
+						}
+
 						view.World = replica;
 						view.Open = true;
 

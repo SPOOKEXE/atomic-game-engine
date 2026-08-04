@@ -342,7 +342,12 @@ namespace client {
 				// other transparency in this engine — and the shader multiplies
 				// by the opposite, so converting at the boundary beats one
 				// subtraction in a shader nobody can put a breakpoint in.
-				surface.ImageOpacity = 1.0f - std::clamp(target.ImageTransparency, 0.0f, 1.0f);
+				// **Not clamped here.** The property setter is the authored gate
+				// and `Renderer` clamps again at its own boundary because
+				// `SurfaceView` is a public struct any host fills — a third copy
+				// in between makes none of the three read as the authority, and
+				// a future widening of the range has to find all of them.
+				surface.ImageOpacity = 1.0f - target.ImageTransparency;
 			}
 		);
 		return found;

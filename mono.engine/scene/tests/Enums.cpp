@@ -15,7 +15,6 @@ using engine::scene::BodyKind;
 using engine::scene::Describe;
 using engine::scene::NormalId;
 using engine::scene::NormalOf;
-using engine::scene::ServiceScope;
 using engine::scene::ShapeKind;
 
 TEST_CASE("every body kind has a name", "[scene][enums]") {
@@ -111,14 +110,4 @@ TEST_CASE("opposite faces have opposite normals", "[scene][enums]") {
 		INFO("ordinal " << static_cast<int>(index));
 		CHECK(NormalOf(static_cast<NormalId>(index)).MagnitudeSquared() == 1.0f);
 	}
-}
-
-// --- service scopes ---------------------------------------------------------
-
-TEST_CASE("every service scope has a name", "[scene][enums]") {
-	// A diagnostic rather than a format — nothing parses these back — so what
-	// matters is only that none of them falls through to "?".
-	CHECK(std::string(Describe(ServiceScope::Shared)) == "shared");
-	CHECK(std::string(Describe(ServiceScope::Server)) == "server");
-	CHECK(std::string(Describe(ServiceScope::Client)) == "client");
 }

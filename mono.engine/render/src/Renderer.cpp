@@ -1820,13 +1820,15 @@ namespace engine::render {
 		if (opaqueCount > 0) {
 			ENGINE_PROFILE_CAT("partition surfaces", core::ProfileCategory::Render);
 
-			const auto opaqueEnd = State->DrawOrder.begin() + static_cast<ptrdiff_t>(opaqueCount);
-			const auto boundary =
-				std::stable_partition(State->DrawOrder.begin(), opaqueEnd, [&](uint32_t index) {
-					return State->VisibleInstances[index].Surface < 0;
-				});
-
-			surfaceInCamera = static_cast<uint32_t>(std::distance(boundary, opaqueEnd));
+			// **`scene::PartitionSurfaces`, not a fourth copy of it.** The
+			// comment forty lines down insists the mirror partition lives in
+			// `scene` "where a headless suite can get at them" — and this file
+			// had two hand-rolled copies of it, which is what that sentence
+			// exists to prevent. They are one function now, and it is the tested
+			// one.
+			surfaceInCamera = static_cast<uint32_t>(scene::PartitionSurfaces(
+				State->VisibleInstances, std::span<uint32_t>(State->DrawOrder.data(), opaqueCount)
+			));
 		}
 		const auto plainOpaque = static_cast<uint32_t>(opaqueCount) - surfaceInCamera;
 
@@ -1845,13 +1847,10 @@ namespace engine::render {
 		if (transparentCount > 0) {
 			ENGINE_PROFILE_CAT("partition blended surfaces", core::ProfileCategory::Render);
 
-			const auto tailBegin = State->DrawOrder.begin() + static_cast<ptrdiff_t>(opaqueCount);
-			const auto tailEnd = tailBegin + static_cast<ptrdiff_t>(transparentCount);
-			const auto boundary = std::stable_partition(tailBegin, tailEnd, [&](uint32_t index) {
-				return State->VisibleInstances[index].Surface < 0;
-			});
-
-			transparentSurfaces = static_cast<uint32_t>(std::distance(boundary, tailEnd));
+			transparentSurfaces = static_cast<uint32_t>(scene::PartitionSurfaces(
+				State->VisibleInstances,
+				std::span<uint32_t>(State->DrawOrder.data() + opaqueCount, transparentCount)
+			));
 		}
 		const uint32_t plainTransparent = transparentCount - transparentSurfaces;
 
@@ -2228,12 +2227,22 @@ namespace engine::render {
 				result.DrawCalls++;
 			}
 
-			if (sceneTransparent > 0) {
+			// **The blended tail *minus* the mirrors in it**, which is the half
+			// this pass was missing. The opaque head already excludes them —
+			// `sceneReflected` is the non-mirror run — for the reason a mirror
+			// must not appear in its own reflection: it sits between its camera
+			// and the world and would fill the texture with itself. A pane that
+			// went transparent moved from the head to the tail and stopped being
+			// excluded, so a faded mirror reflected itself.
+			//
+			// `plan.TransparentSurfaces` is exactly that count and was computed
+			// and then read by nobody, which is the state this line fixes.
+			if (sceneTransparent > plan.TransparentSurfaces) {
 				SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
 				SDL_DrawGPUIndexedPrimitives(
 					pass,
 					static_cast<uint32_t>(CUBE_INDICES.size()),
-					sceneTransparent,
+					sceneTransparent - plan.TransparentSurfaces,
 					0,
 					0,
 					static_cast<uint32_t>(sceneOpaque)
@@ -2475,11 +2484,25 @@ namespace engine::render {
 
 					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
 
-					if (plainTransparent > 0) {
+					// **One draw for the plain run, and the "no texture yet"
+					// case folds into its count.** The mirrors sit contiguously
+					// at the end of the tail, so a frame with no surface texture
+					// — the first one, or a scene whose camera has not rendered
+					// — simply draws the whole tail plainly. That is better than
+					// skipping them: a pane that disappears until the mirror
+					// warms up is worse than one that is briefly its own colour.
+					//
+					// It used to be an `if`/`else if` whose two branches issued
+					// byte-identical draws, including the three-term
+					// `first_instance` arithmetic — the most error-prone line in
+					// this function, written twice.
+					const uint32_t blended = State->SurfaceReady ? plainTransparent : transparentCount;
+
+					if (blended > 0) {
 						SDL_DrawGPUIndexedPrimitives(
 							pass,
 							static_cast<uint32_t>(CUBE_INDICES.size()),
-							plainTransparent,
+							blended,
 							0,
 							0,
 							sceneCount + static_cast<uint32_t>(opaqueCount)
@@ -2491,7 +2514,7 @@ namespace engine::render {
 					// and same sort, different uniform: this run is the one that
 					// samples the surface texture, so a pane at any transparency
 					// still shows its reflection at the image's own opacity.
-					if (transparentSurfaces > 0 && State->SurfaceReady) {
+					if (State->SurfaceReady && transparentSurfaces > 0) {
 						SDL_PushGPUFragmentUniformData(command, 0, &mirrored, sizeof(mirrored));
 
 						SDL_DrawGPUIndexedPrimitives(
@@ -2507,21 +2530,6 @@ namespace engine::render {
 						result.SurfaceInstances += transparentSurfaces;
 
 						SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
-					} else if (transparentSurfaces > 0) {
-						// No surface texture this frame — the first frame, or a
-						// scene whose camera has not rendered yet. Drawn plainly
-						// rather than skipped: a pane that disappears until the
-						// mirror warms up is worse than one that is briefly its
-						// own colour.
-						SDL_DrawGPUIndexedPrimitives(
-							pass,
-							static_cast<uint32_t>(CUBE_INDICES.size()),
-							transparentSurfaces,
-							0,
-							0,
-							sceneCount + static_cast<uint32_t>(opaqueCount) + plainTransparent
-						);
-						result.DrawCalls++;
 					}
 				}
 

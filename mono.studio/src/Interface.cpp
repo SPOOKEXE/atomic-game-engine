@@ -239,31 +239,55 @@ namespace studio {
 		// the rules — right-drag to look, middle-drag to pan, wheel to dolly, F
 		// to frame, WASD to fly — are the same in all of them.
 		//
-		// The order is the whole of it. A viewport under the pointer is the one
-		// a mouse gesture means, whichever panel was last clicked; a viewport
-		// with the keyboard in it is the one WASD means, wherever the pointer
-		// has wandered off to. Asking the pointer first and falling back to
-		// focus gives both without either overriding the other, because a
-		// gesture and a keypress cannot arrive at the same panel by different
-		// routes.
+		// The order is the whole of it. A viewport under the pointer is the one a
+		// mouse gesture means, whichever panel was last clicked; a viewport with
+		// the keyboard in it is the one WASD means, wherever the pointer has
+		// wandered off to. Asking the pointer first and falling back to focus
+		// gives both without either overriding the other.
+		//
+		// **Which panel, resolved once, then driven once.** This was four call
+		// sites of an eight-argument function spread over four early returns —
+		// and two of them were provably the same call, one passing a computed
+		// expression and the other a hard-coded `true` for the same value. A
+		// ninth parameter would have meant four more edits, and the signature
+		// grew by one the last time it was touched.
+		constexpr size_t NONE = ~size_t{0};
+		size_t target = NONE;
+
 		for (size_t index = 1; index <= EXTRA_VIEWPORTS; index++) {
-			ViewportState &view = Extras[index - 1];
+			const ViewportState &view = Extras[index - 1];
 			if (view.Open && (view.Hovered || view.Active || view.Panning)) {
-				DriveCameraFor(
-					view.Frame,
-					view.Yaw,
-					view.Pitch,
-					view.Speed,
-					view.Hovered,
-					view.Active,
-					view.Panning,
-					FocusedIsViewport && FocusedViewport == index
-				);
-				return;
+				target = index;
+				break;
 			}
 		}
 
-		if (ViewportHovered || ViewportActive || ViewportPanning) {
+		if (target == NONE && (ViewportHovered || ViewportActive || ViewportPanning)) {
+			target = 0;
+		}
+
+		// Nothing under the pointer, so the keyboard's panel gets the frame —
+		// but only if the keyboard is genuinely in a viewport. `FocusedViewport`
+		// alone still names one after a click into the properties panel, which is
+		// right for the transport readout and wrong here. See
+		// `ResolveFocusedViewport`, which runs earlier this frame.
+		if (target == NONE && FocusedIsViewport) {
+			ViewportState *focused = ExtraAt(FocusedViewport);
+			if (focused == nullptr || focused->Open) {
+				target = FocusedViewport;
+			}
+		}
+
+		if (target == NONE) {
+			return;
+		}
+
+		// `ExtraAt` returns null for index 0, which is the main viewport's own
+		// fields — the one place the extras array does not hold the state.
+		ViewportState *view = ExtraAt(target);
+		const bool focused = FocusedIsViewport && FocusedViewport == target;
+
+		if (view == nullptr) {
 			DriveCameraFor(
 				CameraFrame,
 				CameraYaw,
@@ -272,45 +296,14 @@ namespace studio {
 				ViewportHovered,
 				ViewportActive,
 				ViewportPanning,
-				FocusedIsViewport && FocusedViewport == 0
+				focused
 			);
 			return;
 		}
 
-		// Nothing under the pointer, so the keyboard's panel gets the frame —
-		// but only if the keyboard is genuinely in a viewport. `FocusedViewport`
-		// alone still names one after a click into the properties panel, which
-		// is right for the transport readout and wrong here. Both are resolved
-		// earlier this frame; see `ResolveFocusedViewport`.
-		if (!FocusedIsViewport) {
-			return;
-		}
-
-		if (ViewportState *focused = ExtraAt(FocusedViewport); focused != nullptr) {
-			if (focused->Open) {
-				DriveCameraFor(
-					focused->Frame,
-					focused->Yaw,
-					focused->Pitch,
-					focused->Speed,
-					focused->Hovered,
-					focused->Active,
-					focused->Panning,
-					true
-				);
-			}
-			return;
-		}
-
 		DriveCameraFor(
-			CameraFrame,
-			CameraYaw,
-			CameraPitch,
-			CameraSpeed,
-			ViewportHovered,
-			ViewportActive,
-			ViewportPanning,
-			true
+			view->Frame, view->Yaw, view->Pitch, view->Speed, view->Hovered, view->Active, view->Panning,
+			focused
 		);
 	}
 

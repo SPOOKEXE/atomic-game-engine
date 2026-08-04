@@ -186,6 +186,30 @@ namespace engine::scene {
 	// @return How many at the front of `order` cast a shadow.
 	size_t PartitionCasters(std::span<const DrawInstance> instances, std::span<uint32_t> order);
 
+	// Moves the instances that show a surface to the back of an order, in place.
+	//
+	// **The twin of `PartitionCasters`, and it exists because there were four
+	// copies of it.** The same `stable_partition` on `Surface < 0` was written
+	// inline in `OrderScene` twice and in the renderer twice, and the copies had
+	// already drifted: two spelled the out-of-range guard `index >= size() ||
+	// Surface < 0` and two spelled it `index < size() && Surface < 0`, which put
+	// a bad index in opposite runs. One helper is what stops that being a thing
+	// anyone has to notice.
+	//
+	// **Stable**, so a run that was sorted back-to-front stays sorted inside each
+	// half — the mirrors keep their depth order and so does everything else.
+	//
+	// **Returns without touching the order when nothing shows a surface**, which
+	// is every scene with no mirror in it. `stable_partition` allocates a
+	// temporary buffer, so the scan that avoids it is not a micro-optimisation:
+	// it is the difference between a per-frame heap allocation in the render path
+	// and none.
+	//
+	// @param instances The draw list the indices refer to.
+	// @param order     Indices into `instances`, reordered in place.
+	// @return How many at the *back* of `order` show a surface.
+	size_t PartitionSurfaces(std::span<const DrawInstance> instances, std::span<uint32_t> order);
+
 	// Where each pass over the scene range starts, and how long it is.
 	//
 	// **The index arithmetic three passes share, in one place that can be

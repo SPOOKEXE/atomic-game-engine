@@ -480,90 +480,6 @@ namespace engine::scene {
 		//
 		// A `Vector2` rather than two properties: a width without a height is
 		// half a target, and two writes means a frame where the two disagree.
-		// Transparency, clamped to what it can mean.
-		//
-		// **A plain field binding could not do this, which is why it stopped
-		// being one.** `Transparency` is a fraction: below zero and above one
-		// both describe nothing, and the renderer does not defend itself against
-		// either — a negative value makes a blend factor greater than one and the
-		// pane comes out brighter than the world behind it, while a value above
-		// one silently behaves like one. Neither is an error anybody could trace
-		// back to the assignment that caused it.
-		//
-		// Clamped rather than refused, because this is a continuous quantity
-		// somebody arrived at by arithmetic: a fade driven off a sine or a
-		// distance overshoots by a hair at the ends, and refusing the write would
-		// make a smooth fade stutter at exactly the two values it is aiming for.
-		// An enum is refused because a wrong name means nothing; a number out of
-		// range has an obvious nearest meaning.
-		PropertyDescriptor TransparencyProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("Transparency");
-			property.Type = PropertyType::Float;
-			property.Size = sizeof(float);
-			property.Kind = PropertyKind::Field;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const Visual *visual = store.Get<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				*static_cast<float *>(out) = visual->Transparency;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				Visual *visual = store.GetMutable<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				visual->Transparency = std::clamp(*static_cast<const float *>(value), 0.0f, 1.0f);
-				return true;
-			};
-
-			return property;
-		}
-
-		// The projected image's own opacity, clamped for `Transparency`'s reason.
-		//
-		// **Two opacities, because a mirror is two things.** The part's
-		// `Transparency` is how much of the world shows through the glass; this
-		// is how much of the glass shows through the reflection. One number
-		// cannot say both, and until this there was only one — so fading a mirror
-		// faded its reflection with it and there was no way to author a
-		// transparent pane that still reflects.
-		PropertyDescriptor ImageTransparencyProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("ImageTransparency");
-			property.Type = PropertyType::Float;
-			property.Size = sizeof(float);
-			property.Kind = PropertyKind::Field;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const SurfaceCamera *surface = store.Get<SurfaceCamera>(instance);
-				if (surface == nullptr) {
-					return false;
-				}
-				*static_cast<float *>(out) = surface->ImageTransparency;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				SurfaceCamera *surface = store.GetMutable<SurfaceCamera>(instance);
-				if (surface == nullptr) {
-					return false;
-				}
-				surface->ImageTransparency = std::clamp(*static_cast<const float *>(value), 0.0f, 1.0f);
-				return true;
-			};
-
-			return property;
-		}
-
 		// Which face of the parent part the surface camera projects off.
 		//
 		// An enum rather than a number, so `camera.Face = "Frnot"` is refused
@@ -571,11 +487,22 @@ namespace engine::scene {
 		// nobody chose. Membership is `EnumTable`'s, and the storage is the
 		// ordinal — Roblox's ordinal, so a game file carrying a number means the
 		// same thing in both engines.
+		// Interned once. `Name.hpp` states the rule this was breaking in as many
+		// words — "not free, so do it once and keep the result rather than
+		// constructing from a literal inside a loop" — and a property getter read
+		// every frame by an immediate-mode properties panel is that loop. Each
+		// construction took the global name-registry mutex and hashed a string,
+		// on top of the `EnumTable` mutex the lookup already takes.
+		const core::Name &NormalIdEnum() {
+			static const core::Name name("NormalId");
+			return name;
+		}
+
 		PropertyDescriptor FaceProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Face");
 			property.Type = PropertyType::Enum;
-			property.EnumName = core::Name("NormalId");
+			property.EnumName = NormalIdEnum();
 			property.Size = sizeof(core::Name);
 			property.Kind = PropertyKind::Field;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
@@ -587,7 +514,7 @@ namespace engine::scene {
 					return false;
 				}
 				*static_cast<core::Name *>(out) =
-					ecs::EnumTable::MemberAt(core::Name("NormalId"), static_cast<size_t>(surface->Face));
+					ecs::EnumTable::MemberAt(NormalIdEnum(), static_cast<size_t>(surface->Face));
 				return true;
 			};
 
@@ -599,7 +526,7 @@ namespace engine::scene {
 
 				size_t ordinal = 0;
 				if (!ecs::EnumTable::OrdinalOf(
-						core::Name("NormalId"), *static_cast<const core::Name *>(value), ordinal
+						NormalIdEnum(), *static_cast<const core::Name *>(value), ordinal
 					)) {
 					return false;
 				}
@@ -715,7 +642,7 @@ namespace engine::scene {
 			for (size_t index = 0; index < normals.size(); index++) {
 				normals[index] = Describe(static_cast<NormalId>(index));
 			}
-			ecs::EnumTable::Register("NormalId", normals);
+			ecs::EnumTable::Register(NormalIdEnum().Text(), normals);
 
 			// The default collision group, so `CollisionGroup` reads back
 			// something a script can compare rather than an invalid name on a
@@ -838,7 +765,19 @@ namespace engine::scene {
 			// with the sorted pass that makes it mean something rather than
 			// ahead of it. A float nothing draws is a field that lies, and it
 			// would have sat in a snapshot and a delta being read by nobody.
-			ecs::Classes::Computed(basePart, TransparencyProperty());
+			//
+			// **Not clamped, deliberately.** It was, briefly. Roblox does not
+			// clamp this either — `part.Transparency = 2` reads back as 2 — and
+			// the reason to match is not fidelity for its own sake: a script that
+			// drives a fade by arithmetic and reads the value back expects what
+			// it wrote, and a property that silently rewrites its input is one an
+			// author debugs by disbelieving their own assignment.
+			//
+			// The renderer is where the range has to hold, and that is a
+			// different place from where it is authored. `SurfaceCamera::
+			// ImageTransparency` below is still clamped because it is not
+			// Roblox's property and has no such expectation to honour.
+			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
 
 			// **The third of the three, and they are three questions rather
 			// than one.** `Visible` decides whether the part is submitted at
@@ -869,7 +808,9 @@ namespace engine::scene {
 
 			// The surface camera's two. `SurfaceSize` above is inherited, so a
 			// `SurfaceCamera` can still be resized like any other.
-			ecs::Classes::Computed(surfaceCameraClass, ImageTransparencyProperty());
+			ecs::Classes::ClampedProperty<&SurfaceCamera::ImageTransparency, 0.0f, 1.0f>(
+				surfaceCameraClass, "ImageTransparency"
+			);
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
 
 			// Still not declared, and for a reason rather than an oversight:

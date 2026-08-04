@@ -358,26 +358,32 @@ TEST_CASE("a replica refuses a property write", "[scene][part]") {
 
 // --- the two opacities ------------------------------------------------------
 
-TEST_CASE("Transparency is clamped to what it can mean", "[scene][part]") {
+TEST_CASE("Transparency stores what a script wrote, out of range included", "[scene][part]") {
 	Store store("transparency_test");
 	const Entity part = MakePart(store, PartDesc{});
 
-	// **Clamped rather than refused, and the distinction is deliberate.** A
-	// transparency is a continuous quantity somebody usually arrives at by
-	// arithmetic — a fade driven off a sine or a distance overshoots by a hair
-	// at both ends — so refusing the write would make a smooth fade stutter at
-	// exactly the two values it is aiming for. An enum is refused because a
-	// wrong name means nothing; a number out of range has an obvious nearest
-	// meaning.
+	// **Not clamped, and this is an assertion rather than an absence.** It was
+	// clamped for one commit. Roblox does not clamp this — `part.Transparency =
+	// 2` reads back as 2 — and matching that is not fidelity for its own sake: a
+	// script that drives a fade by arithmetic and reads the value back expects
+	// what it wrote, and a property that silently rewrites its input is one an
+	// author debugs by disbelieving their own assignment.
+	//
+	// Where the range has to hold is the renderer, which is a different place
+	// from where the value is authored. `SurfaceCamera::ImageTransparency` is
+	// still clamped, because it is not Roblox's property and has no such
+	// expectation to honour.
 	REQUIRE(Write(store, part, "Transparency", 2.5f));
-	CHECK(Read<float>(store, part, "Transparency") == 1.0f);
+	CHECK(Read<float>(store, part, "Transparency") == 2.5f);
 
 	REQUIRE(Write(store, part, "Transparency", -3.0f));
+	CHECK(Read<float>(store, part, "Transparency") == -3.0f);
+
+	// The ordinary range round-trips exactly, which is the half that would still
+	// hold under a clamp and is worth pinning either way.
+	REQUIRE(Write(store, part, "Transparency", 0.0f));
 	CHECK(Read<float>(store, part, "Transparency") == 0.0f);
 
-	// The ends themselves are legal, which is what makes the clamp a clamp
-	// rather than an exclusive range: 0 is an ordinary opaque part and 1 is a
-	// pane you can still collide with.
 	REQUIRE(Write(store, part, "Transparency", 1.0f));
 	CHECK(Read<float>(store, part, "Transparency") == 1.0f);
 

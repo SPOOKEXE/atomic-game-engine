@@ -76,6 +76,26 @@ namespace engine::scene {
 		);
 	}
 
+	size_t PartitionSurfaces(std::span<const DrawInstance> instances, std::span<uint32_t> order) {
+		const auto shows = [instances](uint32_t index) {
+			return index < instances.size() && instances[index].Surface >= 0;
+		};
+
+		// **The scan first, because the common scene has no mirror in it.**
+		// `stable_partition` allocates a temporary buffer whatever it finds, and
+		// with every `Surface` at its default of -1 the partition is a provable
+		// no-op — so a mirrorless frame was paying an allocation and two passes
+		// to reorder nothing.
+		if (std::none_of(order.begin(), order.end(), shows)) {
+			return 0;
+		}
+
+		const auto boundary = std::stable_partition(order.begin(), order.end(), [&shows](uint32_t index) {
+			return !shows(index);
+		});
+		return static_cast<size_t>(std::distance(boundary, order.end()));
+	}
+
 	ScenePlan OrderScene(
 		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
 	) {
@@ -85,19 +105,13 @@ namespace engine::scene {
 		plan.Opaque = static_cast<uint32_t>(opaque);
 		plan.Transparent = static_cast<uint32_t>(instances.size() - opaque);
 
-		// **Mirrors to the back of the blended tail, keeping their sort.** A
-		// `stable_partition` preserves the back-to-front order inside each run,
-		// so what changes is only which run a pane is in — see
+		// **Mirrors to the back of the blended tail, keeping their sort.** See
 		// `ScenePlan::TransparentSurfaces` for why they go last and what that
 		// costs.
 		if (plan.Transparent > 0) {
-			const std::span<uint32_t> tail(order.data() + opaque, plan.Transparent);
-			const auto boundary =
-				std::stable_partition(tail.begin(), tail.end(), [instances](uint32_t index) {
-					return index >= instances.size() || instances[index].Surface < 0;
-				});
-
-			plan.TransparentSurfaces = static_cast<uint32_t>(std::distance(boundary, tail.end()));
+			plan.TransparentSurfaces = static_cast<uint32_t>(
+				PartitionSurfaces(instances, std::span<uint32_t>(order.data() + opaque, plan.Transparent))
+			);
 		}
 
 		if (opaque == 0) {
@@ -114,11 +128,7 @@ namespace engine::scene {
 		// Physically right as well as necessary: nothing sees itself in its own
 		// reflection.
 		const std::span<uint32_t> head(order.data(), opaque);
-		const auto boundary = std::stable_partition(head.begin(), head.end(), [instances](uint32_t index) {
-			return index < instances.size() && instances[index].Surface < 0;
-		});
-
-		plan.Surfaces = static_cast<uint32_t>(std::distance(boundary, head.end()));
+		plan.Surfaces = static_cast<uint32_t>(PartitionSurfaces(instances, head));
 		plan.Reflected = plan.Opaque - plan.Surfaces;
 
 		// Casters within each of those two runs. Nested rather than replacing

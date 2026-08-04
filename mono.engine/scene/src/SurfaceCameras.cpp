@@ -6,6 +6,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 namespace engine::scene {
@@ -19,35 +20,37 @@ namespace engine::scene {
 
 		// The half-extent along a face's own axis.
 		//
-		// **Half, not the full size, and the distinction has bitten this
-		// repository once already.** `Bounds::HalfExtent` is half of a full
-		// extent — the whole reason `Size` is a conversion rather than a member
-		// pointer — so a plane placed at the full extent sits a whole part
-		// outside the part it belongs to, and the reflection lands nowhere near
-		// the pane.
+		// **Derived from `NormalOf` rather than switching on the face again.**
+		// A face normal is axis-aligned and unit, so a dot with the half-extent
+		// picks exactly the matching axis and `abs` drops the sign — which means
+		// this cannot disagree with `NormalOf` about which axis a face lives on.
+		// It was a second switch, twenty lines away and in another file from the
+		// first, and a seventh face would have had to be added to both.
+		//
+		// **Half, not the full size**, which is the distinction `Bounds` exists
+		// to keep: a plane placed at the full extent sits a whole part outside
+		// the part it belongs to.
 		float ReachOf(const Bounds &bounds, NormalId face) {
-			switch (face) {
-			case NormalId::Right:
-			case NormalId::Left:
-				return bounds.HalfExtent.X;
-			case NormalId::Top:
-			case NormalId::Bottom:
-				return bounds.HalfExtent.Y;
-			case NormalId::Back:
-			case NormalId::Front:
-				return bounds.HalfExtent.Z;
-			}
-			return bounds.HalfExtent.Z;
+			return std::abs(NormalOf(face).Dot(bounds.HalfExtent));
 		}
 
 		// The cameras to place, collected before anything is written.
 		//
-		// **Collected first because placing one is a write and the walk is a
-		// read.** `Set<Transform>` may move the row the walk is standing on, and
-		// setting the parent's `Visual::Surface` can move *its* row too — an
-		// iteration that wrote as it went would be walking a table moving
-		// underneath it. Same argument `Store::FlushSignals` makes about
-		// collecting the changed set before firing.
+		// **Not for safety — `Each` already makes writing inside it safe — but
+		// to stay off the deferred path.** The first version of this comment said
+		// a `Set` would move the row the walk was standing on. That is false
+		// twice over: `Transform` is a query term so it is always present, which
+		// takes `SetComponent`'s "already present, nothing moves" branch, and
+		// `Each` opens a `DeferScope` anyway, so a structural change would be
+		// queued rather than applied underneath the iteration.
+		//
+		// The real cost is that same `DeferScope`: a `Set` inside the loop is
+		// queued as a command with a **heap-allocated copy of the component**,
+		// once per camera per frame. Writing after the loop, where the defer
+		// depth is back to zero, is a direct column assign and allocates
+		// nothing. That is the whole reason for the two passes, and it is worth
+		// stating correctly because the wrong reason would have justified
+		// deleting them.
 		struct Aim {
 			Entity Camera;
 			Entity Part;
@@ -101,18 +104,23 @@ namespace engine::scene {
 					return;
 				}
 
-				// The face, rotated into the world. `CFrame` composition rather
-				// than a matrix by hand, so a rotated pane reflects along the
-				// direction it actually faces.
+				// The face, rotated into the world, so a rotated pane reflects
+				// along the direction it actually faces.
+				//
+				// **`VectorToWorldSpace`, not a `CFrame` composition.** This
+				// was `(frame * CFrame(local)).Position - frame.Position`, which
+				// runs a whole quaternion multiply and a discarded normalise to
+				// reach what one rotate gives — and loses precision for a pane
+				// far from the origin, by adding the position and subtracting it
+				// again. `RightVector`/`UpVector`/`LookVector` in the same header
+				// are this call.
+				//
+				// The result is already unit: `NormalOf` returns unit vectors and
+				// a `CFrame`'s quaternion is kept normalised on construction. The
+				// `sqrt`, the zero-length guard and the reciprocal multiply that
+				// used to follow could never change the answer.
 				const CFrame &frame = placement->Frame;
-				const Vector3 local = NormalOf(target.Face);
-				const Vector3 normal = (frame * CFrame(local)).Position - frame.Position;
-
-				const float length = std::sqrt(normal.Dot(normal));
-				if (length < 1e-6f) {
-					return;
-				}
-				const Vector3 unit = normal * (1.0f / length);
+				const Vector3 unit = frame.VectorToWorldSpace(NormalOf(target.Face));
 
 				// The middle of the face: the part's centre pushed out to the
 				// surface along that normal.
@@ -146,11 +154,34 @@ namespace engine::scene {
 			}
 		);
 
+		// **Every write is guarded on the value actually differing, and that is
+		// not a micro-optimisation.** `Set` marks the row dirty and `GetMutable`
+		// marks it by the act of handing out the pointer — it says so itself. So
+		// an unconditional write here is three dirty marks per mirror per frame,
+		// for ever, on a mirror nobody has moved.
+		//
+		// That is invisible in a client store that observes nothing and expensive
+		// everywhere else: `mono.server` observes `scene::Transform`, so a static
+		// mirror would emit a `Transform` delta for its camera and a `Visual`
+		// delta for its pane on **every tick of the game**, and a script watching
+		// the pane would get a `Changed` fan-out over every one of its properties
+		// at the same rate. A derived value that has not changed is not a write.
 		for (const Aim &aim : pending) {
-			store.Set(aim.Camera, Transform{aim.Frame});
+			// **Bitwise, and that is the right comparison rather than a lazy
+			// one.** `CFrame` is seven floats with no equality operator, and what
+			// is being asked is "did this frame's arithmetic produce what last
+			// frame's did" — the same inputs through the same code give the same
+			// bits, so an exact compare answers exactly that. A tolerance would
+			// be answering a different question and would let a slow drift
+			// accumulate unreported.
+			const Transform *placed = store.Get<Transform>(aim.Camera);
+			if (placed == nullptr || std::memcmp(&placed->Frame, &aim.Frame, sizeof(CFrame)) != 0) {
+				store.Set(aim.Camera, Transform{aim.Frame});
+			}
 
-			if (Camera *lens = store.GetMutable<Camera>(aim.Camera); lens != nullptr) {
-				lens->NearPlane = aim.NearPlane;
+			if (const Camera *lens = store.Get<Camera>(aim.Camera);
+				lens != nullptr && lens->NearPlane != aim.NearPlane) {
+				store.GetMutable<Camera>(aim.Camera)->NearPlane = aim.NearPlane;
 			}
 
 			// **The part is told what it shows, so a mirror is a camera parented
@@ -158,8 +189,9 @@ namespace engine::scene {
 			// as well is one fact recorded twice, and its failure mode is a
 			// camera rendering perfectly into a texture nothing samples — which
 			// looks exactly like a mirror that does not work.
-			if (Visual *visual = store.GetMutable<Visual>(aim.Part); visual != nullptr) {
-				visual->Surface = aim.Surface;
+			if (const Visual *visual = store.Get<Visual>(aim.Part);
+				visual != nullptr && visual->Surface != aim.Surface) {
+				store.GetMutable<Visual>(aim.Part)->Surface = aim.Surface;
 			}
 		}
 

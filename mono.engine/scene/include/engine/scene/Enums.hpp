@@ -158,16 +158,6 @@ namespace engine::scene {
 		Client,
 	};
 
-	// Returns a stable, human-readable name for a service scope.
-	//
-	// For logs and the studio's own panels. A diagnostic like the two above it,
-	// not a format like `Describe(NormalId)` — nothing parses these back and
-	// `ServiceScope` is written by name where it crosses.
-	//
-	// @param scope The scope to name.
-	// @return A view valid for the lifetime of the process.
-	const char *Describe(ServiceScope scope);
-
 	// Returns the face's name.
 	//
 	// **This one round-trips, unlike its two neighbours.** `Describe(BodyKind)`
