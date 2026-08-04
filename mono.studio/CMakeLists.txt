@@ -30,6 +30,13 @@ mono_add_library(studio
 		# rather than something this program owns.
 		Engine::game
 
+		# The example scenes, for `ExamplePath` alone — a new place comes up
+		# with the mirror script in it, and finding that file is the one thing
+		# this needs. **Not `LoadScene`**: the editor installs the example as a
+		# `Script` instance and lets Play run it, rather than building its
+		# geometry behind an author's back.
+		Engine::examples
+
 		# L12, `client`. The renderer, and the interface layer that records into
 		# its frames. `Engine::ui` is where Dear ImGui lives; nothing else in
 		# the repository links it.

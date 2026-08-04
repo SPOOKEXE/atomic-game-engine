@@ -387,11 +387,6 @@ which each step has a caller.
 The rendering and camera work this version already carried, unchanged:
 
 - [_] `mono.engine/examples/Mirrors-4-worlds.luau` and `.ts` — split-screen across worlds running in parallel via multi-process. Four `ViewChannel` producers and one compositor, which v0.2 already built and `--worlds N` already drives with a synthetic scene. This demo is what proves the cross-process view path end to end. Both files exist and are empty, same as the v0.6 pair. **Four rather than the two this line used to say**, because the names in the tree are the ones the ports will take and two of anything is the count at which a bug in the placement loop still looks like correct behaviour
-- [_] CurrentCamera
-- [_] basic character controls
-- [_] basic controls (enable/disable/shift-lock)
-- [_] basic camera and controls (zoom, pan, control camera via script)
-- [_] UserInputService and ContextActionService
 
 ### v0.9
 
@@ -413,10 +408,17 @@ The rendering and camera work this version already carried, unchanged:
 - [_] put infront mirrors to see if it works with texture rendering
 - [_] scripts that create MeshPart and set mesh properties (surfaceappearance equivalent but as components).
 - [_] finish replication for server/client, server authoritative
+- [_] for server/client play, create two different scenes for Server-view and Client-view as two separate viewports. Also allow running subworlds together and teleporting between worlds in studio.
+- [_] in studio, add automatic startup and closing of worlds when player teleports between them (e.g. 5 minutes no activity in empty world => closes, teleport to world that is not loaded => load it)
 
 ### v0.10
 
 - [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
+- [_] CurrentCamera
+- [_] basic character controls
+- [_] basic controls (enable/disable/shift-lock)
+- [_] basic camera and controls (zoom, pan, control camera via script)
+- [_] UserInputService and ContextActionService
 
 ### v0.11
 

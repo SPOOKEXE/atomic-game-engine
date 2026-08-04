@@ -280,6 +280,33 @@ namespace engine::game {
 		world::Universe &universe, core::Name name, const std::filesystem::path &path, std::string &error
 	);
 
+	// Adds a game file's worlds to a universe, keeping what is already there.
+	//
+	// **The merging counterpart to `LoadGame`, and the reason both exist.**
+	// Loading replaces: it empties the universe first, because one that is half
+	// of one game and half of another is `ecs::Store::Load`'s hazard a layer up.
+	// Importing is the other operation — bringing a colleague's scenes into the
+	// game already open — and it is what `ImportWorld` does for one world.
+	//
+	// A world whose name is taken is renamed with a numeric suffix rather than
+	// refused; two worlds cannot share a name and being made to guess a free
+	// one is the worse answer.
+	//
+	// **A failure part-way keeps what already read.** The worlds imported
+	// before the bad one are good, and discarding them because the fourth scene
+	// names a missing class would throw away work that loaded perfectly.
+	//
+	// @param universe The universe to add to.
+	// @param path     The `.agame` to read.
+	// @param out      Filled in with what the file said, and the names the
+	//                 worlds were actually created under.
+	// @param error    Filled in with why, when fewer worlds arrived than the
+	//                 file held.
+	// @return How many worlds were created.
+	size_t ImportUniverse(
+		world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error
+	);
+
 	// Replaces a universe's worlds with a game file's.
 	//
 	// **Every existing world is destroyed first**, for `ecs::Store::Load`'s

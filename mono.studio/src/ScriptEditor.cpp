@@ -3,6 +3,7 @@
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <algorithm>
 #include <imgui.h>
 #include <string>
 #include <studio/Editor.hpp>
@@ -104,6 +105,30 @@ namespace studio {
 							ImGui::PopStyleColor();
 						}
 
+						// The zoom, beside the state it applies to. A control
+						// nobody can find is a control that only exists for
+						// people who already knew the wheel did something.
+						ImGui::SameLine();
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+						ImGui::Text("   %.0f%%", static_cast<double>(ScriptZoom * 100.0f));
+						ImGui::PopStyleColor();
+
+						ImGui::SameLine();
+						if (ImGui::SmallButton("-")) {
+							ScriptZoom = std::clamp(ScriptZoom - 0.1f, 0.6f, 3.0f);
+						}
+						ImGui::SameLine();
+						if (ImGui::SmallButton("+")) {
+							ScriptZoom = std::clamp(ScriptZoom + 0.1f, 0.6f, 3.0f);
+						}
+						ImGui::SameLine();
+						if (ImGui::SmallButton("Reset")) {
+							ScriptZoom = 1.0f;
+						}
+						if (ImGui::IsItemHovered()) {
+							ImGui::SetTooltip("Ctrl+wheel over the code zooms it");
+						}
+
 						ImGui::Separator();
 
 						// **The monospace face, which is what makes this a code
@@ -114,8 +139,34 @@ namespace studio {
 						// a font this repository did not have; it has four now.
 						const engine::ui::ScopedFont code(engine::ui::Typeface::Monospace);
 
+						// **Zoom, and it scales the font rather than the
+						// interface.** `Options::Scale` rebuilds every metric
+						// in the editor and needs a restart to rasterise the
+						// faces at the new size; this is one panel's text, and
+						// wanting bigger code is not wanting a bigger
+						// properties panel. `SetWindowFontScale` stretches the
+						// glyphs the atlas already has, which is why it costs
+						// nothing and why it goes soft a long way from 1.
+						ImGui::SetWindowFontScale(ScriptZoom);
+
 						if (CodeField("##text", tab.Text, -1.0f, -1.0f)) {
 							tab.Modified = true;
+						}
+
+						// **Restored before the panel ends.** The scale is a
+						// property of the window rather than of the widget, so
+						// leaving it set would zoom this tab's title and every
+						// other thing drawn in the panel after it.
+						ImGui::SetWindowFontScale(1.0f);
+
+						// Ctrl+wheel over the text, which is what every editor
+						// binds it to. Guarded on hovering the field so that
+						// scrolling the tab bar or the panel does not resize
+						// the code by accident.
+						if (ImGui::IsItemHovered() && ImGui::GetIO().KeyCtrl) {
+							if (const float wheel = ImGui::GetIO().MouseWheel; wheel != 0.0f) {
+								ScriptZoom = std::clamp(ScriptZoom + wheel * 0.1f, 0.6f, 3.0f);
+							}
 						}
 
 						// Ctrl+S inside the editor saves the *script*, not the

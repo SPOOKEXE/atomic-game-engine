@@ -140,6 +140,20 @@ namespace studio {
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
 
+		// Write a frame-graph snapshot here when the run ends.
+		//
+		// **What makes the editor's own frame profilable without a person
+		// watching it.** The panel shows the frame in front of you, which is no
+		// use for a cost that only appears while a window is being dragged —
+		// the hands are busy and the panel is being resized along with
+		// everything else. A snapshot carries the recent *worst case* per span,
+		// so a run that was resized throughout says which span the resizing
+		// went into.
+		//
+		// Implies the frame graph: collection is off unless something is
+		// reading it.
+		std::filesystem::path ProfileSnapshot;
+
 		// Run with no window at all.
 		//
 		// **What makes the editor drivable by something that is not a person.**
@@ -291,6 +305,20 @@ namespace studio {
 		// is not part of `DrawMenuBar`.
 		void DrawShortcuts();
 
+		// Moves the camera back so the selection fills the view.
+		//
+		// **The aim is kept and only the distance changes.** Swinging the
+		// camera round to face the selection as well would move two things at
+		// once from one key, and the direction somebody is looking from is
+		// usually the direction they meant.
+		//
+		// Does nothing with an empty selection: there is no honest frame for
+		// "everything" that is not just the world bounds, and jumping to those
+		// from a stray keypress loses the view somebody had.
+		//
+		// @param position The camera position to adjust, in place.
+		void FocusSelection(engine::core::Vector3 &position);
+
 		// The editor camera, driven from the mouse and the keyboard.
 		//
 		// Called from inside the imgui frame rather than beside it, because
@@ -418,6 +446,28 @@ namespace studio {
 		bool ExportUniverse(const std::filesystem::path &path);
 		bool ImportWorldFile(const std::filesystem::path &path);
 
+		// Adds another game's worlds to this universe, keeping what is here.
+		//
+		// **Not Open.** Open replaces the universe; this merges into it, which
+		// is what `ImportWorldFile` does one level down. A world whose name is
+		// taken arrives under a suffixed one rather than being refused.
+		//
+		// @param path The `.agame` to read.
+		// @return `false` when nothing could be imported.
+		bool ImportUniverseFile(const std::filesystem::path &path);
+
+		// Puts the mirror example into a new place, as a script.
+		//
+		// **A `Script` instance rather than a scene run at edit time.** The
+		// example builds its world from code, and running it here would leave
+		// the result looking like geometry somebody placed — saved into every
+		// file made from a new place, with nothing in the tree to say where it
+		// came from. As a script it is content: visible, editable, run by Play
+		// and undone by Stop.
+		//
+		// @param store The world to install it into.
+		void InstallExampleScript(engine::ecs::Store &store);
+
 		WorldId AddWorld(engine::core::Name name);
 		void RemoveWorld(WorldId world);
 
@@ -487,6 +537,18 @@ namespace studio {
 
 		RunMode Mode = RunMode::Edit;
 
+		// Whether a run is held still.
+		//
+		// **Not a fourth `RunMode`, and the distinction is load-bearing.** The
+		// mode decides which scripts are running and what `IsServer` answers;
+		// pausing changes neither. It stops the clock — `Simulate` returns
+		// early — so the world keeps its runtimes, its connections and its
+		// snapshot, and unpausing carries on rather than starting again.
+		//
+		// Stop still restores the edit snapshot, so pausing is not a way to
+		// keep what a run built.
+		bool Paused = false;
+
 		// The universe as it was when Run was pressed. Restored by Stop.
 		std::vector<std::byte> EditSnapshot;
 
@@ -501,6 +563,14 @@ namespace studio {
 
 		std::vector<OpenScript> Scripts;
 		int ActiveScript = -1;
+
+		// How much bigger the code is drawn than the interface around it.
+		//
+		// **One zoom for the panel rather than one per tab.** Somebody who
+		// wants larger code wants it in every script they open, and a
+		// per-tab zoom is a setting that appears to reset itself every time
+		// they switch file.
+		float ScriptZoom = 1.0f;
 
 		std::deque<Message> Output;
 
@@ -535,6 +605,7 @@ namespace studio {
 		bool AskingExport = false;
 		bool AskingExportUniverse = false;
 		bool AskingImport = false;
+		bool AskingImportUniverse = false;
 		bool AskingNewWorld = false;
 		std::string PathBuffer;
 		std::string NameBuffer;
@@ -601,6 +672,13 @@ namespace studio {
 		// turning quickly.
 		bool ViewportHovered = false;
 		bool ViewportActive = false;
+
+		// Whether a middle-drag pan is in flight.
+		//
+		// Held for `ViewportActive`'s reason: a pan that stopped the moment the
+		// pointer left the panel would be unusable exactly when somebody is
+		// dragging the view a long way.
+		bool ViewportPanning = false;
 
 		// Which panels are open. Not saved here — imgui's ini remembers it, and
 		// a second copy would be the drift rule 2 is about. These are the

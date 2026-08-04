@@ -1,6 +1,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -18,6 +20,8 @@ namespace studio {
 	using engine::core::LogLevel;
 	using engine::core::Name;
 	using engine::core::Vector3;
+	using engine::ecs::Entity;
+	using engine::ecs::Store;
 
 	namespace {
 		// **The dockspace's id carries a version, and bumping it is how a new
@@ -106,6 +110,15 @@ namespace studio {
 		// The world goes into a texture now and the viewport is an ordinary
 		// panel showing it, so there is nothing to see through and no hole to
 		// punch. See `render::SceneTarget`.
+		// **Both bars before the dockspace, and that ordering was the bug.**
+		// `DockSpaceOverViewport` fills the viewport's *work area*, and
+		// `BeginMainMenuBar` and `BeginViewportSideBar` are what shrink that
+		// area. Drawing the toolbar afterwards put it underneath a dockspace
+		// covering the same rectangle — the strip was submitted every frame,
+		// with working buttons, and could not be seen or clicked.
+		DrawMenuBar();
+		DrawToolbar();
+
 		const ImGuiID dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
 
 		if (ResetLayout) {
@@ -122,8 +135,6 @@ namespace studio {
 			}
 		}
 
-		DrawMenuBar();
-		DrawToolbar();
 		DrawViewport();
 		DrawExplorer();
 		DrawWorlds();
@@ -145,6 +156,50 @@ namespace studio {
 		// the end of another is an action that silently does nothing the moment
 		// somebody closes the wrong window.
 		ApplyPendingActions();
+	}
+
+	void Editor::FocusSelection(Vector3 &position) {
+		if (Selection.empty() || !SelectionWorld.IsValid()) {
+			return;
+		}
+
+		// The selection's centre and how far it reaches, from the transforms
+		// themselves. Bounds would be better and `scene::Bounds` is on
+		// `BasePart` rather than on `Instance` — so a folder of parts would
+		// frame from nothing, and a position is the fact every instance has.
+		Vector3 centre;
+		size_t counted = 0;
+
+		const std::vector<Entity> selected = Selection;
+		Universe->Enter(SelectionWorld, [&](Store &store) {
+			for (const Entity instance : selected) {
+				if (!store.Alive(instance)) {
+					continue;
+				}
+				if (const auto *transform = store.Get<engine::scene::Transform>(instance)) {
+					centre = centre + transform->Frame.Position;
+					counted++;
+				}
+			}
+		});
+
+		if (counted == 0) {
+			// Selected, but nothing in it has a place in the world — a script,
+			// a service. Silent rather than a message: F over a folder is a
+			// keypress somebody makes by accident.
+			return;
+		}
+
+		centre = centre * (1.0f / static_cast<float>(counted));
+
+		// Backed off along the way the camera is already pointing. The distance
+		// is a constant rather than a function of the selection's size for the
+		// same reason the centre is a mean of positions: without bounds there
+		// is nothing to measure, and a fixed step is honest about that.
+		const CFrame rotation = CFrame::Angles(CameraPitch, CameraYaw, 0.0f);
+		position = centre - rotation.LookVector() * 18.0f;
+
+		CameraSpeed = 24.0f;
 	}
 
 	void Editor::DriveCamera() {
@@ -184,6 +239,7 @@ namespace studio {
 		const Vector3 forward = rotation.LookVector();
 		const Vector3 right = rotation.RightVector();
 
+		Vector3 position = CameraFrame.Position;
 		Vector3 move;
 		if (looking && !io.WantCaptureKeyboard) {
 			if (ImGui::IsKeyDown(ImGuiKey_W)) {
@@ -206,8 +262,47 @@ namespace studio {
 			}
 		}
 
+		// --- pan, dolly and focus -------------------------------------------
+		//
+		// **The three ways of getting somewhere that are not flying.** The
+		// right-drag flythrough above is how you *look*; it is a poor way to
+		// approach a specific part, which is what an editor is mostly for.
+		// These are Studio's, and they work whether or not the right button is
+		// down.
+
+		const bool overViewport = ViewportHovered && !io.WantCaptureMouse;
+
+		// Middle-drag slides the camera across its own plane, so the thing
+		// under the pointer stays roughly under the pointer.
+		if ((overViewport || ViewportPanning) && ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+			ViewportPanning = true;
+
+			// Scaled by distance-independent speed rather than by depth: there
+			// is no picked point to measure against, and a pan that changed
+			// pace with whatever happened to be in front of it is worse than
+			// one that is merely constant.
+			const float pace = CameraSpeed * 0.0016f;
+			position = position - right * (io.MouseDelta.x * pace);
+			position = position + rotation.UpVector() * (io.MouseDelta.y * pace);
+		} else if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+			ViewportPanning = false;
+		}
+
+		// **The wheel dollies when not looking and changes speed when it is.**
+		// Both are what somebody means by the wheel at those two moments, and
+		// the `looking` branch above already claimed the second — so this is
+		// the other half rather than a conflict.
+		if (overViewport && !looking && io.MouseWheel != 0.0f) {
+			position = position + forward * (io.MouseWheel * CameraSpeed * 0.12f);
+		}
+
+		// F frames the selection, which is the one navigation command that
+		// needs no aim at all.
+		if (overViewport && !io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+			FocusSelection(position);
+		}
+
 		const float length = std::sqrt(move.X * move.X + move.Y * move.Y + move.Z * move.Z);
-		Vector3 position = CameraFrame.Position;
 		if (length > 0.0001f) {
 			// **Wall time, and this is the one place in the program where that
 			// is right.** An editor camera is not simulation: it must move at
@@ -404,6 +499,15 @@ namespace studio {
 				AskingImport = true;
 				PathBuffer.clear();
 			}
+
+			// **Import rather than Open, and they are different operations.**
+			// Open replaces this universe with the file's; this adds the
+			// file's worlds to what is already here, renaming any whose name
+			// is taken. See `game::ImportUniverse`.
+			if (ImGui::MenuItem("Import Universe...", nullptr, false, true)) {
+				AskingImportUniverse = true;
+				PathBuffer.clear();
+			}
 			if (ImGui::MenuItem("Export Active World...", nullptr, false, Active.IsValid())) {
 				AskingExport = true;
 				PathBuffer = std::string(Label(Universe->NameOf(Active))) +
@@ -589,20 +693,24 @@ namespace studio {
 	}
 
 	void Editor::DrawToolbar() {
-		const ImGuiViewport *viewport = ImGui::GetMainViewport();
+		ImGuiViewport *viewport = ImGui::GetMainViewport();
 
-		// Pinned under the menu bar rather than docked, because a toolbar you
-		// can accidentally drag into the corner is a toolbar somebody loses.
-		ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x, viewport->WorkPos.y));
-		ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, 0.0f));
-		ImGui::SetNextWindowViewport(viewport->ID);
+		// **A side bar, not a window placed where a side bar would go.**
+		// `BeginViewportSideBar` reserves the strip out of the viewport's work
+		// area, which is the only thing that stops the dockspace from being
+		// laid over the top of it — the previous version positioned an
+		// ordinary window at `WorkPos` and was invisible for exactly that
+		// reason.
+		//
+		// Pinned rather than dockable, because a toolbar you can accidentally
+		// drag into a corner is a toolbar somebody loses.
+		const float height = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
 
 		constexpr ImGuiWindowFlags FLAGS = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
 										   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
-										   ImGuiWindowFlags_NoBringToFrontOnFocus |
-										   ImGuiWindowFlags_AlwaysAutoResize;
+										   ImGuiWindowFlags_NoScrollbar;
 
-		if (!ImGui::Begin("##toolbar", nullptr, FLAGS)) {
+		if (!ImGui::BeginViewportSideBar("##toolbar", viewport, ImGuiDir_Up, height, FLAGS)) {
 			ImGui::End();
 			return;
 		}
@@ -618,7 +726,19 @@ namespace studio {
 		}
 		ImGui::SameLine();
 
+		// **Pause between Run and Stop, and only while something runs.** It is
+		// the transport a person reaches for mid-run, so it sits where a
+		// transport does; disabled in Edit because there is no clock to stop —
+		// a button that could be pressed and did nothing would read as a
+		// pause that failed.
 		ImGui::BeginDisabled(!running);
+		if (RunButton(Paused ? "Resume" : "Pause", Paused, engine::ui::WarningColour())) {
+			Paused = !Paused;
+			Say(Paused ? "paused — the clock is stopped, the run is not"
+					   : "resumed");
+		}
+		ImGui::SameLine();
+
 		if (ImGui::Button("Stop")) {
 			SetRunMode(RunMode::Edit);
 		}
@@ -770,6 +890,9 @@ namespace studio {
 		if (AskingImport) {
 			ImGui::OpenPopup("Import World");
 		}
+		if (AskingImportUniverse) {
+			ImGui::OpenPopup("Import Universe");
+		}
 		if (AskingNewWorld) {
 			ImGui::OpenPopup("New World");
 		}
@@ -808,6 +931,13 @@ namespace studio {
 			AskingExportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Export Universe")) {
 			AskingExportUniverse = false;
+		}
+
+		if (PathPrompt("Import Universe", "File", PathBuffer, "Import")) {
+			ImportUniverseFile(std::filesystem::path(PathBuffer));
+			AskingImportUniverse = false;
+		} else if (!ImGui::IsPopupOpen("Import Universe")) {
+			AskingImportUniverse = false;
 		}
 
 		if (PathPrompt("Import World", "File", PathBuffer, "Import")) {

@@ -786,6 +786,95 @@ namespace engine::game {
 		return WriteFile(path, WriteGame(universe, name), error);
 	}
 
+	size_t ImportUniverse(
+		world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error
+	) {
+		out = GameInfo{};
+
+		std::string text;
+		if (!ReadFile(path, text, error)) {
+			return 0;
+		}
+
+		XmlDocument document;
+		if (!Parse(text, GAME_ROOT, document, error)) {
+			return 0;
+		}
+
+		const XmlElement &root = *document.Root();
+		out.Name = core::Name(TextOf(root, "name", "Game"));
+
+		// **Nothing is destroyed, which is the whole difference from
+		// `LoadGame`.** That one empties the universe first because a universe
+		// half of one game and half of another is `ecs::Store::Load`'s hazard
+		// one layer up. This is the other operation: an author bringing a
+		// colleague's scenes into the game they already have open, which is the
+		// same thing `ImportWorld` does for one world.
+		//
+		// **The universe's own settings are read and not applied**, for the
+		// reason `LoadGame` applies only the mode: they belong to the universe
+		// being imported *into*, and a file arriving with a different bus
+		// budget must not retune somebody else's game.
+		size_t imported = 0;
+
+		for (const uint32_t index : root.Children) {
+			const XmlElement *child = document.At(index);
+			if (child == nullptr || child->Name != WORLD_ROOT) {
+				continue;
+			}
+
+			world::WorldSettings settings = ReadWorldAttributes(document, *child);
+
+			// **A clash gets a suffix rather than a refusal.** Two worlds
+			// cannot share a name, and importing a game that shares one scene
+			// name with the open game is the ordinary case rather than the
+			// exception — being told "Lobby is taken" and made to guess a free
+			// name is a worse answer than being given one. `ImportWorld` and
+			// `DuplicateWorld` both already do this.
+			if (universe.Find(settings.Name).IsValid()) {
+				const std::string base(settings.Name.Text());
+				core::Name chosen;
+				for (int attempt = 2; attempt < 1000; attempt++) {
+					const core::Name candidate(base + " " + std::to_string(attempt));
+					if (!universe.Find(candidate).IsValid()) {
+						chosen = candidate;
+						break;
+					}
+				}
+
+				if (!chosen.IsValid()) {
+					error = "could not find a free name to import '" + base + "' under";
+					return imported;
+				}
+				settings.Name = chosen;
+			}
+
+			world::WorldStatus status = world::WorldStatus::Ok;
+			const world::WorldId id = universe.Create(settings, &status);
+			if (!id.IsValid()) {
+				error = "could not create world '" + std::string(settings.Name.Text()) + "'";
+				return imported;
+			}
+
+			std::string worldError;
+			universe.Enter(id, [&](Store &store) { ReadWorldBody(document, *child, store, worldError); });
+
+			if (!worldError.empty()) {
+				// **Only this world is undone.** The ones already imported are
+				// good, and throwing them away because the fourth scene names a
+				// class this build lacks would lose work that read perfectly.
+				error = worldError;
+				universe.Destroy(id);
+				return imported;
+			}
+
+			out.Worlds.push_back(settings.Name);
+			imported++;
+		}
+
+		return imported;
+	}
+
 	bool LoadGame(
 		world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error
 	) {

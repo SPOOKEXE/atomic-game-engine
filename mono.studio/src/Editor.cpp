@@ -5,6 +5,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -239,6 +240,17 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		// **Before anything is torn down**, because the graph's history is what
+		// is being written and a snapshot taken after the universe has gone is
+		// a snapshot of the shutdown.
+		if (!Settings.ProfileSnapshot.empty()) {
+			if (engine::core::FrameGraph::WriteSnapshot(Settings.ProfileSnapshot)) {
+				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());
+			} else {
+				ENGINE_ERROR("could not write {}", Settings.ProfileSnapshot.string());
+			}
+		}
+
 		if (Mode != RunMode::Edit) {
 			// Runtimes hold a `Store &`, and the stores are the universe's. Let
 			// go of them before it goes away.
@@ -324,6 +336,15 @@ namespace studio {
 			return;
 		}
 
+		if (Paused) {
+			// **The clock stops and nothing else does.** The runtimes are
+			// still alive, their connections still exist and the snapshot Stop
+			// restores is untouched — a paused run resumes rather than
+			// restarts. Skipping the tick is the whole of it, which is why
+			// this is a flag and not a fourth `RunMode`.
+			return;
+		}
+
 		ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 		Universe->Tick(frameSeconds);
 	}
@@ -357,6 +378,61 @@ namespace studio {
 		PresentWorld(frameSeconds);
 	}
 
+	void Editor::InstallExampleScript(Store &store) {
+		// **A `Script` in the tree, not a scene built behind somebody's back.**
+		// `examples::LoadScene` would run the file right now and leave the
+		// mirror's parts in the world as though an author had placed them —
+		// which is the wrong shape for an editor twice over: the geometry would
+		// be saved into every game file made from a new place, and the thing
+		// that produced it would be invisible. A script instance is content: it
+		// is in the explorer, it opens in the script editor, Play runs it and
+		// Stop takes its work away again.
+		const Entity service = store.FindFirstRoot("ServerScriptService");
+		if (service == NULL_ENTITY) {
+			return;
+		}
+
+		// **Located with `ExamplePath` and filed under a relative name**, and
+		// the two are different on purpose. The scenes stage into
+		// `<stage>/assets/examples` while `Paths::Assets()` is each program's
+		// own directory — a layout mismatch `ExamplePath` already knows how to
+		// bridge — so finding the file needs its fallback. What goes *into* the
+		// world is the short name, because an absolute path from this machine
+		// would be written into the save file.
+		static const Name PATH("examples/Mirrors-1-world.luau");
+		const Name located(engine::examples::ExamplePath("Mirrors-1-world.luau"));
+
+		// **Read now and filed into the world**, rather than left as a path for
+		// the runtime to resolve later. `ReadSource` looks in the cache before
+		// the filesystem, so filing it here is what makes the game *contain*
+		// the program — a `.agame` saved from a new place carries the text and
+		// opens on a machine that has no engine checkout beside it.
+		std::string text;
+		std::string error;
+		if (!engine::script::ReadSource(store, located, text, error)) {
+			// Not fatal, and not silent. A build with no staged assets is a
+			// real situation — the editor still works, it just has nothing to
+			// put in the new place.
+			ENGINE_WARN("no example script to install: {}", error);
+			return;
+		}
+
+		engine::script::SourceCache cache;
+		if (const auto *existing = store.Resource<engine::script::SourceCache>(); existing != nullptr) {
+			cache = *existing;
+		}
+		cache.Set(PATH, text);
+		store.SetResource(cache);
+
+		const Entity script = store.CreateInstance(engine::script::ScriptClass(), "MirrorScene");
+		if (script == NULL_ENTITY) {
+			return;
+		}
+
+		store.SetParent(script, service);
+		store.SetProperty(script, Name("Source"), &PATH, sizeof(PATH));
+	}
+
 	void Editor::SampleFrame(float frameSeconds) {
 		// **Sampled every frame, whether or not a panel is open.** A frame-rate
 		// panel that started collecting when it was opened would show an empty
@@ -369,7 +445,11 @@ namespace studio {
 		// Recording every span of every frame costs real time, and the whole
 		// reason to look at that panel is that time is scarce. The client's
 		// overlay makes the same trade.
-		engine::core::FrameGraph::SetEnabled(ShowFrameGraph);
+		//
+		// A snapshot at the end of the run counts as reading it, and is the
+		// only way to profile something — a window drag — that occupies the
+		// hands that would otherwise be opening the panel.
+		engine::core::FrameGraph::SetEnabled(ShowFrameGraph || !Settings.ProfileSnapshot.empty());
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {
@@ -491,7 +571,7 @@ namespace studio {
 		// looks like a broken renderer. This is the one piece of content the
 		// editor authors on a user's behalf, and it is a `Part` like any other
 		// — deletable, renameable, and written into the save file.
-		Universe->Enter(Active, [](Store &store) {
+		Universe->Enter(Active, [this](Store &store) {
 			const Entity baseplate = store.CreateInstance(engine::scene::PartClass(), "Baseplate");
 
 			// **Under the workspace, because that is what a workspace is for.**
@@ -514,6 +594,8 @@ namespace studio {
 
 			const engine::core::Color3 grey{0.32f, 0.34f, 0.36f};
 			store.SetProperty(baseplate, Name("Color"), &grey, sizeof(grey));
+
+			InstallExampleScript(store);
 		});
 
 		Say("new game");
@@ -668,6 +750,55 @@ namespace studio {
 		MarkModified();
 
 		Say("imported '" + std::string(Label(Universe->NameOf(imported))) + "'");
+		return true;
+	}
+
+	bool Editor::ImportUniverseFile(const std::filesystem::path &path) {
+		engine::game::GameInfo info;
+		std::string error;
+
+		const size_t imported = engine::game::ImportUniverse(*Universe, path, info, error);
+
+		if (imported == 0) {
+			Say("import failed: " + error, LogLevel::Error);
+			return false;
+		}
+
+		// The client's half and the fixtures, on every world that arrived —
+		// the same two things `OpenGame` does, for the same reasons. A world
+		// with no draw list renders as an empty frame.
+		for (const WorldId id : Universe->Worlds()) {
+			Universe->Enter(id, [](Store &store, Scheduler &systems) {
+				client::InstallPresentation(store, systems, 256);
+				engine::scene::InstallServices(store);
+			});
+		}
+
+		InstanceCounts.clear();
+
+		// Land on the first world that arrived, because an import somebody
+		// cannot see is one they will do twice.
+		if (!info.Worlds.empty()) {
+			if (const WorldId first = Universe->Find(info.Worlds.front()); first.IsValid()) {
+				Active = first;
+				SelectionWorld = first;
+			}
+		}
+
+		ClearSelection();
+		MarkModified();
+
+		// **Partial success is still success, and it says so.** `ImportUniverse`
+		// keeps the worlds that read before the one that failed, so reporting
+		// only the error would describe a universe that is not the one on
+		// screen.
+		if (!error.empty()) {
+			Say("imported " + std::to_string(imported) + " world(s), then stopped: " + error,
+				LogLevel::Warning);
+			return true;
+		}
+
+		Say("imported " + std::to_string(imported) + " world(s) from " + path.string());
 		return true;
 	}
 
@@ -892,6 +1023,10 @@ namespace studio {
 		Runtimes.clear();
 		Mode = mode;
 
+		// A run always starts running. Carrying a pause across Stop and Play
+		// would be a game that came up frozen for a reason nobody could see.
+		Paused = false;
+
 		for (const WorldId id : Universe->Worlds()) {
 			if (Universe->IsRemote(id)) {
 				continue;
@@ -928,6 +1063,7 @@ namespace studio {
 		// a runtime still alive across it holds a reference to freed storage.
 		Runtimes.clear();
 		Mode = RunMode::Edit;
+		Paused = false;
 
 		if (EditSnapshot.empty()) {
 			return;
