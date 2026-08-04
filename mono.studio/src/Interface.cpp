@@ -298,7 +298,22 @@ namespace studio {
 
 		Vector3 position = frame.Position;
 		Vector3 move;
-		if (looking && !io.WantCaptureKeyboard) {
+
+		// **WASD without holding a mouse button, which is what an author
+		// expects.** Flying used to require the right button down — the
+		// aim-while-you-move arrangement Unreal and Roblox use — so tapping W
+		// over the picture did nothing at all and read as a broken camera.
+		// Turning still needs the right button, because a viewport that swung
+		// whenever the pointer crossed it would be unusable; only the
+		// translation is freed here.
+		//
+		// **`WantCaptureKeyboard` is what keeps this out of the script
+		// editor.** imgui raises it while any text field has focus, so typing
+		// `while` in a script does not fly the camera four ways. That guard was
+		// already here and is why this is safe to widen.
+		const bool driving = (active || hovered) && !io.WantCaptureKeyboard;
+
+		if (driving) {
 			if (ImGui::IsKeyDown(ImGuiKey_W)) {
 				move = move + forward;
 			}

@@ -251,6 +251,17 @@ namespace engine::render {
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
 
+		// **Which depth format this device actually supports.** `SDL_gpu.h` is
+		// blunt about it: "Unless D16_UNORM is sufficient for your purposes,
+		// always check which of D24/D32 is supported before creating a
+		// depth-stencil texture!" D16_UNORM is the only one guaranteed. This was
+		// hard-coded to D32_FLOAT in four places, which works on every desktop
+		// GPU anybody here has and fails as a black window on the first one that
+		// does not — the texture creation fails, the frame is dropped, and
+		// nothing says why. Chosen once at start-up so the pipelines and the
+		// textures cannot disagree.
+		SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
+
 		SDL_GPUTexture *DepthTexture = nullptr;
 		uint32_t DepthWidth = 0;
 		uint32_t DepthHeight = 0;
@@ -279,6 +290,24 @@ namespace engine::render {
 			// `SceneTextureExtent` reports. See `render::SceneExtent`.
 			uint32_t DrawnWidth = 0;
 			uint32_t DrawnHeight = 0;
+
+			// **This slot's depth buffer, and it is per slot for the same
+			// reason the colour target is.** One shared depth texture is fine
+			// for one viewport and catastrophic for two: the panels are
+			// different sizes, so each `Render` found the other's dimensions and
+			// reallocated — a colour-sized D32 texture destroyed and created
+			// *twice per frame, every frame*. That is a megabyte and a half of
+			// device memory churned a hundred and twenty times a second, and it
+			// does not stay inside this process: thrashing the driver's
+			// allocator stalls the GPU for everything sharing it, which is what
+			// "resizing makes my whole desktop lag" was.
+			//
+			// Sized to `Width`/`Height` — the block-rounded allocation, not the
+			// drawn rectangle — because SDL requires the depth target's
+			// dimensions to match the colour target it is bound beside.
+			SDL_GPUTexture *Depth = nullptr;
+			uint32_t DepthWidth = 0;
+			uint32_t DepthHeight = 0;
 		};
 
 		std::vector<SceneSlot> SceneSlots;
@@ -404,6 +433,13 @@ namespace engine::render {
 		bool CreateGeometry();
 		bool EnsureInstanceCapacity(uint32_t count);
 		bool EnsureDepth(uint32_t width, uint32_t height);
+
+		// The same, into whichever depth texture the caller owns. See
+		// `SceneSlot::Depth` for why a viewport keeps its own.
+		bool EnsureDepthIn(
+			SDL_GPUTexture *&texture, uint32_t &haveWidth, uint32_t &haveHeight, uint32_t width,
+			uint32_t height
+		);
 		bool EnsureScene(uint32_t width, uint32_t height);
 
 		// Whether this renderer has a window at all.
@@ -522,7 +558,7 @@ namespace engine::render {
 		opaque.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
 		opaque.target_info.color_target_descriptions = &opaqueTarget;
 		opaque.target_info.num_color_targets = 1;
-		opaque.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		opaque.target_info.depth_stencil_format = DepthFormat;
 		opaque.target_info.has_depth_stencil_target = true;
 
 		OpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
@@ -746,8 +782,20 @@ namespace engine::render {
 				RetiredScenes.push_back(target.Texture);
 				target.Texture = nullptr;
 			}
+
+			// **Released outright rather than retired.** Nothing samples a depth
+			// buffer — no interface hook can have recorded a bind of it — so the
+			// grace period the colour target needs does not apply, and a closed
+			// panel should not go on holding a megabyte of it.
+			if (target.Depth) {
+				SDL_ReleaseGPUTexture(Device, target.Depth);
+				target.Depth = nullptr;
+			}
+
 			target.Width = 0;
 			target.Height = 0;
+			target.DepthWidth = 0;
+			target.DepthHeight = 0;
 			return false;
 		}
 
@@ -813,19 +861,22 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::EnsureDepth(uint32_t width, uint32_t height) {
-		if (DepthTexture && width == DepthWidth && height == DepthHeight) {
+	bool Renderer::Impl::EnsureDepthIn(
+		SDL_GPUTexture *&texture, uint32_t &haveWidth, uint32_t &haveHeight, uint32_t width,
+		uint32_t height
+	) {
+		if (texture && width == haveWidth && height == haveHeight) {
 			return true;
 		}
 
-		if (DepthTexture) {
-			SDL_ReleaseGPUTexture(Device, DepthTexture);
-			DepthTexture = nullptr;
+		if (texture) {
+			SDL_ReleaseGPUTexture(Device, texture);
+			texture = nullptr;
 		}
 
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
-		info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		info.format = DepthFormat;
 		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 		info.width = width;
 		info.height = height;
@@ -833,15 +884,21 @@ namespace engine::render {
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		DepthTexture = SDL_CreateGPUTexture(Device, &info);
-		if (!DepthTexture) {
+		texture = SDL_CreateGPUTexture(Device, &info);
+		if (!texture) {
 			ENGINE_ERROR("depth texture {}x{}: {}", width, height, SDL_GetError());
+			haveWidth = 0;
+			haveHeight = 0;
 			return false;
 		}
 
-		DepthWidth = width;
-		DepthHeight = height;
+		haveWidth = width;
+		haveHeight = height;
 		return true;
+	}
+
+	bool Renderer::Impl::EnsureDepth(uint32_t width, uint32_t height) {
+		return EnsureDepthIn(DepthTexture, DepthWidth, DepthHeight, width, height);
 	}
 
 	bool Renderer::Impl::EnsureShadow() {
@@ -851,7 +908,7 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
-		info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		info.format = DepthFormat;
 
 		// **Both usages, and the sampler one is the point.** A depth attachment
 		// that is only a target cannot be read, and a shadow map that cannot be
@@ -931,7 +988,7 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
-		depth.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		depth.format = DepthFormat;
 		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 		depth.width = width;
 		depth.height = height;
@@ -1104,6 +1161,39 @@ namespace engine::render {
 		const char *driver = SDL_GetGPUDeviceDriver(State->Device);
 		State->Backend = driver ? driver : "unknown";
 
+		// **Before the pipelines, because they name the format too.** A pipeline
+		// built against one depth format and bound beside a texture in another
+		// is a validation error at bind time. See `Impl::DepthFormat`.
+		{
+			// **Both usages, because one format serves both kinds of depth
+			// texture.** The viewport's buffer is only ever a target, but the
+			// shadow map is sampled as well — and a second format for the shadow
+			// map would be a second thing that has to agree with the shadow
+			// pipeline. Asking for the intersection once is cheaper than keeping
+			// two in step.
+			const auto supports = [&](SDL_GPUTextureFormat format) {
+				return SDL_GPUTextureSupportsFormat(
+					State->Device,
+					format,
+					SDL_GPU_TEXTURETYPE_2D,
+					SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
+				);
+			};
+
+			// Most precision first. The shadow pass compares depths across a
+			// whole scene, so the extra bits are worth asking for — and
+			// D16_UNORM is the fallback rather than the preference because a
+			// sixteen-bit shadow map stair-steps on a large world.
+			if (supports(SDL_GPU_TEXTUREFORMAT_D32_FLOAT)) {
+				State->DepthFormat = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+			} else if (supports(SDL_GPU_TEXTUREFORMAT_D24_UNORM)) {
+				State->DepthFormat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
+			} else {
+				// Guaranteed by SDL, so there is no third case to handle.
+				State->DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
+			}
+		}
+
 		SDL_GPUSamplerCreateInfo sampler{};
 		// Nearest, because the overlay is pixel art at exactly one texel per
 		// pixel. Linear would blur the 3x5 font into illegibility.
@@ -1164,6 +1254,10 @@ namespace engine::render {
 			if (slot.Texture) {
 				SDL_ReleaseGPUTexture(device, slot.Texture);
 				slot.Texture = nullptr;
+			}
+			if (slot.Depth) {
+				SDL_ReleaseGPUTexture(device, slot.Depth);
+				slot.Depth = nullptr;
 			}
 		}
 
@@ -1382,7 +1476,16 @@ namespace engine::render {
 		if (!State->Headless() && (!acquired || !swapchain)) {
 			// Minimised, or mid-resize. Not an error, and not a reason to stop
 			// ticking — the simulation carries on and the next frame presents.
-			SDL_SubmitGPUCommandBuffer(command);
+			//
+			// **Cancelled rather than submitted, which is what SDL's own example
+			// does here.** No swapchain texture was acquired, so there is
+			// nothing to present and nothing recorded worth executing;
+			// submitting an empty buffer sends it through the whole submit path
+			// and consumes a frame in flight for no work. Cancel is only legal
+			// *because* the acquire failed — `SDL_CancelGPUCommandBuffer` is
+			// documented as an error to call once a swapchain texture has been
+			// acquired, which is why the later bail-outs still submit.
+			SDL_CancelGPUCommandBuffer(command);
 			return result;
 		}
 
@@ -1439,8 +1542,23 @@ namespace engine::render {
 			// not the rectangle the world is drawn into. Sizing this to the
 			// world instead is a validation failure on the frames where the two
 			// differ, which is nearly all of them.
+			//
+			// **The slot's own depth when drawing offscreen.** Two viewports of
+			// different sizes sharing one depth texture made every frame
+			// reallocate it twice — see `SceneSlot::Depth`.
 			ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
-			if (!State->EnsureDepth(targetWidth, targetHeight)) {
+
+			bool depthReady = false;
+			if (offscreen) {
+				Impl::SceneSlot &slot = State->SlotAt(targetSlot);
+				depthReady = State->EnsureDepthIn(
+					slot.Depth, slot.DepthWidth, slot.DepthHeight, targetWidth, targetHeight
+				);
+			} else {
+				depthReady = State->EnsureDepth(targetWidth, targetHeight);
+			}
+
+			if (!depthReady) {
 				SDL_SubmitGPUCommandBuffer(command);
 				return result;
 			}
@@ -1942,7 +2060,11 @@ namespace engine::render {
 		windowTarget.store_op = SDL_GPU_STOREOP_STORE;
 
 		SDL_GPUDepthStencilTargetInfo depthTarget{};
-		depthTarget.texture = State->DepthTexture;
+		// The one `EnsureDepth` above filled: this slot's when the world is going
+		// into a texture, the shared window one when it is going to the
+		// swapchain. See `SceneSlot::Depth`.
+		depthTarget.texture =
+			offscreen ? State->SlotAt(targetSlot).Depth : State->DepthTexture;
 		depthTarget.clear_depth = 1.0f;
 		depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 		// Nothing reads depth after the pass, so there is no reason to write it

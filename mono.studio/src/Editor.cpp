@@ -813,34 +813,17 @@ namespace studio {
 			InstallExampleScript(store, "SkyGrid.luau", "SkyGridScene");
 		});
 
-		// A floor, because an empty world is a black frame and a black frame
-		// looks like a broken renderer. This is the one piece of content the
-		// editor authors on a user's behalf, and it is a `Part` like any other
-		// — deletable, renameable, and written into the save file.
+		// **No baseplate here either, and the reason is specific rather than
+		// symmetric.** `Mirrors-1-world.luau` builds its own `Floor` — 60x60,
+		// top face at y = 0 — and the editor's baseplate is 128x128 with its top
+		// face at *the same* y = 0. Two coplanar surfaces is z-fighting, and
+		// during Play the mirror world showed a floor tearing between two greys.
+		//
+		// The general rule the baseplate came from — an empty world is a black
+		// frame and a black frame looks like a broken renderer — still holds for
+		// a world somebody made themselves. It does not hold for one whose
+		// script lays a floor the moment it runs.
 		Universe->Enter(mirrors, [this](Store &store) {
-			const Entity baseplate = store.CreateInstance(engine::scene::PartClass(), "Baseplate");
-
-			// **Under the workspace, because that is what a workspace is for.**
-			// `AddWorld` installed the fixtures before this ran, so the parent
-			// exists; the guard is for the case where it did not, and a floor
-			// at the root is a better answer there than no floor at all.
-			if (const Entity workspace = engine::scene::WorkspaceOf(store);
-				workspace != engine::ecs::NULL_ENTITY) {
-				store.SetParent(baseplate, workspace);
-			}
-
-			const Vector3 size{128.0f, 1.0f, 128.0f};
-			store.SetProperty(baseplate, Name("Size"), &size, sizeof(size));
-
-			const Vector3 position{0.0f, -0.5f, 0.0f};
-			store.SetProperty(baseplate, Name("Position"), &position, sizeof(position));
-
-			const bool anchored = true;
-			store.SetProperty(baseplate, Name("Anchored"), &anchored, sizeof(anchored));
-
-			const engine::core::Color3 grey{0.32f, 0.34f, 0.36f};
-			store.SetProperty(baseplate, Name("Color"), &grey, sizeof(grey));
-
 			InstallExampleScript(store, "Mirrors-1-world.luau", "MirrorScene");
 		});
 
