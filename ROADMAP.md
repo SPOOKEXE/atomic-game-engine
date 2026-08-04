@@ -306,6 +306,7 @@ Deferred:
 - [x] **`studio --headless --frames N --run play --capture PATH`**, which is the editor driven by something that is not a person. `Renderer::RequestSceneCapture` downloads the scene texture through a fence and writes a BMP. `just studio-smoke` loads a game, starts it, renders it and writes the result with **no display at all** — which is how the run cycle above was verified while the machine's screen was busy. Deliberately not part of `just check`: it needs a GPU, and a build container without one would fail a check about the editor for a reason that is not about the editor
 - [_] for server/client play, create two different scenes for Server-view and Client-view as two separate viewports. Also allow running subworlds together and teleporting between worlds in studio.
 - [_] in studio, add automatic startup and closing of worlds when player teleports between them (e.g. 5 minutes no activity in empty world => closes, teleport to world that is not loaded => load it)
+- [_] remember its meant to be parallel running (simulation). The drawing can be sequential or can be drawn in parallel then collected. Decide as well.
 
 Found while building this, and fixed here rather than filed:
 
