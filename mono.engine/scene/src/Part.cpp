@@ -4,6 +4,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
@@ -698,26 +699,23 @@ namespace engine::scene {
 
 			// The faces of a box, for `SurfaceCamera::Face`.
 			//
-			// **Roblox's names *and* Roblox's order.** The order is not
-			// cosmetic: `EnumTable` ordinals are registration order and
-			// `SurfaceCamera::Face` stores the ordinal, so this list is what
-			// makes a saved `Face` of 1 mean `Top` in both engines. Registering
-			// them alphabetically would have been a game file that loaded
-			// silently wrong.
+			// **Generated from the enum rather than typed out beside it**, which
+			// is the difference between one declaration and two that agree until
+			// they do not. `NormalId`'s ordinals are the storage — a `Face` of 1
+			// is `Top` in a game file — so a literal list here would be a second
+			// place the order lives, and getting it wrong would load every saved
+			// mirror pointing at the wrong side of its pane. Silently: nothing
+			// about a face is checkable at load time.
 			//
-			// `Top` and `Bottom` rather than Up and Down, which is Roblox's
-			// spelling — a script written against `Enum.NormalId.Top` has to
-			// find it here, and a second name for one face is the duplicate
-			// `scene/AGENTS.md` calls the most expensive kind of debt.
-			static const std::string_view NORMALS[] = {
-				"Right",
-				"Top",
-				"Back",
-				"Left",
-				"Bottom",
-				"Front",
-			};
-			ecs::EnumTable::Register("NormalId", NORMALS);
+			// The loop walks the enum's own range, so adding a seventh face means
+			// adding it in one place. `Describe(NormalId)` is what makes it
+			// possible, and `scene/Enums.hpp` says why that one round-trips where
+			// its neighbours are only for logs.
+			std::array<std::string_view, 6> normals{};
+			for (size_t index = 0; index < normals.size(); index++) {
+				normals[index] = Describe(static_cast<NormalId>(index));
+			}
+			ecs::EnumTable::Register("NormalId", normals);
 
 			// The default collision group, so `CollisionGroup` reads back
 			// something a script can compare rather than an invalid name on a

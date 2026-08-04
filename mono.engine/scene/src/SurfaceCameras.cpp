@@ -2,6 +2,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Enums.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <cmath>

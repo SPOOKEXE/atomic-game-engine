@@ -28,6 +28,7 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/scene/Enums.hpp>
 
 #include <cstdint>
 
@@ -36,27 +37,6 @@ namespace engine::ecs {
 }
 
 namespace engine::scene {
-
-	// Who may see what a service holds.
-	//
-	// **Replication is not implemented from this yet, and the field is here
-	// anyway.** It is the fact that distinguishes `ServerStorage` from
-	// `ReplicatedStorage`, and a pair of containers that differ only in their
-	// name is a pair somebody will use interchangeably until the day one of
-	// them starts leaking server state to clients.
-	//
-	// @since v0.7
-	enum class ServiceScope : uint8_t {
-		// Both halves see it. `ReplicatedStorage`, `Workspace`, `Lighting`.
-		Shared,
-
-		// The server only. `ServerScriptService`, `ServerStorage`.
-		Server,
-
-		// The client only. The `Starter*` services, which are templates a
-		// client copies rather than content a server simulates.
-		Client,
-	};
 
 	// Marks an instance as made by whoever is looking, not by an author.
 	//
