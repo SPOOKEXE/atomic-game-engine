@@ -20,22 +20,22 @@
 			"name": "Instance",
 			"parent": null,
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
 			]
 		},
 		{
 			"name": "PVInstance",
 			"parent": "Instance",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "scene.Transform"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Transform"],
 			"properties": [
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
 			]
 		},
@@ -43,7 +43,7 @@
 			"name": "BasePart",
 			"parent": "PVInstance",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.Transform", "scene.Visual"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -55,10 +55,9 @@
 				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
-				{"name": "Surface", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
 			]
@@ -67,7 +66,7 @@
 			"name": "Part",
 			"parent": "BasePart",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.Transform", "scene.Visual"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -79,10 +78,9 @@
 				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
-				{"name": "Surface", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
 			]
@@ -91,7 +89,7 @@
 			"name": "Camera",
 			"parent": "PVInstance",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "scene.Camera", "scene.Transform"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Camera", "scene.Transform"],
 			"properties": [
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "FarPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
@@ -99,7 +97,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
 				{"name": "NearPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
 			]
@@ -108,7 +106,7 @@
 			"name": "SurfaceCamera",
 			"parent": "Camera",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "scene.Camera", "scene.SurfaceCamera", "scene.Transform"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Camera", "scene.SurfaceCamera", "scene.Transform"],
 			"properties": [
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
@@ -118,7 +116,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
 				{"name": "NearPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
 			]
@@ -127,11 +125,11 @@
 			"name": "LuaSourceContainer",
 			"parent": "Instance",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "script.Source"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "script.Source"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
 			]
 		},
@@ -139,11 +137,11 @@
 			"name": "Script",
 			"parent": "LuaSourceContainer",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "script.Source"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "script.Source"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
 			]
 		},
@@ -151,11 +149,11 @@
 			"name": "LocalScript",
 			"parent": "LuaSourceContainer",
 			"constructible": true,
-			"components": ["Hierarchy", "InstanceClass", "InstanceName", "script.Source"],
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "script.Source"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["Hierarchy"], "writes": ["Hierarchy"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
 			]
 		}

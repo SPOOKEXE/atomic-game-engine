@@ -334,9 +334,13 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection"
 		);
 
+		// **No slot set here, because nothing authors one.** A pane is a mirror
+		// because a `SurfaceCamera` is parented to it, and
+		// `scene::AimSurfaceCameras` hands the slots out — so what this fixture
+		// has to get right is the face and the parent link, which are the two
+		// things the wire has to carry.
 		engine::scene::SurfaceCamera target;
 		target.Face = engine::scene::NormalId::Front;
-		target.Surface = 2;
 		store.Set(reflection, target);
 		store.Set(reflection, engine::scene::Camera{});
 
@@ -349,12 +353,10 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 	fixture.Step(link, 32);
 
 	fixture.Worlds.Enter(link.ReplicaWorld(), [pane, reflection](Store &store) {
-		// The camera itself, with the face it projects off and the index that
-		// pairs it with the pane.
+		// The camera itself, with the face it projects off.
 		const auto *target = store.Get<engine::scene::SurfaceCamera>(reflection);
 		REQUIRE(target != nullptr);
 		CHECK(target->Face == engine::scene::NormalId::Front);
-		CHECK(target->Surface == 2);
 
 		// Its lens, without which there is no projection to render with.
 		CHECK(store.Get<engine::scene::Camera>(reflection) != nullptr);
@@ -386,8 +388,14 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 	// at z = -0.2 and the eye at z = 20, so the reflection lands at z = -20.4 —
 	// the same arithmetic `scene/tests/SurfaceCameras.cpp` pins, reached here
 	// through the wire rather than through a parent set in this process.
+	// **Slot 0, and derived rather than received.** The number is not on the
+	// wire at all now — each end hands out slots in entity order, and a replica
+	// matches entities by index and generation, so both arrive at the same
+	// answer without sending it. One camera therefore means slot 0 on both
+	// sides, and the two ends of the pairing are written from one variable.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [pane, reflection](Store &store) {
-		CHECK(store.Get<Visual>(pane)->Surface == 2);
+		CHECK(store.Get<Visual>(pane)->Surface == 0);
+		CHECK(store.Get<engine::scene::SurfaceCamera>(reflection)->Surface == 0);
 
 		const Vector3 placed = store.Get<Transform>(reflection)->Frame.Position;
 		CHECK_THAT(placed.Z, Catch::Matchers::WithinAbs(-20.4f, 0.001f));
@@ -399,5 +407,5 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 	});
 
 	REQUIRE(views.size() == 1);
-	CHECK(views.front().Index == 2);
+	CHECK(views.front().Index == 0);
 }

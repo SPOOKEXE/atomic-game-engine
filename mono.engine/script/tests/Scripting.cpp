@@ -1948,7 +1948,12 @@ TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scr
 	CHECK(surface->Height == 256);
 }
 
-TEST_CASE("a part names which surface it shows", "[scripting][surface]") {
+TEST_CASE("a part is a mirror because a surface camera is parented to it", "[scripting][surface]") {
+	// **There is no `Surface` property to set, and that is the point.** It was
+	// Roblox's name for something else entirely, and what it actually held was a
+	// render-target index the author had to keep unique by hand — two cameras
+	// silently sharing a texture being the failure. A pane is a mirror because a
+	// `SurfaceCamera` is parented to it; a plain `Camera` projects nothing.
 	RegisterClasses();
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
@@ -1958,14 +1963,27 @@ TEST_CASE("a part names which surface it shows", "[scripting][surface]") {
 		pane.Name = 'Pane'
 		pane.Parent = workspace
 
-		assert(pane.Surface == -1, 'a fresh part shows a surface')
+		-- Refused at the read, not nil: an unknown member raises, so a scene
+		-- still setting a slot by hand fails loudly at the line that does it
+		-- rather than silently doing nothing.
+		assert(not pcall(function() return pane.Surface end), 'Surface is still a property')
 
-		pane.Surface = 0
-		assert(pane.Surface == 0, 'the surface did not round-trip')
+		local reflection = Instance.new('SurfaceCamera')
+		reflection.Name = 'Reflection'
+		reflection.SurfaceSize = Vector3.new(256, 256)
+		reflection.Face = Enum.NormalId.Front
+		reflection.Parent = pane
+
+		assert(not pcall(function() return reflection.Surface end), 'the camera still names a slot')
 	)");
 
 	const Entity pane = InScene(store, "Pane");
-	CHECK(store.Get<Visual>(pane)->Surface == 0);
+
+	// Nothing has aimed anything yet, so the pane is an ordinary part. The slot
+	// arrives from `AimSurfaceCameras`, which needs a viewer — see
+	// `scene/tests/SurfaceCameras.cpp` for the pass itself.
+	CHECK(store.Get<Visual>(pane)->Surface == -1);
+	CHECK(store.FindFirstChild(pane, "Reflection") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]") {
@@ -1981,7 +1999,6 @@ TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]
 
 		const pane = Instance.new('Part');
 		pane.Name = 'JsPane';
-		pane.Surface = 0;
 		pane.Parent = workspace;
 	)");
 
@@ -1990,5 +2007,7 @@ TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]
 	CHECK(surface->Width == 512);
 	CHECK(surface->Height == 256);
 
-	CHECK(store.Get<Visual>(InScene(store, "JsPane"))->Surface == 0);
+	// Unaimed, so still an ordinary part: JavaScript has no way to name a slot
+	// either, which is the half of the surface removal this case covers.
+	CHECK(store.Get<Visual>(InScene(store, "JsPane"))->Surface == -1);
 }

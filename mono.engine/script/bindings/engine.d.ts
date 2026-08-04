@@ -67,7 +67,6 @@ declare interface BasePart extends PVInstance {
 	Material: Enum_Material;
 	Mesh: string;
 	Size: Vector3;
-	Surface: number;
 	Transparency: number;
 	Visible: boolean;
 }

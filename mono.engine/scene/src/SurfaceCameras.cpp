@@ -3,9 +3,11 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -57,7 +59,9 @@ namespace engine::scene {
 			Entity Part;
 			CFrame Frame;
 			float NearPlane = 0.0f;
-			int8_t Surface = 0;
+			// Handed out after the walk, by entity id. -1 is a camera past the
+			// renderer's cap, whose pane is left as an ordinary part.
+			int8_t Surface = -1;
 		};
 
 		std::vector<Aim> &Pending() {
@@ -228,7 +232,6 @@ namespace engine::scene {
 				aim.Camera = entity;
 				aim.Part = face.Part;
 				aim.Frame = CFrame::LookAt(reflected, centre);
-				aim.Surface = target.Surface;
 
 				// The near plane at the glass, which is the poor-man's oblique
 				// clip: everything between the reflected camera and the pane
@@ -239,6 +242,38 @@ namespace engine::scene {
 				pending.push_back(aim);
 			}
 		);
+
+		// **The slots, handed out here rather than authored on the camera.**
+		// A pane is a mirror because a `SurfaceCamera` is parented to it — a
+		// plain `Camera` projects nothing — so which texture it uses is the
+		// engine's bookkeeping and never a number anybody has to type. It was a
+		// `Surface` property on both classes, and that was Roblox's name for
+		// something else entirely; what it actually held was a render-target
+		// index that the author had to keep unique by hand, with two cameras
+		// silently sharing a texture as the failure.
+		//
+		// **By entity id, which is creation order, and the sort is what makes it
+		// deterministic.** `Each` walks archetypes in an order that moves the
+		// moment anything changes a component set, so assigning in walk order
+		// would shuffle which mirror owned which texture whenever an unrelated
+		// component was added — a reflection that jumped between panes for no
+		// reason a scene could show. Ids are stable across a snapshot and a
+		// replica matches entities by index and generation, so both ends of a
+		// wire hand out the same slots without sending them.
+		std::sort(pending.begin(), pending.end(), [](const Aim &left, const Aim &right) {
+			return left.Camera.Id < right.Camera.Id;
+		});
+
+		for (size_t index = 0; index < pending.size(); index++) {
+			// **Past the cap is not a mirror, rather than a mirror sharing slot
+			// zero.** The renderer has a texture pair per slot and only so many;
+			// a scene with more surface cameras than it can draw gets the first
+			// `MAX_SURFACES` of them and the rest render nothing. Pointing the
+			// overflow at an existing slot would be worse than nothing — two
+			// panes showing one camera's reflection, which reads as a projection
+			// bug rather than as a budget.
+			pending[index].Surface = index < MAX_SURFACES ? static_cast<int8_t>(index) : int8_t{-1};
+		}
 
 		// **Every write is guarded on the value actually differing, and that is
 		// not a micro-optimisation.** `Set` marks the row dirty and `GetMutable`
@@ -270,11 +305,22 @@ namespace engine::scene {
 				store.GetMutable<Camera>(aim.Camera)->NearPlane = aim.NearPlane;
 			}
 
-			// **The part is told what it shows, so a mirror is a camera parented
-			// to a part and nothing else.** Requiring `Surface` to be set by hand
-			// as well is one fact recorded twice, and its failure mode is a
-			// camera rendering perfectly into a texture nothing samples — which
-			// looks exactly like a mirror that does not work.
+			// **Both ends of the pairing, written from one number.** The camera
+			// carries the slot it renders into — `client::CollectSurfaceViews`
+			// reads it to fill `render::SurfaceView::Index` — and the pane
+			// carries the slot it samples. They are the same slot seen from its
+			// two ends, and writing them from one variable here is what makes
+			// that true by construction rather than by two authors agreeing.
+			//
+			// The failure this replaces is worth naming: while the number was
+			// authored, forgetting it on one of the two left a camera rendering
+			// perfectly into a texture nothing sampled, which looks exactly like
+			// a mirror that does not work.
+			if (const SurfaceCamera *target = store.Get<SurfaceCamera>(aim.Camera);
+				target != nullptr && target->Surface != aim.Surface) {
+				store.GetMutable<SurfaceCamera>(aim.Camera)->Surface = aim.Surface;
+			}
+
 			if (const Visual *visual = store.Get<Visual>(aim.Part);
 				visual != nullptr && visual->Surface != aim.Surface) {
 				store.GetMutable<Visual>(aim.Part)->Surface = aim.Surface;

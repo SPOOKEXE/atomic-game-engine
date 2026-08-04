@@ -73,7 +73,6 @@ export type BasePart = {
 	Parent: Instance,
 	Position: Vector3,
 	Size: Vector3,
-	Surface: number,
 	Transparency: number,
 	Visible: boolean,
 }
@@ -93,7 +92,6 @@ export type Part = {
 	Parent: Instance,
 	Position: Vector3,
 	Size: Vector3,
-	Surface: number,
 	Transparency: number,
 	Visible: boolean,
 }

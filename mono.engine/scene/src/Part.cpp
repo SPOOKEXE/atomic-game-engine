@@ -4,6 +4,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -12,7 +13,9 @@
 #include <algorithm>
 #include <array>
 #include <numbers>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::scene {
 
@@ -424,53 +427,6 @@ namespace engine::scene {
 			return property;
 		}
 
-		// Surface: which surface texture a part shows, as a script integer.
-		//
-		// **A conversion rather than a plain field, and the reason is a real
-		// hazard.** `Visual::Surface` is an `int8_t` — one byte, because it fits
-		// in padding the struct already had — and no `PropertyType` describes
-		// one. Declaring it with `Classes::Property` would type it `Opaque` and
-		// size it at one byte, and a binding marshalling an `Int32` into that
-		// would write four bytes over three neighbouring fields.
-		//
-		// So the width changes here, once, where it can be seen. Neither Luau
-		// nor JavaScript has an eight-bit integer to hand back anyway.
-		PropertyDescriptor SurfaceProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("Surface");
-			property.Type = PropertyType::Int32;
-			property.Size = sizeof(int32_t);
-			property.Kind = PropertyKind::Computed;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const Visual *visual = store.Get<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				*static_cast<int32_t *>(out) = visual->Surface;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				const auto index = *static_cast<const int32_t *>(value);
-
-				// Anything out of range is "no surface" rather than a refusal.
-				// A script computing an index that came out wrong gets a part
-				// that draws normally, which is visible; a refusal mid-loop
-				// would stop the rest of the scene being built.
-				Visual *visual = store.GetMutable<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-
-				visual->Surface = index >= 0 && index < 127 ? static_cast<int8_t>(index) : int8_t{-1};
-				return true;
-			};
-			return property;
-		}
-
 		// SurfaceSize: the texture a surface camera renders into.
 		//
 		// **Structural, because the component's presence is the query.** A
@@ -532,56 +488,6 @@ namespace engine::scene {
 				}
 
 				surface->Face = static_cast<NormalId>(ordinal);
-				return true;
-			};
-
-			return property;
-		}
-
-		// Which surface index a camera renders into.
-		//
-		// **The camera's, and distinct from `BasePart::Surface` above even
-		// though they hold the same number.** One says "this pane samples that
-		// texture" and the other says "this camera writes it"; they agree
-		// because `AimSurfaceCameras` copies the camera's onto the pane it is
-		// parented to, and that copy is the whole reason a mirror is a camera
-		// parented to a part and nothing else.
-		//
-		// Authored rather than handed out by the engine, because the number is
-		// what pairs the two across a wire that carries no tree — and a derived
-		// one would move whenever creation order did.
-		PropertyDescriptor SurfaceIndexProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("Surface");
-			property.Type = PropertyType::Int32;
-			property.Size = sizeof(int32_t);
-			property.Kind = PropertyKind::Computed;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const SurfaceCamera *target = store.Get<SurfaceCamera>(instance);
-				if (target == nullptr) {
-					return false;
-				}
-				*static_cast<int32_t *>(out) = target->Surface;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				const auto index = *static_cast<const int32_t *>(value);
-
-				SurfaceCamera *target = store.GetMutable<SurfaceCamera>(instance);
-				if (target == nullptr) {
-					return false;
-				}
-
-				// **Clamped into the renderer's range rather than refused**, for
-				// `BasePart::Surface`'s reason: a script computing an index that
-				// came out wrong should get a mirror that visibly renders
-				// nothing, not a scene that stopped building half way through.
-				// The renderer says so in the log when it drops the view.
-				target->Surface = index >= 0 && index < 127 ? static_cast<int8_t>(index) : int8_t{0};
 				return true;
 			};
 
@@ -840,7 +746,6 @@ namespace engine::scene {
 			// rather than a reference to the camera: the renderer indexes a
 			// small fixed set, and a handle would have to be resolved back to an
 			// index every frame for every part.
-			ecs::Classes::Computed(basePart, SurfaceProperty());
 
 			// The two that were named as gaps at v0.5, both now closed with the
 			// thing they were waiting for rather than with a guess.
@@ -862,7 +767,6 @@ namespace engine::scene {
 				surfaceCameraClass, "ImageTransparency"
 			);
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
-			ecs::Classes::Computed(surfaceCameraClass, SurfaceIndexProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.

@@ -27,11 +27,12 @@
 --
 -- That took two things, both of which arrived at v0.8:
 --
---   - a **surface index per camera**. `reflection.Surface` below is what pairs a
---     camera with the pane that samples it, and each index owns a ping-ponged
---     texture pair of its own. Every camera used to default to 0, so all four
---     walls wrote into one target and three of them projected the fourth's
---     image across themselves;
+--   - a **surface slot per camera**, each owning a ping-ponged texture pair of
+--     its own. Every camera used to share slot 0, so all four walls wrote into
+--     one target and three of them projected the fourth's image across
+--     themselves. `scene::AimSurfaceCameras` hands the slots out in entity
+--     order and writes both ends of the pairing — the camera that renders into
+--     a slot and the pane that samples it — so nothing in this file names one;
 --   - a **per-view exclusion** in the surface pass. It used to skip every
 --     mirror, because a mirror sits between its own reflection camera and the
 --     world and would fill its texture with itself. It now skips only the
@@ -120,31 +121,27 @@ floor.Parent = workspace
 local WALLS = {
 	{
 		Name = "MirrorNorth",
-		Surface = 0,
 		Position = Vector3.new(0, WALL_HEIGHT / 2, -WALL_OFFSET),
 		Size = Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
-		Face = "Back",
+		Face = Enum.NormalId.Back,
 	},
 	{
 		Name = "MirrorEast",
-		Surface = 1,
 		Position = Vector3.new(WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		Size = Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
-		Face = "Left",
+		Face = Enum.NormalId.Left,
 	},
 	{
 		Name = "MirrorWest",
-		Surface = 2,
 		Position = Vector3.new(-WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		Size = Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
-		Face = "Right",
+		Face = Enum.NormalId.Right,
 	},
 	{
 		Name = "MirrorSouth",
-		Surface = 3,
 		Position = Vector3.new(0, WALL_HEIGHT / 2, WALL_OFFSET),
 		Size = Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
-		Face = "Front",
+		Face = Enum.NormalId.Front,
 	},
 }
 
@@ -173,12 +170,10 @@ for _, wall in WALLS do
 	-- frame, which is the whole distinction the property was added for.
 	pane.CastShadow = false
 
-	-- **No `Surface` line on the pane.** The index is authored on the *camera*
-	-- below and `scene::AimSurfaceCameras` copies it here, so a mirror is a
-	-- camera parented to a part and nothing else. Setting it in both places
-	-- would be one fact recorded twice, and forgetting it renders a perfect
-	-- reflection into a texture nothing samples — which looks exactly like a
-	-- mirror that does not work.
+	-- **Nothing here says which texture this pane shows, and that is the
+	-- point.** A pane is a mirror because a `SurfaceCamera` is parented to it —
+	-- a plain `Camera` projects nothing — so `scene::AimSurfaceCameras` hands
+	-- out the slots and writes both ends of the pairing itself.
 	pane.Parent = workspace
 
 	local reflection = Instance.new("SurfaceCamera")
@@ -186,16 +181,13 @@ for _, wall in WALLS do
 	reflection.SurfaceSize = SURFACE_SIZE
 	reflection.Face = wall.Face
 
-	-- **A texture of its own, which is the whole of what makes four walls four
-	-- mirrors.** Every surface camera used to default to 0, so all four wrote
-	-- into one target and the last one to render won — three walls projected a
-	-- fourth wall's image across themselves, and the scene's own header used to
-	-- explain that as a limitation of the pipeline.
-	--
-	-- It is authored rather than handed out by the engine because the number is
-	-- what pairs a camera with the pane that samples it, and a derived one would
-	-- move whenever creation order did. `scene::MAX_SURFACES` is the ceiling.
-	reflection.Surface = wall.Surface
+	-- **A texture of its own, and nothing in this file asks for one.** Every
+	-- surface camera used to share slot 0, so all four wrote into one target and
+	-- the last to render won — three walls projected a fourth wall's image
+	-- across themselves. The fix was a slot per camera, and the slots are handed
+	-- out by `scene::AimSurfaceCameras` in entity order rather than typed here:
+	-- a render-target index is the engine's bookkeeping, and an authored one is
+	-- a number two cameras can silently be given the same value of.
 
 	-- **Wide enough to still cover the pane when the viewer walks up to it.**
 	-- The reflected camera stands as far behind the glass as the eye is in

@@ -17,9 +17,9 @@
 //
 // **Four walls, four surfaces, and each one shows the other three**, which is
 // also in the Luau file and is the fact most worth carrying across. Two things
-// make it work: `reflection.Surface` gives every camera a texture of its own,
-// and the surface pass excludes only the surface it is rendering *for* rather
-// than every mirror. What a mirror shows of another mirror is one frame old,
+// make it work: `scene::AimSurfaceCameras` gives every camera a texture of its
+// own, and the surface pass excludes only the surface it is rendering *for*
+// rather than every mirror. What a mirror shows of another mirror is one frame old,
 // because each is being rendered for the others and no order would let any of
 // them be ready first.
 //
@@ -74,34 +74,35 @@ floor.Parent = workspace;
 // The X walls run the plate's exact depth and the Z walls overrun by a
 // thickness at each end, so the corners meet flush instead of overlapping into
 // a z-fighting post.
-const WALLS: { name: string; position: Vector3; size: Vector3; face: string }[] = [
+const WALLS: {
+	name: string;
+	position: Vector3;
+	size: Vector3;
+	face: Enum_NormalId;
+}[] = [
 	{
 		name: "MirrorNorth",
-		surface: 0,
 		position: Vector3.new(0, WALL_HEIGHT / 2, -WALL_OFFSET),
 		size: Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
-		face: "Back",
+		face: Enum.NormalId.Back,
 	},
 	{
 		name: "MirrorEast",
-		surface: 1,
 		position: Vector3.new(WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		size: Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
-		face: "Left",
+		face: Enum.NormalId.Left,
 	},
 	{
 		name: "MirrorWest",
-		surface: 2,
 		position: Vector3.new(-WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		size: Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
-		face: "Right",
+		face: Enum.NormalId.Right,
 	},
 	{
 		name: "MirrorSouth",
-		surface: 3,
 		position: Vector3.new(0, WALL_HEIGHT / 2, WALL_OFFSET),
 		size: Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
-		face: "Front",
+		face: Enum.NormalId.Front,
 	},
 ];
 
@@ -125,9 +126,9 @@ for (const wall of WALLS) {
 	// with its own shadow and bury the cube shadows this scene exists to show.
 	pane.CastShadow = false;
 
-	// No `Surface` line on the pane: the index is authored on the camera below
-	// and `scene::AimSurfaceCameras` copies it here. Parenting is what tells this pane
-	// which texture to show.
+	// Nothing here says which texture this pane shows: a pane is a mirror
+	// because a `SurfaceCamera` is parented to it, and `scene::AimSurfaceCameras`
+	// hands out the slots and writes both ends of the pairing itself.
 	pane.Parent = workspace;
 
 	const reflection = Instance.new("SurfaceCamera");
@@ -135,8 +136,9 @@ for (const wall of WALLS) {
 	reflection.SurfaceSize = SURFACE_SIZE;
 	reflection.Face = wall.face;
 
-	// A texture of its own, which is what makes four walls four mirrors.
-	reflection.Surface = wall.surface;
+	// A texture of its own, and nothing here asks for one. Every camera used to
+	// share slot 0, so three walls projected the fourth's image across
+	// themselves; the slots are now handed out in entity order by the engine.
 
 	// Wide enough to still cover the pane when the viewer walks up to it: the
 	// reflected camera stands as far behind the glass as the eye is in front,
