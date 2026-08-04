@@ -15,6 +15,22 @@
 
 namespace engine::scene {
 
+	const core::Name &DefaultMaterial() {
+		// **`Plastic` spelled here and registered as an enum member in
+		// `Part.cpp`, which is two places holding one string.** They are not
+		// collapsible in the direction that would help: the enum list is
+		// registered when the class tree is built, and a `Visual` can be default
+		// constructed before that has happened — a replica's column grows from a
+		// wire delta, and nothing on that path builds a class tree. Reading the
+		// enum's first member instead would therefore return an invalid name on
+		// exactly the path this default exists to serve.
+		//
+		// `scene/tests/Components.cpp` asserts the two agree, which is the check
+		// that makes the duplication safe rather than merely stated.
+		static const core::Name name("Plastic");
+		return name;
+	}
+
 	namespace {
 		// `Surface`, `Visual` and `SurfaceTable` all hold a `core::Name`, and a
 		// name's id is a counter this process assigned in first-seen order. The

@@ -202,6 +202,26 @@ namespace engine::scene {
 		core::Name Material;
 	};
 
+	// The material a part is drawn with when nobody says otherwise.
+	//
+	// **A function rather than a constant, because a `core::Name` is interned
+	// and interning needs the registry to exist.** A namespace-scope `const
+	// core::Name` would be constructed during static initialisation, in an order
+	// nothing specifies, and the registry it needs is itself a function-local
+	// static somewhere else. A function-local static is initialised on first
+	// call and therefore after whatever it depends on, which is the same
+	// arrangement `NormalIdEnum` in `Part.cpp` uses for the same reason.
+	//
+	// Interned once per process and returned by reference. `Name.hpp` states the
+	// rule — constructing from a literal takes the registry mutex and hashes a
+	// string — and this is read once per default-constructed `Visual`, which is
+	// once per row a column grows by.
+	//
+	// @return `Plastic`, a member of the `Material` enum `scene::Part.cpp`
+	//         registers.
+	// @since v0.8
+	const core::Name &DefaultMaterial();
+
 	// What a thing looks like.
 	//
 	// Names rather than handles, because a mesh reference has to survive a save
@@ -221,7 +241,19 @@ namespace engine::scene {
 		// The material to draw it with. Distinct from `Surface::Material`,
 		// which is what it *feels* like: a mirror-finish floor and a rubber
 		// floor may share a surface and never a material.
-		core::Name Material;
+		//
+		// **`Plastic` rather than invalid**, so a part that nobody has authored
+		// a material for reads back a member of the enum instead of a blank. An
+		// invalid name here meant the properties panel showed an empty combo on
+		// every fresh part — a control whose current value is not one of the
+		// values it offers — and a script reading `part.Material` got something
+		// it could not compare against `Enum.Material.Plastic` even though that
+		// is exactly what the part was drawn as.
+		//
+		// `Mesh` above is deliberately *not* given the same treatment: an
+		// invalid mesh means "the consumer's own default", which is a real and
+		// useful state, and there is no name for the unit cube to give it.
+		core::Name Material = DefaultMaterial();
 
 		// How much of what is behind shows through, 0 to 1.
 		//

@@ -1,7 +1,9 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
@@ -171,7 +173,41 @@ TEST_CASE("a default visual is a visible untinted default mesh", "[scene][compon
 	// default mesh is, and a name interned here would be a second place that
 	// decides.
 	CHECK_FALSE(visual.Mesh.IsValid());
-	CHECK_FALSE(visual.Material.IsValid());
+
+	// **Material is the opposite case, and the asymmetry is the point.** There
+	// is no name for "the consumer's own default material" the way there is for
+	// its default mesh — a part is drawn as *something* — so leaving this
+	// invalid meant a properties panel showing an empty combo whose current
+	// value was not among the values it offered, and a script comparing
+	// `part.Material` against `Enum.Material.Plastic` and getting false on a
+	// part that was drawn as plastic.
+	CHECK(visual.Material == engine::scene::DefaultMaterial());
+	CHECK(visual.Material == Name("Plastic"));
+}
+
+TEST_CASE("the default material is a member of the material enum", "[scene][components]") {
+	// **The check that makes one string in two files safe.** `DefaultMaterial`
+	// interns "Plastic" and `scene::Part.cpp` registers the enum's members from
+	// a separate list, and they cannot be collapsed in the direction that would
+	// help: a `Visual` can be default constructed before any class tree exists —
+	// a replica's column grows straight from a wire delta — so reading the
+	// enum's first member as the default would hand back an invalid name on
+	// exactly the path the default is for.
+	//
+	// So they are two declarations of one fact, and this is what stops them
+	// drifting. Renaming the enum member without renaming the default would
+	// otherwise leave every part carrying a material name the enum does not
+	// contain, and the only symptom would be a combo with no selection.
+	// Building the class tree is what registers the enum, so this is the call
+	// that makes the lookup below meaningful rather than merely absent.
+	(void)engine::scene::PartClass();
+
+	size_t ordinal = 0;
+	REQUIRE(engine::ecs::EnumTable::OrdinalOf(Name("Material"), engine::scene::DefaultMaterial(), ordinal));
+
+	// First, because `Part.cpp` lists it first and a fresh part reading back the
+	// enum's leading member is what an author expects to see.
+	CHECK(ordinal == 0);
 }
 
 TEST_CASE("a default surface names nothing", "[scene][components]") {
