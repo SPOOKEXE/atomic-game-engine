@@ -105,11 +105,31 @@ declare interface RaycastResult {
 }
 
 declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
+declare interface Enum_EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
+declare interface Enum_EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
 declare interface Enum_Material extends EnumItem { readonly __enum: "Material"; }
 declare interface Enum_NormalId extends EnumItem { readonly __enum: "NormalId"; }
 declare interface Enum_ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 
 declare namespace Enum {
+	const EasingDirection: {
+		readonly In: Enum_EasingDirection;
+		readonly Out: Enum_EasingDirection;
+		readonly InOut: Enum_EasingDirection;
+	};
+	const EasingStyle: {
+		readonly Linear: Enum_EasingStyle;
+		readonly Quad: Enum_EasingStyle;
+		readonly Cubic: Enum_EasingStyle;
+		readonly Quart: Enum_EasingStyle;
+		readonly Quint: Enum_EasingStyle;
+		readonly Sine: Enum_EasingStyle;
+		readonly Exponential: Enum_EasingStyle;
+		readonly Circular: Enum_EasingStyle;
+		readonly Back: Enum_EasingStyle;
+		readonly Elastic: Enum_EasingStyle;
+		readonly Bounce: Enum_EasingStyle;
+	};
 	const Material: {
 		readonly Plastic: Enum_Material;
 		readonly SmoothPlastic: Enum_Material;
@@ -143,6 +163,160 @@ declare namespace Enum {
 		readonly Client: Enum_ServiceScope;
 	};
 }
+
+// --- the datatype vocabulary ----------------------------------------------
+
+declare interface Vector2 {
+	readonly X: number;
+	readonly Y: number;
+	readonly Magnitude: number;
+	readonly Unit: Vector2;
+	add(other: Vector2): Vector2;
+	sub(other: Vector2): Vector2;
+	mul(other: Vector2 | number): Vector2;
+	Equals(other: Vector2): boolean;
+}
+
+declare const Vector2: {
+	new: (x?: number, y?: number) => Vector2;
+};
+
+declare interface UDim {
+	readonly Scale: number;
+	readonly Offset: number;
+}
+
+declare const UDim: {
+	new: (scale?: number, offset?: number) => UDim;
+};
+
+declare interface UDim2 {
+	readonly X: UDim;
+	readonly Y: UDim;
+}
+
+declare const UDim2: {
+	new: (xScale?: number, xOffset?: number, yScale?: number, yOffset?: number) => UDim2;
+	// Four numbers where two are zero is noise an author stops reading.
+	fromScale: (x?: number, y?: number) => UDim2;
+	fromOffset: (x?: number, y?: number) => UDim2;
+};
+
+declare interface Rect {
+	readonly Min: Vector2;
+	readonly Max: Vector2;
+	readonly Width: number;
+	readonly Height: number;
+}
+
+declare const Rect: {
+	new: {
+		(min: Vector2, max: Vector2): Rect;
+		(minX?: number, minY?: number, maxX?: number, maxY?: number): Rect;
+	};
+};
+
+declare interface Region3 {
+	readonly CFrame: CFrame;
+	readonly Size: Vector3;
+}
+
+declare const Region3: {
+	new: (min: Vector3, max: Vector3) => Region3;
+};
+
+declare interface NumberRange {
+	readonly Min: number;
+	readonly Max: number;
+}
+
+declare const NumberRange: {
+	// One argument is the degenerate range, which is Roblox's shape.
+	new: (min: number, max?: number) => NumberRange;
+};
+
+declare interface NumberSequence {
+	Evaluate(time: number): number;
+}
+
+declare const NumberSequence: {
+	new: {
+		(value: number): NumberSequence;
+		(from: number, to: number): NumberSequence;
+		// `[time, value]`. The Luau half reads an envelope as a third element;
+		// this one does not.
+		(keypoints: [number, number][]): NumberSequence;
+	};
+};
+
+declare interface ColorSequence {
+	Evaluate(time: number): Color3;
+}
+
+declare const ColorSequence: {
+	new: {
+		(value: Color3): ColorSequence;
+		(from: Color3, to: Color3): ColorSequence;
+	};
+};
+
+declare interface TweenInfo {
+	readonly Time: number;
+	readonly DelayTime: number;
+	readonly RepeatCount: number;
+	readonly Reverses: boolean;
+	Evaluate(time: number): number;
+}
+
+declare const TweenInfo: {
+	new: (
+		time?: number,
+		style?: Enum_EasingStyle,
+		direction?: Enum_EasingDirection,
+		repeatCount?: number,
+		reverses?: boolean,
+		delayTime?: number
+	) => TweenInfo;
+};
+
+// The direction is normalised on the way in, so the length an author passed is
+// not silently kept.
+declare interface Ray {
+	readonly Origin: Vector3;
+	readonly Direction: Vector3;
+	PointAt(distance: number): Vector3;
+}
+
+declare const Ray: {
+	new: (origin: Vector3, direction: Vector3) => Ray;
+};
+
+// Indexed rather than streamed underneath: the seed is a salt and the draw
+// number is an index, so a script's sequence is a pure function of its seed and
+// how many values it has taken. Two runs agree and a recording replays.
+declare interface Random {
+	NextNumber(min?: number, max?: number): number;
+	// Inclusive of both ends, which is Roblox's contract.
+	NextInteger(min: number, max: number): number;
+}
+
+declare const Random: {
+	new: (seed?: number) => Random;
+};
+
+declare interface DateTime {
+	readonly UnixTimestamp: number;
+	readonly UnixTimestampMillis: number;
+}
+
+declare const DateTime: {
+	// **Always throws**, hence `never`, and the refusal is the design: a world's
+	// clock is simulated, and a script branching on wall time produces a run
+	// that does not replay. The two below are what to use instead.
+	now: () => never;
+	fromSimulated: () => DateTime;
+	fromUnixTimestamp: (seconds: number) => DateTime;
+};
 
 // --- the class tree -------------------------------------------------------
 
@@ -212,6 +386,7 @@ declare interface Service extends Instance {
 }
 
 declare interface Workspace extends Service {
+	CurrentCamera: Camera | null;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 }
 

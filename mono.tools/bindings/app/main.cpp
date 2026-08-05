@@ -22,6 +22,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Datatypes.hpp>
 #include <engine/script/Instances.hpp>
 
 #include <algorithm>
@@ -484,6 +485,180 @@ declare RaycastParams: {
 
 )LUAU";
 
+	// The rest of the datatype vocabulary, emitted after the enums because
+	// `TweenInfo` names two of them.
+	//
+	// **`Region3` is `core::AABB` and `Ray` is `core::Ray`**, which is why
+	// neither carries a rotation: Roblox's `Region3` is an axis-aligned box and
+	// the engine already had that box under the name every spatial query uses.
+	//
+	// A sequence keypoint is a table rather than a type of its own —
+	// `{time, value, envelope}` for a number and `{time, Color3}` for a colour —
+	// because two more userdata types for something written inline once is
+	// surface nobody asked for.
+	constexpr const char *LUAU_DATATYPES =
+		R"LUAU(-- --- the datatype vocabulary ----------------------------------------------
+
+declare class Vector2
+	X: number
+	Y: number
+	Magnitude: number
+	Unit: Vector2
+	function __add(self, other: Vector2): Vector2
+	function __sub(self, other: Vector2): Vector2
+	function __mul(self, other: Vector2 | number): Vector2
+end
+
+declare Vector2: {
+	new: (x: number?, y: number?) -> Vector2,
+}
+
+declare class UDim
+	Scale: number
+	Offset: number
+end
+
+declare UDim: {
+	new: (scale: number?, offset: number?) -> UDim,
+}
+
+-- `Width` and `Height` are the same two members as `X` and `Y`, which is
+-- Roblox's spelling and the run time's.
+declare class UDim2
+	X: UDim
+	Y: UDim
+	Width: UDim
+	Height: UDim
+	function __add(self, other: UDim2): UDim2
+	function __sub(self, other: UDim2): UDim2
+end
+
+declare UDim2: {
+	new: (xScale: number?, xOffset: number?, yScale: number?, yOffset: number?) -> UDim2,
+	-- Four numbers where two are zero is noise an author stops reading.
+	fromScale: (x: number?, y: number?) -> UDim2,
+	fromOffset: (x: number?, y: number?) -> UDim2,
+}
+
+declare class Rect
+	Min: Vector2
+	Max: Vector2
+	Width: number
+	Height: number
+end
+
+declare Rect: {
+	new: ((min: Vector2, max: Vector2) -> Rect)
+		& ((minX: number?, minY: number?, maxX: number?, maxY: number?) -> Rect),
+}
+
+declare class Region3
+	CFrame: CFrame
+	Size: Vector3
+end
+
+declare Region3: {
+	new: (min: Vector3, max: Vector3) -> Region3,
+}
+
+declare class NumberRange
+	Min: number
+	Max: number
+end
+
+declare NumberRange: {
+	-- One argument is the degenerate range, which is Roblox's shape.
+	new: (min: number, max: number?) -> NumberRange,
+}
+
+declare class NumberSequence
+	Keypoints: { { number } }
+	function Evaluate(self, time: number): number
+end
+
+declare NumberSequence: {
+	new: ((value: number) -> NumberSequence)
+		& ((from: number, to: number) -> NumberSequence)
+		& ((keypoints: { { number } }) -> NumberSequence),
+}
+
+declare class ColorSequence
+	Keypoints: { { number | Color3 } }
+	function Evaluate(self, time: number): Color3
+end
+
+declare ColorSequence: {
+	new: ((value: Color3) -> ColorSequence)
+		& ((from: Color3, to: Color3) -> ColorSequence)
+		& ((keypoints: { { number | Color3 } }) -> ColorSequence),
+}
+
+declare class TweenInfo
+	Time: number
+	DelayTime: number
+	RepeatCount: number
+	Reverses: boolean
+	EasingStyle: Enum_EasingStyle
+	EasingDirection: Enum_EasingDirection
+	function Evaluate(self, time: number): number
+end
+
+declare TweenInfo: {
+	new: (
+		time: number?,
+		style: Enum_EasingStyle?,
+		direction: Enum_EasingDirection?,
+		repeatCount: number?,
+		reverses: boolean?,
+		delayTime: number?
+	) -> TweenInfo,
+}
+
+-- The direction is normalised on the way in, so the length an author passed is
+-- not silently kept: `core::Ray::Direction` must be unit and Roblox's need not
+-- be. `Ray.Unit` hands back the same ray.
+declare class Ray
+	Origin: Vector3
+	Direction: Vector3
+	Unit: Ray
+	function PointAt(self, distance: number): Vector3
+end
+
+declare Ray: {
+	new: (origin: Vector3, direction: Vector3) -> Ray,
+}
+
+-- Indexed rather than streamed underneath: the seed is a salt and the draw
+-- number is an index, so a script's sequence is a pure function of its seed and
+-- how many values it has taken. Two runs agree and a recording replays.
+declare class Random
+	function NextNumber(self, min: number?, max: number?): number
+	-- Inclusive of both ends, which is Roblox's contract.
+	function NextInteger(self, min: number, max: number): number
+end
+
+declare Random: {
+	new: (seed: number?) -> Random,
+}
+
+-- A plain table rather than a userdata: it is a value over a number and
+-- nothing more.
+type DateTime = {
+	UnixTimestamp: number,
+	UnixTimestampMillis: number,
+}
+
+declare DateTime: {
+	-- **Always raises**, hence `never`, and the refusal is the design: a world's
+	-- clock is simulated, and a script branching on wall time produces a run
+	-- that does not replay. The two below are what to use instead.
+	now: () -> never,
+	fromSimulated: () -> DateTime,
+	fromUnixTimestamp: (seconds: number) -> DateTime,
+}
+
+)LUAU";
+
 	// The globals that reach the class tree, so they are emitted after it.
 	//
 	// **`RunService` is a class and a value of the same name**, which is legal
@@ -615,6 +790,8 @@ declare task: {
 		}
 		out << "}\n\n";
 
+		out << LUAU_DATATYPES;
+
 		out << "-- --- the class tree -------------------------------------------------------\n\n";
 		for (const ClassId id : AllClasses()) {
 			const ClassInfo &info = Classes::Describe(id);
@@ -664,7 +841,10 @@ declare task: {
 			// A raycast result is a plain table at run time — read once and
 			// discarded — so it is written inline rather than given a name.
 			if (name == "Workspace") {
-				out << "\tCurrentCamera: Camera\n";
+				// Optional, because a world with no camera resolved genuinely
+				// has none — `PushCurrentCamera` answers nil rather than minting
+				// a row so the property has something to point at.
+				out << "\tCurrentCamera: Camera?\n";
 				out << "\tfunction Raycast(self, origin: Vector3, direction: Vector3, "
 					   "params: RaycastParams?): {\n";
 				out << "\t\tInstance: Instance,\n";
@@ -839,6 +1019,178 @@ declare interface RaycastResult {
 
 )TS";
 
+	// The rest of the datatype vocabulary.
+	//
+	// **Four of these carry less than the Luau half, and none of it is an
+	// omission here.** `JsDatatypes.cpp` installs what is listed below and
+	// nothing more:
+	//
+	//   - `UDim2` has no `Width`/`Height` aliases and no arithmetic;
+	//   - `TweenInfo` has no `EasingStyle`/`EasingDirection` getters, though its
+	//     constructor still takes both;
+	//   - `Ray` has no `Unit`;
+	//   - `ColorSequence.new` takes no keypoint array, only one colour or two.
+	//
+	// Each of those is a gap in the JavaScript binding rather than in this file,
+	// and writing them down is what makes the gap visible instead of a run-time
+	// `undefined`.
+	constexpr const char *TYPESCRIPT_DATATYPES =
+		R"TS(// --- the datatype vocabulary ----------------------------------------------
+
+declare interface Vector2 {
+	readonly X: number;
+	readonly Y: number;
+	readonly Magnitude: number;
+	readonly Unit: Vector2;
+	add(other: Vector2): Vector2;
+	sub(other: Vector2): Vector2;
+	mul(other: Vector2 | number): Vector2;
+	Equals(other: Vector2): boolean;
+}
+
+declare const Vector2: {
+	new: (x?: number, y?: number) => Vector2;
+};
+
+declare interface UDim {
+	readonly Scale: number;
+	readonly Offset: number;
+}
+
+declare const UDim: {
+	new: (scale?: number, offset?: number) => UDim;
+};
+
+declare interface UDim2 {
+	readonly X: UDim;
+	readonly Y: UDim;
+}
+
+declare const UDim2: {
+	new: (xScale?: number, xOffset?: number, yScale?: number, yOffset?: number) => UDim2;
+	// Four numbers where two are zero is noise an author stops reading.
+	fromScale: (x?: number, y?: number) => UDim2;
+	fromOffset: (x?: number, y?: number) => UDim2;
+};
+
+declare interface Rect {
+	readonly Min: Vector2;
+	readonly Max: Vector2;
+	readonly Width: number;
+	readonly Height: number;
+}
+
+declare const Rect: {
+	new: {
+		(min: Vector2, max: Vector2): Rect;
+		(minX?: number, minY?: number, maxX?: number, maxY?: number): Rect;
+	};
+};
+
+declare interface Region3 {
+	readonly CFrame: CFrame;
+	readonly Size: Vector3;
+}
+
+declare const Region3: {
+	new: (min: Vector3, max: Vector3) => Region3;
+};
+
+declare interface NumberRange {
+	readonly Min: number;
+	readonly Max: number;
+}
+
+declare const NumberRange: {
+	// One argument is the degenerate range, which is Roblox's shape.
+	new: (min: number, max?: number) => NumberRange;
+};
+
+declare interface NumberSequence {
+	Evaluate(time: number): number;
+}
+
+declare const NumberSequence: {
+	new: {
+		(value: number): NumberSequence;
+		(from: number, to: number): NumberSequence;
+		// `[time, value]`. The Luau half reads an envelope as a third element;
+		// this one does not.
+		(keypoints: [number, number][]): NumberSequence;
+	};
+};
+
+declare interface ColorSequence {
+	Evaluate(time: number): Color3;
+}
+
+declare const ColorSequence: {
+	new: {
+		(value: Color3): ColorSequence;
+		(from: Color3, to: Color3): ColorSequence;
+	};
+};
+
+declare interface TweenInfo {
+	readonly Time: number;
+	readonly DelayTime: number;
+	readonly RepeatCount: number;
+	readonly Reverses: boolean;
+	Evaluate(time: number): number;
+}
+
+declare const TweenInfo: {
+	new: (
+		time?: number,
+		style?: Enum_EasingStyle,
+		direction?: Enum_EasingDirection,
+		repeatCount?: number,
+		reverses?: boolean,
+		delayTime?: number
+	) => TweenInfo;
+};
+
+// The direction is normalised on the way in, so the length an author passed is
+// not silently kept.
+declare interface Ray {
+	readonly Origin: Vector3;
+	readonly Direction: Vector3;
+	PointAt(distance: number): Vector3;
+}
+
+declare const Ray: {
+	new: (origin: Vector3, direction: Vector3) => Ray;
+};
+
+// Indexed rather than streamed underneath: the seed is a salt and the draw
+// number is an index, so a script's sequence is a pure function of its seed and
+// how many values it has taken. Two runs agree and a recording replays.
+declare interface Random {
+	NextNumber(min?: number, max?: number): number;
+	// Inclusive of both ends, which is Roblox's contract.
+	NextInteger(min: number, max: number): number;
+}
+
+declare const Random: {
+	new: (seed?: number) => Random;
+};
+
+declare interface DateTime {
+	readonly UnixTimestamp: number;
+	readonly UnixTimestampMillis: number;
+}
+
+declare const DateTime: {
+	// **Always throws**, hence `never`, and the refusal is the design: a world's
+	// clock is simulated, and a script branching on wall time produces a run
+	// that does not replay. The two below are what to use instead.
+	now: () => never;
+	fromSimulated: () => DateTime;
+	fromUnixTimestamp: (seconds: number) => DateTime;
+};
+
+)TS";
+
 	// The TypeScript globals, emitted after the class tree they reach.
 	//
 	// **`RunService` carries `Heartbeat` and nothing else here, and that is not
@@ -967,6 +1319,8 @@ declare const task: {
 		}
 		out << "}\n\n";
 
+		out << TYPESCRIPT_DATATYPES;
+
 		out << "// --- the class tree -------------------------------------------------------\n\n";
 		for (const ClassId id : AllClasses()) {
 			const ClassInfo &info = Classes::Describe(id);
@@ -1014,13 +1368,13 @@ declare const task: {
 				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
 			}
 
-			// **`Raycast` and no `CurrentCamera`, and the asymmetry with the Luau
-			// half is the JavaScript binding's rather than this file's.**
-			// `InstallJsQueries` puts `Raycast` on the world object and then
-			// `JS_PreventExtensions` seals it; nothing installs `CurrentCamera`,
-			// which the Luau `InstanceIndex` special-cases. Declaring it here
-			// would make a write that silently does nothing typecheck.
+			// The two members only the Workspace answers, matching the Luau half.
+			//
+			// `CurrentCamera` is `null` on a world with no camera resolved,
+			// rather than a camera minted so the property has something to point
+			// at — a headless world genuinely has none.
 			if (name == "Workspace") {
+				out << "\tCurrentCamera: Camera | null;\n";
 				out << "\tRaycast(origin: Vector3, direction: Vector3, params?: RaycastParams): "
 					   "RaycastResult | null;\n";
 			}
@@ -1121,6 +1475,14 @@ int main(int argc, char **argv) {
 	// answerable: `Service` is the ancestor that says a class is reached by
 	// name rather than minted.
 	(void)engine::scene::ServiceClass();
+
+	// **The datatype enums, which no class registration reaches.** `EasingStyle`
+	// and `EasingDirection` belong to `TweenInfo` rather than to any class, so
+	// they arrive through the enum table alone — and both VMs used to register
+	// them while opening, which is a moment this tool never has. The result was
+	// a manifest that described `Material` and not `EasingStyle`, and a script
+	// that got no completion for a value the run time accepts.
+	engine::script::RegisterDatatypeEnums();
 
 	const std::filesystem::path directory = arguments.Get("out").has_value()
 												? std::filesystem::path(*arguments.Get("out"))

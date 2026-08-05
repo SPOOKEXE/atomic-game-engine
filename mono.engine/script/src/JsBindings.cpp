@@ -5,6 +5,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -1007,6 +1009,75 @@ namespace engine::script {
 		return object;
 	}
 
+	namespace {
+		// `workspace.CurrentCamera`, and the JavaScript half of `LuauCamera.cpp`.
+		//
+		// **It was missing, and missing in the worst available way.** The Luau
+		// side special-cases this pair in `InstanceIndex`/`InstanceNewIndex`
+		// because the property projects onto no component — it is a *resource*,
+		// `scene::ActiveCamera`, holding which eye the renderer resolves. Nothing
+		// did that here, and the world object is sealed with
+		// `JS_PreventExtensions` before it reaches a script, so
+		// `workspace.CurrentCamera = view` did not add a property, did not throw
+		// outside strict mode, and did not aim the camera.
+		// `mono.engine/examples/Mirrors-1-world.ts` has been writing it since it
+		// was ported from the Luau file.
+		//
+		// Installed on the world object rather than on a prototype, for the
+		// reason `Raycast` is: only the Workspace answers it, and offering it on
+		// a `Folder` would be offering an answer that means nothing.
+		JSValue CurrentCameraGet(JSContext *context, JSValueConst) {
+			ecs::Store &store = *JsOf(context).World;
+
+			const auto *active = store.Resource<scene::ActiveCamera>();
+			if (active == nullptr || active->Entity == ecs::NULL_ENTITY || !store.Alive(active->Entity)) {
+				// **Null rather than a camera made on demand**, which is the Luau
+				// side's answer and for its reason: a headless world genuinely has
+				// none, and minting a row so a property has something to point at
+				// would put a phantom camera in every server world.
+				return JS_NULL;
+			}
+
+			return MakeJsInstance(context, active->Entity);
+		}
+
+		JSValue CurrentCameraSet(JSContext *context, JSValueConst, JSValueConst value) {
+			ecs::Store &store = *JsOf(context).World;
+
+			// The aspect ratio is the *consumer's* — a window wrote it — so it
+			// survives a camera change. Read first and kept, exactly as
+			// `SetCurrentCamera` does; clearing it would make the next resolved
+			// frame use a ratio of one and stretch every view.
+			scene::ActiveCamera active;
+			if (const auto *existing = store.Resource<scene::ActiveCamera>(); existing != nullptr) {
+				active = *existing;
+			}
+
+			// `null` and `undefined` both detach. Detaching is a real operation:
+			// a script tearing down a cutscene camera wants the world to have
+			// none rather than to keep pointing at a row it is about to destroy.
+			if (JS_IsNull(value) || JS_IsUndefined(value)) {
+				active.Entity = ecs::NULL_ENTITY;
+				store.SetResource(active);
+				return JS_UNDEFINED;
+			}
+
+			const Entity camera = JsEntityOf(context, value);
+
+			// Refused when the instance carries no `Camera`, rather than accepted
+			// and quietly ignored by `ResolveActiveCamera` — which leaves the
+			// matrices as they were, so the symptom would be a view that stopped
+			// following anything with nothing reporting why.
+			if (camera == ecs::NULL_ENTITY || store.Get<scene::Camera>(camera) == nullptr) {
+				return JS_ThrowTypeError(context, "CurrentCamera must be an instance carrying a Camera");
+			}
+
+			active.Entity = camera;
+			store.SetResource(active);
+			return JS_UNDEFINED;
+		}
+	}
+
 	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role) {
 		auto *bound = new JsContext();
 		bound->World = &store;
@@ -1278,8 +1349,15 @@ namespace engine::script {
 				world = JS_NewObject(context);
 			}
 
-			// **Before the seal**, because a sealed object cannot take a method.
+			// **Before the seal**, because a sealed object cannot take a method
+			// — nor an accessor, which is what made `CurrentCamera`'s absence
+			// silent rather than loud.
 			InstallJsQueries(context, global, world);
+
+			static const JSCFunctionListEntry members[] = {
+				JS_CGETSET_DEF("CurrentCamera", CurrentCameraGet, CurrentCameraSet),
+			};
+			JS_SetPropertyFunctionList(context, world, members, 1);
 
 			JS_PreventExtensions(context, world);
 

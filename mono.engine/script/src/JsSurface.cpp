@@ -39,6 +39,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/script/Datatypes.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
@@ -1041,25 +1042,11 @@ namespace engine::script {
 		JsContext &bound = JsOf(context);
 		JSValue global = JS_GetGlobalObject(context);
 
-		// The two enums this vocabulary needs. `ecs::EnumTable` is process-wide
-		// and takes a second declaration as agreement, so registering here as
-		// well as on the Luau side is not a conflict.
-		static const std::string_view EASING_STYLES[] = {
-			"Linear",
-			"Quad",
-			"Cubic",
-			"Quart",
-			"Quint",
-			"Sine",
-			"Exponential",
-			"Circular",
-			"Back",
-			"Elastic",
-			"Bounce",
-		};
-		static const std::string_view EASING_DIRECTIONS[] = {"In", "Out", "InOut"};
-		ecs::EnumTable::Register("EasingStyle", EASING_STYLES);
-		ecs::EnumTable::Register("EasingDirection", EASING_DIRECTIONS);
+		// The two enums this vocabulary needs. Shared with the Luau surface and
+		// with the bindings generator rather than listed again here: process-wide
+		// registration takes a second declaration as agreement, which is what
+		// kept the duplicate invisible until a third caller needed the same list.
+		RegisterDatatypeEnums();
 
 		// --- signals ---
 		{

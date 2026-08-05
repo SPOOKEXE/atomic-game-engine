@@ -125,6 +125,38 @@ bindings: (build "bindings")
 bindings-check: (build "bindings")
     ./{{build}}/tools/bindings --check
 
+# Every authored script against the declarations, in both languages.
+#
+# **The other half of `bindings-check`.** That one asks whether the declarations
+# still match the class table; this asks whether the scripts still match the
+# declarations. A property removed from the class table regenerates cleanly and
+# leaves every script that named it broken, with nothing reporting it until the
+# scene fails to build.
+#
+# The Luau half is `mono.tools/scriptcheck`, which exists because upstream's
+# `luau-analyze` has no way to load a definition file — see MonoVendor.cmake.
+# The TypeScript half is `tsc` against the checked-in `tsconfig.json`, which
+# already lists the generated `.d.ts` as its type root.
+#
+# **`tsc` is skipped rather than fatal when no runner is installed.** It is the
+# one check here that needs something outside the C++ toolchain, and a
+# prerequisite list that grows a Node runtime for two example files is a worse
+# trade than a check that says out loud when it did not run.
+typecheck: (build "scriptcheck")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ./{{build}}/tools/scriptcheck mono.engine/examples/*.luau
+
+    if command -v bunx > /dev/null; then
+        bunx tsc --noEmit
+        echo "typecheck ok — luau and typescript"
+    elif command -v npx > /dev/null; then
+        npx --yes tsc --noEmit
+        echo "typecheck ok — luau and typescript"
+    else
+        echo "typecheck ok — luau. TypeScript skipped: no bunx or npx on PATH."
+    fi
+
 # Everything CI runs, in the order CI runs it, against one preset.
 #
 # Here so that "it passes locally" and "it passes in CI" mean the same thing.
@@ -137,8 +169,8 @@ bindings-check: (build "bindings")
 # Not `preset=ci` by default, because that makes every warning fatal and the
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for what
 # the pipeline actually enforces.
-check: format-check build test-all test-architecture bindings-check determinism replay-check
-    @echo "check ok — format, build, tests, architecture, bindings, determinism, replay"
+check: format-check build test-all test-architecture bindings-check typecheck determinism replay-check
+    @echo "check ok — format, build, tests, architecture, bindings, typecheck, determinism, replay"
 
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")

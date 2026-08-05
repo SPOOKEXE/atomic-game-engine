@@ -3,6 +3,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/script/Datatypes.hpp>
 
 #include <lualib.h>
 #include <new>
@@ -795,10 +796,13 @@ namespace engine::script {
 		return core::Name(NAMES[static_cast<size_t>(direction)]);
 	}
 
-	void OpenDatatypes(lua_State *state) {
-		// The two enums this vocabulary needs, registered here because this is
-		// where they are consumed. `ecs::EnumTable` is process-wide, so
-		// registering twice is agreement rather than conflict.
+	// The two enums this vocabulary needs.
+	//
+	// **Here rather than in each VM's open, because there are three callers.**
+	// Both surfaces consume them through `TweenInfo`, and `mono.tools/bindings`
+	// needs them without opening a VM at all — see `script/Datatypes.hpp` for
+	// what having written the list twice actually cost.
+	void RegisterDatatypeEnums() {
 		static const std::string_view EASING_STYLES[] = {
 			"Linear",
 			"Quad",
@@ -816,6 +820,10 @@ namespace engine::script {
 
 		ecs::EnumTable::Register("EasingStyle", EASING_STYLES);
 		ecs::EnumTable::Register("EasingDirection", EASING_DIRECTIONS);
+	}
+
+	void OpenDatatypes(lua_State *state) {
+		RegisterDatatypeEnums();
 
 		static const luaL_Reg vector2[] = {{"new", Vector2New}, {nullptr, nullptr}};
 		static const luaL_Reg udim[] = {{"new", UDimNew}, {nullptr, nullptr}};

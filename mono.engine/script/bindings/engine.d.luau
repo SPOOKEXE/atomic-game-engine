@@ -101,6 +101,12 @@ declare class EnumItem
 	EnumType: string
 end
 
+declare class Enum_EasingDirection extends EnumItem
+end
+
+declare class Enum_EasingStyle extends EnumItem
+end
+
 declare class Enum_Material extends EnumItem
 end
 
@@ -111,6 +117,24 @@ declare class Enum_ServiceScope extends EnumItem
 end
 
 declare Enum: {
+	EasingDirection: {
+		In: Enum_EasingDirection,
+		Out: Enum_EasingDirection,
+		InOut: Enum_EasingDirection,
+	},
+	EasingStyle: {
+		Linear: Enum_EasingStyle,
+		Quad: Enum_EasingStyle,
+		Cubic: Enum_EasingStyle,
+		Quart: Enum_EasingStyle,
+		Quint: Enum_EasingStyle,
+		Sine: Enum_EasingStyle,
+		Exponential: Enum_EasingStyle,
+		Circular: Enum_EasingStyle,
+		Back: Enum_EasingStyle,
+		Elastic: Enum_EasingStyle,
+		Bounce: Enum_EasingStyle,
+	},
 	Material: {
 		Plastic: Enum_Material,
 		SmoothPlastic: Enum_Material,
@@ -143,6 +167,166 @@ declare Enum: {
 		Server: Enum_ServiceScope,
 		Client: Enum_ServiceScope,
 	},
+}
+
+-- --- the datatype vocabulary ----------------------------------------------
+
+declare class Vector2
+	X: number
+	Y: number
+	Magnitude: number
+	Unit: Vector2
+	function __add(self, other: Vector2): Vector2
+	function __sub(self, other: Vector2): Vector2
+	function __mul(self, other: Vector2 | number): Vector2
+end
+
+declare Vector2: {
+	new: (x: number?, y: number?) -> Vector2,
+}
+
+declare class UDim
+	Scale: number
+	Offset: number
+end
+
+declare UDim: {
+	new: (scale: number?, offset: number?) -> UDim,
+}
+
+-- `Width` and `Height` are the same two members as `X` and `Y`, which is
+-- Roblox's spelling and the run time's.
+declare class UDim2
+	X: UDim
+	Y: UDim
+	Width: UDim
+	Height: UDim
+	function __add(self, other: UDim2): UDim2
+	function __sub(self, other: UDim2): UDim2
+end
+
+declare UDim2: {
+	new: (xScale: number?, xOffset: number?, yScale: number?, yOffset: number?) -> UDim2,
+	-- Four numbers where two are zero is noise an author stops reading.
+	fromScale: (x: number?, y: number?) -> UDim2,
+	fromOffset: (x: number?, y: number?) -> UDim2,
+}
+
+declare class Rect
+	Min: Vector2
+	Max: Vector2
+	Width: number
+	Height: number
+end
+
+declare Rect: {
+	new: ((min: Vector2, max: Vector2) -> Rect)
+		& ((minX: number?, minY: number?, maxX: number?, maxY: number?) -> Rect),
+}
+
+declare class Region3
+	CFrame: CFrame
+	Size: Vector3
+end
+
+declare Region3: {
+	new: (min: Vector3, max: Vector3) -> Region3,
+}
+
+declare class NumberRange
+	Min: number
+	Max: number
+end
+
+declare NumberRange: {
+	-- One argument is the degenerate range, which is Roblox's shape.
+	new: (min: number, max: number?) -> NumberRange,
+}
+
+declare class NumberSequence
+	Keypoints: { { number } }
+	function Evaluate(self, time: number): number
+end
+
+declare NumberSequence: {
+	new: ((value: number) -> NumberSequence)
+		& ((from: number, to: number) -> NumberSequence)
+		& ((keypoints: { { number } }) -> NumberSequence),
+}
+
+declare class ColorSequence
+	Keypoints: { { number | Color3 } }
+	function Evaluate(self, time: number): Color3
+end
+
+declare ColorSequence: {
+	new: ((value: Color3) -> ColorSequence)
+		& ((from: Color3, to: Color3) -> ColorSequence)
+		& ((keypoints: { { number | Color3 } }) -> ColorSequence),
+}
+
+declare class TweenInfo
+	Time: number
+	DelayTime: number
+	RepeatCount: number
+	Reverses: boolean
+	EasingStyle: Enum_EasingStyle
+	EasingDirection: Enum_EasingDirection
+	function Evaluate(self, time: number): number
+end
+
+declare TweenInfo: {
+	new: (
+		time: number?,
+		style: Enum_EasingStyle?,
+		direction: Enum_EasingDirection?,
+		repeatCount: number?,
+		reverses: boolean?,
+		delayTime: number?
+	) -> TweenInfo,
+}
+
+-- The direction is normalised on the way in, so the length an author passed is
+-- not silently kept: `core::Ray::Direction` must be unit and Roblox's need not
+-- be. `Ray.Unit` hands back the same ray.
+declare class Ray
+	Origin: Vector3
+	Direction: Vector3
+	Unit: Ray
+	function PointAt(self, distance: number): Vector3
+end
+
+declare Ray: {
+	new: (origin: Vector3, direction: Vector3) -> Ray,
+}
+
+-- Indexed rather than streamed underneath: the seed is a salt and the draw
+-- number is an index, so a script's sequence is a pure function of its seed and
+-- how many values it has taken. Two runs agree and a recording replays.
+declare class Random
+	function NextNumber(self, min: number?, max: number?): number
+	-- Inclusive of both ends, which is Roblox's contract.
+	function NextInteger(self, min: number, max: number): number
+end
+
+declare Random: {
+	new: (seed: number?) -> Random,
+}
+
+-- A plain table rather than a userdata: it is a value over a number and
+-- nothing more.
+type DateTime = {
+	UnixTimestamp: number,
+	UnixTimestampMillis: number,
+}
+
+declare DateTime: {
+	-- **Always raises**, hence `never`, and the refusal is the design: a world's
+	-- clock is simulated, and a script branching on wall time produces a run
+	-- that does not replay. The two below are what to use instead.
+	now: () -> never,
+	fromSimulated: () -> DateTime,
+	fromUnixTimestamp: (seconds: number) -> DateTime,
 }
 
 -- --- the class tree -------------------------------------------------------
@@ -213,7 +397,7 @@ declare class Service extends Instance
 end
 
 declare class Workspace extends Service
-	CurrentCamera: Camera
+	CurrentCamera: Camera?
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
 		Position: Vector3,

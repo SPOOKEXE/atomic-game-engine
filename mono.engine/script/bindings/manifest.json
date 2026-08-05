@@ -287,6 +287,8 @@
 		}
 	],
 	"enums": [
+		{"name": "EasingDirection", "members": ["In", "Out", "InOut"]},
+		{"name": "EasingStyle", "members": ["Linear", "Quad", "Cubic", "Quart", "Quint", "Sine", "Exponential", "Circular", "Back", "Elastic", "Bounce"]},
 		{"name": "Material", "members": ["Plastic", "SmoothPlastic", "Wood", "WoodPlanks", "Metal", "CorrodedMetal", "DiamondPlate", "Concrete", "Brick", "Cobblestone", "Grass", "Sand", "Slate", "Ice", "Glass", "Neon", "ForceField"]},
 		{"name": "NormalId", "members": ["Right", "Top", "Back", "Left", "Bottom", "Front"]},
 		{"name": "ServiceScope", "members": ["Shared", "Server", "Client"]}

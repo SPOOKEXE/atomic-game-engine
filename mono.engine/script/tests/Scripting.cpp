@@ -913,6 +913,45 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
 }
 
+TEST_CASE("javascript aims the same camera through the same resource", "[scripting][js]") {
+	// **The second consumer, and until now there was not one.** `CurrentCamera`
+	// projects onto no component — it is `scene::ActiveCamera`, a resource — so
+	// each VM has to special-case it, and only the Luau side did. The JavaScript
+	// world object is sealed with `JS_PreventExtensions` before a script sees
+	// it, so `workspace.CurrentCamera = view` added no property, threw nothing
+	// outside strict mode, and left the renderer resolving whatever it had.
+	// `examples/Mirrors-1-world.ts` had been writing it since it was ported.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		if (workspace.CurrentCamera !== null) throw new Error('a fresh world already has a camera');
+
+		const camera = Instance.new('Camera');
+		camera.Name = 'Main';
+		camera.Parent = workspace;
+		camera.CFrame = CFrame.new(0, 5, 10);
+		camera.FieldOfView = 90;
+
+		workspace.CurrentCamera = camera;
+		if (workspace.CurrentCamera === null) throw new Error('CurrentCamera did not take');
+
+		// Identity is not equality here: each read mints a fresh wrapper over
+		// the same entity, which is the same reason the Luau side has an `__eq`.
+		if (workspace.CurrentCamera.Name !== 'Main') throw new Error('a different camera came back');
+
+		workspace.CurrentCamera = null;
+		if (workspace.CurrentCamera !== null) throw new Error('detaching did not take');
+	)");
+
+	// The same degrees-out, radians-stored split the Luau case asserts, reached
+	// through the other VM.
+	const Entity camera = InScene(store, "Main");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
+}
+
 TEST_CASE("CurrentCamera refuses something that is not a camera", "[scripting]") {
 	// `ResolveActiveCamera` leaves the matrices alone for a row with no
 	// `Camera`, so accepting one would present as a view that stopped following
@@ -922,6 +961,10 @@ TEST_CASE("CurrentCamera refuses something that is not a camera", "[scripting]")
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	CHECK_FALSE(runtime->Run("workspace.CurrentCamera = Instance.new('Part')"));
+
+	// And the same refusal from the other VM, for the same reason.
+	const auto javascript = MakeRuntime(store, Language::JavaScript);
+	CHECK_FALSE(javascript->Run("workspace.CurrentCamera = Instance.new('Part');"));
 }
 
 // --- transparency and collision groups --------------------------------------
