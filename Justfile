@@ -157,18 +157,20 @@ typecheck: (build "scriptcheck")
         echo "typecheck ok — luau. TypeScript skipped: no bunx or npx on PATH."
     fi
 
-# Everything CI runs, in the order CI runs it, against one preset.
+# Every check there is, in the order to run them, against one preset.
 #
-# Here so that "it passes locally" and "it passes in CI" mean the same thing.
-# `.github/workflows/ci.yml` splits this across jobs by what each one needs
-# installed — the point of the split is that the headless half runs on a machine
-# with no graphics stack at all — but the checks are these and in this order:
-# cheapest and most likely to fail first, so a misformatted file does not wait
-# behind a compile.
+# **The whole guarantee, and it is local and manual.** No machine other than
+# this one runs any of it: there is no workflow on GitHub, and there will not be
+# one until the repository's owner asks for it. `docs/DEFERRED.md` D00005 carries
+# that decision and what it costs. So this recipe is not "what CI runs" — it is
+# what a person runs before a push, and nothing runs it for them.
+#
+# The order is cheapest and most likely to fail first, so a misformatted file
+# does not wait behind a compile.
 #
 # Not `preset=ci` by default, because that makes every warning fatal and the
-# recipe is meant to be runnable mid-change. Use `just preset=ci check` for what
-# the pipeline actually enforces.
+# recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
+# strictest configuration this repository has.
 check: format-check build test-all test-architecture bindings-check typecheck determinism replay-check
     @echo "check ok — format, build, tests, architecture, bindings, typecheck, determinism, replay"
 
