@@ -64,7 +64,7 @@ namespace cdn {
 	ContentRoot::ContentRoot(std::filesystem::path directory) : Base(std::move(directory)) {}
 
 	std::optional<ContentRoot> ContentRoot::Mount(const std::filesystem::path &directory) {
-		ENGINE_PROFILE("ContentRoot::Mount");
+		ENGINE_PROFILE_CAT("ContentRoot::Mount", engine::core::ProfileCategory::Assets);
 
 		if (directory.empty()) {
 			ENGINE_ERROR("cdn: no content root given");
@@ -92,7 +92,7 @@ namespace cdn {
 	}
 
 	std::optional<std::filesystem::path> ContentRoot::Resolve(std::string_view name) const {
-		ENGINE_PROFILE("ContentRoot::Resolve");
+		ENGINE_PROFILE_CAT("ContentRoot::Resolve", engine::core::ProfileCategory::Assets);
 
 		std::optional<std::filesystem::path> permitted = Permit(Base, name);
 
@@ -105,7 +105,7 @@ namespace cdn {
 	}
 
 	bool ContentRoot::Exists(std::string_view name) const {
-		ENGINE_PROFILE("ContentRoot::Exists");
+		ENGINE_PROFILE_CAT("ContentRoot::Exists", engine::core::ProfileCategory::Assets);
 
 		const std::optional<std::filesystem::path> path = Resolve(name);
 		if (!path) {

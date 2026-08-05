@@ -640,6 +640,23 @@ namespace engine::render {
 		bool EnsureShadow();
 		bool EnsureSurface(uint8_t index, uint32_t width, uint32_t height);
 
+		// One opaque white texel, bound wherever a real texture is missing.
+		//
+		// **The pipelines declare two fragment samplers and a draw must bind
+		// both.** An unbound sampler is undefined behaviour on several backends
+		// where a wrongly bound one is merely ignored, and the uniform flag is
+		// what stops the result being read — so any valid texture will do, and
+		// what matters is that there is always one.
+		//
+		// This used to be `OverlayTexture`, which is created only when a debug
+		// panel has something in it, standing in for `ShadowTexture`, which is
+		// created only when something casts. Both are absent together in an
+		// ordinary case — a scene of nothing but transparent geometry, with the
+		// panels closed — and the screen pass then bound no samplers at all and
+		// drew anyway. Owning a texture for the job costs four bytes of device
+		// memory and removes the case rather than making it rarer.
+		SDL_GPUTexture *FallbackTexture = nullptr;
+
 		SDL_GPUTexture *OverlayTexture = nullptr;
 		SDL_GPUTransferBuffer *OverlayTransfer = nullptr;
 		SDL_GPUSampler *OverlaySampler = nullptr;
@@ -919,11 +936,31 @@ namespace engine::render {
 			return false;
 		}
 
+		// The sampler stand-in, created here because this function already owns
+		// a command buffer and a copy pass to fill it. See `FallbackTexture`.
+		{
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			info.width = 1;
+			info.height = 1;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+			FallbackTexture = SDL_CreateGPUTexture(Device, &info);
+			if (!FallbackTexture) {
+				ENGINE_ERROR("fallback texture: {}", SDL_GetError());
+				return false;
+			}
+		}
+
 		// The mesh never changes, so the transfer buffer is temporary — unlike
 		// the instance one, which is kept for the life of the renderer.
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-		transferInfo.size = VERTEX_BYTES + INDEX_BYTES;
+		transferInfo.size = VERTEX_BYTES + INDEX_BYTES + OverlayImage::BYTES_PER_PIXEL;
 
 		SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
 		if (!transfer) {
@@ -931,9 +968,16 @@ namespace engine::render {
 			return false;
 		}
 
+		// Opaque white for the fallback texel. Nothing reads it — the uniform
+		// flag sees to that — but a texture whose contents were never written
+		// is uninitialised device memory, and "nothing reads it" is a claim
+		// about the shaders of the day rather than a property of the resource.
+		constexpr uint8_t FALLBACK_TEXEL[OverlayImage::BYTES_PER_PIXEL] = {255, 255, 255, 255};
+
 		auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(Device, transfer, false));
 		std::memcpy(mapped, CUBE_VERTICES.data(), VERTEX_BYTES);
 		std::memcpy(mapped + VERTEX_BYTES, CUBE_INDICES.data(), INDEX_BYTES);
+		std::memcpy(mapped + VERTEX_BYTES + INDEX_BYTES, FALLBACK_TEXEL, sizeof(FALLBACK_TEXEL));
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
@@ -946,6 +990,19 @@ namespace engine::render {
 		source.offset = VERTEX_BYTES;
 		destination = SDL_GPUBufferRegion{IndexBuffer, 0, INDEX_BYTES};
 		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+
+		SDL_GPUTextureTransferInfo texel{};
+		texel.transfer_buffer = transfer;
+		texel.offset = VERTEX_BYTES + INDEX_BYTES;
+		texel.pixels_per_row = 1;
+		texel.rows_per_layer = 1;
+
+		SDL_GPUTextureRegion texelTarget{};
+		texelTarget.texture = FallbackTexture;
+		texelTarget.w = 1;
+		texelTarget.h = 1;
+		texelTarget.d = 1;
+		SDL_UploadToGPUTexture(copy, &texel, &texelTarget, false);
 
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
@@ -1580,6 +1637,9 @@ namespace engine::render {
 		if (State->DepthTexture) {
 			SDL_ReleaseGPUTexture(device, State->DepthTexture);
 		}
+		if (State->FallbackTexture) {
+			SDL_ReleaseGPUTexture(device, State->FallbackTexture);
+		}
 		if (State->OverlayTexture) {
 			SDL_ReleaseGPUTexture(device, State->OverlayTexture);
 		}
@@ -1642,6 +1702,11 @@ namespace engine::render {
 				ENGINE_ERROR("SDL_SaveBMP: {}", SDL_GetError());
 			}
 			SDL_DestroySurface(surface);
+		} else {
+			// Every other failure here says so, and this one used to return
+			// false in silence — a capture that produced no file and no reason
+			// reads as the request having been ignored.
+			ENGINE_ERROR("capture: SDL_CreateSurfaceFrom: {}", SDL_GetError());
 		}
 
 		SDL_UnmapGPUTransferBuffer(Device, from);
@@ -2119,8 +2184,17 @@ namespace engine::render {
 			// to it, so a frame that redraws nothing still has a panel to show —
 			// which is the whole point of the image living on the GPU rather
 			// than being pushed there again every frame.
+			// **Headless first, because nothing headless can show it.** The
+			// overlay pass is the window's, so a headless frame allocated a
+			// texture, copied the panels into it and drew none of them — and
+			// `MarkUploaded` then told the image the GPU matched it, which was
+			// a claim about a texture nothing would ever sample. Now the whole
+			// overlay is one question answered once.
+			//
+			// Safe to skip only because the screen pass no longer borrows this
+			// texture when the shadow map is missing; see `FallbackTexture`.
 			ENGINE_PROFILE_CAT("ensure overlay", core::ProfileCategory::Render);
-			haveOverlay = overlay.HasContent() && !overlay.IsEmpty() &&
+			haveOverlay = !State->Headless() && overlay.HasContent() && !overlay.IsEmpty() &&
 						  State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
 		}
 
@@ -2463,7 +2537,7 @@ namespace engine::render {
 				};
 
 				SDL_GPUTexture *const fallback =
-					State->ShadowTexture != nullptr ? State->ShadowTexture : state.Texture[state.Slot ^ 1u];
+					State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
 				SDL_GPUSampler *const shadowSampler =
 					State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
 
@@ -2773,8 +2847,15 @@ namespace engine::render {
 				// flag above is what stops it being read, and an unbound sampler
 				// is undefined behaviour on several backends where a wrongly
 				// bound one is merely ignored.
+				//
+				// **`FallbackTexture` rather than `OverlayTexture`**, which only
+				// exists while a debug panel has something in it. A scene of
+				// nothing but transparent geometry casts nothing, so the shadow
+				// map is absent too — and with the panels closed both were null
+				// and the guard below skipped the bind and drew anyway. See
+				// `Impl::FallbackTexture`.
 				SDL_GPUTexture *const shadow =
-					State->ShadowTexture != nullptr ? State->ShadowTexture : State->OverlayTexture;
+					State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
 				SDL_GPUSampler *const shadowSampler =
 					State->ShadowSampler != nullptr ? State->ShadowSampler : State->OverlaySampler;
 				SDL_GPUSampler *const surfaceSampler =
@@ -2922,7 +3003,8 @@ namespace engine::render {
 
 		// --- overlay pass ---------------------------------------------------
 
-		if (haveOverlay && !State->Headless()) {
+		// `haveOverlay` already requires a window, so there is no second test.
+		if (haveOverlay) {
 			ENGINE_PROFILE_CAT("overlay pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Overlay);
 
@@ -2949,7 +3031,9 @@ namespace engine::render {
 
 		// --- interface pass -------------------------------------------------
 
-		if (drawInterface && !State->Headless()) {
+		// `drawInterface` already requires a window — the hook is not asked to
+		// prepare anything headless — so there is no second test here.
+		if (drawInterface) {
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Interface);
 

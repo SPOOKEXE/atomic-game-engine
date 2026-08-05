@@ -119,6 +119,77 @@ TEST_CASE("a change cascades through declared dependencies and no further", "[ca
 	REQUIRE(before.at("other") == after.at("other"));
 }
 
+TEST_CASE("a signature changes when the module's implementation does", "[cascade]") {
+	// **The gap that made the cascade quiet on the most ordinary edit there
+	// is.** A suite is signed over its own translation unit's header closure,
+	// and a module's `src/*.cpp` is in no test's closure — a test includes the
+	// header and links the object. So editing an implementation and nothing
+	// else moved no signature, and `just test` re-ran nothing.
+	Scratch scratch;
+	fs::create_directories(scratch.Root / "widget" / "src");
+	fs::create_directories(scratch.Root / "widget" / "tests");
+
+	const auto source = scratch.Write("widget/tests/Widget.cpp", "test");
+	const auto implementation = scratch.Write("widget/src/Widget.cpp", "one");
+
+	const std::vector<Suite> suites{Make("widget", source)};
+	const DependencyClosures closures{{source, {source}}};
+
+	const auto before = Sign(suites, closures).at("widget");
+
+	// Neither the test nor anything it includes changed.
+	scratch.Write("widget/src/Widget.cpp", "two");
+
+	REQUIRE(Sign(suites, closures).at("widget") != before);
+	REQUIRE(implementation.filename() == "Widget.cpp");
+}
+
+TEST_CASE("a module's implementation reaches the suites above it", "[cascade]") {
+	// The other half, and the reason `TEST_DEPENDS` is worth declaring across
+	// modules at all: a dependency's signature now covers its own sources, so
+	// it moves when they do and carries everything above it. Without the module
+	// walk this cascaded nothing, because a `.cpp` was in nobody's closure.
+	Scratch scratch;
+	fs::create_directories(scratch.Root / "low" / "src");
+	fs::create_directories(scratch.Root / "low" / "tests");
+	fs::create_directories(scratch.Root / "high" / "tests");
+
+	const auto lowTest = scratch.Write("low/tests/Low.cpp", "low test");
+	const auto highTest = scratch.Write("high/tests/High.cpp", "high test");
+	scratch.Write("low/src/Low.cpp", "one");
+
+	const std::vector<Suite> suites{
+		Make("low", lowTest),
+		Make("high", highTest, {"low"}),
+	};
+	const DependencyClosures closures{{lowTest, {lowTest}}, {highTest, {highTest}}};
+
+	const auto before = Sign(suites, closures);
+	scratch.Write("low/src/Low.cpp", "two");
+	const auto after = Sign(suites, closures);
+
+	REQUIRE(before.at("low") != after.at("low"));
+	REQUIRE(before.at("high") != after.at("high"));
+}
+
+TEST_CASE("a suite outside a module layout is signed as before", "[cascade]") {
+	// The walk keys off a `tests` directory, so anything not laid out that way
+	// keeps the old behaviour rather than silently signing over whatever
+	// happens to sit beside it.
+	Scratch scratch;
+	const auto source = scratch.Write("Loose.cpp", "loose");
+	const auto neighbour = scratch.Write("Neighbour.cpp", "one");
+
+	const std::vector<Suite> suites{Make("loose", source)};
+	const DependencyClosures closures{{source, {source}}};
+
+	const auto before = Sign(suites, closures).at("loose");
+	scratch.Write("Neighbour.cpp", "two");
+
+	REQUIRE(Sign(suites, closures).at("loose") == before);
+	REQUIRE(neighbour.filename() == "Neighbour.cpp");
+}
+
 TEST_CASE("include order does not change the signature", "[cascade]") {
 	Scratch scratch;
 	const auto source = scratch.Write("A.cpp", "source");
@@ -268,7 +339,7 @@ TEST_CASE("a line somebody trimmed by hand still reads", "[cache]") {
 
 	{
 		std::ofstream file(path);
-		file << "# atomic smart-tests cache v2\n";
+		file << "# atomic smart-tests cache v3\n";
 		file << "engine.core.types\tpass\tabc123\n";
 	}
 

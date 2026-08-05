@@ -46,7 +46,7 @@ namespace engine::physics {
 	}
 
 	void NarrowPhase(ecs::Store &store) {
-		ENGINE_PROFILE_CAT("physics.narrowphase", core::ProfileCategory::ECS);
+		ENGINE_PROFILE_CAT("physics.narrowphase", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) {

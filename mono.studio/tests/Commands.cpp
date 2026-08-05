@@ -422,3 +422,60 @@ TEST_CASE("a command whose subject is gone is dropped rather than guessed at", "
 	// row is the ordinary case rather than a remote one.
 	CHECK_FALSE(fixture.Log.Undo());
 }
+
+TEST_CASE("forgetting a scene drops its commands and leaves the others", "[studio][commands]") {
+	Fixture fixture;
+
+	// A second scene, because the whole point of `Forget` is that it is not
+	// `Clear` — stopping a run in one world must not throw away the history of
+	// another that was edited throughout and never ran.
+	engine::world::WorldSettings other;
+	other.Name = Name("Other");
+	const WorldId second = fixture.Worlds.Create(other);
+	fixture.Worlds.Enter(second, [](Store &store) { engine::scene::InstallServices(store); });
+
+	Entity elsewhere = NULL_ENTITY;
+	fixture.Worlds.Enter(second, [&](Store &store) {
+		elsewhere = store.CreateInstance(engine::scene::PartClass(), "Far");
+		store.SetParent(elsewhere, engine::scene::WorkspaceOf(store));
+		fixture.Log.RecordCreate(store, second, elsewhere, "Insert Far");
+	});
+
+	fixture.Insert(fixture.Workspace(), "Near");
+	REQUIRE(fixture.Log.Depth() == 2);
+
+	fixture.Log.Forget(fixture.Scene);
+
+	// Only the other scene's command survives, and it is still the one undo
+	// reaches.
+	REQUIRE(fixture.Log.Depth() == 1);
+	CHECK(fixture.Log.NextUndo() == "Insert Far");
+
+	REQUIRE(fixture.Log.Undo());
+	bool alive = true;
+	fixture.Worlds.Enter(second, [&](Store &store) { alive = store.Alive(elsewhere); });
+	CHECK_FALSE(alive);
+}
+
+TEST_CASE("forgetting clears the redo branch for that scene too", "[studio][commands]") {
+	Fixture fixture;
+
+	fixture.Insert(fixture.Workspace(), "Part");
+	REQUIRE(fixture.Log.Undo());
+	REQUIRE(fixture.Log.CanRedo());
+
+	// A restore invalidates the handles a redo would rebuild against just as
+	// surely as the ones an undo would.
+	fixture.Log.Forget(fixture.Scene);
+
+	CHECK_FALSE(fixture.Log.CanUndo());
+	CHECK_FALSE(fixture.Log.CanRedo());
+}
+
+TEST_CASE("forgetting a scene nothing was recorded in changes nothing", "[studio][commands]") {
+	Fixture fixture;
+	fixture.Insert(fixture.Workspace(), "Part");
+
+	fixture.Log.Forget(WorldId{});
+	CHECK(fixture.Log.Depth() == 1);
+}

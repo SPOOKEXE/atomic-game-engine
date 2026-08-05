@@ -133,6 +133,8 @@ namespace studio {
 		// The panel-space rectangle the world was drawn into. See the header:
 		// this is the renderer's reported sub-rect, not the panel.
 		glm::vec2 ImageMin{0.0f, 0.0f};
+
+		// How big that rectangle is, in the same space as `ImageMin`.
 		glm::vec2 ImageSize{1.0f, 1.0f};
 
 		// The camera's near clipping distance, matching `scene::Camera`.

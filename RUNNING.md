@@ -187,7 +187,7 @@ mains over the parts of it they need.
 | Build a game | `studio` *(v0.7)* | the editor: explorer, properties, script editor, run and play |
 | See something on screen | `client` | window, input, renderer, and the client half of networking |
 | Host a simulation with no window | `server` | the tick loop, and the hosting half of networking |
-| Serve a game's content | `cdn` | a content root, and later the manifest and the origin's HTTP layer |
+| Serve a game's content | `cdn` | a content store, published and signed, served over HTTP |
 | Exercise one module | its test binary | Catch2 |
 | Re-run only what your change affected | `testrunner` | — |
 | Check the architecture held | a CMake script | — |
@@ -782,32 +782,144 @@ the game for single-player, LAN and split-screen, or on its own for a large
 content collection. Nothing inside the program tells them apart — the difference
 is which directory it mounts and who can reach it.
 
+Publishing and serving are **two invocations, and the split is deliberate**: the
+signing key belongs to whoever publishes the game and the origin holds none,
+which is what makes it safe to deploy on hardware nobody here owns.
+
+### Publish a directory of files
+
 ```sh
-just serve                            # the staged directory, beside the binary
-just serve --root ./content           # a directory of your own
-./.cache/build/dev/cdn/cdn --help
+./.cache/build/dev/cdn/cdn \
+    --publish ./content \
+    --store   ./store \
+    --signing-key $(printf '7a%.0s' {1..32})
+```
+
+It walks the directory, cuts every file into content-defined chunks, writes them
+into the store, classifies each asset from its extension, groups them, trains a
+compression dictionary if there is enough content to learn from, and signs the
+manifest root. It prints the root and **the publisher key**, which is what a
+client has to be told:
+
+```
+[info] cdn: published 5 assets in 1 bundles — 717432 bytes of content in 717432 bytes of chunks
+[info] cdn: manifest root 8a1c34d1d3f8...
+[info] cdn: publisher key ba42458e83ba...
+```
+
+Republishing is cheap: unchanged content is already in the store and every write
+of it is a no-op.
+
+### Serve one
+
+```sh
+just serve                                  # the staged directory, beside the binary
+./.cache/build/dev/cdn/cdn --store ./store --grant-key HEX --port 9080
+```
+
+```sh
+curl http://127.0.0.1:9080/health           # ok 5 assets 1 bundles
+curl -o manifest.acm http://127.0.0.1:9080/manifest
+curl -o group.zst -H "x-atomic-grant: HEX" http://127.0.0.1:9080/bundle/<root>
 ```
 
 ### Options
 
 ```
---root DIR   Directory to serve content from (default: beside the binary)
---verbose    Log at trace level
---help       Show this text
+--store DIR              The content store to serve or publish into
+--publish DIR            Publish this directory of files into the store, then exit
+--signing-key HEX        64 hex characters — the Ed25519 seed to sign a publish with
+--grant-key HEX          64 hex characters — the secret shared with the server
+--port N                 Port to listen on (default 9080; 0 binds an ephemeral one)
+--upstream NAME=HOST:PORT   An origin to forward a miss to. Repeatable
+--allow-upstream         Forward a miss. Off unless asked for
+--no-local-first         Always ask an upstream — a pure proxy
+--no-cache-upstream      Do not keep what an upstream returned
+--compression-level N    Zstd level groups are prepared at (default 9)
+--cache-bytes N          What the prepared-group cache may hold
+--frames N               Serve this many pumps and exit. For a smoke test
+--verbose                Log at trace level
 ```
 
-### What happens today
+`--grant-key` is **required to serve**, and it is not a convenience to remove.
+An origin that admitted everyone would be deciding who may have what, which is
+the server's job — CDN.md §4.
 
-**Nothing is served.** The program mounts the root, reports it and says so:
+CDN.md §6's three deployments are flag combinations rather than three programs:
+
+| Deployment | Flags |
+|---|---|
+| Local store — serve your own disk | the default |
+| Cache server — local first, forward a miss, keep it | `--allow-upstream --upstream a=host:port` |
+| Pure proxy — always ask, keep nothing | `--allow-upstream --no-local-first --no-cache-upstream` |
+
+### Attached to a server instead
+
+A server can run one in-process, which is the self-hosted case:
+
+```sh
+just server --content-store ./store --content-grant-key HEX --content-port 9080
+```
+
+The grant is then issued and verified across a function call, and **both halves
+are real** — the MAC is computed and checked. A path skipped in the
+configuration people develop against is a path that breaks the first time
+somebody ships the other one.
+
+### Fetching it
+
+```sh
+just client --cdn 127.0.0.1:9080 --publisher-key HEX --content-cache ./cache
+just client --cdn dir:./store --publisher-key HEX     # a local store, no wire
+```
+
+`--cdn` is repeatable and **the order is the priority**: the first source that
+answers wins, and one that fails is passed over. That is how "local cache first,
+otherwise ask the origin" is expressed — there is no policy flag, because the
+order of the list *is* the policy. The studio edits the same list under
+Preferences → Content.
+
+Without `--publisher-key` nothing is fetched, and that is deliberate: a client
+that accepted an unsigned manifest would have no trust boundary at all.
+
+---
+
+# Audio
+
+```sh
+just client --sound ./assets/tone.wav      # plays it on a loop
+```
+
+RIFF/WAV only — 8, 16 and 24-bit integer PCM and 32-bit float. `.ogg`, `.flac`
+and `.mp3` are classified by the content manifest and are **not decoded**: each
+is a vendored codec and a licence decision, and listing an extension without a
+decoder behind it would be worse than the honest gap.
+
+**A machine with no audio output is not an error.** The client says so and runs
+quietly:
 
 ```
-[info]    cdn: content root /home/you/game/content
-[warning] cdn: nothing is served — the manifest is Engine::assets and the
-          origin's HTTP layer is Engine::net, and neither has landed.
+[info]    audio: no output available (No available audio device) — running silently
+[warning] audio: 'tone.wav' decoded (1.00s) but there is no output on this machine
 ```
 
-A root that is missing or is not a directory is refused at start-up with exit
-code 1, rather than being accepted and failing one request at a time.
+A file that cannot be read, or is not a WAV this engine decodes, **is** an error
+and stops start-up — and it is reported whether or not there is a device, so a
+typo'd path is visible on a headless box too.
+
+### What it is doing underneath
+
+The pipeline is a node graph: `Player` inputs, `Fader`, `Emitter` and `Bus`
+processors, one `Output`. A tick never touches it — it posts a command carrying
+a **sample deadline**, and the mixer splits its block at every deadline inside
+it. That is the one thing here that is a requirement rather than a refinement: a
+game ticks at frame rate and audio runs at sample rate, so a sound applied at
+the top of whichever block comes next is audibly early or late.
+
+`mono.engine/audio/AGENTS.md` carries the rest.
+
+A store that is missing, or that holds no manifest, is refused at start-up with
+exit code 1, rather than being accepted and failing one request at a time.
 
 What exists is `cdn::ContentRoot` — the boundary between a content name and the
 filesystem. It refuses traversal by default, and both of its checks are
@@ -819,7 +931,10 @@ pattern this is for.
 
 The design — content addressing, the hierarchical hash, grants, and how groups
 are streamed so a game builds progressively — is `CDN.md` in the design notes.
-`ROADMAP.md` puts the rest at v0.8.
+What is still open at v0.9 is `control/` (the upload API and dashboard, in
+TypeScript), invalidation, and chunk-level verification of what an upstream
+returned — today that is a length check against the signed manifest, which is
+real and is not the whole of one.
 
 ### Proving it needs no graphics stack
 

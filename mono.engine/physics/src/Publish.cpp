@@ -56,7 +56,7 @@ namespace engine::physics {
 	}
 
 	void Publish(ecs::Store &store) {
-		ENGINE_PROFILE_CAT("physics.publish", core::ProfileCategory::ECS);
+		ENGINE_PROFILE_CAT("physics.publish", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) {

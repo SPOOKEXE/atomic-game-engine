@@ -46,6 +46,16 @@ namespace engine::control {
 				return "idle";
 			case world::WorldState::Suspended:
 				return "suspended";
+			case world::WorldState::Faulted:
+				// Named rather than folded into "unknown". A world whose tick
+				// threw is the one state a reader most needs to be told about,
+				// and the supervisor's restore is invisible without it.
+				return "faulted";
+			case world::WorldState::Remote:
+				// Held by a supervised host, not by this process. Distinct from
+				// "suspended", which is a world this process holds and has
+				// chosen not to tick — see `world/Enums.hpp`.
+				return "remote";
 			}
 			return "unknown";
 		}

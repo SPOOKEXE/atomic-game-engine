@@ -158,17 +158,23 @@ TEST_CASE("an unavailable operator still appears in the palette", "[studio][oper
 	CHECK_FALSE(found[0]->Poll().Ready);
 }
 
-TEST_CASE("every action has exactly one operator", "[studio][operators]") {
-	// **This is the case the two-table design is conditional on.** `Keybinds`
-	// owns what key runs a command and `Palette.cpp` owns what the commands are;
-	// an action present in one and absent from the other is a command with a
-	// binding and no behaviour, or a palette entry no key can reach. Neither
-	// shows up anywhere else.
+TEST_CASE("every action is namable and takes one operator", "[studio][operators]") {
+	// **Read what this does and does not cover before trusting it.** It builds
+	// a synthetic operator per keybind row and checks that the table accepts
+	// exactly one of each — so it covers `Keybinds`' table being complete and
+	// `OperatorTable::Add` refusing a duplicate.
 	//
-	// Registration needs an `Editor`, which needs a window — so rather than
-	// standing one up, this asserts the property the registrations have to
-	// satisfy and leaves `Editor::RegisterOperators` to satisfy it. A new
-	// `Action` added without a registration fails here as a count mismatch.
+	// It does **not** reach `Editor::RegisterOperators`, which is the list in
+	// `Palette.cpp` that the palette and the menus actually walk. The synthetic
+	// registrations below are built *from* the keybind table, so a new `Action`
+	// brings its own synthetic operator with it and the count matches whether or
+	// not anybody registered a real one.
+	//
+	// That leaves the gap `Operators.hpp` says this suite closes: an `Action`
+	// with a binding and no `Operators.Add` is a command with a key, no palette
+	// entry and no behaviour, and nothing here goes red. Closing it needs the
+	// registration list reachable without an `Editor` — see the review note on
+	// splitting the descriptors from the closures.
 	OperatorTable table;
 	int runs = 0;
 

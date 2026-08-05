@@ -1,26 +1,26 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/delivery/GroupCodec.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <cdn/GroupCodec.hpp>
 #include <cstddef>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-TEST_SUITE_ID("cdn.groupcodec")
+TEST_SUITE_ID("engine.delivery.groupcodec")
 TEST_DEPENDS("engine.assets.contenthash")
 TEST_DEPENDS("engine.core.framegraph")
 TEST_DEPENDS("engine.core.metrics")
 
-using cdn::Dictionary;
-using cdn::GroupCodec;
 using engine::core::FrameGraph;
 using engine::core::Metrics;
+using engine::delivery::Dictionary;
+using engine::delivery::GroupCodec;
 
 namespace {
 	std::vector<std::byte> Bytes(std::string_view text) {

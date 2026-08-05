@@ -130,24 +130,35 @@ frame pacing. One texture upload per frame, and only while a panel is open.
 
 Do not reimplement them over an immediate-mode UI library.
 
-## Five passes are not an architecture either
+## Six passes are not an architecture either
 
 `Renderer::Render` is a shadow pass, a surface pass, an opaque pass, a
-transparent pass and an overlay pass, submitted in that order by a function that
-knows all five by name. It is enough to prove the staged-shader path, the depth
-buffer, an offscreen target and the swapchain, and that is all it claims to be.
+transparent pass, an overlay pass and an interface pass, submitted in that order
+by a function that knows all six by name. It is enough to prove the
+staged-shader path, the depth buffer, an offscreen target and the swapchain, and
+that is all it claims to be.
+
+**The sixth draws nothing this module owns.** `interface` is a
+`FrameOverlayHook`, which is what lets `mono.engine/ui` record an editor's
+chrome into this frame without Dear ImGui appearing anywhere in the engine. A
+game runs five.
 
 **`mono.engine/graph` describes that order and does not execute it.**
-`graph::StandardPipeline` is the same five stages as data, and
+`graph::StandardPipeline` is the same six stages as data, and
 `Pipeline::Validate` catches the one mistake that matters — a stage reading a
 target nothing earlier wrote.
 
 **Keeping the two in step is a check, not a convention.** `render::Pass` and
-`PassOrder()` name this module's five in submission order, and
+`PassOrder()` name this module's six in submission order, and
 `tests/Passes.cpp` compares them against that pipeline's stage names, in order,
-with no device. A sixth stage on one side and not the other fails the build.
+with no device. A seventh stage on one side and not the other fails the build.
 `PassRecorder` walks the same list as `Render` submits and refuses to go
 backwards, which is the half a headless test cannot see.
+
+**Do not write the count into that test.** This section said "five" until v0.7
+added `interface` and then said something false for a release; `tests/Passes.cpp`
+compares the two descriptions against each other and neither against a number,
+which is why it did not rot with the prose.
 
 **So: enter every pass through `PassRecorder`, and add its stage to
 `StandardPipeline` in the same change.** The first is what the check hangs on —
@@ -159,27 +170,46 @@ the execution. When it arrives, this class becomes the backend those nodes
 compile to — so do not grow the hand-rolled list further in the meantime. Two
 competing ways to describe a frame is worse than either.
 
-## The two textures this module owns, and what each pass may assume
+## The textures this module owns, and what each pass may assume
 
 - **The shadow map** is written by the shadow pass and read by every pass that
   shades. It is `SAMPLER | DEPTH_STENCIL_TARGET`, and both usages are required:
   a depth attachment that is only a target cannot be read, and a shadow map that
   cannot be read is a pass that costs a draw and changes nothing.
-- **The surface texture** is written by the surface pass and read by the opaque
-  one, both in the same frame and in that order — so a mirror shows *this*
-  frame, not the one before it. `SurfaceReady` is what stops the first frame
-  sampling whatever the driver handed back.
-- **There are two of them and the pair is not a recursion trick.** Binding a
-  render target as its own sampler is undefined behaviour; writing one and
-  binding the other is what makes the surface pass legal. It does **not** give a
-  mirror inside a mirror, because `sceneReflected` partitions surface instances
-  out of that pass — no mirror is ever drawn into a mirror's texture. This file
-  and two comments claimed otherwise, and the claim was not harmless: it is why
-  `Flags.z` was set for the entire surface pass instead of for the mirrors in
-  it, which made the floor sample the previous reflection and show the clear
-  colour as a black wedge in the pane. **Nothing in the surface pass may set
-  `Flags.z`.** Real recursion needs a per-view exclusion this pipeline has no
-  shape for, and belongs with the render-node system.
+- **The surface textures** are written by the surface pass and read by the
+  opaque one, both in the same frame and in that order — so a mirror shows
+  *this* frame, not the one before it. `SurfaceSlotState::Ready` is what stops
+  the first frame sampling whatever the driver handed back.
+- **There is a pair per surface index, and the pair is not a recursion trick.**
+  Binding a render target as its own sampler is undefined behaviour; writing one
+  and binding the other is what makes the surface pass legal. `Surfaces` is
+  `MAX_SURFACES` slots, each a `Texture[2]`, a depth buffer and the matrices
+  that drew them; a slot is allocated the first time an index renders and kept
+  until shutdown.
+- **It does give a mirror inside a mirror, one bounce stale, and that changed at
+  v0.8.** The exclusion used to be every surface, so no mirror was ever drawn
+  into a mirror's texture and there was nothing to be one bounce deep. It is per
+  view now — `if (index == self) continue;`, so a pass excludes only the index it
+  is rendering *for* — and every other mirror is drawn from the half of its pair
+  this frame is not writing, which is the previous frame's image. That staleness
+  is what makes the cycle a line: each surface is being rendered for the others,
+  so there is no order in which this frame's could be ready first.
+- **`Flags.z` is per draw and never per pass.** It means "this draw samples a
+  surface texture instead of its own tint". Setting it for the *whole* surface
+  pass is what made the floor sample the previous reflection and show the clear
+  colour as a black wedge in the pane — found by eye, not by a test. The world
+  draws in the surface pass leave it at zero and the mirror runs in that same
+  pass set it; both are correct, and the rule is the granularity rather than the
+  value. An earlier version of this file said nothing in the surface pass may
+  set it, which stopped being true when mirrors began appearing in mirrors.
+- **One opaque white texel, bound wherever a real texture is missing.** The
+  pipelines declare two fragment samplers and a draw must bind both — an unbound
+  sampler is undefined behaviour on several backends where a wrongly bound one
+  is merely ignored. The shadow map exists only when something casts and the
+  overlay texture only while a panel is open, so a scene of nothing but
+  transparent geometry with the panels closed had neither, and the screen pass
+  bound no samplers at all and drew anyway. `Impl::FallbackTexture` is a
+  resource for the job rather than another texture borrowed for it.
 
 **The shadow and surface passes draw the whole scene; the screen passes draw the
 culled set.** A caster outside the camera's frustum still shadows into it and a

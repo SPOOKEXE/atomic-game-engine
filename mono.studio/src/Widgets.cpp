@@ -1,3 +1,5 @@
+#include "PerCallSite.hpp"
+
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -208,25 +210,16 @@ namespace studio {
 		// this function and they are not looking at the same place: Open starts
 		// where the game is, Export starts wherever the last export went. One
 		// shared directory would make each of them jump to whichever was used
-		// last. Same shape as the class picker's per-id search state.
+		// last.
+		//
+		// `PerCallSite` is that pattern, written once — this was the third
+		// transcription of it and the comment here used to say so.
 		struct Browsing {
-			std::string Id;
 			std::filesystem::path Where;
 			std::string Name;
 		};
-		static std::vector<Browsing> browsing;
 
-		Browsing *state = nullptr;
-		for (Browsing &candidate : browsing) {
-			if (candidate.Id == title) {
-				state = &candidate;
-				break;
-			}
-		}
-		if (state == nullptr) {
-			browsing.push_back(Browsing{title, {}, {}});
-			state = &browsing.back();
-		}
+		Browsing *const state = &PerCallSite<Browsing>(title);
 
 		// Opened fresh: start from whatever path the caller had, which is the
 		// game's own folder far more often than not.

@@ -43,6 +43,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <studio/Commands.hpp>
+#include <studio/ContentSources.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
@@ -147,6 +148,8 @@ namespace studio {
 		// be a second thing to remember. They also make the panels reachable
 		// without a keyboard, which is what lets a capture prove they draw.
 		bool ShowStatistics = false;
+
+		// The frame graph, which is the second of the two panels above.
 		bool ShowFrameGraph = false;
 
 		// The loopback port the control server listens on, or -1 for off.
@@ -353,6 +356,14 @@ namespace studio {
 		// changed. See `studio::Keybinds` — this page edits that table
 		// directly, so it cannot drift from what the keys actually do.
 		void DrawKeybindSettings();
+
+		// The Preferences page that says where content comes from.
+		//
+		// A reorderable list, because the order *is* the policy: a delivery
+		// client walks it and stops at the first source that answers, so "local
+		// cache first, then the origin next door" is what the list says rather
+		// than something the engine decides.
+		void DrawContentSettings();
 
 		void DrawStatusBar();
 		void DrawDialogs();
@@ -755,6 +766,13 @@ namespace studio {
 		bool ControlWantsProfile = false;
 
 		Options Settings;
+
+		// Where this editor fetches content from, in priority order.
+		ContentSources Content;
+
+		// Beside the binary with the layout ini and the keybinds, so a
+		// launcher's working directory cannot move somebody's configuration.
+		std::filesystem::path ContentSourcesPath;
 
 		// The listener and the table. Held by value and started only when asked;
 		// a server that was never started costs a thread that was never spawned.

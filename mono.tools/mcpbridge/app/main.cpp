@@ -116,7 +116,11 @@ int main(int argc, char **argv) {
 	std::thread inbound([&] {
 		Pump(
 			running,
-			[](char *into, size_t size) { return std::fread(into, 1, 1, stdin) == 1 ? 1u : 0u; },
+			// One byte at a time, so the buffer's size is deliberately unused: a
+			// blocking `fread` of more would sit on a partial line until the
+			// peer sent enough to fill it, and this is a request/response pipe
+			// where the sender is waiting for the reply.
+			[](char *into, size_t) { return std::fread(into, 1, 1, stdin) == 1 ? 1u : 0u; },
 			[&](const char *from, size_t size) {
 				asio::error_code failed;
 				asio::write(socket, asio::buffer(from, size), failed);

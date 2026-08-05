@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
@@ -208,6 +209,13 @@ namespace engine::ui {
 	}
 
 	void Interface::Begin(float frameSeconds) {
+		// Four spans over one frame of imgui rather than one, because the
+		// four cost different things: `Begin` and `End` are layout and
+		// vertex generation on the CPU, `Prepare` uploads them, and
+		// `Record` binds. The editor's `build interface` span covered all
+		// of it and could not tell a heavy panel from a heavy upload.
+		ENGINE_PROFILE_CAT("ui.begin", core::ProfileCategory::Render);
+
 		if (!State->Ready) {
 			return;
 		}
@@ -234,6 +242,10 @@ namespace engine::ui {
 	}
 
 	void Interface::End() {
+		// Where imgui turns a frame of widgets into vertices, so this is
+		// the span that scales with how much is on screen.
+		ENGINE_PROFILE_CAT("ui.end", core::ProfileCategory::Render);
+
 		if (!State->Ready) {
 			return;
 		}
@@ -251,6 +263,8 @@ namespace engine::ui {
 	}
 
 	bool Interface::Prepare(void *commandBuffer) {
+		ENGINE_PROFILE_CAT("ui.prepare", core::ProfileCategory::Render);
+
 		if (!State->Ready || !State->Drawable || State->Draw == nullptr || commandBuffer == nullptr) {
 			return false;
 		}
@@ -266,6 +280,8 @@ namespace engine::ui {
 	}
 
 	void Interface::Record(void *commandBuffer, void *renderPass) {
+		ENGINE_PROFILE_CAT("ui.record", core::ProfileCategory::Render);
+
 		if (!State->Ready || State->Draw == nullptr) {
 			return;
 		}

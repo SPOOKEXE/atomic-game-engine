@@ -129,10 +129,6 @@ namespace studio {
 		}
 
 		Table()[IndexOf(action)].Keys = chord;
-
-		// TODO: file persistence. See the declaration — this is where a write
-		// would go, and the reason it is not here yet is the format rather than
-		// the call.
 	}
 
 	void Keybinds::Reset() {

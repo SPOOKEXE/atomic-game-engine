@@ -3,6 +3,8 @@
 L11 transport, `shared` tier. Connection lifecycle, framing and channels — the
 layer `upstream/`, `downstream/`, `predict/` and `http/` all sit on.
 
+`http/` exists as of v0.9 and has its own rules, below.
+
 ## This module does not know what a component is
 
 Nor an entity, a world or a store. Replication is a **reader** of this, one layer
@@ -274,3 +276,65 @@ what stops asio reaching every module that links this.
   rate-limits and has no answer for two peers that cannot see each other.
 - **Interest management and lag compensation**, both later and both with their
   own plans.
+
+## `http/` is a content protocol, not a web framework
+
+It exists because a delivery group is megabytes and `Packet::MAXIMUM_PAYLOAD_BYTES`
+is 1200. `Transport` carries datagrams for a simulation with a per-tick packet
+budget; a content origin ships bulk bytes and wants ordering, retransmission and
+flow control from the operating system. CDN.md §5.
+
+**The subset is small and each omission closes something. Do not widen it
+casually:**
+
+- **`GET` and `HEAD` only.** An origin serves. Upload is `mono.cdn/control/`'s,
+  in TypeScript, over its own API.
+- **`Content-Length` framing only, and `Transfer-Encoding` is refused outright.**
+  A body that can be framed two ways is request smuggling: two parsers in a chain
+  disagree about where one message ends and the next begins, and the disagreement
+  *is* the attack. Two `Content-Length` fields are refused **even when they
+  agree**, because "even when they agree" is the check somebody eventually
+  loosens.
+- **No folded header lines, no bare `LF`, no absolute-form target.** Each is a
+  spelling two implementations can read differently.
+
+**Strict rather than forgiving is a security position, not a style.** Postel's
+rule is the wrong one for a parser sitting behind a port.
+
+**The protocol is split from the socket and that split is the design.**
+`Message.hpp` is parsing and formatting over spans, so the whole wire format is
+exercised by a suite that opens no port and waits for nothing. `Server` and
+`Client` are the thin halves that own file descriptors.
+
+**A response to `HEAD` carries a length and no body, and the reader has to be
+told.** It is the one place the response format is not self-describing —
+`ParseResponse` takes `bodyOmitted` for that reason, and a reader that believed
+the length would wait for bytes nobody is sending.
+
+**A response with no `Content-Length` is refused rather than read to
+end-of-connection.** "Until the peer hangs up" is a framing an origin can use to
+make a truncated group look complete, and the client would then hash short bytes
+and report content corruption for what was a dropped socket.
+
+### Polled, and completions land on the caller's thread
+
+`Pump` drives everything — accepting, reading, dispatching, writing — on the
+thread that called it. Nothing here calls `run()` or `poll()` on an
+`io_context`, exactly as `UdpTransport` does not.
+
+That is allowed to be *asynchronous* where `Transport` is not, and the reason is
+CDN.md §3: **an origin has no tick.** Rule 5 governs work inside a tick, and a
+request that completes a poll later changes nothing a recorded run would have to
+reproduce. A datagram arriving on somebody else's thread mid-tick is a desync; a
+byte of a group arriving between two polls is not.
+
+**A handler runs inside `Pump` with every other connection waiting, so it must
+not block.**
+
+### The bounds are the security surface
+
+A public port with no connection ceiling, no per-connection buffer bound and no
+message size limit is a denial-of-service primitive with a friendly name. All
+three are in `ServerSettings` and none is optional. Timeouts are counted in
+*polls* rather than wall time, for this module's standing reason: time is passed
+in, so a suite states a timeout instead of sleeping for one.

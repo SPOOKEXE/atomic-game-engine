@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <imgui.h>
+#include <studio/ContentSources.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
@@ -321,6 +322,163 @@ namespace studio {
 		ImGui::PopStyleColor();
 	}
 
+	void Editor::DrawContentSettings() {
+		// **The order is the feature.** Nothing in the engine implements
+		// "local cache first, then the origin next door, then the one across
+		// the internet" — that is what a list in this order *means* to
+		// `delivery::AssetClient`, which walks it and stops at the first source
+		// that answers. So the page is a reorderable list, and the arrows are
+		// the policy editor.
+		ImGui::SeparatorText("Origins, in the order they are tried");
+
+		ImGui::TextDisabled("the first source that answers wins; one that fails is passed over");
+
+		bool changed = false;
+
+		if (ImGui::BeginTable("##sources", 6, ImGuiTableFlags_SizingStretchProp)) {
+			ImGui::TableSetupColumn("##on", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(24.0f));
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+			ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(96.0f));
+			ImGui::TableSetupColumn("Location", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+			ImGui::TableSetupColumn("##order", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(52.0f));
+			ImGui::TableSetupColumn("##drop", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(24.0f));
+			ImGui::TableHeadersRow();
+
+			int move = 0;
+			size_t moveFrom = 0;
+			int remove = -1;
+
+			for (size_t index = 0; index < Content.Sources.size(); ++index) {
+				engine::delivery::Source &source = Content.Sources[index];
+				// **The id is pinned to the row, not to the text.** A widget's
+				// id comes from its label, so a field whose label changed as
+				// somebody typed into it would become a different widget and
+				// drop keyboard focus after one character — the lesson the
+				// script editor's tabs already carry.
+				ImGui::PushID(static_cast<int>(index));
+				ImGui::TableNextRow();
+
+				ImGui::TableNextColumn();
+				changed |= ImGui::Checkbox("##enabled", &source.Enabled);
+
+				ImGui::TableNextColumn();
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				changed |= TextField("##name", source.Name);
+
+				ImGui::TableNextColumn();
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				int kind = source.Kind == engine::delivery::SourceKind::Directory ? 0 : 1;
+				if (ImGui::Combo("##kind", &kind, "directory\0http\0")) {
+					source.Kind = kind == 0 ? engine::delivery::SourceKind::Directory
+											: engine::delivery::SourceKind::Http;
+					changed = true;
+				}
+
+				ImGui::TableNextColumn();
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				changed |= TextField(
+					"##location",
+					source.Location,
+					source.Kind == engine::delivery::SourceKind::Http ? "127.0.0.1:9080" : "path/to/store"
+				);
+				if (!source.IsValid() && ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						source.Kind == engine::delivery::SourceKind::Http
+							? "an address and a port, as 127.0.0.1:9080 — a host name has to be resolved first"
+							: "a directory holding a published content store"
+					);
+				}
+
+				ImGui::TableNextColumn();
+				if (ImGui::SmallButton("^")) {
+					move = -1;
+					moveFrom = index;
+				}
+				ImGui::SameLine();
+				if (ImGui::SmallButton("v")) {
+					move = 1;
+					moveFrom = index;
+				}
+
+				ImGui::TableNextColumn();
+				if (ImGui::SmallButton("x")) {
+					remove = static_cast<int>(index);
+				}
+
+				ImGui::PopID();
+			}
+			ImGui::EndTable();
+
+			// Applied after the loop, because both mutate the vector the loop
+			// is walking.
+			if (move != 0) {
+				changed |= Content.Move(moveFrom, move);
+			}
+			if (remove >= 0) {
+				Content.Sources.erase(Content.Sources.begin() + remove);
+				changed = true;
+			}
+		}
+
+		if (ImGui::Button("Add origin")) {
+			Content.Sources.push_back(engine::delivery::Source{
+				.Name = "origin",
+				.Kind = engine::delivery::SourceKind::Http,
+				.Location = "127.0.0.1:" + std::to_string(engine::delivery::DEFAULT_ORIGIN_PORT),
+				.Enabled = true,
+			});
+			changed = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Add local store")) {
+			Content.Sources.push_back(engine::delivery::Source{
+				.Name = "on-disk",
+				.Kind = engine::delivery::SourceKind::Directory,
+				.Location = "",
+				.Enabled = true,
+			});
+			changed = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Reset to default")) {
+			Content = ContentSources::Default();
+			changed = true;
+		}
+
+		ImGui::SeparatorText("Trust");
+
+		// **Without this nothing is fetched, and saying so here is the point.**
+		// A client that accepted an unsigned manifest would have no trust
+		// boundary at all, and that failure is invisible until somebody is
+		// serving content the publisher did not write.
+		changed |= TextField("Publisher key", Content.PublisherKey, "64 hex characters");
+		if (Content.PublisherKey.empty()) {
+			ImGui::TextColored(
+				ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
+				"no publisher key — nothing will be fetched, because nothing could be verified"
+			);
+		} else if (!engine::assets::PublicKey::FromHex(Content.PublisherKey)) {
+			ImGui::TextDisabled("64 lowercase hex characters; `cdn --publish` prints it");
+		}
+
+		ImGui::SeparatorText("Cache");
+
+		std::string cache = Content.CachePath.generic_string();
+		if (TextField("Cache directory", cache, "empty keeps nothing")) {
+			Content.CachePath = std::filesystem::path(cache);
+			changed = true;
+		}
+		ImGui::TextDisabled("verified content kept between sessions; empty keeps none");
+
+		if (changed) {
+			// Saved as it is edited rather than behind an Apply button. There
+			// is nothing here that is only valid as a set, so a half-finished
+			// list is a half-finished list either way — and an editor that lost
+			// a typed address on exit is worse than one that saved it.
+			Content.Save(ContentSourcesPath);
+		}
+	}
+
 	void Editor::DrawSettings() {
 		if (!ShowSettings) {
 			return;
@@ -343,6 +501,11 @@ namespace studio {
 
 			if (ImGui::BeginTabItem("Appearance")) {
 				DrawAppearanceSettings();
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Content")) {
+				DrawContentSettings();
 				ImGui::EndTabItem();
 			}
 

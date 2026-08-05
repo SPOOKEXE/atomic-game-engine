@@ -212,6 +212,13 @@ namespace studio {
 		// action ships unbound, so a fresh install reads nothing and the menus
 		// are the whole interface until somebody says otherwise. See
 		// `Keybinds::Load`.
+		ContentSourcesPath = engine::core::Paths::Base() / "studio-content.ini";
+		if (!Content.Load(ContentSourcesPath)) {
+			// A fresh install gets one origin on this machine, which is what
+			// works with nothing else running — `DeliverySettings::Default`.
+			Content = ContentSources::Default();
+		}
+
 		KeybindPath = engine::core::Paths::Base() / "studio-keybinds.ini";
 		if (Keybinds::Load(KeybindPath)) {
 			ENGINE_INFO("keybinds from {}", KeybindPath.string());
@@ -1971,6 +1978,17 @@ namespace studio {
 		// destroy leaves, so the handle survives and a viewport pinned to this
 		// world still points at it — the same trick `RenameWorld` depends on.
 		Universe->Destroy(world);
+
+		// **This scene's undo history goes with it, and only this scene's.** A
+		// running world can still be manipulated — the gizmo and the explorer
+		// both work during a play test on purpose — so edits are recorded during
+		// the run, and the destroy above has just invalidated every handle they
+		// name. Here rather than after the restore because the failure path
+		// below returns without one, and those commands are just as dead.
+		// See `CommandLog::Forget`.
+		if (Commands != nullptr) {
+			Commands->Forget(world);
+		}
 
 		std::string error;
 		const WorldId restored = engine::game::ReadWorldDocument(*Universe, document, name, error);

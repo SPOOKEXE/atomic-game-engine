@@ -80,6 +80,7 @@ namespace studio {
 	//
 	// @since v0.7
 	struct EditId {
+		// The id itself. Zero is the null id and resolves to no entity.
 		uint64_t Value = 0;
 
 		// Reports whether two ids name the same tracked instance.
@@ -127,6 +128,8 @@ namespace studio {
 	//
 	// @since v0.7
 	struct Command {
+		// Which edit this is, and therefore which of the fields below carry
+		// anything.
 		CommandKind Kind = CommandKind::Create;
 
 		// Which scene it happened in.
@@ -135,18 +138,21 @@ namespace studio {
 		// What was edited.
 		EditId Subject;
 
-		// Where it hung before, and where it hangs now. `Reparent` uses both;
-		// `Create` and `Destroy` use `OldParent` as the place to rebuild under.
+		// Where it hung before. `Reparent` uses this, and `Create` and `Destroy`
+		// use it as the place to rebuild under.
 		EditId OldParent;
+
+		// Where it hangs now. `Reparent` only.
 		EditId NewParent;
 
 		// The subtree, for the kinds that have to rebuild one.
 		std::string Document;
 
-		// Which property, and what it read before and after.
+		// Which property changed.
 		engine::core::Name Property;
-		engine::game::PropertyValue Before;
-		engine::game::PropertyValue After;
+
+		engine::game::PropertyValue Before;  // What it read before the edit.
+		engine::game::PropertyValue After;   // What it reads after it.
 
 		// What to call this in the Edit menu — "Delete Part", not "Destroy".
 		std::string Description;
@@ -317,6 +323,28 @@ namespace studio {
 		// the restore has already discarded.
 		void Clear();
 
+		// Drops every command naming one scene, and forgets its ids.
+		//
+		// **What `EndRun` calls, and it is the other half of `Clear`.** A scene
+		// can be manipulated *while it runs* — the gizmo and the explorer both
+		// work during a play test, deliberately — so edits are recorded during
+		// the run. Stop then destroys that world and rebuilds it from the
+		// snapshot, which gives every instance in it a new handle.
+		//
+		// Those commands are not merely stale, they are unreversible: their
+		// subjects resolve to dead handles and every one of them would be
+		// dropped on the way past. Leaving them in would make the Edit menu
+		// offer "Undo Move" and then refuse it, which reads as undo being
+		// broken rather than as the restore having already undone it.
+		//
+		// **One scene, not the whole log.** Another world may have been edited
+		// throughout and never run; its history has nothing to do with this
+		// restore. That is the same argument `EndRun` already makes for leaving
+		// other scenes' script tabs alone.
+		//
+		// @param world The scene whose commands to forget.
+		void Forget(engine::world::WorldId world);
+
 		// How deep the undo stack is, for tests and the statistics panel.
 		//
 		// @return The number of commands that can be undone.
@@ -335,8 +363,9 @@ namespace studio {
 		// Points an id at a different entity, after a rebuild gave it one.
 		//
 		// @param id     The id to rebind.
+		// @param world  Which scene the new handle lives in.
 		// @param entity What now carries it.
-		void Rebind(EditId id, engine::ecs::Entity entity);
+		void Rebind(EditId id, engine::world::WorldId world, engine::ecs::Entity entity);
 
 		// Pushes onto the undo stack, dropping the oldest past `DEPTH`.
 		//
@@ -353,10 +382,42 @@ namespace studio {
 		std::vector<Command> Done;
 		std::vector<Command> Undone;
 
+		// What an id currently names: a world and a handle within it.
+		//
+		// **The world is part of the answer, not context.** An `ecs::Entity` is
+		// an index and a generation into *one* store, so the same numeric handle
+		// exists in every world at once — the first instance in one scene and
+		// the first in another are the same number. A table keyed on the handle
+		// alone therefore hands one id to two different instances, and undo
+		// applies an edit recorded in one scene to whatever happens to share its
+		// handle in another.
+		//
+		// That is the failure this header's opening note describes and the
+		// reverse map walked straight into. Found by a test that recorded in two
+		// worlds — with one world it is invisible, which is why it is worth the
+		// pair.
+		struct Bound {
+			engine::world::WorldId World;
+			engine::ecs::Entity Instance;
+
+			bool operator==(const Bound &other) const {
+				return World == other.World && Instance == other.Instance;
+			}
+		};
+
+		// Hashes a world and handle together.
+		struct BoundHash {
+			size_t operator()(const Bound &bound) const {
+				const size_t world = std::hash<uint32_t>{}(bound.World.Index);
+				const size_t entity = std::hash<engine::ecs::Entity>{}(bound.Instance);
+				return world ^ (entity + 0x9e3779b97f4a7c15ULL + (world << 6) + (world >> 2));
+			}
+		};
+
 		// The id table, both ways. Forward is what `Resolve` reads; reverse is
 		// what stops `Track` minting a second id for an instance that has one.
-		std::unordered_map<uint64_t, engine::ecs::Entity> Entities;
-		std::unordered_map<engine::ecs::Entity, uint64_t> Ids;
+		std::unordered_map<uint64_t, Bound> Entities;
+		std::unordered_map<Bound, uint64_t, BoundHash> Ids;
 
 		uint64_t NextId = 1;
 	};

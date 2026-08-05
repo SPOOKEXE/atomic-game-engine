@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 
@@ -126,6 +127,12 @@ namespace engine::replication {
 	}
 
 	void SnapshotBuffer::Advance(double frameSeconds) {
+		// `Network` and not `Simulation`, although this is the interpolation
+		// clock: what it costs is a function of how many ticks the buffer is
+		// holding, which is a property of the link and of nothing else. A
+		// stalling client wants both halves of that under one bar.
+		ENGINE_PROFILE_CAT("replica.advance", core::ProfileCategory::Network);
+
 		if (!Started) {
 			return;
 		}

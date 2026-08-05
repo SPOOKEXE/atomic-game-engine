@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/replication/Replica.hpp>
 
@@ -92,6 +93,12 @@ namespace engine::replication {
 	}
 
 	ApplyStatus Replica::Apply(ecs::Store &store, const SnapshotChunk &chunk) {
+		// One span per message rather than one per frame. A join arrives as a
+		// burst of chunks and a steady link carries a delta or two, so a single
+		// span over the lot would average the two costs that are worth telling
+		// apart — and the burst is the one that drops a frame.
+		ENGINE_PROFILE_CAT("replica.snapshot", core::ProfileCategory::Network);
+
 		// A later snapshot supersedes one still arriving. The server only sends
 		// a second when it has decided this client cannot be caught up, so
 		// finishing the first would be finishing something already abandoned.
@@ -160,6 +167,8 @@ namespace engine::replication {
 	}
 
 	ApplyStatus Replica::Apply(ecs::Store &store, const replication::Delta &delta) {
+		ENGINE_PROFILE_CAT("replica.delta", core::ProfileCategory::Network);
+
 		// Nothing before the world exists. A delta against a world that has not
 		// arrived describes rows that are not there.
 		if (!Joined_) {
@@ -294,6 +303,8 @@ namespace engine::replication {
 	}
 
 	ApplyStatus Replica::Apply(ecs::Store &store, const replication::Structure &structure) {
+		ENGINE_PROFILE_CAT("replica.structure", core::ProfileCategory::Network);
+
 		// Nothing before the world exists. The snapshot *is* the structure at the
 		// tick it describes, so anything said before it arrived is either already
 		// in it or about a world this client does not have.

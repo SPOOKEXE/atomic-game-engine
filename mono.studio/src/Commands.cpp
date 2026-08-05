@@ -46,19 +46,21 @@ namespace studio {
 	}
 
 	EditId CommandLog::Track(WorldId world, Entity instance) {
-		(void)world;
-
-		if (instance == NULL_ENTITY) {
+		if (instance == NULL_ENTITY || !world.IsValid()) {
 			return EditId{};
 		}
 
-		if (const auto found = Ids.find(instance); found != Ids.end()) {
+		// Keyed on the pair. See `Bound`: the same handle exists in every world
+		// at once, so keying on the handle alone hands one id to two instances.
+		const Bound bound{world, instance};
+
+		if (const auto found = Ids.find(bound); found != Ids.end()) {
 			return EditId{found->second};
 		}
 
 		const uint64_t minted = NextId++;
-		Ids.emplace(instance, minted);
-		Entities.emplace(minted, instance);
+		Ids.emplace(bound, minted);
+		Entities.emplace(minted, bound);
 		return EditId{minted};
 	}
 
@@ -68,10 +70,10 @@ namespace studio {
 		}
 
 		const auto found = Entities.find(id.Value);
-		return found == Entities.end() ? NULL_ENTITY : found->second;
+		return found == Entities.end() ? NULL_ENTITY : found->second.Instance;
 	}
 
-	void CommandLog::Rebind(EditId id, Entity entity) {
+	void CommandLog::Rebind(EditId id, WorldId world, Entity entity) {
 		if (!id) {
 			return;
 		}
@@ -89,8 +91,9 @@ namespace studio {
 			return;
 		}
 
-		Entities[id.Value] = entity;
-		Ids[entity] = id.Value;
+		const Bound bound{world, entity};
+		Entities[id.Value] = bound;
+		Ids[bound] = id.Value;
 	}
 
 	void CommandLog::Push(Command &&command) {
@@ -225,7 +228,7 @@ namespace studio {
 						return;
 					}
 
-					Rebind(command.Subject, rebuilt);
+					Rebind(command.Subject, command.World, rebuilt);
 					landed = true;
 					return;
 				}
@@ -242,7 +245,7 @@ namespace studio {
 				command.OldParent = Track(command.World, store.ParentOf(subject));
 
 				store.DestroyInstance(subject);
-				Rebind(command.Subject, NULL_ENTITY);
+				Rebind(command.Subject, command.World, NULL_ENTITY);
 				landed = true;
 				return;
 			}
@@ -321,6 +324,46 @@ namespace studio {
 
 		Done.push_back(std::move(command));
 		return true;
+	}
+
+	void CommandLog::Forget(WorldId world) {
+		if (!world.IsValid()) {
+			return;
+		}
+
+		// The ids the dropped commands referred to go too. An `EditId` left
+		// bound to a handle in a destroyed world is a row that `Track` could
+		// hand back for an entity the store has since recycled into something
+		// else — the same reasoning as `Rebind`'s reverse-row erase.
+		const auto forgetIds = [this](const Command &command) {
+			for (const EditId id : {command.Subject, command.OldParent, command.NewParent}) {
+				if (!id) {
+					continue;
+				}
+				if (const auto found = Entities.find(id.Value); found != Entities.end()) {
+					Ids.erase(found->second);
+					Entities.erase(found);
+				}
+			}
+		};
+
+		const auto drop = [&](std::vector<Command> &stack) {
+			const auto first = std::remove_if(
+				stack.begin(),
+				stack.end(),
+				[&](const Command &command) {
+					if (command.World != world) {
+						return false;
+					}
+					forgetIds(command);
+					return true;
+				}
+			);
+			stack.erase(first, stack.end());
+		};
+
+		drop(Done);
+		drop(Undone);
 	}
 
 	void CommandLog::Clear() {

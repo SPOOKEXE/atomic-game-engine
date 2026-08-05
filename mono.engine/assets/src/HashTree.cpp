@@ -63,7 +63,7 @@ namespace engine::assets {
 	}
 
 	HashTree HashTree::Build(std::span<const ContentHash> leaves) {
-		ENGINE_PROFILE("HashTree::Build");
+		ENGINE_PROFILE_CAT("HashTree::Build", core::ProfileCategory::Assets);
 
 		HashTree tree;
 		tree.Leaves = leaves.size();
@@ -141,7 +141,7 @@ namespace engine::assets {
 		std::span<const ContentHash> proof,
 		const ContentHash &root
 	) {
-		ENGINE_PROFILE("HashTree::Verify");
+		ENGINE_PROFILE_CAT("HashTree::Verify", core::ProfileCategory::Assets);
 
 		const bool passed = Check(leaf, index, leafCount, proof, root);
 

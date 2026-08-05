@@ -1,3 +1,4 @@
+#include <engine/audio/Wav.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <client/Client.hpp>
 #include <client/Replicated.hpp>
+#include <fstream>
 
 namespace client {
 
@@ -221,11 +223,182 @@ namespace client {
 			}
 		}
 
+		if (!BeginContentDelivery()) {
+			return false;
+		}
+
+		if (!BeginAudio()) {
+			return false;
+		}
+
 		Running = true;
 		return true;
 	}
 
+	bool Client::BeginContentDelivery() {
+		if (Settings.ContentSources.empty() && Settings.ContentPublisherKey.empty()) {
+			// Nothing was asked for. Not a failure — a game with its content
+			// beside it in a game file needs no origin at all.
+			return true;
+		}
+
+		engine::delivery::DeliverySettings settings =
+			engine::delivery::DeliverySettings::Default(Settings.ContentCache);
+		settings.CachePath = Settings.ContentCache;
+
+		if (!Settings.ContentSources.empty()) {
+			settings.Sources.clear();
+			for (const std::string &source : Settings.ContentSources) {
+				// `dir:` names a published store on this machine; anything else
+				// is an address. One flag rather than two, because the priority
+				// order is a single list and splitting it across two flags
+				// would make "local first, then remote" unexpressible.
+				const bool directory = source.starts_with("dir:");
+				settings.Sources.push_back(
+					engine::delivery::Source{
+						.Name = source,
+						.Kind = directory ? engine::delivery::SourceKind::Directory
+										  : engine::delivery::SourceKind::Http,
+						.Location = directory ? source.substr(4) : source,
+						.Enabled = true,
+					}
+				);
+			}
+		}
+
+		if (const auto key = engine::assets::PublicKey::FromHex(Settings.ContentPublisherKey)) {
+			settings.Publisher = *key;
+		} else {
+			ENGINE_ERROR("content delivery needs --publisher-key, 64 hex characters");
+			ENGINE_ERROR("a client that accepted an unsigned manifest would have no trust boundary");
+			return false;
+		}
+
+		Content = engine::delivery::MakeAssetClient(settings);
+		if (!Content) {
+			return false;
+		}
+
+		ENGINE_INFO(
+			"content: {} source(s), first is '{}'", settings.Usable().size(), settings.Usable().front().Name
+		);
+		return true;
+	}
+
+	bool Client::BeginAudio() {
+		// **The sound is validated before the device is consulted**, so a
+		// typo'd path is reported on a machine with no output as well as on one
+		// with speakers. Ordering it the other way round means a developer on a
+		// headless box is told only that nothing can be heard — which is true,
+		// unhelpful, and hides a mistake they could have fixed.
+		std::shared_ptr<const engine::audio::SampleBuffer> decoded;
+		if (!Settings.SoundPath.empty()) {
+			std::ifstream file(Settings.SoundPath, std::ios::binary | std::ios::ate);
+			if (!file) {
+				ENGINE_ERROR("audio: cannot read {}", Settings.SoundPath.string());
+				return false;
+			}
+			const std::streamoff size = file.tellg();
+			file.seekg(0);
+			std::vector<std::byte> bytes(static_cast<size_t>(std::max<std::streamoff>(0, size)));
+			if (!bytes.empty()) {
+				file.read(reinterpret_cast<char *>(bytes.data()), size);
+			}
+
+			const auto samples = engine::audio::DecodeWav(bytes);
+			if (!samples) {
+				ENGINE_ERROR("audio: {} is not a wav this engine decodes", Settings.SoundPath.string());
+				return false;
+			}
+			decoded = std::make_shared<const engine::audio::SampleBuffer>(*samples);
+		}
+
+		// Opened whether or not a sound was asked for: a world's own scripts
+		// will want one, and a device that is only opened when a flag is passed
+		// is a device nothing exercises.
+		Sound = engine::audio::OpenDevice({});
+		if (Sound == nullptr) {
+			// Not a failure. A CI container has no sound server and a laptop
+			// may have its output disabled; a game that refused to start
+			// because it could not make a noise would be worse than a quiet
+			// one.
+			if (decoded) {
+				ENGINE_WARN(
+					"audio: '{}' decoded ({:.2f}s) but there is no output on this machine",
+					Settings.SoundPath.string(),
+					decoded->Seconds()
+				);
+			}
+			return true;
+		}
+		if (!decoded) {
+			return true;
+		}
+
+		// Converted once, here, at load time — never on the device thread.
+		auto &mixer = Sound->Mixer();
+		const auto sample =
+			std::make_shared<const engine::audio::SampleBuffer>(decoded->ConvertTo(Sound->Format()));
+
+		// Player -> fader -> output. The fader is not decoration: it is where a
+		// master volume goes, and building it now means a level control is a
+		// parameter rather than a refactor.
+		const engine::audio::NodeId player = mixer.Commands().Allocate();
+		const engine::audio::NodeId fader = mixer.Commands().Allocate();
+
+		engine::audio::Command command;
+		command.Kind = engine::audio::CommandKind::AddNode;
+		command.Target = player;
+		command.Node = engine::audio::NodeKind::Player;
+		mixer.Commands().Post(command);
+
+		command.Target = fader;
+		command.Node = engine::audio::NodeKind::Fader;
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::Connect;
+		command.Target = player;
+		command.Second = fader;
+		mixer.Commands().Post(command);
+
+		command.Target = fader;
+		command.Second = mixer.Graph().Output();
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::SetSound;
+		command.Target = player;
+		command.Sound = sample;
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::SetLooping;
+		command.Target = player;
+		command.Flag = true;
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::Play;
+		command.Target = player;
+		// **On the sample clock, not "now".** The device is already running, so
+		// scheduling a little ahead is what lets the start land on a known
+		// sample rather than wherever the callback happens to be — which is the
+		// whole point of the queue carrying a deadline.
+		command.AtSample = mixer.Clock() + Sound->Format().SampleRate / 10;
+		mixer.Commands().Post(command);
+
+		ENGINE_INFO("audio: playing {} ({:.2f}s, looping)", Settings.SoundPath.string(), sample->Seconds());
+		return true;
+	}
+
 	void Client::Shutdown() {
+		// Before the renderer and SDL: the device holds a callback that is
+		// inside this object, and tearing SDL down underneath it is a crash on
+		// exit.
+		Sound.reset();
+		Content.reset();
+
 		// The connection before the socket it borrows, and both before the
 		// universe holding the world it writes into. A connector outliving its
 		// transport is a dangling reference in a destructor.
@@ -372,9 +545,19 @@ namespace client {
 		// frame's events has to survive until something reads it.
 		Actions.BeginFrame();
 
-		SDL_Event event;
-		while (SDL_PollEvent(&event)) {
-			Actions.HandleEvent(event);
+		{
+			// **The pump on its own.** `pump events` covered the poll and every
+			// key it then acted on, and the poll is the half that can block on
+			// the compositor — so a frame stalled by the window system and a
+			// frame stalled by a keybinding doing work read as one number.
+			// There is nothing worth a span inside `input` itself: `Actions` is
+			// a bitset and a switch, and this is the cost of reaching it.
+			ENGINE_PROFILE("poll events");
+
+			SDL_Event event;
+			while (SDL_PollEvent(&event)) {
+				Actions.HandleEvent(event);
+			}
 		}
 
 		if (Actions.Fired(Action::Quit)) {
@@ -507,7 +690,12 @@ namespace client {
 			// After the tick and before presentation, the same place the server
 			// publishes from — so what the replica applied this frame is what
 			// the frame draws, rather than being one frame stale for no reason.
-			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::ECS);
+			//
+			// `Network` and not `ECS`: this is the socket being drained and
+			// what came out of it being applied. It was ECS time because it
+			// writes to a store, which put the link's cost in the same bar as
+			// the systems and made a bad connection read as a slow game.
+			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::Network);
 			PollServer(engine::core::Clock::Seconds());
 		}
 

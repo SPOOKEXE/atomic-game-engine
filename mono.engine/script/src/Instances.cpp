@@ -1,4 +1,5 @@
 #include "Bindings.hpp"
+#include "Subtree.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -247,29 +248,16 @@ namespace engine::script {
 			LuauContext &context = UpvalueContext(state);
 			const Entity instance = CheckInstance(state, 1);
 
-			// **The signal table is told before the storage is.** A `.Changed`
-			// connection on a destroyed row would otherwise fire against a dead
-			// handle every tick for the rest of the world's life, and
-			// `EachSubject` would keep visiting it.
-			std::vector<CallbackRef> released;
-			context.Signals.DropSubject(instance, released);
-			context.Changes.Unwatch(instance);
-
-			for (const CallbackRef reference : released) {
-				lua_unref(state, reference);
-			}
-
-			// Children go too, and each of them has to be forgotten as well.
-			// `DestroyInstance` takes the whole subtree, so a listener on a
-			// grandchild would survive the row it was watching.
-			context.World->EachChild(instance, [&](Entity child) {
-				std::vector<CallbackRef> fromChild;
-				context.Signals.DropSubject(child, fromChild);
-				context.Changes.Unwatch(child);
-				for (const CallbackRef reference : fromChild) {
+			// **The signal table is told before the storage is**, and it is told
+			// about the whole subtree. `DestroyInstance` takes every descendant,
+			// so a connection anywhere under here would otherwise outlive the row
+			// it watched: the ref is never given up, so the closure and
+			// everything it captured stay alive for the rest of the world's life.
+			ForgetSubtree(
+				*context.World, context.Signals, context.Changes, instance, [state](CallbackRef reference) {
 					lua_unref(state, reference);
 				}
-			});
+			);
 
 			context.World->DestroyInstance(instance);
 			return 0;
@@ -317,24 +305,10 @@ namespace engine::script {
 			lua_newtable(state);
 			int index = 0;
 
-			// An explicit stack rather than recursion: a deep tree would put the
-			// depth of the scene onto the C stack, and a scene's depth is the
-			// author's to choose.
-			std::vector<Entity> pending;
-			store.EachChild(instance, [&](Entity child) { pending.push_back(child); });
-
-			while (!pending.empty()) {
-				const Entity current = pending.front();
-				pending.erase(pending.begin());
-
-				PushInstance(state, current);
+			EachDescendant(store, instance, [&](Entity descendant) {
+				PushInstance(state, descendant);
 				lua_rawseti(state, -2, ++index);
-
-				size_t insertAt = 0;
-				store.EachChild(current, [&](Entity child) {
-					pending.insert(pending.begin() + static_cast<ptrdiff_t>(insertAt++), child);
-				});
-			}
+			});
 			return 1;
 		}
 
@@ -381,12 +355,14 @@ namespace engine::script {
 			context.World->EachChild(instance, [&](Entity child) { children.push_back(child); });
 
 			for (const Entity child : children) {
-				std::vector<CallbackRef> released;
-				context.Signals.DropSubject(child, released);
-				context.Changes.Unwatch(child);
-				for (const CallbackRef reference : released) {
-					lua_unref(state, reference);
-				}
+				// The child's whole subtree, because that is what destroying it
+				// takes — forgetting only the child leaves every grandchild's
+				// connections pointing at rows that no longer exist.
+				ForgetSubtree(
+					*context.World, context.Signals, context.Changes, child, [state](CallbackRef reference) {
+						lua_unref(state, reference);
+					}
+				);
 				context.World->DestroyInstance(child);
 			}
 			return 0;
@@ -611,7 +587,7 @@ namespace engine::script {
 		PushInstance(state, instance);
 	}
 
-	void OpenInstances(lua_State *state, ecs::Store &store) {
+	void OpenInstances(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 
 		// The method table, in the registry so `__index` hands back one shared
@@ -673,8 +649,6 @@ namespace engine::script {
 		lua_pushcclosure(state, InstanceNew, "new", 1);
 		lua_setfield(state, -2, "new");
 		lua_setglobal(state, "Instance");
-
-		(void)store;
 	}
 
 	std::string PumpChanges(lua_State *state) {

@@ -1,9 +1,13 @@
+#include <engine/assets/ContentHash.hpp>
 #include <engine/assets/HashTree.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <span>
 #include <utility>
 
 namespace engine::assets {
@@ -37,11 +41,68 @@ namespace engine::assets {
 			}
 			return hashes;
 		}
+
+		// What binds a name and a kind to the content they describe.
+		//
+		// Length-prefixed rather than concatenated, and that is the whole
+		// reason this is a function rather than three appends at the call
+		// site: `ab` + `c` and `a` + `bc` are the same bytes, so without a
+		// length two different manifests could produce one descriptor and the
+		// binding this exists to provide would not hold. The tag byte is the
+		// same domain separation HashTree.hpp uses, for the same reason — a
+		// descriptor must not be presentable as a chunk hash.
+		ContentHash DescriptorOf(const AssetEntry &asset) {
+			Hasher hasher;
+			constexpr std::byte DESCRIPTOR_TAG{0x04};
+			hasher.Update({&DESCRIPTOR_TAG, 1});
+
+			const auto length = static_cast<uint64_t>(asset.Name.size());
+			std::array<std::byte, 8> encoded{};
+			for (size_t index = 0; index < encoded.size(); ++index) {
+				encoded[index] = static_cast<std::byte>((length >> (index * 8)) & 0xFF);
+			}
+			hasher.Update(encoded);
+			hasher.Update(std::as_bytes(std::span(asset.Name.data(), asset.Name.size())));
+
+			const auto kind = static_cast<std::byte>(asset.Kind);
+			hasher.Update({&kind, 1});
+			hasher.Update(std::as_bytes(std::span(asset.Root.Digest.data(), asset.Root.Digest.size())));
+			return hasher.Finish();
+		}
 	}
 
-	ContentHash Manifest::AddAsset(std::string name, std::vector<ChunkEntry> chunks) {
+	bool VerifyAsset(const AssetEntry &asset, std::span<const std::byte> bytes) {
+		if (bytes.size() != asset.TotalBytes) {
+			return false;
+		}
+
+		std::vector<ContentHash> hashes;
+		hashes.reserve(asset.Chunks.size());
+
+		size_t offset = 0;
+		for (const ChunkEntry &chunk : asset.Chunks) {
+			if (offset + chunk.Bytes > bytes.size()) {
+				return false;
+			}
+			// Each chunk against its own hash. Doing it per chunk rather than
+			// over the whole is what lets a caller say *which* chunk was wrong,
+			// and it is the only comparison the root's shape allows.
+			if (Hasher::Of(bytes.subspan(offset, chunk.Bytes)) != chunk.Hash) {
+				return false;
+			}
+			hashes.push_back(chunk.Hash);
+			offset += chunk.Bytes;
+		}
+
+		// And the tree, so a run of chunks that each verified cannot be passed
+		// off as a different asset made of the same pieces in another order.
+		return offset == bytes.size() && HashTree::RootOf(hashes) == asset.Root;
+	}
+
+	ContentHash Manifest::AddAsset(std::string name, AssetKind kind, std::vector<ChunkEntry> chunks) {
 		AssetEntry entry;
 		entry.Name = std::move(name);
+		entry.Kind = kind;
 		entry.Chunks = std::move(chunks);
 		entry.Root = HashTree::RootOf(ChunkHashes(entry.Chunks));
 
@@ -116,13 +177,32 @@ namespace engine::assets {
 		return root;
 	}
 
-	ContentHash Manifest::Root() const {
+	ContentHash Manifest::DescriptorRoot() const {
+		std::vector<ContentHash> descriptors;
+		descriptors.reserve(AssetsByName.size());
+		// In name order, which is the order the assets are already held in, so
+		// the canonical arrangement of the file and the arrangement of the hash
+		// are one thing rather than two that could drift.
+		for (const AssetEntry &asset : AssetsByName) {
+			descriptors.push_back(DescriptorOf(asset));
+		}
+		return HashTree::RootOf(descriptors);
+	}
+
+	ContentHash Manifest::BundleRoot() const {
 		std::vector<ContentHash> roots;
 		roots.reserve(BundlesByRoot.size());
 		for (const BundleEntry &bundle : BundlesByRoot) {
 			roots.push_back(bundle.Root);
 		}
 		return HashTree::RootOf(roots);
+	}
+
+	ContentHash Manifest::Root() const {
+		// Two leaves, always both present, so an empty manifest still has a
+		// root that is not the root of anything else.
+		const std::array<ContentHash, 2> halves{DescriptorRoot(), BundleRoot()};
+		return HashTree::RootOf(halves);
 	}
 
 	const AssetEntry *Manifest::Find(std::string_view name) const {
@@ -151,8 +231,51 @@ namespace engine::assets {
 		return position == AssetsByName.end() ? nullptr : &*position;
 	}
 
+	const BundleEntry *Manifest::BundleFor(const ContentHash &assetRoot) const {
+		for (const BundleEntry &bundle : BundlesByRoot) {
+			// Members are sorted, so this is a binary search per bundle rather
+			// than a scan. The bundle list itself is walked: an asset is in one
+			// bundle and there is no index from asset to bundle in the format,
+			// because building one would be a second structure to keep true.
+			if (std::binary_search(bundle.Assets.begin(), bundle.Assets.end(), assetRoot)) {
+				return &bundle;
+			}
+		}
+		return nullptr;
+	}
+
+	std::optional<BundleSlice>
+	Manifest::SliceOf(const BundleEntry &bundle, const ContentHash &assetRoot) const {
+		uint64_t offset = 0;
+		for (const ContentHash &member : bundle.Assets) {
+			const AssetEntry *const asset = FindByRoot(member);
+			if (asset == nullptr) {
+				// A bundle naming an asset this manifest does not describe
+				// cannot be cut up at all, and `AddBundle` and `Read` both
+				// refuse to build one. Returning nothing rather than a partial
+				// answer keeps that a refusal rather than a wrong offset.
+				return std::nullopt;
+			}
+			if (member == assetRoot) {
+				return BundleSlice{.Offset = offset, .Bytes = asset->TotalBytes};
+			}
+			offset += asset->TotalBytes;
+		}
+		return std::nullopt;
+	}
+
+	std::vector<const AssetEntry *> Manifest::OfKind(AssetKind kind) const {
+		std::vector<const AssetEntry *> matching;
+		for (const AssetEntry &asset : AssetsByName) {
+			if (asset.Kind == kind) {
+				matching.push_back(&asset);
+			}
+		}
+		return matching;
+	}
+
 	void Manifest::Write(core::ByteWriter &writer) const {
-		ENGINE_PROFILE("Manifest::Write");
+		ENGINE_PROFILE_CAT("Manifest::Write", core::ProfileCategory::Assets);
 
 		writer.WriteUInt32(MAGIC);
 		writer.WriteUInt16(VERSION);
@@ -160,6 +283,7 @@ namespace engine::assets {
 		writer.WriteUInt32(static_cast<uint32_t>(AssetsByName.size()));
 		for (const AssetEntry &asset : AssetsByName) {
 			writer.WriteString(asset.Name);
+			writer.WriteUInt8(static_cast<uint8_t>(asset.Kind));
 			WriteHash(writer, asset.Root);
 			writer.WriteUInt64(asset.TotalBytes);
 			writer.WriteUInt32(static_cast<uint32_t>(asset.Chunks.size()));
@@ -181,7 +305,7 @@ namespace engine::assets {
 	}
 
 	std::optional<Manifest> Manifest::Read(core::ByteReader &reader) {
-		ENGINE_PROFILE("Manifest::Read");
+		ENGINE_PROFILE_CAT("Manifest::Read", core::ProfileCategory::Assets);
 
 		// Every refusal below returns nothing rather than a partly built
 		// manifest. A half-parsed manifest is the shape a caller uses by
@@ -223,6 +347,17 @@ namespace engine::assets {
 				return refuse();
 			}
 			asset.Name.assign(name);
+
+			// An unknown kind is read as `Unknown` rather than refused. The
+			// list is append-only, so a manifest from a later build naming a
+			// kind this one has not heard of is a legitimate document: its
+			// content still delivers and verifies, and it is simply not
+			// something a kind-filtered request here will return. Refusing
+			// would make every kind added later a hard break for every client
+			// already deployed.
+			const uint8_t kind = reader.ReadUInt8();
+			asset.Kind = kind <= static_cast<uint8_t>(AssetKind::Data) ? static_cast<AssetKind>(kind)
+																	   : AssetKind::Unknown;
 
 			if (!ReadHash(reader, asset.Root)) {
 				return refuse();

@@ -81,8 +81,10 @@ namespace studio {
 		// field that answers whether anything arrived; this one answers when.
 		uint64_t Applied = 0;
 
-		// Messages handed over on the last step, and their bytes.
+		// Messages handed over on the last step.
 		size_t Messages = 0;
+
+		// What those messages weighed, in bytes.
 		size_t Bytes = 0;
 
 		// The largest single message, which is the number that says whether a
@@ -91,8 +93,10 @@ namespace studio {
 		// would not fit.
 		size_t LargestMessage = 0;
 
-		// Messages and bytes since the run started.
+		// Messages since the run started.
 		uint64_t TotalMessages = 0;
+
+		// What all of them weighed, in bytes.
 		uint64_t TotalBytes = 0;
 
 		// Entities carrying a `scene::Transform` on each side.
@@ -101,6 +105,8 @@ namespace studio {
 		// with a blank client view is a drawing problem; unequal counts is a
 		// replication one, and the two have nothing to do with each other.
 		size_t ServerEntities = 0;
+
+		// The replica's side of that comparison.
 		size_t ClientEntities = 0;
 	};
 

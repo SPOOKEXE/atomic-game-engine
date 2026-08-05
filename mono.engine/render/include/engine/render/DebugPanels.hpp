@@ -307,42 +307,12 @@ namespace engine::render {
 		int Scale = 2;
 	};
 
-	// The share of the frame's *busy* time each span accounts for.
+	// The share arithmetic these panels are drawn from — `BusyShares`,
+	// `BusyMillisecondsOf`, `CategoryShares` — is in `src/PanelShares.hpp`.
 	//
-	// **Split out of the drawing so it can be checked**, which is the whole
-	// reason it exists as a function: the SHARE column read **2634%** on a
-	// vsynced frame and the arithmetic was doing exactly what it was told. A
-	// span's `Milliseconds` is inclusive, the denominator is the frame less its
-	// idle time, and `Renderer::Render` encloses the swapchain wait — so the
-	// column divided 16.385 ms of render by 0.622 ms of busy. Two real numbers,
-	// never the same measurement.
-	//
-	// This puts both sides on one basis by taking the waiting out of the
-	// numerator too. Every result is bounded by 100%, a parent still reads as
-	// its whole subtree, and a scope whose entire job is to block reads zero.
-	//
-	// @param spans            The published frame's spans, in open order.
-	// @param busyMilliseconds The frame less its idle time. Must be positive.
-	// @return One share per span, parallel to `spans`.
-	std::vector<float> BusyShares(std::span<const core::FrameSpan> spans, float busyMilliseconds);
-
-	// A span's inclusive time less the waiting inside it.
-	//
-	// **The number the overlay leads with, and the reason the BUSY and IDLE
-	// columns are a pair.** `Milliseconds` alone made `Renderer::Render` read
-	// 16 ms on a vsynced frame when 15.9 of it was one child blocking on the
-	// display, and a reader going after the biggest number went after the
-	// renderer — twice, for work it was not doing. This is the half somebody
-	// can act on; `FrameSpan::IdleMilliseconds` is the half they cannot.
-	//
-	// Clamped at zero: the two figures come from separate accumulators and
-	// float error must not produce a negative cost.
-	//
-	// @param span The span.
-	// @return Its busy milliseconds.
-	inline float BusyMillisecondsOf(const core::FrameSpan &span) {
-		return std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
-	}
+	// It was here, published so that the suite could reach it, which is the
+	// one thing the root `AGENTS.md` names: do not widen a public header to
+	// make a test easier. Nothing outside this module ever called any of it.
 
 	// Clears the image and draws whatever is switched on. Draws nothing, and
 	// leaves the image clean, when both panels are off — which is what lets the

@@ -36,10 +36,19 @@
 // `name` must be a string literal: Tracy keeps the pointer for the life of
 // the process, and FrameGraph reads it after the frame has ended.
 //
+// **`ZoneNamedN` rather than `ZoneScopedN`, so two of these may share a C++
+// scope.** `ZoneScopedN` declares a variable called `___tracy_scoped_zone`,
+// which is one fixed name — so a second macro beside the first was a
+// redeclaration error naming a Tracy internal, from a header the caller never
+// wrote, and only in builds with `ENGINE_TRACY` on. The FrameGraph half was
+// already unique per line; this makes the Tracy half agree. Two on the *same*
+// line still collide, because the source-location record is per line, and
+// that is the one restriction left.
+//
 // @param name String literal used by both profiling consumers.
 // @param category ProfileCategory used by FrameGraph.
 #define ENGINE_PROFILE_CAT(name, category)                                                                   \
-	ZoneScopedN(name);                                                                                       \
+	ZoneNamedN(ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__), name, true);                             \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
 		name, category                                                                                       \
 	}
@@ -60,10 +69,10 @@
 // @param view Runtime string view copied by FrameGraph when collected.
 // @param category ProfileCategory used by FrameGraph.
 #define ENGINE_PROFILE_DYNAMIC(fallback, view, category)                                                     \
-	ZoneScopedN(fallback);                                                                                   \
+	ZoneNamedN(ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__), fallback, true);                         \
 	do {                                                                                                     \
 		if (!(view).empty()) {                                                                               \
-			ZoneName((view).data(), (view).size());                                                          \
+			ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__).Name((view).data(), (view).size());          \
 		}                                                                                                    \
 	} while (0);                                                                                             \
 	::engine::core::FrameGraph::CopiedScope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {           \
@@ -86,10 +95,10 @@
 // @param view Runtime string view backed by stable caller-owned storage.
 // @param category ProfileCategory used by FrameGraph.
 #define ENGINE_PROFILE_DYNAMIC_STABLE(fallback, view, category)                                              \
-	ZoneScopedN(fallback);                                                                                   \
+	ZoneNamedN(ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__), fallback, true);                         \
 	do {                                                                                                     \
 		if (!(view).empty()) {                                                                               \
-			ZoneName((view).data(), (view).size());                                                          \
+			ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__).Name((view).data(), (view).size());          \
 		}                                                                                                    \
 	} while (0);                                                                                             \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \

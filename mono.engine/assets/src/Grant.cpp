@@ -89,7 +89,7 @@ namespace engine::assets {
 	}
 
 	std::optional<Grant> Grant::Issue(GrantScope scope, const GrantKey &key) {
-		ENGINE_PROFILE("Grant::Issue");
+		ENGINE_PROFILE_CAT("Grant::Issue", core::ProfileCategory::Assets);
 
 		// Sorted and deduplicated before anything else, so one set of bundles
 		// has one encoding and therefore one MAC. Without this, two servers
@@ -121,7 +121,7 @@ namespace engine::assets {
 
 	std::optional<Grant>
 	Grant::Open(std::span<const std::byte> token, const GrantKey &key, uint64_t nowSeconds) {
-		ENGINE_PROFILE("Grant::Open");
+		ENGINE_PROFILE_CAT("Grant::Open", core::ProfileCategory::Assets);
 
 		const auto refuse = [](const char *counter) -> std::optional<Grant> {
 			core::Metrics::Count(counter, 1.0);

@@ -84,9 +84,14 @@ namespace engine::ui {
 	//
 	// @since v0.7
 	struct PaletteSample {
-		// Packed `IM_COL32`, ready for `ImDrawList`.
+		// The background the sample sits on. Packed `IM_COL32`, ready for
+		// `ImDrawList`.
 		unsigned int Surface;
+
+		// A control drawn on that surface, packed the same way.
 		unsigned int Raised;
+
+		// The accent the other two are chosen against, packed the same way.
 		unsigned int Accent;
 	};
 

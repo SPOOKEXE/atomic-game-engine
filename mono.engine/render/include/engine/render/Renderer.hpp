@@ -521,6 +521,11 @@ namespace engine::render {
 		//                    size instead of into the window, or null for the
 		//                    window. Decides the aspect ratio and the cull
 		//                    frustum as well as the target — see `SceneTarget`.
+		// @param targetSlot  Which offscreen target `sceneTarget` names. A game
+		//                    draws one view and never passes this; a studio
+		//                    keeps a slot per viewport so two panels of
+		//                    different sizes do not reallocate one shared
+		//                    texture twice a frame. See `SceneTexture`.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,

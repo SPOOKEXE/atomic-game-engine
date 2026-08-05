@@ -8,7 +8,9 @@
 // three lines long and what will let single-player link the server library into
 // this same process later.
 
+#include <engine/audio/Device.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/delivery/Client.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/input/Actions.hpp>
@@ -27,6 +29,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 struct SDL_Window;
 
@@ -143,6 +146,37 @@ namespace client {
 		// is what v0.2 built the compositor for, and one of them being somebody
 		// else's authority is the case this version adds.
 		std::string ConnectAddress;
+
+		// Content origins, in priority order — the first one that answers wins.
+		//
+		// **Localhost by default and configurable, which is the point.** A game
+		// being developed has its content beside it; a shipped one is told
+		// where to look. `repo_layout.md` §11 wants moving between those to be a
+		// configuration change rather than a rebuild, and this is where that
+		// change is made. Each entry is `host:port`, or a directory path when
+		// prefixed with `dir:`.
+		std::vector<std::string> ContentSources;
+
+		// Where verified content is kept between runs. Empty disables it.
+		std::filesystem::path ContentCache;
+
+		// The publisher key this client trusts, as 64 hex characters.
+		//
+		// **Without it nothing is fetched.** A client that accepted an unsigned
+		// manifest would have no trust boundary at all, and that failure is
+		// invisible until somebody is serving content the publisher did not
+		// write — so an unset key disables delivery loudly rather than
+		// quietly trusting whatever answers.
+		std::string ContentPublisherKey;
+
+		// A `.wav` to play on a loop once the world is up.
+		//
+		// **A real caller rather than a demo flag.** `ROADMAP.md` v0.9 asks for
+		// audio "running in-studio and in-game", and a subsystem with no caller
+		// is the thing this repository refuses everywhere else. This is the
+		// smallest honest one: it decodes a delivered format, builds a routing,
+		// and plays it through the same device a game would.
+		std::filesystem::path SoundPath;
 	};
 
 	// The window, the renderer and the frame loop over one world.
@@ -227,6 +261,27 @@ namespace client {
 		//         a client that looks like a server bug.
 		bool BeginConnecting();
 
+		// Builds the delivery client and fetches the catalogue.
+		//
+		// **Reports what is reachable rather than loading anything**, because
+		// there is nothing yet to load it into: mesh and texture importing are
+		// `ROADMAP.md` v0.9's and land beside this. What this does earn today is
+		// real — it proves the configured origins answer, that their manifest
+		// verifies against the publisher key, and what is available by kind. A
+		// content misconfiguration then shows up at start-up with a reason,
+		// instead of as missing geometry much later.
+		//
+		// @return `false` only when sources were configured and are unusable.
+		//         No configuration at all is not a failure.
+		bool BeginContentDelivery();
+
+		// Opens the audio device and builds the mixer's routing.
+		//
+		// @return `false` only when a sound was asked for and cannot be played.
+		//         **No device is not a failure**: a CI container and a machine
+		//         with its output disabled both run quietly.
+		bool BeginAudio();
+
 		// Takes one tick's worth of what the server sent.
 		//
 		// @param nowSeconds The current time.
@@ -293,6 +348,12 @@ namespace client {
 		// opening a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
 		std::unique_ptr<engine::replication::Connector> Connection;
+
+		// The delivery client, when content sources were configured.
+		std::unique_ptr<engine::delivery::AssetClient> Content;
+
+		// The audio device, when one opened. Null runs silently.
+		std::unique_ptr<engine::audio::Device> Sound;
 
 		// The world the server owns. Invalid when not connected.
 		engine::world::WorldId Replicated;

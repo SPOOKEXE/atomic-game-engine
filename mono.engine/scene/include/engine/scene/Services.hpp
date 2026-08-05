@@ -115,8 +115,11 @@ namespace engine::scene {
 		// The time of day, in hours. 14 is Roblox's default afternoon.
 		float ClockTime = 14.0f;
 
-		// Where fog starts and where it is total, in studs.
+		// Where fog starts, in studs.
 		float FogStart = 0.0f;
+
+		// Where fog is total, in studs. The default is far enough out to read as
+		// no fog at all.
 		float FogEnd = 100000.0f;
 
 		// Which latitude the sun's arc is computed for, in degrees.

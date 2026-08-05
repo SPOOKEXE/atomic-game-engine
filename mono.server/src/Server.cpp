@@ -1,3 +1,6 @@
+#include <engine/assets/ChunkStore.hpp>
+#include <engine/assets/Grant.hpp>
+#include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
@@ -11,6 +14,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cdn/Origin.hpp>
+#include <cdn/Service.hpp>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <server/Server.hpp>
@@ -70,6 +76,150 @@ namespace server {
 			);
 			return static_cast<bool>(file);
 		}
+	}
+
+	Server::Server() = default;
+
+	// Out of line, so `cdn::Origin` and `cdn::Service` may be incomplete in the
+	// header. The order matters: the service borrows the origin, so it is
+	// destroyed first — which is what member declaration order already gives,
+	// stated here because it is the kind of thing a later edit reorders.
+	Server::~Server() {
+		ContentService.reset();
+		ContentOrigin.reset();
+		ContentGrantSecret.reset();
+	}
+
+	bool Server::BeginServingContent() {
+		if (Settings.ContentStore.empty()) {
+			return true;
+		}
+
+		auto store = engine::assets::ChunkStore::Open(Settings.ContentStore, false);
+		if (!store) {
+			ENGINE_ERROR("server: no content store at {}", Settings.ContentStore.string());
+			ENGINE_ERROR(
+				"server: publish one first — cdn --publish DIR --store {} --signing-key HEX",
+				Settings.ContentStore.string()
+			);
+			return false;
+		}
+
+		engine::assets::SignatureBytes signature;
+		auto manifest = store->ReadManifest(signature);
+		if (!manifest) {
+			ENGINE_ERROR("server: {} holds no manifest", Settings.ContentStore.string());
+			return false;
+		}
+
+		// The secret shared with whoever issues grants.
+		//
+		// **Required rather than invented, and that is not friction for its own
+		// sake.** A grant key is HMAC material, and `assets/AGENTS.md` is
+		// explicit that `core::Random` is not a cryptographic generator and
+		// must never be used for one. The alternatives here are to reach for a
+		// generator this engine does not have, or to say plainly that a secret
+		// is the deployment's to supply — which is what `Grant.hpp` already
+		// says and what `cdn --grant-key` already requires.
+		//
+		// A key minted from a weak generator would look exactly like a strong
+		// one and would be discovered by somebody else, not by us.
+		std::array<std::byte, engine::assets::GrantKey::BYTES> secret{};
+		if (Settings.ContentGrantKey.size() != secret.size() * 2) {
+			ENGINE_ERROR(
+				"server: --content-store needs --content-grant-key, {} hex characters", secret.size() * 2
+			);
+			ENGINE_ERROR(
+				"server: the secret is the deployment's to supply — this engine has no "
+				"cryptographic generator to invent one with"
+			);
+			return false;
+		}
+		for (size_t index = 0; index < secret.size(); ++index) {
+			const std::string byte = Settings.ContentGrantKey.substr(index * 2, 2);
+			char *end = nullptr;
+			const long value = std::strtol(byte.c_str(), &end, 16);
+			if (end != byte.c_str() + 2) {
+				ENGINE_ERROR("server: --content-grant-key is not hex");
+				return false;
+			}
+			secret[index] = static_cast<std::byte>(value);
+		}
+
+		auto key = engine::assets::GrantKey::FromSecret(secret);
+		if (!key) {
+			return false;
+		}
+
+		// One secret, two keys, because there are two roles — see the member's
+		// comment. Built from the same bytes rather than shared, since a
+		// `GrantKey` zeroes itself and is deliberately not copyable.
+		auto issuing = engine::assets::GrantKey::FromSecret(secret);
+		if (!issuing) {
+			return false;
+		}
+		ContentGrantSecret = std::make_unique<engine::assets::GrantKey>(std::move(*issuing));
+		ContentOrigin = std::make_unique<cdn::Origin>(std::move(*key));
+
+		auto mounted = cdn::ContentRoot::Mount(Settings.ContentStore);
+		if (!mounted) {
+			return false;
+		}
+		if (!ContentOrigin->Publish(
+				std::make_shared<const cdn::Publication>(*mounted, std::move(*manifest))
+			)) {
+			ENGINE_ERROR("server: could not publish the content store");
+			return false;
+		}
+
+		cdn::ServiceSettings service;
+		service.Port = Settings.ContentPort;
+		ContentService = cdn::Serve(*ContentOrigin, std::move(*store), service);
+		if (!ContentService) {
+			ENGINE_ERROR("server: could not serve content on port {}", Settings.ContentPort);
+			return false;
+		}
+
+		ENGINE_INFO(
+			"server: serving content from {} on port {}",
+			Settings.ContentStore.string(),
+			ContentService->Local().Port
+		);
+		return true;
+	}
+
+	std::optional<uint16_t> Server::ContentPort() const {
+		if (!ContentService) {
+			return std::nullopt;
+		}
+		return ContentService->Local().Port;
+	}
+
+	std::optional<std::vector<std::byte>>
+	Server::IssueContentGrant(uint64_t session, uint64_t nowSeconds, uint64_t lifetimeSeconds) const {
+		if (!ContentOrigin || !ContentGrantSecret) {
+			return std::nullopt;
+		}
+		const std::shared_ptr<const cdn::Publication> published = ContentOrigin->Current();
+		if (!published) {
+			return std::nullopt;
+		}
+
+		engine::assets::GrantScope scope;
+		scope.Session = session;
+		for (const engine::assets::BundleEntry &bundle : published->Contents().Bundles()) {
+			scope.Bundles.push_back(bundle.Root);
+		}
+		scope.ExpiresAtSeconds = nowSeconds + lifetimeSeconds;
+		// What an operator will accept being billed for rather than a secrecy
+		// bound — game content is not secret, it ships to everyone who plays.
+		scope.ByteBudget = 1024ull * 1024ull * 1024ull;
+
+		const auto grant = engine::assets::Grant::Issue(scope, *ContentGrantSecret);
+		if (!grant) {
+			return std::nullopt;
+		}
+		return grant->Encode();
 	}
 
 	bool Server::Initialise(const Options &options) {
@@ -231,6 +381,10 @@ namespace server {
 		}
 
 		if (!BeginListening()) {
+			return false;
+		}
+
+		if (!BeginServingContent()) {
 			return false;
 		}
 
@@ -707,6 +861,18 @@ namespace server {
 			// hand on the mouse does, so it lands at the same point in the loop.
 			if (ControlServer.IsRunning()) {
 				ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
+			}
+
+			// Beside the control surface, and for the same reason it is here:
+			// content delivery is not part of the tick. A fetch that completes
+			// between two ticks changes nothing a recorded run would have to
+			// reproduce — CDN.md §3 — so it is pumped where the frame is
+			// bookkept rather than where the world is simulated, and
+			// `just determinism` is unaffected by whether anyone is fetching.
+			if (ContentService) {
+				ContentService->Pump(
+					static_cast<uint64_t>(engine::core::Clock::Nanoseconds() / 1'000'000'000ull)
+				);
 			}
 
 			if (Replayer_) {

@@ -176,11 +176,11 @@ namespace engine::script {
 		OpenDatatypes(State);
 		OpenEnums(State);
 		OpenSignals(State);
-		OpenInstances(State, Store);
+		OpenInstances(State);
 		OpenRunService(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
-		OpenServices(State, Store);
+		OpenServices(State);
 		OpenQueries(State);
 		OpenTask(State);
 		OpenClock(State);

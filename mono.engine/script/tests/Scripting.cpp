@@ -351,6 +351,91 @@ TEST_CASE("Destroy takes the row and the listeners with it", "[scripting]") {
 	CHECK(runtime->LastError().empty());
 }
 
+TEST_CASE("GetDescendants is depth first and reaches every level", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local root = Instance.new('Part')
+		root.Name = 'Root'
+
+		local a = Instance.new('Part', root)  a.Name = 'A'
+		local a1 = Instance.new('Part', a)    a1.Name = 'A1'
+		local b = Instance.new('Part', root)  b.Name = 'B'
+
+		local seen = {}
+		for _, descendant in ipairs(root:GetDescendants()) do
+			table.insert(seen, descendant.Name)
+		end
+
+		-- A child, then what is under it, then the next child. `A1` before `B`
+		-- is the whole difference between this and a breadth-first walk.
+		assert(#seen == 3, 'expected three descendants, got ' .. #seen)
+		assert(table.concat(seen, ',') == 'A,A1,B', 'wrong order: ' .. table.concat(seen, ','))
+	)");
+}
+
+TEST_CASE("Destroy forgets a grandchild's listeners too", "[scripting]") {
+	// `DestroyInstance` takes the whole subtree, so everything the script side
+	// remembers about it has to go in step. Forgetting only the direct children
+	// left a grandchild's connection holding its callable for the rest of the
+	// world's life.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local model = Instance.new('Part')
+		model.Name = 'Model'
+		model.Parent = workspace
+
+		local child = Instance.new('Part', model)
+		child.Name = 'Child'
+
+		local grandchild = Instance.new('Part', child)
+		grandchild.Name = 'Grandchild'
+		grandchild.Changed:Connect(function() end)
+
+		model:Destroy()
+	)");
+
+	CHECK(InScene(store, "Model") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Grandchild") == engine::ecs::NULL_ENTITY);
+
+	Beat(store, *runtime);
+	Beat(store, *runtime);
+	CHECK(runtime->LastError().empty());
+}
+
+TEST_CASE("javascript Destroy forgets a grandchild's listeners too", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const model = Instance.new('Part');
+		model.Name = 'JsModelDeep';
+		model.Parent = workspace;
+
+		const child = Instance.new('Part', model);
+		child.Name = 'JsChild';
+
+		const grandchild = Instance.new('Part', child);
+		grandchild.Name = 'JsGrandchild';
+		grandchild.Changed.Connect(() => {});
+
+		model.Destroy();
+	)");
+
+	CHECK(InScene(store, "JsModelDeep") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "JsGrandchild") == engine::ecs::NULL_ENTITY);
+
+	Beat(store, *runtime);
+	Beat(store, *runtime);
+	CHECK(runtime->LastError().empty());
+}
+
 TEST_CASE("a child is reachable by name, and a property still wins", "[scripting]") {
 	// Last rather than first, deliberately: a child named `Size` must not
 	// shadow the property, or adding a part with an unlucky name would break

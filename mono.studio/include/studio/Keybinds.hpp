@@ -48,11 +48,12 @@ namespace studio {
 		Delete,
 		SelectNone,
 
-		// **The two panels the client puts on F3 and F5.** They are unbound
-		// here rather than bound to a different pair: F5 is Play in an editor
-		// and always will be, and inventing a second set of function keys for
-		// the editor is a decision better made by whoever wants them — which is
-		// what the Keybinds page is for.
+		// The two panels the client puts on F3 and F5.
+		//
+		// **They are unbound here rather than bound to a different pair.** F5 is
+		// Play in an editor and always will be, and inventing a second set of
+		// function keys for the editor is a decision better made by whoever
+		// wants them — which is what the Keybinds page is for.
 		ShowStatistics,
 		ShowFrameGraph,
 
@@ -94,10 +95,13 @@ namespace studio {
 	//
 	// @since v0.7
 	struct Chord {
+		// The key itself. `ImGuiKey_None` is what an unbound action carries,
+		// which is what `IsBound` reads.
 		ImGuiKey Key = ImGuiKey_None;
-		bool Ctrl = false;
-		bool Shift = false;
-		bool Alt = false;
+
+		bool Ctrl = false;   // Whether Ctrl is held with it.
+		bool Shift = false;  // Whether Shift is held with it.
+		bool Alt = false;    // Whether Alt is held with it.
 
 		// Whether this chord names a key at all.
 		//
@@ -111,6 +115,10 @@ namespace studio {
 		// @return The text, or an empty string when unbound.
 		std::string Text() const;
 
+		// Whether two chords are the same key with the same modifiers.
+		//
+		// @param other The chord to compare against.
+		// @return `true` when the key and all three modifiers match.
 		bool operator==(const Chord &other) const {
 			return Key == other.Key && Ctrl == other.Ctrl && Shift == other.Shift && Alt == other.Alt;
 		}
@@ -120,17 +128,21 @@ namespace studio {
 	//
 	// @since v0.7
 	struct Keybind {
+		// The action this row binds. `Action::Count` is the unset value.
 		Action Bound = Action::Count;
 
-		// **The name in the file, and it is not the display name.** A saved
-		// binding has to survive an action being renamed for the page, and it
-		// has to survive `Action`'s members being reordered — which an enum
-		// value cannot, because the number would then name a different command.
-		// This is the only thing written to disk.
+		// The name in the file, which is not the display name.
+		//
+		// **A saved binding has to survive an action being renamed for the
+		// page, and it has to survive `Action`'s members being reordered** —
+		// which an enum value cannot, because the number would then name a
+		// different command. This is the only thing written to disk.
 		const char *Id = "";
 
-		// What the Keybinds page calls it, and what it says underneath.
+		// What the Keybinds page calls it.
 		const char *Name = "";
+
+		// The line that page prints under the name.
 		const char *Description = "";
 
 		// Where it applies. See `Scope`.
@@ -170,11 +182,10 @@ namespace studio {
 		// whichever happens to be checked first — a bug that reads as the
 		// editor being haunted.
 		//
-		// TODO: file persistence. These live for the run and are forgotten on
-		// exit. They belong beside the palette in the layout ini — see
-		// `ui::InstallThemeSettings`, which is the same job done for one value
-		// — but a whole table wants a format that survives an action being
-		// renamed, and that is a decision rather than a line of code.
+		// This writes nothing on its own. `Save` is the write, and the editor
+		// calls it once on the way out rather than on every rebind — a file
+		// rewritten per keystroke of a capture dialog is a file that can be
+		// caught half-written.
 		//
 		// @param action The action to bind.
 		// @param chord  The chord, or an unbound one to clear it.

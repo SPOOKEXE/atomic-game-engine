@@ -146,7 +146,7 @@ namespace engine::net {
 
 	std::array<std::byte, Cookie::COOKIE_BYTES>
 	Cookie::Issue(double nowSeconds, const Endpoint &peer, std::span<const std::byte> evidence) {
-		ENGINE_PROFILE("Cookie::Issue");
+		ENGINE_PROFILE_CAT("Cookie::Issue", core::ProfileCategory::Network);
 
 		Rotate(nowSeconds);
 		core::Metrics::Count("net.cookie.issued", 1.0);
@@ -159,7 +159,7 @@ namespace engine::net {
 		std::span<const std::byte> evidence,
 		std::span<const std::byte> cookie
 	) {
-		ENGINE_PROFILE("Cookie::Answers");
+		ENGINE_PROFILE_CAT("Cookie::Answers", core::ProfileCategory::Network);
 
 		if (cookie.size() != COOKIE_BYTES) {
 			core::Metrics::Count("net.cookie.refused", 1.0);

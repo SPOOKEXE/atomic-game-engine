@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/replication/Connector.hpp>
 
@@ -197,6 +198,12 @@ namespace engine::replication {
 	}
 
 	void Connector::Poll(ecs::Store &store, double nowSeconds) {
+		// The client's whole receive path, under one name. Above this there
+		// was a single `replication` span in the client's frame loop and
+		// nothing at all below it, so a link that had gone bad and a store
+		// that had gone slow produced the same reading.
+		ENGINE_PROFILE_CAT("replica.poll", core::ProfileCategory::Network);
+
 		// Set here rather than left to the caller, because the set of stores
 		// that must not mint *authoritative* entities is exactly the set a
 		// connector writes into. An authoritative index minted in a replica is

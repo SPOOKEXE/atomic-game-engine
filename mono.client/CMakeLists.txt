@@ -40,6 +40,19 @@ mono_add_library(client
 		# running its scripts as both roles needs the format and the VM and
 		# nothing else, so the tier escape reserved below is still not declared.
 		Engine::game
+
+		# L12, `client`. The mixer graph, spatialisation and the device. A game
+		# that makes no sound never opens one — `OpenDevice` answers null on a
+		# machine with no output and the client runs quietly — so this is a
+		# dependency rather than a start-up requirement.
+		Engine::audio
+
+		# L11, `shared`. Fetching content from an origin — a local directory, a
+		# server serving its own disk, or a delivery service. `--cdn` points it
+		# somewhere and the default is this machine. A game whose content ships
+		# inside its game file never builds one, which is why this is a
+		# dependency and not a start-up step.
+		Engine::delivery
 	VENDOR SDL3::SDL3
 )
 

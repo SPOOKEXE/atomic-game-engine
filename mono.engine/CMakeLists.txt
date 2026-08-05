@@ -21,6 +21,7 @@ add_subdirectory(graph)     # L9 what is drawn, before binding [shared]
 add_subdirectory(game)      # L10 what a game file is      [shared]
 add_subdirectory(examples)  # L10 the example scene        [shared]
 add_subdirectory(net)       # L11 transport and authority   [shared]
+add_subdirectory(delivery)  # L11 fetching content          [shared]
 add_subdirectory(replication) # L12 what the wire means     [shared]
 add_subdirectory(control)   # L13 the control surface      [shared]
 
@@ -32,6 +33,7 @@ add_subdirectory(control)   # L13 the control surface      [shared]
 # have neither installed, and the only way to be sure that works is to not
 # configure them.
 if(MONO_BUILD_CLIENT)
+	add_subdirectory(audio)   # L12 mixer graph, spatialisation [client]
 	add_subdirectory(input)   # L12 devices, action mapping  [client]
 	add_subdirectory(render)  # L12 RHI, render nodes        [client]
 	add_subdirectory(ui)      # L12 the editor's toolkit     [client]

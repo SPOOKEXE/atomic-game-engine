@@ -280,10 +280,6 @@ namespace engine::ecs {
 		// because a wrong name means nothing; a number out of range has an
 		// obvious nearest meaning.
 		//
-		// @param owner The class that declares it.
-		// @param name  The property's name.
-		// @param low   The smallest legal value.
-		// @param high  The largest.
 		// **The bounds are template arguments, not parameters, and that is
 		// forced rather than stylistic.** `PropertyDescriptor::Set` is a raw
 		// function pointer — `Property` is written the way it is precisely so the
@@ -294,6 +290,12 @@ namespace engine::ecs {
 		//
 		// Usage: `ClampedProperty<&Visual::Transparency, 0.0f, 1.0f>(basePart,
 		// "Transparency")`.
+		//
+		// @tparam Member A pointer-to-member of a registered component type.
+		// @tparam Low    The smallest legal value.
+		// @tparam High   The largest.
+		// @param owner   The class that declares it.
+		// @param name    The property's name.
 		template <auto Member, auto Low, auto High>
 		static void ClampedProperty(ClassId owner, std::string_view name);
 

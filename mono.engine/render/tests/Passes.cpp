@@ -27,6 +27,19 @@
 
 TEST_SUITE_ID("engine.render.passes")
 
+// This suite asserts against another module, so it says so. It was the one
+// cross-module assertion in `render` with nothing declared — `DebugPanels.cpp`
+// names `engine.core.framegraph` for the same reason.
+//
+// **And it is what re-runs this file when a stage is added.**
+// `StandardPipeline`'s body is in `graph/src/Pipeline.cpp`, which is in no
+// suite's *header* closure — a test includes the header and links the object.
+// The runner signs each suite over its own module's sources as well as that
+// closure, so an edit there moves `engine.graph.pipeline`, and this line is
+// what carries that up to here. Without it the check would stay green through
+// exactly the change it was written to catch.
+TEST_DEPENDS("engine.graph.pipeline")
+
 using engine::core::Name;
 using engine::graph::Pipeline;
 using engine::graph::PipelineStatus;

@@ -55,7 +55,7 @@ namespace cdn {
 	}
 
 	PreparedFrame PreparedCache::Find(const PreparedKey &key) {
-		ENGINE_PROFILE("PreparedCache::Find");
+		ENGINE_PROFILE_CAT("PreparedCache::Find", engine::core::ProfileCategory::Assets);
 
 		const std::lock_guard<std::mutex> held(State->Guard);
 
@@ -71,7 +71,7 @@ namespace cdn {
 	}
 
 	PreparedFrame PreparedCache::Insert(const PreparedKey &key, std::vector<std::byte> frame) {
-		ENGINE_PROFILE("PreparedCache::Insert");
+		ENGINE_PROFILE_CAT("PreparedCache::Insert", engine::core::ProfileCategory::Assets);
 
 		const uint64_t size = frame.size();
 

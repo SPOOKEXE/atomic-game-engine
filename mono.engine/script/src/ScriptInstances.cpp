@@ -101,14 +101,14 @@ namespace engine::script {
 		return ecs::Classes::Find(core::Name("LocalScript"));
 	}
 
-	std::vector<ecs::Entity> ScriptsIn(const ecs::Store &store, bool server, bool client) {
+	std::vector<ecs::Entity> ScriptsIn(ecs::Store &store, bool server, bool client) {
 		ScriptClass();
 
 		const ecs::ClassId scriptId = ecs::Classes::Find(core::Name("Script"));
 		const ecs::ClassId localId = ecs::Classes::Find(core::Name("LocalScript"));
 
 		std::vector<ecs::Entity> found;
-		const_cast<ecs::Store &>(store).Each<const Source>([&](ecs::Entity entity, const Source &) {
+		store.Each<const Source>([&](ecs::Entity entity, const Source &) {
 			// A disabled script is in another archetype, so this query does not
 			// visit one — but the check is here anyway, because `Each` matches
 			// on `Source` alone and a caller could add the tag to a row this

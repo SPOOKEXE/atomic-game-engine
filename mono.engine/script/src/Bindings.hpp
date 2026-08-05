@@ -258,7 +258,7 @@ namespace engine::script {
 	// two want a reply, and a reply arrives at a later barrier, so a script
 	// **yields** on one — which is legal under `docs/SCRIPT_CONCURRENCY.md` §1
 	// precisely because the barrier applies replies in a deterministic order.
-	void OpenServices(lua_State *state, ecs::Store &store);
+	void OpenServices(lua_State *state);
 
 	// Installs `task`, and the yield rule made real.
 	void OpenTask(lua_State *state);
@@ -367,8 +367,7 @@ namespace engine::script {
 	// property write.
 	//
 	// @param state The VM.
-	// @param store The world instances are created in.
-	void OpenInstances(lua_State *state, ecs::Store &store);
+	void OpenInstances(lua_State *state);
 
 	// Installs the world clock under names that do not lie about it.
 	//

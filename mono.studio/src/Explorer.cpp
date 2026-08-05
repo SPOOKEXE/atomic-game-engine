@@ -3,6 +3,8 @@
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include "PerCallSite.hpp"
+
 #include <algorithm>
 #include <imgui.h>
 #include <studio/Editor.hpp>
@@ -117,36 +119,26 @@ namespace studio {
 	}
 
 	ClassId Editor::DrawClassPicker(const char *id) {
-		// One search per call site, keyed by the id the caller gave. The
+		// One picker per call site, keyed by the id the caller gave. The
 		// toolbar's popup and the tree's context menu are two different lists
 		// with two different queries, and sharing one would make typing in one
 		// filter the other.
-		static std::vector<std::pair<std::string, ClassSearch>> searches;
+		//
+		// **The typed text and the search are one record and two fields.** One
+		// record because they are keyed the same way, and keeping them in two
+		// tables was two scans to answer one question. Two fields because
+		// `Refresh` compares them: `Query` is what is in the box now and
+		// `Search.Query` is what the results on screen are the answer to, and
+		// collapsing those would either re-score three hundred names every
+		// frame or never re-score them at all.
+		struct Picker {
+			std::string Query;
+			ClassSearch Search;
+		};
 
-		ClassSearch *search = nullptr;
-		for (auto &entry : searches) {
-			if (entry.first == id) {
-				search = &entry.second;
-				break;
-			}
-		}
-		if (search == nullptr) {
-			searches.emplace_back(id, ClassSearch{});
-			search = &searches.back().second;
-		}
-
-		static std::vector<std::pair<std::string, std::string>> queries;
-		std::string *query = nullptr;
-		for (auto &entry : queries) {
-			if (entry.first == id) {
-				query = &entry.second;
-				break;
-			}
-		}
-		if (query == nullptr) {
-			queries.emplace_back(id, std::string{});
-			query = &queries.back().second;
-		}
+		Picker &picker = PerCallSite<Picker>(id);
+		std::string *const query = &picker.Query;
+		ClassSearch *const search = &picker.Search;
 
 		ImGui::SetNextItemWidth(220.0f * Settings.Scale);
 		if (ImGui::IsWindowAppearing()) {

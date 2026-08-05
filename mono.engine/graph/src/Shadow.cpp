@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
 
@@ -15,6 +16,11 @@ namespace engine::graph {
 	}
 
 	core::AABB BoundsOfAll(std::span<const scene::DrawInstance> instances) {
+		// A pass over the whole draw list rather than the culled set, which
+		// is deliberate and is why it is worth a row of its own: it does not
+		// get cheaper when the camera turns away.
+		ENGINE_PROFILE_CAT("graph.light-bounds", core::ProfileCategory::Render);
+
 		if (instances.empty()) {
 			// A unit box rather than an inverted one. Nothing here accumulates
 			// from an empty sentinel — `AABB.hpp` says so and says why — and a

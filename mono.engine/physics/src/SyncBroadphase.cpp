@@ -88,7 +88,7 @@ namespace engine::physics {
 	}
 
 	void SyncBroadphase(ecs::Store &store) {
-		ENGINE_PROFILE_CAT("physics.sync-broadphase", core::ProfileCategory::ECS);
+		ENGINE_PROFILE_CAT("physics.sync-broadphase", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) {
@@ -112,7 +112,15 @@ namespace engine::physics {
 			) { Append(dynamicProxies, dynamicRecords, entity, transform, collider); }
 		);
 
-		PipelineInternals::DynamicIndex(*world).Rebuild(dynamicProxies);
+		{
+			// The rebuild on its own, separate from gathering the proxies that
+			// feed it. Both scale with the moving set and they scale
+			// differently — the gather is a store walk and this is a count-then-
+			// fill over cells — so one number covering both says a broadphase is
+			// expensive without saying which half to go and look at.
+			ENGINE_PROFILE_CAT("physics.index-dynamic", core::ProfileCategory::Physics);
+			PipelineInternals::DynamicIndex(*world).Rebuild(dynamicProxies);
+		}
 		PipelineInternals::DynamicRebuildCount(*world)++;
 
 		// Every collider, minus the ones that just went into the dynamic index.
@@ -145,7 +153,13 @@ namespace engine::physics {
 			}
 		);
 
-		PipelineInternals::StaticIndex(*world).Rebuild(staticProxies);
+		{
+			// Only on a tick where the static set actually changed, which is what
+			// makes it worth its own row: a span that is absent from most frames
+			// and 4 ms on one of them is exactly what the RMAX column is for.
+			ENGINE_PROFILE_CAT("physics.index-static", core::ProfileCategory::Physics);
+			PipelineInternals::StaticIndex(*world).Rebuild(staticProxies);
+		}
 		PipelineInternals::StaticRebuildCount(*world)++;
 		PipelineInternals::StaticStale(*world) = false;
 		PipelineInternals::StaticChangeVersion(*world) = store.ChangeVersion();

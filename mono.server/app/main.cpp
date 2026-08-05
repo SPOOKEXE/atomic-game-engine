@@ -51,6 +51,11 @@ int main(int argc, char **argv) {
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("listen", "PORT", "Serve the world to clients on this UDP port (0 for ephemeral)");
+	arguments.Value("content-store", "DIR", "Serve this content store to clients — CDN.md §6's local store");
+	arguments.Value("content-port", "PORT", "Port the attached origin listens on (0 for ephemeral)");
+	arguments.Value(
+		"content-grant-key", "HEX", "64 hex characters — the secret grants are issued and checked with"
+	);
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -80,6 +85,14 @@ int main(int argc, char **argv) {
 	options.ControlPort =
 		arguments.Has("mcp-port") ? static_cast<int>(arguments.GetInteger("mcp-port", 8734)) : -1;
 	options.Chatter = arguments.Has("chatter");
+
+	if (auto store = arguments.Get("content-store")) {
+		options.ContentStore = std::filesystem::path(*store);
+	}
+	options.ContentPort = static_cast<uint16_t>(arguments.GetInteger("content-port", 0));
+	if (auto key = arguments.Get("content-grant-key")) {
+		options.ContentGrantKey = std::string(*key);
+	}
 
 	if (auto game = arguments.Get("game")) {
 		options.GamePath = std::string(*game);

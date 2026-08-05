@@ -109,16 +109,23 @@ namespace engine::render {
 			}
 		}
 
+		// **Clamped the same way `Draw` clamps, because the three have to agree.**
+		// `Draw` has always drawn a scale below one at scale one; these two
+		// multiplied it raw. So a zero scale measured every panel at zero width
+		// and then drew full-size text into it — a panel with its background
+		// missing and its text running off the side, from a number nothing
+		// rejected. `DebugPanelData::Scale` is a public `int` and nothing bounds
+		// it, so the disagreement was reachable from outside the module.
 		int Measure(std::string_view text, int scale) {
 			if (text.empty()) {
 				return 0;
 			}
 			// The last glyph does not need its trailing blank column.
-			return (static_cast<int>(text.size()) * ADVANCE - 1) * scale;
+			return (static_cast<int>(text.size()) * ADVANCE - 1) * std::max(scale, 1);
 		}
 
 		int LineHeight(int scale) {
-			return (GLYPH_HEIGHT + 2) * scale;
+			return (GLYPH_HEIGHT + 2) * std::max(scale, 1);
 		}
 
 		void Draw(

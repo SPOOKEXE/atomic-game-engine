@@ -82,11 +82,18 @@ namespace engine::script {
 	// order that depended on archetype layout would reorder itself the first
 	// time an unrelated component was added.
 	//
+	// **Takes the store mutably, because asking it a question is a mutation.**
+	// A query is built and cached on first use, so `Store::Each` is non-const by
+	// design — and a `const Store &` here bought nothing except a `const_cast`
+	// at the one line that had to do the work. Naming the requirement in the
+	// signature is the honest version: this reads no rows the caller wrote, but
+	// it is not a call you may make from a thread that does not own the world.
+	//
 	// @param store  The world.
 	// @param server Whether this host simulates authoritatively.
 	// @param client Whether this host presents.
 	// @return The instances to run, in order.
-	std::vector<ecs::Entity> ScriptsIn(const ecs::Store &store, bool server, bool client);
+	std::vector<ecs::Entity> ScriptsIn(ecs::Store &store, bool server, bool client);
 
 	// Creates a script instance naming a file.
 	//

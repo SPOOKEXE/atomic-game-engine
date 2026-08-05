@@ -21,6 +21,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <imgui.h>
+#include <iterator>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
@@ -54,9 +55,34 @@ namespace studio {
 				return IM_COL32(70, 74, 86, 190);
 			}
 
-			constexpr float TURN[] = {0.00f, 0.52f, 0.14f, 0.72f, 0.30f, 0.00f};
+			// One turn per category, in enum order, spread around the circle so
+			// that neighbours in the list are not neighbours in hue.
+			//
+			// **Positional, and sized from the enum rather than from a literal
+			// count.** This was indexed with a hand-written `< 6`, so a
+			// seventh category did not overflow — it silently took engine's
+			// hue and drew two subsystems in one colour, which is the one
+			// failure a colour key cannot survive. The array is now short by
+			// construction if a category is added without a turn, and the
+			// assert below says so at build time.
+			constexpr float TURN[] = {
+				0.00f, // engine
+				0.52f, // render
+				0.14f, // ECS
+				0.86f, // physics
+				0.72f, // simulation
+				0.30f, // script
+				0.42f, // network
+				0.62f, // assets
+				0.00f, // idle — returned above, and here so the array lines up
+			};
+			static_assert(
+				std::size(TURN) == static_cast<size_t>(ProfileCategory::Count),
+				"A ProfileCategory was added without a hue turn in TURN."
+			);
+
 			const auto index = static_cast<size_t>(category);
-			hue += TURN[index < 6 ? index : 0];
+			hue += TURN[index < std::size(TURN) ? index : 0];
 			hue -= static_cast<float>(static_cast<int>(hue));
 
 			float red = 0.0f;

@@ -45,6 +45,76 @@ namespace testrunner {
 			return error ? path : canonical;
 		}
 
+		// The module a suite belongs to, or empty when it does not sit in one.
+		//
+		// Every library in this repository is `<area>/{src,include,tests}` —
+		// `mono_add_library` requires it — so the directory holding the `tests`
+		// folder a suite's source is under is the module it tests.
+		fs::path ModuleOf(const fs::path &source) {
+			for (fs::path directory = source.parent_path(); directory.has_relative_path();
+				 directory = directory.parent_path()) {
+				if (directory.filename() == "tests") {
+					return directory.parent_path();
+				}
+			}
+			return {};
+		}
+
+		// Every first-party source and header under a module.
+		//
+		// **This is the half a header closure cannot see, and without it the
+		// cascade was blind to the thing it is asked about most.** A suite is
+		// signed over its own translation unit's `.d` closure — the test file
+		// and the headers it includes — and a module's `src/*.cpp` is in no
+		// test's closure, because a test includes the header and links the
+		// object. So editing an implementation and nothing else moved no
+		// signature at all: `just test` re-ran nothing, and the one thing it is
+		// relied on for is noticing that an implementation changed.
+		//
+		// Directory contents rather than link inputs, and that is a deliberate
+		// approximation. `ninja -t inputs` would give the exact set, at a
+		// process per binary and a walk of every vendor source in the graph;
+		// this is a `readdir` of two directories, and the cost of it being
+		// coarse is a suite that occasionally re-runs when a sibling file it
+		// does not use changed. Over-running is the safe direction — the whole
+		// point of the tool is that under-running is silent.
+		//
+		// Cross-module reach is `TEST_DEPENDS`, and it works now for the same
+		// reason: a dependency's signature covers its own module's sources, so
+		// it moves when they do and carries every suite above it.
+		std::vector<fs::path> ModuleSources(const fs::path &module) {
+			std::vector<fs::path> sources;
+			if (module.empty()) {
+				return sources;
+			}
+
+			for (const char *area : {"src", "include"}) {
+				std::error_code error;
+				const fs::path root = module / area;
+				if (!fs::is_directory(root, error)) {
+					continue;
+				}
+
+				for (fs::recursive_directory_iterator entry(root, error), end; entry != end;
+					 entry.increment(error)) {
+					if (error) {
+						break;
+					}
+					if (!entry->is_regular_file(error)) {
+						continue;
+					}
+
+					const auto extension = entry->path().extension();
+					if (extension == ".cpp" || extension == ".hpp" || extension == ".h" ||
+						extension == ".c" || extension == ".inl") {
+						sources.push_back(Normalise(entry->path()));
+					}
+				}
+			}
+
+			return sources;
+		}
+
 		std::string HashFile(const fs::path &path, std::map<fs::path, std::string> &cache) {
 			const auto existing = cache.find(path);
 			if (existing != cache.end()) {
@@ -208,6 +278,10 @@ namespace testrunner {
 		std::map<std::string, std::string> signatures;
 		std::set<std::string> visiting;
 
+		// One walk per module rather than per suite: `render` alone has five
+		// suites, and they all sign over the same directory.
+		std::map<fs::path, std::vector<fs::path>> moduleSources;
+
 		// Recursive rather than a topological sort: the graph is tens of nodes
 		// and hand-declared, so depth is bounded by how many layers a person
 		// wrote down.
@@ -250,6 +324,18 @@ namespace testrunner {
 				}
 			}
 
+			// And the module this suite is testing, which the closure above
+			// cannot reach. See `ModuleSources` for why that gap was the whole
+			// cascade going quiet on an implementation-only change.
+			const fs::path module = ModuleOf(suite.Source);
+			auto walked = moduleSources.find(module);
+			if (walked == moduleSources.end()) {
+				walked = moduleSources.emplace(module, ModuleSources(module)).first;
+			}
+			for (const auto &file : walked->second) {
+				digests.push_back(HashFile(file, fileHashes));
+			}
+
 			// Sorted, so the digest does not depend on the order the compiler
 			// happened to report includes in.
 			std::sort(digests.begin(), digests.end());
@@ -286,7 +372,10 @@ namespace testrunner {
 		// price: a v1 line carries neither, and inventing zeroes for it would
 		// put a suite in test-output.md claiming to hold no tests and cost no
 		// time.
-		constexpr const char *CACHE_HEADER = "# atomic smart-tests cache v2";
+		// v3: signatures now cover the module's own sources as well as the
+		// suite's header closure, so a v2 number means something different and
+		// reading it would skip suites on the strength of the old meaning.
+		constexpr const char *CACHE_HEADER = "# atomic smart-tests cache v3";
 
 		unsigned long long Count(const std::string &text) {
 			unsigned long long value = 0;
