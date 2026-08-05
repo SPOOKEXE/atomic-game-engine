@@ -30,6 +30,7 @@ it is built in a tree of its own — `.gitmodules` carries the reasoning.
 | [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no — `just docs` only |
 | [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and its compiler, from v0.6; its analysis library behind `mono.tools/scriptcheck`, from v0.7 | yes, once linked — nothing links it today |
 | [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no — never built by this build; `just luau-lsp` builds it separately |
+| [nlohmann/json](https://github.com/nlohmann/json) | MIT | JSON for the studio's control server, which speaks Model Context Protocol, from v0.8 | studio only |
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM, from v0.6 | yes, once linked — nothing links it today |
 | [Dear ImGui](https://github.com/ocornut/imgui) | MIT | the editor's widget toolkit, behind `engine::ui`, from v0.7 | client only — `mono.studio` alone links it |
 | [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | the editor's interface typeface, from v0.7 | staged beside any program that links `engine::ui` |

@@ -686,10 +686,28 @@ namespace server {
 
 		const auto ticksSoFar = [this] { return Worlds().StatisticsOf(PrimaryWorld).Ticks; };
 
+		if (Settings.ControlPort >= 0) {
+			ControlSurface.AddUniverseTools(Worlds());
+			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
+				ENGINE_INFO(
+					"control: listening on 127.0.0.1:{} — {} tools",
+					ControlServer.Port(),
+					ControlSurface.Count()
+				);
+			}
+		}
+
 		while (Running && !StopRequested.load()) {
 			const uint64_t tickStarted = engine::core::Clock::Nanoseconds();
 
 			engine::core::FrameGraph::BeginFrame();
+
+			// **Between the frame's start and its work**, which is where the
+			// editor pumps it too: a tool that writes a property is doing what a
+			// hand on the mouse does, so it lands at the same point in the loop.
+			if (ControlServer.IsRunning()) {
+				ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
+			}
 
 			if (Replayer_) {
 				// The recording decides the frame time as well as the traffic:

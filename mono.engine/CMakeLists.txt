@@ -22,6 +22,7 @@ add_subdirectory(game)      # L10 what a game file is      [shared]
 add_subdirectory(examples)  # L10 the example scene        [shared]
 add_subdirectory(net)       # L11 transport and authority   [shared]
 add_subdirectory(replication) # L12 what the wire means     [shared]
+add_subdirectory(control)   # L13 the control surface      [shared]
 
 # The presentation half of L12, configured only when something links it.
 #

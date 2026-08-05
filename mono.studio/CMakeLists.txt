@@ -25,6 +25,11 @@ mono_add_library(studio
 		Engine::scene
 		Engine::script
 
+		# L13, `shared`. The Model Context Protocol surface: the socket, the
+		# handshake and the tools any program with worlds can answer. This
+		# module adds the editor's own on top.
+		Engine::control
+
 		# L10, `shared`. What a game file is. The studio writes one and the
 		# server and the client read one, which is why the format is a module
 		# rather than something this program owns.

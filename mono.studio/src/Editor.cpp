@@ -281,11 +281,20 @@ namespace studio {
 			}
 		}
 
+		// **After the game is loaded**, so the first thing a client can ask
+		// about is a universe that has its worlds rather than an empty one.
+		StartControl();
+
 		Running = true;
 		return true;
 	}
 
 	void Editor::Shutdown() {
+		// **First, and before the universe goes.** A socket thread parked on a
+		// request the frame loop will never pump again would keep the process
+		// alive; Stop wakes it and joins.
+		ControlServer.Stop();
+
 		// **Before anything is torn down**, because the graph's history is what
 		// is being written and a snapshot taken after the universe has gone is
 		// a snapshot of the shutdown.
@@ -357,6 +366,14 @@ namespace studio {
 			engine::core::FrameGraph::BeginFrame();
 
 			PumpEvents();
+
+			// **Between input and simulation**, which is where a person's click
+			// would have landed. A tool that starts a world or writes a property
+			// is doing what a hand on the mouse does, so it happens at the same
+			// point in the frame and needs no separate ordering story.
+			PumpControl();
+			ControlWantsProfile = ControlSurface.WantsProfiling();
+
 			Simulate(delta);
 			Present(delta);
 
@@ -733,7 +750,14 @@ namespace studio {
 		// A snapshot at the end of the run counts as reading it, and is the
 		// only way to profile something — a window drag — that occupies the
 		// hands that would otherwise be opening the panel.
-		engine::core::FrameGraph::SetEnabled(ShowFrameGraph || !Settings.ProfileSnapshot.empty());
+		// **Three reasons to record, and the third is not a panel.** This line
+		// runs every frame and is the authority, so a caller that switched the
+		// graph on from outside had it switched off again before the next frame —
+		// which is exactly what `profile_frame` did until it had a flag of its
+		// own to set.
+		engine::core::FrameGraph::SetEnabled(
+			ShowFrameGraph || ControlWantsProfile || !Settings.ProfileSnapshot.empty()
+		);
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {

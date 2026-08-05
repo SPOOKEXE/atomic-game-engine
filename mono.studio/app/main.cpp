@@ -35,6 +35,9 @@ int main(int argc, char **argv) {
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
+
+	// The control surface. Off unless asked for — see `Options::ControlPort`.
+	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8738)");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -57,6 +60,11 @@ int main(int argc, char **argv) {
 	options.Scale = static_cast<float>(arguments.GetNumber("scale", options.Scale));
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
+	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare
+	// `GetInteger` with a fallback would open the port on every run, because a
+	// fallback is returned when the flag is absent. This way `--mcp-port` alone
+	// takes this program's number and no flag at all leaves it shut.
+	options.ControlPort = arguments.Has("mcp-port") ? static_cast<int>(arguments.GetInteger("mcp-port", 8738)) : -1;
 	options.Headless = arguments.Has("headless");
 	options.Uncapped = arguments.Has("uncapped");
 	options.ShowStatistics = arguments.Has("stats");

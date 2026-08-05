@@ -26,6 +26,10 @@ add_subdirectory(docgen)
 # that faces the scripts rather than the class table.
 add_subdirectory(scriptcheck)
 
+# The bridge between an MCP client's stdio and a running editor's control port.
+# Declared always: it is a hundred lines over asio and needs nothing installed.
+add_subdirectory(mcpbridge)
+
 # The line counter. Declared always, for the same reason as docgen: it is an
 # ordinary library with ordinary tests over a pure function, and nothing about
 # it needs a program to be installed.

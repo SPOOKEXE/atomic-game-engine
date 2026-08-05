@@ -31,6 +31,9 @@ int main(int argc, char **argv) {
 	arguments.Flag("unpaced", "Tick back to back instead of pacing to the tick rate");
 	arguments.Flag("graph", "Collect the frame graph (for a Tracy capture)");
 	arguments.Flag("verbose", "Log at trace level");
+
+	// The control surface. Off unless asked for — see `Options::ControlPort`.
+	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8734)");
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
@@ -69,6 +72,13 @@ int main(int argc, char **argv) {
 	options.MaximumTicks = arguments.GetInteger("ticks", -1);
 	options.Seconds = arguments.GetNumber("seconds", 0.0);
 	options.Unpaced = arguments.Has("unpaced");
+
+	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare
+	// `GetInteger` with a fallback would open the port on every run, because a
+	// fallback is returned when the flag is absent. This way `--mcp-port` alone
+	// takes this program's number and no flag at all leaves it shut.
+	options.ControlPort =
+		arguments.Has("mcp-port") ? static_cast<int>(arguments.GetInteger("mcp-port", 8734)) : -1;
 	options.Chatter = arguments.Has("chatter");
 
 	if (auto game = arguments.Get("game")) {

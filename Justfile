@@ -164,6 +164,27 @@ typecheck: (build "scriptcheck")
     ./node_modules/.bin/tsc --noEmit
     echo "typecheck ok — luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
 
+# The editor, with its control surface open for a Model Context Protocol client.
+#
+# **Two processes and one port.** This starts the editor listening on loopback;
+# `mono.tools/mcpbridge` is what an MCP client launches, and it pumps bytes
+# between the client's stdio and this port. `mono.studio/src/Control.cpp` carries
+# why the editor listens rather than being launched.
+#
+# Off unless asked for: the surface runs scripts, writes properties and saves
+# files for whatever connects, so opening it is a decision rather than a default.
+# `just mcp` opens 8730; `just mcp 9001 --game My.agame` picks a port and passes
+# the rest through to the editor.
+#
+# The editor, listening for a Model Context Protocol client.
+mcp port="8730" +args="--width 1600": (build "studio") (build "mcpbridge")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "editor: 127.0.0.1:{{port}}"
+    echo "client: $(pwd)/{{build}}/tools/mcpbridge --port {{port}}"
+    echo ""
+    ./{{build}}/studio/studio --mcp-port {{port}} {{args}}
+
 # The editor's language server, built from `mono.vendor/luau-lsp`.
 #
 # **The one vendor this build never compiles**, which is why it is a recipe of

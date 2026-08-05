@@ -75,6 +75,25 @@ target_compile_definitions(vendor_asio INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECA
 find_package(Threads REQUIRED)
 target_link_libraries(vendor_asio INTERFACE Threads::Threads)
 
+# --- nlohmann/json ------------------------------------------------------------
+# JSON, for the one thing in this repository that speaks it: `mono.studio`'s
+# control server answers Model Context Protocol, which is JSON-RPC 2.0.
+#
+# Header-only and declared here rather than added as a subdirectory, for asio's
+# reason — upstream's CMakeLists builds tests and a package config nobody here
+# wants, and the single header is the whole library.
+#
+# **The single_include copy, not include/.** Upstream ships both; the amalgamated
+# one is one file and one include path, and there is nothing to choose between
+# them beyond that.
+#
+# `shared` in engine terms, but only `mono.studio` links it and that is on
+# purpose: a wire format is binary, a save file is XML, and JSON belongs to the
+# one surface that talks to something outside this repository.
+add_library(vendor_json INTERFACE)
+add_library(Vendor::json ALIAS vendor_json)
+target_include_directories(vendor_json SYSTEM INTERFACE "${MONO_VENDOR}/json/single_include")
+
 # --- Dear ImGui -----------------------------------------------------------
 # Editor and tooling UI, not game UI. `ui` at L12 is a retained-mode tree that a
 # game author builds interfaces with; this is what mono.studio's shell, docking

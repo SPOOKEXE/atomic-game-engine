@@ -1049,6 +1049,66 @@ committed: TypeScript pins its own per-platform binaries to the same exact
 version, so the version string is already the whole tree and a lockfile would
 only be a format for bun and npm to disagree about.
 
+## Driving the engine from outside — `--mcp-port`
+
+Every long-running program can open a socket that answers **Model Context
+Protocol**, so a language model or a script can watch it and steer it: list the
+scenes, read and write properties, start and stop a world, read the log, read
+the frame profile.
+
+**It is off unless you ask.** Read
+[SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
+before opening one — it binds loopback only, has no authentication, and must
+never be enabled on a host in front of players.
+
+```sh
+just mcp                                  # the editor, port 8738
+server --mcp-port 8734 --game My.agame    # a dedicated server
+```
+
+The port is yours to choose; the defaults exist so five programs on one machine
+do not collide:
+
+| Program | Port | What it exposes |
+|---|---|---|
+| `server` | 8734 | its worlds, read and write |
+| `client` | 8735 | *not wired yet* |
+| `unified_server_client` | 8736 | *not wired yet* |
+| `cdn` | 8737 | *not wired yet* — it has no run loop |
+| `studio` | 8738 | worlds, plus selection, Play and the output panel |
+
+### Connecting a client to it
+
+MCP clients launch a server as a subprocess and talk to it over stdio. The
+engine cannot be that subprocess — it is a program with a renderer and a
+universe that outlives any one client — so it listens, and `mcpbridge` is the
+subprocess:
+
+```jsonc
+"atomic": {
+	"command": ".cache/build/dev/tools/mcpbridge",
+	"args": ["--port", "8738"]
+}
+```
+
+The bridge parses nothing. It copies bytes between the client's stdio and the
+port, which is why a tool added to `mono.engine/control` is reachable the moment
+it exists and the bridge never changes.
+
+### What a program answers
+
+`mono.engine/control` carries the handshake and the tools any program with
+worlds can answer — `engine_info`, `world_list`, `world_tree`, `instance_get`,
+`instance_set`, `profile_frame`. A program adds its own on top: the editor
+replaces `engine_info` with one that also knows about the open game file, and
+adds `world_run`, `select`, `selection_get` and `log_tail`.
+
+**A tool runs on the program's own thread, between input and simulation.** That
+is not an implementation detail — `Universe::Enter` aborts on a foreign thread
+rather than racing, so a tool lands at exactly the point in the frame where a
+person's click would have. It also means a slow tool is a stutter, which is why
+the tree tools take a `depth` and a `limit`.
+
 ## Proving the server is headless
 
 ```sh

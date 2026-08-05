@@ -17,6 +17,10 @@ mono_add_library(server
 		Engine::ecs
 		Engine::world
 
+		# L13, `shared`. The Model Context Protocol surface, opened only when
+		# `--mcp-port` asks for it.
+		Engine::control
+
 		# L7, `shared`. The component set both programs share, so a snapshot
 		# this process writes resolves in a client with no translation layer.
 		# `shared`, so it costs the headless property nothing: a `Transform` and

@@ -13,6 +13,8 @@
 // than aspirational: the `server` preset configures with no graphics stack and
 // the staged `server/` directory has no `shaders/` folder.
 
+#include <engine/control/Server.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -39,6 +41,13 @@ namespace server {
 	// argument list again after start-up and there is one answer to "what is
 	// this process configured to do".
 	struct Options {
+		// The loopback port the control surface listens on, or -1 for off.
+		//
+		// **Off by default, and that is the security boundary.** The surface
+		// reads and writes world state for whatever connects to it, with no
+		// authentication — see `SECURITY.md`. `--mcp-port` is the opting in.
+		int ControlPort = -1;
+
 		// Ticks per second. A world ticks at its own rate; this is the rate the
 		// one world this version hosts runs at.
 		double TickRate = 30.0;
@@ -372,6 +381,16 @@ namespace server {
 		//
 		// @param nowSeconds The current time.
 		void ServeClients(double nowSeconds);
+
+		// The control surface. Started only when asked; a server that was never
+		// started costs a thread that was never spawned.
+		engine::control::Server ControlServer;
+		engine::control::Surface ControlSurface{
+			"atomic-server",
+			"A dedicated server of the atomic game engine, hosting worlds headlessly. `world_list` "
+			"is worth calling first: a world is a scene and the universe is the game. This program "
+			"authors nothing — it hosts, so there is no selection and no run mode to change."
+		};
 
 		Options Settings;
 

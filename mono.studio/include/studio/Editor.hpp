@@ -39,6 +39,9 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/world/Universe.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <engine/control/Server.hpp>
+#include <engine/control/Surface.hpp>
 #include <studio/PlayLink.hpp>
 
 #include <cstdint>
@@ -142,6 +145,17 @@ namespace studio {
 		// without a keyboard, which is what lets a capture prove they draw.
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+
+		// The loopback port the control server listens on, or -1 for off.
+		//
+		// **Off by default, and that is the security boundary.** This surface
+		// runs scripts, writes properties and saves files on behalf of whatever
+		// connects to it. A port that opened itself because the editor started
+		// would be one nobody chose; `--mcp-port` is the choosing.
+		//
+		// Zero means "any free port", which is what a launcher wants — the one
+		// actually bound is logged and reported by `engine_info`.
+		int ControlPort = -1;
 
 		// Open the second viewport at start-up.
 		//
@@ -642,7 +656,48 @@ namespace studio {
 		void MarkModified();
 		std::string TitleText() const;
 
+		// --- control -----------------------------------------------------------
+		//
+		// The Model Context Protocol surface. `engine/control/Server.hpp` carries
+		// why it is a socket rather than stdio and why it only ever binds
+		// loopback; `Control.cpp` here registers the rows an editor has and a
+		// server does not.
+		//
+		// Every one of these runs on the editor's own thread, called from the
+		// frame loop, because `Universe::Enter` aborts on a foreign one.
+
+		// Binds the port, if `--mcp-port` asked for one, and fills the table.
+		void StartControl();
+
+		// Answers everything the socket parked since the last frame.
+		void PumpControl();
+
+		// The editor's own tools, added on top of the shared ones.
+		void RegisterControlTools();
+
+		// The `world` argument, defaulting to the active scene.
+		WorldId ControlWorld(const nlohmann::json &arguments, std::string &failure);
+
+		// Whether a control client has asked for the frame graph.
+		//
+		// Mirrored from `ControlSurface.WantsProfiling()` rather than reusing
+		// `ShowFrameGraph`, because that one is a *panel* — setting it would open
+		// a window in an editor somebody is using, to answer a question asked
+		// over a socket.
+		bool ControlWantsProfile = false;
+
 		Options Settings;
+
+		// The listener and the table. Held by value and started only when asked;
+		// a server that was never started costs a thread that was never spawned.
+		engine::control::Server ControlServer;
+		engine::control::Surface ControlSurface{
+			"atomic-studio",
+			"The editor of the atomic game engine, live. `engine_info` and `world_list` are the two "
+			"worth calling first: the universe is the game and each world under it is a scene, which "
+			"is the same mapping a script sees through `game` and `workspace`. Worlds run "
+			"independently — `world_run` starts one without starting the rest, and stopping restores "
+			"the snapshot taken when it started."};
 
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;

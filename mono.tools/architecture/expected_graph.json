@@ -95,6 +95,15 @@
 			],
 			"requires": "MONO_BUILD_CLIENT"
 		},
+		"control": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel",
+				"world"
+			]
+		},
 		"core": {
 			"tier": "shared",
 			"links": []
@@ -229,6 +238,7 @@
 		"server": {
 			"tier": "server",
 			"links": [
+				"control",
 				"core",
 				"ecs",
 				"examples",
@@ -254,6 +264,7 @@
 			"tier": "client",
 			"links": [
 				"client",
+				"control",
 				"core",
 				"ecs",
 				"examples",
@@ -297,6 +308,7 @@
 			"tier": "client",
 			"links": [
 				"client",
+				"control",
 				"core",
 				"ecs",
 				"examples",
@@ -359,6 +371,7 @@
 		"server": {
 			"tier": "server",
 			"links": [
+				"control",
 				"core",
 				"ecs",
 				"examples",
@@ -378,6 +391,7 @@
 			"tier": "client",
 			"links": [
 				"client",
+				"control",
 				"core",
 				"ecs",
 				"examples",
@@ -402,6 +416,7 @@
 			"tier": "client",
 			"links": [
 				"client",
+				"control",
 				"core",
 				"ecs",
 				"examples",
