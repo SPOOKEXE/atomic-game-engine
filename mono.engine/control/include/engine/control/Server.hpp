@@ -17,18 +17,23 @@
 // remote-control surface for a program that runs scripts and writes files, on a
 // developer's machine, with no authentication.
 //
-// **Nothing here knows what a request means.** This class owns a thread, a
-// socket and a queue of strings; `control::Surface` turns one into an answer, on
-// whichever thread called `Pump` — which is the program's main thread, because
-// that is the only one allowed to look at a world. `Universe::Enter` aborts on re-entry rather than
+// **Nothing here knows what a request means.** This class owns a socket;
+// `control::Surface` turns a line into an answer, on whichever thread called
+// `Pump` — which is the program's main thread, because that is the only one
+// allowed to look at a world. `Universe::Enter` aborts on re-entry rather than
 // allowing it, so a socket thread reaching into a store would not race — it
-// would abort the process. `Pump` is the seam: the socket thread parks a request
-// and waits, the editor thread answers it between frames, and the answer goes
-// back out.
+// would abort the process.
+//
+// **There is no socket thread.** Every operation is asynchronous and nothing is
+// ever blocked on: `Pump` polls the reactor from the editor's frame loop, so a
+// completion runs on the editor's thread because that is the thread that ran it.
+// The rule above therefore costs nothing to keep. It also means this can never
+// be what hangs a shutdown — an operation that does not block cannot be stuck,
+// so `Stop` has nothing to wake and no thread to join.
 //
 // One client at a time. MCP is one client by construction, and a second
 // connection is a second thing driving the same editor — accepted and then
-// closed, rather than interleaved into the same queue.
+// closed immediately, rather than left established and unanswered.
 //
 // @tier shared
 
@@ -40,7 +45,7 @@
 
 namespace engine::control {
 
-	// The listener, its thread, and the queue between them.
+	// The listener, and the one client it serves.
 	//
 	// @since v0.8
 	class Server final {
@@ -66,11 +71,16 @@ namespace engine::control {
 		//         second editor already listening on it.
 		bool Start(uint16_t port);
 
-		// Closes the socket and joins the thread. Safe to call twice, and safe
-		// to call when `Start` failed.
+		// Closes the client and the acceptor. Safe to call twice, and safe to
+		// call when `Start` failed.
+		//
+		// **Cannot block.** There is no thread to join and nothing parked on a
+		// socket, which is the whole reason the shutdown of a program embedding
+		// this is not allowed to depend on whether a client happened to be
+		// attached.
 		void Stop();
 
-		// Whether the thread is up.
+		// Whether the socket is listening.
 		bool IsRunning() const;
 
 		// The port actually bound, which is what `Start(0)` is for.
@@ -79,14 +89,22 @@ namespace engine::control {
 		// Whether a client is connected right now.
 		bool IsConnected() const;
 
-		// Answers everything queued since the last call.
+		// Gives the socket one slice of this frame.
 		//
-		// **Called from the editor's frame loop and nowhere else.** Each
-		// request is handed to `handler` on this thread, and the socket thread
-		// is released once the answer is stored — so a slow tool blocks its own
-		// caller and never the editor for longer than the call takes.
+		// **Called from the editor's frame loop and nowhere else, and it is the
+		// only thing that makes the socket progress at all.** This polls the
+		// reactor: whatever is ready — a connection, a line, a written response
+		// — is run here and now, on this thread, and then it returns. Stop
+		// calling it and the socket simply stops being read; nothing blocks and
+		// nothing is lost, the client just waits.
 		//
-		// @param handler What answers a request.
+		// A request is handed to `handler` inside that poll, so a slow tool
+		// costs the frame it runs in. That is the trade being made deliberately:
+		// the alternative is answering a request off the editor's thread, which
+		// is the one thing a world does not allow.
+		//
+		// @param handler What answers a request. Borrowed for the duration of
+		//        the call and not retained.
 		void Pump(const Handler &handler);
 
 		// How many requests have been answered since the server started.

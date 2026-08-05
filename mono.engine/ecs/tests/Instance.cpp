@@ -737,3 +737,52 @@ TEST_CASE("destroying random subtrees leaves no orphans", "[ecs][fuzz]") {
 
 	REQUIRE(orphans == 0);
 }
+
+TEST_CASE("parenting survives a child freed without unlinking", "[ecs][instance]") {
+	const Tree &tree = Classes_();
+	Store store("dangling");
+
+	const Entity parent = store.CreateInstance(tree.Model);
+	const Entity first = store.CreateInstance(tree.Part);
+	const Entity doomed = store.CreateInstance(tree.Part);
+	store.SetParent(first, parent);
+	store.SetParent(doomed, parent);
+
+	// **`Destroy`, not `DestroyInstance`, and that is the whole test.** The
+	// raw destroy frees the row and leaves the parent's `LastChild` naming it,
+	// which is the state the studio reached by releasing a viewport camera on
+	// a world switch. The next parent into the same node then wrote through a
+	// handle to a row that was gone.
+	store.Destroy(doomed);
+
+	const Entity added = store.CreateInstance(tree.Part);
+	REQUIRE(store.SetParent(added, parent));
+
+	std::vector<Entity> children;
+	store.EachChild(parent, [&](Entity child) { children.push_back(child); });
+
+	REQUIRE(children == std::vector<Entity>{first, added});
+	REQUIRE(store.ParentOf(added) == parent);
+}
+
+TEST_CASE("parenting survives an only child freed without unlinking", "[ecs][instance]") {
+	const Tree &tree = Classes_();
+	Store store("dangling-only");
+
+	const Entity parent = store.CreateInstance(tree.Model);
+	const Entity doomed = store.CreateInstance(tree.Part);
+	store.SetParent(doomed, parent);
+
+	// The list is broken at the front as well as the back here, so there is no
+	// surviving row to hang the repair off.
+	store.Destroy(doomed);
+
+	const Entity added = store.CreateInstance(tree.Part);
+	REQUIRE(store.SetParent(added, parent));
+
+	std::vector<Entity> children;
+	store.EachChild(parent, [&](Entity child) { children.push_back(child); });
+
+	REQUIRE(children == std::vector<Entity>{added});
+	REQUIRE(store.ParentOf(added) == parent);
+}

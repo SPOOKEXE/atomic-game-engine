@@ -635,7 +635,13 @@ namespace studio {
 				store.SetResource(engine::scene::ActiveCamera{});
 			}
 
-			store.Destroy(instance);
+			// **`DestroyInstance`, because this camera has a parent.** It was
+			// parented into the workspace when it was minted, and `Destroy`
+			// frees the row while leaving the workspace's `LastChild` naming
+			// it — so the next camera parented into that workspace writes
+			// through a handle to a row that is gone. A viewport switched to
+			// another world and back is all it took.
+			store.DestroyInstance(instance);
 		});
 	}
 

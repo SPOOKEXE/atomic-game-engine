@@ -723,7 +723,12 @@ namespace studio {
 
 		Universe->Enter(source, [&](Store &store) {
 			if (store.Alive(instance)) {
-				store.Destroy(instance);
+				// **The subtree, and unlinked from its parent.** `Destroy`
+				// takes this one row and leaves the rest: the children stay
+				// alive in a world nothing can reach them from, and the parent
+				// keeps naming a freed handle as a child. A move that leaves
+				// the source world holding both is not a move.
+				store.DestroyInstance(instance);
 			}
 		});
 

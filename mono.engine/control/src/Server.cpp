@@ -1,10 +1,26 @@
-// The control socket, and the thread that owns it.
+// The control socket, and the editor's frame loop that drives it.
 //
-// **Synchronous asio rather than asynchronous, and that is deliberate.** One
-// client, one thread, one request in flight: the asynchronous form buys
-// concurrency this has no use for and costs a completion handler around every
-// read. What the thread does is block on a read, park the line, block on the
-// editor, write the answer, and go round again.
+// **Asynchronous asio with no thread of its own, polled from `Pump`.** The
+// operations are all `async_`, but nothing here ever calls `io_context::run` —
+// `Pump` calls `poll`, which runs whatever is ready and returns. So the socket
+// makes progress one frame at a time, on the editor's thread, and there is no
+// second thread and nothing that blocks.
+//
+// That is not a style preference, it is the bug class. A thread blocked in
+// `accept` does not come out because the acceptor was closed, and a thread
+// blocked in `read` does not come out because a flag was cleared — so an editor
+// asked to quit joined threads that were waiting for a connection and a line
+// that were never going to arrive, and the program hung with its window already
+// gone. Quitting an editor started with `--mcp-port` did that every time, with
+// no client ever attached. An operation that never blocks cannot be stuck, so
+// `Stop` has nothing to wake and nothing to join.
+//
+// It also makes the one rule this has to obey free rather than engineered. Only
+// the editor's thread may look at a world — `Universe::Enter` aborts on
+// re-entry rather than racing — and a completion handler runs on whichever
+// thread called `poll`, which is that thread by construction. The queue, the
+// mutex and the condition variable that used to carry a request across the
+// boundary are gone because there is no longer a boundary.
 //
 // The framing is one JSON object per line, which is MCP's own stdio framing.
 // `mono.tools/mcpbridge` copies bytes between stdio and this socket without
@@ -14,76 +30,93 @@
 #include <engine/core/Log.hpp>
 
 #include <asio.hpp>
-#include <chrono>
-#include <condition_variable>
-#include <deque>
-#include <mutex>
+#include <istream>
+#include <memory>
 #include <string>
-#include <thread>
 #include <utility>
 
 namespace engine::control {
 
-	namespace {
-		// A request parked by the socket thread until the editor answers it.
-		//
-		// **The answer travels back in the same object rather than through a
-		// second queue**, because the socket thread has to write the responses
-		// in the order it read the requests, and two queues would need the pair
-		// rebuilding at the far end.
-		struct Pending {
-			std::string Request;
-			std::string Response;
-			bool Answered = false;
-		};
-	}
-
 	struct Server::Impl {
 		asio::io_context Context;
 		std::unique_ptr<asio::ip::tcp::acceptor> Acceptor;
-		std::thread Thread;
 
-		std::mutex Lock;
-		std::condition_variable Answered;
-		std::deque<std::shared_ptr<Pending>> Queue;
+		// The one client, when there is one, and the buffers its exchange runs
+		// through. Held rather than passed around because every continuation
+		// below has to find them again.
+		std::unique_ptr<asio::ip::tcp::socket> Client;
+		asio::streambuf Incoming;
 
-		std::atomic<bool> Running{false};
-		std::atomic<bool> Connected{false};
-		std::atomic<size_t> Count{0};
+		// **The response outlives the call that wrote it.** `async_write` keeps
+		// the buffer, not a copy of it, so a local string would be gone by the
+		// time the write happened.
+		std::string Outgoing;
+
+		// Plain, not atomic: every one of these is touched only by the thread
+		// that calls `Pump`, which is the editor's.
+		bool Running = false;
+		size_t Count = 0;
 		uint16_t Bound = 0;
 
-		// Parks one line and waits for the editor to answer it.
+		// What answers a request, for exactly as long as one `Pump` lasts.
 		//
-		// **Returns empty when the server is stopping**, which is what makes
-		// Stop able to join: a socket thread blocked forever on a request the
-		// editor will never pump would outlive the editor that was supposed to
-		// answer it.
-		std::string Ask(std::string line) {
-			auto pending = std::make_shared<Pending>();
-			pending->Request = std::move(line);
+		// The read continuation needs it and only ever runs inside `poll`, so
+		// pointing at the caller's handler is sound and copying a `std::function`
+		// per request is not needed.
+		const Handler *Answering = nullptr;
 
-			{
-				std::lock_guard<std::mutex> guard(Lock);
-				Queue.push_back(pending);
-			}
-
-			std::unique_lock<std::mutex> guard(Lock);
-			Answered.wait(guard, [&] { return pending->Answered || !Running.load(); });
-			return pending->Answered ? std::move(pending->Response) : std::string();
-		}
-
-		void Serve(asio::ip::tcp::socket socket) {
-			Connected.store(true);
-			asio::streambuf buffer;
-
-			while (Running.load()) {
-				asio::error_code failed;
-				const size_t read = asio::read_until(socket, buffer, '\n', failed);
-				if (failed || read == 0) {
-					break;
+		// Keeps one accept outstanding, always.
+		//
+		// **Re-armed even after a connection is refused**, because otherwise the
+		// second client to be turned away would be the last one ever noticed.
+		void Accept() {
+			Acceptor->async_accept([this](const asio::error_code &failed, asio::ip::tcp::socket socket) {
+				if (failed) {
+					// The acceptor was closed by `Stop`. Nothing to re-arm.
+					return;
 				}
 
-				std::istream stream(&buffer);
+				asio::error_code ignored;
+
+				// **Nagle off.** Every message here is one small line and the far
+				// end is waiting for it; a 40ms coalescing delay on a
+				// request/response protocol is the whole latency budget.
+				socket.set_option(asio::ip::tcp::no_delay(true), ignored);
+
+				if (Client != nullptr) {
+					// **A second client is closed, and closing it is the point.**
+					// One at a time is the contract; an extra connection left
+					// established and unread is the worst of the three options,
+					// because its end believes it is talking to an editor and
+					// waits for an answer nothing is going to write. A close is
+					// something it can act on.
+					socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
+					socket.close(ignored);
+					ENGINE_INFO("control: refused a second client, one drives the editor at a time.");
+				} else {
+					Client = std::make_unique<asio::ip::tcp::socket>(std::move(socket));
+					Incoming.consume(Incoming.size());
+					Read();
+				}
+
+				Accept();
+			});
+		}
+
+		// Reads one line, answers it, writes the answer, and goes round again.
+		//
+		// **Strictly one request in flight, by chaining rather than by a lock.**
+		// The next read is started by the write's completion, so the responses
+		// leave in the order the requests arrived — two writes outstanding on one
+		// socket have no defined order between them.
+		void Read() {
+			asio::async_read_until(*Client, Incoming, '\n', [this](const asio::error_code &failed, size_t) {
+				if (failed) {
+					Drop();
+					return;
+				}
+
+				std::istream stream(&Incoming);
 				std::string line;
 				std::getline(stream, line);
 
@@ -93,45 +126,47 @@ namespace engine::control {
 				if (!line.empty() && line.back() == '\r') {
 					line.pop_back();
 				}
+
 				if (line.empty()) {
-					continue;
+					Read();
+					return;
 				}
 
-				std::string answer = Ask(std::move(line));
+				std::string answer = Answering != nullptr ? (*Answering)(line) : std::string();
+				Count++;
+
 				if (answer.empty()) {
-					// A notification, or a stopping server. Neither is written.
-					continue;
+					// A notification. JSON-RPC forbids answering one, and MCP
+					// sends `notifications/initialized` during every handshake.
+					Read();
+					return;
 				}
 
 				answer.push_back('\n');
-				asio::write(socket, asio::buffer(answer), failed);
-				if (failed) {
-					break;
-				}
-			}
+				Outgoing = std::move(answer);
 
-			Connected.store(false);
+				asio::async_write(
+					*Client, asio::buffer(Outgoing), [this](const asio::error_code &wrote, size_t) {
+						if (wrote) {
+							Drop();
+							return;
+						}
+						Read();
+					}
+				);
+			});
 		}
 
-		void Run() {
-			while (Running.load()) {
-				asio::error_code failed;
-				asio::ip::tcp::socket socket(Context);
-				Acceptor->accept(socket, failed);
-
-				if (failed) {
-					// The acceptor was closed by Stop, or the listen backlog
-					// failed. Either way there is nothing to serve.
-					break;
-				}
-
-				// **Nagle off.** Every message here is one small line and the
-				// far end is waiting for it; a 40ms coalescing delay on a
-				// request/response protocol is the whole latency budget.
-				socket.set_option(asio::ip::tcp::no_delay(true), failed);
-
-				Serve(std::move(socket));
+		// Closes the client, if there is one, and forgets what it had said.
+		void Drop() {
+			if (Client != nullptr) {
+				asio::error_code ignored;
+				Client->shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
+				Client->close(ignored);
+				Client.reset();
 			}
+
+			Incoming.consume(Incoming.size());
 		}
 	};
 
@@ -142,7 +177,7 @@ namespace engine::control {
 	}
 
 	bool Server::Start(uint16_t port) {
-		if (State->Running.load()) {
+		if (State->Running) {
 			return true;
 		}
 
@@ -164,42 +199,41 @@ namespace engine::control {
 			return false;
 		}
 
-		State->Running.store(true);
-		State->Thread = std::thread([this] { State->Run(); });
+		// A context that has been stopped refuses to run anything until it is
+		// told the run is a new one. Starting after a `Stop` is what needs this.
+		State->Context.restart();
+
+		State->Running = true;
+		State->Accept();
 
 		ENGINE_INFO("control: listening on 127.0.0.1:{}", State->Bound);
 		return true;
 	}
 
 	void Server::Stop() {
-		if (!State->Running.exchange(false)) {
-			// Never started, or already stopped. The thread may still be
-			// joinable from a failed start, so fall through to the join.
-			if (!State->Thread.joinable()) {
-				return;
-			}
-		}
+		State->Running = false;
+
+		// **Nothing is joined and nothing is woken, because nothing ever
+		// blocked.** Closing the client and the acceptor completes their
+		// outstanding operations with an error, and the final `poll` runs those
+		// completions so no handler is left holding a socket. All of it on this
+		// thread, none of it able to wait.
+		State->Drop();
 
 		if (State->Acceptor) {
 			asio::error_code ignored;
 			State->Acceptor->close(ignored);
 		}
 
-		// **Wake anything parked before joining.** A socket thread inside `Ask`
-		// is waiting on a condition variable the editor will not signal again,
-		// and joining without this hangs the shutdown of the whole program.
-		State->Answered.notify_all();
-
-		if (State->Thread.joinable()) {
-			State->Thread.join();
-		}
+		State->Answering = nullptr;
+		State->Context.poll();
+		State->Context.stop();
 
 		State->Acceptor.reset();
-		State->Connected.store(false);
 	}
 
 	bool Server::IsRunning() const {
-		return State->Running.load();
+		return State->Running;
 	}
 
 	uint16_t Server::Port() const {
@@ -207,38 +241,24 @@ namespace engine::control {
 	}
 
 	bool Server::IsConnected() const {
-		return State->Connected.load();
+		return State->Client != nullptr;
 	}
 
 	size_t Server::Served() const {
-		return State->Count.load();
+		return State->Count;
 	}
 
 	void Server::Pump(const Handler &handler) {
-		for (;;) {
-			std::shared_ptr<Pending> pending;
-			{
-				std::lock_guard<std::mutex> guard(State->Lock);
-				if (State->Queue.empty()) {
-					return;
-				}
-				pending = State->Queue.front();
-				State->Queue.pop_front();
-			}
-
-			// **Outside the lock**, because a tool can take a while — a
-			// screenshot encodes an image — and holding the queue lock across
-			// it would stall the socket thread's next read for no reason.
-			std::string answer = handler(pending->Request);
-
-			{
-				std::lock_guard<std::mutex> guard(State->Lock);
-				pending->Response = std::move(answer);
-				pending->Answered = true;
-			}
-
-			State->Count.fetch_add(1);
-			State->Answered.notify_all();
+		if (!State->Running) {
+			return;
 		}
+
+		// **`poll`, never `run`.** `run` would block this thread until the work
+		// ran out, which for a listening socket is never. `poll` runs what is
+		// ready and returns, so the editor gives the socket one slice a frame
+		// and keeps drawing.
+		State->Answering = &handler;
+		State->Context.poll();
+		State->Answering = nullptr;
 	}
 }

@@ -318,6 +318,20 @@ namespace engine::replication {
 			store.CreateAt(entity);
 		}
 		for (const ecs::Entity entity : structure.Destroyed) {
+			// **Unlinked before it is freed, and `Destroy` does not do that.**
+			// The server names the entities that died, not the links that named
+			// them — so freeing the row on its own leaves a surviving parent
+			// still holding it as a child. `EachChild` then hands its body a
+			// dead handle and stops there, which quietly loses every sibling
+			// behind it: one destroyed part takes the rest of the model off the
+			// replica's tree without anything reporting a fault.
+			//
+			// Not `DestroyInstance`, which would take the subtree with it. Only
+			// the server decides what dies here, and a subtree it destroyed is
+			// already in this list — entity by entity, in whatever order the
+			// handles sort. A dead handle from a resend falls out of `SetParent`
+			// as a `false`, so applying one twice stays harmless.
+			store.SetParent(entity, ecs::NULL_ENTITY);
 			store.Destroy(entity);
 		}
 		Forgotten_.insert(Forgotten_.end(), structure.Forgotten.begin(), structure.Forgotten.end());
