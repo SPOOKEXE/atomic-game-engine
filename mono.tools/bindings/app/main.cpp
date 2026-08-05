@@ -21,6 +21,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 
 #include <algorithm>
@@ -198,6 +199,69 @@ namespace {
 		return ids;
 	}
 
+	// Whether `Instance.new` should offer this class.
+	//
+	// **A service is not constructible, and the table can now say so.** This
+	// field shipped hard-coded `true` with a note that nothing in the class
+	// table could express a service — one instance per world, reached by name,
+	// never minted by a script. `scene::ServiceClass()` is that expression:
+	// `Workspace` and `Lighting` derive from `Service`, so the question is an
+	// `IsA` rather than a list of names, and a tenth service never touches this
+	// function.
+	//
+	// The abstract bases — `Instance`, `BasePart`, `LuaSourceContainer` — stay
+	// constructible here, because the *run time* still accepts them:
+	// `Instances.cpp` looks the name up in the class table and mints whatever it
+	// finds. `Explorer.cpp` filters them out of the class picker by name, which
+	// is a decision about a palette rather than about the binding, and copying
+	// that list into a second place is how the two would disagree later.
+	bool Constructible(ClassId id) {
+		const ClassId service = Classes::Find(engine::core::Name("Service"));
+		return !service.IsValid() || !Classes::IsA(id, service);
+	}
+
+	// The classes a script can construct, which is what both `Instance.new`
+	// overload lists are built from.
+	std::vector<ClassId> ConstructibleClasses() {
+		std::vector<ClassId> ids;
+		for (const ClassId id : AllClasses()) {
+			if (Constructible(id)) {
+				ids.push_back(id);
+			}
+		}
+		return ids;
+	}
+
+	// The properties a class declares itself, sorted by name.
+	//
+	// **Own, not inherited.** Both declaration files now express inheritance —
+	// TypeScript through `extends` on an interface and Luau through `extends` on
+	// a `declare class` — so repeating an inherited property would be a second
+	// declaration of one fact. TypeScript accepts a narrowing of one silently,
+	// and Luau's would simply be noise growing with the depth of the tree.
+	std::vector<PropertyDescriptor> OwnProperties(const ClassInfo &info) {
+		std::vector<PropertyDescriptor> own;
+		for (const PropertyDescriptor &property : info.Properties) {
+			bool inherited = false;
+			if (info.Parent.IsValid()) {
+				for (const PropertyDescriptor &above : Classes::Describe(info.Parent).Properties) {
+					if (above.Name == property.Name) {
+						inherited = true;
+						break;
+					}
+				}
+			}
+			if (!inherited) {
+				own.push_back(property);
+			}
+		}
+
+		std::sort(own.begin(), own.end(), [](const auto &left, const auto &right) {
+			return left.Name.Text() < right.Name.Text();
+		});
+		return own;
+	}
+
 	std::string Manifest() {
 		std::ostringstream out;
 		out << "{\n";
@@ -234,12 +298,12 @@ namespace {
 			}
 			out << ",\n";
 
-			// Every class registered today is constructible. The field ships
-			// now anyway, because v0.9's `UserInputService` is a service — one
-			// instance, reachable by name, not a class you construct — and
-			// nothing in the table can express that yet. One field now against
-			// a format bump later.
-			out << "\t\t\t\"constructible\": true,\n";
+			// **Answered from the tree rather than asserted.** This shipped
+			// hard-coded `true` against the day a service arrived; services are
+			// here now, so `Constructible` asks whether the class derives from
+			// `Service` and both declaration files build their `Instance.new`
+			// overloads from the same answer.
+			out << "\t\t\t\"constructible\": " << (Constructible(ids[index]) ? "true" : "false") << ",\n";
 
 			out << "\t\t\t\"components\": ";
 			WriteStrings(out, ComponentNames(info.Set));
@@ -324,34 +388,222 @@ namespace {
 		return enums;
 	}
 
+	// The hand-written half of the Luau file: what the VM installs rather than
+	// what the class table holds.
+	//
+	// **A `declare class` rather than a table type, and the operators are why.**
+	// `part.CFrame * CFrame.Angles(0, angle, 0)` is the idiom every rotation in
+	// this repository is written with, and a table type has nowhere to put a
+	// `__mul`. The same syntax is what lets the class tree below express
+	// `extends`, so the Luau half stopped repeating every inherited property.
+	//
+	// **The signals are three classes because a definition file cannot declare a
+	// generic one.** Roblox spells this `RBXScriptSignal<T...>` and that syntax
+	// does not parse here — so each signal is named for what it hands its
+	// handler, which is the thing an author actually wants completed. Same
+	// `Connect`, same `Once`, same `RBXScriptConnection` back.
+	constexpr const char *LUAU_PRELUDE =
+		R"LUAU(-- --- the value types -------------------------------------------------------
+
+declare class Vector3
+	X: number
+	Y: number
+	Z: number
+	Magnitude: number
+	Unit: Vector3
+	function __add(self, other: Vector3): Vector3
+	function __sub(self, other: Vector3): Vector3
+	function __mul(self, other: Vector3 | number): Vector3
+	function __unm(self): Vector3
+end
+
+declare Vector3: {
+	new: (x: number?, y: number?, z: number?) -> Vector3,
+}
+
+declare class Color3
+	R: number
+	G: number
+	B: number
+end
+
+declare Color3: {
+	new: (r: number?, g: number?, b: number?) -> Color3,
+	-- 0-255, the way an author reads a colour off a palette.
+	fromRGB: (r: number?, g: number?, b: number?) -> Color3,
+}
+
+-- `CFrame * Vector3` takes a point into the frame's space and is the other half
+-- of one run-time metamethod. It is not declared: `__mul` is one member here, so
+-- the two argument types would have to share a return type, and a `CFrame |
+-- Vector3` that every call site had to narrow is worse than the composition
+-- overload alone.
+declare class CFrame
+	Position: Vector3
+	function __mul(self, other: CFrame): CFrame
+end
+
+declare CFrame: {
+	new: ((x: number?, y: number?, z: number?) -> CFrame) & ((position: Vector3) -> CFrame),
+	-- Radians, because Roblox's is radians — while `Orientation` is degrees.
+	Angles: (pitch: number, yaw: number, roll: number) -> CFrame,
+	lookAt: (from: Vector3, to: Vector3, up: Vector3?) -> CFrame,
+}
+
+-- --- signals ---------------------------------------------------------------
+
+declare class RBXScriptConnection
+	Connected: boolean
+	function Disconnect(self): ()
+end
+
+declare class HeartbeatSignal
+	function Connect(self, handler: (deltaTime: number) -> ()): RBXScriptConnection
+	function Once(self, handler: (deltaTime: number) -> ()): RBXScriptConnection
+end
+
+declare class ChangedSignal
+	function Connect(self, handler: (property: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
+end
+
+declare class PropertyChangedSignal
+	function Connect(self, handler: () -> ()): RBXScriptConnection
+	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- --- queries ---------------------------------------------------------------
+
+declare class RaycastParams
+	CollisionGroup: string
+end
+
+declare RaycastParams: {
+	new: () -> RaycastParams,
+}
+
+)LUAU";
+
+	// The globals that reach the class tree, so they are emitted after it.
+	//
+	// **`RunService` is a class and a value of the same name**, which is legal
+	// because Luau keeps types and values in separate namespaces and is how
+	// Roblox's own declarations spell a service.
+	//
+	// The bus services carry `(value, status, version)` back, which is the shape
+	// `Services.cpp` resumes a suspended thread with. Roblox's `GetAsync` returns
+	// the value alone and swallows the rest; the status rides beside it here
+	// because a refusal a script cannot see is a refusal it cannot handle.
+	constexpr const char *LUAU_SERVICES =
+		R"LUAU(-- --- the bus services ------------------------------------------------------
+
+export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "Unknown"
+
+declare class MessagingService
+	function PublishAsync(self, topic: string, message: any): (any, BusStatus, number)
+	function SubscribeAsync(self, topic: string, handler: (message: any) -> ()): ()
+end
+
+declare class MemoryStoreService
+	function GetAsync(self, key: string): (any, BusStatus, number)
+	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
+	function UpdateAsync(self, key: string, version: number, value: any): (any, BusStatus, number)
+	function RemoveAsync(self, key: string): (any, BusStatus, number)
+end
+
+declare class DataStoreService
+	function GetAsync(self, key: string): (any, BusStatus, number)
+	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
+	function RemoveAsync(self, key: string): (any, BusStatus, number)
+end
+
+declare class RunService
+	Heartbeat: HeartbeatSignal
+	function IsServer(self): boolean
+	function IsClient(self): boolean
+	function IsStudio(self): boolean
+	-- Not Roblox's, and the more precise question: whether this world's rows
+	-- belong to somebody else. A single-player process is a server whose
+	-- client-side world is still a replica.
+	function IsReplica(self): boolean
+end
+
+-- --- the globals -----------------------------------------------------------
+
+declare MessagingService: MessagingService
+declare MemoryStoreService: MemoryStoreService
+declare DataStoreService: DataStoreService
+declare RunService: RunService
+
+-- The world this script runs on. `game` is the universe above it.
+declare workspace: Workspace
+
+-- The instance this chunk was loaded from, set on the thread after the sandbox.
+declare script: LuaSourceContainer
+
+declare warn: (...any) -> ()
+declare wait: (seconds: number?) -> number
+declare spawn: (callback: (...any) -> (), ...any) -> thread
+declare delay: (seconds: number, callback: (...any) -> ()) -> thread
+declare time: () -> number
+declare elapsedTime: () -> number
+declare tick: () -> number
+
+declare task: {
+	wait: (seconds: number?) -> number,
+	spawn: (callback: (...any) -> (), ...any) -> thread,
+	defer: (callback: (...any) -> (), ...any) -> thread,
+	delay: (seconds: number, callback: (...any) -> ()) -> thread,
+	cancel: (task: thread) -> (),
+}
+
+)LUAU";
+
 	// The Luau declaration file.
 	std::string LuauDeclarations() {
 		std::ostringstream out;
 		out << "--!strict\n";
 		out << "-- Generated by mono.tools/bindings. Do not edit by hand.\n";
 		out << "--\n";
-		out << "-- What a Luau script can name, typed. Generated from the same manifest the\n";
-		out << "-- TypeScript declarations come from, so the two surfaces cannot drift into\n";
-		out << "-- two APIs.\n\n";
+		out << "-- What a Luau script can name, typed. The class tree and the enums come out\n";
+		out << "-- of the class table; the globals come out of what the VM installs. Both\n";
+		out << "-- halves are written by one program alongside the TypeScript declarations, so\n";
+		out << "-- the two surfaces cannot drift into two APIs by accident — where they do\n";
+		out << "-- differ, they differ because the two VMs do, and the difference is written\n";
+		out << "-- down rather than smoothed over.\n";
+		out << "--\n";
+		out << "-- This is a definition file rather than a module: point a language server at\n";
+		out << "-- it, do not `require` it. For luau-lsp that is\n";
+		out << "-- `luau-lsp.types.definitionFiles`, which `.vscode/settings.json` sets --\n";
+		out << "-- and that file is gitignored because editor configuration is personal, so\n";
+		out << "-- the path is written here too. `.luaurc` beside it is checked in and is\n";
+		out << "-- what makes a new script strict by default.\n\n";
 
-		out << "export type Vector3 = { X: number, Y: number, Z: number }\n";
-		out << "export type Color3 = { R: number, G: number, B: number }\n";
-		out << "export type CFrame = { Position: Vector3 }\n\n";
+		out << LUAU_PRELUDE;
 
 		// **The enums, declared before the classes that name them.** A property
 		// typed `Enum.Material` with no declaration of `Material` would be half
 		// a contract, and `--!strict` would reject the file outright.
 		//
-		// A member is a *singleton table type* rather than a string literal, so
+		// A member is a *class* rather than a string literal, so
 		// `part.Material = "Plastic"` is a type error at authoring time even
 		// though the binding accepts it at run time. That gap is deliberate: the
 		// run-time acceptance exists for scripts being migrated, and the type
 		// error exists so new code does not acquire the habit.
-		out << "export type EnumItem = { Name: string, EnumType: string }\n";
+		//
+		// One class per enum rather than one shared `EnumItem`, which is the
+		// brand the TypeScript half gets from `__enum`: two classes deriving
+		// from a common base are not assignable to one another, so the
+		// wrong-enum mistake the run time refuses does not typecheck either.
+		out << "-- --- the enums ------------------------------------------------------------\n\n";
+		out << "declare class EnumItem\n";
+		out << "\tName: string\n";
+		out << "\tEnumType: string\n";
+		out << "end\n\n";
 		for (const engine::core::Name enumName : SortedEnums()) {
-			out << "export type Enum_" << enumName.Text() << " = EnumItem\n";
+			out << "declare class Enum_" << enumName.Text() << " extends EnumItem\n";
+			out << "end\n\n";
 		}
-		out << "\n";
 
 		out << "declare Enum: {\n";
 		for (const engine::core::Name enumName : SortedEnums()) {
@@ -363,15 +615,16 @@ namespace {
 		}
 		out << "}\n\n";
 
+		out << "-- --- the class tree -------------------------------------------------------\n\n";
 		for (const ClassId id : AllClasses()) {
 			const ClassInfo &info = Classes::Describe(id);
+			const std::string name(info.Name.Text());
 
-			out << "-- " << info.Name.Text();
+			out << "declare class " << name;
 			if (info.Parent.IsValid()) {
-				out << " : " << Classes::Describe(info.Parent).Name.Text();
+				out << " extends " << Classes::Describe(info.Parent).Name.Text();
 			}
 			out << "\n";
-			out << "export type " << info.Name.Text() << " = {\n";
 
 			// **No hand-written `Name` line, and removing it was a fix rather
 			// than a tidy-up.** `Name` was special-cased here because it *was* a
@@ -380,26 +633,293 @@ namespace {
 			// `Classes::Property<&InstanceName::Value>` landed it started coming
 			// out of the loop below as well, and every class in this file
 			// carried the field twice.
-			//
-			// A duplicate key in a Luau table type is not an error the way a
-			// missing one is — which is exactly why it survived: nothing failed,
-			// the file just quietly said one thing twice. See the TypeScript
-			// half, where the same leftover was worse.
-			std::vector<PropertyDescriptor> properties(info.Properties.begin(), info.Properties.end());
-			std::sort(
-				properties.begin(),
-				properties.end(),
-				[](const PropertyDescriptor &left, const PropertyDescriptor &right) {
-					return left.Name.Text() < right.Name.Text();
-				}
-			);
-			for (const PropertyDescriptor &property : properties) {
-				out << "\t" << property.Name.Text() << ": " << LuauType(property) << ",\n";
+			for (const PropertyDescriptor &property : OwnProperties(info)) {
+				out << "\t" << property.Name.Text() << ": " << LuauType(property) << "\n";
 			}
-			out << "}\n\n";
+
+			// **The host members, which project onto no component and never
+			// will.** `.Changed` and the methods below it are the binding's
+			// rather than the class table's — declaring components for them so
+			// this loop could find them is the change `script/AGENTS.md` says to
+			// refuse. They are written here, against the one class that has
+			// them, so they are declared once and inherited by the rest.
+			if (name == "Instance") {
+				out << "\tChanged: ChangedSignal\n";
+				out << "\tfunction IsA(self, className: string): boolean\n";
+				out << "\tfunction Destroy(self): ()\n";
+				out << "\tfunction Clone(self): Instance\n";
+				out << "\tfunction GetChildren(self): { Instance }\n";
+				out << "\tfunction GetDescendants(self): { Instance }\n";
+				out << "\tfunction FindFirstChild(self, name: string): Instance?\n";
+				out << "\tfunction IsDescendantOf(self, ancestor: Instance): boolean\n";
+				out << "\tfunction ClearAllChildren(self): ()\n";
+				out << "\tfunction GetPropertyChangedSignal(self, property: string): "
+					   "PropertyChangedSignal\n";
+			}
+
+			// The two members only the Workspace answers, for the reason
+			// `Instances.cpp` keeps them in a table of their own: a `Raycast` on
+			// a `Folder` would be an answer that means nothing.
+			//
+			// A raycast result is a plain table at run time — read once and
+			// discarded — so it is written inline rather than given a name.
+			if (name == "Workspace") {
+				out << "\tCurrentCamera: Camera\n";
+				out << "\tfunction Raycast(self, origin: Vector3, direction: Vector3, "
+					   "params: RaycastParams?): {\n";
+				out << "\t\tInstance: Instance,\n";
+				out << "\t\tPosition: Vector3,\n";
+				out << "\t\tNormal: Vector3,\n";
+				out << "\t\tDistance: number,\n";
+				out << "\t\tMaterial: Enum_Material,\n";
+				out << "\t}?\n";
+			}
+
+			out << "end\n\n";
 		}
+
+		out << LUAU_SERVICES;
+
+		// **A table of names to types, read with `index`, rather than one
+		// overload per class.** Both of these started as an intersection of
+		// function types — which is how a reader would first write "one
+		// signature per class name" — and the type checker refused the file
+		// outright with *"Code is too complex to typecheck"* at nine of them.
+		// An intersection is solved by trying every branch; a lookup is one
+		// step, and it stays one step when the tree doubles.
+		//
+		// `keyof` narrows the argument to a name that exists, so a typo is
+		// still an error at the call rather than an `Instance` handed back.
+		out << "-- --- what a name resolves to --------------------------------------------\n\n";
+
+		out << "type Services = {\n";
+		out << "\tWorkspace: Workspace,\n";
+		out << "\tRunService: RunService,\n";
+		out << "\tMessagingService: MessagingService,\n";
+		out << "\tMemoryStoreService: MemoryStoreService,\n";
+		out << "\tDataStoreService: DataStoreService,\n";
+		out << "}\n\n";
+
+		out << "type CreatableInstances = {\n";
+		for (const ClassId id : ConstructibleClasses()) {
+			const std::string_view name = Classes::Describe(id).Name.Text();
+			out << "\t" << name << ": " << name << ",\n";
+		}
+		out << "}\n\n";
+
+		// **`game` is the universe, and `GetService` is a global lookup at run
+		// time** — so `Services` above is exactly the globals that exist, plus
+		// `Workspace`, which `RunService.cpp` special-cases because its global
+		// is spelled lower case.
+		//
+		// **Named `DataModel`, and `self` is that name rather than `any`.** The
+		// name is the run time's — `OpenGame` sets `__metatable` to the same
+		// string — and it has to be written down because a generic method whose
+		// `self` is `any` does not infer: `game:GetService("RunService")`
+		// resolved `T` to `any` and handed back a service with no members. A
+		// concrete `self` is what makes the singleton argument reach `T`.
+		out << "type DataModel = {\n";
+		out << "\tWorkspace: Workspace,\n";
+		out << "\tGetService: <T>(self: DataModel, service: keyof<Services> & T) "
+			   "-> index<Services, T>,\n";
+		out << "}\n\n";
+		out << "declare game: DataModel\n\n";
+
+		// So that `Instance.new("Part")` is a `Part` rather than an `Instance`
+		// an author has to cast.
+		out << "declare Instance: {\n";
+		out << "\tnew: <T>(className: keyof<CreatableInstances> & T, parent: Instance?) "
+			   "-> index<CreatableInstances, T>,\n";
+		out << "}\n";
 		return out.str();
 	}
+
+	// The hand-written half of the TypeScript file.
+	//
+	// **`Vector3.new(...)`, not `new Vector3(...)`, and the difference was a
+	// bug.** This declared `{ new(x?: number, ...): Vector3 }` — which inside an
+	// object type is a *construct signature*, so the declaration said
+	// `new Vector3(1, 2, 3)` while `JsBindings.cpp` provides a `new` **method**
+	// and `Mirrors-1-world.ts` calls it. The file disagreed with its own
+	// example. A property typed as a function is the unambiguous spelling.
+	//
+	// **Methods rather than operators**, because JavaScript has no operator
+	// overloading: `a.add(b)` and `cf.mul(other)` are the same run-time
+	// arithmetic the Luau half spells `+` and `*`.
+	constexpr const char *TYPESCRIPT_PRELUDE =
+		R"TS(// --- the value types -------------------------------------------------------
+
+declare interface Vector3 {
+	readonly X: number;
+	readonly Y: number;
+	readonly Z: number;
+	readonly Magnitude: number;
+	readonly Unit: Vector3;
+	add(other: Vector3): Vector3;
+	sub(other: Vector3): Vector3;
+	mul(other: Vector3 | number): Vector3;
+	Equals(other: Vector3): boolean;
+}
+
+declare interface Color3 {
+	readonly R: number;
+	readonly G: number;
+	readonly B: number;
+	Equals(other: Color3): boolean;
+}
+
+declare interface CFrame {
+	readonly Position: Vector3;
+	mul(other: CFrame): CFrame;
+}
+
+declare const Vector3: {
+	new: (x?: number, y?: number, z?: number) => Vector3;
+};
+
+declare const Color3: {
+	new: (r?: number, g?: number, b?: number) => Color3;
+	// 0-255, the way an author reads a colour off a palette.
+	fromRGB: (r?: number, g?: number, b?: number) => Color3;
+};
+
+declare const CFrame: {
+	new: {
+		(x?: number, y?: number, z?: number): CFrame;
+		(position: Vector3): CFrame;
+	};
+	// Radians, because Roblox's is radians -- while `Orientation` is degrees.
+	Angles: (pitch: number, yaw: number, roll: number) => CFrame;
+	lookAt: (from: Vector3, to: Vector3, up?: Vector3) => CFrame;
+};
+
+// --- signals ---------------------------------------------------------------
+//
+// `Heartbeat.Connect(fn)` rather than `Heartbeat:Connect(fn)` -- the colon is
+// Lua's and a JavaScript author writes the dot. Same signal, same list.
+
+declare interface RBXScriptConnection {
+	readonly Connected: boolean;
+	Disconnect(): void;
+}
+
+declare interface HeartbeatSignal {
+	Connect(handler: (deltaTime: number) => void): RBXScriptConnection;
+}
+
+declare interface ChangedSignal {
+	Connect(handler: (property: string) => void): RBXScriptConnection;
+	Once(handler: (property: string) => void): RBXScriptConnection;
+	Equals(other: ChangedSignal): boolean;
+}
+
+declare interface PropertyChangedSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: PropertyChangedSignal): boolean;
+}
+
+// --- queries ---------------------------------------------------------------
+
+declare interface RaycastParams {
+	CollisionGroup: string;
+}
+
+declare const RaycastParams: {
+	new: () => RaycastParams;
+};
+
+declare interface RaycastResult {
+	readonly Instance: Instance;
+	readonly Position: Vector3;
+	readonly Normal: Vector3;
+	readonly Distance: number;
+	readonly Material: Enum_Material;
+}
+
+)TS";
+
+	// The TypeScript globals, emitted after the class tree they reach.
+	//
+	// **`RunService` carries `Heartbeat` and nothing else here, and that is not
+	// an omission in this file.** `JsBindings.cpp` builds the service out of one
+	// property; `IsServer`, `IsClient`, `IsStudio` and `IsReplica` exist on the
+	// Luau side only. Declaring them anyway would turn a missing binding into a
+	// run-time `undefined is not a function` instead of a red squiggle.
+	//
+	// A store call suspends on a promise rather than on a coroutine, and the
+	// reply arrives as one object because a promise resolves with a single
+	// value. That is the same `(value, status, version)` the Luau side returns.
+	constexpr const char *TYPESCRIPT_SERVICES =
+		R"TS(// --- the bus services ------------------------------------------------------
+
+declare type BusStatus =
+	| "Ok"
+	| "NotFound"
+	| "Conflict"
+	| "OverBudget"
+	| "NoSuchWorld"
+	| "Unsupported"
+	| "Unknown";
+
+declare interface StoreReply {
+	readonly Value: unknown;
+	readonly Status: BusStatus;
+	readonly Version: number;
+}
+
+declare interface MessagingService {
+	PublishAsync(topic: string, message: unknown): Promise<StoreReply>;
+	SubscribeAsync(topic: string, handler: (message: unknown) => void): void;
+}
+
+declare interface MemoryStoreService {
+	GetAsync(key: string): Promise<StoreReply>;
+	SetAsync(key: string, value: unknown): Promise<StoreReply>;
+	UpdateAsync(key: string, version: number, value: unknown): Promise<StoreReply>;
+	RemoveAsync(key: string): Promise<StoreReply>;
+}
+
+declare interface DataStoreService {
+	GetAsync(key: string): Promise<StoreReply>;
+	SetAsync(key: string, value: unknown): Promise<StoreReply>;
+	RemoveAsync(key: string): Promise<StoreReply>;
+}
+
+declare interface RunService {
+	readonly Heartbeat: HeartbeatSignal;
+}
+
+// --- the globals -----------------------------------------------------------
+
+declare const MessagingService: MessagingService;
+declare const MemoryStoreService: MemoryStoreService;
+declare const DataStoreService: DataStoreService;
+declare const RunService: RunService;
+
+// The world this script runs on. `game` is the universe above it.
+declare const workspace: Workspace;
+
+// An alias for `null`, because this is a Roblox-shaped API and a Roblox author
+// writes `part.Parent = nil`. A third empty value would be a footgun wearing a
+// familiar name, so it is not one.
+declare const nil: null;
+
+declare function print(...values: unknown[]): void;
+declare function warn(...values: unknown[]): void;
+declare function typeOf(value: unknown): string;
+declare function time(): number;
+declare function tick(): number;
+
+declare const task: {
+	wait: (seconds?: number) => number;
+	spawn: (callback: (...args: unknown[]) => void, ...args: unknown[]) => void;
+	defer: (callback: (...args: unknown[]) => void, ...args: unknown[]) => void;
+	delay: (seconds: number, callback: (...args: unknown[]) => void) => void;
+	cancel: (handle: unknown) => void;
+};
+
+)TS";
 
 	// The TypeScript declaration file.
 	std::string TypeScriptDeclarations() {
@@ -409,15 +929,18 @@ namespace {
 		out << "// What a TypeScript author can name, typed. TypeScript is the typed\n";
 		out << "// authoring surface over the JavaScript VM -- it erases its types by\n";
 		out << "// design, so this describes what the bindings expose and nothing about\n";
-		out << "// how a value is represented at run time.\n\n";
+		out << "// how a value is represented at run time.\n";
+		out << "//\n";
+		out << "// This is a type root: a `tsconfig.json` lists it in place of\n";
+		out << "// `@rbxts/types`. The one in the repository root already does, and\n";
+		out << "// `bunx tsc --noEmit` is what checks a script against it.\n";
+		out << "//\n";
+		out << "// Written alongside the Luau declarations by one program. Where the two\n";
+		out << "// disagree -- `game.GetService(\"Workspace\")`, the `RunService`\n";
+		out << "// predicates -- they disagree because the two VMs do, and each file says\n";
+		out << "// what its own VM installs rather than what the other one has.\n\n";
 
-		out << "declare interface Vector3 { readonly X: number; readonly Y: number; readonly Z: number; }\n";
-		out << "declare interface Color3 { readonly R: number; readonly G: number; readonly B: number; }\n";
-		out << "declare interface CFrame { readonly Position: Vector3; }\n\n";
-
-		out << "declare const Vector3: { new(x?: number, y?: number, z?: number): Vector3 };\n";
-		out << "declare const Color3: { new(r?: number, g?: number, b?: number): Color3 };\n";
-		out << "declare function print(...values: unknown[]): void;\n\n";
+		out << TYPESCRIPT_PRELUDE;
 
 		// The enums, for the reason the Luau file declares them: a property
 		// typed `Enum.Material` needs `Material` to exist.
@@ -444,10 +967,12 @@ namespace {
 		}
 		out << "}\n\n";
 
+		out << "// --- the class tree -------------------------------------------------------\n\n";
 		for (const ClassId id : AllClasses()) {
 			const ClassInfo &info = Classes::Describe(id);
+			const std::string name(info.Name.Text());
 
-			out << "declare interface " << info.Name.Text();
+			out << "declare interface " << name;
 			if (info.Parent.IsValid()) {
 				out << " extends " << Classes::Describe(info.Parent).Name.Text();
 			}
@@ -463,47 +988,75 @@ namespace {
 			//
 			// A Roblox script sets `.Name`, so the property's own answer —
 			// writable — is the right one, and it is the one that survives now
-			// that nothing competes with it. The Luau half carried the same
-			// leftover as a plain duplicate.
-
-			// Only what this class declares itself. A derived interface extends
-			// its base, so repeating an inherited property here would be a
-			// second declaration of one fact — and TypeScript would accept a
-			// narrowing of it silently.
-			std::vector<PropertyDescriptor> own;
-			for (const PropertyDescriptor &property : info.Properties) {
-				bool inherited = false;
-				if (info.Parent.IsValid()) {
-					for (const PropertyDescriptor &above : Classes::Describe(info.Parent).Properties) {
-						if (above.Name == property.Name) {
-							inherited = true;
-							break;
-						}
-					}
-				}
-				if (!inherited) {
-					own.push_back(property);
-				}
-			}
-			std::sort(own.begin(), own.end(), [](const auto &left, const auto &right) {
-				return left.Name.Text() < right.Name.Text();
-			});
-
-			for (const PropertyDescriptor &property : own) {
+			// that nothing competes with it.
+			for (const PropertyDescriptor &property : OwnProperties(info)) {
 				out << "\t";
 				if (!property.Writable) {
 					out << "readonly ";
 				}
 				out << property.Name.Text() << ": " << TypeScriptType(property) << ";\n";
 			}
+
+			// The host members, for the reason the Luau half states: they
+			// project onto no component, so the loop above cannot find them and
+			// declaring components so that it could is the change
+			// `script/AGENTS.md` says to refuse.
+			if (name == "Instance") {
+				out << "\treadonly Changed: ChangedSignal;\n";
+				out << "\tIsA(className: string): boolean;\n";
+				out << "\tDestroy(): void;\n";
+				out << "\tClone(): Instance;\n";
+				out << "\tGetChildren(): Instance[];\n";
+				out << "\tGetDescendants(): Instance[];\n";
+				out << "\tFindFirstChild(name: string): Instance | null;\n";
+				out << "\tIsDescendantOf(ancestor: Instance): boolean;\n";
+				out << "\tClearAllChildren(): void;\n";
+				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
+			}
+
+			// **`Raycast` and no `CurrentCamera`, and the asymmetry with the Luau
+			// half is the JavaScript binding's rather than this file's.**
+			// `InstallJsQueries` puts `Raycast` on the world object and then
+			// `JS_PreventExtensions` seals it; nothing installs `CurrentCamera`,
+			// which the Luau `InstanceIndex` special-cases. Declaring it here
+			// would make a write that silently does nothing typecheck.
+			if (name == "Workspace") {
+				out << "\tRaycast(origin: Vector3, direction: Vector3, params?: RaycastParams): "
+					   "RaycastResult | null;\n";
+			}
+
 			out << "}\n\n";
 		}
 
+		out << TYPESCRIPT_SERVICES;
+
+		// `game` carries `GetService` alone. The Luau half also answers
+		// `game.Workspace`, because `RunService.cpp` gives it a `__index`;
+		// `JsBindings.cpp` builds a plain object with one property, so this one
+		// does not.
+		out << "declare const game: {\n";
+		out << "\tGetService: {\n";
+		out << "\t\t(service: \"RunService\"): RunService;\n";
+		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
+		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";
+		out << "\t\t(service: \"DataStoreService\"): DataStoreService;\n";
+		out << "\t};\n";
+		out << "};\n\n";
+
+		// **A `new` property carrying overloads, not a construct signature.**
+		// `Instance.new("Part")` is what the binding provides; `new
+		// Instance("Part")` is what a construct signature would have described,
+		// and this file described that for three versions.
+		//
+		// Services are absent because a script does not mint one — the same
+		// `constructible` answer the manifest now carries.
 		out << "declare const Instance: {\n";
-		for (const ClassId id : AllClasses()) {
-			const ClassInfo &info = Classes::Describe(id);
-			out << "\tnew(className: \"" << info.Name.Text() << "\"): " << info.Name.Text() << ";\n";
+		out << "\tnew: {\n";
+		for (const ClassId id : ConstructibleClasses()) {
+			const std::string_view name = Classes::Describe(id).Name.Text();
+			out << "\t\t(className: \"" << name << "\", parent?: Instance): " << name << ";\n";
 		}
+		out << "\t};\n";
 		out << "};\n";
 		return out.str();
 	}
@@ -559,6 +1112,15 @@ int main(int argc, char **argv) {
 	// would be describing what a script can *build* and not what a world can
 	// *hold*, and the second is the half a save file needs.
 	(void)engine::script::ScriptClass();
+
+	// **And the services, because `workspace` is one.** Every script opens by
+	// reaching into the world through the `Workspace` global, and a manifest
+	// that stopped at `Part` had no type to give it — so the declaration files
+	// either left the most-used global in the engine untyped or hand-wrote a
+	// class the table already knew. This is also what makes `constructible`
+	// answerable: `Service` is the ancestor that says a class is reached by
+	// name rather than minted.
+	(void)engine::scene::ServiceClass();
 
 	const std::filesystem::path directory = arguments.Get("out").has_value()
 												? std::filesystem::path(*arguments.Get("out"))

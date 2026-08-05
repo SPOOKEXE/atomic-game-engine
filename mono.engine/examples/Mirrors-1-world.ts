@@ -166,7 +166,10 @@ function range(index: number, salt: number, low: number, high: number): number {
 	return low + hashed(index, salt) * (high - low);
 }
 
-const casters = [];
+// Annotated rather than inferred: the array is filled below and read inside the
+// `Heartbeat` closure, and TypeScript stops widening an empty `[]` the moment a
+// closure captures it.
+const casters: { part: Part; base: Vector3; phase: number; rate: number }[] = [];
 
 for (let index = 0; index < 24; index++) {
 	const part = Instance.new("Part");

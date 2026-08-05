@@ -156,10 +156,139 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Source", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["script.Source"], "writes": ["script.Source"]}
 			]
+		},
+		{
+			"name": "Service",
+			"parent": "Instance",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "Workspace",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "Lighting",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.LightingService", "scene.Service"],
+			"properties": [
+				{"name": "Ambient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "ClockTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "FogColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "FogEnd", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "FogStart", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "GeographicLatitude", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "OutdoorAmbient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "ReplicatedFirst",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "ReplicatedStorage",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "ServerScriptService",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "ServerStorage",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "StarterGui",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "StarterPlayer",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
+			"name": "StarterPlayerScripts",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["InstanceClass", "InstanceName", "ecs.Hierarchy", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["InstanceName"], "writes": ["InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
 		}
 	],
 	"enums": [
 		{"name": "Material", "members": ["Plastic", "SmoothPlastic", "Wood", "WoodPlanks", "Metal", "CorrodedMetal", "DiamondPlate", "Concrete", "Brick", "Cobblestone", "Grass", "Sand", "Slate", "Ice", "Glass", "Neon", "ForceField"]},
-		{"name": "NormalId", "members": ["Right", "Top", "Back", "Left", "Bottom", "Front"]}
+		{"name": "NormalId", "members": ["Right", "Top", "Back", "Left", "Bottom", "Front"]},
+		{"name": "ServiceScope", "members": ["Shared", "Server", "Client"]}
 	]
 }

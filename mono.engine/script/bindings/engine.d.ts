@@ -4,18 +4,110 @@
 // authoring surface over the JavaScript VM -- it erases its types by
 // design, so this describes what the bindings expose and nothing about
 // how a value is represented at run time.
+//
+// This is a type root: a `tsconfig.json` lists it in place of
+// `@rbxts/types`. The one in the repository root already does, and
+// `bunx tsc --noEmit` is what checks a script against it.
+//
+// Written alongside the Luau declarations by one program. Where the two
+// disagree -- `game.GetService("Workspace")`, the `RunService`
+// predicates -- they disagree because the two VMs do, and each file says
+// what its own VM installs rather than what the other one has.
 
-declare interface Vector3 { readonly X: number; readonly Y: number; readonly Z: number; }
-declare interface Color3 { readonly R: number; readonly G: number; readonly B: number; }
-declare interface CFrame { readonly Position: Vector3; }
+// --- the value types -------------------------------------------------------
 
-declare const Vector3: { new(x?: number, y?: number, z?: number): Vector3 };
-declare const Color3: { new(r?: number, g?: number, b?: number): Color3 };
-declare function print(...values: unknown[]): void;
+declare interface Vector3 {
+	readonly X: number;
+	readonly Y: number;
+	readonly Z: number;
+	readonly Magnitude: number;
+	readonly Unit: Vector3;
+	add(other: Vector3): Vector3;
+	sub(other: Vector3): Vector3;
+	mul(other: Vector3 | number): Vector3;
+	Equals(other: Vector3): boolean;
+}
+
+declare interface Color3 {
+	readonly R: number;
+	readonly G: number;
+	readonly B: number;
+	Equals(other: Color3): boolean;
+}
+
+declare interface CFrame {
+	readonly Position: Vector3;
+	mul(other: CFrame): CFrame;
+}
+
+declare const Vector3: {
+	new: (x?: number, y?: number, z?: number) => Vector3;
+};
+
+declare const Color3: {
+	new: (r?: number, g?: number, b?: number) => Color3;
+	// 0-255, the way an author reads a colour off a palette.
+	fromRGB: (r?: number, g?: number, b?: number) => Color3;
+};
+
+declare const CFrame: {
+	new: {
+		(x?: number, y?: number, z?: number): CFrame;
+		(position: Vector3): CFrame;
+	};
+	// Radians, because Roblox's is radians -- while `Orientation` is degrees.
+	Angles: (pitch: number, yaw: number, roll: number) => CFrame;
+	lookAt: (from: Vector3, to: Vector3, up?: Vector3) => CFrame;
+};
+
+// --- signals ---------------------------------------------------------------
+//
+// `Heartbeat.Connect(fn)` rather than `Heartbeat:Connect(fn)` -- the colon is
+// Lua's and a JavaScript author writes the dot. Same signal, same list.
+
+declare interface RBXScriptConnection {
+	readonly Connected: boolean;
+	Disconnect(): void;
+}
+
+declare interface HeartbeatSignal {
+	Connect(handler: (deltaTime: number) => void): RBXScriptConnection;
+}
+
+declare interface ChangedSignal {
+	Connect(handler: (property: string) => void): RBXScriptConnection;
+	Once(handler: (property: string) => void): RBXScriptConnection;
+	Equals(other: ChangedSignal): boolean;
+}
+
+declare interface PropertyChangedSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: PropertyChangedSignal): boolean;
+}
+
+// --- queries ---------------------------------------------------------------
+
+declare interface RaycastParams {
+	CollisionGroup: string;
+}
+
+declare const RaycastParams: {
+	new: () => RaycastParams;
+};
+
+declare interface RaycastResult {
+	readonly Instance: Instance;
+	readonly Position: Vector3;
+	readonly Normal: Vector3;
+	readonly Distance: number;
+	readonly Material: Enum_Material;
+}
 
 declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
 declare interface Enum_Material extends EnumItem { readonly __enum: "Material"; }
 declare interface Enum_NormalId extends EnumItem { readonly __enum: "NormalId"; }
+declare interface Enum_ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 
 declare namespace Enum {
 	const Material: {
@@ -45,11 +137,28 @@ declare namespace Enum {
 		readonly Bottom: Enum_NormalId;
 		readonly Front: Enum_NormalId;
 	};
+	const ServiceScope: {
+		readonly Shared: Enum_ServiceScope;
+		readonly Server: Enum_ServiceScope;
+		readonly Client: Enum_ServiceScope;
+	};
 }
+
+// --- the class tree -------------------------------------------------------
 
 declare interface Instance {
 	Name: string;
 	Parent: Instance;
+	readonly Changed: ChangedSignal;
+	IsA(className: string): boolean;
+	Destroy(): void;
+	Clone(): Instance;
+	GetChildren(): Instance[];
+	GetDescendants(): Instance[];
+	FindFirstChild(name: string): Instance | null;
+	IsDescendantOf(ancestor: Instance): boolean;
+	ClearAllChildren(): void;
+	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
 }
 
 declare interface PVInstance extends Instance {
@@ -97,14 +206,134 @@ declare interface Script extends LuaSourceContainer {
 declare interface LocalScript extends LuaSourceContainer {
 }
 
+declare interface Service extends Instance {
+	Fixture: boolean;
+	Scope: Enum_ServiceScope;
+}
+
+declare interface Workspace extends Service {
+	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
+}
+
+declare interface Lighting extends Service {
+	Ambient: Color3;
+	Brightness: number;
+	ClockTime: number;
+	FogColor: Color3;
+	FogEnd: number;
+	FogStart: number;
+	GeographicLatitude: number;
+	OutdoorAmbient: Color3;
+}
+
+declare interface ReplicatedFirst extends Service {
+}
+
+declare interface ReplicatedStorage extends Service {
+}
+
+declare interface ServerScriptService extends Service {
+}
+
+declare interface ServerStorage extends Service {
+}
+
+declare interface StarterGui extends Service {
+}
+
+declare interface StarterPlayer extends Service {
+}
+
+declare interface StarterPlayerScripts extends Service {
+}
+
+// --- the bus services ------------------------------------------------------
+
+declare type BusStatus =
+	| "Ok"
+	| "NotFound"
+	| "Conflict"
+	| "OverBudget"
+	| "NoSuchWorld"
+	| "Unsupported"
+	| "Unknown";
+
+declare interface StoreReply {
+	readonly Value: unknown;
+	readonly Status: BusStatus;
+	readonly Version: number;
+}
+
+declare interface MessagingService {
+	PublishAsync(topic: string, message: unknown): Promise<StoreReply>;
+	SubscribeAsync(topic: string, handler: (message: unknown) => void): void;
+}
+
+declare interface MemoryStoreService {
+	GetAsync(key: string): Promise<StoreReply>;
+	SetAsync(key: string, value: unknown): Promise<StoreReply>;
+	UpdateAsync(key: string, version: number, value: unknown): Promise<StoreReply>;
+	RemoveAsync(key: string): Promise<StoreReply>;
+}
+
+declare interface DataStoreService {
+	GetAsync(key: string): Promise<StoreReply>;
+	SetAsync(key: string, value: unknown): Promise<StoreReply>;
+	RemoveAsync(key: string): Promise<StoreReply>;
+}
+
+declare interface RunService {
+	readonly Heartbeat: HeartbeatSignal;
+}
+
+// --- the globals -----------------------------------------------------------
+
+declare const MessagingService: MessagingService;
+declare const MemoryStoreService: MemoryStoreService;
+declare const DataStoreService: DataStoreService;
+declare const RunService: RunService;
+
+// The world this script runs on. `game` is the universe above it.
+declare const workspace: Workspace;
+
+// An alias for `null`, because this is a Roblox-shaped API and a Roblox author
+// writes `part.Parent = nil`. A third empty value would be a footgun wearing a
+// familiar name, so it is not one.
+declare const nil: null;
+
+declare function print(...values: unknown[]): void;
+declare function warn(...values: unknown[]): void;
+declare function typeOf(value: unknown): string;
+declare function time(): number;
+declare function tick(): number;
+
+declare const task: {
+	wait: (seconds?: number) => number;
+	spawn: (callback: (...args: unknown[]) => void, ...args: unknown[]) => void;
+	defer: (callback: (...args: unknown[]) => void, ...args: unknown[]) => void;
+	delay: (seconds: number, callback: (...args: unknown[]) => void) => void;
+	cancel: (handle: unknown) => void;
+};
+
+declare const game: {
+	GetService: {
+		(service: "RunService"): RunService;
+		(service: "MessagingService"): MessagingService;
+		(service: "MemoryStoreService"): MemoryStoreService;
+		(service: "DataStoreService"): DataStoreService;
+	};
+};
+
 declare const Instance: {
-	new(className: "Instance"): Instance;
-	new(className: "PVInstance"): PVInstance;
-	new(className: "BasePart"): BasePart;
-	new(className: "Part"): Part;
-	new(className: "Camera"): Camera;
-	new(className: "SurfaceCamera"): SurfaceCamera;
-	new(className: "LuaSourceContainer"): LuaSourceContainer;
-	new(className: "Script"): Script;
-	new(className: "LocalScript"): LocalScript;
+	new: {
+		(className: "Instance", parent?: Instance): Instance;
+		(className: "PVInstance", parent?: Instance): PVInstance;
+		(className: "BasePart", parent?: Instance): BasePart;
+		(className: "Part", parent?: Instance): Part;
+		(className: "Camera", parent?: Instance): Camera;
+		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
+		(className: "LuaSourceContainer", parent?: Instance): LuaSourceContainer;
+		(className: "Script", parent?: Instance): Script;
+		(className: "LocalScript", parent?: Instance): LocalScript;
+	};
 };

@@ -1,0 +1,15 @@
+{
+	"languageMode": "strict",
+	"lint": {
+		"LocalShadow": true,
+		"UnknownGlobal": true,
+		"DeprecatedGlobal": true,
+		"ForRange": true,
+		"UnreachableCode": true,
+		"DuplicateLocal": true,
+		"DuplicateFunction": true,
+		"TableOperations": true
+	},
+	"lintErrors": false,
+	"typeErrors": true
+}
