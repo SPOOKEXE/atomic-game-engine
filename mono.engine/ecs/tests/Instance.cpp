@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -736,6 +737,486 @@ TEST_CASE("destroying random subtrees leaves no orphans", "[ecs][fuzz]") {
 	}
 
 	REQUIRE(orphans == 0);
+}
+
+TEST_CASE("a tree churned by raw destroys keeps every live instance reachable", "[ecs][fuzz]") {
+	// **The invariant the other two fuzz tests cannot state.** They ask whether
+	// anything alive names something dead, which the truncation bug passes:
+	// after a middle child was freed without unlinking, every *surviving* row
+	// still named a live parent. What was wrong was the other direction — the
+	// parent's list stopped at the hole, so the rows behind it were alive, held
+	// a correct parent, and were reachable from no root at all. They would have
+	// been written into the save file and drawn by nothing.
+	//
+	// So this walks down from the roots and requires the set it reaches to be
+	// exactly the set that is alive. And it churns through `Store::Destroy` —
+	// the raw one, which `DestroyInstance` and the two tests above never use.
+	const Tree &tree = Classes_();
+	Store store("raw-churn");
+
+	std::vector<Entity> nodes;
+	for (int index = 0; index < 80; index++) {
+		const Entity node = store.CreateInstance(tree.Model, "N" + std::to_string(index));
+		if (index > 0) {
+			store.SetParent(node, nodes[Random::Bits(static_cast<uint32_t>(index), 701) % nodes.size()]);
+		}
+		nodes.push_back(node);
+	}
+
+	for (uint32_t step = 0; step < 400; step++) {
+		const Entity target = nodes[Random::Bits(step, 702) % nodes.size()];
+		if (!store.Alive(target)) {
+			continue;
+		}
+
+		switch (Random::Bits(step, 703) % 5) {
+		case 0:
+			store.Destroy(target);
+			break;
+		case 1:
+			store.DestroyInstance(target);
+			break;
+		case 2:
+			store.SetParent(target, NULL_ENTITY);
+			break;
+		default: {
+			const Entity parent = nodes[Random::Bits(step, 704) % nodes.size()];
+			if (store.Alive(parent)) {
+				store.SetParent(target, parent);
+			}
+			break;
+		}
+		}
+	}
+
+	const auto byId = [](Entity left, Entity right) { return left.Id < right.Id; };
+
+	std::vector<Entity> live;
+	for (const Entity node : nodes) {
+		if (store.Alive(node)) {
+			live.push_back(node);
+		}
+	}
+	std::sort(live.begin(), live.end(), byId);
+
+	// Down from every root, which is the direction a save file, the renderer
+	// and the explorer all read the world in.
+	std::vector<Entity> reached;
+	std::vector<Entity> frontier;
+	store.EachRoot([&](Entity root) { frontier.push_back(root); });
+
+	while (!frontier.empty()) {
+		const Entity at = frontier.back();
+		frontier.pop_back();
+		reached.push_back(at);
+
+		// Bounded, so a list that somehow looped is a failure rather than a
+		// test that never returns.
+		REQUIRE(reached.size() <= nodes.size());
+		store.EachChild(at, [&](Entity child) { frontier.push_back(child); });
+	}
+	std::sort(reached.begin(), reached.end(), byId);
+
+	REQUIRE(reached == live);
+}
+
+// --- the tree's edges ------------------------------------------------------
+
+TEST_CASE("reparenting to the parent it already has changes nothing", "[ecs][instance]") {
+	// Roblox's `thing.Parent = thing.Parent` is a no-op, and this used to be an
+	// unlink followed by an append — so a write that changed nothing moved the
+	// instance to the back of its own siblings, and `GetChildren()` came back
+	// in a different order on the machine that happened to run that line.
+	//
+	// The shape that finds it is ordinary: a script assigning a parent that may
+	// or may not have changed, or an editor applying a drag onto the row the
+	// instance was already under.
+	const Tree &tree = Classes_();
+	Store store("test");
+
+	const Entity model = store.CreateInstance(tree.Model, "Model");
+	std::vector<Entity> made;
+	for (int index = 0; index < 4; index++) {
+		const Entity part = store.CreateInstance(tree.Part, "Part" + std::to_string(index));
+		REQUIRE(store.SetParent(part, model));
+		made.push_back(part);
+	}
+
+	const std::vector<Name> before = ChildNames(store, model);
+	REQUIRE(before.size() == 4);
+
+	// The first child, which is the one an append would move furthest.
+	REQUIRE(store.SetParent(made.front(), model));
+	CHECK(ChildNames(store, model) == before);
+	CHECK(store.ParentOf(made.front()) == model);
+
+	// And a root told that it is a root.
+	const Entity loose = store.CreateInstance(tree.Part, "Loose");
+	REQUIRE(store.SetParent(loose, NULL_ENTITY));
+	CHECK(store.ParentOf(loose) == NULL_ENTITY);
+	CHECK(ChildNames(store, model) == before);
+}
+
+TEST_CASE("a raw destroy takes the row out of the tree first", "[ecs][instance]") {
+	// **`Destroy`, not `DestroyInstance`.** Freeing a row does not touch the
+	// links that point at it, and `EachChild` stops at the first dead link
+	// rather than stepping over it — because the links *out of* a freed row
+	// went with the row, so there is no way to reach what followed it.
+	//
+	// Destroying the middle of three children therefore truncated the list to
+	// one and lost the other two: still alive, still in the save file, and
+	// reachable from nothing. The unlink now happens before the free.
+	const Tree &tree = Classes_();
+	Store store("raw-destroy");
+
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity first = store.CreateInstance(tree.Part, "A");
+	const Entity middle = store.CreateInstance(tree.Part, "B");
+	const Entity last = store.CreateInstance(tree.Part, "C");
+	store.SetParent(first, parent);
+	store.SetParent(middle, parent);
+	store.SetParent(last, parent);
+
+	SECTION("the middle child") {
+		store.Destroy(middle);
+
+		std::vector<Entity> children;
+		store.EachChild(parent, [&](Entity child) { children.push_back(child); });
+		REQUIRE(children == std::vector<Entity>{first, last});
+	}
+
+	SECTION("the first child") {
+		store.Destroy(first);
+
+		std::vector<Entity> children;
+		store.EachChild(parent, [&](Entity child) { children.push_back(child); });
+		REQUIRE(children == std::vector<Entity>{middle, last});
+	}
+
+	SECTION("the last child") {
+		store.Destroy(last);
+
+		std::vector<Entity> children;
+		store.EachChild(parent, [&](Entity child) { children.push_back(child); });
+		REQUIRE(children == std::vector<Entity>{first, middle});
+
+		// The tail is what an append writes through, so it has to be the row
+		// that survived rather than the one that went.
+		const Entity added = store.CreateInstance(tree.Part, "D");
+		REQUIRE(store.SetParent(added, parent));
+
+		children.clear();
+		store.EachChild(parent, [&](Entity child) { children.push_back(child); });
+		REQUIRE(children == std::vector<Entity>{first, middle, added});
+	}
+}
+
+TEST_CASE("a raw destroy inside a loop unlinks now and frees afterwards", "[ecs][instance]") {
+	// **The two halves of a destroy do not defer together, and they must not.**
+	// `Store::Destroy` inside `Each` queues the free until the loop ends, so
+	// that removing a row cannot move the rows the loop is still walking. The
+	// unlink cannot wait with it: once the row is vacated its own links are
+	// gone, and there is no "afterwards" left to unlink it by.
+	//
+	// So the tree is right immediately and the directory catches up at the end
+	// of the loop. Both halves are asserted here because a change to either one
+	// on its own is a bug the other one hides.
+	const Tree &tree = Classes_();
+	Store store("destroy-in-loop");
+
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity first = store.CreateInstance(tree.Part, "A");
+	const Entity middle = store.CreateInstance(tree.Part, "B");
+	const Entity last = store.CreateInstance(tree.Part, "C");
+	store.SetParent(first, parent);
+	store.SetParent(middle, parent);
+	store.SetParent(last, parent);
+
+	bool aliveInside = true;
+	store.Each<const Hierarchy>([&](Entity entity, const Hierarchy &) {
+		if (entity == middle) {
+			store.Destroy(middle);
+			aliveInside = store.Alive(middle);
+		}
+	});
+
+	// Deferred, so it outlived the loop it was destroyed in.
+	CHECK(aliveInside);
+	CHECK_FALSE(store.Alive(middle));
+
+	// And unlinked, so the two either side of it found each other.
+	std::vector<Entity> children;
+	store.EachChild(parent, [&](Entity child) { children.push_back(child); });
+	CHECK(children == std::vector<Entity>{first, last});
+}
+
+TEST_CASE("a raw destroy re-roots the children it leaves behind", "[ecs][instance]") {
+	// A raw destroy asks for one row to go, so the subtree stays — but a child
+	// still pointing at a freed parent is worse than either outcome. It is not
+	// a root, because `EachRoot` asks for `Parent == NULL_ENTITY` and this one
+	// names something merely *dead*; so it is in the world, in the save file,
+	// and reachable from nothing.
+	const Tree &tree = Classes_();
+	Store store("re-root");
+
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity kept = store.CreateInstance(tree.Part, "Kept");
+	const Entity nested = store.CreateInstance(tree.Part, "Nested");
+	store.SetParent(kept, parent);
+	store.SetParent(nested, kept);
+
+	store.Destroy(parent);
+
+	REQUIRE(store.Alive(kept));
+	REQUIRE(store.ParentOf(kept) == NULL_ENTITY);
+
+	// One level only. Taking the whole subtree would make this
+	// `DestroyInstance`, which is a delete the caller did not ask for.
+	REQUIRE(store.Alive(nested));
+	REQUIRE(store.ParentOf(nested) == kept);
+
+	size_t found = 0;
+	store.EachRoot([&](Entity root) {
+		if (root == kept) {
+			found++;
+		}
+	});
+	REQUIRE(found == 1);
+}
+
+TEST_CASE("EachChild never hands over a link that resolves to nothing", "[ecs][instance]") {
+	// The walk has always stopped at a link it cannot resolve. What it used to
+	// do first was call the body with it — so the one value a caller cannot
+	// survive, a handle that is not a child, was the one value it was given.
+	// `script`'s `GetChildren()` pushed it straight to Luau.
+	//
+	// Built by hand, because `Store::Destroy` no longer leaves this state: the
+	// parent is pointed at a live entity that carries no `Hierarchy` at all,
+	// which is what a link out of the tree looks like from in here.
+	const Tree &tree = Classes_();
+	Store store("dangling-link");
+
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity real = store.CreateInstance(tree.Part, "Real");
+	store.SetParent(real, parent);
+
+	const Entity stranger = store.Create("");
+	REQUIRE(store.Alive(stranger));
+	REQUIRE(store.Get<Hierarchy>(stranger) == nullptr);
+
+	Hierarchy links = *store.Get<Hierarchy>(parent);
+	links.FirstChild = stranger;
+	store.Set<Hierarchy>(parent, links);
+
+	std::vector<Entity> seen;
+	store.EachChild(parent, [&](Entity child) { seen.push_back(child); });
+	CHECK(seen.empty());
+}
+
+// --- roots -----------------------------------------------------------------
+
+TEST_CASE("roots are every instance with no parent", "[ecs][instance]") {
+	const Tree &tree = Classes_();
+	Store store("roots");
+
+	const Entity first = store.CreateInstance(tree.Model, "First");
+	const Entity second = store.CreateInstance(tree.Model, "Second");
+	const Entity child = store.CreateInstance(tree.Part, "Child");
+
+	std::vector<Entity> roots;
+	const auto collect = [&] {
+		roots.clear();
+		store.EachRoot([&](Entity root) { roots.push_back(root); });
+	};
+
+	collect();
+	CHECK(roots == std::vector<Entity>{first, second, child});
+
+	store.SetParent(child, first);
+	collect();
+	CHECK(roots == std::vector<Entity>{first, second});
+
+	// Back out again, and it is a root once more.
+	store.SetParent(child, NULL_ENTITY);
+	collect();
+	CHECK(roots == std::vector<Entity>{first, second, child});
+
+	// An entity that is not an instance carries no `Hierarchy`, so it is not a
+	// root of the tree — it is not in the tree at all.
+	store.Create("plain");
+	collect();
+	CHECK(roots == std::vector<Entity>{first, second, child});
+}
+
+TEST_CASE("roots come back in creation order, not insertion order", "[ecs][instance]") {
+	// **The contract `Store::EachRoot` documents, and the one thing about it a
+	// reader is most likely to assume wrongly.** A child list is threaded in
+	// insertion order, so reparenting moves an instance to the end of its new
+	// siblings; a root that was detached and reattached keeps its original
+	// place here. Deterministic either way, which is what a recording needs —
+	// an archetype walk would not have been, because a row moves when its
+	// archetype does.
+	const Tree &tree = Classes_();
+	Store store("root-order");
+
+	const Entity first = store.CreateInstance(tree.Model, "First");
+	const Entity second = store.CreateInstance(tree.Model, "Second");
+	const Entity third = store.CreateInstance(tree.Model, "Third");
+
+	// Out of the tree and back in, which is what would move it to the end if
+	// roots were ordered by anything the tree did rather than by their ids.
+	store.SetParent(first, second);
+	store.SetParent(first, NULL_ENTITY);
+
+	std::vector<Entity> roots;
+	store.EachRoot([&](Entity root) { roots.push_back(root); });
+	CHECK(roots == std::vector<Entity>{first, second, third});
+
+	// Adding a component moves the row to another archetype. The order must not
+	// notice: that is the difference between this and a walk over the tables.
+	store.Set<Motion>(third, Motion{1.0f});
+	store.Set<Motion>(first, Motion{2.0f});
+
+	roots.clear();
+	store.EachRoot([&](Entity root) { roots.push_back(root); });
+	CHECK(roots == std::vector<Entity>{first, second, third});
+}
+
+TEST_CASE("FindFirstRoot takes the first root with the name", "[ecs][instance]") {
+	const Tree &tree = Classes_();
+	Store store("find-root");
+
+	const Entity first = store.CreateInstance(tree.Model, "Same");
+	const Entity second = store.CreateInstance(tree.Model, "Same");
+	const Entity buried = store.CreateInstance(tree.Part, "Buried");
+	store.SetParent(buried, first);
+
+	CHECK(store.FindFirstRoot("Same") == first);
+	CHECK(second != NULL_ENTITY);
+
+	// Not a root, so not found — this searches the world's own children and
+	// not its whole tree.
+	CHECK(store.FindFirstRoot("Buried") == NULL_ENTITY);
+	CHECK(store.FindFirstRoot("Nothing") == NULL_ENTITY);
+	CHECK(store.FindFirstRoot("") == NULL_ENTITY);
+}
+
+// --- the O(1) questions ----------------------------------------------------
+
+TEST_CASE("HasChildren answers what EachChild would find", "[ecs][instance]") {
+	// The probe a tree view asks per row. It is `FirstChild != NULL_ENTITY` and
+	// never a walk, so what it has to be tested for is that it stays in step
+	// with the list through every edit that empties one.
+	const Tree &tree = Classes_();
+	Store store("has-children");
+
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity only = store.CreateInstance(tree.Part, "Only");
+
+	CHECK_FALSE(store.HasChildren(parent));
+
+	store.SetParent(only, parent);
+	CHECK(store.HasChildren(parent));
+	CHECK_FALSE(store.HasChildren(only));
+
+	SECTION("emptied by reparenting away") {
+		store.SetParent(only, NULL_ENTITY);
+		CHECK_FALSE(store.HasChildren(parent));
+	}
+
+	SECTION("emptied by destroying the child") {
+		store.DestroyInstance(only);
+		CHECK_FALSE(store.HasChildren(parent));
+	}
+
+	SECTION("emptied by a raw destroy") {
+		store.Destroy(only);
+		CHECK_FALSE(store.HasChildren(parent));
+	}
+
+	SECTION("an entity that is not an instance has no children") {
+		CHECK_FALSE(store.HasChildren(store.Create("plain")));
+		CHECK_FALSE(store.HasChildren(NULL_ENTITY));
+	}
+}
+
+TEST_CASE("descendancy includes the instance itself and stops at a root", "[ecs][instance]") {
+	const Tree &tree = Classes_();
+	Store store("descendancy");
+
+	const Entity top = store.CreateInstance(tree.Model, "Top");
+	const Entity middle = store.CreateInstance(tree.Model, "Middle");
+	const Entity leaf = store.CreateInstance(tree.Part, "Leaf");
+	const Entity elsewhere = store.CreateInstance(tree.Part, "Elsewhere");
+	store.SetParent(middle, top);
+	store.SetParent(leaf, middle);
+
+	// Reflexive, which is what makes it the test `SetParent` uses to refuse a
+	// cycle: an instance is inside its own subtree.
+	CHECK(store.IsDescendantOf(top, top));
+
+	CHECK(store.IsDescendantOf(leaf, middle));
+	CHECK(store.IsDescendantOf(leaf, top));
+	CHECK_FALSE(store.IsDescendantOf(top, leaf));
+	CHECK_FALSE(store.IsDescendantOf(elsewhere, top));
+
+	// **Not everything is a descendant of nothing.** The walk ends when it runs
+	// out of parents, and the null handle is where it ends rather than
+	// something it matches — so a caller asking "is this under NULL_ENTITY"
+	// gets `false` and not "yes, everything is".
+	CHECK_FALSE(store.IsDescendantOf(leaf, NULL_ENTITY));
+	CHECK_FALSE(store.IsDescendantOf(NULL_ENTITY, top));
+}
+
+TEST_CASE("FindFirstChild searches one level and reports nothing honestly", "[ecs][instance]") {
+	const Tree &tree = Classes_();
+	Store store("find-child");
+
+	const Entity parent = store.CreateInstance(tree.Model, "Parent");
+	const Entity named = store.CreateInstance(tree.Part, "Wanted");
+	const Entity unnamed = store.CreateInstance(tree.Part);
+	const Entity deep = store.CreateInstance(tree.Part, "Deep");
+	store.SetParent(unnamed, parent);
+	store.SetParent(named, parent);
+	store.SetParent(deep, named);
+
+	CHECK(store.FindFirstChild(parent, "Wanted") == named);
+
+	// One level, which is what makes it `FindFirstChild` rather than a search.
+	CHECK(store.FindFirstChild(parent, "Deep") == NULL_ENTITY);
+
+	CHECK(store.FindFirstChild(parent, "Absent") == NULL_ENTITY);
+	CHECK(store.FindFirstChild(store.Create("plain"), "Wanted") == NULL_ENTITY);
+	CHECK(store.FindFirstChild(NULL_ENTITY, "Wanted") == NULL_ENTITY);
+
+	// **The empty name finds an unnamed instance, and this asserts it because
+	// it is surprising rather than because it is obviously right.**
+	// `CreateInstance` with an empty name leaves the instance with no
+	// `core::Name` at all, `InstanceNameOf` answers with an invalid one, and an
+	// invalid name is what `Name("")` compares equal to — so searching for ""
+	// is asking for "whatever has no name", and it answers.
+	//
+	// Self-consistent, and not Roblox: there `FindFirstChild("")` finds only an
+	// instance somebody named "". Worth a decision rather than a silent change,
+	// so it is written down here as what the engine does today.
+	CHECK(store.FindFirstChild(parent, "") == unnamed);
+}
+
+TEST_CASE("SetParent refuses ends that are not instances", "[ecs][instance]") {
+	const Tree &tree = Classes_();
+	Store store("bad-ends");
+
+	const Entity instance = store.CreateInstance(tree.Part, "Part");
+	const Entity plain = store.Create("plain");
+
+	CHECK_FALSE(store.SetParent(plain, instance));
+	CHECK_FALSE(store.SetParent(instance, plain));
+	CHECK_FALSE(store.SetParent(NULL_ENTITY, instance));
+
+	// Detaching something already detached is the one pairing that succeeds,
+	// because it is asking for the state it is already in.
+	CHECK(store.SetParent(instance, NULL_ENTITY));
+	CHECK_FALSE(store.SetParent(plain, NULL_ENTITY));
 }
 
 TEST_CASE("parenting survives a child freed without unlinking", "[ecs][instance]") {

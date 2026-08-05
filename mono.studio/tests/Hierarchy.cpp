@@ -6,21 +6,26 @@
 // reason the compile is a class rather than a function inside `DrawExplorer`.
 
 #include <engine/core/Name.hpp>
+#include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <studio/Hierarchy.hpp>
+#include <studio/Widgets.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.hierarchy")
 
 using engine::core::Name;
+using engine::core::Random;
 using engine::ecs::ClassId;
 using engine::ecs::Classes;
 using engine::ecs::Entity;
@@ -352,6 +357,375 @@ TEST_CASE("a view pointed at another world re-compiles", "[studio][hierarchy]") 
 	CHECK(view.Rebuild(second.World, Closed()));
 	CHECK_FALSE(view.Rebuild(second.World, Closed()));
 	CHECK(view.Rebuild(first.World, Closed()));
+}
+
+TEST_CASE("the signature ignores everything the rows do not read", "[studio][hierarchy]") {
+	// **The other half of the contract, and the half a soundness test cannot
+	// reach.** A signature that changed whenever anything in the world moved
+	// would be correct and worthless: an editor open beside a running
+	// simulation would re-compile its tree every frame, which is the cost this
+	// whole design exists to avoid.
+	Scene scene;
+	HierarchyView view;
+
+	REQUIRE(view.Rebuild(scene.World, Closed()));
+	REQUIRE_FALSE(view.Rebuild(scene.World, Closed()));
+
+	SECTION("a property on an instance") {
+		// The case that happens sixty times a second. `Transform` is not one of
+		// the three columns the flatten reads, so moving every part in the
+		// scene must not cost a single rebuild.
+		for (const engine::ecs::Entity moved :
+			 {scene.Workspace, scene.Model, scene.Handle, scene.Grip, scene.Terrain}) {
+			engine::scene::Transform shifted;
+			shifted.Frame.Position = engine::core::Vector3{1.0f, 2.0f, 3.0f};
+			scene.World.Set<engine::scene::Transform>(moved, shifted);
+		}
+
+		// The write landed, so the absence of a rebuild below is the signature
+		// ignoring a real change rather than the test having done nothing.
+		REQUIRE(scene.World.Get<engine::scene::Transform>(scene.Grip) != nullptr);
+		REQUIRE(scene.World.Get<engine::scene::Transform>(scene.Grip)->Frame.Position.X == 1.0f);
+
+		CHECK_FALSE(view.Rebuild(scene.World, Closed()));
+	}
+
+	SECTION("the clock") {
+		scene.World.AdvanceTick(1.0f / 60.0f);
+		scene.World.SetFrame(1.0f / 60.0f, 0.5f);
+		CHECK_FALSE(view.Rebuild(scene.World, Closed()));
+	}
+
+	SECTION("entities that are not instances") {
+		// A plain entity carries no `Hierarchy`, so it is not in the tree and
+		// not in the query the scan runs.
+		const engine::ecs::Entity plain = scene.World.Create("plain");
+		CHECK_FALSE(view.Rebuild(scene.World, Closed()));
+
+		scene.World.Destroy(plain);
+		CHECK_FALSE(view.Rebuild(scene.World, Closed()));
+	}
+}
+
+TEST_CASE("a skipped rebuild leaves the rows usable", "[studio][hierarchy]") {
+	// The rows are the answer, not a cache in front of one — so everything that
+	// reads them has to keep working on a frame that did not re-compile. This
+	// is what makes `Rebuild`'s `false` safe to ignore at the call site.
+	Scene scene;
+	HierarchyView view;
+
+	const engine::ecs::Entity open[] = {scene.Workspace, scene.Model};
+	HierarchyRequest request = Closed();
+	request.Open = open;
+
+	REQUIRE(view.Rebuild(scene.World, request));
+	const std::vector<std::string> before = Names(view);
+	const size_t grip = view.RowOf(scene.Grip);
+	const size_t count = view.Count();
+
+	REQUIRE_FALSE(view.Rebuild(scene.World, request));
+
+	CHECK(Names(view) == before);
+	CHECK(view.RowOf(scene.Grip) == grip);
+	CHECK(view.Count() == count);
+	CHECK(view.Holds(scene.Grip));
+	CHECK(view.MatchCount() == 0);
+}
+
+TEST_CASE("a deep chain flattens in order and reports its depths", "[studio][hierarchy]") {
+	const ClassId part = PartClass();
+	Store world{"hierarchy_deep"};
+
+	std::vector<engine::ecs::Entity> chain;
+	for (int level = 0; level < 24; level++) {
+		const engine::ecs::Entity made =
+			world.CreateInstance(part, "Level" + std::to_string(level));
+		if (!chain.empty()) {
+			world.SetParent(made, chain.back());
+		}
+		chain.push_back(made);
+	}
+
+	HierarchyView view;
+	HierarchyRequest request = Closed();
+	request.Open = chain;
+	REQUIRE(view.Rebuild(world, request));
+
+	REQUIRE(view.Rows().size() == chain.size());
+	for (size_t level = 0; level < chain.size(); level++) {
+		CHECK(view.Rows()[level].Instance == chain[level]);
+		CHECK(view.Rows()[level].Depth == level);
+		CHECK(view.RowOf(chain[level]) == level);
+	}
+
+	// The deepest row is the only leaf, and the only one with no expander.
+	CHECK_FALSE(view.Rows().back().HasChildren);
+	CHECK(view.Rows().front().HasChildren);
+
+	// Filtering to the bottom of the chain keeps the whole chain, because every
+	// level of it is an ancestor of the match.
+	REQUIRE(view.Rebuild(world, Closed("Level23")));
+	CHECK(view.Rows().size() == chain.size());
+	CHECK(view.MatchCount() == 1);
+	CHECK(view.Rows().back().Matched);
+	CHECK_FALSE(view.Rows().front().Matched);
+}
+
+TEST_CASE("several roots each keep their own subtree", "[studio][hierarchy]") {
+	// The interleaving a single-root scene cannot catch: a root's whole subtree
+	// is emitted before the next root starts, rather than the roots coming out
+	// first and their children after.
+	const ClassId part = PartClass();
+	Store world{"hierarchy_forest"};
+
+	const engine::ecs::Entity left = world.CreateInstance(part, "Left");
+	const engine::ecs::Entity right = world.CreateInstance(part, "Right");
+	const engine::ecs::Entity leftChild = world.CreateInstance(part, "LeftChild");
+	const engine::ecs::Entity rightChild = world.CreateInstance(part, "RightChild");
+	world.SetParent(leftChild, left);
+	world.SetParent(rightChild, right);
+
+	const engine::ecs::Entity open[] = {left, right};
+	HierarchyRequest request = Closed();
+	request.Open = open;
+
+	HierarchyView view;
+	REQUIRE(view.Rebuild(world, request));
+	CHECK(Names(view) == std::vector<std::string>{"Left", "LeftChild", "Right", "RightChild"});
+
+	// A filter that hits both branches keeps both, and nothing else.
+	REQUIRE(view.Rebuild(world, Closed("Child")));
+	CHECK(Names(view) == std::vector<std::string>{"Left", "LeftChild", "Right", "RightChild"});
+	CHECK(view.MatchCount() == 2);
+}
+
+TEST_CASE("a filter matching nothing shows nothing", "[studio][hierarchy]") {
+	Scene scene;
+	HierarchyView view;
+
+	REQUIRE(view.Rebuild(scene.World, Closed("zzzz")));
+	CHECK(view.Rows().empty());
+	CHECK(view.MatchCount() == 0);
+	CHECK(view.Filtering());
+
+	// Still the world it was: hiding every row is not forgetting them.
+	CHECK(view.Count() == 6);
+	CHECK(view.Holds(scene.Workspace));
+	CHECK(view.RowOf(scene.Workspace) == HierarchyView::NO_ROW);
+}
+
+TEST_CASE("handles that name nothing are ignored rather than fatal", "[studio][hierarchy]") {
+	// Both sets are handles the panel collected on an earlier frame, and an
+	// instance can be deleted between one frame and the next — by an undo, by a
+	// script, by Stop restoring a snapshot. A stale handle has to be nothing
+	// more than an entry nobody matches.
+	Scene scene;
+	HierarchyView view;
+
+	const engine::ecs::Entity dead = scene.Grip;
+	scene.World.DestroyInstance(dead);
+
+	const engine::ecs::Entity open[] = {scene.Workspace, dead, engine::ecs::Entity{0xABCDEF}};
+	const engine::ecs::Entity reveal[] = {dead};
+	HierarchyRequest request = Closed();
+	request.Open = open;
+	request.Reveal = reveal;
+
+	REQUIRE(view.Rebuild(scene.World, request));
+	CHECK(Names(view) == std::vector<std::string>{"Workspace", "Model", "Terrain", "Lighting"});
+	CHECK_FALSE(view.Holds(dead));
+	CHECK(view.RowOf(dead) == HierarchyView::NO_ROW);
+
+	// `Model` is closed, because the only thing that asked for it open was a
+	// handle to something that is gone.
+	CHECK_FALSE(RowNamed(view, "Model")->Open);
+	CHECK(RowNamed(view, "Model")->HasChildren);
+}
+
+TEST_CASE("an unnamed instance draws as unnamed and matches no filter", "[studio][hierarchy]") {
+	const ClassId part = PartClass();
+	Store world{"hierarchy_unnamed"};
+
+	const engine::ecs::Entity anonymous = world.CreateInstance(part, "");
+	REQUIRE(anonymous != NULL_ENTITY);
+
+	HierarchyView view;
+	REQUIRE(view.Rebuild(world, Closed()));
+
+	REQUIRE(view.Rows().size() == 1);
+	CHECK(std::string_view(view.Rows()[0].Text) == "(unnamed)");
+
+	// The class is still drawn, because that is the half of the row that always
+	// has something to say.
+	CHECK(std::string_view(view.Rows()[0].ClassText) == "Part");
+	CHECK_FALSE(view.Rows()[0].Name.IsValid());
+
+	// **Not matched by the empty-ish filter that finds it in the store.**
+	// `FindFirstChild("")` treats an invalid name as a name; a filter box is a
+	// person typing, and a row with nothing to read cannot be what they meant.
+	REQUIRE(view.Rebuild(world, Closed("unnamed")));
+	CHECK(view.Rows().empty());
+	CHECK(view.MatchCount() == 0);
+}
+
+TEST_CASE("opening a leaf changes nothing", "[studio][hierarchy]") {
+	Scene scene;
+	HierarchyView view;
+
+	// `Terrain` has no children, so asking for it open is a request the tree
+	// has nothing to honour with — and must not draw an expander for.
+	const engine::ecs::Entity open[] = {scene.Workspace, scene.Terrain};
+	HierarchyRequest request = Closed();
+	request.Open = open;
+
+	REQUIRE(view.Rebuild(scene.World, request));
+	CHECK(Names(view) == std::vector<std::string>{"Workspace", "Model", "Terrain", "Lighting"});
+	CHECK_FALSE(RowNamed(view, "Terrain")->Open);
+	CHECK_FALSE(RowNamed(view, "Terrain")->HasChildren);
+}
+
+TEST_CASE("the compiled rows are what a plain walk of the tree would draw", "[studio][hierarchy][fuzz]") {
+	// **A model, written from the store rather than from the compiled nodes.**
+	// Every other test here names a case somebody thought of. This one builds a
+	// random tree, opens a random part of it, and checks the flattened rows
+	// against a straightforward recursive walk — the obvious implementation the
+	// clever one has to agree with.
+	//
+	// It is the only test that can catch a wrong answer in the parts that do
+	// not look like anything: the binary chop into the sorted nodes, the
+	// reverse push onto the flatten's stack, and the ancestor propagation's
+	// early exit.
+	const ClassId part = PartClass();
+	Store world{"hierarchy_model"};
+
+	std::vector<Entity> nodes;
+	for (int index = 0; index < 120; index++) {
+		// A quarter of the names repeat, so the filter has something to match
+		// in more than one branch and at more than one depth.
+		const Entity made = world.CreateInstance(
+			part, (index % 4 == 0 ? "Marked" : "Node") + std::to_string(index)
+		);
+		if (index > 0 && Random::Bits(static_cast<uint32_t>(index), 811) % 5 != 0) {
+			world.SetParent(made, nodes[Random::Bits(static_cast<uint32_t>(index), 812) % nodes.size()]);
+		}
+		nodes.push_back(made);
+	}
+
+	std::vector<Entity> open;
+	for (size_t index = 0; index < nodes.size(); index++) {
+		if (Random::Bits(static_cast<uint32_t>(index), 813) % 3 != 0) {
+			open.push_back(nodes[index]);
+		}
+	}
+
+	const auto isOpen = [&](Entity instance) {
+		return std::find(open.begin(), open.end(), instance) != open.end();
+	};
+
+	HierarchyRequest request = Closed();
+	request.Open = open;
+
+	HierarchyView view;
+	REQUIRE(view.Rebuild(world, request));
+
+	SECTION("unfiltered") {
+		std::vector<Entity> expected;
+		std::vector<uint16_t> depths;
+
+		// The obvious walk: a node, then its children when it is open.
+		const auto walk = [&](Entity at, uint16_t depth, auto &&self) -> void {
+			expected.push_back(at);
+			depths.push_back(depth);
+			if (!isOpen(at)) {
+				return;
+			}
+			world.EachChild(at, [&](Entity child) {
+				self(child, static_cast<uint16_t>(depth + 1), self);
+			});
+		};
+		world.EachRoot([&](Entity root) { walk(root, 0, walk); });
+
+		// **The model has to have produced a tree worth comparing.** A model
+		// test that quietly degenerates to "both sides are empty" passes
+		// forever and checks nothing.
+		REQUIRE(expected.size() > 20);
+		REQUIRE(*std::max_element(depths.begin(), depths.end()) >= 2);
+
+		REQUIRE(view.Rows().size() == expected.size());
+		for (size_t index = 0; index < expected.size(); index++) {
+			CHECK(view.Rows()[index].Instance == expected[index]);
+			CHECK(view.Rows()[index].Depth == depths[index]);
+			CHECK(view.RowOf(expected[index]) == index);
+		}
+	}
+
+	SECTION("filtered") {
+		int score = 0;
+		const auto matches = [&](Entity at) {
+			const Name name = world.InstanceNameOf(at);
+			return name.IsValid() && studio::FuzzyMatch("Marked", studio::Label(name), score);
+		};
+
+		// Shown when this node matched, or anything beneath it did.
+		const auto survives = [&](Entity at, auto &&self) -> bool {
+			bool any = matches(at);
+			world.EachChild(at, [&](Entity child) {
+				if (self(child, self)) {
+					any = true;
+				}
+			});
+			return any;
+		};
+
+		std::vector<Entity> expected;
+		const auto walk = [&](Entity at, uint16_t depth, auto &&self) -> void {
+			if (!survives(at, survives)) {
+				return;
+			}
+			expected.push_back(at);
+
+			// An ancestor of a match is opened whatever the author last
+			// clicked; anything else keeps the open set's answer, and neither
+			// opens onto a subtree the filter has emptied.
+			bool below = false;
+			world.EachChild(at, [&](Entity child) {
+				if (survives(child, survives)) {
+					below = true;
+				}
+			});
+			if (!below || !(isOpen(at) || below)) {
+				return;
+			}
+			world.EachChild(at, [&](Entity child) {
+				self(child, static_cast<uint16_t>(depth + 1), self);
+			});
+		};
+
+		request.Filter = "Marked";
+		REQUIRE(view.Rebuild(world, request));
+		world.EachRoot([&](Entity root) { walk(root, 0, walk); });
+
+		// Narrowed, but not to nothing — see the note above.
+		REQUIRE(expected.size() > 5);
+		REQUIRE(expected.size() < view.Count());
+
+		REQUIRE(view.Rows().size() == expected.size());
+		for (size_t index = 0; index < expected.size(); index++) {
+			CHECK(view.Rows()[index].Instance == expected[index]);
+		}
+
+		// Every row is either a match or an ancestor of one, and every match is
+		// a row.
+		size_t matched = 0;
+		for (const HierarchyRow &row : view.Rows()) {
+			CHECK(survives(row.Instance, survives));
+			CHECK(row.Matched == matches(row.Instance));
+			if (row.Matched) {
+				matched++;
+			}
+		}
+		CHECK(view.MatchCount() == matched);
+	}
 }
 
 TEST_CASE("Forget re-compiles unconditionally", "[studio][hierarchy]") {
