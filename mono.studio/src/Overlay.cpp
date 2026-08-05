@@ -804,6 +804,15 @@ namespace studio {
 			return;
 		}
 
-		Select(shown, Entity(hit->Id), add);
+		const Entity picked(hit->Id);
+		Select(shown, picked, add);
+		SelectionAnchor = picked;
+
+		// **Shown in the tree as well as highlighted in the viewport.** Clicking
+		// a part is how an author asks "what is this and where does it live",
+		// and an explorer that left it collapsed six levels down answered half
+		// the question. Studio reveals it; so does this.
+		OpenPathTo(shown, picked);
+		RevealSelection = true;
 	}
 }

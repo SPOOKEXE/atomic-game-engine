@@ -182,7 +182,19 @@ namespace engine::ecs {
 			// Read before the body runs, so a body that reparents or destroys
 			// the child it was handed does not lose its place in the list.
 			const Hierarchy *link = NodeOf(state, child);
-			const Entity next = link == nullptr ? NULL_ENTITY : link->NextSibling;
+
+			// **A link that resolves to nothing ends the walk without being
+			// handed over.** It used to call the body first and stop
+			// afterwards, so the one thing a caller could not survive — a
+			// handle that is not a child, and may not be an entity — was the
+			// one thing it was given. `GetChildren()` published it straight to
+			// a script, and `RepairChildren` two functions up already breaks
+			// before using the same value.
+			if (link == nullptr) {
+				return;
+			}
+
+			const Entity next = link->NextSibling;
 
 			body(child);
 			child = next;
@@ -229,6 +241,23 @@ namespace engine::ecs {
 		// — including the one that would destroy it.
 		if (parent != NULL_ENTITY && IsDescendantOf(state, parent, instance)) {
 			return false;
+		}
+
+		// **Re-parenting to the parent it already has does nothing**, and it has
+		// to do nothing rather than do the same thing twice. Everything below
+		// unlinks and then appends at the end, so a no-op assignment moved the
+		// instance to the back of its own sibling list — and the sibling list
+		// is the order `GetChildren()` returns, which replication and replay
+		// both depend on agreeing across machines.
+		//
+		// The shape that finds it is ordinary Roblox code: a script that writes
+		// `thing.Parent = holder` on a value that may or may not have changed,
+		// or an editor that applies a drag by assigning the parent the row was
+		// already under. Roblox's own assignment is a no-op here, so a game
+		// written against it silently reorders on this engine and nothing says
+		// why.
+		if (node->Parent == parent) {
+			return true;
 		}
 
 		// --- unlink from the old parent ---
@@ -297,6 +326,42 @@ namespace engine::ecs {
 		node->Parent = parent;
 		node->PreviousSibling = last;
 		return true;
+	}
+
+	void DetachFromTree(StoreState &state, Entity instance) {
+		// **`Assigned`, never `Of`.** This runs on every `Store::Destroy`,
+		// including in a process that has not registered a single class yet —
+		// and `Components::Of<Hierarchy>()` would *register* the type there,
+		// under the compiler-spelled name, which the explicit `ecs.Hierarchy`
+		// registration then aborts on. A type nothing has registered is a type
+		// no row can be carrying, so an invalid id is the whole answer.
+		const ComponentId hierarchy = Components::Assigned<Hierarchy>();
+		if (!hierarchy.IsValid()) {
+			return;
+		}
+
+		if (GetComponent(state, instance, hierarchy) == nullptr) {
+			// Not an instance, so nothing in the tree names it. One component
+			// lookup is the whole cost this adds to destroying a plain entity.
+			return;
+		}
+
+		// **The children first, and re-rooted rather than destroyed.** Leaving
+		// them pointing at a freed parent would not crash — `ParentOf` of a
+		// dead handle is null — but it would make them invisible: `EachRoot`
+		// asks for `Parent == NULL_ENTITY`, so a child whose parent is merely
+		// *dead* is in the world, in the save file, and reachable from nothing.
+		//
+		// Collected before anything moves, because unlinking one rewrites the
+		// sibling links the walk is standing on.
+		std::vector<Entity> children;
+		EachChild(state, instance, [&children](Entity child) { children.push_back(child); });
+
+		for (const Entity child : children) {
+			SetParent(state, child, NULL_ENTITY);
+		}
+
+		SetParent(state, instance, NULL_ENTITY);
 	}
 
 	void DestroyInstance(StoreState &state, Entity instance) {

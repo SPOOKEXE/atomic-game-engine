@@ -633,13 +633,16 @@ namespace studio {
 	}
 
 	void Editor::ExpandWorldTree(WorldId world) {
-		Universe->Enter(world, [this](Store &store) {
-			// Every entity, not only the ones with children. A leaf in the set
-			// costs one comparison the first time the tree draws and is then
-			// dropped; filtering them out here would mean walking the children
-			// of everything, which is the work the explorer is about to do
-			// anyway.
-			store.EachEntity([this](Entity instance) { Expanded.push_back(instance.Id); });
+		WorldTree &tree = TreeFor(world);
+		tree.Open.clear();
+
+		Universe->Enter(world, [&tree](Store &store) {
+			// Every entity, not only the ones with children. A leaf in the open
+			// set is one entry the compile never finds a child for and never
+			// asks about again; filtering them out here would mean walking the
+			// children of everything, which is the work the explorer is about
+			// to do anyway.
+			store.EachEntity([&tree](Entity instance) { tree.Open.push_back(instance); });
 		});
 
 		ExpandedWorlds.push_back(world.Index);
@@ -1095,6 +1098,12 @@ namespace studio {
 
 	void Editor::ClearSelection() {
 		Selection.clear();
+
+		// The anchor goes with it. `SelectRange` already falls back to a plain
+		// click for an anchor it cannot find a row for, so a stale one is not a
+		// fault — but an author whose next shift-click measures from a row they
+		// deselected two minutes ago has no way to know why.
+		SelectionAnchor = NULL_ENTITY;
 	}
 
 	bool Editor::IsSelected(Entity instance) const {
@@ -1145,7 +1154,7 @@ namespace studio {
 		Scripts.clear();
 		ActiveScript = -1;
 		ClearSelection();
-		Expanded.clear();
+		Trees.clear();
 
 		for (const WorldId existing : Universe->Worlds()) {
 			Universe->Destroy(existing);
@@ -1241,7 +1250,7 @@ namespace studio {
 		Scripts.clear();
 		ActiveScript = -1;
 		ClearSelection();
-		Expanded.clear();
+		Trees.clear();
 
 		GameName = info.Name;
 		GamePath = path;
@@ -1596,9 +1605,9 @@ namespace studio {
 
 		if (created != NULL_ENTITY) {
 			Select(world, created, false);
-			if (landed != NULL_ENTITY) {
-				Expanded.push_back(landed.Id);
-			}
+			SelectionAnchor = created;
+			OpenPathTo(world, created);
+			RevealSelection = true;
 			MarkModified();
 		}
 		return created;
@@ -2134,7 +2143,7 @@ namespace studio {
 			SelectionWorld = Active;
 			ClearSelection();
 		}
-		Expanded.clear();
+		Trees.clear();
 
 		SyncWorldStates();
 	}

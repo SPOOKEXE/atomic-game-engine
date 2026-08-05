@@ -807,6 +807,11 @@ namespace engine::ecs {
 		// Appends to the end of the sibling list, so `EachChild` yields
 		// insertion order — which replication and replay both depend on.
 		//
+		// **Assigning the parent it already has is a no-op**, exactly as it is
+		// in Roblox. Without that it was an unlink and an append, which moved
+		// the instance to the back of its own siblings and changed what
+		// `GetChildren()` returns for a write that changed nothing.
+		//
 		// Refuses to make an instance its own ancestor, because a cycle in the
 		// tree is a hang in every walk of it rather than a wrong answer.
 		//

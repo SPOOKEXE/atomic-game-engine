@@ -231,203 +231,291 @@ namespace studio {
 
 			if (ImGui::MenuItem("Unparent")) {
 				PendingReparent.World = world;
-				PendingReparent.Instance = instance;
 				PendingReparent.Parent = NULL_ENTITY;
+				PendingReparent.Instances.clear();
+
+				// The menu acts on the selection when the row it was opened
+				// over is part of it, exactly as Delete and Duplicate do.
+				if (world == SelectionWorld && IsSelected(instance)) {
+					PendingReparent.Instances = Selection;
+				} else {
+					PendingReparent.Instances.push_back(instance);
+				}
 			}
 		}
 	}
 
-	void Editor::DrawTreeNode(Store &store, WorldId world, engine::ecs::Entity instance) {
-		if (!store.Alive(instance)) {
+	Editor::WorldTree &Editor::TreeFor(WorldId world) {
+		for (WorldTree &tree : Trees) {
+			if (tree.World == world) {
+				return tree;
+			}
+		}
+
+		Trees.push_back(WorldTree{});
+		Trees.back().World = world;
+		return Trees.back();
+	}
+
+	void Editor::OpenPathTo(WorldId world, engine::ecs::Entity instance) {
+		if (!world.IsValid() || instance == NULL_ENTITY) {
 			return;
 		}
 
-		const Name name = store.InstanceNameOf(instance);
-		const ClassId klass = store.ClassOf(instance);
-		const char *className = klass.IsValid() ? Label(Classes::Describe(klass).Name) : "Entity";
+		WorldTree &tree = TreeFor(world);
 
-		// **O(1), and it used to be a full walk of the sibling list.** This asks
-		// whether to draw an expander, and answering it with `EachChild` cost two
-		// hundred steps on the root of a two-hundred-part scene — every frame,
-		// for a bool the first child settles. `bench_studio` measured the probe
-		// alone at 2.40 us on that shape.
-		const bool hasChildren = store.HasChildren(instance);
-
-		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
-								   ImGuiTreeNodeFlags_OpenOnDoubleClick;
-		if (!hasChildren) {
-			flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-		}
-		if (IsSelected(instance) && world == SelectionWorld) {
-			flags |= ImGuiTreeNodeFlags_Selected;
-		}
-
-		const bool wanted =
-			std::find(Expanded.begin(), Expanded.end(), instance.Id) != Expanded.end();
-		if (wanted) {
-			ImGui::SetNextItemOpen(true);
-			// Consumed. The set is a request from an action — "I just made a
-			// child in here" — and not a mirror of what is open, which imgui
-			// already tracks. Keeping it would fight every attempt to collapse.
-			Expanded.erase(std::remove(Expanded.begin(), Expanded.end(), instance.Id), Expanded.end());
-		}
-
-		ImGui::PushID(static_cast<int>(instance.Id));
-		const bool open = ImGui::TreeNodeEx(
-			"##node", flags, "%s", name.IsValid() ? Label(name) : "(unnamed)"
-		);
-
-		// **Everything that asks about "the last item" happens here, before
-		// anything else is drawn.** imgui has exactly one last item, and it is
-		// whatever was submitted most recently — so the dimmed class name below
-		// would become it, and `BeginDragDropSource` would then be asked to drag
-		// a `Text` with no id. That is an assertion rather than a subtle bug,
-		// which is the good version of this mistake, and it cost one run to
-		// find.
-
-		// **Everything below this point is skipped for a row nobody can see**,
-		// and on a long tree that is most of them. imgui already declines to
-		// *render* a clipped item, but every question asked about it and every
-		// scope opened around it still costs — the two drag-and-drop scopes, the
-		// context popup, and the dimmed class name with its own font push, which
-		// is glyph layout for text that is off screen.
-		//
-		// None of it can do anything for an invisible row: an item outside the
-		// clip rect cannot be hovered, clicked or dragged, so every one of these
-		// answers false anyway. The row still submits its node, so the scrollbar
-		// and the layout are unchanged — what goes is only the work whose result
-		// was already known.
-		if (!ImGui::IsItemVisible()) {
-			if (open && hasChildren) {
-				const size_t first = ChildScratch.size();
-				store.EachChild(instance, [&](engine::ecs::Entity child) {
-					ChildScratch.push_back(child);
-				});
-				const size_t last = ChildScratch.size();
-
-				for (size_t index = first; index < last; index++) {
-					DrawTreeNode(store, world, ChildScratch[index]);
+		// **The store, not the compiled view.** This is reached from actions —
+		// an insert, a paste, a Find result — and the view describing the world
+		// as it was *before* that action has never heard of what was just made.
+		Universe->Enter(world, [&](Store &store) {
+			for (engine::ecs::Entity walk = store.ParentOf(instance);
+				 walk != NULL_ENTITY && store.Alive(walk);
+				 walk = store.ParentOf(walk)) {
+				if (std::find(tree.Open.begin(), tree.Open.end(), walk) == tree.Open.end()) {
+					tree.Open.push_back(walk);
 				}
-
-				ChildScratch.resize(first);
-				ImGui::TreePop();
 			}
+		});
+	}
 
-			ImGui::PopID();
+	void Editor::SelectRange(
+		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor,
+		engine::ecs::Entity to, bool add
+	) {
+		const size_t from = view.RowOf(anchor);
+		const size_t until = view.RowOf(to);
+
+		// An anchor that has been deleted, collapsed out of sight or filtered
+		// away is no anchor. Falling back to a plain click is what every list
+		// does, and is what an author reads the gesture as when the row they
+		// remember shift-clicking from is no longer on screen.
+		if (from == HierarchyView::NO_ROW || until == HierarchyView::NO_ROW) {
+			Select(world, to, add);
 			return;
 		}
 
-		const bool toggled = ImGui::IsItemToggledOpen();
-		const bool hovered = ImGui::IsItemHovered();
-
-		if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !toggled) {
-			Select(world, instance, ImGui::GetIO().KeyCtrl);
+		if (world != SelectionWorld) {
+			Selection.clear();
+			SelectionWorld = world;
+		}
+		if (!add) {
+			Selection.clear();
 		}
 
-		if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-			Select(world, instance, false);
-		}
+		const std::span<const HierarchyRow> rows = view.Rows();
+		const size_t first = from < until ? from : until;
+		const size_t last = from < until ? until : from;
 
-		if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-			const ClassId scriptClass = Classes::Find(Name("LuaSourceContainer"));
-			if (scriptClass.IsValid() && store.IsA(instance, scriptClass)) {
-				PendingOpenScript.World = world;
-				PendingOpenScript.Instance = instance;
+		for (size_t index = first; index <= last && index < rows.size(); index++) {
+			const engine::ecs::Entity row = rows[index].Instance;
+			if (std::find(Selection.begin(), Selection.end(), row) == Selection.end()) {
+				Selection.push_back(row);
 			}
 		}
 
-		// --- drag and drop --------------------------------------------------
+		// **The anchor does not move.** Shift-clicking a second time has to
+		// re-measure from the same place, or dragging the range back over
+		// itself grows instead of shrinking.
+	}
 
-		if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
-			const DragPayload payload{world.Index, instance};
-			ImGui::SetDragDropPayload(DRAG_TYPE, &payload, sizeof(payload));
-			ImGui::Text("%s", name.IsValid() ? Label(name) : "(unnamed)");
-			ImGui::EndDragDropSource();
+	void Editor::DrawInstanceRows(Store &store, WorldTree &tree) {
+		const std::span<const HierarchyRow> rows = tree.View.Rows();
+		if (rows.empty()) {
+			ImGui::TextDisabled(tree.View.Filtering() ? "no instance matches" : "empty scene");
+			return;
 		}
 
-		if (ImGui::BeginDragDropTarget()) {
-			if (const ImGuiPayload *dropped = ImGui::AcceptDragDropPayload(DRAG_TYPE)) {
-				const auto *moved = static_cast<const DragPayload *>(dropped->Data);
+		const WorldId world = tree.World;
+		const float step = ImGui::GetStyle().IndentSpacing;
 
-				// **Two different operations, and the payload's world is what
-				// picks between them.** Within one store a move is a
-				// `SetParent` and the instance keeps its handle, its id and
-				// everything pointing at it. Across two stores none of that is
-				// possible — an `Entity` means nothing in another world — so
-				// the subtree is written out, rebuilt on the other side and the
-				// original destroyed. Same gesture, and the cost is not the
-				// same, which is why they are not one code path pretending to
-				// be.
-				PendingReparent.World = WorldId{};
-				PendingMove.Source = WorldId{};
+		// Resolved before the clipper, because a row it is going to skip cannot
+		// be scrolled to — `IncludeItemByIndex` is what keeps it submitted.
+		size_t reveal = HierarchyView::NO_ROW;
+		if (RevealSelection && world == SelectionWorld && !Selection.empty()) {
+			reveal = tree.View.RowOf(Selection.front());
+		}
 
-				if (moved->World == world.Index) {
-					PendingReparent.World = world;
-					PendingReparent.Instance = moved->Instance;
-					PendingReparent.Parent = instance;
-				} else {
-					PendingMove.Source = WorldFor(moved->World);
-					PendingMove.Instance = moved->Instance;
-					PendingMove.Target = world;
-					PendingMove.Parent = instance;
+		ImGuiListClipper clipper;
+		clipper.Begin(static_cast<int>(rows.size()));
+		if (reveal != HierarchyView::NO_ROW) {
+			clipper.IncludeItemByIndex(static_cast<int>(reveal));
+		}
+
+		while (clipper.Step()) {
+			for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; index++) {
+				const HierarchyRow &row = rows[static_cast<size_t>(index)];
+
+				// **Keyed by the instance, not by the row number.** A row's
+				// index moves whenever anything above it opens, closes or is
+				// filtered away, and an imgui id that moves takes its state
+				// with it — most visibly the open context menu, which would
+				// detach from the row it was opened on and reattach to whoever
+				// inherited the number.
+				ImGui::PushID(static_cast<int>(row.Instance.Id));
+				if (row.Depth > 0) {
+					// **`Indent` rather than `TreePush`.** A push has to be
+					// matched by a pop in the same order, which is a recursion
+					// — and a recursion is the one thing a clipper cannot skip
+					// through. Indenting by depth costs the same pixels and
+					// leaves every row independent of the ones above it.
+					ImGui::Indent(static_cast<float>(row.Depth) * step);
 				}
+
+				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+										   ImGuiTreeNodeFlags_SpanAvailWidth |
+										   ImGuiTreeNodeFlags_OpenOnDoubleClick |
+										   ImGuiTreeNodeFlags_NoTreePushOnOpen;
+				if (!row.HasChildren) {
+					flags |= ImGuiTreeNodeFlags_Leaf;
+				}
+				if (world == SelectionWorld && IsSelected(row.Instance)) {
+					flags |= ImGuiTreeNodeFlags_Selected;
+				}
+
+				// Ours to assert every frame, because the row list was built
+				// from it. imgui still toggles its own copy on a click, and
+				// `IsItemToggledOpen` below is how that reaches us.
+				ImGui::SetNextItemOpen(row.Open);
+				ImGui::TreeNodeEx("##node", flags, "%s", row.Text);
+
+				// **Everything that asks about "the last item" happens here,
+				// before anything else is drawn.** imgui has exactly one last
+				// item, and it is whatever was submitted most recently — so the
+				// dimmed class name below would become it, and
+				// `BeginDragDropSource` would then be asked to drag a `Text`
+				// with no id. That is an assertion rather than a subtle bug,
+				// which is the good version of this mistake.
+				const bool toggled = ImGui::IsItemToggledOpen();
+				const bool hovered = ImGui::IsItemHovered();
+
+				if (toggled) {
+					const auto found =
+						std::find(tree.Open.begin(), tree.Open.end(), row.Instance);
+					if (found != tree.Open.end()) {
+						tree.Open.erase(found);
+					} else {
+						tree.Open.push_back(row.Instance);
+					}
+				}
+
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !toggled) {
+					const ImGuiIO &io = ImGui::GetIO();
+					if (io.KeyShift && SelectionAnchor != NULL_ENTITY) {
+						SelectRange(world, tree.View, SelectionAnchor, row.Instance, io.KeyCtrl);
+					} else {
+						Select(world, row.Instance, io.KeyCtrl);
+						SelectionAnchor = row.Instance;
+					}
+				}
+
+				// **A right-click inside the selection keeps it.** It used to
+				// collapse to the one row, so "select five parts, right-click,
+				// Delete" deleted one — the gesture every author uses, doing
+				// four fifths less than it looked like it would.
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Right) &&
+					!(world == SelectionWorld && IsSelected(row.Instance))) {
+					Select(world, row.Instance, false);
+					SelectionAnchor = row.Instance;
+				}
+
+				if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+					const ClassId scriptClass = Classes::Find(Name("LuaSourceContainer"));
+					if (scriptClass.IsValid() && store.IsA(row.Instance, scriptClass)) {
+						PendingOpenScript.World = world;
+						PendingOpenScript.Instance = row.Instance;
+					}
+				}
+
+				// --- drag and drop ------------------------------------------
+
+				if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
+					const DragPayload payload{world.Index, row.Instance};
+					ImGui::SetDragDropPayload(DRAG_TYPE, &payload, sizeof(payload));
+
+					// Dragging a row that is part of the selection drags the
+					// selection, which is what the highlight already promised.
+					if (world == SelectionWorld && IsSelected(row.Instance) &&
+						Selection.size() > 1) {
+						ImGui::Text("%zu instances", Selection.size());
+					} else {
+						ImGui::TextUnformatted(row.Text);
+					}
+					ImGui::EndDragDropSource();
+				}
+
+				if (ImGui::BeginDragDropTarget()) {
+					if (const ImGuiPayload *dropped = ImGui::AcceptDragDropPayload(DRAG_TYPE)) {
+						const auto *moved = static_cast<const DragPayload *>(dropped->Data);
+
+						// **Two different operations, and the payload's world
+						// is what picks between them.** Within one store a move
+						// is a `SetParent` and the instance keeps its handle,
+						// its id and everything pointing at it. Across two
+						// stores none of that is possible — an `Entity` means
+						// nothing in another world — so the subtree is written
+						// out, rebuilt on the other side and the original
+						// destroyed. Same gesture, and the cost is not the
+						// same, which is why they are not one code path
+						// pretending to be.
+						PendingReparent.World = WorldId{};
+						PendingMove.Source = WorldId{};
+
+						if (moved->World == world.Index) {
+							PendingReparent.World = world;
+							PendingReparent.Parent = row.Instance;
+							PendingReparent.Instances.clear();
+
+							if (world == SelectionWorld && IsSelected(moved->Instance)) {
+								PendingReparent.Instances = Selection;
+							} else {
+								PendingReparent.Instances.push_back(moved->Instance);
+							}
+						} else {
+							PendingMove.Source = WorldFor(moved->World);
+							PendingMove.Instance = moved->Instance;
+							PendingMove.Target = world;
+							PendingMove.Parent = row.Instance;
+						}
+					}
+					ImGui::EndDragDropTarget();
+				}
+
+				if (ImGui::BeginPopupContextItem("##actions")) {
+					DrawInstanceActions(store, world, row.Instance);
+					ImGui::EndPopup();
+				}
+
+				// The class name, dimmed, on the same row. Roblox puts an icon
+				// here; an icon set is a texture atlas and a lot of art, and
+				// the class name carries the same information in the space
+				// available. Smaller as well as dimmer: a class name is an
+				// annotation on the row rather than a second name on it, and
+				// two things at the same size read as two names however
+				// different their colours are.
+				ImGui::SameLine();
+				{
+					const engine::ui::ScopedFont small(
+						engine::ui::Typeface::Interface, engine::ui::TextSize::Small
+					);
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+					ImGui::TextUnformatted(row.ClassText);
+					ImGui::PopStyleColor();
+				}
+
+				if (static_cast<size_t>(index) == reveal) {
+					// The row somebody selected somewhere else, brought to the
+					// middle rather than to whichever edge it happened to be
+					// nearest — an author who has just clicked a part in the
+					// viewport wants to see what is around it in the tree.
+					ImGui::SetScrollHereY(0.5f);
+				}
+
+				if (row.Depth > 0) {
+					ImGui::Unindent(static_cast<float>(row.Depth) * step);
+				}
+				ImGui::PopID();
 			}
-			ImGui::EndDragDropTarget();
 		}
-
-		if (ImGui::BeginPopupContextItem("##actions")) {
-			DrawInstanceActions(store, world, instance);
-			ImGui::EndPopup();
-		}
-
-		// The class name, dimmed, on the same row. Roblox puts an icon here; an
-		// icon set is a texture atlas and a lot of art, and the class name
-		// carries the same information in the space available.
-		// Smaller as well as dimmer. A class name is an annotation on the row
-		// rather than a second name on it, and two things at the same size read
-		// as two names however different their colours are.
-		ImGui::SameLine();
-		{
-			const engine::ui::ScopedFont small(
-				engine::ui::Typeface::Interface, engine::ui::TextSize::Small
-			);
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::TextUnformatted(className);
-			ImGui::PopStyleColor();
-		}
-
-		if (open && hasChildren) {
-			// Collected first, then walked. `DrawTreeNode` can queue a
-			// reparent, and reading the sibling list while something is about
-			// to change it is the iteration hazard `EachChild` warns about from
-			// the other side.
-			//
-			// **One buffer for the whole recursion rather than a vector per
-			// node.** This was a `std::vector` constructed inside the body, so
-			// an open tree of two hundred rows was two hundred heap allocations
-			// and frees per frame, in a panel that rebuilds every frame because
-			// imgui is immediate mode.
-			//
-			// The recursion shares it by range: each level appends its children,
-			// remembers where its own run starts and ends, and truncates back to
-			// that mark on the way out. Indices rather than iterators, because a
-			// deeper level appending can reallocate — which is exactly the bug
-			// this shape would have if it held references.
-			const size_t first = ChildScratch.size();
-			store.EachChild(instance, [&](engine::ecs::Entity child) {
-				ChildScratch.push_back(child);
-			});
-			const size_t last = ChildScratch.size();
-
-			for (size_t index = first; index < last; index++) {
-				DrawTreeNode(store, world, ChildScratch[index]);
-			}
-
-			ChildScratch.resize(first);
-			ImGui::TreePop();
-		}
-
-		ImGui::PopID();
 	}
 
 	void Editor::DrawExplorer() {
@@ -544,8 +632,14 @@ namespace studio {
 							// Same world, so it is an unparent rather than a
 							// move: the instance becomes a root where it is.
 							PendingReparent.World = world;
-							PendingReparent.Instance = moved->Instance;
 							PendingReparent.Parent = NULL_ENTITY;
+							PendingReparent.Instances.clear();
+
+							if (world == SelectionWorld && IsSelected(moved->Instance)) {
+								PendingReparent.Instances = Selection;
+							} else {
+								PendingReparent.Instances.push_back(moved->Instance);
+							}
 						}
 					}
 					ImGui::EndDragDropTarget();
@@ -583,26 +677,30 @@ namespace studio {
 					if (Universe->IsRemote(world)) {
 						ImGui::TextDisabled("held by host '%s'", Label(Universe->HostOf(world)));
 					} else {
-						Universe->Enter(world, [&](Store &store) {
-							std::vector<engine::ecs::Entity> roots;
-							store.EachRoot([&](engine::ecs::Entity root) { roots.push_back(root); });
+						WorldTree &tree = TreeFor(world);
 
-							for (const engine::ecs::Entity root : roots) {
-								if (!ExplorerFilter.empty()) {
-									// Filtered at the root, which is the honest
-									// version of what this does: a subtree
-									// search that hid parents would show
-									// children with no path to them, and a tree
-									// with no parents is a list.
-									const Name name = store.InstanceNameOf(root);
-									int score = 0;
-									if (!name.IsValid() ||
-										!FuzzyMatch(ExplorerFilter, Label(name), score)) {
-										continue;
-									}
-								}
-								DrawTreeNode(store, world, root);
+						Universe->Enter(world, [&](Store &store) {
+							// **The whole tree, worked out in one pass over the
+							// store and only when the store has moved.** See
+							// `studio/Hierarchy.hpp`: the scan is a signature,
+							// and the rows behind it are re-compiled only when
+							// that signature does not match the last one.
+							HierarchyRequest request;
+							request.Filter = ExplorerFilter;
+							request.Open = tree.Open;
+
+							// The selection reveals its own path, and only on
+							// the frame something outside this panel asked for
+							// it. Folded into the signature, so asking is a
+							// re-compile and not asking is not.
+							std::span<const engine::ecs::Entity> reveal;
+							if (RevealSelection && world == SelectionWorld && !Selection.empty()) {
+								reveal = Selection;
 							}
+							request.Reveal = reveal;
+
+							tree.View.Rebuild(store, request);
+							DrawInstanceRows(store, tree);
 
 							if (ImGui::BeginPopupContextWindow(
 									"##world-blank", ImGuiPopupFlags_MouseButtonRight |
@@ -621,6 +719,13 @@ namespace studio {
 
 			ImGui::TreePop();
 		}
+
+		// **Consumed here, whatever happened to it.** A reveal that could not
+		// land — the world is collapsed, the selection was emptied, the panel
+		// is showing something else — must not stay pending, or the tree
+		// scrolls itself back to the selection on some later frame for a reason
+		// nobody can connect to anything they did.
+		RevealSelection = false;
 
 		ImGui::End();
 	}
@@ -730,9 +835,9 @@ namespace studio {
 		// like a move rather than like a delete and a paste somewhere else.
 		SelectionWorld = target;
 		Selection.assign(1, rebuilt);
-		if (parent != NULL_ENTITY) {
-			Expanded.push_back(parent.Id);
-		}
+		SelectionAnchor = rebuilt;
+		OpenPathTo(target, rebuilt);
+		RevealSelection = true;
 
 		MarkModified();
 		Say("moved '" + std::string(Label(moved)) + "' to '" +
@@ -762,48 +867,82 @@ namespace studio {
 
 		if (PendingReparent.World.IsValid()) {
 			const WorldId world = PendingReparent.World;
-			const engine::ecs::Entity instance = PendingReparent.Instance;
 			const engine::ecs::Entity parent = PendingReparent.Parent;
+			const std::vector<engine::ecs::Entity> moving = PendingReparent.Instances;
 			PendingReparent = PendingReparentAction{};
 
-			bool moved = false;
-			Entity was = NULL_ENTITY;
-			std::string named;
+			// One record per instance, taken while the world is open, and
+			// applied there too. `RecordReparent` is outside the `Enter`
+			// because the command log enters the world itself.
+			struct Applied {
+				engine::ecs::Entity Instance;
+				engine::ecs::Entity Was;
+				std::string Named;
+			};
+			std::vector<Applied> applied;
+			size_t refused = 0;
 
 			Universe->Enter(world, [&](Store &store) {
-				if (!store.Alive(instance)) {
-					return;
-				}
-				if (parent != NULL_ENTITY && !store.Alive(parent)) {
-					return;
-				}
+				for (const engine::ecs::Entity instance : moving) {
+					if (!store.Alive(instance)) {
+						continue;
+					}
+					if (parent != NULL_ENTITY && !store.Alive(parent)) {
+						return;
+					}
 
-				// Read before the write, because the parent it had is the whole
-				// of what undo needs and there is no way to ask afterwards.
-				was = store.ParentOf(instance);
-				named = std::string(Label(store.InstanceNameOf(instance)));
+					// **A member of the selection that is already inside
+					// another member does not move.** Dragging a model and one
+					// of its parts together means "move the model"; moving both
+					// would take the part out of the model on the way, which is
+					// the one outcome nobody dragging them together wants.
+					bool nested = false;
+					for (const engine::ecs::Entity other : moving) {
+						if (other != instance && store.IsDescendantOf(instance, other)) {
+							nested = true;
+							break;
+						}
+					}
+					if (nested) {
+						continue;
+					}
 
-				// **Refused rather than allowed to cycle.** `SetParent` already
-				// refuses to make an instance its own ancestor — a cycle in the
-				// tree is a hang in every walk of it rather than a wrong answer
-				// — and this reports the refusal instead of leaving a drag that
-				// silently did nothing.
-				moved = store.SetParent(instance, parent);
+					// Read before the write, because the parent it had is the
+					// whole of what undo needs and there is no way to ask
+					// afterwards.
+					const engine::ecs::Entity was = store.ParentOf(instance);
+					std::string named(Label(store.InstanceNameOf(instance)));
+
+					// **Refused rather than allowed to cycle.** `SetParent`
+					// already refuses to make an instance its own ancestor — a
+					// cycle in the tree is a hang in every walk of it rather
+					// than a wrong answer — and this reports the refusal
+					// instead of leaving a drag that silently did nothing.
+					if (store.SetParent(instance, parent)) {
+						applied.push_back(Applied{instance, was, std::move(named)});
+					} else {
+						refused++;
+					}
+				}
 			});
 
-			// **Recorded only when the move landed.** A refused reparent is not
-			// an edit, and logging one would put an entry on the stack whose
-			// undo restores the parent it never left.
-			if (moved && Commands != nullptr) {
-				Commands->RecordReparent(world, instance, was, parent, "Move " + named);
+			// **Recorded only for the ones that landed.** A refused reparent is
+			// not an edit, and logging one would put an entry on the stack
+			// whose undo restores the parent it never left.
+			if (Commands != nullptr) {
+				for (const Applied &entry : applied) {
+					Commands->RecordReparent(
+						world, entry.Instance, entry.Was, parent, "Move " + entry.Named
+					);
+				}
 			}
 
-			if (moved) {
-				if (parent != NULL_ENTITY) {
-					Expanded.push_back(parent.Id);
-				}
+			if (!applied.empty()) {
+				OpenPathTo(world, applied.front().Instance);
 				MarkModified();
-			} else {
+			}
+
+			if (refused > 0) {
 				Say("that would put an instance inside itself", engine::core::LogLevel::Warning);
 			}
 		}

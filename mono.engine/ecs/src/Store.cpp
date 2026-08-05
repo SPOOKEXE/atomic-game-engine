@@ -206,6 +206,17 @@ namespace engine::ecs {
 	void Store::Destroy(Entity entity) {
 		RequireOwningThread("Destroy");
 
+		// **Out of the tree before out of the directory.** See `DetachFromTree`:
+		// freeing a row leaves every link that points at it naming something
+		// that is gone, and the sibling walk stops at the first of those rather
+		// than stepping over it — so destroying the middle child of three used
+		// to truncate the list and lose the rest.
+		//
+		// Before rather than after, because there is no "after": once the row
+		// is vacated its own links are gone and there is nothing left to unlink
+		// it by.
+		DetachFromTree(*State, entity);
+
 		DestroyEntity(*State, entity);
 	}
 

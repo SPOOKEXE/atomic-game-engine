@@ -44,6 +44,7 @@
 #include <engine/control/Surface.hpp>
 #include <studio/Commands.hpp>
 #include <studio/ContentSources.hpp>
+#include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
@@ -551,8 +552,72 @@ namespace studio {
 			bool focused
 		);
 
-		// One instance and its subtree, in the explorer.
-		void DrawTreeNode(engine::ecs::Store &store, WorldId world, Entity instance);
+		// The explorer's state for one world: what is open in it, and the tree
+		// compiled from it.
+		//
+		// **Per world, and it has to be.** Expansion used to be one set of
+		// entity ids for the whole universe, and an `ecs::Entity` is an index
+		// into one store — so entity 7 of World A and entity 7 of World B are
+		// the same number. Opening a model in one scene opened whatever
+		// happened to be the seventh instance in every other.
+		//
+		// Expansion is a *state* here rather than the consume-once request it
+		// used to be. That changed because the rows are ours now: imgui owned
+		// what was open while the panel recursed through `TreeNodeEx`, and a
+		// flat list that can be clipped cannot ask imgui which of a thousand
+		// rows it is holding open. Still not world state — a set of handles in
+		// the editor, exactly as the selection is.
+		struct WorldTree {
+			WorldId World;
+
+			// Instances the author has opened, by handle. A handle that no
+			// longer names anything is harmless: the compile does not find it
+			// and it is never asked about again.
+			std::vector<Entity> Open;
+
+			// What to draw, and the signature that says whether it is stale.
+			HierarchyView View;
+		};
+
+		// One world's instances, as a flat clipped list.
+		//
+		// **Flat rather than recursive, which is what lets it be clipped.**
+		// `HierarchyView` has already worked out which rows exist and in what
+		// order, so this submits only the ones the scroll position can show —
+		// a thousand-instance scene draws the thirty on screen instead of
+		// submitting a thousand tree nodes to lay out and throw away.
+		//
+		// @param store The world, already entered.
+		// @param tree  Its explorer state, already rebuilt this frame.
+		void DrawInstanceRows(engine::ecs::Store &store, WorldTree &tree);
+
+		// The explorer's per-world state, made on first sight of the world.
+		//
+		// @param world The world to look up.
+		// @return Its record, valid until `Trees` next grows.
+		WorldTree &TreeFor(WorldId world);
+
+		// Opens the path down to an instance, so the tree can show it.
+		//
+		// @param world    The world it lives in.
+		// @param instance The instance to make reachable.
+		void OpenPathTo(WorldId world, Entity instance);
+
+		// Selects every row between two instances, as shift-click means.
+		//
+		// **Over the drawn order, not over the tree.** A range in a tree view
+		// is what the eye sees between two rows, which is the flattened order
+		// with the closed subtrees left out — so it is `HierarchyView`'s row
+		// indices and not an ancestor walk.
+		//
+		// @param world  The world both rows are in.
+		// @param view   The compiled tree they were drawn from.
+		// @param anchor Where the range starts, from the last plain click.
+		// @param to     Where it ends, being the row just clicked.
+		// @param add    Whether to keep what was already selected.
+		void SelectRange(
+			WorldId world, const HierarchyView &view, Entity anchor, Entity to, bool add
+		);
 
 		// The right-click menu shared by the tree and the Insert menu.
 		//
@@ -1010,20 +1075,32 @@ namespace studio {
 		WorldId SelectionWorld;
 		std::vector<Entity> Selection;
 
-		// Instances the explorer has been told to expand, by entity id.
-		//
-		// A set of ids rather than a flag on the instance, because expansion is
-		// not world state — see the header comment. An id that no longer names
-		// anything is harmless and is dropped the next time the tree is walked.
-		std::vector<uint64_t> Expanded;
+		// One record per world the explorer has drawn. See `WorldTree`.
+		std::vector<WorldTree> Trees;
 
 		// Worlds the explorer has been told to expand, by world index.
 		//
-		// **Apart from `Expanded` because the key spaces are different.** A
-		// world is identified by a small index and an instance by a 64-bit id,
-		// and putting both in one set would have world 3 open whatever instance
-		// happened to be entity 3.
+		// **Apart from `WorldTree::Open` because the key spaces are
+		// different.** A world is identified by a small index and an instance
+		// by a 64-bit handle, and putting both in one set would have world 3
+		// open whatever happened to be entity 3.
 		std::vector<uint32_t> ExpandedWorlds;
+
+		// Where a shift-click measures its range from.
+		//
+		// The last row clicked without shift. Roblox's explorer works the same
+		// way, and so does every file list: shift extends from the last plain
+		// click rather than from whichever end of the selection is nearer.
+		Entity SelectionAnchor;
+
+		// Whether the explorer should open the path to the selection and scroll
+		// to it, once.
+		//
+		// **Set by whatever selected from outside the panel** — a viewport
+		// click, a Find result, an undo — and never by the tree itself, because
+		// scrolling the row somebody just clicked on to the middle of the panel
+		// moves the thing under their cursor.
+		bool RevealSelection = false;
 
 		// How many more frames the Worlds panel should ask for its dock tab.
 		//
@@ -1680,7 +1757,16 @@ namespace studio {
 
 		struct PendingReparentAction {
 			WorldId World;
-			Entity Instance;
+
+			// Everything to move, which is one row for a menu action and the
+			// whole selection for a drag that started on a selected row.
+			//
+			// **A list rather than a single handle**, because dragging a
+			// multi-selection and having one part of it move is worse than
+			// either outcome: the author sees the gesture work and finds out
+			// later that most of it did not.
+			std::vector<Entity> Instances;
+
 			Entity Parent;
 		};
 
@@ -1897,17 +1983,6 @@ namespace studio {
 
 		// The explorer's recursion buffer, shared by every level of one walk.
 		//
-		// **A member rather than a local, because a local was a heap allocation
-		// per node per frame.** `DrawTreeNode` collects a node's children before
-		// walking them — it has to, since drawing one can queue a reparent — and
-		// doing that with a `std::vector` inside the body meant an open tree of
-		// two hundred rows allocated and freed two hundred times every frame.
-		//
-		// Each level appends its own run and truncates back to its mark on the
-		// way out, so the buffer is empty between frames and reaches the depth of
-		// the deepest open path exactly once.
-		std::vector<Entity> ChildScratch;
-
 		// One cached instance count per scene. See `InstanceCountOf`.
 		struct InstanceCount {
 			// The scene it counted.

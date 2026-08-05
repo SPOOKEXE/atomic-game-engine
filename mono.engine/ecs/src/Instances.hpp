@@ -107,6 +107,29 @@ namespace engine::ecs {
 	//         would make `instance` its own ancestor.
 	bool SetParent(StoreState &state, Entity instance, Entity parent);
 
+	// Takes an instance out of the tree without destroying anything.
+	//
+	// **What `Store::Destroy` owes the tree.** Freeing a row does not touch the
+	// links that point *at* it, so a raw destroy used to leave a live parent
+	// naming a freed child — and `EachChild` stops at the first dead link
+	// rather than stepping over it, because the links *out of* a freed row went
+	// with the row. Destroying the middle of three children therefore truncated
+	// the list to one, silently, and the two that were left were unreachable.
+	//
+	// So the unlink happens before the free rather than being repaired
+	// afterwards, and "no live row names a freed one" is an invariant instead
+	// of something every reader has to tolerate.
+	//
+	// The children become roots rather than being destroyed. This is not
+	// `DestroyInstance` and must not quietly become it: a raw destroy asks for
+	// one row to go, and taking a subtree with it would be a delete nobody
+	// asked for.
+	//
+	// @param state    The world holding it.
+	// @param instance The instance to unlink. Does nothing for an entity that
+	//                 carries no `Hierarchy`.
+	void DetachFromTree(StoreState &state, Entity instance);
+
 	// Destroys an instance and everything under it.
 	//
 	// @param state    The world to remove it from.
