@@ -170,3 +170,50 @@ TEST_CASE("adding twice at one place replaces rather than duplicates", "[debugge
 	REQUIRE(debug.Breakpoints().size() == 1);
 	CHECK(debug.Breakpoints().front().Action == BreakAction::Stop);
 }
+
+TEST_CASE("adopting takes the breakpoints and none of the hits", "[debugger]") {
+	// **What survives a Stop.** The editor holds the master list and hands it to
+	// each new runtime; a Stop destroys the runtime, and re-typing every line
+	// number afterwards is how a debugger stops being used.
+	Debugger master;
+	master.Add("a.luau", 10, BreakAction::Stop);
+	master.Add("b.luau", 20);
+	REQUIRE(master.Enable("b.luau", 20, false));
+
+	// A hit on the master, which nothing should carry across: it describes a
+	// run that is over.
+	engine::script::DebugHit stale;
+	stale.Line = 10;
+	master.Record(std::move(stale));
+
+	Debugger fresh;
+	fresh.Adopt(master);
+
+	REQUIRE(fresh.Breakpoints().size() == 2);
+	CHECK(fresh.Hits().empty());
+
+	// The action and the enabled flag both came across — a copy that dropped
+	// either would be a breakpoint that behaves differently after a Stop than
+	// before it, which is worse than losing it outright.
+	CHECK(fresh.Breakpoints()[0].Action == BreakAction::Stop);
+	CHECK(fresh.Breakpoints()[0].Enabled);
+	CHECK_FALSE(fresh.Breakpoints()[1].Enabled);
+
+	// And the disabled one does not arm the fresh runtime on its own.
+	CHECK(fresh.Armed());
+	CHECK(fresh.Match("a.luau", 10) != nullptr);
+	CHECK(fresh.Match("b.luau", 20) == nullptr);
+}
+
+TEST_CASE("adopting twice does not duplicate", "[debugger]") {
+	// `BeginRun` may hand the list to a runtime that already has some — a
+	// second Play without a Stop, or a world started while another runs.
+	Debugger master;
+	master.Add("a.luau", 10);
+
+	Debugger fresh;
+	fresh.Adopt(master);
+	fresh.Adopt(master);
+
+	CHECK(fresh.Breakpoints().size() == 1);
+}

@@ -53,11 +53,48 @@ The handle changes, so anything holding one has to be told: the selection is
 repointed and script tabs inside the moved subtree are closed. A single code
 path covering both operations would make that "sometimes".
 
+## A Play run admits N clients, and each is a whole world
+
+`WorldRun::Links` is a vector because one replica cannot show a disagreement.
+The bugs a play test exists for — an entity that arrives on one client and not
+another, a value that replicates late to the second joiner — need two replicas to
+disagree *with each other*, and two views of one store never can.
+
+Each link is an independent `PlayLink` with its own replica world, its own
+`Replica` and its own `LinkReport`. The worlds are named apart deliberately:
+rule 4 makes a world's name its identity to the universe, the worlds panel and
+any recording, so two clients sharing one would be two worlds nothing could tell
+apart.
+
+**Only the first is pinned to a viewport.** A panel per client is three pictures
+nobody asked for, each a slice of the centre pane and a turn in `PresentWorld`'s
+round robin; the rest are ordinary worlds reachable from the scene selector.
+
+The count is fixed at `BeginRun`, so the menu that sets it is disabled while
+anything runs — a number that changed under a live run would describe something
+that is not there.
+
 ## `RunService:IsStudio()` is set here and nowhere else
 
 `script::HostRole::Studio` defaults to false and `script/Runtime.hpp` says why:
 editor-only behaviour must never appear in a shipped game because a default was
 optimistic. `BeginRun` is the one place in the repository that sets it true.
+
+## Undo is a command log, and Stop clears it
+
+Every edit is recorded as a `Command` carrying what it did and what it undid.
+Two rules keep it honest, and both are in `Commands.hpp`:
+
+- **`Clear` on `BeginRun`**, because Stop restores a snapshot taken before the
+  run and a stack spanning that boundary would offer to reverse edits the
+  restore has already discarded.
+- **`Forget(world)` on `EndRun`**, because a scene *can* be edited while it runs
+  — the gizmo and the explorer both work during a play test, deliberately — and
+  those commands are not merely stale but unreversible, since the restore gives
+  every instance a new handle.
+
+The History panel is a reader over the two stacks. Walking to a point in it is
+repeated `Undo`/`Redo` rather than a second way to move the log.
 
 ## Play snapshots before it runs, and Stop restores
 
@@ -139,13 +176,72 @@ stable — the instance, not the text.
   the presentation phase and the render. Driving the panels themselves without a
   window needs the backends replaced rather than skipped, and that is the shape
   a scripted or agent-driven editor will need.
-- **No undo.** Every action is applied straight to the store. Undo needs a
-  command log, and a half-undo that covered property edits and not deletions
-  would be worse than none.
 - **No reference picker.** A `PropertyType::Reference` shows its target's name
   and cannot be changed. Picking one means a modal over the tree.
-- **No viewport picking or gizmos.** Selection is the explorer's. A click in
-  the world does nothing.
 - **No syntax highlighting and no line-number gutter.** The script editor is a
   plain multiline field in imgui's default proportional font. A monospace font
   is a file this repository does not have and a licence somebody has to choose.
+- **No `ModuleScript`, so a Rojo sync makes every module a `Script`.** Every
+  `Script` is run by `RunWorldScripts` at world start and `require` is refused
+  by name, so a synced project executes files that were written to be required.
+  `script/Instances.hpp` records why the class does not exist; until it does,
+  the sync is useful for the tree and the source text rather than for pressing
+  Play on somebody else's game.
+
+## The debugger captures, it does not pause
+
+Two reasons, and both outrank the convenience of a stepping debugger:
+
+- **A paused world is not a replayable one.** Rule 5 is that work across ticks
+  may not be parallel; a tick held open while somebody reads a variable is the
+  largest possible violation, and a recording made through the session would
+  stop replaying a long way from the cause.
+- **The editor's frame loop is the thread the VM runs on.** Blocking in the hook
+  blocks the loop that would draw the panel showing what was caught, so a
+  stop-the-world breakpoint here is a frozen window with the answer inside it.
+
+So a breakpoint records the stack and every local at the moment the line ran and
+then carries on — or ends that one script with an ordinary error, which the host
+already knows how to report. A stepping debugger wants the VM on its own thread
+and is a different program.
+
+**Breakpoints live on the `Editor`, not on a runtime.** Stop destroys every
+runtime, and re-typing line numbers after each Play is how a debugger stops being
+used, so `BeginRun` hands the list to each new one — *before* its scripts run,
+because a script's top level has already executed by the time `StartWorldScripts`
+returns. Hits stay per-run: a hit describes one execution and showing an old one
+against a new run would be a lie about when it happened.
+
+**Stepping compiles the chunk at `-O0`.** At the usual optimisation level the
+compiler folds constants and drops the instructions their lines would have
+produced, so a breakpoint on `local x = 1` would sit there never firing while the
+script plainly ran past it. That is the worst thing a debugger can do. It applies
+only while something is armed, so nothing else in the world pays for it — and
+keeping that true is the property to protect in any change here.
+
+## A panel that answers a question is closed by default
+
+The v0.10 additions — History, Find Instances, Bus, Changes, Debugger, Script
+Profile — are all off until somebody opens them from the View menu. They answer a
+question occasionally rather than earning permanent space, and each returns
+immediately when closed, which is what makes a long list of them cost nothing.
+
+Three of them are readers over data that already existed, and that is why they
+were cheap: the Bus panel reads `Outbox` and `Inbox` because rule 3 already
+forces every crossing to be a copy; Script Profile reads the interrupt counter
+the step budget already maintains; History reads `CommandLog`'s two stacks.
+**None of them caches what it reads** — the corollary at the top of this file
+bites hardest on the Bus panel, because `Inbox` is replaced wholesale every
+barrier.
+
+## The testable half of a panel goes in a free function
+
+`MatchesQuery`, `DiffText` and `ParseRojoProject` are not methods, and that is
+deliberate. Each is the half that can be **silently wrong** — a filter that
+matches nothing looks exactly like a scene containing nothing, and a comparator
+that finds no changes looks exactly like a clean tree — while everything around
+them needs a window, a device and an imgui frame.
+
+`tests/Operators.cpp` records what it costs to get this wrong: the suite there
+cannot reach `Editor::RegisterOperators`, so the join it claims to check is not
+actually checked. Put the logic where a test can call it.

@@ -67,6 +67,16 @@ namespace engine::script {
 		Points.clear();
 	}
 
+	void Debugger::Adopt(const Debugger &other) {
+		for (const Breakpoint &point : other.Points) {
+			// Through `Add` rather than by copying the vector, so the
+			// replace-in-place rule holds and a hit count from the other side
+			// cannot arrive attached to a run that never produced it.
+			Add(point.Source, point.Line, point.Action);
+			Enable(point.Source, point.Line, point.Enabled);
+		}
+	}
+
 	bool Debugger::Armed() const {
 		return std::any_of(Points.begin(), Points.end(), [](const Breakpoint &point) {
 			return point.Enabled;

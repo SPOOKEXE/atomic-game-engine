@@ -1886,7 +1886,7 @@ namespace studio {
 		// function or the studio's Play and the server's hosting drift — and the
 		// first thing to drift would be the heartbeat's delta.
 		Universe->Enter(world, [&](Store &store, Scheduler &systems) {
-			run.Runtime = engine::game::StartWorldScripts(store, systems, limits, failure);
+			run.Runtime = engine::game::StartWorldScripts(store, systems, limits, failure, &Breakpoints);
 		});
 
 		if (!failure.empty()) {

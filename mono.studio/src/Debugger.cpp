@@ -51,18 +51,23 @@ namespace studio {
 		const bool valid = !BreakSource.empty() && BreakLine > 0;
 		ImGui::BeginDisabled(!valid);
 		if (ImGui::Button("Add")) {
-			// Added to every running runtime. A breakpoint is a thing about a
-			// *script*, and the same script may be running in several worlds —
-			// asking which one somebody meant would be a question with no
-			// answer they could give.
+			// **Into the editor's list first, then mirrored into anything
+			// already running.** The editor's is the one that survives a Stop;
+			// a runtime's is a copy it was handed at `BeginRun`. Adding only to
+			// the live runtimes would make a breakpoint disappear the next time
+			// somebody pressed Stop, which is the behaviour this arrangement
+			// exists to prevent.
+			const BreakAction action = BreakStops ? BreakAction::Stop : BreakAction::Capture;
+			Breakpoints.Add(BreakSource, BreakLine, action);
+
+			// Every running world, because a breakpoint is a thing about a
+			// *script* and the same script may be running in several — asking
+			// which one somebody meant would be a question with no answer they
+			// could give.
 			for (WorldRun &run : Runs) {
 				if (run.Runtime != nullptr) {
-					run.Runtime->Debug().Add(BreakSource, BreakLine, BreakStops ? BreakAction::Stop
-																				: BreakAction::Capture);
+					run.Runtime->Debug().Add(BreakSource, BreakLine, action);
 				}
-			}
-			if (Runs.empty()) {
-				Say("nothing is running — a breakpoint is added to a live runtime", engine::core::LogLevel::Warning);
 			}
 		}
 		ImGui::EndDisabled();
@@ -94,6 +99,77 @@ namespace studio {
 			return;
 		}
 
+		// --- the breakpoints, which belong to the editor ----------------------
+		{
+			std::string removeSource;
+			int removeLine = 0;
+
+			for (const Breakpoint &point : Breakpoints.Breakpoints()) {
+				ImGui::PushID(point.Line);
+				ImGui::PushID(point.Source.c_str());
+
+				bool enabled = point.Enabled;
+				if (ImGui::Checkbox("##on", &enabled)) {
+					Breakpoints.Enable(point.Source, point.Line, enabled);
+					for (WorldRun &run : Runs) {
+						if (run.Runtime != nullptr) {
+							run.Runtime->Debug().Enable(point.Source, point.Line, enabled);
+						}
+					}
+				}
+
+				ImGui::SameLine();
+				ImGui::Text("%s:%d", point.Source.c_str(), point.Line);
+
+				// **Summed across the runs, because the master list never fires
+				// one.** The editor's copy is the record of what somebody asked
+				// for; the counting happens in the VMs.
+				uint64_t hits = 0;
+				for (const WorldRun &run : Runs) {
+					if (run.Runtime == nullptr) {
+						continue;
+					}
+					for (const Breakpoint &live : run.Runtime->Debug().Breakpoints()) {
+						if (live.Line == point.Line && live.Source == point.Source) {
+							hits += live.Hits;
+						}
+					}
+				}
+
+				ImGui::SameLine();
+				ImGui::TextDisabled(
+					"%s · %llu hit%s",
+					point.Action == BreakAction::Stop ? "stop" : "capture",
+					static_cast<unsigned long long>(hits),
+					hits == 1 ? "" : "s"
+				);
+
+				ImGui::SameLine();
+				if (ImGui::SmallButton("x")) {
+					removeSource = point.Source;
+					removeLine = point.Line;
+				}
+
+				ImGui::PopID();
+				ImGui::PopID();
+			}
+
+			if (removeLine > 0) {
+				Breakpoints.Remove(removeSource, removeLine);
+				for (WorldRun &run : Runs) {
+					if (run.Runtime != nullptr) {
+						run.Runtime->Debug().Remove(removeSource, removeLine);
+					}
+				}
+			}
+
+			if (Breakpoints.Breakpoints().empty()) {
+				ImGui::TextDisabled("no breakpoints");
+			}
+		}
+
+		ImGui::Separator();
+
 		for (WorldRun &run : Runs) {
 			if (run.Runtime == nullptr) {
 				continue;
@@ -120,52 +196,10 @@ namespace studio {
 
 			ImGui::PushID(static_cast<int>(run.World.Index));
 
-			// --- the breakpoints ------------------------------------------------
-			std::string removeSource;
-			int removeLine = 0;
-
-			for (const Breakpoint &point : debug.Breakpoints()) {
-				ImGui::PushID(point.Line);
-				ImGui::PushID(point.Source.c_str());
-
-				bool enabled = point.Enabled;
-				if (ImGui::Checkbox("##on", &enabled)) {
-					debug.Enable(point.Source, point.Line, enabled);
-				}
-
-				ImGui::SameLine();
-				ImGui::Text("%s:%d", point.Source.c_str(), point.Line);
-
-				ImGui::SameLine();
-				ImGui::TextDisabled(
-					"%s · %llu hit%s",
-					point.Action == BreakAction::Stop ? "stop" : "capture",
-					static_cast<unsigned long long>(point.Hits),
-					point.Hits == 1 ? "" : "s"
-				);
-
-				ImGui::SameLine();
-				if (ImGui::SmallButton("x")) {
-					// Queued: removing inside the walk would erase the vector
-					// being iterated.
-					removeSource = point.Source;
-					removeLine = point.Line;
-				}
-
-				ImGui::PopID();
-				ImGui::PopID();
-			}
-
-			if (removeLine > 0) {
-				debug.Remove(removeSource, removeLine);
-			}
-
-			if (debug.Breakpoints().empty()) {
-				ImGui::TextDisabled("no breakpoints in this world");
-			}
-
-			// --- what they caught -----------------------------------------------
-			ImGui::Separator();
+			// --- what this world caught ------------------------------------------
+			//
+			// The breakpoints themselves are above and belong to the editor;
+			// what is per-world is what actually fired here.
 
 			if (debug.Hits().empty()) {
 				ImGui::TextDisabled("nothing caught yet");

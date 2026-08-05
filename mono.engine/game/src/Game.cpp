@@ -719,11 +719,23 @@ namespace engine::game {
 	}
 
 	std::shared_ptr<script::Runtime> StartWorldScripts(
-		Store &store, ecs::Scheduler &scheduler, const script::RuntimeLimits &limits, std::string &error
+		Store &store,
+		ecs::Scheduler &scheduler,
+		const script::RuntimeLimits &limits,
+		std::string &error,
+		const script::Debugger *breakpoints
 	) {
 		error.clear();
 
 		std::shared_ptr<script::Runtime> runtime = script::MakeRuntime(store, script::Language::Luau, limits);
+
+		// **Before the scripts run, and that ordering is the whole point.** A
+		// script's top level has already executed by the time this function
+		// returns, so breakpoints adopted afterwards would silently never fire
+		// on it — which is the failure a debugger can least afford.
+		if (breakpoints != nullptr) {
+			runtime->Debug().Adopt(*breakpoints);
+		}
 
 		const size_t ran = runtime->RunWorldScripts();
 		if (!runtime->LastError().empty()) {

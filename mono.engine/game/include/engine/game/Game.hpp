@@ -37,6 +37,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Xml.hpp>
+#include <engine/script/Debugger.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 #include <engine/world/World.hpp>
@@ -258,9 +259,17 @@ namespace engine::game {
 	//                  failure does not stop the others — a world where half
 	//                  the scripts silently did not start is a bug report with
 	//                  nothing in it.
+	// @param breakpoints Optional. Adopted by the runtime **before** its scripts
+	//                    run, which is the only ordering that lets a breakpoint
+	//                    on a script's top level fire at all — that code has
+	//                    already executed by the time this returns.
 	// @return The runtime, which is never null.
 	std::shared_ptr<script::Runtime> StartWorldScripts(
-		ecs::Store &store, ecs::Scheduler &scheduler, const script::RuntimeLimits &limits, std::string &error
+		ecs::Store &store,
+		ecs::Scheduler &scheduler,
+		const script::RuntimeLimits &limits,
+		std::string &error,
+		const script::Debugger *breakpoints = nullptr
 	);
 
 	// --- the whole game ----------------------------------------------------

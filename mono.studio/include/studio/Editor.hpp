@@ -1795,6 +1795,20 @@ namespace studio {
 		// Whether a new breakpoint ends the script or lets it carry on.
 		bool BreakStops = false;
 
+		// The breakpoints, held here rather than on a runtime.
+		//
+		// **A Stop destroys every runtime, and breakpoints must not go with
+		// them.** They belong to the person debugging, not to the VM that
+		// happens to be alive — and re-typing every line number after each Play
+		// is how a debugger stops being used. `BeginRun` hands this list to each
+		// new runtime; the hits stay per-run, because a hit describes one
+		// execution and showing an old one against a new run would be a lie
+		// about when it happened.
+		//
+		// Not written to disk. A breakpoint is a today problem, and a file of
+		// stale ones pointing at lines that have moved is worse than none.
+		engine::script::Debugger Breakpoints;
+
 		// How many clients a Play run admits.
 		//
 		// **One is the default because one is what a scene author wants**, and

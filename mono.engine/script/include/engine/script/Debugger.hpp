@@ -172,6 +172,21 @@ namespace engine::script {
 		// Forgets every breakpoint.
 		void Clear();
 
+		// Takes another debugger's breakpoints, keeping none of its hits.
+		//
+		// **What a fresh runtime is given at the start of a run.** Breakpoints
+		// belong to the person debugging, not to the VM that happens to be
+		// alive — a Stop destroys the runtime, and re-typing every line number
+		// afterwards is how a debugger stops being used. Hits are deliberately
+		// not carried: they describe a run that is over, and showing them
+		// against a new one would be a lie about when they happened.
+		//
+		// Existing breakpoints are kept and matching ones replaced, so this can
+		// be applied to a runtime that already has some.
+		//
+		// @param other The list to take.
+		void Adopt(const Debugger &other);
+
 		// Every breakpoint, in the order they were added.
 		//
 		// @return The list, valid until the next `Add` or `Clear`.
