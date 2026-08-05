@@ -433,6 +433,7 @@ The rendering and camera work this version already carried, unchanged:
 - [_] put infront mirrors to see if it works with texture rendering
 - [_] scripts that create MeshPart and set mesh properties (surfaceappearance equivalent but as components).
 - [_] finish replication for server/client, server authoritative
+- [_] audio in cdn and running audio in-studio and in-game.
 
 ### v0.10
 
