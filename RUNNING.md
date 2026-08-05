@@ -1084,12 +1084,39 @@ engine cannot be that subprocess — it is a program with a renderer and a
 universe that outlives any one client — so it listens, and `mcpbridge` is the
 subprocess:
 
+**`.mcp.json` in the repository root already does this for the editor**, so a
+client that reads project-scoped MCP config finds `atomic-studio` on port 8738
+with nothing to set up. Another program is one more entry:
+
 ```jsonc
-"atomic": {
-	"command": ".cache/build/dev/tools/mcpbridge",
-	"args": ["--port", "8738"]
+{
+	"mcpServers": {
+		"atomic-studio": {
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8738"]
+		},
+		"atomic-server": {
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8734"]
+		}
+	}
 }
 ```
+
+The path is relative on purpose: `.mcp.json` is checked in, and an absolute one
+carries whoever wrote it. It points into `.cache/`, which is not — so a fresh
+clone needs `just build mcpbridge` before a client can start it.
+
+**The program has to be running first.** The bridge connects on start-up and
+exits 1 if nothing is listening, saying which command would have opened it:
+
+```
+mcpbridge: could not reach an editor at 127.0.0.1:8738 — connect: Connection refused
+Start one with: just edit --mcp-port 8738
+```
+
+That is the ordinary case rather than a fault — a client launches the bridge
+when *it* starts, and the editor is started by a person.
 
 The bridge parses nothing. It copies bytes between the client's stdio and the
 port, which is why a tool added to `mono.engine/control` is reachable the moment
