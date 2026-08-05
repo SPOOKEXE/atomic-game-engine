@@ -13,11 +13,14 @@
 // than aspirational: the `server` preset configures with no graphics stack and
 // the staged `server/` directory has no `shaders/` folder.
 
+#include <engine/control/Server.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Recording.hpp>
@@ -27,8 +30,20 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+// The content attachment is held by pointer and named nowhere else in this
+// header — see `Server::~Server`.
+namespace cdn {
+	class Origin;
+	class Service;
+}
+
+namespace engine::assets {
+	class GrantKey;
+}
 
 namespace server {
 
@@ -38,6 +53,13 @@ namespace server {
 	// argument list again after start-up and there is one answer to "what is
 	// this process configured to do".
 	struct Options {
+		// The loopback port the control surface listens on, or -1 for off.
+		//
+		// **Off by default, and that is the security boundary.** The surface
+		// reads and writes world state for whatever connects to it, with no
+		// authentication — see `SECURITY.md`. `--mcp-port` is the opting in.
+		int ControlPort = -1;
+
 		// Ticks per second. A world ticks at its own rate; this is the rate the
 		// one world this version hosts runs at.
 		double TickRate = 30.0;
@@ -176,6 +198,38 @@ namespace server {
 		// demonstrable rather than merely startable. Off by default; passed
 		// down to hosts when it is on.
 		bool Chatter = false;
+
+		// A content store this server serves to its own clients.
+		//
+		// **CDN.md §6's "local store", and it is an attachment rather than a
+		// second program.** `mono.cdn` is the same library deployed on its own
+		// and scaled; running one in-process is the self-hosted case — a small
+		// game, a LAN session, development — and the client cannot tell the
+		// difference, which is the property §11 asks for. One store, one
+		// manifest format, three deployments.
+		//
+		// Empty serves no content, which is what every existing recipe gets:
+		// a server that bound a port because nobody said not to would be a
+		// behaviour change in the determinism run, for `Listening`'s reason.
+		std::filesystem::path ContentStore;
+
+		// The port the attached origin listens on. Only read when
+		// `ContentStore` is set. Zero binds an ephemeral one.
+		uint16_t ContentPort = 0;
+
+		// The secret shared with whoever issues grants — which, for an attached
+		// origin, is this same process.
+		//
+		// **Still checked, and still a real MAC over a real token.** CDN.md §4
+		// is explicit that single-player and LAN use the same flow with the
+		// server in-process: the grant is issued and verified across a function
+		// call and both halves are real. A path skipped in the configuration
+		// people develop against is a path that breaks the first time somebody
+		// ships the other one — §16.6's argument, applied to content.
+		//
+		// Empty means the attached origin generates one at start-up and keeps
+		// it to itself, which is right when this process is the only issuer.
+		std::string ContentGrantKey;
 	};
 
 	// What the run produced. Returned rather than logged only, so a test can
@@ -211,6 +265,17 @@ namespace server {
 	// test — does so through Stop from another thread.
 	class Server {
 	  public:
+		Server();
+
+		// Declared so the content attachment can stay an incomplete type in
+		// this header. `mono.server` links `Mono::cdn`, and a server's public
+		// header pulling the origin's in behind it would put a content-delivery
+		// dependency on every translation unit that includes this.
+		~Server();
+
+		Server(const Server &) = delete;
+		Server &operator=(const Server &) = delete;
+
 		// Applies `options`, starts the job system and builds the world.
 		//
 		// @param options Parsed command line. Copied, not referenced.
@@ -225,6 +290,33 @@ namespace server {
 
 		// Runs the fixed-tick loop until the budget is spent or Stop is called.
 		RunSummary Run();
+
+		// Where the attached origin is listening, or nothing.
+		//
+		// Worth asking for even when the port was chosen: zero binds an
+		// ephemeral one, and this is how a test and a launcher learn which.
+		//
+		// @return The port, or nothing when no content is being served.
+		std::optional<uint16_t> ContentPort() const;
+
+		// Issues a grant admitting every bundle this server serves.
+		//
+		// **This is the server's half of CDN.md §4 and the only half it has.**
+		// The server decides what a client may have; the origin checks a token
+		// and serves. A client is handed this and presents it, and the origin
+		// learns nothing about who asked.
+		//
+		// Today it grants the whole publication, because there is no interest
+		// set to narrow it by — no player, no position, no entitlement. That is
+		// the honest scope for what exists rather than a security decision, and
+		// it is the line to change when a session knows what it needs.
+		//
+		// @param session Which session this belongs to.
+		// @param nowSeconds The current time.
+		// @param lifetimeSeconds How long it is good for.
+		// @return The token, or nothing when no content is being served.
+		std::optional<std::vector<std::byte>>
+		IssueContentGrant(uint64_t session, uint64_t nowSeconds, uint64_t lifetimeSeconds = 300) const;
 
 		// Safe from another thread: the loop reads it between ticks.
 		void Stop();
@@ -306,6 +398,21 @@ namespace server {
 		// @return `false` when a named scene could not be loaded.
 		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
+		// Whether `--game` names a game file rather than a scene script.
+		//
+		// By extension. `--game` has accepted a `.luau` since v0.3 and every
+		// recipe that uses it still passes one, so the new format is added
+		// beside the old rather than in place of it.
+		//
+		// @param path What `--game` was given.
+		// @return `true` for a `.agame`.
+		static bool IsGameFile(const std::string &path);
+
+		// Loads a game file's universe and starts every world's scripts.
+		//
+		// @return `false` when the file would not load or holds no worlds.
+		bool HostGameFile();
+
 		// Builds the worlds a host was granted and announces itself.
 		//
 		// @return `false` when there is no link, or no worlds to hold.
@@ -343,6 +450,11 @@ namespace server {
 		// @return `false` when recording was asked for and cannot be done.
 		bool BeginRecording();
 
+		// Starts the attached origin when `ContentStore` is set.
+		//
+		// @return `false` when a store was asked for and cannot be served.
+		bool BeginServingContent();
+
 		// Binds the replication socket and declares what is replicated.
 		//
 		// @return `false` when a port was asked for and could not be bound.
@@ -356,6 +468,16 @@ namespace server {
 		//
 		// @param nowSeconds The current time.
 		void ServeClients(double nowSeconds);
+
+		// The control surface. Started only when asked; a server that was never
+		// started costs a thread that was never spawned.
+		engine::control::Server ControlServer;
+		engine::control::Surface ControlSurface{
+			"atomic-server",
+			"A dedicated server of the atomic game engine, hosting worlds headlessly. `world_list` "
+			"is worth calling first: a world is a scene and the universe is the game. This program "
+			"authors nothing — it hosts, so there is no selection and no run mode to change."
+		};
 
 		Options Settings;
 
@@ -371,6 +493,34 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+
+		// The content origin this process serves, when one was asked for.
+		//
+		// Held by pointer for the reason the driver is: the header stays free
+		// of what it takes to build one. Declared in this order because the
+		// service borrows the origin and must be destroyed first.
+		std::unique_ptr<cdn::Origin> ContentOrigin;
+		std::unique_ptr<cdn::Service> ContentService;
+
+		// The issuing half of the shared secret.
+		//
+		// **Two holders of one key, and that is the design rather than a
+		// duplication.** CDN.md §4 splits the job in two: the server decides
+		// what a client may have and issues a token, the origin checks it and
+		// serves. Here both ends happen to be this process, and the key still
+		// exists twice because the *roles* do — collapsing them into one object
+		// would make the in-process arrangement a different code path from the
+		// deployed one, which is exactly what §16.6 forbids for the transport.
+		std::unique_ptr<engine::assets::GrantKey> ContentGrantSecret;
+
+		// One VM per world, while a game file is being hosted.
+		//
+		// **Held here as well as by each world's scheduler**, because the
+		// scheduler's copy is a capture inside a lambda and nothing else names
+		// it. A server that dropped its own would still work and would be one
+		// refactor away from not, which is the kind of lifetime nobody wants to
+		// re-derive.
+		std::vector<std::shared_ptr<engine::script::Runtime>> Runtimes;
 
 		std::unique_ptr<engine::world::Recorder> Recorder_;
 		std::unique_ptr<engine::world::Replayer> Replayer_;

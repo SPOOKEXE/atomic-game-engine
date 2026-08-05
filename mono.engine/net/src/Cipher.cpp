@@ -72,7 +72,7 @@ namespace engine::net {
 
 	std::optional<Cipher::Sealed>
 	Cipher::Sealer::Seal(std::span<const std::byte> plaintext, std::span<const std::byte> associatedData) {
-		ENGINE_PROFILE("Cipher::Sealer::Seal");
+		ENGINE_PROFILE_CAT("Cipher::Sealer::Seal", core::ProfileCategory::Network);
 
 		if (Counter == EXHAUSTED) {
 			// Either 2^64 frames, or a moved-from Sealer. Both mean this key has
@@ -142,7 +142,7 @@ namespace engine::net {
 	std::optional<std::span<const std::byte>> Cipher::Opener::Open(
 		uint64_t counter, std::span<const std::byte> sealed, std::span<const std::byte> associatedData
 	) {
-		ENGINE_PROFILE("Cipher::Opener::Open");
+		ENGINE_PROFILE_CAT("Cipher::Opener::Open", core::ProfileCategory::Network);
 
 		if (sealed.size() < TAG_BYTES) {
 			// A frame too short to hold a tag. Refused before anything is

@@ -191,9 +191,20 @@ TEST_CASE("the running totals match a walk of the window", "[panels]") {
 	// than summed on demand. Every add has a matching subtract, and an eviction
 	// that forgets to remove its pair leaves the mean drifting away from the
 	// truth without ever looking obviously wrong.
+	// **Long enough that the window actually slides**, which it was not. This
+	// recorded 400 frames of about eleven milliseconds — four and a half
+	// seconds against a twenty second window — so nothing was ever evicted and
+	// the eviction arithmetic the comment above describes was never run at all.
+	//
+	// Four thousand is a little under a minute, so roughly two thirds age out.
+	// What that covers is the window sliding, the ring wrapping under it and
+	// `Rescan` rebuilding the totals — not the incremental subtraction on its
+	// own, because these deltas cycle through their extremes and so nearly
+	// every eviction triggers a rebuild that would repair it. The eviction that
+	// rebuilds nothing is a case of its own, below.
 	std::vector<float> live;
 	double now = 0.0;
-	for (int index = 0; index < 400; index++) {
+	for (int index = 0; index < 4000; index++) {
 		// Deliberately varied, so a dropped or double-counted term shows.
 		const float delta = 0.008f + static_cast<float>(index % 7) * 0.001f;
 		now += static_cast<double>(delta);
@@ -201,19 +212,21 @@ TEST_CASE("the running totals match a walk of the window", "[panels]") {
 		live.push_back(delta);
 	}
 
-	// Drop what the window would have dropped.
-	double cutoff = now - FrameStatistics::WINDOW_SECONDS;
-	double running = 0.0;
+	// Drop what the window would have dropped, using the comparison `Record`
+	// uses rather than one rearranged algebraically — the two disagree by a
+	// sample when a stamp lands exactly on the boundary.
 	std::vector<float> kept;
 	double stamp = 0.0;
 	for (const float delta : live) {
 		stamp += static_cast<double>(delta);
-		if (stamp > cutoff) {
+		if (now - stamp <= FrameStatistics::WINDOW_SECONDS) {
 			kept.push_back(delta);
 		}
 	}
-	(void)running;
 
+	// The point of the run length: if this is the whole list again, the test has
+	// gone back to measuring nothing.
+	REQUIRE(kept.size() < live.size());
 	REQUIRE(statistics.SampleCount() == kept.size());
 
 	double total = 0.0;
@@ -233,6 +246,40 @@ TEST_CASE("the running totals match a walk of the window", "[panels]") {
 		statistics.Jitter() ==
 		Approx(static_cast<float>(change / static_cast<double>(kept.size() - 1)) * 1000.0f).margin(0.01)
 	);
+}
+
+TEST_CASE("an eviction that rebuilds nothing still gives up its pair", "[panels]") {
+	// **The one eviction the walk above cannot see.** `Rescan` recomputes the
+	// sums from scratch, and it runs whenever the sample leaving the window was
+	// the best or the worst frame in it — so in a long varied run almost every
+	// eviction is followed by a rebuild that hides whatever the incremental
+	// bookkeeping got wrong. The case that is left is an ordinary sample ageing
+	// out while the extremes stay: nothing rebuilds, and `ChangeSum` is only as
+	// right as the subtraction in `Record`.
+	//
+	// Built by hand rather than swept, because the whole point is a leaving
+	// sample that is strictly between the extremes.
+	FrameStatistics statistics;
+
+	statistics.Record(0.0, 0.010f); // leaves, and is neither extreme
+	statistics.Record(1.0, 0.020f); // the worst frame, and it stays
+	statistics.Record(2.0, 0.005f); // the best frame, and it stays
+	statistics.Record(3.0, 0.012f);
+
+	// Past the window, so the first sample ages out. 0.012 is inside the
+	// extremes, so recording it does not disturb them either.
+	statistics.Record(FrameStatistics::WINDOW_SECONDS + 1.0, 0.012f);
+
+	REQUIRE(statistics.SampleCount() == 4);
+
+	// The extremes are untouched, which is what says no rescan happened.
+	REQUIRE(statistics.Minimum() == Approx(1.0f / 0.020f).margin(0.01));
+	REQUIRE(statistics.Maximum() == Approx(1.0f / 0.005f).margin(0.01));
+
+	// |0.005-0.020| + |0.012-0.005| + |0.012-0.012| over three pairs. The pair
+	// the departing sample formed with 0.020 must be gone; leaving it in reads
+	// as 10.67 ms of jitter that no frame in the window accounts for.
+	REQUIRE(statistics.Jitter() == Approx((0.015 + 0.007) / 3.0 * 1000.0).margin(0.01));
 }
 
 TEST_CASE("Summarise agrees with asking one number at a time", "[panels]") {
@@ -799,197 +846,4 @@ TEST_CASE("the network panel does not overlap the statistics panel", "[panels][n
 	REQUIRE(statisticsRight > 0);
 	REQUIRE(networkLeft < WIDTH);
 	REQUIRE(statisticsRight < networkLeft);
-}
-
-// --- the SHARE column -------------------------------------------------------
-//
-// The bug this guards against was reported off the screen, not off a test: the
-// column read **2634%**. Nothing was corrupt — a span's `Milliseconds` is
-// inclusive, the denominator was the frame less its idle time, and the render
-// span encloses the swapchain wait. The arithmetic divided two real numbers
-// that were never the same measurement.
-
-namespace {
-	// The frame the bug was found on, to the numbers the snapshot recorded.
-	//
-	// frame 16.737 ms, of which `acquire swapchain` waited 16.115 ms, so the
-	// busy part is 0.622 ms and `Renderer::Render` covers 16.385 ms of it.
-	std::vector<FrameSpan> VsyncedFrame() {
-		std::vector<FrameSpan> spans(3);
-
-		spans[0].Name = "Renderer::Render";
-		spans[0].Depth = 0;
-		spans[0].Parent = 0;
-		spans[0].Milliseconds = 16.385f;
-		spans[0].SelfMilliseconds = 0.270f;
-		spans[0].Category = ProfileCategory::Render;
-
-		spans[1].Name = "acquire swapchain";
-		spans[1].Depth = 1;
-		spans[1].Parent = 0;
-		spans[1].Milliseconds = 16.115f;
-		spans[1].SelfMilliseconds = 16.115f;
-		spans[1].Category = ProfileCategory::Idle;
-
-		spans[2].Name = "simulation";
-		spans[2].Depth = 0;
-		spans[2].Parent = 2;
-		spans[2].Milliseconds = 0.231f;
-		spans[2].SelfMilliseconds = 0.231f;
-		spans[2].Category = ProfileCategory::Simulation;
-
-		return spans;
-	}
-}
-
-TEST_CASE("a span enclosing the vsync wait does not exceed 100%", "[panels]") {
-	std::vector<FrameSpan> spans = VsyncedFrame();
-	engine::core::AccumulateIdleMilliseconds(spans);
-	const std::vector<float> shares = engine::render::BusyShares(spans, 0.622f);
-
-	REQUIRE(shares.size() == spans.size());
-
-	// 16.385 / 0.622 was 2634%. With the wait taken out of the numerator it is
-	// 0.270 / 0.622, which is what the render actually cost.
-	CHECK(shares[0] == Approx(0.270f / 0.622f).margin(0.01));
-	CHECK(shares[0] < 1.0f);
-
-	// A scope whose entire job is to block accounts for none of the busy time.
-	// Zero is the honest answer rather than a suppressed one.
-	CHECK(shares[1] == Approx(0.0f).margin(0.001));
-
-	CHECK(shares[2] == Approx(0.231f / 0.622f).margin(0.01));
-}
-
-TEST_CASE("no span's share exceeds the whole busy frame", "[panels]") {
-	std::vector<FrameSpan> spans = VsyncedFrame();
-	engine::core::AccumulateIdleMilliseconds(spans);
-	const std::vector<float> shares = engine::render::BusyShares(spans, 0.622f);
-
-	for (const float share : shares) {
-		CHECK(share >= 0.0f);
-		CHECK(share <= 1.0f);
-	}
-}
-
-TEST_CASE("nested waits are not counted twice", "[panels]") {
-	std::vector<FrameSpan> spans(3);
-
-	spans[0].Name = "outer";
-	spans[0].Depth = 0;
-	spans[0].Parent = 0;
-	spans[0].Milliseconds = 10.0f;
-	spans[0].SelfMilliseconds = 2.0f;
-	spans[0].Category = ProfileCategory::Render;
-
-	// A wait containing another wait. Subtracting inclusive time at both levels
-	// would remove the inner one twice and drive the outer share negative.
-	spans[1].Depth = 1;
-	spans[1].Parent = 0;
-	spans[1].Milliseconds = 8.0f;
-	spans[1].SelfMilliseconds = 3.0f;
-	spans[1].Category = ProfileCategory::Idle;
-
-	spans[2].Depth = 2;
-	spans[2].Parent = 1;
-	spans[2].Milliseconds = 5.0f;
-	spans[2].SelfMilliseconds = 5.0f;
-	spans[2].Category = ProfileCategory::Idle;
-
-	engine::core::AccumulateIdleMilliseconds(spans);
-	const std::vector<float> shares = engine::render::BusyShares(spans, 2.0f);
-
-	// 10 inclusive less 8 of waiting is 2, which is the whole busy frame.
-	CHECK(shares[0] == Approx(1.0f).margin(0.001));
-	CHECK(shares[1] == Approx(0.0f).margin(0.001));
-	CHECK(shares[2] == Approx(0.0f).margin(0.001));
-}
-
-TEST_CASE("busy and idle split an inclusive duration in two", "[panels]") {
-	// **The pair the BUSY and IDLE columns print.** The share arithmetic above
-	// checks a ratio, which stays right even if both halves are wrong together.
-	// These are the two numbers a reader acts on, so they are checked as
-	// numbers: what the renderer did, and what it waited for.
-	std::vector<FrameSpan> spans = VsyncedFrame();
-	engine::core::AccumulateIdleMilliseconds(spans);
-
-	// The enclosing render span: 16.385 inclusive, 16.115 of it the wait.
-	CHECK(spans[0].IdleMilliseconds == Approx(16.115f).margin(0.001));
-	CHECK(engine::render::BusyMillisecondsOf(spans[0]) == Approx(0.270f).margin(0.001));
-
-	// The wait itself is all idle and no work, which is what makes it legible
-	// as the answer rather than as another expensive-looking row.
-	CHECK(spans[1].IdleMilliseconds == Approx(16.115f).margin(0.001));
-	CHECK(engine::render::BusyMillisecondsOf(spans[1]) == Approx(0.0f).margin(0.001));
-
-	// A sibling that never waited reports no idle at all — the column has to
-	// distinguish "did not wait" from "was not measured".
-	CHECK(spans[2].IdleMilliseconds == Approx(0.0f).margin(0.001));
-	CHECK(engine::render::BusyMillisecondsOf(spans[2]) == Approx(0.231f).margin(0.001));
-
-	// Busy plus idle is the inclusive time, for every span. The split loses
-	// nothing, which is why the wall clock is still recoverable from the panel.
-	for (const FrameSpan &span : spans) {
-		CHECK(
-			engine::render::BusyMillisecondsOf(span) + span.IdleMilliseconds ==
-			Approx(span.Milliseconds).margin(0.001)
-		);
-	}
-}
-
-TEST_CASE("busy is never negative when a child reports more than its parent", "[panels]") {
-	// A `Reported` child carries time measured on another thread, so a parent
-	// can legitimately contain more idle than it has wall clock. The columns
-	// must not print a negative cost when that happens.
-	std::vector<FrameSpan> spans(2);
-	spans[0].Depth = 0;
-	spans[0].Parent = 0;
-	spans[0].Milliseconds = 1.0f;
-	spans[0].SelfMilliseconds = 1.0f;
-	spans[0].Category = ProfileCategory::Render;
-
-	spans[1].Depth = 1;
-	spans[1].Parent = 0;
-	spans[1].Milliseconds = 5.0f;
-	spans[1].SelfMilliseconds = 5.0f;
-	spans[1].Category = ProfileCategory::Idle;
-	spans[1].Reported = true;
-
-	engine::core::AccumulateIdleMilliseconds(spans);
-
-	CHECK(engine::render::BusyMillisecondsOf(spans[0]) >= 0.0f);
-	CHECK(engine::render::BusyShares(spans, 1.0f)[0] >= 0.0f);
-}
-
-TEST_CASE("a frame with no idle is unchanged by the correction", "[panels]") {
-	std::vector<FrameSpan> spans(1);
-	spans[0].Depth = 0;
-	spans[0].Parent = 0;
-	spans[0].Milliseconds = 4.0f;
-	spans[0].SelfMilliseconds = 4.0f;
-	spans[0].Category = ProfileCategory::Simulation;
-
-	// The uncapped case, where the fix must do nothing at all.
-	CHECK(engine::render::BusyShares(spans, 8.0f)[0] == Approx(0.5f).margin(0.001));
-}
-
-TEST_CASE("a parent chain that points at itself terminates", "[panels]") {
-	std::vector<FrameSpan> spans(2);
-	spans[0].Depth = 0;
-	spans[0].Parent = 1;
-	spans[0].Milliseconds = 1.0f;
-	spans[0].Category = ProfileCategory::Idle;
-	spans[0].SelfMilliseconds = 1.0f;
-
-	spans[1].Depth = 0;
-	spans[1].Parent = 0;
-	spans[1].Milliseconds = 1.0f;
-	spans[1].Category = ProfileCategory::Render;
-
-	// A cycle is not something the frame graph should produce, and the overlay
-	// must not hang if it ever does — a profiler that freezes the frame it is
-	// profiling is worse than a wrong number.
-	engine::core::AccumulateIdleMilliseconds(spans);
-	const std::vector<float> shares = engine::render::BusyShares(spans, 1.0f);
-	CHECK(shares.size() == 2);
 }

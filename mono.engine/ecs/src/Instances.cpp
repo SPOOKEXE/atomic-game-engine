@@ -22,6 +22,44 @@ namespace engine::ecs {
 			);
 		}
 
+		// Rebuilds a parent's child links after a freed row was left named by
+		// them, and answers with the tail that survived.
+		//
+		// **Reached only once a link is already known bad**, so an intact list
+		// pays nothing for this. The walk stops at the first dead child rather
+		// than stepping over it because the links *out of* a freed row are gone
+		// with the row: there is no way to reach what followed it, and guessing
+		// would invent an order the author never wrote.
+		Entity RepairChildren(StoreState &state, Entity parent) {
+			const Hierarchy *host = NodeOf(state, parent);
+			if (host == nullptr) {
+				return NULL_ENTITY;
+			}
+
+			Entity tail = NULL_ENTITY;
+			for (Entity child = host->FirstChild; child != NULL_ENTITY;) {
+				const Hierarchy *link = NodeOf(state, child);
+				if (link == nullptr) {
+					break;
+				}
+				tail = child;
+				child = link->NextSibling;
+			}
+
+			// Whatever the walk ended on is the end of the list now, and its
+			// `NextSibling` is still naming the row that was freed.
+			if (tail != NULL_ENTITY) {
+				MutableNodeOf(state, tail)->NextSibling = NULL_ENTITY;
+			}
+
+			Hierarchy *node = MutableNodeOf(state, parent);
+			if (tail == NULL_ENTITY) {
+				node->FirstChild = NULL_ENTITY;
+			}
+			node->LastChild = tail;
+			return tail;
+		}
+
 		// Copies one instance without its subtree.
 		Entity CloneOne(StoreState &state, Entity source) {
 			const EntityId key = EntityId::Of(source);
@@ -128,6 +166,11 @@ namespace engine::ecs {
 		return node == nullptr ? NULL_ENTITY : node->Parent;
 	}
 
+	bool HasChildren(const StoreState &state, Entity instance) {
+		const Hierarchy *node = NodeOf(state, instance);
+		return node != nullptr && node->FirstChild != NULL_ENTITY;
+	}
+
 	void EachChild(const StoreState &state, Entity instance, const std::function<void(Entity)> &body) {
 		const Hierarchy *node = NodeOf(state, instance);
 		if (node == nullptr) {
@@ -225,7 +268,22 @@ namespace engine::ecs {
 
 		// --- link at the end of the new parent, so order is insertion order ---
 		Hierarchy *host = MutableNodeOf(state, parent);
-		const Entity last = host->LastChild;
+
+		// **A tail naming a freed row is repaired before it is written
+		// through, not trusted.** `Store::Destroy` releases an entity without
+		// touching the links that point *at* it — that unlink is what
+		// `DestroyInstance` adds — so a parent outlives a destroyed child while
+		// still naming it as `LastChild`. Every other lookup in this function
+		// already tolerates a null; this one dereferenced it, and took the
+		// process with it the next time anything parented into that same
+		// parent.
+		Entity last = host->LastChild;
+		if (last != NULL_ENTITY && NodeOf(state, last) == nullptr) {
+			last = RepairChildren(state, parent);
+			// Re-read: the repair is a series of lookups, and any of them may
+			// have moved this row.
+			host = MutableNodeOf(state, parent);
+		}
 
 		if (last == NULL_ENTITY) {
 			host->FirstChild = instance;

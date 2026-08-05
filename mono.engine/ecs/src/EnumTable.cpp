@@ -97,6 +97,42 @@ namespace engine::ecs {
 		return entry == nullptr ? std::vector<core::Name>{} : entry->Members;
 	}
 
+	core::Name EnumTable::MemberAt(core::Name enumName, size_t ordinal) {
+		Table &table = Registry();
+		const std::lock_guard lock(table.Guard);
+
+		const Entry *entry = Lookup(table, enumName);
+		if (entry == nullptr || ordinal >= entry->Members.size()) {
+			// An invalid `Name` rather than the first member. A stored ordinal
+			// past the end means the component holds a value nothing registered
+			// — reading it back as `Right` would make a corrupt row look like a
+			// deliberate one.
+			return core::Name{};
+		}
+		return entry->Members[ordinal];
+	}
+
+	bool EnumTable::OrdinalOf(core::Name enumName, core::Name member, size_t &ordinal) {
+		Table &table = Registry();
+		const std::lock_guard lock(table.Guard);
+
+		const Entry *entry = Lookup(table, enumName);
+		if (entry == nullptr) {
+			return false;
+		}
+
+		const auto found = std::find(entry->Members.begin(), entry->Members.end(), member);
+		if (found == entry->Members.end()) {
+			return false;
+		}
+
+		// A scan rather than a map, for `Classes`' reason about short lists: an
+		// enum here is a handful of names, and a hash keyed by two interned ids
+		// would cost more to maintain than the walk it replaces.
+		ordinal = static_cast<size_t>(std::distance(entry->Members.begin(), found));
+		return true;
+	}
+
 	std::vector<core::Name> EnumTable::Names() {
 		Table &table = Registry();
 		const std::lock_guard lock(table.Guard);

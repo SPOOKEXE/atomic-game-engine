@@ -27,4 +27,26 @@ namespace engine::scene {
 		}
 		return "?";
 	}
+
+	const char *Describe(NormalId face) {
+		// **Capitalised, unlike the two above, because these are not
+		// diagnostics.** `Describe(BodyKind)` produces "dynamic" for a log line;
+		// these are the members `ecs::EnumTable` registers and the strings a
+		// script assigns to `Face`, so they are Roblox's spelling exactly.
+		switch (face) {
+		case NormalId::Right:
+			return "Right";
+		case NormalId::Top:
+			return "Top";
+		case NormalId::Back:
+			return "Back";
+		case NormalId::Left:
+			return "Left";
+		case NormalId::Bottom:
+			return "Bottom";
+		case NormalId::Front:
+			return "Front";
+		}
+		return "?";
+	}
 }

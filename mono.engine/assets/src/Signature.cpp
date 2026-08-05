@@ -113,7 +113,7 @@ namespace engine::assets {
 	}
 
 	SignatureBytes SigningKey::SignManifestRoot(const ContentHash &root) const {
-		ENGINE_PROFILE("SigningKey::SignManifestRoot");
+		ENGINE_PROFILE_CAT("SigningKey::SignManifestRoot", core::ProfileCategory::Assets);
 
 		const ContentHash message = SigningMessage(root);
 
@@ -129,7 +129,7 @@ namespace engine::assets {
 	}
 
 	bool VerifyManifestRoot(const ContentHash &root, const SignatureBytes &signature, const PublicKey &key) {
-		ENGINE_PROFILE("assets::VerifyManifestRoot");
+		ENGINE_PROFILE_CAT("assets::VerifyManifestRoot", core::ProfileCategory::Assets);
 
 		const ContentHash message = SigningMessage(root);
 

@@ -148,7 +148,7 @@ namespace engine::net {
 	}
 
 	bool Link::OnPacket(const PacketHeader &header, size_t payloadBytes, double nowSeconds) {
-		ENGINE_PROFILE("Link::OnPacket");
+		ENGINE_PROFILE_CAT("Link::OnPacket", core::ProfileCategory::Network);
 
 		if (Phase == ConnectionState::Disconnected) {
 			return false;

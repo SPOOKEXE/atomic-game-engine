@@ -31,7 +31,7 @@ namespace engine::physics {
 	}
 
 	void BroadPhase(ecs::Store &store) {
-		ENGINE_PROFILE_CAT("physics.broadphase", core::ProfileCategory::ECS);
+		ENGINE_PROFILE_CAT("physics.broadphase", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) {
@@ -57,6 +57,12 @@ namespace engine::physics {
 		if (candidates.size() < widest) {
 			candidates.resize(widest);
 		}
+
+		// The queries themselves, separate from the sync that built the
+		// index and from the narrow phase that consumes the pairs. This is
+		// the part that scales with how *clustered* a scene is rather than
+		// with how large it is, and the two want different answers.
+		ENGINE_PROFILE_CAT("physics.query", core::ProfileCategory::Physics);
 
 		// Only dynamic colliders are queried. Two anchored parts overlapping is
 		// the level author's business, and a pair the solver could not move

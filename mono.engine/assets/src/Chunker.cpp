@@ -154,7 +154,7 @@ namespace engine::assets {
 		// asset cuts into thousands, and the frame graph holds 4096 spans in
 		// total. The counters below carry the per-chunk detail instead, which
 		// is an atomic add rather than a tree node.
-		ENGINE_PROFILE("Chunker::Split");
+		ENGINE_PROFILE_CAT("Chunker::Split", core::ProfileCategory::Assets);
 
 		std::vector<ChunkSpan> chunks;
 		if (data.empty()) {

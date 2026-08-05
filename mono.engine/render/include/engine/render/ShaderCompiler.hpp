@@ -15,6 +15,7 @@
 // @tier L12 · client
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -103,8 +104,12 @@ namespace engine::render {
 
 	  private:
 		struct Impl;
-		// Not a unique_ptr: the deleter would need the complete type here, and
-		// the point of the pimpl is that it is not.
-		Impl *State = nullptr;
+
+		// Incomplete here, which is the point of the pimpl, and owned by a
+		// `unique_ptr` anyway: the deleter needs the complete type at the point
+		// the destructor is *defined*, not at the point it is declared. It is
+		// declared above and defined in `ShaderCompiler.cpp`, where `Impl` is
+		// complete — the same arrangement `Renderer.hpp` uses.
+		std::unique_ptr<Impl> State;
 	};
 }

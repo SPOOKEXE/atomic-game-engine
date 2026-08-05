@@ -83,7 +83,13 @@ namespace engine::scene {
 		uint32_t Reserved = 0;
 
 		// What `ResolveActiveCamera` last computed. Identity until it runs.
-		CameraMatrices Matrices;
+		//
+		// Braced rather than left bare so that "identity until it runs" is what
+		// the type says and not only what this comment says. An aggregate
+		// initialiser naming the entity and the aspect ratio — which is every
+		// caller — leaves this member behind, and a member with no default is
+		// one `-Wmissing-field-initializers` is right to call out.
+		CameraMatrices Matrices{};
 	};
 
 	// Builds the matrices for one camera at one placement.

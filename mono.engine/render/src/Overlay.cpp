@@ -265,7 +265,21 @@ namespace engine::render {
 				pixel[0] = static_cast<uint8_t>((red * source + pixel[0] * inverse + 127) / 255);
 				pixel[1] = static_cast<uint8_t>((green * source + pixel[1] * inverse + 127) / 255);
 				pixel[2] = static_cast<uint8_t>((blue * source + pixel[2] * inverse + 127) / 255);
-				pixel[3] = static_cast<uint8_t>(std::min(255u, source + pixel[3] * inverse / 255));
+
+				// **The same rounding as the three above, and that is the whole
+				// point of writing it in this shape.** Alpha used to be
+				// `source + pixel[3] * inverse / 255`, which truncates where the
+				// colours round — so the two could land a step apart and produce
+				// a channel larger than the alpha carrying it. Premultiplied
+				// storage has no such pixel: `(R=100, A=100)` under red at alpha
+				// 128 came out `R=178, A=177`, which the GPU's
+				// `ONE / ONE_MINUS_SRC_ALPHA` blend reads as slightly more red
+				// than the coverage allows.
+				//
+				// A source alpha of 255 is the store above, so the largest value
+				// reachable here is `(254*255 + 255*1 + 127) / 255`, which is
+				// 255. There is nothing left for a clamp to catch.
+				pixel[3] = static_cast<uint8_t>((source * 255u + pixel[3] * inverse + 127) / 255);
 				pixel += BYTES_PER_PIXEL;
 			}
 		}

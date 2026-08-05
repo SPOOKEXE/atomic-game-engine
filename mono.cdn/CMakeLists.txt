@@ -12,33 +12,46 @@
 # SDK, no SDL and no shader compiler" is therefore a property of the build
 # rather than a claim about a link line, and it needs no guard to stay true.
 #
-# §8 gives the destination: the delivery service links `core`, `parallel` and
-# `assets`, and stops. All three are here now and each earned its place by being
-# called — `assets` when `Gate` began opening grants, `parallel` when `Origin`
-# began fanning group compression out with `Jobs::For`. Nothing beyond those
-# three, and a dependency declared ahead of its first caller is a dependency
-# nobody can tell from a mistake. This is the one program whose short link row is
-# the point of it.
-
+# §8 gave the destination as `core`, `parallel` and `assets`, and v0.9 widened it
+# by two — which is a change to §8 rather than a drift within it, so it is
+# written down here and in expected_graph.json rather than just happening.
 #
-# Zstd is VENDOR rather than VENDOR_PUBLIC: `zstd.h` reaches no public header,
-# so nothing linking Mono::cdn inherits it. `Dictionary` holds bytes and a hash
-# and says nothing about what will compress against them.
+# `net` arrived with the wire. An origin that serves nothing is a directory; the
+# hop that carries bytes is `Engine::net`'s `http/`, and `ROADMAP.md` v0.9 said
+# in advance that building it "also moves the origin's link row". It does not
+# cost the bare build: `net` links `core` plus asio and Crypto++, and no part of
+# it wants a window.
+#
+# `delivery` arrived with the client half. A compressed group is a format with
+# two ends — this program builds one and a game expands one — so `GroupCodec`
+# moved out of here into `Engine::delivery` where both can reach it. Keeping a
+# copy on each side is how a format acquires a dialect, which CDN.md §6 refuses
+# twice. Zstd went with it, which is why this file no longer names a vendor.
+#
+# What has *not* changed is the property the row exists for: every one of these
+# is `shared`, so `cmake --preset cdn` still configures on a container with no
+# Vulkan SDK, no SDL and no shader compiler. `just check-cdn-is-bare` is the
+# standing proof and it is the thing to run when this line is edited again.
 mono_add_library(cdn
 	TIER shared
 	NAMESPACE Mono
 	DEPS
 		Engine::core
 		Engine::assets
+		Engine::delivery
+		Engine::net
 		Engine::parallel
-	VENDOR
-		Vendor::zstd
 )
 
-mono_add_program(cdn
-	TIER shared
-	SOURCE app/main.cpp
-	DEPS
-		Mono::cdn
-		Engine::core
-)
+# The library above is built whenever the server is, because a server can attach
+# an origin. The *program* is what MONO_BUILD_CDN gates, so `--preset server`
+# stages no origin binary and the staged tree keeps saying what it contains.
+if(MONO_BUILD_CDN)
+	mono_add_program(cdn
+		TIER shared
+		SOURCE app/main.cpp
+		DEPS
+			Mono::cdn
+			Engine::core
+	)
+endif()

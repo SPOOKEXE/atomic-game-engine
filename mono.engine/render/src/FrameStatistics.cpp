@@ -63,13 +63,16 @@ namespace engine::render {
 			Count--;
 		}
 
-		if (Count == 0) {
-			DeltaSum = 0.0;
-			ChangeSum = 0.0;
-			Worst = 0.0f;
-			Best = 0.0f;
-			ExtremesStale = false;
-		}
+		// **The window is never emptied by that loop, and the sums below it are
+		// therefore never rebuilt from nothing.** The sample just recorded sits
+		// at `now`, so once it is the only one left `now - Ring[Head].Time` is
+		// zero and the condition is false whatever the window is set to — a
+		// clock that jumped backwards makes it negative, which fails the same
+		// way. `Record` leaves at least one sample behind, always.
+		//
+		// A reset for `Count == 0` used to follow, duplicating `Clear`. It could
+		// not run, and an unreachable reset beside live accumulators reads as
+		// though the empty case were being handled here.
 	}
 
 	void FrameStatistics::Rescan() const {

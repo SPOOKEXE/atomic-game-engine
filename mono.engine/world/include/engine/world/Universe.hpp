@@ -230,6 +230,21 @@ namespace engine::world {
 		// @return The name, or an invalid Name for an unknown world.
 		core::Name NameOf(WorldId id) const;
 
+		// What a world was configured with.
+		//
+		// **Read-only, and there is no setter to match it.** A world's tick
+		// rate is decided when it is created and changing one underneath a
+		// running simulation is a different operation with different answers
+		// about the ticks already in flight. This exists because a save file
+		// has to write what a world actually is: `game::WriteGame` wrote the
+		// defaults for every world before it, so a scene authored at 30Hz
+		// saved as 60 and nothing said so.
+		//
+		// @param id The world to ask about.
+		// @return The settings, or a default-constructed set for an unknown
+		//         world.
+		WorldSettings SettingsOf(WorldId id) const;
+
 		// What state a world is in.
 		//
 		// @param id The world to ask about.

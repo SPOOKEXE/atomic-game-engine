@@ -25,6 +25,7 @@
 // that API would have had to be rejected on rule 5 alone.
 
 #include "JsBindings.hpp"
+#include "Subtree.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Random.hpp>
@@ -39,6 +40,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/script/Datatypes.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
@@ -251,18 +253,17 @@ namespace engine::script {
 			return JS_NewBool(context, ecs::Classes::IsA(JsOf(context).World->ClassOf(instance), wanted));
 		}
 
-		// Forgets every listener on an instance, so a `.Changed` connection on a
-		// destroyed row does not fire against a dead handle forever.
+		// Forgets every listener on an instance and on everything under it, so a
+		// `.Changed` connection on a destroyed row does not fire against a dead
+		// handle forever.
 		void ForgetInstance(JSContext *context, Entity instance) {
 			JsContext &bound = JsOf(context);
 
-			std::vector<CallbackRef> released;
-			bound.Signals.DropSubject(instance, released);
-			bound.Changes.Unwatch(instance);
-
-			for (const CallbackRef reference : released) {
-				Release(context, reference);
-			}
+			ForgetSubtree(
+				*bound.World, bound.Signals, bound.Changes, instance, [context](CallbackRef reference) {
+					Release(context, reference);
+				}
+			);
 		}
 
 		JSValue InstanceDestroy(JSContext *context, JSValueConst self, int, JSValueConst *) {
@@ -272,11 +273,10 @@ namespace engine::script {
 			}
 
 			JsContext &bound = JsOf(context);
-			ForgetInstance(context, instance);
 
-			// Children go too — `DestroyInstance` takes the whole subtree, so a
-			// listener on one would survive the row it was watching.
-			bound.World->EachChild(instance, [&](Entity child) { ForgetInstance(context, child); });
+			// The whole subtree — `DestroyInstance` takes every descendant, so a
+			// listener anywhere under here would survive the row it was watching.
+			ForgetInstance(context, instance);
 
 			bound.World->DestroyInstance(instance);
 			return JS_UNDEFINED;
@@ -314,23 +314,9 @@ namespace engine::script {
 			JSValue array = JS_NewArray(context);
 			uint32_t written = 0;
 
-			// An explicit queue rather than recursion: a deep tree would put the
-			// scene's depth on the C stack, and a scene's depth is the author's
-			// to choose.
-			std::vector<Entity> pending;
-			store.EachChild(instance, [&](Entity child) { pending.push_back(child); });
-
-			while (!pending.empty()) {
-				const Entity current = pending.front();
-				pending.erase(pending.begin());
-
-				JS_SetPropertyUint32(context, array, written++, MakeJsInstance(context, current));
-
-				size_t insertAt = 0;
-				store.EachChild(current, [&](Entity child) {
-					pending.insert(pending.begin() + static_cast<ptrdiff_t>(insertAt++), child);
-				});
-			}
+			EachDescendant(store, instance, [&](Entity descendant) {
+				JS_SetPropertyUint32(context, array, written++, MakeJsInstance(context, descendant));
+			});
 			return array;
 		}
 
@@ -359,11 +345,11 @@ namespace engine::script {
 
 			JsContext &bound = JsOf(context);
 
-			// The world is every root's ancestor, so `part.IsDescendantOf(
-			// workspace)` is true for anything parented into it.
-			if (JS_IsStrictEqual(context, argv[0], bound.Workspace)) {
-				return JS_NewBool(context, bound.World->Alive(instance));
-			}
+			// No case for the workspace any more, and losing it is the point:
+			// this used to be true for every live instance in the world, because
+			// the world was every root's ancestor. It is now the real subtree
+			// question — the same one the render gate asks — so a script and the
+			// renderer cannot disagree about whether something is in the scene.
 			return JS_NewBool(context, bound.World->IsDescendantOf(instance, JsEntityOf(context, argv[0])));
 		}
 
@@ -1041,25 +1027,11 @@ namespace engine::script {
 		JsContext &bound = JsOf(context);
 		JSValue global = JS_GetGlobalObject(context);
 
-		// The two enums this vocabulary needs. `ecs::EnumTable` is process-wide
-		// and takes a second declaration as agreement, so registering here as
-		// well as on the Luau side is not a conflict.
-		static const std::string_view EASING_STYLES[] = {
-			"Linear",
-			"Quad",
-			"Cubic",
-			"Quart",
-			"Quint",
-			"Sine",
-			"Exponential",
-			"Circular",
-			"Back",
-			"Elastic",
-			"Bounce",
-		};
-		static const std::string_view EASING_DIRECTIONS[] = {"In", "Out", "InOut"};
-		ecs::EnumTable::Register("EasingStyle", EASING_STYLES);
-		ecs::EnumTable::Register("EasingDirection", EASING_DIRECTIONS);
+		// The two enums this vocabulary needs. Shared with the Luau surface and
+		// with the bindings generator rather than listed again here: process-wide
+		// registration takes a second declaration as agreement, which is what
+		// kept the duplicate invisible until a third caller needed the same list.
+		RegisterDatatypeEnums();
 
 		// --- signals ---
 		{

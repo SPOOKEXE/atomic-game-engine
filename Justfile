@@ -45,6 +45,7 @@ build target="":
 client: (build "client")
 server: (build "server")
 cdn: (build "cdn")
+studio: (build "studio")
 
 # Only the suites a change could have affected, by cascading signature hash.
 test: build
@@ -124,20 +125,151 @@ bindings: (build "bindings")
 bindings-check: (build "bindings")
     ./{{build}}/tools/bindings --check
 
-# Everything CI runs, in the order CI runs it, against one preset.
+# Every authored script against the declarations, in both languages.
 #
-# Here so that "it passes locally" and "it passes in CI" mean the same thing.
-# `.github/workflows/ci.yml` splits this across jobs by what each one needs
-# installed — the point of the split is that the headless half runs on a machine
-# with no graphics stack at all — but the checks are these and in this order:
-# cheapest and most likely to fail first, so a misformatted file does not wait
-# behind a compile.
+# **The other half of `bindings-check`.** That one asks whether the declarations
+# still match the class table; this asks whether the scripts still match the
+# declarations. A property removed from the class table regenerates cleanly and
+# leaves every script that named it broken, with nothing reporting it until the
+# scene fails to build.
+#
+# The Luau half is `mono.tools/scriptcheck`, which exists because upstream's
+# `luau-analyze` has no way to load a definition file — see MonoVendor.cmake.
+# The TypeScript half is `tsc` against the checked-in `tsconfig.json`, which
+# already lists the generated `.d.ts` as its type root.
+#
+# **The compiler is the pinned one, not whatever `bunx tsc` resolves to.**
+# `package.json` names an exact version and this runs `node_modules/.bin/tsc`,
+# so an upgrade is a commit rather than a morning. Installing is idempotent and
+# offline once the package is cached.
+#
+# **`tsc` is skipped rather than fatal when no runner is installed.** It is the
+# one check here that needs something outside the C++ toolchain, and a
+# prerequisite list that grows a Node runtime for two example files is a worse
+# trade than a check that says out loud when it did not run.
+typecheck: (build "scriptcheck")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ./{{build}}/tools/scriptcheck mono.engine/examples/*.luau
+
+    if command -v bun > /dev/null; then
+        bun install --silent
+    elif command -v npm > /dev/null; then
+        npm install --silent --no-audit --no-fund
+    else
+        echo "typecheck ok — luau. TypeScript skipped: no bun or npm on PATH."
+        exit 0
+    fi
+
+    ./node_modules/.bin/tsc --noEmit
+    echo "typecheck ok — luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
+
+# The editor, with its control surface open for a Model Context Protocol client.
+#
+# **Two processes and one port.** This starts the editor listening on loopback;
+# `mono.tools/mcpbridge` is what an MCP client launches, and it pumps bytes
+# between the client's stdio and this port. `mono.studio/src/Control.cpp` carries
+# why the editor listens rather than being launched.
+#
+# Off unless asked for: the surface runs scripts, writes properties and saves
+# files for whatever connects, so opening it is a decision rather than a default.
+# `just mcp` opens 8738 — the port `.mcp.json` and RUNNING.md name for the
+# editor, and they have to agree or a client connects to nothing; `just mcp 9001 --game My.agame` picks a port and passes
+# the rest through to the editor.
+#
+# The editor, listening for a Model Context Protocol client.
+mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "editor: 127.0.0.1:{{port}}"
+    echo "client: $(pwd)/{{build}}/tools/mcpbridge --port {{port}}"
+    echo ""
+    ./{{build}}/studio/studio --mcp-port {{port}} {{args}}
+
+# The editor's language server, built from `mono.vendor/luau-lsp`.
+#
+# **The one vendor this build never compiles**, which is why it is a recipe of
+# its own rather than a target. `just setup` walks past the submodule —
+# `update = none` in `.gitmodules`, and the reason is written there — so this
+# clones it on first run. Nothing else in the repository needs it: `just
+# typecheck` gates on `mono.tools/scriptcheck`, which links our Luau.
+#
+# It is built in a tree of its own because it brings its own Luau and declares
+# the same `Luau.*` target names ours does. Adding it to this build fails at
+# configure time; `.gitmodules` carries the full argument.
+#
+# **`-Wno-error=maybe-uninitialized`, and the narrowness is the point.** 1.9.2
+# hardcodes `-Wall -Werror` with no option to disable it, and GCC reports a
+# false positive inside nlohmann/json's `NLOHMANN_DEFINE_TYPE_*` macros — so the
+# build fails on a warning about vendored code in a vendored tree.
+# `MonoVendor.cmake` turns Luau's own `LUAU_WERROR` off for exactly this reason.
+#
+# A blanket `-Wno-error` does not work here: `CMAKE_CXX_FLAGS` lands *before*
+# their `target_compile_options`, so the later `-Werror` wins. A specific
+# `-Wno-error=<warning>` takes precedence over the blanket form whatever the
+# order, which is why this names the warning rather than silencing all of them —
+# every other warning upstream cares about still fails the build.
+#
+# **`-include cstdint` is the second one, and it is a dated bug rather than a
+# taste question.** luau-lsp 1.9.2 pins a Luau from before GCC 13 stopped
+# including `<cstdint>` transitively, so `Ast/src/StringUtils.cpp` names
+# `uint8_t` without including it and does not compile on a current toolchain.
+# Forcing the header in is the standard answer and costs one flag; the
+# alternative is editing a file inside two vendored trees.
+#
+# **This is the version skew `.gitmodules` warns about, arriving early.** Our own
+# `mono.vendor/luau` is 0.732 and builds clean — the tree that does not is the
+# one luau-lsp brought with it.
+#
+# Flags rather than patches, because `mono.vendor/AGENTS.md` says a patch goes
+# upstream or into a fork, never into a file in this tree.
+luau-lsp:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git submodule update --init --recursive --checkout --depth 1 mono.vendor/luau-lsp
+
+    # **The two Luaus must be one Luau.** The editor type-checks with the copy
+    # luau-lsp brings and `just typecheck` with `mono.vendor/luau`; if they drift
+    # apart, an author gets diagnostics from a language the engine does not run —
+    # which is worse than no editor support, because it looks authoritative.
+    # Checked rather than written down, because rule 6 says a rule the build does
+    # not check is documentation.
+    ours=$(git -C mono.vendor/luau rev-parse HEAD)
+    theirs=$(git -C mono.vendor/luau-lsp/luau rev-parse HEAD)
+    if [ "$ours" != "$theirs" ]; then
+        echo "the two vendored Luaus disagree:" >&2
+        echo "  mono.vendor/luau          $ours" >&2
+        echo "  mono.vendor/luau-lsp/luau $theirs" >&2
+        echo "" >&2
+        echo "Pin them to one commit. .gitmodules says which and why; the ceiling" >&2
+        echo "is whatever luau-lsp compiles against. docs/DEFERRED.md D00019." >&2
+        exit 1
+    fi
+
+    cmake -S mono.vendor/luau-lsp -B .cache/build/luau-lsp -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized -include cstdint" > /dev/null
+    cmake --build .cache/build/luau-lsp --target luau-lsp
+    echo ""
+    echo "luau-lsp built: $(pwd)/.cache/build/luau-lsp/luau-lsp"
+    echo "Point your editor at it — see RUNNING.md, 'Autocomplete while you write one'."
+
+# Every check there is, in the order to run them, against one preset.
+#
+# **The whole guarantee, and it is local and manual.** No machine other than
+# this one runs any of it: there is no workflow on GitHub, and there will not be
+# one until the repository's owner asks for it. `docs/DEFERRED.md` D00005 carries
+# that decision and what it costs. So this recipe is not "what CI runs" — it is
+# what a person runs before a push, and nothing runs it for them.
+#
+# The order is cheapest and most likely to fail first, so a misformatted file
+# does not wait behind a compile.
 #
 # Not `preset=ci` by default, because that makes every warning fatal and the
-# recipe is meant to be runnable mid-change. Use `just preset=ci check` for what
-# the pipeline actually enforces.
-check: format-check build test-all test-architecture bindings-check determinism replay-check
-    @echo "check ok — format, build, tests, architecture, bindings, determinism, replay"
+# recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
+# strictest configuration this repository has.
+check: format-check build test-all test-architecture bindings-check typecheck determinism replay-check
+    @echo "check ok — format, build, tests, architecture, bindings, typecheck, determinism, replay"
 
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")
@@ -146,6 +278,45 @@ run *args: (build "client")
 # Run the ECS demo scene with both debug panels open.
 demo: (build "client")
     ./{{build}}/client/client --stats --graph
+
+# Run the editor. `just edit --game My.agame` passes flags straight through.
+#
+# The only program in the repository where `RunService:IsStudio()` is true, and
+# the one that writes a `.agame`. `just host --game X.agame` and
+# `just run --game X.agame` read the same file back — a dedicated server and a
+# single-player client respectively, which is what makes the format a module
+# rather than something the editor owns.
+edit *args: (build "studio")
+    ./{{build}}/studio/studio {{args}}
+
+# The editor, driven with no display at all.
+#
+# **What makes the studio checkable by something that is not a person.** It
+# loads a game, starts it, renders the world into an offscreen target and writes
+# the result — no window, no compositor, no machine that has to be left alone.
+# A scripted control or an agent reads the image instead of a screen.
+#
+# Not part of `just check`: it needs a GPU, and a build container that has none
+# would fail a check about the editor for a reason that is not about the editor.
+studio-smoke game="" out=".cache/studio-smoke.bmp": (build "studio")
+    @rm -f {{out}}
+    ./{{build}}/studio/studio --headless --frames 12 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
+    @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
+    @echo "studio ok — loaded, played and rendered with no display, into {{out}}"
+
+# Drag the editor's window and check it is still alive afterwards.
+#
+# **The one bug class a headless run cannot reach.** The viewport shows last
+# frame's scene texture, so resizing the panel means the renderer frees a
+# texture the interface has already recorded a bind of — a use-after-free
+# inside SDL's Vulkan backend, with nothing of ours on the stack. It needs a
+# real window, a real swapchain and a window manager, which is exactly what
+# `--headless` does not have.
+#
+# Not part of `just check`, for `studio-smoke`'s reason plus one more: it needs
+# a display and `xdotool`, not only a GPU.
+studio-resize: (build "studio")
+    ./scripts/studio-resize-test.sh ./{{build}}/studio/studio
 
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")

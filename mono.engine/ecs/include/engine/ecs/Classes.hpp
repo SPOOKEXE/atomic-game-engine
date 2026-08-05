@@ -170,6 +170,11 @@ namespace engine::ecs {
 		// one component write out to every property name observing it — writing
 		// `Transform` fires `CFrame`, `Position` *and* `Orientation`.
 		const ComponentSet *Reads = nullptr;
+
+		// The components the setter touches. The same set as `Reads` for a
+		// plain field, and deliberately a separate pointer: a computed property
+		// may read more than it writes, and a caller asking what a write
+		// dirties must not be told what a read needed.
 		const ComponentSet *Writes = nullptr;
 
 		// Reads the property into `out`, which holds `Size` bytes.
@@ -259,6 +264,40 @@ namespace engine::ecs {
 		// @param owner   The class exposing the property.
 		// @param name    The name scripts and files use.
 		template <auto Member> static void Property(ClassId owner, std::string_view name);
+
+		// The same, for a field whose legal values are a closed range.
+		//
+		// **Because `PropertyDescriptor` could not say "this is a fraction", and
+		// the first two properties that needed to say it abandoned the generated
+		// form to do it.** Each became thirty-odd lines that were character for
+		// character `Property<Member>` plus one `std::clamp` — and the next 0..1
+		// float would have been a third copy.
+		//
+		// **Clamped rather than refused**, which is the right answer for a
+		// continuous quantity: a fade driven off a sine or a distance overshoots
+		// by a hair at both ends, and refusing the write would make a smooth fade
+		// stutter at exactly the two values it is aiming for. An enum is refused
+		// because a wrong name means nothing; a number out of range has an
+		// obvious nearest meaning.
+		//
+		// **The bounds are template arguments, not parameters, and that is
+		// forced rather than stylistic.** `PropertyDescriptor::Set` is a raw
+		// function pointer — `Property` is written the way it is precisely so the
+		// generated setter is captureless — so bounds passed as values would need
+		// a capturing lambda and would not convert. As template arguments they
+		// are baked into the generated function and the descriptor stays a
+		// pointer.
+		//
+		// Usage: `ClampedProperty<&Visual::Transparency, 0.0f, 1.0f>(basePart,
+		// "Transparency")`.
+		//
+		// @tparam Member A pointer-to-member of a registered component type.
+		// @tparam Low    The smallest legal value.
+		// @tparam High   The largest.
+		// @param owner   The class that declares it.
+		// @param name    The property's name.
+		template <auto Member, auto Low, auto High>
+		static void ClampedProperty(ClassId owner, std::string_view name);
 
 		// Declares a property whose conversion is written rather than generated.
 		//

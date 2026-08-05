@@ -1,0 +1,10 @@
+{
+	"mcpServers": {
+		"atomic-studio": {
+			"type": "stdio",
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8738"],
+			"env": {}
+		}
+	}
+}

@@ -1,3 +1,5 @@
+#include "PanelShares.hpp"
+
 #include <engine/core/Profiling.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/DebugText.hpp>
@@ -64,8 +66,17 @@ namespace engine::render {
 			// silently shifts every colour below it.
 			Colour{80, 200, 230}, // ECS
 
+			// Red, and the only warm colour above the middle of the list. The
+			// physics bar is the one a reader goes looking for when a frame
+			// went long, so it is findable without reading a label — and it
+			// sits between the cyan above it and the amber below it, which is
+			// the largest hue gap the palette had left.
+			Colour{236, 112, 108}, // physics
+
 			Colour{222, 158, 70},  // simulation
 			Colour{190, 120, 210}, // script
+			Colour{232, 208, 96},  // network
+			Colour{150, 205, 100}, // assets
 			// Grey, and deliberately the dullest thing on the panel. Idle is the
 			// largest bar on a vsynced frame and the least interesting.
 			Colour{96, 104, 118}, // idle
@@ -579,7 +590,7 @@ namespace engine::render {
 			const float frameMilliseconds = std::max(data.FrameMilliseconds, 0.0001f);
 			const float busyMilliseconds = std::max(data.BusyMilliseconds(), 0.0001f);
 
-			const std::vector<float> shares = BusyShares(data.Spans, busyMilliseconds);
+			const std::vector<float> shares = BusyShares(data);
 			const auto busyShare = [&](size_t index) { return index < shares.size() ? shares[index] : 0.0f; };
 			const float timelineScale = static_cast<float>(timelineWidth) / frameMilliseconds;
 
@@ -820,50 +831,75 @@ namespace engine::render {
 			}
 		}
 
+		// The widest category name, plus room for its figure.
+		//
+		// **Measured rather than written down.** This was sized against the
+		// literal `engine 00.00`, which held while every name was six
+		// characters or fewer and stopped holding the moment one was not — a
+		// `physics` bar starting one glyph early is not a compile error and
+		// not a test failure, it is a panel that looks very slightly wrong to
+		// somebody who is busy reading the numbers on it.
+		int CategoryLabelWidth(int scale) {
+			size_t widest = 0;
+			for (size_t index = 0; index < static_cast<size_t>(core::ProfileCategory::Count); index++) {
+				widest =
+					std::max(widest, core::GetCategoryName(static_cast<core::ProfileCategory>(index)).size());
+			}
+			// The name, a space, and `00.00`.
+			return MeasureChars(widest + 1 + 5, scale) + 4 * scale;
+		}
+
 		void DrawCategories(OverlayImage &image, const DebugPanelData &data, int x, int y, int width) {
 			const int scale = data.Scale;
 			const int lineHeight = DebugText::LineHeight(scale);
 			const int barHeight = DebugText::GLYPH_HEIGHT * scale;
-			// Measured against the longest category name rather than a sample
-			// one: `engine`, `render` and `script` are six characters and
-			// `ECS` is three, so a column sized for the short one puts the bars
-			// through the text.
-			const int labelWidth = DebugText::Measure("engine 00.00", scale) + 4 * scale;
-
-			const float total = std::max(data.FrameMilliseconds, 0.0001f);
+			const int labelWidth = CategoryLabelWidth(scale);
+			const int trackWidth = std::max(width - labelWidth, 1);
 
 			// One pass over the spans for every category, not one pass per
 			// category. The old shape read the whole frame four times to
 			// produce four numbers, and would have read it once more for every
 			// category anybody added.
-			std::array<float, static_cast<size_t>(core::ProfileCategory::Count)> totals{};
+			std::array<float, CATEGORY_BAR_COUNT> shares{};
 			{
 				ENGINE_PROFILE_CAT("category totals", core::ProfileCategory::Render);
-				for (const auto &span : data.Spans) {
-					const auto index = static_cast<size_t>(span.Category);
-					if (index < totals.size()) {
-						totals[index] += span.SelfMilliseconds;
-					}
+				shares = CategoryShares(data);
+			}
+
+			// The figures beside the bars, which the shares no longer carry —
+			// a share is what the bar is drawn from and a millisecond count is
+			// what the reader is told, and they are not the same number.
+			std::array<float, static_cast<size_t>(core::ProfileCategory::Count)> totals{};
+			for (const auto &span : data.Spans) {
+				const auto index = static_cast<size_t>(span.Category);
+				if (index < totals.size()) {
+					totals[index] += span.SelfMilliseconds;
 				}
 			}
 
 			ENGINE_PROFILE_CAT("category glyphs", core::ProfileCategory::Render);
+
+			const auto bar = [&](int cursor, float share, Colour colour) {
+				// One pixel minimum, so a category that ran and cost nothing
+				// measurable is still visibly present rather than absent.
+				const auto barWidth =
+					std::clamp(static_cast<int>(static_cast<float>(trackWidth) * share), 1, trackWidth);
+				image.Blend(x + labelWidth, cursor, barWidth, barHeight, colour.R, colour.G, colour.B, 235);
+			};
 
 			int cursor = y;
 			for (size_t index = 0; index < static_cast<size_t>(core::ProfileCategory::Count); index++) {
 				const auto category = static_cast<core::ProfileCategory>(index);
 
 				// Idle is not part of the busy total these bars are drawn
-				// against, so a bar for it would run off the end of the panel.
-				// The header reports it as a number instead, which is the only
-				// place it means anything.
+				// against, so a bar for it would be a share of something it is
+				// not in. The header reports it as a number instead, which is
+				// the only place it means anything.
 				if (category == core::ProfileCategory::Idle) {
 					continue;
 				}
 
 				const std::string_view name = core::GetCategoryName(category);
-
-				const float milliseconds = totals[index];
 
 				DebugText::Draw(
 					image,
@@ -873,7 +909,7 @@ namespace engine::render {
 						"%.*s %.2f",
 						static_cast<int>(name.size()),
 						name.data(),
-						static_cast<double>(milliseconds)
+						static_cast<double>(totals[index])
 					),
 					TEXT.R,
 					TEXT.G,
@@ -881,20 +917,7 @@ namespace engine::render {
 					scale
 				);
 
-				const int barWidth =
-					static_cast<int>(static_cast<float>(width - labelWidth) * (milliseconds / total));
-				const auto colour = CATEGORY_COLOURS[index];
-				image.Blend(
-					x + labelWidth,
-					cursor,
-					std::max(barWidth, 1),
-					barHeight,
-					colour.R,
-					colour.G,
-					colour.B,
-					235
-				);
-
+				bar(cursor, shares[index], CATEGORY_COLOURS[index]);
 				cursor += lineHeight;
 			}
 
@@ -913,19 +936,7 @@ namespace engine::render {
 				scale
 			);
 
-			const int unmarkedWidth = static_cast<int>(
-				static_cast<float>(width - labelWidth) * (data.UnmarkedMilliseconds / total)
-			);
-			image.Blend(
-				x + labelWidth,
-				cursor,
-				std::max(unmarkedWidth, 1),
-				barHeight,
-				TEXT_DIM.R,
-				TEXT_DIM.G,
-				TEXT_DIM.B,
-				235
-			);
+			bar(cursor, shares[UNMARKED_BAR], TEXT_DIM);
 		}
 
 		void
@@ -1152,9 +1163,12 @@ namespace engine::render {
 					break;
 				}
 				case ProfilerTab::Categories:
-					// Plus the unmarked bar, which is drawn after the categories so
-					// that the bars sum to the frame rather than to less than it.
-					bodyRows = static_cast<int>(core::ProfileCategory::Count) + 1;
+					// Every category but `Idle`, which is a figure in the header
+					// rather than a bar, plus the unmarked bar drawn after them so
+					// that the bars sum to the busy frame rather than to less than
+					// it. The two adjustments cancel, which is why this reads as
+					// the plain category count and is not one.
+					bodyRows = static_cast<int>(core::ProfileCategory::Count) - 1 + 1;
 					break;
 				case ProfilerTab::Systems:
 					bodyRows = static_cast<int>(data.Systems.size()) - std::max(data.Scroll, 0);
@@ -1249,31 +1263,6 @@ namespace engine::render {
 				break;
 			}
 		}
-	}
-
-	// The panels are drawn by rasterising glyphs into a CPU image, one pixel at
-	// a time, every frame. That is the right trade for a tool that has to work
-	// with no second process attached — but it is not free, and until these
-	// scopes existed the whole cost landed as self time on whatever the caller
-	// had opened around it. A panel reporting a frame it is a large part of, and
-	// not saying so, is the one measurement error a profiler cannot afford.
-	//
-	// The reading is of the *previous* frame, so the panel does show its own
-	// cost. That is not a flaw to be corrected away: the observer is part of the
-	// frame while it is open, and hiding that would make closing the panel look
-	// like it fixed something.
-	std::vector<float> BusyShares(std::span<const core::FrameSpan> spans, float busyMilliseconds) {
-		const float denominator = std::max(busyMilliseconds, 0.0001f);
-
-		// The walk that used to be here now happens once in `FrameGraph`, where
-		// `RecordHistory` needs the same answer — a share taken from busy time
-		// beside an RMAX taken from wall time is two numbers on one row that
-		// contradict each other.
-		std::vector<float> shares(spans.size(), 0.0f);
-		for (size_t index = 0; index < spans.size(); index++) {
-			shares[index] = BusyMillisecondsOf(spans[index]) / denominator;
-		}
-		return shares;
 	}
 
 	void DrawDebugPanels(OverlayImage &image, const DebugPanelData &data) {

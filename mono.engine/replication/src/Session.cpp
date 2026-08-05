@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/replication/Session.hpp>
 
@@ -176,6 +177,12 @@ namespace engine::replication {
 	}
 
 	size_t Session::Flush(double nowSeconds) {
+		// The send half, and the one that scales with what is going wrong: a
+		// resend is work this frame for a packet an earlier frame already
+		// paid for, so a link losing packets shows up here as time and not
+		// only as a counter on the F4 panel.
+		ENGINE_PROFILE_CAT("replica.flush", core::ProfileCategory::Network);
+
 		size_t sent = 0;
 
 		for (const net::ReliableSender::Unacknowledged &waiting : Sender.Due(nowSeconds)) {

@@ -37,4 +37,8 @@ namespace engine::core {
 	std::filesystem::path Paths::Shaders(std::string_view module) {
 		return Assets() / "shaders" / std::filesystem::path(module);
 	}
+
+	std::filesystem::path Paths::Fonts() {
+		return Assets() / "fonts";
+	}
 }

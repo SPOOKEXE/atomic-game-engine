@@ -431,6 +431,38 @@ TEST_CASE("layered blends accumulate towards the source colour", "[overlay]") {
 	REQUIRE(At(image, 0, 0, 0) >= 254);
 }
 
+TEST_CASE("no channel ever exceeds the alpha carrying it", "[overlay]") {
+	// **The invariant premultiplied storage is**, and the one case that broke it
+	// was a rounding mismatch rather than a formula mistake: the colours rounded
+	// and the alpha truncated, so the two could land a step apart. `(R=100,
+	// A=100)` under red at alpha 128 came out `R=178, A=177` — a pixel carrying
+	// more red than its coverage allows, which the GPU's premultiplied blend
+	// shows as a faint over-brightness rather than as anything that looks like a
+	// bug in this file.
+	//
+	// Swept rather than asserted at the one pair that failed, because a single
+	// case is a regression test for one bug and this is the property.
+	OverlayImage image;
+
+	for (int destinationAlpha = 0; destinationAlpha <= 255; destinationAlpha += 5) {
+		for (int sourceAlpha = 0; sourceAlpha <= 255; sourceAlpha += 5) {
+			image.Resize(2, 2);
+			image.Clear();
+
+			// A fully saturated destination: every channel already at its alpha,
+			// which is the extreme the invariant is tightest at.
+			image.Blend(0, 0, 2, 2, 255, 255, 255, static_cast<uint8_t>(destinationAlpha));
+			image.Blend(0, 0, 2, 2, 255, 255, 255, static_cast<uint8_t>(sourceAlpha));
+
+			const uint8_t alpha = At(image, 0, 0, 3);
+			INFO("destination alpha " << destinationAlpha << ", source alpha " << sourceAlpha);
+			CHECK(At(image, 0, 0, 0) <= alpha);
+			CHECK(At(image, 0, 0, 1) <= alpha);
+			CHECK(At(image, 0, 0, 2) <= alpha);
+		}
+	}
+}
+
 TEST_CASE("dirty tracks whether anything was drawn", "[overlay]") {
 	OverlayImage image;
 	image.Resize(8, 8);
@@ -463,6 +495,30 @@ TEST_CASE("text measures one advance per character less the trailing gap", "[ove
 	REQUIRE(DebugText::Measure("A", 1) == DebugText::GLYPH_WIDTH);
 	REQUIRE(DebugText::Measure("AB", 1) == DebugText::ADVANCE * 2 - 1);
 	REQUIRE(DebugText::Measure("AB", 2) == (DebugText::ADVANCE * 2 - 1) * 2);
+}
+
+TEST_CASE("measuring and drawing agree about a scale below one", "[overlay]") {
+	// `Draw` has always clamped to one and the other two multiplied raw, so a
+	// zero scale measured a panel at zero width and then drew full-size text
+	// into it. `DebugPanelData::Scale` is a public `int` that nothing bounds,
+	// so the disagreement was reachable from outside the module.
+	REQUIRE(DebugText::Measure("ABC", 0) == DebugText::Measure("ABC", 1));
+	REQUIRE(DebugText::Measure("ABC", -3) == DebugText::Measure("ABC", 1));
+	REQUIRE(DebugText::LineHeight(0) == DebugText::LineHeight(1));
+	REQUIRE(DebugText::LineHeight(-3) == DebugText::LineHeight(1));
+
+	// And what is measured is what lands: the same pixels at zero as at one.
+	OverlayImage clamped;
+	OverlayImage plain;
+	clamped.Resize(64, 16);
+	plain.Resize(64, 16);
+
+	DebugText::Draw(clamped, 1, 1, "ABC", 255, 255, 255, 0);
+	DebugText::Draw(plain, 1, 1, "ABC", 255, 255, 255, 1);
+
+	for (size_t index = 0; index < plain.GetByteCount(); index++) {
+		REQUIRE(clamped.GetPixels()[index] == plain.GetPixels()[index]);
+	}
 }
 
 TEST_CASE("text draws pixels", "[overlay]") {

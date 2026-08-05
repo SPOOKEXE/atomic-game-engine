@@ -10,7 +10,9 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <vector>
 
 TEST_SUITE_ID("engine.core.framegraph")
 
@@ -693,4 +695,152 @@ TEST_CASE("a reported span can be named at runtime", "[framegraph]") {
 
 	// Empty text falls back to the stable name rather than drawing a blank bar.
 	REQUIRE(spans[1].Name == "host");
+}
+
+TEST_CASE("every category has a name of its own", "[framegraph]") {
+	// `GetCategoryName` is a switch, and a switch over an enum class with no
+	// default is a warning at worst — a category added without a case falls
+	// through to "?" and the panel draws two bars with the same label. There
+	// is nothing in a build that catches that, so this does.
+	std::vector<std::string_view> names;
+	for (size_t index = 0; index < static_cast<size_t>(ProfileCategory::Count); index++) {
+		const std::string_view name = engine::core::GetCategoryName(static_cast<ProfileCategory>(index));
+
+		REQUIRE(name != "?");
+		REQUIRE_FALSE(name.empty());
+		REQUIRE(std::find(names.begin(), names.end(), name) == names.end());
+		names.push_back(name);
+	}
+
+	// The sentinel is not a category and must not be given a name that reads
+	// like one, or a loop written with `<=` draws a bar for it.
+	REQUIRE(engine::core::GetCategoryName(ProfileCategory::Count) == "?");
+}
+
+TEST_CASE("the subsystem categories carved out of ECS total separately", "[framegraph]") {
+	Collecting collecting;
+
+	// The whole point of `Physics`, `Network` and `Assets`: this work used to
+	// land in `ECS` and `Engine`, where a slow broadphase and a slow scheduler
+	// were one number.
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE_CAT("ecs.systems", ProfileCategory::ECS);
+		{
+			ENGINE_PROFILE_CAT("physics.solve", ProfileCategory::Physics);
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		}
+	}
+	{
+		ENGINE_PROFILE_CAT("replica.poll", ProfileCategory::Network);
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	}
+	{
+		ENGINE_PROFILE_CAT("HashTree::Verify", ProfileCategory::Assets);
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	}
+	FrameGraph::EndFrame();
+
+	REQUIRE(FrameGraph::CategoryMilliseconds(ProfileCategory::Physics) >= 1.0f);
+	REQUIRE(FrameGraph::CategoryMilliseconds(ProfileCategory::Network) >= 1.0f);
+	REQUIRE(FrameGraph::CategoryMilliseconds(ProfileCategory::Assets) >= 1.0f);
+
+	// The physics span is nested inside the ECS one, and self time is what the
+	// totals are made of — so the scheduler keeps only what it spent itself.
+	// This is the assertion that says the carve-out actually moved the time
+	// rather than counting it twice.
+	REQUIRE(
+		FrameGraph::CategoryMilliseconds(ProfileCategory::ECS) <
+		FrameGraph::CategoryMilliseconds(ProfileCategory::Physics)
+	);
+}
+
+TEST_CASE("the tracked-name budget is released when collection stops", "[framegraph]") {
+	// **A quota spent once per process rather than once per session.** The
+	// window was cleared on every toggle and the name table that indexes it
+	// was not, so a panel opened in one scene consumed names a panel opened
+	// in the next could not get back. Filling it here is the only way to see
+	// that: below the limit the two behaviours are identical.
+	{
+		Collecting collecting;
+		FrameGraph::BeginFrame();
+		for (size_t index = 0; index < FrameGraph::MAXIMUM_HISTORY_NAMES; index++) {
+			const std::string name = "filler." + std::to_string(index);
+			ENGINE_PROFILE_DYNAMIC("filler", name, ProfileCategory::Engine);
+		}
+		FrameGraph::EndFrame();
+	}
+
+	// A second session, which must start with the whole budget.
+	{
+		Collecting collecting;
+		FrameGraph::BeginFrame();
+		{
+			ENGINE_PROFILE("the.next.scene");
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		}
+		FrameGraph::EndFrame();
+
+		// Zero is what a name the history turned away reads as, and it is also
+		// what a span costing nothing reads as — so this span sleeps, and the
+		// assertion is about a duration rather than about presence.
+		REQUIRE(FrameGraph::RecentMaximum("the.next.scene") >= 1.0f);
+	}
+}
+
+TEST_CASE("a stopped session leaves no readings behind", "[framegraph]") {
+	{
+		Collecting collecting;
+		FrameGraph::BeginFrame();
+		{
+			ENGINE_PROFILE("first.session");
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		}
+		FrameGraph::EndFrame();
+		REQUIRE(FrameGraph::RecentMaximum("first.session") >= 1.0f);
+	}
+
+	// Collection only runs while the panel is open, so keeping the last
+	// session's frames would put a gap of arbitrary length in the middle of a
+	// five-second window and give the column a worst case from another scene.
+	{
+		Collecting collecting;
+		REQUIRE(FrameGraph::RecentMaximum("first.session") == 0.0f);
+		REQUIRE(FrameGraph::HistoryFrames() == 0);
+	}
+}
+
+TEST_CASE("two profiling scopes may share one C++ scope", "[framegraph]") {
+	// **This case earns its keep at compile time.** `ENGINE_PROFILE_CAT`
+	// expanded to Tracy's `ZoneScopedN`, which declares a variable with one
+	// fixed name — so a second macro beside the first failed to build, in
+	// `ENGINE_TRACY` configurations only, with an error naming a Tracy
+	// internal from a header the caller never wrote. Nothing said so and
+	// nothing would have caught it; the code below simply does not compile if
+	// it comes back.
+	Collecting collecting;
+
+	const std::string runtime = "runtime.named";
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE("first");
+		ENGINE_PROFILE_CAT("second", ProfileCategory::Render);
+		ENGINE_PROFILE_DYNAMIC("third", runtime, ProfileCategory::Physics);
+	}
+	FrameGraph::EndFrame();
+
+	// All three live in one C++ scope, so each opens inside the one before it
+	// and they close in reverse. Nesting, not siblings — which is what the
+	// stack the scopes are pushed onto means.
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 3);
+	REQUIRE(spans[0].Name == "first");
+	REQUIRE(spans[0].Depth == 0);
+	REQUIRE(spans[1].Name == "second");
+	REQUIRE(spans[1].Depth == 1);
+	REQUIRE(spans[1].Category == ProfileCategory::Render);
+	REQUIRE(spans[2].Name == "runtime.named");
+	REQUIRE(spans[2].Depth == 2);
+	REQUIRE(spans[2].Category == ProfileCategory::Physics);
 }

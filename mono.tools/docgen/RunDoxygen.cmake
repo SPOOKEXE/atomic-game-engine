@@ -103,6 +103,29 @@ set(SCRIPTS
 <script type=\"text/javascript\" src=\"$relpath^doxygen-awesome-paragraph-link.js\"></script>
 <script type=\"text/javascript\" src=\"$relpath^doxygen-awesome-interactive-toc.js\"></script>
 <script type=\"text/javascript\">
+    // **Dark on a first visit, whatever the reader's operating system says.**
+    // doxygen-awesome follows `prefers-color-scheme`, so a machine configured
+    // light served a light site — the one surface of this project that did not
+    // match the rest of it, since `ui::Palette` has no light theme at all.
+    //
+    // Seeded once and never again, which is the whole reason for the extra key.
+    // The toggle records a *disagreement* with the system rather than a choice:
+    // on a light system, \"I want dark\" is a stored key and \"I want light\" is
+    // its absence — indistinguishable from never having visited. Without a
+    // marker of our own, writing the preference on every load would overwrite
+    // the reader's choice each time they picked light and the toggle would
+    // appear not to work.
+    try {
+        if (!localStorage.getItem(\"mono-theme-seeded\")) {
+            localStorage.setItem(\"mono-theme-seeded\", \"1\")
+            localStorage.setItem(DoxygenAwesomeDarkModeToggle.prefersDarkModeInLightModeKey, true)
+            localStorage.removeItem(DoxygenAwesomeDarkModeToggle.prefersLightModeInDarkModeKey)
+        }
+    } catch (e) {
+        // Private browsing refuses `localStorage`. The site still works and
+        // still toggles; it just opens in whatever the system prefers.
+    }
+
     DoxygenAwesomeDarkModeToggle.init()
     DoxygenAwesomeFragmentCopyButton.init()
     DoxygenAwesomeParagraphLink.init()

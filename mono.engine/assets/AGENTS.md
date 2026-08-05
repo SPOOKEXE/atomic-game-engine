@@ -26,8 +26,8 @@ everywhere. None of them is a tuning knob.
 - **The gear table and its seed.** `Chunker.cpp` generates 256 constants from
   `GEAR_SEED`. Change either and every chunk boundary in the world moves — every
   stored chunk, every manifest, every client cache, at once.
-- **The tag bytes.** `0x01` interior, `0x02` root, `0x03` signing. They are
-  domain separation, not decoration; see below.
+- **The tag bytes.** `0x01` interior, `0x02` root, `0x03` signing, `0x04`
+  descriptor. They are domain separation, not decoration; see below.
 
 The chunk *sizes* are not in that list. They are per-`ChunkLimits` and a
 manifest records what it was cut with, so a future default is a re-cut of new
@@ -158,10 +158,78 @@ for one.
 **Compression.** Chunks are stored uncompressed so that dedup works on them;
 compression is per delivery group and in flight. Do not compress here.
 
+## The root covers the index as well as the content
+
+Until v0.9 `Manifest::Root` was a tree over bundle roots alone, which bound every
+byte of content and none of what a byte was *called*. An origin serving a
+manifest with two names swapped handed a client content that verified perfectly
+and was the wrong asset. Signing the content and not the index is signing the
+half nobody looks anything up by.
+
+It is now a two-leaf tree over the **descriptor root** and the **bundle root**,
+where a descriptor covers an asset's name, its kind and its content root
+together. One signature, still at the top; a client that trusts it has verified
+what the content is, what it is called and what it is for.
+
+**The asset root is untouched and still covers chunks alone.** That is what makes
+it an *address*: folding a name into it would give two identical files under two
+names two different roots and lose dedup across them.
+
+A descriptor is length-prefixed and tagged `0x04`. Both for the reasons
+`HashTree`'s own tags exist — without the length, `ab` + `c` and `a` + `bc` are
+one hash and the binding does not hold.
+
+## `AssetKind` is decided once, by the publisher
+
+A kind says which subsystem a blob belongs to and nothing about what is inside
+it. `KindOfName` is the whole of the extension-to-kind opinion in this engine and
+has exactly one caller: the publisher. Everything else reads the manifest.
+
+Deriving it at each reader instead would be two opinions about what `rock.glb`
+is, which disagree the day one reader learns an extension the other has not.
+
+**The list is closed and its numbers are part of the format.** Appending is safe;
+renumbering is not. An unknown kind is read as `Unknown` rather than refused,
+because a manifest from a later build is a legitimate document — refusing would
+make every kind added later a hard break for every client already deployed.
+
+## Verification is `VerifyAsset` and nothing else
+
+An asset root is a **tree over chunk hashes**, not the digest of its content, so
+`Hasher::Of(bytes) == asset.Root` is wrong for every asset cut into more than one
+chunk and right by coincidence for some that were not.
+
+That is the worst shape a check can have — it passes in the small case somebody
+tests with — and it was written once, in the delivery cache, where it silently
+refused every real asset as a cache miss. One implementation now, with three
+callers: the chunk store reassembling, the delivery client checking what arrived
+from an origin, and the same client checking what came out of its own cache.
+
+## The chunk store is the format's, not the origin's
+
+`ChunkStore` decides how chunks are laid out on a disk — the thing `CDN.md` §7
+listed as undecided. It is here rather than in `mono.cdn` for the reason the
+manifest is: **a publisher writes that tree and a client reads it**, so one
+implementation or the two acquire a dialect.
+
+**Chunks are stored uncompressed.** Dedup and patching work on them; compression
+is per delivery group and in flight, and belongs to `Engine::delivery`. Two
+levels, two jobs.
+
+**Every read verifies.** A chunk's name *is* the hash of its bytes, so checking
+costs one pass and catches a corrupt disk, a partial write and a tampered store
+with the same check.
+
+`ReadBundle` is the one producer of a group's payload — members concatenated in
+`BundleEntry::Assets` order — and `SliceOf` is the one consumer's definition of
+where each asset sits. The origin compresses what one produces and the client
+splits what the other describes, so the two ends cannot disagree about where an
+asset starts.
+
 ## Not here yet
 
 - Fetching. There is no network in this module and there will not be — transport
-  is `Engine::net` at L11, and this stays the format.
+  is `Engine::net` at L11 and the fetch path is `Engine::delivery` above it.
 - Containers and cooked-asset layout: what is *inside* an asset, as opposed to
   how it is named and delivered.
 - GUIDs, and the mapping from an authoring identity to a name.

@@ -35,14 +35,148 @@
 		"gives it core, parallel and assets and stops. It links core alone today",
 		"because that is all it calls — a short row here is what makes",
 		"`cmake --preset cdn` configure on a container with no Vulkan SDK, no SDL",
-		"and no shader compiler."
+		"and no shader compiler.",
+		"",
+		"v0.7 added three entries and widened three rows.",
+		"",
+		"`game` is `shared` and links scene and script, which is what lets one",
+		"description of the save format serve the studio that writes it and the",
+		"server and client that read it. Its short row is the claim: no render, no",
+		"net, no SDL — a game file is content, and reading one is not a client-tier",
+		"idea.",
+		"",
+		"`ui` is the only target in the repository that links Dear ImGui, and",
+		"nothing in mono.engine links `ui`. The edge runs one way: `ui` implements",
+		"`render::FrameOverlayHook` and `render` knows nothing about it, so a",
+		"shipped client pays nothing for an editor toolkit it never draws. A `ui`",
+		"appearing in another module's row is that guarantee being lost.",
+		"",
+		"`studio` is the second declared user of the escape D00008 reserved, and",
+		"the first that is a product rather than a diagnostic: a client-tier target",
+		"with `server` in its row, because Play hosts a server and draws its world",
+		"in one process. Single-player is still not that edge — `client` gained",
+		"`game` and not `server`, which is the row to check if somebody claims",
+		"otherwise.",
+		"",
+		"v0.9 added one module and widened five rows, all for content delivery.",
+		"",
+		"`delivery` is new and is L11 `shared`, linking core, assets and net. It is",
+		"the fetch path: sources in priority order, the local content cache, and the",
+		"group codec that a compressed group is expanded with. repo_layout.md §5.2",
+		"files 'remote fetch' under `assets` at L8, and that cannot be built —",
+		"fetching needs a transport, the transport is `net` at L11, and rule 1 says a",
+		"layer sees below it and not above. assets/AGENTS.md reaches the same",
+		"conclusion from the other side. So the fetch path sits above both and",
+		"`assets` stays the format. This row is that decision.",
+		"",
+		"`cdn` gained `net` and `delivery`. `net` is the wire the origin never had —",
+		"ROADMAP.md v0.9 said in advance that building it would move this row. ",
+		"`delivery` is where `GroupCodec` went: a compressed group is a format with",
+		"two ends, and a copy on each side is how a format acquires a dialect. The",
+		"row is still every-entry-`shared`, which is what keeps `--preset cdn`",
+		"configuring on a container with no Vulkan SDK, no SDL and no shader",
+		"compiler. `just check-cdn-is-bare` is the standing proof.",
+		"",
+		"`server` gained `cdn`, and that is the row worth arguing about. An attached",
+		"origin is CDN.md §6's 'local store' — the self-hosted case — and it is the",
+		"same library `mono.cdn` deploys alone, so a client cannot tell them apart.",
+		"It costs the headless property nothing: `cdn` is `shared` and reaches a",
+		"hash, a socket and a compressor, none of which wants a device. If this row",
+		"ever pulls in a `client`-tier target the tier check fails before this file",
+		"is consulted.",
+		"",
+		"`client` gained `delivery`, which is how `--cdn` points a game at content.",
+		"`studio` and `unified_server_client` gained both transitively, through the",
+		"programs they already link rather than by declaring anything themselves.",
+		"",
+		"The `cdn` module row deliberately carries no `requires`. It is built under",
+		"MONO_BUILD_CDN *or* MONO_BUILD_SERVER, because a server can attach an",
+		"origin, so no single option decides whether it exists. The cdn *program*",
+		"row keeps its `requires`: that is still gated, which is why `--preset",
+		"server` stages no origin binary.",
+		"",
+		"v0.9 also added `audio` at L12 `client`. It declares `core` alone. It is",
+		"`client` tier because repo_layout.md §5.2 puts it there beside render, text,",
+		"ui and input — a server does not mix, it decides what is audible and",
+		"replicates that. `scene` is deliberately absent: a listener and an emitter are",
+		"placed by plain coordinates today, and nothing here calls `scene` — a",
+		"dependency ahead of its first caller cannot be told from a mistake.",
+		"",
+		"The DSP is pure arithmetic and could have been `shared` to make it testable.",
+		"It is not, because the null device already gives that property: every suite",
+		"in the module runs with no sound card. Moving the mixer to `shared` would put",
+		"an audio graph in the server binary to buy something already had."
 	],
 	"modules": {
+		"assets": {
+			"tier": "shared",
+			"links": [
+				"core"
+			]
+		},
+		"audio": {
+			"tier": "client",
+			"links": [
+				"core"
+			],
+			"requires": "MONO_BUILD_CLIENT"
+		},
+		"cdn": {
+			"tier": "shared",
+			"links": [
+				"assets",
+				"core",
+				"delivery",
+				"net",
+				"parallel"
+			]
+		},
+		"client": {
+			"tier": "client",
+			"links": [
+				"assets",
+				"audio",
+				"core",
+				"delivery",
+				"ecs",
+				"examples",
+				"game",
+				"graph",
+				"input",
+				"net",
+				"parallel",
+				"physics",
+				"render",
+				"replication",
+				"scene",
+				"script",
+				"spatial",
+				"world"
+			],
+			"requires": "MONO_BUILD_CLIENT"
+		},
+		"control": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel",
+				"world"
+			]
+		},
 		"core": {
 			"tier": "shared",
 			"links": []
 		},
-		"parallel": {
+		"delivery": {
+			"tier": "shared",
+			"links": [
+				"assets",
+				"core",
+				"net"
+			]
+		},
+		"docgen": {
 			"tier": "shared",
 			"links": [
 				"core"
@@ -53,67 +187,6 @@
 			"links": [
 				"core",
 				"parallel"
-			]
-		},
-		"world": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel"
-			]
-		},
-		"spatial": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"scene": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"spatial"
-			]
-		},
-		"assets": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"physics": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"scene",
-				"spatial"
-			]
-		},
-		"script": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"physics",
-				"scene",
-				"spatial",
-				"world"
-			]
-		},
-		"graph": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"scene",
-				"spatial"
 			]
 		},
 		"examples": {
@@ -129,10 +202,27 @@
 				"world"
 			]
 		},
-		"net": {
+		"game": {
 			"tier": "shared",
 			"links": [
-				"core"
+				"core",
+				"ecs",
+				"parallel",
+				"physics",
+				"scene",
+				"script",
+				"spatial",
+				"world"
+			]
+		},
+		"graph": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel",
+				"scene",
+				"spatial"
 			]
 		},
 		"input": {
@@ -141,6 +231,34 @@
 				"core"
 			],
 			"requires": "MONO_BUILD_CLIENT"
+		},
+		"linecount": {
+			"tier": "shared",
+			"links": [
+				"core"
+			]
+		},
+		"net": {
+			"tier": "shared",
+			"links": [
+				"core"
+			]
+		},
+		"parallel": {
+			"tier": "shared",
+			"links": [
+				"core"
+			]
+		},
+		"physics": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel",
+				"scene",
+				"spatial"
+			]
 		},
 		"render": {
 			"tier": "client",
@@ -154,92 +272,6 @@
 			],
 			"requires": "MONO_BUILD_CLIENT"
 		},
-		"client": {
-			"tier": "client",
-			"links": [
-				"core",
-				"ecs",
-				"examples",
-				"graph",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"server": {
-			"tier": "server",
-			"links": [
-				"core",
-				"ecs",
-				"examples",
-				"net",
-				"parallel",
-				"physics",
-				"replication",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_SERVER"
-		},
-		"unified_server_client": {
-			"tier": "client",
-			"links": [
-				"client",
-				"core",
-				"ecs",
-				"examples",
-				"graph",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"server",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"cdn": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"core",
-				"parallel"
-			],
-			"requires": "MONO_BUILD_CDN"
-		},
-		"testrunner": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"docgen": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"linecount": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
 		"replication": {
 			"tier": "shared",
 			"links": [
@@ -249,15 +281,163 @@
 				"parallel",
 				"world"
 			]
-		}
-	},
-	"programs": {
-		"client": {
+		},
+		"scene": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel",
+				"spatial"
+			]
+		},
+		"script": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel",
+				"physics",
+				"scene",
+				"spatial",
+				"world"
+			]
+		},
+		"server": {
+			"tier": "server",
+			"links": [
+				"assets",
+				"cdn",
+				"control",
+				"core",
+				"delivery",
+				"ecs",
+				"examples",
+				"game",
+				"net",
+				"parallel",
+				"physics",
+				"replication",
+				"scene",
+				"script",
+				"spatial",
+				"world"
+			],
+			"requires": "MONO_BUILD_SERVER"
+		},
+		"spatial": {
+			"tier": "shared",
+			"links": [
+				"core"
+			]
+		},
+		"studio": {
+			"tier": "client",
+			"links": [
+				"assets",
+				"audio",
+				"cdn",
+				"client",
+				"control",
+				"core",
+				"delivery",
+				"ecs",
+				"examples",
+				"game",
+				"graph",
+				"input",
+				"net",
+				"parallel",
+				"physics",
+				"render",
+				"replication",
+				"scene",
+				"script",
+				"server",
+				"spatial",
+				"ui",
+				"world"
+			],
+			"requires": "MONO_BUILD_CLIENT"
+		},
+		"testrunner": {
+			"tier": "shared",
+			"links": [
+				"core"
+			]
+		},
+		"ui": {
 			"tier": "client",
 			"links": [
 				"core",
 				"ecs",
+				"graph",
+				"parallel",
+				"render",
+				"scene",
+				"spatial"
+			],
+			"requires": "MONO_BUILD_CLIENT"
+		},
+		"unified_server_client": {
+			"tier": "client",
+			"links": [
+				"assets",
+				"audio",
+				"cdn",
+				"client",
+				"control",
+				"core",
+				"delivery",
+				"ecs",
 				"examples",
+				"game",
+				"graph",
+				"input",
+				"net",
+				"parallel",
+				"physics",
+				"render",
+				"replication",
+				"scene",
+				"script",
+				"server",
+				"spatial",
+				"world"
+			],
+			"requires": "MONO_BUILD_CLIENT"
+		},
+		"world": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel"
+			]
+		}
+	},
+	"programs": {
+		"cdn": {
+			"tier": "shared",
+			"links": [
+				"assets",
+				"core",
+				"delivery",
+				"net",
+				"parallel"
+			],
+			"requires": "MONO_BUILD_CDN"
+		},
+		"client": {
+			"tier": "client",
+			"links": [
+				"assets",
+				"audio",
+				"core",
+				"delivery",
+				"ecs",
+				"examples",
+				"game",
 				"graph",
 				"input",
 				"net",
@@ -275,9 +455,14 @@
 		"server": {
 			"tier": "server",
 			"links": [
+				"assets",
+				"cdn",
+				"control",
 				"core",
+				"delivery",
 				"ecs",
 				"examples",
+				"game",
 				"net",
 				"parallel",
 				"physics",
@@ -289,13 +474,48 @@
 			],
 			"requires": "MONO_BUILD_SERVER"
 		},
+		"studio": {
+			"tier": "client",
+			"links": [
+				"assets",
+				"audio",
+				"cdn",
+				"client",
+				"control",
+				"core",
+				"delivery",
+				"ecs",
+				"examples",
+				"game",
+				"graph",
+				"input",
+				"net",
+				"parallel",
+				"physics",
+				"render",
+				"replication",
+				"scene",
+				"script",
+				"server",
+				"spatial",
+				"ui",
+				"world"
+			],
+			"requires": "MONO_BUILD_CLIENT"
+		},
 		"unified_server_client": {
 			"tier": "client",
 			"links": [
+				"assets",
+				"audio",
+				"cdn",
 				"client",
+				"control",
 				"core",
+				"delivery",
 				"ecs",
 				"examples",
+				"game",
 				"graph",
 				"input",
 				"net",
@@ -310,15 +530,6 @@
 				"world"
 			],
 			"requires": "MONO_BUILD_CLIENT"
-		},
-		"cdn": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"core",
-				"parallel"
-			],
-			"requires": "MONO_BUILD_CDN"
 		}
 	}
 }

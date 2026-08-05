@@ -202,6 +202,26 @@ namespace engine::scene {
 		core::Name Material;
 	};
 
+	// The material a part is drawn with when nobody says otherwise.
+	//
+	// **A function rather than a constant, because a `core::Name` is interned
+	// and interning needs the registry to exist.** A namespace-scope `const
+	// core::Name` would be constructed during static initialisation, in an order
+	// nothing specifies, and the registry it needs is itself a function-local
+	// static somewhere else. A function-local static is initialised on first
+	// call and therefore after whatever it depends on, which is the same
+	// arrangement `NormalIdEnum` in `Part.cpp` uses for the same reason.
+	//
+	// Interned once per process and returned by reference. `Name.hpp` states the
+	// rule — constructing from a literal takes the registry mutex and hashes a
+	// string — and this is read once per default-constructed `Visual`, which is
+	// once per row a column grows by.
+	//
+	// @return `Plastic`, a member of the `Material` enum `scene::Part.cpp`
+	//         registers.
+	// @since v0.8
+	const core::Name &DefaultMaterial();
+
 	// What a thing looks like.
 	//
 	// Names rather than handles, because a mesh reference has to survive a save
@@ -221,7 +241,19 @@ namespace engine::scene {
 		// The material to draw it with. Distinct from `Surface::Material`,
 		// which is what it *feels* like: a mirror-finish floor and a rubber
 		// floor may share a surface and never a material.
-		core::Name Material;
+		//
+		// **`Plastic` rather than invalid**, so a part that nobody has authored
+		// a material for reads back a member of the enum instead of a blank. An
+		// invalid name here meant the properties panel showed an empty combo on
+		// every fresh part — a control whose current value is not one of the
+		// values it offers — and a script reading `part.Material` got something
+		// it could not compare against `Enum.Material.Plastic` even though that
+		// is exactly what the part was drawn as.
+		//
+		// `Mesh` above is deliberately *not* given the same treatment: an
+		// invalid mesh means "the consumer's own default", which is a real and
+		// useful state, and there is no name for the unit cube to give it.
+		core::Name Material = DefaultMaterial();
 
 		// How much of what is behind shows through, 0 to 1.
 		//
@@ -250,18 +282,41 @@ namespace engine::scene {
 		// means and why it is a mirror feature rather than a general one.
 		int8_t Surface = -1;
 
+		// Whether this entity is drawn into the shadow map.
+		//
+		// **A third distinct question, and the three must not be collapsed into
+		// one.** `Visible` decides whether the entity is submitted at all,
+		// `Transparency` decides which camera pass it lands in, and this decides
+		// whether it occludes the sun. They come apart constantly: a glass pane
+		// is submitted, sorted back-to-front, and casts nothing; a collision
+		// volume is invisible and still needs its physics; a decorative shell
+		// inside a building is drawn and would only double-shadow the wall
+		// around it.
+		//
+		// **Only opaque geometry reaches the shadow pass anyway** — a blended
+		// fragment writing full depth would cast a solid shadow, which is the
+		// most obviously wrong thing glass can do, and the renderer already
+		// draws the opaque head alone. So this is the switch for the case the
+		// transparency rule does not already cover: an *opaque* thing that
+		// should not occlude.
+		//
+		// Defaults to true, because the surprising default is the one where
+		// authored geometry silently stops casting.
+		bool CastShadow = true;
+
 		// Explicit padding. `Visual` is registered with an explicit writer
 		// because it holds names, so these bytes do not reach a snapshot today
 		// — they are named anyway, because the day somebody re-registers this
 		// type without one is the day three uninitialised bytes start ending up
 		// in a recording.
 		//
-		// **Two now, not three.** `Surface` took one of them, which is what
-		// named padding is for: a field that fits goes in the hole rather than
-		// widening the row. `Transparency` did not fit — a float needs
-		// four-byte alignment and these are the tail after a `bool` — so the
-		// struct grew by four for that one and by nothing for this one.
-		uint8_t Reserved[2] = {};
+		// **One now, not two.** `CastShadow` took another, which is what named
+		// padding is for: a field that fits goes in the hole rather than
+		// widening the row. `Surface` took the first the same way, and
+		// `Transparency` did not fit — a float needs four-byte alignment and
+		// these are the tail after a `bool` — so the struct grew by four for
+		// that one and by nothing for the other two.
+		uint8_t Reserved[1] = {};
 	};
 
 	// A point of view on a world.
@@ -312,6 +367,22 @@ namespace engine::scene {
 		// The other axis.
 		uint16_t Height = 1024;
 
+		// How much of the part behind shows through the projected image, 0 to 1.
+		//
+		// **A second opacity, and the reason there are two is that they are two
+		// different things.** `Visual::Transparency` is how much of the *world*
+		// shows through the pane; this is how much of the *pane* shows through
+		// the reflection. A mirror is a transparent sheet of glass with an
+		// opaque image on it, and one number cannot say both — which is exactly
+		// what went wrong: fading a mirror faded its reflection with it, so
+		// there was no way to author glass that reflects.
+		//
+		// At 0 the image is solid and covers whatever the part would have drawn,
+		// **whatever the part's own transparency is** — a fully transparent pane
+		// still shows its reflection, which is what a mirror is. At 1 the image
+		// is gone and the part draws as itself.
+		float ImageTransparency = 0.0f;
+
 		// Which surface index this camera writes.
 		//
 		// One today, and the field exists because the pipeline that replaces
@@ -319,8 +390,21 @@ namespace engine::scene {
 		// add a second mirror would be a stage list that encoded the count.
 		int8_t Surface = 0;
 
+		// Which face of the parent part this camera projects off.
+		//
+		// **Only meaningful when this camera is parented to a `BasePart`**, which
+		// is the arrangement `AimSurfaceCameras` exists for: the camera is placed
+		// by the engine, mirrored through that face's plane, rather than by a
+		// script computing the reflection itself. A camera parented to the world
+		// keeps whatever `CFrame` it was given, because there is no face to
+		// project off.
+		//
+		// Stored as the enum's underlying type so the component stays trivially
+		// copyable and the row stays the size it was.
+		NormalId Face = NormalId::Front;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// A content hash of what a consumer last saw, for consumers that cannot

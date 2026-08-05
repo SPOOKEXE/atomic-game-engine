@@ -44,7 +44,9 @@ namespace cdn {
 	}
 
 	Publication::Publication(
-		ContentRoot root, engine::assets::Manifest manifest, std::optional<Dictionary> dictionary
+		ContentRoot root,
+		engine::assets::Manifest manifest,
+		std::optional<engine::delivery::Dictionary> dictionary
 	)
 		: Directory(std::move(root)), Described(std::move(manifest)), Codebook(std::move(dictionary)) {
 		if (Codebook) {
@@ -179,7 +181,7 @@ namespace cdn {
 
 	RequestId
 	Origin::Submit(std::span<const std::byte> token, const ContentHash &bundleRoot, uint64_t nowSeconds) {
-		ENGINE_PROFILE("Origin::Submit");
+		ENGINE_PROFILE_CAT("Origin::Submit", engine::core::ProfileCategory::Assets);
 
 		const RequestId id{NextRequest++};
 
@@ -230,7 +232,7 @@ namespace cdn {
 	}
 
 	size_t Origin::Pump(const PayloadSource &source, const UpstreamFetch &upstream) {
-		ENGINE_PROFILE("Origin::Pump");
+		ENGINE_PROFILE_CAT("Origin::Pump", engine::core::ProfileCategory::Assets);
 
 		// What to prepare this pump. Gathered first so that the parallel step
 		// below has a fixed set — a fan-out over a container something else may
@@ -246,7 +248,7 @@ namespace cdn {
 			return 0;
 		}
 
-		const Dictionary *dictionary = nullptr;
+		const engine::delivery::Dictionary *dictionary = nullptr;
 		ContentHash dictionaryHash;
 		if (Serving) {
 			dictionary = Serving->CompressionDictionary();
@@ -313,10 +315,13 @@ namespace cdn {
 						continue;
 					}
 
-					frames[slot] =
-						dictionary != nullptr
-							? GroupCodec::Compress(*payloads[slot], *dictionary, Configured.CompressionLevel)
-							: GroupCodec::Compress(*payloads[slot], Configured.CompressionLevel);
+					frames[slot] = dictionary != nullptr
+									   ? engine::delivery::GroupCodec::Compress(
+											 *payloads[slot], *dictionary, Configured.CompressionLevel
+										 )
+									   : engine::delivery::GroupCodec::Compress(
+											 *payloads[slot], Configured.CompressionLevel
+										 );
 				}
 			});
 		}

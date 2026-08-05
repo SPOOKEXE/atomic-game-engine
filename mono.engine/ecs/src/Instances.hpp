@@ -77,6 +77,9 @@ namespace engine::ecs {
 	// @param instance The parent whose children to visit.
 	// @param body     Called as `body(Entity)` for each child. It may reparent
 	//                 or destroy the child it was handed.
+	// Whether an instance has any children. O(1); see `Store::HasChildren`.
+	bool HasChildren(const StoreState &state, Entity instance);
+
 	void EachChild(const StoreState &state, Entity instance, const std::function<void(Entity)> &body);
 
 	// The first child with a name, searching in insertion order.

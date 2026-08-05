@@ -5,9 +5,15 @@ The content origin: a `shared`-tier library and a thin main over it.
 
 ## The short link row is the product
 
-`mono.cdn` links `core`, `assets` and `parallel` — exactly the three §8 gives
-it, and nothing else. No `ecs`, no `scene`, no `script`, no `world`, no
-`render`.
+`mono.cdn` links `core`, `assets`, `delivery`, `net` and `parallel`. No `ecs`,
+no `scene`, no `script`, no `world`, no `render`.
+
+**Two of those arrived at v0.9 and both are changes to §8 rather than drift
+within it.** `net` is the wire — `ROADMAP.md` v0.9 said in advance that building
+the origin's HTTP hop would move this row. `delivery` is where `GroupCodec` went,
+because a compressed group is a format with two ends and a copy on each side is
+how a format acquires a dialect. Anything added from here is a change to §8 too,
+and it goes in `expected_graph.json` in the same commit.
 
 That is not tidiness. It is the reason `cmake --preset cdn` configures on a bare
 container with no Vulkan SDK, no SDL and no shader compiler — and the day that
@@ -31,8 +37,13 @@ group compression out with `Jobs::For`.
 
 Keep doing that. A dependency declared ahead of its first caller is
 indistinguishable from a mistake, and on the one program whose short link row
-*is* the point, an unexplained edge is the most expensive kind. **The row is now
-complete** — anything added to it from here is a change to §8, not to this file.
+*is* the point, an unexplained edge is the most expensive kind. `net` and
+`delivery` arrived the same way at v0.9: `net` when `Service` began listening,
+`delivery` when `Origin` began compressing against a codec both ends share.
+
+**Every entry is still `shared`**, which is the property the row exists for.
+`just check-cdn-is-bare` is the standing proof and is the thing to run when this
+line is edited again.
 
 ## The origin decides nothing about who
 
@@ -179,11 +190,17 @@ byte-identical, and churning the entry would invalidate whatever is streaming it
 A frame larger than the whole capacity is refused rather than stored by emptying
 the cache for it.
 
-## `PayloadSource` is a seam, not a placeholder
+## `PayloadSource` is a seam, and v0.9 gave it a caller
 
-The on-disk chunk layout is deliberately not decided here — `CDN.md` §7 lists it
-as not started. Wiring the pipeline directly to a filesystem would bake an
-undecided layout into the request path.
+The on-disk chunk layout was deliberately not decided here — `CDN.md` §7 listed
+it as not started, and wiring the pipeline directly to a filesystem would have
+baked an undecided layout into the request path.
+
+It is decided now, and **it is decided in `Engine::assets`** rather than here:
+`assets::ChunkStore`, because a publisher writes that tree and a client reads it,
+so one implementation or the two acquire a dialect. `Service` closes over a
+store and hands `Origin` a source; the seam stays, and what it is wired to is a
+`shared` module both ends already link.
 
 A source returning nothing is a **refusal**, never an empty group. Serving an
 empty group would hand a client bytes that verify against nothing.
@@ -304,20 +321,34 @@ A server serving its own assets is not a fourth implementation either. It is
 `Engine::assets` over a local store plus `Engine::net`'s HTTP layer, linked into
 `mono.server`. One store, one manifest format, three deployments.
 
+## The origin decides admission; publishing is a different mode for a reason
+
+`cdn --publish` builds a store and `cdn --store` serves one, and they are
+separate invocations because **the signing key is separate**. A key belongs to
+whoever publishes the game and the origin holds none — that is what makes it
+deployable on hardware nobody here owns. A single mode that published on start-up
+would put a signing key on every serving box, permanently.
+
+`--grant-key` is required to serve, and it is not a convenience to remove. An
+origin that admitted everyone would be deciding who may have what, which is the
+server's job.
+
 ## Not here yet
 
-Everything except the root. Named so nobody adds half of one:
+Named so nobody adds half of one:
 
-- `Engine::assets` — manifests, content addressing, chunking, hashes.
-- `Engine::net` — the HTTP range serving that makes this an origin rather than a
-  directory.
 - `control/` — the upload API, auth and dashboard, in TypeScript, talking to
   this program's HTTP API rather than reimplementing any of it.
-- Signing and invalidation.
+- Invalidation, and an edge cache to invalidate.
+- Chunk-level verification of what an upstream returned. Today it is a length
+  check against the signed manifest, which is real and is not the whole of one —
+  say so rather than implying the proxy is authoritative.
+- Range serving is present but nothing *resumes* with it yet: the delivery
+  client fetches whole groups. The route answers `206` correctly, and a client
+  that dropped mid-group would want it.
 
-`app/main.cpp` mounts a root, reports it and warns that it serves nothing. That
-warning stays until there is something to serve — a program that silently does
-nothing is worse than one that says so.
+`app/main.cpp` used to mount a root, report it and warn that it served nothing.
+That warning is gone with the thing it was warning about.
 
 ## Not here at all
 

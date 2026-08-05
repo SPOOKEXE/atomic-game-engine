@@ -110,7 +110,7 @@ namespace engine::net {
 	}
 
 	bool Handshake::Consume(std::span<const std::byte> peerMessage) {
-		ENGINE_PROFILE("Handshake::Consume");
+		ENGINE_PROFILE_CAT("Handshake::Consume", core::ProfileCategory::Network);
 
 		if (Phase != HandshakeState::AwaitingPeer) {
 			// A replayed message, or two code paths both believing they own the

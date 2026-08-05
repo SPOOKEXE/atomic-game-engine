@@ -164,12 +164,29 @@ endif()
 # client to link and this is absent rather than stubbed.
 if(MONO_BUILD_CLIENT AND MONO_BUILD_SERVER)
 	add_subdirectory(mono.unified_server_client)
+
+	# The editor. Needs the renderer to draw with and the server library to host
+	# with, so like the harness above it configures only where both exist —
+	# under the `server` preset there is nothing here to build.
+	add_subdirectory(mono.studio)
 endif()
 
 # The content origin. `shared` tier rather than `server`, so the tier rule
 # itself — not a guard here — is what keeps a graphics stack off its link line.
 # repo_layout.md §11.
-if(MONO_BUILD_CDN)
+#
+# **The library is built whenever the server is, and the program is what
+# MONO_BUILD_CDN gates.** Since v0.9 a server can attach an origin and serve its
+# own disk — CDN.md §6's local store — so `Mono::cdn` is on `mono.server`'s link
+# line and has to exist under the `server` preset, which sets MONO_BUILD_CDN
+# OFF. The alternative was a conditional dependency and an `#ifdef` around the
+# attachment, which would make "does this server serve content" a build-time
+# question with two code paths, and rule 6 asks for the opposite.
+#
+# It costs the `server` preset a `shared` library holding a hash, a socket and a
+# compressor. It costs the staged tree nothing: the cdn *executable* is still
+# gated, so `--preset server` stages no origin binary.
+if(MONO_BUILD_CDN OR MONO_BUILD_SERVER)
 	add_subdirectory(mono.cdn)
 endif()
 

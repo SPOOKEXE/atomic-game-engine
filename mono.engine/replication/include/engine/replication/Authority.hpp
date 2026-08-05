@@ -151,6 +151,54 @@ namespace engine::replication {
 		uint64_t StarvationTicks = 30;
 	};
 
+	// How the authority notices that a component's value moved.
+	//
+	// **Two detectors, because the writers are not alike.** A position is
+	// written every tick by a system that goes through `Store::Set`, and a
+	// colour is written once by a script and then never again. The cheap answer
+	// for the first is the expensive answer for the second, and the reverse.
+	//
+	// @since v0.7
+	enum class ChangeDetection : uint8_t {
+		// The dirty bits, through `Store::EachChangedRuns`.
+		//
+		// **Costs nothing to ask and requires `Store::Observe`.** A component
+		// nobody observes has no bits, so this detector finds nothing for it —
+		// silently, and for ever. That is the right trade for something a
+		// system writes every tick: the bit was set by the write that already
+		// happened, and the walk hands over adjacent changed rows as a block so
+		// a delta is a memcpy per run.
+		//
+		// **What it cannot see** is a write through a raw column pointer.
+		// `EachBatch` and `EachBatchParallel` set no bit — deliberately, since
+		// checking per row is the cost those paths exist to avoid — so a system
+		// that writes in bulk is invisible to this. `ecs/ChangeChannel.hpp`
+		// says so in its own words.
+		Observed,
+
+		// A hash of the value, compared against the last one seen.
+		//
+		// **Indifferent to how the write happened**, which is the whole point:
+		// a script assignment, a bulk column write and a snapshot restore all
+		// change the bytes, and none of them has to remember to announce it.
+		// That closes the two holes `Observed` leaves — the unobserved
+		// component and the batch path — at the cost of reading every value of
+		// every entity once per `Publish`.
+		//
+		// **For what changes rarely and matters when it does.** `Bounds` and
+		// `Visual` are the case this was added for: nothing writes them per
+		// tick, so observing them buys a dirty column paid for every tick and
+		// read never — and *not* observing them meant a part recoloured by a
+		// script stayed its old colour on every client until it happened to be
+		// re-snapshotted. They crossed once, in the join snapshot, and never
+		// again.
+		//
+		// Not for a position. A transform moves every tick, so the hash differs
+		// every tick, and hashing it is a pass over the world to learn what the
+		// dirty bits already knew for free.
+		Signature,
+	};
+
 	// What the server owes each client this tick.
 	//
 	// @since v0.3
@@ -169,7 +217,17 @@ namespace engine::replication {
 		// consequence of forgetting rather than of deciding.
 		//
 		// @param component The component's registered name.
-		void Replicate(core::Name component);
+		// @param detection How a change to it is noticed. See `ChangeDetection`
+		//        — the default suits something a system writes every tick, and
+		//        a component nobody observes needs `Signature` or it never
+		//        deltas at all.
+		void Replicate(core::Name component, ChangeDetection detection = ChangeDetection::Observed);
+
+		// How a replicated component's changes are noticed.
+		//
+		// @param component The component's registered name.
+		// @return Its detector, or `Observed` for one that is not replicated.
+		ChangeDetection DetectionFor(core::Name component) const;
 
 		// Whether a component is replicated.
 		//
@@ -553,9 +611,33 @@ namespace engine::replication {
 			size_t Values = 0;
 		};
 
+		// One `Signature`-detected component's memory of what it last saw.
+		//
+		// **Server-wide and not per client**, because the question it answers —
+		// "did this value move" — has one answer for everybody. What each
+		// client has actually *received* is a different question and is
+		// `Client::Unconfirmed`'s, which is why a value that changed once is
+		// resent until it is acknowledged rather than only on the tick it moved.
+		struct Signature {
+			// Entity id to the hash of its value as of the last `Publish`.
+			//
+			// Bounded by the world rather than by time: an entry is replaced
+			// when the value changes and swept when the component or the entity
+			// goes away.
+			std::unordered_map<uint64_t, uint64_t> Hashes;
+
+			// Entities whose hash differed this `Publish`, sorted.
+			//
+			// Sorted because `Bearing` is walked in order to build it, and two
+			// runs of one server have to produce the same bytes — the same
+			// reason `Recovering` is sorted before it is walked.
+			std::vector<uint64_t> Changed;
+		};
+
 		Client *Reach(ClientId client);
 		const Client *Reach(ClientId client) const;
 		void Survey(ecs::Store &store);
+		void Resign(ecs::Store &store);
 		void BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick);
 		void BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
 		void Prioritise(ClientId client, uint64_t tick);
@@ -567,6 +649,15 @@ namespace engine::replication {
 		std::function<bool(ClientId, ecs::Entity)> Interest;
 		std::function<float(ClientId, ecs::Entity)> Priority;
 		std::vector<core::Name> Components;
+
+		// How each entry of `Components` notices a change. Parallel to it.
+		std::vector<ChangeDetection> Detection;
+
+		// The memory a `Signature` component keeps. Parallel to `Components`,
+		// and left empty for a slot that uses the dirty bits — a vector of
+		// unused maps costs nothing and keeps one index meaningful everywhere.
+		std::vector<Signature> Signatures;
+
 		std::vector<Client> Clients;
 		Statistics Stats_;
 

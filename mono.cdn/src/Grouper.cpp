@@ -75,7 +75,7 @@ namespace cdn {
 	Grouper::Grouper(GroupPolicy policy) : Envelope(policy.IsValid() ? policy : GroupPolicy{}) {}
 
 	Assembly Grouper::Assemble(std::span<const GroupCandidate> candidates) const {
-		ENGINE_PROFILE("Grouper::Assemble");
+		ENGINE_PROFILE_CAT("Grouper::Assemble", engine::core::ProfileCategory::Assets);
 
 		Assembly assembly;
 		if (candidates.empty()) {

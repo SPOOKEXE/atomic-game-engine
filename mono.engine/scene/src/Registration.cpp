@@ -1,16 +1,35 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
 #include <cstddef>
 #include <cstdint>
 
 namespace engine::scene {
+
+	const core::Name &DefaultMaterial() {
+		// **`Plastic` spelled here and registered as an enum member in
+		// `Part.cpp`, which is two places holding one string.** They are not
+		// collapsible in the direction that would help: the enum list is
+		// registered when the class tree is built, and a `Visual` can be default
+		// constructed before that has happened — a replica's column grows from a
+		// wire delta, and nothing on that path builds a class tree. Reading the
+		// enum's first member instead would therefore return an invalid name on
+		// exactly the path this default exists to serve.
+		//
+		// `scene/tests/Components.cpp` asserts the two agree, which is the check
+		// that makes the duplication safe rather than merely stated.
+		static const core::Name name("Plastic");
+		return name;
+	}
 
 	namespace {
 		// `Surface`, `Visual` and `SurfaceTable` all hold a `core::Name`, and a
@@ -44,6 +63,25 @@ namespace engine::scene {
 				writer.WriteName(visual.Mesh);
 				writer.WriteName(visual.Material);
 				writer.WriteBool(visual.Visible);
+
+				// **Added at v0.7, and the reason it was missing is the reason
+				// a custom serialiser is dangerous.** A field added to a type
+				// with a generated serialiser crosses for free; a field added to
+				// one with a hand-written pair crosses only if somebody
+				// remembers, and nothing in the build checks. `Transparency` and
+				// `Surface` both landed after this function was written and
+				// both silently reset to their defaults on every load —
+				// invisible for a part that was opaque anyway, and a glass pane
+				// that turned solid the first time a world was saved and
+				// reopened. `mono.client/tests/Presentation.cpp` is the check
+				// that would have caught it, and now does.
+				writer.WriteFloat(visual.Transparency);
+				writer.WriteInt8(visual.Surface);
+
+				// Added at v0.7 beside the shadow pass that reads it, and
+				// written here in the same breath rather than a release later —
+				// which is the whole lesson of the paragraph above.
+				writer.WriteBool(visual.CastShadow);
 			}
 		}
 
@@ -57,6 +95,9 @@ namespace engine::scene {
 				visual.Mesh = reader.ReadName();
 				visual.Material = reader.ReadName();
 				visual.Visible = reader.ReadBool();
+				visual.Transparency = reader.ReadFloat();
+				visual.Surface = reader.ReadInt8();
+				visual.CastShadow = reader.ReadBool();
 			}
 		}
 
@@ -114,6 +155,34 @@ namespace engine::scene {
 		// `PreviousTransform` deliberately has none. It is a render-side
 		// history nothing replicates, and giving it one would be declaring a
 		// wire form for something that never reaches a wire.
+		// **The tree, and it is registered here for want of an earlier place
+		// that every host already calls.** `ecs::Hierarchy` is the ECS's own
+		// type and had only the automatic name `Components::Of<T>` mints from
+		// the compiler's spelling — which is unusable on a wire, because the two
+		// processes have to agree on it and nothing makes them.
+		//
+		// It has to happen before anything creates an instance:
+		// `Components::Of<T>` caches its answer per type per process, and
+		// `Adopt` aborts on an explicit registration that arrives after an
+		// automatic one under a different name. This function is the earliest
+		// call every program makes, which is why it is here rather than beside
+		// the type.
+		//
+		// **The default POD wire form, and that is safe because a `Hierarchy` is
+		// five entity handles and nothing else.** A replica adopts the
+		// authority's indices — `Store::SetAdoptOnly` exists to guarantee it —
+		// so the handles mean the same thing on both ends without remapping.
+		//
+		// A child whose parent has not arrived yet holds a handle to a row that
+		// does not exist. `Instances.cpp` resolves every link through
+		// `MutableNodeOf`, which returns null for a missing row, so the walk
+		// stops early and resumes when the next delta fills the gap. Transient,
+		// and stated because the alternative reading is a corrupted tree.
+		ecs::Components::Register<ecs::Hierarchy>("ecs.Hierarchy");
+
+		// Added at the end of this list rather than beside `ServiceComponent`,
+		// per the ordering note above: a component id decides column order, and
+		// inserting one in the middle reorders iteration across the engine.
 		ecs::Components::Register<Transform>("scene.Transform", TransformWire());
 		ecs::Components::Register<PreviousTransform>("scene.PreviousTransform");
 		ecs::Components::Register<Bounds>("scene.Bounds");
@@ -125,6 +194,35 @@ namespace engine::scene {
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 		ecs::Components::Register<Camera>("scene.Camera");
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
+
+		// The service fixtures, added at the end because that is the rule this
+		// list opens with: registration order decides component ids, ids decide
+		// the order archetypes iterate their columns, and inserting one of
+		// these above `Transform` would change the order every row in the
+		// engine is visited in. Neither carries a wire form — a service is
+		// authored content that a snapshot moves, not per-tick state a delta
+		// does.
+		ecs::Components::Register<TransientComponent>("scene.Transient");
+		ecs::Components::Register<ServiceComponent>("scene.Service");
+		ecs::Components::Register<LightingServiceComponent>("scene.LightingService");
+
+		// **Who this host is looking through, and only a client has one.** A
+		// resource, so it is carried by a snapshot and covered by the affinity
+		// check like everything else a world holds — and named explicitly
+		// because an automatic name minted from the compiler's spelling is
+		// unusable the moment a world crosses a process.
+		ecs::Components::Register<LocalPlayer>("scene.LocalPlayer");
+
+		// The render gate, at the end for the reason this list opens with.
+		//
+		// **No wire form, and it is not an oversight.** This is a conclusion
+		// drawn from the tree, and a conclusion is the thing least worth
+		// sending: an authority replicates what is in its own scene, so a
+		// replica's draw list is already filtered by what arrived. Putting this
+		// on the wire would give a replica a second opinion about visibility
+		// that could disagree with the first. `client::CollectReplicated`
+		// carries the same argument from the receiving end.
+		ecs::Components::Register<Rendered>("scene.Rendered");
 
 		// The resources. A resource is keyed by a component id too, so one that
 		// is never registered here would be minted by the first
@@ -140,5 +238,12 @@ namespace engine::scene {
 		// first call, so this is the same registration under the name a caller
 		// looks for rather than a second one.
 		(void)PartClass();
+
+		// The services, through the same door. A game file naming `Lighting`
+		// has to resolve it, and a reader that depended on the studio having
+		// registered these first would fail with "no class named 'Lighting'" on
+		// a perfectly good file — which is exactly the failure
+		// `game::RegisterGameClasses` exists to prevent for `Part`.
+		(void)ServiceClass();
 	}
 }

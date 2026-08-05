@@ -48,7 +48,7 @@ namespace engine::net {
 	}
 
 	size_t ReliableSender::OnAcknowledge(const PacketHeader &header) {
-		ENGINE_PROFILE("ReliableSender::OnAcknowledge");
+		ENGINE_PROFILE_CAT("ReliableSender::OnAcknowledge", core::ProfileCategory::Network);
 
 		const size_t before = Pending.size();
 		std::erase_if(Pending, [&header](const Held &entry) {

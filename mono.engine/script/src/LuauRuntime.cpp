@@ -5,8 +5,10 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +33,11 @@ namespace engine::script {
 			size_t MemoryHeld = 0;
 			uint64_t StepBudget = 0;
 			uint64_t StepsTaken = 0;
+
+			// Where the last breakpoint fired, so a line that compiles to
+			// several instructions reports once rather than once per opcode.
+			int LastBreakLine = 0;
+			std::string LastBreakSource;
 
 			LuauContext Context;
 		};
@@ -83,6 +90,109 @@ namespace engine::script {
 			if (++bounds.StepsTaken > bounds.StepBudget) {
 				bounds.StepsTaken = 0;
 				luaL_errorL(state, "script exceeded its step budget");
+			}
+		}
+
+		// Renders one stack value the way `print` would.
+		//
+		// Through `luaL_tolstring` so `__tostring` is honoured: an instance
+		// reads as its name and a Vector3 as its components, which is the whole
+		// difference between a useful capture and a column of addresses.
+		std::string Rendered(lua_State *state, int index) {
+			size_t length = 0;
+			const char *text = luaL_tolstring(state, index, &length);
+			std::string value(text, length);
+			lua_pop(state, 1);
+			return value;
+		}
+
+		// Walks the stack into a hit record.
+		//
+		// **Innermost frame first**, which is the order a stack is read in and
+		// the order `lua_getinfo` numbers levels.
+		void Capture(lua_State *state, DebugHit &hit) {
+			const int depth = lua_stackdepth(state);
+
+			for (int level = 0; level < depth; level++) {
+				lua_Debug info;
+				if (lua_getinfo(state, level, "sln", &info) == 0) {
+					continue;
+				}
+
+				DebugFrame frame;
+				frame.Source = info.short_src != nullptr ? info.short_src : "";
+				frame.Function = info.name != nullptr ? info.name : "";
+				frame.Line = info.currentline;
+
+				// Locals and arguments both, because a script author does not
+				// distinguish them and the one being looked for is as often a
+				// parameter as a `local`.
+				for (int slot = 1;; slot++) {
+					const char *name = lua_getlocal(state, level, slot);
+					if (name == nullptr) {
+						break;
+					}
+					frame.Locals.push_back(DebugLocal{name, Rendered(state, -1)});
+					lua_pop(state, 1);
+
+					// Bounded: a frame with two hundred locals is a generated
+					// one and the panel cannot show them anyway.
+					if (frame.Locals.size() >= 32) {
+						break;
+					}
+				}
+
+				hit.Frames.push_back(std::move(frame));
+			}
+		}
+
+		// Called after every instruction while single-step mode is on.
+		//
+		// **Only ever on while a breakpoint is armed.** `LuauRuntime::Run`
+		// switches it on and off around each chunk, so a runtime nobody is
+		// debugging never reaches this function.
+		void DebugStep(lua_State *state, lua_Debug *) {
+			Bounds &bounds = BoundsOf(state);
+			Debugger *debug = bounds.Context.Breakpoints;
+			if (debug == nullptr) {
+				return;
+			}
+
+			lua_Debug here;
+			if (lua_getinfo(state, 0, "sl", &here) == 0) {
+				return;
+			}
+
+			const char *source = here.short_src != nullptr ? here.short_src : "";
+			Breakpoint *point = debug->Match(source, here.currentline);
+			if (point == nullptr) {
+				return;
+			}
+
+			// **Once per arrival at the line, not once per instruction on it.**
+			// A line compiles to several instructions and single-step fires for
+			// each, so without this a breakpoint on one line reports four times
+			// and the hit count means nothing.
+			if (bounds.LastBreakLine == here.currentline && bounds.LastBreakSource == source) {
+				return;
+			}
+			bounds.LastBreakLine = here.currentline;
+			bounds.LastBreakSource = source;
+
+			point->Hits++;
+
+			DebugHit hit;
+			hit.Source = source;
+			hit.Line = here.currentline;
+			hit.Instance = bounds.Context.RunningScript;
+			Capture(state, hit);
+			debug->Record(std::move(hit));
+
+			if (point->Action == BreakAction::Stop) {
+				// An ordinary script error, which the host already knows how to
+				// report — rather than a new state the runtime would have to
+				// learn to be in.
+				luaL_errorL(state, "stopped at a breakpoint: %s:%d", source, here.currentline);
 			}
 		}
 
@@ -175,17 +285,30 @@ namespace engine::script {
 		OpenDatatypes(State);
 		OpenEnums(State);
 		OpenSignals(State);
-		OpenInstances(State, Store);
+		OpenInstances(State);
 		OpenRunService(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
-		OpenServices(State, Store);
+		OpenServices(State);
 		OpenQueries(State);
 		OpenTask(State);
 		OpenClock(State);
 		OpenBaseExtras(State);
 
+		// **After `OpenBaseExtras`, which installs the refusal.** Overwriting it
+		// here rather than deleting it there keeps a runtime that never calls this
+		// refusing with a sentence rather than with a nil global.
+		OpenRequire(State);
+
 		lua_callbacks(State)->interrupt = Interrupt;
+
+		// **The step callback is installed, single-step mode is not.** Luau only
+		// calls this while stepping is enabled, and `Run` enables it for exactly
+		// as long as a breakpoint is armed — so a runtime nobody is debugging
+		// pays nothing for this line.
+		lua_callbacks(State)->debugstep = DebugStep;
+
+		BoundsOf(State).Context.Breakpoints = &Breakpoints;
 
 		// Freezes the global table and the library tables. After this a script
 		// can read `math.floor` and cannot replace it, so one script cannot
@@ -222,6 +345,22 @@ namespace engine::script {
 		lua_CompileOptions options = {};
 		options.optimizationLevel = 1;
 		options.debugLevel = 1;
+
+		// **A breakpoint compiles the chunk differently, and it has to.** At
+		// optimisation level 1 the compiler folds constants and drops the
+		// instructions their lines would have produced — so `local x = 1` is not
+		// a line execution ever arrives at, and a breakpoint on it would sit
+		// there never firing while the script plainly ran past it. That is the
+		// worst failure a debugger has: silently pointing at the wrong place.
+		//
+		// So stepping compiles at level 0 with full debug info, which is the
+		// same trade `dev` already makes for C++ — the code does what it says
+		// rather than what it was rewritten into. It applies only while a
+		// breakpoint is armed, so nothing else in the world pays for it.
+		if (Breakpoints.Armed()) {
+			options.optimizationLevel = 0;
+			options.debugLevel = 2;
+		}
 
 		size_t bytecodeSize = 0;
 		char *bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);
@@ -260,7 +399,25 @@ namespace engine::script {
 
 		BoundsOf(State).StepsTaken = 0;
 
+		// **Single-step is switched on only while something is armed, and off
+		// again the moment the chunk ends.** Luau checks a flag per instruction
+		// when it is on, so leaving it on would tax every script in the world
+		// for a breakpoint nobody set — and a debugger that costs something when
+		// unused is one that gets switched off and then rots.
+		//
+		// On the thread rather than the state, because that is what runs.
+		const bool stepping = Breakpoints.Armed();
+		if (stepping) {
+			BoundsOf(State).LastBreakLine = 0;
+			BoundsOf(State).LastBreakSource.clear();
+			lua_singlestep(thread, 1);
+		}
+
 		const int status = lua_resume(thread, nullptr, 0);
+
+		if (stepping) {
+			lua_singlestep(thread, 0);
+		}
 
 		// **A yield is legal now, and only from `task`.**
 		//
@@ -304,6 +461,147 @@ namespace engine::script {
 		return true;
 	}
 
+	namespace {
+		// `require(moduleScript)`.
+		//
+		// **The argument is an instance, never a path.** A path would be a second
+		// namespace beside the tree — two ways to name one module, disagreeing the
+		// first time somebody moved a file — and it would reach code no manifest
+		// describes, which is what the old refusal was written to prevent. An
+		// instance is already in the world, already saved, already replicated.
+		int Require(lua_State *state) {
+			LuauContext &context = UpvalueContext(state);
+
+			void *value = lua_touserdatatagged(state, 1, TAG_INSTANCE);
+			if (value == nullptr) {
+				luaL_typeerrorL(state, 1, "ModuleScript");
+			}
+
+			const ecs::Entity module = *static_cast<ecs::Entity *>(value);
+			ecs::Store &store = *context.World;
+
+			if (!store.Alive(module) || !ecs::Classes::IsA(store.ClassOf(module), ModuleScriptClass())) {
+				// Named rather than nil, for `GetService`'s reason: a script that
+				// gets nil back fails one line later, somewhere that says nothing
+				// about the cause.
+				luaL_errorL(state, "require expects a ModuleScript");
+			}
+
+			// **Already evaluated: hand back the same value.** Not a fresh copy —
+			// two scripts requiring one module must see one table, or a module
+			// used to share state silently shares nothing.
+			if (const auto found = context.Modules.find(module.Id); found != context.Modules.end()) {
+				lua_getref(state, found->second);
+				return 1;
+			}
+
+			// A cycle, named at both ends. Recursing instead would exhaust the C
+			// stack and surface as a crash with no line number.
+			for (const ecs::Entity loading : context.Loading) {
+				if (loading == module) {
+					luaL_errorL(
+						state,
+						"require cycle: '%s' is already being required",
+						store.InstanceNameOf(module).Text().data()
+					);
+				}
+			}
+
+			const Source *source = store.Get<Source>(module);
+			if (source == nullptr || !source->Path.IsValid()) {
+				luaL_errorL(
+					state, "'%s' has no source to require", store.InstanceNameOf(module).Text().data()
+				);
+			}
+
+			std::string program;
+			std::string error;
+			if (!ReadSource(store, source->Path, program, error)) {
+				luaL_errorL(state, "%s", error.c_str());
+			}
+
+			lua_CompileOptions options = {};
+			options.optimizationLevel = 1;
+			options.debugLevel = 1;
+
+			size_t bytecodeSize = 0;
+			char *bytecode = luau_compile(program.data(), program.size(), &options, &bytecodeSize);
+			if (bytecode == nullptr) {
+				luaL_errorL(state, "the compiler produced nothing for '%s'", source->Path.Text().data());
+			}
+
+			// The same shape a `Script` gets: its own sandboxed thread, so a
+			// module assigning a global does not leak into whoever required it.
+			lua_State *thread = lua_newthread(state);
+			luaL_sandboxthread(thread);
+
+			PushInstanceValue(thread, module);
+			lua_setglobal(thread, "script");
+
+			const std::string chunkName = "=" + std::string(source->Path.Text());
+			const int loaded = luau_load(thread, chunkName.c_str(), bytecode, bytecodeSize, 0);
+			std::free(bytecode);
+
+			if (loaded != 0) {
+				const char *message = lua_tostring(thread, -1);
+				luaL_errorL(state, "%s", message != nullptr ? message : "could not load the module");
+			}
+
+			context.Loading.push_back(module);
+			const int status = lua_resume(thread, nullptr, 0);
+			context.Loading.pop_back();
+
+			if (status == LUA_YIELD) {
+				// **A module may not yield**, and the reason is the one every
+				// yield here answers to: the value is cached the moment it is
+				// produced, so a module suspended half way would leave every
+				// later `require` waiting on a value that arrives at a tick
+				// nobody chose.
+				luaL_errorL(state, "a ModuleScript may not yield while it is being required");
+			}
+			if (status != LUA_OK) {
+				const char *message = lua_tostring(thread, -1);
+				luaL_errorL(state, "%s", message != nullptr ? message : "the module raised");
+			}
+
+			// Roblox requires exactly one value back. Nothing returned is the
+			// mistake an author makes once, and it reads as `nil` three files
+			// away unless it is refused here.
+			if (lua_gettop(thread) < 1) {
+				luaL_errorL(
+					state,
+					"'%s' returned nothing — a ModuleScript must return one value",
+					store.InstanceNameOf(module).Text().data()
+				);
+			}
+
+			lua_xmove(thread, state, 1);
+
+			// Referenced before it is handed over, so the cache owns a value the
+			// collector cannot take while a script is still holding it.
+			lua_pushvalue(state, -1);
+			context.Modules[module.Id] = lua_ref(state, -1);
+			lua_pop(state, 1);
+
+			return 1;
+		}
+	}
+
+	void OpenRequire(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+
+		lua_pushlightuserdata(state, &context);
+		lua_pushcclosure(state, Require, "require", 1);
+		lua_setglobal(state, "require");
+	}
+
+	uint64_t LuauRuntime::StepsTaken() const {
+		if (State == nullptr) {
+			return 0;
+		}
+		return BoundsOf(State).StepsTaken;
+	}
+
 	bool LuauRuntime::RunInstance(ecs::Entity instance) {
 		Error.clear();
 
@@ -315,21 +613,20 @@ namespace engine::script {
 			return true;
 		}
 
-		// An absolute `Source` is used as it stands. `operator/` already drops
-		// the left side for an absolute right side, so this is what the standard
-		// does anyway — said out loud because a reader checking whether
-		// `--script /tmp/x.luau` works should not have to know that.
-		const std::filesystem::path named(source->Path.Text());
-		const std::filesystem::path path = named.is_absolute() ? named : core::Paths::Assets() / named;
-
-		std::ifstream file(path, std::ios::binary);
-		if (!file) {
-			Error = "could not open " + path.string();
+		// **The world's `SourceCache` before the filesystem**, through the one
+		// function that knows both. A studio's unsaved edit lives in that table
+		// and a game file's scripts arrive in it, so a second resolver here
+		// would be a second place to forget it — and the symptom would be
+		// edited code that runs from one entry point and not another.
+		std::string program;
+		if (!ReadSource(Store, source->Path, program, Error)) {
 			return false;
 		}
 
-		std::ostringstream contents;
-		contents << file.rdbuf();
+		// Which script a captured hit came from. Cleared after the run, because
+		// a heartbeat connection is not attributable to one — see
+		// `LuauContext::RunningScript`.
+		ContextOf(State).RunningScript = instance;
 
 		// **`script` names the instance, and it is set before the chunk runs.**
 		// That is the whole difference from `RunFile`: a chunk run this way can
@@ -341,7 +638,7 @@ namespace engine::script {
 		// invisible to the next, which is exactly the scoping an author expects.
 		ContextOf(State).PendingScript = instance;
 
-		const bool ok = Run(contents.str(), source->Path.Text());
+		const bool ok = Run(program, source->Path.Text());
 		ContextOf(State).PendingScript = ecs::NULL_ENTITY;
 		return ok;
 	}

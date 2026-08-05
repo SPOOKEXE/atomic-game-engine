@@ -28,9 +28,11 @@
 // A replica that ticked would be this process disagreeing with the authority
 // once per tick, which is the bug replication exists to avoid.
 
+#include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
+#include <engine/scene/Components.hpp>
 
 #include <cstdint>
 
@@ -75,4 +77,33 @@ namespace client {
 	//        `engine::replication::Connector::Applied`. Zero does nothing:
 	//        the snapshot has not landed and there is no state to record.
 	void RecordReplicatedTick(engine::ecs::Store &store, uint64_t tick);
+
+	// Points the replica's own camera at wherever this client is looking.
+	//
+	// **A replica has to construct its own viewer, and this is why.** A mirror
+	// reflects the *eye*, so a reflection computed on the authority is correct
+	// for the authority's camera and wrong for every client watching. What
+	// crosses the wire is therefore the mirror — the `SurfaceCamera`, its lens
+	// and the tree that says which pane it belongs to — and never the aim. Each
+	// client aims it again, from where that client is standing, which is the
+	// only place the right answer exists.
+	//
+	// The camera is minted from the **predicted** range. A replica may not mint
+	// an authoritative entity — `Store::SetAdoptOnly` says why: the index would
+	// collide exactly with one the authority allocates and `Apply` would be
+	// right to merge them — but the reserved high range is a client's own, and a
+	// camera nobody else can see is precisely what it is for.
+	//
+	// Created on the first call and reused after, so this is one component write
+	// per frame on a steady view. Destroying the world destroys it; there is
+	// nothing else to clean up, because nothing on the authority knows it
+	// exists.
+	//
+	// @param store The replicated world.
+	// @param frame Where this client's camera is, in world space.
+	// @param lens  Its field of view and clipping distances.
+	// @return The camera entity, or `NULL_ENTITY` when one could not be made.
+	engine::ecs::Entity AimReplicaViewer(
+		engine::ecs::Store &store, const engine::core::CFrame &frame, const engine::scene::Camera &lens
+	);
 }

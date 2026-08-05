@@ -4,9 +4,14 @@ This engine is MPL-2.0. It builds against the projects below, each under its own
 licence. Every one of them lives in `mono.vendor/` as a git submodule, so the
 full licence text ships with the source in `mono.vendor/<name>/`.
 
-All fifteen are permissive and compatible with MPL-2.0. **Nothing here is
+All of them are permissive and compatible with MPL-2.0. **Nothing here is
 copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
 adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`.
+
+One of them is not a dependency of the build at all. **luau-lsp is a developer
+tool**, cloned only when somebody runs `just luau-lsp`; `just setup` walks past
+it and no target links it. It brings a second copy of Luau with it, which is why
+it is built in a tree of its own — `.gitmodules` carries the reasoning.
 
 | Library | Licence | Used for | In a shipped game |
 |---|---|---|---|
@@ -23,8 +28,15 @@ adding a dependency rather than a happy accident — see `mono.vendor/AGENTS.md`
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` — chunk, asset, bundle and manifest addressing | yes, once linked |
 | [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
 | [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no — `just docs` only |
-| [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and its compiler, from v0.6 | yes, once linked — nothing links it today |
+| [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and its compiler, from v0.6; its analysis library behind `mono.tools/scriptcheck`, from v0.7 | yes, once linked — nothing links it today |
+| [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no — never built by this build; `just luau-lsp` builds it separately |
+| [nlohmann/json](https://github.com/nlohmann/json) | MIT | JSON for the studio's control server, which speaks Model Context Protocol, from v0.8 | studio only |
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM, from v0.6 | yes, once linked — nothing links it today |
+| [Dear ImGui](https://github.com/ocornut/imgui) | MIT | the editor's widget toolkit, behind `engine::ui`, from v0.7 | client only — `mono.studio` alone links it |
+| [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | the editor's interface typeface, from v0.7 | staged beside any program that links `engine::ui` |
+| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | the monospace typeface the script editor uses, from v0.7 | as above |
+| [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display typeface, from v0.7 | as above |
+| [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | the coverage face merged into the others, from v0.7 | as above |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They
@@ -128,6 +140,23 @@ contains the `yes` rows and not the others:
   HTML by `just docs` and is never compiled, linked or staged. It is a submodule
   rather than a copied `.css` for the ordinary reason — a vendored file gets a
   local fix, upstream gets a different one, and nobody finds out.
+
+## The typefaces are files, not submodules
+
+Everything else here is a submodule, and `mono.vendor/AGENTS.md` explains why
+nothing is copied into the tree as source. The four fonts are the exception, and
+it is a deliberate one: each upstream repository is tens of megabytes of sources,
+build tooling and every static instance, to obtain one variable `.ttf`. A
+submodule of that to take 0.2% of it is a clone everybody pays for.
+
+So `mono.vendor/fonts/` holds the four files and, beside each, the licence text
+that upstream ships — which is the whole obligation OFL 1.1 imposes on a binary
+distribution. They are **not modified**, and the OFL's reserved-name clause is
+therefore not engaged.
+
+They are used at their **default variable instance**, which for all four is the
+regular weight. Nothing here drives a weight axis, because stb_truetype — which
+is what Dear ImGui rasterises with — does not.
 
 ## If you add one
 

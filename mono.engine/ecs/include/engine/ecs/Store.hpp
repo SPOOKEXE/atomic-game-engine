@@ -840,6 +840,18 @@ namespace engine::ecs {
 		// @return The child, or NULL_ENTITY when none matches.
 		Entity FindFirstChild(Entity instance, std::string_view name) const;
 
+		// Whether an instance has any children at all.
+		//
+		// **O(1), which `EachChild` is not.** A tree view asks this per row to
+		// decide whether to draw an expander, and answering it with `EachChild`
+		// walks the entire sibling list to set a bool — free on a leaf, and two
+		// hundred steps on the root of a two-hundred-part scene, every frame.
+		// `Hierarchy::FirstChild` is the answer already.
+		//
+		// @param instance The instance to ask about.
+		// @return `true` when it has at least one child.
+		bool HasChildren(Entity instance) const;
+
 		// Visits every instance with no parent.
 		//
 		// **The world's own children.** `SetParent(instance, NULL_ENTITY)` means

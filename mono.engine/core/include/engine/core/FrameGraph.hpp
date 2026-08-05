@@ -36,23 +36,66 @@ namespace engine::core {
 		Engine, // General engine work.
 		Render, // Rendering work.
 
-		// Time inside the entity-component system: the scheduler, every system
-		// it ran, and the storage work underneath them.
+		// Time inside the entity-component system: the scheduler, and every
+		// system it ran that no narrower category below claims.
 		//
-		// **This is where a game's time goes.** Every engine and game system
-		// runs through the ECS, so a system that is slow is ECS time and the
-		// bar says so. It is separate from `Simulation` because the two answer
-		// different questions: this one is "what did the systems cost", and
-		// that one is "what did the machinery around them cost" — a driver
-		// spending more on its barrier than on its worlds is a real and
-		// findable problem, and one category could not show it.
+		// **This is the default home of a game's systems, not all of them.**
+		// Everything runs through the ECS, so this bar would be the whole
+		// frame if it took everything the scheduler dispatched — which is a
+		// bar that says "the game ran" and nothing else. The carve-outs below
+		// are the subsystems large enough that a reader wants them named
+		// before they want them grouped, and `Script` was the first of them
+		// long before `Physics` joined it.
+		//
+		// It is separate from `Simulation` because the two answer different
+		// questions: this one is "what did the systems cost", and that one is
+		// "what did the machinery around them cost" — a driver spending more
+		// on its barrier than on its worlds is a real and findable problem,
+		// and one category could not show it.
 		ECS,
+
+		// Collision and rigid-body work: broad phase, narrow phase, the
+		// solver, integration, and publishing the result back to the store.
+		//
+		// **Carved out of `ECS` because it is the system a slow frame is
+		// usually about.** Physics runs as scheduler systems like everything
+		// else, so it was ECS time and indistinguishable from it — and "ECS
+		// 9 ms" sends a reader to the scheduler when the answer is a
+		// broadphase rebuild. The per-system view could always tell them
+		// apart; the category view is the one read first, and it could not.
+		//
+		// @since v0.7
+		Physics,
 
 		// Simulation work that is not a system: the fixed-timestep accumulator,
 		// the driver's barrier, bus routing, snapshotting.
 		Simulation,
 
 		Script, // Script runtime work.
+
+		// Replication and transport: the link, the handshake, sealing and
+		// opening packets, and applying what arrived to the store.
+		//
+		// **Not `Idle`, even though most of it is waiting on somebody else.**
+		// A wait is time the frame cannot use; this is time the frame spends
+		// on the network's behalf and can be made cheaper. The blocking parts
+		// open an `Idle` scope of their own, exactly as the swapchain wait
+		// does, so the two stay separable.
+		//
+		// @since v0.7
+		Network,
+
+		// Content: hashing, chunking, manifests, signatures, decompression,
+		// and the cache in front of them.
+		//
+		// **Separate from `Network` because a stall in one is not a stall in
+		// the other**, and they are reached by the same call. An asset that
+		// arrived instantly and cost 12 ms to verify and an asset that took
+		// 12 ms to arrive are different problems with different fixes, and a
+		// single I/O category reports them as the same number.
+		//
+		// @since v0.7
+		Assets,
 
 		// Time the frame spent waiting rather than working — the wait for the
 		// display, above all.

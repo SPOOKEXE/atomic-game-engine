@@ -404,10 +404,18 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	for (const auto &timing : session.Systems.Timings()) {
 		timings.push_back({timing.Name, timing.Milliseconds});
 	}
-	// capture-previous, script-heartbeat, move-camera, collect-instances. Four
-	// rather than the five the C++ demo ran: one scripted heartbeat replaced
-	// `orbit` and `spin`.
-	REQUIRE(timings.size() == 4);
+	// capture-previous, script-heartbeat, move-camera, sync-rendered,
+	// aim-surface-cameras, collect-instances. `sync-rendered` arrived at v0.7
+	// with the render gate: it is what keeps `scene::Rendered` in step with the
+	// `Workspace` subtree, and it is structural. `aim-surface-cameras` arrived
+	// beside it and places every surface camera parented to a part — see
+	// `scene/SurfaceCameras.hpp`.
+	//
+	// **A count rather than a list, and it is worth keeping as one.** It fails
+	// whenever a system is added to the presentation phase, which is exactly
+	// when somebody should be asked whether a world that only presents — the
+	// studio's suspended scene — still does the right thing.
+	REQUIRE(timings.size() == 6);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

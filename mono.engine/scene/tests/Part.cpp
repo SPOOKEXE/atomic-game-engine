@@ -6,6 +6,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -30,6 +31,7 @@ using engine::scene::MakePart;
 using engine::scene::Motion;
 using engine::scene::PartClass;
 using engine::scene::PartDesc;
+using engine::scene::RegisterSceneClasses;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
@@ -180,9 +182,13 @@ TEST_CASE("what the description does not name keeps its prototype default", "[sc
 	CHECK(visual->Visible);
 	CHECK(visual->Tint.R == 1.0f);
 
-	// Named by nothing in the description, so it stays unset rather than
-	// picking up the mesh name.
-	CHECK_FALSE(visual->Material.IsValid());
+	// **Named by nothing in the description, so it keeps the component's own
+	// default rather than picking up the mesh name.** `PartDesc::Material` is
+	// what a part *feels* like and lands in `Surface`; what it looks like is
+	// `Visual::Material`, which `PartDesc` does not describe at all — so this is
+	// the default arriving through `MakePart` untouched, which is the same
+	// default a script gets from `Instance.new("Part")`.
+	CHECK(visual->Material == engine::scene::DefaultMaterial());
 }
 
 TEST_CASE("a replica refuses to mint a part", "[scene][part]") {
@@ -352,4 +358,92 @@ TEST_CASE("a replica refuses a property write", "[scene][part]") {
 	// those apart from inside the script.
 	CHECK_FALSE(Write(store, part, "Position", Vector3{9.0f, 9.0f, 9.0f}));
 	CHECK(store.Get<Transform>(part)->Frame.Position.X == 0.0f);
+}
+
+// --- the two opacities ------------------------------------------------------
+
+TEST_CASE("Transparency stores what a script wrote, out of range included", "[scene][part]") {
+	Store store("transparency_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	// **Not clamped, and this is an assertion rather than an absence.** It was
+	// clamped for one commit. Roblox does not clamp this — `part.Transparency =
+	// 2` reads back as 2 — and matching that is not fidelity for its own sake: a
+	// script that drives a fade by arithmetic and reads the value back expects
+	// what it wrote, and a property that silently rewrites its input is one an
+	// author debugs by disbelieving their own assignment.
+	//
+	// Where the range has to hold is the renderer, which is a different place
+	// from where the value is authored. `SurfaceCamera::ImageTransparency` is
+	// still clamped, because it is not Roblox's property and has no such
+	// expectation to honour.
+	REQUIRE(Write(store, part, "Transparency", 2.5f));
+	CHECK(Read<float>(store, part, "Transparency") == 2.5f);
+
+	REQUIRE(Write(store, part, "Transparency", -3.0f));
+	CHECK(Read<float>(store, part, "Transparency") == -3.0f);
+
+	// The ordinary range round-trips exactly, which is the half that would still
+	// hold under a clamp and is worth pinning either way.
+	REQUIRE(Write(store, part, "Transparency", 0.0f));
+	CHECK(Read<float>(store, part, "Transparency") == 0.0f);
+
+	REQUIRE(Write(store, part, "Transparency", 1.0f));
+	CHECK(Read<float>(store, part, "Transparency") == 1.0f);
+
+	REQUIRE(Write(store, part, "Transparency", 0.25f));
+	CHECK(Read<float>(store, part, "Transparency") == 0.25f);
+}
+
+TEST_CASE("a surface camera has its own opacity, clamped the same way", "[scene][part]") {
+	Store store("image_transparency_test");
+	RegisterSceneClasses();
+
+	const Entity camera =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+
+	// **Two opacities, because a mirror is two things.** The part's
+	// `Transparency` is how much of the world shows through the glass; this is
+	// how much of the glass shows through the reflection. Until there were two,
+	// fading a mirror faded its reflection with it and there was no way to
+	// author a transparent pane that still reflects.
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
+
+	REQUIRE(Write(store, camera, "ImageTransparency", 0.5f));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.5f);
+
+	REQUIRE(Write(store, camera, "ImageTransparency", 4.0f));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 1.0f);
+
+	REQUIRE(Write(store, camera, "ImageTransparency", -1.0f));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
+}
+
+TEST_CASE("Face is an enum, so a misspelling is refused where it was written", "[scene][part]") {
+	Store store("face_test");
+	RegisterSceneClasses();
+
+	const Entity camera =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
+
+	// The default reads back as a name rather than as a number, which is what
+	// having an `EnumTable` ordinal in the component buys: the storage is one
+	// byte and the surface is a name a script can compare.
+	CHECK(Read<Name>(store, camera, "Face") == Name("Front"));
+
+	REQUIRE(Write(store, camera, "Face", Name("Top")));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Top"));
+
+	// **Refused rather than defaulted.** A face nobody chose is a mirror
+	// projecting off the wrong side of a pane, which looks like a broken
+	// reflection rather than like a typo — the same argument `Material` makes
+	// about `"Plsatic"`.
+	CHECK_FALSE(Write(store, camera, "Face", Name("Frnot")));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Top"));
+
+	// Roblox's spelling, which is the one a ported script will use.
+	CHECK_FALSE(Write(store, camera, "Face", Name("Up")));
+	REQUIRE(Write(store, camera, "Face", Name("Bottom")));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Bottom"));
 }

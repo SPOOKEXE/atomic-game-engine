@@ -64,6 +64,33 @@ namespace client {
 		std::vector<engine::scene::DrawInstance> Instances;
 	};
 
+	// Every surface camera in the world, as views the renderer takes.
+	//
+	// **All of them since v0.8, and it used to be the first by entity id.** The
+	// pipeline rendered one offscreen view, so a world with four mirrored walls
+	// got one working mirror and three panes projecting that one camera's image
+	// across themselves — which looked like a bug in the mirror rather than the
+	// limit of the pipeline it was. `render::SurfaceView::Index` and
+	// `scene::MAX_SURFACES` are what replaced it.
+	//
+	// **Ordered by entity id, which is creation order**, so a world loaded the
+	// same way twice produces the same list. An archetype walk would return
+	// whichever row happened to be first, and that moves when anything changes a
+	// component set.
+	//
+	// **Reads what a camera *is*, never where it should be.** Aiming is
+	// `scene::AimSurfaceCameras` in `PreRender`, and this runs after it — so a
+	// view carries the frame that system computed. Two things deriving a
+	// reflection would be two answers to one question, and the one on screen
+	// would be whichever ran last.
+	//
+	// @param store The world to search.
+	// @param views Cleared and filled. Kept capacity, so a steady scene stops
+	//              allocating after the first frame.
+	// @return How many views were written. Zero is the ordinary case in a scene
+	//         with no mirror in it, and is not a failure.
+	size_t CollectSurfaceViews(engine::ecs::Store &store, std::vector<engine::render::SurfaceView> &views);
+
 	// Builds the scene by running a Luau file instead of a C++ loop.
 	//
 	// The entities, the components and the systems that move them all come from
@@ -76,24 +103,64 @@ namespace client {
 	// @param path      The `.luau` file to run.
 	// @param reserve   How much draw-list capacity to reserve up front.
 	// @return `false` when the script could not be read, compiled or run.
-	// The world's first surface camera, if it has one.
-	//
-	// **First rather than all**, and this pipeline renders one offscreen view.
-	// A world with two surface cameras gets the first by entity id — which is
-	// creation order — and the second is ignored. Said here rather than left to
-	// be discovered: the render-node system that replaces this pipeline is where
-	// several belong, and a silent pick would make its absence look like a bug
-	// in the mirror rather than a limit of the pipeline.
-	//
-	// @param store   The world to search.
-	// @param surface Filled in when one is found.
-	// @return `false` when the world has no surface camera.
-	bool FindSurfaceCamera(engine::ecs::Store &store, engine::render::SurfaceView &surface);
-
 	bool BuildScriptedWorld(
 		engine::ecs::Store &store,
 		engine::ecs::Scheduler &scheduler,
 		const std::string &path,
 		uint32_t reserve
 	);
+
+	// The client's half of a world, installed onto one somebody else built.
+	//
+	// **`BuildScriptedWorld` is the demo's entry point and this is the general
+	// one.** A studio opens a world out of a game file rather than out of a
+	// `.luau`, and a world with no draw list is a world that renders as an
+	// empty frame — which reads as a broken renderer rather than as a missing
+	// system, and cost an afternoon to find once.
+	//
+	// Installs a `DrawList`, the previous-transform capture that rendering
+	// interpolates from, and the collector that fills the list. Does **not**
+	// install `move-camera`: a world being edited is looked at through the
+	// editor's camera, and a second thing writing the same `Transform` is the
+	// bug `BuildScriptedWorld`'s comment describes.
+	//
+	// @param store     The world.
+	// @param scheduler The systems to install into.
+	// @param reserve   How much draw-list capacity to reserve up front.
+	void
+	InstallPresentation(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t reserve = 0);
+
+	// Gives a world an orbiting camera, when it has none of its own.
+	//
+	// **A scene that placed its own camera keeps it**, which is the rule
+	// `BuildScriptedWorld` already holds and the reason it is a rule: running
+	// the placeholder orbit beside a script that aimed a camera is two things
+	// writing one `Transform`, the second winning silently every tick. That is
+	// not hypothetical — it made `Mirrors-1-world.luau` compute its reflection
+	// for a position the viewer was no longer at, and the mirror looked broken.
+	//
+	// A game file's world usually has no camera, because a camera is something
+	// a script makes and the studio does not author one. So single-player needs
+	// this and the editor does not: the editor looks through its own camera,
+	// which is not an entity in any world.
+	//
+	// @param store     The world.
+	// @param scheduler The systems to install into.
+	// @return `true` when a camera was installed, `false` when the world
+	//         already had one.
+	bool InstallDefaultCamera(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+
+	// Registers this module's own types under explicit names.
+	//
+	// **One type, and it had no registration at all until v0.7.** `DrawList` is
+	// a resource, a resource is keyed by a component id, and
+	// `Store::SetResource` was minting one under the compiler's spelling of the
+	// type — which is rule 4's exact failure and sat unnoticed because nothing
+	// had ever snapshotted a world that had one. The studio's Stop does.
+	//
+	// Idempotent, and called by both entry points above. Call it before
+	// anything touches a `DrawList`: `Components::Of<T>` caches its answer per
+	// type per process, so an explicit registration arriving second aborts
+	// rather than leaving two names for one thing.
+	void RegisterClientComponents();
 }

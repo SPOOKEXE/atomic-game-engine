@@ -95,6 +95,37 @@ namespace engine::ecs {
 		// @return The members, empty for an unregistered enum.
 		static std::vector<core::Name> MembersOf(core::Name enumName);
 
+		// The member at an ordinal, for a property whose storage is the number.
+		//
+		// **The other direction, and a table that could not answer it was half a
+		// table.** `Has` says whether a name is a member, which is everything a
+		// *checked string* property needs — and a component cannot hold a string,
+		// so the ones that matter store the ordinal and have to convert both ways
+		// on every read and write. Without this each of them would keep its own
+		// list of the names in order, which is the same fact recorded twice and
+		// wrong the first time somebody registers a member in between.
+		//
+		// Ordinals are registration order, which is why registration order is
+		// worth being deliberate about: `scene` registers `NormalId` in Roblox's
+		// order so that a saved number means the same thing in both engines.
+		//
+		// @param enumName The set.
+		// @param ordinal  Which member, from zero.
+		// @return The member, or an invalid `Name` when the enum is unregistered
+		//         or the ordinal is past its end.
+		static core::Name MemberAt(core::Name enumName, size_t ordinal);
+
+		// Where a member sits in its set.
+		//
+		// @param enumName The set.
+		// @param member   The member to find.
+		// @param ordinal  Filled with its position when this returns true.
+		// @return `false` when the enum is unregistered or holds no such member,
+		//         leaving `ordinal` untouched — which is what makes
+		//         `part.Face = "Frnot"` a refusal at the assignment rather than a
+		//         face nobody chose.
+		static bool OrdinalOf(core::Name enumName, core::Name member, size_t &ordinal);
+
 		// Every registered enum, in registration order.
 		//
 		// What the bindings manifest walks. By value, for the reason

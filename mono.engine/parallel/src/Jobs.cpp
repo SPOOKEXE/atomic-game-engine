@@ -1,5 +1,6 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
 
 #include <atomic>
@@ -267,9 +268,23 @@ namespace engine::parallel {
 		}
 		pool.Available.notify_all();
 
-		Drain(batch);
+		{
+			// The dispatching thread's own share. It is a participant, not a
+			// supervisor, so this is real work and belongs beside the ranges
+			// the workers took rather than folded into the wait below.
+			ENGINE_PROFILE_CAT("jobs.drain", core::ProfileCategory::Engine);
+			Drain(batch);
+		}
 
 		{
+			// **`Idle`, and this is the one that was worth finding.** A
+			// fork-join barrier is the dispatching thread doing nothing until
+			// the slowest range lands, and it read as busy engine time — so an
+			// imbalanced batch, which is the failure this pool actually has,
+			// looked identical to a batch that was simply large. The overlay
+			// subtracts idle to get its busy figure, so this now leaves the
+			// numerator the moment it starts blocking.
+			ENGINE_PROFILE_CAT("jobs.join", core::ProfileCategory::Idle);
 			std::unique_lock lock(pool.Guard);
 			pool.Finished.wait(lock, [&] { return batch.Outstanding.load(std::memory_order_acquire) == 0; });
 			pool.Current = nullptr;

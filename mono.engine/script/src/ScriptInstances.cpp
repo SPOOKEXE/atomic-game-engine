@@ -4,6 +4,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 
 #include <algorithm>
 #include <array>
@@ -59,8 +60,13 @@ namespace engine::script {
 			// rather than prevented one.
 			scene::PartClass();
 
-			ecs::Components::Register<Source>("script.Source");
-			ecs::Components::Register<Disabled>("script.Disabled");
+			// Through the one function, so a caller that registers the class
+			// tree cannot end up with a `SourceCache` the snapshot writer
+			// refuses — a resource keyed by an unregistered type is minted
+			// under the compiler's spelling and aborts once the table is
+			// sealed, which is a crash at the first world rather than at the
+			// line that caused it.
+			RegisterScriptComponents();
 
 			const ecs::ClassId instance = ecs::Classes::Find(core::Name("Instance"));
 
@@ -79,6 +85,14 @@ namespace engine::script {
 			const ecs::ClassId script = ecs::Classes::Register("Script", container, {});
 			ecs::Classes::Register("LocalScript", container, {});
 
+			// **A sibling of `Script`, not a kind of one, and that is what makes
+			// it inert.** `ScriptsIn` collects `IsA(Script)` and
+			// `IsA(LocalScript)`; a `ModuleScript` is neither, so the run loop
+			// never visits one and nothing had to learn to skip it. Derived from
+			// `Script` it would have run on every server by default, which is
+			// the opposite of what a module is for.
+			ecs::Classes::Register("ModuleScript", container, {});
+
 			ecs::Classes::Property<&Source::Path>(container, "Source");
 			ecs::Classes::Computed(container, DisabledProperty());
 			return script;
@@ -95,14 +109,14 @@ namespace engine::script {
 		return ecs::Classes::Find(core::Name("LocalScript"));
 	}
 
-	std::vector<ecs::Entity> ScriptsIn(const ecs::Store &store, bool server, bool client) {
+	std::vector<ecs::Entity> ScriptsIn(ecs::Store &store, bool server, bool client) {
 		ScriptClass();
 
 		const ecs::ClassId scriptId = ecs::Classes::Find(core::Name("Script"));
 		const ecs::ClassId localId = ecs::Classes::Find(core::Name("LocalScript"));
 
 		std::vector<ecs::Entity> found;
-		const_cast<ecs::Store &>(store).Each<const Source>([&](ecs::Entity entity, const Source &) {
+		store.Each<const Source>([&](ecs::Entity entity, const Source &) {
 			// A disabled script is in another archetype, so this query does not
 			// visit one — but the check is here anyway, because `Each` matches
 			// on `Source` alone and a caller could add the tag to a row this
@@ -132,6 +146,21 @@ namespace engine::script {
 			return left.Id < right.Id;
 		});
 		return found;
+	}
+
+	ecs::ClassId ModuleScriptClass() {
+		ScriptClass();
+		return ecs::Classes::Find(core::Name("ModuleScript"));
+	}
+
+	ecs::Entity MakeModule(ecs::Store &store, std::string_view path, std::string_view name) {
+		const ecs::Entity instance = store.CreateInstance(ModuleScriptClass(), name);
+		if (instance == ecs::NULL_ENTITY) {
+			return ecs::NULL_ENTITY;
+		}
+
+		store.Set(instance, Source{core::Name(path)});
+		return instance;
 	}
 
 	ecs::Entity MakeScript(ecs::Store &store, std::string_view path, std::string_view name, bool local) {

@@ -134,6 +134,26 @@ namespace engine::graph {
 			}
 		);
 
+		// The editor's chrome, and the only stage in this list a shipped game
+		// never runs. No depth, for the overlay's reason; last, because it is
+		// the surface the world is looked at *through* rather than part of it.
+		//
+		// **Declared here even though nothing in the engine draws it**, because
+		// this list and `render::PassOrder` are two descriptions of one frame
+		// and `render/tests/Passes.cpp` fails the build when they disagree.
+		// A stage that only `mono.studio` supplies is still a stage the frame
+		// has, and leaving it out of the description to keep the engine looking
+		// smaller is how the two halves drift apart.
+		pipeline.Add(
+			Stage{
+				core::Name("interface"),
+				{},
+				{Attachment{core::Name("colour"), false}},
+				true,
+				true,
+			}
+		);
+
 		return pipeline;
 	}
 }

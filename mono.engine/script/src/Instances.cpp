@@ -1,8 +1,10 @@
 #include "Bindings.hpp"
+#include "Subtree.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 
 #include <lualib.h>
 #include <string_view>
@@ -34,13 +36,20 @@ namespace engine::script {
 			return *static_cast<Entity *>(value);
 		}
 
-		// Whether a value is the world.
-		bool IsWorkspace(lua_State *state, int index) {
-			return lua_touserdatatagged(state, index, TAG_WORLD) != nullptr;
-		}
-
-		void PushWorkspace(lua_State *state) {
+		// This world's `Workspace`, as `OpenWorkspace` resolved it.
+		//
+		// **From the registry rather than from `WorkspaceOf`**, which is a scan
+		// of every root in the world. This is read on the miss path of a member
+		// lookup, so it has to be a table read and a compare rather than a
+		// search.
+		Entity WorkspaceEntity(lua_State *state) {
 			lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+			Entity workspace = ecs::NULL_ENTITY;
+			if (void *value = lua_touserdatatagged(state, -1, TAG_INSTANCE); value != nullptr) {
+				workspace = *static_cast<Entity *>(value);
+			}
+			lua_pop(state, 1);
+			return workspace;
 		}
 
 		void PushInstance(lua_State *state, Entity entity) {
@@ -100,13 +109,18 @@ namespace engine::script {
 				*PushCFrame(state) = *static_cast<const core::CFrame *>(bytes);
 				return true;
 			case PropertyType::Reference: {
-				// A root instance's parent is the world, which is what
-				// `workspace` is. Handing back nil would make
-				// `part.Parent = workspace` a write a script could not read
-				// back, and the two would disagree about the same fact.
+				// **Nil, and this is where "an orphan is not in the world"
+				// begins.** This used to hand back `workspace` for a null
+				// reference, because `workspace` *was* the world and a root
+				// therefore belonged to it. Now `workspace` is an instance like
+				// any other, `Workspace` is somewhere a thing can be parented,
+				// and having no parent is an ordinary state a script can both
+				// produce and read back — which is what makes
+				// `Instance.new("Part")` an object nothing draws and nothing
+				// lists until somebody says where it goes.
 				const Entity referenced = *static_cast<const Entity *>(bytes);
 				if (referenced == ecs::NULL_ENTITY) {
-					PushWorkspace(state);
+					lua_pushnil(state);
 				} else {
 					PushInstance(state, referenced);
 				}
@@ -156,8 +170,11 @@ namespace engine::script {
 				*static_cast<core::CFrame *>(out) = CheckCFrame(state, index);
 				return true;
 			case PropertyType::Reference:
-				// `part.Parent = workspace` — a root of this world.
-				if (IsWorkspace(state, index) || lua_isnil(state, index)) {
+				// `part.Parent = nil` detaches. `part.Parent = workspace` is now
+				// an ordinary instance reference and needs no case of its own —
+				// which is the whole of what collapsing the two notions of "the
+				// workspace" bought.
+				if (lua_isnil(state, index)) {
 					*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
 					return true;
 				}
@@ -231,29 +248,16 @@ namespace engine::script {
 			LuauContext &context = UpvalueContext(state);
 			const Entity instance = CheckInstance(state, 1);
 
-			// **The signal table is told before the storage is.** A `.Changed`
-			// connection on a destroyed row would otherwise fire against a dead
-			// handle every tick for the rest of the world's life, and
-			// `EachSubject` would keep visiting it.
-			std::vector<CallbackRef> released;
-			context.Signals.DropSubject(instance, released);
-			context.Changes.Unwatch(instance);
-
-			for (const CallbackRef reference : released) {
-				lua_unref(state, reference);
-			}
-
-			// Children go too, and each of them has to be forgotten as well.
-			// `DestroyInstance` takes the whole subtree, so a listener on a
-			// grandchild would survive the row it was watching.
-			context.World->EachChild(instance, [&](Entity child) {
-				std::vector<CallbackRef> fromChild;
-				context.Signals.DropSubject(child, fromChild);
-				context.Changes.Unwatch(child);
-				for (const CallbackRef reference : fromChild) {
+			// **The signal table is told before the storage is**, and it is told
+			// about the whole subtree. `DestroyInstance` takes every descendant,
+			// so a connection anywhere under here would otherwise outlive the row
+			// it watched: the ref is never given up, so the closure and
+			// everything it captured stay alive for the rest of the world's life.
+			ForgetSubtree(
+				*context.World, context.Signals, context.Changes, instance, [state](CallbackRef reference) {
 					lua_unref(state, reference);
 				}
-			});
+			);
 
 			context.World->DestroyInstance(instance);
 			return 0;
@@ -301,24 +305,10 @@ namespace engine::script {
 			lua_newtable(state);
 			int index = 0;
 
-			// An explicit stack rather than recursion: a deep tree would put the
-			// depth of the scene onto the C stack, and a scene's depth is the
-			// author's to choose.
-			std::vector<Entity> pending;
-			store.EachChild(instance, [&](Entity child) { pending.push_back(child); });
-
-			while (!pending.empty()) {
-				const Entity current = pending.front();
-				pending.erase(pending.begin());
-
-				PushInstance(state, current);
+			EachDescendant(store, instance, [&](Entity descendant) {
+				PushInstance(state, descendant);
 				lua_rawseti(state, -2, ++index);
-
-				size_t insertAt = 0;
-				store.EachChild(current, [&](Entity child) {
-					pending.insert(pending.begin() + static_cast<ptrdiff_t>(insertAt++), child);
-				});
-			}
+			});
 			return 1;
 		}
 
@@ -343,13 +333,12 @@ namespace engine::script {
 			Store &store = StoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
 
-			// The world is every root's ancestor, so `part:IsDescendantOf(
-			// workspace)` is true for anything parented into it.
-			if (IsWorkspace(state, 2)) {
-				lua_pushboolean(state, store.Alive(instance));
-				return 1;
-			}
-
+			// No case for the workspace any more, and losing it is the point:
+			// `part:IsDescendantOf(workspace)` used to be true for every live
+			// instance in the world, because the world was every root's
+			// ancestor. It is now the real subtree question — the same one the
+			// renderer asks — so a script and the render gate cannot disagree
+			// about whether something is in the scene.
 			lua_pushboolean(state, store.IsDescendantOf(instance, CheckInstance(state, 2)));
 			return 1;
 		}
@@ -366,12 +355,14 @@ namespace engine::script {
 			context.World->EachChild(instance, [&](Entity child) { children.push_back(child); });
 
 			for (const Entity child : children) {
-				std::vector<CallbackRef> released;
-				context.Signals.DropSubject(child, released);
-				context.Changes.Unwatch(child);
-				for (const CallbackRef reference : released) {
-					lua_unref(state, reference);
-				}
+				// The child's whole subtree, because that is what destroying it
+				// takes — forgetting only the child leaves every grandchild's
+				// connections pointing at rows that no longer exist.
+				ForgetSubtree(
+					*context.World, context.Signals, context.Changes, child, [state](CallbackRef reference) {
+						lua_unref(state, reference);
+					}
+				);
 				context.World->DestroyInstance(child);
 			}
 			return 0;
@@ -446,6 +437,34 @@ namespace engine::script {
 			}
 			lua_pop(state, 2);
 
+			// --- what only the Workspace answers ----------------------------
+			//
+			// **A second table rather than more entries in the shared one.**
+			// `Raycast` is a query against a world and `CurrentCamera` is which
+			// eye is live; offering either on a `Folder` would be offering an
+			// answer that means nothing. They were on the world object before
+			// this and they stay together now that the world object is gone —
+			// what changed is which instance they hang off, not what they are.
+			//
+			// Checked after the shared methods and before a child by name, so
+			// the precedence is the one two comments in this file already
+			// argue for: a part called `CurrentCamera` must not shadow the
+			// property.
+			if (instance == WorkspaceEntity(state)) {
+				if (name == "CurrentCamera") {
+					PushCurrentCamera(state);
+					return 1;
+				}
+
+				lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");
+				lua_getfield(state, -1, field);
+				if (!lua_isnil(state, -1)) {
+					lua_remove(state, -2);
+					return 1;
+				}
+				lua_pop(state, 2);
+			}
+
 			// **And finally a child by name.** `workspace.Baseplate` is how a
 			// Roblox script reaches one, and it is last rather than first
 			// deliberately: a child named `Size` must not shadow the property,
@@ -464,6 +483,15 @@ namespace engine::script {
 			Store &store = StoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
 			const char *field = luaL_checkstring(state, 2);
+
+			// The other half of the Workspace's own members. Before the property
+			// lookup rather than after it only because there is no property of
+			// this name to find; the read path checks in the same order for the
+			// same reason.
+			if (std::string_view(field) == "CurrentCamera" && instance == WorkspaceEntity(state)) {
+				SetCurrentCamera(state, 3);
+				return 0;
+			}
 
 			const PropertyDescriptor *property = Find(store, instance, field);
 			if (property == nullptr) {
@@ -535,11 +563,17 @@ namespace engine::script {
 			// **The second argument, which Roblox has and v0.5 did not.**
 			// `Instance.new("Part", workspace)` is one call rather than two, and
 			// the difference is not only brevity: a part created and parented in
-			// one statement is never briefly a root of the world, so nothing
-			// that walks roots can observe the half-built state.
+			// one statement is never briefly an orphan, so nothing that walks
+			// the tree can observe the half-built state.
+			//
+			// **Omitting it leaves the instance parented to nothing**, which is
+			// Roblox's behaviour and now means what it says: the part exists, it
+			// is fully formed, no draw list contains it and no walk of the tree
+			// reaches it until somebody sets `.Parent`. That is what makes an
+			// object usable as pure data — a template, a marker, a thing a
+			// script holds and never shows.
 			if (!lua_isnoneornil(state, 2)) {
-				const Entity parent = IsWorkspace(state, 2) ? ecs::NULL_ENTITY : CheckInstance(state, 2);
-				if (!store.SetParent(instance, parent)) {
+				if (!store.SetParent(instance, CheckInstance(state, 2))) {
 					luaL_errorL(state, "could not parent the new '%s'", className);
 				}
 			}
@@ -553,7 +587,7 @@ namespace engine::script {
 		PushInstance(state, instance);
 	}
 
-	void OpenInstances(lua_State *state, ecs::Store &store) {
+	void OpenInstances(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 
 		// The method table, in the registry so `__index` hands back one shared
@@ -615,8 +649,6 @@ namespace engine::script {
 		lua_pushcclosure(state, InstanceNew, "new", 1);
 		lua_setfield(state, -2, "new");
 		lua_setglobal(state, "Instance");
-
-		(void)store;
 	}
 
 	std::string PumpChanges(lua_State *state) {
@@ -657,148 +689,40 @@ namespace engine::script {
 		return firstError;
 	}
 
-	namespace {
-		int WorkspaceIndex(lua_State *state) {
-			Store &store = StoreOf(state);
-			const char *field = luaL_checkstring(state, 2);
-			const std::string_view name(field);
-
-			// The world's own name — `client.world`, `unified.server`. A
-			// script that logs it is telling you which world it is running on,
-			// which is a real question the moment a universe holds several.
-			if (name == "Name") {
-				lua_pushlstring(state, store.Name().data(), store.Name().size());
-				return 1;
-			}
-
-			// `workspace.CurrentCamera` — the live camera, or nil when nothing
-			// has made one. See `Camera.cpp`.
-			if (name == "CurrentCamera") {
-				PushCurrentCamera(state);
-				return 1;
-			}
-
-			// A method next. **`__index` is a function here, so nothing falls
-			// through to the metatable's own fields** — a method put there would
-			// be invisible, which is exactly how `workspace:GetChildren()` was
-			// missing while `GetChildren` sat on the metatable in plain sight.
-			lua_getfield(state, LUA_REGISTRYINDEX, "engine.world.methods");
-			lua_getfield(state, -1, field);
-			if (!lua_isnil(state, -1)) {
-				lua_remove(state, -2);
-				return 1;
-			}
-			lua_pop(state, 2);
-
-			// And finally a root instance by name, which is what
-			// `workspace.Baseplate` is. The world is the parent of every root.
-			// Last, for the reason an instance's own children are last: a root
-			// named `CurrentCamera` must not shadow the property.
-			const Entity root = store.FindFirstRoot(name);
-			if (root != ecs::NULL_ENTITY) {
-				PushInstance(state, root);
-				return 1;
-			}
-
-			luaL_errorL(state, "the world has no member '%s'", field);
-		}
-
-		int WorkspaceNewIndex(lua_State *state) {
-			const char *field = luaL_checkstring(state, 2);
-
-			if (std::string_view(field) == "CurrentCamera") {
-				SetCurrentCamera(state, 3);
-				return 0;
-			}
-
-			luaL_errorL(state, "the world's '%s' cannot be set", field);
-		}
-
-		// `workspace:GetChildren()` and friends. The world is the parent of
-		// every root, so these are the instance methods with `NULL_ENTITY` in
-		// place of the subject.
-		int WorkspaceGetChildren(lua_State *state) {
-			Store &store = StoreOf(state);
-
-			lua_newtable(state);
-			int index = 0;
-			store.EachRoot([&](Entity child) {
-				PushInstance(state, child);
-				lua_rawseti(state, -2, ++index);
-			});
-			return 1;
-		}
-
-		int WorkspaceFindFirstChild(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity found = store.FindFirstRoot(luaL_checkstring(state, 2));
-
-			if (found == ecs::NULL_ENTITY) {
-				lua_pushnil(state);
-				return 1;
-			}
-			PushInstance(state, found);
-			return 1;
-		}
-
-		int WorkspaceToString(lua_State *state) {
-			Store &store = StoreOf(state);
-			lua_pushlstring(state, store.Name().data(), store.Name().size());
-			return 1;
-		}
-	}
-
 	void OpenWorkspace(lua_State *state, ecs::Store &store) {
-		LuauContext &context = ContextOf(state);
+		// **Idempotent, and called here so that a world always has one.** A
+		// world read out of a game file brings its own services; a world built
+		// by hand or by a test has none, and a `workspace` global that resolved
+		// to nothing would make every script in the engine fail at its first
+		// `.Parent`. `InstallServices` finds before it creates, so this is a
+		// lookup on the common path.
+		//
+		// It hands back the `Workspace` because that is what callers want next,
+		// which is exactly this call site.
+		Entity workspace = scene::InstallServices(store);
+		if (workspace == ecs::NULL_ENTITY) {
+			// A replica may not mint entities, so the fixtures arrive from the
+			// authority instead of from here. Whatever it has already sent is
+			// what this resolves to — and a null one is a world whose first
+			// snapshot has not landed, which reads back as a `workspace` that
+			// finds no children rather than as a crash.
+			workspace = scene::WorkspaceOf(store);
+		}
 
-		// Zero-sized userdata: it carries no state because the world it stands
-		// for is reached through the upvalue every bound function already has.
-		// What it needs is an identity a script can compare and assign.
-		lua_newuserdatatagged(state, 1, TAG_WORLD);
+		PushInstance(state, workspace);
 
-		luaL_newmetatable(state, "World");
-
-		lua_pushlightuserdata(state, &context);
-		lua_pushcclosure(state, WorkspaceIndex, "__index", 1);
-		lua_setfield(state, -2, "__index");
-
-		lua_pushlightuserdata(state, &context);
-		lua_pushcclosure(state, WorkspaceNewIndex, "__newindex", 1);
-		lua_setfield(state, -2, "__newindex");
-
-		lua_pushlightuserdata(state, &context);
-		lua_pushcclosure(state, WorkspaceToString, "__tostring", 1);
-		lua_setfield(state, -2, "__tostring");
-
-		lua_pushstring(state, "World");
-		lua_setfield(state, -2, "__metatable");
-		lua_pushstring(state, "World");
-		lua_setfield(state, -2, "__type");
-
-		lua_setmetatable(state, -2);
-
-		// Kept in the registry as well as in a global, so the `Parent` getter
-		// can hand back *the same* value a script assigned rather than a second
-		// object that merely behaves alike.
+		// Kept in the registry as well as in a global, so `game.Workspace`,
+		// the `Parent` getter and the member lookup all hand back *the same*
+		// instance rather than three userdata that merely compare equal.
 		lua_pushvalue(state, -1);
 		lua_setfield(state, LUA_REGISTRYINDEX, "engine.workspace");
 		lua_setglobal(state, "workspace");
 
-		// The world's methods, in their own registry table because `__index`
-		// looks them up rather than falling through to the metatable.
-		//
-		// Its own table rather than the instance one: a world is not an
-		// instance, so it answers a smaller set — and sharing the table would
-		// have offered `workspace:Destroy()`, which means nothing.
+		// The table `InstanceIndex` consults for the two members only the
+		// Workspace has. Created empty here and filled by `OpenQueries`, which
+		// runs after this — `Bindings.hpp` states that ordering, and it is why
+		// the table has to exist by the time this returns.
 		lua_newtable(state);
-		lua_pushlightuserdata(state, &context);
-		lua_pushcclosure(state, WorkspaceGetChildren, "GetChildren", 1);
-		lua_setfield(state, -2, "GetChildren");
-		lua_pushlightuserdata(state, &context);
-		lua_pushcclosure(state, WorkspaceFindFirstChild, "FindFirstChild", 1);
-		lua_setfield(state, -2, "FindFirstChild");
-		lua_setfield(state, LUA_REGISTRYINDEX, "engine.world.methods");
-
-		(void)store;
+		lua_setfield(state, LUA_REGISTRYINDEX, "engine.workspace.methods");
 	}
 }
