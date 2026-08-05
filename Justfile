@@ -173,11 +173,12 @@ typecheck: (build "scriptcheck")
 #
 # Off unless asked for: the surface runs scripts, writes properties and saves
 # files for whatever connects, so opening it is a decision rather than a default.
-# `just mcp` opens 8730; `just mcp 9001 --game My.agame` picks a port and passes
+# `just mcp` opens 8738 — the port `.mcp.json` and RUNNING.md name for the
+# editor, and they have to agree or a client connects to nothing; `just mcp 9001 --game My.agame` picks a port and passes
 # the rest through to the editor.
 #
 # The editor, listening for a Model Context Protocol client.
-mcp port="8730" +args="--width 1600": (build "studio") (build "mcpbridge")
+mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
     #!/usr/bin/env bash
     set -euo pipefail
     echo "editor: 127.0.0.1:{{port}}"
