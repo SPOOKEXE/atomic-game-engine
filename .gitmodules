@@ -147,3 +147,29 @@
 	url = https://github.com/quickjs-ng/quickjs.git
 	branch = master
 	shallow = true
+; luau-lsp is the editor's language server, and it is the one vendor this build
+; never compiles. `update = none` is why `just setup` walks past it: setup's
+; contract is what a fresh clone needs *before it can configure*, and nothing
+; here needs a language server to configure. `just luau-lsp` clones and builds
+; it on demand, for whoever wants completion in an editor.
+;
+; **It brings its own Luau, and that is the reason it is built in a tree of its
+; own rather than added to ours.** Its CMakeLists does `add_subdirectory(luau)`
+; against a submodule pinned to its own commit, which declares `Luau.Ast`,
+; `Luau.Analysis` and `Luau.VM` — the same target names `mono.vendor/luau`
+; already gives us. Adding it to this build fails at configure time with "another
+; target with the same name already exists", and there is no flag that makes it
+; consume an existing Luau.
+;
+; The consequence worth knowing: the editor type-checks against luau-lsp's Luau
+; and `just typecheck` checks against ours. `mono.tools/scriptcheck` is the one
+; that gates, and it links `mono.vendor/luau`, so the answer that counts comes
+; from the same Luau the engine runs.
+;
+; Pinned to a release tag rather than tracking `main`, because a language server
+; that changes under an editor is a stream of diagnostics nobody asked for.
+[submodule "mono.vendor/luau-lsp"]
+	path = mono.vendor/luau-lsp
+	url = https://github.com/JohnnyMorganz/luau-lsp.git
+	branch = main
+	update = none

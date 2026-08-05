@@ -237,9 +237,10 @@ namespace {
 	//
 	// **Own, not inherited.** Both declaration files now express inheritance —
 	// TypeScript through `extends` on an interface and Luau through `extends` on
-	// a `declare class` — so repeating an inherited property would be a second
-	// declaration of one fact. TypeScript accepts a narrowing of one silently,
-	// and Luau's would simply be noise growing with the depth of the tree.
+	// a `declare extern type` — so repeating an inherited property would be a
+	// second declaration of one fact. TypeScript accepts a narrowing of one
+	// silently, and Luau's would simply be noise growing with the depth of the
+	// tree.
 	std::vector<PropertyDescriptor> OwnProperties(const ClassInfo &info) {
 		std::vector<PropertyDescriptor> own;
 		for (const PropertyDescriptor &property : info.Properties) {
@@ -392,11 +393,23 @@ namespace {
 	// The hand-written half of the Luau file: what the VM installs rather than
 	// what the class table holds.
 	//
-	// **A `declare class` rather than a table type, and the operators are why.**
+	// **A nominal type rather than a table type, and the operators are why.**
 	// `part.CFrame * CFrame.Angles(0, angle, 0)` is the idiom every rotation in
 	// this repository is written with, and a table type has nowhere to put a
 	// `__mul`. The same syntax is what lets the class tree below express
 	// `extends`, so the Luau half stopped repeating every inherited property.
+	//
+	// **`declare extern type X with ... end`, not `declare class X ... end`, and
+	// the difference is not cosmetic.** Both spellings parse in the Luau this
+	// repository vendors, but the class form is gated behind
+	// `FFlag::LuauAllowGlobalDeclarationToBeCalledClass` — whose own comment says
+	// the plan is to remove `declare class X [extends Y]`. Anything that enables
+	// Luau's flags therefore rejects the class form outright, and `luau-lsp` does
+	// exactly that: pointed at a file using it, the language server fails to load
+	// the definitions at all and an author gets *no* completion rather than
+	// slightly wrong completion. `mono.tools/scriptcheck` runs with default flags
+	// and accepts both, so this generator would not have caught it — `just
+	// luau-lsp` did, which is the argument for that recipe existing.
 	//
 	// **The signals are three classes because a definition file cannot declare a
 	// generic one.** Roblox spells this `RBXScriptSignal<T...>` and that syntax
@@ -406,7 +419,7 @@ namespace {
 	constexpr const char *LUAU_PRELUDE =
 		R"LUAU(-- --- the value types -------------------------------------------------------
 
-declare class Vector3
+declare extern type Vector3 with
 	X: number
 	Y: number
 	Z: number
@@ -422,7 +435,7 @@ declare Vector3: {
 	new: (x: number?, y: number?, z: number?) -> Vector3,
 }
 
-declare class Color3
+declare extern type Color3 with
 	R: number
 	G: number
 	B: number
@@ -439,7 +452,7 @@ declare Color3: {
 -- the two argument types would have to share a return type, and a `CFrame |
 -- Vector3` that every call site had to narrow is worse than the composition
 -- overload alone.
-declare class CFrame
+declare extern type CFrame with
 	Position: Vector3
 	function __mul(self, other: CFrame): CFrame
 end
@@ -453,29 +466,29 @@ declare CFrame: {
 
 -- --- signals ---------------------------------------------------------------
 
-declare class RBXScriptConnection
+declare extern type RBXScriptConnection with
 	Connected: boolean
 	function Disconnect(self): ()
 end
 
-declare class HeartbeatSignal
+declare extern type HeartbeatSignal with
 	function Connect(self, handler: (deltaTime: number) -> ()): RBXScriptConnection
 	function Once(self, handler: (deltaTime: number) -> ()): RBXScriptConnection
 end
 
-declare class ChangedSignal
+declare extern type ChangedSignal with
 	function Connect(self, handler: (property: string) -> ()): RBXScriptConnection
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
 end
 
-declare class PropertyChangedSignal
+declare extern type PropertyChangedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
 	function Once(self, handler: () -> ()): RBXScriptConnection
 end
 
 -- --- queries ---------------------------------------------------------------
 
-declare class RaycastParams
+declare extern type RaycastParams with
 	CollisionGroup: string
 end
 
@@ -499,7 +512,7 @@ declare RaycastParams: {
 	constexpr const char *LUAU_DATATYPES =
 		R"LUAU(-- --- the datatype vocabulary ----------------------------------------------
 
-declare class Vector2
+declare extern type Vector2 with
 	X: number
 	Y: number
 	Magnitude: number
@@ -513,7 +526,7 @@ declare Vector2: {
 	new: (x: number?, y: number?) -> Vector2,
 }
 
-declare class UDim
+declare extern type UDim with
 	Scale: number
 	Offset: number
 end
@@ -524,7 +537,7 @@ declare UDim: {
 
 -- `Width` and `Height` are the same two members as `X` and `Y`, which is
 -- Roblox's spelling and the run time's.
-declare class UDim2
+declare extern type UDim2 with
 	X: UDim
 	Y: UDim
 	Width: UDim
@@ -540,7 +553,7 @@ declare UDim2: {
 	fromOffset: (x: number?, y: number?) -> UDim2,
 }
 
-declare class Rect
+declare extern type Rect with
 	Min: Vector2
 	Max: Vector2
 	Width: number
@@ -552,7 +565,7 @@ declare Rect: {
 		& ((minX: number?, minY: number?, maxX: number?, maxY: number?) -> Rect),
 }
 
-declare class Region3
+declare extern type Region3 with
 	CFrame: CFrame
 	Size: Vector3
 end
@@ -561,7 +574,7 @@ declare Region3: {
 	new: (min: Vector3, max: Vector3) -> Region3,
 }
 
-declare class NumberRange
+declare extern type NumberRange with
 	Min: number
 	Max: number
 end
@@ -571,7 +584,7 @@ declare NumberRange: {
 	new: (min: number, max: number?) -> NumberRange,
 }
 
-declare class NumberSequence
+declare extern type NumberSequence with
 	Keypoints: { { number } }
 	function Evaluate(self, time: number): number
 end
@@ -582,7 +595,7 @@ declare NumberSequence: {
 		& ((keypoints: { { number } }) -> NumberSequence),
 }
 
-declare class ColorSequence
+declare extern type ColorSequence with
 	Keypoints: { { number | Color3 } }
 	function Evaluate(self, time: number): Color3
 end
@@ -593,7 +606,7 @@ declare ColorSequence: {
 		& ((keypoints: { { number | Color3 } }) -> ColorSequence),
 }
 
-declare class TweenInfo
+declare extern type TweenInfo with
 	Time: number
 	DelayTime: number
 	RepeatCount: number
@@ -617,7 +630,7 @@ declare TweenInfo: {
 -- The direction is normalised on the way in, so the length an author passed is
 -- not silently kept: `core::Ray::Direction` must be unit and Roblox's need not
 -- be. `Ray.Unit` hands back the same ray.
-declare class Ray
+declare extern type Ray with
 	Origin: Vector3
 	Direction: Vector3
 	Unit: Ray
@@ -631,7 +644,7 @@ declare Ray: {
 -- Indexed rather than streamed underneath: the seed is a salt and the draw
 -- number is an index, so a script's sequence is a pure function of its seed and
 -- how many values it has taken. Two runs agree and a recording replays.
-declare class Random
+declare extern type Random with
 	function NextNumber(self, min: number?, max: number?): number
 	-- Inclusive of both ends, which is Roblox's contract.
 	function NextInteger(self, min: number, max: number): number
@@ -674,25 +687,25 @@ declare DateTime: {
 
 export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "Unknown"
 
-declare class MessagingService
+declare extern type MessagingService with
 	function PublishAsync(self, topic: string, message: any): (any, BusStatus, number)
 	function SubscribeAsync(self, topic: string, handler: (message: any) -> ()): ()
 end
 
-declare class MemoryStoreService
+declare extern type MemoryStoreService with
 	function GetAsync(self, key: string): (any, BusStatus, number)
 	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
 	function UpdateAsync(self, key: string, version: number, value: any): (any, BusStatus, number)
 	function RemoveAsync(self, key: string): (any, BusStatus, number)
 end
 
-declare class DataStoreService
+declare extern type DataStoreService with
 	function GetAsync(self, key: string): (any, BusStatus, number)
 	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
 	function RemoveAsync(self, key: string): (any, BusStatus, number)
 end
 
-declare class RunService
+declare extern type RunService with
 	Heartbeat: HeartbeatSignal
 	function IsServer(self): boolean
 	function IsClient(self): boolean
@@ -771,12 +784,12 @@ declare task: {
 		// from a common base are not assignable to one another, so the
 		// wrong-enum mistake the run time refuses does not typecheck either.
 		out << "-- --- the enums ------------------------------------------------------------\n\n";
-		out << "declare class EnumItem\n";
+		out << "declare extern type EnumItem with\n";
 		out << "\tName: string\n";
 		out << "\tEnumType: string\n";
 		out << "end\n\n";
 		for (const engine::core::Name enumName : SortedEnums()) {
-			out << "declare class Enum_" << enumName.Text() << " extends EnumItem\n";
+			out << "declare extern type Enum_" << enumName.Text() << " extends EnumItem with\n";
 			out << "end\n\n";
 		}
 
@@ -797,11 +810,11 @@ declare task: {
 			const ClassInfo &info = Classes::Describe(id);
 			const std::string name(info.Name.Text());
 
-			out << "declare class " << name;
+			out << "declare extern type " << name;
 			if (info.Parent.IsValid()) {
 				out << " extends " << Classes::Describe(info.Parent).Name.Text();
 			}
-			out << "\n";
+			out << " with\n";
 
 			// **No hand-written `Name` line, and removing it was a fix rather
 			// than a tidy-up.** `Name` was special-cased here because it *was* a

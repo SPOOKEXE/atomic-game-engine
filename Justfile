@@ -138,6 +138,11 @@ bindings-check: (build "bindings")
 # The TypeScript half is `tsc` against the checked-in `tsconfig.json`, which
 # already lists the generated `.d.ts` as its type root.
 #
+# **The compiler is the pinned one, not whatever `bunx tsc` resolves to.**
+# `package.json` names an exact version and this runs `node_modules/.bin/tsc`,
+# so an upgrade is a commit rather than a morning. Installing is idempotent and
+# offline once the package is cached.
+#
 # **`tsc` is skipped rather than fatal when no runner is installed.** It is the
 # one check here that needs something outside the C++ toolchain, and a
 # prerequisite list that grows a Node runtime for two example files is a worse
@@ -147,15 +152,66 @@ typecheck: (build "scriptcheck")
     set -euo pipefail
     ./{{build}}/tools/scriptcheck mono.engine/examples/*.luau
 
-    if command -v bunx > /dev/null; then
-        bunx tsc --noEmit
-        echo "typecheck ok — luau and typescript"
-    elif command -v npx > /dev/null; then
-        npx --yes tsc --noEmit
-        echo "typecheck ok — luau and typescript"
+    if command -v bun > /dev/null; then
+        bun install --silent
+    elif command -v npm > /dev/null; then
+        npm install --silent --no-audit --no-fund
     else
-        echo "typecheck ok — luau. TypeScript skipped: no bunx or npx on PATH."
+        echo "typecheck ok — luau. TypeScript skipped: no bun or npm on PATH."
+        exit 0
     fi
+
+    ./node_modules/.bin/tsc --noEmit
+    echo "typecheck ok — luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
+
+# The editor's language server, built from `mono.vendor/luau-lsp`.
+#
+# **The one vendor this build never compiles**, which is why it is a recipe of
+# its own rather than a target. `just setup` walks past the submodule —
+# `update = none` in `.gitmodules`, and the reason is written there — so this
+# clones it on first run. Nothing else in the repository needs it: `just
+# typecheck` gates on `mono.tools/scriptcheck`, which links our Luau.
+#
+# It is built in a tree of its own because it brings its own Luau and declares
+# the same `Luau.*` target names ours does. Adding it to this build fails at
+# configure time; `.gitmodules` carries the full argument.
+#
+# **`-Wno-error=maybe-uninitialized`, and the narrowness is the point.** 1.9.2
+# hardcodes `-Wall -Werror` with no option to disable it, and GCC reports a
+# false positive inside nlohmann/json's `NLOHMANN_DEFINE_TYPE_*` macros — so the
+# build fails on a warning about vendored code in a vendored tree.
+# `MonoVendor.cmake` turns Luau's own `LUAU_WERROR` off for exactly this reason.
+#
+# A blanket `-Wno-error` does not work here: `CMAKE_CXX_FLAGS` lands *before*
+# their `target_compile_options`, so the later `-Werror` wins. A specific
+# `-Wno-error=<warning>` takes precedence over the blanket form whatever the
+# order, which is why this names the warning rather than silencing all of them —
+# every other warning upstream cares about still fails the build.
+#
+# **`-include cstdint` is the second one, and it is a dated bug rather than a
+# taste question.** luau-lsp 1.9.2 pins a Luau from before GCC 13 stopped
+# including `<cstdint>` transitively, so `Ast/src/StringUtils.cpp` names
+# `uint8_t` without including it and does not compile on a current toolchain.
+# Forcing the header in is the standard answer and costs one flag; the
+# alternative is editing a file inside two vendored trees.
+#
+# **This is the version skew `.gitmodules` warns about, arriving early.** Our own
+# `mono.vendor/luau` is 0.732 and builds clean — the tree that does not is the
+# one luau-lsp brought with it.
+#
+# Flags rather than patches, because `mono.vendor/AGENTS.md` says a patch goes
+# upstream or into a fork, never into a file in this tree.
+luau-lsp:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git submodule update --init --recursive --checkout --depth 1 mono.vendor/luau-lsp
+    cmake -S mono.vendor/luau-lsp -B .cache/build/luau-lsp -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized -include cstdint" > /dev/null
+    cmake --build .cache/build/luau-lsp --target luau-lsp
+    echo ""
+    echo "luau-lsp built: $(pwd)/.cache/build/luau-lsp/luau-lsp"
+    echo "Point your editor at it — see RUNNING.md, 'Autocomplete while you write one'."
 
 # Every check there is, in the order to run them, against one preset.
 #

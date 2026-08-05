@@ -1,0 +1,20 @@
+{
+	"$comment": [
+		"luau-lsp's configuration, checked in so the editor and the command line",
+		"agree. `.vscode/settings.json` is gitignored — editor config is personal",
+		"here — so this is the copy that survives a fresh clone, and the VS Code",
+		"one should mirror it rather than diverge.",
+		"",
+		"Used by `luau-lsp analyze --settings=luau-lsp.json`. The keys are dotted",
+		"exactly as an editor writes them, because luau-lsp reads the same shape",
+		"from both."
+	],
+
+	"luau-lsp.types.definitionFiles": ["mono.engine/script/bindings/engine.d.luau"],
+
+	"luau-lsp.fflags.enableNewSolver": true,
+
+	"luau-lsp.platform.type": "standard",
+	"luau-lsp.sourcemap.enabled": false,
+	"luau-lsp.ignoreGlobs": ["mono.vendor/**", ".cache/**"]
+}

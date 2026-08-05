@@ -17,7 +17,7 @@
 
 -- --- the value types -------------------------------------------------------
 
-declare class Vector3
+declare extern type Vector3 with
 	X: number
 	Y: number
 	Z: number
@@ -33,7 +33,7 @@ declare Vector3: {
 	new: (x: number?, y: number?, z: number?) -> Vector3,
 }
 
-declare class Color3
+declare extern type Color3 with
 	R: number
 	G: number
 	B: number
@@ -50,7 +50,7 @@ declare Color3: {
 -- the two argument types would have to share a return type, and a `CFrame |
 -- Vector3` that every call site had to narrow is worse than the composition
 -- overload alone.
-declare class CFrame
+declare extern type CFrame with
 	Position: Vector3
 	function __mul(self, other: CFrame): CFrame
 end
@@ -64,29 +64,29 @@ declare CFrame: {
 
 -- --- signals ---------------------------------------------------------------
 
-declare class RBXScriptConnection
+declare extern type RBXScriptConnection with
 	Connected: boolean
 	function Disconnect(self): ()
 end
 
-declare class HeartbeatSignal
+declare extern type HeartbeatSignal with
 	function Connect(self, handler: (deltaTime: number) -> ()): RBXScriptConnection
 	function Once(self, handler: (deltaTime: number) -> ()): RBXScriptConnection
 end
 
-declare class ChangedSignal
+declare extern type ChangedSignal with
 	function Connect(self, handler: (property: string) -> ()): RBXScriptConnection
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
 end
 
-declare class PropertyChangedSignal
+declare extern type PropertyChangedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
 	function Once(self, handler: () -> ()): RBXScriptConnection
 end
 
 -- --- queries ---------------------------------------------------------------
 
-declare class RaycastParams
+declare extern type RaycastParams with
 	CollisionGroup: string
 end
 
@@ -96,24 +96,24 @@ declare RaycastParams: {
 
 -- --- the enums ------------------------------------------------------------
 
-declare class EnumItem
+declare extern type EnumItem with
 	Name: string
 	EnumType: string
 end
 
-declare class Enum_EasingDirection extends EnumItem
+declare extern type Enum_EasingDirection extends EnumItem with
 end
 
-declare class Enum_EasingStyle extends EnumItem
+declare extern type Enum_EasingStyle extends EnumItem with
 end
 
-declare class Enum_Material extends EnumItem
+declare extern type Enum_Material extends EnumItem with
 end
 
-declare class Enum_NormalId extends EnumItem
+declare extern type Enum_NormalId extends EnumItem with
 end
 
-declare class Enum_ServiceScope extends EnumItem
+declare extern type Enum_ServiceScope extends EnumItem with
 end
 
 declare Enum: {
@@ -171,7 +171,7 @@ declare Enum: {
 
 -- --- the datatype vocabulary ----------------------------------------------
 
-declare class Vector2
+declare extern type Vector2 with
 	X: number
 	Y: number
 	Magnitude: number
@@ -185,7 +185,7 @@ declare Vector2: {
 	new: (x: number?, y: number?) -> Vector2,
 }
 
-declare class UDim
+declare extern type UDim with
 	Scale: number
 	Offset: number
 end
@@ -196,7 +196,7 @@ declare UDim: {
 
 -- `Width` and `Height` are the same two members as `X` and `Y`, which is
 -- Roblox's spelling and the run time's.
-declare class UDim2
+declare extern type UDim2 with
 	X: UDim
 	Y: UDim
 	Width: UDim
@@ -212,7 +212,7 @@ declare UDim2: {
 	fromOffset: (x: number?, y: number?) -> UDim2,
 }
 
-declare class Rect
+declare extern type Rect with
 	Min: Vector2
 	Max: Vector2
 	Width: number
@@ -224,7 +224,7 @@ declare Rect: {
 		& ((minX: number?, minY: number?, maxX: number?, maxY: number?) -> Rect),
 }
 
-declare class Region3
+declare extern type Region3 with
 	CFrame: CFrame
 	Size: Vector3
 end
@@ -233,7 +233,7 @@ declare Region3: {
 	new: (min: Vector3, max: Vector3) -> Region3,
 }
 
-declare class NumberRange
+declare extern type NumberRange with
 	Min: number
 	Max: number
 end
@@ -243,7 +243,7 @@ declare NumberRange: {
 	new: (min: number, max: number?) -> NumberRange,
 }
 
-declare class NumberSequence
+declare extern type NumberSequence with
 	Keypoints: { { number } }
 	function Evaluate(self, time: number): number
 end
@@ -254,7 +254,7 @@ declare NumberSequence: {
 		& ((keypoints: { { number } }) -> NumberSequence),
 }
 
-declare class ColorSequence
+declare extern type ColorSequence with
 	Keypoints: { { number | Color3 } }
 	function Evaluate(self, time: number): Color3
 end
@@ -265,7 +265,7 @@ declare ColorSequence: {
 		& ((keypoints: { { number | Color3 } }) -> ColorSequence),
 }
 
-declare class TweenInfo
+declare extern type TweenInfo with
 	Time: number
 	DelayTime: number
 	RepeatCount: number
@@ -289,7 +289,7 @@ declare TweenInfo: {
 -- The direction is normalised on the way in, so the length an author passed is
 -- not silently kept: `core::Ray::Direction` must be unit and Roblox's need not
 -- be. `Ray.Unit` hands back the same ray.
-declare class Ray
+declare extern type Ray with
 	Origin: Vector3
 	Direction: Vector3
 	Unit: Ray
@@ -303,7 +303,7 @@ declare Ray: {
 -- Indexed rather than streamed underneath: the seed is a salt and the draw
 -- number is an index, so a script's sequence is a pure function of its seed and
 -- how many values it has taken. Two runs agree and a recording replays.
-declare class Random
+declare extern type Random with
 	function NextNumber(self, min: number?, max: number?): number
 	-- Inclusive of both ends, which is Roblox's contract.
 	function NextInteger(self, min: number, max: number): number
@@ -331,7 +331,7 @@ declare DateTime: {
 
 -- --- the class tree -------------------------------------------------------
 
-declare class Instance
+declare extern type Instance with
 	Name: string
 	Parent: Instance
 	Changed: ChangedSignal
@@ -346,13 +346,13 @@ declare class Instance
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
 end
 
-declare class PVInstance extends Instance
+declare extern type PVInstance extends Instance with
 	CFrame: CFrame
 	Orientation: Vector3
 	Position: Vector3
 end
 
-declare class BasePart extends PVInstance
+declare extern type BasePart extends PVInstance with
 	Anchored: boolean
 	CanCollide: boolean
 	CastShadow: boolean
@@ -365,38 +365,38 @@ declare class BasePart extends PVInstance
 	Visible: boolean
 end
 
-declare class Part extends BasePart
+declare extern type Part extends BasePart with
 end
 
-declare class Camera extends PVInstance
+declare extern type Camera extends PVInstance with
 	FarPlaneZ: number
 	FieldOfView: number
 	NearPlaneZ: number
 	SurfaceSize: Vector3
 end
 
-declare class SurfaceCamera extends Camera
+declare extern type SurfaceCamera extends Camera with
 	Face: Enum_NormalId
 	ImageTransparency: number
 end
 
-declare class LuaSourceContainer extends Instance
+declare extern type LuaSourceContainer extends Instance with
 	Disabled: boolean
 	Source: string
 end
 
-declare class Script extends LuaSourceContainer
+declare extern type Script extends LuaSourceContainer with
 end
 
-declare class LocalScript extends LuaSourceContainer
+declare extern type LocalScript extends LuaSourceContainer with
 end
 
-declare class Service extends Instance
+declare extern type Service extends Instance with
 	Fixture: boolean
 	Scope: Enum_ServiceScope
 end
 
-declare class Workspace extends Service
+declare extern type Workspace extends Service with
 	CurrentCamera: Camera?
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
@@ -407,7 +407,7 @@ declare class Workspace extends Service
 	}?
 end
 
-declare class Lighting extends Service
+declare extern type Lighting extends Service with
 	Ambient: Color3
 	Brightness: number
 	ClockTime: number
@@ -418,50 +418,50 @@ declare class Lighting extends Service
 	OutdoorAmbient: Color3
 end
 
-declare class ReplicatedFirst extends Service
+declare extern type ReplicatedFirst extends Service with
 end
 
-declare class ReplicatedStorage extends Service
+declare extern type ReplicatedStorage extends Service with
 end
 
-declare class ServerScriptService extends Service
+declare extern type ServerScriptService extends Service with
 end
 
-declare class ServerStorage extends Service
+declare extern type ServerStorage extends Service with
 end
 
-declare class StarterGui extends Service
+declare extern type StarterGui extends Service with
 end
 
-declare class StarterPlayer extends Service
+declare extern type StarterPlayer extends Service with
 end
 
-declare class StarterPlayerScripts extends Service
+declare extern type StarterPlayerScripts extends Service with
 end
 
 -- --- the bus services ------------------------------------------------------
 
 export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "Unknown"
 
-declare class MessagingService
+declare extern type MessagingService with
 	function PublishAsync(self, topic: string, message: any): (any, BusStatus, number)
 	function SubscribeAsync(self, topic: string, handler: (message: any) -> ()): ()
 end
 
-declare class MemoryStoreService
+declare extern type MemoryStoreService with
 	function GetAsync(self, key: string): (any, BusStatus, number)
 	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
 	function UpdateAsync(self, key: string, version: number, value: any): (any, BusStatus, number)
 	function RemoveAsync(self, key: string): (any, BusStatus, number)
 end
 
-declare class DataStoreService
+declare extern type DataStoreService with
 	function GetAsync(self, key: string): (any, BusStatus, number)
 	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
 	function RemoveAsync(self, key: string): (any, BusStatus, number)
 end
 
-declare class RunService
+declare extern type RunService with
 	Heartbeat: HeartbeatSignal
 	function IsServer(self): boolean
 	function IsClient(self): boolean

@@ -399,25 +399,31 @@ editor knows what a script may name without anything being restated by hand:
 | `mono.engine/script/bindings/engine.d.luau` | the Luau definitions | yes, generated |
 | `mono.engine/script/bindings/engine.d.ts` | the TypeScript type root | yes, generated |
 | `.luaurc` | strict by default, and the lints | yes |
+| `luau-lsp.json` | points the language server at the definitions | yes |
 | `tsconfig.json` | lists the type root; `types: []`, no DOM | yes |
-| `.vscode/settings.json` | points luau-lsp at the definitions | **no** — `.vscode/` is gitignored |
+| `package.json` | pins the exact `tsc` the check runs | yes |
+| `.vscode/settings.json` | the same luau-lsp keys, for VS Code | **no** — `.vscode/` is gitignored |
 
-The last row is the one that needs doing by hand on a fresh clone. Install
-[luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) and give it two settings —
-the definitions file, and a platform that is not Roblox, or it will fetch an API
-dump and complete services this engine does not have:
-
-```jsonc
-"luau-lsp.types.definitionFiles": ["mono.engine/script/bindings/engine.d.luau"],
-"luau-lsp.platform.type": "standard"
-```
-
-TypeScript needs nothing installed beyond a compiler, because `tsconfig.json`
-already lists the type root:
+**Nothing needs installing.** The language server is vendored at
+`mono.vendor/luau-lsp` and built on demand:
 
 ```sh
-bunx tsc --noEmit          # or npx tsc --noEmit
+just luau-lsp              # clones the submodule if needed, prints the binary's path
 ```
+
+Point your editor at that binary and at `luau-lsp.json`. `.vscode/` is
+gitignored — editor configuration is personal here — so `luau-lsp.json` is the
+copy that survives a fresh clone, and a VS Code `settings.json` should mirror it
+rather than diverge from it.
+
+**One of its settings is load-bearing rather than a preference.**
+`luau-lsp.fflags.enableNewSolver` must be on: the declarations use the `keyof`
+and `index` type functions, which exist only in Luau's new solver, and without
+it the definitions file fails to load *entirely* — every global reads as
+unknown, which looks like the file is missing rather than misconfigured.
+
+TypeScript needs no separate setup: `tsconfig.json` lists the type root and
+`package.json` pins the compiler, which `just typecheck` installs on first run.
 
 Both languages are checked together by `just typecheck`, which `just check`
 runs — see [The script type check](#the-script-type-check) for what it catches
@@ -997,7 +1003,16 @@ in `mono.engine/script/bindings/`. Directly:
 
 ```sh
 ./.cache/build/dev/tools/scriptcheck mono.engine/examples/*.luau
-bunx tsc --noEmit
+./node_modules/.bin/tsc --noEmit
+```
+
+The language server answers the same question, which is worth using as a second
+opinion after changing the generator — it runs a *different* Luau, the one
+`mono.vendor/luau-lsp` brings with it:
+
+```sh
+just luau-lsp
+./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
 ```
 
 **This is the half of the bindings contract that faces the scripts.** `just
@@ -1016,10 +1031,17 @@ and the squiggles in an editor come from one code path. It checks in strict mode
 whatever a file's own `--!` directive says, because a check a script can switch
 off from the inside is not one.
 
-The TypeScript half needs `bunx` or `npx` on `PATH`. **Without either it is
+The TypeScript half needs `bun` or `npm` on `PATH`. **Without either it is
 skipped and says so** — it is the only check here that needs something outside
 the C++ toolchain, and growing the prerequisite list by a Node runtime is a
 worse trade than a check that reports when it did not run.
+
+**The compiler is pinned.** `package.json` names an exact version and the recipe
+runs `node_modules/.bin/tsc`, so an upgrade is a commit somebody reviews rather
+than whatever `latest` resolved to that morning. `node_modules/` is not
+committed: TypeScript pins its own per-platform binaries to the same exact
+version, so the version string is already the whole tree and a lockfile would
+only be a format for bun and npm to disagree about.
 
 ## Proving the server is headless
 
