@@ -253,6 +253,128 @@ namespace studio {
 		bool Modified = false;
 	};
 
+	// What the Find panel was asked for.
+	//
+	// **Every field is optional and they are combined with "and".** An empty
+	// field does not filter, which is what makes "every Part" and "anything with
+	// Transparency above zero" the same control rather than two modes.
+	//
+	// @since v0.10
+	struct FindQuery {
+		// An `IsA` filter, not an exact class name — "BasePart" finds every
+		// part. Empty matches every class.
+		std::string Class;
+
+		// A substring of the instance's name. Empty matches every name.
+		std::string Name;
+
+		// A substring of a property's name. Empty means "any property", which
+		// only matters when `Value` is filled in.
+		std::string Property;
+
+		// What the property's value must contain, or equal when `Exact`.
+		std::string Value;
+
+		// Whether `Value` is compared through the property's own type rather
+		// than through its rendered text. See `Editor::InstanceMatches`.
+		bool Exact = false;
+	};
+
+	// One instance the query matched.
+	//
+	// Names are copied rather than held as handles because the panel draws them
+	// outside `Universe::Enter`, where the store that owns them is not reachable.
+	//
+	// @since v0.10
+	struct FindResult {
+		// Which world it is in.
+		WorldId World;
+
+		// The instance itself, for selecting it.
+		Entity Instance;
+
+		// Its name at the moment of the walk.
+		std::string Name;
+
+		// Its class's name.
+		std::string Class;
+
+		// The property and value that matched, for the row. Empty when the
+		// query had no property or value in it.
+		std::string Matched;
+	};
+
+	// Whether one instance satisfies a query, and what matched.
+	//
+	// **A free function rather than a method, so a test can reach it.** The
+	// predicate is the half of Find that can be silently wrong — a filter that
+	// quietly matches nothing looks exactly like a scene that contains nothing —
+	// and everything else about the panel needs a window, a device and an imgui
+	// frame. `Operators.hpp` records what it costs when the testable half is
+	// only reachable through an `Editor`.
+	//
+	// @param store    The world the instance is in.
+	// @param instance The instance to test.
+	// @param query    What was asked for.
+	// @param matched  Filled with the property and value that matched, for the
+	//                 result row. Cleared when the query named neither.
+	// @return `true` when it satisfies every filled-in field of the query.
+	bool MatchesQuery(
+		const engine::ecs::Store &store,
+		Entity instance,
+		const FindQuery &query,
+		std::string &matched
+	);
+
+	// Which side of a comparison a line came from.
+	//
+	// @since v0.10
+	enum class DiffKind : uint8_t {
+		// In both, unchanged.
+		Same,
+
+		// In the live game and not in the file.
+		Added,
+
+		// In the file and not in the live game.
+		Removed,
+	};
+
+	// One line of a comparison.
+	//
+	// @since v0.10
+	struct DiffLine {
+		// Which side it came from.
+		DiffKind Kind = DiffKind::Same;
+
+		// The line itself, without its newline.
+		std::string Text;
+	};
+
+	// Compares two documents line by line.
+	//
+	// **A free function with its own suite**, because a comparator that reports
+	// no changes looks exactly like a clean tree and nothing about the panel
+	// would say which it was.
+	//
+	// Common prefix and suffix are trimmed first — two saves of one game are
+	// almost identical — and the differing middle is aligned by longest common
+	// subsequence. Past `DIFF_CELL_LIMIT` cells the alignment is abandoned and
+	// the whole middle is reported as removed-then-added, which is still true
+	// and much coarser.
+	//
+	// @param before The document to compare against, normally the file on disk.
+	// @param after  The document as it stands now.
+	// @param coarse Set when the alignment was abandoned. Optional.
+	// @return One entry per line of the comparison, in order.
+	std::vector<DiffLine> DiffText(std::string_view before, std::string_view after, bool *coarse = nullptr);
+
+	// The largest alignment table `DiffText` will build.
+	//
+	// The table is O(n·m) and this is a bound on the work, not on the answer —
+	// past it the diff degrades rather than failing, and says so.
+	inline constexpr size_t DIFF_CELL_LIMIT = 4u * 1000u * 1000u;
+
 	// The window, the renderer, the interface and the game.
 	//
 	// @since v0.7
@@ -606,6 +728,56 @@ namespace studio {
 		// forever.
 		void DrawPalette();
 
+		// The undo stack, as a list somebody can read and click.
+		//
+		// **Undo is only trustworthy if you can see what it will do.** The Edit
+		// menu names the next one; this names all of them, and clicking an entry
+		// walks to that point rather than making somebody press Ctrl+Z and count.
+		void DrawHistory();
+
+		// What crosses between worlds, which is the one thing they share.
+		//
+		// **The rule that nothing crossing a world boundary is a pointer is what
+		// makes this panel possible at all.** Every crossing is already a copy
+		// with a topic and a payload, so this reads what is there rather than
+		// instrumenting a path.
+		void DrawBus();
+
+		// Instances matching a class and a property predicate.
+		//
+		// **Generic over properties for the same reason the properties panel
+		// is**: `PropertyDescriptor` is data, so this names no property and
+		// gains one the day any module declares it.
+		void DrawFindInstances();
+
+		// Rebuilds `FindResults` from `Find` across every world.
+		void RunFind();
+
+		// Which script is spending the tick.
+		//
+		// Reads the interrupt counter the step budget already maintains, so the
+		// number is one the VM was counting anyway.
+		void DrawScriptProfile();
+
+		// What has changed since the file on disk was written.
+		void DrawDiff();
+
+		// Re-reads the file and re-writes the live game, then compares them.
+		void RefreshDiff();
+
+		// Builds a Rojo project's tree into the active world.
+		//
+		// **Into the active world rather than a new one**, because a project is
+		// how somebody lays out a game they are already working on — and a sync
+		// that made a world of its own would leave them with the scene in one
+		// place and the scripts in another.
+		//
+		// @param project The path to `default.project.json`.
+		void SyncRojo(const std::filesystem::path &project);
+
+		// Breakpoints, the paused stack, and stepping.
+		void DrawDebugger();
+
 		// Reverses the last edit, and tells the author what was reversed.
 		//
 		// **The selection is cleared rather than repointed.** Undoing a delete
@@ -943,7 +1115,15 @@ namespace studio {
 			// Held by pointer because `PlayLink` owns an `Authority` and a
 			// `Replica`, neither of which is movable in the way a vector of
 			// runs needs — and a run is moved whenever another one starts.
-			std::unique_ptr<PlayLink> Link;
+			//
+			// **Several, because one client cannot show a disagreement.** The
+			// bugs a play test is for — an entity that arrives on one client and
+			// not another, a value that replicates late to the second joiner —
+			// are invisible with a single replica, because there is nothing for
+			// it to disagree *with*. Each entry is an independent client with
+			// its own world, its own `Replica` and its own report; N is a loop
+			// over the machinery one already needed.
+			std::vector<std::unique_ptr<PlayLink>> Links;
 		};
 
 		// Every world currently running. Worlds absent from this are in edit.
@@ -1462,6 +1642,9 @@ namespace studio {
 
 		bool AskingSaveAs = false;
 		bool AskingOpen = false;
+
+		// Whether the Rojo project picker is up. See `SyncRojo`.
+		bool AskingRojo = false;
 		bool AskingExport = false;
 		bool AskingExportUniverse = false;
 		bool AskingImport = false;
@@ -1552,6 +1735,81 @@ namespace studio {
 
 		// Closed by default: it is a panel somebody opens to change one thing.
 		bool ShowSettings = false;
+
+		// --- v0.10's panels ----------------------------------------------------
+		//
+		// All closed by default. Each of these answers a question somebody has
+		// occasionally and none of them earns permanent space in the layout —
+		// which is what the View menu and the palette are for.
+
+		// The undo stack as a list. See `DrawHistory`.
+		bool ShowHistory = false;
+
+		// What crosses between worlds. See `DrawBus`.
+		bool ShowBus = false;
+
+		// Find instances by class and property. See `DrawFindInstances`.
+		bool ShowFindInstances = false;
+
+		// What the Find panel was asked for. Every field is optional and an
+		// empty one is "do not filter on this" rather than "match nothing".
+		FindQuery Find;
+
+		// What matched, rebuilt every frame the panel is open.
+		std::vector<FindResult> FindResults;
+
+		// Whether the walk stopped early. Reported, never silent.
+		bool FindTruncated = false;
+
+		// The most results the panel will collect in one pass.
+		//
+		// A predicate matching everything in a large place would otherwise build
+		// a list nobody can scroll and spend a frame doing it. The number is a
+		// bound on the work, not a claim about how many exist — which is why the
+		// panel says it stopped.
+		static constexpr size_t FIND_LIMIT = 500;
+
+		// Which script is spending the tick. See `DrawScriptProfile`.
+		bool ShowScriptProfile = false;
+
+		// What has changed since the file was written. See `DrawDiff`.
+		bool ShowDiff = false;
+
+		// The last comparison. Rebuilt on demand rather than every frame: it
+		// re-serialises the whole game, which is not a per-frame cost.
+		std::vector<DiffLine> DiffRows;
+
+		// Why the comparison could not be made, or empty.
+		std::string DiffError;
+
+		// Whether the alignment was abandoned for size. Reported, never silent.
+		bool DiffCoarse = false;
+
+		// Breakpoints and the captured stacks. See `DrawDebugger`.
+		bool ShowDebugger = false;
+
+		// What the debugger's add-breakpoint row holds.
+		std::string BreakSource;
+		int BreakLine = 1;
+
+		// Whether a new breakpoint ends the script or lets it carry on.
+		bool BreakStops = false;
+
+		// How many clients a Play run admits.
+		//
+		// **One is the default because one is what a scene author wants**, and
+		// every extra client is a whole world: its own store, its own replica
+		// and its own turn in the render round robin. Two is what somebody
+		// reaches for when a bug only happens with company, which is most
+		// replication bugs.
+		int PlayClients = 1;
+
+		// The most clients Play will admit at once.
+		//
+		// A bound rather than a slider to infinity: each client costs a world,
+		// and the failure mode of asking for forty is an editor that stops
+		// responding rather than an error.
+		static constexpr int MAXIMUM_PLAY_CLIENTS = 4;
 
 		// --- the debug panels -------------------------------------------------
 		//

@@ -17,6 +17,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>
@@ -28,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -2138,4 +2140,68 @@ TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]
 	// Unaimed, so still an ordinary part: JavaScript has no way to name a slot
 	// either, which is the half of the surface removal this case covers.
 	CHECK(store.Get<Visual>(InScene(store, "JsPane"))->Surface == -1);
+}
+
+TEST_CASE("each script's steps are recorded against it", "[scripting]") {
+	// **What the Script Profile panel reads.** The interrupt counter exists for
+	// the step budget and runs whether or not anybody is looking; this asserts
+	// that the delta around one script is attributed to *that* script, which is
+	// the part a panel cannot show you is wrong.
+	RegisterClasses();
+	Store store("script_test");
+	engine::script::RegisterScriptComponents();
+	store.SetResource(engine::script::SourceCache{});
+
+	auto &cache = *store.ResourceMutable<engine::script::SourceCache>();
+
+	// One script that loops and one that does almost nothing. The absolute
+	// numbers are a VM detail; the *ordering* is the claim worth pinning.
+	cache.Set(engine::core::Name("busy.luau"), R"(
+		local total = 0
+		for index = 1, 2000 do
+			total = total + index
+		end
+	)");
+	cache.Set(engine::core::Name("idle.luau"), "local x = 1\n");
+
+	const Entity busy = engine::script::MakeScript(store, "busy.luau", "Busy", false);
+	const Entity idle = engine::script::MakeScript(store, "idle.luau", "Idle", false);
+	REQUIRE(busy != engine::ecs::NULL_ENTITY);
+	REQUIRE(idle != engine::ecs::NULL_ENTITY);
+
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfServer();
+	const auto runtime = MakeRuntime(store, Language::Luau, limits);
+
+	REQUIRE(runtime->RunWorldScripts() == 2);
+
+	const std::span<const engine::script::ScriptCost> costs = runtime->Costs();
+	REQUIRE(costs.size() == 2);
+
+	uint64_t busySteps = 0;
+	uint64_t idleSteps = 0;
+	for (const engine::script::ScriptCost &cost : costs) {
+		CHECK(cost.Completed);
+		if (cost.Instance == busy) {
+			busySteps = cost.Steps;
+		} else if (cost.Instance == idle) {
+			idleSteps = cost.Steps;
+		}
+	}
+
+	// The loop costs more than the assignment. A counter attributed to the
+	// wrong script, or not moved at all, fails here rather than being read off
+	// a panel as a plausible number.
+	CHECK(busySteps > idleSteps);
+	CHECK(busySteps > 0);
+}
+
+TEST_CASE("a runtime with no scripts reports no costs", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::script::RegisterScriptComponents();
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK(runtime->RunWorldScripts() == 0);
+	CHECK(runtime->Costs().empty());
 }

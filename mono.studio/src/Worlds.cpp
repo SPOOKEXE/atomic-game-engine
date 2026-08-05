@@ -141,7 +141,22 @@ namespace studio {
 			// was — and they belong on the row rather than in a panel of their
 			// own, because the question is always about *this* world.
 			if (const WorldRun *owner = RunForReplica(world); owner != nullptr) {
-				const LinkReport &report = owner->Link->Report();
+				// Which client's row this is. A run may have several and each
+				// keeps its own report — the counts on one client say nothing
+				// about another, which is the whole reason for admitting more
+				// than one.
+				const PlayLink *mine = nullptr;
+				for (const std::unique_ptr<PlayLink> &link : owner->Links) {
+					if (link != nullptr && link->ReplicaWorld() == world) {
+						mine = link.get();
+						break;
+					}
+				}
+				if (mine == nullptr) {
+					continue;
+				}
+
+				const LinkReport &report = mine->Report();
 
 				ImGui::SameLine();
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());

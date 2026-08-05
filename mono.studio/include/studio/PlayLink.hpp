@@ -54,6 +54,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace engine::world {
 	class Universe;
@@ -138,12 +139,17 @@ namespace studio {
 		//        a delay in ticks against a frame rate is a delay that changes
 		//        when the display does.
 		// @param error     Filled when this returns false.
+		// @param label     What to call this client, appended to the authority's
+		//        name. **A world's name is its identity to the whole universe**
+		//        — rule 4 — so two clients that took one name would be two
+		//        worlds nothing could tell apart, in a panel or in a recording.
 		// @return `false` when the replica world could not be created.
 		bool Start(
 			engine::world::Universe &universe,
 			engine::world::WorldId authority,
 			double tickRate,
-			std::string &error
+			std::string &error,
+			std::string_view label = "client"
 		);
 
 		// Publishes this tick, hands the messages over, and acknowledges.

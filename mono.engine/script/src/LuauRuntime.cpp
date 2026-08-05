@@ -33,6 +33,11 @@ namespace engine::script {
 			uint64_t StepBudget = 0;
 			uint64_t StepsTaken = 0;
 
+			// Where the last breakpoint fired, so a line that compiles to
+			// several instructions reports once rather than once per opcode.
+			int LastBreakLine = 0;
+			std::string LastBreakSource;
+
 			LuauContext Context;
 		};
 
@@ -84,6 +89,109 @@ namespace engine::script {
 			if (++bounds.StepsTaken > bounds.StepBudget) {
 				bounds.StepsTaken = 0;
 				luaL_errorL(state, "script exceeded its step budget");
+			}
+		}
+
+		// Renders one stack value the way `print` would.
+		//
+		// Through `luaL_tolstring` so `__tostring` is honoured: an instance
+		// reads as its name and a Vector3 as its components, which is the whole
+		// difference between a useful capture and a column of addresses.
+		std::string Rendered(lua_State *state, int index) {
+			size_t length = 0;
+			const char *text = luaL_tolstring(state, index, &length);
+			std::string value(text, length);
+			lua_pop(state, 1);
+			return value;
+		}
+
+		// Walks the stack into a hit record.
+		//
+		// **Innermost frame first**, which is the order a stack is read in and
+		// the order `lua_getinfo` numbers levels.
+		void Capture(lua_State *state, DebugHit &hit) {
+			const int depth = lua_stackdepth(state);
+
+			for (int level = 0; level < depth; level++) {
+				lua_Debug info;
+				if (lua_getinfo(state, level, "sln", &info) == 0) {
+					continue;
+				}
+
+				DebugFrame frame;
+				frame.Source = info.short_src != nullptr ? info.short_src : "";
+				frame.Function = info.name != nullptr ? info.name : "";
+				frame.Line = info.currentline;
+
+				// Locals and arguments both, because a script author does not
+				// distinguish them and the one being looked for is as often a
+				// parameter as a `local`.
+				for (int slot = 1;; slot++) {
+					const char *name = lua_getlocal(state, level, slot);
+					if (name == nullptr) {
+						break;
+					}
+					frame.Locals.push_back(DebugLocal{name, Rendered(state, -1)});
+					lua_pop(state, 1);
+
+					// Bounded: a frame with two hundred locals is a generated
+					// one and the panel cannot show them anyway.
+					if (frame.Locals.size() >= 32) {
+						break;
+					}
+				}
+
+				hit.Frames.push_back(std::move(frame));
+			}
+		}
+
+		// Called after every instruction while single-step mode is on.
+		//
+		// **Only ever on while a breakpoint is armed.** `LuauRuntime::Run`
+		// switches it on and off around each chunk, so a runtime nobody is
+		// debugging never reaches this function.
+		void DebugStep(lua_State *state, lua_Debug *) {
+			Bounds &bounds = BoundsOf(state);
+			Debugger *debug = bounds.Context.Breakpoints;
+			if (debug == nullptr) {
+				return;
+			}
+
+			lua_Debug here;
+			if (lua_getinfo(state, 0, "sl", &here) == 0) {
+				return;
+			}
+
+			const char *source = here.short_src != nullptr ? here.short_src : "";
+			Breakpoint *point = debug->Match(source, here.currentline);
+			if (point == nullptr) {
+				return;
+			}
+
+			// **Once per arrival at the line, not once per instruction on it.**
+			// A line compiles to several instructions and single-step fires for
+			// each, so without this a breakpoint on one line reports four times
+			// and the hit count means nothing.
+			if (bounds.LastBreakLine == here.currentline && bounds.LastBreakSource == source) {
+				return;
+			}
+			bounds.LastBreakLine = here.currentline;
+			bounds.LastBreakSource = source;
+
+			point->Hits++;
+
+			DebugHit hit;
+			hit.Source = source;
+			hit.Line = here.currentline;
+			hit.Instance = bounds.Context.RunningScript;
+			Capture(state, hit);
+			debug->Record(std::move(hit));
+
+			if (point->Action == BreakAction::Stop) {
+				// An ordinary script error, which the host already knows how to
+				// report — rather than a new state the runtime would have to
+				// learn to be in.
+				luaL_errorL(state, "stopped at a breakpoint: %s:%d", source, here.currentline);
 			}
 		}
 
@@ -188,6 +296,14 @@ namespace engine::script {
 
 		lua_callbacks(State)->interrupt = Interrupt;
 
+		// **The step callback is installed, single-step mode is not.** Luau only
+		// calls this while stepping is enabled, and `Run` enables it for exactly
+		// as long as a breakpoint is armed — so a runtime nobody is debugging
+		// pays nothing for this line.
+		lua_callbacks(State)->debugstep = DebugStep;
+
+		BoundsOf(State).Context.Breakpoints = &Breakpoints;
+
 		// Freezes the global table and the library tables. After this a script
 		// can read `math.floor` and cannot replace it, so one script cannot
 		// change the language the next one runs in.
@@ -223,6 +339,22 @@ namespace engine::script {
 		lua_CompileOptions options = {};
 		options.optimizationLevel = 1;
 		options.debugLevel = 1;
+
+		// **A breakpoint compiles the chunk differently, and it has to.** At
+		// optimisation level 1 the compiler folds constants and drops the
+		// instructions their lines would have produced — so `local x = 1` is not
+		// a line execution ever arrives at, and a breakpoint on it would sit
+		// there never firing while the script plainly ran past it. That is the
+		// worst failure a debugger has: silently pointing at the wrong place.
+		//
+		// So stepping compiles at level 0 with full debug info, which is the
+		// same trade `dev` already makes for C++ — the code does what it says
+		// rather than what it was rewritten into. It applies only while a
+		// breakpoint is armed, so nothing else in the world pays for it.
+		if (Breakpoints.Armed()) {
+			options.optimizationLevel = 0;
+			options.debugLevel = 2;
+		}
 
 		size_t bytecodeSize = 0;
 		char *bytecode = luau_compile(source.data(), source.size(), &options, &bytecodeSize);
@@ -261,7 +393,25 @@ namespace engine::script {
 
 		BoundsOf(State).StepsTaken = 0;
 
+		// **Single-step is switched on only while something is armed, and off
+		// again the moment the chunk ends.** Luau checks a flag per instruction
+		// when it is on, so leaving it on would tax every script in the world
+		// for a breakpoint nobody set — and a debugger that costs something when
+		// unused is one that gets switched off and then rots.
+		//
+		// On the thread rather than the state, because that is what runs.
+		const bool stepping = Breakpoints.Armed();
+		if (stepping) {
+			BoundsOf(State).LastBreakLine = 0;
+			BoundsOf(State).LastBreakSource.clear();
+			lua_singlestep(thread, 1);
+		}
+
 		const int status = lua_resume(thread, nullptr, 0);
+
+		if (stepping) {
+			lua_singlestep(thread, 0);
+		}
 
 		// **A yield is legal now, and only from `task`.**
 		//
@@ -305,6 +455,13 @@ namespace engine::script {
 		return true;
 	}
 
+	uint64_t LuauRuntime::StepsTaken() const {
+		if (State == nullptr) {
+			return 0;
+		}
+		return BoundsOf(State).StepsTaken;
+	}
+
 	bool LuauRuntime::RunInstance(ecs::Entity instance) {
 		Error.clear();
 
@@ -325,6 +482,11 @@ namespace engine::script {
 		if (!ReadSource(Store, source->Path, program, Error)) {
 			return false;
 		}
+
+		// Which script a captured hit came from. Cleared after the run, because
+		// a heartbeat connection is not attributable to one — see
+		// `LuauContext::RunningScript`.
+		ContextOf(State).RunningScript = instance;
 
 		// **`script` names the instance, and it is set before the chunk runs.**
 		// That is the whole difference from `RunFile`: a chunk run this way can

@@ -46,8 +46,23 @@ namespace engine::script {
 		size_t ran = 0;
 		std::string firstError;
 
+		// **Rebuilt rather than accumulated.** This is what the scripts cost on
+		// *this* run; adding to a previous run's figures would make the panel
+		// report a total nobody asked about and hide a script that got slower.
+		ScriptCosts.clear();
+		ScriptCosts.reserve(scripts.size());
+
 		for (const ecs::Entity instance : scripts) {
-			if (RunInstance(instance)) {
+			const uint64_t before = StepsTaken();
+			const bool ok = RunInstance(instance);
+			const uint64_t after = StepsTaken();
+
+			// Saturating, because the counter resets when a script blows its
+			// budget — and a reset read as a delta would be an enormous figure
+			// attributed to whichever script ran next.
+			ScriptCosts.push_back(ScriptCost{instance, after >= before ? after - before : 0, ok});
+
+			if (ok) {
 				ran++;
 				continue;
 			}

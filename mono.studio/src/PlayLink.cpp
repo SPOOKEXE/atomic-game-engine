@@ -89,7 +89,8 @@ namespace studio {
 		engine::world::Universe &universe,
 		engine::world::WorldId authority,
 		double tickRate,
-		std::string &error
+		std::string &error,
+		std::string_view label
 	) {
 		if (IsRunning()) {
 			error = "this link is already running";
@@ -104,7 +105,7 @@ namespace studio {
 		const Name authorityName = universe.NameOf(authority);
 
 		engine::world::WorldSettings settings;
-		settings.Name = Name(std::string(authorityName.Text()) + " (client)");
+		settings.Name = Name(std::string(authorityName.Text()) + " (" + std::string(label) + ")");
 
 		// **The authority's rate, not the display's.** The replica never
 		// simulates, but its interpolation delay is counted in ticks, and a

@@ -26,6 +26,7 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/script/Debugger.hpp>
 #include <engine/script/Runtime.hpp>
 
 #include <lua.h>
@@ -112,6 +113,21 @@ namespace engine::script {
 		// The VM this context belongs to, so a `Connection` userdata can reach
 		// the table without a second upvalue on every method.
 		lua_State *State = nullptr;
+
+		// Where execution should be reported from, owned by the `Runtime`.
+		//
+		// A pointer rather than a copy: breakpoints are edited from the editor
+		// while the world runs, and a copy taken at construction would be a
+		// second answer to what is armed.
+		Debugger *Breakpoints = nullptr;
+
+		// The script currently being run by `RunInstance`, so a captured hit can
+		// say which one it came from.
+		//
+		// Set around one run and cleared after it. Null during a heartbeat,
+		// which is honest — the connection that is running was made by a script
+		// and nothing records which, so naming one would be a guess.
+		ecs::Entity RunningScript;
 
 		// The script instance the next chunk belongs to.
 		//

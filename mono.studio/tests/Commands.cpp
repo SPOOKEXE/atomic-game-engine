@@ -479,3 +479,41 @@ TEST_CASE("forgetting a scene nothing was recorded in changes nothing", "[studio
 	fixture.Log.Forget(WorldId{});
 	CHECK(fixture.Log.Depth() == 1);
 }
+
+TEST_CASE("the history reads oldest first, and the last entry is what undo reverses",
+		  "[studio][commands]") {
+	// **What the History panel walks.** The stacks are stored as stacks — the
+	// back is the top — and a history list reads downwards in the order things
+	// happened. Getting that backwards would put the newest edit at the top of
+	// the list, which nothing in an editor does, so the order is pinned here
+	// rather than left to whoever draws it.
+	Fixture fixture;
+	const Entity first = fixture.Insert(fixture.Workspace(), "First");
+	const Entity second = fixture.Insert(fixture.Workspace(), "Second");
+	REQUIRE(first != NULL_ENTITY);
+	REQUIRE(second != NULL_ENTITY);
+
+	REQUIRE(fixture.Log.Undoable().size() == 2);
+	CHECK(fixture.Log.Redoable().empty());
+
+	// The back is the one `Undo` takes next, and it is the same string the Edit
+	// menu shows — so the panel's "you are here" row and the menu agree.
+	CHECK(fixture.Log.Undoable().back().Description == fixture.Log.NextUndo());
+
+	REQUIRE(fixture.Log.Undo());
+
+	// One moved across, and the redo stack's back is what `Redo` does next.
+	CHECK(fixture.Log.Undoable().size() == 1);
+	REQUIRE(fixture.Log.Redoable().size() == 1);
+	CHECK(fixture.Log.Redoable().back().Description == fixture.Log.NextRedo());
+
+	REQUIRE(fixture.Log.Redo());
+	CHECK(fixture.Log.Undoable().size() == 2);
+	CHECK(fixture.Log.Redoable().empty());
+}
+
+TEST_CASE("an empty log offers no history", "[studio][commands]") {
+	Fixture fixture;
+	CHECK(fixture.Log.Undoable().empty());
+	CHECK(fixture.Log.Redoable().empty());
+}

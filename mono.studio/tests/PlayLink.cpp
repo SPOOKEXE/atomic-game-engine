@@ -409,3 +409,63 @@ TEST_CASE("a mirror arrives on the client whole", "[studio][playlink]") {
 	REQUIRE(views.size() == 1);
 	CHECK(views.front().Index == 0);
 }
+
+TEST_CASE("two clients get two worlds with two names", "[studio][playlink]") {
+	// **What multi-client Play is made of.** Each client is an independent
+	// link with its own replica world, because the bug a second client exists
+	// to catch is the two of them disagreeing — and two views of one store
+	// cannot disagree.
+	//
+	// The names have to differ for rule 4's reason: a world's name is its
+	// identity to the universe, the worlds panel and any recording, so two
+	// clients sharing one would be two worlds nothing could tell apart.
+	Fixture fixture;
+	PlayLink first;
+	PlayLink second;
+
+	std::string error;
+	REQUIRE(first.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 1"));
+	REQUIRE(second.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 2"));
+
+	REQUIRE(first.ReplicaWorld().IsValid());
+	REQUIRE(second.ReplicaWorld().IsValid());
+
+	CHECK(first.ReplicaWorld() != second.ReplicaWorld());
+	CHECK(fixture.Worlds.NameOf(first.ReplicaWorld()) != fixture.Worlds.NameOf(second.ReplicaWorld()));
+
+	// And both are replicas of the same authority, which is what makes them
+	// comparable rather than two unrelated scenes.
+	CHECK(fixture.Worlds.NameOf(first.ReplicaWorld()) != fixture.Worlds.NameOf(fixture.Authority));
+	CHECK(fixture.Worlds.NameOf(second.ReplicaWorld()) != fixture.Worlds.NameOf(fixture.Authority));
+
+	first.Stop(fixture.Worlds);
+	second.Stop(fixture.Worlds);
+}
+
+TEST_CASE("what the server holds arrives on every client", "[studio][playlink]") {
+	// The property a single replica cannot demonstrate: the authority's state
+	// reaches *each* client independently rather than one of them.
+	Fixture fixture;
+	PlayLink first;
+	PlayLink second;
+
+	std::string error;
+	REQUIRE(first.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 1"));
+	REQUIRE(second.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "client 2"));
+
+	fixture.Spawn(2.0f);
+
+	for (int beat = 0; beat < 8; beat++) {
+		fixture.Worlds.Tick(1.0f / static_cast<float>(TICK_RATE));
+		first.Step(fixture.Worlds);
+		second.Step(fixture.Worlds);
+	}
+
+	CHECK(first.Report().ClientEntities == first.Report().ServerEntities);
+	CHECK(second.Report().ClientEntities == second.Report().ServerEntities);
+	CHECK(first.Report().ClientEntities > 0);
+	CHECK(second.Report().ClientEntities > 0);
+
+	first.Stop(fixture.Worlds);
+	second.Stop(fixture.Worlds);
+}

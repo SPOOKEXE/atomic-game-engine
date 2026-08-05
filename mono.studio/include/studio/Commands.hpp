@@ -67,6 +67,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -350,6 +351,29 @@ namespace studio {
 		// @return The number of commands that can be undone.
 		size_t Depth() const {
 			return Done.size();
+		}
+
+		// The commands that can be reversed, oldest first.
+		//
+		// **For the History panel, which is why this is a span and not a
+		// copy.** The panel reads it every frame — `AGENTS.md`'s rule that a
+		// panel caches nothing the model owns — and the last element is what
+		// `Undo` would reverse next.
+		//
+		// @return The undo stack, valid until the next command.
+		std::span<const Command> Undoable() const {
+			return Done;
+		}
+
+		// The commands that have been reversed and can be reapplied.
+		//
+		// **Ordered so the last element is what `Redo` does next**, which is
+		// the reverse of how a person reads a history list. The panel presents
+		// it accordingly rather than making the reader hold that in their head.
+		//
+		// @return The redo stack, valid until the next command.
+		std::span<const Command> Redoable() const {
+			return Undone;
 		}
 
 	private:

@@ -27,6 +27,10 @@
 #include <imgui.h>
 #include <mutex>
 #include <studio/Editor.hpp>
+#include <studio/RojoSync.hpp>
+
+#include <fstream>
+#include <sstream>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
 
@@ -518,8 +522,13 @@ namespace studio {
 		// still marked, and so is everything done to the world since. The tick
 		// below then clears exactly what was just sent.
 		for (WorldRun &run : Runs) {
-			if (run.Link != nullptr && !run.Paused) {
-				run.Link->Step(*Universe);
+			if (run.Paused) {
+				continue;
+			}
+			for (const std::unique_ptr<PlayLink> &link : run.Links) {
+				if (link != nullptr) {
+					link->Step(*Universe);
+				}
 			}
 		}
 
@@ -1263,6 +1272,67 @@ namespace studio {
 		return true;
 	}
 
+	void Editor::SyncRojo(const std::filesystem::path &project) {
+		if (Universe == nullptr || !Active.IsValid()) {
+			Say("no scene to sync into", engine::core::LogLevel::Warning);
+			return;
+		}
+
+		std::ifstream in(project, std::ios::binary);
+		if (!in) {
+			Say("could not read " + project.string(), engine::core::LogLevel::Error);
+			return;
+		}
+
+		std::ostringstream buffer;
+		buffer << in.rdbuf();
+
+		RojoProject parsed;
+		std::string error;
+		if (!ParseRojoProject(buffer.str(), parsed, error)) {
+			Say("not a Rojo project: " + error, engine::core::LogLevel::Error);
+			return;
+		}
+
+		// **Relative to the project file, not to the working directory.** A
+		// launcher's cwd must not decide which tree gets read — the same rule
+		// `Keybinds::Load` gives for the configuration beside the binary.
+		const std::filesystem::path root = project.parent_path();
+
+		RojoSyncReport report;
+		bool built = false;
+		Universe->Enter(Active, [&](Store &store) {
+			built = SyncRojoProject(parsed, root, store, report, error);
+		});
+
+		if (!built) {
+			Say("sync failed: " + error, engine::core::LogLevel::Error);
+			return;
+		}
+
+		Say("synced " + std::to_string(report.Instances) + " instances, " +
+			std::to_string(report.Scripts) + " scripts from " + parsed.Name);
+
+		for (const std::string &missing : report.Missing) {
+			Say("  no such path: " + missing, engine::core::LogLevel::Warning);
+		}
+
+		// **Capped, because a project with a thousand unrecognised files would
+		// otherwise be a thousand log lines nobody reads.** The count is still
+		// reported, so the information is there without the flood.
+		size_t shown = 0;
+		for (const std::string &note : report.Notes) {
+			if (shown++ >= 8) {
+				Say("  ... and " + std::to_string(report.Notes.size() - 8) + " more notes");
+				break;
+			}
+			Say("  " + note);
+		}
+
+		Modified = true;
+		Touch(Active);
+	}
+
 	bool Editor::SaveGame(const std::filesystem::path &path) {
 		// **Unsaved script buffers are flushed into their worlds first.**
 		// Otherwise the file on disk is the game minus whatever is currently
@@ -1661,8 +1731,10 @@ namespace studio {
 		}
 
 		for (const WorldRun &run : Runs) {
-			if (run.Link != nullptr && run.Link->ReplicaWorld() == world) {
-				return &run;
+			for (const std::unique_ptr<PlayLink> &link : run.Links) {
+				if (link != nullptr && link->ReplicaWorld() == world) {
+					return &run;
+				}
 			}
 		}
 		return nullptr;
@@ -1833,10 +1905,22 @@ namespace studio {
 		// way — the snapshot is re-sent until it is acknowledged — but a client
 		// view that opens blank and fills in reads as a bug in the link.
 		if (mode == RunMode::Play) {
+			// **One loop, N clients.** Two clients is what turns "the replica
+			// disagrees with the server" into "these two clients disagree",
+			// which is the bug class a play test exists for and the one a single
+			// replica cannot show. The first is pinned to a viewport; the rest
+			// are ordinary worlds reachable from the scene selector, for the
+			// same reason only one was pinned before — a panel per client is
+			// three pictures nobody asked for and a slice of the centre pane
+			// each.
+			for (int client = 0; client < PlayClients; client++) {
 			auto link = std::make_unique<PlayLink>();
 
+			const std::string label =
+				PlayClients == 1 ? std::string("client") : "client " + std::to_string(client + 1);
+
 			std::string linkError;
-			if (link->Start(*Universe, world, Settings.TickRate, linkError)) {
+			if (link->Start(*Universe, world, Settings.TickRate, linkError, label)) {
 				// **A viewport pinned to it, or the whole thing is invisible.**
 				// The point of a client view is the *difference* between it and
 				// the server's, and a difference nobody is shown is a feature
@@ -1859,7 +1943,13 @@ namespace studio {
 				// world.
 				const bool anotherIsShown =
 					std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
-						return other.Link != nullptr && other.Link->IsRunning();
+						return std::any_of(
+							other.Links.begin(),
+							other.Links.end(),
+							[](const std::unique_ptr<PlayLink> &link) {
+								return link != nullptr && link->IsRunning();
+							}
+						);
 					});
 
 				// **Hoisted out of the loop it disables.** It cannot change
@@ -1887,7 +1977,7 @@ namespace studio {
 					}
 				}
 
-				run.Link = std::move(link);
+				run.Links.push_back(std::move(link));
 			} else {
 				// **Not fatal, and the run goes on without it.** A Play that
 				// refused to start because its client view could not be made
@@ -1895,6 +1985,12 @@ namespace studio {
 				// and the server half is exactly what Run already gives, so
 				// there is a working thing to fall back to.
 				Say("no client view: " + linkError, LogLevel::Warning);
+
+				// And no point asking for the rest: whatever refused the first
+				// one refuses them all, and four copies of one warning is a log
+				// nobody reads.
+				break;
+			}
 			}
 		}
 
@@ -1925,12 +2021,15 @@ namespace studio {
 		// below would have each of them answering about a world that is being
 		// rebuilt underneath them. It also holds no reference to the authority's
 		// store, which is why it can go before the runtime rather than after.
-		if (record->Link != nullptr) {
+		for (const std::unique_ptr<PlayLink> &link : record->Links) {
+			if (link == nullptr) {
+				continue;
+			}
 			// Any viewport pinned to the client view is unpinned before the
 			// world under it disappears. A pin naming a destroyed world would
 			// leave the panel following the active scene with no way to tell
 			// that it had stopped showing what it was opened for.
-			const WorldId replica = record->Link->ReplicaWorld();
+			const WorldId replica = link->ReplicaWorld();
 			for (ViewportState &view : Extras) {
 				if (view.World == replica) {
 					view.World = WorldId{};
@@ -1938,9 +2037,9 @@ namespace studio {
 				}
 			}
 
-			record->Link->Stop(*Universe);
-			record->Link.reset();
+			link->Stop(*Universe);
 		}
+		record->Links.clear();
 
 		// **The runtime goes before the restore.** It holds a `Store &` and the
 		// store is the universe's; the world is about to be destroyed, so a

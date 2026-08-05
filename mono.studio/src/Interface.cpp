@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <studio/Editor.hpp>
@@ -45,7 +46,7 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v5";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v6";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -223,6 +224,16 @@ namespace studio {
 		DrawSettings();
 		DrawStatistics();
 		DrawFrameGraph();
+
+		// v0.10's panels. Each returns immediately when closed, which is what
+		// makes a long list of them cost nothing to leave wired in.
+		DrawHistory();
+		DrawBus();
+		DrawFindInstances();
+		DrawScriptProfile();
+		DrawDiff();
+		DrawDebugger();
+
 		DrawDialogs();
 		DrawPalette();
 
@@ -817,6 +828,18 @@ namespace studio {
 		// now, and two places to bind a key is one too many.
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
+		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
+
+		ImGui::Separator();
+
+		// The inspectors. Closed by default and grouped apart from the panels
+		// somebody works in all day, because these are opened to answer a
+		// question and closed again.
+		ImGui::MenuItem("History", nullptr, &ShowHistory);
+		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
+		ImGui::MenuItem("Bus", nullptr, &ShowBus);
+		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
+		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
 
 		ImGui::Separator();
 
@@ -854,6 +877,18 @@ namespace studio {
 			if (ImGui::MenuItem("Open Game...", Keybinds::Of(Action::OpenGame).Text().c_str())) {
 				AskingOpen = true;
 				PathBuffer = GamePath.string();
+			}
+
+			// **Rojo's layout, because it is the one the ecosystem already
+			// writes.** A game laid out for Rojo has its scripts in folders that
+			// mean something, its tooling assumes it, and every author who has
+			// used Roblox knows it — asking them to convert a working project in
+			// order to try this engine is the wrong side of the trade for a
+			// format that costs a parser to read.
+			if (ImGui::MenuItem("Sync Rojo Project...")) {
+				AskingRojo = true;
+				PathBuffer = GamePath.empty() ? std::string("default.project.json")
+											  : (GamePath.parent_path() / "default.project.json").string();
 			}
 
 			ImGui::Separator();
@@ -1031,6 +1066,29 @@ namespace studio {
 					mode == RunMode::Server
 				)) {
 				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
+			}
+
+			// **How many clients the next Play admits.** Disabled while
+			// something is running, because the links are made at `BeginRun` and
+			// a number that changed underneath a live run would describe
+			// something that is not there. Stop, change it, Play again — which
+			// is also how Roblox's own player count works.
+			ImGui::Separator();
+			ImGui::BeginDisabled(mode != RunMode::Edit);
+			if (ImGui::BeginMenu("Clients")) {
+				for (int count = 1; count <= MAXIMUM_PLAY_CLIENTS; count++) {
+					char label[32];
+					std::snprintf(label, sizeof(label), "%d client%s", count, count == 1 ? "" : "s");
+					if (ImGui::MenuItem(label, nullptr, PlayClients == count)) {
+						PlayClients = count;
+					}
+				}
+				ImGui::EndMenu();
+			}
+			ImGui::EndDisabled();
+
+			if (PlayClients > 1) {
+				ImGui::TextDisabled("  Play opens %d clients", PlayClients);
 			}
 			if (ImGui::MenuItem(
 					"Stop", Keybinds::Of(Action::Stop).Text().c_str(), false, mode != RunMode::Edit
@@ -1626,6 +1684,11 @@ namespace studio {
 		// that cannot load.
 		const std::vector<std::string> GAME_FILES{std::string(engine::game::GAME_EXTENSION)};
 		const std::vector<std::string> WORLD_FILES{std::string(engine::game::WORLD_EXTENSION)};
+
+		// Rojo's own name for its project file, and the only one this opens.
+		// A picker that offered every `.json` would invite somebody to point it
+		// at a `package.json` and get an error rather than a filter.
+		const std::vector<std::string> ROJO_FILES{".json"};
 	}
 
 	void Editor::DrawDialogs() {
@@ -1638,6 +1701,9 @@ namespace studio {
 		}
 		if (AskingOpen) {
 			ImGui::OpenPopup("Open Game");
+		}
+		if (AskingRojo) {
+			ImGui::OpenPopup("Sync Rojo Project");
 		}
 		if (AskingExport) {
 			ImGui::OpenPopup("Export World");
@@ -1670,6 +1736,13 @@ namespace studio {
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
+		}
+
+		if (FilePrompt("Sync Rojo Project", PathBuffer, "Sync", ROJO_FILES, true)) {
+			SyncRojo(std::filesystem::path(PathBuffer));
+			AskingRojo = false;
+		} else if (!ImGui::IsPopupOpen("Sync Rojo Project")) {
+			AskingRojo = false;
 		}
 
 		if (FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
