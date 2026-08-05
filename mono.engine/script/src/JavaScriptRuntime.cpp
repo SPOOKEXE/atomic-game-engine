@@ -146,6 +146,14 @@ namespace engine::script {
 	}
 
 	JavaScriptRuntime::~JavaScriptRuntime() {
+		// **The store's listeners go before the VM does.** The removal hook
+		// captures this `JSContext *`, and a store that outlived the runtime
+		// would call into a freed context the next time anything in the world
+		// was destroyed — which is the ordinary case, because a world is
+		// destroyed after the scripts that built it. `CloseJsBindings` takes
+		// the change subscriptions back for the same reason.
+		Store.ClearDescendantRemoving();
+
 		if (Context != nullptr) {
 			CloseJsBindings(Context);
 			JS_FreeContext(Context);
@@ -281,6 +289,13 @@ namespace engine::script {
 		};
 
 		note(PumpJsChanges(Context));
+
+		// **After the property changes and before the tasks**, exactly as the
+		// Luau side orders it: both are "what the previous barrier recorded",
+		// and a handler watching a part's position and its ancestry should see
+		// one world rather than two.
+		note(PumpJsTree(Context));
+
 		note(PumpJsTasks(Context));
 		note(PumpJsHeartbeat(Context, delta));
 

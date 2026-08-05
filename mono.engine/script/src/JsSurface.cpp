@@ -137,6 +137,48 @@ namespace engine::script {
 			return As<ConnectionId>(context, value, JsOf(context).ConnectionClass);
 		}
 
+		// Starts recording what a tree signal needs, on the first connection.
+		//
+		// **The same two mechanisms the Luau side installs, and neither is
+		// optional here.** Four of the five are recorded and delivered at the
+		// barrier, so the store has to be told to record; `DescendantRemoving`
+		// is dispatched from inside the store before the removal, so the store
+		// has to be given somewhere to dispatch to.
+		//
+		// Late rather than with the runtime, for the reason `.Changed` observes
+		// late: the removal fan-out walks the leaving subtree and every
+		// ancestor above it, and a world nobody asked must not pay for it.
+		void WatchJsTreeFor(JSContext *context, SignalKind kind) {
+			JsContext &bound = JsOf(context);
+
+			if (kind == SignalKind::ChildAdded || kind == SignalKind::ChildRemoved ||
+				kind == SignalKind::DescendantAdded || kind == SignalKind::AncestryChanged) {
+				bound.World->ObserveTree();
+				return;
+			}
+
+			if (kind != SignalKind::DescendantRemoving || bound.RemovingHooked) {
+				return;
+			}
+			bound.RemovingHooked = true;
+
+			bound.World->OnDescendantRemoving([context](Entity ancestor, Entity leaving) {
+				JSValue subject = MakeJsInstance(context, leaving);
+
+				// **Logged rather than returned**, because there is nowhere to
+				// return it to: this runs underneath `Store::SetParent`, called
+				// from wherever in the engine chose to move something. A
+				// handler that throws must not take the reparent with it.
+				const std::string failed =
+					FireJsSignal(context, SignalKind::DescendantRemoving, ancestor, 1, &subject);
+				if (!failed.empty()) {
+					ENGINE_WARN("[script] a DescendantRemoving handler failed: {}", failed);
+				}
+
+				JS_FreeValue(context, subject);
+			});
+		}
+
 		JSValue ConnectTo(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, bool once) {
 			JsContext &bound = JsOf(context);
 
@@ -155,6 +197,7 @@ namespace engine::script {
 			if (signal->Kind == SignalKind::Changed || signal->Kind == SignalKind::PropertyChanged) {
 				bound.Changes.Watch(*bound.World, signal->Subject);
 			}
+			WatchJsTreeFor(context, signal->Kind);
 
 			const ConnectionId id = bound.Signals.Connect(
 				signal->Kind, signal->Subject, Retain(context, argv[0]), signal->Property
@@ -497,6 +540,20 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "not an instance");
 			}
 			return MakeJsSignal(context, SignalKind::Changed, instance);
+		}
+
+		// The tree's own signals, as getters for the same reason `Changed` is
+		// one: Roblox spells them as properties and they take no arguments.
+		//
+		// **One template rather than five near-copies.** Each differs only in
+		// which kind it names, and five hand-written bodies is five places for
+		// the null check to be forgotten.
+		template <SignalKind Kind> JSValue InstanceTreeSignal(JSContext *context, JSValueConst self) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+			return MakeJsSignal(context, Kind, instance);
 		}
 
 		// --- the codec bridge ------------------------------------------------
@@ -1021,6 +1078,76 @@ namespace engine::script {
 		return firstError;
 	}
 
+	std::string PumpJsTree(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		if (!bound.World->TreeObserved()) {
+			return {};
+		}
+
+		// **Taken, not read.** A handler may reparent something, and a swap
+		// leaves the store's list empty before the first one runs — so the move
+		// it makes belongs to the next delivery instead of being appended to
+		// the list being walked.
+		std::vector<ecs::TreeChange> changes;
+		bound.World->TakeTreeChanges(changes);
+		if (changes.empty()) {
+			return {};
+		}
+
+		std::string firstError;
+		const auto note = [&](std::string message) {
+			if (firstError.empty() && !message.empty()) {
+				firstError = std::move(message);
+			}
+		};
+
+		// One argument for three of the four signals, freed once per use rather
+		// than once per fire — `MakeJsInstance` mints an object per call, and
+		// leaking one per reparent is a leak per reparent.
+		const auto fire = [&](SignalKind kind, Entity subject, Entity argument) {
+			JSValue value = MakeJsInstance(context, argument);
+			note(FireJsSignal(context, kind, subject, 1, &value));
+			JS_FreeValue(context, value);
+		};
+
+		for (const ecs::TreeChange &change : changes) {
+			if (change.From != ecs::NULL_ENTITY) {
+				fire(SignalKind::ChildRemoved, change.From, change.Instance);
+			}
+
+			if (change.To != ecs::NULL_ENTITY) {
+				fire(SignalKind::ChildAdded, change.To, change.Instance);
+
+				// `DescendantAdded` is every ancestor's, not just the new
+				// parent's — that is the whole difference between it and
+				// `ChildAdded`.
+				for (Entity above = change.To; above != ecs::NULL_ENTITY;
+					 above = bound.World->ParentOf(above)) {
+					fire(SignalKind::DescendantAdded, above, change.Instance);
+				}
+			}
+
+			// **The instance and everything under it**, because an ancestry
+			// change is inherited: moving a model changes the ancestry of every
+			// part in it, and a script watching a part has no way to know its
+			// model moved otherwise.
+			const auto ancestry = [&](Entity subject) {
+				JSValue arguments[2] = {
+					MakeJsInstance(context, subject),
+					MakeJsInstance(context, bound.World->ParentOf(subject)),
+				};
+				note(FireJsSignal(context, SignalKind::AncestryChanged, subject, 2, arguments));
+				JS_FreeValue(context, arguments[0]);
+				JS_FreeValue(context, arguments[1]);
+			};
+
+			ancestry(change.Instance);
+			bound.World->EachDescendant(change.Instance, ancestry);
+		}
+
+		return firstError;
+	}
+
 	std::string PumpJsTasks(JSContext *context) {
 		JsContext &bound = JsOf(context);
 		std::string firstError;
@@ -1102,6 +1229,50 @@ namespace engine::script {
 		}
 	}
 
+	void InstallJsInstanceMethods(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		JSValue global = JS_GetGlobalObject(context);
+
+		JSValue methods = JS_NewObject(context);
+		static const JSCFunctionListEntry entries[] = {
+			JS_CFUNC_DEF("IsA", 1, InstanceIsA),
+			JS_CFUNC_DEF("Destroy", 0, InstanceDestroy),
+			JS_CFUNC_DEF("Clone", 0, InstanceClone),
+			JS_CFUNC_DEF("GetChildren", 0, InstanceGetChildren),
+			JS_CFUNC_DEF("GetDescendants", 0, InstanceGetDescendants),
+			JS_CFUNC_DEF("FindFirstChild", 1, InstanceFindFirstChild),
+			JS_CFUNC_DEF("FindFirstChildOfClass", 1, InstanceClassLookup<JsLookup::ChildOfClass>),
+			JS_CFUNC_DEF("FindFirstChildWhichIsA", 1, InstanceClassLookup<JsLookup::ChildWhichIsA>),
+			JS_CFUNC_DEF("FindFirstAncestor", 1, InstanceFindFirstAncestor),
+			JS_CFUNC_DEF("FindFirstAncestorOfClass", 1, InstanceClassLookup<JsLookup::AncestorOfClass>),
+			JS_CFUNC_DEF("FindFirstAncestorWhichIsA", 1, InstanceClassLookup<JsLookup::AncestorWhichIsA>),
+			JS_CFUNC_DEF("GetFullName", 0, InstanceGetFullName),
+			JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
+			JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
+			JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
+			JS_CGETSET_DEF("Changed", InstanceChanged, nullptr),
+			JS_CGETSET_DEF("ChildAdded", InstanceTreeSignal<SignalKind::ChildAdded>, nullptr),
+			JS_CGETSET_DEF("ChildRemoved", InstanceTreeSignal<SignalKind::ChildRemoved>, nullptr),
+			JS_CGETSET_DEF("DescendantAdded", InstanceTreeSignal<SignalKind::DescendantAdded>, nullptr),
+			JS_CGETSET_DEF("DescendantRemoving", InstanceTreeSignal<SignalKind::DescendantRemoving>, nullptr),
+			JS_CGETSET_DEF("AncestryChanged", InstanceTreeSignal<SignalKind::AncestryChanged>, nullptr),
+		};
+		// **`std::size`, not a number somebody has to remember.** This read
+		// `10` while the list held sixteen, so the last six — including
+		// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` — were
+		// simply not installed. Nothing warned: a method that is not there
+		// is `undefined`, and `undefined` only fails at the call site, in
+		// whatever script reaches it first.
+		JS_SetPropertyFunctionList(context, methods, entries, static_cast<int>(std::size(entries)));
+
+		// Held in the context so `PrototypeFor` can put every class
+		// prototype behind it, and so it is freed with everything else.
+		bound.Owned.push_back(JS_DupValue(context, methods));
+		JS_SetPropertyStr(context, global, "__instanceMethods", methods);
+
+		JS_FreeValue(context, global);
+	}
+
 	void OpenJsSurface(JSContext *context) {
 		JsContext &bound = JsOf(context);
 		JSValue global = JS_GetGlobalObject(context);
@@ -1127,42 +1298,6 @@ namespace engine::script {
 				JS_CGETSET_DEF("Connected", ConnectionConnected, nullptr),
 			};
 			InstallClass<ConnectionId>(context, bound.ConnectionClass, "RBXScriptConnection", members, 2);
-		}
-
-		// --- the instance methods, on the prototype every class prototype sits
-		// behind ---
-		{
-			JSValue methods = JS_NewObject(context);
-			static const JSCFunctionListEntry entries[] = {
-				JS_CFUNC_DEF("IsA", 1, InstanceIsA),
-				JS_CFUNC_DEF("Destroy", 0, InstanceDestroy),
-				JS_CFUNC_DEF("Clone", 0, InstanceClone),
-				JS_CFUNC_DEF("GetChildren", 0, InstanceGetChildren),
-				JS_CFUNC_DEF("GetDescendants", 0, InstanceGetDescendants),
-				JS_CFUNC_DEF("FindFirstChild", 1, InstanceFindFirstChild),
-				JS_CFUNC_DEF("FindFirstChildOfClass", 1, InstanceClassLookup<JsLookup::ChildOfClass>),
-				JS_CFUNC_DEF("FindFirstChildWhichIsA", 1, InstanceClassLookup<JsLookup::ChildWhichIsA>),
-				JS_CFUNC_DEF("FindFirstAncestor", 1, InstanceFindFirstAncestor),
-				JS_CFUNC_DEF("FindFirstAncestorOfClass", 1, InstanceClassLookup<JsLookup::AncestorOfClass>),
-				JS_CFUNC_DEF("FindFirstAncestorWhichIsA", 1, InstanceClassLookup<JsLookup::AncestorWhichIsA>),
-				JS_CFUNC_DEF("GetFullName", 0, InstanceGetFullName),
-				JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
-				JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
-				JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
-				JS_CGETSET_DEF("Changed", InstanceChanged, nullptr),
-			};
-			// **`std::size`, not a number somebody has to remember.** This read
-			// `10` while the list held sixteen, so the last six — including
-			// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` — were
-			// simply not installed. Nothing warned: a method that is not there
-			// is `undefined`, and `undefined` only fails at the call site, in
-			// whatever script reaches it first.
-			JS_SetPropertyFunctionList(context, methods, entries, static_cast<int>(std::size(entries)));
-
-			// Held in the context so `PrototypeFor` can put every class
-			// prototype behind it, and so it is freed with everything else.
-			bound.Owned.push_back(JS_DupValue(context, methods));
-			JS_SetPropertyStr(context, global, "__instanceMethods", methods);
 		}
 
 		// --- task ---

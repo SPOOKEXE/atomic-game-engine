@@ -49,6 +49,12 @@ namespace engine::script {
 		// The context itself, so a callback holding only this can reach the VM.
 		JSContext *Js = nullptr;
 
+		// Whether `Store::OnDescendantRemoving` already holds this VM's hook.
+		//
+		// The store keeps one listener, so this is about not reinstalling an
+		// identical one per connection rather than about correctness.
+		bool RemovingHooked = false;
+
 		JSClassID InstanceClass = 0;
 		JSClassID EnumItemClass = 0;
 		JSClassID Vector3Class = 0;

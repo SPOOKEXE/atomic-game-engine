@@ -1085,6 +1085,13 @@ namespace engine::script {
 		bound->Js = context;
 		JS_SetContextOpaque(context, bound);
 
+		// **Before anything builds a prototype.** `PrototypeFor` chains every
+		// class prototype behind `__instanceMethods` and caches what it builds,
+		// so a prototype made before that object existed kept a plain one for
+		// the life of the VM — which is what left the `workspace` global below
+		// with no `IsA`, no `GetChildren` and no signals.
+		InstallJsInstanceMethods(context);
+
 		JSRuntime *runtime = JS_GetRuntime(context);
 
 		// Classes exist so an object of the wrong kind is caught by the VM

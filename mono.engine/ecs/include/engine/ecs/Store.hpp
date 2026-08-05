@@ -940,6 +940,39 @@ namespace engine::ecs {
 		// @param out Cleared, then swapped with what the store has recorded.
 		void TakeTreeChanges(std::vector<TreeChange> &out);
 
+		// Installs the one listener told about a removal *before* it happens.
+		//
+		// **The only synchronous signal in the engine, and the only one that
+		// has to be.** Everything else is recorded and delivered at the next
+		// barrier, because a handler re-entering from inside a write would see
+		// a half-written row — `script/Changes.hpp` sets out that rule. This
+		// one is called at the *top* of the operation, before a single link
+		// moves, so the tree it is handed is entirely consistent. That is also
+		// the only position from which its contract can hold at all: a handler
+		// told "this is leaving" is told while it is still there, which a queue
+		// drained a tick later cannot offer.
+		//
+		// Called as `body(ancestor, descendant)` once per losing ancestor per
+		// leaving instance, which is Roblox's fan-out for `DescendantRemoving`.
+		//
+		// **One listener, replaced rather than added to.** A world runs one
+		// script runtime, and a second subscriber would need a disconnect
+		// mechanism for a surface with one caller.
+		//
+		// The listener must be cleared before it outlives whatever it captured.
+		// See `ClearDescendantRemoving`.
+		//
+		// @param body What to call. An empty function is the same as clearing.
+		void OnDescendantRemoving(std::function<void(Entity, Entity)> body);
+
+		// Takes the removal listener back.
+		//
+		// **Called before the store outlives the VM**, exactly as
+		// `script::ChangeQueue::Detach` is: a store is often declared before
+		// the runtime that binds it and destroyed after, so a listener holding
+		// a `lua_State *` outlives the state unless something takes it back.
+		void ClearDescendantRemoving();
+
 		// The dotted path from the root of the tree down to an instance.
 		//
 		// **From the world's root, and there is no `game.` in front of it.** A

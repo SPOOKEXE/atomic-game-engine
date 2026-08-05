@@ -332,6 +332,13 @@ namespace engine::script {
 			bounds->Context.Changes.Detach(Store);
 		}
 
+		// **And the removal hook, for exactly the same reason.** It captures
+		// this VM's `lua_State *`, and a store that outlived the runtime would
+		// call into a closed state the next time anything was destroyed. Taken
+		// back unconditionally: a runtime that never installed one is clearing
+		// an empty function.
+		Store.ClearDescendantRemoving();
+
 		lua_close(State);
 		delete bounds;
 	}

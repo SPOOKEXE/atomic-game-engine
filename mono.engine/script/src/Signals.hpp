@@ -55,15 +55,23 @@ namespace engine::script {
 		// `instance.DescendantAdded`. The subject is any ancestor of what
 		// arrived, and the handler is called with it.
 		//
-		// **There is no `DescendantRemoving` here, and its absence is a
-		// decision.** Roblox fires that one *before* the removal, so a handler
-		// can still read the subtree it is losing. Everything on this list is
-		// delivered from a queue at the next barrier — see `Changes.hpp` for
-		// why a signal cannot fire from inside the write — and by then the
-		// instance is already gone from the tree. A signal whose whole contract
-		// is "you are called while it is still there" cannot be honoured one
-		// tick late, so it is not offered rather than offered wrongly.
 		DescendantAdded,
+
+		// `instance.DescendantRemoving`. The subject is the ancestor about to
+		// lose it, and the handler is called with what is leaving.
+		//
+		// **The one signal here that is not queued, and the only one that
+		// cannot be.** Everything else on this list is recorded and delivered
+		// at the next barrier — `Changes.hpp` sets out why a signal must not
+		// fire from inside a write. This one's whole contract is that the
+		// handler is called *while the thing is still there*, which a queue
+		// drained a tick later cannot offer, because by then it has gone.
+		//
+		// So it is dispatched synchronously from `Store::OnDescendantRemoving`,
+		// at the top of the operation and before a single link moves. That is a
+		// different position from the one `Changes.hpp` rules out: nothing is
+		// half-written, because nothing has been written.
+		DescendantRemoving,
 
 		// `instance.AncestryChanged`. The subject is the instance whose chain
 		// of parents changed, which is what moved *and everything under it*,

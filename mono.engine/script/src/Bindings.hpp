@@ -114,6 +114,13 @@ namespace engine::script {
 		// the table without a second upvalue on every method.
 		lua_State *State = nullptr;
 
+		// Whether `Store::OnDescendantRemoving` already holds this VM's hook.
+		//
+		// The store keeps one listener, so a second install would replace the
+		// first with an identical one — harmless, and still worth not doing
+		// once per connection.
+		bool RemovingHooked = false;
+
 		// Where execution should be reported from, owned by the `Runtime`.
 		//
 		// A pointer rather than a copy: breakpoints are edited from the editor

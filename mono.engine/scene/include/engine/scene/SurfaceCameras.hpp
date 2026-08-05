@@ -23,16 +23,41 @@
 //
 //   1. the eye is mirrored through the plane — same distance behind, opposite
 //      side;
-//   2. the camera looks back at the middle of the face, so the projection lines
-//      up with the pane rather than sliding across it;
+//   2. the camera looks back along the face normal, square on to the pane rather
+//      than at its centre — see below, because the difference is not decorative;
 //   3. the near plane is pushed out to the glass, which is the poor-man's
 //      oblique clip: everything between the reflected camera and the pane — the
 //      frame, the back of the pane, whatever the viewer is standing behind —
 //      would otherwise occlude the reflection;
-//   4. the part is told which surface it shows, so a mirror is a camera parented
+//   4. the field of view is fitted to the pane's four corners, because no
+//      constant one covers it — the camera stands as far behind the glass as the
+//      viewer stands in front, so the pane subtends the same angle from the
+//      camera as from the viewer, and that grows without bound as somebody walks
+//      up to a mirror;
+//   5. the part is told which surface it shows, so a mirror is a camera parented
 //      to a part and nothing else.
 //
-// **Step 4 is what makes this an instance rather than a configuration.** Setting
+// **Steps 2 and 4 are one bug, and it is worth naming because a still frame does
+// not show it.** The reflection is projected back onto the pane per fragment and
+// `opaque.frag` tests the projected coordinate against the texture's 0..1
+// rectangle, falling through to the plain lit pane outside it. So a frustum that
+// does not cover the pane does not produce a smaller or a softer image — it
+// produces a hard-edged rectangle of reflection floating on a grey wall, which
+// moves and resizes as the viewer walks. That reads as a mirror aimed at the
+// wrong thing, and it is what a fixed 70° field of view did from anywhere closer
+// than a few pane-widths.
+//
+// Aiming along the normal is what makes the fit possible at all. An aim at the
+// pane's centre tilts the view axis by however far the viewer stands to one
+// side, and once the viewer is close *and* off-centre the nearest corner of the
+// pane falls behind the camera — which no field of view covers. Looking along
+// the normal puts every point of the pane at one depth, so the corners are
+// always in front and the angle needed is always finite. It costs nothing: the
+// image is read back through this camera's own matrix, so its orientation
+// decides which texels the pane lands on and never which part of the world it
+// shows. The position is what makes it a reflection.
+//
+// **Step 5 is what makes this an instance rather than a configuration.** Setting
 // `Visual::Surface` by hand as well as parenting the camera is one fact recorded
 // twice, and the failure mode is a mirror that renders perfectly into a texture
 // nothing samples — which looks exactly like a mirror that does not work.
@@ -43,11 +68,26 @@
 // curved. A general reflection needs a cube map or a screen-space trace and
 // neither belongs in a pipeline this size.
 //
-// The oblique case is approximate. A real planar reflection skews the
-// projection's near plane onto the mirror, which handles a viewer looking at the
-// pane from the side; this clips at a plane parallel to the face instead, so a
-// steep angle clips slightly too much. That is the head-on case done correctly
-// and the oblique case done approximately, stated rather than discovered.
+// The oblique case is approximate, in two ways worth telling apart.
+//
+// A real planar reflection skews the projection's near plane onto the mirror,
+// which handles a viewer looking at the pane from the side; this clips at a
+// plane parallel to the face instead, so a steep angle clips slightly too much.
+//
+// And the fitted frustum is **symmetric about the face normal**, so a viewer
+// off to one side pays for the far edge of the pane on both sides — the texture
+// covers twice the width it needs and the mirror is drawn at half the resolution
+// it could be. An off-axis frustum fits the same four corners with none of that
+// waste and is the right shape here; it needs `render::SurfaceView` to carry the
+// pane's rectangle rather than a field of view, which is the change this is
+// waiting on. Correctness is not what is being traded — the coverage is exact
+// either way — only texels.
+//
+// Neither is escapable by widening. A pane subtends half a turn from a point on
+// its own surface, so walking into the glass asks for a 180° frustum; the fit
+// clamps just short of that and the far corners stop being covered. That is the
+// geometry rather than the parameterisation, and an off-axis frustum has the
+// same limit.
 //
 // **A camera with no `BasePart` parent is left exactly where it was put.** That
 // is the script-authored arrangement `Mirrors-1-world.luau` used and it still

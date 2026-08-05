@@ -291,6 +291,23 @@ namespace engine::ecs {
 		bool WatchTree = false;
 		std::vector<TreeChange> TreeChanges;
 
+		// Called *before* a subtree leaves its ancestors. See
+		// `Store::OnDescendantRemoving`.
+		//
+		// **The one signal in the engine that is not deferred, and the only one
+		// that cannot be.** Its whole contract is that the handler is called
+		// while the thing is still there — which a queue drained at the next
+		// barrier cannot offer, because by then it has gone.
+		std::function<void(Entity, Entity)> BeforeRemoving;
+
+		// Whether a removal is already being announced.
+		//
+		// A handler may destroy or reparent something, and `DestroyInstance`
+		// unparents every row on its way out — so without this the announcement
+		// of one removal would announce the removals it causes, and a handler
+		// that moved what it was told about would not stop.
+		bool Removing = false;
+
 		// Named entities, both ways. Names are optional and most entities have
 		// none, so this is a map rather than a column.
 		std::unordered_map<uint32_t, std::string> NamesByIndex;

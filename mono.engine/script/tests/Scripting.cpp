@@ -2738,3 +2738,298 @@ TEST_CASE("a world nobody watches records no tree changes", "[scripting]") {
 	MustRun(*runtime, "workspace.ChildAdded:Connect(function() end)");
 	CHECK(store.TreeObserved());
 }
+
+TEST_CASE("DescendantRemoving fires while the thing is still there", "[scripting]") {
+	// **The contract, and the only assertion that matters.** Every other tree
+	// signal is delivered from a queue at the next barrier; this one has to be
+	// called *before* the removal, or a handler cannot do the one thing it
+	// exists for — read the subtree it is about to lose.
+	//
+	// So the handler asks, at call time, whether the leaving instance is still
+	// a descendant of the ancestor being notified. Answering "no" would mean
+	// the signal is `DescendantRemoved` under a name that promises otherwise.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local model = Instance.new('Part', workspace)
+		model.Name = 'Model'
+
+		local part = Instance.new('Part', model)
+		part.Name = 'Part'
+
+		workspace.DescendantRemoving:Connect(function(leaving)
+			local mark = Instance.new('Part', log)
+
+			-- Still parented, still reachable, still where it was. This is the
+			-- assertion the whole signal is for.
+			local intact = leaving:IsDescendantOf(workspace) and leaving.Parent ~= nil
+			mark.Name = (intact and 'intact-' or 'gone-') .. leaving.Name
+		end)
+	)");
+
+	const Entity workspaceRoot = engine::scene::WorkspaceOf(store);
+	const Entity log = store.FindFirstChild(workspaceRoot, "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	// Nothing has left yet.
+	CHECK(store.FindFirstChild(log, "intact-Model") == engine::ecs::NULL_ENTITY);
+
+	// **No heartbeat between the write and the assertion**, deliberately. This
+	// signal does not wait for a barrier, so if it needed one the checks below
+	// would fail.
+	MustRun(*runtime, R"(
+		local holder = Instance.new('Part')
+		holder.Name = 'Holder'
+		workspace:FindFirstChild('Model').Parent = holder
+	)");
+
+	// The model and the part inside it both stopped being descendants of the
+	// workspace, so both were announced — and both were still there when they
+	// were.
+	CHECK(store.FindFirstChild(log, "intact-Model") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "intact-Part") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Model") == engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Part") == engine::ecs::NULL_ENTITY);
+
+	// And the move still happened. A handler running underneath `SetParent`
+	// must not be able to stop it.
+	CHECK(store.FindFirstChild(workspaceRoot, "Model") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("DescendantRemoving announces a destroyed subtree once", "[scripting]") {
+	// A destroy takes the ancestors inside the subtree with it, so a model
+	// being destroyed fires on itself for its own children as well as on the
+	// workspace for everything. What it must not do is announce the same
+	// removal again for every unparent the teardown performs.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local model = Instance.new('Part', workspace)
+		model.Name = 'Model'
+
+		local part = Instance.new('Part', model)
+		part.Name = 'Part'
+
+		local nested = Instance.new('Part', part)
+		nested.Name = 'Nested'
+
+		workspace.DescendantRemoving:Connect(function(leaving)
+			local mark = Instance.new('Part', log)
+			mark.Name = 'workspace-' .. leaving.Name
+		end)
+
+		model.DescendantRemoving:Connect(function(leaving)
+			local mark = Instance.new('Part', log)
+			mark.Name = 'model-' .. leaving.Name
+		end)
+	)");
+
+	const Entity log = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	const auto counted = [&](const char *name) {
+		size_t count = 0;
+		store.EachChild(log, [&](Entity mark) {
+			if (store.InstanceNameOf(mark) == engine::core::Name(name)) {
+				count++;
+			}
+		});
+		return count;
+	};
+
+	MustRun(*runtime, "workspace:FindFirstChild('Model'):Destroy()");
+
+	// The workspace loses all three, once each.
+	CHECK(counted("workspace-Model") == 1);
+	CHECK(counted("workspace-Part") == 1);
+	CHECK(counted("workspace-Nested") == 1);
+
+	// The model loses the two under it, and is not told about itself.
+	CHECK(counted("model-Part") == 1);
+	CHECK(counted("model-Nested") == 1);
+	CHECK(counted("model-Model") == 0);
+}
+
+TEST_CASE("a world nobody watches installs no removal hook", "[scripting]") {
+	// The fan-out walks the leaving subtree and every ancestor above it, on
+	// every destroy in the world. A game that never connects one of these must
+	// not pay for that.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part', workspace)
+		part.Name = 'Part'
+		part:Destroy()
+	)");
+
+	// Nothing to assert but the absence of a crash and of a hook: the store
+	// took no listener, so the destroy above dispatched nothing.
+	MustRun(*runtime, "workspace.DescendantRemoving:Connect(function() end)");
+}
+
+TEST_CASE("javascript reaches the same tree signals", "[scripting][js]") {
+	// **Two VMs, one surface.** The tree signals were Luau-only when they
+	// landed, which is the gap this closes: a method or a signal that exists in
+	// one language and not the other is a game that runs until somebody
+	// switches, and the two agree right up until the first time one is fixed.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = Instance.new('Part', workspace);
+		log.Name = 'Log';
+
+		const home = Instance.new('Part', workspace);
+		home.Name = 'Home';
+
+		const note = (what) => {
+			const mark = Instance.new('Part', log);
+			mark.Name = what;
+		};
+
+		home.ChildAdded.Connect((child) => note('added-' + child.Name));
+		home.ChildRemoved.Connect((child) => note('removed-' + child.Name));
+		workspace.DescendantAdded.Connect((what) => note('descendant-' + what.Name));
+
+		const mover = Instance.new('Part');
+		mover.Name = 'Mover';
+		mover.AncestryChanged.Connect((subject, parent) => {
+			note('ancestry-' + subject.Name + '-' + (parent === null ? 'nil' : parent.Name));
+		});
+
+		mover.Parent = home;
+	)");
+
+	const Entity log = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	// Queued, not immediate — the same one-tick contract the Luau side has.
+	CHECK(store.FindFirstChild(log, "added-Mover") == engine::ecs::NULL_ENTITY);
+
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	CHECK(store.FindFirstChild(log, "added-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "descendant-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "ancestry-Mover-Home") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "removed-Mover") == engine::ecs::NULL_ENTITY);
+
+	// **No `const` here.** Unlike Luau, whose chunks each get their own
+	// sandboxed globals, these two share one scope — so re-declaring a name the
+	// first chunk bound is a `SyntaxError` rather than a shadow.
+	MustRun(*runtime, R"(
+		workspace.FindFirstChild('Home').FindFirstChild('Mover').Parent = workspace;
+	)");
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	CHECK(store.FindFirstChild(log, "removed-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "ancestry-Mover-Workspace") != engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("javascript DescendantRemoving fires while the thing is still there", "[scripting][js]") {
+	// The contract, from the other language. Dispatched from inside the store
+	// before the removal, so no heartbeat runs between the write and the
+	// assertions below — if it needed one they would fail.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = Instance.new('Part', workspace);
+		log.Name = 'Log';
+
+		const model = Instance.new('Part', workspace);
+		model.Name = 'Model';
+
+		const part = Instance.new('Part', model);
+		part.Name = 'Part';
+
+		workspace.DescendantRemoving.Connect((leaving) => {
+			const mark = Instance.new('Part', log);
+			const intact = leaving.IsDescendantOf(workspace) && leaving.Parent !== null;
+			mark.Name = (intact ? 'intact-' : 'gone-') + leaving.Name;
+		});
+	)");
+
+	const Entity workspaceRoot = engine::scene::WorkspaceOf(store);
+	const Entity log = store.FindFirstChild(workspaceRoot, "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "intact-Model") == engine::ecs::NULL_ENTITY);
+
+	MustRun(*runtime, R"(
+		const holder = Instance.new('Part');
+		holder.Name = 'Holder';
+		workspace.FindFirstChild('Model').Parent = holder;
+	)");
+
+	CHECK(store.FindFirstChild(log, "intact-Model") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "intact-Part") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Model") == engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Part") == engine::ecs::NULL_ENTITY);
+
+	// And the move still happened.
+	CHECK(store.FindFirstChild(workspaceRoot, "Model") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("javascript announces a destroyed subtree once", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = Instance.new('Part', workspace);
+		log.Name = 'Log';
+
+		const model = Instance.new('Part', workspace);
+		model.Name = 'Model';
+
+		const part = Instance.new('Part', model);
+		part.Name = 'Part';
+
+		const nested = Instance.new('Part', part);
+		nested.Name = 'Nested';
+
+		workspace.DescendantRemoving.Connect((leaving) => {
+			const mark = Instance.new('Part', log);
+			mark.Name = 'workspace-' + leaving.Name;
+		});
+		model.DescendantRemoving.Connect((leaving) => {
+			const mark = Instance.new('Part', log);
+			mark.Name = 'model-' + leaving.Name;
+		});
+	)");
+
+	const Entity log = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	const auto counted = [&](const char *name) {
+		size_t count = 0;
+		store.EachChild(log, [&](Entity mark) {
+			if (store.InstanceNameOf(mark) == engine::core::Name(name)) {
+				count++;
+			}
+		});
+		return count;
+	};
+
+	MustRun(*runtime, "workspace.FindFirstChild('Model').Destroy();");
+
+	CHECK(counted("workspace-Model") == 1);
+	CHECK(counted("workspace-Part") == 1);
+	CHECK(counted("workspace-Nested") == 1);
+	CHECK(counted("model-Part") == 1);
+	CHECK(counted("model-Nested") == 1);
+	CHECK(counted("model-Model") == 0);
+}

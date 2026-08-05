@@ -189,13 +189,19 @@ for _, wall in WALLS do
 	-- a render-target index is the engine's bookkeeping, and an authored one is
 	-- a number two cameras can silently be given the same value of.
 
-	-- **Wide enough to still cover the pane when the viewer walks up to it.**
-	-- The reflected camera stands as far behind the glass as the eye is in
-	-- front, so approaching the wall shortens that distance and a narrow lens
-	-- would start cropping the pane's edges. 70 degrees wastes texels at range
-	-- and never runs out of pane, which is the right way round for a mirror
-	-- somebody can walk towards.
-	reflection.FieldOfView = 70
+	-- **Not authored any more, and the attempt is left here as the reason.**
+	-- This used to be 70 degrees, chosen to be "wide enough to still cover the
+	-- pane when the viewer walks up to it" — which is the one thing a constant
+	-- cannot be. The reflected camera stands as far behind the glass as the eye
+	-- is in front, so the pane subtends the same angle from the camera as from
+	-- the viewer: this wall needs 24 degrees from the middle of the room and 127
+	-- from five units away, and past the authored 70 the reflection stopped
+	-- covering the wall and drew as a hard-edged rectangle floating on grey.
+	--
+	-- `scene::AimSurfaceCameras` fits it to the pane's corners every frame, so a
+	-- value set here would be overwritten — as `CFrame` and `NearPlaneZ` already
+	-- are, and for the same reason. A surface camera parented to a part is
+	-- placed by the engine, frustum included.
 
 	-- **The image's own opacity, which is not the pane's.** At 0 the reflection
 	-- is solid whatever the pane's `Transparency` is — so a sheet of glass you

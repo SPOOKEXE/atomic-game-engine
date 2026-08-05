@@ -645,6 +645,16 @@ namespace engine::ecs {
 		out.swap(State->TreeChanges);
 	}
 
+	void Store::OnDescendantRemoving(std::function<void(Entity, Entity)> body) {
+		RequireOwningThread("OnDescendantRemoving");
+
+		State->BeforeRemoving = std::move(body);
+	}
+
+	void Store::ClearDescendantRemoving() {
+		State->BeforeRemoving = {};
+	}
+
 	std::string Store::GetFullName(Entity instance) const {
 		return engine::ecs::GetFullName(*State, instance);
 	}

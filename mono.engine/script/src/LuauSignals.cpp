@@ -1,6 +1,9 @@
 #include "Bindings.hpp"
 
+#include <engine/core/Log.hpp>
+
 #include <lualib.h>
+#include <string>
 #include <string_view>
 
 namespace engine::script {
@@ -17,7 +20,41 @@ namespace engine::script {
 			if (kind == SignalKind::ChildAdded || kind == SignalKind::ChildRemoved ||
 				kind == SignalKind::DescendantAdded || kind == SignalKind::AncestryChanged) {
 				context.World->ObserveTree();
+				return;
 			}
+
+			if (kind != SignalKind::DescendantRemoving) {
+				return;
+			}
+
+			// **Its own switch, because it is not the same mechanism.** The
+			// four above are recorded and delivered at the barrier; this one is
+			// dispatched from inside the store, before the removal happens, and
+			// is the only signal here that is.
+			//
+			// Installed on the first connection rather than with the runtime,
+			// for the reason `.Changed` observes late: the fan-out walks the
+			// leaving subtree and every ancestor above it, and a world nobody
+			// asked must not pay for it.
+			if (context.RemovingHooked) {
+				return;
+			}
+			context.RemovingHooked = true;
+
+			lua_State *state = context.State;
+			context.World->OnDescendantRemoving([state](ecs::Entity ancestor, ecs::Entity leaving) {
+				PushInstanceValue(state, leaving);
+
+				// **The error is logged rather than returned**, because there
+				// is nowhere to return it to: this runs underneath
+				// `Store::SetParent`, called from wherever in the engine chose
+				// to move something. A handler that throws must not take the
+				// reparent with it.
+				const std::string failed = FireSignal(state, SignalKind::DescendantRemoving, ancestor, 1);
+				if (!failed.empty()) {
+					ENGINE_WARN("[script] a DescendantRemoving handler failed: {}", failed);
+				}
+			});
 		}
 
 		using ecs::Entity;

@@ -399,6 +399,13 @@ namespace engine::scene {
 		// keeps whatever `CFrame` it was given, because there is no face to
 		// project off.
 		//
+		// **When it is parented, the lens is the engine's too** — `NearPlaneZ`
+		// is put at the glass and `FieldOfView` is fitted to the pane, because a
+		// frustum that does not cover the pane draws a hard-edged rectangle of
+		// reflection on a bare wall. A script setting either on a parented camera
+		// is overwritten on the next frame, exactly as one setting its `CFrame`
+		// is. Parent it to the world to own all three.
+		//
 		// Stored as the enum's underlying type so the component stays trivially
 		// copyable and the row stays the size it was.
 		NormalId Face = NormalId::Front;

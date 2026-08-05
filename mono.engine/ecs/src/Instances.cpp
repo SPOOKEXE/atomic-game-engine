@@ -18,6 +18,78 @@ namespace engine::ecs {
 		// allocation behind it is the worst way to find out.
 		constexpr size_t MAXIMUM_DEPTH = 4096;
 
+		// Suppresses removal announcements for as long as it is alive.
+		struct RemovalGuard {
+			StoreState &State;
+			bool Previous;
+
+			explicit RemovalGuard(StoreState &state) : State(state), Previous(state.Removing) {
+				State.Removing = true;
+			}
+			~RemovalGuard() {
+				State.Removing = Previous;
+			}
+
+			RemovalGuard(const RemovalGuard &) = delete;
+			RemovalGuard &operator=(const RemovalGuard &) = delete;
+		};
+
+		// Tells every ancestor what it is about to lose, while it still has it.
+		//
+		// **Before a single link is touched, which is what makes this safe to
+		// dispatch synchronously.** `script/Changes.hpp` refuses to fire
+		// `.Changed` from inside a write because the handler would re-enter the
+		// VM with the row half-written. Nothing is half-written here: this runs
+		// at the top of the operation, on a tree that is entirely consistent,
+		// and it is the only position from which "you are called while it is
+		// still there" can be true at all.
+		//
+		// **Every leaving instance, against every ancestor losing it**, which is
+		// Roblox's fan-out. Moving a model out of `Workspace` announces the
+		// model *and every part in it* to `Workspace`, because each of them
+		// stops being a descendant of it.
+		//
+		// @param state  The world it is happening in.
+		// @param leaving The subtree root that is going.
+		// @param from   The parent it is leaving, for a reparent.
+		// @param ownChain Whether each subject announces to its *own* ancestors
+		//                 rather than to `from`'s. True for a destroy, where the
+		//                 ancestors inside the subtree lose their children too;
+		//                 false for a reparent, where they move along with it.
+		void NotifyRemoving(StoreState &state, Entity leaving, Entity from, bool ownChain) {
+			if (!state.BeforeRemoving || state.Removing) {
+				return;
+			}
+
+			// Collected before anything is announced. A handler may reparent or
+			// destroy part of what it was told about, and a walk that read the
+			// tree as it went would then be walking something else.
+			std::vector<Entity> subjects;
+			subjects.push_back(leaving);
+			EachDescendant(state, leaving, [&subjects](Entity under) { subjects.push_back(under); });
+
+			const RemovalGuard guard(state);
+
+			for (const Entity subject : subjects) {
+				// A handler may have taken this one already, and announcing a
+				// row that is gone is the failure this signal exists to avoid.
+				if (!IsEntityAlive(state, subject)) {
+					continue;
+				}
+
+				const Entity start = ownChain ? ParentOf(state, subject) : from;
+
+				size_t steps = 0;
+				for (Entity above = start; above != NULL_ENTITY && steps < MAXIMUM_DEPTH;
+					 above = ParentOf(state, above), steps++) {
+					if (!IsEntityAlive(state, above)) {
+						break;
+					}
+					state.BeforeRemoving(above, subject);
+				}
+			}
+		}
+
 		// Writes down a reparent, when anything is listening for one.
 		//
 		// @param state    The world it happened in.
@@ -514,6 +586,30 @@ namespace engine::ecs {
 		// what `ChildRemoved` is about and there is no way to ask afterwards.
 		const Entity leaving = node->Parent;
 
+		// **Announced here, before the first link moves.** See `NotifyRemoving`.
+		if (leaving != NULL_ENTITY) {
+			NotifyRemoving(state, instance, leaving, false);
+
+			// **Everything read above is re-read, because a handler ran.** It
+			// may have destroyed either end, moved the instance somewhere else,
+			// or parented the intended destination underneath it — so each of
+			// the three checks at the top of this function has to hold again
+			// rather than be assumed to.
+			node = MutableNodeOf(state, instance);
+			if (node == nullptr) {
+				return false;
+			}
+			if (parent != NULL_ENTITY && MutableNodeOf(state, parent) == nullptr) {
+				return false;
+			}
+			if (parent != NULL_ENTITY && IsDescendantOf(state, parent, instance)) {
+				return false;
+			}
+			if (node->Parent == parent) {
+				return true;
+			}
+		}
+
 		// --- unlink from the old parent ---
 		if (node->Parent != NULL_ENTITY) {
 			Hierarchy *previous =
@@ -625,6 +721,24 @@ namespace engine::ecs {
 		if (!IsEntityAlive(state, instance)) {
 			return;
 		}
+
+		// **The whole subtree, announced once, before any of it goes.**
+		// `ownChain` because a destroy takes the ancestors inside the subtree
+		// with it: a model being destroyed loses its own children, so
+		// `model.DescendantRemoving` fires as well as `Workspace`'s.
+		NotifyRemoving(state, instance, ParentOf(state, instance), true);
+
+		// A handler may have destroyed it already.
+		if (!IsEntityAlive(state, instance)) {
+			return;
+		}
+
+		// **Silent from here down.** The recursion below destroys each child
+		// and unparents every row on the way out, and each of those is a
+		// removal that has already been announced by the pass above. Without
+		// this a subtree of a thousand rows would announce itself a thousand
+		// times over.
+		const RemovalGuard guard(state);
 
 		// Children collected before anything is destroyed, because destroying
 		// one rewrites the sibling links the walk is standing on.

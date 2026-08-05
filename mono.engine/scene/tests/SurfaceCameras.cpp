@@ -22,6 +22,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <glm/vec4.hpp>
+
+#include <cmath>
 
 TEST_SUITE_ID("engine.scene.surfacecameras")
 
@@ -163,6 +166,107 @@ TEST_CASE("the near plane is pushed out to the glass", "[scene][surfacecameras]"
 	const Camera *lens = mirror.World.Get<Camera>(mirror.Reflection);
 	REQUIRE(lens != nullptr);
 	CHECK_THAT(lens->NearPlane, Catch::Matchers::WithinAbs(20.5f, TOLERANCE));
+}
+
+TEST_CASE("the frustum covers the whole pane, however close the viewer stands", "[scene][surfacecameras]") {
+	// **The bug a screenshot showed and no test did.** The reflection is
+	// projected back onto the pane per fragment and `opaque.frag` tests the
+	// projected coordinate against the texture's 0..1 rectangle, falling through
+	// to the plain lit pane outside it. A frustum narrower than the pane
+	// therefore does not produce a smaller or softer image — it produces a
+	// hard-edged rectangle of reflection floating on a grey wall, which moves and
+	// resizes as the viewer walks and reads as a mirror aimed at the wrong thing.
+	//
+	// A constant field of view cannot cover it. The camera stands as far behind
+	// the glass as the viewer stands in front, so the pane subtends *the same
+	// angle from the camera as from the viewer* — and that grows without bound as
+	// somebody walks up to a mirror. The authored 70° covered this pane at twenty
+	// units and covered a third of it at two.
+	//
+	// So what is asserted is the thing that actually matters, rather than an
+	// angle: every corner of the pane projects inside the image the camera
+	// renders.
+	Mirror mirror;
+
+	// Half extents 8 by 4.5 on a pane facing -Z, so the face is at z = -0.2 and
+	// its corners are the four combinations of those.
+	const auto cornersAreCovered = [&]() {
+		const Transform *placed = mirror.World.Get<Transform>(mirror.Reflection);
+		const Camera *lens = mirror.World.Get<Camera>(mirror.Reflection);
+		const SurfaceCamera *target = mirror.World.Get<SurfaceCamera>(mirror.Reflection);
+		REQUIRE(placed != nullptr);
+		REQUIRE(lens != nullptr);
+		REQUIRE(target != nullptr);
+
+		const float aspect = static_cast<float>(target->Width) / static_cast<float>(target->Height);
+		const glm::mat4 viewProjection =
+			engine::scene::ResolveCamera(placed->Frame, *lens, aspect).ViewProjection;
+
+		bool covered = true;
+		for (const float x : {-8.0f, 8.0f}) {
+			for (const float y : {-4.5f, 4.5f}) {
+				const glm::vec4 clip = viewProjection * glm::vec4(x, y, -0.2f, 1.0f);
+				INFO("corner " << x << ", " << y << " has w " << clip.w);
+
+				// Behind the camera is not covered, and saying so beats a divide
+				// that flips the sign and reports the corner as central.
+				if (!(clip.w > 0.0f)) {
+					covered = false;
+					continue;
+				}
+
+				covered = covered && std::abs(clip.x / clip.w) <= 1.0f && std::abs(clip.y / clip.w) <= 1.0f;
+			}
+		}
+		return covered;
+	};
+
+	// Twenty units back, which the old constant did cover.
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(cornersAreCovered());
+
+	// **Two units, which it did not.** The pane needs about 150 degrees from
+	// here and had 70, so the corners fell outside the texture and the wall drew
+	// its own grey around a rectangle of reflection.
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 2.0f});
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(cornersAreCovered());
+
+	// And off to one side as well as close, which is the case a symmetric
+	// frustum has to widen for rather than shift.
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{6.0f, 3.0f, 3.0f});
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(cornersAreCovered());
+
+	// **Far enough away that the fit narrows rather than widens**, which is the
+	// half a "make it wider" fix would pass without doing: a distant pane gets a
+	// frustum tight around it, and the texels go on the mirror instead of on the
+	// room around it.
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, 200.0f});
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	CHECK(cornersAreCovered());
+	CHECK(mirror.World.Get<Camera>(mirror.Reflection)->FieldOfViewRadians < 0.2f);
+}
+
+TEST_CASE(
+	"a pane in the plane of the viewer does not produce an infinite frustum", "[scene][surfacecameras]"
+) {
+	// The 180 degree case, arriving. The viewer walks into the glass, the
+	// reflected camera arrives with it, and the angle the pane subtends goes to
+	// half a turn — which no projection covers and which `tan` answers with
+	// infinity. Clamped, so the frame is a reflection that stops covering the far
+	// corners rather than a matrix full of infinities spreading into every
+	// culled bound.
+	Mirror mirror;
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+
+	const Camera *lens = mirror.World.Get<Camera>(mirror.Reflection);
+	REQUIRE(lens != nullptr);
+	CHECK(std::isfinite(lens->FieldOfViewRadians));
+	CHECK(lens->FieldOfViewRadians > 0.0f);
+	CHECK(lens->FieldOfViewRadians < 3.1415926f);
 }
 
 TEST_CASE("a camera with no part parent is left where it was put", "[scene][surfacecameras]") {

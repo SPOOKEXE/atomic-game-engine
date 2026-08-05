@@ -59,6 +59,7 @@ namespace engine::scene {
 			Entity Part;
 			CFrame Frame;
 			float NearPlane = 0.0f;
+			float FieldOfView = 0.0f;
 			// Handed out after the walk, by entity id. -1 is a camera past the
 			// renderer's cap, whose pane is left as an ordinary part.
 			int8_t Surface = -1;
@@ -67,6 +68,149 @@ namespace engine::scene {
 		std::vector<Aim> &Pending() {
 			static thread_local std::vector<Aim> pending;
 			return pending;
+		}
+
+		// A little wider than the pane exactly needs.
+		//
+		// **Because the edge of a frustum is not a safe place to sample.** The
+		// projection is read back per fragment and the surface texture is
+		// filtered, so a corner landing precisely on `u = 1` samples half a texel
+		// of whatever `CLAMP_TO_EDGE` hands back. A couple of percent of slack
+		// costs a couple of percent of texels and puts the pane's edge inside the
+		// image rather than on its boundary.
+		constexpr float FIT_MARGIN = 1.02f;
+
+		// The widest frustum worth building, in radians — a whisker under 180°.
+		//
+		// **A limit of the projection rather than a policy.** A pane subtends
+		// half a turn from a point on its own surface, so as the viewer walks
+		// into the glass the frustum needed to cover it approaches 180° and its
+		// tangent approaches infinity. There is no field of view that covers a
+		// plane you are standing on, and clamping is what turns that into a
+		// reflection that stops covering the far corners instead of a projection
+		// matrix full of infinities. An oblique frustum does not escape this
+		// either; it is the geometry, not the parameterisation.
+		constexpr float FIT_MAXIMUM = 3.0f;
+
+		// And the narrowest, so a distant pane still has a frustum with a shape.
+		constexpr float FIT_MINIMUM = 0.02f;
+
+		// The two half-axes of a face, in the world.
+		//
+		// **The axes the normal is not on**, picked the way `MarkerExtent` picks
+		// them and for the same reason: a face normal is axis-aligned and unit,
+		// so the component above a half names the axis it lies on and the other
+		// two are what is left. Returned already scaled by their half-extents and
+		// rotated into the world, so `centre ± first ± second` is the pane's four
+		// corners and nothing downstream has to know which axes they were.
+		void FaceAxes(
+			const CFrame &placement,
+			const Vector3 &local,
+			const Vector3 &half,
+			Vector3 &first,
+			Vector3 &second
+		) {
+			if (std::abs(local.X) > 0.5f) {
+				first = placement.VectorToWorldSpace(Vector3{0.0f, 1.0f, 0.0f}) * half.Y;
+				second = placement.VectorToWorldSpace(Vector3{0.0f, 0.0f, 1.0f}) * half.Z;
+				return;
+			}
+			if (std::abs(local.Y) > 0.5f) {
+				first = placement.VectorToWorldSpace(Vector3{1.0f, 0.0f, 0.0f}) * half.X;
+				second = placement.VectorToWorldSpace(Vector3{0.0f, 0.0f, 1.0f}) * half.Z;
+				return;
+			}
+			first = placement.VectorToWorldSpace(Vector3{1.0f, 0.0f, 0.0f}) * half.X;
+			second = placement.VectorToWorldSpace(Vector3{0.0f, 1.0f, 0.0f}) * half.Y;
+		}
+
+		// The vertical field of view that just covers a pane, in radians.
+		//
+		// **The bug this exists for, because it is not obvious from a still
+		// frame.** The reflection is projected back onto the pane per fragment
+		// and `opaque.frag` tests the projected coordinate against the texture's
+		// 0..1 rectangle, falling back to the plain lit pane outside it. So a
+		// frustum that does not cover the whole pane does not stretch or fade —
+		// it draws a hard-edged rectangle of reflection floating on a grey wall.
+		//
+		// A fixed field of view cannot cover it, and the reason is the whole of
+		// planar reflection: the camera stands as far behind the glass as the
+		// viewer stands in front, so the pane subtends *the same angle from the
+		// camera as it does from the viewer*. Walk towards a mirror and that
+		// angle grows without bound. `Mirrors-1-world.luau` authored 70° with a
+		// comment saying it was "wide enough to still cover the pane when the
+		// viewer walks up to it", which is exactly the thing no constant can be:
+		// at 48 units back the north wall needs 24°, and at 5 units it needs 127°.
+		//
+		// So it is fitted, every frame, to the four corners.
+		//
+		// **This needs the camera to look along the face normal, and the caller
+		// does.** Every point of the pane is then at the same depth, so each
+		// corner's constraint is finite and none can fall behind the camera. An
+		// aim at the pane's centre puts the near corner behind the camera as soon
+		// as the viewer is close and off to one side, and no angle covers that.
+		//
+		// The frustum is symmetric about the axis, so a viewer off to one side
+		// pays for the far edge on both sides — an off-axis frustum would fit the
+		// same corners with none of that waste, and is the better shape once
+		// `SurfaceView` can carry a rectangle rather than a field of view.
+		//
+		// @param frame  Where the camera stands and which way it faces.
+		// @param centre The middle of the pane.
+		// @param first  One half-axis of the pane, in the world.
+		// @param second The other.
+		// @param aspect Width over height of the texture it renders into.
+		// @return A vertical field of view in radians, clamped to something a
+		//         projection can be built from.
+		float FitFieldOfView(
+			const CFrame &frame,
+			const Vector3 &centre,
+			const Vector3 &first,
+			const Vector3 &second,
+			float aspect
+		) {
+			// A texture with no height would divide the horizontal constraint by
+			// zero and hand back a frustum of infinities.
+			if (!(aspect > 0.0f)) {
+				return FIT_MAXIMUM;
+			}
+
+			const Vector3 eye = frame.Position;
+			const Vector3 forward = frame.LookVector();
+			const Vector3 right = frame.RightVector();
+			const Vector3 up = frame.UpVector();
+
+			float tangent = 0.0f;
+
+			for (int alongFirst = -1; alongFirst <= 1; alongFirst += 2) {
+				for (int alongSecond = -1; alongSecond <= 1; alongSecond += 2) {
+					const Vector3 corner = centre + first * static_cast<float>(alongFirst) +
+										   second * static_cast<float>(alongSecond);
+					const Vector3 toCorner = corner - eye;
+
+					// **Level with the camera or behind it**, which happens as
+					// the viewer approaches the plane of the pane: the reflected
+					// camera approaches it too, and a corner at ninety degrees is
+					// the 180° case arriving. Nothing finite covers that, so the
+					// widest frustum is the answer rather than a division that
+					// produces one.
+					const float depth = toCorner.Dot(forward);
+					if (!(depth > 1e-4f)) {
+						return FIT_MAXIMUM;
+					}
+
+					// The vertical constraint directly, and the horizontal one
+					// divided by the aspect — because `ResolveCamera` builds a
+					// projection from a *vertical* field of view and widens it by
+					// the aspect, so `tan(h/2) = aspect * tan(v/2)` and a corner
+					// off to the side asks for proportionally less of the vertical
+					// angle than one above.
+					tangent = std::max(tangent, std::abs(toCorner.Dot(up)) / depth);
+					tangent = std::max(tangent, std::abs(toCorner.Dot(right)) / depth / aspect);
+				}
+			}
+
+			return std::clamp(2.0f * std::atan(tangent * FIT_MARGIN), FIT_MINIMUM, FIT_MAXIMUM);
 		}
 
 		// How thick the face marker is, in studs, on the two axes it is not
@@ -228,16 +372,68 @@ namespace engine::scene {
 				// renders empty space. That was the first version of the script
 				// this replaces, and the mirror came out showing the clear
 				// colour.
+				//
+				// **Square on to the pane, and not at its centre.** Aiming at the
+				// middle sounds like the same thing and is not: it tilts the view
+				// axis off the face normal by however far the viewer stands to one
+				// side, and the pane then lies at an angle across the frustum.
+				// Push that far enough — close to the glass and off to the side,
+				// which is a metre from a wall in a room — and the nearest corner
+				// of the pane goes *behind* the camera. Nothing covers a point
+				// behind a camera, so no field of view could rescue it, and the
+				// corner drew as bare wall.
+				//
+				// Looking along the normal puts every point of the pane at the
+				// same depth, so the fit below is always finite and the corners
+				// are always in front. It costs nothing in correctness: the image
+				// is read back by projecting each fragment through this camera's
+				// own matrix, so the orientation decides which texels the pane
+				// lands on and never which part of the world it shows. The
+				// *position* is what makes it a reflection, and that is unchanged.
+				//
+				// Which way along the normal follows from which side the viewer
+				// is on, because a face can be looked at from behind — the sign of
+				// `distance` is exactly that question, already answered.
+				const float facing = distance >= 0.0f ? 1.0f : -1.0f;
+				const Vector3 forward = unit * facing;
+
+				// **A different up for a floor or a ceiling.** `LookAt` builds its
+				// rotation against an up vector and cannot when the two are
+				// parallel — a mirror in the floor faces straight up, which is the
+				// one case the default cannot resolve, and it produces a NaN
+				// rotation that spreads into the frame, the near plane and every
+				// bound derived from them.
+				const Vector3 up =
+					std::abs(forward.Dot(Vector3::YAxis)) > 0.99f ? Vector3::ZAxis : Vector3::YAxis;
+
 				Aim aim;
 				aim.Camera = entity;
 				aim.Part = face.Part;
-				aim.Frame = CFrame::LookAt(reflected, centre);
+				aim.Frame = CFrame::LookAt(reflected, reflected + forward, up);
 
 				// The near plane at the glass, which is the poor-man's oblique
 				// clip: everything between the reflected camera and the pane
 				// would otherwise occlude the reflection. A small margin,
 				// because a near plane exactly on the surface z-fights it.
 				aim.NearPlane = std::abs(distance) + 0.3f;
+
+				// **And a frustum fitted to the pane, because a constant one
+				// cannot be.** See `FitFieldOfView`: the reflection is projected
+				// back per fragment and clipped to the texture's rectangle, so a
+				// frustum narrower than the pane draws a hard-edged rectangle of
+				// reflection on a grey wall rather than a smaller or softer image.
+				Vector3 first;
+				Vector3 second;
+				FaceAxes(face.Placement, NormalOf(target.Face), face.HalfExtent, first, second);
+
+				// The texture's shape, which is what `client::CollectSurfaceViews`
+				// hands the renderer and therefore what the projection is widened
+				// by. Taking it from anywhere else would fit a frustum to a
+				// rectangle nothing renders into.
+				const float aspect = static_cast<float>(target.Width) /
+									 static_cast<float>(std::max<uint16_t>(target.Height, 1));
+
+				aim.FieldOfView = FitFieldOfView(aim.Frame, centre, first, second, aspect);
 
 				pending.push_back(aim);
 			}
@@ -300,9 +496,19 @@ namespace engine::scene {
 				store.Set(aim.Camera, Transform{aim.Frame});
 			}
 
-			if (const Camera *lens = store.Get<Camera>(aim.Camera);
-				lens != nullptr && lens->NearPlane != aim.NearPlane) {
-				store.GetMutable<Camera>(aim.Camera)->NearPlane = aim.NearPlane;
+			// **Both clip and field of view, and both are the engine's now.** A
+			// surface camera parented to a part has its placement written here
+			// every frame; the frustum that placement implies is no more the
+			// author's to choose than the placement is. A `FieldOfView` set by a
+			// script is honoured on a camera parented to the world, which is the
+			// same line `Transform` is already drawn on.
+			if (const Camera *lens = store.Get<Camera>(aim.Camera); lens != nullptr) {
+				if (lens->NearPlane != aim.NearPlane) {
+					store.GetMutable<Camera>(aim.Camera)->NearPlane = aim.NearPlane;
+				}
+				if (lens->FieldOfViewRadians != aim.FieldOfView) {
+					store.GetMutable<Camera>(aim.Camera)->FieldOfViewRadians = aim.FieldOfView;
+				}
 			}
 
 			// **Both ends of the pairing, written from one number.** The camera

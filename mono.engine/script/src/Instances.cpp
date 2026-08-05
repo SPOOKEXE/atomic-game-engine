@@ -499,6 +499,10 @@ namespace engine::script {
 				PushSignal(state, SignalKind::DescendantAdded, instance);
 				return 1;
 			}
+			if (name == "DescendantRemoving") {
+				PushSignal(state, SignalKind::DescendantRemoving, instance);
+				return 1;
+			}
 			if (name == "AncestryChanged") {
 				PushSignal(state, SignalKind::AncestryChanged, instance);
 				return 1;
