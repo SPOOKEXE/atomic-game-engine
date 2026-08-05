@@ -12,6 +12,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -146,8 +147,13 @@ TEST_CASE("a directory becomes a folder and its scripts become scripts", "[studi
 	const Entity shared = Child(store, replicated, "Shared");
 	REQUIRE(shared != NULL_ENTITY);
 
-	// A plain `.luau` is a script named without its extension.
-	CHECK(Child(store, shared, "Util") != NULL_ENTITY);
+	// **A plain `.luau` is a `ModuleScript`, not a `Script`.** Only the suffixed
+	// files are programs a host runs; everything else in a project is something
+	// a program requires, and mapping them all to `Script` would make a synced
+	// project execute every library it contains.
+	const Entity util = Child(store, shared, "Util");
+	REQUIRE(util != NULL_ENTITY);
+	CHECK(store.ClassOf(util) == engine::ecs::Classes::Find(Name("ModuleScript")));
 
 	// A subdirectory is a folder, and its scripts hang under it rather than
 	// being flattened into the parent.
@@ -180,8 +186,9 @@ TEST_CASE("init.luau makes the directory itself the script", "[studio][rojosync]
 	const Entity config = Child(store, shared, "Config");
 	REQUIRE(config != NULL_ENTITY);
 
-	// It is a script, not a folder — and it kept its children.
-	CHECK(engine::ecs::Classes::IsA(store.ClassOf(config), engine::ecs::Classes::Find(Name("Script"))));
+	// It is a module, not a folder — and it kept its children. `init` is how a
+	// module gets children, not how a folder becomes a program.
+	CHECK(store.ClassOf(config) == engine::ecs::Classes::Find(Name("ModuleScript")));
 	CHECK(Child(store, config, "Values") != NULL_ENTITY);
 
 	// The `init.luau` did not also appear as a child called `init`.
@@ -336,5 +343,48 @@ TEST_CASE("syncing twice does not duplicate the tree", "[studio][rojosync]") {
 	store.EachRoot([&after](Entity) { after++; });
 
 	CHECK(after == roots);
+}
+
+
+TEST_CASE("the three script classes come from the three file shapes", "[studio][rojosync]") {
+	// **The mapping in one case, because it is the whole contract with Rojo.**
+	// Getting any row of this wrong is a project that runs the wrong half of
+	// itself, and nothing about the tree would look unusual.
+	Tree tree;
+	Store store("rojo_test");
+	(void)engine::scene::PartClass();
+
+	RojoProject project;
+	std::string error;
+	REQUIRE(ParseRojoProject(
+		R"({"name":"E","tree":{"$className":"DataModel",
+		    "ReplicatedStorage":{"$className":"ReplicatedStorage",
+		      "Shared":{"$className":"Folder","$path":"src/shared"}},
+		    "ServerScriptService":{"$className":"ServerScriptService",
+		      "Server":{"$className":"Folder","$path":"src/server"}},
+		    "StarterPlayer":{"$className":"StarterPlayer",
+		      "Client":{"$className":"Folder","$path":"src/client"}}}})",
+		project, error
+	));
+
+	RojoSyncReport report;
+	REQUIRE(SyncRojoProject(project, tree.Root, store, report, error));
+
+	const auto classOf = [&](Entity parent, const char *name) {
+		const Entity found = Child(store, parent, name);
+		REQUIRE(found != NULL_ENTITY);
+		return store.ClassOf(found);
+	};
+
+	const Entity shared = Child(store, store.FindFirstRoot("ReplicatedStorage"), "Shared");
+	const Entity server = Child(store, store.FindFirstRoot("ServerScriptService"), "Server");
+	const Entity client = Child(store, store.FindFirstRoot("StarterPlayer"), "Client");
+	REQUIRE(shared != NULL_ENTITY);
+	REQUIRE(server != NULL_ENTITY);
+	REQUIRE(client != NULL_ENTITY);
+
+	CHECK(classOf(shared, "Util") == engine::ecs::Classes::Find(Name("ModuleScript")));
+	CHECK(classOf(server, "Boot") == engine::ecs::Classes::Find(Name("Script")));
+	CHECK(classOf(client, "Hud") == engine::ecs::Classes::Find(Name("LocalScript")));
 }
 

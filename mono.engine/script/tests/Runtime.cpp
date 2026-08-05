@@ -606,8 +606,12 @@ TEST_CASE("a service nobody provides is an error", "[script]") {
 
 	// Naming it beats returning nil: a script that gets nil back fails one line
 	// later, somewhere that says nothing about the cause.
-	CHECK_FALSE(runtime->Run("game:GetService('Players')"));
-	CHECK(runtime->LastError().find("Players") != std::string::npos);
+	//
+	// `MarketplaceService` rather than `Players`, which this used to name and
+	// which the engine now provides. A test whose example becomes real is a test
+	// that stops testing what it says.
+	CHECK_FALSE(runtime->Run("game:GetService('MarketplaceService')"));
+	CHECK(runtime->LastError().find("MarketplaceService") != std::string::npos);
 }
 
 TEST_CASE("workspace is an instance in the world", "[script]") {
@@ -639,15 +643,19 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	REQUIRE(runtime->Run("assert(game.Workspace == workspace)"));
 	REQUIRE(runtime->Run("assert(game:GetService('Workspace') == workspace)"));
 
-	// The part, the Workspace, and the eight other services `InstallServices`
+	// The part, the Workspace, and the nine other services `InstallServices`
 	// puts in every world. A phantom row standing for the world is exactly what
 	// there is still none of — `workspace` names something that was already
 	// there.
+	//
+	// The count moves whenever a service is added, and it is written out rather
+	// than derived on purpose: a service arriving without somebody noticing is
+	// exactly what this number is here to make impossible.
 	size_t instances = 0;
 	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
 		instances++;
 	});
-	CHECK(instances == 10);
+	CHECK(instances == 11);
 }
 
 // **The rule the render gate rests on**, stated from the script side: an

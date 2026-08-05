@@ -180,6 +180,9 @@ namespace engine::scene {
 		// and stated because the alternative reading is a corrupted tree.
 		ecs::Components::Register<ecs::Hierarchy>("ecs.Hierarchy");
 
+		// Added at the end of this list rather than beside `ServiceComponent`,
+		// per the ordering note above: a component id decides column order, and
+		// inserting one in the middle reorders iteration across the engine.
 		ecs::Components::Register<Transform>("scene.Transform", TransformWire());
 		ecs::Components::Register<PreviousTransform>("scene.PreviousTransform");
 		ecs::Components::Register<Bounds>("scene.Bounds");
@@ -202,6 +205,13 @@ namespace engine::scene {
 		ecs::Components::Register<TransientComponent>("scene.Transient");
 		ecs::Components::Register<ServiceComponent>("scene.Service");
 		ecs::Components::Register<LightingServiceComponent>("scene.LightingService");
+
+		// **Who this host is looking through, and only a client has one.** A
+		// resource, so it is carried by a snapshot and covered by the affinity
+		// check like everything else a world holds — and named explicitly
+		// because an automatic name minted from the compiler's spelling is
+		// unusable the moment a world crosses a process.
+		ecs::Components::Register<LocalPlayer>("scene.LocalPlayer");
 
 		// The render gate, at the end for the reason this list opens with.
 		//

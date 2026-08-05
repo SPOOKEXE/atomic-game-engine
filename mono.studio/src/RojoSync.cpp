@@ -37,6 +37,13 @@ namespace studio {
 		struct ScriptFile {
 			bool IsScript = false;
 			bool Local = false;
+
+			// **A plain `.luau` is a module, which is Rojo's own rule.** Only the
+			// suffixed files are programs the host runs; everything else in a
+			// project is something a program requires. Mapping them all to
+			// `Script` — which this did before `ModuleScript` existed — meant a
+			// synced project executed every library it contained.
+			bool Module = false;
 			std::string Name;
 		};
 
@@ -56,6 +63,8 @@ namespace studio {
 			} else if (EndsWith(stem, ".client")) {
 				stem.resize(stem.size() - 7);
 				found.Local = true;
+			} else {
+				found.Module = true;
 			}
 
 			found.Name = stem;
@@ -181,7 +190,10 @@ namespace studio {
 					if (std::filesystem::exists(init, kind)) {
 						const std::string key = keyPrefix + leaf + "/init.luau";
 						if (StageProgram(store, init, key)) {
-							node = engine::script::MakeScript(store, key, leaf, false);
+							// A module, like any other plain `.luau`. `init` is
+							// how a module gets children, not how a folder
+							// becomes a program.
+							node = engine::script::MakeModule(store, key, leaf);
 							report.Scripts++;
 						}
 					}
@@ -219,7 +231,9 @@ namespace studio {
 					continue;
 				}
 
-				const Entity script = engine::script::MakeScript(store, key, file.Name, file.Local);
+				const Entity script = file.Module
+										  ? engine::script::MakeModule(store, key, file.Name)
+										  : engine::script::MakeScript(store, key, file.Name, file.Local);
 				if (script == NULL_ENTITY) {
 					continue;
 				}
@@ -266,7 +280,10 @@ namespace studio {
 					const ScriptFile file = ClassifyFile(source);
 					if (file.IsScript && StageProgram(store, source, node.Path)) {
 						const Entity script =
-							engine::script::MakeScript(store, node.Path, file.Name, file.Local);
+							file.Module ? engine::script::MakeModule(store, node.Path, file.Name)
+										: engine::script::MakeScript(
+											  store, node.Path, file.Name, file.Local
+										  );
 						if (script != NULL_ENTITY) {
 							store.SetParent(script, node_);
 							report.Instances++;

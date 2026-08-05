@@ -181,12 +181,38 @@ stable — the instance, not the text.
 - **No syntax highlighting and no line-number gutter.** The script editor is a
   plain multiline field in imgui's default proportional font. A monospace font
   is a file this repository does not have and a licence somebody has to choose.
-- **No `ModuleScript`, so a Rojo sync makes every module a `Script`.** Every
-  `Script` is run by `RunWorldScripts` at world start and `require` is refused
-  by name, so a synced project executes files that were written to be required.
-  `script/Instances.hpp` records why the class does not exist; until it does,
-  the sync is useful for the tree and the source text rather than for pressing
-  Play on somebody else's game.
+- **No two-way sync.** A Rojo project is read, never written back. Conflict
+  semantics for everything the editor can touch is a real piece of work rather
+  than a flag, and `docs/v07v08.md` files it under v0.10.
+
+## A file's shape decides its class, and its class decides its context
+
+The three script classes are three contexts, and the Rojo sync is where a file
+becomes one of them:
+
+| On disk | Class | Runs |
+|---|---|---|
+| `X.server.luau` | `Script` | where `IsServer()` |
+| `X.client.luau` | `LocalScript` | where `IsClient()` |
+| `X.luau`, `init.luau` | `ModuleScript` | never — `require` evaluates it |
+
+**`ModuleScript` is a sibling of `Script`, not a kind of one.** `ScriptsIn`
+collects `IsA(Script)` and `IsA(LocalScript)`; a module is neither, so the run
+loop never visits one and nothing had to learn to skip it. Derived from `Script`
+it would have run on every server by default, which is the opposite of what a
+module is for — and a synced project would execute every library it contains.
+
+**A module is keyed by instance, not by path.** Two copies in two places are two
+modules with two states, exactly as two copies of a `Script` are two scripts.
+That is what makes a module a thing in the tree rather than a thing on disk, and
+it is why `require` takes an instance and never a string.
+
+`Players.LocalPlayer` is a **computed property**, not a script-side special case.
+`Instances.cpp` switches on `PropertyType` and nothing else, so declaring it in
+`scene` made it readable from Luau, from JavaScript and in the properties panel
+with none of them changing. It is read-only and nil on a server: a `Script`
+reaching for it gets nothing rather than somebody else's player, which is the one
+thing a shared codebase must not get wrong.
 
 ## The debugger captures, it does not pause
 

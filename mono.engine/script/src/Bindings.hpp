@@ -121,6 +121,27 @@ namespace engine::script {
 		// second answer to what is armed.
 		Debugger *Breakpoints = nullptr;
 
+		// What each `ModuleScript` evaluated to, by entity id.
+		//
+		// **A registry ref per module, and the module runs once.** Roblox's rule:
+		// every `require` of one module hands back the same value, so a module
+		// with a side effect at its top level has that side effect once — on
+		// whichever script required it first. A map that re-ran would make
+		// module order something an author had to reason about.
+		//
+		// Keyed by `Entity::Id` rather than by path, because two instances may
+		// name one file and they are two modules. That is what makes a module a
+		// thing in the tree rather than a thing on disk.
+		std::unordered_map<uint64_t, int> Modules;
+
+		// Modules part way through evaluating, innermost last.
+		//
+		// **Cycle detection, and it has to be by instance.** `a` requiring `b`
+		// requiring `a` would otherwise recurse until the C stack ran out, which
+		// surfaces as a crash with no line number rather than as a script error
+		// naming the two files.
+		std::vector<ecs::Entity> Loading;
+
 		// The script currently being run by `RunInstance`, so a captured hit can
 		// say which one it came from.
 		//
@@ -275,6 +296,15 @@ namespace engine::script {
 	// **yields** on one — which is legal under `docs/SCRIPT_CONCURRENCY.md` §1
 	// precisely because the barrier applies replies in a deterministic order.
 	void OpenServices(lua_State *state);
+
+	// Installs `require`, which is the only route to a `ModuleScript`.
+	//
+	// **Defined beside the compiler rather than with the other globals**, because
+	// evaluating a module is loading a chunk — the same compile, the same
+	// sandboxed thread and the same `script` global that a `Script` gets. A
+	// second loader here would be a second answer to what running a program
+	// means.
+	void OpenRequire(lua_State *state);
 
 	// Installs `task`, and the yield rule made real.
 	void OpenTask(lua_State *state);

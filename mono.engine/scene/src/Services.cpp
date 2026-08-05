@@ -49,6 +49,45 @@ namespace engine::scene {
 		// want is the word. The same trade `Material` makes one file over: the
 		// component holds what is cheap to iterate and the property holds what
 		// is legible.
+		// `Players.LocalPlayer`.
+		//
+		// **A property, so no binding ever learns the name.** `Instances.cpp`
+		// switches on `PropertyType` and nothing else — that is what makes a
+		// property declared here readable from Luau, from JavaScript and in the
+		// properties panel with none of them changing. A `if (name ==
+		// "LocalPlayer")` in the script layer would be the second source of
+		// truth the whole conversion design exists to prevent.
+		//
+		// **Read-only, because who you are is not yours to assign.** A script
+		// setting `LocalPlayer` would be a client claiming to be somebody else,
+		// which is the one thing a client must not be able to say.
+		PropertyDescriptor LocalPlayerProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("LocalPlayer");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(Entity);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+
+			// Reads nothing on the row: the answer is a resource, because there
+			// is one of it per world. An empty set rather than null, so every
+			// consumer that walks `Reads` finds a set to walk.
+			property.Reads = &ecs::ComponentSet::Intern({});
+			property.Writes = property.Reads;
+
+			property.Get = [](const Store &store, Entity, void *out) -> bool {
+				const LocalPlayer *local = store.Resource<LocalPlayer>();
+
+				// **Nil on a server, and that is the feature.** A `Script` that
+				// reaches for it gets nothing rather than somebody else's
+				// player — the mistake this separation exists to make
+				// impossible.
+				*static_cast<Entity *>(out) = local != nullptr ? local->Instance : NULL_ENTITY;
+				return true;
+			};
+			return property;
+		}
+
 		PropertyDescriptor ScopeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Scope");
@@ -100,7 +139,7 @@ namespace engine::scene {
 			std::string_view Parent;
 		};
 
-		constexpr std::array<ServiceDesc, 9> SERVICES{{
+		constexpr std::array<ServiceDesc, 10> SERVICES{{
 			// **Workspace first, and the order matters.** These are created in
 			// this order and the explorer draws roots in creation order, so
 			// this is the order an author sees — Workspace at the top, exactly
@@ -114,6 +153,12 @@ namespace engine::scene {
 			{"StarterGui", ServiceScope::Client, {}},
 			{"StarterPlayer", ServiceScope::Client, {}},
 			{"StarterPlayerScripts", ServiceScope::Client, "StarterPlayer"},
+
+			// **`Shared`, because both halves need it and for different
+			// things.** A server enumerates who is connected; a client asks
+			// which of them is itself. A `Client` scope would hide the list
+			// from the authority that maintains it.
+			{"Players", ServiceScope::Shared, {}},
 		}};
 
 		ClassId RegisterServiceTree() {
@@ -151,7 +196,18 @@ namespace engine::scene {
 				Classes::Register(desc.Name, service, {});
 			}
 
+			// **A `Player` is an instance, not a service.** There are many of
+			// them, they come and go, and a script reaches one through
+			// `Players` — which is exactly the shape the instance tree already
+			// has. Derived from `Instance` rather than from `Service` so the
+			// class picker's service exclusion does not hide it, and so a world
+			// can hold as many as it has occupants.
+			Classes::Register("Player", instance, {});
+
 			Classes::Computed(service, ScopeProperty());
+
+			const ClassId players = Classes::Find(core::Name("Players"));
+			Classes::Computed(players, LocalPlayerProperty());
 			Classes::Property<&ServiceComponent::Fixture>(service, "Fixture");
 
 			const ClassId lighting = Classes::Find(core::Name("Lighting"));
@@ -175,6 +231,41 @@ namespace engine::scene {
 
 	Entity WorkspaceOf(const Store &store) {
 		return store.FindFirstRoot("Workspace");
+	}
+
+	Entity PlayersOf(const Store &store) {
+		return store.FindFirstRoot("Players");
+	}
+
+	ecs::ClassId PlayerClass() {
+		ServiceClass();
+		return Classes::Find(core::Name("Player"));
+	}
+
+	Entity AddPlayer(Store &store, std::string_view name, bool local) {
+		const Entity players = PlayersOf(store);
+		if (players == NULL_ENTITY) {
+			// **Refused rather than furnished on the way past.** A caller adding
+			// a player to a world with no `Players` has skipped
+			// `InstallServices`, and quietly creating the service here would
+			// make that omission invisible until something else asked for it.
+			return NULL_ENTITY;
+		}
+
+		const Entity player = store.CreateInstance(PlayerClass(), name);
+		if (player == NULL_ENTITY) {
+			return NULL_ENTITY;
+		}
+
+		store.SetParent(player, players);
+
+		if (local) {
+			// One per world, and the last marked wins. A resource rather than a
+			// tag because there is one of it — `ecs/AGENTS.md`'s rule — and
+			// because "who am I" is a question with one answer.
+			store.SetResource(LocalPlayer{player});
+		}
+		return player;
 	}
 
 	Entity InstallServices(Store &store) {

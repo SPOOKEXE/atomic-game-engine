@@ -60,11 +60,10 @@ namespace engine::script {
 	//
 	// Process-wide and idempotent, like every other class registration.
 	//
-	// **No `ModuleScript`**, and that is a gap with a reason rather than an
-	// oversight: a module is reached with `require`, `require` reaches code no
-	// manifest describes, and `LuauHost.cpp` refuses it by name. The instance
-	// tree is the route a module should arrive through, and designing that is
-	// v0.7's.
+	// `ModuleScript` is registered here too, and it is a **sibling** of `Script`
+	// rather than a kind of one — which is what makes it inert. `ScriptsIn`
+	// collects `IsA(Script)` and `IsA(LocalScript)`; a module is neither, so the
+	// run loop never visits one and nothing had to learn to skip it.
 	//
 	// @return The `Script` class id.
 	ecs::ClassId ScriptClass();
@@ -73,6 +72,17 @@ namespace engine::script {
 	//
 	// @return The class id.
 	ecs::ClassId LocalScriptClass();
+
+	// The `ModuleScript` class id, registering the tree on first call.
+	//
+	// **Nothing runs a module.** It is reached with `require`, which evaluates it
+	// once per runtime and hands every later caller the same value back. A module
+	// with a side effect at its top level therefore has that side effect once, on
+	// whichever script required it first — Roblox's rule, and the reason module
+	// order is not something an author has to think about.
+	//
+	// @return The class id.
+	ecs::ClassId ModuleScriptClass();
 
 	// Every script instance a host of this role should run, in a stable order.
 	//
@@ -104,4 +114,12 @@ namespace engine::script {
 	// @return The instance, or `NULL_ENTITY` when the world refused it.
 	ecs::Entity
 	MakeScript(ecs::Store &store, std::string_view path, std::string_view name, bool local = false);
+
+	// Creates a `ModuleScript` naming a file.
+	//
+	// @param store The world.
+	// @param path  The asset-relative path to read the program from.
+	// @param name  The instance's name, which is what `require` reaches it by.
+	// @return The instance, or `NULL_ENTITY` when the world refused it.
+	ecs::Entity MakeModule(ecs::Store &store, std::string_view path, std::string_view name);
 }

@@ -5,6 +5,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -294,6 +295,11 @@ namespace engine::script {
 		OpenClock(State);
 		OpenBaseExtras(State);
 
+		// **After `OpenBaseExtras`, which installs the refusal.** Overwriting it
+		// here rather than deleting it there keeps a runtime that never calls this
+		// refusing with a sentence rather than with a nil global.
+		OpenRequire(State);
+
 		lua_callbacks(State)->interrupt = Interrupt;
 
 		// **The step callback is installed, single-step mode is not.** Luau only
@@ -453,6 +459,140 @@ namespace engine::script {
 
 		lua_pop(State, 1);
 		return true;
+	}
+
+	namespace {
+		// `require(moduleScript)`.
+		//
+		// **The argument is an instance, never a path.** A path would be a second
+		// namespace beside the tree — two ways to name one module, disagreeing the
+		// first time somebody moved a file — and it would reach code no manifest
+		// describes, which is what the old refusal was written to prevent. An
+		// instance is already in the world, already saved, already replicated.
+		int Require(lua_State *state) {
+			LuauContext &context = UpvalueContext(state);
+
+			void *value = lua_touserdatatagged(state, 1, TAG_INSTANCE);
+			if (value == nullptr) {
+				luaL_typeerrorL(state, 1, "ModuleScript");
+			}
+
+			const ecs::Entity module = *static_cast<ecs::Entity *>(value);
+			ecs::Store &store = *context.World;
+
+			if (!store.Alive(module) || !ecs::Classes::IsA(store.ClassOf(module), ModuleScriptClass())) {
+				// Named rather than nil, for `GetService`'s reason: a script that
+				// gets nil back fails one line later, somewhere that says nothing
+				// about the cause.
+				luaL_errorL(state, "require expects a ModuleScript");
+			}
+
+			// **Already evaluated: hand back the same value.** Not a fresh copy —
+			// two scripts requiring one module must see one table, or a module
+			// used to share state silently shares nothing.
+			if (const auto found = context.Modules.find(module.Id); found != context.Modules.end()) {
+				lua_getref(state, found->second);
+				return 1;
+			}
+
+			// A cycle, named at both ends. Recursing instead would exhaust the C
+			// stack and surface as a crash with no line number.
+			for (const ecs::Entity loading : context.Loading) {
+				if (loading == module) {
+					luaL_errorL(
+						state,
+						"require cycle: '%s' is already being required",
+						store.InstanceNameOf(module).Text().data()
+					);
+				}
+			}
+
+			const Source *source = store.Get<Source>(module);
+			if (source == nullptr || !source->Path.IsValid()) {
+				luaL_errorL(
+					state, "'%s' has no source to require", store.InstanceNameOf(module).Text().data()
+				);
+			}
+
+			std::string program;
+			std::string error;
+			if (!ReadSource(store, source->Path, program, error)) {
+				luaL_errorL(state, "%s", error.c_str());
+			}
+
+			lua_CompileOptions options = {};
+			options.optimizationLevel = 1;
+			options.debugLevel = 1;
+
+			size_t bytecodeSize = 0;
+			char *bytecode = luau_compile(program.data(), program.size(), &options, &bytecodeSize);
+			if (bytecode == nullptr) {
+				luaL_errorL(state, "the compiler produced nothing for '%s'", source->Path.Text().data());
+			}
+
+			// The same shape a `Script` gets: its own sandboxed thread, so a
+			// module assigning a global does not leak into whoever required it.
+			lua_State *thread = lua_newthread(state);
+			luaL_sandboxthread(thread);
+
+			PushInstanceValue(thread, module);
+			lua_setglobal(thread, "script");
+
+			const std::string chunkName = "=" + std::string(source->Path.Text());
+			const int loaded = luau_load(thread, chunkName.c_str(), bytecode, bytecodeSize, 0);
+			std::free(bytecode);
+
+			if (loaded != 0) {
+				const char *message = lua_tostring(thread, -1);
+				luaL_errorL(state, "%s", message != nullptr ? message : "could not load the module");
+			}
+
+			context.Loading.push_back(module);
+			const int status = lua_resume(thread, nullptr, 0);
+			context.Loading.pop_back();
+
+			if (status == LUA_YIELD) {
+				// **A module may not yield**, and the reason is the one every
+				// yield here answers to: the value is cached the moment it is
+				// produced, so a module suspended half way would leave every
+				// later `require` waiting on a value that arrives at a tick
+				// nobody chose.
+				luaL_errorL(state, "a ModuleScript may not yield while it is being required");
+			}
+			if (status != LUA_OK) {
+				const char *message = lua_tostring(thread, -1);
+				luaL_errorL(state, "%s", message != nullptr ? message : "the module raised");
+			}
+
+			// Roblox requires exactly one value back. Nothing returned is the
+			// mistake an author makes once, and it reads as `nil` three files
+			// away unless it is refused here.
+			if (lua_gettop(thread) < 1) {
+				luaL_errorL(
+					state,
+					"'%s' returned nothing — a ModuleScript must return one value",
+					store.InstanceNameOf(module).Text().data()
+				);
+			}
+
+			lua_xmove(thread, state, 1);
+
+			// Referenced before it is handed over, so the cache owns a value the
+			// collector cannot take while a script is still holding it.
+			lua_pushvalue(state, -1);
+			context.Modules[module.Id] = lua_ref(state, -1);
+			lua_pop(state, 1);
+
+			return 1;
+		}
+	}
+
+	void OpenRequire(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+
+		lua_pushlightuserdata(state, &context);
+		lua_pushcclosure(state, Require, "require", 1);
+		lua_setglobal(state, "require");
 	}
 
 	uint64_t LuauRuntime::StepsTaken() const {

@@ -2205,3 +2205,264 @@ TEST_CASE("a runtime with no scripts reports no costs", "[scripting]") {
 	CHECK(runtime->RunWorldScripts() == 0);
 	CHECK(runtime->Costs().empty());
 }
+
+namespace {
+	// A world with a module in the workspace, ready to be required by name.
+	//
+	// Parented to `Workspace` because that is how a script reaches one: through
+	// the tree, which is the whole point of a module being an instance rather
+	// than a path.
+	Entity StageModule(Store &store, const char *path, const char *name, const char *program) {
+		// **Services first, because `WorkspaceOf` is a lookup and not a create.**
+		// The runtime installs them when it opens, which is after this — so
+		// staging a module before one existed would parent it to nothing and
+		// leave it a root beside the Workspace rather than inside it.
+		engine::scene::InstallServices(store);
+		engine::script::RegisterScriptComponents();
+		if (store.Resource<engine::script::SourceCache>() == nullptr) {
+			store.SetResource(engine::script::SourceCache{});
+		}
+		store.ResourceMutable<engine::script::SourceCache>()->Set(engine::core::Name(path), program);
+
+		const Entity module = engine::script::MakeModule(store, path, name);
+		REQUIRE(module != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(module, engine::scene::WorkspaceOf(store)));
+		return module;
+	}
+}
+
+TEST_CASE("a ModuleScript is not run by the world", "[scripting]") {
+	// **The whole reason `ModuleScript` is a sibling of `Script` rather than a
+	// kind of one.** A world that ran every module at start would give a library
+	// a side effect nobody asked for — and a synced Rojo project would execute a
+	// thousand files written to be required.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "mod.luau", "Mod", "error('a module must not run on its own')\n");
+
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
+	const auto runtime = MakeRuntime(store, Language::Luau, limits);
+
+	// Nothing ran, so nothing raised. Both halves matter: a module that ran and
+	// happened not to error would pass a test that only checked `LastError`.
+	CHECK(runtime->RunWorldScripts() == 0);
+	CHECK(runtime->LastError().empty());
+}
+
+TEST_CASE("require evaluates a module and hands back its value", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "mod.luau", "Mod", "return { Answer = 42 }\n");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local mod = require(workspace.Mod)
+		assert(mod.Answer == 42, 'the module did not return its table')
+	)");
+}
+
+TEST_CASE("a module runs once however many times it is required", "[scripting]") {
+	// **Roblox's rule, and the reason module order is not an author's problem.**
+	// A module with a side effect at its top level has it once, on whichever
+	// script required it first. Re-running would make two requires two different
+	// tables, so a module used to share state would silently share nothing.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "counter.luau", "Counter", R"(
+		local state = { Count = 0 }
+		state.Count = state.Count + 1
+		return state
+	)");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local first = require(workspace.Counter)
+		local second = require(workspace.Counter)
+
+		assert(first == second, 'two requires produced two tables')
+		assert(first.Count == 1, 'the module ran ' .. first.Count .. ' times')
+
+		-- And the shared state really is shared.
+		first.Count = 99
+		assert(require(workspace.Counter).Count == 99, 'the table was copied')
+	)");
+}
+
+TEST_CASE("requiring something that is not a module is refused by name", "[scripting]") {
+	// Named rather than nil, for `GetService`'s reason: a script that gets nil
+	// back fails one line later, somewhere that says nothing about the cause.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Parent = workspace
+		require(part)
+	)"));
+	CHECK(runtime->LastError().find("ModuleScript") != std::string::npos);
+}
+
+TEST_CASE("a module that returns nothing is refused", "[scripting]") {
+	// The mistake an author makes once. Unrefused it reads as `nil` three files
+	// away, where nothing points back at the module.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "empty.luau", "Empty", "local x = 1\n");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK_FALSE(runtime->Run("require(workspace.Empty)"));
+	CHECK(runtime->LastError().find("must return") != std::string::npos);
+}
+
+TEST_CASE("a require cycle is named rather than crashing", "[scripting]") {
+	// **Recursing instead would exhaust the C stack**, which surfaces as a crash
+	// with no line number rather than as an error naming the two files.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "a.luau", "A", "return require(workspace.B)\n");
+	StageModule(store, "b.luau", "B", "return require(workspace.A)\n");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK_FALSE(runtime->Run("require(workspace.A)"));
+	CHECK(runtime->LastError().find("cycle") != std::string::npos);
+}
+
+TEST_CASE("a module gets script pointing at itself", "[scripting]") {
+	// The same global a `Script` gets, so a module can find its own siblings —
+	// which is how a folder of modules refers to its neighbours without knowing
+	// where the folder sits.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "self.luau", "Selfie", R"(
+		return { Name = script.Name }
+	)");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		assert(require(workspace.Selfie).Name == 'Selfie', 'script was not the module')
+	)");
+}
+
+TEST_CASE("two module instances naming one file are two modules", "[scripting]") {
+	// **Keyed by instance, not by path.** That is what makes a module a thing in
+	// the tree rather than a thing on disk — two copies in two places are two
+	// modules with two states, exactly as two copies of a Script are two scripts.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "shared.luau", "First", "return {}\n");
+
+	const Entity second = engine::script::MakeModule(store, "shared.luau", "Second");
+	REQUIRE(second != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.SetParent(second, engine::scene::WorkspaceOf(store)));
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		assert(require(workspace.First) ~= require(workspace.Second), 'one file became one module')
+	)");
+}
+
+TEST_CASE("Players.LocalPlayer is nil until a host says who it is", "[scripting]") {
+	// **The default is nobody**, because who is in a game is the host's business
+	// — a dedicated server admits players as they connect and the studio admits
+	// one per client view. Furnishing a world does not invent an occupant.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local players = game:GetService('Players')
+		assert(players ~= nil, 'there is no Players service')
+		assert(players.LocalPlayer == nil, 'a fresh world already had a local player')
+	)");
+}
+
+TEST_CASE("a client sees itself as LocalPlayer and a server sees nobody", "[scripting]") {
+	// **The separation the whole feature is for.** A `Script` reaching for
+	// `LocalPlayer` gets nil rather than somebody else's player, which is the
+	// one thing a shared codebase must not get wrong.
+	RegisterClasses();
+
+	Store client("client_world");
+	engine::scene::InstallServices(client);
+	const Entity me = engine::scene::AddPlayer(client, "Ada", true);
+	REQUIRE(me != engine::ecs::NULL_ENTITY);
+
+	// Somebody else is in the game too, and must not be mistaken for me.
+	REQUIRE(engine::scene::AddPlayer(client, "Grace", false) != engine::ecs::NULL_ENTITY);
+
+	engine::script::RuntimeLimits clientLimits;
+	clientLimits.Role = engine::script::HostRole::OfClient();
+	const auto onClient = MakeRuntime(client, Language::Luau, clientLimits);
+
+	MustRun(*onClient, R"(
+		local players = game:GetService('Players')
+		assert(players.LocalPlayer ~= nil, 'the client had no local player')
+		assert(players.LocalPlayer.Name == 'Ada', 'the client was somebody else')
+
+		-- And the other player is there, reachable and not me.
+		local other = players:FindFirstChild('Grace')
+		assert(other ~= nil, 'the other player is missing')
+		assert(other ~= players.LocalPlayer, 'the two players are one instance')
+	)");
+
+	// The same world shape on a server: players present, none of them local.
+	Store server("server_world");
+	engine::scene::InstallServices(server);
+	REQUIRE(engine::scene::AddPlayer(server, "Ada", false) != engine::ecs::NULL_ENTITY);
+
+	engine::script::RuntimeLimits serverLimits;
+	serverLimits.Role = engine::script::HostRole::OfServer();
+	const auto onServer = MakeRuntime(server, Language::Luau, serverLimits);
+
+	MustRun(*onServer, R"(
+		local players = game:GetService('Players')
+		assert(players:FindFirstChild('Ada') ~= nil, 'the server cannot see its players')
+		assert(players.LocalPlayer == nil, 'a server claimed to be a player')
+	)");
+}
+
+TEST_CASE("LocalPlayer cannot be assigned from a script", "[scripting]") {
+	// Who you are is not yours to set. A client writing this would be a client
+	// claiming to be somebody else.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	REQUIRE(engine::scene::AddPlayer(store, "Ada", true) != engine::ecs::NULL_ENTITY);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK_FALSE(runtime->Run(R"(
+		local players = game:GetService('Players')
+		players.LocalPlayer = Instance.new('Part')
+	)"));
+}
+
+TEST_CASE("a LocalScript runs on a client and a Script does not", "[scripting]") {
+	// **Roblox's rule, and the contexts it decides.** The same world, two hosts,
+	// two different sets of scripts — which is what makes one codebase able to
+	// hold both halves of a game.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::script::RegisterScriptComponents();
+	store.SetResource(engine::script::SourceCache{});
+
+	auto &cache = *store.ResourceMutable<engine::script::SourceCache>();
+	cache.Set(engine::core::Name("s.luau"), "return\n");
+	cache.Set(engine::core::Name("c.luau"), "return\n");
+	cache.Set(engine::core::Name("m.luau"), "return {}\n");
+
+	const Entity server = engine::script::MakeScript(store, "s.luau", "OnServer", false);
+	const Entity client = engine::script::MakeScript(store, "c.luau", "OnClient", true);
+	REQUIRE(engine::script::MakeModule(store, "m.luau", "Mod") != engine::ecs::NULL_ENTITY);
+
+	// Three classes, three contexts: server-only, client-only, and never.
+	CHECK(engine::script::ScriptsIn(store, true, false) == std::vector<Entity>{server});
+	CHECK(engine::script::ScriptsIn(store, false, true) == std::vector<Entity>{client});
+	CHECK(engine::script::ScriptsIn(store, true, true) == std::vector<Entity>{server, client});
+
+	// The module appears in none of them, however the host is configured.
+	CHECK(engine::script::ScriptsIn(store, false, false).empty());
+}

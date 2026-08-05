@@ -159,4 +159,47 @@ namespace engine::scene {
 	// @param store The world.
 	// @return The workspace instance.
 	ecs::Entity WorkspaceOf(const ecs::Store &store);
+
+	// The world's `Players` service, or a null entity when it has none.
+	//
+	// @param store The world.
+	// @return The service instance.
+	ecs::Entity PlayersOf(const ecs::Store &store);
+
+	// Which player this host is, when it is a client.
+	//
+	// **A resource rather than a component, because there is one of it.** A
+	// world has many `Player` instances and at most one of them is *this*
+	// viewer — `ecs/AGENTS.md`'s rule is that one-of-a-kind state is a resource,
+	// and a `LocalPlayer` tag on a row would be a second place the answer lived.
+	//
+	// **Empty on a server, and that is the whole point.** `Players.LocalPlayer`
+	// is nil where `IsClient()` is false, so a `Script` that reached for it gets
+	// nil rather than somebody else's player — which is the bug this separation
+	// exists to make impossible.
+	//
+	// @since v0.10
+	struct LocalPlayer {
+		// The player instance this host is looking through, or a null entity.
+		ecs::Entity Instance;
+	};
+
+	// Adds a `Player` under `Players` and names it.
+	//
+	// **Not automatic.** Who is in a game is the host's business — a dedicated
+	// server admits players as they connect and the studio admits one per client
+	// view — so furnishing a world does not invent an occupant.
+	//
+	// @param store The world.
+	// @param name  What to call them.
+	// @param local Whether this host is looking through them, which is what
+	//        makes `Players.LocalPlayer` answer. At most one player per world
+	//        should be marked local; the last one marked wins.
+	// @return The player instance, or `NULL_ENTITY` when there is no `Players`.
+	ecs::Entity AddPlayer(ecs::Store &store, std::string_view name, bool local = false);
+
+	// The `Player` class id, registering the service tree on first call.
+	//
+	// @return The class id.
+	ecs::ClassId PlayerClass();
 }

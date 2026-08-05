@@ -85,6 +85,14 @@ namespace engine::script {
 			const ecs::ClassId script = ecs::Classes::Register("Script", container, {});
 			ecs::Classes::Register("LocalScript", container, {});
 
+			// **A sibling of `Script`, not a kind of one, and that is what makes
+			// it inert.** `ScriptsIn` collects `IsA(Script)` and
+			// `IsA(LocalScript)`; a `ModuleScript` is neither, so the run loop
+			// never visits one and nothing had to learn to skip it. Derived from
+			// `Script` it would have run on every server by default, which is
+			// the opposite of what a module is for.
+			ecs::Classes::Register("ModuleScript", container, {});
+
 			ecs::Classes::Property<&Source::Path>(container, "Source");
 			ecs::Classes::Computed(container, DisabledProperty());
 			return script;
@@ -138,6 +146,21 @@ namespace engine::script {
 			return left.Id < right.Id;
 		});
 		return found;
+	}
+
+	ecs::ClassId ModuleScriptClass() {
+		ScriptClass();
+		return ecs::Classes::Find(core::Name("ModuleScript"));
+	}
+
+	ecs::Entity MakeModule(ecs::Store &store, std::string_view path, std::string_view name) {
+		const ecs::Entity instance = store.CreateInstance(ModuleScriptClass(), name);
+		if (instance == ecs::NULL_ENTITY) {
+			return ecs::NULL_ENTITY;
+		}
+
+		store.Set(instance, Source{core::Name(path)});
+		return instance;
 	}
 
 	ecs::Entity MakeScript(ecs::Store &store, std::string_view path, std::string_view name, bool local) {
