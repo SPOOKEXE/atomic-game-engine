@@ -221,9 +221,17 @@ namespace studio {
 		// a sixteen millisecond frame are a sleep — so a span measured against
 		// the whole frame reads as one per cent whatever it costs, and the
 		// panel becomes one on which nothing is ever worth optimising.
+		// **Three causes, and this used to name the rarest one.** `Dropped`
+		// counts buffer overflow, depth past `MAXIMUM_DEPTH`, and scopes opened
+		// off the frame's owning thread — and with `MAXIMUM_SPANS` at 4096
+		// against a frame of a few dozen, overflow is the one that essentially
+		// never happens. What does happen every frame is the third: two worlds
+		// ticking on workers open a span per phase and per system, and every one
+		// of them is refused. Reading "overflowed the buffer" sent at least one
+		// investigation at the span budget, which was 1% used.
 		if (const size_t dropped = FrameGraph::Dropped(); dropped > 0) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::Text("%zu spans dropped — the frame overflowed the buffer", dropped);
+			ImGui::Text("%zu spans dropped — off-thread, too deep, or past the buffer", dropped);
 			ImGui::PopStyleColor();
 		}
 

@@ -914,6 +914,32 @@ namespace engine::ecs {
 		// @return The ancestor, or NULL_ENTITY when none matches.
 		Entity FindFirstAncestorWhichIsA(Entity instance, ClassId id) const;
 
+		// Starts recording reparents, so that a listener can be told about them.
+		//
+		// **Opt in, exactly as observing a component is.** A world nobody is
+		// watching stores nothing and pays one branch per `SetParent`; the
+		// alternative is a list that grows for the life of every world with no
+		// script draining it. Idempotent, and there is no way back off — the
+		// same shape `Observe` has, for the same reason: a second listener
+		// connecting must not be able to switch the first one off.
+		void ObserveTree();
+
+		// Whether reparents are being recorded.
+		//
+		// @return `true` once `ObserveTree` has been called.
+		bool TreeObserved() const;
+
+		// Hands over everything recorded since the last call, and forgets it.
+		//
+		// **Taken rather than read, because a half-drained queue is the bug
+		// this shape removes.** A caller that walked the list and then cleared
+		// it would lose anything a listener caused while it was walking; a swap
+		// leaves the store's list empty before the first listener runs, so a
+		// reparent made from inside a handler belongs to the next delivery.
+		//
+		// @param out Cleared, then swapped with what the store has recorded.
+		void TakeTreeChanges(std::vector<TreeChange> &out);
+
 		// The dotted path from the root of the tree down to an instance.
 		//
 		// **From the world's root, and there is no `game.` in front of it.** A

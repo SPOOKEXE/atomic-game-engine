@@ -393,4 +393,65 @@ namespace studio {
 	void HierarchyView::Forget() {
 		Stamped = false;
 	}
+
+	bool HierarchyView::IsUnder(Entity instance, Entity ancestor) const {
+		if (ancestor == NULL_ENTITY) {
+			// Not everything is inside nothing. The walk ends at the null
+			// handle rather than matching it, exactly as `IsDescendantOf` does.
+			return false;
+		}
+
+		Entity walk = instance;
+		for (size_t step = 0; step <= Nodes.size() && walk != NULL_ENTITY; step++) {
+			if (walk == ancestor) {
+				return true;
+			}
+
+			const Node *node = Find(walk);
+			if (node == nullptr) {
+				return false;
+			}
+			walk = node->Parent;
+		}
+		return false;
+	}
+
+	std::span<const HierarchyRow> RowsBetween(const HierarchyView &view, Entity anchor, Entity to) {
+		const size_t from = view.RowOf(anchor);
+		const size_t until = view.RowOf(to);
+		if (from == HierarchyView::NO_ROW || until == HierarchyView::NO_ROW) {
+			return {};
+		}
+
+		const std::span<const HierarchyRow> rows = view.Rows();
+		const size_t first = from < until ? from : until;
+		const size_t last = from < until ? until : from;
+		if (last >= rows.size()) {
+			return {};
+		}
+
+		return rows.subspan(first, last - first + 1);
+	}
+
+	void TopMost(
+		const HierarchyView &view, std::span<const Entity> moving, std::vector<Entity> &out
+	) {
+		out.clear();
+		out.reserve(moving.size());
+
+		for (const Entity candidate : moving) {
+			bool nested = false;
+			for (const Entity other : moving) {
+				if (other != candidate && view.IsUnder(candidate, other)) {
+					nested = true;
+					break;
+				}
+			}
+
+			if (!nested) {
+				out.push_back(candidate);
+			}
+		}
+	}
+
 }

@@ -132,6 +132,31 @@ namespace engine::ecs {
 		core::Name Value;
 	};
 
+	// One reparent, as the tree recorded it.
+	//
+	// **Recorded rather than dispatched, and only while somebody is watching.**
+	// A script's `ChildAdded` cannot fire from inside `SetParent`: the handler
+	// would re-enter the VM with the sibling list half-relinked, and could
+	// destroy the very instance being moved. So the tree writes down what
+	// happened and the barrier delivers it, which is the chain
+	// `script/Changes.hpp` already describes for `.Changed`.
+	//
+	// **Both ends, because the two signals need different halves.**
+	// `ChildRemoved` belongs to `From` and `ChildAdded` to `To`, and an entry
+	// carrying only the new parent could not fire the first.
+	//
+	// @since v0.75
+	struct TreeChange {
+		// What moved.
+		Entity Instance;
+
+		// The parent it left, or NULL_ENTITY when it had none.
+		Entity From;
+
+		// The parent it joined, or NULL_ENTITY when it now has none.
+		Entity To;
+	};
+
 	// Present on an instance that `Clone` must not copy.
 	//
 	// **A tag, and the sense is inverted, and both follow from what this

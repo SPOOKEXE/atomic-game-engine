@@ -752,3 +752,144 @@ TEST_CASE("an empty world compiles to nothing", "[studio][hierarchy]") {
 	CHECK(view.RowOf(NULL_ENTITY) == HierarchyView::NO_ROW);
 	CHECK_FALSE(view.Holds(NULL_ENTITY));
 }
+
+// --- the panel logic that used to live inside Editor -------------------------
+
+TEST_CASE("a shift-click range is what the eye sees between two rows", "[studio][hierarchy]") {
+	// **The drawn order, not the tree.** A range in a tree view is the rows
+	// between two rows on screen, which is the flattened order with the closed
+	// subtrees left out — so `Terrain` is in a range from `Handle` to
+	// `Lighting` and `Grip` is too, because both are drawn between them.
+	Scene scene;
+	HierarchyView view;
+
+	const Entity open[] = {scene.Workspace, scene.Model};
+	HierarchyRequest request = Closed();
+	request.Open = open;
+	REQUIRE(view.Rebuild(scene.World, request));
+
+	// Workspace, Model, Handle, Grip, Terrain, Lighting
+	const auto names = [](std::span<const HierarchyRow> rows) {
+		std::vector<std::string> out;
+		for (const HierarchyRow &row : rows) {
+			out.emplace_back(row.Text);
+		}
+		return out;
+	};
+
+	CHECK(
+		names(studio::RowsBetween(view, scene.Handle, scene.Lighting)) ==
+		std::vector<std::string>{"Handle", "Grip", "Terrain", "Lighting"}
+	);
+
+	// **Symmetric.** Dragging a range upwards is the same range as dragging it
+	// down, or shift-clicking above the anchor would select nothing.
+	CHECK(
+		names(studio::RowsBetween(view, scene.Lighting, scene.Handle)) ==
+		std::vector<std::string>{"Handle", "Grip", "Terrain", "Lighting"}
+	);
+
+	// A range of one is the row itself rather than nothing.
+	CHECK(names(studio::RowsBetween(view, scene.Grip, scene.Grip)) == std::vector<std::string>{"Grip"});
+
+	SECTION("an end that is not drawn yields nothing") {
+		// The caller falls back to a plain click on an empty range, which is
+		// what makes a stale anchor harmless rather than a gesture that
+		// silently selects the wrong run.
+		HierarchyView closed;
+		REQUIRE(closed.Rebuild(scene.World, Closed()));
+
+		// `Grip` is inside a collapsed `Workspace`, so it is not a row.
+		CHECK(studio::RowsBetween(closed, scene.Grip, scene.Lighting).empty());
+		CHECK(studio::RowsBetween(closed, scene.Lighting, scene.Grip).empty());
+		CHECK(studio::RowsBetween(closed, NULL_ENTITY, scene.Lighting).empty());
+	}
+
+	SECTION("a filter changes what is between") {
+		REQUIRE(view.Rebuild(scene.World, Closed("a")));
+
+		// Whatever survived the filter, a range over it never includes a row
+		// the filter removed — because the rows are the range.
+		for (const HierarchyRow &row : studio::RowsBetween(view, view.Rows().front().Instance,
+														  view.Rows().back().Instance)) {
+			CHECK(view.RowOf(row.Instance) != HierarchyView::NO_ROW);
+		}
+	}
+}
+
+TEST_CASE("a multi-drag moves the outermost members only", "[studio][hierarchy]") {
+	// Dragging a model and one of its own parts together means "move the
+	// model". Moving both would take the part out of the model on the way,
+	// which is the one outcome nobody dragging them together wants.
+	Scene scene;
+	HierarchyView view;
+	REQUIRE(view.Rebuild(scene.World, Closed()));
+
+	std::vector<Entity> out;
+
+	SECTION("a parent and its child") {
+		const Entity moving[] = {scene.Model, scene.Handle};
+		studio::TopMost(view, moving, out);
+		CHECK(out == std::vector<Entity>{scene.Model});
+	}
+
+	SECTION("a grandparent and a grandchild") {
+		const Entity moving[] = {scene.Workspace, scene.Grip};
+		studio::TopMost(view, moving, out);
+		CHECK(out == std::vector<Entity>{scene.Workspace});
+	}
+
+	SECTION("siblings are all outermost") {
+		const Entity moving[] = {scene.Handle, scene.Grip};
+		studio::TopMost(view, moving, out);
+		CHECK(out == std::vector<Entity>{scene.Handle, scene.Grip});
+	}
+
+	SECTION("order is the caller's") {
+		// The first entry is what the reveal follows afterwards, so it has to
+		// still be first.
+		const Entity moving[] = {scene.Terrain, scene.Lighting, scene.Model};
+		studio::TopMost(view, moving, out);
+		CHECK(out == std::vector<Entity>{scene.Terrain, scene.Lighting, scene.Model});
+	}
+
+	SECTION("nothing moving is nothing to move") {
+		studio::TopMost(view, {}, out);
+		CHECK(out.empty());
+	}
+
+	SECTION("rows a filter is hiding still count as ancestors") {
+		// The drag can only start on a drawn row, but the *ancestor test* has
+		// to see the whole world — a model hidden by the filter is still the
+		// parent of the part being dragged.
+		HierarchyView filtered;
+		REQUIRE(filtered.Rebuild(scene.World, Closed("Grip")));
+		CHECK(filtered.RowOf(scene.Handle) == HierarchyView::NO_ROW);
+
+		const Entity moving[] = {scene.Model, scene.Handle};
+		studio::TopMost(filtered, moving, out);
+		CHECK(out == std::vector<Entity>{scene.Model});
+	}
+}
+
+TEST_CASE("IsUnder is reflexive and stops at the root", "[studio][hierarchy]") {
+	Scene scene;
+	HierarchyView view;
+	REQUIRE(view.Rebuild(scene.World, Closed()));
+
+	CHECK(view.IsUnder(scene.Grip, scene.Model));
+	CHECK(view.IsUnder(scene.Grip, scene.Workspace));
+	CHECK(view.IsUnder(scene.Model, scene.Model));
+	CHECK_FALSE(view.IsUnder(scene.Workspace, scene.Grip));
+	CHECK_FALSE(view.IsUnder(scene.Grip, scene.Lighting));
+
+	// Not everything is inside nothing, matching `Store::IsDescendantOf`.
+	CHECK_FALSE(view.IsUnder(scene.Grip, NULL_ENTITY));
+	CHECK_FALSE(view.IsUnder(NULL_ENTITY, scene.Workspace));
+
+	// And it agrees with the store, which is the thing it is standing in for.
+	CHECK(view.IsUnder(scene.Grip, scene.Workspace) ==
+		  scene.World.IsDescendantOf(scene.Grip, scene.Workspace));
+	CHECK(view.IsUnder(scene.Lighting, scene.Workspace) ==
+		  scene.World.IsDescendantOf(scene.Lighting, scene.Workspace));
+}

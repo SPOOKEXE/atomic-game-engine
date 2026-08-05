@@ -82,6 +82,17 @@ namespace engine::scene {
 	// be drawing the screen from inside the mirror, which is a scene mistake
 	// rather than something to guard here.
 	//
+	// **One aim per world, so a host showing one world from several places has
+	// to aim between the draws**, and it has to keep the textures apart as well.
+	// The aim is world state and is only correct for the eye `ActiveCamera` named
+	// when this ran; the *texture* that eye produced outlives the frame, so a
+	// caller drawing the world twice out of one set of surface textures gets the
+	// last panel's reflection in every panel. `render::Renderer::Render` takes a
+	// viewport slot and keeps a surface set per slot for exactly that reason —
+	// see its `targetSlot` — and `mono.studio` draws one panel per frame, aiming
+	// immediately before each. Nothing here can enforce that: this pass has no
+	// idea how many places its answer is about to be drawn from.
+	//
 	// @param store The world.
 	// @return How many surface cameras were placed. Zero is the ordinary case in
 	//         a scene with no mirror in it, and is not a failure.

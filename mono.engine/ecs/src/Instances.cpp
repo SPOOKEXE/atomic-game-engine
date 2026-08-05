@@ -18,6 +18,19 @@ namespace engine::ecs {
 		// allocation behind it is the worst way to find out.
 		constexpr size_t MAXIMUM_DEPTH = 4096;
 
+		// Writes down a reparent, when anything is listening for one.
+		//
+		// @param state    The world it happened in.
+		// @param instance What moved.
+		// @param from     The parent it left.
+		// @param to       The parent it joined.
+		void RecordTreeChange(StoreState &state, Entity instance, Entity from, Entity to) {
+			if (!state.WatchTree) {
+				return;
+			}
+			state.TreeChanges.push_back(TreeChange{instance, from, to});
+		}
+
 		// One node's tree links, or null when the entity is not an instance.
 		const Hierarchy *NodeOf(const StoreState &state, Entity instance) {
 			return static_cast<const Hierarchy *>(GetComponent(state, instance, Components::Of<Hierarchy>()));
@@ -497,6 +510,10 @@ namespace engine::ecs {
 			return true;
 		}
 
+		// Read before anything is unlinked, because the parent it is leaving is
+		// what `ChildRemoved` is about and there is no way to ask afterwards.
+		const Entity leaving = node->Parent;
+
 		// --- unlink from the old parent ---
 		if (node->Parent != NULL_ENTITY) {
 			Hierarchy *previous =
@@ -529,6 +546,7 @@ namespace engine::ecs {
 		node->PreviousSibling = NULL_ENTITY;
 
 		if (parent == NULL_ENTITY) {
+			RecordTreeChange(state, instance, leaving, NULL_ENTITY);
 			return true;
 		}
 
@@ -562,6 +580,8 @@ namespace engine::ecs {
 		node = MutableNodeOf(state, instance);
 		node->Parent = parent;
 		node->PreviousSibling = last;
+
+		RecordTreeChange(state, instance, leaving, parent);
 		return true;
 	}
 

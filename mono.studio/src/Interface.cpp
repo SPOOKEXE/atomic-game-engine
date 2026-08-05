@@ -155,11 +155,21 @@ namespace studio {
 		// is noticed the first time somebody reaches for Play, and an invisible
 		// readout is indistinguishable from one nobody looked at. It moved up
 		// here with the other two and became a side bar in the same change.
-		DrawMenuBar();
-		DrawToolbar();
-		DrawStatusBar();
+		{
+			ENGINE_PROFILE_CAT("bars", engine::core::ProfileCategory::Render);
+			DrawMenuBar();
+			DrawToolbar();
+			DrawStatusBar();
+		}
 
-		const ImGuiID dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
+		// **Spanned, because it is not the free line it looks like.** The
+		// dockspace host is a full-window `Begin` and the splitter arithmetic for
+		// every node under it, and it sat in the same unmeasured gap the bars did.
+		ImGuiID dockspace = 0;
+		{
+			ENGINE_PROFILE_CAT("dockspace", engine::core::ProfileCategory::Render);
+			dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
+		}
 
 		if (ResetLayout) {
 			ResetLayout = false;
@@ -220,38 +230,78 @@ namespace studio {
 			DrawScripts();
 		}
 
-		DrawOutput();
-		DrawSettings();
-		DrawStatistics();
-		DrawFrameGraph();
+		{
+			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Render);
+			DrawOutput();
+		}
+		{
+			ENGINE_PROFILE_CAT("settings", engine::core::ProfileCategory::Render);
+			DrawSettings();
+		}
+		{
+			ENGINE_PROFILE_CAT("statistics", engine::core::ProfileCategory::Render);
+			DrawStatistics();
+		}
+		// **The panel that reports the frame, inside the frame it reports.** It
+		// draws a row per span and a bar per span, so it scales with exactly the
+		// thing it is used to measure — and it was the largest of the panels with
+		// no span of its own, which made it the one thing the graph could not
+		// account for while being read.
+		{
+			ENGINE_PROFILE_CAT("frame graph", engine::core::ProfileCategory::Render);
+			DrawFrameGraph();
+		}
 
 		// v0.10's panels. Each returns immediately when closed, which is what
 		// makes a long list of them cost nothing to leave wired in.
-		DrawHistory();
-		DrawBus();
-		DrawFindInstances();
-		DrawScriptProfile();
-		DrawDiff();
-		DrawDebugger();
+		//
+		// One span over the group rather than six. A closed panel is an early
+		// return, and six spans of almost nothing crowd the graph without ever
+		// distinguishing themselves; if this bar is ever wide, splitting it is
+		// the next step rather than the current one.
+		{
+			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
+			DrawHistory();
+			DrawBus();
+			DrawFindInstances();
+			DrawScriptProfile();
+			DrawDiff();
+			DrawDebugger();
+		}
 
-		DrawDialogs();
-		DrawPalette();
+		{
+			ENGINE_PROFILE_CAT("dialogs", engine::core::ProfileCategory::Render);
+			DrawDialogs();
+			DrawPalette();
+		}
 
-		DriveCamera();
+		{
+			ENGINE_PROFILE_CAT("camera", engine::core::ProfileCategory::Render);
+			DriveCamera();
+		}
 
 		// **Immediately after the camera moves and before the frame ends.** See
 		// `Editor::OverlaySlot`: this is what makes the grid sit still on the
 		// ground instead of swimming across it.
-		DrawViewportOverlays();
+		{
+			ENGINE_PROFILE_CAT("overlays", engine::core::ProfileCategory::Render);
+			DrawViewportOverlays();
+		}
 
-		DrawShortcuts();
+		{
+			ENGINE_PROFILE_CAT("shortcuts", engine::core::ProfileCategory::Render);
+			DrawShortcuts();
+		}
 
 		// **Once, here, after every panel and whether or not any of them
 		// drew.** Panels are closable and every one of them returns early when
 		// closed, so an action queued from a menu in one panel and applied at
 		// the end of another is an action that silently does nothing the moment
 		// somebody closes the wrong window.
-		ApplyPendingActions();
+		{
+			ENGINE_PROFILE_CAT("actions", engine::core::ProfileCategory::Render);
+			ApplyPendingActions();
+		}
 	}
 
 	void Editor::FocusSelection(Vector3 &position, float yaw, float pitch) {

@@ -46,6 +46,29 @@ namespace engine::script {
 		// the key, because a per-property key would mean a map entry per
 		// property per instance for a surface most scripts never touch.
 		PropertyChanged,
+
+		// `instance.ChildAdded` and `instance.ChildRemoved`. The subject is the
+		// parent, and the handler is called with the child.
+		ChildAdded,
+		ChildRemoved,
+
+		// `instance.DescendantAdded`. The subject is any ancestor of what
+		// arrived, and the handler is called with it.
+		//
+		// **There is no `DescendantRemoving` here, and its absence is a
+		// decision.** Roblox fires that one *before* the removal, so a handler
+		// can still read the subtree it is losing. Everything on this list is
+		// delivered from a queue at the next barrier — see `Changes.hpp` for
+		// why a signal cannot fire from inside the write — and by then the
+		// instance is already gone from the tree. A signal whose whole contract
+		// is "you are called while it is still there" cannot be honoured one
+		// tick late, so it is not offered rather than offered wrongly.
+		DescendantAdded,
+
+		// `instance.AncestryChanged`. The subject is the instance whose chain
+		// of parents changed, which is what moved *and everything under it*,
+		// and the handler is called with the instance and its new parent.
+		AncestryChanged,
 	};
 
 	// A callable, as the VM that owns it names one.

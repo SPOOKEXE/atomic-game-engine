@@ -160,11 +160,21 @@ namespace engine::parallel {
 		// **Waking the pool costs the same whatever the work is, and it is
 		// bigger than it reads.** `engine.parallel.bench.dispatch` measures an
 		// empty dispatch at 31 us against 48 ns for the decision not to
-		// dispatch, and at 2.3 us against a pool of one — so the cost is about
-		// 1.3 us per *worker*, and only about 95 ns per range. It is linear in
-		// the pool because every worker decrements `Batch::Outstanding` under
+		// dispatch, and at 2.3 us against a pool of one — so the cost was about
+		// 1.3 us per *worker*, and only about 95 ns per range. It was linear in
+		// the pool because every worker decremented `Batch::Outstanding` under
 		// `Pool::Guard` whether it took a range or not; that join, not the
-		// notify, is what a short span cannot repay.
+		// notify, was what a short span could not repay.
+		//
+		// **The per-worker term is gone and this number has not been re-derived
+		// from it.** The barrier counts ranges rather than workers now, and only
+		// as many workers are woken as there are ranges to give them, so a
+		// dispatch no longer pays for the threads it had no work for — a two-
+		// range batch across twenty-three workers measured 0.35 ms of pure join
+		// in `studio`'s frame graph and should now measure the imbalance alone.
+		// The floor below is still the measured one, so it is now conservative
+		// rather than wrong: it refuses handovers that may well pay. Re-measure
+		// `engine.parallel.bench.dispatch` before moving it.
 		//
 		// **The crossover is an amount of time, and this expresses it as a row
 		// count.** Re-measured at `-O3`: three float adds per row cross near

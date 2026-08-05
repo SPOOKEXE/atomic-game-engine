@@ -2582,3 +2582,159 @@ TEST_CASE("javascript reaches the same tree lookups", "[scripting][js]") {
 		}
 	)");
 }
+
+TEST_CASE("the tree signals fire at the barrier", "[scripting]") {
+	// **One tick late, and that is the contract rather than a shortcoming.**
+	// `Changes.hpp` says why a signal cannot fire from inside the write: the
+	// handler would re-enter the VM with the sibling list half-relinked, and
+	// could destroy the instance being moved. So the tree records and the beat
+	// delivers.
+	//
+	// Recorded into the world rather than into a script global, for the reason
+	// the disconnect test above gives: each chunk gets its own sandboxed
+	// globals, so the assertions are made from here instead.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local home = Instance.new('Part', workspace)
+		home.Name = 'Home'
+
+		local away = Instance.new('Part', workspace)
+		away.Name = 'Away'
+
+		local function note(what)
+			local mark = Instance.new('Part', log)
+			mark.Name = what
+		end
+
+		home.ChildAdded:Connect(function(child) note('added-' .. child.Name) end)
+		home.ChildRemoved:Connect(function(child) note('removed-' .. child.Name) end)
+		away.ChildAdded:Connect(function(child) note('away-added-' .. child.Name) end)
+		log.DescendantAdded:Connect(function() end)
+
+		local mover = Instance.new('Part')
+		mover.Name = 'Mover'
+		mover.AncestryChanged:Connect(function(subject, parent)
+			note('ancestry-' .. subject.Name .. '-' .. (parent and parent.Name or 'nil'))
+		end)
+
+		mover.Parent = home
+	)");
+
+	const auto log = [&] { return store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log"); };
+
+	// **Nothing yet.** The write happened during the chunk and the delivery is
+	// the barrier that has not run.
+	REQUIRE(log() != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "added-Mover") == engine::ecs::NULL_ENTITY);
+
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	CHECK(store.FindFirstChild(log(), "added-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "ancestry-Mover-Home") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "removed-Mover") == engine::ecs::NULL_ENTITY);
+
+	// Moved again, from a second chunk that has to find it rather than
+	// remember it.
+	MustRun(*runtime, R"(
+		local home = workspace:FindFirstChild('Home')
+		local away = workspace:FindFirstChild('Away')
+		home:FindFirstChild('Mover').Parent = away
+	)");
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	// Leaving fires on the parent it left, which is the half a record carrying
+	// only the new parent could not answer.
+	CHECK(store.FindFirstChild(log(), "removed-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "away-added-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "ancestry-Mover-Away") != engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("an ancestry change reaches the whole subtree", "[scripting]") {
+	// Moving a model changes the ancestry of every part in it, and a script
+	// watching a part has no other way to learn that its model moved.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local model = Instance.new('Part', workspace)
+		model.Name = 'Model'
+
+		local part = Instance.new('Part', model)
+		part.Name = 'Part'
+
+		local nested = Instance.new('Part', part)
+		nested.Name = 'Nested'
+
+		local holder = Instance.new('Part', workspace)
+		holder.Name = 'Holder'
+
+		for _, watched in ipairs({model, part, nested}) do
+			watched.AncestryChanged:Connect(function(subject)
+				local mark = Instance.new('Part', log)
+				mark.Name = 'heard-' .. subject.Name
+			end)
+		end
+	)");
+
+	// The creations above are reparents too, so they are delivered first. This
+	// beat drains them; the move below is what the test is about.
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	const Entity workspace = engine::scene::WorkspaceOf(store);
+	const Entity log = store.FindFirstChild(workspace, "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	const auto heard = [&](const char *name) {
+		size_t count = 0;
+		store.EachChild(log, [&](Entity mark) {
+			if (store.InstanceNameOf(mark) == engine::core::Name(name)) {
+				count++;
+			}
+		});
+		return count;
+	};
+
+	const size_t before = heard("heard-Nested");
+
+	MustRun(*runtime, R"(
+		workspace:FindFirstChild('Model').Parent = workspace:FindFirstChild('Holder')
+	)");
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	// The moved instance, its child and its grandchild each heard it once.
+	CHECK(heard("heard-Model") == 1);
+	CHECK(heard("heard-Part") == 1);
+	CHECK(heard("heard-Nested") == before + 1);
+}
+
+TEST_CASE("a world nobody watches records no tree changes", "[scripting]") {
+	// The opt-in half. A list that grew for the life of every world would be a
+	// leak in every game that never connected one of these.
+	RegisterClasses();
+	Store store("script_test");
+	CHECK_FALSE(store.TreeObserved());
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part', workspace)
+		part.Name = 'Part'
+	)");
+	CHECK_FALSE(store.TreeObserved());
+
+	std::vector<engine::ecs::TreeChange> changes;
+	store.TakeTreeChanges(changes);
+	CHECK(changes.empty());
+
+	MustRun(*runtime, "workspace.ChildAdded:Connect(function() end)");
+	CHECK(store.TreeObserved());
+}

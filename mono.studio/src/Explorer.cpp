@@ -308,14 +308,17 @@ namespace studio {
 		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor,
 		engine::ecs::Entity to, bool add
 	) {
-		const size_t from = view.RowOf(anchor);
-		const size_t until = view.RowOf(to);
+		// **The range itself is `RowsBetween`, which is a free function over the
+		// compiled tree and is tested as one.** What is left here is the part
+		// that needs the editor: which world the selection belongs to, and
+		// whether this click replaces it or adds to it.
+		const std::span<const HierarchyRow> range = RowsBetween(view, anchor, to);
 
 		// An anchor that has been deleted, collapsed out of sight or filtered
 		// away is no anchor. Falling back to a plain click is what every list
 		// does, and is what an author reads the gesture as when the row they
 		// remember shift-clicking from is no longer on screen.
-		if (from == HierarchyView::NO_ROW || until == HierarchyView::NO_ROW) {
+		if (range.empty()) {
 			Select(world, to, add);
 			return;
 		}
@@ -328,14 +331,9 @@ namespace studio {
 			Selection.clear();
 		}
 
-		const std::span<const HierarchyRow> rows = view.Rows();
-		const size_t first = from < until ? from : until;
-		const size_t last = from < until ? until : from;
-
-		for (size_t index = first; index <= last && index < rows.size(); index++) {
-			const engine::ecs::Entity row = rows[index].Instance;
-			if (std::find(Selection.begin(), Selection.end(), row) == Selection.end()) {
-				Selection.push_back(row);
+		for (const HierarchyRow &row : range) {
+			if (std::find(Selection.begin(), Selection.end(), row.Instance) == Selection.end()) {
+				Selection.push_back(row.Instance);
 			}
 		}
 
@@ -947,29 +945,21 @@ namespace studio {
 			std::vector<Applied> applied;
 			size_t refused = 0;
 
+			// **The nested members dropped before the world is entered**, by
+			// `TopMost` — a free function over the compiled tree, tested as
+			// one. Dragging a model and one of its own parts together means
+			// "move the model", and moving both would take the part out of the
+			// model on the way.
+			std::vector<engine::ecs::Entity> topMost;
+			TopMost(TreeFor(world).View, moving, topMost);
+
 			Universe->Enter(world, [&](Store &store) {
-				for (const engine::ecs::Entity instance : moving) {
+				for (const engine::ecs::Entity instance : topMost) {
 					if (!store.Alive(instance)) {
 						continue;
 					}
 					if (parent != NULL_ENTITY && !store.Alive(parent)) {
 						return;
-					}
-
-					// **A member of the selection that is already inside
-					// another member does not move.** Dragging a model and one
-					// of its parts together means "move the model"; moving both
-					// would take the part out of the model on the way, which is
-					// the one outcome nobody dragging them together wants.
-					bool nested = false;
-					for (const engine::ecs::Entity other : moving) {
-						if (other != instance && store.IsDescendantOf(instance, other)) {
-							nested = true;
-							break;
-						}
-					}
-					if (nested) {
-						continue;
 					}
 
 					// Read before the write, because the parent it had is the

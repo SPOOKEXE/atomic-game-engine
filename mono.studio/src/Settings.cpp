@@ -86,6 +86,13 @@ namespace studio {
 		// differently: sync ties the frame to the display and is what anybody
 		// wants by default; turning it off is what a benchmark or a latency
 		// measurement needs, and *then* the question of a ceiling arises.
+		// **Asked for from here and applied at the top of the next frame**, which
+		// is the renderer's business and is worth knowing about at the one call
+		// site that clicks it mid-frame. This panel is drawn *after*
+		// `Renderer::WaitForFrame` has already acquired this frame's swapchain
+		// image; setting the mode here used to rebuild the swapchain underneath
+		// it and the frame then presented a freed texture. See
+		// `render::Renderer::SetVerticalSync`.
 		if (ImGui::Checkbox("Vertical sync", &VerticalSync)) {
 			if (Renderer.SetVerticalSync(VerticalSync)) {
 				Say(VerticalSync ? "frames are paced by the display" : "vertical sync off");

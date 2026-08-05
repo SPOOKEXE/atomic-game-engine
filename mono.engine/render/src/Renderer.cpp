@@ -401,6 +401,52 @@ namespace engine::render {
 		// consumed it.
 		bool FrameClaimed = false;
 
+		// A present mode asked for, waiting for a legal moment to be set.
+		//
+		// **Because changing it recreates the swapchain, and the caller asks
+		// from the middle of a frame.** `SDL_SetGPUSwapchainParameters` destroys
+		// every swapchain image and builds new ones — and this renderer claims
+		// its frame up front, so between `BeginFrame` and `Render` there is an
+		// acquired `PendingSwapchain` pointing into exactly those images.
+		//
+		// The studio's Preferences page sits in that gap: `WaitForFrame` runs at
+		// the top of the editor's loop and the panels are drawn afterwards, so
+		// ticking "Vertical sync" applied the mode immediately, freed the texture
+		// this frame had already acquired, and `Render` bound it. It crashed on
+		// the frame the box was clicked, every time, which read as the toggle
+		// itself being broken rather than as a lifetime.
+		//
+		// Deferring is the whole fix: the request is honoured at the top of the
+		// next frame, before anything is acquired, where recreating the swapchain
+		// invalidates nothing anybody is holding. One frame of latency on a
+		// setting a person just clicked is not observable — the frame it would
+		// have applied to is the one being drawn as they let go of the mouse.
+		SDL_GPUPresentMode PendingPresentMode = SDL_GPU_PRESENTMODE_VSYNC;
+		bool PresentModePending = false;
+
+		// Sets it, if one was asked for. Safe only while no frame is claimed.
+		void ApplyPresentMode() {
+			if (!PresentModePending) {
+				return;
+			}
+			PresentModePending = false;
+
+			if (Device == nullptr || Window == nullptr) {
+				return;
+			}
+
+			if (!SDL_SetGPUSwapchainParameters(
+					Device, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, PendingPresentMode
+				)) {
+				// **Warned rather than reported back.** The caller was told
+				// whether the mode was *supported* when it asked, which is the
+				// question a checkbox can act on; a driver failing the set a frame
+				// later is not something there is anybody left to tell. The mode
+				// is unchanged, which is the safe outcome.
+				ENGINE_WARN("SDL_SetGPUSwapchainParameters: {}", SDL_GetError());
+			}
+		}
+
 		// Claims this frame: drains what the last one retired, takes a command
 		// buffer, and waits for a swapchain image unless there is no window.
 		//
@@ -419,6 +465,10 @@ namespace engine::render {
 			if (Device == nullptr) {
 				return false;
 			}
+
+			// **Before the acquire, which is the only moment it is legal.** See
+			// `PendingPresentMode`.
+			ApplyPresentMode();
 
 			// **Before anything this frame records or binds.** Whatever a
 			// previous frame retired is unreferenced now: its draw lists have
@@ -625,6 +675,8 @@ namespace engine::render {
 			uint64_t Signature = 0;
 		};
 
+		// Every surface a viewport owns.
+		//
 		// **Indexed by surface number, and never released short of shutdown.**
 		// A slot is allocated the first time an index is rendered and then kept,
 		// which is deliberate rather than lax: the studio round-robins its
@@ -633,12 +685,44 @@ namespace engine::render {
 		// every surface texture on alternate frames, which is the same
 		// reallocation `SCENE_TARGET_BLOCK` exists to avoid one layer up. The
 		// high-water mark is bounded by `scene::MAX_SURFACES`.
-		SurfaceSlotState Surfaces[scene::MAX_SURFACES];
+		struct SurfaceBank {
+			SurfaceSlotState Surfaces[scene::MAX_SURFACES];
+		};
+
+		// **One bank per viewport, and that is what makes a mirror a mirror when
+		// a world is on screen twice.** A reflection is of the viewer: `scene::
+		// AimSurfaceCameras` mirrors the world's `ActiveCamera` through each
+		// pane, so two panels looking at one world want two different images out
+		// of the same `SurfaceCamera`. With one shared bank they got one — the
+		// panel that drew most recently wrote every surface texture, and the
+		// other panel then composited its panes from a reflection computed for
+		// somebody else's eye. Flying either camera moved the mirrors in both
+		// windows, at half the frame rate, which reads as a projection fault
+		// rather than as one texture with two authors.
+		//
+		// The aim is still world state and still per frame — one panel draws per
+		// frame and re-aims before it does — so what has to be per viewport is
+		// the *texture*, which outlives the frame that drew it. A panel that is
+		// not this frame's shows its own last image rather than another panel's
+		// current one.
+		//
+		// **Grown on demand rather than sized to a maximum.** A client has one
+		// viewport and a scene with no mirrors has no banks at all; the studio's
+		// four allocate as their panels first draw a surface, and each costs a
+		// texture pair per live surface index and nothing per unused one.
+		std::vector<SurfaceBank> SurfaceBanks;
+
+		SurfaceBank &SurfacesAt(size_t viewport) {
+			if (SurfaceBanks.size() <= viewport) {
+				SurfaceBanks.resize(viewport + 1);
+			}
+			return SurfaceBanks[viewport];
+		}
 
 		SDL_GPUSampler *SurfaceSampler = nullptr;
 
 		bool EnsureShadow();
-		bool EnsureSurface(uint8_t index, uint32_t width, uint32_t height);
+		bool EnsureSurface(size_t viewport, uint8_t index, uint32_t width, uint32_t height);
 
 		// One opaque white texel, bound wherever a real texture is missing.
 		//
@@ -1234,12 +1318,12 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::EnsureSurface(uint8_t index, uint32_t width, uint32_t height) {
+	bool Renderer::Impl::EnsureSurface(size_t viewport, uint8_t index, uint32_t width, uint32_t height) {
 		if (index >= scene::MAX_SURFACES) {
 			return false;
 		}
 
-		SurfaceSlotState &state = Surfaces[index];
+		SurfaceSlotState &state = SurfacesAt(viewport).Surfaces[index];
 
 		if (state.Texture[0] != nullptr && width == state.Width && height == state.Height) {
 			return true;
@@ -1274,7 +1358,9 @@ namespace engine::render {
 		for (SDL_GPUTexture *&texture : state.Texture) {
 			texture = SDL_CreateGPUTexture(Device, &colour);
 			if (!texture) {
-				ENGINE_ERROR("surface {} texture {}x{}: {}", index, width, height, SDL_GetError());
+				ENGINE_ERROR(
+					"viewport {} surface {} texture {}x{}: {}", viewport, index, width, height, SDL_GetError()
+				);
 				return false;
 			}
 		}
@@ -1291,7 +1377,9 @@ namespace engine::render {
 
 		state.Depth = SDL_CreateGPUTexture(Device, &depth);
 		if (!state.Depth) {
-			ENGINE_ERROR("surface {} depth {}x{}: {}", index, width, height, SDL_GetError());
+			ENGINE_ERROR(
+				"viewport {} surface {} depth {}x{}: {}", viewport, index, width, height, SDL_GetError()
+			);
 			return false;
 		}
 
@@ -1390,20 +1478,23 @@ namespace engine::render {
 
 		// VSYNC is the only mode required to exist. Asking for IMMEDIATE on a
 		// backend without it fails rather than silently staying synchronised,
-		// so check before setting — an unsupported mode would otherwise leave
-		// the swapchain in whatever state the failed call left it.
+		// so check before asking for it — an unsupported mode would otherwise
+		// leave the swapchain in whatever state the failed call left it.
+		//
+		// **The query is the half that is safe to do now**, which is what lets
+		// this keep answering the caller straight away. It reads the surface's
+		// capabilities and touches nothing; setting the mode is what recreates
+		// the swapchain, and that is deferred.
 		if (!SDL_WindowSupportsGPUPresentMode(State->Device, State->Window, mode)) {
 			ENGINE_WARN("present mode unsupported on {}", State->Backend);
 			return false;
 		}
 
-		if (!SDL_SetGPUSwapchainParameters(
-				State->Device, State->Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode
-			)) {
-			ENGINE_WARN("SDL_SetGPUSwapchainParameters: {}", SDL_GetError());
-			return false;
-		}
-
+		// **Queued rather than set, and see `Impl::PendingPresentMode` for why.**
+		// Setting it destroys and rebuilds every swapchain image, and this is
+		// called from the middle of a frame that is already holding one of them.
+		State->PendingPresentMode = mode;
+		State->PresentModePending = true;
 		return true;
 	}
 
@@ -1590,16 +1681,19 @@ namespace engine::render {
 		if (State->ShadowSampler) {
 			SDL_ReleaseGPUSampler(device, State->ShadowSampler);
 		}
-		for (Impl::SurfaceSlotState &surface : State->Surfaces) {
-			for (SDL_GPUTexture *texture : surface.Texture) {
-				if (texture) {
-					SDL_ReleaseGPUTexture(device, texture);
+		for (Impl::SurfaceBank &bank : State->SurfaceBanks) {
+			for (Impl::SurfaceSlotState &surface : bank.Surfaces) {
+				for (SDL_GPUTexture *texture : surface.Texture) {
+					if (texture) {
+						SDL_ReleaseGPUTexture(device, texture);
+					}
+				}
+				if (surface.Depth) {
+					SDL_ReleaseGPUTexture(device, surface.Depth);
 				}
 			}
-			if (surface.Depth) {
-				SDL_ReleaseGPUTexture(device, surface.Depth);
-			}
 		}
+		State->SurfaceBanks.clear();
 		if (State->SurfaceSampler) {
 			SDL_ReleaseGPUSampler(device, State->SurfaceSampler);
 		}
@@ -1943,6 +2037,12 @@ namespace engine::render {
 		size_t acceptedCount = 0;
 		bool claimed[scene::MAX_SURFACES] = {};
 
+		// **This viewport's surfaces, and not the renderer's.** A reflection is
+		// of the viewer, so a world drawn from two panels wants two images per
+		// pane. Resolved once here and read everywhere below, so no pass can
+		// reach the wrong bank. See `Impl::SurfaceBanks`.
+		Impl::SurfaceBank &bank = State->SurfacesAt(targetSlot);
+
 		for (const SurfaceView &view : surfaces) {
 			if (view.Index < 0 || static_cast<uint8_t>(view.Index) >= scene::MAX_SURFACES) {
 				ENGINE_WARN(
@@ -2099,7 +2199,7 @@ namespace engine::render {
 		size_t liveCount = 0;
 		for (size_t index = 0; index < acceptedCount; index++) {
 			const AcceptedView &view = accepted[index];
-			if (State->EnsureSurface(view.Index, view.View->Width, view.View->Height)) {
+			if (State->EnsureSurface(targetSlot, view.Index, view.View->Width, view.View->Height)) {
 				accepted[liveCount++] = view;
 			}
 		}
@@ -2141,7 +2241,7 @@ namespace engine::render {
 			}
 
 			for (size_t index = 0; index < acceptedCount; index++) {
-				Impl::SurfaceSlotState &state = State->Surfaces[accepted[index].Index];
+				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
 
 				// **Written whether or not the surface renders.** The opacity is
 				// what the *screen* pass composites the pane with and it changes
@@ -2473,7 +2573,7 @@ namespace engine::render {
 					continue;
 				}
 
-				Impl::SurfaceSlotState &state = State->Surfaces[accepted[index].Index];
+				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
 				state.PreviousViewProjection = state.ViewProjection;
 				state.ViewProjection = accepted[index].ViewProjection;
 				state.Slot ^= 1u;
@@ -2485,7 +2585,7 @@ namespace engine::render {
 				}
 
 				const uint8_t self = accepted[index].Index;
-				Impl::SurfaceSlotState &state = State->Surfaces[self];
+				Impl::SurfaceSlotState &state = bank.Surfaces[self];
 
 				SDL_GPUColorTargetInfo surfaceColour{};
 				surfaceColour.texture = state.Texture[state.Slot];
@@ -2601,7 +2701,7 @@ namespace engine::render {
 							continue;
 						}
 
-						const Impl::SurfaceSlotState &shown = State->Surfaces[index];
+						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
 						if (!shown.Ready || !claimed[index]) {
 							plainly();
 							SDL_DrawGPUIndexedPrimitives(
@@ -2688,7 +2788,7 @@ namespace engine::render {
 					continue;
 				}
 
-				Impl::SurfaceSlotState &state = State->Surfaces[accepted[index].Index];
+				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
 				state.Ready = true;
 				state.Signature = surfaceSignature;
 				result.SurfacePasses++;
@@ -2908,7 +3008,7 @@ namespace engine::render {
 							continue;
 						}
 
-						const Impl::SurfaceSlotState &shown = State->Surfaces[index];
+						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
 
 						// Its own tint until the surface has a frame, and for a
 						// pane naming an index nothing renders. Skipping it

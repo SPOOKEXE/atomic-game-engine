@@ -685,6 +685,15 @@ namespace engine::script {
 			note(PumpChanges(State));
 		}
 		{
+			// **After the property changes and before the tasks**, which puts
+			// it inside step 2 of the order above rather than beside it: both
+			// are "what the previous barrier recorded", and a handler watching
+			// a part's `Position` and its `AncestryChanged` should see one
+			// world rather than two.
+			ENGINE_PROFILE_CAT("script tree", core::ProfileCategory::Script);
+			note(PumpTree(State));
+		}
+		{
 			ENGINE_PROFILE_CAT("script tasks", core::ProfileCategory::Script);
 			note(PumpTasks(State));
 		}

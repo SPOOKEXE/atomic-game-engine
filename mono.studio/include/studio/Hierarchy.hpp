@@ -184,6 +184,20 @@ namespace studio {
 		// @return `true` when the last scan saw it.
 		bool Holds(engine::ecs::Entity instance) const;
 
+		// Whether one instance sits inside another's subtree.
+		//
+		// **Answered from the compiled nodes, not from the store**, so it
+		// covers rows a filter is hiding as well as rows on screen — and so the
+		// panel logic that needs it can be tested without a world open.
+		//
+		// Reflexive, matching `Store::IsDescendantOf`: an instance is inside
+		// its own subtree.
+		//
+		// @param instance The instance to test.
+		// @param ancestor The subtree root to test against.
+		// @return `true` when `instance` is `ancestor` or sits beneath it.
+		bool IsUnder(engine::ecs::Entity instance, engine::ecs::Entity ancestor) const;
+
 		// Whether a filter is narrowing the view.
 		//
 		// @return `true` when the last request carried a non-empty filter.
@@ -325,4 +339,42 @@ namespace studio {
 		bool Narrowed = false;
 		size_t Matches = 0;
 	};
+
+	// The rows a shift-click covers, from the anchor to the row just clicked.
+	//
+	// **Over the drawn order, not over the tree.** A range in a tree view is
+	// what the eye sees between two rows, which is the flattened order with the
+	// closed subtrees left out — so it is row indices and not an ancestor walk.
+	//
+	// Either end being off screen — deleted, collapsed away, filtered out —
+	// yields nothing, and the caller falls back to a plain click. That is what
+	// every list does, and what an author reads the gesture as when the row
+	// they remember shift-clicking from is no longer there.
+	//
+	// @param view   The compiled tree the rows were drawn from.
+	// @param anchor Where the range starts.
+	// @param to     Where it ends.
+	// @return The rows inclusive of both ends, or an empty span.
+	std::span<const HierarchyRow>
+	RowsBetween(const HierarchyView &view, engine::ecs::Entity anchor, engine::ecs::Entity to);
+
+	// The members of a set that are not inside another member.
+	//
+	// **What a multi-selection drag actually moves.** Dragging a model and one
+	// of its own parts together means "move the model": moving both would take
+	// the part out of the model on the way, which is the one outcome nobody
+	// dragging them together wants. Roblox drops the nested ones for the same
+	// reason.
+	//
+	// Order is preserved, so the caller's first choice stays first.
+	//
+	// @param view   The compiled tree, for the ancestor test.
+	// @param moving The instances asked for.
+	// @param out    Cleared, then filled with the ones to act on.
+	void TopMost(
+		const HierarchyView &view,
+		std::span<const engine::ecs::Entity> moving,
+		std::vector<engine::ecs::Entity> &out
+	);
+
 }

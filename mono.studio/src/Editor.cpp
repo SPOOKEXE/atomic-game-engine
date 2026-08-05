@@ -1035,6 +1035,17 @@ namespace studio {
 		// the same reason and in the same place — a replica may not mint an
 		// authoritative entity, so its viewpoint comes out of the predicted
 		// range.
+		//
+		// **`DrawingViewport` below chooses the surface textures as well as the
+		// scene target, and the mirrors need it to.** The views collected above
+		// were aimed from *this* panel's eye a few lines ago — the aim is world
+		// state and one panel draws per frame, so it is correct at the moment it
+		// is read and wrong by the time the next panel draws. What outlives the
+		// frame is the texture, so that is what is kept per viewport: every panel
+		// composites its panes from reflections taken for its own camera, and a
+		// panel that is not this frame's shows its own last image rather than
+		// another panel's current one. They shared one set until v0.75, and
+		// flying either camera moved the mirrors in both windows.
 
 		LastFrame = Renderer.Render(
 			eye,

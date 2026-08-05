@@ -628,6 +628,23 @@ namespace engine::ecs {
 		return engine::ecs::FindFirstAncestorWhichIsA(*State, instance, id);
 	}
 
+	void Store::ObserveTree() {
+		RequireOwningThread("ObserveTree");
+
+		State->WatchTree = true;
+	}
+
+	bool Store::TreeObserved() const {
+		return State->WatchTree;
+	}
+
+	void Store::TakeTreeChanges(std::vector<TreeChange> &out) {
+		RequireOwningThread("TakeTreeChanges");
+
+		out.clear();
+		out.swap(State->TreeChanges);
+	}
+
 	std::string Store::GetFullName(Entity instance) const {
 		return engine::ecs::GetFullName(*State, instance);
 	}

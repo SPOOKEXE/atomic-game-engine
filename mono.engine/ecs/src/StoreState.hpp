@@ -20,6 +20,7 @@
 
 #include <engine/ecs/ComponentSet.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/SparseSet.hpp>
 
 #include <algorithm>
@@ -278,6 +279,17 @@ namespace engine::ecs {
 
 		// Entity index to generation and location.
 		SparseSet Directory;
+
+		// Whether anything is listening for reparents, and what has happened
+		// since it last looked.
+		//
+		// **Opt in, like `Observe`.** A world with no script watching the tree
+		// pays one bool per `SetParent` and stores nothing; the alternative is a
+		// list that grows for the whole life of every world nobody is draining.
+		// The same argument `.Changed` makes for observing a component on the
+		// first connection rather than on creation.
+		bool WatchTree = false;
+		std::vector<TreeChange> TreeChanges;
 
 		// Named entities, both ways. Names are optional and most entities have
 		// none, so this is a map rather than a column.

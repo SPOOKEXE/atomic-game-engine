@@ -6,6 +6,20 @@
 namespace engine::script {
 
 	namespace {
+		// Turns the store's reparent recording on, the first time a tree signal is
+		// connected.
+		//
+		// **On connection rather than on world creation**, for the reason
+		// `.Changed` observes late: a world nobody is watching must not pay for a
+		// list nobody drains. Idempotent, so the second connection is a store
+		// write of a bool it already holds.
+		void WatchTreeFor(LuauContext &context, SignalKind kind) {
+			if (kind == SignalKind::ChildAdded || kind == SignalKind::ChildRemoved ||
+				kind == SignalKind::DescendantAdded || kind == SignalKind::AncestryChanged) {
+				context.World->ObserveTree();
+			}
+		}
+
 		using ecs::Entity;
 
 		// What a signal userdata carries.
@@ -59,6 +73,7 @@ namespace engine::script {
 			if (signal.Kind == SignalKind::Changed || signal.Kind == SignalKind::PropertyChanged) {
 				context.Changes.Watch(*context.World, signal.Subject);
 			}
+			WatchTreeFor(context, signal.Kind);
 
 			// A registry ref keeps the function alive, and is what `CallbackRef`
 			// means on this side. The JavaScript side puts an index into its own
@@ -88,6 +103,7 @@ namespace engine::script {
 			if (signal.Kind == SignalKind::Changed || signal.Kind == SignalKind::PropertyChanged) {
 				context.Changes.Watch(*context.World, signal.Subject);
 			}
+			WatchTreeFor(context, signal.Kind);
 
 			lua_pushvalue(state, 2);
 			const int reference = lua_ref(state, -1);

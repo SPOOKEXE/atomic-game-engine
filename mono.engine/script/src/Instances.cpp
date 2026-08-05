@@ -485,6 +485,25 @@ namespace engine::script {
 				return 1;
 			}
 
+			// The tree's own signals, for the same reason and in the same
+			// place: none of them projects onto a component either.
+			if (name == "ChildAdded") {
+				PushSignal(state, SignalKind::ChildAdded, instance);
+				return 1;
+			}
+			if (name == "ChildRemoved") {
+				PushSignal(state, SignalKind::ChildRemoved, instance);
+				return 1;
+			}
+			if (name == "DescendantAdded") {
+				PushSignal(state, SignalKind::DescendantAdded, instance);
+				return 1;
+			}
+			if (name == "AncestryChanged") {
+				PushSignal(state, SignalKind::AncestryChanged, instance);
+				return 1;
+			}
+
 			const PropertyDescriptor *property = Find(store, instance, field);
 			if (property != nullptr) {
 				// Sized from the descriptor rather than from a guess, so this
@@ -765,6 +784,72 @@ namespace engine::script {
 				}
 			});
 		});
+		return firstError;
+	}
+
+	std::string PumpTree(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+		if (!context.World->TreeObserved()) {
+			return {};
+		}
+
+		// **Taken, not read.** A handler may reparent something, and a swap
+		// leaves the store's list empty before the first one runs — so the move
+		// it makes belongs to the next delivery instead of being appended to
+		// the list being walked.
+		std::vector<ecs::TreeChange> changes;
+		context.World->TakeTreeChanges(changes);
+		if (changes.empty()) {
+			return {};
+		}
+
+		std::string firstError;
+		const auto note = [&](std::string message) {
+			if (firstError.empty() && !message.empty()) {
+				firstError = std::move(message);
+			}
+		};
+
+		for (const ecs::TreeChange &change : changes) {
+			// **The parent's signals first, then the subtree's.** Roblox orders
+			// them the same way, and a handler that reads `Parent` from an
+			// `AncestryChanged` should see the move already finished — which it
+			// does here whatever the order, because the delivery is a whole
+			// tick after the write.
+			if (change.From != ecs::NULL_ENTITY) {
+				PushInstance(state, change.Instance);
+				note(FireSignal(state, SignalKind::ChildRemoved, change.From, 1));
+			}
+
+			if (change.To != ecs::NULL_ENTITY) {
+				PushInstance(state, change.Instance);
+				note(FireSignal(state, SignalKind::ChildAdded, change.To, 1));
+
+				// `DescendantAdded` is every ancestor's, not just the new
+				// parent's — that is the whole difference between it and
+				// `ChildAdded`. Walked upwards from the parent, which is a
+				// handful of steps rather than a search.
+				for (Entity above = change.To; above != ecs::NULL_ENTITY;
+					 above = context.World->ParentOf(above)) {
+					PushInstance(state, change.Instance);
+					note(FireSignal(state, SignalKind::DescendantAdded, above, 1));
+				}
+			}
+
+			// **The instance and everything under it**, because an ancestry
+			// change is inherited: moving a model changes the ancestry of every
+			// part in it, and a script watching a part has no way to know its
+			// model moved otherwise.
+			const auto ancestry = [&](Entity subject) {
+				PushInstance(state, subject);
+				PushInstance(state, context.World->ParentOf(subject));
+				note(FireSignal(state, SignalKind::AncestryChanged, subject, 2));
+			};
+
+			ancestry(change.Instance);
+			context.World->EachDescendant(change.Instance, ancestry);
+		}
+
 		return firstError;
 	}
 

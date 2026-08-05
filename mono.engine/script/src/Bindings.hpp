@@ -360,6 +360,17 @@ namespace engine::script {
 	// @return An error message when a handler raised, or empty.
 	std::string PumpChanges(lua_State *state);
 
+	// Delivers everything the tree recorded since the last barrier.
+	//
+	// **Beside `PumpChanges` and for the same reason.** A reparent cannot fire
+	// a signal from inside `SetParent` — the handler would re-enter the VM with
+	// the sibling list half-relinked — so the store writes it down and this
+	// hands it over one tick later. See `ecs::TreeChange`.
+	//
+	// @param state The VM to deliver into.
+	// @return The first error a handler raised, or empty.
+	std::string PumpTree(lua_State *state);
+
 	// Resumes every task due at the world's current tick.
 	//
 	// @return An error message when a resumed thread raised, or empty.

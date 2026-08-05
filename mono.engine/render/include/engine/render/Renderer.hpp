@@ -483,8 +483,21 @@ namespace engine::render {
 		// window because the swapchain belongs to the GPU device, and the
 		// device is behind the pimpl.
 		//
+		// **Answered now and applied at the start of the next frame**, which is
+		// a distinction a caller may ignore and a caller writing a test may not.
+		// Whether the mode exists is a query and is resolved before this returns;
+		// setting it destroys and rebuilds every swapchain image, and this is
+		// called from panels drawn in the middle of a frame that is already
+		// holding one of those images. Applying it there freed the texture the
+		// frame had acquired and the next `Render` bound it — a crash on the
+		// frame the box was ticked. So the request is queued and honoured by the
+		// next `WaitForFrame` or `Render`, before anything is acquired.
+		//
+		// A true return therefore means "the backend has this mode and it is
+		// queued", not "the swapchain is in it as of this line".
+		//
 		// @param enabled True to wait for vertical blank; false to request immediate presentation.
-		// @return True when the requested mode was supported and applied.
+		// @return True when the requested mode was supported and taken.
 		bool SetVerticalSync(bool enabled);
 
 		// Draws one frame and presents it. Returns false in Presented when the
@@ -521,11 +534,22 @@ namespace engine::render {
 		//                    size instead of into the window, or null for the
 		//                    window. Decides the aspect ratio and the cull
 		//                    frustum as well as the target — see `SceneTarget`.
-		// @param targetSlot  Which offscreen target `sceneTarget` names. A game
-		//                    draws one view and never passes this; a studio
-		//                    keeps a slot per viewport so two panels of
-		//                    different sizes do not reallocate one shared
-		//                    texture twice a frame. See `SceneTexture`.
+		// @param targetSlot  Which viewport this call is drawing. A game draws
+		//                    one view and never passes this; a studio keeps a
+		//                    slot per viewport so two panels of different sizes
+		//                    do not reallocate one shared texture twice a frame.
+		//                    See `SceneTexture`.
+		//
+		//                    **It also selects the surface textures**, which is
+		//                    what makes a mirror right in more than one panel. A
+		//                    reflection is of the viewer — `scene::
+		//                    AimSurfaceCameras` mirrors the live camera through
+		//                    each pane — so two panels showing one world want two
+		//                    images out of the same `SurfaceCamera`. They shared
+		//                    one set until v0.75, and the panel that drew most
+		//                    recently wrote all of them: flying either camera
+		//                    moved the mirrors in both windows. A caller that
+		//                    passes a slot per view gets a set per view.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,
