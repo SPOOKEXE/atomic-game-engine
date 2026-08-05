@@ -1,15 +1,20 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Visibility.hpp>
 
 #include <algorithm>
 #include <client/Scene.hpp>
@@ -30,6 +35,7 @@ namespace client {
 	using engine::scene::Bounds;
 	using engine::scene::DrawInstance;
 	using engine::scene::PreviousTransform;
+	using engine::scene::Rendered;
 	using engine::scene::Transform;
 	using engine::scene::Visual;
 	using engine::scene::WorldBounds;
@@ -93,6 +99,42 @@ namespace client {
 			}
 		}
 
+		// Brings the render gate in step with the tree.
+		//
+		// **`PreRender`, and registered before `collect-instances` in the same
+		// phase**, because what it produces is presentation state and this is
+		// the phase that derives presentation state. Registration order carries
+		// no ordering contract — `Scheduler` says so — but these two are
+		// independent in the only way that matters: a gate one frame stale
+		// would be a part that appears a frame after it was parented, and the
+		// phase runs them in the order they were added.
+		//
+		// **It is the one thing here that is structural**, which is worth
+		// naming rather than hiding: adding or removing `Rendered` moves a row
+		// to another archetype. That is acceptable because nothing in the
+		// simulation reads `Rendered` — it exists to be a query term for the
+		// draw list and for nothing else — and because every host derives it
+		// the same way, so two runs of one scene still agree. The alternative
+		// was `PostSimulation`, and it fails a world that presents without
+		// ticking: the studio edits a suspended world, and it would have shown
+		// nothing until somebody pressed play.
+		void SyncVisibility(Store &store) {
+			(void)engine::scene::SyncRendered(store);
+		}
+
+		// Places every surface camera parented to a part. See
+		// `scene/SurfaceCameras.hpp` for the reflection and why it lives in
+		// `scene` rather than in a script.
+		//
+		// **Before the draw list is collected, and that ordering matters here.**
+		// Aiming a camera also writes its part's `Visual::Surface`, so a pass
+		// that ran afterwards would publish a draw list built from last frame's
+		// answer — a mirror would be one frame late to start showing anything,
+		// which is invisible in a still scene and a flicker in a moving one.
+		void AimSurfaces(Store &store) {
+			(void)engine::scene::AimSurfaceCameras(store);
+		}
+
 		// The one phase that turns simulation state into something to draw. It
 		// reads the simulation and writes only the draw list, which is what
 		// "PreRender never mutates simulation state" means in practice.
@@ -116,7 +158,7 @@ namespace client {
 			size_t matching = 0;
 			{
 				ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-				matching = store.CountMatching<Transform, PreviousTransform, Bounds, Visual>();
+				matching = store.CountMatching<Transform, PreviousTransform, Bounds, Visual, Rendered>();
 			}
 
 			{
@@ -155,18 +197,28 @@ namespace client {
 				DrawInstance *const out = drawList->Instances.data();
 				const size_t capacity = drawList->Instances.size();
 
+				// **`Rendered` is in the signature and nothing reads it**, which
+				// is the point of a tag: it is a term in the query, so the
+				// archetype walk never reaches a row that has not been marked as
+				// a visible descendant of `Workspace`. A branch here could not
+				// have done the same job — this loop writes `out[first + row]`
+				// so that no two workers touch the same bytes, and skipping a
+				// row would leave a hole in the draw list and make `written` a
+				// lie. `scene/Visibility.hpp` has the whole argument.
 				written = store.EachBatchParallel<
 					const Transform,
 					const PreviousTransform,
 					const Bounds,
-					const Visual>([out, capacity, alpha](
-									  size_t first,
-									  size_t rows,
-									  const Transform *transforms,
-									  const PreviousTransform *previous,
-									  const Bounds *bounds,
-									  const Visual *visuals
-								  ) {
+					const Visual,
+					const Rendered>([out, capacity, alpha](
+										size_t first,
+										size_t rows,
+										const Transform *transforms,
+										const PreviousTransform *previous,
+										const Bounds *bounds,
+										const Visual *visuals,
+										const Rendered *
+									) {
 					// The count came from a different query than the one
 					// being walked. They agree, and this is what happens if
 					// they ever stop: instances go missing and the number on
@@ -207,6 +259,7 @@ namespace client {
 							// from several views.
 							visuals[row].Transparency,
 							visuals[row].Surface,
+							visuals[row].CastShadow,
 						};
 					}
 				});
@@ -224,6 +277,18 @@ namespace client {
 					"render.instances", static_cast<double>(drawList->Instances.size())
 				);
 			}
+
+			// **After the metric, deliberately.** `render.instances` answers
+			// "how much scene is there", and a number that moved when somebody
+			// turned a debugging aid on would stop being comparable across the
+			// runs it exists to compare.
+			//
+			// The markers are appended rather than written by the loop above
+			// because they are not entities: nothing in the world matches the
+			// query, so there is no row to size the list against. `push_back`
+			// past the shrink costs one reallocation on the frame a mirror is
+			// created and nothing after it — the capacity stays.
+			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 		}
 	}
 
@@ -258,36 +323,84 @@ namespace client {
 
 	}
 
-	bool FindSurfaceCamera(Store &store, engine::render::SurfaceView &surface) {
-		bool found = false;
-		Entity chosen = engine::ecs::NULL_ENTITY;
+	namespace {
+		// A surface camera's view beside the entity id it came from, which is
+		// the only thing the sort below needs and the one thing a `SurfaceView`
+		// must not grow a field for.
+		using OrderedView = std::pair<uint32_t, engine::render::SurfaceView>;
 
-		// By entity id, which is creation order, so a world loaded the same way
-		// twice picks the same camera. An archetype walk would pick whichever
-		// row happened to be first, and that moves when anything changes a
-		// component set.
+		// Scratch, kept between frames so a steady scene stops allocating. The
+		// same argument `scene::SurfaceCameras.cpp` makes for its own.
+		std::vector<OrderedView> &Ordered() {
+			static thread_local std::vector<OrderedView> ordered;
+			return ordered;
+		}
+	}
+
+	size_t CollectSurfaceViews(Store &store, std::vector<engine::render::SurfaceView> &views) {
+		views.clear();
+		Ordered().clear();
+
 		store.Each<const engine::scene::SurfaceCamera, const engine::scene::Camera, const Transform>(
-			[&](Entity entity,
+			[&views](
+				Entity entity,
 				const engine::scene::SurfaceCamera &target,
 				const engine::scene::Camera &lens,
-				const Transform &placement) {
-				if (found && entity.Id >= chosen.Id) {
-					return;
-				}
+				const Transform &placement
+			) {
+				engine::render::SurfaceView view;
+				view.Index = target.Surface;
+				view.Frame = placement.Frame;
+				view.Lens = lens;
+				view.Width = target.Width;
+				view.Height = target.Height;
 
-				chosen = entity;
-				found = true;
+				// **Opacity here, transparency in the component**, and the flip
+				// happens once. `scene::SurfaceCamera::ImageTransparency` is
+				// authored the way a script thinks — 0 is solid, like every
+				// other transparency in this engine — and the shader multiplies
+				// by the opposite, so converting at the boundary beats one
+				// subtraction in a shader nobody can put a breakpoint in.
+				// **Not clamped here.** The property setter is the authored gate
+				// and `Renderer` clamps again at its own boundary because
+				// `SurfaceView` is a public struct any host fills — a third copy
+				// in between makes none of the three read as the authority, and
+				// a future widening of the range has to find all of them.
+				view.ImageOpacity = 1.0f - target.ImageTransparency;
 
-				surface.Frame = placement.Frame;
-				surface.Lens = lens;
-				surface.Width = target.Width;
-				surface.Height = target.Height;
+				// **Kept beside its entity id, because `SurfaceView` does not
+				// carry one and should not.** It is what the renderer takes, and
+				// an entity handle in it would be a world's identifier in a type
+				// the device layer reads.
+				//
+				// The order matters: two cameras claiming one index is a scene
+				// mistake the renderer refuses by keeping the *first*, and
+				// without a stable order there is no first. `Each` walks
+				// archetypes in an order that moves whenever anything changes a
+				// component set.
+				Ordered().push_back({entity.Id, view});
 			}
 		);
-		return found;
+
+		std::sort(Ordered().begin(), Ordered().end(), [](const OrderedView &left, const OrderedView &right) {
+			return left.first < right.first;
+		});
+
+		views.reserve(Ordered().size());
+		for (const OrderedView &ordered : Ordered()) {
+			views.push_back(ordered.second);
+		}
+
+		return views.size();
 	}
 
 	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
+		// Before anything mints an automatic id for `DrawList`. See
+		// `RegisterClientComponents`: `Components::Of<T>` caches its answer per
+		// type per process, so an explicit registration that arrives second
+		// aborts rather than quietly leaving two names for one thing.
+		RegisterClientComponents();
+
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
 		std::string error;
@@ -319,8 +432,99 @@ namespace client {
 			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		}
 
+		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
+		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 		return true;
 	}
 
+	bool InstallDefaultCamera(Store &store, Scheduler &scheduler) {
+		const auto *existing = store.Resource<ActiveCamera>();
+		if (existing != nullptr && existing->Entity != engine::ecs::NULL_ENTITY &&
+			store.Alive(existing->Entity)) {
+			return false;
+		}
+
+		ActiveCamera live;
+		live.Entity = InstallCamera(store);
+		store.SetResource(live);
+
+		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
+		return true;
+	}
+
+	void RegisterClientComponents() {
+		// **A `DrawList` is derived state, and its serialisation says so by
+		// writing nothing.**
+		//
+		// It had no registration at all before v0.7, which meant
+		// `Store::SetResource` minted one under the compiler's spelling of the
+		// type — rule 4's exact failure, sitting unnoticed because nothing had
+		// ever tried to snapshot a world that had one. The studio's Stop does:
+		// it saves the universe when Play is pressed and restores it when Stop
+		// is, and `Store::Save` refuses a resource with no serialisation rather
+		// than writing bytes that cannot be read back. That refusal is correct
+		// and this is the fix for it.
+		//
+		// Nothing is written and nothing is read because the list is rebuilt by
+		// `collect-instances` in `PreRender`, every frame, before anything
+		// looks at it. Writing a frame's worth of interpolated cubes into every
+		// save file would be storing an answer that is recomputed before it is
+		// ever used.
+		engine::ecs::Components::Register<DrawList>(
+			"client.DrawList",
+			[](engine::core::ByteWriter &, const void *, size_t) {},
+			[](engine::core::ByteReader &, void *destination, size_t count) {
+				auto *lists = static_cast<DrawList *>(destination);
+				for (size_t index = 0; index < count; index++) {
+					lists[index].Instances.clear();
+				}
+			}
+		);
+	}
+
+	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {
+		RegisterClientComponents();
+
+		if (!store.HasResource<DrawList>()) {
+			store.SetResource(DrawList{});
+			store.ResourceMutable<DrawList>()->Instances.reserve(reserve);
+		}
+
+		if (!store.HasResource<WorldBounds>()) {
+			// A default rather than nothing. `WorldBounds` is what the
+			// replication wire quantises against and what a camera would frame,
+			// and a world opened in an editor has authored no such number — so
+			// it gets the type's own default instead of a missing resource
+			// somebody later reads through a null pointer.
+			store.SetResource(WorldBounds{});
+		}
+
+		// **The same system `engine::examples` installs, from the same place.**
+		// It moved into `scene` at v0.7 precisely so this call site could exist:
+		// two copies of a system that writes `PreviousTransform` can both be
+		// installed into one world, and the second wins silently every tick.
+		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
+
+		// **And the mirrors, which only `BuildScriptedWorld` was installing.**
+		// That is why a mirror worked under `--scene` and was a plain white
+		// rectangle everywhere else: the studio, `--game` and an imported world
+		// all come through here, and none of them was aiming anything.
+		//
+		// The visible half of that failure is not the camera at all — it is
+		// step 4 of `scene/SurfaceCameras.hpp`. Aiming a camera is also what
+		// writes `Visual::Surface` on the pane it is parented to, so without
+		// this system the pane keeps the component's default of -1, samples no
+		// texture, and draws as its own flat `Tint`. `Mirrors-1-world.luau`
+		// tints its pane white, so the symptom was a white part beside a frame
+		// that was rendering perfectly — which reads as a broken surface pass
+		// rather than as a missing system.
+		//
+		// **Between the two, not beside them.** `sync-rendered` decides what is
+		// drawn at all and `collect-instances` reads the `Visual` this writes,
+		// so a mirror aimed after collection would publish last frame's answer.
+		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
+		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+	}
 }

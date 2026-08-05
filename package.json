@@ -1,0 +1,31 @@
+{
+	"$comment": [
+		"The TypeScript compiler, pinned. This is not a Node project — nothing here",
+		"is published, imported or shipped, and no engine code is JavaScript. The",
+		"file exists so that `just typecheck` runs a compiler this repository chose",
+		"rather than whichever one was newest that morning.",
+		"",
+		"It pinned nothing before: the recipe ran `bunx tsc`, which resolves to the",
+		"`latest` tag and fetches it. A compiler upgrade could therefore change what",
+		"the check accepts with no commit anywhere — the exact failure mode",
+		"docs/DEFERRED.md records for `just docs-check`, where a check nobody could",
+		"reproduce stopped being true while still claiming to pass.",
+		"",
+		"**Exact, with no caret, and there is no lockfile on purpose.** TypeScript 7",
+		"is the native compiler: its dependencies are one prebuilt binary per",
+		"platform and upstream pins every one of them to its own exact version. So",
+		"`7.0.2` already names the whole tree, and a lockfile would add nothing",
+		"except a format to disagree about — bun writes `bun.lock`, npm writes",
+		"`package-lock.json`, and the Justfile accepts either runner.",
+		"",
+		"Bump it deliberately: change the version, run `just typecheck`, and review",
+		"what the new compiler says. `mono.engine/script/bindings/engine.d.ts` is",
+		"generated, so a diagnostic that appears here is either a real disagreement",
+		"or a change in the compiler worth knowing about."
+	],
+	"name": "atomic-game-engine-scripts",
+	"private": true,
+	"devDependencies": {
+		"typescript": "7.0.2"
+	}
+}

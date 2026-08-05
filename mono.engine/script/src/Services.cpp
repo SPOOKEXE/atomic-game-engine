@@ -464,7 +464,7 @@ namespace engine::script {
 		}
 	}
 
-	void OpenServices(lua_State *state, ecs::Store &store) {
+	void OpenServices(lua_State *state) {
 		// **Before anything constructs a `Postbox`, and this is not a
 		// formality.** A `Postbox` is a view over two resources, and reading
 		// one on a store that never registered them mints them under the
@@ -509,8 +509,6 @@ namespace engine::script {
 		InstallService(state, context, "MessagingService", messaging);
 		InstallService(state, context, "MemoryStoreService", memoryStore);
 		InstallService(state, context, "DataStoreService", dataStore);
-
-		(void)store;
 	}
 
 	std::string PumpDeliveries(lua_State *state, ecs::Store &store) {

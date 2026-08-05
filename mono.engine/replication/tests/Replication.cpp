@@ -8,6 +8,7 @@
 
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/replication/Authority.hpp>
@@ -57,6 +58,7 @@ namespace replication_test {
 			engine::ecs::Components::Register<Spot>("replication_test.Spot");
 			engine::ecs::Components::Register<Secret>("replication_test.Secret");
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
+			engine::ecs::Components::Register<engine::ecs::Hierarchy>("ecs.Hierarchy");
 			return true;
 		}();
 		(void)once;
@@ -1007,4 +1009,60 @@ TEST_CASE("a run of losses still converges", "[replication]") {
 		REQUIRE(pair.Client.Get<Spot>(entities[index])->X == static_cast<float>(index));
 		REQUIRE(pair.Client.Get<Spot>(entities[index])->Y == 2.0f);
 	}
+}
+
+TEST_CASE("a destroyed entity leaves the replica's tree walkable", "[replication]") {
+	// **The repair may not be left to the delta that follows.** A destroy rides
+	// the reliable channel and the corrected links ride the delta, and the two
+	// do not arrive together — `ApplyStructure` says so itself. A client renders
+	// in between, and a parent still naming a freed child makes `EachChild` hand
+	// its body a dead handle and stop there, taking every sibling behind it off
+	// the tree.
+	Pair pair;
+	pair.Authority_.Replicate(Name("ecs.Hierarchy"), engine::replication::ChangeDetection::Signature);
+
+	const Entity parent = pair.Server.Create();
+	pair.Server.Set<engine::ecs::Hierarchy>(parent, engine::ecs::Hierarchy{});
+	pair.Server.Set<Spot>(parent, Spot{0.0f, 0.0f});
+
+	std::vector<Entity> children;
+	for (int index = 0; index < 3; index++) {
+		const Entity child = pair.Server.Create();
+		pair.Server.Set<engine::ecs::Hierarchy>(child, engine::ecs::Hierarchy{});
+		pair.Server.Set<Spot>(child, Spot{static_cast<float>(index), 0.0f});
+		pair.Server.SetParent(child, parent);
+		children.push_back(child);
+	}
+
+	REQUIRE(pair.Join());
+	pair.Tick();
+
+	std::vector<Entity> seen;
+	pair.Client.EachChild(parent, [&](Entity child) { seen.push_back(child); });
+	REQUIRE(seen == children);
+
+	pair.Server.DestroyInstance(children[1]);
+
+	// Delivered one message at a time, and the tree is checked between each.
+	// Whether the delta that heals this arrives in the same tick is not
+	// something the invariant is allowed to depend on.
+	pair.Now++;
+	pair.Authority_.Publish(pair.Server, pair.Now);
+
+	size_t dead = 0;
+	for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+		pair.Replica_.Receive(pair.Client, message);
+		pair.Client.EachChild(parent, [&](Entity child) {
+			if (!pair.Client.Alive(child)) {
+				dead++;
+			}
+		});
+	}
+	pair.Server.ClearChanges();
+
+	REQUIRE(dead == 0);
+
+	seen.clear();
+	pair.Client.EachChild(parent, [&](Entity child) { seen.push_back(child); });
+	REQUIRE(seen == std::vector<Entity>{children[0], children[2]});
 }

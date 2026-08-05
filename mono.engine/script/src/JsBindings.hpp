@@ -72,7 +72,30 @@ namespace engine::script {
 	std::string PumpJsDeliveries(JSContext *context, ecs::Store &store);
 
 	// Fires `.Changed` for everything the last barrier recorded.
+	// Puts the shared instance methods on the global, as `__instanceMethods`.
+	//
+	// **Called before the first prototype is built, and that ordering is the
+	// whole reason it is its own function.** `PrototypeFor` chains every class
+	// prototype behind this object and *caches the result*; a prototype built
+	// before it existed fell back to a plain one and was then kept forever. The
+	// `workspace` global is built during `OpenJsBindings`, so it had no
+	// `IsA`, no `GetChildren` and no signals at all — silently, because a
+	// missing method in JavaScript is `undefined` until something calls it.
+	//
+	// @param context The VM to install into.
+	void InstallJsInstanceMethods(JSContext *context);
+
 	std::string PumpJsChanges(JSContext *context);
+
+	// Delivers everything the tree recorded since the last barrier.
+	//
+	// The JavaScript half of `PumpTree`. `DescendantRemoving` is not here and
+	// never will be: it is dispatched from inside the store before the removal
+	// happens, because that is the only place its contract can hold.
+	//
+	// @param context The VM to deliver into.
+	// @return The first error a handler raised, or empty.
+	std::string PumpJsTree(JSContext *context);
 
 	// Resolves every task due at the world's current tick.
 	std::string PumpJsTasks(JSContext *context);

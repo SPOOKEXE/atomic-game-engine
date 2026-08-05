@@ -5,6 +5,9 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <string>
@@ -119,13 +122,34 @@ namespace engine::script {
 			case PropertyType::CFrame:
 				return MakeCFrame(context, *static_cast<const core::CFrame *>(bytes));
 			case PropertyType::Reference: {
-				// A root instance's parent is the world, and the world is
-				// `workspace`. Handing back null would make
-				// `part.Parent = workspace` a write a script could not read
-				// back, and the two would disagree about one fact.
+				// **Null, and it means nil rather than "a root".** This handed
+				// back `workspace` before v0.7, because `workspace` *was* the
+				// world and a root therefore belonged to it. `workspace` is now
+				// the `Workspace` instance, so having no parent is an ordinary
+				// state a script can produce and read back — and an instance in
+				// that state is drawn by nothing and listed by nothing. The Luau
+				// side says the same thing in `PushValue`; one property
+				// declaration, two languages, one answer.
 				const Entity referenced = *static_cast<const Entity *>(bytes);
 				if (referenced == ecs::NULL_ENTITY) {
-					return JS_DupValue(context, JsOf(context).Workspace);
+					return JS_NULL;
+				}
+
+				// **The stored object for the Workspace, not a fresh one.**
+				// `MakeJsInstance` mints a new JS object per call, and
+				// JavaScript's `===` is object identity with no `__eq` to
+				// override — so `part.Parent === workspace` would be false for
+				// the one comparison every script makes. Luau has no such
+				// problem: its `Instance` metatable carries `__eq` and compares
+				// entities.
+				//
+				// Narrow on purpose. This does not give instances identity in
+				// general — `child.Parent === model` is still false — and
+				// pretending otherwise would need every live instance interned
+				// in the context. What it does is keep the one object a script
+				// is handed as a global comparable with itself.
+				if (JsContext &bound = JsOf(context); referenced == JsEntityOf(context, bound.Workspace)) {
+					return JS_DupValue(context, bound.Workspace);
 				}
 				return MakeJsInstance(context, referenced);
 			}
@@ -196,11 +220,12 @@ namespace engine::script {
 				return true;
 			}
 			case PropertyType::Reference: {
-				// `part.Parent = workspace` — a root of this world. An instance
-				// arrives as its object; `null` detaches, which is what
-				// Roblox's `Parent = nil` means.
-				if (JS_IsNull(value) || JS_IsUndefined(value) ||
-					JS_IsStrictEqual(context, value, JsOf(context).Workspace)) {
+				// An instance arrives as its object; `null` detaches, which is
+				// what Roblox's `Parent = nil` means. `workspace` needs no case
+				// of its own any more — it is an instance object like any other,
+				// which is the whole of what collapsing the two notions of "the
+				// workspace" bought.
+				if (JS_IsNull(value) || JS_IsUndefined(value)) {
 					*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
 					return true;
 				}
@@ -493,14 +518,14 @@ namespace engine::script {
 			// **The second argument, which Roblox has and v0.5 did not.**
 			// `Instance.new('Part', workspace)` is one call rather than two, and
 			// the difference is not only brevity: a part created and parented in
-			// one statement is never briefly a root of the world, so nothing
-			// that walks roots can observe the half-built state.
+			// one statement is never briefly an orphan, so nothing that walks
+			// the tree can observe the half-built state.
+			//
+			// Omitting it leaves the instance parented to nothing, which is now
+			// a real state: fully formed, drawn by nothing, reached by no walk
+			// of the tree until a script says where it goes.
 			if (argc > 1 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
-				const Entity parent = JS_IsStrictEqual(context, argv[1], bound.Workspace)
-										  ? ecs::NULL_ENTITY
-										  : JsEntityOf(context, argv[1]);
-
-				if (!bound.World->SetParent(instance, parent)) {
+				if (!bound.World->SetParent(instance, JsEntityOf(context, argv[1]))) {
 					return JS_ThrowTypeError(context, "could not parent the new instance");
 				}
 			}
@@ -984,12 +1009,88 @@ namespace engine::script {
 		return object;
 	}
 
+	namespace {
+		// `workspace.CurrentCamera`, and the JavaScript half of `LuauCamera.cpp`.
+		//
+		// **It was missing, and missing in the worst available way.** The Luau
+		// side special-cases this pair in `InstanceIndex`/`InstanceNewIndex`
+		// because the property projects onto no component — it is a *resource*,
+		// `scene::ActiveCamera`, holding which eye the renderer resolves. Nothing
+		// did that here, and the world object is sealed with
+		// `JS_PreventExtensions` before it reaches a script, so
+		// `workspace.CurrentCamera = view` did not add a property, did not throw
+		// outside strict mode, and did not aim the camera.
+		// `mono.engine/examples/Mirrors-1-world.ts` has been writing it since it
+		// was ported from the Luau file.
+		//
+		// Installed on the world object rather than on a prototype, for the
+		// reason `Raycast` is: only the Workspace answers it, and offering it on
+		// a `Folder` would be offering an answer that means nothing.
+		JSValue CurrentCameraGet(JSContext *context, JSValueConst) {
+			ecs::Store &store = *JsOf(context).World;
+
+			const auto *active = store.Resource<scene::ActiveCamera>();
+			if (active == nullptr || active->Entity == ecs::NULL_ENTITY || !store.Alive(active->Entity)) {
+				// **Null rather than a camera made on demand**, which is the Luau
+				// side's answer and for its reason: a headless world genuinely has
+				// none, and minting a row so a property has something to point at
+				// would put a phantom camera in every server world.
+				return JS_NULL;
+			}
+
+			return MakeJsInstance(context, active->Entity);
+		}
+
+		JSValue CurrentCameraSet(JSContext *context, JSValueConst, JSValueConst value) {
+			ecs::Store &store = *JsOf(context).World;
+
+			// The aspect ratio is the *consumer's* — a window wrote it — so it
+			// survives a camera change. Read first and kept, exactly as
+			// `SetCurrentCamera` does; clearing it would make the next resolved
+			// frame use a ratio of one and stretch every view.
+			scene::ActiveCamera active;
+			if (const auto *existing = store.Resource<scene::ActiveCamera>(); existing != nullptr) {
+				active = *existing;
+			}
+
+			// `null` and `undefined` both detach. Detaching is a real operation:
+			// a script tearing down a cutscene camera wants the world to have
+			// none rather than to keep pointing at a row it is about to destroy.
+			if (JS_IsNull(value) || JS_IsUndefined(value)) {
+				active.Entity = ecs::NULL_ENTITY;
+				store.SetResource(active);
+				return JS_UNDEFINED;
+			}
+
+			const Entity camera = JsEntityOf(context, value);
+
+			// Refused when the instance carries no `Camera`, rather than accepted
+			// and quietly ignored by `ResolveActiveCamera` — which leaves the
+			// matrices as they were, so the symptom would be a view that stopped
+			// following anything with nothing reporting why.
+			if (camera == ecs::NULL_ENTITY || store.Get<scene::Camera>(camera) == nullptr) {
+				return JS_ThrowTypeError(context, "CurrentCamera must be an instance carrying a Camera");
+			}
+
+			active.Entity = camera;
+			store.SetResource(active);
+			return JS_UNDEFINED;
+		}
+	}
+
 	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role) {
 		auto *bound = new JsContext();
 		bound->World = &store;
 		bound->Role = role;
 		bound->Js = context;
 		JS_SetContextOpaque(context, bound);
+
+		// **Before anything builds a prototype.** `PrototypeFor` chains every
+		// class prototype behind `__instanceMethods` and caches what it builds,
+		// so a prototype made before that object existed kept a plain one for
+		// the life of the VM — which is what left the `workspace` global below
+		// with no `IsA`, no `GetChildren` and no signals.
+		InstallJsInstanceMethods(context);
 
 		JSRuntime *runtime = JS_GetRuntime(context);
 
@@ -1225,17 +1326,45 @@ namespace engine::script {
 			JS_SetPropertyStr(context, global, "RunService", service);
 		}
 
-		// workspace — the world this script runs on, not an instance in it.
-		// See `Bindings.hpp`: a world is what entities live in, and making it
-		// an entity would put a phantom row in every scene.
+		// workspace — **this world's `Workspace` service**, and until v0.7 it
+		// was a plain object standing for the world itself. `Bindings.hpp`
+		// carries the whole reason the two were collapsed; the short version is
+		// that a world now has a real `Workspace` instance, keeping both meant
+		// two answers to "what is in the scene", and the renderer listened to
+		// neither.
 		{
-			JSValue world = JS_NewObject(context);
-			JS_SetPropertyStr(
-				context, world, "Name", JS_NewString(context, std::string(store.Name()).c_str())
-			);
-			// **Before the seal**, because a sealed object cannot take a method.
-			// `OpenJsSurface` runs after this and would find the world closed.
+			// Idempotent, and here so that a world always has one. See the Luau
+			// `OpenWorkspace`, which does the same for the same reason.
+			Entity workspace = scene::InstallServices(store);
+			if (workspace == ecs::NULL_ENTITY) {
+				workspace = scene::WorkspaceOf(store);
+			}
+
+			// Built out rather than through `MakeJsInstance`, which seals the
+			// object before returning it — and this one takes `Raycast` first.
+			// Everything else about it is an ordinary instance: same class,
+			// same prototype, same opaque entity, so `IsA`, `GetChildren` and
+			// every declared property arrive through the chain rather than
+			// being listed again here.
+			JSValue world = JS_NULL;
+			if (const ecs::ClassId id = bound->World->ClassOf(workspace); id.IsValid()) {
+				JSValue proto = PrototypeFor(context, id, workspace);
+				world = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound->InstanceClass));
+				JS_FreeValue(context, proto);
+				JS_SetOpaque(world, new Entity(workspace));
+			} else {
+				world = JS_NewObject(context);
+			}
+
+			// **Before the seal**, because a sealed object cannot take a method
+			// — nor an accessor, which is what made `CurrentCamera`'s absence
+			// silent rather than loud.
 			InstallJsQueries(context, global, world);
+
+			static const JSCFunctionListEntry members[] = {
+				JS_CGETSET_DEF("CurrentCamera", CurrentCameraGet, CurrentCameraSet),
+			};
+			JS_SetPropertyFunctionList(context, world, members, 1);
 
 			JS_PreventExtensions(context, world);
 

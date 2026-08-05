@@ -14,8 +14,10 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>
@@ -27,7 +29,9 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.script.scripting")
@@ -46,6 +50,29 @@ using engine::script::Runtime;
 using engine::script::RuntimeLimits;
 
 namespace {
+
+	// Where a script's content lives now.
+	//
+	// **`part.Parent = workspace` used to make a root and now makes a child of
+	// the `Workspace` service**, so a lookup by root finds nothing. See
+	// `script/Bindings.hpp`'s `OpenWorkspace` for why the two notions of "the
+	// workspace" were collapsed, and `scene/Visibility.hpp` for what the tree
+	// now decides.
+	//
+	// Falls back to a root, because some of these scripts deliberately leave an
+	// instance unparented — an orphan is still reachable from C++ through
+	// `EachRoot`, and only a *script* is unable to list one. A test about
+	// signals or tasks should not have to care which of the two its fixture is.
+	Entity InScene(Store &store, std::string_view name) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		if (workspace != engine::ecs::NULL_ENTITY) {
+			if (const Entity child = store.FindFirstChild(workspace, name);
+				child != engine::ecs::NULL_ENTITY) {
+				return child;
+			}
+		}
+		return store.FindFirstRoot(name);
+	}
 	void RegisterClasses() {
 		(void)PartClass();
 	}
@@ -130,7 +157,7 @@ TEST_CASE("a disconnected handler stops being called", "[scripting]") {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
 
-	const Entity counter = store.FindFirstRoot("Counter");
+	const Entity counter = InScene(store, "Counter");
 	REQUIRE(counter != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Transform>(counter)->Frame.Position.X == Approx(2.0f));
 }
@@ -154,7 +181,7 @@ TEST_CASE("Once retires after one call", "[scripting]") {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
 
-	const Entity once = store.FindFirstRoot("Once");
+	const Entity once = InScene(store, "Once");
 	CHECK(store.Get<Transform>(once)->Frame.Position.X == Approx(1.0f));
 }
 
@@ -214,7 +241,7 @@ TEST_CASE("one component write fires every property name reading it", "[scriptin
 	Barrier(store);
 	Beat(store, *runtime);
 
-	const Entity seen = store.FindFirstRoot("Seen");
+	const Entity seen = InScene(store, "Seen");
 	REQUIRE(seen != engine::ecs::NULL_ENTITY);
 
 	CHECK(store.FindFirstChild(seen, "Position") != engine::ecs::NULL_ENTITY);
@@ -251,7 +278,7 @@ TEST_CASE("GetPropertyChangedSignal fires for one name only", "[scripting]") {
 	Beat(store, *runtime);
 
 	// A `Transform` write must not fire a `Bounds` listener.
-	const Entity marker = store.FindFirstRoot("Marker");
+	const Entity marker = InScene(store, "Marker");
 	CHECK(store.Get<Transform>(marker)->Frame.Position.X == Approx(0.0f));
 }
 
@@ -295,7 +322,12 @@ TEST_CASE("the instance methods reach what Store already did", "[scripting]") {
 
 		local copy = child:Clone()
 		assert(copy ~= child, 'a clone is the original')
-		assert(copy.Parent == workspace, 'a clone arrived parented')
+
+		-- **Nil, and this line used to read `== workspace` and mean the same
+		-- thing.** A clone arrives unparented in Roblox and it does here; what
+		-- changed at v0.7 is how "unparented" is spelled, because a null parent
+		-- is no longer "a root of this world".
+		assert(copy.Parent == nil, 'a clone arrived parented')
 	)");
 }
 
@@ -312,10 +344,95 @@ TEST_CASE("Destroy takes the row and the listeners with it", "[scripting]") {
 		part:Destroy()
 	)");
 
-	CHECK(store.FindFirstRoot("Doomed") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Doomed") == engine::ecs::NULL_ENTITY);
 
 	// The listener must not fire against a dead handle, which is what this
 	// beat would surface as a crash or an error.
+	Beat(store, *runtime);
+	Beat(store, *runtime);
+	CHECK(runtime->LastError().empty());
+}
+
+TEST_CASE("GetDescendants is depth first and reaches every level", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local root = Instance.new('Part')
+		root.Name = 'Root'
+
+		local a = Instance.new('Part', root)  a.Name = 'A'
+		local a1 = Instance.new('Part', a)    a1.Name = 'A1'
+		local b = Instance.new('Part', root)  b.Name = 'B'
+
+		local seen = {}
+		for _, descendant in ipairs(root:GetDescendants()) do
+			table.insert(seen, descendant.Name)
+		end
+
+		-- A child, then what is under it, then the next child. `A1` before `B`
+		-- is the whole difference between this and a breadth-first walk.
+		assert(#seen == 3, 'expected three descendants, got ' .. #seen)
+		assert(table.concat(seen, ',') == 'A,A1,B', 'wrong order: ' .. table.concat(seen, ','))
+	)");
+}
+
+TEST_CASE("Destroy forgets a grandchild's listeners too", "[scripting]") {
+	// `DestroyInstance` takes the whole subtree, so everything the script side
+	// remembers about it has to go in step. Forgetting only the direct children
+	// left a grandchild's connection holding its callable for the rest of the
+	// world's life.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local model = Instance.new('Part')
+		model.Name = 'Model'
+		model.Parent = workspace
+
+		local child = Instance.new('Part', model)
+		child.Name = 'Child'
+
+		local grandchild = Instance.new('Part', child)
+		grandchild.Name = 'Grandchild'
+		grandchild.Changed:Connect(function() end)
+
+		model:Destroy()
+	)");
+
+	CHECK(InScene(store, "Model") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Grandchild") == engine::ecs::NULL_ENTITY);
+
+	Beat(store, *runtime);
+	Beat(store, *runtime);
+	CHECK(runtime->LastError().empty());
+}
+
+TEST_CASE("javascript Destroy forgets a grandchild's listeners too", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const model = Instance.new('Part');
+		model.Name = 'JsModelDeep';
+		model.Parent = workspace;
+
+		const child = Instance.new('Part', model);
+		child.Name = 'JsChild';
+
+		const grandchild = Instance.new('Part', child);
+		grandchild.Name = 'JsGrandchild';
+		grandchild.Changed.Connect(() => {});
+
+		model.Destroy();
+	)");
+
+	CHECK(InScene(store, "JsModelDeep") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "JsGrandchild") == engine::ecs::NULL_ENTITY);
+
 	Beat(store, *runtime);
 	Beat(store, *runtime);
 	CHECK(runtime->LastError().empty());
@@ -382,7 +499,7 @@ TEST_CASE("task.wait resumes at a tick boundary", "[scripting]") {
 		end)
 	)");
 
-	const Entity waiter = store.FindFirstRoot("Waiter");
+	const Entity waiter = InScene(store, "Waiter");
 	REQUIRE(waiter != engine::ecs::NULL_ENTITY);
 
 	// Nothing yet: `task.wait(0)` is the *next* tick, never this one.
@@ -411,7 +528,7 @@ TEST_CASE("a top-level script may yield, and the load still succeeds", "[scripti
 		part.Position = Vector3.new(9, 0, 0)
 	)");
 
-	const Entity yielded = store.FindFirstRoot("Yielded");
+	const Entity yielded = InScene(store, "Yielded");
 	CHECK(store.Get<Transform>(yielded)->Frame.Position.X == Approx(0.0f));
 
 	Beat(store, *runtime);
@@ -437,7 +554,7 @@ TEST_CASE("task.wait counts in ticks, rounding up", "[scripting]") {
 		end)
 	)");
 
-	const Entity timed = store.FindFirstRoot("Timed");
+	const Entity timed = InScene(store, "Timed");
 
 	Beat(store, *runtime);
 	Beat(store, *runtime);
@@ -472,7 +589,7 @@ TEST_CASE("task.spawn runs now and task.defer runs at the end of the beat", "[sc
 
 	Beat(store, *runtime);
 
-	const Entity order = store.FindFirstRoot("Order");
+	const Entity order = InScene(store, "Order");
 	CHECK(store.Get<Transform>(order)->Frame.Position.X == Approx(2.0f));
 }
 
@@ -495,7 +612,7 @@ TEST_CASE("task.cancel unschedules a resume", "[scripting]") {
 	Beat(store, *runtime);
 	Beat(store, *runtime);
 
-	const Entity cancelled = store.FindFirstRoot("Cancelled");
+	const Entity cancelled = InScene(store, "Cancelled");
 	CHECK(store.Get<Transform>(cancelled)->Frame.Position.X == Approx(0.0f));
 }
 
@@ -727,7 +844,7 @@ TEST_CASE("javascript sees transparency and collision groups too", "[scripting][
 		if (part.CollisionGroup !== 'Players') throw new Error('the group did not take');
 	)");
 
-	const Entity glass = store.FindFirstRoot("JsGlass");
+	const Entity glass = InScene(store, "JsGlass");
 	REQUIRE(glass != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Visual>(glass)->Transparency == Approx(0.5f));
 
@@ -747,7 +864,7 @@ TEST_CASE("javascript reads the camera class", "[scripting][js]") {
 		if (Math.abs(camera.FieldOfView - 90) > 1e-3) throw new Error('FieldOfView did not round-trip');
 	)");
 
-	const Entity camera = store.FindFirstRoot("JsCamera");
+	const Entity camera = InScene(store, "JsCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
 }
@@ -878,7 +995,46 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 	)");
 
 	// Degrees out, radians stored — the same split `Orientation` makes.
-	const Entity camera = store.FindFirstRoot("Main");
+	const Entity camera = InScene(store, "Main");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
+}
+
+TEST_CASE("javascript aims the same camera through the same resource", "[scripting][js]") {
+	// **The second consumer, and until now there was not one.** `CurrentCamera`
+	// projects onto no component — it is `scene::ActiveCamera`, a resource — so
+	// each VM has to special-case it, and only the Luau side did. The JavaScript
+	// world object is sealed with `JS_PreventExtensions` before a script sees
+	// it, so `workspace.CurrentCamera = view` added no property, threw nothing
+	// outside strict mode, and left the renderer resolving whatever it had.
+	// `examples/Mirrors-1-world.ts` had been writing it since it was ported.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		if (workspace.CurrentCamera !== null) throw new Error('a fresh world already has a camera');
+
+		const camera = Instance.new('Camera');
+		camera.Name = 'Main';
+		camera.Parent = workspace;
+		camera.CFrame = CFrame.new(0, 5, 10);
+		camera.FieldOfView = 90;
+
+		workspace.CurrentCamera = camera;
+		if (workspace.CurrentCamera === null) throw new Error('CurrentCamera did not take');
+
+		// Identity is not equality here: each read mints a fresh wrapper over
+		// the same entity, which is the same reason the Luau side has an `__eq`.
+		if (workspace.CurrentCamera.Name !== 'Main') throw new Error('a different camera came back');
+
+		workspace.CurrentCamera = null;
+		if (workspace.CurrentCamera !== null) throw new Error('detaching did not take');
+	)");
+
+	// The same degrees-out, radians-stored split the Luau case asserts, reached
+	// through the other VM.
+	const Entity camera = InScene(store, "Main");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::Camera>(camera)->FieldOfViewRadians == Approx(1.5707963f).margin(1e-4));
 }
@@ -892,6 +1048,10 @@ TEST_CASE("CurrentCamera refuses something that is not a camera", "[scripting]")
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	CHECK_FALSE(runtime->Run("workspace.CurrentCamera = Instance.new('Part')"));
+
+	// And the same refusal from the other VM, for the same reason.
+	const auto javascript = MakeRuntime(store, Language::JavaScript);
+	CHECK_FALSE(javascript->Run("workspace.CurrentCamera = Instance.new('Part');"));
 }
 
 // --- transparency and collision groups --------------------------------------
@@ -915,7 +1075,7 @@ TEST_CASE("Transparency is a real property and Visible is a different one", "[sc
 		assert(part.Visible, 'Transparency = 1 cleared Visible')
 	)");
 
-	const Entity glass = store.FindFirstRoot("Glass");
+	const Entity glass = InScene(store, "Glass");
 	CHECK(store.Get<Visual>(glass)->Transparency == Approx(1.0f));
 	CHECK(store.Get<Visual>(glass)->Visible);
 }
@@ -981,7 +1141,7 @@ TEST_CASE("javascript signals connect and disconnect", "[scripting][js]") {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
 
-	const Entity counter = store.FindFirstRoot("JsCounter");
+	const Entity counter = InScene(store, "JsCounter");
 	REQUIRE(counter != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Transform>(counter)->Frame.Position.X == Approx(2.0f));
 }
@@ -1004,7 +1164,7 @@ TEST_CASE("javascript Once retires after one call", "[scripting][js]") {
 	for (int beat = 0; beat < 4; beat++) {
 		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
 	}
-	CHECK(store.Get<Transform>(store.FindFirstRoot("JsOnce"))->Frame.Position.X == Approx(1.0f));
+	CHECK(store.Get<Transform>(InScene(store, "JsOnce"))->Frame.Position.X == Approx(1.0f));
 }
 
 TEST_CASE("javascript .Changed fans one write out to every name", "[scripting][js]") {
@@ -1033,7 +1193,7 @@ TEST_CASE("javascript .Changed fans one write out to every name", "[scripting][j
 	Barrier(store);
 	Beat(store, *runtime);
 
-	const Entity seen = store.FindFirstRoot("JsSeen");
+	const Entity seen = InScene(store, "JsSeen");
 	REQUIRE(seen != engine::ecs::NULL_ENTITY);
 
 	CHECK(store.FindFirstChild(seen, "Position") != engine::ecs::NULL_ENTITY);
@@ -1071,7 +1231,7 @@ TEST_CASE("javascript has the instance methods", "[scripting][js]") {
 		function JsEquals(a, b) { return a !== null && b !== null && a.Name === b.Name; }
 	)");
 
-	CHECK(store.FindFirstRoot("JsModel") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "JsModel") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("javascript Destroy takes the row and the listeners", "[scripting][js]") {
@@ -1087,7 +1247,7 @@ TEST_CASE("javascript Destroy takes the row and the listeners", "[scripting][js]
 		part.Destroy();
 	)");
 
-	CHECK(store.FindFirstRoot("JsDoomed") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "JsDoomed") == engine::ecs::NULL_ENTITY);
 
 	Beat(store, *runtime);
 	Beat(store, *runtime);
@@ -1116,7 +1276,7 @@ TEST_CASE("javascript task.wait resumes at a tick boundary", "[scripting][js]") 
 		});
 	)");
 
-	const Entity waiter = store.FindFirstRoot("JsWaiter");
+	const Entity waiter = InScene(store, "JsWaiter");
 	REQUIRE(waiter != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<Transform>(waiter)->Frame.Position.X == Approx(0.0f));
 
@@ -1145,7 +1305,7 @@ TEST_CASE("javascript task.defer runs at the end of the beat", "[scripting][js]"
 	)");
 
 	Beat(store, *runtime);
-	CHECK(store.Get<Transform>(store.FindFirstRoot("JsOrder"))->Frame.Position.X == Approx(2.0f));
+	CHECK(store.Get<Transform>(InScene(store, "JsOrder"))->Frame.Position.X == Approx(2.0f));
 }
 
 TEST_CASE("javascript task.cancel unschedules a resume", "[scripting][js]") {
@@ -1164,7 +1324,7 @@ TEST_CASE("javascript task.cancel unschedules a resume", "[scripting][js]") {
 
 	Beat(store, *runtime);
 	Beat(store, *runtime);
-	CHECK(store.Get<Transform>(store.FindFirstRoot("JsCancelled"))->Frame.Position.X == Approx(0.0f));
+	CHECK(store.Get<Transform>(InScene(store, "JsCancelled"))->Frame.Position.X == Approx(0.0f));
 }
 
 TEST_CASE("javascript has the clock and refuses the wall one", "[scripting][js]") {
@@ -1295,8 +1455,8 @@ TEST_CASE("javascript Random matches Luau for one seed", "[scripting][js]") {
 		part.Position = Vector3.new(stream.NextNumber(), stream.NextNumber(), stream.NextNumber());
 	)");
 
-	const auto *left = store.Get<Transform>(store.FindFirstRoot("LuauDraws"));
-	const auto *right = store.Get<Transform>(store.FindFirstRoot("JsDraws"));
+	const auto *left = store.Get<Transform>(InScene(store, "LuauDraws"));
+	const auto *right = store.Get<Transform>(InScene(store, "JsDraws"));
 	REQUIRE(left != nullptr);
 	REQUIRE(right != nullptr);
 
@@ -1347,8 +1507,8 @@ TEST_CASE("a table published from Luau arrives as an object in JavaScript", "[sc
 		part.Parent = workspace;
 	)");
 
-	CHECK(store.FindFirstRoot("Sender") != engine::ecs::NULL_ENTITY);
-	CHECK(store.FindFirstRoot("Receiver") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Sender") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Receiver") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("javascript refuses to send what cannot cross a world boundary", "[scripting][js]") {
@@ -1409,7 +1569,7 @@ TEST_CASE("a script is an instance with a class and a source", "[scripting][inst
 		assert(program.Disabled, 'Disabled did not take')
 	)");
 
-	const Entity holder = store.FindFirstRoot("Holder");
+	const Entity holder = InScene(store, "Holder");
 	REQUIRE(holder != engine::ecs::NULL_ENTITY);
 
 	const Entity program = store.FindFirstChild(holder, "Behaviour");
@@ -1553,8 +1713,8 @@ TEST_CASE("two scripts each see themselves and not each other", "[scripting][ins
 	INFO(runtime->LastError());
 	CHECK(ran == 2);
 
-	CHECK(store.FindFirstRoot("First") != engine::ecs::NULL_ENTITY);
-	CHECK(store.FindFirstRoot("Second") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "First") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Second") != engine::ecs::NULL_ENTITY);
 
 	engine::core::Paths::SetAssetsOverride(previous);
 	std::filesystem::remove_all(directory);
@@ -1624,9 +1784,7 @@ TEST_CASE("a MemoryStore write and read round-trips through the barrier", "[scri
 	});
 
 	// Nothing yet: the reply lands at a later barrier by design.
-	universe.Enter(world, [&](Store &store) {
-		CHECK(store.FindFirstRoot("Set:Ok") == engine::ecs::NULL_ENTITY);
-	});
+	universe.Enter(world, [&](Store &store) { CHECK(InScene(store, "Set:Ok") == engine::ecs::NULL_ENTITY); });
 
 	// Each barrier carries one reply, and each resume issues the next call — so
 	// the round trip takes as many ticks as it takes calls.
@@ -1637,12 +1795,12 @@ TEST_CASE("a MemoryStore write and read round-trips through the barrier", "[scri
 
 	universe.Enter(world, [&](Store &store) {
 		// The write was accepted...
-		CHECK(store.FindFirstRoot("Set:Ok") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "Set:Ok") != engine::ecs::NULL_ENTITY);
 
 		// ...and the read brought back the table, through the codec, with its
 		// number intact. A string would have come back as a string; this is the
 		// map the codec exists for.
-		CHECK(store.FindFirstRoot("Get:Ok:7") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "Get:Ok:7") != engine::ecs::NULL_ENTITY);
 	});
 }
 
@@ -1681,7 +1839,7 @@ TEST_CASE("a MemoryStore read of nothing is NotFound rather than silence", "[scr
 	}
 
 	universe.Enter(world, [&](Store &store) {
-		CHECK(store.FindFirstRoot("NotFound:nil") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "NotFound:nil") != engine::ecs::NULL_ENTITY);
 	});
 }
 
@@ -1724,7 +1882,7 @@ TEST_CASE("javascript awaits a store reply as a promise", "[scripting][stores][j
 	}
 
 	universe.Enter(world, [&](Store &store) {
-		CHECK(store.FindFirstRoot("Js:Ok:11") != engine::ecs::NULL_ENTITY);
+		CHECK(InScene(store, "Js:Ok:11") != engine::ecs::NULL_ENTITY);
 	});
 }
 
@@ -1908,7 +2066,7 @@ TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scr
 		assert(camera.SurfaceSize == Vector3.new(0, 0, 0), 'clearing did not take')
 	)");
 
-	const Entity camera = store.FindFirstRoot("Reflection");
+	const Entity camera = InScene(store, "Reflection");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::SurfaceCamera>(camera) == nullptr);
 
@@ -1920,7 +2078,12 @@ TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scr
 	CHECK(surface->Height == 256);
 }
 
-TEST_CASE("a part names which surface it shows", "[scripting][surface]") {
+TEST_CASE("a part is a mirror because a surface camera is parented to it", "[scripting][surface]") {
+	// **There is no `Surface` property to set, and that is the point.** It was
+	// Roblox's name for something else entirely, and what it actually held was a
+	// render-target index the author had to keep unique by hand — two cameras
+	// silently sharing a texture being the failure. A pane is a mirror because a
+	// `SurfaceCamera` is parented to it; a plain `Camera` projects nothing.
 	RegisterClasses();
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
@@ -1930,14 +2093,27 @@ TEST_CASE("a part names which surface it shows", "[scripting][surface]") {
 		pane.Name = 'Pane'
 		pane.Parent = workspace
 
-		assert(pane.Surface == -1, 'a fresh part shows a surface')
+		-- Refused at the read, not nil: an unknown member raises, so a scene
+		-- still setting a slot by hand fails loudly at the line that does it
+		-- rather than silently doing nothing.
+		assert(not pcall(function() return pane.Surface end), 'Surface is still a property')
 
-		pane.Surface = 0
-		assert(pane.Surface == 0, 'the surface did not round-trip')
+		local reflection = Instance.new('SurfaceCamera')
+		reflection.Name = 'Reflection'
+		reflection.SurfaceSize = Vector3.new(256, 256)
+		reflection.Face = Enum.NormalId.Front
+		reflection.Parent = pane
+
+		assert(not pcall(function() return reflection.Surface end), 'the camera still names a slot')
 	)");
 
-	const Entity pane = store.FindFirstRoot("Pane");
-	CHECK(store.Get<Visual>(pane)->Surface == 0);
+	const Entity pane = InScene(store, "Pane");
+
+	// Nothing has aimed anything yet, so the pane is an ordinary part. The slot
+	// arrives from `AimSurfaceCameras`, which needs a viewer — see
+	// `scene/tests/SurfaceCameras.cpp` for the pass itself.
+	CHECK(store.Get<Visual>(pane)->Surface == -1);
+	CHECK(store.FindFirstChild(pane, "Reflection") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]") {
@@ -1953,14 +2129,907 @@ TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]
 
 		const pane = Instance.new('Part');
 		pane.Name = 'JsPane';
-		pane.Surface = 0;
 		pane.Parent = workspace;
 	)");
 
-	const auto *surface = store.Get<engine::scene::SurfaceCamera>(store.FindFirstRoot("JsReflection"));
+	const auto *surface = store.Get<engine::scene::SurfaceCamera>(InScene(store, "JsReflection"));
 	REQUIRE(surface != nullptr);
 	CHECK(surface->Width == 512);
 	CHECK(surface->Height == 256);
 
-	CHECK(store.Get<Visual>(store.FindFirstRoot("JsPane"))->Surface == 0);
+	// Unaimed, so still an ordinary part: JavaScript has no way to name a slot
+	// either, which is the half of the surface removal this case covers.
+	CHECK(store.Get<Visual>(InScene(store, "JsPane"))->Surface == -1);
+}
+
+TEST_CASE("each script's steps are recorded against it", "[scripting]") {
+	// **What the Script Profile panel reads.** The interrupt counter exists for
+	// the step budget and runs whether or not anybody is looking; this asserts
+	// that the delta around one script is attributed to *that* script, which is
+	// the part a panel cannot show you is wrong.
+	RegisterClasses();
+	Store store("script_test");
+	engine::script::RegisterScriptComponents();
+	store.SetResource(engine::script::SourceCache{});
+
+	auto &cache = *store.ResourceMutable<engine::script::SourceCache>();
+
+	// One script that loops and one that does almost nothing. The absolute
+	// numbers are a VM detail; the *ordering* is the claim worth pinning.
+	cache.Set(engine::core::Name("busy.luau"), R"(
+		local total = 0
+		for index = 1, 2000 do
+			total = total + index
+		end
+	)");
+	cache.Set(engine::core::Name("idle.luau"), "local x = 1\n");
+
+	const Entity busy = engine::script::MakeScript(store, "busy.luau", "Busy", false);
+	const Entity idle = engine::script::MakeScript(store, "idle.luau", "Idle", false);
+	REQUIRE(busy != engine::ecs::NULL_ENTITY);
+	REQUIRE(idle != engine::ecs::NULL_ENTITY);
+
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfServer();
+	const auto runtime = MakeRuntime(store, Language::Luau, limits);
+
+	REQUIRE(runtime->RunWorldScripts() == 2);
+
+	const std::span<const engine::script::ScriptCost> costs = runtime->Costs();
+	REQUIRE(costs.size() == 2);
+
+	uint64_t busySteps = 0;
+	uint64_t idleSteps = 0;
+	for (const engine::script::ScriptCost &cost : costs) {
+		CHECK(cost.Completed);
+		if (cost.Instance == busy) {
+			busySteps = cost.Steps;
+		} else if (cost.Instance == idle) {
+			idleSteps = cost.Steps;
+		}
+	}
+
+	// The loop costs more than the assignment. A counter attributed to the
+	// wrong script, or not moved at all, fails here rather than being read off
+	// a panel as a plausible number.
+	CHECK(busySteps > idleSteps);
+	CHECK(busySteps > 0);
+}
+
+TEST_CASE("a runtime with no scripts reports no costs", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::script::RegisterScriptComponents();
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK(runtime->RunWorldScripts() == 0);
+	CHECK(runtime->Costs().empty());
+}
+
+namespace {
+	// A world with a module in the workspace, ready to be required by name.
+	//
+	// Parented to `Workspace` because that is how a script reaches one: through
+	// the tree, which is the whole point of a module being an instance rather
+	// than a path.
+	Entity StageModule(Store &store, const char *path, const char *name, const char *program) {
+		// **Services first, because `WorkspaceOf` is a lookup and not a create.**
+		// The runtime installs them when it opens, which is after this — so
+		// staging a module before one existed would parent it to nothing and
+		// leave it a root beside the Workspace rather than inside it.
+		engine::scene::InstallServices(store);
+		engine::script::RegisterScriptComponents();
+		if (store.Resource<engine::script::SourceCache>() == nullptr) {
+			store.SetResource(engine::script::SourceCache{});
+		}
+		store.ResourceMutable<engine::script::SourceCache>()->Set(engine::core::Name(path), program);
+
+		const Entity module = engine::script::MakeModule(store, path, name);
+		REQUIRE(module != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(module, engine::scene::WorkspaceOf(store)));
+		return module;
+	}
+}
+
+TEST_CASE("a ModuleScript is not run by the world", "[scripting]") {
+	// **The whole reason `ModuleScript` is a sibling of `Script` rather than a
+	// kind of one.** A world that ran every module at start would give a library
+	// a side effect nobody asked for — and a synced Rojo project would execute a
+	// thousand files written to be required.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "mod.luau", "Mod", "error('a module must not run on its own')\n");
+
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
+	const auto runtime = MakeRuntime(store, Language::Luau, limits);
+
+	// Nothing ran, so nothing raised. Both halves matter: a module that ran and
+	// happened not to error would pass a test that only checked `LastError`.
+	CHECK(runtime->RunWorldScripts() == 0);
+	CHECK(runtime->LastError().empty());
+}
+
+TEST_CASE("require evaluates a module and hands back its value", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "mod.luau", "Mod", "return { Answer = 42 }\n");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local mod = require(workspace.Mod)
+		assert(mod.Answer == 42, 'the module did not return its table')
+	)");
+}
+
+TEST_CASE("a module runs once however many times it is required", "[scripting]") {
+	// **Roblox's rule, and the reason module order is not an author's problem.**
+	// A module with a side effect at its top level has it once, on whichever
+	// script required it first. Re-running would make two requires two different
+	// tables, so a module used to share state would silently share nothing.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "counter.luau", "Counter", R"(
+		local state = { Count = 0 }
+		state.Count = state.Count + 1
+		return state
+	)");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local first = require(workspace.Counter)
+		local second = require(workspace.Counter)
+
+		assert(first == second, 'two requires produced two tables')
+		assert(first.Count == 1, 'the module ran ' .. first.Count .. ' times')
+
+		-- And the shared state really is shared.
+		first.Count = 99
+		assert(require(workspace.Counter).Count == 99, 'the table was copied')
+	)");
+}
+
+TEST_CASE("requiring something that is not a module is refused by name", "[scripting]") {
+	// Named rather than nil, for `GetService`'s reason: a script that gets nil
+	// back fails one line later, somewhere that says nothing about the cause.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Parent = workspace
+		require(part)
+	)"));
+	CHECK(runtime->LastError().find("ModuleScript") != std::string::npos);
+}
+
+TEST_CASE("a module that returns nothing is refused", "[scripting]") {
+	// The mistake an author makes once. Unrefused it reads as `nil` three files
+	// away, where nothing points back at the module.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "empty.luau", "Empty", "local x = 1\n");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK_FALSE(runtime->Run("require(workspace.Empty)"));
+	CHECK(runtime->LastError().find("must return") != std::string::npos);
+}
+
+TEST_CASE("a require cycle is named rather than crashing", "[scripting]") {
+	// **Recursing instead would exhaust the C stack**, which surfaces as a crash
+	// with no line number rather than as an error naming the two files.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "a.luau", "A", "return require(workspace.B)\n");
+	StageModule(store, "b.luau", "B", "return require(workspace.A)\n");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK_FALSE(runtime->Run("require(workspace.A)"));
+	CHECK(runtime->LastError().find("cycle") != std::string::npos);
+}
+
+TEST_CASE("a module gets script pointing at itself", "[scripting]") {
+	// The same global a `Script` gets, so a module can find its own siblings —
+	// which is how a folder of modules refers to its neighbours without knowing
+	// where the folder sits.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "self.luau", "Selfie", R"(
+		return { Name = script.Name }
+	)");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		assert(require(workspace.Selfie).Name == 'Selfie', 'script was not the module')
+	)");
+}
+
+TEST_CASE("two module instances naming one file are two modules", "[scripting]") {
+	// **Keyed by instance, not by path.** That is what makes a module a thing in
+	// the tree rather than a thing on disk — two copies in two places are two
+	// modules with two states, exactly as two copies of a Script are two scripts.
+	RegisterClasses();
+	Store store("script_test");
+	StageModule(store, "shared.luau", "First", "return {}\n");
+
+	const Entity second = engine::script::MakeModule(store, "shared.luau", "Second");
+	REQUIRE(second != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.SetParent(second, engine::scene::WorkspaceOf(store)));
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		assert(require(workspace.First) ~= require(workspace.Second), 'one file became one module')
+	)");
+}
+
+TEST_CASE("Players.LocalPlayer is nil until a host says who it is", "[scripting]") {
+	// **The default is nobody**, because who is in a game is the host's business
+	// — a dedicated server admits players as they connect and the studio admits
+	// one per client view. Furnishing a world does not invent an occupant.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local players = game:GetService('Players')
+		assert(players ~= nil, 'there is no Players service')
+		assert(players.LocalPlayer == nil, 'a fresh world already had a local player')
+	)");
+}
+
+TEST_CASE("a client sees itself as LocalPlayer and a server sees nobody", "[scripting]") {
+	// **The separation the whole feature is for.** A `Script` reaching for
+	// `LocalPlayer` gets nil rather than somebody else's player, which is the
+	// one thing a shared codebase must not get wrong.
+	RegisterClasses();
+
+	Store client("client_world");
+	engine::scene::InstallServices(client);
+	const Entity me = engine::scene::AddPlayer(client, "Ada", true);
+	REQUIRE(me != engine::ecs::NULL_ENTITY);
+
+	// Somebody else is in the game too, and must not be mistaken for me.
+	REQUIRE(engine::scene::AddPlayer(client, "Grace", false) != engine::ecs::NULL_ENTITY);
+
+	engine::script::RuntimeLimits clientLimits;
+	clientLimits.Role = engine::script::HostRole::OfClient();
+	const auto onClient = MakeRuntime(client, Language::Luau, clientLimits);
+
+	MustRun(*onClient, R"(
+		local players = game:GetService('Players')
+		assert(players.LocalPlayer ~= nil, 'the client had no local player')
+		assert(players.LocalPlayer.Name == 'Ada', 'the client was somebody else')
+
+		-- And the other player is there, reachable and not me.
+		local other = players:FindFirstChild('Grace')
+		assert(other ~= nil, 'the other player is missing')
+		assert(other ~= players.LocalPlayer, 'the two players are one instance')
+	)");
+
+	// The same world shape on a server: players present, none of them local.
+	Store server("server_world");
+	engine::scene::InstallServices(server);
+	REQUIRE(engine::scene::AddPlayer(server, "Ada", false) != engine::ecs::NULL_ENTITY);
+
+	engine::script::RuntimeLimits serverLimits;
+	serverLimits.Role = engine::script::HostRole::OfServer();
+	const auto onServer = MakeRuntime(server, Language::Luau, serverLimits);
+
+	MustRun(*onServer, R"(
+		local players = game:GetService('Players')
+		assert(players:FindFirstChild('Ada') ~= nil, 'the server cannot see its players')
+		assert(players.LocalPlayer == nil, 'a server claimed to be a player')
+	)");
+}
+
+TEST_CASE("LocalPlayer cannot be assigned from a script", "[scripting]") {
+	// Who you are is not yours to set. A client writing this would be a client
+	// claiming to be somebody else.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	REQUIRE(engine::scene::AddPlayer(store, "Ada", true) != engine::ecs::NULL_ENTITY);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	CHECK_FALSE(runtime->Run(R"(
+		local players = game:GetService('Players')
+		players.LocalPlayer = Instance.new('Part')
+	)"));
+}
+
+TEST_CASE("a LocalScript runs on a client and a Script does not", "[scripting]") {
+	// **Roblox's rule, and the contexts it decides.** The same world, two hosts,
+	// two different sets of scripts — which is what makes one codebase able to
+	// hold both halves of a game.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::script::RegisterScriptComponents();
+	store.SetResource(engine::script::SourceCache{});
+
+	auto &cache = *store.ResourceMutable<engine::script::SourceCache>();
+	cache.Set(engine::core::Name("s.luau"), "return\n");
+	cache.Set(engine::core::Name("c.luau"), "return\n");
+	cache.Set(engine::core::Name("m.luau"), "return {}\n");
+
+	const Entity server = engine::script::MakeScript(store, "s.luau", "OnServer", false);
+	const Entity client = engine::script::MakeScript(store, "c.luau", "OnClient", true);
+	REQUIRE(engine::script::MakeModule(store, "m.luau", "Mod") != engine::ecs::NULL_ENTITY);
+
+	// Three classes, three contexts: server-only, client-only, and never.
+	CHECK(engine::script::ScriptsIn(store, true, false) == std::vector<Entity>{server});
+	CHECK(engine::script::ScriptsIn(store, false, true) == std::vector<Entity>{client});
+	CHECK(engine::script::ScriptsIn(store, true, true) == std::vector<Entity>{server, client});
+
+	// The module appears in none of them, however the host is configured.
+	CHECK(engine::script::ScriptsIn(store, false, false).empty());
+}
+
+TEST_CASE("the tree lookups reach past the direct children", "[scripting]") {
+	// The half of Roblox's `Instance` surface that answers "where is this" —
+	// and the half a script reaches for the moment a scene stops being flat.
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local outer = Instance.new('Part', workspace)
+		outer.Name = 'Outer'
+
+		local inner = Instance.new('Part', outer)
+		inner.Name = 'Inner'
+
+		local target = Instance.new('Part', inner)
+		target.Name = 'Target'
+
+		local eye = Instance.new('Camera', outer)
+		eye.Name = 'Eye'
+
+		-- **The recursive flag, which used to be read and ignored.** This line
+		-- returned nil, because `Target` is a grandchild.
+		assert(outer:FindFirstChild('Target') == nil, 'a grandchild is not a child')
+		assert(outer:FindFirstChild('Target', true) == target, 'the recursive flag did nothing')
+
+		-- Exact against derived, which is the split Roblox draws. A `Part` is a
+		-- `BasePart`, so only one of these two finds it under that name.
+		assert(outer:FindFirstChildOfClass('Part') == inner, 'OfClass missed the exact class')
+		assert(outer:FindFirstChildOfClass('BasePart') == nil, 'OfClass matched a base class')
+		assert(outer:FindFirstChildOfClass('Camera') == eye, 'OfClass missed the camera')
+		assert(outer:FindFirstChildWhichIsA('BasePart') == inner, 'WhichIsA missed a derived class')
+
+		-- `Target` is a grandchild, so only the recursive form reaches it once
+		-- the direct children have been ruled out.
+		assert(inner:FindFirstChildWhichIsA('BasePart') == target, 'WhichIsA missed a child')
+
+		-- Upwards, and never the instance itself.
+		assert(target:FindFirstAncestor('Outer') == outer, 'FindFirstAncestor missed')
+		assert(target:FindFirstAncestor('Target') == nil, 'an instance is its own ancestor')
+		assert(target:FindFirstAncestorOfClass('Part') == inner, 'the nearest ancestor lost')
+		assert(target:FindFirstAncestorWhichIsA('Instance') == inner, 'WhichIsA lost upwards')
+		assert(eye:FindFirstAncestorOfClass('Camera') == nil, 'an ancestor matched the wrong class')
+
+		assert(
+			target:GetFullName() == 'Workspace.Outer.Inner.Target',
+			'GetFullName said ' .. target:GetFullName()
+		)
+
+		-- Nothing found is nil, not a userdata wrapping the null handle.
+		assert(outer:FindFirstChild('Absent', true) == nil, 'a miss was not nil')
+		assert(outer:FindFirstAncestorOfClass('Nonexistent') == nil, 'an unknown class matched')
+	)");
+}
+
+TEST_CASE("javascript reaches the same tree lookups", "[scripting][js]") {
+	// **Two VMs, one surface.** A method that exists in one and not the other
+	// is a game that runs until somebody switches language, and the two agree
+	// right up until the first time one is fixed.
+	//
+	// **Compared by path rather than by `===`.** `JsBindings.cpp` says why: a
+	// JavaScript instance object is minted per call and `===` is object
+	// identity with no `__eq` to override, so two handles to one entity are two
+	// objects. `GetFullName()` is the identity a script can actually test, and
+	// checking it here exercises the new method as well.
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const outer = Instance.new('Part', workspace);
+		outer.Name = 'Outer';
+
+		const inner = Instance.new('Part', outer);
+		inner.Name = 'Inner';
+
+		const target = Instance.new('Part', inner);
+		target.Name = 'Target';
+
+		const path = (found) => found === null ? null : found.GetFullName();
+
+		if (path(outer.FindFirstChild('Target')) !== null) {
+			throw new Error('a grandchild is not a child');
+		}
+		if (path(outer.FindFirstChild('Target', true)) !== 'Workspace.Outer.Inner.Target') {
+			throw new Error('the recursive flag did nothing');
+		}
+
+		if (path(outer.FindFirstChildOfClass('Part')) !== 'Workspace.Outer.Inner') {
+			throw new Error('OfClass missed');
+		}
+		if (path(outer.FindFirstChildOfClass('BasePart')) !== null) {
+			throw new Error('OfClass matched a base class');
+		}
+		if (path(inner.FindFirstChildWhichIsA('BasePart')) !== 'Workspace.Outer.Inner.Target') {
+			throw new Error('WhichIsA missed');
+		}
+
+		if (path(target.FindFirstAncestor('Outer')) !== 'Workspace.Outer') {
+			throw new Error('FindFirstAncestor missed');
+		}
+		if (path(target.FindFirstAncestor('Target')) !== null) {
+			throw new Error('an instance is its own ancestor');
+		}
+		if (path(target.FindFirstAncestorOfClass('Part')) !== 'Workspace.Outer.Inner') {
+			throw new Error('the nearest ancestor lost');
+		}
+		if (path(target.FindFirstAncestorWhichIsA('Instance')) !== 'Workspace.Outer.Inner') {
+			throw new Error('WhichIsA lost upwards');
+		}
+
+		// The methods the hard-coded table length used to drop are still here.
+		if (!target.IsDescendantOf(outer)) { throw new Error('IsDescendantOf went missing'); }
+		if (typeof target.GetPropertyChangedSignal !== 'function') {
+			throw new Error('GetPropertyChangedSignal went missing');
+		}
+	)");
+}
+
+TEST_CASE("the tree signals fire at the barrier", "[scripting]") {
+	// **One tick late, and that is the contract rather than a shortcoming.**
+	// `Changes.hpp` says why a signal cannot fire from inside the write: the
+	// handler would re-enter the VM with the sibling list half-relinked, and
+	// could destroy the instance being moved. So the tree records and the beat
+	// delivers.
+	//
+	// Recorded into the world rather than into a script global, for the reason
+	// the disconnect test above gives: each chunk gets its own sandboxed
+	// globals, so the assertions are made from here instead.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local home = Instance.new('Part', workspace)
+		home.Name = 'Home'
+
+		local away = Instance.new('Part', workspace)
+		away.Name = 'Away'
+
+		local function note(what)
+			local mark = Instance.new('Part', log)
+			mark.Name = what
+		end
+
+		home.ChildAdded:Connect(function(child) note('added-' .. child.Name) end)
+		home.ChildRemoved:Connect(function(child) note('removed-' .. child.Name) end)
+		away.ChildAdded:Connect(function(child) note('away-added-' .. child.Name) end)
+		log.DescendantAdded:Connect(function() end)
+
+		local mover = Instance.new('Part')
+		mover.Name = 'Mover'
+		mover.AncestryChanged:Connect(function(subject, parent)
+			note('ancestry-' .. subject.Name .. '-' .. (parent and parent.Name or 'nil'))
+		end)
+
+		mover.Parent = home
+	)");
+
+	const auto log = [&] { return store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log"); };
+
+	// **Nothing yet.** The write happened during the chunk and the delivery is
+	// the barrier that has not run.
+	REQUIRE(log() != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "added-Mover") == engine::ecs::NULL_ENTITY);
+
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	CHECK(store.FindFirstChild(log(), "added-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "ancestry-Mover-Home") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "removed-Mover") == engine::ecs::NULL_ENTITY);
+
+	// Moved again, from a second chunk that has to find it rather than
+	// remember it.
+	MustRun(*runtime, R"(
+		local home = workspace:FindFirstChild('Home')
+		local away = workspace:FindFirstChild('Away')
+		home:FindFirstChild('Mover').Parent = away
+	)");
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	// Leaving fires on the parent it left, which is the half a record carrying
+	// only the new parent could not answer.
+	CHECK(store.FindFirstChild(log(), "removed-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "away-added-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log(), "ancestry-Mover-Away") != engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("an ancestry change reaches the whole subtree", "[scripting]") {
+	// Moving a model changes the ancestry of every part in it, and a script
+	// watching a part has no other way to learn that its model moved.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local model = Instance.new('Part', workspace)
+		model.Name = 'Model'
+
+		local part = Instance.new('Part', model)
+		part.Name = 'Part'
+
+		local nested = Instance.new('Part', part)
+		nested.Name = 'Nested'
+
+		local holder = Instance.new('Part', workspace)
+		holder.Name = 'Holder'
+
+		for _, watched in ipairs({model, part, nested}) do
+			watched.AncestryChanged:Connect(function(subject)
+				local mark = Instance.new('Part', log)
+				mark.Name = 'heard-' .. subject.Name
+			end)
+		end
+	)");
+
+	// The creations above are reparents too, so they are delivered first. This
+	// beat drains them; the move below is what the test is about.
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	const Entity workspace = engine::scene::WorkspaceOf(store);
+	const Entity log = store.FindFirstChild(workspace, "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	const auto heard = [&](const char *name) {
+		size_t count = 0;
+		store.EachChild(log, [&](Entity mark) {
+			if (store.InstanceNameOf(mark) == engine::core::Name(name)) {
+				count++;
+			}
+		});
+		return count;
+	};
+
+	const size_t before = heard("heard-Nested");
+
+	MustRun(*runtime, R"(
+		workspace:FindFirstChild('Model').Parent = workspace:FindFirstChild('Holder')
+	)");
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	// The moved instance, its child and its grandchild each heard it once.
+	CHECK(heard("heard-Model") == 1);
+	CHECK(heard("heard-Part") == 1);
+	CHECK(heard("heard-Nested") == before + 1);
+}
+
+TEST_CASE("a world nobody watches records no tree changes", "[scripting]") {
+	// The opt-in half. A list that grew for the life of every world would be a
+	// leak in every game that never connected one of these.
+	RegisterClasses();
+	Store store("script_test");
+	CHECK_FALSE(store.TreeObserved());
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part', workspace)
+		part.Name = 'Part'
+	)");
+	CHECK_FALSE(store.TreeObserved());
+
+	std::vector<engine::ecs::TreeChange> changes;
+	store.TakeTreeChanges(changes);
+	CHECK(changes.empty());
+
+	MustRun(*runtime, "workspace.ChildAdded:Connect(function() end)");
+	CHECK(store.TreeObserved());
+}
+
+TEST_CASE("DescendantRemoving fires while the thing is still there", "[scripting]") {
+	// **The contract, and the only assertion that matters.** Every other tree
+	// signal is delivered from a queue at the next barrier; this one has to be
+	// called *before* the removal, or a handler cannot do the one thing it
+	// exists for — read the subtree it is about to lose.
+	//
+	// So the handler asks, at call time, whether the leaving instance is still
+	// a descendant of the ancestor being notified. Answering "no" would mean
+	// the signal is `DescendantRemoved` under a name that promises otherwise.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local model = Instance.new('Part', workspace)
+		model.Name = 'Model'
+
+		local part = Instance.new('Part', model)
+		part.Name = 'Part'
+
+		workspace.DescendantRemoving:Connect(function(leaving)
+			local mark = Instance.new('Part', log)
+
+			-- Still parented, still reachable, still where it was. This is the
+			-- assertion the whole signal is for.
+			local intact = leaving:IsDescendantOf(workspace) and leaving.Parent ~= nil
+			mark.Name = (intact and 'intact-' or 'gone-') .. leaving.Name
+		end)
+	)");
+
+	const Entity workspaceRoot = engine::scene::WorkspaceOf(store);
+	const Entity log = store.FindFirstChild(workspaceRoot, "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	// Nothing has left yet.
+	CHECK(store.FindFirstChild(log, "intact-Model") == engine::ecs::NULL_ENTITY);
+
+	// **No heartbeat between the write and the assertion**, deliberately. This
+	// signal does not wait for a barrier, so if it needed one the checks below
+	// would fail.
+	MustRun(*runtime, R"(
+		local holder = Instance.new('Part')
+		holder.Name = 'Holder'
+		workspace:FindFirstChild('Model').Parent = holder
+	)");
+
+	// The model and the part inside it both stopped being descendants of the
+	// workspace, so both were announced — and both were still there when they
+	// were.
+	CHECK(store.FindFirstChild(log, "intact-Model") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "intact-Part") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Model") == engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Part") == engine::ecs::NULL_ENTITY);
+
+	// And the move still happened. A handler running underneath `SetParent`
+	// must not be able to stop it.
+	CHECK(store.FindFirstChild(workspaceRoot, "Model") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("DescendantRemoving announces a destroyed subtree once", "[scripting]") {
+	// A destroy takes the ancestors inside the subtree with it, so a model
+	// being destroyed fires on itself for its own children as well as on the
+	// workspace for everything. What it must not do is announce the same
+	// removal again for every unparent the teardown performs.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local log = Instance.new('Part', workspace)
+		log.Name = 'Log'
+
+		local model = Instance.new('Part', workspace)
+		model.Name = 'Model'
+
+		local part = Instance.new('Part', model)
+		part.Name = 'Part'
+
+		local nested = Instance.new('Part', part)
+		nested.Name = 'Nested'
+
+		workspace.DescendantRemoving:Connect(function(leaving)
+			local mark = Instance.new('Part', log)
+			mark.Name = 'workspace-' .. leaving.Name
+		end)
+
+		model.DescendantRemoving:Connect(function(leaving)
+			local mark = Instance.new('Part', log)
+			mark.Name = 'model-' .. leaving.Name
+		end)
+	)");
+
+	const Entity log = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	const auto counted = [&](const char *name) {
+		size_t count = 0;
+		store.EachChild(log, [&](Entity mark) {
+			if (store.InstanceNameOf(mark) == engine::core::Name(name)) {
+				count++;
+			}
+		});
+		return count;
+	};
+
+	MustRun(*runtime, "workspace:FindFirstChild('Model'):Destroy()");
+
+	// The workspace loses all three, once each.
+	CHECK(counted("workspace-Model") == 1);
+	CHECK(counted("workspace-Part") == 1);
+	CHECK(counted("workspace-Nested") == 1);
+
+	// The model loses the two under it, and is not told about itself.
+	CHECK(counted("model-Part") == 1);
+	CHECK(counted("model-Nested") == 1);
+	CHECK(counted("model-Model") == 0);
+}
+
+TEST_CASE("a world nobody watches installs no removal hook", "[scripting]") {
+	// The fan-out walks the leaving subtree and every ancestor above it, on
+	// every destroy in the world. A game that never connects one of these must
+	// not pay for that.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part', workspace)
+		part.Name = 'Part'
+		part:Destroy()
+	)");
+
+	// Nothing to assert but the absence of a crash and of a hook: the store
+	// took no listener, so the destroy above dispatched nothing.
+	MustRun(*runtime, "workspace.DescendantRemoving:Connect(function() end)");
+}
+
+TEST_CASE("javascript reaches the same tree signals", "[scripting][js]") {
+	// **Two VMs, one surface.** The tree signals were Luau-only when they
+	// landed, which is the gap this closes: a method or a signal that exists in
+	// one language and not the other is a game that runs until somebody
+	// switches, and the two agree right up until the first time one is fixed.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = Instance.new('Part', workspace);
+		log.Name = 'Log';
+
+		const home = Instance.new('Part', workspace);
+		home.Name = 'Home';
+
+		const note = (what) => {
+			const mark = Instance.new('Part', log);
+			mark.Name = what;
+		};
+
+		home.ChildAdded.Connect((child) => note('added-' + child.Name));
+		home.ChildRemoved.Connect((child) => note('removed-' + child.Name));
+		workspace.DescendantAdded.Connect((what) => note('descendant-' + what.Name));
+
+		const mover = Instance.new('Part');
+		mover.Name = 'Mover';
+		mover.AncestryChanged.Connect((subject, parent) => {
+			note('ancestry-' + subject.Name + '-' + (parent === null ? 'nil' : parent.Name));
+		});
+
+		mover.Parent = home;
+	)");
+
+	const Entity log = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	// Queued, not immediate — the same one-tick contract the Luau side has.
+	CHECK(store.FindFirstChild(log, "added-Mover") == engine::ecs::NULL_ENTITY);
+
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	CHECK(store.FindFirstChild(log, "added-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "descendant-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "ancestry-Mover-Home") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "removed-Mover") == engine::ecs::NULL_ENTITY);
+
+	// **No `const` here.** Unlike Luau, whose chunks each get their own
+	// sandboxed globals, these two share one scope — so re-declaring a name the
+	// first chunk bound is a `SyntaxError` rather than a shadow.
+	MustRun(*runtime, R"(
+		workspace.FindFirstChild('Home').FindFirstChild('Mover').Parent = workspace;
+	)");
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+
+	CHECK(store.FindFirstChild(log, "removed-Mover") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "ancestry-Mover-Workspace") != engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("javascript DescendantRemoving fires while the thing is still there", "[scripting][js]") {
+	// The contract, from the other language. Dispatched from inside the store
+	// before the removal, so no heartbeat runs between the write and the
+	// assertions below — if it needed one they would fail.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = Instance.new('Part', workspace);
+		log.Name = 'Log';
+
+		const model = Instance.new('Part', workspace);
+		model.Name = 'Model';
+
+		const part = Instance.new('Part', model);
+		part.Name = 'Part';
+
+		workspace.DescendantRemoving.Connect((leaving) => {
+			const mark = Instance.new('Part', log);
+			const intact = leaving.IsDescendantOf(workspace) && leaving.Parent !== null;
+			mark.Name = (intact ? 'intact-' : 'gone-') + leaving.Name;
+		});
+	)");
+
+	const Entity workspaceRoot = engine::scene::WorkspaceOf(store);
+	const Entity log = store.FindFirstChild(workspaceRoot, "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "intact-Model") == engine::ecs::NULL_ENTITY);
+
+	MustRun(*runtime, R"(
+		const holder = Instance.new('Part');
+		holder.Name = 'Holder';
+		workspace.FindFirstChild('Model').Parent = holder;
+	)");
+
+	CHECK(store.FindFirstChild(log, "intact-Model") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "intact-Part") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Model") == engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(log, "gone-Part") == engine::ecs::NULL_ENTITY);
+
+	// And the move still happened.
+	CHECK(store.FindFirstChild(workspaceRoot, "Model") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("javascript announces a destroyed subtree once", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = Instance.new('Part', workspace);
+		log.Name = 'Log';
+
+		const model = Instance.new('Part', workspace);
+		model.Name = 'Model';
+
+		const part = Instance.new('Part', model);
+		part.Name = 'Part';
+
+		const nested = Instance.new('Part', part);
+		nested.Name = 'Nested';
+
+		workspace.DescendantRemoving.Connect((leaving) => {
+			const mark = Instance.new('Part', log);
+			mark.Name = 'workspace-' + leaving.Name;
+		});
+		model.DescendantRemoving.Connect((leaving) => {
+			const mark = Instance.new('Part', log);
+			mark.Name = 'model-' + leaving.Name;
+		});
+	)");
+
+	const Entity log = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Log");
+	REQUIRE(log != engine::ecs::NULL_ENTITY);
+
+	const auto counted = [&](const char *name) {
+		size_t count = 0;
+		store.EachChild(log, [&](Entity mark) {
+			if (store.InstanceNameOf(mark) == engine::core::Name(name)) {
+				count++;
+			}
+		});
+		return count;
+	};
+
+	MustRun(*runtime, "workspace.FindFirstChild('Model').Destroy();");
+
+	CHECK(counted("workspace-Model") == 1);
+	CHECK(counted("workspace-Part") == 1);
+	CHECK(counted("workspace-Nested") == 1);
+	CHECK(counted("model-Part") == 1);
+	CHECK(counted("model-Nested") == 1);
+	CHECK(counted("model-Model") == 0);
 }

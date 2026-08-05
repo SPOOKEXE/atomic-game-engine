@@ -24,7 +24,7 @@ namespace engine::render {
 		shaderc::CompileOptions Options;
 	};
 
-	ShaderCompiler::ShaderCompiler() : State(new Impl) {
+	ShaderCompiler::ShaderCompiler() : State(std::make_unique<Impl>()) {
 		// Vulkan 1.0 / SPIR-V 1.0 is the floor every backend SDL's GPU API
 		// targets can accept. Raising it would compile shaders some drivers
 		// then refuse, which surfaces as a pipeline that will not create
@@ -33,9 +33,10 @@ namespace engine::render {
 		State->Options.SetSourceLanguage(shaderc_source_language_glsl);
 	}
 
-	ShaderCompiler::~ShaderCompiler() {
-		delete State;
-	}
+	// Out of line, and that is what makes the `unique_ptr` in the header legal:
+	// this is the point at which `Impl` is complete and the deleter is
+	// instantiated.
+	ShaderCompiler::~ShaderCompiler() = default;
 
 	void ShaderCompiler::SetOptimise(bool optimise) {
 		State->Options.SetOptimizationLevel(

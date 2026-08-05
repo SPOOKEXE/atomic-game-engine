@@ -10,7 +10,7 @@
 namespace engine::physics {
 
 	void IntegrateMotion(ecs::Store &store) {
-		ENGINE_PROFILE_CAT("physics.integrate", core::ProfileCategory::ECS);
+		ENGINE_PROFILE_CAT("physics.integrate", core::ProfileCategory::Physics);
 
 		// The fixed tick delta, read from the world. A system takes no float
 		// argument precisely so that nobody can hand it a frame time.

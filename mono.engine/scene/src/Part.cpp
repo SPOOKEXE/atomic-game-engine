@@ -4,13 +4,18 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
+#include <algorithm>
 #include <array>
 #include <numbers>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::scene {
 
@@ -422,53 +427,6 @@ namespace engine::scene {
 			return property;
 		}
 
-		// Surface: which surface texture a part shows, as a script integer.
-		//
-		// **A conversion rather than a plain field, and the reason is a real
-		// hazard.** `Visual::Surface` is an `int8_t` — one byte, because it fits
-		// in padding the struct already had — and no `PropertyType` describes
-		// one. Declaring it with `Classes::Property` would type it `Opaque` and
-		// size it at one byte, and a binding marshalling an `Int32` into that
-		// would write four bytes over three neighbouring fields.
-		//
-		// So the width changes here, once, where it can be seen. Neither Luau
-		// nor JavaScript has an eight-bit integer to hand back anyway.
-		PropertyDescriptor SurfaceProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("Surface");
-			property.Type = PropertyType::Int32;
-			property.Size = sizeof(int32_t);
-			property.Kind = PropertyKind::Computed;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const Visual *visual = store.Get<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				*static_cast<int32_t *>(out) = visual->Surface;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				const auto index = *static_cast<const int32_t *>(value);
-
-				// Anything out of range is "no surface" rather than a refusal.
-				// A script computing an index that came out wrong gets a part
-				// that draws normally, which is visible; a refusal mid-loop
-				// would stop the rest of the scene being built.
-				Visual *visual = store.GetMutable<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-
-				visual->Surface = index >= 0 && index < 127 ? static_cast<int8_t>(index) : int8_t{-1};
-				return true;
-			};
-			return property;
-		}
-
 		// SurfaceSize: the texture a surface camera renders into.
 		//
 		// **Structural, because the component's presence is the query.** A
@@ -478,6 +436,64 @@ namespace engine::scene {
 		//
 		// A `Vector2` rather than two properties: a width without a height is
 		// half a target, and two writes means a frame where the two disagree.
+		// Which face of the parent part the surface camera projects off.
+		//
+		// An enum rather than a number, so `camera.Face = "Frnot"` is refused
+		// where it was written instead of landing in the component as a face
+		// nobody chose. Membership is `EnumTable`'s, and the storage is the
+		// ordinal — Roblox's ordinal, so a game file carrying a number means the
+		// same thing in both engines.
+		// Interned once. `Name.hpp` states the rule this was breaking in as many
+		// words — "not free, so do it once and keep the result rather than
+		// constructing from a literal inside a loop" — and a property getter read
+		// every frame by an immediate-mode properties panel is that loop. Each
+		// construction took the global name-registry mutex and hashed a string,
+		// on top of the `EnumTable` mutex the lookup already takes.
+		const core::Name &NormalIdEnum() {
+			static const core::Name name("NormalId");
+			return name;
+		}
+
+		PropertyDescriptor FaceProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Face");
+			property.Type = PropertyType::Enum;
+			property.EnumName = NormalIdEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceCamera *surface = store.Get<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(NormalIdEnum(), static_cast<size_t>(surface->Face));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				SurfaceCamera *surface = store.GetMutable<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						NormalIdEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				surface->Face = static_cast<NormalId>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor SurfaceSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("SurfaceSize");
@@ -564,6 +580,26 @@ namespace engine::scene {
 			};
 			ecs::EnumTable::Register("Material", MATERIALS);
 
+			// The faces of a box, for `SurfaceCamera::Face`.
+			//
+			// **Generated from the enum rather than typed out beside it**, which
+			// is the difference between one declaration and two that agree until
+			// they do not. `NormalId`'s ordinals are the storage — a `Face` of 1
+			// is `Top` in a game file — so a literal list here would be a second
+			// place the order lives, and getting it wrong would load every saved
+			// mirror pointing at the wrong side of its pane. Silently: nothing
+			// about a face is checkable at load time.
+			//
+			// The loop walks the enum's own range, so adding a seventh face means
+			// adding it in one place. `Describe(NormalId)` is what makes it
+			// possible, and `scene/Enums.hpp` says why that one round-trips where
+			// its neighbours are only for logs.
+			std::array<std::string_view, 6> normals{};
+			for (size_t index = 0; index < normals.size(); index++) {
+				normals[index] = Describe(static_cast<NormalId>(index));
+			}
+			ecs::EnumTable::Register(NormalIdEnum().Text(), normals);
+
 			// The default collision group, so `CollisionGroup` reads back
 			// something a script can compare rather than an invalid name on a
 			// part nobody configured.
@@ -619,6 +655,27 @@ namespace engine::scene {
 			const std::array camera{ecs::Components::Of<Camera>()};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
 
+			// **A surface camera is a camera you parent to a part**, and that is
+			// the whole of the class.
+			//
+			// It derives from `Camera` rather than standing beside it, because
+			// it *is* one — it has a field of view, clip planes and a place in
+			// the world, and `workspace.CurrentCamera` is a question anybody may
+			// ask of it. What it adds is a texture to render into and a face to
+			// project off.
+			//
+			// **The component is in the class set, so `Instance.new` makes a
+			// working one.** On `Camera` the surface component is structural —
+			// `SurfaceSize` adds and removes it — which is right there, because
+			// an ordinary camera that acquired a render target by being asked
+			// its size would be a surprise. Here it is what the class is for, so
+			// a `SurfaceCamera` that had to be given a size before it became one
+			// would be a class with a footnote. Same argument
+			// `PreviousTransform` on `BasePart` settles.
+			const std::array surface{ecs::Components::Of<SurfaceCamera>()};
+			const ecs::ClassId surfaceCameraClass =
+				ecs::Classes::Register("SurfaceCamera", cameraClass, surface);
+
 			// --- properties, declared where the component arrives ------------
 			//
 			// Each on the class that first holds what it projects, so a derived
@@ -664,13 +721,31 @@ namespace engine::scene {
 			// with the sorted pass that makes it mean something rather than
 			// ahead of it. A float nothing draws is a field that lies, and it
 			// would have sat in a snapshot and a delta being read by nobody.
+			//
+			// **Not clamped, deliberately.** It was, briefly. Roblox does not
+			// clamp this either — `part.Transparency = 2` reads back as 2 — and
+			// the reason to match is not fidelity for its own sake: a script that
+			// drives a fade by arithmetic and reads the value back expects what
+			// it wrote, and a property that silently rewrites its input is one an
+			// author debugs by disbelieving their own assignment.
+			//
+			// The renderer is where the range has to hold, and that is a
+			// different place from where it is authored. `SurfaceCamera::
+			// ImageTransparency` below is still clamped because it is not
+			// Roblox's property and has no such expectation to honour.
 			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
+
+			// **The third of the three, and they are three questions rather
+			// than one.** `Visible` decides whether the part is submitted at
+			// all, `Transparency` decides which pass it lands in, and this
+			// decides whether it occludes the sun. `Visual::CastShadow` carries
+			// the whole argument for why collapsing any two of them is wrong.
+			ecs::Classes::Property<&Visual::CastShadow>(basePart, "CastShadow");
 
 			// Which surface texture this part shows, or -1 for none. An `int32`
 			// rather than a reference to the camera: the renderer indexes a
 			// small fixed set, and a handle would have to be resolved back to an
 			// index every frame for every part.
-			ecs::Classes::Computed(basePart, SurfaceProperty());
 
 			// The two that were named as gaps at v0.5, both now closed with the
 			// thing they were waiting for rather than with a guess.
@@ -685,6 +760,13 @@ namespace engine::scene {
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
+
+			// The surface camera's three. `SurfaceSize` above is inherited, so a
+			// `SurfaceCamera` can still be resized like any other.
+			ecs::Classes::ClampedProperty<&SurfaceCamera::ImageTransparency, 0.0f, 1.0f>(
+				surfaceCameraClass, "ImageTransparency"
+			);
+			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.

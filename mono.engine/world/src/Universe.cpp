@@ -310,6 +310,11 @@ namespace engine::world {
 		return world == nullptr ? core::Name{} : world->Name();
 	}
 
+	WorldSettings Universe::SettingsOf(WorldId id) const {
+		const World *world = Reach(id);
+		return world == nullptr ? WorldSettings{} : world->Settings();
+	}
+
 	WorldState Universe::StateOf(WorldId id) const {
 		const World *world = Reach(id);
 		return world == nullptr ? WorldState::Suspended : world->State();

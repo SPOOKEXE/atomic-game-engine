@@ -23,6 +23,7 @@ TEST_DEPENDS("engine.core.framegraph")
 TEST_DEPENDS("engine.core.metrics")
 
 using engine::assets::AssetEntry;
+using engine::assets::AssetKind;
 using engine::assets::ChunkEntry;
 using engine::assets::ContentHash;
 using engine::assets::Hasher;
@@ -49,9 +50,10 @@ namespace {
 	Manifest Sample() {
 		Manifest manifest;
 		const ContentHash rock =
-			manifest.AddAsset("meshes/rock.mesh", {Chunk("rock-one"), Chunk("rock-two")});
-		const ContentHash grass = manifest.AddAsset("textures/grass.tex", {Chunk("grass")});
-		const ContentHash bark = manifest.AddAsset("audio/bark.wav", {Chunk("bark")});
+			manifest.AddAsset("meshes/rock.mesh", AssetKind::Mesh, {Chunk("rock-one"), Chunk("rock-two")});
+		const ContentHash grass =
+			manifest.AddAsset("textures/grass.tex", AssetKind::Texture, {Chunk("grass")});
+		const ContentHash bark = manifest.AddAsset("audio/bark.wav", AssetKind::Audio, {Chunk("bark")});
 
 		REQUIRE(manifest.AddBundle(std::vector<ContentHash>{rock, grass}).has_value());
 		REQUIRE(manifest.AddBundle(std::vector<ContentHash>{bark}).has_value());
@@ -69,7 +71,7 @@ namespace {
 TEST_CASE("an asset's root is the tree over its chunks", "[assets][manifest]") {
 	Manifest manifest;
 	const std::vector<ChunkEntry> chunks{Chunk("one"), Chunk("two"), Chunk("three")};
-	const ContentHash root = manifest.AddAsset("a", chunks);
+	const ContentHash root = manifest.AddAsset("a", AssetKind::Data, chunks);
 
 	std::vector<ContentHash> hashes;
 	for (const ChunkEntry &chunk : chunks) {
@@ -100,8 +102,8 @@ TEST_CASE("a name resolves to exactly one asset", "[assets][manifest]") {
 
 TEST_CASE("adding a name twice replaces rather than duplicates", "[assets][manifest]") {
 	Manifest manifest;
-	manifest.AddAsset("a", {Chunk("first")});
-	const ContentHash second = manifest.AddAsset("a", {Chunk("second")});
+	manifest.AddAsset("a", AssetKind::Data, {Chunk("first")});
+	const ContentHash second = manifest.AddAsset("a", AssetKind::Data, {Chunk("second")});
 
 	// Publishing twice from one build must not leave two rows for one name, or
 	// Find stops being total and which row wins becomes an accident of order.
@@ -122,9 +124,9 @@ TEST_CASE("assets are held in canonical name order", "[assets][manifest]") {
 
 TEST_CASE("a bundle is a set, so member order does not change it", "[assets][manifest]") {
 	Manifest manifest;
-	const ContentHash a = manifest.AddAsset("a", {Chunk("a")});
-	const ContentHash b = manifest.AddAsset("b", {Chunk("b")});
-	const ContentHash c = manifest.AddAsset("c", {Chunk("c")});
+	const ContentHash a = manifest.AddAsset("a", AssetKind::Data, {Chunk("a")});
+	const ContentHash b = manifest.AddAsset("b", AssetKind::Data, {Chunk("b")});
+	const ContentHash c = manifest.AddAsset("c", AssetKind::Data, {Chunk("c")});
 
 	const auto forward = manifest.AddBundle(std::vector<ContentHash>{a, b, c});
 	const auto backward = manifest.AddBundle(std::vector<ContentHash>{c, b, a});
@@ -139,7 +141,7 @@ TEST_CASE("a bundle is a set, so member order does not change it", "[assets][man
 
 TEST_CASE("a bundle naming an unknown asset is refused", "[assets][manifest]") {
 	Manifest manifest;
-	const ContentHash known = manifest.AddAsset("a", {Chunk("a")});
+	const ContentHash known = manifest.AddAsset("a", AssetKind::Data, {Chunk("a")});
 
 	// Unfetchable content in a bundle is a problem discovered at delivery time,
 	// which is far too late.
@@ -151,8 +153,8 @@ TEST_CASE("a bundle naming an unknown asset is refused", "[assets][manifest]") {
 
 TEST_CASE("a bundle totals its assets' bytes", "[assets][manifest]") {
 	Manifest manifest;
-	const ContentHash a = manifest.AddAsset("a", {Chunk("12345")});
-	const ContentHash b = manifest.AddAsset("b", {Chunk("123"), Chunk("12")});
+	const ContentHash a = manifest.AddAsset("a", AssetKind::Data, {Chunk("12345")});
+	const ContentHash b = manifest.AddAsset("b", AssetKind::Data, {Chunk("123"), Chunk("12")});
 
 	REQUIRE(manifest.AddBundle(std::vector<ContentHash>{a, b}).has_value());
 	REQUIRE(manifest.Bundles().size() == 1);
@@ -166,13 +168,131 @@ TEST_CASE("the manifest root changes when anything below it changes", "[assets][
 	// One edited chunk changes its asset root, its bundle root and this. That
 	// chain is the invalidation set an edge cache is handed — CDN.md §2.
 	Manifest edited;
-	const ContentHash rock = edited.AddAsset("meshes/rock.mesh", {Chunk("rock-one"), Chunk("rock-CHANGED")});
-	const ContentHash grass = edited.AddAsset("textures/grass.tex", {Chunk("grass")});
-	const ContentHash bark = edited.AddAsset("audio/bark.wav", {Chunk("bark")});
+	const ContentHash rock =
+		edited.AddAsset("meshes/rock.mesh", AssetKind::Mesh, {Chunk("rock-one"), Chunk("rock-CHANGED")});
+	const ContentHash grass = edited.AddAsset("textures/grass.tex", AssetKind::Texture, {Chunk("grass")});
+	const ContentHash bark = edited.AddAsset("audio/bark.wav", AssetKind::Audio, {Chunk("bark")});
 	REQUIRE(edited.AddBundle(std::vector<ContentHash>{rock, grass}).has_value());
 	REQUIRE(edited.AddBundle(std::vector<ContentHash>{bark}).has_value());
 
 	CHECK(edited.Root() != root);
+}
+
+TEST_CASE("the root binds a name to its content, not just the content", "[assets][manifest]") {
+	// **The gap this closes.** Before v0.9 the root covered bundle roots alone,
+	// so an origin serving a manifest with two names swapped handed a client
+	// content that verified perfectly against the signed root and was the wrong
+	// asset. Signing the content and not the index is signing the half nobody
+	// looks anything up by.
+	Manifest straight;
+	const ContentHash a1 = straight.AddAsset("meshes/rock.mesh", AssetKind::Mesh, {Chunk("rock")});
+	const ContentHash b1 = straight.AddAsset("meshes/tree.mesh", AssetKind::Mesh, {Chunk("tree")});
+	REQUIRE(straight.AddBundle(std::vector<ContentHash>{a1, b1}).has_value());
+
+	Manifest swapped;
+	const ContentHash a2 = swapped.AddAsset("meshes/rock.mesh", AssetKind::Mesh, {Chunk("tree")});
+	const ContentHash b2 = swapped.AddAsset("meshes/tree.mesh", AssetKind::Mesh, {Chunk("rock")});
+	REQUIRE(swapped.AddBundle(std::vector<ContentHash>{a2, b2}).has_value());
+
+	// Identical content, identical bundles — and a different root, because the
+	// names now point at each other's bytes.
+	CHECK(straight.BundleRoot() == swapped.BundleRoot());
+	CHECK(straight.DescriptorRoot() != swapped.DescriptorRoot());
+	CHECK(straight.Root() != swapped.Root());
+}
+
+TEST_CASE("the root binds an asset's kind", "[assets][manifest]") {
+	// A client routes on the kind, so an origin that could relabel a script as
+	// a texture without breaking the signature would be deciding what a blob is
+	// for.
+	Manifest asMesh;
+	const ContentHash mesh = asMesh.AddAsset("thing", AssetKind::Mesh, {Chunk("bytes")});
+	REQUIRE(asMesh.AddBundle(std::vector<ContentHash>{mesh}).has_value());
+
+	Manifest asAudio;
+	const ContentHash audio = asAudio.AddAsset("thing", AssetKind::Audio, {Chunk("bytes")});
+	REQUIRE(asAudio.AddBundle(std::vector<ContentHash>{audio}).has_value());
+
+	CHECK(asMesh.BundleRoot() == asAudio.BundleRoot());
+	CHECK(asMesh.Root() != asAudio.Root());
+}
+
+TEST_CASE("a name and a kind cannot be re-cut to produce one descriptor", "[assets][manifest]") {
+	// The descriptor is length-prefixed, so `ab` + `c` and `a` + `bc` are not
+	// the same hash. Without the length they would be, and the binding above
+	// would not hold for names that happen to line up.
+	Manifest first;
+	const ContentHash left = first.AddAsset("ab", AssetKind::Mesh, {Chunk("x")});
+	REQUIRE(first.AddBundle(std::vector<ContentHash>{left}).has_value());
+
+	Manifest second;
+	const ContentHash right = second.AddAsset("a", AssetKind::Mesh, {Chunk("x")});
+	REQUIRE(second.AddBundle(std::vector<ContentHash>{right}).has_value());
+
+	CHECK(first.DescriptorRoot() != second.DescriptorRoot());
+}
+
+TEST_CASE("the asset root still addresses content alone", "[assets][manifest]") {
+	// The name is bound a level up, deliberately: folding it into the asset
+	// root would give two identical files under two names two different roots
+	// and lose dedup across them.
+	Manifest manifest;
+	const ContentHash here = manifest.AddAsset("one/thing.mesh", AssetKind::Mesh, {Chunk("identical")});
+	const ContentHash there = manifest.AddAsset("other/thing.mesh", AssetKind::Mesh, {Chunk("identical")});
+	CHECK(here == there);
+}
+
+TEST_CASE("an asset's kind survives a round trip", "[assets][manifest]") {
+	Manifest manifest;
+	manifest.AddAsset("a.mesh", AssetKind::Mesh, {Chunk("a")});
+	manifest.AddAsset("b.png", AssetKind::Texture, {Chunk("b")});
+	manifest.AddAsset("c.wav", AssetKind::Audio, {Chunk("c")});
+
+	// The bytes are held in a named local: a ByteReader is a view, so reading
+	// from a temporary would be reading freed memory.
+	const auto bytes = Serialise(manifest);
+	ByteReader reader(bytes);
+	const auto parsed = Manifest::Read(reader);
+	REQUIRE(parsed.has_value());
+
+	REQUIRE(parsed->Find("a.mesh") != nullptr);
+	CHECK(parsed->Find("a.mesh")->Kind == AssetKind::Mesh);
+	CHECK(parsed->Find("b.png")->Kind == AssetKind::Texture);
+	CHECK(parsed->Find("c.wav")->Kind == AssetKind::Audio);
+}
+
+TEST_CASE("assets can be selected by kind", "[assets][manifest]") {
+	// What "connect and get assets of types" resolves to at the format layer.
+	Manifest manifest;
+	manifest.AddAsset("a.mesh", AssetKind::Mesh, {Chunk("a")});
+	manifest.AddAsset("b.png", AssetKind::Texture, {Chunk("b")});
+	manifest.AddAsset("c.png", AssetKind::Texture, {Chunk("c")});
+
+	const auto textures = manifest.OfKind(AssetKind::Texture);
+	REQUIRE(textures.size() == 2);
+	// Name order, which is the order the manifest holds them in.
+	CHECK(textures[0]->Name == "b.png");
+	CHECK(textures[1]->Name == "c.png");
+
+	CHECK(manifest.OfKind(AssetKind::Mesh).size() == 1);
+	CHECK(manifest.OfKind(AssetKind::Audio).empty());
+}
+
+TEST_CASE("an asset resolves to the bundle that carries it", "[assets][manifest]") {
+	// The lookup a fetch needs: a client wants one asset and the unit that
+	// travels is the group it is in.
+	Manifest manifest;
+	const ContentHash rock = manifest.AddAsset("rock.mesh", AssetKind::Mesh, {Chunk("rock")});
+	const ContentHash bark = manifest.AddAsset("bark.wav", AssetKind::Audio, {Chunk("bark")});
+	const auto first = manifest.AddBundle(std::vector<ContentHash>{rock});
+	REQUIRE(first.has_value());
+
+	REQUIRE(manifest.BundleFor(rock) != nullptr);
+	CHECK(manifest.BundleFor(rock)->Root == *first);
+
+	// An asset in no bundle is unfetchable, and being able to detect that is
+	// worth more than a nullptr nobody checks.
+	CHECK(manifest.BundleFor(bark) == nullptr);
 }
 
 TEST_CASE("the manifest is byte-stable", "[assets][manifest]") {
@@ -180,13 +300,13 @@ TEST_CASE("the manifest is byte-stable", "[assets][manifest]") {
 	// produce identical bytes, or the manifest cannot be diffed or cached and
 	// "did the content change?" stops having a cheap answer.
 	Manifest forward;
-	const ContentHash a1 = forward.AddAsset("a", {Chunk("a")});
-	const ContentHash b1 = forward.AddAsset("b", {Chunk("b")});
+	const ContentHash a1 = forward.AddAsset("a", AssetKind::Data, {Chunk("a")});
+	const ContentHash b1 = forward.AddAsset("b", AssetKind::Data, {Chunk("b")});
 	REQUIRE(forward.AddBundle(std::vector<ContentHash>{a1, b1}).has_value());
 
 	Manifest backward;
-	const ContentHash b2 = backward.AddAsset("b", {Chunk("b")});
-	const ContentHash a2 = backward.AddAsset("a", {Chunk("a")});
+	const ContentHash b2 = backward.AddAsset("b", AssetKind::Data, {Chunk("b")});
+	const ContentHash a2 = backward.AddAsset("a", AssetKind::Data, {Chunk("a")});
 	REQUIRE(backward.AddBundle(std::vector<ContentHash>{b2, a2}).has_value());
 
 	CHECK(Serialise(forward) == Serialise(backward));
@@ -254,7 +374,7 @@ TEST_CASE("a truncated manifest is refused", "[assets][manifest]") {
 
 TEST_CASE("a manifest whose root does not match its chunks is refused", "[assets][manifest]") {
 	Manifest manifest;
-	manifest.AddAsset("a", {Chunk("one"), Chunk("two")});
+	manifest.AddAsset("a", AssetKind::Data, {Chunk("one"), Chunk("two")});
 	const ContentHash a = manifest.Assets()[0].Root;
 	REQUIRE(manifest.AddBundle(std::vector<ContentHash>{a}).has_value());
 
@@ -319,7 +439,7 @@ TEST_CASE("a manifest root signs and verifies", "[assets][manifest][signature]")
 	CHECK(VerifyManifestRoot(manifest.Root(), signature, key->Public()));
 
 	Manifest different;
-	const ContentHash only = different.AddAsset("a", {Chunk("a")});
+	const ContentHash only = different.AddAsset("a", AssetKind::Data, {Chunk("a")});
 	REQUIRE(different.AddBundle(std::vector<ContentHash>{only}).has_value());
 	CHECK_FALSE(VerifyManifestRoot(different.Root(), signature, key->Public()));
 }

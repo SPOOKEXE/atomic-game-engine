@@ -36,16 +36,22 @@ namespace engine::render {
 
 		// Width in pixels the text would occupy at `scale`.
 		//
+		// Values below one are measured at scale one, which is what `Draw`
+		// draws them at. The three calls here agree about that or a caller
+		// sizes a panel for one thing and fills it with another.
+		//
 		// @param text  Text to measure; unsupported characters still occupy one advance.
-		// @param scale Positive integer pixel scale.
+		// @param scale Integer pixel scale; below one is treated as one.
 		// @return Width without a trailing inter-glyph column, or zero for empty text.
 		// @client
 		int Measure(std::string_view text, int scale);
 
 		// Returns the line-to-line row height in pixels at `scale`.
 		//
-		// @param scale Positive integer pixel scale.
-		// @return Seven pixels multiplied by `scale`.
+		// Values below one are measured at scale one. See `Measure`.
+		//
+		// @param scale Integer pixel scale; below one is treated as one.
+		// @return Seven pixels multiplied by the effective scale.
 		// @client
 		int LineHeight(int scale);
 

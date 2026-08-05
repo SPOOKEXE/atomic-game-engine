@@ -9,7 +9,9 @@
 //
 // Headless, and one worker, so a run of this agrees with the run before it.
 
+#include <engine/core/types/Color3.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -243,4 +245,266 @@ TEST_CASE("the world crosses quantised and the server's copy does not", "[unifie
 	// nothing happening.
 	CHECK(differing > compared / 2);
 	CHECK(serverOffGrid);
+}
+
+// --- what changes after the join, and what does not -------------------------
+//
+// **The gap these close is stated at the top of `Report::Drawn`**: `Bounds` and
+// `Visual` used to cross once, in the join snapshot, and never again. They are
+// not observed — nothing in this world resizes or recolours anything per tick,
+// so a dirty column for them would be paid for every tick and read never — and
+// a delta is built from those bits. So a part recoloured after the join kept its
+// old colour on every client for ever, and nothing anywhere said so.
+//
+// `replication::ChangeDetection::Signature` is what closes it: the authority
+// hashes the value itself once per `Publish` and sends what differs. These cases
+// are here rather than in `engine.replication.*` because what they check is the
+// pairing between a *world's* components and their detectors — which is this
+// program's seam, not the protocol's.
+
+namespace {
+	using engine::scene::Bounds;
+	using engine::scene::Visual;
+
+	// Steps until a condition holds, so a case says how long it waited rather
+	// than assuming a number.
+	//
+	// A value keeps being resent until the client acknowledges the tick it went
+	// out on, so "it arrived" is a few ticks after "it changed" even with
+	// nothing between the two halves.
+	template <class Predicate> bool StepUntil(Harness &harness, int limit, Predicate held) {
+		for (int step = 0; step < limit; step++) {
+			harness.Step();
+			if (held()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// The bytes the authority built on the last tick.
+	size_t LastBytes(const Harness &harness) {
+		return harness.Authority().Stats().Bytes;
+	}
+
+	// Steps until the stream settles, and returns what a quiet tick costs.
+	//
+	// **Not zero.** Every transform is marked changed every tick by
+	// `Integrate`, so a quiet tick still carries the whole world's positions.
+	// What it does not carry is a `Bounds` or a `Visual`, and that is the
+	// difference the cases below measure against.
+	size_t SettledBytes(Harness &harness) {
+		size_t bytes = 0;
+		size_t same = 0;
+
+		// The join seeds every entity as owed its values, so the first ticks
+		// after it carry them whether or not anything moved. Waiting for two
+		// consecutive equal ticks is what says that has drained.
+		for (int step = 0; step < 120 && same < 2; step++) {
+			harness.Step();
+			const size_t now = LastBytes(harness);
+			same = now == bytes ? same + 1 : 0;
+			bytes = now;
+		}
+		return bytes;
+	}
+}
+
+TEST_CASE("a colour changed after the join reaches the client", "[unified]") {
+	Harness harness(Small());
+	REQUIRE(harness.Join());
+	SettledBytes(harness);
+
+	const engine::ecs::Entity probe = harness.Probe();
+	REQUIRE(harness.ClientWorld().Get<Visual>(probe) != nullptr);
+
+	const engine::core::Color3 wanted{0.9f, 0.1f, 0.2f};
+	REQUIRE(harness.ClientWorld().Get<Visual>(probe)->Tint.R != Approx(wanted.R));
+
+	// Written the way a script writes it. `Visual` is not observed here, so
+	// this sets no dirty bit and no delta could have carried it before v0.7 —
+	// the value is noticed because its hash differs, not because the write
+	// announced itself.
+	harness.ServerWorld().GetMutable<Visual>(probe)->Tint = wanted;
+
+	const bool arrived = StepUntil(harness, 60, [&] {
+		const Visual *replicated = harness.ClientWorld().Get<Visual>(probe);
+		return replicated != nullptr && replicated->Tint.R == Approx(wanted.R) &&
+			   replicated->Tint.G == Approx(wanted.G) && replicated->Tint.B == Approx(wanted.B);
+	});
+
+	CHECK(arrived);
+}
+
+TEST_CASE("a size changed after the join reaches what is drawn", "[unified]") {
+	// `Bounds` is the other half of the pair, and it is the one whose loss is
+	// visible: a client that received a position and no size has nothing to
+	// draw, and one that received a *stale* size draws the wrong shape.
+	Harness harness(Small());
+	REQUIRE(harness.Join());
+	SettledBytes(harness);
+
+	const engine::ecs::Entity probe = harness.Probe();
+	const engine::core::Vector3 wanted{4.0f, 0.25f, 4.0f};
+
+	harness.ServerWorld().GetMutable<Bounds>(probe)->HalfExtent = wanted;
+
+	const bool arrived = StepUntil(harness, 60, [&] {
+		const Bounds *replicated = harness.ClientWorld().Get<Bounds>(probe);
+		return replicated != nullptr && replicated->HalfExtent.X == Approx(wanted.X);
+	});
+	REQUIRE(arrived);
+
+	// And it reached the draw list rather than only the store, which is the
+	// half `Report::Drawn` exists to separate.
+	const auto *drawList = harness.ClientWorld().Resource<client::DrawList>();
+	REQUIRE(drawList != nullptr);
+
+	bool drawn = false;
+	for (const engine::scene::DrawInstance &instance : drawList->Instances) {
+		if (instance.HalfExtent.X == Approx(wanted.X) && instance.HalfExtent.Y == Approx(wanted.Y)) {
+			drawn = true;
+		}
+	}
+	CHECK(drawn);
+}
+
+TEST_CASE("a value written in bulk is noticed", "[unified]") {
+	// **The hole a dirty bit cannot cover, and the strongest reason a signature
+	// exists.** `EachBatch` hands out raw column pointers and sets no bit —
+	// deliberately, because checking per row is the cost that path exists to
+	// avoid — so a system writing in bulk is invisible to `ChangeDetection::
+	// Observed` however carefully it was observed. `ecs/ChangeChannel.hpp` says
+	// so in its own words, and `scene::QuickHash` is the same answer one layer
+	// up.
+	Harness harness(Small());
+	REQUIRE(harness.Join());
+	SettledBytes(harness);
+
+	const float wanted = 0.75f;
+	harness.ServerWorld().EachBatch<Visual>([wanted](size_t rows, Visual *visuals) {
+		for (size_t row = 0; row < rows; row++) {
+			visuals[row].Transparency = wanted;
+		}
+	});
+
+	const engine::ecs::Entity probe = harness.Probe();
+	const bool arrived = StepUntil(harness, 90, [&] {
+		const Visual *replicated = harness.ClientWorld().Get<Visual>(probe);
+		return replicated != nullptr && replicated->Transparency == Approx(wanted);
+	});
+	REQUIRE(arrived);
+
+	// Every row, not only the one the reports follow — a bulk write changed the
+	// whole column and the detector has to have seen all of it.
+	size_t matching = 0;
+	size_t total = 0;
+	harness.ServerWorld().Each<const Visual>([&](engine::ecs::Entity entity, const Visual &) {
+		total++;
+		const Visual *replicated = harness.ClientWorld().Get<Visual>(entity);
+		if (replicated != nullptr && replicated->Transparency == Approx(wanted)) {
+			matching++;
+		}
+	});
+	CHECK(total == 16);
+	CHECK(matching == total);
+}
+
+TEST_CASE("a component nothing wrote is not sent again", "[unified]") {
+	// **The other half of the promise, and the one a naive fix breaks.** A
+	// detector that resent every value every tick would close the gap above and
+	// cost the whole world's colours per tick to do it — so "sends what
+	// changed" has to mean "and nothing else".
+	Harness harness(Small());
+	REQUIRE(harness.Join());
+
+	const size_t settled = SettledBytes(harness);
+	REQUIRE(settled > 0);
+
+	// A quiet tick stays quiet. Transforms are marked every tick by `Integrate`
+	// so this is not zero, but it does not grow.
+	harness.Step();
+	CHECK(LastBytes(harness) == settled);
+
+	// One colour changes, and the tick it lands on is bigger.
+	harness.ServerWorld().GetMutable<Visual>(harness.Probe())->Tint = engine::core::Color3{0.1f, 0.9f, 0.4f};
+
+	harness.Step();
+	const size_t one = LastBytes(harness);
+	CHECK(one > settled);
+
+	// And it goes back down once the client has confirmed it, rather than the
+	// value being offered for ever.
+	CHECK(StepUntil(harness, 60, [&] { return LastBytes(harness) == settled; }));
+
+	// **The assertion that a detector resending everything would fail**, and
+	// the reason the two above are not enough on their own: both of them hold
+	// just as well for an authority that puts every colour in every tick, which
+	// closes the gap this feature exists for and pays the whole world's
+	// bandwidth to do it. What separates the two is how much a tick grows when
+	// *every* value changes — a real detector was carrying none of them and
+	// grows by all sixteen, and a resend-everything one was already carrying
+	// them and cannot grow at all.
+	harness.ServerWorld().EachBatch<Visual>([](size_t rows, Visual *visuals) {
+		for (size_t row = 0; row < rows; row++) {
+			visuals[row].Tint = engine::core::Color3{0.2f, 0.3f, 0.4f};
+		}
+	});
+
+	harness.Step();
+	const size_t all = LastBytes(harness);
+
+	// Sixteen entities' worth rather than one. Stated as a wide margin rather
+	// than an exact figure: what is being asserted is that the cost scales with
+	// what changed, not what one `Visual` happens to encode to today.
+	CHECK(all > settled + (one - settled) * 8);
+}
+
+TEST_CASE("only the entity that changed is sent", "[unified]") {
+	// Granularity, which is what makes a per-entity signature worth keeping
+	// over a per-component one: a world where one part is recoloured must not
+	// pay to resend the other fifteen.
+	Harness harness(Small());
+	REQUIRE(harness.Join());
+
+	const size_t settled = SettledBytes(harness);
+
+	// Two entities that are not the probe, so the case says something about
+	// rows the reports do not follow.
+	std::vector<engine::ecs::Entity> rows;
+	harness.ServerWorld().Each<const Visual>([&](engine::ecs::Entity entity, const Visual &) {
+		rows.push_back(entity);
+	});
+	REQUIRE(rows.size() == 16);
+
+	const engine::ecs::Entity first = rows[3];
+	const engine::ecs::Entity second = rows[9];
+
+	harness.ServerWorld().GetMutable<Visual>(first)->Tint = engine::core::Color3{1.0f, 0.0f, 0.0f};
+	harness.Step();
+	const size_t one = LastBytes(harness);
+
+	REQUIRE(StepUntil(harness, 60, [&] { return LastBytes(harness) == settled; }));
+
+	// The second entity's value on the client, before anything touches it.
+	const Visual before = *harness.ClientWorld().Get<Visual>(second);
+
+	harness.ServerWorld().GetMutable<Visual>(second)->Tint = engine::core::Color3{0.0f, 0.0f, 1.0f};
+	harness.Step();
+	const size_t other = LastBytes(harness);
+
+	// One entity's worth each time, not one and then two: the first change was
+	// confirmed and forgotten before the second was made.
+	CHECK(one == other);
+	CHECK(one > settled);
+
+	REQUIRE(StepUntil(harness, 60, [&] {
+		const Visual *replicated = harness.ClientWorld().Get<Visual>(second);
+		return replicated != nullptr && replicated->Tint.B == Approx(1.0f);
+	}));
+
+	// And the first entity kept the colour it was given rather than being
+	// reverted by a delta that carried the whole column.
+	CHECK(harness.ClientWorld().Get<Visual>(first)->Tint.R == Approx(1.0f));
+	CHECK(before.Tint.B != Approx(1.0f));
 }

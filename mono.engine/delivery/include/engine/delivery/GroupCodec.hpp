@@ -26,7 +26,7 @@
 // decompressed size it likes, so nothing here allocates against what the frame
 // says — only against what the *manifest* already said the group weighs.
 //
-// @tier shared
+// @tier L11 · shared
 
 #include <engine/assets/ContentHash.hpp>
 
@@ -36,7 +36,7 @@
 #include <span>
 #include <vector>
 
-namespace cdn {
+namespace engine::delivery {
 
 	// A trained Zstd dictionary, addressed by its content like everything else.
 	//

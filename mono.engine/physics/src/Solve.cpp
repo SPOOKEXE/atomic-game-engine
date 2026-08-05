@@ -196,7 +196,7 @@ namespace engine::physics {
 	}
 
 	void Solve(ecs::Store &store) {
-		ENGINE_PROFILE_CAT("physics.solve", core::ProfileCategory::ECS);
+		ENGINE_PROFILE_CAT("physics.solve", core::ProfileCategory::Physics);
 
 		PhysicsWorld *world = PreparedWorldMutable(store);
 		if (world == nullptr) {

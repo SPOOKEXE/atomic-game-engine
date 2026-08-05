@@ -166,9 +166,12 @@ namespace engine::script {
 			}
 			Lists.erase(list);
 
-			// Out of the walk order too. Leaving a destroyed instance in it
-			// would make `EachSubject` visit a dead handle every tick for the
-			// rest of the world's life.
+			// Out of the walk order too, or the vector grows by one entry per
+			// destroyed instance for the rest of the world's life and
+			// `EachSubject` hands out a dead handle. Nothing in the engine walks
+			// subjects today — the `.Changed` fan-out is `ChangeQueue`,
+			// subscribed per component with an entity filter — so this is a leak
+			// first and a wrong answer only once something does.
 			if (const auto order = SubjectOrder.find(static_cast<uint8_t>(kind));
 				order != SubjectOrder.end()) {
 				std::erase(order->second, subject);

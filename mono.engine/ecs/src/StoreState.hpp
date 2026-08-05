@@ -20,6 +20,7 @@
 
 #include <engine/ecs/ComponentSet.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/SparseSet.hpp>
 
 #include <algorithm>
@@ -278,6 +279,34 @@ namespace engine::ecs {
 
 		// Entity index to generation and location.
 		SparseSet Directory;
+
+		// Whether anything is listening for reparents, and what has happened
+		// since it last looked.
+		//
+		// **Opt in, like `Observe`.** A world with no script watching the tree
+		// pays one bool per `SetParent` and stores nothing; the alternative is a
+		// list that grows for the whole life of every world nobody is draining.
+		// The same argument `.Changed` makes for observing a component on the
+		// first connection rather than on creation.
+		bool WatchTree = false;
+		std::vector<TreeChange> TreeChanges;
+
+		// Called *before* a subtree leaves its ancestors. See
+		// `Store::OnDescendantRemoving`.
+		//
+		// **The one signal in the engine that is not deferred, and the only one
+		// that cannot be.** Its whole contract is that the handler is called
+		// while the thing is still there — which a queue drained at the next
+		// barrier cannot offer, because by then it has gone.
+		std::function<void(Entity, Entity)> BeforeRemoving;
+
+		// Whether a removal is already being announced.
+		//
+		// A handler may destroy or reparent something, and `DestroyInstance`
+		// unparents every row on its way out — so without this the announcement
+		// of one removal would announce the removals it causes, and a handler
+		// that moved what it was told about would not stop.
+		bool Removing = false;
 
 		// Named entities, both ways. Names are optional and most entities have
 		// none, so this is a map rather than a column.

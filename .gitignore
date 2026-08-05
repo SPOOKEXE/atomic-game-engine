@@ -15,9 +15,19 @@ compile_commands.json
 *.swp
 .DS_Store
 
+# The pinned TypeScript compiler `just typecheck` installs. Not committed: the
+# version in package.json is exact and TypeScript pins its own platform binaries
+# to the same version, so the tree is already reproducible without a lockfile —
+# and committing one would mean choosing between bun's and npm's, when the
+# recipe accepts either.
+node_modules/
+bun.lock
+package-lock.json
+
 # Nothing outside mono.vendor/ should ever be a third-party source tree.
 build/
 out/
 __pycache__/
 *.pyc
 .opencode/
+*.aworld

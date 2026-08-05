@@ -14,11 +14,13 @@
 // Headless. Nothing here needs a GPU, and drawing the line there is what keeps
 // the suite runnable everywhere.
 
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -74,11 +76,20 @@ namespace {
 
 		// One drawable row, at the origin.
 		Entity Spawn() {
+			return SpawnLooking(Visual{});
+		}
+
+		// The same, with the appearance the authority sent.
+		Entity SpawnLooking(const Visual &visual) {
 			const Entity entity = World.Create();
 			World.Set<Transform>(entity, Transform{});
 			World.Set<Bounds>(entity, Bounds{Vector3{0.5f, 0.5f, 0.5f}});
-			World.Set<Visual>(entity, Visual{});
+			World.Set<Visual>(entity, visual);
 			return entity;
+		}
+
+		const std::vector<engine::scene::DrawInstance> &Instances() const {
+			return World.Resource<DrawList>()->Instances;
 		}
 
 		// What arriving looks like from this side: the connection wrote the
@@ -222,4 +233,90 @@ TEST_CASE("nothing is buffered before the join", "[client][replication]") {
 	}
 	REQUIRE(buffer->Stats().Ticks == 1);
 	REQUIRE(buffer->Newest() == 7);
+}
+
+// **A replica draws what a part *looks like*, not only where it is.**
+//
+// `CollectReplicated` builds a `DrawInstance` field by field, and for three
+// releases it copied the first five and stopped — so `Transparency`, `Surface`
+// and later `CastShadow` arrived over the wire, sat correctly in the store, and
+// were dropped on the way to the renderer. A glass pane replicated as solid and
+// a mirror replicated as a plain part, while every property panel and every
+// script that inspected them said the values were right.
+//
+// That is the same class of loss as a serialiser forgetting a field, arriving
+// through a different door, and it is why this asserts every field rather than
+// the one that was last found missing.
+TEST_CASE("a replica draws every field of what it was sent", "[client][replication]") {
+	Replica replica;
+
+	Visual sent;
+	sent.Tint = engine::core::Color3{0.25f, 0.5f, 0.75f};
+	sent.Mesh = engine::core::Name("replicated_test.Mesh");
+	sent.Material = engine::core::Name("replicated_test.Material");
+	sent.Transparency = 0.5f;
+	sent.Surface = 1;
+	sent.CastShadow = false;
+
+	replica.SpawnLooking(sent);
+	replica.Draw();
+
+	REQUIRE(replica.Instances().size() == 1);
+	const engine::scene::DrawInstance &drawn = replica.Instances()[0];
+
+	CHECK(drawn.Tint.R == Approx(sent.Tint.R));
+	CHECK(drawn.Tint.G == Approx(sent.Tint.G));
+	CHECK(drawn.Tint.B == Approx(sent.Tint.B));
+	CHECK(drawn.Mesh == sent.Mesh);
+	CHECK(drawn.Material == sent.Material);
+	CHECK(drawn.Transparency == Approx(sent.Transparency));
+	CHECK(drawn.Surface == sent.Surface);
+	CHECK_FALSE(drawn.CastShadow);
+}
+
+// **`Visible` is the one half of the render gate a replica can honour**, and it
+// has to honour it here rather than through `scene::Rendered`.
+//
+// The gate proper is an ancestry test, and ancestry is what the wire does not
+// carry — `Server.cpp` replicates `Transform`, `Motion`, `Bounds` and `Visual`,
+// and `Hierarchy` holds entity handles that mean nothing until they are remapped
+// between two processes' directories. So a replica has no tree to test and the
+// authority's decision about what is in the scene arrives as *what it sent*.
+//
+// `Visible` rides inside `Visual`, so this process genuinely was told, and a
+// hidden part must not be drawn.
+TEST_CASE("a replica does not draw a part it was told is invisible", "[client][replication]") {
+	Replica replica;
+
+	replica.Spawn();
+
+	Visual hidden;
+	hidden.Visible = false;
+	replica.SpawnLooking(hidden);
+
+	replica.Draw();
+	CHECK(replica.Instances().size() == 1);
+}
+
+// **The registration this world used to skip**, and the failure it caused was a
+// long way from the cause.
+//
+// `Components::Of<T>` caches its answer per type per process and marks the name
+// it minted as automatic — so the first mention of `DrawList` anywhere decides
+// what it is called. `BuildReplicatedWorld` reached for the resource without
+// registering first, which named it `client::DrawList`, the compiler's
+// spelling. Nothing failed here. It failed in whichever world was built *next*,
+// where the explicit `RegisterClientComponents` aborted the process naming a
+// type that function never mentions.
+//
+// This suite runs in its own process, so `Replica` above is the first thing in
+// it to touch `DrawList` — which is what makes this assertion mean anything.
+TEST_CASE("a replicated world registers its own types before it uses them", "[client][replication]") {
+	Replica replica;
+
+	const engine::ecs::ComponentId id = engine::ecs::Components::Of<DrawList>();
+	REQUIRE(id.IsValid());
+
+	// The explicit name, not the compiler's. A recording carries this string.
+	CHECK(engine::ecs::Components::Describe(id).Name.Text() == "client.DrawList");
 }

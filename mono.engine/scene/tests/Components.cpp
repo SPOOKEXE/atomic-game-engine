@@ -1,6 +1,10 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -24,8 +28,10 @@ using engine::scene::Bounds;
 using engine::scene::Camera;
 using engine::scene::Collider;
 using engine::scene::Motion;
+using engine::scene::NormalId;
 using engine::scene::PreviousTransform;
 using engine::scene::QuickHash;
+using engine::scene::Rendered;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
@@ -69,30 +75,49 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(Surface) == sizeof(Name));
 	CHECK(sizeof(QuickHash) == sizeof(uint64_t));
 	CHECK(sizeof(Camera) == 3 * sizeof(float));
-	CHECK(sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(int8_t) + 3);
-	CHECK(offsetof(SurfaceCamera, Reserved) + 3 == sizeof(SurfaceCamera));
+	// **`ImageTransparency` widened this one and the two bytes it needed came
+	// out of the named padding**, which is the same trade `Visual` records
+	// above: a float needs four-byte alignment, so it could not sit in the three
+	// bytes after `Surface` — the struct grew — while `Face` is a byte-wide enum
+	// and took one of them for nothing. Two are left.
+	CHECK(
+		sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(float) + sizeof(int8_t) + sizeof(NormalId) + 2
+	);
+	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
+
+	// A face is one byte, so a component can hold one without the row noticing.
+	CHECK(sizeof(NormalId) == sizeof(uint8_t));
 
 	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + sizeof(BodyKind) + 3);
 	CHECK(
 		sizeof(Collider) ==
 		sizeof(Vector3) + 2 * sizeof(LayerMask) + sizeof(ShapeKind) + sizeof(bool) + sizeof(uint16_t)
 	);
-	// **Two v0.6 fields, and only one of them widened the struct.**
-	// `Transparency` is a float and needed four-byte alignment, so it could not
-	// live in the three named bytes after `Visible` and the row got wider.
-	// `Surface` is an `int8_t` and fits, so it took one of those bytes and cost
-	// nothing — which is what named padding is *for*, and what this check is
-	// here to keep honest.
+	// **Three fields added since v0.6, and only one of them widened the
+	// struct.** `Transparency` is a float and needed four-byte alignment, so it
+	// could not live in the three named bytes after `Visible` and the row got
+	// wider. `Surface` is an `int8_t` and `CastShadow` is a `bool`, so each took
+	// one of those bytes and cost nothing — which is what named padding is
+	// *for*, and what this check is here to keep honest. One byte is left.
 	CHECK(
 		sizeof(Visual) ==
-		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + 2
+		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + sizeof(bool) + 1
 	);
+
+	CHECK(sizeof(Rendered) == sizeof(uint8_t) + 3);
 
 	// The named padding is the last thing in each, so a member appended after
 	// it would reopen the hole silently.
-	CHECK(offsetof(RigidBody, Reserved) + 3 == sizeof(RigidBody));
-	CHECK(offsetof(Collider, Reserved) + sizeof(uint16_t) == sizeof(Collider));
-	CHECK(offsetof(Visual, Reserved) + 2 == sizeof(Visual));
+	//
+	// Written as `sizeof(T::Reserved)` rather than as a literal, because the
+	// literal is the thing that goes stale: `Visual::Reserved` shrank from two
+	// bytes to one when `CastShadow` moved into the hole, and a hand-written 2
+	// here would have failed for a struct that was in fact still exactly
+	// packed.
+	CHECK(offsetof(RigidBody, Reserved) + sizeof(RigidBody::Reserved) == sizeof(RigidBody));
+	CHECK(offsetof(Collider, Reserved) + sizeof(Collider::Reserved) == sizeof(Collider));
+	CHECK(offsetof(Visual, Reserved) + sizeof(Visual::Reserved) == sizeof(Visual));
+	CHECK(offsetof(Rendered, Reserved) + sizeof(Rendered::Reserved) == sizeof(Rendered));
 }
 
 TEST_CASE("a default transform is the identity at the origin", "[scene][components]") {
@@ -148,7 +173,41 @@ TEST_CASE("a default visual is a visible untinted default mesh", "[scene][compon
 	// default mesh is, and a name interned here would be a second place that
 	// decides.
 	CHECK_FALSE(visual.Mesh.IsValid());
-	CHECK_FALSE(visual.Material.IsValid());
+
+	// **Material is the opposite case, and the asymmetry is the point.** There
+	// is no name for "the consumer's own default material" the way there is for
+	// its default mesh — a part is drawn as *something* — so leaving this
+	// invalid meant a properties panel showing an empty combo whose current
+	// value was not among the values it offered, and a script comparing
+	// `part.Material` against `Enum.Material.Plastic` and getting false on a
+	// part that was drawn as plastic.
+	CHECK(visual.Material == engine::scene::DefaultMaterial());
+	CHECK(visual.Material == Name("Plastic"));
+}
+
+TEST_CASE("the default material is a member of the material enum", "[scene][components]") {
+	// **The check that makes one string in two files safe.** `DefaultMaterial`
+	// interns "Plastic" and `scene::Part.cpp` registers the enum's members from
+	// a separate list, and they cannot be collapsed in the direction that would
+	// help: a `Visual` can be default constructed before any class tree exists —
+	// a replica's column grows straight from a wire delta — so reading the
+	// enum's first member as the default would hand back an invalid name on
+	// exactly the path the default is for.
+	//
+	// So they are two declarations of one fact, and this is what stops them
+	// drifting. Renaming the enum member without renaming the default would
+	// otherwise leave every part carrying a material name the enum does not
+	// contain, and the only symptom would be a combo with no selection.
+	// Building the class tree is what registers the enum, so this is the call
+	// that makes the lookup below meaningful rather than merely absent.
+	(void)engine::scene::PartClass();
+
+	size_t ordinal = 0;
+	REQUIRE(engine::ecs::EnumTable::OrdinalOf(Name("Material"), engine::scene::DefaultMaterial(), ordinal));
+
+	// First, because `Part.cpp` lists it first and a fresh part reading back the
+	// enum's leading member is what an author expects to see.
+	CHECK(ordinal == 0);
 }
 
 TEST_CASE("a default surface names nothing", "[scene][components]") {

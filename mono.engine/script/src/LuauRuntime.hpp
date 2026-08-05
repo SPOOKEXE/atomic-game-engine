@@ -27,6 +27,15 @@ namespace engine::script {
 			return Language::Luau;
 		}
 
+		// The interrupt counter the step budget already maintains.
+		//
+		// **Nothing is added to the hot path to produce this.** `Interrupt` runs
+		// at every loop back-edge, call and return because the budget needs it
+		// to; this is the number it was already incrementing.
+		//
+		// @return Cumulative steps since this runtime was made.
+		uint64_t StepsTaken() const override;
+
 	  private:
 		lua_State *State = nullptr;
 	};

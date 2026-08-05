@@ -1,3 +1,5 @@
+#include "Instances.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Column.hpp>
@@ -105,6 +107,14 @@ namespace engine::ecs {
 
 	ClassId
 	Classes::Register(std::string_view name, ClassId parent, std::span<const ComponentId> components) {
+		// **Before the lock, and before anything reaches for one of them.**
+		// Every class carries the three instance components, and `Of<T>` a few
+		// lines below would name them after the compiler if nothing had. See
+		// `RegisterInstanceComponents`. Outside the lock because it takes the
+		// component table's, and two locks taken in two orders is the one bug
+		// worth avoiding by construction.
+		RegisterInstanceComponents();
+
 		auto &table = Get();
 		const core::Name key(name);
 

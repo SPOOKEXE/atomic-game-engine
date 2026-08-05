@@ -131,4 +131,47 @@ namespace engine::ecs {
 		// The interned name, or an invalid Name for an unnamed instance.
 		core::Name Value;
 	};
+
+	// One reparent, as the tree recorded it.
+	//
+	// **Recorded rather than dispatched, and only while somebody is watching.**
+	// A script's `ChildAdded` cannot fire from inside `SetParent`: the handler
+	// would re-enter the VM with the sibling list half-relinked, and could
+	// destroy the very instance being moved. So the tree writes down what
+	// happened and the barrier delivers it, which is the chain
+	// `script/Changes.hpp` already describes for `.Changed`.
+	//
+	// **Both ends, because the two signals need different halves.**
+	// `ChildRemoved` belongs to `From` and `ChildAdded` to `To`, and an entry
+	// carrying only the new parent could not fire the first.
+	//
+	// @since v0.75
+	struct TreeChange {
+		// What moved.
+		Entity Instance;
+
+		// The parent it left, or NULL_ENTITY when it had none.
+		Entity From;
+
+		// The parent it joined, or NULL_ENTITY when it now has none.
+		Entity To;
+	};
+
+	// Present on an instance that `Clone` must not copy.
+	//
+	// **A tag, and the sense is inverted, and both follow from what this
+	// costs.** Roblox spells it `Archivable` and defaults it to true, so a
+	// component holding a bool would be one byte per instance in every
+	// archetype in the engine, set the same way on all but a handful — which is
+	// the exact shape `ecs/AGENTS.md` names as belonging somewhere else.
+	//
+	// A tag is presence rather than bytes: it costs nothing on the instances
+	// that do not have it, and the ones that do are rare enough that the
+	// archetype move each one pays is not a cost anybody meets in a loop.
+	//
+	// So `Archivable` is `!Has<NotArchivable>`, which is the same fact read the
+	// cheap way round.
+	//
+	// @since v0.75
+	struct NotArchivable {};
 }

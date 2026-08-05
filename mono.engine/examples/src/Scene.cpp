@@ -6,6 +6,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/script/Instances.hpp>
@@ -37,17 +38,6 @@ namespace engine::examples {
 		// Plain functions capturing nothing, because there is nothing outside
 		// the world for them to capture — which is what makes them replayable
 		// from a recording and reusable by a second world.
-
-		// Before anything moves. Rendering interpolates from here, so it has to
-		// be the position at the start of *this* tick; capturing it afterwards
-		// would interpolate from a place nothing was ever at.
-		void CapturePrevious(Store &store) {
-			store.EachParallel<PreviousTransform, const Transform>(
-				[](Entity, PreviousTransform &previous, const Transform &transform) {
-					previous.Frame = transform.Frame;
-				}
-			);
-		}
 
 		void MoveOrbits(Store &store) {
 			// Simulated seconds, from the world's clock. Nothing accumulates
@@ -92,7 +82,7 @@ namespace engine::examples {
 	}
 
 	void InstallMotionSystems(Scheduler &scheduler) {
-		scheduler.Add("capture-previous", Phase::PreSimulation, CapturePrevious);
+		scheduler.Add("capture-previous", Phase::PreSimulation, scene::CapturePreviousTransforms);
 		scheduler.Add("orbit", Phase::Simulation, MoveOrbits);
 		scheduler.Add("spin", Phase::Simulation, ApplySpin);
 	}
@@ -184,7 +174,7 @@ namespace engine::examples {
 		// scripted scene moves itself, and installing the C++ orbit and spin
 		// beside it would be two things driving one `Transform` — the second
 		// one winning, silently, on whichever ran last.
-		scheduler.Add("capture-previous", Phase::PreSimulation, CapturePrevious);
+		scheduler.Add("capture-previous", Phase::PreSimulation, scene::CapturePreviousTransforms);
 
 		scheduler.Add("script-heartbeat", Phase::Simulation, [runtime](Store &world) {
 			// **The fixed tick delta, never a frame time.** A script

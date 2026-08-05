@@ -75,6 +75,25 @@ target_compile_definitions(vendor_asio INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECA
 find_package(Threads REQUIRED)
 target_link_libraries(vendor_asio INTERFACE Threads::Threads)
 
+# --- nlohmann/json ------------------------------------------------------------
+# JSON, for the one thing in this repository that speaks it: `mono.studio`'s
+# control server answers Model Context Protocol, which is JSON-RPC 2.0.
+#
+# Header-only and declared here rather than added as a subdirectory, for asio's
+# reason — upstream's CMakeLists builds tests and a package config nobody here
+# wants, and the single header is the whole library.
+#
+# **The single_include copy, not include/.** Upstream ships both; the amalgamated
+# one is one file and one include path, and there is nothing to choose between
+# them beyond that.
+#
+# `shared` in engine terms, but only `mono.studio` links it and that is on
+# purpose: a wire format is binary, a save file is XML, and JSON belongs to the
+# one surface that talks to something outside this repository.
+add_library(vendor_json INTERFACE)
+add_library(Vendor::json ALIAS vendor_json)
+target_include_directories(vendor_json SYSTEM INTERFACE "${MONO_VENDOR}/json/single_include")
+
 # --- Dear ImGui -----------------------------------------------------------
 # Editor and tooling UI, not game UI. `ui` at L12 is a retained-mode tree that a
 # game author builds interfaces with; this is what mono.studio's shell, docking
@@ -427,7 +446,7 @@ set(LUAU_WERROR OFF CACHE BOOL "" FORCE)
 add_subdirectory("${MONO_VENDOR}/luau" EXCLUDE_FROM_ALL)
 
 # Same reason as Crypto++, BLAKE3 and Zstd.
-foreach(_luau_target Luau.VM Luau.Compiler Luau.Ast Luau.Common)
+foreach(_luau_target Luau.VM Luau.Compiler Luau.Ast Luau.Common Luau.Analysis Luau.Config Luau.EqSat)
 	if(TARGET ${_luau_target})
 		get_target_property(_luau_includes ${_luau_target} INTERFACE_INCLUDE_DIRECTORIES)
 		if(_luau_includes)
@@ -451,14 +470,28 @@ unset(_luau_target)
 #   second execution path for the same script. That is exactly the test v0.4
 #   stated before changing to `-O3`, and it has to be stated again before a
 #   second backend, not after.
-# - **`Luau.Analysis` is the type checker.** Wanted by a tool that checks the
-#   generated declaration files, which is `v05.md` §5.7's business and not a
-#   runtime's. It gets an alias when that tool exists.
 # - **`Luau.Require` resolves `require` against a filesystem.** A game's scripts
 #   arrive through `assets` and the CDN, content-addressed and signed. A resolver
 #   that reads paths would be a second way in that none of that covers.
 add_library(Vendor::luau_vm ALIAS Luau.VM)
 add_library(Vendor::luau_compiler ALIAS Luau.Compiler)
+
+# **`Luau.Analysis` is the type checker, and the tool this waited for now
+# exists.** The note here said it would get an alias when something wanted to
+# check the generated declaration files; `mono.tools/scriptcheck` is that thing,
+# and `just typecheck` is what runs it.
+#
+# **Not linked by `Engine::script`, and that separation is the point.** Nothing a
+# game binary contains type-checks anything — a shipped runtime compiles bytecode
+# and runs it. This is a build-time consumer only, which is why the alias sits
+# beside the two the runtime uses rather than among them.
+#
+# Upstream's `luau-analyze` CLI would have been the obvious answer and cannot be:
+# it has no flag for loading a definition file, so it can only check against the
+# built-in globals. Every `Instance`, `Vector3` and `workspace` in this engine
+# would read as an unknown global, which is the one thing the check exists to
+# catch. Forty lines against a fork.
+add_library(Vendor::luau_analysis ALIAS Luau.Analysis)
 
 # --- QuickJS-ng -------------------------------------------------------------
 # The second script VM, and the JavaScript/TypeScript half of the two-language

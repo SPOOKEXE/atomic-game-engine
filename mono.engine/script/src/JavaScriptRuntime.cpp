@@ -5,12 +5,11 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <quickjs.h>
-#include <sstream>
+#include <string>
 
 namespace engine::script {
 
@@ -147,6 +146,14 @@ namespace engine::script {
 	}
 
 	JavaScriptRuntime::~JavaScriptRuntime() {
+		// **The store's listeners go before the VM does.** The removal hook
+		// captures this `JSContext *`, and a store that outlived the runtime
+		// would call into a freed context the next time anything in the world
+		// was destroyed — which is the ordinary case, because a world is
+		// destroyed after the scripts that built it. `CloseJsBindings` takes
+		// the change subscriptions back for the same reason.
+		Store.ClearDescendantRemoving();
+
 		if (Context != nullptr) {
 			CloseJsBindings(Context);
 			JS_FreeContext(Context);
@@ -235,21 +242,13 @@ namespace engine::script {
 			return true;
 		}
 
-		// An absolute `Source` is used as it stands. `operator/` already drops
-		// the left side for an absolute right side, so this is what the standard
-		// does anyway — said out loud because a reader checking whether
-		// `--script /tmp/x.luau` works should not have to know that.
-		const std::filesystem::path named(source->Path.Text());
-		const std::filesystem::path path = named.is_absolute() ? named : core::Paths::Assets() / named;
-
-		std::ifstream file(path, std::ios::binary);
-		if (!file) {
-			Error = "could not open " + path.string();
+		// The world's `SourceCache` before the filesystem, through the same one
+		// function the Luau side uses. Two resolvers is two places to forget
+		// the cache, and both VMs load the same game file.
+		std::string program;
+		if (!ReadSource(Store, source->Path, program, Error)) {
 			return false;
 		}
-
-		std::ostringstream contents;
-		contents << file.rdbuf();
 
 		// `script` names the instance, for the reason the Luau side gives.
 		//
@@ -265,7 +264,7 @@ namespace engine::script {
 			JS_FreeValue(Context, global);
 		}
 
-		const bool ok = Run(contents.str(), std::string(source->Path.Text()));
+		const bool ok = Run(program, std::string(source->Path.Text()));
 
 		{
 			JSValue global = JS_GetGlobalObject(Context);
@@ -290,6 +289,13 @@ namespace engine::script {
 		};
 
 		note(PumpJsChanges(Context));
+
+		// **After the property changes and before the tasks**, exactly as the
+		// Luau side orders it: both are "what the previous barrier recorded",
+		// and a handler watching a part's position and its ancestry should see
+		// one world rather than two.
+		note(PumpJsTree(Context));
+
 		note(PumpJsTasks(Context));
 		note(PumpJsHeartbeat(Context, delta));
 

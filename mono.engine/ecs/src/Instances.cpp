@@ -3,11 +3,106 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 
+#include <string>
 #include <vector>
 
 namespace engine::ecs {
 
 	namespace {
+		// How deep a tree this file will walk before deciding it is looking at
+		// a cycle rather than at a scene.
+		//
+		// `SetParent` refuses to make a cycle, so nothing should ever reach
+		// this. It exists because the walks that would hang are the ones that
+		// build a string or a list as they go, and a hang with a growing
+		// allocation behind it is the worst way to find out.
+		constexpr size_t MAXIMUM_DEPTH = 4096;
+
+		// Suppresses removal announcements for as long as it is alive.
+		struct RemovalGuard {
+			StoreState &State;
+			bool Previous;
+
+			explicit RemovalGuard(StoreState &state) : State(state), Previous(state.Removing) {
+				State.Removing = true;
+			}
+			~RemovalGuard() {
+				State.Removing = Previous;
+			}
+
+			RemovalGuard(const RemovalGuard &) = delete;
+			RemovalGuard &operator=(const RemovalGuard &) = delete;
+		};
+
+		// Tells every ancestor what it is about to lose, while it still has it.
+		//
+		// **Before a single link is touched, which is what makes this safe to
+		// dispatch synchronously.** `script/Changes.hpp` refuses to fire
+		// `.Changed` from inside a write because the handler would re-enter the
+		// VM with the row half-written. Nothing is half-written here: this runs
+		// at the top of the operation, on a tree that is entirely consistent,
+		// and it is the only position from which "you are called while it is
+		// still there" can be true at all.
+		//
+		// **Every leaving instance, against every ancestor losing it**, which is
+		// Roblox's fan-out. Moving a model out of `Workspace` announces the
+		// model *and every part in it* to `Workspace`, because each of them
+		// stops being a descendant of it.
+		//
+		// @param state  The world it is happening in.
+		// @param leaving The subtree root that is going.
+		// @param from   The parent it is leaving, for a reparent.
+		// @param ownChain Whether each subject announces to its *own* ancestors
+		//                 rather than to `from`'s. True for a destroy, where the
+		//                 ancestors inside the subtree lose their children too;
+		//                 false for a reparent, where they move along with it.
+		void NotifyRemoving(StoreState &state, Entity leaving, Entity from, bool ownChain) {
+			if (!state.BeforeRemoving || state.Removing) {
+				return;
+			}
+
+			// Collected before anything is announced. A handler may reparent or
+			// destroy part of what it was told about, and a walk that read the
+			// tree as it went would then be walking something else.
+			std::vector<Entity> subjects;
+			subjects.push_back(leaving);
+			EachDescendant(state, leaving, [&subjects](Entity under) { subjects.push_back(under); });
+
+			const RemovalGuard guard(state);
+
+			for (const Entity subject : subjects) {
+				// A handler may have taken this one already, and announcing a
+				// row that is gone is the failure this signal exists to avoid.
+				if (!IsEntityAlive(state, subject)) {
+					continue;
+				}
+
+				const Entity start = ownChain ? ParentOf(state, subject) : from;
+
+				size_t steps = 0;
+				for (Entity above = start; above != NULL_ENTITY && steps < MAXIMUM_DEPTH;
+					 above = ParentOf(state, above), steps++) {
+					if (!IsEntityAlive(state, above)) {
+						break;
+					}
+					state.BeforeRemoving(above, subject);
+				}
+			}
+		}
+
+		// Writes down a reparent, when anything is listening for one.
+		//
+		// @param state    The world it happened in.
+		// @param instance What moved.
+		// @param from     The parent it left.
+		// @param to       The parent it joined.
+		void RecordTreeChange(StoreState &state, Entity instance, Entity from, Entity to) {
+			if (!state.WatchTree) {
+				return;
+			}
+			state.TreeChanges.push_back(TreeChange{instance, from, to});
+		}
+
 		// One node's tree links, or null when the entity is not an instance.
 		const Hierarchy *NodeOf(const StoreState &state, Entity instance) {
 			return static_cast<const Hierarchy *>(GetComponent(state, instance, Components::Of<Hierarchy>()));
@@ -20,6 +115,44 @@ namespace engine::ecs {
 			return static_cast<Hierarchy *>(
 				GetComponentMutable(state, instance, Components::Of<Hierarchy>())
 			);
+		}
+
+		// Rebuilds a parent's child links after a freed row was left named by
+		// them, and answers with the tail that survived.
+		//
+		// **Reached only once a link is already known bad**, so an intact list
+		// pays nothing for this. The walk stops at the first dead child rather
+		// than stepping over it because the links *out of* a freed row are gone
+		// with the row: there is no way to reach what followed it, and guessing
+		// would invent an order the author never wrote.
+		Entity RepairChildren(StoreState &state, Entity parent) {
+			const Hierarchy *host = NodeOf(state, parent);
+			if (host == nullptr) {
+				return NULL_ENTITY;
+			}
+
+			Entity tail = NULL_ENTITY;
+			for (Entity child = host->FirstChild; child != NULL_ENTITY;) {
+				const Hierarchy *link = NodeOf(state, child);
+				if (link == nullptr) {
+					break;
+				}
+				tail = child;
+				child = link->NextSibling;
+			}
+
+			// Whatever the walk ended on is the end of the list now, and its
+			// `NextSibling` is still naming the row that was freed.
+			if (tail != NULL_ENTITY) {
+				MutableNodeOf(state, tail)->NextSibling = NULL_ENTITY;
+			}
+
+			Hierarchy *node = MutableNodeOf(state, parent);
+			if (tail == NULL_ENTITY) {
+				node->FirstChild = NULL_ENTITY;
+			}
+			node->LastChild = tail;
+			return tail;
 		}
 
 		// Copies one instance without its subtree.
@@ -62,6 +195,40 @@ namespace engine::ecs {
 
 			return copy;
 		}
+	}
+
+	void RegisterInstanceComponents() {
+		// `InstanceClass` and `Hierarchy` are handles and nothing else, so the
+		// generated byte serialisation is the right one: a `ClassId` is a
+		// registration index and an `Entity` is a directory index, and a
+		// snapshot restores the directory exactly so that handles inside a
+		// component stay valid.
+		Components::Register<InstanceClass>("ecs.InstanceClass");
+		Components::Register<Hierarchy>("ecs.Hierarchy");
+
+		// **`InstanceName` is the one that cannot use it.** It holds a
+		// `core::Name`, whose id is first-seen order *within one process* — so
+		// the generated serialiser was writing an interning counter into save
+		// files, and a world reloaded by a process that had interned its
+		// strings in a different order came back with every instance named
+		// something else. `Components.hpp` says in as many words that this is
+		// the form to use for anything holding a `Name`; this type is the one
+		// that most obviously does and was the one that did not.
+		Components::Register<InstanceName>(
+			"ecs.InstanceName",
+			[](core::ByteWriter &writer, const void *values, size_t count) {
+				const auto *labels = static_cast<const InstanceName *>(values);
+				for (size_t index = 0; index < count; index++) {
+					writer.WriteName(labels[index].Value);
+				}
+			},
+			[](core::ByteReader &reader, void *values, size_t count) {
+				auto *labels = static_cast<InstanceName *>(values);
+				for (size_t index = 0; index < count; index++) {
+					labels[index].Value = reader.ReadName();
+				}
+			}
+		);
 	}
 
 	Entity CreateInstance(StoreState &state, ClassId id, std::string_view name) {
@@ -128,6 +295,11 @@ namespace engine::ecs {
 		return node == nullptr ? NULL_ENTITY : node->Parent;
 	}
 
+	bool HasChildren(const StoreState &state, Entity instance) {
+		const Hierarchy *node = NodeOf(state, instance);
+		return node != nullptr && node->FirstChild != NULL_ENTITY;
+	}
+
 	void EachChild(const StoreState &state, Entity instance, const std::function<void(Entity)> &body) {
 		const Hierarchy *node = NodeOf(state, instance);
 		if (node == nullptr) {
@@ -139,14 +311,79 @@ namespace engine::ecs {
 			// Read before the body runs, so a body that reparents or destroys
 			// the child it was handed does not lose its place in the list.
 			const Hierarchy *link = NodeOf(state, child);
-			const Entity next = link == nullptr ? NULL_ENTITY : link->NextSibling;
+
+			// **A link that resolves to nothing ends the walk without being
+			// handed over.** It used to call the body first and stop
+			// afterwards, so the one thing a caller could not survive — a
+			// handle that is not a child, and may not be an entity — was the
+			// one thing it was given. `GetChildren()` published it straight to
+			// a script, and `RepairChildren` two functions up already breaks
+			// before using the same value.
+			if (link == nullptr) {
+				return;
+			}
+
+			const Entity next = link->NextSibling;
 
 			body(child);
 			child = next;
 		}
 	}
 
-	Entity FindFirstChild(const StoreState &state, Entity instance, std::string_view name) {
+	void EachDescendant(const StoreState &state, Entity instance, const std::function<void(Entity)> &body) {
+		// **An explicit stack, because a scene's depth is the author's.** The
+		// walk this replaced lived in `script` and recursed; a file with ten
+		// thousand nested folders in it would have been a stack overflow on
+		// open, from data, with nothing to point at.
+		//
+		// Children are pushed in reverse so they pop in insertion order, which
+		// is what makes this the order a hand-written recursive walk produces.
+		std::vector<Entity> stack;
+		std::vector<Entity> children;
+
+		const auto descend = [&](Entity parent) {
+			children.clear();
+			EachChild(state, parent, [&children](Entity child) { children.push_back(child); });
+			for (size_t index = children.size(); index > 0; index--) {
+				stack.push_back(children[index - 1]);
+			}
+		};
+
+		descend(instance);
+
+		while (!stack.empty()) {
+			const Entity at = stack.back();
+			stack.pop_back();
+
+			body(at);
+			descend(at);
+		}
+	}
+
+	bool SetInstanceName(StoreState &state, Entity instance, std::string_view name) {
+		if (GetComponent(state, instance, Components::Of<InstanceName>()) == nullptr) {
+			return false;
+		}
+
+		const InstanceName label{name.empty() ? core::Name{} : core::Name(name)};
+		SetComponent(state, instance, Components::Of<InstanceName>(), &label);
+		return true;
+	}
+
+	Entity FindFirstChild(const StoreState &state, Entity instance, std::string_view name, bool recursive) {
+		// **An empty query finds nothing, and it used to find the unnamed.**
+		// `CreateInstance("")` leaves an instance with no `core::Name` at all,
+		// `InstanceNameOf` answers with an invalid one, and an invalid name is
+		// what `Name("")` compares equal to — so `FindFirstChild(x, "")` was
+		// asking for "whatever has no name" and answering with the first one.
+		//
+		// Self-consistent, and not what anybody calling it means. Roblox
+		// returns nil, and a caller passing a name it read from somewhere and
+		// got an empty string for wants nil rather than an arbitrary child.
+		if (name.empty()) {
+			return NULL_ENTITY;
+		}
+
 		const core::Name wanted(name);
 
 		const Hierarchy *node = NodeOf(state, instance);
@@ -161,7 +398,147 @@ namespace engine::ecs {
 			const Hierarchy *link = NodeOf(state, child);
 			child = link == nullptr ? NULL_ENTITY : link->NextSibling;
 		}
+
+		if (!recursive) {
+			return NULL_ENTITY;
+		}
+
+		// **The children first, then the descendants**, rather than one
+		// depth-first pass over both. Roblox's recursive form is documented as
+		// finding the nearest match, and a script asking for a name it expects
+		// one level down should not get one six levels down inside the first
+		// child instead. The loop above has already answered the common case,
+		// so the cost of the second pass is only paid by a search that failed.
+		Entity found = NULL_ENTITY;
+		EachDescendant(state, instance, [&](Entity descendant) {
+			if (found == NULL_ENTITY && InstanceNameOf(state, descendant) == wanted) {
+				found = descendant;
+			}
+		});
+		return found;
+	}
+
+	Entity FindFirstChildOfClass(const StoreState &state, Entity instance, ClassId id) {
+		if (!id.IsValid()) {
+			return NULL_ENTITY;
+		}
+
+		const Hierarchy *node = NodeOf(state, instance);
+		if (node == nullptr) {
+			return NULL_ENTITY;
+		}
+
+		for (Entity child = node->FirstChild; child != NULL_ENTITY;) {
+			// Exactly this class. `IsA` would make asking for a `BasePart` find
+			// a `Part`, which is what `FindFirstChildWhichIsA` is for.
+			if (ClassOf(state, child) == id) {
+				return child;
+			}
+			const Hierarchy *link = NodeOf(state, child);
+			child = link == nullptr ? NULL_ENTITY : link->NextSibling;
+		}
 		return NULL_ENTITY;
+	}
+
+	Entity FindFirstChildWhichIsA(const StoreState &state, Entity instance, ClassId id, bool recursive) {
+		if (!id.IsValid()) {
+			return NULL_ENTITY;
+		}
+
+		const Hierarchy *node = NodeOf(state, instance);
+		if (node == nullptr) {
+			return NULL_ENTITY;
+		}
+
+		for (Entity child = node->FirstChild; child != NULL_ENTITY;) {
+			if (IsA(state, child, id)) {
+				return child;
+			}
+			const Hierarchy *link = NodeOf(state, child);
+			child = link == nullptr ? NULL_ENTITY : link->NextSibling;
+		}
+
+		if (!recursive) {
+			return NULL_ENTITY;
+		}
+
+		Entity found = NULL_ENTITY;
+		EachDescendant(state, instance, [&](Entity descendant) {
+			if (found == NULL_ENTITY && IsA(state, descendant, id)) {
+				found = descendant;
+			}
+		});
+		return found;
+	}
+
+	Entity FindFirstAncestor(const StoreState &state, Entity instance, std::string_view name) {
+		if (name.empty()) {
+			return NULL_ENTITY;
+		}
+
+		const core::Name wanted(name);
+		for (Entity walk = ParentOf(state, instance); walk != NULL_ENTITY; walk = ParentOf(state, walk)) {
+			if (InstanceNameOf(state, walk) == wanted) {
+				return walk;
+			}
+		}
+		return NULL_ENTITY;
+	}
+
+	Entity FindFirstAncestorOfClass(const StoreState &state, Entity instance, ClassId id) {
+		if (!id.IsValid()) {
+			return NULL_ENTITY;
+		}
+
+		for (Entity walk = ParentOf(state, instance); walk != NULL_ENTITY; walk = ParentOf(state, walk)) {
+			if (ClassOf(state, walk) == id) {
+				return walk;
+			}
+		}
+		return NULL_ENTITY;
+	}
+
+	Entity FindFirstAncestorWhichIsA(const StoreState &state, Entity instance, ClassId id) {
+		if (!id.IsValid()) {
+			return NULL_ENTITY;
+		}
+
+		for (Entity walk = ParentOf(state, instance); walk != NULL_ENTITY; walk = ParentOf(state, walk)) {
+			if (IsA(state, walk, id)) {
+				return walk;
+			}
+		}
+		return NULL_ENTITY;
+	}
+
+	std::string GetFullName(const StoreState &state, Entity instance) {
+		if (NodeOf(state, instance) == nullptr) {
+			return {};
+		}
+
+		// Collected upwards and written downwards, because a path reads from
+		// the root and the tree only runs the other way.
+		std::vector<core::Name> path;
+		for (Entity walk = instance; walk != NULL_ENTITY; walk = ParentOf(state, walk)) {
+			path.push_back(InstanceNameOf(state, walk));
+
+			// Bounded by nothing else, so a tree that somehow held a cycle
+			// would build a string until the process ran out of memory.
+			// `SetParent` refuses to make one; this is the second lock.
+			if (path.size() > MAXIMUM_DEPTH) {
+				return {};
+			}
+		}
+
+		std::string full;
+		for (size_t index = path.size(); index > 0; index--) {
+			if (!full.empty()) {
+				full.push_back('.');
+			}
+			const core::Name step = path[index - 1];
+			full.append(step.IsValid() ? step.Text() : std::string_view{});
+		}
+		return full;
 	}
 
 	bool IsDescendantOf(const StoreState &state, Entity instance, Entity ancestor) {
@@ -186,6 +563,51 @@ namespace engine::ecs {
 		// — including the one that would destroy it.
 		if (parent != NULL_ENTITY && IsDescendantOf(state, parent, instance)) {
 			return false;
+		}
+
+		// **Re-parenting to the parent it already has does nothing**, and it has
+		// to do nothing rather than do the same thing twice. Everything below
+		// unlinks and then appends at the end, so a no-op assignment moved the
+		// instance to the back of its own sibling list — and the sibling list
+		// is the order `GetChildren()` returns, which replication and replay
+		// both depend on agreeing across machines.
+		//
+		// The shape that finds it is ordinary Roblox code: a script that writes
+		// `thing.Parent = holder` on a value that may or may not have changed,
+		// or an editor that applies a drag by assigning the parent the row was
+		// already under. Roblox's own assignment is a no-op here, so a game
+		// written against it silently reorders on this engine and nothing says
+		// why.
+		if (node->Parent == parent) {
+			return true;
+		}
+
+		// Read before anything is unlinked, because the parent it is leaving is
+		// what `ChildRemoved` is about and there is no way to ask afterwards.
+		const Entity leaving = node->Parent;
+
+		// **Announced here, before the first link moves.** See `NotifyRemoving`.
+		if (leaving != NULL_ENTITY) {
+			NotifyRemoving(state, instance, leaving, false);
+
+			// **Everything read above is re-read, because a handler ran.** It
+			// may have destroyed either end, moved the instance somewhere else,
+			// or parented the intended destination underneath it — so each of
+			// the three checks at the top of this function has to hold again
+			// rather than be assumed to.
+			node = MutableNodeOf(state, instance);
+			if (node == nullptr) {
+				return false;
+			}
+			if (parent != NULL_ENTITY && MutableNodeOf(state, parent) == nullptr) {
+				return false;
+			}
+			if (parent != NULL_ENTITY && IsDescendantOf(state, parent, instance)) {
+				return false;
+			}
+			if (node->Parent == parent) {
+				return true;
+			}
 		}
 
 		// --- unlink from the old parent ---
@@ -220,12 +642,28 @@ namespace engine::ecs {
 		node->PreviousSibling = NULL_ENTITY;
 
 		if (parent == NULL_ENTITY) {
+			RecordTreeChange(state, instance, leaving, NULL_ENTITY);
 			return true;
 		}
 
 		// --- link at the end of the new parent, so order is insertion order ---
 		Hierarchy *host = MutableNodeOf(state, parent);
-		const Entity last = host->LastChild;
+
+		// **A tail naming a freed row is repaired before it is written
+		// through, not trusted.** `Store::Destroy` releases an entity without
+		// touching the links that point *at* it — that unlink is what
+		// `DestroyInstance` adds — so a parent outlives a destroyed child while
+		// still naming it as `LastChild`. Every other lookup in this function
+		// already tolerates a null; this one dereferenced it, and took the
+		// process with it the next time anything parented into that same
+		// parent.
+		Entity last = host->LastChild;
+		if (last != NULL_ENTITY && NodeOf(state, last) == nullptr) {
+			last = RepairChildren(state, parent);
+			// Re-read: the repair is a series of lookups, and any of them may
+			// have moved this row.
+			host = MutableNodeOf(state, parent);
+		}
 
 		if (last == NULL_ENTITY) {
 			host->FirstChild = instance;
@@ -238,13 +676,69 @@ namespace engine::ecs {
 		node = MutableNodeOf(state, instance);
 		node->Parent = parent;
 		node->PreviousSibling = last;
+
+		RecordTreeChange(state, instance, leaving, parent);
 		return true;
+	}
+
+	void DetachFromTree(StoreState &state, Entity instance) {
+		// **`Assigned`, never `Of`.** This runs on every `Store::Destroy`,
+		// including in a process that has not registered a single class yet —
+		// and `Components::Of<Hierarchy>()` would *register* the type there,
+		// under the compiler-spelled name, which the explicit `ecs.Hierarchy`
+		// registration then aborts on. A type nothing has registered is a type
+		// no row can be carrying, so an invalid id is the whole answer.
+		const ComponentId hierarchy = Components::Assigned<Hierarchy>();
+		if (!hierarchy.IsValid()) {
+			return;
+		}
+
+		if (GetComponent(state, instance, hierarchy) == nullptr) {
+			// Not an instance, so nothing in the tree names it. One component
+			// lookup is the whole cost this adds to destroying a plain entity.
+			return;
+		}
+
+		// **The children first, and re-rooted rather than destroyed.** Leaving
+		// them pointing at a freed parent would not crash — `ParentOf` of a
+		// dead handle is null — but it would make them invisible: `EachRoot`
+		// asks for `Parent == NULL_ENTITY`, so a child whose parent is merely
+		// *dead* is in the world, in the save file, and reachable from nothing.
+		//
+		// Collected before anything moves, because unlinking one rewrites the
+		// sibling links the walk is standing on.
+		std::vector<Entity> children;
+		EachChild(state, instance, [&children](Entity child) { children.push_back(child); });
+
+		for (const Entity child : children) {
+			SetParent(state, child, NULL_ENTITY);
+		}
+
+		SetParent(state, instance, NULL_ENTITY);
 	}
 
 	void DestroyInstance(StoreState &state, Entity instance) {
 		if (!IsEntityAlive(state, instance)) {
 			return;
 		}
+
+		// **The whole subtree, announced once, before any of it goes.**
+		// `ownChain` because a destroy takes the ancestors inside the subtree
+		// with it: a model being destroyed loses its own children, so
+		// `model.DescendantRemoving` fires as well as `Workspace`'s.
+		NotifyRemoving(state, instance, ParentOf(state, instance), true);
+
+		// A handler may have destroyed it already.
+		if (!IsEntityAlive(state, instance)) {
+			return;
+		}
+
+		// **Silent from here down.** The recursion below destroys each child
+		// and unparents every row on the way out, and each of those is a
+		// removal that has already been announced by the pass above. Without
+		// this a subtree of a thousand rows would announce itself a thousand
+		// times over.
+		const RemovalGuard guard(state);
 
 		// Children collected before anything is destroyed, because destroying
 		// one rewrites the sibling links the walk is standing on.
@@ -259,26 +753,48 @@ namespace engine::ecs {
 		DestroyEntity(state, instance);
 	}
 
-	Entity CloneInstance(StoreState &state, Entity source) {
-		if (!IsEntityAlive(state, source) || NodeOf(state, source) == nullptr) {
-			return NULL_ENTITY;
-		}
-
-		const Entity copy = CloneOne(state, source);
-		if (copy == NULL_ENTITY) {
-			return NULL_ENTITY;
-		}
-
-		std::vector<Entity> children;
-		EachChild(state, source, [&children](Entity child) { children.push_back(child); });
-
-		for (const Entity child : children) {
-			const Entity copied = CloneInstance(state, child);
-			if (copied != NULL_ENTITY) {
-				SetParent(state, copied, copy);
+	namespace {
+		// Copies a subtree, recording what became what.
+		//
+		// @param state  The world holding the source.
+		// @param source The instance to copy.
+		// @param made   Appended to as `{source, copy}` for every row copied.
+		// @return The copy, or NULL_ENTITY when the source is not archivable.
+		Entity CloneSubtree(StoreState &state, Entity source, std::vector<ClonedPair> &made) {
+			if (!IsEntityAlive(state, source) || NodeOf(state, source) == nullptr) {
+				return NULL_ENTITY;
 			}
-		}
 
-		return copy;
+			// **Not archivable, not copied**, which is Roblox's rule and the
+			// whole point of the flag: a marker an author puts on something
+			// that a duplicate would break — a script's state holder, a debug
+			// visualiser, anything that is one-of.
+			if (GetComponent(state, source, Components::Of<NotArchivable>()) != nullptr) {
+				return NULL_ENTITY;
+			}
+
+			const Entity copy = CloneOne(state, source);
+			if (copy == NULL_ENTITY) {
+				return NULL_ENTITY;
+			}
+
+			made.push_back(ClonedPair{source, copy});
+
+			std::vector<Entity> children;
+			EachChild(state, source, [&children](Entity child) { children.push_back(child); });
+
+			for (const Entity child : children) {
+				const Entity copied = CloneSubtree(state, child, made);
+				if (copied != NULL_ENTITY) {
+					SetParent(state, copied, copy);
+				}
+			}
+
+			return copy;
+		}
+	}
+
+	Entity CloneInstance(StoreState &state, Entity source, std::vector<ClonedPair> &made) {
+		return CloneSubtree(state, source, made);
 	}
 }

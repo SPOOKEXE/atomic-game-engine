@@ -26,6 +26,7 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/script/Debugger.hpp>
 #include <engine/script/Runtime.hpp>
 
 #include <lua.h>
@@ -48,9 +49,16 @@ namespace engine::script {
 		TAG_CFRAME = 3,
 		TAG_INSTANCE = 4,
 
-		// The world a script is running on. Not an instance: a world is the
-		// container entities live in, not one of them.
-		TAG_WORLD = 5,
+		// **Retired at v0.7, and the number is held down rather than reused.**
+		// This tagged `workspace`, back when `workspace` was the world itself
+		// rather than an instance in it. It is a `TAG_INSTANCE` now — see
+		// `OpenWorkspace` for why the two notions were collapsed.
+		//
+		// Not deleted, because the paragraph above this enum gives the reason:
+		// a tag is compared against userdata created earlier in the same
+		// process, and handing 5 to a new type is how a type confusion nothing
+		// reports gets introduced.
+		TAG_WORLD_RETIRED = 5,
 
 		// v0.6's datatype vocabulary.
 		TAG_VECTOR2 = 6,
@@ -105,6 +113,49 @@ namespace engine::script {
 		// The VM this context belongs to, so a `Connection` userdata can reach
 		// the table without a second upvalue on every method.
 		lua_State *State = nullptr;
+
+		// Whether `Store::OnDescendantRemoving` already holds this VM's hook.
+		//
+		// The store keeps one listener, so a second install would replace the
+		// first with an identical one — harmless, and still worth not doing
+		// once per connection.
+		bool RemovingHooked = false;
+
+		// Where execution should be reported from, owned by the `Runtime`.
+		//
+		// A pointer rather than a copy: breakpoints are edited from the editor
+		// while the world runs, and a copy taken at construction would be a
+		// second answer to what is armed.
+		Debugger *Breakpoints = nullptr;
+
+		// What each `ModuleScript` evaluated to, by entity id.
+		//
+		// **A registry ref per module, and the module runs once.** Roblox's rule:
+		// every `require` of one module hands back the same value, so a module
+		// with a side effect at its top level has that side effect once — on
+		// whichever script required it first. A map that re-ran would make
+		// module order something an author had to reason about.
+		//
+		// Keyed by `Entity::Id` rather than by path, because two instances may
+		// name one file and they are two modules. That is what makes a module a
+		// thing in the tree rather than a thing on disk.
+		std::unordered_map<uint64_t, int> Modules;
+
+		// Modules part way through evaluating, innermost last.
+		//
+		// **Cycle detection, and it has to be by instance.** `a` requiring `b`
+		// requiring `a` would otherwise recurse until the C stack ran out, which
+		// surfaces as a crash with no line number rather than as a script error
+		// naming the two files.
+		std::vector<ecs::Entity> Loading;
+
+		// The script currently being run by `RunInstance`, so a captured hit can
+		// say which one it came from.
+		//
+		// Set around one run and cleared after it. Null during a heartbeat,
+		// which is honest — the connection that is running was made by a script
+		// and nothing records which, so naming one would be a guess.
+		ecs::Entity RunningScript;
 
 		// The script instance the next chunk belongs to.
 		//
@@ -251,7 +302,16 @@ namespace engine::script {
 	// two want a reply, and a reply arrives at a later barrier, so a script
 	// **yields** on one — which is legal under `docs/SCRIPT_CONCURRENCY.md` §1
 	// precisely because the barrier applies replies in a deterministic order.
-	void OpenServices(lua_State *state, ecs::Store &store);
+	void OpenServices(lua_State *state);
+
+	// Installs `require`, which is the only route to a `ModuleScript`.
+	//
+	// **Defined beside the compiler rather than with the other globals**, because
+	// evaluating a module is loading a chunk — the same compile, the same
+	// sandboxed thread and the same `script` global that a `Script` gets. A
+	// second loader here would be a second answer to what running a program
+	// means.
+	void OpenRequire(lua_State *state);
 
 	// Installs `task`, and the yield rule made real.
 	void OpenTask(lua_State *state);
@@ -307,27 +367,47 @@ namespace engine::script {
 	// @return An error message when a handler raised, or empty.
 	std::string PumpChanges(lua_State *state);
 
+	// Delivers everything the tree recorded since the last barrier.
+	//
+	// **Beside `PumpChanges` and for the same reason.** A reparent cannot fire
+	// a signal from inside `SetParent` — the handler would re-enter the VM with
+	// the sibling list half-relinked — so the store writes it down and this
+	// hands it over one tick later. See `ecs::TreeChange`.
+	//
+	// @param state The VM to deliver into.
+	// @return The first error a handler raised, or empty.
+	std::string PumpTree(lua_State *state);
+
 	// Resumes every task due at the world's current tick.
 	//
 	// @return An error message when a resumed thread raised, or empty.
 	std::string PumpTasks(lua_State *state);
 
-	// Installs `workspace` — **the world this script is running on**.
-	//
-	// Roblox's `Workspace` is a service inside the `DataModel` holding
-	// everything with a position. Here the mapping is one step more direct:
+	// Installs `workspace` — **this world's `Workspace` service**.
 	//
 	//     game      -> the universe
-	//     workspace -> the world this script runs on
+	//     workspace -> the `Workspace` instance in the world this script runs on
 	//
-	// **It is not an instance**, and that is the honest shape rather than a
-	// simplification. A world is what entities live *in*; making it an entity
-	// would have put a phantom row in every scene, counted by nothing and drawn
-	// by nothing, so that one property could have something to point at.
+	// **It is an instance, and until v0.7 it was not.** The old mapping made
+	// `workspace` stand for the world itself, so `part.Parent = workspace` meant
+	// `SetParent(part, NULL_ENTITY)` — "a root of this world" — and reading
+	// `.Parent` back on a root handed `workspace` over. That was the honest
+	// shape while a world had no `Workspace` in it. `scene::InstallServices`
+	// changed that: a world now has a real `Workspace` instance, and keeping
+	// both meant the engine held two answers to "what is in the scene" and the
+	// renderer listened to neither.
 	//
-	// `part.Parent = workspace` therefore means "a root instance of this
-	// world", which is what `Store::SetParent(part, NULL_ENTITY)` already
-	// means, and reading `part.Parent` back on a root hands `workspace` over.
+	// Collapsing them is what lets a null parent mean **nil**. An instance with
+	// no parent is now an orphan rather than a root: nothing draws it, no walk
+	// of the tree reaches it, and it becomes visible when a script says where it
+	// goes. `scene/Visibility.hpp` is the other half — it is what makes
+	// "under `Workspace`" the thing the renderer actually tests.
+	//
+	// Calls `InstallServices`, so a world that has none gets them here. That is
+	// idempotent and finds before it creates.
+	//
+	// **Run before `OpenQueries`**, which fills in the Workspace's own method
+	// table with `Raycast`.
 	//
 	// @param state The VM.
 	// @param store The world this script runs on.
@@ -351,8 +431,7 @@ namespace engine::script {
 	// property write.
 	//
 	// @param state The VM.
-	// @param store The world instances are created in.
-	void OpenInstances(lua_State *state, ecs::Store &store);
+	void OpenInstances(lua_State *state);
 
 	// Installs the world clock under names that do not lie about it.
 	//

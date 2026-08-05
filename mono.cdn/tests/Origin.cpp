@@ -30,6 +30,7 @@ using cdn::PreparedFrame;
 using cdn::Publication;
 using cdn::RequestId;
 using cdn::RequestState;
+using engine::assets::AssetKind;
 using engine::assets::ChunkEntry;
 using engine::assets::ContentHash;
 using engine::assets::Grant;
@@ -102,6 +103,7 @@ namespace {
 		Manifest manifest;
 		const ContentHash asset = manifest.AddAsset(
 			std::string("meshes/rock-") + std::string(marker),
+			AssetKind::Mesh,
 			{Chunk(std::string("rock-") + std::string(marker))}
 		);
 		const auto bundle = manifest.AddBundle(std::vector<ContentHash>{asset});

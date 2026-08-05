@@ -1,5 +1,7 @@
 #include "Snapshot.hpp"
 
+#include "Instances.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
@@ -373,6 +375,18 @@ namespace engine::ecs {
 				}
 			}
 			for (const Entity entity : stale) {
+				// Out of the tree before out of the directory, exactly as
+				// `Store::Destroy` does it. See `DetachFromTree`: freeing a row
+				// leaves every link that points at it naming something gone,
+				// and the sibling walk stops at the first of those rather than
+				// stepping over it.
+				//
+				// Masked here rather than harmless — the sweep takes every
+				// unmentioned entity and the pass below rewrites `Hierarchy` on
+				// the ones that survive — but a second reader should not have
+				// to reconstruct that argument to know this line is safe, and
+				// it stops being true the moment the sweep narrows.
+				DetachFromTree(state, entity);
 				DestroyEntity(state, entity);
 			}
 		}
@@ -386,7 +400,17 @@ namespace engine::ecs {
 				// sender destroyed and recreated it, so this is a different
 				// entity and the old one goes.
 				if (state.Directory.Live(key.Index)) {
-					DestroyEntity(state, EntityId::Pack(key.Index, state.Directory.Generation(key.Index)));
+					const Entity replaced = EntityId::Pack(key.Index, state.Directory.Generation(key.Index));
+
+					// **This is the one that was reachable.** It sits outside
+					// the authoritative-only sweep above, so it runs in Overlay
+					// mode — where nothing rewrites the `Hierarchy` of entities
+					// the snapshot does not mention. A surviving parent kept
+					// naming the freed row, `EachChild` ended its walk there,
+					// and every sibling behind it was alive, in the save file,
+					// and reachable from nothing.
+					DetachFromTree(state, replaced);
+					DestroyEntity(state, replaced);
 				}
 
 				// Restored at the sender's index *and* generation, so a handle

@@ -56,6 +56,11 @@ namespace registration_test {
 		"scene.Visual",
 		"scene.Camera",
 		"scene.QuickHash",
+		"scene.SurfaceCamera",
+		"scene.Transient",
+		"scene.Service",
+		"scene.LightingService",
+		"scene.Rendered",
 		"scene.SurfaceTable",
 		"scene.ActiveCamera",
 		"scene.WorldBounds",
@@ -204,4 +209,114 @@ TEST_CASE("the active camera resource survives a snapshot", "[scene][registratio
 	const ActiveCamera *back = restored.Resource<ActiveCamera>();
 	REQUIRE(back != nullptr);
 	CHECK(back->AspectRatio == 16.0f / 9.0f);
+}
+
+// **The test that catches the field somebody forgets, rather than the field
+// somebody already forgot.**
+//
+// `Visual` is registered with a hand-written writer and reader, because it
+// holds `core::Name`s that have to cross as text. The cost of that pair is that
+// a field added to the struct crosses only if a person remembers to add two
+// lines, and nothing in the build checks — so the field silently resets to its
+// default on every load, which looks like a bug in whatever reads it.
+//
+// This has happened three times. `Transparency` and `Surface` were both added
+// at v0.6 and neither was written, so a glass pane turned solid and a mirror
+// went blank the first time a world was saved and reopened. `CastShadow`
+// arrived at v0.7 and was written the same day, because of this.
+//
+// The check is per field and it is a *difference* rather than a round trip: two
+// visuals that differ in exactly one field must produce different bytes. A
+// round-trip test passes for a field the writer skips whenever the reader
+// leaves the default in place, which is exactly the case that goes wrong.
+//
+// Adding a field to `Visual` and not adding a case here leaves it untested —
+// which is why `engine.scene.components` pins `sizeof(Visual)`. That assertion
+// fails first, and it fails in a file whose comment points back at this one.
+TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
+	RegisterSceneComponents();
+
+	const TypeDescriptor &descriptor = Components::Describe(Components::Find(Name("scene.Visual")));
+	REQUIRE(descriptor.Write != nullptr);
+	REQUIRE(descriptor.Read != nullptr);
+
+	const auto written = [&descriptor](const Visual &visual) {
+		ByteWriter writer;
+		descriptor.Write(writer, &visual, 1);
+		return std::vector<std::byte>(writer.Bytes().begin(), writer.Bytes().end());
+	};
+
+	const Visual base;
+	const std::vector<std::byte> reference = written(base);
+
+	// One mutation per field, each away from the default so that a writer which
+	// skipped it would produce the reference bytes unchanged.
+	struct Case {
+		std::string_view Field;
+		Visual Value;
+	};
+
+	std::vector<Case> cases;
+	{
+		Visual tint = base;
+		tint.Tint = engine::core::Color3{0.1f, 0.2f, 0.3f};
+		cases.push_back({"Tint", tint});
+
+		Visual mesh = base;
+		mesh.Mesh = Name("registration_test.Mesh");
+		cases.push_back({"Mesh", mesh});
+
+		Visual material = base;
+		material.Material = Name("registration_test.Material");
+		cases.push_back({"Material", material});
+
+		Visual transparency = base;
+		transparency.Transparency = 0.5f;
+		cases.push_back({"Transparency", transparency});
+
+		Visual visible = base;
+		visible.Visible = !base.Visible;
+		cases.push_back({"Visible", visible});
+
+		Visual surface = base;
+		surface.Surface = 3;
+		cases.push_back({"Surface", surface});
+
+		Visual shadow = base;
+		shadow.CastShadow = !base.CastShadow;
+		cases.push_back({"CastShadow", shadow});
+	}
+
+	for (const Case &one : cases) {
+		INFO(one.Field);
+		CHECK(written(one.Value) != reference);
+	}
+
+	// And the whole thing survives the round trip, which is the half the
+	// difference check cannot make on its own: bytes that change are not
+	// necessarily bytes that come back.
+	Visual authored;
+	authored.Tint = engine::core::Color3{0.1f, 0.2f, 0.3f};
+	authored.Mesh = Name("registration_test.Mesh");
+	authored.Material = Name("registration_test.Material");
+	authored.Transparency = 0.5f;
+	authored.Visible = false;
+	authored.Surface = 3;
+	authored.CastShadow = false;
+
+	const std::vector<std::byte> bytes = written(authored);
+	ByteReader reader(bytes);
+
+	Visual restored;
+	descriptor.Read(reader, &restored, 1);
+
+	CHECK(restored.Tint.R == authored.Tint.R);
+	CHECK(restored.Tint.G == authored.Tint.G);
+	CHECK(restored.Tint.B == authored.Tint.B);
+	CHECK(restored.Mesh == authored.Mesh);
+	CHECK(restored.Material == authored.Material);
+	CHECK(restored.Transparency == authored.Transparency);
+	CHECK(restored.Visible == authored.Visible);
+	CHECK(restored.Surface == authored.Surface);
+	CHECK(restored.CastShadow == authored.CastShadow);
 }

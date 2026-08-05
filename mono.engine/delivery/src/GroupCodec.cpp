@@ -1,12 +1,12 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/delivery/GroupCodec.hpp>
 
-#include <cdn/GroupCodec.hpp>
 #include <cstring>
 #include <zdict.h>
 #include <zstd.h>
 
-namespace cdn {
+namespace engine::delivery {
 
 	namespace {
 		using engine::assets::ContentHash;
@@ -161,7 +161,7 @@ namespace cdn {
 
 	std::optional<Dictionary>
 	Dictionary::Train(std::span<const std::span<const std::byte>> samples, size_t capacityBytes) {
-		ENGINE_PROFILE("Dictionary::Train");
+		ENGINE_PROFILE_CAT("Dictionary::Train", core::ProfileCategory::Assets);
 
 		if (samples.empty() || capacityBytes == 0) {
 			return std::nullopt;
@@ -229,26 +229,26 @@ namespace cdn {
 
 	std::optional<std::vector<std::byte>>
 	GroupCodec::Compress(std::span<const std::byte> payload, int level) {
-		ENGINE_PROFILE("GroupCodec::Compress");
+		ENGINE_PROFILE_CAT("GroupCodec::Compress", core::ProfileCategory::Assets);
 		return CompressWith(payload, nullptr, 0, level);
 	}
 
 	std::optional<std::vector<std::byte>>
 	GroupCodec::Compress(std::span<const std::byte> payload, const Dictionary &dictionary, int level) {
-		ENGINE_PROFILE("GroupCodec::Compress");
+		ENGINE_PROFILE_CAT("GroupCodec::Compress", core::ProfileCategory::Assets);
 		return CompressWith(payload, dictionary.Bytes().data(), dictionary.Bytes().size(), level);
 	}
 
 	std::optional<std::vector<std::byte>>
 	GroupCodec::Decompress(std::span<const std::byte> frame, uint64_t expectedBytes) {
-		ENGINE_PROFILE("GroupCodec::Decompress");
+		ENGINE_PROFILE_CAT("GroupCodec::Decompress", core::ProfileCategory::Assets);
 		return DecompressWith(frame, nullptr, 0, expectedBytes);
 	}
 
 	std::optional<std::vector<std::byte>> GroupCodec::Decompress(
 		std::span<const std::byte> frame, const Dictionary &dictionary, uint64_t expectedBytes
 	) {
-		ENGINE_PROFILE("GroupCodec::Decompress");
+		ENGINE_PROFILE_CAT("GroupCodec::Decompress", core::ProfileCategory::Assets);
 		return DecompressWith(frame, dictionary.Bytes().data(), dictionary.Bytes().size(), expectedBytes);
 	}
 }

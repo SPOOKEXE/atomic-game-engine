@@ -1,7 +1,9 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <exception>
@@ -24,6 +26,24 @@ namespace engine::parallel {
 			size_t Count = 0;
 			size_t Grain = 0;
 			std::atomic<size_t> Next{0};
+
+			// Ranges not yet finished, **counted in ranges rather than in
+			// workers**, and that distinction was worth 0.35 ms a frame.
+			//
+			// It used to be the worker count, so the join could not return until
+			// every thread in the pool had woken, taken `Pool::Guard` to read the
+			// batch, found nothing left to claim, and taken the guard a second
+			// time to decrement. Two worlds dispatched across twenty-three
+			// workers meant forty-six serialised acquisitions of one contended
+			// mutex on the barrier's critical path to run two ticks — a cost
+			// linear in `hardware_concurrency` and independent of the work, which
+			// is why it was invisible on a four-thread box and a third of the
+			// frame on a real one.
+			//
+			// Counting ranges makes the join ask the only question it has: is the
+			// work done. Which threads showed up, and how many of them found
+			// nothing, stops being the barrier's business — see `Pool::Inside`
+			// for the part that still is.
 			std::atomic<size_t> Outstanding{0};
 
 			std::mutex FailureGuard;
@@ -53,6 +73,37 @@ namespace engine::parallel {
 			std::condition_variable Available;
 			std::condition_variable Finished;
 
+			// Signalled when the last worker leaves `Drain`. See `Inside`.
+			std::condition_variable Drained;
+
+			// The one batch, owned by the pool rather than by the `For` that
+			// dispatched it.
+			//
+			// **It was a local, and a range-counted join makes a local unsound.**
+			// Once the barrier stops waiting for every worker, `For` can return
+			// while a worker is still on its way into `Drain` — and that worker
+			// holds a pointer to the batch. A stack frame that has returned is
+			// not memory it may read, and `Batch::Body` pointed at the caller's
+			// `std::function`, which is not a callable it may reach either.
+			//
+			// One slot is enough because `Claimed` already admits one batch at a
+			// time; a second dispatch runs inline and shares nothing.
+			Batch Slot;
+
+			// Workers between reading `Current` and leaving `Drain`.
+			//
+			// **This is the wait that used to be the join, moved to where it is
+			// free.** Somebody still has to know when the last straggler has let
+			// go of the batch — but the thread that needs to know is not the one
+			// finishing this frame's tick, it is the one starting the *next*
+			// dispatch, and that is a frame away. By then every worker woken for
+			// the last batch has long since found nothing, decremented, and gone
+			// back to sleep, so the wait is satisfied the moment it is asked.
+			//
+			// The stragglers still pay their two lock acquisitions each. They now
+			// pay them alongside the interface build instead of in front of it.
+			size_t Inside = 0;
+
 			// Whether a batch owns the pool right now.
 			//
 			// Not redundant with `Current`, and the difference is the whole
@@ -77,34 +128,86 @@ namespace engine::parallel {
 			return pool;
 		}
 
+		// No range. Distinct from index zero, which is a real one.
+		constexpr size_t NO_RANGE = static_cast<size_t>(-1);
+
+		// Runs one already-claimed range, without retiring it.
+		void RunBody(Batch &batch, size_t begin, uint64_t &busy) {
+			const size_t end = std::min(begin + batch.Grain, batch.Count);
+
+			// Around the body only. The claim, the wait and the bookkeeping
+			// are the dispatch's cost and belong to the thread that paid
+			// them; what a worker reports is the work.
+			const uint64_t started = core::Clock::Nanoseconds();
+			try {
+				(*batch.Body)(begin, end);
+			} catch (...) {
+				std::lock_guard lock(batch.FailureGuard);
+				if (!batch.Failure) {
+					batch.Failure = std::current_exception();
+				}
+			}
+			busy += core::Clock::Nanoseconds() - started;
+		}
+
+		// Marks one range finished, releasing the join when it was the last.
+		//
+		// Called once the body has returned *or* thrown: a range that failed is
+		// finished, and a batch whose join waited on an abandoned range would
+		// hang rather than rethrow.
+		void Retire(Batch &batch) {
+			// **The guard is taken by the last range only, never by the others.**
+			// That is the difference from the old join: retiring used to cost an
+			// acquisition of `Pool::Guard` per *worker*, including the ones that
+			// had no range, and every one of them was in front of the dispatcher.
+			// Now the mutex is touched once per batch, by whichever thread
+			// happened to finish last, and it is taken rather than skipped
+			// because a notify racing the waiter's predicate check is a lost
+			// wakeup and therefore a hang.
+			if (batch.Outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+				Pool &pool = Get();
+				std::lock_guard lock(pool.Guard);
+				pool.Finished.notify_all();
+			}
+		}
+
 		// Claims ranges until there are none left. Run by the workers and by
 		// the calling thread, which is why the caller never idles.
-		void Drain(Batch &batch) {
+		//
+		// `first` is a range the caller claimed before calling, or `NO_RANGE`.
+		//
+		// **One range is always held back unretired, and that is what keeps the
+		// reported timings whole.** The retire that empties `Outstanding` is
+		// what lets `For` return and read `BusyNanoseconds` — so a thread that
+		// retired its last range and *then* added its total would be racing the
+		// dispatcher for it, and `worlds (workers)` would silently lose whichever
+		// worker finished closest to the barrier. Keeping one in hand means the
+		// decrement that can release the join is always the one after this
+		// thread's numbers have landed.
+		void Drain(Batch &batch, size_t first = NO_RANGE) {
 			uint64_t busy = 0;
 			bool took = false;
+			size_t pending = NO_RANGE;
+			size_t begin = first;
 
 			for (;;) {
-				const size_t begin = batch.Next.fetch_add(batch.Grain, std::memory_order_relaxed);
-				if (begin >= batch.Count) {
-					break;
-				}
-
-				const size_t end = std::min(begin + batch.Grain, batch.Count);
-				took = true;
-
-				// Around the body only. The claim, the wait and the bookkeeping
-				// are the dispatch's cost and belong to the thread that paid
-				// them; what a worker reports is the work.
-				const uint64_t started = core::Clock::Nanoseconds();
-				try {
-					(*batch.Body)(begin, end);
-				} catch (...) {
-					std::lock_guard lock(batch.FailureGuard);
-					if (!batch.Failure) {
-						batch.Failure = std::current_exception();
+				if (begin == NO_RANGE) {
+					begin = batch.Next.fetch_add(batch.Grain, std::memory_order_relaxed);
+					if (begin >= batch.Count) {
+						break;
 					}
 				}
-				busy += core::Clock::Nanoseconds() - started;
+
+				// Safe to let the previous one go now: this thread holds another,
+				// so `Outstanding` cannot reach zero on this line.
+				if (pending != NO_RANGE) {
+					Retire(batch);
+				}
+
+				RunBody(batch, begin, busy);
+				took = true;
+				pending = begin;
+				begin = NO_RANGE;
 			}
 
 			// Once per participant rather than once per range: a relaxed add
@@ -113,6 +216,10 @@ namespace engine::parallel {
 			if (took) {
 				batch.BusyNanoseconds.fetch_add(busy, std::memory_order_relaxed);
 				batch.Participants.fetch_add(1, std::memory_order_relaxed);
+			}
+
+			if (pending != NO_RANGE) {
+				Retire(batch);
 			}
 		}
 
@@ -130,14 +237,28 @@ namespace engine::parallel {
 					}
 					seen = pool.Generation;
 					batch = pool.Current;
+
+					// **Under the same lock that read `Current`, which is the
+					// whole of the lifetime argument.** The dispatcher clears
+					// `Current` and rewrites the slot under this guard too, so a
+					// worker either gets here first — and is counted, so the next
+					// dispatch waits for it — or arrives to a null pointer and
+					// has nothing to hold.
+					if (batch != nullptr) {
+						pool.Inside++;
+					}
 				}
 
-				if (batch) {
+				if (batch != nullptr) {
+					// A worker that wakes after the batch is finished finds
+					// `Next` past `Count` and returns without touching `Body`,
+					// which is what makes a straggler harmless rather than a
+					// call into a dead `std::function`.
 					Drain(*batch);
 
 					std::lock_guard lock(pool.Guard);
-					if (batch->Outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-						pool.Finished.notify_all();
+					if (--pool.Inside == 0) {
+						pool.Drained.notify_all();
 					}
 				}
 			}
@@ -254,24 +375,95 @@ namespace engine::parallel {
 
 		const uint64_t dispatched = core::Clock::Nanoseconds();
 
-		Batch batch;
-		batch.Body = &body;
-		batch.Count = count;
-		batch.Grain = grain;
-		batch.Outstanding.store(workers, std::memory_order_relaxed);
+		const size_t ranges = (count + grain - 1) / grain;
 
-		{
-			std::lock_guard lock(pool.Guard);
-			pool.Current = &batch;
-			pool.Generation++;
-		}
-		pool.Available.notify_all();
-
-		Drain(batch);
+		Batch &batch = pool.Slot;
 
 		{
 			std::unique_lock lock(pool.Guard);
+
+			// **The straggler wait, and it is here rather than in the join.**
+			// See `Pool::Inside`: the previous batch's leftovers have had a whole
+			// frame to notice they had nothing to do, so this is a predicate that
+			// is already true, not a barrier. It has to be checked somewhere,
+			// though — and it has to be checked *before* the slot is rewritten,
+			// because a worker still reading `Next` and `Count` from the last
+			// batch would otherwise see them replaced underneath it and claim a
+			// range of the new one that nothing counted.
+			pool.Drained.wait(lock, [&] { return pool.Inside == 0; });
+
+			// Written under the guard for the same reason: a worker reads
+			// `Current` while holding it, so nobody can be looking at the slot
+			// between these two lines.
+			batch.Body = &body;
+			batch.Count = count;
+			batch.Grain = grain;
+			batch.Outstanding.store(ranges, std::memory_order_relaxed);
+			batch.BusyNanoseconds.store(0, std::memory_order_relaxed);
+			batch.Participants.store(0, std::memory_order_relaxed);
+			batch.Failure = nullptr;
+
+			// **`Next` starts one range in, not at zero: the dispatcher's own
+			// share, reserved before the pool is woken.** The comment below has
+			// always said this thread is a participant rather than a supervisor,
+			// and measured it was not — `notify_all` ran first, so on a wide pool
+			// the workers had claimed every range before this thread's own
+			// `fetch_add` landed. `jobs.drain` read 0.00 while `jobs.join` read
+			// the entire barrier: the dispatcher paid the wait and did none of
+			// the work. Reserving here makes the claim true by construction.
+			batch.Next.store(grain, std::memory_order_relaxed);
+
+			pool.Current = &batch;
+			pool.Generation++;
+		}
+
+		// **As many workers as there are ranges left, not as many as exist.**
+		// Waking twenty-three threads to run two world ticks is twenty-one
+		// threads whose entire contribution is a `fetch_add` that finds nothing
+		// and two acquisitions of a contended mutex. The range count is what the
+		// pool can actually absorb, and one of the ranges is already this
+		// thread's.
+		//
+		// Under-waking cannot lose work — the dispatcher drains until the batch
+		// is empty, so an unwoken worker costs parallelism and never a range.
+		// That is what makes this safe to tune where the old worker-counted join
+		// would have hung.
+		if (ranges > workers) {
+			pool.Available.notify_all();
+		} else {
+			for (size_t woken = 1; woken < ranges; woken++) {
+				pool.Available.notify_one();
+			}
+		}
+
+		{
+			// The dispatching thread's own share. It is a participant, not a
+			// supervisor, so this is real work and belongs beside the ranges
+			// the workers took rather than folded into the wait below.
+			ENGINE_PROFILE_CAT("jobs.drain", core::ProfileCategory::Engine);
+
+			Drain(batch, 0);
+		}
+
+		{
+			// **`Idle`, and this is the one that was worth finding.** A
+			// fork-join barrier is the dispatching thread doing nothing until
+			// the slowest range lands, and it read as busy engine time — so an
+			// imbalanced batch, which is the failure this pool actually has,
+			// looked identical to a batch that was simply large. The overlay
+			// subtracts idle to get its busy figure, so this now leaves the
+			// numerator the moment it starts blocking.
+			//
+			// It waits on ranges now, so what is left here is genuine imbalance:
+			// the slowest world still running while this thread has nothing to
+			// take. The pool's own wake-up no longer appears in it.
+			ENGINE_PROFILE_CAT("jobs.join", core::ProfileCategory::Idle);
+			std::unique_lock lock(pool.Guard);
 			pool.Finished.wait(lock, [&] { return batch.Outstanding.load(std::memory_order_acquire) == 0; });
+
+			// Cleared so a worker still on its way in reads null and never
+			// counts itself, which keeps `Inside` down to the threads that
+			// genuinely overlapped the batch.
 			pool.Current = nullptr;
 		}
 

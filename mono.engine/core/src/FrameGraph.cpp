@@ -102,9 +102,27 @@ namespace engine::core {
 		}
 
 		void ClearHistory(State &state) {
-			for (auto &ring : state.RecentRings) {
-				std::fill(ring.begin(), ring.end(), 0.0f);
-			}
+			// **The name table goes with the window, and it did not.** Zeroing
+			// the rings emptied the readings and left the names that indexed
+			// them, so the MAXIMUM_HISTORY_NAMES budget was spent once per
+			// process rather than once per session: open the panel in one
+			// scene, close it, open it in another, and the second scene's spans
+			// were turned away by a table full of the first one's. The snapshot
+			// said so in a WARNING line, which is the only reason it was
+			// findable at all.
+			//
+			// The cost is that a name's ring is allocated again on the first
+			// collected frame of the next session, which is the same frame that
+			// takes the window's own storage — one hitch, at the moment
+			// somebody opened a profiler, rather than a quota that never comes
+			// back.
+			state.HistoryNames.clear();
+			state.HistoryNameIds.clear();
+			state.RecentRings.clear();
+			state.FrameMaximums.clear();
+			state.FrameSeen.clear();
+			state.FrameTouched.clear();
+
 			state.RecentCursor = 0;
 			state.HistoryStart = 0;
 			state.HistoryCount = 0;
@@ -161,10 +179,6 @@ namespace engine::core {
 				state.RecentRings[id][state.RecentCursor] = state.FrameMaximums[id];
 			}
 			state.RecentCursor = (state.RecentCursor + 1) % FrameGraph::RECENT_FRAMES;
-
-			if (state.History.size() < FrameGraph::MAXIMUM_HISTORY_FRAMES) {
-				state.History.resize(FrameGraph::MAXIMUM_HISTORY_FRAMES);
-			}
 
 			const size_t slot =
 				(state.HistoryStart + state.HistoryCount) % FrameGraph::MAXIMUM_HISTORY_FRAMES;
@@ -237,12 +251,18 @@ namespace engine::core {
 			return "render";
 		case ProfileCategory::ECS:
 			return "ECS";
+		case ProfileCategory::Physics:
+			return "physics";
 		case ProfileCategory::Simulation:
 			return "sim";
 		case ProfileCategory::Idle:
 			return "IDLE";
 		case ProfileCategory::Script:
 			return "script";
+		case ProfileCategory::Network:
+			return "net";
+		case ProfileCategory::Assets:
+			return "assets";
 		case ProfileCategory::Count:
 			break;
 		}
@@ -264,7 +284,22 @@ namespace engine::core {
 		// different scene.
 		ClearHistory(state);
 
-		if (!enabled) {
+		if (enabled) {
+			// The retained window's storage, taken when the panel opens rather
+			// than on the first frame it collects.
+			//
+			// Twenty thousand frames is not a large allocation, but it was
+			// happening inside `EndFrame` — so the first frame anybody watched
+			// was the one frame in the session that paid for it, and the panel
+			// opened onto a spike it had caused. Opening a profiler is a
+			// keypress and is allowed to cost something; the frame after it is
+			// a measurement.
+			//
+			// Not released on the way out. Freeing twenty thousand frames of
+			// span lists would put the same hitch back the next time the panel
+			// opened, in exchange for memory nothing else is contending for.
+			state.History.resize(FrameGraph::MAXIMUM_HISTORY_FRAMES);
+		} else {
 			state.Published.clear();
 			state.PublishedMilliseconds = 0.0f;
 			state.PublishedUnmarked = 0.0f;
@@ -795,9 +830,6 @@ namespace engine::core {
 
 		Pop(index);
 
-		// Overwritten after the close, which is the whole point: the elapsed
-		// time this thread would have measured is the cost of the call, and the
-		// number worth showing is the one the producer reported.
 		// Overwritten after the close, which is the point: the elapsed time this
 		// thread would have measured is the cost of the call, and the number
 		// worth showing is the one the producer reported. `EndFrame` does the

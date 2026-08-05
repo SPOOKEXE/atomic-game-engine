@@ -55,6 +55,12 @@ namespace engine::ecs {
 
 	Store::Store(std::string_view name)
 		: State(std::make_unique<StoreState>()), StoreName(name), Owner(std::this_thread::get_id()) {
+		// **The other door into the instance model.** A world can be made and
+		// filled from a snapshot without a single `Classes::Register` running
+		// first, and the names in that snapshot have to mean what they meant
+		// when it was written. See `RegisterInstanceComponents`.
+		RegisterInstanceComponents();
+
 		// The clock is the one resource that is always present, so that no
 		// system has to check whether the world has a time.
 		SetResource(WorldTime{});
@@ -205,6 +211,17 @@ namespace engine::ecs {
 
 	void Store::Destroy(Entity entity) {
 		RequireOwningThread("Destroy");
+
+		// **Out of the tree before out of the directory.** See `DetachFromTree`:
+		// freeing a row leaves every link that points at it naming something
+		// that is gone, and the sibling walk stops at the first of those rather
+		// than stepping over it — so destroying the middle child of three used
+		// to truncate the list and lose the rest.
+		//
+		// Before rather than after, because there is no "after": once the row
+		// is vacated its own links are gone and there is nothing left to unlink
+		// it by.
+		DetachFromTree(*State, entity);
 
 		DestroyEntity(*State, entity);
 	}
@@ -573,8 +590,73 @@ namespace engine::ecs {
 		engine::ecs::EachChild(*State, instance, body);
 	}
 
-	Entity Store::FindFirstChild(Entity instance, std::string_view name) const {
-		return engine::ecs::FindFirstChild(*State, instance, name);
+	bool Store::HasChildren(Entity instance) const {
+		return engine::ecs::HasChildren(*State, instance);
+	}
+
+	void Store::EachDescendant(Entity instance, const std::function<void(Entity)> &body) const {
+		engine::ecs::EachDescendant(*State, instance, body);
+	}
+
+	bool Store::SetInstanceName(Entity instance, std::string_view name) {
+		RequireOwningThread("SetInstanceName");
+
+		return engine::ecs::SetInstanceName(*State, instance, name);
+	}
+
+	Entity Store::FindFirstChild(Entity instance, std::string_view name, bool recursive) const {
+		return engine::ecs::FindFirstChild(*State, instance, name, recursive);
+	}
+
+	Entity Store::FindFirstChildOfClass(Entity instance, ClassId id) const {
+		return engine::ecs::FindFirstChildOfClass(*State, instance, id);
+	}
+
+	Entity Store::FindFirstChildWhichIsA(Entity instance, ClassId id, bool recursive) const {
+		return engine::ecs::FindFirstChildWhichIsA(*State, instance, id, recursive);
+	}
+
+	Entity Store::FindFirstAncestor(Entity instance, std::string_view name) const {
+		return engine::ecs::FindFirstAncestor(*State, instance, name);
+	}
+
+	Entity Store::FindFirstAncestorOfClass(Entity instance, ClassId id) const {
+		return engine::ecs::FindFirstAncestorOfClass(*State, instance, id);
+	}
+
+	Entity Store::FindFirstAncestorWhichIsA(Entity instance, ClassId id) const {
+		return engine::ecs::FindFirstAncestorWhichIsA(*State, instance, id);
+	}
+
+	void Store::ObserveTree() {
+		RequireOwningThread("ObserveTree");
+
+		State->WatchTree = true;
+	}
+
+	bool Store::TreeObserved() const {
+		return State->WatchTree;
+	}
+
+	void Store::TakeTreeChanges(std::vector<TreeChange> &out) {
+		RequireOwningThread("TakeTreeChanges");
+
+		out.clear();
+		out.swap(State->TreeChanges);
+	}
+
+	void Store::OnDescendantRemoving(std::function<void(Entity, Entity)> body) {
+		RequireOwningThread("OnDescendantRemoving");
+
+		State->BeforeRemoving = std::move(body);
+	}
+
+	void Store::ClearDescendantRemoving() {
+		State->BeforeRemoving = {};
+	}
+
+	std::string Store::GetFullName(Entity instance) const {
+		return engine::ecs::GetFullName(*State, instance);
 	}
 
 	void Store::EachRoot(const std::function<void(Entity)> &body) const {
@@ -635,7 +717,44 @@ namespace engine::ecs {
 			return NULL_ENTITY;
 		}
 
-		return engine::ecs::CloneInstance(*State, source);
+		std::vector<engine::ecs::ClonedPair> made;
+		const Entity copy = engine::ecs::CloneInstance(*State, source, made);
+		if (copy == NULL_ENTITY) {
+			return NULL_ENTITY;
+		}
+
+		// **A reference into the subtree is part of what was copied; one out of
+		// it is not.** A weld naming the two parts it joins has to name the two
+		// *new* parts, or the duplicate is welded to the original and dragging
+		// it moves the thing it was copied from. A part naming the terrain it
+		// sits on has to keep naming the terrain, because there is only one.
+		//
+		// Roblox draws the line in exactly that place, and it is the only place
+		// that makes both cases work. Here rather than in `Instances.cpp`
+		// because a property is reached through generated conversions that take
+		// a `Store`, and that layer holds a `StoreState`.
+		for (const engine::ecs::ClonedPair &pair : made) {
+			for (const PropertyDescriptor &property : PropertiesOf(pair.Copy)) {
+				if (property.Type != PropertyType::Reference || !property.Writable ||
+					property.Get == nullptr || property.Set == nullptr) {
+					continue;
+				}
+
+				Entity held;
+				if (!property.Get(*this, pair.Copy, &held) || held == NULL_ENTITY) {
+					continue;
+				}
+
+				for (const engine::ecs::ClonedPair &other : made) {
+					if (other.Source == held) {
+						property.Set(*this, pair.Copy, &other.Copy);
+						break;
+					}
+				}
+			}
+		}
+
+		return copy;
 	}
 
 	// --- change tracking ---------------------------------------------------

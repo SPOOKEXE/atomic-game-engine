@@ -56,10 +56,17 @@ int main(int argc, char **argv) {
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems or counters");
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
+	arguments.Value("game", "PATH", "Game file to play single-player (.agame)");
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
+	arguments.Value(
+		"cdn", "HOST:PORT", "A content origin, in priority order. 'dir:PATH' for a local store. Repeatable"
+	);
+	arguments.Value("content-cache", "DIR", "Keep verified content here between runs");
+	arguments.Value("publisher-key", "HEX", "64 hex characters — the key whose manifests this client trusts");
+	arguments.Value("sound", "PATH", "Play this .wav on a loop — proves audio runs in-game");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -101,11 +108,35 @@ int main(int argc, char **argv) {
 	if (auto script = arguments.Get("script")) {
 		options.ScriptPath = std::string(*script);
 	}
+	if (auto game = arguments.Get("game")) {
+		options.GameFile = std::filesystem::path(*game);
+
+		// Loudly rather than silently. A run given both a game file and a scene
+		// script has to choose, and a choice nobody was told about is a run
+		// that did something other than what was asked.
+		if (!options.ScriptPath.empty()) {
+			ENGINE_WARN("--game and --script were both given; playing the game file");
+			options.ScriptPath.clear();
+		}
+	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
 	}
 	if (auto server = arguments.Get("connect")) {
 		options.ConnectAddress = std::string(*server);
+	}
+
+	for (const std::string_view source : arguments.GetAll("cdn")) {
+		options.ContentSources.emplace_back(source);
+	}
+	if (auto cache = arguments.Get("content-cache")) {
+		options.ContentCache = std::filesystem::path(*cache);
+	}
+	if (auto sound = arguments.Get("sound")) {
+		options.SoundPath = std::filesystem::path(*sound);
+	}
+	if (auto key = arguments.Get("publisher-key")) {
+		options.ContentPublisherKey = std::string(*key);
 	}
 
 	if (auto tab = arguments.Get("profiler-tab")) {

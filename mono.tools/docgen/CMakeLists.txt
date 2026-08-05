@@ -118,6 +118,10 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/mono.engine"
 	"${CMAKE_SOURCE_DIR}/mono.client"
 	"${CMAKE_SOURCE_DIR}/mono.server"
+	# The editor, added at v0.7. A product with public headers is a product
+	# whose headers are checked for coverage, which is the point of listing it
+	# rather than a cost of doing so.
+	"${CMAKE_SOURCE_DIR}/mono.studio"
 	"${CMAKE_SOURCE_DIR}/mono.cdn"
 	"${CMAKE_SOURCE_DIR}/mono.tools")
 	# An input Doxygen cannot read is a warning, and `docs-check` fails on

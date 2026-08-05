@@ -1,7 +1,9 @@
+#include <engine/audio/Wav.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -13,6 +15,7 @@
 #include <algorithm>
 #include <client/Client.hpp>
 #include <client/Replicated.hpp>
+#include <fstream>
 
 namespace client {
 
@@ -66,6 +69,80 @@ namespace client {
 
 		Universe_ = std::make_unique<engine::world::Universe>();
 
+		if (!Settings.GameFile.empty()) {
+			if (!LoadGameFile()) {
+				return false;
+			}
+		} else if (!BuildDemoWorlds()) {
+			return false;
+		}
+
+		// The first is the one the panels report on and the one the composed
+		// camera comes from. A client draws one world's worth of camera however
+		// many it composites.
+		Rendered = Simulated.front();
+
+		if (!BeginConnecting()) {
+			return false;
+		}
+
+		if (Simulated.size() > 1) {
+			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", Simulated.size(), Settings.ViewSpacing);
+		}
+
+		FrameGraph::SetEnabled(Settings.ShowFrameGraph);
+		return FinishStartup();
+	}
+
+	bool Client::LoadGameFile() {
+		engine::game::GameInfo info;
+		std::string error;
+
+		if (!engine::game::LoadGame(*Universe_, Settings.GameFile, info, error)) {
+			ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
+			return false;
+		}
+
+		const auto worlds = Universe_->Worlds();
+		if (worlds.empty()) {
+			ENGINE_ERROR("--game '{}' holds no worlds", Settings.GameFile.string());
+			return false;
+		}
+
+		// **Both halves, in one process.** A single-player run is a server and
+		// a client at once — `HostRole::OfBoth` says so and `RunService.hpp`
+		// argues that both being true is a legal answer rather than a bug — so
+		// a game's `Script` and its `LocalScript` both run here.
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+
+		for (const engine::world::WorldId id : worlds) {
+			std::string failure;
+
+			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				InstallPresentation(store, systems, Settings.Entities);
+
+				// The scripts before the camera, so a scene that aimed one of
+				// its own keeps it — see `InstallDefaultCamera`.
+				Runtimes.push_back(engine::game::StartWorldScripts(store, systems, limits, failure));
+				InstallDefaultCamera(store, systems);
+			});
+
+			if (!failure.empty()) {
+				ENGINE_ERROR("world '{}': {}", Universe_->NameOf(id).Text(), failure);
+			}
+
+			Views.Track(id, Universe_->NameOf(id), Settings.Entities);
+			Simulated.push_back(id);
+		}
+
+		ENGINE_INFO(
+			"playing '{}' — {} world(s)", info.Name.IsValid() ? info.Name.Text() : "game", worlds.size()
+		);
+		return true;
+	}
+
+	bool Client::BuildDemoWorlds() {
 		const uint32_t worlds = std::max(1u, Settings.Worlds);
 		for (uint32_t index = 0; index < worlds; index++) {
 			engine::world::WorldSettings world;
@@ -122,21 +199,10 @@ namespace client {
 			Simulated.push_back(id);
 		}
 
-		// The first is the one the panels report on and the one the composed
-		// camera comes from. A client draws one world's worth of camera however
-		// many it composites.
-		Rendered = Simulated.front();
+		return true;
+	}
 
-		if (!BeginConnecting()) {
-			return false;
-		}
-
-		if (worlds > 1) {
-			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", worlds, Settings.ViewSpacing);
-		}
-
-		FrameGraph::SetEnabled(Settings.ShowFrameGraph);
-
+	bool Client::FinishStartup() {
 		// Tracy is on-demand: it collects nothing until a profiler attaches, so
 		// a short run with nothing listening produces an empty capture. Waiting
 		// makes that an explicit choice rather than a surprise.
@@ -157,11 +223,182 @@ namespace client {
 			}
 		}
 
+		if (!BeginContentDelivery()) {
+			return false;
+		}
+
+		if (!BeginAudio()) {
+			return false;
+		}
+
 		Running = true;
 		return true;
 	}
 
+	bool Client::BeginContentDelivery() {
+		if (Settings.ContentSources.empty() && Settings.ContentPublisherKey.empty()) {
+			// Nothing was asked for. Not a failure — a game with its content
+			// beside it in a game file needs no origin at all.
+			return true;
+		}
+
+		engine::delivery::DeliverySettings settings =
+			engine::delivery::DeliverySettings::Default(Settings.ContentCache);
+		settings.CachePath = Settings.ContentCache;
+
+		if (!Settings.ContentSources.empty()) {
+			settings.Sources.clear();
+			for (const std::string &source : Settings.ContentSources) {
+				// `dir:` names a published store on this machine; anything else
+				// is an address. One flag rather than two, because the priority
+				// order is a single list and splitting it across two flags
+				// would make "local first, then remote" unexpressible.
+				const bool directory = source.starts_with("dir:");
+				settings.Sources.push_back(
+					engine::delivery::Source{
+						.Name = source,
+						.Kind = directory ? engine::delivery::SourceKind::Directory
+										  : engine::delivery::SourceKind::Http,
+						.Location = directory ? source.substr(4) : source,
+						.Enabled = true,
+					}
+				);
+			}
+		}
+
+		if (const auto key = engine::assets::PublicKey::FromHex(Settings.ContentPublisherKey)) {
+			settings.Publisher = *key;
+		} else {
+			ENGINE_ERROR("content delivery needs --publisher-key, 64 hex characters");
+			ENGINE_ERROR("a client that accepted an unsigned manifest would have no trust boundary");
+			return false;
+		}
+
+		Content = engine::delivery::MakeAssetClient(settings);
+		if (!Content) {
+			return false;
+		}
+
+		ENGINE_INFO(
+			"content: {} source(s), first is '{}'", settings.Usable().size(), settings.Usable().front().Name
+		);
+		return true;
+	}
+
+	bool Client::BeginAudio() {
+		// **The sound is validated before the device is consulted**, so a
+		// typo'd path is reported on a machine with no output as well as on one
+		// with speakers. Ordering it the other way round means a developer on a
+		// headless box is told only that nothing can be heard — which is true,
+		// unhelpful, and hides a mistake they could have fixed.
+		std::shared_ptr<const engine::audio::SampleBuffer> decoded;
+		if (!Settings.SoundPath.empty()) {
+			std::ifstream file(Settings.SoundPath, std::ios::binary | std::ios::ate);
+			if (!file) {
+				ENGINE_ERROR("audio: cannot read {}", Settings.SoundPath.string());
+				return false;
+			}
+			const std::streamoff size = file.tellg();
+			file.seekg(0);
+			std::vector<std::byte> bytes(static_cast<size_t>(std::max<std::streamoff>(0, size)));
+			if (!bytes.empty()) {
+				file.read(reinterpret_cast<char *>(bytes.data()), size);
+			}
+
+			const auto samples = engine::audio::DecodeWav(bytes);
+			if (!samples) {
+				ENGINE_ERROR("audio: {} is not a wav this engine decodes", Settings.SoundPath.string());
+				return false;
+			}
+			decoded = std::make_shared<const engine::audio::SampleBuffer>(*samples);
+		}
+
+		// Opened whether or not a sound was asked for: a world's own scripts
+		// will want one, and a device that is only opened when a flag is passed
+		// is a device nothing exercises.
+		Sound = engine::audio::OpenDevice({});
+		if (Sound == nullptr) {
+			// Not a failure. A CI container has no sound server and a laptop
+			// may have its output disabled; a game that refused to start
+			// because it could not make a noise would be worse than a quiet
+			// one.
+			if (decoded) {
+				ENGINE_WARN(
+					"audio: '{}' decoded ({:.2f}s) but there is no output on this machine",
+					Settings.SoundPath.string(),
+					decoded->Seconds()
+				);
+			}
+			return true;
+		}
+		if (!decoded) {
+			return true;
+		}
+
+		// Converted once, here, at load time — never on the device thread.
+		auto &mixer = Sound->Mixer();
+		const auto sample =
+			std::make_shared<const engine::audio::SampleBuffer>(decoded->ConvertTo(Sound->Format()));
+
+		// Player -> fader -> output. The fader is not decoration: it is where a
+		// master volume goes, and building it now means a level control is a
+		// parameter rather than a refactor.
+		const engine::audio::NodeId player = mixer.Commands().Allocate();
+		const engine::audio::NodeId fader = mixer.Commands().Allocate();
+
+		engine::audio::Command command;
+		command.Kind = engine::audio::CommandKind::AddNode;
+		command.Target = player;
+		command.Node = engine::audio::NodeKind::Player;
+		mixer.Commands().Post(command);
+
+		command.Target = fader;
+		command.Node = engine::audio::NodeKind::Fader;
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::Connect;
+		command.Target = player;
+		command.Second = fader;
+		mixer.Commands().Post(command);
+
+		command.Target = fader;
+		command.Second = mixer.Graph().Output();
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::SetSound;
+		command.Target = player;
+		command.Sound = sample;
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::SetLooping;
+		command.Target = player;
+		command.Flag = true;
+		mixer.Commands().Post(command);
+
+		command = {};
+		command.Kind = engine::audio::CommandKind::Play;
+		command.Target = player;
+		// **On the sample clock, not "now".** The device is already running, so
+		// scheduling a little ahead is what lets the start land on a known
+		// sample rather than wherever the callback happens to be — which is the
+		// whole point of the queue carrying a deadline.
+		command.AtSample = mixer.Clock() + Sound->Format().SampleRate / 10;
+		mixer.Commands().Post(command);
+
+		ENGINE_INFO("audio: playing {} ({:.2f}s, looping)", Settings.SoundPath.string(), sample->Seconds());
+		return true;
+	}
+
 	void Client::Shutdown() {
+		// Before the renderer and SDL: the device holds a callback that is
+		// inside this object, and tearing SDL down underneath it is a crash on
+		// exit.
+		Sound.reset();
+		Content.reset();
+
 		// The connection before the socket it borrows, and both before the
 		// universe holding the world it writes into. A connector outliving its
 		// transport is a dangling reference in a destructor.
@@ -308,9 +545,19 @@ namespace client {
 		// frame's events has to survive until something reads it.
 		Actions.BeginFrame();
 
-		SDL_Event event;
-		while (SDL_PollEvent(&event)) {
-			Actions.HandleEvent(event);
+		{
+			// **The pump on its own.** `pump events` covered the poll and every
+			// key it then acted on, and the poll is the half that can block on
+			// the compositor — so a frame stalled by the window system and a
+			// frame stalled by a keybinding doing work read as one number.
+			// There is nothing worth a span inside `input` itself: `Actions` is
+			// a bitset and a switch, and this is the cost of reaching it.
+			ENGINE_PROFILE("poll events");
+
+			SDL_Event event;
+			while (SDL_PollEvent(&event)) {
+				Actions.HandleEvent(event);
+			}
 		}
 
 		if (Actions.Fired(Action::Quit)) {
@@ -404,6 +651,16 @@ namespace client {
 	}
 
 	void Client::Step() {
+		// **The display is waited for before the input is read**, for the reason
+		// `Editor::Run` gives at length: the swapchain wait is most of a frame
+		// with vertical sync on, and doing it after the pump means every frame is
+		// drawn from input that is already a frame old. The client has the same
+		// shape as the studio and had the same frame of delay in it.
+		//
+		// It costs a frame of nothing when it fails — minimised, or mid-resize —
+		// and `Render` reaches the same conclusion for itself below.
+		Renderer.WaitForFrame();
+
 		const float delta = Clock.Tick();
 
 		// Everything from here to EndFrame is one frame's worth of spans. The
@@ -433,7 +690,12 @@ namespace client {
 			// After the tick and before presentation, the same place the server
 			// publishes from — so what the replica applied this frame is what
 			// the frame draws, rather than being one frame stale for no reason.
-			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::ECS);
+			//
+			// `Network` and not `ECS`: this is the socket being drained and
+			// what came out of it being applied. It was ECS time because it
+			// writes to a store, which put the link's cost in the same bar as
+			// the systems and made a bad connection read as a slow game.
+			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::Network);
 			PollServer(engine::core::Clock::Seconds());
 		}
 
@@ -448,6 +710,13 @@ namespace client {
 			// is composited but not presented would publish the frame it built
 			// last time it was, which is a world that appears frozen for a
 			// reason nothing reports.
+			// **Cleared once, before any world is asked.** `CollectSurfaceViews`
+			// clears as well, but only the drawn world reaches it — a world that
+			// returns early for want of a camera would otherwise leave the
+			// previous frame's mirrors in the list, and the surface pass would
+			// go on rendering a camera that is no longer in the scene.
+			Surfaces.clear();
+
 			for (const engine::world::WorldId id : Simulated) {
 				Universe_->Present(id, delta, Universe_->AlphaOf(id));
 
@@ -477,12 +746,12 @@ namespace client {
 						ComposedFrame = placement->Frame;
 						ComposedCamera = *lens;
 
-						// **The surface camera, read from the world that owns
-						// it.** One per frame: the pipeline renders one offscreen
-						// view, and a world with two surface cameras uses the
-						// first — which `FindSurfaceCamera` says plainly rather
-						// than picking one silently.
-						HaveSurface = FindSurfaceCamera(store, Surface);
+						// **The surface cameras, read from the world that owns
+						// them.** All of them: the pipeline renders one offscreen
+						// view per surface index since v0.8, so a room of
+						// mirrored walls gets a working mirror per wall rather
+						// than one wall's image projected across all four.
+						(void)CollectSurfaceViews(store, Surfaces);
 					}
 
 					Views.Publish(
@@ -499,11 +768,20 @@ namespace client {
 			// replica has none: a camera is an entity, and an authoritative
 			// entity minted in a replica collides exactly with one the server
 			// minted, which is what `Store::SetAdoptOnly` refuses. A local row
-			// in a replicated world is safe now — `Store::CreatePredicted`
-			// mints from a range the server never allocates from — but who owns
-			// the replicated view's camera is a decision for whoever gives that
-			// world a camera, and nothing does yet.
+			// in a replicated world is safe — `Store::CreatePredicted` mints
+			// from a range the server never allocates from — and since v0.8
+			// something does own it: `AimReplicaViewer` puts a predicted camera
+			// in the replica and names it `ActiveCamera`.
+			//
+			// **Before `Present`, because `PreRender` is where the mirrors are
+			// aimed.** `aim-surface-cameras` reads `ActiveCamera` and reflects
+			// through it, so setting the eye afterwards would aim every mirror
+			// at where the client stood last frame.
 			if (ReportedJoin) {
+				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
+					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
+				});
+
 				Universe_->Present(Replicated, delta, Universe_->AlphaOf(Replicated));
 
 				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
@@ -666,9 +944,8 @@ namespace client {
 		// view the option does not know about. Two views drawn on top of each
 		// other is two scenes inside one, which reads as a rendering fault.
 		Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
-		LastFrame = Renderer.Render(
-			Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, HaveSurface ? &Surface : nullptr
-		);
+		LastFrame =
+			Renderer.Render(Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, Surfaces);
 
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();
@@ -700,12 +977,14 @@ namespace client {
 				// draw calls are the cheapest honest evidence that the passes
 				// are being submitted at all.
 				ENGINE_INFO(
-					"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced",
+					"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced, "
+					"{} surface pass(es)",
 					Clock.Now(),
 					FramesDrawn,
 					LastFrame.DrawCalls,
 					LastFrame.Culled,
-					LastFrame.SurfaceInstances
+					LastFrame.SurfaceInstances,
+					LastFrame.SurfacePasses
 				);
 				break;
 			}

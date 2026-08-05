@@ -3,6 +3,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>
@@ -605,35 +606,84 @@ TEST_CASE("a service nobody provides is an error", "[script]") {
 
 	// Naming it beats returning nil: a script that gets nil back fails one line
 	// later, somewhere that says nothing about the cause.
-	CHECK_FALSE(runtime->Run("game:GetService('Players')"));
-	CHECK(runtime->LastError().find("Players") != std::string::npos);
+	//
+	// `MarketplaceService` rather than `Players`, which this used to name and
+	// which the engine now provides. A test whose example becomes real is a test
+	// that stops testing what it says.
+	CHECK_FALSE(runtime->Run("game:GetService('MarketplaceService')"));
+	CHECK(runtime->LastError().find("MarketplaceService") != std::string::npos);
 }
 
-TEST_CASE("workspace is the world, not an instance in it", "[script]") {
+TEST_CASE("workspace is an instance in the world", "[script]") {
 	RegisterClasses();
 	Store store("test.world");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// `game` is the universe and `workspace` is the world this script runs on.
-	// The world is what entities live *in*, so it is not one of them — making
-	// it an entity would put a phantom row in every scene, counted by nothing
-	// and drawn by nothing.
+	// **The inverse of what this asserted before v0.7, deliberately.**
+	// `workspace` used to stand for the world itself, so it had the world's
+	// name and `part.Parent = workspace` meant "a root of this world". A world
+	// now holds a real `Workspace` service and the two were collapsed into it —
+	// see `script/Bindings.hpp` on `OpenWorkspace`. It is an ordinary instance:
+	// it has a class, a name of its own, and a place in the tree.
 	REQUIRE(runtime->Run(R"(
-		assert(workspace.Name == 'test.world', workspace.Name)
+		assert(typeof(workspace) == 'Instance', typeof(workspace))
+		assert(workspace.Name == 'Workspace', workspace.Name)
+		assert(workspace:IsA('Workspace'))
 
 		local part = Instance.new('Part')
 		part.Parent = workspace
 
 		-- Read back as the same value, not a second object that behaves alike.
 		assert(part.Parent == workspace, 'Parent did not round-trip')
+		assert(part:IsDescendantOf(workspace), 'not in the scene')
 	)"));
 
-	// Nothing was created to stand for the world.
+	// It is reached by the same name from `game`, and it is the same instance
+	// rather than a second handle onto it.
+	REQUIRE(runtime->Run("assert(game.Workspace == workspace)"));
+	REQUIRE(runtime->Run("assert(game:GetService('Workspace') == workspace)"));
+
+	// The part, the Workspace, and the nine other services `InstallServices`
+	// puts in every world. A phantom row standing for the world is exactly what
+	// there is still none of — `workspace` names something that was already
+	// there.
+	//
+	// The count moves whenever a service is added, and it is written out rather
+	// than derived on purpose: a service arriving without somebody noticing is
+	// exactly what this number is here to make impossible.
 	size_t instances = 0;
 	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
 		instances++;
 	});
-	CHECK(instances == 1);
+	CHECK(instances == 11);
+}
+
+// **The rule the render gate rests on**, stated from the script side: an
+// instance with no parent is not in the scene, and until v0.7 there was no way
+// to say that at all — a null parent meant "a root of this world", which was
+// drawn.
+TEST_CASE("an instance with no parent is an orphan, not a root of the world", "[script]") {
+	RegisterClasses();
+	Store store("test.world");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part')
+
+		-- Nil, where this used to hand back `workspace`.
+		assert(part.Parent == nil, 'a new instance is parented to nothing')
+		assert(not part:IsDescendantOf(workspace), 'an orphan is not in the scene')
+
+		-- And no walk of the tree reaches it, which is what makes it usable as
+		-- data: a template, a marker, a thing a script holds and never shows.
+		for _, child in workspace:GetChildren() do
+			assert(child ~= part, 'an orphan was listed')
+		end
+
+		-- Saying where it goes is what puts it in the scene.
+		part.Parent = workspace
+		assert(part:IsDescendantOf(workspace))
+	)"));
 }
 
 TEST_CASE("javascript sees the same world", "[script][js]") {
@@ -642,11 +692,14 @@ TEST_CASE("javascript sees the same world", "[script][js]") {
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
 	REQUIRE(runtime->Run(R"(
-		if (workspace.Name !== 'test.world') throw new Error(workspace.Name);
+		if (workspace.Name !== 'Workspace') throw new Error(workspace.Name);
 
 		const part = Instance.new('Part');
+		if (part.Parent !== null) throw new Error('a new instance is parented to nothing');
+
 		part.Parent = workspace;
 		if (part.Parent !== workspace) throw new Error('Parent did not round-trip');
+		if (!part.IsDescendantOf(workspace)) throw new Error('not in the scene');
 	)"));
 }
 
@@ -729,9 +782,14 @@ TEST_CASE("a script has no route to another world", "[script]") {
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	// The invariant the whole arrangement rests on. `workspace` is *this*
-	// world, and there is no `game.Workspaces`, no `GetWorld`, no way to name
+	// world's, and there is no `game.Workspaces`, no `GetWorld`, no way to name
 	// another one. If one ever appears, rule 3 is what it has to answer to.
-	REQUIRE(runtime->Run("assert(workspace.Name == 'test.world')"));
+	//
+	// Asked of the store rather than of the name, because the name is
+	// `Workspace` in every world now — it is the *instance* that is this
+	// world's, and a name could no longer tell the two apart.
+	REQUIRE(runtime->Run("assert(workspace:IsA('Workspace'))"));
+	CHECK(engine::scene::WorkspaceOf(store) != engine::ecs::NULL_ENTITY);
 
 	// Naming another world is an **error**, not a nil. That is stronger than
 	// the check this used to make: a nil member is indistinguishable from a
@@ -748,17 +806,25 @@ TEST_CASE("nil is spelled nil in both languages", "[script]") {
 	// Luau has it as a keyword. JavaScript gets it as a global aliasing `null`,
 	// because this is a Roblox-shaped API and a Roblox author writes
 	// `part.Parent = nil`.
+	// **`nil` detaches, and reads back as `nil`.** It used to read back as
+	// `workspace`, because a null parent meant "a root of this world"; now it
+	// means what it says, and the instance is in no scene until somebody says
+	// otherwise.
 	REQUIRE(MakeRuntime(store, Language::Luau)->Run(R"(
 		local part = Instance.new('Part')
+		part.Parent = workspace
+		assert(part.Parent == workspace)
+
 		part.Parent = nil
-		assert(part.Parent == workspace, 'nil parents to the world')
+		assert(part.Parent == nil, 'nil detaches')
 	)"));
 
 	REQUIRE(MakeRuntime(store, Language::JavaScript)->Run(R"(
 		if (nil !== null) throw new Error('nil is not null');
 		const part = Instance.new('Part');
+		part.Parent = workspace;
 		part.Parent = nil;
-		if (part.Parent !== workspace) throw new Error('nil parents to the world');
+		if (part.Parent !== null) throw new Error('nil detaches');
 	)"));
 }
 

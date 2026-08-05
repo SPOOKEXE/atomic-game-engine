@@ -1,11 +1,62 @@
 #include "Bindings.hpp"
 
+#include <engine/core/Log.hpp>
+
 #include <lualib.h>
+#include <string>
 #include <string_view>
 
 namespace engine::script {
 
 	namespace {
+		// Turns the store's reparent recording on, the first time a tree signal is
+		// connected.
+		//
+		// **On connection rather than on world creation**, for the reason
+		// `.Changed` observes late: a world nobody is watching must not pay for a
+		// list nobody drains. Idempotent, so the second connection is a store
+		// write of a bool it already holds.
+		void WatchTreeFor(LuauContext &context, SignalKind kind) {
+			if (kind == SignalKind::ChildAdded || kind == SignalKind::ChildRemoved ||
+				kind == SignalKind::DescendantAdded || kind == SignalKind::AncestryChanged) {
+				context.World->ObserveTree();
+				return;
+			}
+
+			if (kind != SignalKind::DescendantRemoving) {
+				return;
+			}
+
+			// **Its own switch, because it is not the same mechanism.** The
+			// four above are recorded and delivered at the barrier; this one is
+			// dispatched from inside the store, before the removal happens, and
+			// is the only signal here that is.
+			//
+			// Installed on the first connection rather than with the runtime,
+			// for the reason `.Changed` observes late: the fan-out walks the
+			// leaving subtree and every ancestor above it, and a world nobody
+			// asked must not pay for it.
+			if (context.RemovingHooked) {
+				return;
+			}
+			context.RemovingHooked = true;
+
+			lua_State *state = context.State;
+			context.World->OnDescendantRemoving([state](ecs::Entity ancestor, ecs::Entity leaving) {
+				PushInstanceValue(state, leaving);
+
+				// **The error is logged rather than returned**, because there
+				// is nowhere to return it to: this runs underneath
+				// `Store::SetParent`, called from wherever in the engine chose
+				// to move something. A handler that throws must not take the
+				// reparent with it.
+				const std::string failed = FireSignal(state, SignalKind::DescendantRemoving, ancestor, 1);
+				if (!failed.empty()) {
+					ENGINE_WARN("[script] a DescendantRemoving handler failed: {}", failed);
+				}
+			});
+		}
+
 		using ecs::Entity;
 
 		// What a signal userdata carries.
@@ -59,6 +110,7 @@ namespace engine::script {
 			if (signal.Kind == SignalKind::Changed || signal.Kind == SignalKind::PropertyChanged) {
 				context.Changes.Watch(*context.World, signal.Subject);
 			}
+			WatchTreeFor(context, signal.Kind);
 
 			// A registry ref keeps the function alive, and is what `CallbackRef`
 			// means on this side. The JavaScript side puts an index into its own
@@ -88,6 +140,7 @@ namespace engine::script {
 			if (signal.Kind == SignalKind::Changed || signal.Kind == SignalKind::PropertyChanged) {
 				context.Changes.Watch(*context.World, signal.Subject);
 			}
+			WatchTreeFor(context, signal.Kind);
 
 			lua_pushvalue(state, 2);
 			const int reference = lua_ref(state, -1);

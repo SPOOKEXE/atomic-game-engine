@@ -25,6 +25,7 @@
 // that API would have had to be rejected on rule 5 alone.
 
 #include "JsBindings.hpp"
+#include "Subtree.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Random.hpp>
@@ -39,9 +40,11 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/script/Datatypes.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -134,6 +137,48 @@ namespace engine::script {
 			return As<ConnectionId>(context, value, JsOf(context).ConnectionClass);
 		}
 
+		// Starts recording what a tree signal needs, on the first connection.
+		//
+		// **The same two mechanisms the Luau side installs, and neither is
+		// optional here.** Four of the five are recorded and delivered at the
+		// barrier, so the store has to be told to record; `DescendantRemoving`
+		// is dispatched from inside the store before the removal, so the store
+		// has to be given somewhere to dispatch to.
+		//
+		// Late rather than with the runtime, for the reason `.Changed` observes
+		// late: the removal fan-out walks the leaving subtree and every
+		// ancestor above it, and a world nobody asked must not pay for it.
+		void WatchJsTreeFor(JSContext *context, SignalKind kind) {
+			JsContext &bound = JsOf(context);
+
+			if (kind == SignalKind::ChildAdded || kind == SignalKind::ChildRemoved ||
+				kind == SignalKind::DescendantAdded || kind == SignalKind::AncestryChanged) {
+				bound.World->ObserveTree();
+				return;
+			}
+
+			if (kind != SignalKind::DescendantRemoving || bound.RemovingHooked) {
+				return;
+			}
+			bound.RemovingHooked = true;
+
+			bound.World->OnDescendantRemoving([context](Entity ancestor, Entity leaving) {
+				JSValue subject = MakeJsInstance(context, leaving);
+
+				// **Logged rather than returned**, because there is nowhere to
+				// return it to: this runs underneath `Store::SetParent`, called
+				// from wherever in the engine chose to move something. A
+				// handler that throws must not take the reparent with it.
+				const std::string failed =
+					FireJsSignal(context, SignalKind::DescendantRemoving, ancestor, 1, &subject);
+				if (!failed.empty()) {
+					ENGINE_WARN("[script] a DescendantRemoving handler failed: {}", failed);
+				}
+
+				JS_FreeValue(context, subject);
+			});
+		}
+
 		JSValue ConnectTo(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, bool once) {
 			JsContext &bound = JsOf(context);
 
@@ -152,6 +197,7 @@ namespace engine::script {
 			if (signal->Kind == SignalKind::Changed || signal->Kind == SignalKind::PropertyChanged) {
 				bound.Changes.Watch(*bound.World, signal->Subject);
 			}
+			WatchJsTreeFor(context, signal->Kind);
 
 			const ConnectionId id = bound.Signals.Connect(
 				signal->Kind, signal->Subject, Retain(context, argv[0]), signal->Property
@@ -251,18 +297,17 @@ namespace engine::script {
 			return JS_NewBool(context, ecs::Classes::IsA(JsOf(context).World->ClassOf(instance), wanted));
 		}
 
-		// Forgets every listener on an instance, so a `.Changed` connection on a
-		// destroyed row does not fire against a dead handle forever.
+		// Forgets every listener on an instance and on everything under it, so a
+		// `.Changed` connection on a destroyed row does not fire against a dead
+		// handle forever.
 		void ForgetInstance(JSContext *context, Entity instance) {
 			JsContext &bound = JsOf(context);
 
-			std::vector<CallbackRef> released;
-			bound.Signals.DropSubject(instance, released);
-			bound.Changes.Unwatch(instance);
-
-			for (const CallbackRef reference : released) {
-				Release(context, reference);
-			}
+			ForgetSubtree(
+				*bound.World, bound.Signals, bound.Changes, instance, [context](CallbackRef reference) {
+					Release(context, reference);
+				}
+			);
 		}
 
 		JSValue InstanceDestroy(JSContext *context, JSValueConst self, int, JSValueConst *) {
@@ -272,11 +317,10 @@ namespace engine::script {
 			}
 
 			JsContext &bound = JsOf(context);
-			ForgetInstance(context, instance);
 
-			// Children go too — `DestroyInstance` takes the whole subtree, so a
-			// listener on one would survive the row it was watching.
-			bound.World->EachChild(instance, [&](Entity child) { ForgetInstance(context, child); });
+			// The whole subtree — `DestroyInstance` takes every descendant, so a
+			// listener anywhere under here would survive the row it was watching.
+			ForgetInstance(context, instance);
 
 			bound.World->DestroyInstance(instance);
 			return JS_UNDEFINED;
@@ -314,23 +358,9 @@ namespace engine::script {
 			JSValue array = JS_NewArray(context);
 			uint32_t written = 0;
 
-			// An explicit queue rather than recursion: a deep tree would put the
-			// scene's depth on the C stack, and a scene's depth is the author's
-			// to choose.
-			std::vector<Entity> pending;
-			store.EachChild(instance, [&](Entity child) { pending.push_back(child); });
-
-			while (!pending.empty()) {
-				const Entity current = pending.front();
-				pending.erase(pending.begin());
-
-				JS_SetPropertyUint32(context, array, written++, MakeJsInstance(context, current));
-
-				size_t insertAt = 0;
-				store.EachChild(current, [&](Entity child) {
-					pending.insert(pending.begin() + static_cast<ptrdiff_t>(insertAt++), child);
-				});
-			}
+			EachDescendant(store, instance, [&](Entity descendant) {
+				JS_SetPropertyUint32(context, array, written++, MakeJsInstance(context, descendant));
+			});
 			return array;
 		}
 
@@ -345,10 +375,88 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
-			const Entity found = JsOf(context).World->FindFirstChild(instance, name);
+			// **The second argument, which Luau's copy of this also ignored.**
+			// `FindFirstChild("Humanoid", true)` answered the non-recursive
+			// question and said nothing about it.
+			const bool recursive = argc > 1 && JS_ToBool(context, argv[1]) > 0;
+
+			const Entity found = JsOf(context).World->FindFirstChild(instance, name, recursive);
 			JS_FreeCString(context, name);
 
 			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
+		}
+
+		// The class named by an argument, or an invalid id.
+		ecs::ClassId JsClassArgument(JSContext *context, JSValueConst value) {
+			const char *name = JS_ToCString(context, value);
+			if (name == nullptr) {
+				return ecs::ClassId{};
+			}
+
+			const ecs::ClassId klass = ecs::Classes::Find(core::Name(name));
+			JS_FreeCString(context, name);
+			return klass;
+		}
+
+		// The four class-keyed lookups, which differ only in which one they call.
+		//
+		// **One function and a selector rather than four near-copies**, because
+		// the argument handling is the half that goes wrong — a `JS_FreeCString`
+		// missed on one path is a leak nobody sees — and four copies of it is
+		// four places to miss it.
+		enum class JsLookup { ChildOfClass, ChildWhichIsA, AncestorOfClass, AncestorWhichIsA };
+
+		template <JsLookup Kind>
+		JSValue InstanceClassLookup(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY || argc < 1) {
+				return JS_ThrowTypeError(context, "this needs a class name");
+			}
+
+			const ecs::ClassId klass = JsClassArgument(context, argv[0]);
+			Store &store = *JsOf(context).World;
+
+			Entity found = ecs::NULL_ENTITY;
+			if constexpr (Kind == JsLookup::ChildOfClass) {
+				found = store.FindFirstChildOfClass(instance, klass);
+			} else if constexpr (Kind == JsLookup::ChildWhichIsA) {
+				const bool recursive = argc > 1 && JS_ToBool(context, argv[1]) > 0;
+				found = store.FindFirstChildWhichIsA(instance, klass, recursive);
+			} else if constexpr (Kind == JsLookup::AncestorOfClass) {
+				found = store.FindFirstAncestorOfClass(instance, klass);
+			} else {
+				found = store.FindFirstAncestorWhichIsA(instance, klass);
+			}
+
+			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
+		}
+
+		JSValue
+		InstanceFindFirstAncestor(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY || argc < 1) {
+				return JS_ThrowTypeError(context, "FindFirstAncestor needs a name");
+			}
+
+			const char *name = JS_ToCString(context, argv[0]);
+			if (name == nullptr) {
+				return JS_EXCEPTION;
+			}
+
+			const Entity found = JsOf(context).World->FindFirstAncestor(instance, name);
+			JS_FreeCString(context, name);
+
+			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
+		}
+
+		JSValue InstanceGetFullName(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "GetFullName needs an instance");
+			}
+
+			const std::string full = JsOf(context).World->GetFullName(instance);
+			return JS_NewStringLen(context, full.data(), full.size());
 		}
 
 		JSValue InstanceIsDescendantOf(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
@@ -359,11 +467,11 @@ namespace engine::script {
 
 			JsContext &bound = JsOf(context);
 
-			// The world is every root's ancestor, so `part.IsDescendantOf(
-			// workspace)` is true for anything parented into it.
-			if (JS_IsStrictEqual(context, argv[0], bound.Workspace)) {
-				return JS_NewBool(context, bound.World->Alive(instance));
-			}
+			// No case for the workspace any more, and losing it is the point:
+			// this used to be true for every live instance in the world, because
+			// the world was every root's ancestor. It is now the real subtree
+			// question — the same one the render gate asks — so a script and the
+			// renderer cannot disagree about whether something is in the scene.
 			return JS_NewBool(context, bound.World->IsDescendantOf(instance, JsEntityOf(context, argv[0])));
 		}
 
@@ -432,6 +540,20 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "not an instance");
 			}
 			return MakeJsSignal(context, SignalKind::Changed, instance);
+		}
+
+		// The tree's own signals, as getters for the same reason `Changed` is
+		// one: Roblox spells them as properties and they take no arguments.
+		//
+		// **One template rather than five near-copies.** Each differs only in
+		// which kind it names, and five hand-written bodies is five places for
+		// the null check to be forgotten.
+		template <SignalKind Kind> JSValue InstanceTreeSignal(JSContext *context, JSValueConst self) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+			return MakeJsSignal(context, Kind, instance);
 		}
 
 		// --- the codec bridge ------------------------------------------------
@@ -956,6 +1078,76 @@ namespace engine::script {
 		return firstError;
 	}
 
+	std::string PumpJsTree(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		if (!bound.World->TreeObserved()) {
+			return {};
+		}
+
+		// **Taken, not read.** A handler may reparent something, and a swap
+		// leaves the store's list empty before the first one runs — so the move
+		// it makes belongs to the next delivery instead of being appended to
+		// the list being walked.
+		std::vector<ecs::TreeChange> changes;
+		bound.World->TakeTreeChanges(changes);
+		if (changes.empty()) {
+			return {};
+		}
+
+		std::string firstError;
+		const auto note = [&](std::string message) {
+			if (firstError.empty() && !message.empty()) {
+				firstError = std::move(message);
+			}
+		};
+
+		// One argument for three of the four signals, freed once per use rather
+		// than once per fire — `MakeJsInstance` mints an object per call, and
+		// leaking one per reparent is a leak per reparent.
+		const auto fire = [&](SignalKind kind, Entity subject, Entity argument) {
+			JSValue value = MakeJsInstance(context, argument);
+			note(FireJsSignal(context, kind, subject, 1, &value));
+			JS_FreeValue(context, value);
+		};
+
+		for (const ecs::TreeChange &change : changes) {
+			if (change.From != ecs::NULL_ENTITY) {
+				fire(SignalKind::ChildRemoved, change.From, change.Instance);
+			}
+
+			if (change.To != ecs::NULL_ENTITY) {
+				fire(SignalKind::ChildAdded, change.To, change.Instance);
+
+				// `DescendantAdded` is every ancestor's, not just the new
+				// parent's — that is the whole difference between it and
+				// `ChildAdded`.
+				for (Entity above = change.To; above != ecs::NULL_ENTITY;
+					 above = bound.World->ParentOf(above)) {
+					fire(SignalKind::DescendantAdded, above, change.Instance);
+				}
+			}
+
+			// **The instance and everything under it**, because an ancestry
+			// change is inherited: moving a model changes the ancestry of every
+			// part in it, and a script watching a part has no way to know its
+			// model moved otherwise.
+			const auto ancestry = [&](Entity subject) {
+				JSValue arguments[2] = {
+					MakeJsInstance(context, subject),
+					MakeJsInstance(context, bound.World->ParentOf(subject)),
+				};
+				note(FireJsSignal(context, SignalKind::AncestryChanged, subject, 2, arguments));
+				JS_FreeValue(context, arguments[0]);
+				JS_FreeValue(context, arguments[1]);
+			};
+
+			ancestry(change.Instance);
+			bound.World->EachDescendant(change.Instance, ancestry);
+		}
+
+		return firstError;
+	}
+
 	std::string PumpJsTasks(JSContext *context) {
 		JsContext &bound = JsOf(context);
 		std::string firstError;
@@ -1037,29 +1229,59 @@ namespace engine::script {
 		}
 	}
 
+	void InstallJsInstanceMethods(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		JSValue global = JS_GetGlobalObject(context);
+
+		JSValue methods = JS_NewObject(context);
+		static const JSCFunctionListEntry entries[] = {
+			JS_CFUNC_DEF("IsA", 1, InstanceIsA),
+			JS_CFUNC_DEF("Destroy", 0, InstanceDestroy),
+			JS_CFUNC_DEF("Clone", 0, InstanceClone),
+			JS_CFUNC_DEF("GetChildren", 0, InstanceGetChildren),
+			JS_CFUNC_DEF("GetDescendants", 0, InstanceGetDescendants),
+			JS_CFUNC_DEF("FindFirstChild", 1, InstanceFindFirstChild),
+			JS_CFUNC_DEF("FindFirstChildOfClass", 1, InstanceClassLookup<JsLookup::ChildOfClass>),
+			JS_CFUNC_DEF("FindFirstChildWhichIsA", 1, InstanceClassLookup<JsLookup::ChildWhichIsA>),
+			JS_CFUNC_DEF("FindFirstAncestor", 1, InstanceFindFirstAncestor),
+			JS_CFUNC_DEF("FindFirstAncestorOfClass", 1, InstanceClassLookup<JsLookup::AncestorOfClass>),
+			JS_CFUNC_DEF("FindFirstAncestorWhichIsA", 1, InstanceClassLookup<JsLookup::AncestorWhichIsA>),
+			JS_CFUNC_DEF("GetFullName", 0, InstanceGetFullName),
+			JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
+			JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
+			JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
+			JS_CGETSET_DEF("Changed", InstanceChanged, nullptr),
+			JS_CGETSET_DEF("ChildAdded", InstanceTreeSignal<SignalKind::ChildAdded>, nullptr),
+			JS_CGETSET_DEF("ChildRemoved", InstanceTreeSignal<SignalKind::ChildRemoved>, nullptr),
+			JS_CGETSET_DEF("DescendantAdded", InstanceTreeSignal<SignalKind::DescendantAdded>, nullptr),
+			JS_CGETSET_DEF("DescendantRemoving", InstanceTreeSignal<SignalKind::DescendantRemoving>, nullptr),
+			JS_CGETSET_DEF("AncestryChanged", InstanceTreeSignal<SignalKind::AncestryChanged>, nullptr),
+		};
+		// **`std::size`, not a number somebody has to remember.** This read
+		// `10` while the list held sixteen, so the last six — including
+		// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` — were
+		// simply not installed. Nothing warned: a method that is not there
+		// is `undefined`, and `undefined` only fails at the call site, in
+		// whatever script reaches it first.
+		JS_SetPropertyFunctionList(context, methods, entries, static_cast<int>(std::size(entries)));
+
+		// Held in the context so `PrototypeFor` can put every class
+		// prototype behind it, and so it is freed with everything else.
+		bound.Owned.push_back(JS_DupValue(context, methods));
+		JS_SetPropertyStr(context, global, "__instanceMethods", methods);
+
+		JS_FreeValue(context, global);
+	}
+
 	void OpenJsSurface(JSContext *context) {
 		JsContext &bound = JsOf(context);
 		JSValue global = JS_GetGlobalObject(context);
 
-		// The two enums this vocabulary needs. `ecs::EnumTable` is process-wide
-		// and takes a second declaration as agreement, so registering here as
-		// well as on the Luau side is not a conflict.
-		static const std::string_view EASING_STYLES[] = {
-			"Linear",
-			"Quad",
-			"Cubic",
-			"Quart",
-			"Quint",
-			"Sine",
-			"Exponential",
-			"Circular",
-			"Back",
-			"Elastic",
-			"Bounce",
-		};
-		static const std::string_view EASING_DIRECTIONS[] = {"In", "Out", "InOut"};
-		ecs::EnumTable::Register("EasingStyle", EASING_STYLES);
-		ecs::EnumTable::Register("EasingDirection", EASING_DIRECTIONS);
+		// The two enums this vocabulary needs. Shared with the Luau surface and
+		// with the bindings generator rather than listed again here: process-wide
+		// registration takes a second declaration as agreement, which is what
+		// kept the duplicate invisible until a third caller needed the same list.
+		RegisterDatatypeEnums();
 
 		// --- signals ---
 		{
@@ -1076,30 +1298,6 @@ namespace engine::script {
 				JS_CGETSET_DEF("Connected", ConnectionConnected, nullptr),
 			};
 			InstallClass<ConnectionId>(context, bound.ConnectionClass, "RBXScriptConnection", members, 2);
-		}
-
-		// --- the instance methods, on the prototype every class prototype sits
-		// behind ---
-		{
-			JSValue methods = JS_NewObject(context);
-			static const JSCFunctionListEntry entries[] = {
-				JS_CFUNC_DEF("IsA", 1, InstanceIsA),
-				JS_CFUNC_DEF("Destroy", 0, InstanceDestroy),
-				JS_CFUNC_DEF("Clone", 0, InstanceClone),
-				JS_CFUNC_DEF("GetChildren", 0, InstanceGetChildren),
-				JS_CFUNC_DEF("GetDescendants", 0, InstanceGetDescendants),
-				JS_CFUNC_DEF("FindFirstChild", 1, InstanceFindFirstChild),
-				JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
-				JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
-				JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
-				JS_CGETSET_DEF("Changed", InstanceChanged, nullptr),
-			};
-			JS_SetPropertyFunctionList(context, methods, entries, 10);
-
-			// Held in the context so `PrototypeFor` can put every class
-			// prototype behind it, and so it is freed with everything else.
-			bound.Owned.push_back(JS_DupValue(context, methods));
-			JS_SetPropertyStr(context, global, "__instanceMethods", methods);
 		}
 
 		// --- task ---

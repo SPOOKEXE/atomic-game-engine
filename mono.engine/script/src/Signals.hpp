@@ -46,6 +46,37 @@ namespace engine::script {
 		// the key, because a per-property key would mean a map entry per
 		// property per instance for a surface most scripts never touch.
 		PropertyChanged,
+
+		// `instance.ChildAdded` and `instance.ChildRemoved`. The subject is the
+		// parent, and the handler is called with the child.
+		ChildAdded,
+		ChildRemoved,
+
+		// `instance.DescendantAdded`. The subject is any ancestor of what
+		// arrived, and the handler is called with it.
+		//
+		DescendantAdded,
+
+		// `instance.DescendantRemoving`. The subject is the ancestor about to
+		// lose it, and the handler is called with what is leaving.
+		//
+		// **The one signal here that is not queued, and the only one that
+		// cannot be.** Everything else on this list is recorded and delivered
+		// at the next barrier — `Changes.hpp` sets out why a signal must not
+		// fire from inside a write. This one's whole contract is that the
+		// handler is called *while the thing is still there*, which a queue
+		// drained a tick later cannot offer, because by then it has gone.
+		//
+		// So it is dispatched synchronously from `Store::OnDescendantRemoving`,
+		// at the top of the operation and before a single link moves. That is a
+		// different position from the one `Changes.hpp` rules out: nothing is
+		// half-written, because nothing has been written.
+		DescendantRemoving,
+
+		// `instance.AncestryChanged`. The subject is the instance whose chain
+		// of parents changed, which is what moved *and everything under it*,
+		// and the handler is called with the instance and its new parent.
+		AncestryChanged,
 	};
 
 	// A callable, as the VM that owns it names one.

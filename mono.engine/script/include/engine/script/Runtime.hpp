@@ -36,12 +36,15 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Store.hpp>
+#include <engine/script/Debugger.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::script {
 
@@ -139,6 +142,22 @@ namespace engine::script {
 
 		// Where scripts running under this runtime are standing.
 		HostRole Role;
+	};
+
+	// What one script cost the last time it ran.
+	//
+	// @since v0.10
+	struct ScriptCost {
+		// Which script. A handle, so the panel can name it from the store
+		// rather than holding a copy of a name that a rename would stale.
+		ecs::Entity Instance;
+
+		// VM steps spent inside its top level.
+		uint64_t Steps = 0;
+
+		// Whether it ran without raising. A script that failed half way through
+		// has a step count and it is not comparable to one that finished.
+		bool Completed = true;
 	};
 
 	// One VM, bound to one world.
@@ -243,12 +262,82 @@ namespace engine::script {
 			return Store;
 		}
 
+		// How many VM steps this runtime has spent since it was made.
+		//
+		// **Steps rather than seconds, for the reason the budget is counted in
+		// them**: a wall-clock figure makes what a script cost depend on how
+		// busy the machine was, and two runs of one recording would then
+		// disagree about it. A step is the same on every machine.
+		//
+		// Zero from a VM with no equivalent counter, which is honest rather than
+		// approximate — a fabricated number here would be compared against a
+		// real one in the same table.
+		//
+		// @return The cumulative step count.
+		virtual uint64_t StepsTaken() const {
+			return 0;
+		}
+
+		// What each script cost when it last ran, most expensive first.
+		//
+		// **Filled by `RunWorldScripts` and by nothing else**, so it measures a
+		// script's own top level rather than the heartbeat work it went on to
+		// connect. That distinction is worth keeping rather than blurring: the
+		// connections are held by `SignalTable` as opaque callables and nothing
+		// records which script made one, so attributing beat time to a script
+		// would be a guess wearing a number's clothes.
+		//
+		// @return One entry per script that ran, valid until the next run.
+		std::span<const ScriptCost> Costs() const {
+			return ScriptCosts;
+		}
+
+		// This runtime's breakpoints, and what they caught.
+		//
+		// **One per runtime rather than a global**, for the reason the store is:
+		// two runtimes over two worlds must not share them, and a file-static
+		// would have made that mistake available.
+		//
+		// A VM that cannot honour a breakpoint still hands one back — the
+		// breakpoints are then a list nothing consults, which is visible in the
+		// panel rather than silently ignored.
+		//
+		// @return The debugger.
+		Debugger &Debug() {
+			return Breakpoints;
+		}
+
+		// This runtime's breakpoints, for a reader.
+		//
+		// @return The debugger.
+		const Debugger &Debug() const {
+			return Breakpoints;
+		}
+
 	  protected:
+		// Binds a runtime to the world it builds into and the role it believes
+		// it is on.
+		//
+		// @param store The world. Outlives the runtime.
+		// @param role  Where scripts under this runtime are standing.
 		Runtime(ecs::Store &store, const HostRole &role) : Store(store), HostRoleValue(role) {}
 
+		// The world this runtime builds into. A reference rather than a handle,
+		// because a VM is created for one world and dies with it.
 		ecs::Store &Store;
+
+		// Where scripts under this runtime believe they are standing.
 		HostRole HostRoleValue;
+
+		// The last failure, or empty. Read through `LastError`.
 		std::string Error;
+
+		// What each script cost, rebuilt by every `RunWorldScripts`. Read
+		// through `Costs`.
+		std::vector<ScriptCost> ScriptCosts;
+
+		// Where execution should be reported from. Read through `Debug`.
+		Debugger Breakpoints;
 	};
 
 	// Opens a VM of the given language over `store`.

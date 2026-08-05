@@ -17,6 +17,7 @@ cd atomic-game-engine
 just setup                  # submodules, and shaderc's own DEPS
 just build                  # everything, dev preset
 just run --stats --graph    # the client, both debug panels open
+just edit                   # the editor, on a new game
 just test                   # only the suites your change could have affected
 ```
 
@@ -183,9 +184,10 @@ mains over the parts of it they need.
 | You want to | Run | Adds, over the engine |
 |---|---|---|
 | Run a script with nothing else in the way | `atomic` *(v0.6)* | nothing |
+| Build a game | `studio` *(v0.7)* | the editor: explorer, properties, script editor, run and play |
 | See something on screen | `client` | window, input, renderer, and the client half of networking |
 | Host a simulation with no window | `server` | the tick loop, and the hosting half of networking |
-| Serve a game's content | `cdn` | a content root, and later the manifest and the origin's HTTP layer |
+| Serve a game's content | `cdn` | a content store, published and signed, served over HTTP |
 | Exercise one module | its test binary | Catch2 |
 | Re-run only what your change affected | `testrunner` | — |
 | Check the architecture held | a CMake script | — |
@@ -196,8 +198,169 @@ hosting, the session — plus, on the client, presentation. A script that needs
 none of that does not need either program, which is what the standalone runtime
 is for.
 
-`client --help` and `server --help` print their own options, generated from the
-option declarations, so they cannot drift from what the program accepts.
+`client --help`, `server --help` and `studio --help` print their own options,
+generated from the option declarations, so they cannot drift from what the
+program accepts.
+
+---
+
+# The editor *(v0.7)*
+
+```sh
+just edit                       # a new game, one world, a baseplate
+just edit --game My.agame       # open one
+```
+
+The one program where `RunService:IsStudio()` is true. It writes a `.agame`,
+which is the file the other two programs read:
+
+```sh
+just host --game My.agame       # a dedicated server hosting every world in it
+just run  --game My.agame       # single-player, both roles in one process
+```
+
+### The window
+
+A menu bar, a toolbar, and three docked panels around a hole in the middle that
+the world is drawn into. The layout is yours after the first run — it is written
+to `studio-layout.ini` beside the binary, and the built-in arrangement is only
+used when that file does not exist.
+
+| Panel | What it is |
+|---|---|
+| Viewport | the world, drawn into the panel |
+| Explorer | the universe, its worlds, and every instance in the active one |
+| Worlds | every scene: which is active, what state it is in, how much is in it |
+| Properties | whatever is selected, grouped by which class declares each property |
+| Script Editor | a tab per open script |
+| Output | the engine log, including what your scripts `print` |
+
+**Every panel is a panel** — dock it, tear it off, resize it, close it. The
+Viewport is one of them and not a hole in the middle: the world is rendered into
+a texture and the panel shows it, so it moves and docks like the rest. **View**
+brings back anything you closed, and **View ▸ Reset Layout** puts everything
+back where it started.
+
+**The Worlds panel is where scenes are managed.** New, Duplicate, Rename,
+Export and Remove, plus a click to choose which one you are working on. Renaming
+and duplicating go through the save format — a scene is written out and read
+back — so both are refused while a game is running, when a world's name is
+carrying live bus traffic.
+
+**The tree is the mapping `game` and `workspace` already had.** The root is the
+universe, which is what a script calls `game`; each world under it is a scene,
+and the active one is what a script running in it calls `workspace`. That is not
+a resemblance — `script/src/Services.cpp` established the mapping at v0.6 and the
+explorer draws the same objects.
+
+### Getting around
+
+| | |
+|---|---|
+| Right mouse, held | look |
+| `W` `A` `S` `D`, while looking | move |
+| `Q` `E`, while looking | down and up |
+| Wheel, while looking | how fast, not how far |
+
+The camera is not an entity in any world, which is why it is not saved, not
+replicated and not reset by Stop.
+
+### Editing
+
+Insert Object on the toolbar, or right-click in the tree. The list is every
+class registered under `Instance` — it is read from `ecs::Classes` rather than
+written down, so a class added by any module appears in it with nothing in the
+editor changing. The same is true of the properties panel: it walks the class's
+declared properties, and an `Enum` property is a list of its registered members
+rather than a text field, so a mistyped material is impossible rather than
+caught.
+
+Drag a row onto another to reparent it. `Ctrl+D` duplicates, `Del` deletes,
+`Ctrl+S` saves.
+
+### Run, Play and Stop
+
+| | |
+|---|---|
+| **Run** (`F6`) | the server's scripts — `Script`, not `LocalScript` |
+| **Play** (`F5`) | both, which is what single-player is |
+| **Stop** (`Shift+F5`) | ends it, and *puts the scene back* |
+
+Stop is a snapshot restore, exactly as it is in Roblox: what your scripts did to
+the world is undone, and what you authored before pressing Play is not. Edits
+made to a script while the game is running apply on the next run, and the editor
+says so rather than leaving you to find out.
+
+**Nothing ticks in edit mode.** A world that simulated while you were building it
+would settle physics under your hands — a part placed in the air would be on the
+floor by the time you looked away.
+
+### Options
+
+| Option | Default | What it does |
+|---|---|---|
+| `--game PATH` | — | open a game file at startup |
+| `--width`, `--height` | 1600×900 | window size |
+| `--scale FACTOR` | 1.0 | multiplies every font and padding |
+| `--tick-rate HZ` | 60 | simulation rate while running |
+| `--frames N` | — | exit after N frames, for a script or a screenshot |
+| `--capture PATH` | — | write the viewport's world to a BMP and carry on |
+| `--headless` | off | run with no window at all; needs `--frames` |
+| `--run MODE` | `edit` | start in `edit`, `server` or `play` |
+| `--override-assets-directory DIR` | — | read staged data from here |
+
+### Driving it with no display
+
+```sh
+just studio-smoke                      # loads, plays, renders, writes a capture
+just edit --headless --frames 12 --run play --capture shot.bmp
+```
+
+**`--headless` is a renderer with no window rather than a hidden one.** There is
+no swapchain, nothing is presented, and the overlay and editor chrome do not
+draw — but the game loads, the panels lay themselves out, `--run play` starts the
+scripts, the worlds tick and the world is drawn into an offscreen target that
+`--capture` writes out. A hidden window would still own a swapchain, and whether
+one can be acquired for a window nobody can see is a per-platform answer nobody
+should have to know.
+
+That is what makes the editor checkable by a build server, by a golden-image
+comparison, or by something driving it that is not a person — none of which
+should depend on a display being free.
+
+`--capture` works with a window too, and captures the world rather than the
+whole editor: the chrome is drawn onto the swapchain, and SDL does not promise
+that is readable. What it answers is "did the scene render", which is the
+question a renderer is asked.
+
+### The file it writes
+
+A `.agame` is one XML document holding the universe, every world, every
+instance and every script's text. It is meant to be read:
+
+```xml
+<Game format="1" name="Untitled">
+	<Universe mode="WorldParallel" catchUp="8" busBudget="64" />
+	<World name="Start" tickRate="60" idleTickRate="2" faultLimit="3">
+		<Sources>
+			<Source path="Scripts/Script.luau"><![CDATA[print("hello")]]></Source>
+		</Sources>
+		<Item class="Part" name="Baseplate" id="1">
+			<Property name="Size" type="Vector3">128, 1, 128</Property>
+		</Item>
+	</World>
+</Game>
+```
+
+Only properties that differ from their class default are written, which is what
+keeps a scene of a thousand parts a file you can read a diff of. A single world
+exports on its own as a `.aworld` — File ▸ Export Active World — and imports
+back into any universe.
+
+**It is not a snapshot and does not replace one.** `--record` still writes the
+binary format, which carries a *running* universe including tick counters and
+bus state and is same-build only. A game file is content: it survives an engine
+version, and that is what it is for.
 
 ---
 
@@ -225,6 +388,53 @@ Luau; which one a file is comes from its extension, and a game may mix them.
 `mono.engine/examples/` holds the demo scenes, each written twice — once in each
 language, doing the same thing — so that the binding surface is exercised from
 both.
+
+### Autocomplete while you write one
+
+Both languages are typed against files generated from the class table, so an
+editor knows what a script may name without anything being restated by hand:
+
+| file | what it is | checked in |
+| --- | --- | --- |
+| `mono.engine/script/bindings/engine.d.luau` | the Luau definitions | yes, generated |
+| `mono.engine/script/bindings/engine.d.ts` | the TypeScript type root | yes, generated |
+| `.luaurc` | strict by default, and the lints | yes |
+| `luau-lsp.json` | points the language server at the definitions | yes |
+| `tsconfig.json` | lists the type root; `types: []`, no DOM | yes |
+| `package.json` | pins the exact `tsc` the check runs | yes |
+| `.vscode/settings.json` | the same luau-lsp keys, for VS Code | **no** — `.vscode/` is gitignored |
+
+**Nothing needs installing.** The language server is vendored at
+`mono.vendor/luau-lsp` and built on demand:
+
+```sh
+just luau-lsp              # clones the submodule if needed, prints the binary's path
+```
+
+Point your editor at that binary and at `luau-lsp.json`. `.vscode/` is
+gitignored — editor configuration is personal here — so `luau-lsp.json` is the
+copy that survives a fresh clone, and a VS Code `settings.json` should mirror it
+rather than diverge from it.
+
+**One of its settings is load-bearing rather than a preference.**
+`luau-lsp.fflags.enableNewSolver` must be on: the declarations use the `keyof`
+and `index` type functions, which exist only in Luau's new solver, and without
+it the definitions file fails to load *entirely* — every global reads as
+unknown, which looks like the file is missing rather than misconfigured.
+
+TypeScript needs no separate setup: `tsconfig.json` lists the type root and
+`package.json` pins the compiler, which `just typecheck` installs on first run.
+
+Both languages are checked together by `just typecheck`, which `just check`
+runs — see [The script type check](#the-script-type-check) for what it catches
+that `just bindings-check` does not. The declarations themselves are regenerated
+by `just bindings`. **A change to either is a change to what every script can
+name**, so the diff is the review.
+
+They do not describe the same surface everywhere, and that is deliberate: the
+two VMs differ. `game:GetService("Workspace")` and `RunService:IsServer()` are
+Luau's, and each file says what its own VM installs rather than what the other
+one has.
 
 ### What happens today
 
@@ -298,6 +508,7 @@ v0.6.
 --height PX                      Window height (default 720)
 --profiler-tab NAME              frame, categories, systems or counters
 --script PATH                    Luau or TypeScript script to run at startup (v0.6)
+--game PATH                      Game file to play single-player (.agame) (v0.7)
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
 --override-assets-directory DIR  Read shaders and data from here
@@ -306,6 +517,12 @@ v0.6.
 
 Naming a `--profiler-tab` opens the graph, and `--profile-seconds` turns
 collection on — asking to see something is not a separate flag from showing it.
+
+`--game` plays a `.agame` written by the editor: every world in it is
+simulated, its scripts run with both roles true, and there is no socket and no
+server library involved — single-player is the format and a VM, not a server
+hosted in this process. Given both `--game` and `--script`, the game file wins
+and the client says so rather than choosing quietly.
 
 ### Benchmarks
 
@@ -463,7 +680,7 @@ just host --ticks 300 --entities 20000
 --entities N                     Entities in the placeholder world (default 4096)
 --ticks N                        Exit after N ticks
 --seconds N                      Exit after N seconds
---game PATH                      Script or game file to host (v0.2+)
+--game PATH                      Scene script, or a .agame universe to host (v0.7)
 --record PATH                    Write a recording of this run
 --replay PATH                    Replay a recording instead of simulating
 --override-assets-directory DIR  Read staged data from here
@@ -565,32 +782,144 @@ the game for single-player, LAN and split-screen, or on its own for a large
 content collection. Nothing inside the program tells them apart — the difference
 is which directory it mounts and who can reach it.
 
+Publishing and serving are **two invocations, and the split is deliberate**: the
+signing key belongs to whoever publishes the game and the origin holds none,
+which is what makes it safe to deploy on hardware nobody here owns.
+
+### Publish a directory of files
+
 ```sh
-just serve                            # the staged directory, beside the binary
-just serve --root ./content           # a directory of your own
-./.cache/build/dev/cdn/cdn --help
+./.cache/build/dev/cdn/cdn \
+    --publish ./content \
+    --store   ./store \
+    --signing-key $(printf '7a%.0s' {1..32})
+```
+
+It walks the directory, cuts every file into content-defined chunks, writes them
+into the store, classifies each asset from its extension, groups them, trains a
+compression dictionary if there is enough content to learn from, and signs the
+manifest root. It prints the root and **the publisher key**, which is what a
+client has to be told:
+
+```
+[info] cdn: published 5 assets in 1 bundles — 717432 bytes of content in 717432 bytes of chunks
+[info] cdn: manifest root 8a1c34d1d3f8...
+[info] cdn: publisher key ba42458e83ba...
+```
+
+Republishing is cheap: unchanged content is already in the store and every write
+of it is a no-op.
+
+### Serve one
+
+```sh
+just serve                                  # the staged directory, beside the binary
+./.cache/build/dev/cdn/cdn --store ./store --grant-key HEX --port 9080
+```
+
+```sh
+curl http://127.0.0.1:9080/health           # ok 5 assets 1 bundles
+curl -o manifest.acm http://127.0.0.1:9080/manifest
+curl -o group.zst -H "x-atomic-grant: HEX" http://127.0.0.1:9080/bundle/<root>
 ```
 
 ### Options
 
 ```
---root DIR   Directory to serve content from (default: beside the binary)
---verbose    Log at trace level
---help       Show this text
+--store DIR              The content store to serve or publish into
+--publish DIR            Publish this directory of files into the store, then exit
+--signing-key HEX        64 hex characters — the Ed25519 seed to sign a publish with
+--grant-key HEX          64 hex characters — the secret shared with the server
+--port N                 Port to listen on (default 9080; 0 binds an ephemeral one)
+--upstream NAME=HOST:PORT   An origin to forward a miss to. Repeatable
+--allow-upstream         Forward a miss. Off unless asked for
+--no-local-first         Always ask an upstream — a pure proxy
+--no-cache-upstream      Do not keep what an upstream returned
+--compression-level N    Zstd level groups are prepared at (default 9)
+--cache-bytes N          What the prepared-group cache may hold
+--frames N               Serve this many pumps and exit. For a smoke test
+--verbose                Log at trace level
 ```
 
-### What happens today
+`--grant-key` is **required to serve**, and it is not a convenience to remove.
+An origin that admitted everyone would be deciding who may have what, which is
+the server's job — CDN.md §4.
 
-**Nothing is served.** The program mounts the root, reports it and says so:
+CDN.md §6's three deployments are flag combinations rather than three programs:
+
+| Deployment | Flags |
+|---|---|
+| Local store — serve your own disk | the default |
+| Cache server — local first, forward a miss, keep it | `--allow-upstream --upstream a=host:port` |
+| Pure proxy — always ask, keep nothing | `--allow-upstream --no-local-first --no-cache-upstream` |
+
+### Attached to a server instead
+
+A server can run one in-process, which is the self-hosted case:
+
+```sh
+just server --content-store ./store --content-grant-key HEX --content-port 9080
+```
+
+The grant is then issued and verified across a function call, and **both halves
+are real** — the MAC is computed and checked. A path skipped in the
+configuration people develop against is a path that breaks the first time
+somebody ships the other one.
+
+### Fetching it
+
+```sh
+just client --cdn 127.0.0.1:9080 --publisher-key HEX --content-cache ./cache
+just client --cdn dir:./store --publisher-key HEX     # a local store, no wire
+```
+
+`--cdn` is repeatable and **the order is the priority**: the first source that
+answers wins, and one that fails is passed over. That is how "local cache first,
+otherwise ask the origin" is expressed — there is no policy flag, because the
+order of the list *is* the policy. The studio edits the same list under
+Preferences → Content.
+
+Without `--publisher-key` nothing is fetched, and that is deliberate: a client
+that accepted an unsigned manifest would have no trust boundary at all.
+
+---
+
+# Audio
+
+```sh
+just client --sound ./assets/tone.wav      # plays it on a loop
+```
+
+RIFF/WAV only — 8, 16 and 24-bit integer PCM and 32-bit float. `.ogg`, `.flac`
+and `.mp3` are classified by the content manifest and are **not decoded**: each
+is a vendored codec and a licence decision, and listing an extension without a
+decoder behind it would be worse than the honest gap.
+
+**A machine with no audio output is not an error.** The client says so and runs
+quietly:
 
 ```
-[info]    cdn: content root /home/you/game/content
-[warning] cdn: nothing is served — the manifest is Engine::assets and the
-          origin's HTTP layer is Engine::net, and neither has landed.
+[info]    audio: no output available (No available audio device) — running silently
+[warning] audio: 'tone.wav' decoded (1.00s) but there is no output on this machine
 ```
 
-A root that is missing or is not a directory is refused at start-up with exit
-code 1, rather than being accepted and failing one request at a time.
+A file that cannot be read, or is not a WAV this engine decodes, **is** an error
+and stops start-up — and it is reported whether or not there is a device, so a
+typo'd path is visible on a headless box too.
+
+### What it is doing underneath
+
+The pipeline is a node graph: `Player` inputs, `Fader`, `Emitter` and `Bus`
+processors, one `Output`. A tick never touches it — it posts a command carrying
+a **sample deadline**, and the mixer splits its block at every deadline inside
+it. That is the one thing here that is a requirement rather than a refinement: a
+game ticks at frame rate and audio runs at sample rate, so a sound applied at
+the top of whichever block comes next is audibly early or late.
+
+`mono.engine/audio/AGENTS.md` carries the rest.
+
+A store that is missing, or that holds no manifest, is refused at start-up with
+exit code 1, rather than being accepted and failing one request at a time.
 
 What exists is `cdn::ContentRoot` — the boundary between a content name and the
 filesystem. It refuses traversal by default, and both of its checks are
@@ -602,7 +931,10 @@ pattern this is for.
 
 The design — content addressing, the hierarchical hash, grants, and how groups
 are streamed so a game builds progressively — is `CDN.md` in the design notes.
-`ROADMAP.md` puts the rest at v0.8.
+What is still open at v0.9 is `control/` (the upload API and dashboard, in
+TypeScript), invalidation, and chunk-level verification of what an upstream
+returned — today that is a length check against the signed manifest, which is
+real and is not the whole of one.
 
 ### Proving it needs no graphics stack
 
@@ -774,6 +1106,150 @@ This is not what enforces the tier rule — `mono_check_all_tiers` does that at
 configure time and fails the build with the offending edge named. This checks
 the graph against the checked-in expectation, so that an architectural change
 shows up as a diff somebody reviews.
+
+## The script type check
+
+```sh
+just typecheck
+```
+
+Every `.luau` and `.ts` under `mono.engine/examples/`, against the declarations
+in `mono.engine/script/bindings/`. Directly:
+
+```sh
+./.cache/build/dev/tools/scriptcheck mono.engine/examples/*.luau
+./node_modules/.bin/tsc --noEmit
+```
+
+The language server answers the same question and is worth running after
+changing the generator, because it enables Luau's feature flags and
+`scriptcheck` does not — which is how the `declare class` deprecation was caught:
+
+```sh
+just luau-lsp
+./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
+```
+
+**Both run the same Luau.** `mono.vendor/luau` and `mono.vendor/luau-lsp/luau`
+are pinned to one commit, and `just luau-lsp` refuses to build if they drift —
+an editor reporting a language the engine does not run is worse than an editor
+reporting nothing. That pin currently holds the engine one release behind
+upstream; `docs/DEFERRED.md` D00019 is why, and what it would take to stop.
+
+**This is the half of the bindings contract that faces the scripts.** `just
+bindings-check` asks whether the declarations still match the class table; this
+asks whether the scripts still match the declarations, and the two can disagree
+on their own. A property removed from the class table regenerates cleanly and
+leaves every script that named it broken, with nothing reporting it until the
+scene fails to build.
+
+The Luau half is `mono.tools/scriptcheck` rather than upstream's `luau-analyze`,
+which has no flag for loading a definition file — it can only check against
+Luau's built-in globals, so every `Instance`, `Vector3` and `workspace` in this
+engine would come back as an unknown global. `scriptcheck` loads the definitions
+into the global scope first, which is what a language server does, so this check
+and the squiggles in an editor come from one code path. It checks in strict mode
+whatever a file's own `--!` directive says, because a check a script can switch
+off from the inside is not one.
+
+The TypeScript half needs `bun` or `npm` on `PATH`. **Without either it is
+skipped and says so** — it is the only check here that needs something outside
+the C++ toolchain, and growing the prerequisite list by a Node runtime is a
+worse trade than a check that reports when it did not run.
+
+**The compiler is pinned.** `package.json` names an exact version and the recipe
+runs `node_modules/.bin/tsc`, so an upgrade is a commit somebody reviews rather
+than whatever `latest` resolved to that morning. `node_modules/` is not
+committed: TypeScript pins its own per-platform binaries to the same exact
+version, so the version string is already the whole tree and a lockfile would
+only be a format for bun and npm to disagree about.
+
+## Driving the engine from outside — `--mcp-port`
+
+Every long-running program can open a socket that answers **Model Context
+Protocol**, so a language model or a script can watch it and steer it: list the
+scenes, read and write properties, start and stop a world, read the log, read
+the frame profile.
+
+**It is off unless you ask.** Read
+[SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
+before opening one — it binds loopback only, has no authentication, and must
+never be enabled on a host in front of players.
+
+```sh
+just mcp                                  # the editor, port 8738
+server --mcp-port 8734 --game My.agame    # a dedicated server
+```
+
+The port is yours to choose; the defaults exist so five programs on one machine
+do not collide:
+
+| Program | Port | What it exposes |
+|---|---|---|
+| `server` | 8734 | its worlds, read and write |
+| `client` | 8735 | *not wired yet* |
+| `unified_server_client` | 8736 | *not wired yet* |
+| `cdn` | 8737 | *not wired yet* — it has no run loop |
+| `studio` | 8738 | worlds, plus selection, Play and the output panel |
+
+### Connecting a client to it
+
+MCP clients launch a server as a subprocess and talk to it over stdio. The
+engine cannot be that subprocess — it is a program with a renderer and a
+universe that outlives any one client — so it listens, and `mcpbridge` is the
+subprocess:
+
+**`.mcp.json` in the repository root already does this for the editor**, so a
+client that reads project-scoped MCP config finds `atomic-studio` on port 8738
+with nothing to set up. Another program is one more entry:
+
+```jsonc
+{
+	"mcpServers": {
+		"atomic-studio": {
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8738"]
+		},
+		"atomic-server": {
+			"command": ".cache/build/dev/tools/mcpbridge",
+			"args": ["--port", "8734"]
+		}
+	}
+}
+```
+
+The path is relative on purpose: `.mcp.json` is checked in, and an absolute one
+carries whoever wrote it. It points into `.cache/`, which is not — so a fresh
+clone needs `just build mcpbridge` before a client can start it.
+
+**The program has to be running first.** The bridge connects on start-up and
+exits 1 if nothing is listening, saying which command would have opened it:
+
+```
+mcpbridge: could not reach an editor at 127.0.0.1:8738 — connect: Connection refused
+Start one with: just edit --mcp-port 8738
+```
+
+That is the ordinary case rather than a fault — a client launches the bridge
+when *it* starts, and the editor is started by a person.
+
+The bridge parses nothing. It copies bytes between the client's stdio and the
+port, which is why a tool added to `mono.engine/control` is reachable the moment
+it exists and the bridge never changes.
+
+### What a program answers
+
+`mono.engine/control` carries the handshake and the tools any program with
+worlds can answer — `engine_info`, `world_list`, `world_tree`, `instance_get`,
+`instance_set`, `profile_frame`. A program adds its own on top: the editor
+replaces `engine_info` with one that also knows about the open game file, and
+adds `world_run`, `select`, `selection_get` and `log_tail`.
+
+**A tool runs on the program's own thread, between input and simulation.** That
+is not an implementation detail — `Universe::Enter` aborts on a foreign thread
+rather than racing, so a tool lands at exactly the point in the frame where a
+person's click would have. It also means a slow tool is a stutter, which is why
+the tree tools take a `depth` and a `limit`.
 
 ## Proving the server is headless
 

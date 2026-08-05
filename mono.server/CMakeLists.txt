@@ -17,6 +17,10 @@ mono_add_library(server
 		Engine::ecs
 		Engine::world
 
+		# L13, `shared`. The Model Context Protocol surface, opened only when
+		# `--mcp-port` asks for it.
+		Engine::control
+
 		# L7, `shared`. The component set both programs share, so a snapshot
 		# this process writes resolves in a client with no translation layer.
 		# `shared`, so it costs the headless property nothing: a `Transform` and
@@ -35,6 +39,25 @@ mono_add_library(server
 		# `check-server-is-headless` still passes with them on the line.
 		Engine::net
 		Engine::replication
+
+		# L10, `shared`. What a game file is. `--game FILE.agame` hosts a
+		# universe of worlds authored in the studio; the same module the studio
+		# wrote it with reads it back, which is what keeps one description of
+		# the format.
+		Engine::game
+
+		# `shared`. The content origin, run in-process when `--content-store`
+		# asks for it — CDN.md §6's "local store", which is the self-hosted
+		# case: a small game, a LAN session, development. It is the same
+		# library `mono.cdn` deploys on its own and scaled, so a client cannot
+		# tell the two apart, which is the property repo_layout.md §11 wants.
+		#
+		# **It costs the headless property nothing**, which is the line to check
+		# when this row is edited: `Mono::cdn` is `shared` tier and links
+		# `core`, `assets`, `delivery`, `net` and `parallel` — a hash, a socket
+		# and a compressor, none of which needs a device. `just
+		# check-server-is-headless` is the standing proof.
+		Mono::cdn
 )
 
 mono_add_program(server

@@ -39,10 +39,10 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Manifest.hpp>
+#include <engine/delivery/GroupCodec.hpp>
 
 #include <cdn/ContentRoot.hpp>
 #include <cdn/Gate.hpp>
-#include <cdn/GroupCodec.hpp>
 #include <cdn/PreparedCache.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -68,7 +68,7 @@ namespace cdn {
 		Publication(
 			ContentRoot root,
 			engine::assets::Manifest manifest,
-			std::optional<Dictionary> dictionary = std::nullopt
+			std::optional<engine::delivery::Dictionary> dictionary = std::nullopt
 		);
 
 		// The directory being served.
@@ -82,7 +82,7 @@ namespace cdn {
 		}
 
 		// The dictionary groups are compressed against, or nullptr.
-		const Dictionary *CompressionDictionary() const {
+		const engine::delivery::Dictionary *CompressionDictionary() const {
 			return Codebook ? &*Codebook : nullptr;
 		}
 
@@ -97,7 +97,7 @@ namespace cdn {
 	  private:
 		ContentRoot Directory;
 		engine::assets::Manifest Described;
-		std::optional<Dictionary> Codebook;
+		std::optional<engine::delivery::Dictionary> Codebook;
 		engine::assets::ContentHash CodebookHash;
 	};
 
@@ -235,7 +235,7 @@ namespace cdn {
 		size_t PreparePerPump = 8;
 
 		// The compression level groups are prepared at.
-		int CompressionLevel = GroupCodec::DEFAULT_LEVEL;
+		int CompressionLevel = engine::delivery::GroupCodec::DEFAULT_LEVEL;
 
 		// What the prepared-group cache may hold.
 		uint64_t CacheCapacityBytes = PreparedCache::DEFAULT_CAPACITY_BYTES;

@@ -807,6 +807,11 @@ namespace engine::ecs {
 		// Appends to the end of the sibling list, so `EachChild` yields
 		// insertion order — which replication and replay both depend on.
 		//
+		// **Assigning the parent it already has is a no-op**, exactly as it is
+		// in Roblox. Without that it was an unlink and an append, which moved
+		// the instance to the back of its own siblings and changed what
+		// `GetChildren()` returns for a write that changed nothing.
+		//
 		// Refuses to make an instance its own ancestor, because a cycle in the
 		// tree is a hang in every walk of it rather than a wrong answer.
 		//
@@ -830,15 +835,167 @@ namespace engine::ecs {
 		// @param body     Called as `body(Entity)` for each child.
 		void EachChild(Entity instance, const std::function<void(Entity)> &body) const;
 
+		// Visits everything under an instance, nearest first.
+		//
+		// **Depth first, in the order a recursive walk written by hand would
+		// produce** — a child, then everything under that child, then the next
+		// child. That is Roblox's `GetDescendants` order, and scripts index
+		// into the result, so it is a contract rather than a detail.
+		//
+		// The instance itself is not visited. Iterative rather than recursive:
+		// a scene's depth is the author's to choose.
+		//
+		// @param instance The root of the walk, not itself visited.
+		// @param body     Called as `body(Entity)` for each descendant.
+		void EachDescendant(Entity instance, const std::function<void(Entity)> &body) const;
+
+		// Renames an instance.
+		//
+		// **Not `Create(name)`**, which is the store's own lookup of singular
+		// things. An instance name is not unique: siblings may share one,
+		// exactly as they may in Roblox.
+		//
+		// @param instance The instance to rename.
+		// @param name     The new name. An empty one leaves it unnamed.
+		// @return `false` when the entity is not an instance.
+		bool SetInstanceName(Entity instance, std::string_view name);
+
 		// The first child with a name, searching in insertion order.
 		//
 		// A walk rather than an index, because most instances have few children
 		// and an index per node would allocate for every one of them.
 		//
+		// @param instance  The parent to search.
+		// @param name      The name to find. An empty name matches nothing.
+		// @param recursive Whether to search the whole subtree. The children
+		//                  are still answered first, so the nearest match wins
+		//                  rather than whichever one a depth-first pass reached
+		//                  soonest.
+		// @return The instance, or NULL_ENTITY when none matches.
+		Entity FindFirstChild(Entity instance, std::string_view name, bool recursive = false) const;
+
+		// The first child created as exactly a class.
+		//
+		// **Exactly, which is what separates it from `FindFirstChildWhichIsA`.**
+		// A `Part` is a `BasePart`, so asking for a `BasePart` this way finds
+		// nothing; that is Roblox's split and the reason both exist.
+		//
 		// @param instance The parent to search.
-		// @param name     The name to find.
+		// @param id       The class to match.
 		// @return The child, or NULL_ENTITY when none matches.
-		Entity FindFirstChild(Entity instance, std::string_view name) const;
+		Entity FindFirstChildOfClass(Entity instance, ClassId id) const;
+
+		// The first child of a class or one derived from it.
+		//
+		// @param instance  The parent to search.
+		// @param id        The class to match against.
+		// @param recursive Whether to search the whole subtree.
+		// @return The instance, or NULL_ENTITY when none matches.
+		Entity FindFirstChildWhichIsA(Entity instance, ClassId id, bool recursive = false) const;
+
+		// The nearest ancestor with a name.
+		//
+		// @param instance The instance to search above. Not itself considered.
+		// @param name     The name to find. An empty name matches nothing.
+		// @return The ancestor, or NULL_ENTITY when none matches.
+		Entity FindFirstAncestor(Entity instance, std::string_view name) const;
+
+		// The nearest ancestor created as exactly a class.
+		//
+		// @param instance The instance to search above. Not itself considered.
+		// @param id       The class to match.
+		// @return The ancestor, or NULL_ENTITY when none matches.
+		Entity FindFirstAncestorOfClass(Entity instance, ClassId id) const;
+
+		// The nearest ancestor of a class or one derived from it.
+		//
+		// @param instance The instance to search above. Not itself considered.
+		// @param id       The class to match against.
+		// @return The ancestor, or NULL_ENTITY when none matches.
+		Entity FindFirstAncestorWhichIsA(Entity instance, ClassId id) const;
+
+		// Starts recording reparents, so that a listener can be told about them.
+		//
+		// **Opt in, exactly as observing a component is.** A world nobody is
+		// watching stores nothing and pays one branch per `SetParent`; the
+		// alternative is a list that grows for the life of every world with no
+		// script draining it. Idempotent, and there is no way back off — the
+		// same shape `Observe` has, for the same reason: a second listener
+		// connecting must not be able to switch the first one off.
+		void ObserveTree();
+
+		// Whether reparents are being recorded.
+		//
+		// @return `true` once `ObserveTree` has been called.
+		bool TreeObserved() const;
+
+		// Hands over everything recorded since the last call, and forgets it.
+		//
+		// **Taken rather than read, because a half-drained queue is the bug
+		// this shape removes.** A caller that walked the list and then cleared
+		// it would lose anything a listener caused while it was walking; a swap
+		// leaves the store's list empty before the first listener runs, so a
+		// reparent made from inside a handler belongs to the next delivery.
+		//
+		// @param out Cleared, then swapped with what the store has recorded.
+		void TakeTreeChanges(std::vector<TreeChange> &out);
+
+		// Installs the one listener told about a removal *before* it happens.
+		//
+		// **The only synchronous signal in the engine, and the only one that
+		// has to be.** Everything else is recorded and delivered at the next
+		// barrier, because a handler re-entering from inside a write would see
+		// a half-written row — `script/Changes.hpp` sets out that rule. This
+		// one is called at the *top* of the operation, before a single link
+		// moves, so the tree it is handed is entirely consistent. That is also
+		// the only position from which its contract can hold at all: a handler
+		// told "this is leaving" is told while it is still there, which a queue
+		// drained a tick later cannot offer.
+		//
+		// Called as `body(ancestor, descendant)` once per losing ancestor per
+		// leaving instance, which is Roblox's fan-out for `DescendantRemoving`.
+		//
+		// **One listener, replaced rather than added to.** A world runs one
+		// script runtime, and a second subscriber would need a disconnect
+		// mechanism for a surface with one caller.
+		//
+		// The listener must be cleared before it outlives whatever it captured.
+		// See `ClearDescendantRemoving`.
+		//
+		// @param body What to call. An empty function is the same as clearing.
+		void OnDescendantRemoving(std::function<void(Entity, Entity)> body);
+
+		// Takes the removal listener back.
+		//
+		// **Called before the store outlives the VM**, exactly as
+		// `script::ChangeQueue::Detach` is: a store is often declared before
+		// the runtime that binds it and destroyed after, so a listener holding
+		// a `lua_State *` outlives the state unless something takes it back.
+		void ClearDescendantRemoving();
+
+		// The dotted path from the root of the tree down to an instance.
+		//
+		// **From the world's root, and there is no `game.` in front of it.** A
+		// world's roots *are* the services — `scene::InstallServices` puts
+		// `Workspace` and the rest in as ordinary instances — so a part inside
+		// a model comes out as `Workspace.Model.Part`, which is what Roblox
+		// prints for the same thing.
+		//
+		// @param instance The instance to describe.
+		// @return The path, or an empty string when it is not an instance.
+		std::string GetFullName(Entity instance) const;
+
+		// Whether an instance has any children at all.
+		//
+		// **O(1), which `EachChild` is not.** A tree view asks this per row to
+		// decide whether to draw an expander, and answering it with `EachChild`
+		// walks the entire sibling list to set a bool — free on a leaf, and two
+		// hundred steps on the root of a two-hundred-part scene, every frame.
+		// `Hierarchy::FirstChild` is the answer already.
+		//
+		// @param instance The instance to ask about.
+		// @return `true` when it has at least one child.
+		bool HasChildren(Entity instance) const;
 
 		// Visits every instance with no parent.
 		//

@@ -11,7 +11,7 @@ namespace cdn {
 	bool Gate::Admits(
 		std::span<const std::byte> token, const engine::assets::ContentHash &bundleRoot, uint64_t nowSeconds
 	) const {
-		ENGINE_PROFILE("Gate::Admits");
+		ENGINE_PROFILE_CAT("Gate::Admits", engine::core::ProfileCategory::Assets);
 
 		// Open does the MAC and the expiry, in that order, and counts which of
 		// them refused. Doing either of those here as well would be a second

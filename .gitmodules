@@ -125,6 +125,19 @@
 ; master, because Luau tags releases rather than publishing a release branch —
 ; the same situation as glm and the cryptopp pair above, and the superproject
 ; pins the SHA regardless.
+;
+; **Held at 0.731 deliberately, and this is the one submodule that is not simply
+; "as new as possible".** It is pinned to the same commit as
+; `mono.vendor/luau-lsp/luau`, so the language server in an editor and
+; `mono.tools/scriptcheck` in `just typecheck` type-check against one Luau and
+; cannot disagree about the language.
+;
+; **What holds it there is luau-lsp, not us.** 0.732 removed the
+; `ConstraintSolver::reportError` overloads that luau-lsp calls in
+; `src/platform/roblox/RobloxLuauExt.cpp` — sixteen call sites — so the newest
+; Luau both trees compile against is 0.731. `just luau-lsp` asserts the two match
+; rather than trusting this comment, and `docs/DEFERRED.md` D00019 carries the
+; reopen trigger: bump both the day luau-lsp syncs past 0.732.
 [submodule "mono.vendor/luau"]
 	path = mono.vendor/luau
 	url = https://github.com/luau-lang/luau.git
@@ -145,5 +158,59 @@
 [submodule "mono.vendor/quickjs"]
 	path = mono.vendor/quickjs
 	url = https://github.com/quickjs-ng/quickjs.git
+	branch = master
+	shallow = true
+; luau-lsp is the editor's language server, and it is the one vendor this build
+; never compiles. `update = none` is why `just setup` walks past it: setup's
+; contract is what a fresh clone needs *before it can configure*, and nothing
+; here needs a language server to configure. `just luau-lsp` clones and builds
+; it on demand, for whoever wants completion in an editor.
+;
+; **It brings its own Luau, and that is the reason it is built in a tree of its
+; own rather than added to ours.** Its CMakeLists does `add_subdirectory(luau)`
+; against a submodule pinned to its own commit, which declares `Luau.Ast`,
+; `Luau.Analysis` and `Luau.VM` — the same target names `mono.vendor/luau`
+; already gives us. Adding it to this build fails at configure time with "another
+; target with the same name already exists", and there is no flag that makes it
+; consume an existing Luau.
+;
+; **The two Luaus are pinned to the same commit**, so the editor and
+; `just typecheck` type-check against one language rather than two. That is a
+; constraint on `mono.vendor/luau` as much as on this one — see its entry — and
+; `just luau-lsp` asserts it instead of trusting either comment.
+;
+; The ceiling is luau-lsp's: Luau 0.732 removed the `ConstraintSolver::reportError`
+; overloads it calls in `src/platform/roblox/RobloxLuauExt.cpp`, so 0.731 is the
+; newest both trees build against. `docs/DEFERRED.md` D00019 holds the reopen
+; trigger.
+;
+; Pinned to a commit on `main` rather than to the 1.69.0 tag, because that tag
+; carries an older Luau still: matching the engine matters more here than
+; matching a release number.
+[submodule "mono.vendor/luau-lsp"]
+	path = mono.vendor/luau-lsp
+	url = https://github.com/JohnnyMorganz/luau-lsp.git
+	branch = main
+	update = none
+
+; JSON, for the one place this engine speaks it: the control server in
+; `mono.studio` answers Model Context Protocol, which is JSON-RPC 2.0 over a
+; socket. Nothing else here parses JSON — a `.agame` is XML, a snapshot is
+; binary, and the bindings manifest is written with an ostringstream and never
+; read back by us.
+;
+; **Vendored rather than hand-rolled, and that is the unusual call.** This
+; repository writes its own Arguments, its own log wrapper and its own save
+; format, so a 300-line JSON parser would be in keeping. It is not worth it
+; here: JSON's edge cases are string escapes, surrogate pairs and number
+; formats, and a parser that is subtly wrong about any of them breaks a
+; protocol rather than a feature — silently, at the far end, in a client that
+; is not ours.
+;
+; Header-only, so `MonoVendor.cmake` declares an INTERFACE target the way it
+; does for asio. Nothing links it but the studio.
+[submodule "mono.vendor/json"]
+	path = mono.vendor/json
+	url = https://github.com/nlohmann/json.git
 	branch = master
 	shallow = true

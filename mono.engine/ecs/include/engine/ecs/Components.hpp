@@ -122,6 +122,25 @@ namespace engine::ecs {
 			return id;
 		}
 
+		// The id `T` already holds, registering nothing.
+		//
+		// **The form to reach for on a path that must not decide a type's
+		// name.** `Of<T>()` registers under the compiler-spelled name when it
+		// finds nothing, and that name then loses to an explicit registration
+		// — but only by aborting, because a type cannot have two. So a call
+		// made *before* startup names the type is a call that decides the name
+		// wrongly and takes the process with it later.
+		//
+		// The gap is not theoretical: `Store::Destroy` asks whether the row it
+		// is freeing sits in a tree, and it is reachable long before anything
+		// registers `ecs.Hierarchy`. An invalid answer there is the correct
+		// one — a type nothing has registered is a type no row can carry.
+		//
+		// @return The id, or an invalid id when `T` has not been registered.
+		template <class T> static ComponentId Assigned() {
+			return Slot<T>();
+		}
+
 		// The descriptor behind an id.
 		//
 		// @param id The id to describe.

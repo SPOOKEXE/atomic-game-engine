@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 
 namespace engine::graph {
@@ -9,6 +10,8 @@ namespace engine::graph {
 	size_t Cull(
 		std::span<const scene::DrawInstance> instances, const Frustum &frustum, std::vector<uint32_t> &visible
 	) {
+		ENGINE_PROFILE_CAT("graph.cull", core::ProfileCategory::Render);
+
 		// Sized to the worst case once rather than grown as it fills. The worst
 		// case is "everything is visible", which is also the common case for a
 		// camera framing its own scene — so a reserve that assumed otherwise
