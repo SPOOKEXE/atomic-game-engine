@@ -12,6 +12,7 @@ its own conventions.
 └─ commands/
    ├─ run-checklist.md  the completion checklist, before a pull request
    ├─ pr-analysis.md    reading a change, and what it should have touched
+   ├─ review-code.md    reviewing an area with no diff, and fixing it
    └─ new-module.md     scaffolding an engine module correctly
 ```
 
@@ -102,6 +103,39 @@ Splitting the absences by direction is the part worth keeping. Downward is
 mostly checkable — tier edges, `expected_graph.json`, `TEST_SUITE_ID`, declared
 flags. Upward is mostly not, because the scripting layer it argues about does
 not exist yet, and that is exactly when the decisions are cheap.
+
+### `/review-code <area> [code|tests]`
+
+Takes a module, a program or a file, reads it properly, works
+`docs/CODE_QUALITY.md` over it, and then **fixes what it finds.** The second
+argument narrows it to one pass; with no argument it does both, code first.
+
+It exists because the other two are scoped to a diff and standing code does not
+have one. Nobody is about to open a pull request against `mono.engine/spatial`,
+so nothing ever walks it, and the sections of the checklist with no build step
+behind them — §8 Craft and the two negative-practice lists — are exactly the
+ones that accumulate when nobody is looking. Every item on those lists compiles
+and passes tests. That is why they are on a list.
+
+It is the only command here that edits. Three consequences worth knowing before
+running it:
+
+- **It only applies what it can defend.** Behaviour-preserving fixes and bug
+  fixes with a failing test behind them, yes. Splitting a file, moving something
+  across a module boundary, changing a public signature — proposed and left
+  alone, because something already depends on that shape and a review is the
+  wrong place to decide.
+- **It runs the full gate afterwards**, both presets and `test-all` rather than
+  the cascade. The cascade is for the inner loop; a command that has already
+  changed the code owes more than that.
+- **It stops when the diff gets too large to review.** The checklist treats that
+  as a finding, and there is no reason the rule stops applying to a diff this
+  command produced. The remainder is a second run.
+
+The performance section is deliberately report-only. A speculative optimisation
+with no measurement is a behaviour change bought with nothing, and `just bench`
+against the `bench` preset is the way to get a number — not a throwaway harness
+written to justify a change already made.
 
 ### `/new-module <name>`
 
