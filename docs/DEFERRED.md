@@ -31,6 +31,17 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00019
+
+**The engine's Luau is held one release behind upstream so that the editor and the type check agree, and what holds it there is luau-lsp rather than anything here.**
+
+- `mono.vendor/luau` and `mono.vendor/luau-lsp/luau` are pinned to the **same commit** — `f8ca77ac`, Luau **0.731**. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
+- **0.732 is the ceiling and it is luau-lsp's ceiling, not ours.** That release removed the `ConstraintSolver::reportError(TypeError)` and `reportError(TypeErrorData&&, const Location&)` overloads in favour of one that also takes a `ModuleName`. luau-lsp calls the old forms at **sixteen sites** in `src/platform/roblox/RobloxLuauExt.cpp`, so it does not compile against 0.732. The engine itself builds, tests, replays and stays byte-identical on 0.732 — it was there briefly, and moving back cost one release plus two commits, one of which was a `CODEOWNERS` file.
+- **Checked, not written down.** `just luau-lsp` compares the two `HEAD`s and refuses to build when they differ, naming both. Verified by mutation: bumping `mono.vendor/luau` alone makes the recipe fail with the two SHAs printed. Without that, the drift is invisible — the engine keeps passing every check it has, and only an editor is wrong.
+- **What the choice actually costs, so a later reader can weigh it.** One Luau release on the *engine's* VM, to buy one language across both tools. The trade is only defensible while the gap is small; a year of releases behind would invert it, and the answer then is the fork below rather than a wider gap.
+- **The fork is the way out and was declined at v0.7 on purpose.** Pointing luau-lsp at `mono.vendor/luau` needs sixteen mechanical call-site changes, and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork whose remote is recorded in `.gitmodules` — never into a file in this tree. That is a fork to maintain against a moving target, for a developer tool.
+- **Reopen trigger: luau-lsp syncs past 0.732.** Its `main` already reads "Sync to upstream Luau 0.731", so this is a matter of weeks rather than a standing condition. Bump both submodules together, run `just luau-lsp` — which will refuse if only one moved — then `just check`.
+
 ### [_] D00018
 
 **What a game replicates is written out three times, and the third copy was added at v0.7 by the change that noticed it.** Filed rather than fixed, because there is nowhere correct to put it yet and the obstacle is a layer rather than an opinion.

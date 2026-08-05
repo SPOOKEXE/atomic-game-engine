@@ -205,6 +205,25 @@ luau-lsp:
     #!/usr/bin/env bash
     set -euo pipefail
     git submodule update --init --recursive --checkout --depth 1 mono.vendor/luau-lsp
+
+    # **The two Luaus must be one Luau.** The editor type-checks with the copy
+    # luau-lsp brings and `just typecheck` with `mono.vendor/luau`; if they drift
+    # apart, an author gets diagnostics from a language the engine does not run —
+    # which is worse than no editor support, because it looks authoritative.
+    # Checked rather than written down, because rule 6 says a rule the build does
+    # not check is documentation.
+    ours=$(git -C mono.vendor/luau rev-parse HEAD)
+    theirs=$(git -C mono.vendor/luau-lsp/luau rev-parse HEAD)
+    if [ "$ours" != "$theirs" ]; then
+        echo "the two vendored Luaus disagree:" >&2
+        echo "  mono.vendor/luau          $ours" >&2
+        echo "  mono.vendor/luau-lsp/luau $theirs" >&2
+        echo "" >&2
+        echo "Pin them to one commit. .gitmodules says which and why; the ceiling" >&2
+        echo "is whatever luau-lsp compiles against. docs/DEFERRED.md D00019." >&2
+        exit 1
+    fi
+
     cmake -S mono.vendor/luau-lsp -B .cache/build/luau-lsp -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized -include cstdint" > /dev/null

@@ -1006,14 +1006,20 @@ in `mono.engine/script/bindings/`. Directly:
 ./node_modules/.bin/tsc --noEmit
 ```
 
-The language server answers the same question, which is worth using as a second
-opinion after changing the generator — it runs a *different* Luau, the one
-`mono.vendor/luau-lsp` brings with it:
+The language server answers the same question and is worth running after
+changing the generator, because it enables Luau's feature flags and
+`scriptcheck` does not — which is how the `declare class` deprecation was caught:
 
 ```sh
 just luau-lsp
 ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
 ```
+
+**Both run the same Luau.** `mono.vendor/luau` and `mono.vendor/luau-lsp/luau`
+are pinned to one commit, and `just luau-lsp` refuses to build if they drift —
+an editor reporting a language the engine does not run is worse than an editor
+reporting nothing. That pin currently holds the engine one release behind
+upstream; `docs/DEFERRED.md` D00019 is why, and what it would take to stop.
 
 **This is the half of the bindings contract that faces the scripts.** `just
 bindings-check` asks whether the declarations still match the class table; this

@@ -125,6 +125,19 @@
 ; master, because Luau tags releases rather than publishing a release branch —
 ; the same situation as glm and the cryptopp pair above, and the superproject
 ; pins the SHA regardless.
+;
+; **Held at 0.731 deliberately, and this is the one submodule that is not simply
+; "as new as possible".** It is pinned to the same commit as
+; `mono.vendor/luau-lsp/luau`, so the language server in an editor and
+; `mono.tools/scriptcheck` in `just typecheck` type-check against one Luau and
+; cannot disagree about the language.
+;
+; **What holds it there is luau-lsp, not us.** 0.732 removed the
+; `ConstraintSolver::reportError` overloads that luau-lsp calls in
+; `src/platform/roblox/RobloxLuauExt.cpp` — sixteen call sites — so the newest
+; Luau both trees compile against is 0.731. `just luau-lsp` asserts the two match
+; rather than trusting this comment, and `docs/DEFERRED.md` D00019 carries the
+; reopen trigger: bump both the day luau-lsp syncs past 0.732.
 [submodule "mono.vendor/luau"]
 	path = mono.vendor/luau
 	url = https://github.com/luau-lang/luau.git
@@ -161,13 +174,19 @@
 ; target with the same name already exists", and there is no flag that makes it
 ; consume an existing Luau.
 ;
-; The consequence worth knowing: the editor type-checks against luau-lsp's Luau
-; and `just typecheck` checks against ours. `mono.tools/scriptcheck` is the one
-; that gates, and it links `mono.vendor/luau`, so the answer that counts comes
-; from the same Luau the engine runs.
+; **The two Luaus are pinned to the same commit**, so the editor and
+; `just typecheck` type-check against one language rather than two. That is a
+; constraint on `mono.vendor/luau` as much as on this one — see its entry — and
+; `just luau-lsp` asserts it instead of trusting either comment.
 ;
-; Pinned to a release tag rather than tracking `main`, because a language server
-; that changes under an editor is a stream of diagnostics nobody asked for.
+; The ceiling is luau-lsp's: Luau 0.732 removed the `ConstraintSolver::reportError`
+; overloads it calls in `src/platform/roblox/RobloxLuauExt.cpp`, so 0.731 is the
+; newest both trees build against. `docs/DEFERRED.md` D00019 holds the reopen
+; trigger.
+;
+; Pinned to a commit on `main` rather than to the 1.69.0 tag, because that tag
+; carries an older Luau still: matching the engine matters more here than
+; matching a release number.
 [submodule "mono.vendor/luau-lsp"]
 	path = mono.vendor/luau-lsp
 	url = https://github.com/JohnnyMorganz/luau-lsp.git
