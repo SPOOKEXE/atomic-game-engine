@@ -41,6 +41,9 @@ namespace studio {
 		RunServer,
 		Stop,
 
+		Undo,
+		Redo,
+
 		Duplicate,
 		Delete,
 		SelectNone,
@@ -52,6 +55,12 @@ namespace studio {
 		// what the Keybinds page is for.
 		ShowStatistics,
 		ShowFrameGraph,
+
+		// The palette itself, which is a command like any other — it appears in
+		// its own list, and that is correct rather than a curiosity: somebody
+		// who has found the palette once should be able to find out what opens
+		// it without leaving it.
+		CommandPalette,
 
 		Count,
 	};

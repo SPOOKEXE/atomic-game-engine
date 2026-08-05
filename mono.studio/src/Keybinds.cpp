@@ -39,6 +39,19 @@ namespace studio {
 			{Action::RunServer, "run.server", "Run", "Run the server's scripts only", Scope::Global, {}},
 			{Action::Stop, "run.stop", "Stop", "Stop and restore the scene as it was", Scope::Global, {}},
 
+			// **`Tree`, not `Global`, and the script editor is why.** A plain
+			// multiline field has imgui's own text undo on the same chord, and a
+			// world undo that fired while somebody was typing would reverse the
+			// last thing they built instead of the last thing they typed. The
+			// same argument `Delete` is scoped by, which is a character in a
+			// field and an action in the tree.
+			//
+			// §4.6 of `docs/v07v08.md` gives the viewport its own editing, and
+			// this wants a second home there when it does — scopes are one per
+			// binding today, so that is a decision rather than a line.
+			{Action::Undo, "edit.undo", "Undo", "Reverse the last edit", Scope::Tree, {}},
+			{Action::Redo, "edit.redo", "Redo", "Reapply the last undone edit", Scope::Tree, {}},
+
 			{Action::Duplicate, "edit.duplicate", "Duplicate", "Copy the selection beside itself",
 			 Scope::Tree, {}},
 			{Action::Delete, "edit.delete", "Delete", "Delete the selection", Scope::Tree, {}},
@@ -47,6 +60,9 @@ namespace studio {
 			{Action::ShowStatistics, "panel.statistics", "Statistics", "Show the frame rate panel",
 			 Scope::Global, {}},
 			{Action::ShowFrameGraph, "panel.framegraph", "Frame Graph", "Show where the frame went",
+			 Scope::Global, {}},
+
+			{Action::CommandPalette, "panel.palette", "Command Palette", "Find and run any command",
 			 Scope::Global, {}},
 		}};
 

@@ -379,7 +379,29 @@ namespace studio {
 
 				for (const PropertyDescriptor &descriptor : Classes::Describe(klass).Properties) {
 					if (descriptor.Name == edit.Property) {
-						WriteProperty(store, instance, descriptor, edit.Value);
+						// **One command per instance, because the write is per
+						// instance.** A multi-selection whose members held
+						// different values before cannot be reversed by one
+						// entry carrying one "before" — undo would give every
+						// one of them whatever the first happened to have.
+						//
+						// `RecordProperty` drops a write that changed nothing,
+						// which is what keeps the members that already agreed
+						// off the stack.
+						PropertyValue before;
+						const bool had = ReadProperty(store, instance, descriptor, before);
+
+						if (WriteProperty(store, instance, descriptor, edit.Value) && had &&
+							Commands != nullptr) {
+							Commands->RecordProperty(
+								SelectionWorld,
+								instance,
+								descriptor.Name,
+								before,
+								edit.Value,
+								"Set " + std::string(Label(descriptor.Name))
+							);
+						}
 						break;
 					}
 				}

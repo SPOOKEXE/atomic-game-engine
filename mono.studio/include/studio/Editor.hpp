@@ -42,7 +42,10 @@
 #include <nlohmann/json_fwd.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
+#include <studio/Commands.hpp>
+#include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/Projection.hpp>
 
 #include <cstdint>
 #include <array>
@@ -342,6 +345,10 @@ namespace studio {
 		// The theme picker and the interface scale.
 		void DrawAppearanceSettings();
 
+		// The Preferences page that is not about looks: the world lifecycle
+		// and how frames are paced.
+		void DrawGeneralSettings();
+
 		// The searchable list of what every key does, and where they are
 		// changed. See `studio::Keybinds` — this page edits that table
 		// directly, so it cannot drift from what the keys actually do.
@@ -539,6 +546,67 @@ namespace studio {
 
 		void Select(WorldId world, Entity instance, bool add);
 		void ClearSelection();
+
+		// Draws the grid, the axes and the selection outline into every panel
+		// that drew this frame.
+		//
+		// **Called from `DrawInterface` immediately after `DriveCamera`**, for
+		// the reason `OverlaySlot` gives at length. Moving this call earlier
+		// reintroduces the one-frame swim silently — it still draws, and it
+		// still looks right whenever the camera is still.
+		void DrawViewportOverlays();
+
+		// How one panel maps between the world and itself, this frame.
+		//
+		// Built from the camera `PresentWorld` is about to use, so the two
+		// agree. See `studio::PanelProjection`.
+		//
+		// @param viewport 0 is the main panel, 1..EXTRA_VIEWPORTS the others.
+		// @return The mapping, invalid when that panel did not draw.
+		PanelProjection ProjectionFor(size_t viewport);
+
+		// Selects whatever is under a panel point.
+		//
+		// **Builds a `spatial::HashGrid` per click rather than reading the
+		// physics broadphase.** A part with no collider is not in the physics
+		// index and is still something an author can click on; and in Edit mode
+		// the physics world is not stepping, so its index is whatever the last
+		// run left. A grid built from the drawables at the moment of the click
+		// is correct for both, and a click is not a per-frame cost.
+		//
+		// @param viewport Which panel.
+		// @param point    Where, in screen coordinates.
+		// @param add      Whether to add to the selection rather than replace.
+		void PickInViewport(size_t viewport, float x, float y, bool add);
+
+		// Fills `Operators` in. Called once, from `Start`, after the universe
+		// exists — several polls read it.
+		//
+		// **One place that knows what the editor can do.** See `Operators.hpp`
+		// for why the menus ask this table rather than writing their enable
+		// conditions out again.
+		void RegisterOperators();
+
+		// The command palette, over `Operators`.
+		//
+		// **A modal over the whole window rather than a panel**, because it is
+		// reached, used and dismissed within one gesture — a dockable palette
+		// would be a panel somebody has to find a home for and then look at
+		// forever.
+		void DrawPalette();
+
+		// Reverses the last edit, and tells the author what was reversed.
+		//
+		// **The selection is cleared rather than repointed.** Undoing a delete
+		// gives the subtree a new root handle, so whatever the selection held is
+		// either dead or about to be misleading — and a selection pointing at a
+		// handle that has been recycled is the failure `CommandLog` is written
+		// to avoid, reintroduced one layer up. Clearing is honest; guessing is
+		// not.
+		void UndoEdit();
+
+		// Reapplies the last undone edit. See `UndoEdit` for the selection.
+		void RedoEdit();
 		bool IsSelected(Entity instance) const;
 
 		// --- actions ----------------------------------------------------------
@@ -710,6 +778,31 @@ namespace studio {
 		// wherever this object was declared. Same reason `client::Client` holds
 		// its own that way.
 		std::unique_ptr<engine::world::Universe> Universe;
+
+		// Undo and redo. Held the same way and for a narrower version of the
+		// same reason: it binds to the universe above, so it cannot exist before
+		// there is one to bind to.
+		//
+		// **Not world state**, per the note at the top of this file — see
+		// `Commands.hpp` for why a log that travelled with a world would be
+		// restored by Stop describing edits the restore had discarded.
+		std::unique_ptr<CommandLog> Commands;
+
+		// Every command this editor offers. Built by `RegisterOperators`.
+		OperatorTable Operators;
+
+		// Whether the palette is up, and what has been typed into it.
+		//
+		// **Not saved in the layout**, unlike a panel's open flag: a palette
+		// that came back open on start-up would be a modal in front of the
+		// window before anybody had asked for one.
+		bool ShowPalette = false;
+		std::string PaletteQuery;
+
+		// Which row the arrow keys have moved to. Reset whenever the query
+		// changes, because the row that was second for one query is not
+		// meaningfully the second for the next.
+		int PaletteCursor = 0;
 
 		// The game's name and where it came from. An empty path is a game that
 		// has never been saved, which is what makes Save fall through to Save
@@ -1048,6 +1141,38 @@ namespace studio {
 		// saved layout having a name it has never seen — and a studio with an
 		// unbounded number of viewports is one where the frame rate divides by a
 		// number nobody chose.
+		// What one viewport panel handed the overlay pass this frame.
+		//
+		// **The overlay is deferred rather than drawn where the panel is, and
+		// the frame order is why.** `DrawViewport` runs at the top of
+		// `DrawInterface`; `DriveCamera` runs near the bottom, because it needs
+		// the hover and active state the viewport's `InvisibleButton` produces;
+		// and `PresentWorld` renders the world *after* the whole imgui frame,
+		// with the camera `DriveCamera` just set.
+		//
+		// So an overlay projected while the panel drew is one `DriveCamera`
+		// behind the pixels it sits on, and the grid swims against the ground
+		// whenever the camera moves. Keeping the panel's draw list and appending
+		// to it after `DriveCamera` — still inside the same imgui frame — costs
+		// nothing and removes the lag rather than sharing it.
+		//
+		// @since v0.7
+		struct OverlaySlot {
+			// The panel's own draw list, valid for the rest of this frame.
+			struct ImDrawList *List = nullptr;
+
+			// The panel-space rectangle the world image occupies, in screen
+			// coordinates because that is what a draw list takes.
+			float X = 0.0f;
+			float Y = 0.0f;
+			float Width = 0.0f;
+			float Height = 0.0f;
+
+			// Whether this panel drew at all this frame. A closed panel returns
+			// early and leaves this false.
+			bool Drawn = false;
+		};
+
 		static constexpr size_t EXTRA_VIEWPORTS = 3;
 		std::array<ViewportState, EXTRA_VIEWPORTS> Extras;
 
@@ -1066,6 +1191,172 @@ namespace studio {
 		// Indexed the way `DrawingViewport` is: 0 is the main panel, 1.. are the
 		// extras, so a panel index is a subscript rather than a branch.
 		std::array<ViewerCamera, 1 + EXTRA_VIEWPORTS> Viewers;
+
+		// What each panel handed this frame's overlay pass. Cleared as each
+		// panel draws, so a closed one contributes nothing.
+		std::array<OverlaySlot, 1 + EXTRA_VIEWPORTS> Overlays;
+
+		// A click in a viewport, waiting to be turned into a selection.
+		//
+		// A `Pending*` like every other action a panel offers, for the reason
+		// the group of them gives: picking enters a store, and a panel draws
+		// from inside `Universe::Enter` and acts from outside it.
+		//
+		// @since v0.7
+		struct PendingPickAction {
+			size_t Viewport = 0;
+			float X = 0.0f;
+			float Y = 0.0f;
+			bool Add = false;
+			bool Wanted = false;
+		};
+
+		PendingPickAction PendingPick;
+
+		// Which manipulator the viewport is offering.
+		//
+		// **A mode rather than three gizmos drawn at once.** Studio and every
+		// other editor does it this way for one reason: three sets of handles
+		// over one object is a target nobody can hit, because the ones you are
+		// not using are in front of the one you are.
+		//
+		// @since v0.7
+		enum class ToolMode : uint8_t {
+			// No handles. A click selects and nothing else, which is what you
+			// want while placing the camera or reading a scene.
+			Select,
+
+			// Drag an axis to move along it.
+			Move,
+
+			// Drag a ring to turn about its axis.
+			Rotate,
+
+			// Drag an axis to grow along it.
+			Scale,
+		};
+
+		ToolMode CurrentTool = ToolMode::Select;
+
+		// Snap steps, and whether they are on.
+		//
+		// **Off by default.** Snapping is a constraint somebody turns on for a
+		// job, and an editor that quietly rounded every drag would be an editor
+		// that cannot place anything where it was asked to.
+		bool SnapEnabled = false;
+		float SnapDistance = 1.0f;
+		float SnapDegrees = 15.0f;
+
+		// A translate gizmo, mid-drag.
+		//
+		// **One command per drag, not one per frame.** A drag that recorded on
+		// every frame it moved would fill the undo stack with a hundred entries
+		// describing one motion, and reaching back past it would take a hundred
+		// presses. The `Before` frames are captured on grab and the command is
+		// recorded on release.
+		//
+		// @since v0.7
+		struct GizmoDrag {
+			// Which axis is held: 0 is X, 1 is Y, 2 is Z. Negative is none.
+			int Axis = -1;
+
+			// Which panel the drag started in, so turning to another viewport
+			// mid-drag does not retarget it.
+			size_t Viewport = 0;
+
+			// Where along the axis the cursor was when it was grabbed. The
+			// difference from this is the translation, which is what stops the
+			// selection jumping to the cursor on the first frame.
+			float Grabbed = 0.0f;
+
+			// Where the selection was before any of this, for the undo entry
+			// and for applying an absolute rather than accumulated delta.
+			std::vector<engine::core::CFrame> Before;
+			std::vector<Entity> Instances;
+
+			// The half-extents before the drag, for a scale. Parallel to
+			// `Instances`; an entry is zero for anything with no `Bounds`.
+			std::vector<engine::core::Vector3> BeforeSize;
+
+			// Which manipulation this drag is. Captured on grab rather than
+			// read live, so changing tool mid-drag cannot turn a move into a
+			// rotation halfway through it.
+			ToolMode Mode = ToolMode::Move;
+
+			// Where on the rotation plane the drag began, for a rotate.
+			engine::core::Vector3 GrabbedPoint;
+
+			// Whether anything actually moved. A click on a handle that never
+			// dragged is not an edit and must not reach the log.
+			bool Moved = false;
+		};
+
+		GizmoDrag Dragging;
+
+		// Draws the translate gizmo and runs a drag. Called from the overlay.
+		//
+		// @param viewport Which panel.
+		// @param panel    That panel's mapping.
+		// @return `true` when the pointer is over a handle, so the click that
+		//         would otherwise pick is swallowed.
+		bool DrawGizmo(size_t viewport, const PanelProjection &panel);
+
+		// Where the selection is, as a gizmo needs it.
+		//
+		// @param world  The scene.
+		// @param centre Filled in with the average position.
+		// @return `false` when nothing selected has a place in the world.
+		bool SelectionCentre(WorldId world, engine::core::Vector3 &centre);
+
+		// How frames are paced, as the Preferences page sets them.
+		//
+		// **Live rather than start-up-only, unlike `Options::Uncapped`.** The
+		// flag is what a launcher passes; these are what somebody changes while
+		// looking at the frame graph, which is the only time the question comes
+		// up. `Options::Uncapped` seeds `VerticalSync` and is not read again.
+		bool VerticalSync = true;
+
+		// A ceiling on frames per second while vertical sync is off.
+		//
+		// **Zero is no ceiling**, which is what `--uncapped` means and what a
+		// benchmark wants. Anything else is a soft cap applied by sleeping out
+		// the rest of the frame — worth having because an editor that renders
+		// nine hundred frames a second to show a still scene is an editor that
+		// spins a laptop's fans for nothing.
+		float FrameCap = 0.0f;
+
+		// The script editor's find bar: whether it is up, and what is in it.
+		//
+		// **One bar for every tab rather than one per tab.** Somebody hunting a
+		// name is hunting it across the scripts they have open, and a find box
+		// that emptied itself every time they switched tab would be a find box
+		// they retype.
+		bool ShowFind = false;
+		std::string FindText;
+		std::string ReplaceText;
+
+		// What the output panel is showing, and what it is searching for.
+		//
+		// **Three flags rather than a minimum level**, because "just the
+		// warnings" is a question a threshold cannot answer. See `DrawOutput`.
+		bool ShowInfo = true;
+		bool ShowWarnings = true;
+		bool ShowErrors = true;
+		std::string OutputFilter;
+
+		// How far a pick ray reaches, in metres.
+		//
+		// Bounded rather than infinite because `spatial::Raycast` takes a
+		// distance and an unbounded one would walk every cell in the grid to
+		// find nothing.
+		static constexpr float PICK_REACH = 5000.0f;
+
+		// Whether the ground grid and the origin axes are drawn.
+		//
+		// **On by default, and it is not decoration.** An empty world with no
+		// grid is a black rectangle: no scale, no horizon, and no way to tell
+		// where the origin is or which way is up.
+		bool ShowGrid = true;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//

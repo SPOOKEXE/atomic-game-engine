@@ -1,7 +1,9 @@
 #include <engine/ui/Metrics.hpp>
+#include <engine/ui/Theme.hpp>
 
 #include <cctype>
 #include <imgui.h>
+#include <studio/Browse.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -91,8 +93,36 @@ namespace studio {
 		// from its contents below; asking for a width as well meant the two
 		// disagreed on the appearing frame and the auto-size won every frame
 		// after, which is a starting width that lasted exactly one frame.
-		const ImVec2 centre = ImGui::GetMainViewport()->GetCenter();
-		ImGui::SetNextWindowPos(centre, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+		//
+		// **`Appearing` alone was not enough, and the failure needs a resize to
+		// see.** A position set once is in absolute coordinates, so shrinking
+		// the window afterwards leaves the modal where the old centre used to
+		// be — which is off the edge, and a modal is the one window somebody
+		// cannot scroll to or drag back because it has taken the input. So the
+		// frame the viewport changes size re-centres every prompt, and every
+		// other frame leaves it where it is. Re-centring unconditionally would
+		// have been simpler and would have taken away dragging the prompt out
+		// of the way of what it is asking about.
+		// **Latched per frame, not per call.** `DrawDialogs` submits every
+		// prompt every frame and only one of them can be open, so comparing and
+		// then storing the size would let the first call consume the change and
+		// the other seven — including the open one — see nothing. The frame
+		// number is what makes "did the viewport resize" a fact about the frame
+		// rather than about the call order within it.
+		static int measuredFrame = -1;
+		static ImVec2 lastViewport = ImVec2(0.0f, 0.0f);
+		static bool resized = false;
+
+		const ImGuiViewport *main = ImGui::GetMainViewport();
+		if (const int frame = ImGui::GetFrameCount(); frame != measuredFrame) {
+			measuredFrame = frame;
+			resized = main->Size.x != lastViewport.x || main->Size.y != lastViewport.y;
+			lastViewport = main->Size;
+		}
+
+		ImGui::SetNextWindowPos(
+			main->GetCenter(), resized ? ImGuiCond_Always : ImGuiCond_Appearing, ImVec2(0.5f, 0.5f)
+		);
 
 		if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			return false;
@@ -148,6 +178,167 @@ namespace studio {
 
 		ImGui::SameLine();
 		if (ImGui::Button("Cancel", button) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+		return confirmed;
+	}
+
+	bool FilePrompt(
+		const char *title,
+		std::string &path,
+		const char *accept,
+		const std::vector<std::string> &extensions,
+		bool mustExist
+	) {
+		bool confirmed = false;
+
+		const ImGuiViewport *main = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos(main->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+		ImGui::SetNextWindowSize(
+			ImVec2(engine::ui::Scaled(640.0f), engine::ui::Scaled(460.0f)), ImGuiCond_Appearing
+		);
+
+		if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+			return false;
+		}
+
+		// **Where each dialog is looking, kept per title.** Six dialogs share
+		// this function and they are not looking at the same place: Open starts
+		// where the game is, Export starts wherever the last export went. One
+		// shared directory would make each of them jump to whichever was used
+		// last. Same shape as the class picker's per-id search state.
+		struct Browsing {
+			std::string Id;
+			std::filesystem::path Where;
+			std::string Name;
+		};
+		static std::vector<Browsing> browsing;
+
+		Browsing *state = nullptr;
+		for (Browsing &candidate : browsing) {
+			if (candidate.Id == title) {
+				state = &candidate;
+				break;
+			}
+		}
+		if (state == nullptr) {
+			browsing.push_back(Browsing{title, {}, {}});
+			state = &browsing.back();
+		}
+
+		// Opened fresh: start from whatever path the caller had, which is the
+		// game's own folder far more often than not.
+		if (ImGui::IsWindowAppearing()) {
+			const std::filesystem::path given(path);
+			state->Where = given;
+			state->Name = given.has_filename() ? given.filename().string() : std::string();
+		}
+
+		const Listing listing = BrowseDirectory(state->Where, extensions);
+		state->Where = listing.Directory;
+
+		// The path bar. Not editable — the field at the bottom is where a path
+		// is typed, and two places to type one would be two places for them to
+		// disagree.
+		ImGui::TextDisabled("%s", listing.Directory.string().c_str());
+		ImGui::Separator();
+
+		const float footer = ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetStyle().ItemSpacing.y;
+
+		if (ImGui::BeginChild("##rows", ImVec2(0.0f, -footer), ImGuiChildFlags_Borders)) {
+			if (!listing.Error.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::TextWrapped("%s", listing.Error.c_str());
+				ImGui::PopStyleColor();
+			}
+
+			if (!listing.Parent.empty()) {
+				if (ImGui::Selectable("..", false, ImGuiSelectableFlags_AllowDoubleClick)) {
+					state->Where = listing.Parent;
+				}
+			}
+
+			for (const BrowseEntry &entry : listing.Entries) {
+				// The id is the path rather than the name, so two folders with
+				// the same name in different places are two rows.
+				ImGui::PushID(entry.Path.string().c_str());
+
+				const bool selected = !entry.Directory && entry.Name == state->Name;
+
+				if (entry.Directory) {
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+				}
+
+				if (ImGui::Selectable(
+						(entry.Directory ? entry.Name + "/" : entry.Name).c_str(),
+						selected,
+						ImGuiSelectableFlags_AllowDoubleClick
+					)) {
+					if (entry.Directory) {
+						// Single click descends. A folder is not a thing this
+						// dialog can return, so there is nothing else a click
+						// on one could mean.
+						state->Where = entry.Path;
+						state->Name.clear();
+					} else {
+						state->Name = entry.Name;
+
+						// Double-click is confirm, which is what every file
+						// dialog does and what a person tries first.
+						if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+							confirmed = true;
+						}
+					}
+				}
+
+				if (entry.Directory) {
+					ImGui::PopStyleColor();
+				}
+
+				ImGui::PopID();
+			}
+		}
+		ImGui::EndChild();
+
+		ImGui::SetNextItemWidth(-1.0f);
+		const bool entered = TextField("##name", state->Name, "file name");
+
+		const std::filesystem::path chosen =
+			state->Name.empty() ? std::filesystem::path{} : listing.Directory / state->Name;
+
+		std::error_code code;
+		const bool exists = !chosen.empty() && std::filesystem::exists(chosen, code);
+
+		// **Refused rather than allowed to fail later.** Open on a path that is
+		// not there used to be discovered by pressing the button and reading a
+		// log line; a disabled button with the reason beside it is the same
+		// information before the click rather than after.
+		const bool usable = !chosen.empty() && (!mustExist || exists);
+
+		const ImVec2 button(engine::ui::Scaled(120.0f), 0.0f);
+
+		ImGui::BeginDisabled(!usable);
+		if (ImGui::Button(accept, button) || (entered && usable)) {
+			confirmed = true;
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", button) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+			ImGui::CloseCurrentPopup();
+		}
+
+		if (!chosen.empty() && mustExist && !exists) {
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted("no such file");
+			ImGui::PopStyleColor();
+		}
+
+		if (confirmed) {
+			path = chosen.string();
 			ImGui::CloseCurrentPopup();
 		}
 

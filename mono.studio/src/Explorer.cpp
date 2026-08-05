@@ -775,6 +775,9 @@ namespace studio {
 			PendingReparent = PendingReparentAction{};
 
 			bool moved = false;
+			Entity was = NULL_ENTITY;
+			std::string named;
+
 			Universe->Enter(world, [&](Store &store) {
 				if (!store.Alive(instance)) {
 					return;
@@ -783,6 +786,11 @@ namespace studio {
 					return;
 				}
 
+				// Read before the write, because the parent it had is the whole
+				// of what undo needs and there is no way to ask afterwards.
+				was = store.ParentOf(instance);
+				named = std::string(Label(store.InstanceNameOf(instance)));
+
 				// **Refused rather than allowed to cycle.** `SetParent` already
 				// refuses to make an instance its own ancestor — a cycle in the
 				// tree is a hang in every walk of it rather than a wrong answer
@@ -790,6 +798,13 @@ namespace studio {
 				// silently did nothing.
 				moved = store.SetParent(instance, parent);
 			});
+
+			// **Recorded only when the move landed.** A refused reparent is not
+			// an edit, and logging one would put an entry on the stack whose
+			// undo restores the parent it never left.
+			if (moved && Commands != nullptr) {
+				Commands->RecordReparent(world, instance, was, parent, "Move " + named);
+			}
 
 			if (moved) {
 				if (parent != NULL_ENTITY) {

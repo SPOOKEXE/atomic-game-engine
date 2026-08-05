@@ -15,6 +15,7 @@
 #include <engine/core/Name.hpp>
 
 #include <string>
+#include <vector>
 #include <string_view>
 
 namespace studio {
@@ -76,6 +77,36 @@ namespace studio {
 	// @param accept The confirming button's caption.
 	// @return `true` on the frame the caller should act on `buffer`.
 	bool PathPrompt(const char *title, const char *label, std::string &buffer, const char *accept);
+
+	// A modal that browses for a file, rather than asking for one to be typed.
+	//
+	// **Beside `PathPrompt` rather than replacing it**, because two of the eight
+	// dialogs ask for a *name* — New World and Rename Scene — and a folder tree
+	// is no help at all with those. The six that take a path get this; the two
+	// that take a name keep the field.
+	//
+	// Same shape as `PathPrompt` otherwise: opened by `OpenPopup` on the title,
+	// returns true on the frame it is confirmed, and leaves `path` holding the
+	// answer. See `studio/Browse.hpp` for why this is an imgui browser and not a
+	// native dialog.
+	//
+	// @param title      The popup id, which is also its heading.
+	// @param path       The path, in and out. Its folder is where browsing
+	//                   starts.
+	// @param accept     What the confirm button says.
+	// @param extensions Which suffixes to list, lowercase and with the dot.
+	//                   Empty lists every file.
+	// @param mustExist  Whether the accept button refuses a path that is not
+	//                   there. Open refuses; Save As does not, because naming a
+	//                   file that does not exist yet is the whole point of it.
+	// @return `true` on the frame it is confirmed.
+	bool FilePrompt(
+		const char *title,
+		std::string &path,
+		const char *accept,
+		const std::vector<std::string> &extensions,
+		bool mustExist
+	);
 
 	// A case-insensitive subsequence match, with exact and prefix hits promoted.
 	//

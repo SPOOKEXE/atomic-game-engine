@@ -3,6 +3,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -53,7 +54,14 @@ namespace studio {
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *SCRIPTS = "Script Editor";
 		constexpr const char *OUTPUT = "Output";
-		constexpr const char *SETTINGS = "Studio Settings";
+		// **The title reads "Preferences" and the id stays "Studio Settings".**
+		// imgui derives a window's id from its label, and the saved layout keys
+		// on that id — so renaming the panel outright would leave the ini's
+		// entry orphaned and the panel would come back floating in a corner for
+		// everybody who had docked it. `###` pins the id to the old name while
+		// the visible title changes, which is the same trick the script tabs use
+		// to survive a rename. See `mono.studio/AGENTS.md`.
+		constexpr const char *SETTINGS = "Preferences###Studio Settings";
 		constexpr const char *STATISTICS = "Statistics";
 		constexpr const char *FRAMEGRAPH = "Frame Graph";
 
@@ -134,14 +142,21 @@ namespace studio {
 		// The world goes into a texture now and the viewport is an ordinary
 		// panel showing it, so there is nothing to see through and no hole to
 		// punch. See `render::SceneTarget`.
-		// **Both bars before the dockspace, and that ordering was the bug.**
+		// **Every bar before the dockspace, and that ordering was the bug.**
 		// `DockSpaceOverViewport` fills the viewport's *work area*, and
 		// `BeginMainMenuBar` and `BeginViewportSideBar` are what shrink that
 		// area. Drawing the toolbar afterwards put it underneath a dockspace
 		// covering the same rectangle — the strip was submitted every frame,
 		// with working buttons, and could not be seen or clicked.
+		//
+		// **The status bar had the same bug and kept it a version longer**,
+		// because it is a readout rather than a control: an unclickable toolbar
+		// is noticed the first time somebody reaches for Play, and an invisible
+		// readout is indistinguishable from one nobody looked at. It moved up
+		// here with the other two and became a side bar in the same change.
 		DrawMenuBar();
 		DrawToolbar();
+		DrawStatusBar();
 
 		const ImGuiID dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
 
@@ -162,6 +177,13 @@ namespace studio {
 		// Reset before any panel draws: the claim is a within-frame fact, not
 		// state that carries. See `ViewportClaimed`.
 		ViewportClaimed = false;
+
+		// Same reason, and the same lifetime: a draw list belongs to the frame
+		// it came from, and a panel closed this frame must contribute nothing
+		// rather than the rectangle it had when it was last open.
+		for (OverlaySlot &slot : Overlays) {
+			slot = OverlaySlot{};
+		}
 
 		// **One span per panel, so the interface bar has something under it.**
 		// Without these the whole build is a single wide block and the only
@@ -201,10 +223,16 @@ namespace studio {
 		DrawSettings();
 		DrawStatistics();
 		DrawFrameGraph();
-		DrawStatusBar();
 		DrawDialogs();
+		DrawPalette();
 
 		DriveCamera();
+
+		// **Immediately after the camera moves and before the frame ends.** See
+		// `Editor::OverlaySlot`: this is what makes the grid sit still on the
+		// ground instead of swimming across it.
+		DrawViewportOverlays();
+
 		DrawShortcuts();
 
 		// **Once, here, after every panel and whether or not any of them
@@ -627,10 +655,47 @@ namespace studio {
 		// Right and middle only. Left is deliberately not claimed — it belongs
 		// to selecting things in the world, and a button that swallowed it
 		// would be in the way of the first feature added here.
+		// What the overlay pass needs, kept rather than drawn now. See
+		// `Editor::OverlaySlot`: the camera has not been driven yet, so
+		// anything projected here would be a frame behind the pixels under it.
+		if (index < Overlays.size()) {
+			OverlaySlot &slot = Overlays[index];
+			slot.List = ImGui::GetWindowDrawList();
+			slot.X = origin.x;
+			slot.Y = origin.y;
+			slot.Width = size.x;
+			slot.Height = size.y;
+			slot.Drawn = true;
+		}
+
 		ImGui::SetCursorScreenPos(origin);
+
+		// **Left is claimed now, and the comment below used to say it was
+		// deliberately not.** It was reserved for "selecting things in the
+		// world", which is this. Right and middle still drive the camera; a
+		// left click picks, and ctrl-click adds — the modifier the explorer
+		// already uses, because two ways to extend one selection is two things
+		// to learn.
 		ImGui::InvisibleButton(
-			"##surface", size, ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle
+			"##surface",
+			size,
+			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
+				ImGuiButtonFlags_MouseButtonMiddle
 		);
+
+		// Recorded rather than acted on: picking enters the store, and a panel
+		// acts from outside `Universe::Enter` — the rule at the top of
+		// `Editor.hpp`. `DrawViewportOverlays` runs it after the camera moves,
+		// which is also when the projection it needs is correct.
+		if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+			!ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left)) {
+			const ImVec2 at = ImGui::GetIO().MousePos;
+			PendingPick.Viewport = index;
+			PendingPick.X = at.x;
+			PendingPick.Y = at.y;
+			PendingPick.Add = ImGui::GetIO().KeyCtrl;
+			PendingPick.Wanted = true;
+		}
 
 		if (second) {
 			extra->Hovered = ImGui::IsItemHovered();
@@ -741,7 +806,7 @@ namespace studio {
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
 		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
-		ImGui::MenuItem("Settings", nullptr, &ShowSettings);
+		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);
 
 		ImGui::Separator();
 
@@ -752,6 +817,13 @@ namespace studio {
 		// now, and two places to bind a key is one too many.
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
+
+		ImGui::Separator();
+
+		// Not a panel, so it is below the separator rather than in the list of
+		// them — but it is a thing somebody turns off and has to be able to
+		// turn back on, which is the rule this menu exists for.
+		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
 
 		ImGui::Separator();
 
@@ -842,16 +914,60 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("Edit")) {
-			if (ImGui::MenuItem("Duplicate", Keybinds::Of(Action::Duplicate).Text().c_str(), false, !Selection.empty())) {
-				DuplicateSelection();
-			}
-			if (ImGui::MenuItem("Delete", Keybinds::Of(Action::Delete).Text().c_str(), false, !Selection.empty())) {
-				DeleteSelection();
-			}
+			// **Named after what they would reverse, not "Undo".** A stack whose
+			// top is invisible is one somebody presses hopefully; "Undo Delete
+			// Wall" is the difference between reversing an edit and finding out
+			// what you reversed afterwards. `CommandLog::NextUndo` carries the
+			// description the recording site wrote for exactly this.
+			const bool canUndo = Commands != nullptr && Commands->CanUndo();
+			const bool canRedo = Commands != nullptr && Commands->CanRedo();
+
+			const std::string undoLabel =
+				canUndo ? "Undo " + std::string(Commands->NextUndo()) : std::string("Undo");
+			const std::string redoLabel =
+				canRedo ? "Redo " + std::string(Commands->NextRedo()) : std::string("Redo");
+
+			// **Every item below asks the operator table whether it may run.**
+			// The conditions used to be written here — `!Selection.empty()`
+			// three times in this menu alone, and again in `DrawShortcuts` —
+			// which is four copies of one rule with nothing comparing them. See
+			// `Operators.hpp`.
+			const auto item = [this](Action id, const char *label) {
+				const Availability state = Operators.Available(id);
+				if (ImGui::MenuItem(label, Keybinds::Of(id).Text().c_str(), false, state.Ready)) {
+					Operators.Run(id);
+				}
+
+				// The reason, on hover, for a greyed row. A menu item that is
+				// disabled and silent is one somebody clicks twice.
+				if (!state.Ready && !state.Reason.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+					ImGui::SetTooltip("%s", state.Reason.c_str());
+				}
+			};
+
+			item(Action::Undo, undoLabel.c_str());
+			item(Action::Redo, redoLabel.c_str());
 			ImGui::Separator();
-			if (ImGui::MenuItem("Select None", Keybinds::Of(Action::SelectNone).Text().c_str(), false, !Selection.empty())) {
-				ClearSelection();
+			item(Action::Duplicate, "Duplicate");
+			item(Action::Delete, "Delete");
+			ImGui::Separator();
+			item(Action::SelectNone, "Select None");
+			ImGui::Separator();
+			item(Action::CommandPalette, "Command Palette...");
+
+			ImGui::Separator();
+
+			// **Where every other editor puts it.** Preferences is the last
+			// item in Edit on Windows and Linux, and somebody looking for the
+			// theme or the frame cap looks there before they look in View —
+			// which is where the panel was, filed with the panels because it is
+			// one. It is still in View as well, because it is still a panel and
+			// `DrawViewMenu` is the guaranteed way back to any of them.
+			if (ImGui::MenuItem("Preferences...", nullptr, ShowSettings)) {
+				ShowSettings = true;
+				ImGui::SetWindowFocus(SETTINGS);
 			}
+
 			ImGui::EndMenu();
 		}
 
@@ -981,6 +1097,22 @@ namespace studio {
 		if (Keybinds::Fired(Action::OpenGame)) {
 			AskingOpen = true;
 			PathBuffer = GamePath.string();
+		}
+
+		if (Keybinds::Fired(Action::CommandPalette)) {
+			ShowPalette = true;
+		}
+
+		// **Through the table, not through the method.** A shortcut that called
+		// `UndoEdit` directly would be a second answer to "may this run now" —
+		// the menu asks the poll and the key would not, and the two would agree
+		// only for as long as nobody changed one of them.
+		if (Keybinds::Fired(Action::Undo)) {
+			Operators.Run(Action::Undo);
+		}
+
+		if (Keybinds::Fired(Action::Redo)) {
+			Operators.Run(Action::Redo);
 		}
 
 		if (Keybinds::Fired(Action::Duplicate) && !Selection.empty()) {
@@ -1238,6 +1370,71 @@ namespace studio {
 			ImGui::EndPopup();
 		}
 
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+
+		// **One mode at a time, not three gizmos at once.** See
+		// `Editor::ToolMode`: three sets of handles over one object is a target
+		// nobody can hit, because the ones you are not using are in front of the
+		// one you are.
+		const auto toolButton = [this](ToolMode mode, const char *label, const char *tip) {
+			if (RunButton(label, CurrentTool == mode, engine::ui::AccentColour())) {
+				// Clicking the active mode returns to Select, so the handles can
+				// be put away without reaching for another button.
+				CurrentTool = CurrentTool == mode ? ToolMode::Select : mode;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", tip);
+			}
+			ImGui::SameLine();
+		};
+
+		toolButton(ToolMode::Move, "Move", "drag an axis to move the selection along it");
+		toolButton(ToolMode::Rotate, "Rotate", "drag a ring to turn the selection about its axis");
+		toolButton(ToolMode::Scale, "Scale", "drag an axis to grow the selection along it");
+
+		// Snap, beside the modes it constrains rather than in a settings page:
+		// it is turned on and off for a job, not configured once.
+		ImGui::Checkbox("Snap", &SnapEnabled);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("round a drag to a fixed step");
+		}
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!SnapEnabled);
+		ImGui::SetNextItemWidth(70.0f * Settings.Scale);
+		ImGui::DragFloat(
+			"##snap-distance", &SnapDistance, 0.1f, 0.05f, 100.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp
+		);
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(70.0f * Settings.Scale);
+		ImGui::DragFloat(
+			"##snap-degrees", &SnapDegrees, 1.0f, 1.0f, 90.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp
+		);
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+
+		// **Camera speed is a control, so it lives here rather than in the
+		// status bar.** The status bar reported it and could not change it,
+		// which is the wrong half of the pair to have — and until v0.7 the
+		// status bar could not be seen at all, so the number was reported to
+		// nobody. It still reads it out; this sets it.
+		ImGui::SetNextItemWidth(140.0f * Settings.Scale);
+		ImGui::SliderFloat("##camera-speed", &CameraSpeed, 1.0f, 200.0f, "%.0f u/s");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("how fast the viewport camera flies");
+		}
+
+		ImGui::SameLine();
+
+		// The grid, reachable without opening a menu. Also in `DrawViewMenu`,
+		// which is the rule: anything closable needs one guaranteed way back.
+		ImGui::Checkbox("Grid", &ShowGrid);
+
 		ImGui::End();
 	}
 
@@ -1254,8 +1451,28 @@ namespace studio {
 		if (ImGui::SmallButton("Clear")) {
 			Output.clear();
 		}
+
+		// **Level toggles rather than a minimum level.** A minimum is the
+		// obvious control and it is the wrong one: the thing somebody actually
+		// wants is "errors and warnings, without the progress chatter", which a
+		// threshold gives, and also "just the warnings", which it cannot.
 		ImGui::SameLine();
-		ImGui::TextDisabled("%zu line(s)", Output.size());
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+		ImGui::Checkbox("info", &ShowInfo);
+		ImGui::SameLine();
+		ImGui::Checkbox("warnings", &ShowWarnings);
+		ImGui::SameLine();
+		ImGui::Checkbox("errors", &ShowErrors);
+
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(-1.0f);
+
+		// The same `FuzzyMatch` the explorer, the properties panel and the
+		// palette filter with. Three notions of "matches what I typed" in one
+		// program is three things to learn.
+		TextField("##output-filter", OutputFilter, "filter output");
+
 		ImGui::Separator();
 
 		if (ImGui::BeginChild("##lines", ImVec2(0, 0), ImGuiChildFlags_None)) {
@@ -1266,10 +1483,28 @@ namespace studio {
 				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small
 			);
 
+			size_t shown = 0;
+
 			for (const Message &message : Output) {
-				const unsigned int colour = message.Level == LogLevel::Error ? engine::ui::ErrorColour()
-										  : message.Level == LogLevel::Warning ? engine::ui::WarningColour()
-																			: 0u;
+				const bool isError = message.Level == LogLevel::Error;
+				const bool isWarning = message.Level == LogLevel::Warning;
+
+				if (isError ? !ShowErrors : isWarning ? !ShowWarnings : !ShowInfo) {
+					continue;
+				}
+
+				if (!OutputFilter.empty()) {
+					int score = 0;
+					if (!FuzzyMatch(OutputFilter, message.Text, score)) {
+						continue;
+					}
+				}
+
+				shown++;
+
+				const unsigned int colour = isError	  ? engine::ui::ErrorColour()
+											: isWarning ? engine::ui::WarningColour()
+														: 0u;
 
 				if (colour != 0u) {
 					ImGui::PushStyleColor(ImGuiCol_Text, colour);
@@ -1278,6 +1513,18 @@ namespace studio {
 				if (colour != 0u) {
 					ImGui::PopStyleColor();
 				}
+			}
+
+			// **Says what is hidden, not just what is shown.** A filtered log
+			// that reports only its visible count looks like a log that lost
+			// the line somebody is hunting for.
+			if (shown != Output.size()) {
+				ImGui::TextDisabled(
+					"— %zu of %zu lines, %zu hidden by the filter",
+					shown,
+					Output.size(),
+					Output.size() - shown
+				);
 			}
 
 			// Pinned to the bottom while the view is already there, and left
@@ -1293,20 +1540,22 @@ namespace studio {
 	}
 
 	void Editor::DrawStatusBar() {
-		const ImGuiViewport *viewport = ImGui::GetMainViewport();
-		const float height = ImGui::GetFrameHeight();
+		ImGuiViewport *viewport = ImGui::GetMainViewport();
 
-		ImGui::SetNextWindowPos(
-			ImVec2(viewport->WorkPos.x, viewport->WorkPos.y + viewport->WorkSize.y - height)
-		);
-		ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, height));
-		ImGui::SetNextWindowViewport(viewport->ID);
+		// **A side bar, for `DrawToolbar`'s reason and after the same bug.**
+		// Positioning an ordinary window at the bottom of the work area puts it
+		// under a dockspace covering that same rectangle, and
+		// `NoBringToFrontOnFocus` then guarantees a docked panel wins. The strip
+		// was submitted every frame, with correct numbers in it, and could not
+		// be seen. `BeginViewportSideBar` reserves the row instead, so the
+		// dockspace is laid out around it rather than over it.
+		const float height = ImGui::GetFrameHeight();
 
 		constexpr ImGuiWindowFlags FLAGS = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
 										   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
-										   ImGuiWindowFlags_NoBringToFrontOnFocus;
+										   ImGuiWindowFlags_NoScrollbar;
 
-		if (!ImGui::Begin("##status", nullptr, FLAGS)) {
+		if (!ImGui::BeginViewportSideBar("##status", viewport, ImGuiDir_Down, height, FLAGS)) {
 			ImGui::End();
 			return;
 		}
@@ -1321,16 +1570,62 @@ namespace studio {
 											  : std::to_string(live) + " scenes running";
 
 		ImGui::Text(
-			"%s  |  %.0f fps  |  %u draw calls, %llu triangles, %u culled  |  camera %.0f u/s",
+			"%s  |  %.0f fps  |  %u draw calls, %llu triangles, %u culled",
 			state.c_str(),
 			ImGui::GetIO().Framerate,
 			LastFrame.DrawCalls,
 			static_cast<unsigned long long>(LastFrame.Triangles),
-			LastFrame.Culled,
-			static_cast<double>(CameraSpeed)
+			LastFrame.Culled
 		);
 
+		// **What is selected, which the explorer cannot say while you are
+		// looking at the viewport.** It is the one fact about the current state
+		// that has no other home once the eye is in the centre panel — the
+		// explorer has it, and the explorer is the panel you are not reading.
+		//
+		// Drawn from the store every frame rather than from a cached name,
+		// because a cached one is wrong for a frame after a rename and one
+		// frame is enough to see.
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+
+		if (Selection.empty()) {
+			ImGui::TextDisabled("nothing selected");
+		} else if (Selection.size() > 1) {
+			ImGui::Text("%zu selected", Selection.size());
+		} else {
+			const Entity only = Selection.front();
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				if (!store.Alive(only)) {
+					ImGui::TextDisabled("selection is gone");
+					return;
+				}
+
+				const engine::ecs::ClassId klass = store.ClassOf(only);
+				const Name named = store.InstanceNameOf(only);
+				if (klass.IsValid()) {
+					ImGui::Text(
+						"%s (%s)",
+						named.IsValid() ? Label(named) : "?",
+						Label(engine::ecs::Classes::Describe(klass).Name)
+					);
+				} else {
+					ImGui::TextUnformatted(named.IsValid() ? Label(named) : "?");
+				}
+			});
+		}
+
 		ImGui::End();
+	}
+
+	namespace {
+		// What each dialog lists. **From `game`'s own constants rather than
+		// written out**, because the reader refuses a `<World>` where a `<Game>`
+		// belongs and a browser offering the wrong one would be offering a file
+		// that cannot load.
+		const std::vector<std::string> GAME_FILES{std::string(engine::game::GAME_EXTENSION)};
+		const std::vector<std::string> WORLD_FILES{std::string(engine::game::WORLD_EXTENSION)};
 	}
 
 	void Editor::DrawDialogs() {
@@ -1363,21 +1658,21 @@ namespace studio {
 			ImGui::OpenPopup("Rename Scene");
 		}
 
-		if (PathPrompt("Save Game As", "File", PathBuffer, "Save")) {
+		if (FilePrompt("Save Game As", PathBuffer, "Save", GAME_FILES, false)) {
 			SaveGame(std::filesystem::path(PathBuffer));
 			AskingSaveAs = false;
 		} else if (!ImGui::IsPopupOpen("Save Game As")) {
 			AskingSaveAs = false;
 		}
 
-		if (PathPrompt("Open Game", "File", PathBuffer, "Open")) {
+		if (FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
 			OpenGame(std::filesystem::path(PathBuffer));
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
 		}
 
-		if (PathPrompt("Export World", "File", PathBuffer, "Export")) {
+		if (FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
 			ExportActiveWorld(std::filesystem::path(PathBuffer));
 			AskingExport = false;
 		} else if (!ImGui::IsPopupOpen("Export World")) {
@@ -1389,21 +1684,21 @@ namespace studio {
 		// reader refuses each in the other's place, so the two exports write
 		// different extensions and say which they are — see
 		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
-		if (PathPrompt("Export Universe", "File", PathBuffer, "Export")) {
+		if (FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
 			ExportUniverse(std::filesystem::path(PathBuffer));
 			AskingExportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Export Universe")) {
 			AskingExportUniverse = false;
 		}
 
-		if (PathPrompt("Import Universe", "File", PathBuffer, "Import")) {
+		if (FilePrompt("Import Universe", PathBuffer, "Import", GAME_FILES, true)) {
 			ImportUniverseFile(std::filesystem::path(PathBuffer));
 			AskingImportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Import Universe")) {
 			AskingImportUniverse = false;
 		}
 
-		if (PathPrompt("Import World", "File", PathBuffer, "Import")) {
+		if (FilePrompt("Import World", PathBuffer, "Import", WORLD_FILES, true)) {
 			ImportWorldFile(std::filesystem::path(PathBuffer));
 			AskingImport = false;
 		} else if (!ImGui::IsPopupOpen("Import World")) {

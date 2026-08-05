@@ -20,6 +20,8 @@
 #include <spdlog/sinks/base_sink.h>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <imgui.h>
@@ -183,8 +185,13 @@ namespace studio {
 		// mode belongs to a swapchain and a headless run has none. The client
 		// makes the same call for `--uncapped`; see `Options::Uncapped` for why
 		// an editor wants it for a different reason.
+		// The flag seeds the preference and is not read again — see
+		// `Editor::VerticalSync`, which is what the Preferences page moves.
+		VerticalSync = !Settings.Uncapped;
+
 		if (Settings.Uncapped && !Settings.Headless && !Renderer.SetVerticalSync(false)) {
 			ENGINE_WARN("--uncapped had no effect; frames stay paced by the display");
+			VerticalSync = true;
 		}
 
 		engine::ui::InterfaceSettings interfaceSettings;
@@ -238,6 +245,10 @@ namespace studio {
 		engine::script::ScriptClass();
 
 		Universe = std::make_unique<engine::world::Universe>();
+		Commands = std::make_unique<CommandLog>(*Universe);
+
+		// After both, because several polls read them.
+		RegisterOperators();
 
 		if (!Settings.Game.empty()) {
 			if (!OpenGame(Settings.Game)) {
@@ -317,6 +328,9 @@ namespace studio {
 		// of every one of them before it goes away.
 		EndAllRuns();
 		Runs.clear();
+
+		// Before the universe, because it holds a reference to it.
+		Commands.reset();
 		Universe.reset();
 
 		// Detached before the sink is dropped. The logger is process-wide and
@@ -362,6 +376,7 @@ namespace studio {
 			Renderer.WaitForFrame();
 
 			const float delta = Clock.Tick();
+			const double frameBegan = Clock.Now();
 
 			engine::core::FrameGraph::BeginFrame();
 
@@ -378,6 +393,23 @@ namespace studio {
 			Present(delta);
 
 			engine::core::FrameGraph::EndFrame();
+
+			// **After `EndFrame`, so the sleep is not measured as part of the
+			// frame.** Inside it, the frame graph would report the editor
+			// spending most of its time in "waiting", which is true and is the
+			// opposite of the question the graph is opened to answer.
+			//
+			// Only when vertical sync is off: with it on the display already
+			// paces the frame, and a second limiter would beat against it and
+			// produce a stutter neither one causes alone.
+			if (!VerticalSync && FrameCap > 0.0f && !Settings.Headless) {
+				const double budget = 1.0 / static_cast<double>(FrameCap);
+				const double spent = Clock.Now() - frameBegan;
+
+				if (spent < budget) {
+					std::this_thread::sleep_for(std::chrono::duration<double>(budget - spent));
+				}
+			}
 
 			if (Settings.MaximumFrames >= 0 && FramesDrawn >= Settings.MaximumFrames) {
 				Running = false;
@@ -1053,6 +1085,43 @@ namespace studio {
 		return std::find(Selection.begin(), Selection.end(), instance) != Selection.end();
 	}
 
+	void Editor::UndoEdit() {
+		if (Commands == nullptr || !Commands->CanUndo()) {
+			return;
+		}
+
+		// Read before the call, because a successful undo pops it.
+		const std::string what(Commands->NextUndo());
+
+		if (!Commands->Undo()) {
+			Say("nothing to undo — '" + what + "' is gone", engine::core::LogLevel::Warning);
+			return;
+		}
+
+		// See the declaration: a handle the undo replaced is either dead or
+		// about to name something else.
+		ClearSelection();
+		MarkModified();
+		Say("undid " + what);
+	}
+
+	void Editor::RedoEdit() {
+		if (Commands == nullptr || !Commands->CanRedo()) {
+			return;
+		}
+
+		const std::string what(Commands->NextRedo());
+
+		if (!Commands->Redo()) {
+			Say("nothing to redo — '" + what + "' is gone", engine::core::LogLevel::Warning);
+			return;
+		}
+
+		ClearSelection();
+		MarkModified();
+		Say("redid " + what);
+	}
+
 	// --- the game ----------------------------------------------------------
 
 	void Editor::NewGame() {
@@ -1436,6 +1505,16 @@ namespace studio {
 			if (landed != NULL_ENTITY) {
 				store.SetParent(created, landed);
 			}
+
+			// **After the parent, not before it.** The document a redo rebuilds
+			// from is taken here, and one taken before `SetParent` would rebuild
+			// the instance as a root — an undo followed by a redo would quietly
+			// move it out of the tree.
+			if (Commands != nullptr) {
+				Commands->RecordCreate(
+					store, world, created, "Insert " + std::string(Label(info.Name))
+				);
+			}
 		});
 
 		if (created != NULL_ENTITY) {
@@ -1468,6 +1547,19 @@ namespace studio {
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : doomed) {
 				if (store.Alive(instance)) {
+					// **Recorded before the destroy**, because after it there is
+					// nothing left to photograph and the undo would restore an
+					// empty document — which reads as "undo did nothing" rather
+					// than as a fault, and is therefore the version of this
+					// mistake nobody reports.
+					if (Commands != nullptr) {
+						Commands->RecordDestroy(
+							store,
+							SelectionWorld,
+							instance,
+							"Delete " + std::string(Label(store.InstanceNameOf(instance)))
+						);
+					}
 					store.DestroyInstance(instance);
 				}
 			}
@@ -1502,6 +1594,15 @@ namespace studio {
 				// here rather than changed there.
 				store.SetParent(copy, store.ParentOf(source));
 				copies.push_back(copy);
+
+				if (Commands != nullptr) {
+					Commands->RecordCreate(
+						store,
+						SelectionWorld,
+						copy,
+						"Duplicate " + std::string(Label(store.InstanceNameOf(source)))
+					);
+				}
 			}
 		});
 
@@ -1685,6 +1786,19 @@ namespace studio {
 		// would be a game that came up frozen for a reason nobody could see.
 		run.Paused = false;
 		run.Snapshot = std::move(document);
+
+		// **The undo stack does not survive the run, and Stop is why.** Stop
+		// restores the snapshot taken on the line above, which throws away
+		// everything the run did — so a command recorded before it describes a
+		// world that the restore has already put back, and one recorded during
+		// it describes a world that no longer exists. Either way the entry is a
+		// lie the moment Stop is pressed.
+		//
+		// Cleared here rather than at Stop so that the guarantee holds even for
+		// a run that is never stopped cleanly.
+		if (Commands != nullptr) {
+			Commands->Clear();
+		}
 
 		std::string failure;
 

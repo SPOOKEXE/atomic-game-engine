@@ -131,7 +131,78 @@ namespace studio {
 							ImGui::SetTooltip("Ctrl+wheel over the code zooms it");
 						}
 
+						ImGui::SameLine();
+						if (ImGui::SmallButton(ShowFind ? "Hide Find" : "Find")) {
+							ShowFind = !ShowFind;
+						}
+
 						ImGui::Separator();
+
+						// **Find and Replace All, and deliberately not Find
+						// Next.** Jumping the caret to a match means setting the
+						// selection inside `InputTextMultiline`, which imgui
+						// does not expose — reaching into `ImGuiInputTextState`
+						// to do it would tie the script editor to a private
+						// layout that changes between imgui releases. A match
+						// count and a whole-file replace are the two thirds of
+						// this that can be built honestly.
+						if (ShowFind) {
+							ImGui::SetNextItemWidth(180.0f * Settings.Scale);
+							TextField("##find", FindText, "find");
+
+							ImGui::SameLine();
+							ImGui::SetNextItemWidth(180.0f * Settings.Scale);
+							TextField("##replace", ReplaceText, "replace with");
+
+							size_t matches = 0;
+							if (!FindText.empty()) {
+								for (size_t at = tab.Text.find(FindText); at != std::string::npos;
+									 at = tab.Text.find(FindText, at + FindText.size())) {
+									matches++;
+								}
+							}
+
+							ImGui::SameLine();
+							ImGui::BeginDisabled(matches == 0);
+							if (ImGui::SmallButton("Replace All")) {
+								std::string rebuilt;
+								rebuilt.reserve(tab.Text.size());
+
+								// Built once into a new string rather than
+								// replaced in place: replacing in place while
+								// scanning re-finds the replacement when it
+								// contains the needle, which is an editor that
+								// hangs on "a" -> "aa".
+								size_t at = 0;
+								for (size_t found = tab.Text.find(FindText, at);
+									 found != std::string::npos;
+									 found = tab.Text.find(FindText, at)) {
+									rebuilt.append(tab.Text, at, found - at);
+									rebuilt.append(ReplaceText);
+									at = found + FindText.size();
+								}
+								rebuilt.append(tab.Text, at, std::string::npos);
+
+								tab.Text = rebuilt;
+								tab.Modified = true;
+								Say(
+									"replaced " + std::to_string(matches) + " occurrence(s) in " +
+									std::string(Label(tab.Path))
+								);
+							}
+							ImGui::EndDisabled();
+
+							ImGui::SameLine();
+							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+							if (FindText.empty()) {
+								ImGui::TextUnformatted("type something to find");
+							} else {
+								ImGui::Text("%zu match(es)", matches);
+							}
+							ImGui::PopStyleColor();
+
+							ImGui::Separator();
+						}
 
 						// **The monospace face, which is what makes this a code
 						// editor rather than a text box.** Columns line up, an

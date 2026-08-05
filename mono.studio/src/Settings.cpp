@@ -9,6 +9,12 @@
 
 namespace studio {
 
+	// The same string `Interface.cpp` docks and focuses. Declared here rather
+	// than shared through a header because two translation units naming one
+	// window is exactly the drift `###` is guarding against — so it is written
+	// once in each and checked by the panel appearing where it was left.
+	static constexpr const char *PREFERENCES = "Preferences###Studio Settings";
+
 	namespace {
 		using engine::ui::Palette;
 
@@ -47,6 +53,70 @@ namespace studio {
 		}
 	}
 
+	void Editor::DrawGeneralSettings() {
+		// **What the editor does, as opposed to what it looks like.** Splitting
+		// these off the Appearance page is not tidiness: a page called
+		// Appearance holding the world lifecycle and the frame pacing is a page
+		// nobody looks in for either of them.
+		ImGui::SeparatorText("Worlds");
+
+		// **The lifecycle is a policy, so it has a switch.** A universe of
+		// subareas cannot tick all of them, which is what closing empty worlds
+		// is for — but an author debugging a world that keeps closing under
+		// them needs to be able to stop it happening rather than work out why.
+		ImGui::Checkbox("Close empty worlds automatically", &AutoManageWorlds);
+
+		ImGui::BeginDisabled(!AutoManageWorlds);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+
+		float minutes = IdleCloseSeconds / 60.0f;
+		if (ImGui::SliderFloat("Close after", &minutes, 0.5f, 30.0f, "%.1f min")) {
+			IdleCloseSeconds = minutes * 60.0f;
+		}
+		ImGui::EndDisabled();
+
+		ImGui::TextDisabled("a world with no player and nobody looking at it stops ticking;");
+		ImGui::TextDisabled("teleporting into a closed world opens it first");
+
+		ImGui::SeparatorText("Frames");
+
+		// **Vertical sync, then a cap, and the cap only matters without it.**
+		// The two are one decision presented as two controls because they fail
+		// differently: sync ties the frame to the display and is what anybody
+		// wants by default; turning it off is what a benchmark or a latency
+		// measurement needs, and *then* the question of a ceiling arises.
+		if (ImGui::Checkbox("Vertical sync", &VerticalSync)) {
+			if (Renderer.SetVerticalSync(VerticalSync)) {
+				Say(VerticalSync ? "frames are paced by the display" : "vertical sync off");
+			} else {
+				// **Put back rather than left lying.** A checkbox that stays
+				// ticked while the device ignored it is a control reporting a
+				// state the program is not in — and the driver refusing is an
+				// ordinary outcome rather than a fault.
+				VerticalSync = !VerticalSync;
+				Say("this device will not change vertical sync", engine::core::LogLevel::Warning);
+			}
+		}
+
+		ImGui::BeginDisabled(VerticalSync);
+
+		bool capped = FrameCap > 0.0f;
+		if (ImGui::Checkbox("Limit frame rate", &capped)) {
+			FrameCap = capped ? 120.0f : 0.0f;
+		}
+
+		ImGui::BeginDisabled(!capped);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+		ImGui::SliderFloat("Frames per second", &FrameCap, 30.0f, 360.0f, "%.0f fps");
+		ImGui::EndDisabled();
+
+		ImGui::EndDisabled();
+
+		ImGui::TextDisabled("without a cap the editor draws as fast as it can, which on a still");
+		ImGui::TextDisabled("scene is a great many frames of the same picture");
+
+	}
+
 	void Editor::DrawAppearanceSettings() {
 		ImGui::SeparatorText("Theme");
 
@@ -82,26 +152,6 @@ namespace studio {
 
 		ImGui::Spacing();
 		ImGui::TextDisabled("remembered in the layout file, beside the panel positions");
-
-		ImGui::SeparatorText("Worlds");
-
-		// **The lifecycle is a policy, so it has a switch.** A universe of
-		// subareas cannot tick all of them, which is what closing empty worlds
-		// is for — but an author debugging a world that keeps closing under
-		// them needs to be able to stop it happening rather than work out why.
-		ImGui::Checkbox("Close empty worlds automatically", &AutoManageWorlds);
-
-		ImGui::BeginDisabled(!AutoManageWorlds);
-		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
-
-		float minutes = IdleCloseSeconds / 60.0f;
-		if (ImGui::SliderFloat("Close after", &minutes, 0.5f, 30.0f, "%.1f min")) {
-			IdleCloseSeconds = minutes * 60.0f;
-		}
-		ImGui::EndDisabled();
-
-		ImGui::TextDisabled("a world with no player and nobody looking at it stops ticking;");
-		ImGui::TextDisabled("teleporting into a closed world opens it first");
 
 		ImGui::SeparatorText("Interface");
 
@@ -276,7 +326,7 @@ namespace studio {
 			return;
 		}
 
-		if (!ImGui::Begin("Studio Settings", &ShowSettings)) {
+		if (!ImGui::Begin(PREFERENCES, &ShowSettings)) {
 			ImGui::End();
 			return;
 		}
@@ -286,6 +336,11 @@ namespace studio {
 		// would put a scroll bar between a person and whichever one they came
 		// for.
 		if (ImGui::BeginTabBar("##settings")) {
+			if (ImGui::BeginTabItem("General")) {
+				DrawGeneralSettings();
+				ImGui::EndTabItem();
+			}
+
 			if (ImGui::BeginTabItem("Appearance")) {
 				DrawAppearanceSettings();
 				ImGui::EndTabItem();
