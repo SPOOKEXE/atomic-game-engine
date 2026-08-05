@@ -597,6 +597,11 @@ namespace studio {
 		// @return Its record, valid until `Trees` next grows.
 		WorldTree &TreeFor(WorldId world);
 
+		// Starts typing a new name over an instance's row in the tree.
+		//
+		// @param instance The instance to rename. Ignored when it is null.
+		void BeginRename(Entity instance);
+
 		// Opens the path down to an instance, so the tree can show it.
 		//
 		// @param world    The world it lives in.
@@ -1085,6 +1090,30 @@ namespace studio {
 		// by a 64-bit handle, and putting both in one set would have world 3
 		// open whatever happened to be entity 3.
 		std::vector<uint32_t> ExpandedWorlds;
+
+		// The instance whose name is being typed in the tree, and what has been
+		// typed so far.
+		//
+		// **The buffer is the editor's rather than the store's**, for the
+		// reason every panel here reads the store every frame: a half-typed
+		// name is not world state, and writing each keystroke through would put
+		// one undo entry on the stack per character.
+		Entity Renaming;
+		std::string RenameBuffer;
+
+		// Whether the rename field still has to be given the keyboard.
+		//
+		// One frame's worth of request. imgui's `SetKeyboardFocusHere` applies
+		// to the *next* item submitted, so it has to be asked for on the frame
+		// the field first appears and not afterwards, or every frame steals
+		// focus back and the caret can never be moved.
+		bool RenameFocus = false;
+
+		// A rename the context menu asked for.
+		//
+		// A `Pending*` like the rest: the menu is drawn inside `Universe::Enter`
+		// and `BeginRename` enters the world to read the name it seeds with.
+		Entity PendingRenameStart;
 
 		// Where a shift-click measures its range from.
 		//
@@ -1755,6 +1784,13 @@ namespace studio {
 			Entity Parent;
 		};
 
+		// A rename the tree asked for, applied outside `Universe::Enter`.
+		struct PendingRenameInstanceAction {
+			WorldId World;
+			Entity Instance;
+			std::string To;
+		};
+
 		struct PendingReparentAction {
 			WorldId World;
 
@@ -1939,6 +1975,7 @@ namespace studio {
 
 		PendingInsertAction PendingInsert;
 		PendingReparentAction PendingReparent;
+		PendingRenameInstanceAction PendingRenameInstance;
 		PendingMoveAction PendingMove;
 		PendingScriptAction PendingOpenScript;
 		WorldId PendingRemoveWorld;

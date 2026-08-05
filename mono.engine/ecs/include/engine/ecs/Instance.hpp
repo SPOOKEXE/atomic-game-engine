@@ -131,4 +131,22 @@ namespace engine::ecs {
 		// The interned name, or an invalid Name for an unnamed instance.
 		core::Name Value;
 	};
+
+	// Present on an instance that `Clone` must not copy.
+	//
+	// **A tag, and the sense is inverted, and both follow from what this
+	// costs.** Roblox spells it `Archivable` and defaults it to true, so a
+	// component holding a bool would be one byte per instance in every
+	// archetype in the engine, set the same way on all but a handful — which is
+	// the exact shape `ecs/AGENTS.md` names as belonging somewhere else.
+	//
+	// A tag is presence rather than bytes: it costs nothing on the instances
+	// that do not have it, and the ones that do are rare enough that the
+	// archetype move each one pays is not a cost anybody meets in a loop.
+	//
+	// So `Archivable` is `!Has<NotArchivable>`, which is the same fact read the
+	// cheap way round.
+	//
+	// @since v0.75
+	struct NotArchivable {};
 }

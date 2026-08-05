@@ -312,19 +312,92 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `instance:FindFirstChild(name)`
-		int InstanceFindFirstChild(lua_State *state) {
-			Store &store = StoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
-			const char *name = luaL_checkstring(state, 2);
-
-			const Entity found = store.FindFirstChild(instance, name);
+		// Pushes an instance, or nil for the null handle.
+		//
+		// Every lookup below ends the same way, and writing it out six times is
+		// six chances to push a userdata wrapping `NULL_ENTITY` — which is not
+		// nil, compares equal to nothing, and is the shape a script cannot test
+		// for.
+		int PushFound(lua_State *state, Entity found) {
 			if (found == ecs::NULL_ENTITY) {
 				lua_pushnil(state);
 				return 1;
 			}
 
 			PushInstance(state, found);
+			return 1;
+		}
+
+		// The class named by an argument, or an invalid id.
+		ecs::ClassId CheckClass(lua_State *state, int index) {
+			return ecs::Classes::Find(core::Name(luaL_checkstring(state, index)));
+		}
+
+		// `instance:FindFirstChild(name, recursive)`
+		int InstanceFindFirstChild(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			const char *name = luaL_checkstring(state, 2);
+
+			// **The second argument, which used to be read and ignored.** A
+			// script calling `FindFirstChild("Humanoid", true)` got the
+			// non-recursive answer — nil for anything not a direct child — and
+			// nothing said so. Silently answering a different question than the
+			// one asked is the worst kind of gap in a binding.
+			const bool recursive = lua_toboolean(state, 3) != 0;
+
+			return PushFound(state, store.FindFirstChild(instance, name, recursive));
+		}
+
+		// `instance:FindFirstChildOfClass(className)`
+		int InstanceFindFirstChildOfClass(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			return PushFound(state, store.FindFirstChildOfClass(instance, CheckClass(state, 2)));
+		}
+
+		// `instance:FindFirstChildWhichIsA(className, recursive)`
+		int InstanceFindFirstChildWhichIsA(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			const ecs::ClassId klass = CheckClass(state, 2);
+			const bool recursive = lua_toboolean(state, 3) != 0;
+
+			return PushFound(state, store.FindFirstChildWhichIsA(instance, klass, recursive));
+		}
+
+		// `instance:FindFirstAncestor(name)`
+		int InstanceFindFirstAncestor(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			return PushFound(state, store.FindFirstAncestor(instance, luaL_checkstring(state, 2)));
+		}
+
+		// `instance:FindFirstAncestorOfClass(className)`
+		int InstanceFindFirstAncestorOfClass(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			return PushFound(state, store.FindFirstAncestorOfClass(instance, CheckClass(state, 2)));
+		}
+
+		// `instance:FindFirstAncestorWhichIsA(className)`
+		int InstanceFindFirstAncestorWhichIsA(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			return PushFound(state, store.FindFirstAncestorWhichIsA(instance, CheckClass(state, 2)));
+		}
+
+		// `instance:GetFullName()`
+		int InstanceGetFullName(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			const std::string full = store.GetFullName(instance);
+			lua_pushlstring(state, full.data(), full.size());
 			return 1;
 		}
 
@@ -602,6 +675,12 @@ namespace engine::script {
 			{"GetChildren", InstanceGetChildren},
 			{"GetDescendants", InstanceGetDescendants},
 			{"FindFirstChild", InstanceFindFirstChild},
+			{"FindFirstChildOfClass", InstanceFindFirstChildOfClass},
+			{"FindFirstChildWhichIsA", InstanceFindFirstChildWhichIsA},
+			{"FindFirstAncestor", InstanceFindFirstAncestor},
+			{"FindFirstAncestorOfClass", InstanceFindFirstAncestorOfClass},
+			{"FindFirstAncestorWhichIsA", InstanceFindFirstAncestorWhichIsA},
+			{"GetFullName", InstanceGetFullName},
 			{"IsDescendantOf", InstanceIsDescendantOf},
 			{"ClearAllChildren", InstanceClearAllChildren},
 			{"GetPropertyChangedSignal", InstanceGetPropertyChangedSignal},

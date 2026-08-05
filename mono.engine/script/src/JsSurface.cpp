@@ -44,6 +44,7 @@
 #include <engine/world/Postbox.hpp>
 
 #include <cmath>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -331,10 +332,88 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
-			const Entity found = JsOf(context).World->FindFirstChild(instance, name);
+			// **The second argument, which Luau's copy of this also ignored.**
+			// `FindFirstChild("Humanoid", true)` answered the non-recursive
+			// question and said nothing about it.
+			const bool recursive = argc > 1 && JS_ToBool(context, argv[1]) > 0;
+
+			const Entity found = JsOf(context).World->FindFirstChild(instance, name, recursive);
 			JS_FreeCString(context, name);
 
 			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
+		}
+
+		// The class named by an argument, or an invalid id.
+		ecs::ClassId JsClassArgument(JSContext *context, JSValueConst value) {
+			const char *name = JS_ToCString(context, value);
+			if (name == nullptr) {
+				return ecs::ClassId{};
+			}
+
+			const ecs::ClassId klass = ecs::Classes::Find(core::Name(name));
+			JS_FreeCString(context, name);
+			return klass;
+		}
+
+		// The four class-keyed lookups, which differ only in which one they call.
+		//
+		// **One function and a selector rather than four near-copies**, because
+		// the argument handling is the half that goes wrong — a `JS_FreeCString`
+		// missed on one path is a leak nobody sees — and four copies of it is
+		// four places to miss it.
+		enum class JsLookup { ChildOfClass, ChildWhichIsA, AncestorOfClass, AncestorWhichIsA };
+
+		template <JsLookup Kind>
+		JSValue InstanceClassLookup(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY || argc < 1) {
+				return JS_ThrowTypeError(context, "this needs a class name");
+			}
+
+			const ecs::ClassId klass = JsClassArgument(context, argv[0]);
+			Store &store = *JsOf(context).World;
+
+			Entity found = ecs::NULL_ENTITY;
+			if constexpr (Kind == JsLookup::ChildOfClass) {
+				found = store.FindFirstChildOfClass(instance, klass);
+			} else if constexpr (Kind == JsLookup::ChildWhichIsA) {
+				const bool recursive = argc > 1 && JS_ToBool(context, argv[1]) > 0;
+				found = store.FindFirstChildWhichIsA(instance, klass, recursive);
+			} else if constexpr (Kind == JsLookup::AncestorOfClass) {
+				found = store.FindFirstAncestorOfClass(instance, klass);
+			} else {
+				found = store.FindFirstAncestorWhichIsA(instance, klass);
+			}
+
+			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
+		}
+
+		JSValue
+		InstanceFindFirstAncestor(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY || argc < 1) {
+				return JS_ThrowTypeError(context, "FindFirstAncestor needs a name");
+			}
+
+			const char *name = JS_ToCString(context, argv[0]);
+			if (name == nullptr) {
+				return JS_EXCEPTION;
+			}
+
+			const Entity found = JsOf(context).World->FindFirstAncestor(instance, name);
+			JS_FreeCString(context, name);
+
+			return found == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, found);
+		}
+
+		JSValue InstanceGetFullName(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "GetFullName needs an instance");
+			}
+
+			const std::string full = JsOf(context).World->GetFullName(instance);
+			return JS_NewStringLen(context, full.data(), full.size());
 		}
 
 		JSValue InstanceIsDescendantOf(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
@@ -1061,12 +1140,24 @@ namespace engine::script {
 				JS_CFUNC_DEF("GetChildren", 0, InstanceGetChildren),
 				JS_CFUNC_DEF("GetDescendants", 0, InstanceGetDescendants),
 				JS_CFUNC_DEF("FindFirstChild", 1, InstanceFindFirstChild),
+				JS_CFUNC_DEF("FindFirstChildOfClass", 1, InstanceClassLookup<JsLookup::ChildOfClass>),
+				JS_CFUNC_DEF("FindFirstChildWhichIsA", 1, InstanceClassLookup<JsLookup::ChildWhichIsA>),
+				JS_CFUNC_DEF("FindFirstAncestor", 1, InstanceFindFirstAncestor),
+				JS_CFUNC_DEF("FindFirstAncestorOfClass", 1, InstanceClassLookup<JsLookup::AncestorOfClass>),
+				JS_CFUNC_DEF("FindFirstAncestorWhichIsA", 1, InstanceClassLookup<JsLookup::AncestorWhichIsA>),
+				JS_CFUNC_DEF("GetFullName", 0, InstanceGetFullName),
 				JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
 				JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
 				JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
 				JS_CGETSET_DEF("Changed", InstanceChanged, nullptr),
 			};
-			JS_SetPropertyFunctionList(context, methods, entries, 10);
+			// **`std::size`, not a number somebody has to remember.** This read
+			// `10` while the list held sixteen, so the last six — including
+			// `IsDescendantOf`, `GetPropertyChangedSignal` and `Changed` — were
+			// simply not installed. Nothing warned: a method that is not there
+			// is `undefined`, and `undefined` only fails at the call site, in
+			// whatever script reaches it first.
+			JS_SetPropertyFunctionList(context, methods, entries, static_cast<int>(std::size(entries)));
 
 			// Held in the context so `PrototypeFor` can put every class
 			// prototype behind it, and so it is freed with everything else.

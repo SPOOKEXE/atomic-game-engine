@@ -47,6 +47,7 @@ namespace studio {
 		Duplicate,
 		Delete,
 		SelectNone,
+		Rename,
 
 		// The two panels the client puts on F3 and F5.
 		//

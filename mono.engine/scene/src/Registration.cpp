@@ -178,7 +178,10 @@ namespace engine::scene {
 		// `MutableNodeOf`, which returns null for a missing row, so the walk
 		// stops early and resumes when the next delta fills the gap. Transient,
 		// and stated because the alternative reading is a corrupted tree.
-		ecs::Components::Register<ecs::Hierarchy>("ecs.Hierarchy");
+		// `ecs.Hierarchy` used to be registered here, and it was the wrong
+		// place: an `ecs::` type named by `scene` is a name that depends on this
+		// function having run first, and nothing made it. `ecs` names all three
+		// instance components itself now — see `RegisterInstanceComponents`.
 
 		// Added at the end of this list rather than beside `ServiceComponent`,
 		// per the ordering note above: a component id decides column order, and

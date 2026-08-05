@@ -151,6 +151,12 @@ namespace studio {
 					   [this] { return NeedsSelection(!Selection.empty()); },
 					   [this] { ClearSelection(); }});
 
+		Operators.Add({Action::Rename,
+					   "Rename",
+					   "Rename the selected instance",
+					   [this] { return NeedsSelection(!Selection.empty()); },
+					   [this] { BeginRename(Selection.empty() ? Entity{} : Selection.front()); }});
+
 		// --- the panels -----------------------------------------------------
 
 		Operators.Add({Action::ShowStatistics, "Statistics", "Show the frame rate panel", always, [this] {

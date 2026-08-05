@@ -57,6 +57,16 @@ namespace studio {
 			{Action::Delete, "edit.delete", "Delete", "Delete the selection", Scope::Tree, {}},
 			{Action::SelectNone, "edit.selectnone", "Select None", "Clear the selection", Scope::Tree, {}},
 
+			// **Unbound, like everything else here, and F2 was asked for.**
+			// `tests/Keybinds.cpp` holds the rule above still: every action
+			// ships unbound, because a default nobody asked for is how one key
+			// came to mean two things in three files. Shipping F2 would have
+			// been a decision to override a tested invariant to save one visit
+			// to the Keybinds page — so the action is here, the operator and
+			// the tree's context menu make it reachable, and F2 is one binding
+			// away rather than baked in.
+			{Action::Rename, "edit.rename", "Rename", "Rename the selected instance", Scope::Tree, {}},
+
 			{Action::ShowStatistics, "panel.statistics", "Statistics", "Show the frame rate panel",
 			 Scope::Global, {}},
 			{Action::ShowFrameGraph, "panel.framegraph", "Frame Graph", "Show where the frame went",

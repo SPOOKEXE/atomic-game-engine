@@ -1181,6 +1181,13 @@ namespace studio {
 			DeleteSelection();
 		}
 
+		// The primary selection, which is the one the tree highlights first. A
+		// rename is a single-instance edit however many rows are selected —
+		// there is one field and one name being typed into it.
+		if (Keybinds::Fired(Action::Rename) && !Selection.empty()) {
+			BeginRename(Selection.front());
+		}
+
 		if (Keybinds::Fired(Action::SelectNone) && !Selection.empty()) {
 			ClearSelection();
 		}

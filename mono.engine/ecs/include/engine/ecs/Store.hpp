@@ -835,15 +835,96 @@ namespace engine::ecs {
 		// @param body     Called as `body(Entity)` for each child.
 		void EachChild(Entity instance, const std::function<void(Entity)> &body) const;
 
+		// Visits everything under an instance, nearest first.
+		//
+		// **Depth first, in the order a recursive walk written by hand would
+		// produce** — a child, then everything under that child, then the next
+		// child. That is Roblox's `GetDescendants` order, and scripts index
+		// into the result, so it is a contract rather than a detail.
+		//
+		// The instance itself is not visited. Iterative rather than recursive:
+		// a scene's depth is the author's to choose.
+		//
+		// @param instance The root of the walk, not itself visited.
+		// @param body     Called as `body(Entity)` for each descendant.
+		void EachDescendant(Entity instance, const std::function<void(Entity)> &body) const;
+
+		// Renames an instance.
+		//
+		// **Not `Create(name)`**, which is the store's own lookup of singular
+		// things. An instance name is not unique: siblings may share one,
+		// exactly as they may in Roblox.
+		//
+		// @param instance The instance to rename.
+		// @param name     The new name. An empty one leaves it unnamed.
+		// @return `false` when the entity is not an instance.
+		bool SetInstanceName(Entity instance, std::string_view name);
+
 		// The first child with a name, searching in insertion order.
 		//
 		// A walk rather than an index, because most instances have few children
 		// and an index per node would allocate for every one of them.
 		//
+		// @param instance  The parent to search.
+		// @param name      The name to find. An empty name matches nothing.
+		// @param recursive Whether to search the whole subtree. The children
+		//                  are still answered first, so the nearest match wins
+		//                  rather than whichever one a depth-first pass reached
+		//                  soonest.
+		// @return The instance, or NULL_ENTITY when none matches.
+		Entity FindFirstChild(Entity instance, std::string_view name, bool recursive = false) const;
+
+		// The first child created as exactly a class.
+		//
+		// **Exactly, which is what separates it from `FindFirstChildWhichIsA`.**
+		// A `Part` is a `BasePart`, so asking for a `BasePart` this way finds
+		// nothing; that is Roblox's split and the reason both exist.
+		//
 		// @param instance The parent to search.
-		// @param name     The name to find.
+		// @param id       The class to match.
 		// @return The child, or NULL_ENTITY when none matches.
-		Entity FindFirstChild(Entity instance, std::string_view name) const;
+		Entity FindFirstChildOfClass(Entity instance, ClassId id) const;
+
+		// The first child of a class or one derived from it.
+		//
+		// @param instance  The parent to search.
+		// @param id        The class to match against.
+		// @param recursive Whether to search the whole subtree.
+		// @return The instance, or NULL_ENTITY when none matches.
+		Entity FindFirstChildWhichIsA(Entity instance, ClassId id, bool recursive = false) const;
+
+		// The nearest ancestor with a name.
+		//
+		// @param instance The instance to search above. Not itself considered.
+		// @param name     The name to find. An empty name matches nothing.
+		// @return The ancestor, or NULL_ENTITY when none matches.
+		Entity FindFirstAncestor(Entity instance, std::string_view name) const;
+
+		// The nearest ancestor created as exactly a class.
+		//
+		// @param instance The instance to search above. Not itself considered.
+		// @param id       The class to match.
+		// @return The ancestor, or NULL_ENTITY when none matches.
+		Entity FindFirstAncestorOfClass(Entity instance, ClassId id) const;
+
+		// The nearest ancestor of a class or one derived from it.
+		//
+		// @param instance The instance to search above. Not itself considered.
+		// @param id       The class to match against.
+		// @return The ancestor, or NULL_ENTITY when none matches.
+		Entity FindFirstAncestorWhichIsA(Entity instance, ClassId id) const;
+
+		// The dotted path from the root of the tree down to an instance.
+		//
+		// **From the world's root, and there is no `game.` in front of it.** A
+		// world's roots *are* the services — `scene::InstallServices` puts
+		// `Workspace` and the rest in as ordinary instances — so a part inside
+		// a model comes out as `Workspace.Model.Part`, which is what Roblox
+		// prints for the same thing.
+		//
+		// @param instance The instance to describe.
+		// @return The path, or an empty string when it is not an instance.
+		std::string GetFullName(Entity instance) const;
 
 		// Whether an instance has any children at all.
 		//

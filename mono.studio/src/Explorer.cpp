@@ -1,4 +1,5 @@
 #include <engine/ecs/Classes.hpp>
+#include <engine/game/Values.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <imgui.h>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
@@ -199,6 +201,9 @@ namespace studio {
 
 		ImGui::Separator();
 
+		if (ImGui::MenuItem("Rename", Keybinds::Of(Action::Rename).Text().c_str(), false, haveInstance)) {
+			PendingRenameStart = instance;
+		}
 		if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, haveInstance)) {
 			PendingDuplicate = true;
 		}
@@ -255,6 +260,27 @@ namespace studio {
 		Trees.push_back(WorldTree{});
 		Trees.back().World = world;
 		return Trees.back();
+	}
+
+	void Editor::BeginRename(engine::ecs::Entity instance) {
+		if (instance == NULL_ENTITY) {
+			return;
+		}
+
+		Renaming = instance;
+		RenameFocus = true;
+		RenameBuffer.clear();
+
+		// Seeded with the name it has, because a rename is almost always an
+		// edit of the current name rather than a replacement for it — and a
+		// field that opened empty would make "Part" into "Part2" a retype.
+		if (SelectionWorld.IsValid()) {
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				if (store.Alive(instance)) {
+					RenameBuffer = Label(store.InstanceNameOf(instance));
+				}
+			});
+		}
 	}
 
 	void Editor::OpenPathTo(WorldId world, engine::ecs::Entity instance) {
@@ -375,8 +401,16 @@ namespace studio {
 				// Ours to assert every frame, because the row list was built
 				// from it. imgui still toggles its own copy on a click, and
 				// `IsItemToggledOpen` below is how that reaches us.
+				const bool renaming = row.Instance == Renaming;
+
 				ImGui::SetNextItemOpen(row.Open);
-				ImGui::TreeNodeEx("##node", flags, "%s", row.Text);
+
+				// **The node is still submitted while renaming, with no
+				// label.** It keeps the row's height, its arrow and its
+				// indentation, so the tree does not jump as the field opens and
+				// closes — and it keeps the clipper's rows uniform, which is
+				// what lets it skip by arithmetic.
+				ImGui::TreeNodeEx("##node", flags, "%s", renaming ? "" : row.Text);
 
 				// **Everything that asks about "the last item" happens here,
 				// before anything else is drawn.** imgui has exactly one last
@@ -483,6 +517,37 @@ namespace studio {
 				if (ImGui::BeginPopupContextItem("##actions")) {
 					DrawInstanceActions(store, world, row.Instance);
 					ImGui::EndPopup();
+				}
+
+				if (renaming) {
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(-1.0f);
+					if (RenameFocus) {
+						ImGui::SetKeyboardFocusHere();
+						RenameFocus = false;
+					}
+
+					TextField("##rename", RenameBuffer);
+
+					// **Committed when the field is deactivated after an edit,
+					// cancelled when it is deactivated without one.** That is
+					// one test for three gestures: Enter and a click elsewhere
+					// both commit what was typed, and Escape reverts the field
+					// before deactivating it so nothing was edited at all.
+					if (ImGui::IsItemDeactivatedAfterEdit()) {
+						PendingRenameInstance.World = world;
+						PendingRenameInstance.Instance = row.Instance;
+						PendingRenameInstance.To = RenameBuffer;
+						Renaming = NULL_ENTITY;
+					} else if (ImGui::IsItemDeactivated()) {
+						Renaming = NULL_ENTITY;
+					}
+
+					if (row.Depth > 0) {
+						ImGui::Unindent(static_cast<float>(row.Depth) * step);
+					}
+					ImGui::PopID();
+					continue;
 				}
 
 				// The class name, dimmed, on the same row. Roblox puts an icon
@@ -944,6 +1009,59 @@ namespace studio {
 
 			if (refused > 0) {
 				Say("that would put an instance inside itself", engine::core::LogLevel::Warning);
+			}
+		}
+
+		if (PendingRenameStart != NULL_ENTITY) {
+			const engine::ecs::Entity starting = PendingRenameStart;
+			PendingRenameStart = NULL_ENTITY;
+			BeginRename(starting);
+		}
+
+		if (PendingRenameInstance.World.IsValid()) {
+			const PendingRenameInstanceAction rename = PendingRenameInstance;
+			PendingRenameInstance = PendingRenameInstanceAction{};
+
+			bool renamed = false;
+			engine::game::PropertyValue before;
+			engine::game::PropertyValue after;
+
+			Universe->Enter(rename.World, [&](Store &store) {
+				if (!store.Alive(rename.Instance)) {
+					return;
+				}
+
+				const Name was = store.InstanceNameOf(rename.Instance);
+				if (Label(was) == rename.To) {
+					// Nothing changed, so nothing goes on the undo stack. A
+					// rename field that was opened and closed is not an edit.
+					return;
+				}
+
+				// **Recorded as a write to the `Name` property**, which is a
+				// real registered property here — so undo, the properties panel
+				// and a script all reverse this the same way rather than the
+				// tree having a private path to the same field.
+				before.Type = engine::ecs::PropertyType::Name;
+				before.Name = was;
+				after.Type = engine::ecs::PropertyType::Name;
+				after.Name = rename.To.empty() ? Name{} : Name(rename.To);
+
+				renamed = store.SetInstanceName(rename.Instance, rename.To);
+			});
+
+			if (renamed) {
+				if (Commands != nullptr) {
+					Commands->RecordProperty(
+						rename.World,
+						rename.Instance,
+						Name("Name"),
+						before,
+						after,
+						"Rename to " + rename.To
+					);
+				}
+				MarkModified();
 			}
 		}
 

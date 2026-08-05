@@ -2466,3 +2466,119 @@ TEST_CASE("a LocalScript runs on a client and a Script does not", "[scripting]")
 	// The module appears in none of them, however the host is configured.
 	CHECK(engine::script::ScriptsIn(store, false, false).empty());
 }
+
+TEST_CASE("the tree lookups reach past the direct children", "[scripting]") {
+	// The half of Roblox's `Instance` surface that answers "where is this" —
+	// and the half a script reaches for the moment a scene stops being flat.
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local outer = Instance.new('Part', workspace)
+		outer.Name = 'Outer'
+
+		local inner = Instance.new('Part', outer)
+		inner.Name = 'Inner'
+
+		local target = Instance.new('Part', inner)
+		target.Name = 'Target'
+
+		local eye = Instance.new('Camera', outer)
+		eye.Name = 'Eye'
+
+		-- **The recursive flag, which used to be read and ignored.** This line
+		-- returned nil, because `Target` is a grandchild.
+		assert(outer:FindFirstChild('Target') == nil, 'a grandchild is not a child')
+		assert(outer:FindFirstChild('Target', true) == target, 'the recursive flag did nothing')
+
+		-- Exact against derived, which is the split Roblox draws. A `Part` is a
+		-- `BasePart`, so only one of these two finds it under that name.
+		assert(outer:FindFirstChildOfClass('Part') == inner, 'OfClass missed the exact class')
+		assert(outer:FindFirstChildOfClass('BasePart') == nil, 'OfClass matched a base class')
+		assert(outer:FindFirstChildOfClass('Camera') == eye, 'OfClass missed the camera')
+		assert(outer:FindFirstChildWhichIsA('BasePart') == inner, 'WhichIsA missed a derived class')
+
+		-- `Target` is a grandchild, so only the recursive form reaches it once
+		-- the direct children have been ruled out.
+		assert(inner:FindFirstChildWhichIsA('BasePart') == target, 'WhichIsA missed a child')
+
+		-- Upwards, and never the instance itself.
+		assert(target:FindFirstAncestor('Outer') == outer, 'FindFirstAncestor missed')
+		assert(target:FindFirstAncestor('Target') == nil, 'an instance is its own ancestor')
+		assert(target:FindFirstAncestorOfClass('Part') == inner, 'the nearest ancestor lost')
+		assert(target:FindFirstAncestorWhichIsA('Instance') == inner, 'WhichIsA lost upwards')
+		assert(eye:FindFirstAncestorOfClass('Camera') == nil, 'an ancestor matched the wrong class')
+
+		assert(
+			target:GetFullName() == 'Workspace.Outer.Inner.Target',
+			'GetFullName said ' .. target:GetFullName()
+		)
+
+		-- Nothing found is nil, not a userdata wrapping the null handle.
+		assert(outer:FindFirstChild('Absent', true) == nil, 'a miss was not nil')
+		assert(outer:FindFirstAncestorOfClass('Nonexistent') == nil, 'an unknown class matched')
+	)");
+}
+
+TEST_CASE("javascript reaches the same tree lookups", "[scripting][js]") {
+	// **Two VMs, one surface.** A method that exists in one and not the other
+	// is a game that runs until somebody switches language, and the two agree
+	// right up until the first time one is fixed.
+	//
+	// **Compared by path rather than by `===`.** `JsBindings.cpp` says why: a
+	// JavaScript instance object is minted per call and `===` is object
+	// identity with no `__eq` to override, so two handles to one entity are two
+	// objects. `GetFullName()` is the identity a script can actually test, and
+	// checking it here exercises the new method as well.
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const outer = Instance.new('Part', workspace);
+		outer.Name = 'Outer';
+
+		const inner = Instance.new('Part', outer);
+		inner.Name = 'Inner';
+
+		const target = Instance.new('Part', inner);
+		target.Name = 'Target';
+
+		const path = (found) => found === null ? null : found.GetFullName();
+
+		if (path(outer.FindFirstChild('Target')) !== null) {
+			throw new Error('a grandchild is not a child');
+		}
+		if (path(outer.FindFirstChild('Target', true)) !== 'Workspace.Outer.Inner.Target') {
+			throw new Error('the recursive flag did nothing');
+		}
+
+		if (path(outer.FindFirstChildOfClass('Part')) !== 'Workspace.Outer.Inner') {
+			throw new Error('OfClass missed');
+		}
+		if (path(outer.FindFirstChildOfClass('BasePart')) !== null) {
+			throw new Error('OfClass matched a base class');
+		}
+		if (path(inner.FindFirstChildWhichIsA('BasePart')) !== 'Workspace.Outer.Inner.Target') {
+			throw new Error('WhichIsA missed');
+		}
+
+		if (path(target.FindFirstAncestor('Outer')) !== 'Workspace.Outer') {
+			throw new Error('FindFirstAncestor missed');
+		}
+		if (path(target.FindFirstAncestor('Target')) !== null) {
+			throw new Error('an instance is its own ancestor');
+		}
+		if (path(target.FindFirstAncestorOfClass('Part')) !== 'Workspace.Outer.Inner') {
+			throw new Error('the nearest ancestor lost');
+		}
+		if (path(target.FindFirstAncestorWhichIsA('Instance')) !== 'Workspace.Outer.Inner') {
+			throw new Error('WhichIsA lost upwards');
+		}
+
+		// The methods the hard-coded table length used to drop are still here.
+		if (!target.IsDescendantOf(outer)) { throw new Error('IsDescendantOf went missing'); }
+		if (typeof target.GetPropertyChangedSignal !== 'function') {
+			throw new Error('GetPropertyChangedSignal went missing');
+		}
+	)");
+}

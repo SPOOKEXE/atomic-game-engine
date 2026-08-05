@@ -11,29 +11,14 @@ namespace engine::script {
 	}
 
 	void EachDescendant(const Store &store, Entity instance, const std::function<void(Entity)> &body) {
-		// A stack, popped from the back. The previous shape of this walk kept a
-		// vector and took the front of it, which made every pop and every insert
-		// an O(n) shift of the whole pending list — quadratic over a subtree,
-		// on the call a script uses to find things.
-		std::vector<Entity> pending;
-
-		// Children go on reversed, so the first child is the next one off the
-		// back. That is what keeps this in the recursive walk's order while
-		// popping from the cheap end.
-		const auto push = [&](Entity parent) {
-			const size_t mark = pending.size();
-			store.EachChild(parent, [&](Entity child) { pending.push_back(child); });
-			std::reverse(pending.begin() + static_cast<ptrdiff_t>(mark), pending.end());
-		};
-
-		push(instance);
-		while (!pending.empty()) {
-			const Entity current = pending.back();
-			pending.pop_back();
-
-			body(current);
-			push(current);
-		}
+		// **`Store` owns the walk now, and this is the caller the header
+		// predicted.** `Subtree.hpp` said the walk lived here because only this
+		// module needed one, and that if a second module ever wanted it, it
+		// belonged on `Store` and this became a caller. `ecs`'s own recursive
+		// lookups — `FindFirstChild(name, true)` and
+		// `FindFirstChildWhichIsA` — are that second module, and a descendant
+		// order defined in two places is two orders the day one is changed.
+		store.EachDescendant(instance, body);
 	}
 
 	void ForgetSubtree(
