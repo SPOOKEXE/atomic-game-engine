@@ -8,6 +8,8 @@
 
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Input.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -15,8 +17,6 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
-#include <engine/gui/Input.hpp>
-#include <engine/gui/Registration.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -34,6 +34,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 TEST_SUITE_ID("engine.script.scripting")
@@ -3189,8 +3190,7 @@ TEST_CASE("a pointer signal is called with the canvas position", "[scripting][gu
 		end)
 	)");
 
-	const engine::gui::GuiEvent moved =
-		Happened(engine::gui::EventKind::MouseMoved, button, 123.0f, 456.0f);
+	const engine::gui::GuiEvent moved = Happened(engine::gui::EventKind::MouseMoved, button, 123.0f, 456.0f);
 	runtime->DeliverGuiEvents(std::span(&moved, 1));
 	Beat(store, *runtime);
 
@@ -3334,4 +3334,203 @@ TEST_CASE("javascript reads the same JobId", "[scripting][js]") {
 	)");
 
 	CHECK(Trace(store, log) == "mirrors.world.3");
+}
+
+namespace {
+	// A directory of `.luau` files on disk, removed when the test ends.
+	//
+	// Written rather than staged from the source tree: what `MountModuleTree`
+	// has to get right is the *layout* rule, and a fixture that spells the
+	// layout out in the test is the one that fails loudly when the rule changes.
+	struct MountedLibrary {
+		std::filesystem::path Root;
+
+		explicit MountedLibrary(const char *name) {
+			Root = std::filesystem::temp_directory_path() /
+				   ("mono_mount_" + std::string(name) + "_" + std::to_string(::getpid()));
+			std::filesystem::remove_all(Root);
+			std::filesystem::create_directories(Root);
+		}
+
+		~MountedLibrary() {
+			std::error_code ignored;
+			std::filesystem::remove_all(Root, ignored);
+		}
+
+		void Write(const std::string &relative, const std::string &program) const {
+			const std::filesystem::path path = Root / relative;
+			std::filesystem::create_directories(path.parent_path());
+			std::ofstream file(path);
+			file << program;
+		}
+	};
+}
+
+TEST_CASE("a mounted directory becomes a tree a script can require", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const MountedLibrary library("basic");
+	library.Write("Lib/Numbers.luau", "return { Answer = 42 }\n");
+	// The sibling lookup every module in a real library is built out of.
+	library.Write("Lib/Sum.luau", R"(
+		local Numbers = require(script.Parent.Numbers)
+		return { Value = Numbers.Answer + 1 }
+	)");
+
+	const Entity mounted = engine::script::MountModuleTree(
+		store, library.Root / "Lib", "Lib", engine::scene::WorkspaceOf(store)
+	);
+	REQUIRE(mounted != engine::ecs::NULL_ENTITY);
+
+	// **A container, not a `ModuleScript`**, because the directory had no
+	// `init.luau`. Requiring it would be a mistake and must stay one.
+	CHECK(store.ClassOf(mounted) == engine::ecs::Classes::Find(engine::core::Name("Instance")));
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local lib = workspace.Lib
+		assert(require(lib.Numbers).Answer == 42, 'the module did not load')
+		assert(require(lib.Sum).Value == 43, 'a sibling require did not resolve')
+	)");
+}
+
+TEST_CASE("init.luau collapses into its own directory", "[scripting]") {
+	// **Rojo's rule, and the one that is silent when it is wrong.** With
+	// `init.luau` collapsed, `script.Parent` inside a child is the *module*; got
+	// wrong, it is a folder beside it and every relative require in the library
+	// resolves one level off.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const MountedLibrary library("init");
+	library.Write("Presets/init.luau", R"(
+		return { First = require(script.First), Second = require(script.Second) }
+	)");
+	library.Write("Presets/First.luau", "return 'first'\n");
+	library.Write("Presets/Second.luau", R"(
+		-- Up through the collapsed module to its sibling, which is the shape a
+		-- preset uses to reach the library it belongs to.
+		return require(script.Parent.First) .. '+second'
+	)");
+
+	const Entity presets = engine::script::MountModuleTree(
+		store, library.Root / "Presets", "Presets", engine::scene::WorkspaceOf(store)
+	);
+	REQUIRE(presets != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(presets) == engine::script::ModuleScriptClass());
+
+	// The children are on the module itself, which is what `script.First` reads.
+	CHECK(store.FindFirstChild(presets, "First") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(presets, "Second") != engine::ecs::NULL_ENTITY);
+	// And there is no leftover `init` beside them.
+	CHECK(store.FindFirstChild(presets, "init") == engine::ecs::NULL_ENTITY);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local presets = require(workspace.Presets)
+		assert(presets.First == 'first', 'a child module did not load')
+		assert(presets.Second == 'first+second', 'a child could not reach its sibling')
+	)");
+}
+
+TEST_CASE("mounting nests directories and skips what it cannot run", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const MountedLibrary library("nested");
+	library.Write("Core/Root.luau", "return require(script.Parent.Deep.Inner)\n");
+	library.Write("Core/Deep/Inner.luau", "return 'inner'\n");
+	// Neither of these is a program, and mounting either would give the world a
+	// ModuleScript whose source is not Luau.
+	library.Write("Core/README.md", "not a module\n");
+	library.Write("Core/data.json", "{}\n");
+
+	const Entity core = engine::script::MountModuleTree(
+		store, library.Root / "Core", "Core", engine::scene::WorkspaceOf(store)
+	);
+	REQUIRE(core != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(core, "README") == engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(core, "data") == engine::ecs::NULL_ENTITY);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, "assert(require(workspace.Core.Root) == 'inner', 'a nested module did not resolve')");
+}
+
+TEST_CASE("mounting a directory with nothing to run leaves no instance", "[scripting]") {
+	// An empty container reads exactly like a library whose files failed to
+	// stage, and the second is worth noticing rather than presenting as a tree
+	// with nothing in it.
+	RegisterClasses();
+	Store store("script_test");
+
+	const MountedLibrary library("empty");
+	library.Write("Empty/notes.txt", "nothing here\n");
+
+	CHECK(
+		engine::script::MountModuleTree(store, library.Root / "Empty", "Empty") == engine::ecs::NULL_ENTITY
+	);
+	CHECK(
+		engine::script::MountModuleTree(store, library.Root / "Missing", "Missing") ==
+		engine::ecs::NULL_ENTITY
+	);
+}
+
+TEST_CASE("a mounted tree is identical twice", "[scripting]") {
+	// `directory_iterator` yields in filesystem order, which differs between
+	// machines. A world whose instance ids depended on that would not replay.
+	RegisterClasses();
+
+	const MountedLibrary library("order");
+	for (const char *name : {"Zulu", "Alpha", "Mike", "Bravo"}) {
+		library.Write(std::string("Lib/") + name + ".luau", "return {}\n");
+	}
+
+	std::vector<std::string> first;
+	std::vector<std::string> second;
+
+	for (std::vector<std::string> *into : {&first, &second}) {
+		Store store("script_test");
+		const Entity root = engine::script::MountModuleTree(store, library.Root / "Lib", "Lib");
+		REQUIRE(root != engine::ecs::NULL_ENTITY);
+
+		store.EachChild(root, [&](Entity child) {
+			into->push_back(std::to_string(child.Id) + ":" + std::string(store.InstanceNameOf(child).Text()));
+		});
+	}
+
+	CHECK(first == second);
+}
+
+TEST_CASE("Vector3 has the Magnitude and Unit the declarations promise", "[scripting]") {
+	// **Declared since the bindings existed and implemented by nothing.**
+	// `Vector2` had both; `Vector3` errored at run time on a script that had
+	// typechecked clean, because `bindings-check` compares the declarations
+	// against the *class table* and a value type's members are in neither.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local v = Vector3.new(3, 4, 0)
+		assert(math.abs(v.Magnitude - 5) < 1e-5, 'Magnitude is wrong')
+
+		local unit = v.Unit
+		assert(math.abs(unit.X - 0.6) < 1e-5, 'Unit.X is wrong')
+		assert(math.abs(unit.Y - 0.8) < 1e-5, 'Unit.Y is wrong')
+		assert(math.abs(unit.Magnitude - 1) < 1e-5, 'Unit is not unit length')
+
+		-- The idiom this was actually missing for: a direction between two
+		-- points, which is the first line of every aiming routine.
+		local direction = (Vector3.new(0, 0, 10) - Vector3.new(0, 0, 0)).Unit
+		assert(math.abs(direction.Z - 1) < 1e-5, 'a direction did not normalise')
+	)");
+
+	// A zero vector has no direction, and returning three NaNs would put them
+	// into a transform and lose geometry somewhere else entirely.
+	CHECK_FALSE(runtime->Run("return Vector3.new(0, 0, 0).Unit"));
+	CHECK(runtime->LastError().find("zero vector") != std::string::npos);
 }

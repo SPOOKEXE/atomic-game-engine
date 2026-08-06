@@ -1,37 +1,21 @@
 --!strict
--- Imported meshes, their textures, and a mirror in front of them.
+-- Imported meshes, built-ins, textures, and a mirror.
 --
--- `Mirrors-1-world.luau` proves the rendering path over boxes. This proves the
--- **content** path: every shape here is either a built-in the engine generates
--- or a mesh a publisher baked and a client fetched, and the pane in the middle
--- reflects both.
+-- Mesh names must match the published manifest names.
 --
 -- ## What has to line up for a mesh to appear
 --
--- Four things, and each of them is a different module's:
---
---   1. `assetc` reads a `.glb`, a `.pmx` or an `.obj` and writes a `.amesh`
---      beside it — `bake::ReadModel` and `assets::Mesh`;
---   2. `cdn --publish` signs the tree and `client --cdn` fetches, verifies and
---      hands the bytes over — `delivery::AssetClient`;
---   3. the client registers each one in the renderer's mesh table under the
---      name the manifest carried;
---   4. this script sets `MeshPart.MeshId` to that same name.
---
--- **Step four is a string and the other three are machinery.** If the string
--- does not match what the manifest published, the part draws as a cube — which
--- is the deliberate fallback and is what you see when the pipeline is fine and
--- the name is wrong.
+-- The manifest name is the lookup key; an unknown name falls back to a cube.
 --
 -- ## Run it
 --
---     assetc --input ART --output content
+--     assetc --input ART --output content --model-size 1
 --     cdn --publish content --store store --signing-key HEX
 --     client --cdn dir:store --publisher-key PUBLIC --script Meshes.luau
 --
--- With no `--cdn` at all it still runs: every `MeshId` resolves to nothing, and
--- the scene is the built-ins plus five cubes standing in for the imports. That
--- is the honest degraded state rather than an error, and it is worth seeing.
+-- Bake imports with `--model-size 1`; `Size` then denotes metres.
+--
+-- Without `--cdn`, unresolved imports use the built-in fallback.
 
 local PLATE = 24
 local SURFACE_SIZE = Vector3.new(1024, 1024, 0)
@@ -44,9 +28,7 @@ local IMPORTS = {
 	{ mesh = "characters/xiao_pack/芭芭拉.amesh", texture = "", offset = 5 },
 }
 
--- The six shapes the engine generates rather than fetches. They need no origin
--- and no publisher, which is what makes them the thing to check first when
--- nothing appears.
+-- Generated meshes that need no published asset.
 local BUILTINS = {
 	"engine.Cube",
 	"engine.Sphere",
@@ -64,9 +46,7 @@ floor.CFrame = CFrame.new(Vector3.new(0, -0.25, 0))
 floor.Color = Color3.new(0.30, 0.32, 0.36)
 floor.Parent = workspace
 
--- The built-ins, in a row, so a glance says whether the mesh table is working
--- at all. A sphere that draws as a cube means the name resolved to the
--- fallback; a sphere that draws as a sphere means every step below it is fine.
+-- Built-ins provide a visible mesh-table check.
 for index, name in ipairs(BUILTINS) do
 	local part = Instance.new("MeshPart")
 	part.Name = name
@@ -78,9 +58,7 @@ for index, name in ipairs(BUILTINS) do
 	part.Parent = workspace
 end
 
--- The imports. A `MeshPart` with no `TextureID` samples whatever texture each
--- of the mesh's own submeshes named at bake time — which is how a character
--- with twenty sheets works without this file knowing any of them.
+-- Imported meshes use textures named by their baked submeshes.
 for _, import in ipairs(IMPORTS) do
 	local part = Instance.new("MeshPart")
 	part.Name = import.mesh
@@ -90,10 +68,10 @@ for _, import in ipairs(IMPORTS) do
 		part.TextureID = import.texture
 	end
 
-	-- Four metres, because `assetc --model-size` fitted every import into a
-	-- four-metre box and a `MeshPart`'s size scales the unit mesh. A model
-	-- imported at its authored scale would need this to be something else, and
-	-- the two numbers agreeing is what makes a PMX character and a glTF fox the
+	-- Four metres, and metres only because the bake was `--model-size 1` — see
+	-- the header. `assetc` fitted every import's longest axis to one and
+	-- centred it, so this scales a unit mesh exactly as it would scale a
+	-- built-in cube, which is what makes a PMX character and a glTF fox the
 	-- same height.
 	part.Size = Vector3.new(4, 4, 4)
 	part.CFrame = CFrame.new(Vector3.new(import.offset, 2, 0))
@@ -125,7 +103,7 @@ reflection.SurfaceSize = SURFACE_SIZE
 -- `Front` is -Z, so a pane at +Z looks back at the origin. Parenting is what
 -- makes it a mirror at all — `scene::AimSurfaceCameras` places it, fits its
 -- lens to the pane and hands out the surface slot.
-reflection.Face = "Front"
+reflection.Face = Enum.NormalId.Front
 reflection.Parent = pane
 
 -- **The second mirror, and the one that proves the filter.** It is authored
@@ -144,7 +122,7 @@ redirected.Parent = workspace
 local groupCamera = Instance.new("SurfaceCamera")
 groupCamera.Name = "ImportedOnlyCamera"
 groupCamera.SurfaceSize = SURFACE_SIZE
-groupCamera.Face = "Front"
+groupCamera.Face = Enum.NormalId.Front
 
 -- One property, and it is the whole feature.
 groupCamera.TagFilter = "Imported"
@@ -152,5 +130,11 @@ groupCamera.Parent = redirected
 
 local view = Instance.new("Camera")
 view.Name = "Eye"
-view.CFrame = CFrame.new(Vector3.new(0, 5, 18))
+view.CFrame = CFrame.lookAt(Vector3.new(0, 5, 18), Vector3.new(0, 2.5, 0))
 view.Parent = workspace
+
+-- **Parenting a camera is not aiming with it.** `ActiveCamera` names the live
+-- one, so a camera that is only parented is a row nothing reads and the client
+-- keeps orbiting its own placeholder — which is what was happening here, and it
+-- looks like bad framing rather than a missing line.
+workspace.CurrentCamera = view

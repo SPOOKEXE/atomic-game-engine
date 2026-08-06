@@ -18,9 +18,7 @@ namespace engine::render {
 			return false;
 		}
 
-		// The built-ins, every one of them, so a scene may name any of the six
-		// without anything having been published. They cost about two thousand
-		// vertices between them — the sphere is most of it.
+		// Register all built-ins before content arrives.
 		for (uint8_t index = 0; index < assets::BUILTIN_MESH_COUNT; index++) {
 			const auto builtin = static_cast<assets::BuiltinMesh>(index);
 			if (!Add(core::Name(assets::BuiltinName(builtin)), assets::MakeBuiltin(builtin))) {
@@ -33,9 +31,7 @@ namespace engine::render {
 			return false;
 		}
 
-		// **The fallback is the cube, resolved once.** Looking it up per
-		// unknown name would be a hash lookup in the draw loop for an answer
-		// that never changes.
+		// Resolve the fallback once; the draw loop never hashes unknown names.
 		const auto found = Entries.find(core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube)).Id());
 		if (found == Entries.end()) {
 			return false;
@@ -76,12 +72,7 @@ namespace engine::render {
 			return false;
 		}
 
-		// **Appended rather than replacing in place, even when the name is
-		// already known.** A replacement mesh is almost never the same size,
-		// and moving every mesh after it to close the gap would invalidate
-		// every `MeshRange` already handed out. The old vertices become dead
-		// space until something evicts — which nothing does yet, and the
-		// header says so.
+		// Append replacements so existing ranges remain valid until the next upload.
 		MeshEntry entry;
 		entry.Whole.FirstIndex = static_cast<uint32_t>(HostIndices.size());
 		entry.Whole.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
@@ -94,10 +85,7 @@ namespace engine::render {
 			run.VertexOffset = entry.Whole.VertexOffset;
 			entry.Runs.push_back(run);
 
-			// Interned here and nowhere else on this path. `assets::Submesh`
-			// holds a `std::string` precisely so that content cannot grow the
-			// name registry; this is the point where a name has been accepted
-			// and becomes something to compare with an integer.
+			// Intern asset names at the renderer boundary.
 			entry.Textures.push_back(submesh.Texture.empty() ? core::Name() : core::Name(submesh.Texture));
 			entry.Colours.push_back({
 				submesh.BaseColour[0],
@@ -130,9 +118,7 @@ namespace engine::render {
 		const size_t vertexBytes = HostVertices.size() * sizeof(assets::MeshVertex);
 		const size_t indexBytes = HostIndices.size() * sizeof(uint32_t);
 
-		// Grown in doubling steps rather than to the exact size, so a game
-		// streaming meshes in one at a time does not recreate two device
-		// buffers on every arrival.
+		// Grow geometrically to avoid recreating buffers for every arrival.
 		if (VertexBuffer == nullptr || HostVertices.size() > VertexCapacity ||
 			HostIndices.size() > IndexCapacity) {
 			size_t vertices = VertexCapacity == 0 ? HostVertices.size() : VertexCapacity;
@@ -193,9 +179,7 @@ namespace engine::render {
 		SDL_GPUTransferBufferLocation source{transfer, 0};
 		SDL_GPUBufferRegion destination{VertexBuffer, 0, static_cast<uint32_t>(vertexBytes)};
 
-		// Cycled, because a re-upload may land while the previous frame is
-		// still reading the buffer — the same reason the instance upload
-		// cycles.
+		// Cycle the upload so a previous frame can still read the buffer.
 		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
 
 		source.offset = static_cast<uint32_t>(vertexBytes);

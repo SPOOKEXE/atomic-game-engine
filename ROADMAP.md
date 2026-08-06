@@ -805,19 +805,33 @@ The rendering and camera work this version already carried, unchanged:
 
 ### v0.10
 
-- [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
 - [_] CurrentCamera
 - [_] basic character controls
 - [_] basic controls (enable/disable/shift-lock)
 - [_] basic camera and controls (zoom, pan, control camera via script)
 - [_] UserInputService and ContextActionService
+- [_] beams, trails
+- [_] pointlight, spotlight, surfacelight
+- [_] attachment
+- [_] NumberSequenceKeypoint + ColorSequenceKeypoint
+- [_] Vector3.zero / Vector3.one
+- [_] hook assets manager to local cdn folder, but setup config to ~/Documents/atomic-game-engine/cdn/raw and ~/Documents/atomic-game-engine/cdn/processed with hash-based naming between the folders and a log file in the directory. Do flat folders for now in raw/ and processed/. Hook up all cdn behavior to this by default to simplify tests, also setup unified\_server\_client as well. Create additional tests for it. Also live renderer. /home/declan/Documents/GitHub/atomic-game-engine-hidden-docs/files/explorer-plus-master
+- [_] upload current assets to that folder as well
+- [_] setup assets manager with a upload button and a way to view already uploaded assets
+- [_] convert our luau/ts Enum_Material to Enum.Material. underlying engine can stay same.
+- [_] Attributes and GetAttribute/SetAttribute component and hook to instances
+- [_] particle emitters (and hook to particle system)
+- [_] flipbook particle animation (grid cell with size selections)
+- [_] particle system. Make the particle system extensive with a roblox shim layer as well. https://create.roblox.com/docs/reference/engine/classes/ParticleEmitter (or search the roblox docs skill), support everything you can. Add all existing properties and we can have more underlying later. Do a huge stress test scene as well to test the performance and clean any big bottlenecks with each. I want to support like 100k particle emitters at once with at least 5 particles
 
 ### v0.11
 
-- [_] ...
+- [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
+- [_] convert the entire rendering pipeline to the node system with a studio editor? then during play, it'll compile and work. Add a node editor like blender's system as well for both the mesh pipeline and the rendering pipeline, as separate widgets called Render Pipeline and Assets Pipeline. I plan to have all assets be managed in Assets Pipeline using many node trees in one editor (and same for render but as different subpipelines).
 
 ### v0.12
 
+- [_] deferred items
 - [_] ...
 
 ---

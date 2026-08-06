@@ -26,10 +26,18 @@
 #
 # It is the right edge to add the day audio reads components directly, and when
 # that happens rule 2 is the argument — one copy of where things are, not two.
+#
+# minimp3 is VENDOR for SDL's reason: no public header here names a `mp3dec_t`,
+# and `Mp3.hpp` hands back the same `SampleBuffer` `Wav.hpp` does. It arrived
+# with its first caller — `DecodeMp3` — rather than ahead of one, and it was
+# addable at all because it is CC0. A codec is usually where a licence question
+# ends the conversation, which is why `Wav.hpp` carried the gap honestly for a
+# release rather than listing an extension it could not decode.
 mono_add_library(audio
 	TIER client
 	DEPS
 		Engine::core
 	VENDOR
 		SDL3::SDL3
+		Vendor::minimp3
 )

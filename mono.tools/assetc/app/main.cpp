@@ -8,14 +8,7 @@
 #include <filesystem>
 #include <string>
 
-// Walk, bake, write, report. Every decision that is a decision lives in the
-// library; what is left here is parsing a command line and printing rows.
-//
-//     assetc --input art --output content
-//     cdn --publish content --store store --signing-key HEX
-//
-// The second command has no idea the first ran, which is the contract: this
-// produces a directory, and a publisher publishes directories.
+// The CLI parses options and reports the bake library's rows.
 
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("assetc");
@@ -74,8 +67,7 @@ int main(int argc, char **argv) {
 	const bool quiet = arguments.Has("quiet");
 	for (const assetc::Baked &baked : report.Assets) {
 		if (!baked.Failure.empty()) {
-			// A failure is always printed, however quiet the run: it is the one
-			// line somebody has to act on.
+			// Failures remain visible in quiet mode.
 			ENGINE_WARN("assetc: {} — {}", baked.Source, baked.Failure);
 		} else if (!quiet) {
 			ENGINE_INFO(
@@ -96,8 +88,6 @@ int main(int argc, char **argv) {
 		report.OutputBytes
 	);
 
-	// A failed row is a non-zero exit, so a build script notices. The assets
-	// that did bake are still written, because a run that threw away four
-	// hundred good files over one bad one would be the wrong trade.
+	// Preserve successful outputs, but make any failed row fail the command.
 	return report.Failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

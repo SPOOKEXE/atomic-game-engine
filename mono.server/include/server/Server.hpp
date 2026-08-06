@@ -1,17 +1,6 @@
 #pragma once
 
-// The server program's own code — an attachment on top of the engine, not a
-// layer of it.
-//
-// It owns the fixed tick, the world set and the shutdown path. It contains no
-// renderer: `mono.server` links no `client`-tier target, so `render`, `ui`,
-// `audio`, `input`, `text` and `vfx` are absent from the link line entirely. A
-// server-side script that reaches for input will fail because the class was
-// never registered into this binary, not because a check rejected it.
-//
-// There is no window, no swapchain and no SDL here. That is checkable rather
-// than aspirational: the `server` preset configures with no graphics stack and
-// the staged `server/` directory has no `shaders/` folder.
+// Headless server-owned tick, world set and shutdown path.
 
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
@@ -50,17 +39,11 @@ namespace engine::assets {
 
 namespace server {
 
-	// Everything the command line decides, in one place.
-	//
-	// Parsed once and copied into the Server by Initialise, so nothing reads the
-	// argument list again after start-up and there is one answer to "what is
-	// this process configured to do".
+	// Command-line configuration copied into Server during Initialise.
 	struct Options {
 		// The loopback port the control surface listens on, or -1 for off.
 		//
-		// **Off by default, and that is the security boundary.** The surface
-		// reads and writes world state for whatever connects to it, with no
-		// authentication — see `SECURITY.md`. `--mcp-port` is the opting in.
+		// Unauthenticated world control; disabled by default.
 		int ControlPort = -1;
 
 		// Ticks per second. A world ticks at its own rate; this is the rate the
@@ -84,15 +67,7 @@ namespace server {
 
 		// The scene to host. Empty means the placeholder world.
 		//
-		// **A scene script, not yet a game file.** Since v0.3 this runs through
-		// the same loader the client's `--script` does, over the same file, so
-		// both ends author the world identically — a server that built it its
-		// own way would disagree with its replicas once a tick and every side
-		// would look self-consistent while doing it.
-		//
-		// The flag keeps the name it will have when `mono.gamefile` lands and a
-		// universe of worlds is what this points at, rather than being renamed
-		// twice. Until then a game is one scene.
+		// Scene script loaded with the same path as the client.
 		std::string GamePath;
 
 		// Read assets from here instead of from beside the binary. Empty means
@@ -122,15 +97,7 @@ namespace server {
 
 		// Run as a supervised host under a driver, rather than as a driver.
 		//
-		// **A host is not a different program.** It is this one, holding some
-		// of a universe's worlds in its own address space so that a hard fault
-		// in one of them takes this process rather than the server. That is
-		// what makes the grouping a deployment decision instead of an engine
-		// one, and it is the reason there is no `mono.host`.
-		//
-		// Empty means this process is a driver. Set, it names this host to its
-		// driver — and the process then expects a channel it was started with,
-		// and refuses to start without one.
+		// Empty means driver; set means this process is a supervised host.
 		std::string HostName;
 
 		// The worlds this host was granted, by name.
@@ -161,15 +128,7 @@ namespace server {
 
 		// How many processes share this machine, including this one.
 		//
-		// **Every process calling `Jobs::Start(0)` is the bug this prevents.**
-		// That asks for one worker per hardware thread, so a driver and seven
-		// hosts on a twenty-four core machine run a hundred and ninety threads
-		// over twenty-four cores, and every one of them is slower than it would
-		// have been alone.
-		//
-		// Zero means work it out: a driver counts the hosts it is about to
-		// spawn and tells each of them the total, so the arithmetic is done
-		// once by the only process that knows the answer.
+		// Zero lets the driver size one shared worker budget for all processes.
 		uint32_t Processes = 0;
 
 		// Whether to serve the primary world to clients at all.
@@ -204,16 +163,7 @@ namespace server {
 
 		// A content store this server serves to its own clients.
 		//
-		// **CDN.md §6's "local store", and it is an attachment rather than a
-		// second program.** `mono.cdn` is the same library deployed on its own
-		// and scaled; running one in-process is the self-hosted case — a small
-		// game, a LAN session, development — and the client cannot tell the
-		// difference, which is the property §11 asks for. One store, one
-		// manifest format, three deployments.
-		//
-		// Empty serves no content, which is what every existing recipe gets:
-		// a server that bound a port because nobody said not to would be a
-		// behaviour change in the determinism run, for `Listening`'s reason.
+		// Empty disables the attached origin.
 		std::filesystem::path ContentStore;
 
 		// The port the attached origin listens on. Only read when
@@ -223,15 +173,7 @@ namespace server {
 		// The secret shared with whoever issues grants — which, for an attached
 		// origin, is this same process.
 		//
-		// **Still checked, and still a real MAC over a real token.** CDN.md §4
-		// is explicit that single-player and LAN use the same flow with the
-		// server in-process: the grant is issued and verified across a function
-		// call and both halves are real. A path skipped in the configuration
-		// people develop against is a path that breaks the first time somebody
-		// ships the other one — §16.6's argument, applied to content.
-		//
-		// Empty means the attached origin generates one at start-up and keeps
-		// it to itself, which is right when this process is the only issuer.
+		// Empty generates an in-process-only grant key at startup.
 		std::string ContentGrantKey;
 
 		// The Ed25519 seed this server proves its identity with, as 64 hex

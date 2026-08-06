@@ -1,12 +1,6 @@
 #pragma once
 
-// The client program's own code — an attachment on top of the engine, not a
-// layer of it.
-//
-// It owns the window, the swapchain, the event loop and the tick. Everything it
-// does is a call into a library, which is what makes `mono.client/app/main.cpp`
-// three lines long and what will let single-player link the server library into
-// this same process later.
+// Client-owned window, renderer, event loop and frame state.
 
 #include <engine/audio/Device.hpp>
 #include <engine/core/Clock.hpp>
@@ -27,23 +21,22 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <chrono>
 #include <client/Compositor.hpp>
 #include <client/Scene.hpp>
+#include <client/Sounds.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct SDL_Window;
 
 namespace client {
 
-	// Everything the command line decides, in one place.
-	//
-	// Parsed once and copied into the Client by Initialise, so nothing reads the
-	// argument list again after start-up and there is one answer to "what is
-	// this process configured to do".
+	// Command-line configuration copied into Client during Initialise.
 	struct Options {
 		// Window width in logical pixels, before any display scaling.
 		int Width = 1280;
@@ -105,6 +98,22 @@ namespace client {
 		// the display.
 		bool Uncapped = false;
 
+		// The frame rate to hold, or zero for none.
+		//
+		// **The other half of `Uncapped`, not a contradiction of it.** Turning
+		// off the vblank wait is what lets a frame finish early; without a
+		// limiter the loop then spins as fast as the GPU allows, which on a
+		// scene that costs 2 ms a frame is 500 fps of heat for a display that
+		// shows 165. This is how a run says "do not wait for the display, and
+		// do not run away from it either" — which is what a variable-refresh
+		// monitor wants, and what a like-for-like measurement between two
+		// machines needs.
+		//
+		// Ignored when the vblank wait is on: the display is already the
+		// limiter, and a second one fighting it produces judder rather than a
+		// lower number.
+		uint32_t MaximumFrameRate = 0;
+
 		// Seconds to wait for a Tracy profiler to attach before starting.
 		// Zero means do not wait. Tracy is on-demand, so a short run with
 		// nothing attached records nothing at all — which looks identical to a
@@ -128,37 +137,19 @@ namespace client {
 
 		// A game file to play, single-player. Empty means the demo scene.
 		//
-		// **Single-player, and not a server in this process.** Loading a game
-		// file and running its scripts with `HostRole::OfBoth` needs
-		// `Engine::game` and nothing else — no `Mono::server`, no socket, no
-		// replication. The tier escape this program's CMakeLists reserves for
-		// hosting a *real* server in-process is still not declared, because
-		// this is not that.
-		//
-		// **Takes precedence over `--script`.** A game file is a universe of
-		// worlds and a script is one scene; a run given both would have to
-		// choose, and choosing silently is worse than choosing loudly.
+		// A game file is single-player content, not a hosted server, and takes
+		// precedence over `--script`.
 		std::filesystem::path GameFile;
 
 		// `host:port` of a server to replicate from. Empty means run the local
 		// demo alone.
 		//
-		// **This adds a world rather than replacing one.** The replicated world
-		// is a second world in the same universe, marked `world::Replica` so its
-		// bus handle refuses writes, and the demo keeps running beside it. That
-		// is not a placeholder arrangement — a client compositing several worlds
-		// is what v0.2 built the compositor for, and one of them being somebody
-		// else's authority is the case this version adds.
+		// Adds a read-only replica world beside the local worlds.
 		std::string ConnectAddress;
 
 		// Content origins, in priority order — the first one that answers wins.
 		//
-		// **Localhost by default and configurable, which is the point.** A game
-		// being developed has its content beside it; a shipped one is told
-		// where to look. `repo_layout.md` §11 wants moving between those to be a
-		// configuration change rather than a rebuild, and this is where that
-		// change is made. Each entry is `host:port`, or a directory path when
-		// prefixed with `dir:`.
+		// Sources are tried in order; `dir:` selects a local store.
 		std::vector<std::string> ContentSources;
 
 		// Where verified content is kept between runs. Empty disables it.
@@ -166,28 +157,17 @@ namespace client {
 
 		// The publisher key this client trusts, as 64 hex characters.
 		//
-		// **Without it nothing is fetched.** A client that accepted an unsigned
-		// manifest would have no trust boundary at all, and that failure is
-		// invisible until somebody is serving content the publisher did not
-		// write — so an unset key disables delivery loudly rather than
-		// quietly trusting whatever answers.
+		// An unset key disables delivery; manifests must be authenticated.
 		std::string ContentPublisherKey;
 
 		// A `.wav` to play on a loop once the world is up.
 		//
-		// **A real caller rather than a demo flag.** `ROADMAP.md` v0.9 asks for
-		// audio "running in-studio and in-game", and a subsystem with no caller
-		// is the thing this repository refuses everywhere else. This is the
-		// smallest honest one: it decodes a delivered format, builds a routing,
-		// and plays it through the same device a game would.
 		std::filesystem::path SoundPath;
 
 		// The server's Ed25519 public key, as 64 hex characters, or empty to
 		// accept any server.
 		//
-		// **Set it and a relay cannot get in; leave it and one can.** The
-		// exchange is encrypted either way; what a pin adds is knowing *who*
-		// the other end is. See `replication::ConnectorSettings::ServerIdentity`.
+		// Optional server identity pin; encryption alone does not authenticate it.
 		std::string ServerKey;
 
 		// Where to write a BMP of the scene, or empty for none.
@@ -301,6 +281,15 @@ namespace client {
 		// pass — the two constraints that decide where this can go at all.
 		void PumpContent();
 
+		// Brings the mixer into line with every simulated world's `Sound` rows.
+		//
+		// After the tick and before presentation, so what a script set this
+		// frame is heard this frame. Runs whether or not a device opened: a
+		// null device drains the queue like a real one, which is what keeps the
+		// path exercised on a machine with no output rather than only on one
+		// with speakers.
+		void PumpSounds();
+
 		// Opens the audio device and builds the mixer's routing.
 		//
 		// @return `false` only when a sound was asked for and cannot be played.
@@ -412,11 +401,28 @@ namespace client {
 
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
+		size_t ContentSounds = 0;
+
+		// The decoded audio this client has, by the name the manifest published
+		// it under. **Converted to the device's format once, here** — the graph
+		// must never resample on the callback thread, and a buffer converted
+		// per voice would do it once per part playing a footstep.
+		SoundCatalogue Audible;
+
+		// The voices standing in for each world's `Sound` rows, one stage per
+		// world. Node ids are minted per mixer and an entity is only unique
+		// inside its own store, so a single stage across two worlds would
+		// collide on both counts.
+		std::unordered_map<uint32_t, SoundStage> Stages;
 
 		// The busiest frame's counters, for the run's closing line. See where
 		// they are folded for why the *last* frame's would be zero.
 		uint64_t PeakTriangles = 0;
 		uint32_t PeakDrawCalls = 0;
+
+		// When the next frame is due, for the `--max-fps` limiter. A default
+		// value means "not started"; the first limited frame sets it.
+		std::chrono::steady_clock::time_point NextFrameAt{};
 
 		// The audio device, when one opened. Null runs silently.
 		std::unique_ptr<engine::audio::Device> Sound;

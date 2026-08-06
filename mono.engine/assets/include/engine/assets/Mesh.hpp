@@ -1,26 +1,6 @@
 #pragma once
 
-// What an `AssetKind::Mesh`'s bytes are.
-//
-// `AssetKind.hpp` said in as many words that `Mesh` meant "the mesh pipeline's,
-// when there is one", and that the import and cooking work was `ROADMAP.md`
-// v0.9's and would land beside it rather than under it. This is that file, and
-// it is `Texture.hpp`'s argument applied to geometry: **a runtime does not
-// import.** Turning a glTF, an OBJ or a PMX into this is a publishing step, so
-// the client's whole cost is a bounds check and an upload.
-//
-// That division is not tidiness. An importer is a parser for somebody else's
-// format, which means it is the largest attack surface a content pipeline has;
-// keeping it out of the shipped binary means a malformed model can at worst
-// break a build. It also means the vertex layout on disk is already the vertex
-// layout the GPU wants, so streaming a mesh in costs no conversion pass on the
-// frame it arrives.
-//
-// **Uncompressed here, compressed in transit** — `delivery::GroupCodec` runs
-// zstd over whatever a group holds, exactly as it does for a texture sheet, so
-// the interleaved float layout costs its real size on disk and its compressed
-// size on the wire.
-//
+// Baked mesh data. Runtime code uploads this format; import happens in `bake`.
 // @tier L8 · shared
 
 #include <engine/core/Bytes.hpp>
@@ -33,54 +13,19 @@
 
 namespace engine::assets {
 
-	// One vertex, in the layout a vertex buffer wants.
-	//
-	// **Plain float arrays rather than `core::Vector3`**, and the difference is
-	// the point: this is a device layout that happens to be readable rather than
-	// a value type that happens to be uploadable. A `Vector3` gaining a fourth
-	// component, an alignment attribute or a constructor would silently change
-	// what a published mesh means, and nothing would say so. `render` binds
-	// this struct directly as its vertex layout rather than keeping a copy,
-	// which is what stops a published mesh and a built-in disagreeing about
-	// what a vertex is.
-	//
-	// Interleaved rather than one stream per attribute. A draw reads all three
-	// of these per vertex, so splitting them costs three cache lines where one
-	// would do; the streams only pay off for a depth-only pass wide enough to
-	// care, which this pipeline is not.
-	//
-	// @since v0.9
+	// Stable vertex-buffer layout using plain float arrays.
 	struct MeshVertex {
 		// Object-space position.
 		float Position[3];
 
-		// Object-space normal. Not required to be unit length by the format —
-		// see `MeshData::IsValid` — because an importer that welds vertices
-		// produces sums that a normalise step has yet to touch, and a format
-		// that refused them would make the normalise mandatory before the file
-		// could even be written back out for inspection.
+		// Object-space normal; need not be unit length.
 		float Normal[3];
 
-		// Texture coordinate, with `v` running down the image the way a
-		// texture's row zero does.
-		//
-		// **The flip is the importer's, once, and never the shader's.** glTF
-		// and PMX disagree with OBJ about which way `v` runs, and a renderer
-		// that flipped would flip every format including the ones already
-		// right. Baking the convention in here is what makes a sampled texture
-		// look the same whatever it was imported from.
+		// Texture coordinate; importers normalize `v` to image row order.
 		float TexCoord[2];
 	};
 
 	// One run of indices drawn with one material.
-	//
-	// **A mesh is not one material and pretending otherwise loses the model.**
-	// The PMX models this was built against carry a dozen or more — face, hair,
-	// eyes, each clothing piece — and a format with a single material per file
-	// would either draw them all with one texture or force the importer to emit
-	// a dozen files and lose the fact that they are one thing.
-	//
-	// @since v0.9
 	struct Submesh {
 		// Where this run starts, as an index into `MeshData::Indices`.
 		uint32_t FirstIndex = 0;
@@ -88,40 +33,10 @@ namespace engine::assets {
 		// How many indices it covers. Always a multiple of three.
 		uint32_t IndexCount = 0;
 
-		// Which material, by name.
-		//
-		// **A `std::string` and deliberately not a `core::Name`**, which is the
-		// one place this format departs from `AGENTS.md` rule 4's usual answer.
-		// Interning takes a process-wide mutex and grows a registry that is
-		// never emptied, and every byte here arrives from an origin anybody may
-		// run — so a mesh naming ten thousand distinct materials would be an
-		// unbounded allocation in a shared table, reachable from content.
-		// `delivery::Asset::Name` is a `std::string` for the same reason. The
-		// consumer interns when it *registers* the mesh, which is the point
-		// where the name has already been accepted.
-		//
-		// Empty means the consumer's default material.
+		// Source material name. Empty selects the default material.
 		std::string Material;
 
-		// Which texture this run samples, as a published asset name.
-		//
-		// **Two fields rather than one, and the second is the load-bearing
-		// one.** `Material` is what the source file called this run — `hair`,
-		// `face_02` — and is informational: there is no material format in this
-		// engine, `AssetKind::Material` names a kind nothing writes, and a name
-		// out of somebody's modelling package resolves to nothing. This names
-		// an asset that *exists*, which is what an importer can actually
-		// produce and what a renderer can actually look up.
-		//
-		// Collapsing them was the tempting mistake. A model's material names
-		// are not unique across a library — two characters both have a `hair` —
-		// so a single field would either lose the model's own vocabulary or
-		// make two unrelated meshes fight over one texture. When a material
-		// format arrives this becomes what that material references and the
-		// field above becomes what it is called.
-		//
-		// Empty means the run samples nothing and draws with its tint, which is
-		// the ordinary case for an untextured model.
+		// Published texture asset name. Empty means no texture.
 		std::string Texture;
 
 		// The material's flat colour, multiplied into whatever the texture
@@ -135,25 +50,16 @@ namespace engine::assets {
 		// colour. Without this field it would import as a uniformly tinted
 		// blob, which looks exactly like a broken importer.
 		//
-		// White is the identity, so a mesh that says nothing about colour
-		// samples its texture unchanged.
+		// White is the identity colour.
 		float BaseColour[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 	};
 
-	// A mesh, ready to upload.
-	//
-	// @since v0.9
+	// A mesh ready to upload.
 	struct MeshData {
 		// The vertices, referenced by `Indices`.
 		std::vector<MeshVertex> Vertices;
 
-		// Triangle list, three indices per triangle, counter-clockwise seen
-		// from outside — the winding `render`'s pipeline states as
-		// `FRONTFACE_COUNTER_CLOCKWISE` with `CULLMODE_BACK`.
-		//
-		// **32-bit, and 16 was never an option.** A PMX character is well past
-		// 65535 vertices, and a format that could not carry one would have made
-		// the importer split a model into pieces to satisfy an index width.
+		// Triangle list, counter-clockwise when viewed from outside.
 		std::vector<uint32_t> Indices;
 
 		// The material runs. A mesh with none is drawn whole with the

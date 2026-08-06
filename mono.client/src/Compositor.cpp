@@ -28,6 +28,22 @@ namespace client {
 		size_t PayloadFor(size_t instances) {
 			return sizeof(Prefix) + instances * sizeof(engine::scene::DrawInstance);
 		}
+
+		// How much a channel grows by when a world outgrows it.
+		//
+		// **A step rather than the exact size**, because reserving precisely
+		// what this frame needed would allocate again on the next frame that
+		// added one instance — which is the per-frame allocation the channel
+		// was reserved up front to avoid. 512 is chosen rather than measured:
+		// large enough that a world settling at some size stops growing within
+		// a handful of frames, small enough that overshooting costs a fraction
+		// of a megabyte.
+		constexpr size_t GROWTH_INSTANCES = 512;
+
+		// Rounds an instance count up to the next growth step.
+		size_t GrownTo(size_t instances) {
+			return ((instances / GROWTH_INSTANCES) + 1) * GROWTH_INSTANCES;
+		}
 	}
 
 	void Compositor::Track(engine::world::WorldId id, engine::core::Name world, size_t maximumInstances) {
@@ -67,15 +83,30 @@ namespace client {
 
 		const size_t bytes = PayloadFor(list.size());
 		if (bytes > slot->Channel->MaximumPayload()) {
-			// Refused rather than truncated. Half a draw list is a frame with
-			// holes in it, which reads as a rendering bug rather than as the
-			// budget overrun it is.
-			ENGINE_WARN(
-				"view '{}': {} instances is past this channel's maximum.",
+			// **Grown rather than refused.** The size passed to `Track` is a
+			// starting guess — on the client it is `--entities`, which is the
+			// demo scene's cube count and says nothing about what a script
+			// builds. A world that outgrew it used to stop being drawn
+			// entirely, which reads as a rendering bug and is not one: the
+			// draw list was fine and there was nowhere to put it.
+			//
+			// Truncating was never the alternative. Half a draw list is a
+			// frame with holes in it, and a hole looks like a bug in whatever
+			// was supposed to fill it.
+			const size_t grown = GrownTo(list.size());
+			slot->Channel->Reserve(PayloadFor(grown));
+			slot->Payload.reserve(PayloadFor(grown));
+
+			// Info rather than a warning, and once per growth rather than once
+			// per frame: a world finding its size is ordinary. A line that
+			// keeps appearing is a draw list growing without bound, which is
+			// the thing actually worth seeing.
+			ENGINE_INFO(
+				"view '{}': grown to {} instances ({} instance(s) published)",
 				slot->State.World.Text(),
+				grown,
 				list.size()
 			);
-			return false;
 		}
 
 		// One buffer, reused. A publisher that allocated inside its own render

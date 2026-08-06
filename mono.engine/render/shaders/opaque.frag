@@ -39,21 +39,10 @@ float ShadowFactor(vec3 normal, vec3 toLight) {
 		return 1.0;
 	}
 
-	// The perspective divide, done here rather than in the vertex shader: see
-	// `opaque.vert`. For the orthographic light matrix `w` is one and this
-	// costs nothing, but doing it correctly means the projection can change
-	// without this becoming subtly wrong.
+	// Divide here so the lookup remains perspective-correct if the projection changes.
 	vec3 projected = inLightPosition.xyz / inLightPosition.w;
 
-	// **Y is flipped, and that is SDL's viewport rather than a convention
-	// mistake.** SDL's Vulkan backend submits a negative-height viewport "for
-	// consistency with other backends", so a vertex at `ndc.y = +1` lands at the
-	// *top* of the target — where a texture's `v = 0` is. Sampling with
-	// `ndc.y * 0.5 + 0.5` reads the image upside down.
-	//
-	// Depth needs no remap: Vulkan clip space is already 0..1 there, and an
-	// OpenGL-convention rescale of z would push every comparison half a unit and
-	// shadow the whole scene.
+	// SDL's viewport convention maps the top of the target to texture v = 0.
 	vec2 uv = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
 
 	// Outside the map is lit, not shadowed. The map covers what the scene
@@ -63,11 +52,7 @@ float ShadowFactor(vec3 normal, vec3 toLight) {
 		return 1.0;
 	}
 
-	// **A slope-scaled bias, not a constant one.** A surface nearly edge-on to
-	// the light spans many depth values within one shadow texel, so a constant
-	// bias large enough to stop it self-shadowing is large enough to detach
-	// shadows from their casters everywhere else. Scaling by the angle pays the
-	// cost only where it is needed.
+	// Scale the bias with the light angle to reduce acne without detached shadows.
 	float slope = 1.0 - max(dot(normal, toLight), 0.0);
 	float bias = 0.0015 + 0.0045 * slope;
 
@@ -141,22 +126,7 @@ void main() {
 			vec3 image = texture(surfaceMap, surfaceUv).rgb * inColour.rgb;
 			float imageAlpha = lighting.Flags.w;
 
-			// **Composited over the part rather than replacing it, and the
-			// alphas are combined rather than one winning.** This is the fix for
-			// a mirror that vanished when it was faded: the image used to be
-			// written with the *part's* alpha, so a pane at `Transparency = 0.9`
-			// drew its reflection at one tenth strength and a fully transparent
-			// pane showed no reflection at all — which is not what glass does.
-			//
-			// The two are independent facts. `inColour.a` is how much of the
-			// world behind shows through the pane; `imageAlpha` is how much of
-			// the pane shows through the reflection. Taking the max means the
-			// image is as solid as it was authored to be **whatever the part's
-			// own transparency is**, so a reflection on invisible glass is a
-			// floating reflection — which is exactly what a mirror is.
-			//
-			// The colour is mixed in the same proportion, so a half-opaque image
-			// on a tinted pane is half of each rather than one or the other.
+			// Preserve the image opacity independently from the pane transparency.
 			outColour = vec4(mix(lit, image, imageAlpha), max(alpha, imageAlpha));
 			return;
 		}

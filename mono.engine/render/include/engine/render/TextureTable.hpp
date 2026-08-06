@@ -1,22 +1,7 @@
 #pragma once
 
-// Every texture the renderer can sample, by name.
-//
-// `MeshTable`'s twin, and deliberately much simpler: a texture is its own
-// device resource, so there is no packing decision to make. What this owns is
-// the name-to-handle map and the lifetime.
-//
-// **One sampler for all of them.** A sampler is filtering and wrapping and
-// nothing else, and every texture in this engine wants the same two — linear
-// and repeat. A sampler per texture would be a device object per asset for a
-// setting nothing authors yet.
-//
-// **No mipmaps, and that is a stated gap rather than an oversight.** A 2048
-// sheet minified onto forty pixels aliases into shimmer, and the fix is a mip
-// chain generated at bake time — `bake::ResizeImage` is already the box filter
-// that would build one. It is not here because the format has no place to put
-// the levels: `assets::Texture` is one image, and adding a chain is a format
-// change that should arrive with the sampler work rather than ahead of it.
+// Renderer textures are named device resources with one shared sampler.
+// Mipmaps are not represented by the current asset format.
 //
 // @tier L12 · client
 
@@ -41,10 +26,7 @@ namespace engine::render {
 	  public:
 		// How much device memory the table will hold, in bytes.
 		//
-		// A ceiling on what content can make the renderer allocate, for
-		// `MeshTable::MAXIMUM_VERTICES`'s reason. Half a gigabyte is thirty-two
-		// 2048-pixel sheets, which is a character-heavy scene and well short of
-		// what a modest card has.
+			// Bounds device memory reachable from content.
 		static constexpr size_t MAXIMUM_BYTES = 512u * 1024u * 1024u;
 
 		TextureTable() = default;
@@ -64,9 +46,7 @@ namespace engine::render {
 
 		// Uploads a texture under a name, replacing one already there.
 		//
-		// Uploaded immediately rather than deferred to a flush, unlike
-		// `MeshTable`: a texture is its own resource, so there is no shared
-		// buffer to rebuild and nothing to batch.
+			// Uploads immediately because textures are independent resources.
 		//
 		// @param name  The name a `SurfaceAppearance` or a submesh will ask
 		//              for.
@@ -77,11 +57,7 @@ namespace engine::render {
 
 		// The texture for a name, or null when it is not registered.
 		//
-		// **Null rather than a fallback, unlike `MeshTable::Resolve`.** The two
-		// differ because the consequences differ: a missing mesh has to draw as
-		// *something* or the object vanishes, while a missing texture has an
-		// honest answer already — the submesh's flat base colour, which is what
-		// an untextured model is meant to look like.
+			// Missing textures return null; the material supplies the base colour.
 		//
 		// @param name The name.
 		// @return The texture, or null.

@@ -272,6 +272,43 @@ nothing draws. `CollisionGroup` waits on a name-to-layer registry that does not
 exist, because inventing one here would be this module deciding a physics
 policy.
 
+## A `Sound` has no place, and the omission is the whole design
+
+`Sound` derives from `Instance` and **not** from `PVInstance`. Where it is heard
+from is its parent's: under a service it is heard everywhere at one level, and
+inside something with a `Transform` it is heard from that thing and falls off
+with distance. Roblox's rule, kept for this file's standing reason — a tree that
+differs from the one scripts expect is a migration nobody asked for — and it is
+also the right rule here.
+
+**Do not give it a position.** A `Sound` with coordinates of its own would be a
+second opinion about where a thing is, which is rule 2 with a speaker attached,
+and it would turn "attach a sound to a thing" from `Parent = thing` into a field
+somebody has to keep in step with a hierarchy that already says it.
+
+**Nothing in this module plays anything, and nothing here may.** `scene` is
+`shared` and a server has no mixer — it decides what is audible and replicates
+that, and the sound is produced where somebody is listening. The client walks
+these rows and drives `Engine::audio`; that is the same split `Visual::Mesh`
+already has against the renderer, and it is why this module still does not
+depend on `audio`.
+
+**`Playing` is a property rather than a `Play()` method**, and that is a fact
+about the script binding rather than about audio: methods live on one metatable
+shared by every instance, so a `Play` there would be a method on every `Part` in
+the world. The day classes can carry their own methods, `Play()` sets this
+property and nothing else changes.
+
+**`Volume` clamps at 10 rather than at 1**, which is Roblox's ceiling and the
+honest one: the graph works in floats precisely so a value over full scale
+passes through harmlessly and is clamped once at the device. Refusing above 1
+would make a quietly authored sound impossible to bring up.
+
+`Sound` holds a `core::Name`, so it is registered with a **hand-written wire
+pair** and every field is written the day it is added — including `Playing`, so
+that a level whose ambience is a looping sound comes back sounding rather than
+mute with nothing in the file saying why.
+
 ## Not here yet, so do not add half of one
 
 - **No systems.** `IntegrateMotion`, `SyncBroadphase` and the rest of
@@ -348,3 +385,36 @@ declaring the wrong one compiles, passes any test that writes raw bytes through
 `SetProperty`, and fails at the first script that assigns to it. That is how it
 was found. A test on a computed property should assert the declared type, not
 only the round-trip.
+
+## A mesh's size is a fact about the mesh, so it is keyed by name and never cached on a row
+
+`MeshCatalogue` holds triangles per mesh name; `MeshPart::TrianglesCount` reads
+`Visual::Mesh` and looks the answer up. Refuse the two obvious-looking
+alternatives:
+
+- **A count on the component.** A thousand parts naming one mesh would hold a
+  thousand copies of one number, and repointing `MeshId` would leave every one
+  of them reporting the old mesh. This file already refuses the same shape for a
+  cached world AABB, and for the same reason: a derived fact stored beside the
+  thing it was derived from goes stale silently.
+- **Reaching into `render::MeshTable` for it.** That is the tier edge the first
+  section of this file exists to refuse, and it would also make the property
+  answer nothing on a server. A triangle count is `Indices.size() / 3` of a file
+  on disk — a headless server could produce it and mean it — which is exactly
+  why it is allowed to live here at all, and why a GPU buffer offset is not.
+
+**Zero means "this world has not been told".** Not "empty": `assets::Mesh::Read`
+refuses a mesh with no triangles, so the two cannot be confused. It is the
+honest answer on a server, on a client before the content pump has run, and for
+a `MeshId` naming something no publisher published — and that last case is the
+same condition that draws the fallback cube, so a part reading zero and drawing
+a cube is one fact reported twice rather than two faults.
+
+**`TrianglesOf` never creates the resource and `MeshesOf` may.** The property
+getter calls the first. A getter that acquired a resource would be a structural
+write from inside a read, on every mesh part in the scene, during `PreRender`.
+
+**The catalogue is not saved.** Its registration writes nothing and reads back
+empty, as `RenderedSignature`'s does. A file carrying last run's counts would
+disagree with the content sitting beside it, and a wrong number is worse than a
+zero that says it does not know.

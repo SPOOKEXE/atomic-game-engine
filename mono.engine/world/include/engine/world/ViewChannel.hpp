@@ -83,11 +83,12 @@ namespace engine::world {
 
 		// Creates a channel sized for one payload.
 		//
-		// Slots are allocated once, at the maximum, so publishing never
-		// allocates — which is what keeps a producer off the allocator inside
-		// its own render phase.
+		// Slots are reserved at this size, so publishing a frame that fits
+		// never allocates — which is what keeps a producer off the allocator
+		// inside its own render phase. A frame that does not fit is `Reserve`'s
+		// business rather than a refusal; see there for what that costs.
 		//
-		// @param maximumPayload The largest payload a frame may carry.
+		// @param maximumPayload The payload size to reserve for.
 		explicit ViewChannel(size_t maximumPayload);
 
 		// A channel is a rendezvous between two threads and is never copied.
@@ -138,11 +139,49 @@ namespace engine::world {
 			return Drops.load(std::memory_order_relaxed);
 		}
 
+		// Raises the ceiling so larger frames are accepted.
+		//
+		// **The producer's to call, and only the producer's.** It moves a
+		// number and reserves nothing: each slot grows on the next publish that
+		// writes it, and `Publish` only ever writes the one slot that is
+		// neither published nor being read. Reserving all three here would
+		// touch a buffer the consumer may be copying out of, which is a data
+		// race with a plausible-looking body.
+		//
+		// So the cost of a raise is at most three reallocations, one per slot,
+		// spread over the next three publishes — and then never again at that
+		// size. That is the trade this class was originally written to avoid,
+		// taken deliberately: a fixed ceiling means a world that outgrows it
+		// stops being drawn at all, and a frame nobody can see is worse than a
+		// frame that cost an allocation.
+		//
+		// **Raise in steps, not to the exact size.** A caller that reserved
+		// precisely what this frame needed would allocate again on the next
+		// frame that added one instance, which is the per-frame allocation this
+		// is trying not to have.
+		//
+		// @param maximumPayload The new ceiling. A smaller value is ignored:
+		//        shrinking would mean freeing capacity a slot the consumer
+		//        holds is still using.
+		void Reserve(size_t maximumPayload);
+
 		// The largest payload this channel accepts.
 		//
 		// @return The maximum in bytes.
 		size_t MaximumPayload() const {
-			return Maximum;
+			return Maximum.load(std::memory_order_relaxed);
+		}
+
+		// How many times the ceiling has been raised.
+		//
+		// **Worth reading rather than merely being available.** A number that
+		// settles is a world that found its size; one that keeps climbing is a
+		// world whose draw list grows without bound, and the growth here is the
+		// only place that is visible before the machine runs out of memory.
+		//
+		// @return The raise count.
+		uint64_t Growths() const {
+			return Grown.load(std::memory_order_relaxed);
 		}
 
 	  private:
@@ -166,7 +205,13 @@ namespace engine::world {
 		std::atomic<uint64_t> Drops{0};
 
 		uint32_t NextSerial = 1;
-		size_t Maximum = 0;
+
+		// Atomic because `MaximumPayload` is a question either side may ask,
+		// even though only the producer answers `Reserve`. Relaxed on both: it
+		// orders nothing, and a consumer reading a stale ceiling is reading a
+		// number it does not act on.
+		std::atomic<size_t> Maximum{0};
+		std::atomic<uint64_t> Grown{0};
 		Slot Slots[SLOTS];
 	};
 }

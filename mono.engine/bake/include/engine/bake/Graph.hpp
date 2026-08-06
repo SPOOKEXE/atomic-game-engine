@@ -1,30 +1,7 @@
 #pragma once
 
-// The bake pipeline: input nodes, processing nodes, export nodes.
-//
-// `ROADMAP.md` v0.9 asks for exactly those three words, and this is them. The
-// shape is `audio::Graph`'s deliberately — nodes, wires, a topological run and
-// cycles refused at the wire rather than found at execution — because a second
-// unrelated node model in one engine is two things to learn and two to debug.
-//
-// **The graph touches no filesystem, and that is the whole design.** A source
-// node holds bytes somebody handed it and an export node hands bytes back; the
-// reading and writing is the caller's. That is what `audio::NullDevice` is to
-// the mixer: it makes every importer, every processing step and every export
-// testable in a suite that opens no file, and it means a studio baking into
-// memory and a CLI baking onto a disk run the identical code.
-//
-// **A node has at most one input.** Not a limitation waiting to be lifted — it
-// is what makes "what produced this asset" answerable by walking a chain rather
-// than by reasoning about a fold. Fan-*out* is allowed and is the useful
-// direction: one decoded texture resized to three sizes is three chains sharing
-// a head.
-//
-// **Cycles are refused when the wire is made.** A cycle here is not the audio
-// module's unbounded gain; it is an evaluation that never terminates, and the
-// check is a walk up the input chain at connect time, which is not on any hot
-// path because there is no hot path.
-//
+// In-memory bake graph. Nodes consume at most one input and cycles are rejected
+// when connected. Filesystem access stays outside the graph.
 // @tier L9 · shared
 
 #include <engine/assets/AssetKind.hpp>
@@ -58,23 +35,12 @@ namespace engine::bake {
 		Texture,
 	};
 
-	// One node's result.
-	//
-	// **Three fields of which at most one is filled, rather than a variant.**
-	// A variant would be tidier and would cost every consumer a visit; these
-	// are large, movable, ordinary types and `Kind` is the discriminator that
-	// every path already has to switch on.
-	//
-	// @since v0.9
+	// One node's result; `Kind` selects the populated payload.
 	struct Payload {
 		// Which of the three below is filled.
 		PayloadKind Kind = PayloadKind::None;
 
-		// What this came from, carried down the chain from the source node.
-		//
-		// **The reason an import node needs no configuration**: it dispatches
-		// on this, so a chain that reads `hair.png` and one that reads
-		// `body.pmx` are the same three nodes with different bytes at the top.
+		// Source name, carried down the chain for import dispatch.
 		std::string Source;
 
 		std::vector<std::byte> Bytes;
@@ -82,51 +48,33 @@ namespace engine::bake {
 		assets::TextureData Texture;
 	};
 
-	// What a node does.
-	//
-	// A closed list, for `audio::NodeKind`'s reason: an open set would make
-	// "what does this graph do" unanswerable without running it.
-	//
-	// @since v0.9
+	// Closed list of node operations.
 	enum class NodeKind : uint8_t {
-		// **Input.** Bytes the caller supplied, under the name they came from.
+		// Input bytes supplied by the caller.
 		Source,
 
-		// **Input.** One of `assets::MakeBuiltin`'s meshes, by name. No bytes,
-		// because a built-in is generated rather than read.
+		// Input built-in mesh by name.
 		Builtin,
 
-		// **Processor.** Bytes to a mesh or a texture, chosen by what the bytes
-		// are and — for the formats with no signature — by the source name.
+		// Import bytes to a mesh or texture.
 		Import,
 
-		// **Processor.** Scales a mesh uniformly so its longest axis measures
-		// the given size, and recentres it on the origin. `FitMesh`.
+		// Fit a mesh to a size and recenter it.
 		Fit,
 
-		// **Processor.** Multiplies a mesh's positions per axis. The escape
-		// hatch for a model that is the right proportions and the wrong size,
-		// where `Fit` would be the wrong tool because it changes proportions
-		// relative to other assets.
+		// Scale mesh positions per axis.
 		Scale,
 
-		// **Processor.** Replaces a mesh's normals with area-weighted vertex
-		// normals. `SmoothNormals`.
+		// Recompute area-weighted vertex normals.
 		Smooth,
 
-		// **Processor.** Box-filters a texture to a given size. `ResizeImage`.
+		// Box-filter a texture to a size.
 		Resize,
 
-		// **Processor.** Forces a texture's alpha to fully opaque.
-		//
-		// Narrow on purpose: it exists because a sphere map or a toon ramp
-		// arrives with a zeroed alpha channel it never meant as transparency,
-		// and a blended pass would then draw nothing at all.
+		// Force a texture's alpha opaque.
 		Opaque,
 
-		// **Export.** Serialises its input into the engine's format under a
-		// published name. A mesh becomes `assets::Mesh`'s bytes and a texture
-		// becomes `assets::Texture`'s.
+		// Serialize input into the engine format.
 		Write,
 	};
 

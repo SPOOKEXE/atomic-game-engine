@@ -5,13 +5,7 @@
 namespace engine::examples {
 
 	namespace {
-		// How far a direction's length may sit from one and still be called
-		// unit.
-		//
-		// A client computes this from a camera matrix in single precision, so
-		// demanding exactness would refuse every honest shot. A thousandth is
-		// far tighter than any accumulated error and far looser than the
-		// zero-length direction the check exists to catch.
+		// Allows normal floating-point direction error without accepting zero.
 		constexpr float UNIT_TOLERANCE = 1e-3f;
 
 		bool Finite(const core::Vector3 &value) {
@@ -46,8 +40,7 @@ namespace engine::examples {
 		shot.Range = reader.ReadFloat();
 
 		if (reader.Failed() || reader.Remaining() != 0) {
-			// Trailing bytes mean the sender is not speaking this encoding, and
-			// there is nothing to be gained by acting on the part that parsed.
+			// The payload must contain exactly one shot.
 			return false;
 		}
 		if (!Finite(shot.Aim.Origin) || !Finite(shot.Aim.Direction) || !std::isfinite(shot.Range)) {
@@ -57,12 +50,7 @@ namespace engine::examples {
 			return false;
 		}
 
-		// **A direction of zero would put every point on the ray at the
-		// origin**, so every target standing there is hit by every shot — and
-		// the arithmetic below would report it as a perfectly ordinary hit at
-		// distance zero. Refused rather than normalised: a client that sent one
-		// is not aiming at anything, and inventing a direction for it would be
-		// the server deciding where it shot.
+			// Do not normalize an invalid client direction.
 		const float length = std::sqrt(
 			shot.Aim.Direction.X * shot.Aim.Direction.X + shot.Aim.Direction.Y * shot.Aim.Direction.Y +
 			shot.Aim.Direction.Z * shot.Aim.Direction.Z
@@ -83,9 +71,7 @@ namespace engine::examples {
 				continue;
 			}
 
-			// Ray against sphere, solved along the ray rather than by squaring
-			// a distance: `along` is how far the sphere's centre projects onto
-			// the direction, and what is left is the perpendicular gap.
+			// Solve the ray/sphere intersection along the ray.
 			const core::Vector3 toCentre = target.At - shot.Aim.Origin;
 			const float along = toCentre.X * shot.Aim.Direction.X + toCentre.Y * shot.Aim.Direction.Y +
 								toCentre.Z * shot.Aim.Direction.Z;
@@ -99,15 +85,12 @@ namespace engine::examples {
 				continue;
 			}
 
-			// Where the ray enters the sphere. A shooter already inside one is
-			// hit at distance zero rather than at a negative distance, which is
-			// behind them.
+			// A shooter inside a sphere is hit at distance zero.
 			const float half = std::sqrt(std::max(0.0f, radiusSquared - perpendicularSquared));
 			const float entry = along - half;
 			const float distance = entry < 0.0f ? 0.0f : entry;
 
-			// Entirely behind the shooter: the far intersection is negative
-			// too, so the sphere is not on the ray at all.
+			// Reject spheres entirely behind the ray origin.
 			if (along + half < 0.0f) {
 				continue;
 			}
@@ -115,11 +98,7 @@ namespace engine::examples {
 				continue;
 			}
 
-			// **Nearest, and ties broken by entity id.** The candidates arrive
-			// in whatever order a hash map walked them, so "the first one that
-			// intersects" is a different answer on two machines with the same
-			// input — and a server whose hit resolution depends on map ordering
-			// is one whose recordings do not replay.
+			// Resolve nearest distance, then entity id for deterministic ties.
 			if (!best.Struck || distance < best.Distance ||
 				(distance == best.Distance && target.Entity.Id < best.Entity.Id)) {
 				best.Entity = target.Entity;

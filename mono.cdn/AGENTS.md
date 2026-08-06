@@ -333,12 +333,71 @@ would put a signing key on every serving box, permanently.
 origin that admitted everyone would be deciding who may have what, which is the
 server's job.
 
+## The dashboard is a model plus a device, and the model owns no terminal
+
+`--gui` is two headers and the split between them is the design, not tidiness.
+`Dashboard.hpp` is arithmetic over a publication and a run of counter samples
+producing lines of text; `Terminal.hpp` owns raw mode, the alternate screen and
+an escape sequence. **No escape sequence is emitted by the model** — a colour
+belongs to a `LineStyle` the terminal reads, because a model that emitted colour
+could not be diffed by a test.
+
+That is the same split `net`'s `Message.hpp` has against its `Server`, and it
+buys the same thing: key decoding, scroll arithmetic and frame composition are
+free functions over values, so everything an operator sees and presses is
+covered by a suite that opens no tty. `Terminal::Open` is the one piece with no
+unit suite, for `Renderer.hpp`'s reason — it needs the device, and a mock would
+close the gap on paper only. Do not add one.
+
+**The live section has a fixed line count.** It is rewritten from every sample
+and the content section is written once, so a section that grew a row when a
+counter became interesting would slide the asset list under whoever was reading
+it, for a reason nothing on screen explains. The suite pins the count.
+
+**Sampling is every pump; composing and drawing are not.** The history is built
+from differences between readings, so a reading skipped puts traffic in the
+wrong minute — but formatting sixteen lines and two sparklines a hundred times a
+second to draw four of them is work nobody asked for. `Sample` records and marks
+the section stale; `ComposeLive` runs on the next `LineAt`.
+
+**The history is sixty one-minute buckets and the newest is partial.** An hour
+at sample rate is a ring nobody reads at that resolution. The partial minute is
+said in the row rather than hidden, because a total that silently includes a
+third of a minute reads low for no visible reason. A rate is measured over a
+second rather than between two pumps, where one 16 KB read swings the number by
+a factor of a hundred between redraws.
+
+**`ServedBytes` and `SentBytes` are two measurements and stay two.** One is the
+compressed group payload a client asked for; the other is what the interface
+moved, which also carries manifests, dictionaries, health checks, refusals and
+every response's headers. An operator watching bandwidth wants the second and an
+operator asking what delivery cost wants the first, and a single number cannot
+answer both. `Engine::net` counts the second at the socket — see `net/AGENTS.md`.
+
+**The dashboard holds no clock**, the same rule the rest of this module has.
+`app/main.cpp` reads two: wall time for a grant, because the server that issued
+it used wall time, and `steady_clock` for the dashboard, because a wall clock
+that steps back an hour would put an hour of traffic in one bucket and draw a
+spike nothing caused.
+
+**Raw mode swallows Ctrl-C on purpose.** Leaving `ISIG` on lets the signal end
+the process with the terminal in raw mode, no cursor and the alternate screen
+up — a shell nobody can type into, from a program with a perfectly good
+destructor. Ctrl-C decodes as `Key::Quit`. Do not "fix" this with a signal
+handler.
+
+**`--gui` on something that is not a terminal warns and serves without one.**
+Escape sequences in a log file are a log nobody can read, and serving is the
+job.
+
 ## Not here yet
 
 Named so nobody adds half of one:
 
-- `control/` — the upload API, auth and dashboard, in TypeScript, talking to
-  this program's HTTP API rather than reimplementing any of it.
+- `control/` — the upload API, auth and the web dashboard, in TypeScript,
+  talking to this program's HTTP API rather than reimplementing any of it. It is
+  not what `--gui` is: that reads this process's own counters over a terminal it
+  already has, and a dashboard for a fleet is a different trust boundary.
 - Invalidation, and an edge cache to invalidate.
 - Chunk-level verification of what an upstream returned. Today it is a length
   check against the signed manifest, which is real and is not the whole of one —

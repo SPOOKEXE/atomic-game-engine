@@ -190,12 +190,23 @@ namespace studio {
 		// mode belongs to a swapchain and a headless run has none. The client
 		// makes the same call for `--uncapped`; see `Options::Uncapped` for why
 		// an editor wants it for a different reason.
-		// The flag seeds the preference and is not read again — see
-		// `Editor::VerticalSync`, which is what the Preferences page moves.
-		VerticalSync = !Settings.Uncapped;
+		//
+		// **Every run rather than only under a flag.** The editor's default is
+		// unpaced-and-capped rather than paced by the display, so this is the
+		// call that puts the swapchain in the state `Editor::VerticalSync`
+		// already claims it is in. The flag only clears the ceiling, and is not
+		// read again — the Preferences page is what moves either of them after
+		// this point.
+		if (Settings.Uncapped) {
+			FrameCap = 0.0f;
+		}
 
-		if (Settings.Uncapped && !Settings.Headless && !Renderer.SetVerticalSync(false)) {
-			ENGINE_WARN("--uncapped had no effect; frames stay paced by the display");
+		if (!Settings.Headless && !Renderer.SetVerticalSync(false)) {
+			// **The preference follows the device rather than the other way
+			// round.** A driver with no immediate present mode is an ordinary
+			// machine, not a fault, and the frame limiter below must not run
+			// against a display that is already pacing the frame.
+			ENGINE_WARN("this device will not present without vblank; frames stay paced by the display");
 			VerticalSync = true;
 		}
 

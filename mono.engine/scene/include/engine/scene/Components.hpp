@@ -414,6 +414,73 @@ namespace engine::scene {
 		float FarPlane = 500.0f;
 	};
 
+	// Something that makes a noise.
+	//
+	// **Where it is heard from is its parent's business, not this
+	// component's**, and that is the whole shape of the design. A `Sound` under
+	// `Workspace` is heard everywhere at one level; a `Sound` inside a part is
+	// heard from that part and falls off with distance. Roblox's rule, kept for
+	// `scene/AGENTS.md`'s standing reason — a tree that differs from the one
+	// scripts expect is a migration nobody asked for — and it is also the right
+	// rule: it means "attach a sound to a thing" is `Parent = thing` rather than
+	// a second field naming what a hierarchy already says.
+	//
+	// So there is no position here and there must not be one. A `Sound` with an
+	// `Emitter` position of its own would be a second opinion about where a
+	// thing is, which is rule 2 with a speaker attached.
+	//
+	// **This module holds what a sound *is*; it plays nothing.** `scene` is
+	// `shared` and a server has no mixer — it decides what is audible and
+	// replicates that, and the sound is produced where somebody is listening.
+	// The client walks these rows and drives `engine::audio`.
+	//
+	// Widest-first with the flags last, so the object representation a snapshot
+	// writes holds no uninitialised bytes between fields.
+	//
+	// @since v0.9
+	struct Sound {
+		// The published asset that plays — a manifest name, extension
+		// included, exactly as `Visual::Mesh` names a mesh.
+		//
+		// **A name and never a path.** The manifest is the one place a name
+		// becomes content, and a component holding a path would be a second.
+		// An invalid name means this sound has nothing to play, which is what
+		// a freshly created one is until a script says otherwise.
+		core::Name SoundId;
+
+		// How loud, with 1 being the sample as it was authored.
+		//
+		// Values above 1 are legal here and clamped once at the device, which
+		// is `Sample.hpp`'s rule about headroom reaching the property surface:
+		// a mixer sums, and defensive attenuation at every stage loses range it
+		// cannot get back.
+		float Volume = 0.5f;
+
+		// How close the listener must be for a positional sound to be at full
+		// volume, in metres.
+		//
+		// Ignored entirely when the parent has no place in the world, because
+		// then there is nothing to be far from.
+		float RollOffMinDistance = 10.0f;
+
+		// Where a positional sound has fallen to silence, in metres.
+		float RollOffMaxDistance = 200.0f;
+
+		// Whether it starts again when it ends.
+		bool Looped = false;
+
+		// Whether it should be sounding now.
+		//
+		// **A property rather than a `Play()` method, and that is a statement
+		// about the binding rather than about audio.** Script methods live on
+		// one metatable shared by every instance — `script/src/Instances.cpp` —
+		// so a `Play` there would be a method on every `Part` in the world.
+		// Roblox has this property too and `sound.Playing = true` is what it
+		// means; the day classes can carry their own methods, `Play()` sets
+		// this and nothing else changes.
+		bool Playing = false;
+	};
+
 	// A camera that renders into a texture rather than onto the screen.
 	//
 	// **A second component beside `Camera`, not a field on it.** Most cameras

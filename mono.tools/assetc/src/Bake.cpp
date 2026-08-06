@@ -16,11 +16,7 @@ namespace assetc {
 	namespace {
 		using engine::assets::AssetKind;
 
-		// The extension a baked mesh and a baked texture get.
-		//
-		// `assets::KindOfName` knows both, which is what lets a publisher
-		// pointed at the output tree classify without being told anything about
-		// this program.
+		// Extensions recognized by the runtime asset catalogue.
 		constexpr std::string_view MESH_EXTENSION = ".amesh";
 		constexpr std::string_view TEXTURE_EXTENSION = ".atex";
 
@@ -31,10 +27,7 @@ namespace assetc {
 			return text;
 		}
 
-		// Forward slashes, whatever the platform spells them as. A manifest's
-		// names are forward-slashed, so a tree baked on Windows and one baked
-		// here have to produce the same names or the two disagree about what
-		// was published.
+		// Manifest paths use forward slashes on every platform.
 		std::string Slashed(std::string text) {
 			std::replace(text.begin(), text.end(), '\\', '/');
 			return text;
@@ -96,13 +89,7 @@ namespace assetc {
 			return file.good();
 		}
 
-		// Where a path relative to one file's directory lands, relative to the
-		// tree's root.
-		//
-		// **Resolves `..` and refuses to leave the tree.** A model naming
-		// `../../../etc/passwd` as its texture is the traversal case, and this
-		// is a build tool run over content somebody uploaded — `cdn::ContentRoot`
-		// does the same job on the publishing side and for the same reason.
+		// Resolves relative references without allowing traversal outside the tree.
 		bool Resolve(std::string_view directory, std::string_view relative, std::string &out) {
 			std::vector<std::string> parts;
 
@@ -168,10 +155,7 @@ namespace assetc {
 			return report;
 		}
 
-		// Gathered and sorted before anything is baked, so two runs over one
-		// tree produce the same report in the same order. Directory iteration
-		// order is the filesystem's business and differs between machines,
-		// which would otherwise make a build log undiffable.
+		// Sort sources so reports are deterministic across filesystems.
 		std::vector<std::string> sources;
 		for (const fs::directory_entry &entry : fs::recursive_directory_iterator(settings.Input, error)) {
 			if (!entry.is_regular_file()) {
@@ -204,8 +188,7 @@ namespace assetc {
 					continue;
 				}
 
-				// Copied rather than skipped, so the output tree is the whole
-				// game and not just the half this program understands.
+				// Preserve unknown files unless explicitly disabled.
 				baked.Output = relative;
 				baked.Kind = engine::assets::KindOfName(relative);
 				baked.Bytes = bytes.size();
@@ -232,11 +215,7 @@ namespace assetc {
 				tail = fit;
 			}
 
-			// The resize is added unconditionally for an oversized image, and
-			// the size it targets needs the decoded dimensions — which the
-			// graph does not have until it has run. So the import runs first
-			// and the tail is extended afterwards, which is the one place this
-			// program builds a graph in two passes.
+			// Decode first; dimensions determine whether resize is needed.
 			std::string graphFailure;
 			if (!graph.Run(graphFailure)) {
 				baked.Failure = graphFailure;
@@ -263,9 +242,7 @@ namespace assetc {
 
 			baked.Output = BakedName(relative);
 
-			// **The texture references are rewritten here**, where both halves
-			// of the naming rule are in one place: the model reported the path
-			// it spells and `BakedName` says what that path became.
+			// Rewrite model texture references with the same naming rule.
 			if (model) {
 				const size_t slash = relative.find_last_of('/');
 				const std::string directory =
@@ -278,10 +255,7 @@ namespace assetc {
 					}
 					std::string resolved;
 					if (!Resolve(directory, submesh.Texture, resolved)) {
-						// A texture path that climbs out of the tree. Dropped
-						// rather than followed: the submesh draws with its base
-						// colour, which is visibly plain rather than silently
-						// serving a file from outside the content directory.
+						// Refuse references outside the input tree.
 						submesh.Texture.clear();
 						continue;
 					}

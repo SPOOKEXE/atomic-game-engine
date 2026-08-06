@@ -88,6 +88,19 @@ namespace engine::scene {
 	// @return The class id.
 	ecs::ClassId CameraClass();
 
+	// The `Sound` class id, registering the tree on first call.
+	//
+	// **Derives from `Instance` and not from `PVInstance`**, because a sound
+	// has no place of its own — where it is heard from is its parent's. Under
+	// `Workspace` it is heard everywhere at one level; inside a part it is
+	// heard from that part and falls off with distance. That is Roblox's rule
+	// and it is also the one that keeps "attach a sound to a thing" as
+	// `Parent = thing` rather than a second field naming what the hierarchy
+	// already says.
+	//
+	// @return The class id.
+	ecs::ClassId SoundClass();
+
 	// Creates one part in a world.
 	//
 	// The single place that decides what a part is made of. Anything building

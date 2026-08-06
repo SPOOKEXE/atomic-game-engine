@@ -5,6 +5,7 @@
 #include <engine/core/types/Vector3.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <lualib.h>
 #include <numbers>
 
@@ -50,6 +51,29 @@ namespace engine::script {
 				return 1;
 			default:
 				break;
+			}
+
+			// **`Magnitude` and `Unit`, which the declarations have always
+			// promised and this never delivered.** `engine.d.luau` carries both
+			// on `Vector3`, `Vector2` implements both, and a script reaching for
+			// `direction.Unit` got "Vector3 has no member 'Unit'" at run time
+			// after typechecking clean. `bindings-check` cannot see it: it
+			// compares the declarations against the *class table*, and a value
+			// type's members are in neither.
+			if (std::strcmp(field, "Magnitude") == 0) {
+				lua_pushnumber(state, value.Magnitude());
+				return 1;
+			}
+
+			if (std::strcmp(field, "Unit") == 0) {
+				// A zero vector has no direction, and normalising one gives
+				// three NaNs that propagate into a transform and surface as
+				// geometry vanishing somewhere else entirely. Named here.
+				if (value.Magnitude() <= 0.0f) {
+					luaL_errorL(state, "the zero vector has no Unit");
+				}
+				*PushVector3(state) = value.Unit();
+				return 1;
 			}
 
 			luaL_errorL(state, "Vector3 has no member '%s'", field);

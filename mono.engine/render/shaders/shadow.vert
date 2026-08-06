@@ -1,16 +1,6 @@
 #version 450
 
-// The depth-only pass, from the light's point of view.
-//
-// **The same instance buffer the colour pass binds**, which is the whole reason
-// this is cheap: the geometry is already uploaded and already ordered, so a
-// shadow map costs one more draw over data that is on the device anyway. The
-// only thing that differs is the matrix.
-//
-// The texture coordinate, the colour and the inverse scale are declared and
-// unused. They have to be: the vertex input layout is part of the pipeline, and
-// a pipeline that described the buffer differently from the one that binds it
-// is undefined behaviour rather than a validation error on every backend.
+// Depth-only pass. It shares the colour pass's vertex layout and instance buffer.
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;

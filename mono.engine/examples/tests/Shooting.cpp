@@ -1,10 +1,4 @@
-// A shot, and what it hit.
-//
-// **The decode cases are most of this file and they are the point.** These
-// bytes came from a client, which is the one participant a server may not
-// trust: a zero direction turns every point on the ray into the origin, so
-// every target standing there is hit by every shot and the arithmetic reports
-// it as a perfectly ordinary hit at distance zero.
+// Shot encoding and hit-test regression cases.
 
 #include <engine/examples/Shooting.hpp>
 #include <engine/testing/Suite.hpp>
@@ -72,10 +66,7 @@ TEST_CASE("a direction that is not unit length is refused", "[examples][shooting
 	Shot read;
 
 	SECTION("zero") {
-		// **The case that matters.** Every point on the ray becomes the origin,
-		// so every target standing there is hit by every shot — reported as an
-		// ordinary hit at distance zero, with nothing anywhere saying the
-		// direction was nonsense.
+		// Zero direction must not be normalized or accepted.
 		Shot shot = Along();
 		shot.Aim.Direction = Vector3{0.0f, 0.0f, 0.0f};
 		CHECK_FALSE(DecodeShot(EncodeShot(shot), read));
@@ -97,8 +88,7 @@ TEST_CASE("a direction that is not unit length is refused", "[examples][shooting
 }
 
 TEST_CASE("a range past the ceiling is refused", "[examples][shooting]") {
-	// A client choosing a million metres is asking the server to test its ray
-	// against the whole world, once per input, as often as it likes.
+	// Client-selected range is bounded.
 	Shot read;
 
 	Shot far = Along(MAXIMUM_SHOT_RANGE + 1.0f);
@@ -141,10 +131,7 @@ TEST_CASE("trailing or missing bytes are refused", "[examples][shooting]") {
 }
 
 TEST_CASE("the nearest target is hit, whatever order they arrive in", "[examples][shooting]") {
-	// **Nearest rather than first.** Candidates arrive in whatever order a hash
-	// map walked them, so "the first that intersects" is a different answer on
-	// two machines with the same input — and a server whose hit resolution
-	// depends on map ordering is one whose recordings do not replay.
+	// Order-independent nearest-hit result.
 	const std::vector<Target> far_first = {Sphere(2, 20.0f), Sphere(1, 5.0f), Sphere(3, 50.0f)};
 	const std::vector<Target> near_first = {Sphere(1, 5.0f), Sphere(3, 50.0f), Sphere(2, 20.0f)};
 

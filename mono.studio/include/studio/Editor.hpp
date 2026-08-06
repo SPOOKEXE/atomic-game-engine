@@ -208,17 +208,18 @@ namespace studio {
 		// Needs `--frames`, because a headless run has no window to close.
 		bool Headless = false;
 
-		// Present without waiting for vblank.
+		// Draw as fast as the GPU allows: no vblank and no ceiling.
 		//
-		// **The client's flag, and an editor wants it for a reason a game does
-		// not.** A game uncaps to measure the frame instead of the display; an
-		// editor uncaps because the hands doing the work feel every millisecond
-		// between the mouse and the viewport. Paced to a 60 Hz panel that floor
-		// is 16.7 ms before the compositor has its turn, and on a machine whose
-		// other display runs at 165 Hz the difference is the whole complaint.
+		// **The client's flag, and it removes a different thing in each.** The
+		// client is paced by the display until this is passed. The editor never
+		// is — `Editor::VerticalSync` is off from the start, because the hands
+		// doing the work feel every millisecond between the mouse and the
+		// viewport — so what is left to remove here is `Editor::FrameCap`, the
+		// 120 fps ceiling that keeps a still scene off a laptop's fans.
 		//
-		// Off by default, because a viewport spinning as fast as the GPU allows
-		// is a laptop with its fans up for a still picture. See
+		// Which makes this a benchmark's flag rather than a comfort one: pass it
+		// when the number being read is the frame's cost, and the sleep that
+		// pads every frame out to 8.3 ms would be measured as that cost. See
 		// `render::Renderer::SetVerticalSync`.
 		bool Uncapped = false;
 
@@ -1658,8 +1659,16 @@ namespace studio {
 		// **Live rather than start-up-only, unlike `Options::Uncapped`.** The
 		// flag is what a launcher passes; these are what somebody changes while
 		// looking at the frame graph, which is the only time the question comes
-		// up. `Options::Uncapped` seeds `VerticalSync` and is not read again.
-		bool VerticalSync = true;
+		// up. `Options::Uncapped` clears `FrameCap` and is not read again.
+		//
+		// **Off by default, and the pair is one decision.** An editor is a
+		// program with hands on it, and vertical sync puts the display's refresh
+		// between the mouse and the viewport — 16.7 ms on a 60 Hz panel before
+		// the compositor takes its turn. The cost of turning it off is a
+		// viewport spinning as fast as the GPU allows, which `FrameCap` is there
+		// to answer; the two ship together because either one alone is a worse
+		// default than what they are now.
+		bool VerticalSync = false;
 
 		// A ceiling on frames per second while vertical sync is off.
 		//
@@ -1668,7 +1677,12 @@ namespace studio {
 		// the rest of the frame — worth having because an editor that renders
 		// nine hundred frames a second to show a still scene is an editor that
 		// spins a laptop's fans for nothing.
-		float FrameCap = 0.0f;
+		//
+		// 120 by default: high enough that the cap is not what anybody feels on
+		// a 60, 75 or 120 Hz panel, and low enough that a still scene stops
+		// costing a laptop its fans. It is deliberately *not* tied to the
+		// display's refresh — being unpaced by the display is the point.
+		float FrameCap = 120.0f;
 
 		// The script editor's find bar: whether it is up, and what is in it.
 		//

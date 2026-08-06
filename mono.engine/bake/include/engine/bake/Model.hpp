@@ -1,25 +1,7 @@
 #pragma once
 
-// Reading somebody else's model format, so the engine never has to.
-//
-// `assets::Mesh` is what this produces and `Image.hpp` is its twin for pixels.
-// The same sentence governs both: **a runtime does not import.** A glTF reader
-// is a JSON parser plus an accessor walker plus a node-hierarchy fold, and none
-// of that belongs on the frame a mesh streams in.
-//
-// **What an importer produces is one mesh, not a scene.** A `.glb` may hold a
-// hierarchy of nodes, several meshes and a skeleton; what comes out here is a
-// single `assets::MeshData` with the node transforms already baked into the
-// vertices and one submesh per material. That is a deliberate narrowing rather
-// than a simplification of convenience: `scene` is where a hierarchy lives in
-// this engine, and an importer that produced instances would be authoring a
-// world from a file format's opinion about one.
-//
-// **Skinning is dropped and the rest pose is kept.** There are no skeletons in
-// the engine yet, so a skinned mesh imports as the pose its vertices are
-// actually stored in. `ROADMAP.md` has animation later; the day it arrives,
-// this is where joints and weights start being carried rather than skipped.
-//
+// Model import to one `assets::MeshData`; node transforms are baked in.
+// Skinning remains in the rest pose.
 // @tier L9 · shared
 
 #include <engine/assets/Mesh.hpp>
@@ -33,9 +15,7 @@
 
 namespace engine::bake {
 
-	// Which model format some bytes are.
-	//
-	// @since v0.9
+	// Model format.
 	enum class ModelFormat : uint8_t {
 		// Not a format this reads.
 		Unknown,
@@ -50,15 +30,7 @@ namespace engine::bake {
 		Pmx,
 	};
 
-	// An image that travelled inside the model rather than beside it.
-	//
-	// **GLB embeds its textures far more often than it references them**, and an
-	// importer that only handled the referenced case would import the common
-	// file as untextured — which looks like a texture-binding bug three layers
-	// away. So the bytes come out here and the caller bakes them like any other
-	// image.
-	//
-	// @since v0.9
+	// An image embedded in the model.
 	struct EmbeddedImage {
 		// What the model called it, or a derived name when it called it
 		// nothing. Unique within one import.
@@ -70,9 +42,7 @@ namespace engine::bake {
 		std::vector<std::byte> Bytes;
 	};
 
-	// What an importer produces.
-	//
-	// @since v0.9
+	// Import result.
 	struct ImportedModel {
 		// The geometry, with node transforms baked in and bounds computed.
 		assets::MeshData Mesh;

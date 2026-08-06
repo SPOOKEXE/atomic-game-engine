@@ -1,18 +1,4 @@
-// Drawing a world this process does not own, and not writing to it.
-//
-// The buffer itself is `engine.replication.snapshotbuffer`'s, and everything
-// about the delay, the stall and the predicted entity is stated there. What is
-// this client's own is the seam: which component carries a pose, when the store
-// holds a tick in full, and — the one that matters most — that the interpolated
-// result reaches a `DrawInstance` and nothing else.
-//
-// **The negative case is the important one.** Interpolation is presentation. A
-// render-rate quantity that reached a component would make the world this
-// process replicates depend on the frame rate of whoever happened to be
-// watching it, which is the same rule `v02v03v04.md` §2.11 states for views.
-//
-// Headless. Nothing here needs a GPU, and drawing the line there is what keeps
-// the suite runnable everywhere.
+// Covers the replica presentation seam without a GPU.
 
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -59,7 +45,6 @@ namespace {
 	constexpr int FRAMES_PER_TICK = 4;
 	constexpr float FRAME_SECONDS = 1.0f / static_cast<float>(TICK_RATE * FRAMES_PER_TICK);
 
-	// A replicated world with nothing in it, built the way `Client` builds one.
 	struct Replica {
 		Replica() {
 			engine::parallel::Jobs::Start(1);
@@ -76,12 +61,10 @@ namespace {
 		Replica(const Replica &) = delete;
 		Replica &operator=(const Replica &) = delete;
 
-		// One drawable row, at the origin.
 		Entity Spawn() {
 			return SpawnLooking(Visual{});
 		}
 
-		// The same, with the appearance the authority sent.
 		Entity SpawnLooking(const Visual &visual) {
 			const Entity entity = World.Create();
 			World.Set<Transform>(entity, Transform{});
@@ -90,13 +73,7 @@ namespace {
 			return entity;
 		}
 
-		// The same again, with v0.9's two components on it as well.
-		//
-		// **Separate from `SpawnLooking` on purpose**, because the case that
-		// matters is a replica receiving a `Visual` and *not* these — a server
-		// that has not been taught to send them, which was every server until
-		// they were added to the authority lists. That case has to keep working
-		// and is what `SpawnLooking` covers.
+		// Keep the missing-component case separate from the full appearance case.
 		Entity SpawnSurfaced(const Visual &visual, const SurfaceAppearance &appearance, uint32_t tags) {
 			const Entity entity = SpawnLooking(visual);
 			World.Set<SurfaceAppearance>(entity, appearance);

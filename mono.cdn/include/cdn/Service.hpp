@@ -78,6 +78,23 @@ namespace cdn {
 
 		// Requests for a route that does not exist, or a malformed one.
 		uint64_t Rejected = 0;
+
+		// Every byte written to a socket, and every byte read off one.
+		//
+		// **Counted apart from `ServedBytes`, which is a different measurement
+		// and not a subset of a subset.** `ServedBytes` is the compressed group
+		// payload a client asked for; these two are what the interface moved,
+		// which also carries manifests, dictionaries, health checks, refusals
+		// and every response's headers. An operator watching bandwidth wants
+		// these; an operator asking what delivery cost wants the other, and one
+		// number cannot answer both.
+		//
+		// `Engine::net` measures both at the socket, so a request that never
+		// finished arriving is still counted — see `http::ServeReport`.
+		uint64_t SentBytes = 0;
+
+		// Bytes read off sockets.
+		uint64_t ReceivedBytes = 0;
 	};
 
 	// How a service is set up.

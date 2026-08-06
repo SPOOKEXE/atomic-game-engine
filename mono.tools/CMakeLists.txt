@@ -1,54 +1,30 @@
-# mono.tools — the developer-facing tools.
-#
-# Nothing here ships in a game binary, and nothing here is Python. The tools are
-# C++ where they are programs and CMake where they read the build's own output,
-# which keeps the prerequisite list at CMake, Ninja, a C++ compiler and glslc.
-#
-# Tests live in each tool's own tests/, the same as every other mono.X folder.
+# Developer-facing tools; nothing here ships in a game binary.
 
 add_subdirectory(testrunner)
 
-# The benchmark runner, over the test runner's own library. Declared only when
-# there are benchmarks to run: it exists to time them, and a tool built to time
-# binaries nobody produced is a longer build for nothing.
+# Benchmark runner, enabled only for benchmark builds.
 if(MONO_BUILD_BENCH)
 	add_subdirectory(benchrunner)
 endif()
 
-# The documentation filter, and the `docs` target it feeds. Declared always: the
-# filter is an ordinary library with ordinary tests, and only the `docs` target
-# itself needs Doxygen to be installed.
+# Documentation and binding tools.
 add_subdirectory(bindings)
 add_subdirectory(docgen)
 
-# The script type checker, over the declarations `bindings` generates. Declared
-# always and built by `just typecheck`: it is the half of the bindings contract
-# that faces the scripts rather than the class table.
+# Script type checker over generated declarations.
 add_subdirectory(scriptcheck)
 
-# The bridge between an MCP client's stdio and a running editor's control port.
-# Declared always: it is a hundred lines over asio and needs nothing installed.
+# MCP stdio-to-control-port bridge.
 add_subdirectory(mcpbridge)
 
-# The line counter. Declared always, for the same reason as docgen: it is an
-# ordinary library with ordinary tests over a pure function, and nothing about
-# it needs a program to be installed.
+# Line counter.
 add_subdirectory(linecount)
 
-# The asset compiler. Declared always: it links `bake`, which is `shared` and
-# reaches a decompressor and a JSON parser and nothing that wants a device — so
-# it configures on the same machines `--preset cdn` does.
+# Asset compiler; shared-tier and device-free.
 add_subdirectory(assetc)
 
-# --- architecture ------------------------------------------------------------
-#
-# A CMake script rather than a compiled tool: its input is a JSON file CMake
-# emitted, CMake has a JSON reader, and this way it runs against a tree that has
-# been configured but not yet built.
-#
-# The tier rule itself is enforced at configure time by mono_check_all_tiers.
-# This checks the graph against the checked-in expectation, so that an
-# architectural change is a diff somebody reviews.
+# The tier rule is enforced at configure time; this compares the graph with its
+# checked-in architectural expectation.
 if(MONO_BUILD_TESTS)
 	add_test(
 		NAME architecture

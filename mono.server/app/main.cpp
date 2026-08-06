@@ -1,6 +1,4 @@
-// A thin main over the server library, for the same reason the client's is
-// thin: single-player links this library and hosts a server in-process, which
-// is impossible when the program is one executable's worth of globbed sources.
+// Thin argument-parsing entry point over the server library.
 
 #include <engine/core/Arguments.hpp>
 #include <engine/core/FrameGraph.hpp>
@@ -78,14 +76,7 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	// **Before anything starts a world or a job.** The flag is read on every
-	// dispatch, so setting it late would leave the frames before it with the
-	// shape it exists to remove — and those are the frames somebody was
-	// watching while the program came up.
-	//
-	// It makes the program slower on purpose. See `parallel::SetForceSerialCompute`:
-	// this is a measurement instrument, and the number it produces is a serial
-	// cost rather than a verdict on the parallel one.
+	// Set before startup so every dispatch uses the measured serial path.
 	if (arguments.Has("force-serial-compute")) {
 		engine::parallel::SetForceSerialCompute(true);
 		ENGINE_INFO("serial compute forced: every dispatch runs on its caller's thread");
@@ -178,10 +169,7 @@ int main(int argc, char **argv) {
 
 	server::Server host;
 	if (!host.Initialise(options)) {
-		// Shutdown even on failure. Initialise may already have started the job
-		// pool, and leaving its threads alive means the process never exits —
-		// which reads as a hang rather than as the error it is. Shutdown is
-		// documented as safe after a failed Initialise for exactly this.
+		// Initialise may have started the job pool before failing.
 		host.Shutdown();
 		ENGINE_ERROR("server failed to start");
 		return 1;

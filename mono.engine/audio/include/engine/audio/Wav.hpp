@@ -2,11 +2,12 @@
 
 // Turning the bytes an origin delivered into samples this engine can mix.
 //
-// **This is the one decoder, and it decodes one container.** RIFF/WAV, because
-// it is what every authoring tool writes, it is uncompressed so there is no
-// codec to vendor, and `AssetKind::Audio` already classifies `.wav` at publish
-// time. Ogg, FLAC and MP3 are classified by the manifest and are **not decoded
-// here** — each is a vendored codec and a licence decision, and pretending to
+// **This decodes one container and there is exactly one other.** RIFF/WAV,
+// because it is what every authoring tool writes, it is uncompressed so there
+// is no codec to vendor, and `AssetKind::Audio` already classifies `.wav` at
+// publish time. `Mp3.hpp` is the second, added at v0.9 because minimp3 is CC0 —
+// a licence answer rather than a change of principle. Ogg and FLAC are still
+// classified by the manifest and **not decoded anywhere**, and pretending to
 // support them by listing an extension would be worse than the honest gap.
 //
 // **Every field is hostile.** A `.wav` arrives over the delivery path from an

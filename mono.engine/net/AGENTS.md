@@ -331,6 +331,23 @@ byte of a group arriving between two polls is not.
 **A handler runs inside `Pump` with every other connection waiting, so it must
 not block.**
 
+### `ServeReport`'s byte counters are measured at the socket
+
+`ReceivedBytes` and `SentBytes` are counted where `read_some` and `write_some`
+return, not where a message parses. **That is the whole point of them** and it
+is the one thing to preserve if they are ever moved: a count taken from parsed
+requests reports zero for a peer that is filling a connection buffer and never
+finishing a message, which is precisely the traffic an operator is looking for.
+
+A partial write counts what actually left rather than what was queued — the
+remainder is counted on the poll it goes out on, and bytes still in an outbox
+when a connection drops were never sent and are never counted.
+
+**Say what they are not.** TCP and IP headers, the handshake and every
+retransmission are the kernel's and are invisible here, so this is the payload
+this module moved rather than what the interface carried. A reader that took it
+for the second would find it quietly low and never know by how much.
+
 ### The bounds are the security surface
 
 A public port with no connection ceiling, no per-connection buffer bound and no

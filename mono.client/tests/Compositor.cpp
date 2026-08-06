@@ -173,18 +173,49 @@ TEST_CASE("an empty draw list is a legal frame", "[client]") {
 	REQUIRE(views.Views()[0].Header.SourceTick == 9);
 }
 
-TEST_CASE("a draw list past the channel's maximum is refused whole", "[client]") {
-	// Half a draw list is a frame with holes in it, which reads as a rendering
-	// bug rather than as the budget overrun it is.
+TEST_CASE("a draw list past the channel's size grows it rather than being refused", "[client]") {
+	// **The size passed to `Track` is a guess, not a ceiling.** On the client
+	// it is `--entities`, which is the demo scene's cube count and says nothing
+	// about what a script builds — so a world that outgrew it used to stop
+	// being drawn entirely. That reads as a rendering bug and is not one: the
+	// draw list was fine and there was nowhere to put it.
+	//
+	// Truncating was never the alternative. Half a draw list is a frame with
+	// holes in it, and a hole looks like a bug in whatever was meant to fill
+	// it.
 	Compositor views;
 	views.Track(WorldId{0}, Name("a"), 4);
 
-	REQUIRE_FALSE(views.Publish(WorldId{0}, At(0.0f), LENS, ListOf(64, 0.0f), 1, 0.0f));
+	REQUIRE(views.Publish(WorldId{0}, At(0.0f), LENS, ListOf(64, 0.0f), 1, 0.0f));
+	views.Compose(0.0f);
+	REQUIRE(views.Instances().size() == 64);
 
-	// Still usable: a refused frame is not a broken channel.
+	// And it keeps working at the smaller size afterwards: growing is a
+	// ceiling moving, not a channel reshaping itself around one frame.
 	REQUIRE(views.Publish(WorldId{0}, At(0.0f), LENS, ListOf(4, 0.0f), 2, 0.0f));
 	views.Compose(0.0f);
 	REQUIRE(views.Instances().size() == 4);
+}
+
+TEST_CASE("growth is in steps, so a world that settles stops growing", "[client]") {
+	// A channel reserved at exactly what this frame needed would allocate
+	// again on the next frame that added one instance — which is the
+	// per-frame allocation the reservation exists to avoid.
+	Compositor views;
+	views.Track(WorldId{0}, Name("a"), 4);
+
+	// Past the start, so this one grows.
+	REQUIRE(views.Publish(WorldId{0}, At(0.0f), LENS, ListOf(500, 0.0f), 1, 0.0f));
+	views.Compose(0.0f);
+	REQUIRE(views.Instances().size() == 500);
+
+	// Inside the step it grew to. A frame that fits publishes without the
+	// channel moving again.
+	for (uint64_t tick = 2; tick < 8; tick++) {
+		REQUIRE(views.Publish(WorldId{0}, At(0.0f), LENS, ListOf(500 + tick, 0.0f), tick, 0.0f));
+		views.Compose(0.0f);
+		REQUIRE(views.Instances().size() == 500 + tick);
+	}
 }
 
 TEST_CASE("publishing for an untracked world is refused", "[client]") {

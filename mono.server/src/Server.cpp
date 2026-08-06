@@ -29,14 +29,7 @@
 namespace server {
 
 	namespace {
-		// Fills `out` from `text`, which must be exactly twice its length in
-		// hex.
-		//
-		// **One spelling rather than three.** This loop was written inline for
-		// the grant key and was about to be written again for the identity key;
-		// two copies of a parser is two places for a length check to be
-		// forgotten, and the failure that produces is a key silently half
-		// read.
+		// Parses an exact-length hexadecimal value into `out`.
 		bool ParseHex(std::string_view text, std::span<std::byte> out) {
 			if (text.size() != out.size() * 2) {
 				return false;
@@ -109,10 +102,7 @@ namespace server {
 
 	Server::Server() = default;
 
-	// Out of line, so `cdn::Origin` and `cdn::Service` may be incomplete in the
-	// header. The order matters: the service borrows the origin, so it is
-	// destroyed first — which is what member declaration order already gives,
-	// stated here because it is the kind of thing a later edit reorders.
+	// Out of line so CDN types remain incomplete in the public header.
 	Server::~Server() {
 		ContentService.reset();
 		ContentOrigin.reset();
@@ -141,18 +131,7 @@ namespace server {
 			return false;
 		}
 
-		// The secret shared with whoever issues grants.
-		//
-		// **Required rather than invented, and that is not friction for its own
-		// sake.** A grant key is HMAC material, and `assets/AGENTS.md` is
-		// explicit that `core::Random` is not a cryptographic generator and
-		// must never be used for one. The alternatives here are to reach for a
-		// generator this engine does not have, or to say plainly that a secret
-		// is the deployment's to supply — which is what `Grant.hpp` already
-		// says and what `cdn --grant-key` already requires.
-		//
-		// A key minted from a weak generator would look exactly like a strong
-		// one and would be discovered by somebody else, not by us.
+		// The grant secret is deployment-provided; this path must not invent one.
 		std::array<std::byte, engine::assets::GrantKey::BYTES> secret{};
 		if (Settings.ContentGrantKey.size() != secret.size() * 2) {
 			ENGINE_ERROR(
@@ -174,9 +153,7 @@ namespace server {
 			return false;
 		}
 
-		// One secret, two keys, because there are two roles — see the member's
-		// comment. Built from the same bytes rather than shared, since a
-		// `GrantKey` zeroes itself and is deliberately not copyable.
+		// Keep separate key objects for the issuing and origin roles.
 		auto issuing = engine::assets::GrantKey::FromSecret(secret);
 		if (!issuing) {
 			return false;
@@ -262,38 +239,25 @@ namespace server {
 			return false;
 		}
 
-		// How many processes will share this machine, this one included. A
-		// driver works it out from the hosts it is about to spawn and passes
-		// the answer down, because it is the only process that knows.
 		const unsigned processes =
 			Settings.Processes > 0 ? Settings.Processes : 1u + static_cast<unsigned>(PlannedHosts());
 
 		engine::parallel::Jobs::Start(engine::parallel::WorkersPerHost(processes));
 
-		// Before anything builds or loads a world. A snapshot names its
-		// components, so a process that has not registered them cannot resolve
-		// them — and registration order fixes iteration order, so it belongs at
-		// startup rather than wherever a type is first touched.
+		// Register names before any snapshot or world is built.
 		RegisterPlaceholderComponents();
 
 		engine::world::UniverseSettings universe;
 
-		// A host owns worlds and no bus backend. The topics, the MemoryStore
-		// map and the DataStore records belong to the driver, because two
-		// processes each holding a copy would be two answers to the same key.
+		// Federated hosts do not own shared bus state.
 		universe.Federated = IsHost();
 
 		engine::world::DriverSettings driver;
 		driver.Universe = universe;
 		driver.Hosts.WorldsPerHost = Settings.WorldsPerHost;
 
-		// A host is not a different executable. Defaulting to this one is what
-		// makes the grouping a deployment decision rather than an engine one —
-		// there is no `mono.host` to keep in step.
 		driver.Hosts.Program = Settings.HostProgram.empty() ? ThisProgram() : Settings.HostProgram;
 
-		// Passed through so a host builds the same scene this process would
-		// have. A game file replaces this at v0.5.
 		driver.Hosts.Arguments = {
 			"--unpaced",
 			"--entities",
@@ -301,8 +265,6 @@ namespace server {
 			"--tick-rate",
 			std::to_string(Settings.TickRate),
 
-			// The worker budget, worked out once by the process that knows how
-			// many there will be.
 			"--processes",
 			std::to_string(1u + PlannedHosts()),
 		};
@@ -332,9 +294,7 @@ namespace server {
 				return false;
 			}
 
-			// A snapshot carries state, never code, so the systems are
-			// registered again here — exactly as this program does on a normal
-			// start, because it *is* the same program.
+			// Restore state, then install the systems for this executable.
 			const bool restored =
 				Replayer_->Restore(Worlds(), [](engine::world::Universe &into, engine::world::WorldId id) {
 					into.Enter(id, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
@@ -349,11 +309,7 @@ namespace server {
 
 			PrimaryWorld = Worlds().Find(engine::core::Name(PRIMARY));
 
-			// Recording a *replay* is what proves the replay path reproduces
-			// the run rather than merely surviving it: the two files are
-			// compared byte for byte by `just replay-check`. Without this the
-			// flag combination was accepted and silently ignored, which is the
-			// worst of the three possible behaviours.
+			// Preserve replay recording so byte-for-byte replay checks remain valid.
 			if (!BeginRecording()) {
 				return false;
 			}
@@ -366,10 +322,6 @@ namespace server {
 			return true;
 		}
 
-		// **A game file brings its own worlds, and there may be several.** This
-		// is the promise `Options::GamePath` has carried since v0.3 — the flag
-		// was named for the file it would eventually point at rather than being
-		// renamed twice — and v0.7 is when it comes due.
 		if (IsGameFile(Settings.GamePath)) {
 			if (!HostGameFile()) {
 				return false;

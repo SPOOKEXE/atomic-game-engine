@@ -1,26 +1,7 @@
 #pragma once
 
-// Every mesh the renderer can draw, in one pair of buffers.
-//
-// **A name resolves to a range, not to a buffer.** `scene::DrawInstance::Mesh`
-// has been a `core::Name` since v0.4 and nothing consumed it: the renderer
-// replayed the same thirty-six indices for every instance in the list, so a
-// sphere collided as a sphere and drew as a cube. This is the table that closes
-// that, and the shape it takes is the one decision worth defending.
-//
-// **One vertex buffer and one index buffer for the whole world.** The
-// alternative — a buffer pair per mesh — makes every change of mesh a rebind,
-// and a rebind is a state change the driver cannot batch across. With one pair,
-// a mesh is `(firstIndex, indexCount, vertexOffset)` and switching meshes costs
-// three integers on a draw call that was going to be issued anyway. The cost is
-// that adding a mesh re-uploads the whole thing; meshes arrive when content
-// does, which is a handful of times over a session and never inside a frame.
-//
-// **Growth is a full re-upload rather than a suballocator.** A free-list over
-// device memory is a real allocator with real fragmentation, and the thing it
-// would buy — cheap eviction — is not something this engine does yet: nothing
-// unloads a mesh. When something does, this is the file that changes, and its
-// suite is what will say whether the change was right.
+// Renderer meshes share one vertex buffer and one index buffer.
+// Growth rebuilds both buffers; mesh eviction is not supported.
 //
 // @tier L12 · client
 
@@ -52,11 +33,7 @@ namespace engine::render {
 
 		// What to add to every index before it names a vertex.
 		//
-		// **The reason a mesh's own indices are stored unchanged.** A draw call
-		// takes a vertex offset, so a mesh appended at vertex ten thousand
-		// keeps the indices its author wrote and the offset does the work. The
-		// alternative — rewriting every index on upload — would make a re-upload
-		// after a growth an O(indices) rewrite rather than a memcpy.
+		// Draw calls apply this offset, so uploaded mesh indices stay unchanged.
 		int32_t VertexOffset = 0;
 	};
 
@@ -106,9 +83,7 @@ namespace engine::render {
 
 		// Takes the device and registers the engine's built-in meshes.
 		//
-		// **The built-ins are here rather than in the caller**, because "an
-		// unnamed mesh draws as a cube" is this table's answer to give and
-		// there must be exactly one of it.
+			// Registers the fallback mesh used for unknown names.
 		//
 		// @param device The GPU device. Kept, not owned.
 		// @return `false` when the built-ins could not be uploaded.
@@ -129,10 +104,7 @@ namespace engine::render {
 
 		// Uploads whatever `Add` has accumulated.
 		//
-		// **Cheap and idempotent when nothing changed**, so a caller may call
-		// it every frame at the barrier where content becomes visible without
-		// thinking about it — which is what `delivery::Client::Pump` shaped
-		// every other consumer around.
+		// Safe to call when no mesh has changed.
 		//
 		// @return `false` when the upload failed. The table keeps whatever it
 		//         had, so a failed upload is a frame drawn with the old
@@ -141,11 +113,7 @@ namespace engine::render {
 
 		// The entry for a name, or the default when the name is unknown.
 		//
-		// **Never null, and that is the point.** A mesh that has not arrived
-		// yet is the ordinary state of a streaming game, and a renderer that
-		// had to branch on null at every instance would branch on it in the
-		// inner loop. An unknown name draws as a cube, visibly, which is what
-		// "the consumer's default" has meant since `DrawInstance` was written.
+		// Unknown names resolve to the fallback mesh; this never returns null.
 		const MeshEntry &Resolve(const core::Name &name) const;
 
 		// Whether a name has been registered.

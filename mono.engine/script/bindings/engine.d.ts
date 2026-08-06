@@ -122,6 +122,7 @@ declare interface RaycastResult {
 }
 
 declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
+declare interface Enum_AlphaMode extends EnumItem { readonly __enum: "AlphaMode"; }
 declare interface Enum_AspectType extends EnumItem { readonly __enum: "AspectType"; }
 declare interface Enum_AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 declare interface Enum_BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
@@ -147,6 +148,11 @@ declare interface Enum_VerticalAlignment extends EnumItem { readonly __enum: "Ve
 declare interface Enum_ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 declare namespace Enum {
+	const AlphaMode: {
+		readonly Opaque: Enum_AlphaMode;
+		readonly Clip: Enum_AlphaMode;
+		readonly Blend: Enum_AlphaMode;
+	};
 	const AspectType: {
 		readonly FitWithinMaxSize: Enum_AspectType;
 		readonly ScaleWithParentSize: Enum_AspectType;
@@ -449,6 +455,9 @@ declare interface Instance {
 	Parent: Instance;
 	readonly Changed: ChangedSignal;
 	IsA(className: string): boolean;
+	AddTag(tag: string): boolean;
+	RemoveTag(tag: string): boolean;
+	HasTag(tag: string): boolean;
 	Destroy(): void;
 	Clone(): Instance;
 	GetChildren(): Instance[];
@@ -472,11 +481,14 @@ declare interface PVInstance extends Instance {
 }
 
 declare interface BasePart extends PVInstance {
+	AlphaCutoff: number;
+	AlphaMode: Enum_AlphaMode;
 	Anchored: boolean;
 	CanCollide: boolean;
 	CastShadow: boolean;
 	CollisionGroup: string;
 	Color: Color3;
+	ColorMap: string;
 	Material: Enum_Material;
 	Mesh: string;
 	Size: Vector3;
@@ -485,6 +497,12 @@ declare interface BasePart extends PVInstance {
 }
 
 declare interface Part extends BasePart {
+}
+
+declare interface MeshPart extends BasePart {
+	MeshId: string;
+	TextureID: string;
+	readonly TrianglesCount: number;
 }
 
 declare interface Camera extends PVInstance {
@@ -497,6 +515,16 @@ declare interface Camera extends PVInstance {
 declare interface SurfaceCamera extends Camera {
 	Face: Enum_NormalId;
 	ImageTransparency: number;
+	TagFilter: string;
+}
+
+declare interface Sound extends Instance {
+	Looped: boolean;
+	Playing: boolean;
+	RollOffMaxDistance: number;
+	RollOffMinDistance: number;
+	SoundId: string;
+	Volume: number;
 }
 
 declare interface LuaSourceContainer extends Instance {
@@ -958,8 +986,10 @@ declare const Instance: {
 		(className: "PVInstance", parent?: Instance): PVInstance;
 		(className: "BasePart", parent?: Instance): BasePart;
 		(className: "Part", parent?: Instance): Part;
+		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "Camera", parent?: Instance): Camera;
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
+		(className: "Sound", parent?: Instance): Sound;
 		(className: "LuaSourceContainer", parent?: Instance): LuaSourceContainer;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;

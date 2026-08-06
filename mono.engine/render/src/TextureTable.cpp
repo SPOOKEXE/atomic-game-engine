@@ -23,10 +23,7 @@ namespace engine::render {
 		sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
 		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
 
-		// **Repeat rather than clamp**, because a texture atlas is not what
-		// these are: an imported model's coordinates routinely run past one,
-		// and clamping smears the edge texel across whatever should have
-		// tiled.
+		// Imported model coordinates may exceed one; repeat avoids edge smearing.
 		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
 		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
 		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
@@ -66,11 +63,7 @@ namespace engine::render {
 			return false;
 		}
 
-		// **The engine's format has one layout and the device has two.** An
-		// `R8` sheet is widened to RGBA here rather than given its own pipeline
-		// variant: the shader samples one format, and a mask that arrives as
-		// one channel is three duplicated bytes on the device and none on the
-		// wire.
+		// Expand R8 assets so every texture uses the pipeline's RGBA format.
 		std::vector<std::byte> widened;
 		const std::byte *pixels = image.Pixels.data();
 		if (image.Format == assets::TextureFormat::R8) {
@@ -136,8 +129,7 @@ namespace engine::render {
 		SDL_SubmitGPUCommandBuffer(command);
 		SDL_ReleaseGPUTransferBuffer(Device, transfer);
 
-		// The replaced texture is released *after* the new one is uploaded, so
-		// a failed upload leaves the old image on screen rather than a hole.
+		// Release the old texture only after the replacement upload succeeds.
 		const auto existing = Textures.find(name.Id());
 		if (existing != Textures.end()) {
 			SDL_ReleaseGPUTexture(Device, existing->second);

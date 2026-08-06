@@ -307,7 +307,22 @@ floor by the time you looked away.
 | `--capture PATH` | — | write the viewport's world to a BMP and carry on |
 | `--headless` | off | run with no window at all; needs `--frames` |
 | `--run MODE` | `edit` | start in `edit`, `server` or `play` |
+| `--uncapped` | off | draw with no frame rate ceiling |
 | `--override-assets-directory DIR` | — | read staged data from here |
+
+**The editor is not paced by the display.** It starts with vertical sync off and
+a 120 fps ceiling, because sync puts a whole refresh — 16.7 ms on a 60 Hz panel,
+before the compositor takes its turn — between the mouse and the viewport, and
+that delay is what dragging something feels like. The ceiling is what stops the
+other extreme: a still scene redrawn nine hundred times a second is a laptop
+with its fans up for one picture.
+
+Both are on the Preferences page under **Frames**, live, so a viewport that tears
+is one click from paced and the ceiling is a slider. `--uncapped` removes the
+ceiling for a run, which is what to pass when the number being read is the
+frame's own cost — otherwise the sleep padding each frame out to 8.3 ms is
+measured as that cost. On a device with no immediate present mode the editor says
+so and stays paced by the display.
 
 ### Driving it with no display
 
@@ -389,6 +404,41 @@ Luau; which one a file is comes from its extension, and a game may mix them.
 language, doing the same thing — so that the binding surface is exercised from
 both.
 
+### Shared Luau libraries
+
+`mono.engine/examples/lib/` holds Luau *libraries* rather than scenes. Every
+directory under it is staged with its structure intact and mirrored into
+`ReplicatedStorage` as a tree of `ModuleScript` instances before any scene runs,
+so a script finds `ReplicatedStorage.MagicCore` the way it would in a Rojo place.
+`script::MountModuleTree` does the mirroring and follows Rojo's rule that
+`init.luau` collapses into its own directory.
+
+| library | what it is |
+| --- | --- |
+| `MagicCore` | pure-data spells: config, compile, projectile, effect, status, presets |
+| `MagicRuntime` | the part of a compiled spell this engine can draw |
+| `TerrainCore` | pure-data voxel terrain: noise, height field, edits, meshing |
+| `TerrainRuntime` | terrain boxes as Parts |
+| `MagicTests` | `MagicCore` and `TerrainCore`'s own 183-test suite |
+
+`MagicCore` and `TerrainCore` came from an external Rojo project and are byte
+identical to it, which is the point: they are checked by running that project's
+own tests here. `MagicRuntime` and `TerrainRuntime` are this engine's, because
+that is the only layer that names an instance.
+
+```sh
+just run --script assets/examples/Magic.luau      # spells cratering terrain
+just run --script assets/examples/Libraries.luau  # the libraries, loaded and exercised
+just run --script assets/examples/MagicTests.luau # their 183 tests, in this VM
+```
+
+**`MagicRuntime` draws a body and nothing else.** The Roblox original builds a
+`ParticleEmitter` per authored emitter, plus a `Trail`, a muzzle `Beam` and a
+`PointLight`; this engine has none of those classes, so every tail, plume and
+impact burst has nothing to draw it — 42 of them across the five demo lanes,
+which `Magic.luau` prints at startup. The data is intact and every solver still
+routes it. See the table in `lib/MagicRuntime/init.luau`.
+
 ### Autocomplete while you write one
 
 Both languages are typed against files generated from the class table, so an
@@ -463,35 +513,60 @@ says so, which is why the warnings are there rather than removed —
 just run                          # dev preset, no panels
 just run --stats --graph          # both debug panels open
 just demo                         # the same, spelled shorter
-scripts/run-demo.sh               # the same again, without just
+scripts/demos/run-demo.sh         # the same again, without just
 ./.cache/build/dev/client/client  # directly, no just and no build
 ```
 
 `just run` passes everything after it straight through, and builds the client
 first.
 
-### Without `just`
+### One script per scene
 
-`scripts/run-demo.sh` and `scripts/run-demo.bat` are `just demo` for a machine
-that does not have `just` — which on Windows is most of them. They build the
-client and run the demo scene with both panels open, and everything after the
-script name reaches the client:
+`scripts/demos/` holds a `run-<scene>.sh` and a `run-<scene>.bat` for every
+example, so seeing one is a command rather than a path to look up:
+
+| Script | Scene |
+|---|---|
+| `run-demo` | the built-in C++ demo — `mono.client/src/Demo.cpp` |
+| `run-rings` | orbiting, spinning parts — the loading path |
+| `run-skygrid` | a lattice of blocks in empty sky |
+| `run-terrain` | 16384² voxel terrain, streamed around a camera |
+| `run-magic` | spells fired at terrain they dig holes in |
+| `run-magic-tests` | the ported libraries' 183 tests, run here |
+| `run-libraries` | `MagicCore` and `TerrainCore`, loaded and exercised |
+| `run-interface` | a `ScreenGui` built entirely from a script |
+| `run-mirrors` | one room of mirrors — the rendering path |
+| `run-mirrors-4-worlds` | four worlds composited into one frame |
+| `run-meshes` | imported meshes and textures. Wants `--cdn` |
+| `run-mesh-grid` | bakes and publishes art, then draws it |
 
 ```sh
-scripts/run-demo.sh --frames 600 --uncapped     # Linux, macOS
-scripts\run-demo.bat --frames 600 --uncapped    # Windows
-PRESET=release scripts/run-demo.sh              # any preset but `server`
+scripts/demos/run-terrain.sh                 # uncapped, held at 165 fps
+scripts/demos/run-terrain.sh --graph         # extra flags reach the client
+MAX_FPS=60 scripts/demos/run-terrain.sh      # hold a different rate
+MAX_FPS=0 scripts/demos/run-terrain.sh       # no limit at all
+PRESET=release scripts/demos/run-terrain.sh  # any preset but `server`
+scripts\demos\run-terrain.bat                # Windows, same everything
 ```
 
-They call CMake rather than `just`, so the two halves cannot drift apart, and
-they resolve the repository from their own path — run them from anywhere. The
-`.bat` wants a Developer Command Prompt, because the presets generate Ninja and
-a plain `cmd` window has no compiler in it.
+**`--uncapped --max-fps 165` is one decision rather than two**, and every script
+here makes it. `--uncapped` alone turns off the vblank wait and lets the loop
+run as fast as the GPU allows — several hundred frames a second of heat for a
+display that shows a fraction of them. The vblank wait alone paces to whatever
+the display reports, which is not comparable between two machines and is not
+what a variable-refresh monitor does. So: do not wait for the display, and do
+not run away from it either.
 
-Both carry the note for what replaces them: the demo scene is C++ today
-(`mono.client/src/Demo.cpp`) and becomes
-`mono.engine/examples/Mirrors-1-world.luau` once the script runtime lands at
-v0.6.
+The pair is what `--max-fps` is for, and it does nothing without `--uncapped` —
+with the wait on, the display is already the limiter and a second one fighting
+it produces judder rather than a lower number.
+
+Everything shared lives in `_common.sh` and `_common.bat`; a scene script is a
+header, a filename and its own flags. They call CMake rather than `just`, so the
+two halves cannot drift apart, and they resolve the repository from their own
+path — run them from anywhere. The `.bat` wants a Developer Command Prompt,
+because the presets generate Ninja and a plain `cmd` window has no compiler in
+it.
 
 ### Options
 
@@ -909,8 +984,62 @@ curl -o group.zst -H "x-atomic-grant: HEX" http://127.0.0.1:9080/bundle/<root>
 --compression-level N    Zstd level groups are prepared at (default 9)
 --cache-bytes N          What the prepared-group cache may hold
 --frames N               Serve this many pumps and exit. For a smoke test
+--gui                    Watch it serve in the terminal
 --verbose                Log at trace level
 ```
+
+### Watching it serve
+
+```sh
+./.cache/build/dev/cdn/cdn --store ./store --grant-key HEX --port 9080 --gui
+```
+
+A scrolling terminal view of the origin, on the alternate screen, redrawn four
+times a second:
+
+```
+atomic — content origin · 0.0.0.0:9080
+
+NETWORK
+  now         out   31.8 KB/s   in    4.9 KB/s
+  last hour   out     42.5 KB   in      6.6 KB   (60 minutes, the newest partial)
+  since start out     42.5 KB   in      6.6 KB
+  out ···························································█  peak 42.5 KB/min
+  in  ···························································█  peak 6.6 KB/min
+
+REQUESTS
+  bundles 0 · manifests 40 · dictionaries 0 · health 40
+  refused 0 · missing 0 · rejected 0
+  group payload served  0 B
+  prepared cache  0 groups · 0 B of 256.0 MB
+
+CONTENT
+  4 assets in 1 bundles
+  752.0 KB of content, uncompressed
+  752.0 KB on disk in 12 chunks
+
+BY KIND …  LARGEST 5 …  ASSETS (4, largest first) …
+```
+
+| Key | Does |
+|---|---|
+| `↑` `↓` or `k` `j` | one line |
+| `PgUp` `PgDn`, or `b` and space | one screen |
+| `g` `G` | top, bottom |
+| `q` or Ctrl-C | leave, restoring the terminal |
+
+**Out and in are measured at the socket**, so they count headers, health checks
+and a request that never finished arriving — which is what an operator watching
+bandwidth wants. `group payload served` is the other question, what delivery
+actually cost, and one number could not answer both.
+
+**The log level is raised to errors while it is up**, because the log and the
+dashboard share a screen and the log would win a line at a time. It goes back on
+the way out, and the summary still prints.
+
+`--gui` on something that is not a terminal — a pipe, a log file, a service
+manager — warns and serves without it. Escape sequences written into a log file
+are a log nobody can read.
 
 `--grant-key` is **required to serve**, and it is not a convenience to remove.
 An origin that admitted everyone would be deciding who may have what, which is
@@ -959,12 +1088,62 @@ that accepted an unsigned manifest would have no trust boundary at all.
 
 ```sh
 just client --sound ./assets/tone.wav      # plays it on a loop
+just client --sound ./assets/track.mp3     # the same, and the decoder is picked
+                                           # from the bytes rather than the name
 ```
 
-RIFF/WAV only — 8, 16 and 24-bit integer PCM and 32-bit float. `.ogg`, `.flac`
-and `.mp3` are classified by the content manifest and are **not decoded**: each
-is a vendored codec and a licence decision, and listing an extension without a
-decoder behind it would be worse than the honest gap.
+**Two formats, and the second arrived with a licence rather than with a change
+of mind.** RIFF/WAV — 8, 16 and 24-bit integer PCM and 32-bit float — and MPEG
+Layer I, II and III, behind minimp3, which is CC0. `.ogg` and `.flac` are still
+classified by the content manifest and **not decoded**: each is a vendored codec
+and a licence decision, and listing an extension without a decoder behind it
+would be worse than the honest gap.
+
+### A sound in a world
+
+`Instance.new("Sound")` is a class like any other, and **its parent decides how
+it is heard**:
+
+| Parented to | Heard |
+|---|---|
+| `workspace`, or any service | everywhere, at one level — music |
+| a part, or anything with a place in the world | from that part, falling off between `RollOffMinDistance` and `RollOffMaxDistance` |
+
+```lua
+local music = Instance.new("Sound")
+music.SoundId = "audio/lilium-lainu.mp3"   -- the manifest's name, extension included
+music.Looped = true
+music.Volume = 0.6
+music.Parent = workspace
+music.Playing = true
+```
+
+`SoundId` names a **published asset**, exactly as `MeshId` names a mesh — so the
+client plays it when it is pointed at a store that has it and is silent when it
+is not. Setting `Playing` before the content has streamed is fine: the row keeps
+asking and it starts on the frame the asset lands.
+
+**`Playing` is a property rather than a `Play()` method**, and that is a fact
+about the script binding rather than about audio. Methods live on one metatable
+shared by every instance, so a `Play` there would be a method on every `Part` in
+the world. Roblox has this property too and `sound.Playing = true` is what it
+means.
+
+There is a working one in `mono.engine/examples/Terrain.luau`:
+
+```sh
+cdn --publish ./content --store ./store --signing-key HEX   # content/audio/*.mp3
+just run --script assets/examples/Terrain.luau \
+    --cdn dir:./store --publisher-key PUBLIC
+```
+
+```
+[info] content: audio/lilium-lainu.mp3 decoded (342.3s, 48000 Hz, 2 channel(s))
+[info] content: 0 mesh(es), 0 texture(s) and 1 sound(s) registered
+```
+
+Decoding and resampling happen **once, at load**, never on the device thread —
+which is why the line above reports the device's rate rather than the file's.
 
 **A machine with no audio output is not an error.** The client says so and runs
 quietly:
@@ -974,7 +1153,7 @@ quietly:
 [warning] audio: 'tone.wav' decoded (1.00s) but there is no output on this machine
 ```
 
-A file that cannot be read, or is not a WAV this engine decodes, **is** an error
+A file that cannot be read, or is not audio this engine decodes, **is** an error
 and stops start-up — and it is reported whether or not there is a device, so a
 typo'd path is visible on a headless box too.
 
@@ -1398,6 +1577,33 @@ about twenty units tall and a glTF one about two — so a tree baked without it
 gives a scene where one model fills the sky. `--max-texture 2048` shrinks
 anything larger, because a character pack routinely carries several 4096-pixel
 sheets and four of those is a hundred megabytes of video memory.
+
+**`--model-size` and `MeshPart.Size` multiply — they do not override.** A part's
+`Size` scales the mesh's own coordinates, exactly as it scales the unit cube a
+built-in shape is; it does not fit the mesh into a box of that size. So a model
+baked at `--model-size 4` and given `Size = Vector3.new(4, 4, 4)` draws *sixteen
+metres* across, and the symptom is a grid of models overlapping their
+neighbours rather than anything that looks like a scale setting.
+
+Bake imports with `--model-size 1` when a scene sets sizes in metres. That makes
+an import behave exactly like a built-in, so one number means one thing across
+the whole scene. `mono.engine/examples/MeshGrid.luau` is a worked example, and
+its header says the same thing at the point of use.
+
+**`MeshPart.TrianglesCount` is how a script checks a mesh arrived.** It reports
+how many triangles the world found behind that part's `MeshId`, and it is
+read-only — the number is a fact about the mesh, which a publisher owns, not
+about the part. **Zero means "this world has not been told"**: a headless
+server, a client before the content pump has run, or a `MeshId` naming something
+no publisher published. That last case is the same condition that draws the
+fallback cube, so a part reading zero is the part you are looking for.
+
+```
+mesh grid: 2194625 triangle(s) across 9 model(s), 0 unresolved
+```
+
+The built-in shapes are counted the moment a world exists, since they need no
+publisher; only an imported mesh reads zero until its bytes arrive.
 
 **A file that fails is a row, not an abort**, and the exit code is non-zero so a
 build script notices. One unreadable model in a directory of four hundred should

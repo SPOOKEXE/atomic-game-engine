@@ -3,6 +3,7 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -126,12 +127,57 @@ namespace engine::scene {
 			}
 		}
 
+		// Derived resource: do not persist stale mesh counts.
+		void WriteMeshCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadMeshCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<MeshCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].Triangles.clear();
+			}
+		}
+
 		void WriteSurfaceAppearances(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *appearances = static_cast<const SurfaceAppearance *>(source);
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteName(appearances[index].ColourMap);
 				writer.WriteFloat(appearances[index].AlphaCutoff);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Mode));
+			}
+		}
+
+		// **A hand-written pair, because it holds a name**, and every field is
+		// written the day it is added rather than a release later — the lesson
+		// `WriteVisuals` records above, applied from this function's first line.
+		void WriteSounds(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *sounds = static_cast<const Sound *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const Sound &sound = sounds[index];
+				writer.WriteName(sound.SoundId);
+				writer.WriteFloat(sound.Volume);
+				writer.WriteFloat(sound.RollOffMinDistance);
+				writer.WriteFloat(sound.RollOffMaxDistance);
+				writer.WriteBool(sound.Looped);
+
+				// **Written, so a save file remembers what was playing.** The
+				// alternative reads as tidier — a loaded world starts silent —
+				// and is the wrong default: a level whose ambience is a looping
+				// `Sound` under `Workspace` would come back mute, and nothing
+				// in the file would say why.
+				writer.WriteBool(sound.Playing);
+			}
+		}
+
+		void ReadSounds(core::ByteReader &reader, void *destination, size_t count) {
+			auto *sounds = static_cast<Sound *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				Sound &sound = sounds[index];
+				sound.SoundId = reader.ReadName();
+				sound.Volume = reader.ReadFloat();
+				sound.RollOffMinDistance = reader.ReadFloat();
+				sound.RollOffMaxDistance = reader.ReadFloat();
+				sound.Looped = reader.ReadBool();
+				sound.Playing = reader.ReadBool();
 			}
 		}
 
@@ -300,6 +346,9 @@ namespace engine::scene {
 		ecs::Components::Register<Tags>("scene.Tags");
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 		ecs::Components::Register<Camera>("scene.Camera");
+
+		// A name again, so a hand-written pair again. See `WriteSounds`.
+		ecs::Components::Register<Sound>("scene.Sound", WriteSounds, ReadSounds);
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
 
 		// The service fixtures, added at the end because that is the rule this
@@ -339,6 +388,9 @@ namespace engine::scene {
 		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
+		ecs::Components::Register<MeshCatalogue>(
+			"scene.MeshCatalogue", WriteMeshCatalogues, ReadMeshCatalogues
+		);
 
 		// What `SyncRendered` compares this frame's tree against, at the end of
 		// the list for the reason it opens with. A resource, because a stamp

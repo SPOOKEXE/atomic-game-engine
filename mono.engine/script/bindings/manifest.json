@@ -43,14 +43,17 @@
 			"name": "BasePart",
 			"parent": "PVInstance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
+				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "CanCollide", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "ColorMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Material", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "Material", "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -66,14 +69,17 @@
 			"name": "Part",
 			"parent": "BasePart",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
+				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "CanCollide", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "ColorMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Material", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "Material", "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -82,6 +88,35 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
+			]
+		},
+		{
+			"name": "MeshPart",
+			"parent": "BasePart",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.PreviousTransform", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"properties": [
+				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "Anchored", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.Motion", "scene.RigidBody"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "CanCollide", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
+				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "ColorMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "Material", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "Material", "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "MeshId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
+				{"name": "TextureID", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
+				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "TrianglesCount", "type": "int32", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
 			]
 		},
@@ -118,7 +153,24 @@
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
-				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
+				{"name": "SurfaceSize", "type": "Vector3", "kind": "structural", "bytes": 12, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "TagFilter", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]}
+			]
+		},
+		{
+			"name": "Sound",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Sound"],
+			"properties": [
+				{"name": "Looped", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Playing", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
+				{"name": "RollOffMaxDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
+				{"name": "RollOffMinDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
+				{"name": "SoundId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
+				{"name": "Volume", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]}
 			]
 		},
 		{
@@ -1268,6 +1320,7 @@
 		}
 	],
 	"enums": [
+		{"name": "AlphaMode", "members": ["Opaque", "Clip", "Blend"]},
 		{"name": "AspectType", "members": ["FitWithinMaxSize", "ScaleWithParentSize"]},
 		{"name": "AutomaticSize", "members": ["None", "X", "Y", "XY"]},
 		{"name": "BorderMode", "members": ["Outline", "Middle", "Inset"]},

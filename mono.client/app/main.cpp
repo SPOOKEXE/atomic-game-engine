@@ -1,9 +1,4 @@
-// A thin main over the client library. Everything here is argument parsing;
-// everything after it is a call into a library.
-//
-// That split is what makes single-player possible later: the client links the
-// server library and starts one in-process, which cannot be done when the whole
-// program is one executable's worth of globbed sources.
+// Thin argument-parsing entry point over the client library.
 
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
@@ -45,6 +40,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
+	arguments.Value("max-fps", "N", "Hold this frame rate. Needs --uncapped; 0 is no limit");
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Flag(
 		"force-serial-compute",
@@ -77,7 +73,7 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("content-cache", "DIR", "Keep verified content here between runs");
 	arguments.Value("publisher-key", "HEX", "64 hex characters — the key whose manifests this client trusts");
-	arguments.Value("sound", "PATH", "Play this .wav on a loop — proves audio runs in-game");
+	arguments.Value("sound", "PATH", "Play this .wav or .mp3 on a loop — proves audio runs in-game");
 	arguments.Value(
 		"capture",
 		"PATH",
@@ -94,14 +90,7 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	// **Before anything starts a world or a job.** The flag is read on every
-	// dispatch, so setting it late would leave the frames before it with the
-	// shape it exists to remove — and those are the frames somebody was
-	// watching while the program came up.
-	//
-	// It makes the program slower on purpose. See `parallel::SetForceSerialCompute`:
-	// this is a measurement instrument, and the number it produces is a serial
-	// cost rather than a verdict on the parallel one.
+	// Set before startup so every dispatch uses the measured serial path.
 	if (arguments.Has("force-serial-compute")) {
 		engine::parallel::SetForceSerialCompute(true);
 		ENGINE_INFO("serial compute forced: every dispatch runs on its caller's thread");
@@ -123,14 +112,11 @@ int main(int argc, char **argv) {
 	options.ShowNetwork = arguments.Has("net");
 	options.ShowFrameGraph = arguments.Has("graph");
 	options.Uncapped = arguments.Has("uncapped");
+	options.MaximumFrameRate =
+		static_cast<uint32_t>(arguments.GetInteger("max-fps", options.MaximumFrameRate));
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);
 
 	if (arguments.Has("enable-profiler")) {
-		// Bare `--enable-profiler` is not accepted by the parser, which
-		// requires a value for a Value option — so a caller who wants the
-		// default writes `--enable-profiler 10`. Keeping "takes a value" and
-		// "does not" as separate declarations is what makes a missing value an
-		// error rather than a silently swallowed next argument.
 		options.ProfilerWaitSeconds = arguments.GetNumber("enable-profiler", 10.0);
 	}
 
@@ -181,7 +167,6 @@ int main(int argc, char **argv) {
 			);
 			return 2;
 		}
-		// Naming a tab is asking to see it.
 		options.ShowFrameGraph = true;
 	}
 

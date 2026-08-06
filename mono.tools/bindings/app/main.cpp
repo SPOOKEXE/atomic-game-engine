@@ -819,6 +819,22 @@ declare workspace: Workspace
 -- The instance this chunk was loaded from, set on the thread after the sandbox.
 declare script: LuaSourceContainer
 
+-- `require(moduleScript)`, and declaring it here is what makes it checkable.
+--
+-- **Upstream's `require` is resolved by the *frontend* rather than typed by the
+-- checker**: seeing a call to the global, it hands the argument to a module
+-- resolver expecting a path, and reports `Unknown require: unsupported path` for
+-- anything else. Every argument in this engine is an instance, so every module
+-- a script loaded was an error — which made `require` unusable under
+-- `scriptcheck` even where it worked perfectly at run time.
+--
+-- Declaring it overrides the global and the resolver leaves it alone. The return
+-- is `any` because it genuinely is: a module returns one value of whatever type
+-- it likes, and there is no static link from an instance to the file behind it.
+-- That is the cost of `require` taking an instance, and it is the same cost
+-- Roblox pays.
+declare require: (module: Instance) -> any
+
 declare warn: (...any) -> ()
 declare wait: (seconds: number?) -> number
 declare spawn: (callback: (...any) -> (), ...any) -> thread
@@ -914,7 +930,21 @@ declare task: {
 			// out of the loop below as well, and every class in this file
 			// carried the field twice.
 			for (const PropertyDescriptor &property : OwnProperties(info)) {
-				out << "\t" << property.Name.Text() << ": " << LuauType(property) << "\n";
+				out << "\t";
+
+				// **`read` is Luau's `readonly`, and without it the two
+				// languages disagreed about the same descriptor.** The
+				// TypeScript half below has emitted `readonly` since it was
+				// written; this half emitted nothing, so a Luau script
+				// assigning `MeshPart.TrianglesCount` typechecked clean and was
+				// then refused at run time by `Store::SetProperty` — a
+				// diagnostic arriving one layer later than the one that exists
+				// to prevent it.
+				if (!property.Writable) {
+					out << "read ";
+				}
+
+				out << property.Name.Text() << ": " << LuauType(property) << "\n";
 			}
 
 			// **The host members, which project onto no component and never
@@ -926,6 +956,18 @@ declare task: {
 			if (name == "Instance") {
 				out << "\tChanged: ChangedSignal\n";
 				out << "\tfunction IsA(self, className: string): boolean\n";
+
+				// **The tags, which sit beside `IsA` in `OpenInstances`' method
+				// table and were missing here.** v0.9 added them to the run time
+				// and not to this generator, so every script calling `AddTag`
+				// typechecked as an error against a method the engine answers —
+				// `examples/Meshes.luau` among them. A host member is only
+				// declared where it is written down, and there is no test that
+				// would notice one of these tables growing without the other.
+				out << "\tfunction AddTag(self, tag: string): boolean\n";
+				out << "\tfunction RemoveTag(self, tag: string): boolean\n";
+				out << "\tfunction HasTag(self, tag: string): boolean\n";
+
 				out << "\tfunction Destroy(self): ()\n";
 				out << "\tfunction Clone(self): Instance\n";
 				out << "\tfunction GetChildren(self): { Instance }\n";
@@ -1514,6 +1556,12 @@ declare const task: {
 			if (name == "Instance") {
 				out << "\treadonly Changed: ChangedSignal;\n";
 				out << "\tIsA(className: string): boolean;\n";
+
+				// The tags, for the reason the Luau half states.
+				out << "\tAddTag(tag: string): boolean;\n";
+				out << "\tRemoveTag(tag: string): boolean;\n";
+				out << "\tHasTag(tag: string): boolean;\n";
+
 				out << "\tDestroy(): void;\n";
 				out << "\tClone(): Instance;\n";
 				out << "\tGetChildren(): Instance[];\n";

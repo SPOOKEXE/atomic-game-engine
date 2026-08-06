@@ -1,3 +1,4 @@
+#include <engine/assets/Builtin.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -11,6 +12,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -374,6 +376,33 @@ namespace client {
 			return camera;
 		}
 
+		// Built-in mesh counts are available before scripts load, without delivery.
+		void RecordBuiltinMeshes(Store &store) {
+			engine::scene::RegisterSceneComponents();
+
+			struct Counted {
+				engine::core::Name Name;
+				uint32_t Triangles = 0;
+			};
+
+			static const std::vector<Counted> BUILTINS = [] {
+				std::vector<Counted> counted;
+				for (uint8_t index = 0; index < engine::assets::BUILTIN_MESH_COUNT; index++) {
+					const auto builtin = static_cast<engine::assets::BuiltinMesh>(index);
+					const engine::assets::MeshData mesh = engine::assets::MakeBuiltin(builtin);
+					counted.push_back(
+						{engine::core::Name(engine::assets::BuiltinName(builtin)),
+						 static_cast<uint32_t>(mesh.Indices.size() / 3)}
+					);
+				}
+				return counted;
+			}();
+
+			for (const Counted &builtin : BUILTINS) {
+				engine::scene::RecordMesh(store, builtin.Name, builtin.Triangles);
+			}
+		}
+
 		void InstallResources(Store &store, Entity camera, float extent, uint32_t reserve) {
 			store.SetResource(WorldBounds{extent});
 
@@ -471,6 +500,9 @@ namespace client {
 		// aborts rather than quietly leaving two names for one thing.
 		RegisterClientComponents();
 
+		// Register built-in metadata before the script can query it.
+		RecordBuiltinMeshes(store);
+
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
 		std::string error;
@@ -555,6 +587,9 @@ namespace client {
 
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {
 		RegisterClientComponents();
+
+		// Game-file and studio worlds need the same built-in metadata.
+		RecordBuiltinMeshes(store);
 
 		if (!store.HasResource<DrawList>()) {
 			store.SetResource(DrawList{});

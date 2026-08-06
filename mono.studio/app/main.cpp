@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
 		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
 	);
 	arguments.Flag("headless", "Run with no window (needs --frames)");
-	arguments.Flag("uncapped", "Present without waiting for vblank");
+	arguments.Flag("uncapped", "Draw with no frame rate ceiling (default 120 fps)");
 
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
 	arguments.Flag("stats", "Open the statistics panel (F7)");

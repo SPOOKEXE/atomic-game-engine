@@ -1,29 +1,7 @@
 #pragma once
 
-// What a published set of content is, written down.
-//
-// The manifest is the one place a *name* becomes a *hash*. A game author writes
-// `meshes/rock.mesh`; the manifest says which content that was when this build
-// was published, and everything downstream — request, verification, cache key,
-// patch — carries the hash and never the name. CDN.md §1: a path reaching the
-// request layer is a bug, because a path can be walked and a hash cannot.
-//
-// Four levels, and this file holds the top three:
-//
-//     manifest root      BLAKE3 tree over its bundle roots — the signed value
-//       bundle root      BLAKE3 tree over its asset roots  — the delivery unit
-//         asset root     BLAKE3 tree over its chunk hashes — what a name means
-//           chunk        BLAKE3 of the bytes               — Chunker.hpp
-//
-// **Every list has one canonical order and the bytes are stable.** Two builds
-// of the same content produce the same manifest, byte for byte, so it can be
-// diffed and cached — the discipline v0.2 already applied to snapshots, here for
-// the same reason. A manifest that differs run to run turns "did the content
-// change?" into a question nobody can answer cheaply.
-//
-// This module is the *format*. Deciding which assets belong in which bundle is
-// delivery policy and lives with the origin — CDN.md §5.
-//
+// Published content manifest. Names map to hashed assets; canonical ordering
+// keeps serialized bytes stable. Bundle selection is origin policy.
 // @tier L8 · shared
 
 #include <engine/assets/AssetKind.hpp>
@@ -98,19 +76,7 @@ namespace engine::assets {
 		uint64_t TotalBytes = 0;
 	};
 
-	// Whether some bytes are the asset the manifest describes.
-	//
-	// **Chunk by chunk, then the tree, and never a hash of the whole.** An
-	// asset root is a BLAKE3 *tree over its chunk hashes* — not the digest of
-	// its content — so `Hasher::Of(bytes) == asset.Root` is wrong for every
-	// asset that was cut into more than one chunk, and *right by coincidence*
-	// for some that were not. That is the worst shape a check can have: it
-	// passes in the small case somebody tests with and fails on real content.
-	//
-	// One implementation, because there are three callers who each have to get
-	// this identical — the delivery client checking what arrived from an
-	// origin, the same client checking what came out of its own cache, and the
-	// chunk store checking what it reassembled.
+	// Verifies bytes against the asset's chunk tree.
 	//
 	// @param asset The manifest's entry, carrying the chunk list and the root.
 	// @param bytes The candidate content.

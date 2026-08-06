@@ -1,59 +1,10 @@
 --!strict
--- A 16384 x 16384 voxel world, generated from noise and streamed around a
--- flying camera.
+-- A 16384 x 16384 noise-generated voxel world streamed around a camera.
 --
--- `SkyGrid.luau` proves a viewport survives many small separate objects.
--- `Meshes.luau` proves the content pipeline. This proves the **third** thing,
--- and the one an actual game needs: a world far larger than memory, where what
--- exists at any moment is a function of where the camera is rather than of what
--- a setup pass built.
+-- Terrain is generated on demand; only nearby chunks exist.
 --
--- ## The number that decides the design
---
--- 16384 x 16384 one-metre blocks is 268,435,456 columns. `RuntimeLimits` gives
--- one VM 64 MB (`script/Runtime.hpp`), which is about a quarter of a byte per
--- column — so there is no arrangement of Lua tables that holds this map. It is
--- never stored. `HeightAt` is a **pure function of two integers**, and the map
--- is whatever that function says when somebody asks. Sixty-eight thousand times
--- more world than fits, at the cost of asking twice for the same answer.
---
--- That is also what makes it replay. The noise is integer hashing, the camera
--- path is a function of `time()`, and `Heartbeat` is handed the world's fixed
--- tick delta — so two runs of this file build the same world block for block,
--- which `AGENTS.md` rule 5 asks of anything that has to survive a recording.
---
--- ## What is actually drawn
---
--- Nowhere near 268 million parts. Three reductions, in order of how much they
--- save:
---
---   1. **Only the near field exists.** Chunks within `VIEW_CHUNKS` of the
---      camera are built and everything else is released. The working set is
---      ~150 chunks, not a million.
---   2. **Only the exposed skin of a column.** A column is solid from bedrock to
---      its surface, and every voxel below the neighbouring surfaces is buried
---      forever. What is emitted is the box from the *lowest neighbouring
---      surface* to this column's own — the top face plus whatever cliff is
---      showing beside it, and nothing behind either.
---   3. **Runs are merged along X.** Consecutive columns agreeing on top, bottom
---      and material become one stretched part. This is the one-dimensional half
---      of greedy meshing, and on flat ground it turns a 32-column row into one
---      part.
---
--- Together those take a 32x32 chunk from 1024 columns to a measured **98 parts
--- on average across 40 regions of this map**, ranging from 29 over open water
--- to 260 in broken mountain country. The blocks are still one metre — nothing is
--- scaled up and no detail is dropped; a merged box is exactly the voxels it
--- replaced.
---
--- ## Run it
---
---     client --script Terrain.luau --stats
---
--- The camera flies a slow circuit and the terrain builds ahead of it. `--stats`
--- shows the entity count settling at the working set rather than climbing,
--- which is the thing worth watching: a streaming bug shows up there long before
--- it shows up on screen.
+-- The map is a deterministic function of coordinates. Only exposed, nearby
+-- terrain is emitted, and adjacent columns are merged into boxes.
 
 local Lighting = game:GetService("Lighting")
 
@@ -73,14 +24,10 @@ local BLOCK = 1
 -- solid is filled.
 local SEA_LEVEL = 34
 
--- The floor of the world. Nothing is emitted below this, so a column beside a
--- very deep neighbour still costs one part rather than eighty.
+-- Lowest emitted terrain level.
 local BEDROCK = -8
 
--- How much cliff a single column may show. A ravine wall is more interesting
--- than it is affordable: without this, one column next to a 60-block drop
--- becomes a 60-metre-tall part, and the part is mostly inside the hill behind
--- it. Capped, the wall is drawn by the columns that step down it.
+-- Maximum exposed cliff height.
 local MAX_EXPOSED = 24
 
 -- --- the noise library -----------------------------------------------------
@@ -132,11 +79,6 @@ local function hash3(x: number, y: number, z: number, seed: number): number
 end
 
 -- Quintic fade, `6t^5 - 15t^4 + 10t^3`.
---
--- **Not the cubic one.** The cubic smoothstep has a non-zero second derivative
--- at the lattice points, which puts a faint crease along every integer line —
--- invisible on a hillside and obvious on water, where the surface is nearly
--- flat and the eye has a straight edge to compare against.
 local function fade(t: number): number
 	return t * t * t * (t * (t * 6 - 15) + 10)
 end
@@ -1171,6 +1113,28 @@ Lighting.FogColor = Color3.fromRGB(170, 196, 214)
 Lighting.FogStart = VIEW_CHUNKS * CHUNK * BLOCK * 0.45
 Lighting.FogEnd = VIEW_CHUNKS * CHUNK * BLOCK * 0.95
 Lighting.OutdoorAmbient = Color3.fromRGB(112, 120, 132)
+
+-- --- the music ------------------------------------------------------------
+--
+-- **Parented to `workspace`, which is what makes it music rather than a noise
+-- something makes.** A `Sound` inside a part is heard from that part and falls
+-- off with distance; one under a service is heard everywhere at one level. A
+-- five-minute track emitting from a single point in a 16384-block world would
+-- be inaudible for almost the whole flight, which is the wrong shape for a
+-- score.
+--
+-- `SoundId` is the manifest's name, extension included, exactly as `MeshId`
+-- names a mesh — so this plays when the client is pointed at a store that has
+-- it published and is silent when it is not. The row keeps asking, so setting
+-- `Playing` before the content has streamed is fine and it starts on the frame
+-- the asset lands.
+local music = Instance.new("Sound")
+music.Name = "Score"
+music.SoundId = "audio/lilium-lainu.mp3"
+music.Looped = true
+music.Volume = 0.6
+music.Parent = workspace
+music.Playing = true
 
 -- --- the beat --------------------------------------------------------------
 

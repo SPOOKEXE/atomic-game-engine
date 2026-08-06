@@ -47,15 +47,37 @@ presentation module on this link line fails the configure with the edge named.
 ```sh
 just cdn                          # build the program and only its dependencies
 just serve                        # build and run it against the staged directory
-just serve --root ./content       # a directory of your own
+just serve --store ./store --grant-key HEX --gui
 ./.cache/build/dev/cdn/cdn --help
 ```
 
-```
---root DIR   Directory to serve content from (default: beside the binary)
---verbose    Log at trace level
---help       Show this text
-```
+`RUNNING.md` carries the whole flag list. The two modes are one program because
+the signing key is separate: `--publish` builds a store and needs a signing key,
+serving needs a grant key and holds no signing key at all.
+
+## Watching it serve
+
+`--gui` draws a scrolling terminal view of the origin — what is published, what
+it weighs per kind and per asset, the five largest, and traffic in and out as a
+live rate, an hour of one-minute buckets and a running total.
+
+Two headers and the split between them is the point:
+
+| Header | Owns |
+|---|---|
+| `cdn/Dashboard.hpp` | the arithmetic and the text. No terminal, no escape sequence |
+| `cdn/Terminal.hpp` | raw mode, the alternate screen, a key, a frame |
+
+Key decoding, scroll arithmetic and frame composition are free functions over
+values, so everything an operator sees and presses is covered by a suite that
+opens no tty. `Terminal::Open` is the one piece with no unit suite, for the same
+reason `Renderer.hpp` has none: it needs the device, and a mock would close the
+gap on paper only.
+
+Bytes in and out are counted by `Engine::net` **at the socket**, which is why
+`http::ServeReport` carries them: a count taken from parsed requests reports
+zero for a peer loading a connection buffer and never finishing a message, which
+is the traffic worth seeing.
 
 `cmake --preset cdn` is the bare configure: no client, no server, no graphics
 stack. It is the one worth running in CI on a container with nothing installed.
@@ -78,9 +100,8 @@ The manifest, content addressing, chunking and hash verification belong in
 `mono.engine/assets/` at `shared` tier, so the running game and the origin share
 one implementation. Writing the format twice is how a format acquires a dialect.
 
-HTTP range serving is `Engine::net`. The upload API, auth and dashboard are
-`control/`, in TypeScript, talking to this program's HTTP API rather than
-reimplementing any of it.
-
-Until those land the program mounts a root, reports it and warns that it serves
-nothing. ROADMAP.md v0.8.
+HTTP range serving is `Engine::net`. The upload API, auth and the web dashboard
+are `control/`, in TypeScript, talking to this program's HTTP API rather than
+reimplementing any of it — **`--gui` is not that and does not grow into it.** It
+reads this process's own counters over a terminal it already has; a dashboard
+for a fleet is a different program with a different trust boundary.

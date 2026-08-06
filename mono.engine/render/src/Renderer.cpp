@@ -24,60 +24,38 @@ namespace engine::render {
 
 	namespace {
 
-		// The vertex layout is `assets::MeshVertex` itself rather than a copy of
-		// it. `render::MeshVertex` was that copy — position and normal, no
-		// texture coordinate — and keeping both would mean a published mesh and
-		// a built-in disagreeing about what a vertex is the first time one of
-		// them gained a field. `Primitives.hpp` held the cube and is gone;
-		// `assets::MakeBuiltin` is where it lives now.
+		// Keep the GPU vertex layout identical to the asset vertex layout.
 		using Vertex = assets::MeshVertex;
 
 		// One instance as the vertex shader reads it.
 		//
-		// The device layout, and the reason it is private: a `mat4` and a packed
-		// RGBA are what a GPU wants and are exactly what may not appear in the
-		// `shared` type a headless world publishes. `scene::DrawInstance` is that
-		// type; this is what it becomes, once, on the way into the transfer
-		// buffer.
+		// Private GPU layout; scene data must not expose device types.
 		struct GpuInstance {
 			glm::mat4 Model{1.0f};
 			glm::vec4 Colour{1.0f, 1.0f, 1.0f, 1.0f};
 
 			// One over the square of each axis' scale, for the normal matrix.
-			// `opaque.vert` carries the derivation; the short form is that the
-			// model matrix has a half-extent folded into it, so its upper 3x3
-			// is not what a normal should be transformed by.
+			// The model includes scale, so its upper 3x3 is not a normal matrix.
 			glm::vec4 InverseScaleSquared{1.0f, 1.0f, 1.0f, 0.0f};
 		};
 
 		// A draw instance in the layout the opaque pipeline binds.
 		//
-		// The half-extent is folded into the matrix rather than sent beside it:
-		// every built-in is a unit shape about its own origin, so scaling its
-		// columns is what turns one mesh into every box size in the scene. Scale
-		// on the right of the rotation, so it stays a scale rather than becoming
-		// a shear.
+		// Built-in meshes are unit shapes; scale is folded into the model matrix.
 		GpuInstance ToGpu(const scene::DrawInstance &instance) {
 			GpuInstance gpu;
 			gpu.Model = instance.Frame.ToMatrix();
 
-			// Twice the half-extent, because the mesh is one metre across and
-			// the field is half of what the box measures.
+			// Built-in geometry is one unit across.
 			gpu.Model[0] *= instance.HalfExtent.X * 2.0f;
 			gpu.Model[1] *= instance.HalfExtent.Y * 2.0f;
 			gpu.Model[2] *= instance.HalfExtent.Z * 2.0f;
 
-			// **Alpha is one minus transparency**, because a shader blends by
-			// coverage and an author authors by see-through-ness. Roblox's
-			// `Transparency` is the same inversion, so a script's number means
-			// what its author expects on the way in and what the blender wants
-			// on the way out.
+			// Convert author-facing transparency to shader alpha.
 			gpu.Colour =
 				glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency};
 
-			// Guarded rather than divided blindly: a part scaled to zero on an
-			// axis is a legitimate thing to author — a flat decal — and an
-			// infinity here would put a NaN in every one of its normals.
+			// Avoid infinities for zero-scale geometry.
 			const auto reciprocal = [](float extent) {
 				const float scale = extent * 2.0f;
 				return scale * scale > 1e-12f ? 1.0f / (scale * scale) : 1.0f;
@@ -94,15 +72,10 @@ namespace engine::render {
 		struct FrameUniforms {
 			glm::mat4 ViewProjection;
 
-			// World space to the light's clip space. Passed rather than
-			// recomputed in the shader, because a second derivation is a second
-			// chance to disagree — and the symptom would be shadows offset from
-			// what casts them.
+			// Matches the matrix used by the shadow pass.
 			glm::mat4 LightViewProjection;
 
-			// World space to the surface camera's clip space, for the planar
-			// projection a mirror samples with. Identity when nothing renders to
-			// a surface.
+			// Surface-camera projection, or identity for ordinary geometry.
 			glm::mat4 SurfaceViewProjection;
 		};
 
@@ -123,19 +96,7 @@ namespace engine::render {
 			glm::vec4 Surface{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
-		// --- the surface signature -------------------------------------------
-		//
-		// **The list's half is `scene::SignatureOf` and only the view's half is
-		// here**, for the reason every other piece of draw arithmetic sits in
-		// `scene`: a renderer is the one module a headless suite cannot exercise,
-		// so the part that is pure arithmetic over a `shared` type belongs where
-		// a test can reach it. What is left is what genuinely is not shared — a
-		// projection matrix and the opacity it composites with, both `glm` and
-		// both this tier's.
-		//
-		// `scene::MixSignature` is the fold, rather than a second one written
-		// here, so the combined number cannot depend on which file computed
-		// which half.
+		// Mix renderer-owned view data into the scene signature.
 		uint64_t MixFloat(uint64_t hash, float value) {
 			uint32_t bits = 0;
 			std::memcpy(&bits, &value, sizeof(bits));
@@ -153,40 +114,14 @@ namespace engine::render {
 
 		// The one directional light this pipeline has.
 		//
-		// **A constant, and it is honest about being one.** A light is a row in
-		// a world the moment anything needs two, and `scene` is where that row
-		// would live — putting it there now would be a component nothing writes.
-		// What this buys today is that the shadow fit and the shading agree
-		// about which way the sun points, which they did not have to before
-		// because only one of them existed.
+		// One directional light; shadow fitting and shading share its direction.
 		constexpr glm::vec3 SUN_DIRECTION{-0.45f, -0.8f, -0.4f};
 		constexpr glm::vec4 SUN_AMBIENT{0.26f, 0.28f, 0.34f, 1.0f};
 
-		// **2048, which is a resolution rather than a guess.** The map covers
-		// the whole scene, so its texel size is the scene's extent over this —
-		// about six centimetres across a 128-metre world, which is under the
-		// size of the smallest thing the demo draws. Halving it doubles that and
-		// the stair-stepping becomes visible on a cube edge.
+		// Measured shadow-map resolution for the current scene scale.
 		constexpr uint32_t SHADOW_RESOLUTION = 2048;
 
-		// **What a scene target's size is rounded up to, and 64 is the number
-		// that makes a drag free.** A target allocated to the panel's exact size
-		// changes identity on every frame the panel changes size, and a viewport
-		// being dragged changes size every frame — so the interface, which
-		// recorded its bind before the renderer ran, spends the whole drag
-		// showing the previous frame's image stretched onto a rectangle it was
-		// not drawn for. That is what "laggy while resizing" looks like from the
-		// outside, and no amount of frame time explains it: the measurement is a
-		// flat 16.7 ms throughout.
-		//
-		// Rounding up means the texture survives 64 pixels of drag rather than
-		// one, so the panel samples the image *this* frame drew. What it costs
-		// is a border nothing draws into — at 1600x900 the allocation becomes
-		// 1600x960, under a megabyte — and one `SDL_SetGPUViewport` so the pass
-		// fills the corner rather than the texture.
-		//
-		// Bigger blocks buy fewer reallocations and waste more; 64 is one drag
-		// second at a comfortable pointer speed, which is where the returns stop.
+		// Measured resize threshold; keeps targets stable during viewport drags.
 		constexpr uint32_t SCENE_TARGET_BLOCK = 64;
 
 		// Rounds up to the next whole block, saturating rather than wrapping.
@@ -213,25 +148,7 @@ namespace engine::render {
 
 		// Walks `PassOrder()` as the frame is submitted.
 		//
-		// **Two things are checked and they are checked by different means.**
-		// That this list matches `graph::StandardPipeline` is a *test* — it is
-		// arithmetic over names and needs no device, so it belongs in one.
-		// That `Render`'s body submits in this order is a *runtime* check,
-		// because the body is the one thing a headless test cannot look at.
-		//
-		// Skips are allowed and are the normal case: every pass here is
-		// conditional, and `graph::Stage::Optional` already says so. What is
-		// refused is going backwards — a pass submitted before one that
-		// preceded it in the list. That is not pedantry about bookkeeping: the
-		// order *is* the correctness. The colour pass samples the shadow map,
-		// so a shadow pass moved below it draws a frame lit by whatever was in
-		// that memory, which on a GPU is a plausible image rather than an
-		// error. `Pipeline::Validate` catches that in the description; this
-		// catches it in the submission.
-		//
-		// Logged rather than fatal. A renderer that kills the process over its
-		// own bookkeeping is worse than the bug it found, and the mismatch is
-		// visible in `FrameResult::Passes` either way.
+		// Runtime guard for pass order; optional passes may be skipped.
 		struct PassRecorder {
 			uint8_t Ran = 0;
 			uint8_t Furthest = 0;
@@ -293,10 +210,7 @@ namespace engine::render {
 
 		// What survived culling: the indices, and the instances themselves.
 		//
-		// **The copy is what buys the second pass a contiguous range.** Ordering
-		// over a scattered index list would leave the draw unable to say "these
-		// N in a row are opaque", and `first_instance` is the only thing that
-		// splits one buffer into two draws.
+		// The copy makes scene and camera ranges contiguous in one buffer.
 		std::vector<uint32_t> Visible;
 		std::vector<scene::DrawInstance> VisibleInstances;
 
@@ -308,9 +222,7 @@ namespace engine::render {
 		std::vector<uint32_t> SceneOrder;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
-		// Every mesh the renderer can draw, and every texture it can sample.
-		// `VertexBuffer` and `IndexBuffer` used to be here holding one cube;
-		// the table owns them now, and a name resolves to a range inside them.
+		// Every mesh and texture available to the renderer.
 		MeshTable Meshes;
 		TextureTable Textures;
 
@@ -330,15 +242,7 @@ namespace engine::render {
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
 
-		// **Which depth format this device actually supports.** `SDL_gpu.h` is
-		// blunt about it: "Unless D16_UNORM is sufficient for your purposes,
-		// always check which of D24/D32 is supported before creating a
-		// depth-stencil texture!" D16_UNORM is the only one guaranteed. This was
-		// hard-coded to D32_FLOAT in four places, which works on every desktop
-		// GPU anybody here has and fails as a black window on the first one that
-		// does not — the texture creation fails, the frame is dropped, and
-		// nothing says why. Chosen once at start-up so the pipelines and the
-		// textures cannot disagree.
+		// Chosen once so pipelines and depth textures use one supported format.
 		SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
 
 		SDL_GPUTexture *DepthTexture = nullptr;
@@ -370,20 +274,7 @@ namespace engine::render {
 			uint32_t DrawnWidth = 0;
 			uint32_t DrawnHeight = 0;
 
-			// **This slot's depth buffer, and it is per slot for the same
-			// reason the colour target is.** One shared depth texture is fine
-			// for one viewport and catastrophic for two: the panels are
-			// different sizes, so each `Render` found the other's dimensions and
-			// reallocated — a colour-sized D32 texture destroyed and created
-			// *twice per frame, every frame*. That is a megabyte and a half of
-			// device memory churned a hundred and twenty times a second, and it
-			// does not stay inside this process: thrashing the driver's
-			// allocator stalls the GPU for everything sharing it, which is what
-			// "resizing makes my whole desktop lag" was.
-			//
-			// Sized to `Width`/`Height` — the block-rounded allocation, not the
-			// drawn rectangle — because SDL requires the depth target's
-			// dimensions to match the colour target it is bound beside.
+		// Per-slot depth matches the block-rounded colour target dimensions.
 			SDL_GPUTexture *Depth = nullptr;
 			uint32_t DepthWidth = 0;
 			uint32_t DepthHeight = 0;
@@ -403,21 +294,7 @@ namespace engine::render {
 
 		// Scene targets that have been replaced but may still be referenced.
 		//
-		// **A resized viewport used to be a use-after-free, and this is the
-		// grace period that fixes it.** An interface hook records
-		// `ImGui::Image(SceneTexture())` — last frame's texture, deliberately,
-		// because imgui builds its draw lists before the renderer runs. So on
-		// the frame a panel changes size the order is: the hook records a bind
-		// of the *old* texture, then `EnsureScene` notices the new size, and
-		// then those draw lists are replayed. Releasing the old texture in the
-		// middle of that hands SDL a freed `TextureContainer` to bind, which
-		// segfaults inside the Vulkan backend rather than anywhere near here.
-		//
-		// One frame of grace is exactly enough: draw lists never outlive the
-		// frame that recorded them, and `SDL_ReleaseGPUTexture` already defers
-		// the GPU-side destruction until the commands using it have retired —
-		// what it does *not* do is keep the container addressable, and that is
-		// the half this covers.
+		// Keep replaced targets alive until interface draw lists finish this frame.
 		std::vector<SDL_GPUTexture *> RetiredScenes;
 
 		// Frees what the previous frame retired. Called once at the top of a
@@ -432,16 +309,7 @@ namespace engine::render {
 
 		// --- the frame that has been waited for but not yet recorded ----------
 		//
-		// **A frame is claimed before the caller reads its input, and that is the
-		// whole point of holding this here.** `SDL_WaitAndAcquireGPUSwapchainTexture`
-		// blocks until the display is ready; a loop that pumps events and *then*
-		// waits builds every frame out of input that is already one frame old,
-		// because the wait sits between reading the input and showing what it
-		// produced. Waiting first turns that dead time into time the input has
-		// not happened yet.
-		//
-		// Held rather than passed because the two halves are now two calls and
-		// SDL's own handles are not something a public header may name.
+		// Hold the claimed frame between WaitForFrame and Render.
 		SDL_GPUCommandBuffer *PendingCommand = nullptr;
 		SDL_GPUTexture *PendingSwapchain = nullptr;
 		uint32_t PendingWidth = 0;
@@ -453,24 +321,7 @@ namespace engine::render {
 
 		// A present mode asked for, waiting for a legal moment to be set.
 		//
-		// **Because changing it recreates the swapchain, and the caller asks
-		// from the middle of a frame.** `SDL_SetGPUSwapchainParameters` destroys
-		// every swapchain image and builds new ones — and this renderer claims
-		// its frame up front, so between `BeginFrame` and `Render` there is an
-		// acquired `PendingSwapchain` pointing into exactly those images.
-		//
-		// The studio's Preferences page sits in that gap: `WaitForFrame` runs at
-		// the top of the editor's loop and the panels are drawn afterwards, so
-		// ticking "Vertical sync" applied the mode immediately, freed the texture
-		// this frame had already acquired, and `Render` bound it. It crashed on
-		// the frame the box was clicked, every time, which read as the toggle
-		// itself being broken rather than as a lifetime.
-		//
-		// Deferring is the whole fix: the request is honoured at the top of the
-		// next frame, before anything is acquired, where recreating the swapchain
-		// invalidates nothing anybody is holding. One frame of latency on a
-		// setting a person just clicked is not observable — the frame it would
-		// have applied to is the one being drawn as they let go of the mouse.
+		// Changing present mode recreates the swapchain; apply only before acquire.
 		SDL_GPUPresentMode PendingPresentMode = SDL_GPU_PRESENTMODE_VSYNC;
 		bool PresentModePending = false;
 
@@ -656,32 +507,8 @@ namespace engine::render {
 
 		// --- the surface target ----------------------------------------------
 		//
-		// Where a `SurfaceView` renders. Colour and depth, because a view is a
-		// view: the geometry it draws needs sorting by depth exactly as the
-		// swapchain's does.
-		// **Two of them, ping-ponged, for one reason and not the two this
-		// comment used to claim.** With a single texture the surface pass bound
-		// its own render target as a sampler, which is undefined behaviour on
-		// every backend that checks. Writing one and binding the other makes
-		// that legal.
-		//
-		// **And it is what buys a mirror inside a mirror, which it did not until
-		// v0.8.** The exclusion used to be "every surface", so no mirror was
-		// ever drawn into a mirror's texture and there was no recursion to be
-		// one bounce deep. It is per view now — a pass excludes only the index
-		// it is rendering *for* — and every other mirror is drawn from the pair
-		// it is not writing to. That is the previous frame's image, which is
-		// exactly what makes the cycle a line: each surface is being rendered
-		// for the others, so there is no order in which this frame's could be
-		// ready first.
-		//
-		// The bug the old claim produced is worth keeping, because the fix is
-		// what the loop below is shaped around: the flag that says "sample the
-		// surface texture" was set for the *whole* surface pass, so the floor
-		// sampled the previous frame's reflection and came out as its clear
-		// colour wherever that projection landed on untouched texels. A black
-		// wedge in the mirror, found by eye and not by a test. The flag is per
-		// draw and set for exactly the mirror runs, never for the world.
+		// Surface targets use colour and depth, with ping-pong textures to prevent
+		// render-target self-sampling. The surface flag is per draw.
 		struct SurfaceSlotState {
 			SDL_GPUTexture *Texture[2] = {nullptr, nullptr};
 			SDL_GPUTexture *Depth = nullptr;

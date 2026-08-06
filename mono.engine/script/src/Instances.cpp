@@ -223,38 +223,10 @@ namespace engine::script {
 			return false;
 		}
 
-		// **Compared as text, not interned, and that is a measurement rather
-		// than a preference.**
-		//
-		// This used to build a `core::Name` from the field and compare ids. An
-		// id compare is an integer compare and looks like the cheap option — but
-		// *making* the id is a lock on the process-wide registry plus a hash
-		// lookup, paid on every property read and every property write. A script
-		// animating a scene does that constantly: `Mirrors-1-world` touches
-		// three properties on each of 24 parts every frame, so 72 lock
-		// acquisitions a frame at 60 Hz, on a registry shared with every worker
-		// thread in the job system.
-		//
-		// It showed up as `property lookup` costing about half of every
-		// `instance set` on F5, which is what a lock in the wrong place looks
-		// like from the outside: no spike anybody can point at, just a beat that
-		// is always slower than the work in it.
-		//
-		// A class carries a dozen or so properties, so the scan is a dozen short
-		// string compares over memory that is already hot — and `string_view`'s
-		// comparison rejects on length before it reads a byte. No lock, no hash,
-		// no allocation, and the interned id is never needed because nothing
-		// here stores the name.
+		// Compare the stored spelling directly. Interning each lookup takes the
+		// process-wide registry lock and adds a hash lookup to every property access.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, std::string_view name) {
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-				// **`Spelling`, not `Name.Text()`.** The comment above is right
-				// that interning the key would take the process-wide name
-				// registry's lock — and `Text()` takes that same lock, once per
-				// descriptor this loop walks. Five acquisitions to find
-				// `Position` on a `Part`, and the whole list on a miss. The
-				// spelling is resolved once at declaration, so the scan is now
-				// what that comment claims it is: no lock, no hash, no
-				// allocation.
 				if (property.Spelling == name) {
 					return &property;
 				}

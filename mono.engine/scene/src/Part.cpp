@@ -6,6 +6,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -633,6 +634,35 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Read-only mesh metadata; zero means the catalogue has no entry.
+		PropertyDescriptor TrianglesCountProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TrianglesCount");
+
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+
+			property.Writable = false;
+
+			// Visual is the dependency for change notifications.
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Visual *visual = store.Get<Visual>(instance);
+				if (visual == nullptr) {
+					return false;
+				}
+
+				// Do not create the catalogue from a getter.
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(TrianglesOf(store, visual->Mesh));
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor SurfaceSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("SurfaceSize");
@@ -851,6 +881,22 @@ namespace engine::scene {
 			const ecs::ClassId surfaceCameraClass =
 				ecs::Classes::Register("SurfaceCamera", cameraClass, surface);
 
+			// **A sound is an `Instance`, not a `PVInstance`, and the omission
+			// is the design.** It has no place of its own: under `Workspace` it
+			// is heard everywhere at one level, and inside a part it is heard
+			// from that part and falls off with distance. Giving it a
+			// `Transform` would be a second opinion about where a thing is —
+			// rule 2 with a speaker attached — and would make "attach a sound
+			// to a thing" a field to keep in step with a parent that already
+			// says it.
+			//
+			// Nothing in this module plays one. `scene` is `shared` and a
+			// server has no mixer; the client walks these rows and drives
+			// `engine::audio`, which is the same split `Visual::Mesh` has
+			// against the renderer.
+			const std::array emitter{ecs::Components::Of<Sound>()};
+			const ecs::ClassId soundClass = ecs::Classes::Register("Sound", instance, emitter);
+
 			// --- properties, declared where the component arrives ------------
 			//
 			// Each on the class that first holds what it projects, so a derived
@@ -945,6 +991,9 @@ namespace engine::scene {
 			ecs::Classes::Property<&Visual::Mesh>(meshPart, "MeshId");
 			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(meshPart, "TextureID");
 
+			// Mesh metadata belongs to MeshPart, not every BasePart.
+			ecs::Classes::Computed(meshPart, TrianglesCountProperty());
+
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
@@ -957,6 +1006,28 @@ namespace engine::scene {
 			);
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
 			ecs::Classes::Computed(surfaceCameraClass, TagFilterProperty());
+
+			// The sound's six. All plain fields, which is unusual enough here
+			// to be worth saying: nothing about a sound is a doubled
+			// half-extent or a quaternion in degrees, so there is no conversion
+			// to write and no place for one to be wrong in one direction.
+			//
+			// `SoundId` names a published asset the way `MeshId` does —
+			// extension included, exactly as the manifest carries it, because
+			// the lookup is a string compare and the one place the two could
+			// diverge is a spelling.
+			ecs::Classes::Property<&Sound::SoundId>(soundClass, "SoundId");
+
+			// **Clamped at 10 rather than at 1**, which is Roblox's ceiling and
+			// is also the honest one: the graph works in floats precisely so a
+			// value over full scale passes through harmlessly and is clamped
+			// once at the device. Refusing at 1 would make a sound authored
+			// quiet unable to be brought up.
+			ecs::Classes::ClampedProperty<&Sound::Volume, 0.0f, 10.0f>(soundClass, "Volume");
+			ecs::Classes::Property<&Sound::Looped>(soundClass, "Looped");
+			ecs::Classes::Property<&Sound::Playing>(soundClass, "Playing");
+			ecs::Classes::Property<&Sound::RollOffMinDistance>(soundClass, "RollOffMinDistance");
+			ecs::Classes::Property<&Sound::RollOffMaxDistance>(soundClass, "RollOffMaxDistance");
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.
@@ -972,6 +1043,13 @@ namespace engine::scene {
 	ecs::ClassId PartClass() {
 		static const ecs::ClassId part = RegisterTree();
 		return part;
+	}
+
+	ecs::ClassId SoundClass() {
+		// Through `PartClass` for `CameraClass`'s reason: one registration of
+		// the whole tree, whichever class a caller asks for first.
+		PartClass();
+		return ecs::Classes::Find(core::Name("Sound"));
 	}
 
 	ecs::ClassId CameraClass() {
