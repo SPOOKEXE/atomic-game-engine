@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 #include <numeric>
 #include <set>
 #include <stdexcept>
@@ -353,4 +354,102 @@ TEST_CASE("Start is idempotent and Stop is safe without Start", "[jobs]") {
 	Jobs::Stop();
 	Jobs::Stop();
 	REQUIRE(Jobs::WorkerCount() == 0);
+}
+
+// --- forcing the whole pipeline onto one thread ------------------------------
+
+namespace {
+	// Turns the flag on and puts it back, whatever the case does.
+	//
+	// A process-wide switch left on by a failing assertion would make every
+	// later case in this binary run serially and pass for the wrong reason —
+	// which is the one failure mode a test of a global switch has to close.
+	struct ForcedSerial {
+		ForcedSerial() {
+			engine::parallel::SetForceSerialCompute(true);
+		}
+		~ForcedSerial() {
+			engine::parallel::SetForceSerialCompute(false);
+		}
+	};
+}
+
+TEST_CASE("forcing serial compute runs every span on the caller", "[parallel][jobs]") {
+	// **A real pool, deliberately.** Testing this with no workers would prove
+	// nothing: the inline path is already taken when the pool is empty, so the
+	// case has to be one that would otherwise dispatch.
+	Pool pool(4);
+	REQUIRE(Jobs::WorkerCount() == 4);
+
+	constexpr size_t COUNT = 1u << 20u;
+
+	std::set<std::thread::id> threads;
+	std::mutex guard;
+
+	{
+		ForcedSerial forced;
+		REQUIRE(engine::parallel::ForceSerialCompute());
+
+		Jobs::For(COUNT, 64, [&](size_t begin, size_t end) {
+			std::lock_guard lock(guard);
+			threads.insert(std::this_thread::get_id());
+			(void)begin;
+			(void)end;
+		});
+
+		// The whole point: one thread, and it is this one. A span opened by any
+		// other thread is a span `core::FrameGraph::Push` would refuse, which is
+		// what the flag exists to prevent.
+		CHECK(threads.size() == 1);
+		CHECK(*threads.begin() == std::this_thread::get_id());
+		CHECK(Jobs::LastBatch().Participants == 1);
+	}
+
+	// And it goes back. A switch that could not be turned off would be a
+	// build option wearing a function's clothes.
+	CHECK_FALSE(engine::parallel::ForceSerialCompute());
+
+	threads.clear();
+	Jobs::For(COUNT, 64, [&](size_t begin, size_t end) {
+		std::lock_guard lock(guard);
+		threads.insert(std::this_thread::get_id());
+		(void)begin;
+		(void)end;
+	});
+	CHECK(threads.size() > 1);
+}
+
+TEST_CASE("a forced dispatch still visits every index exactly once", "[parallel][jobs]") {
+	// **The flag changes wall time and nothing else.** `Jobs::For` promises
+	// inline and pooled execution are observationally identical, and a
+	// measurement instrument that quietly changed a result would make every
+	// reading taken through it worthless.
+	Pool pool(4);
+	ForcedSerial forced;
+
+	constexpr size_t COUNT = 10'000;
+	std::vector<int> visits(COUNT, 0);
+
+	Jobs::For(COUNT, 128, [&](size_t begin, size_t end) {
+		for (size_t at = begin; at < end; at++) {
+			visits[at]++;
+		}
+	});
+
+	CHECK(std::count(visits.begin(), visits.end(), 1) == static_cast<long>(COUNT));
+}
+
+TEST_CASE("a forced dispatch still rethrows on the caller", "[parallel][jobs]") {
+	Pool pool(4);
+	ForcedSerial forced;
+
+	CHECK_THROWS_AS(
+		Jobs::For(1u << 20u, 64, [](size_t, size_t) { throw std::runtime_error("boom"); }), std::runtime_error
+	);
+
+	// The pool is released, so the next dispatch is not stranded — the same
+	// property the pooled path promises, checked on this path too. It would
+	// hang rather than fail if it were wrong, which is why it is a bare call
+	// and not an assertion.
+	Jobs::For(16, 4, [](size_t, size_t) {});
 }

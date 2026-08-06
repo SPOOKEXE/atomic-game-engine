@@ -13,6 +13,7 @@
 // does — the data is shared even though the drawing is not.
 
 #include <engine/core/FrameGraph.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
@@ -232,6 +233,35 @@ namespace studio {
 		if (const size_t dropped = FrameGraph::Dropped(); dropped > 0) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 			ImGui::Text("%zu spans dropped — off-thread, too deep, or past the buffer", dropped);
+			ImGui::PopStyleColor();
+		}
+
+		// **The switch belongs on the panel that is lying without it.** The
+		// dropped-span line above is the symptom and this is the cure, so
+		// putting them a menu apart would mean reading the warning and having
+		// to know what to go and find. Flipping it here also means the two
+		// flame graphs — parallel and serial — come from one session and one
+		// build, which is what makes them comparable at all.
+		bool serial = engine::parallel::ForceSerialCompute();
+		if (ImGui::Checkbox("force serial compute", &serial)) {
+			engine::parallel::SetForceSerialCompute(serial);
+		}
+
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Every parallel dispatch runs on the thread that asked, so no span is dropped.\n"
+				"The frame gets slower on purpose: this measures a serial cost, not a verdict\n"
+				"on the parallel one."
+			);
+		}
+
+		// Said on the panel rather than left for somebody to remember, because
+		// the whole risk of this switch is reading a number taken with it on and
+		// treating it as the engine's real cost.
+		if (serial) {
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("— timings are serial, not the shipped cost");
 			ImGui::PopStyleColor();
 		}
 

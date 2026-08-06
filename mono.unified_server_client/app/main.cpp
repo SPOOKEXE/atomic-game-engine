@@ -8,6 +8,7 @@
 
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
@@ -60,6 +61,10 @@ int main(int argc, char **argv) {
 	);
 
 	arguments.Flag("verbose", "Log at trace level");
+	arguments.Flag(
+		"force-serial-compute",
+		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
+	);
 	arguments.Flag("quiet", "Print the summary only, not a line per tick");
 
 	arguments.Value("entities", "N", "Entities in the placeholder world (default 64)");
@@ -78,6 +83,19 @@ int main(int argc, char **argv) {
 	if (parsed.HelpRequested) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 0;
+	}
+
+	// **Before anything starts a world or a job.** The flag is read on every
+	// dispatch, so setting it late would leave the frames before it with the
+	// shape it exists to remove — and those are the frames somebody was
+	// watching while the program came up.
+	//
+	// It makes the program slower on purpose. See `parallel::SetForceSerialCompute`:
+	// this is a measurement instrument, and the number it produces is a serial
+	// cost rather than a verdict on the parallel one.
+	if (arguments.Has("force-serial-compute")) {
+		engine::parallel::SetForceSerialCompute(true);
+		ENGINE_INFO("serial compute forced: every dispatch runs on its caller's thread");
 	}
 
 	if (arguments.Has("verbose")) {

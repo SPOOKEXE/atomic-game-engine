@@ -200,4 +200,56 @@ namespace engine::parallel {
 		// alone would have refused to dispatch them.
 		static constexpr size_t MINIMUM_GRAINS = 8;
 	};
+
+	// --- forcing the whole compute pipeline onto one thread ------------------
+
+	// Makes every parallel dispatch in the process run on the thread that asked.
+	//
+	// **This exists because the profiler cannot see a worker thread, and that is
+	// not a bug in the profiler.** `core::FrameGraph::Push` refuses a span opened
+	// off the frame's owning thread — locking there would put contention on every
+	// span of every frame — so a world ticking on a worker contributes one
+	// reported aggregate and drops every span inside it. `Universe::Tick` says so
+	// where it reports "worlds (workers)", and `studio`'s frame graph says so
+	// again in its dropped-span line.
+	//
+	// The consequence is that the most expensive thing the engine does is the
+	// one thing whose *shape* cannot be read. Turning this on puts every span
+	// back on the owning thread, and the flame graph becomes the whole tick
+	// rather than one bar labelled with a number.
+	//
+	// **A runtime switch and emphatically not a build option.** The only build
+	// worth profiling is an optimised one, and a `#ifdef` would compile this out
+	// of exactly that build. It is also what lets one binary produce both
+	// readings, so the two numbers differ by the flag and not by the compiler.
+	//
+	// **Wall time is expected to get worse and that is the trade.** This is a
+	// measurement instrument: it makes the frame slower and legible. A number
+	// read with it on is a *serial* cost — useful for finding which stage is
+	// expensive, useless for judging whether the parallel version is fast.
+	//
+	// Two things go serial and they are separate mechanisms:
+	//
+	//   - `Jobs::For` runs its whole span inline, whatever the pool holds. The
+	//     pool is left running rather than stopped, so the flag can be turned on
+	//     and off between frames.
+	//   - `world::Universe::Tick` takes its serial branch, so it opens a
+	//     "worlds (serial)" scope instead of reporting an aggregate the flame
+	//     graph would then double-count against the spans underneath it.
+	//
+	// Everything else is unaffected, and the name says `compute` rather than
+	// `threads` for that reason: the render thread, SDL's threads and the
+	// profiler's own are still there. What goes serial is the work whose shape
+	// somebody is trying to read.
+	//
+	// @param forced Whether to force every dispatch inline.
+	// @threadsafe
+	// @since v0.8
+	void SetForceSerialCompute(bool forced);
+
+	// Whether every parallel dispatch is being forced inline.
+	//
+	// @return `true` when `SetForceSerialCompute(true)` is in effect.
+	// @threadsafe
+	bool ForceSerialCompute();
 }

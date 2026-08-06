@@ -60,6 +60,20 @@ namespace engine::parallel {
 		// threads may dispatch at once and each wants its own answer.
 		thread_local BatchTiming LastTiming;
 
+		// Whether every dispatch is being forced onto its caller's thread.
+		//
+		// **Process-wide and not per thread**, because the thing it is for is a
+		// frame graph, and a frame graph is a picture of one process. A worker
+		// that had its own answer could still open a batch of its own and drop
+		// the spans inside it, which is the exact hole this closes.
+		//
+		// Relaxed on both sides. Turning this on does not need to be ordered
+		// against anything — a dispatch that reads the old value runs the way it
+		// was always going to, and the next one reads the new value. The cost of
+		// making it stronger would be paid by every dispatch forever to make a
+		// switch somebody flips by hand land one batch sooner.
+		std::atomic<bool> Forced{false};
+
 		// A dispatch that ran on the calling thread: one participant, and busy
 		// equal to wall because there was nowhere else for the time to go.
 		BatchTiming Inline(uint64_t nanoseconds) {
@@ -321,6 +335,19 @@ namespace engine::parallel {
 			grain = DEFAULT_GRAIN;
 		}
 
+		// **Before the pool is even reached, and before its lock is taken.**
+		// The whole point of the flag is that the caller's thread does the work,
+		// so consulting the pool first would be asking a question whose answer
+		// cannot change what happens. It also makes the forced path cheaper than
+		// the ordinary inline one, which is a happy accident rather than a
+		// reason: this is a measurement instrument, not a fast path.
+		if (Forced.load(std::memory_order_relaxed)) {
+			const uint64_t started = core::Clock::Nanoseconds();
+			body(0, count);
+			LastTiming = Inline(core::Clock::Nanoseconds() - started);
+			return;
+		}
+
 		auto &pool = Get();
 
 		// Inline when there is nobody to hand work to, or too little work to be
@@ -481,5 +508,17 @@ namespace engine::parallel {
 
 	BatchTiming Jobs::LastBatch() {
 		return LastTiming;
+	}
+
+	void SetForceSerialCompute(bool forced) {
+		// **The pool is left running.** Stopping it would make this a decision
+		// taken once at startup rather than a switch, and the case that matters
+		// is flipping it between two frames of one session and reading both
+		// flame graphs. Idle workers cost a condition variable each.
+		Forced.store(forced, std::memory_order_relaxed);
+	}
+
+	bool ForceSerialCompute() {
+		return Forced.load(std::memory_order_relaxed);
 	}
 }
