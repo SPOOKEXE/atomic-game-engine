@@ -227,6 +227,28 @@ namespace engine::replication {
 			Phase = Stage::Admitted;
 			Exchange.reset();
 			Wire.Link().CompleteHandshake(nowSeconds);
+
+			// **Who this client is, as its first act on the encrypted stream.**
+			// It could not have been said earlier: the transcript names both
+			// ephemeral keys and this end did not have the server's until the
+			// message above. Sending it here costs no extra round trip — the
+			// connection is already usable and the server has simply not
+			// decided whether to keep it.
+			//
+			// On the reliable channel, because a lost claim is a client that
+			// never gets in on a server that requires one, with no way to tell
+			// that from a rejection.
+			if (Settings.ClientIdentity != nullptr) {
+				Identify claim;
+				claim.Key = Settings.ClientIdentity->Public();
+				claim.Signature = Settings.ClientIdentity->SignSessionTranscript(transcript);
+
+				core::ByteWriter writer;
+				WriteMessage(writer, claim);
+				if (!Wire.Send(writer.Bytes(), nowSeconds)) {
+					ENGINE_WARN("replication: the identity claim did not fit — the server may refuse us.");
+				}
+			}
 			return;
 		}
 

@@ -279,6 +279,23 @@ namespace engine::replication {
 		//        and is a plain round robin.
 		void SetPriority(std::function<float(ClientId, ecs::Entity)> score);
 
+		// Decides what to do with a client's identity claim.
+		//
+		// **The hook exists because the check needs something this class does
+		// not have.** Verifying a claim means the exchange's transcript, and a
+		// transcript belongs to a connection — which is `Listener`'s, not
+		// `Authority`'s. So the message is parsed here, where every other
+		// client-to-server message is, and judged there.
+		//
+		// Answering `false` refuses the message, which the caller may treat as
+		// a reason to drop the client. Without a hook a claim is accepted and
+		// ignored, which is the behaviour of a server that does not care who
+		// its clients are — the default, and a stated one.
+		//
+		// @param check Called as `check(ClientId, const Identify &)`.
+		// @since v0.9
+		void SetIdentityCheck(std::function<bool(ClientId, const Identify &)> check);
+
 		// Admits a client. It will be sent a full snapshot before any delta.
 		//
 		// @return Its handle.
@@ -648,6 +665,7 @@ namespace engine::replication {
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity)> Interest;
 		std::function<float(ClientId, ecs::Entity)> Priority;
+		std::function<bool(ClientId, const Identify &)> IdentityCheck;
 		std::vector<core::Name> Components;
 
 		// How each entry of `Components` notices a change. Parallel to it.

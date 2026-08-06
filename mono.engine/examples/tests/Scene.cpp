@@ -23,10 +23,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("engine.examples.scene")
 TEST_DEPENDS("engine.script.scripting")
@@ -653,4 +656,133 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 	// `Position` would put them at zero — this separates all three.
 	CHECK(placed->AbsolutePosition.X > 960.0f);
 	CHECK(placed->AbsolutePosition.X < 1920.0f - 300.0f);
+}
+
+namespace {
+
+	// Every voxel box the terrain scene built, as a canonical sorted list.
+	//
+	// Sorted rather than taken in iteration order, because two worlds built the
+	// same way are only guaranteed to hold the same *set* of rows — an
+	// archetype walk is free to visit them in a different sequence, and a
+	// determinism check that compared sequences would fail for a reason that has
+	// nothing to do with the generator.
+	std::vector<std::array<float, 6>> VoxelBoxes(Store &store) {
+		std::vector<std::array<float, 6>> boxes;
+
+		store.Each<const engine::scene::Transform, const engine::scene::Bounds, const Visual>(
+			[&](Entity entity,
+				const engine::scene::Transform &transform,
+				const engine::scene::Bounds &bounds,
+				const Visual &visual) {
+				if (store.InstanceNameOf(entity) != Name("Voxels") || !visual.Visible) {
+					return;
+				}
+
+				const engine::core::Vector3 &at = transform.Frame.Position;
+				boxes.push_back(
+					{at.X,
+					 at.Y,
+					 at.Z,
+					 bounds.HalfExtent.X,
+					 bounds.HalfExtent.Y,
+					 bounds.HalfExtent.Z}
+				);
+			}
+		);
+
+		std::sort(boxes.begin(), boxes.end());
+		return boxes;
+	}
+}
+
+TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("terrain");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Terrain.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The prefill runs before the first frame, so a world exists the moment the
+	// scene is loaded rather than one beat later. Nine chunks of it — the exact
+	// count depends on the terrain the camera starts over, so this asserts the
+	// order of magnitude and not a number that would have to be edited every
+	// time a constant moved.
+	const std::vector<std::array<float, 6>> boxes = VoxelBoxes(store);
+	CHECK(boxes.size() > 100);
+	CHECK(boxes.size() < 20000);
+
+	// **The merge actually merged.** A box wider or deeper than one metre is a
+	// run of voxels that became one part, and this is the assertion that
+	// separates "the generator emitted something" from "the generator emitted a
+	// quarter of a million one-metre cubes". Half-extents, so 0.5 is one block.
+	size_t merged = 0;
+	for (const std::array<float, 6> &box : boxes) {
+		if (box[3] > 0.5f || box[5] > 0.5f) {
+			merged++;
+		}
+	}
+	CHECK(merged > boxes.size() / 4);
+
+	// Nothing reaches below bedrock or above the height field's ceiling. A
+	// generator that produced a column stretching to the origin is the failure
+	// this catches, and it is invisible in a part count.
+	for (const std::array<float, 6> &box : boxes) {
+		const float bottom = box[1] - box[4];
+		const float top = box[1] + box[4];
+		CHECK(bottom >= -8.0f);
+		CHECK(top <= 200.0f);
+	}
+
+	// The camera the scene placed, above the ground rather than inside it.
+	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
+
+	const Entity eye = InScene(store, "Surveyor");
+	REQUIRE(eye != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 34.0f);
+
+	// Measured bounds, not declared. A streamed world reaches as far as what is
+	// loaded, which is the camera's neighbourhood rather than the whole map —
+	// the 16384-block extent exists as a function and never as geometry.
+	REQUIRE(store.Resource<WorldBounds>() != nullptr);
+	CHECK(store.Resource<WorldBounds>()->HalfExtent > 100.0f);
+}
+
+TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
+	const StagedAssets assets;
+
+	// **Rule 5, asserted rather than asserted-in-a-comment.** The map is
+	// 268 million columns and is never stored, so every block anybody ever sees
+	// comes out of `HeightAt` — which means a recording replays if and only if
+	// two runs of that function agree. The integer hashing exists for this, and
+	// a change that reached for `math.random` or wall time would pass every
+	// other check in this file.
+	std::vector<std::array<float, 6>> first;
+	std::vector<std::array<float, 6>> second;
+
+	for (std::vector<std::array<float, 6>> *into : {&first, &second}) {
+		Store store("terrain.determinism");
+		Scheduler systems;
+
+		std::string error;
+		const bool loaded = LoadScene(store, systems, ExamplePath("Terrain.luau"), error);
+		INFO(error);
+		REQUIRE(loaded);
+
+		// Ten fixed ticks each, so the camera moves and the streaming runs —
+		// comparing only the prefill would pin the generator and leave the part
+		// of the file that decides *when* a chunk is built untested.
+		for (int tick = 0; tick < 10; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
+
+		*into = VoxelBoxes(store);
+	}
+
+	REQUIRE(first.size() == second.size());
+	CHECK(first == second);
 }

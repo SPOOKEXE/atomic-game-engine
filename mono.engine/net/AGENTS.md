@@ -338,3 +338,30 @@ message size limit is a denial-of-service primitive with a friendly name. All
 three are in `ServerSettings` and none is optional. Timeouts are counted in
 *polls* rather than wall time, for this module's standing reason: time is passed
 in, so a suite states a timeout instead of sleeping for one.
+
+## The round trip is measured, and Karn's rule is why it is right
+
+`ReliableSender` samples the gap between a reliable packet going out and its
+acknowledgement retiring it, smoothed at RFC 6298's one eighth.
+`ConnectionStats::RoundTripMilliseconds` had been declared since v0.3 and
+assigned by nothing, so it read zero on every connection there has ever been —
+while `replication::Rewind` read it and compensated for interpolation alone.
+
+**Only packets that were never resent are measured.** An acknowledgement of a
+resent packet does not say *which* transmission it answers, so a sample from one
+is either the true trip or the trip plus a retransmit timeout, with no way to
+tell — and measuring them makes the estimate worst on exactly the links that
+need it most.
+
+**`Held::Attempts` counts resends and starts at zero.** The first version of the
+check read `Attempts != 1` and therefore skipped every clean sample and measured
+every ambiguous one — the exact inversion of the rule it was written for. The
+suite catches it; the comment beside the check says which number means what.
+
+**A `Link` cannot measure this itself**, which is why `RecordRoundTrip` is a
+setter. The acknowledgement that closes a trip is matched against a packet a
+`ReliableSender` holds, and a link holds none. `replication::Session` owns both
+and carries the number across.
+
+**Zero means unknown, not instant.** A connection that has sent nothing reliable
+has nothing to measure, and a loopback honestly measures nothing at all.

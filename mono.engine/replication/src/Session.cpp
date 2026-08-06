@@ -21,6 +21,7 @@ namespace engine::replication {
 		case MessageKind::Structure:
 		case MessageKind::Input:
 		case MessageKind::Applied:
+		case MessageKind::Identify:
 			// A lost chunk is a client that never joins. A lost input is a jump
 			// that never happened. A lost acknowledgement stalls the stream.
 			// None of them is covered by the next message.
@@ -32,6 +33,10 @@ namespace engine::replication {
 			// acknowledgement cannot repair that — it says which tick was
 			// applied, not which message — so the redelivery has to come from
 			// the one thing here that counts messages, which is this channel.
+			// **And a lost identity claim is a client that never gets in**, on a
+			// server that requires one: nothing else carries it, and the client
+			// has no way to know it was dropped rather than rejected.
+			//
 			// `docs/DEFERRED.md` D00011.
 			return net::ChannelKind::Reliable;
 		}
@@ -288,7 +293,13 @@ namespace engine::replication {
 		}
 
 		// Whatever this packet acknowledged, in either direction.
-		Sender.OnAcknowledge(packet->Header);
+		Sender.OnAcknowledge(packet->Header, nowSeconds);
+
+		// **The one place both halves of a round trip are in scope.** The
+		// sender holds what went out and when; the link holds the statistics a
+		// game reads. Neither can do this alone, so the session — which owns
+		// both — carries the number across.
+		Link_.RecordRoundTrip(Sender.SmoothedRoundTripSeconds());
 
 		if (packet->Header.Channel == net::ChannelKind::Unreliable) {
 			// `Link::OnPacket` already discarded anything older than what has

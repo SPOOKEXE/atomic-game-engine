@@ -66,6 +66,43 @@ namespace engine::replication {
 		// extent, so the default covers the default world.
 		float FalloffMetres = 64.0f;
 
+		// Whether the line between a client and an entity is blocked.
+		//
+		// **The occlusion query is the caller's for the same reason the two
+		// above are, and more so.** Answering it needs a broad phase and a
+		// game's own idea of what counts as an occluder — a glass wall blocks
+		// sight and a chain fence does not, and no amount of geometry decides
+		// which. `spatial::Raycast` is what a host usually wires this to.
+		//
+		// Empty means nothing is ever blocked, which is the behaviour before
+		// this field existed and the right answer for a game with no walls.
+		//
+		// **Called only for entities that are near enough to matter**, because
+		// a raycast per entity per client per tick is the most expensive thing
+		// on this path by a wide margin — see `HiddenFraction`.
+		std::function<bool(ClientId, ecs::Entity)> Blocked;
+
+		// What a hidden entity keeps of its score, zero to one.
+		//
+		// **Not zero, and that is the whole design of the field.** An entity
+		// scored at nothing is one the rotation alone ever sends — so a player
+		// walking round a corner finds everything behind it stale, and the
+		// first thing they see is a wall of objects snapping into place. A
+		// hidden thing should update *less*, not never.
+		//
+		// A quarter, so something out of sight loses to everything visible at a
+		// comparable distance and still beats the far half of the world.
+		float HiddenFraction = 0.25f;
+
+		// The score below which occlusion is not even asked about.
+		//
+		// **A raycast is orders of magnitude dearer than the subtraction above
+		// it**, so the cheap test gates the expensive one: something already
+		// scoring near nothing on distance cannot be moved far enough by
+		// occlusion to change its place in the order, and asking costs the same
+		// as asking about something in front of the player.
+		float OcclusionFloor = 0.1f;
+
 		// Scores one entity for one client.
 		//
 		// **Never returns a non-finite value**, whatever the accessors do. A NaN

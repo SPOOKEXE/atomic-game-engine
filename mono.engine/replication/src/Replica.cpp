@@ -377,6 +377,7 @@ namespace engine::replication {
 
 		case MessageKind::Input:
 		case MessageKind::Applied:
+		case MessageKind::Identify:
 			// Client to server only. A server sending one is a server with a
 			// bug, and acting on it would hide that.
 			Stats_.Malformed++;

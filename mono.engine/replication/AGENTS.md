@@ -402,11 +402,14 @@ through two different sequences of insertions.
 
 ## Not here yet
 
-- **Applying an input to anything.** `Rewind` answers *where things were*; what
-  a game does with that is a game's. This engine has no notion of a shot, so
-  nothing consumes the answer yet — and a hit test invented here would be a
-  game rule in a network module.
-- **A line of sight in the priority score.** Distance is supplied now —
+- **A weapon, a health pool, or anything else a game decides.**
+  `examples::Shooting` is the demo's rule and `mono.server` joins it to `Rewind`;
+  a second game would write its own, which is the point of `Input::Bytes` being
+  "the game's own encoding". A hit test in *this* module would be a game rule in
+  a network one.
+- **A line of sight in the priority score.** Supplied at v0.9 as
+  `DistancePriority::Blocked`, on the same terms as the rest. Distance is
+  supplied too —
   `replication::DistancePriority` — and the split it is built on is the thing to
   preserve: **the arithmetic is here and the lookup is not.** A caller hands in
   two accessors, one for where a client is looking and one for where an entity
@@ -414,9 +417,14 @@ through two different sequences of insertions.
   A scorer that reached for `scene::Transform` directly would be the coupling
   `SetInterest` and `SetPriority` were both shaped to avoid.
 
-  Line of sight is the one still missing, and it stays missing for a reason
-  rather than for want of time: it needs a broad phase and a game's own idea of
-  what occludes, neither of which this module has any business holding.
+  **A hidden entity is scaled, never zeroed.** One scored at nothing is one the
+  rotation alone ever sends, so a player walking round a corner meets a wall of
+  objects snapping into place. It should update *less*, not never.
+
+  **The cheap test gates the expensive one.** A raycast is orders of magnitude
+  dearer than the subtraction beside it, so anything already scoring below
+  `OcclusionFloor` is never asked about — it cannot be moved far enough by
+  occlusion to change its place in the order.
 - **Authenticating a *client*.** The server is authenticated at v0.9 — see
   below — and the other direction is not: `SetAdmission` still decides who gets
   in on whatever a game knows, and the default admits anybody who completes the
@@ -484,3 +492,30 @@ tell an interpolated answer from a fabricated one.
 **A repeated or out-of-order `Begin` is refused.** A frame is identified only by
 the tick stamped on it, so one landing in the slot the next tick wanted makes
 every later query find the wrong frame with nothing saying so.
+
+## A client proves itself the opposite way round from a server
+
+`ConnectorSettings::ServerIdentity` **pins** a key: a server has one identity
+and every client knows which to expect. `Identify` **sends** one: a server
+expects many clients and cannot list them in a setting, so the key travels with
+the claim and `SetClientPolicy` decides. That asymmetry is how a client
+certificate has always worked and is not an inconsistency to tidy up.
+
+**The claim cannot ride the answer.** The transcript names both ephemeral keys
+and a client does not have the server's until the welcome, so there is no
+earlier message it could sign. It is the first thing said on the encrypted
+stream instead, which costs no extra round trip.
+
+**Verification is not a policy question.** A claim that does not verify is
+dropped without consulting `SetClientPolicy` — a policy answering "is this key
+allowed" is a game's business; one answering "is this key real" would be every
+game re-implementing a signature check, and one of them would get it wrong.
+
+## Adding a `MessageKind` breaks one thing silently
+
+The switches are `-Wswitch`-checked and `ReadMessage`'s range comparison is not.
+It reads `kind > static_cast<uint8_t>(MessageKind::Identify)`, and a kind
+appended after that one parses as out of range — so every message of it is
+dropped as malformed, on both ends, with the counter saying only "malformed".
+`Identify` did exactly that. Update the comparison in the same commit as the
+enum.

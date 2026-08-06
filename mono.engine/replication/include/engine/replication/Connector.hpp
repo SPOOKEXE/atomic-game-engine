@@ -82,6 +82,25 @@ namespace engine::replication {
 		// @since v0.9
 		std::optional<assets::PublicKey> ServerIdentity;
 
+		// This client's own signing key, or null to prove nothing.
+		//
+		// **The mirror of `Listener::SetIdentity`, and it is sent rather than
+		// pinned.** A server has one identity every client knows to expect; a
+		// server expects many clients and cannot list them in a setting, so the
+		// key travels with the claim and the server's policy decides.
+		//
+		// Signed over the transcript, which is why it can only be sent *after*
+		// the welcome — there is no earlier message that names both ephemeral
+		// keys. `Connector` sends it as its first act on the encrypted stream,
+		// so it costs no extra round trip.
+		//
+		// Borrowed, not owned: a `SigningKey` is move-only and zeroes itself,
+		// and copying one into a settings struct would be a second place a
+		// secret lives. The caller's storage must outlive the connector.
+		//
+		// @since v0.9
+		const assets::SigningKey *ClientIdentity = nullptr;
+
 		// How the session frames and resends.
 		SessionSettings Session;
 

@@ -65,6 +65,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -173,6 +174,42 @@ namespace engine::replication {
 		// @since v0.9
 		void SetIdentity(const assets::SigningKey *key);
 
+		// Decides whether a proven client identity is welcome.
+		//
+		// **Called only after the signature has verified**, so a policy is
+		// answering "is this key allowed" and never "is this key real". The two
+		// are worth keeping apart: a policy that had to do both would be a
+		// policy every game reimplemented, and one of them would get it wrong.
+		//
+		// A client whose claim does not verify is dropped without consulting
+		// this — a forged claim is not a policy question.
+		//
+		// **Without a policy a verified claim is recorded and allowed.** That
+		// is a server that wants to know who its clients are without turning
+		// any away, which is a real deployment and the right default.
+		//
+		// @param policy Called as `policy(ClientId, const assets::PublicKey &)`.
+		// @since v0.9
+		void SetClientPolicy(std::function<bool(ClientId, const assets::PublicKey &)> policy);
+
+		// Requires every client to prove an identity.
+		//
+		// **Off by default, and turning it on is a deployment decision.** A
+		// client that has not identified is dropped once it has had
+		// `IdentityGraceSeconds` to do so — long enough for the claim to cross
+		// on a poor link, short enough that a peer holding a slot without
+		// proving anything is not a way to occupy a server.
+		//
+		// @param required Whether a claim is mandatory.
+		// @since v0.9
+		void RequireClientIdentity(bool required);
+
+		// What a client proved, or nothing.
+		//
+		// @param client The client.
+		// @return Its key, or nothing when it has not identified.
+		std::optional<assets::PublicKey> IdentityOf(ClientId client) const;
+
 		// Whether this listener can admit anybody at all.
 		//
 		// `false` when the operating system refused the entropy the challenge
@@ -236,6 +273,25 @@ namespace engine::replication {
 
 		// Drops what a game has applied.
 		void ClearInputs();
+
+		// One client's link round-trip estimate, in milliseconds.
+		//
+		// **Measured from v0.9 and zero before it.** `ReliableSender` samples
+		// the gap between a reliable packet going out and its acknowledgement
+		// coming back, smoothed, and skips any packet that was resent — an
+		// acknowledgement of a resend does not say which transmission it
+		// answers. `Session` carries the number to the link, which is the only
+		// place both halves are in scope.
+		//
+		// Zero still means "nothing measured yet", which a caller should read
+		// as unknown rather than as instant — a connection that has sent
+		// nothing reliable has nothing to measure, and a loopback honestly
+		// measures nothing at all.
+		//
+		// @param client The client.
+		// @return The estimate, or zero for an unknown client or an unmeasured
+		//         link.
+		float RoundTripMilliseconds(ClientId client) const;
 
 		// How many clients are connected.
 		//
@@ -309,6 +365,17 @@ namespace engine::replication {
 			// client is expecting at the first one. Sending the same bytes again
 			// repeats no nonce — it is the same frame, not a second one.
 			std::vector<std::byte> Welcome;
+
+			// The transcript this peer's exchange produced, kept so an identity
+			// claim arriving later can be checked against it.
+			//
+			// **Kept rather than recomputed**, because the ephemeral secret is
+			// gone by design and one of the two keys in it was this server's
+			// own — so there is nothing left to rebuild it from.
+			std::array<std::byte, 2 * net::Handshake::MESSAGE_BYTES + net::Cookie::COOKIE_BYTES> Transcript{};
+
+			// What this peer proved, or nothing.
+			std::optional<assets::PublicKey> Identity;
 		};
 
 		Peer *Find(const net::Endpoint &from);
@@ -323,6 +390,10 @@ namespace engine::replication {
 
 		// What this server signs its transcripts with, or null for none.
 		const assets::SigningKey *Identity = nullptr;
+
+		// Whether a client must prove one, and what decides if it is welcome.
+		bool RequireIdentity = false;
+		std::function<bool(ClientId, const assets::PublicKey &)> ClientPolicy;
 		replication::Authority Authority_;
 
 		// The challenge secret, or nothing when the operating system refused

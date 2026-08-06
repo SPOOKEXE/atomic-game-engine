@@ -25,6 +25,7 @@
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/replication/Protocol.hpp>
 #include <engine/replication/Session.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -1142,4 +1143,72 @@ TEST_CASE("a signature is over the transcript, so it does not move", "[replicati
 	second.Finish(forged);
 	CHECK_FALSE(second.Client->Admitted());
 	CHECK(second.Client->Rejected());
+}
+
+// --- who the client is ---------------------------------------------------------
+//
+// The mirror of the cases above, and it has to work differently. A server has
+// one identity every client knows to expect, so a client *pins* it. A server
+// expects many clients and cannot list them in a setting, so a client's key
+// travels with its claim and a policy decides — which is how a client
+// certificate has always worked.
+//
+// The claim cannot ride the answer: the transcript names both ephemeral keys
+// and the client does not have the server's until the welcome. It is the first
+// thing said on the encrypted stream instead.
+
+TEST_CASE("a client's claim verifies against the transcript", "[replication][admission]") {
+	const engine::assets::SigningKey client = Identity(0x60);
+
+	// The transcript a real exchange would produce, signed by the client.
+	std::array<std::byte, Handshake::MESSAGE_BYTES> clientKey{};
+	std::array<std::byte, Handshake::MESSAGE_BYTES> serverKey{};
+	std::array<std::byte, Cookie::COOKIE_BYTES> cookie{};
+	clientKey.fill(std::byte{0x11});
+	serverKey.fill(std::byte{0x22});
+	cookie.fill(std::byte{0x33});
+
+	const auto transcript = AdmissionTranscript(clientKey, serverKey, cookie);
+	const engine::assets::SignatureBytes signature = client.SignSessionTranscript(transcript);
+
+	CHECK(engine::assets::VerifySessionTranscript(transcript, signature, client.Public()));
+
+	// **A claim lifted into another exchange verifies in none of them**, which
+	// is what stops a recorded claim being replayed by whoever recorded it.
+	std::array<std::byte, Handshake::MESSAGE_BYTES> otherKey{};
+	otherKey.fill(std::byte{0x44});
+	const auto elsewhere = AdmissionTranscript(clientKey, otherKey, cookie);
+	CHECK_FALSE(engine::assets::VerifySessionTranscript(elsewhere, signature, client.Public()));
+
+	// And it proves the key it was made with and no other.
+	const engine::assets::SigningKey impostor = Identity(0x61);
+	CHECK_FALSE(engine::assets::VerifySessionTranscript(transcript, signature, impostor.Public()));
+}
+
+TEST_CASE("an identity claim round-trips on the wire", "[replication][admission]") {
+	const engine::assets::SigningKey client = Identity(0x62);
+
+	engine::replication::Identify sent;
+	sent.Key = client.Public();
+	sent.Signature.Value.fill(0xAB);
+
+	ByteWriter writer;
+	WriteMessage(writer, sent);
+
+	engine::replication::Message read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(engine::replication::ReadMessage(reader, read));
+
+	CHECK(read.Kind == engine::replication::MessageKind::Identify);
+	CHECK(read.Identify.Key == sent.Key);
+	CHECK(read.Identify.Signature.Value == sent.Signature.Value);
+}
+
+TEST_CASE("a claim rides the reliable channel", "[replication][admission]") {
+	// A lost claim is a client that never gets in on a server that requires
+	// one, with no way to tell that from a rejection.
+	CHECK(
+		engine::replication::ChannelFor(engine::replication::MessageKind::Identify) ==
+		engine::net::ChannelKind::Reliable
+	);
 }

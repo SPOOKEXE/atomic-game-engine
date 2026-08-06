@@ -10,7 +10,9 @@
 #include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/physics/Query.hpp>
 #include <engine/replication/Priority.hpp>
+#include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
@@ -619,14 +621,7 @@ namespace server {
 			engine::replication::DistancePriority score;
 
 			score.Position = [this](engine::ecs::Entity entity, engine::core::Vector3 &out) {
-				bool found = false;
-				Worlds().Enter(PrimaryWorld, [entity, &out, &found](engine::ecs::Store &store) {
-					if (const auto *placement = store.Get<engine::scene::Transform>(entity)) {
-						out = placement->Frame.Position;
-						found = true;
-					}
-				});
-				return found;
+				return PositionOf(entity, out);
 			};
 
 			// **Where a client is looking from, and this server does not know
@@ -637,18 +632,43 @@ namespace server {
 			// this replaces, kept as the honest answer rather than pretending
 			// every client is at the origin.
 			score.Viewpoint = [this](engine::replication::ClientId client, engine::core::Vector3 &out) {
-				const auto found = Viewpoints.find(client.Index);
+				return ViewpointOf(client, out);
+			};
 
-				// **The generation is checked, not just the slot.** A slot is
-				// reused when a client leaves and another joins, so keying on
-				// the index alone would hand the new client the old one's
-				// viewpoint — and it would sort *its* world by where somebody
-				// else had been standing.
-				if (found == Viewpoints.end() || found->second.Generation != client.Generation) {
+			// **What a client cannot see sorts below what it can**, and the
+			// query is this program's for the reason the two above are: it
+			// needs a broad phase and a game's idea of what occludes, and
+			// neither is `replication`'s.
+			//
+			// Cast from the viewpoint towards the entity: anything the ray meets
+			// noticeably nearer than the entity itself is between them. The
+			// entity is hit by its own ray, which is why the comparison has a
+			// margin rather than being "did it hit anything".
+			score.Blocked = [this](engine::replication::ClientId client, engine::ecs::Entity entity) {
+				engine::core::Vector3 eye;
+				engine::core::Vector3 at;
+				if (!ViewpointOf(client, eye) || !PositionOf(entity, at)) {
 					return false;
 				}
-				out = found->second.At;
-				return true;
+
+				const engine::core::Vector3 gap = at - eye;
+				const float distance = gap.Magnitude();
+				if (distance <= 0.01f) {
+					return false;
+				}
+
+				bool blocked = false;
+				Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+					const engine::core::Ray ray(eye, gap.Unit());
+					const auto hit = engine::physics::Raycast(store, ray, distance);
+
+					// **A margin, because the entity is hit by its own ray.**
+					// Ten centimetres is well inside anything a wall could be
+					// and well outside the floating-point noise of a cast that
+					// lands on the target's own surface.
+					blocked = hit.has_value() && hit->Owner != entity && hit->Distance < distance - 0.1f;
+				});
+				return blocked;
 			};
 
 			Replication->Authority().SetPriority(score);
@@ -691,6 +711,97 @@ namespace server {
 
 		ENGINE_INFO("replication listening on {}", Socket->Local().Text());
 		return true;
+	}
+
+	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) {
+		// **Not `const`, and the `const_cast` this had was the tell.** Entering
+		// a world takes it, which is a mutating operation on the universe
+		// however read-only the callback is — so a `const` here was a claim the
+		// body had to cast away, and a cast whose job is to make a signature
+		// true is a signature that is not.
+		bool found = false;
+		Worlds().Enter(PrimaryWorld, [entity, &out, &found](engine::ecs::Store &store) {
+			if (const auto *placement = store.Get<engine::scene::Transform>(entity)) {
+				out = placement->Frame.Position;
+				found = true;
+			}
+		});
+		return found;
+	}
+
+	bool Server::ViewpointOf(engine::replication::ClientId client, engine::core::Vector3 &out) const {
+		const auto found = Viewpoints.find(client.Index);
+
+		// **The generation is checked, not just the slot.** A slot is reused
+		// when a client leaves and another joins, so keying on the index alone
+		// would hand the new client the old one's viewpoint — and it would sort
+		// *its* world by where somebody else had been standing.
+		if (found == Viewpoints.end() || found->second.Generation != client.Generation) {
+			return false;
+		}
+		out = found->second.At;
+		return true;
+	}
+
+	void Server::ApplyInputs() {
+		using engine::replication::Rewind;
+
+		// **The one place this engine is server-authoritative about something a
+		// client did.** A client sends where it aimed, never what it hit: a
+		// client that decided what it hit would be a client nothing downstream
+		// can second-guess, and no amount of validation afterwards recovers
+		// from that.
+		for (const auto &submission : Replication->Inputs()) {
+			const float latency = Replication->RoundTripMilliseconds(submission.Client);
+
+			for (const engine::replication::Input &input : submission.Inputs) {
+				engine::examples::Shot shot;
+				if (!engine::examples::DecodeShot(input.Bytes, shot)) {
+					// A client sending something this is not is either running
+					// a different game or probing. Counted and dropped; there
+					// is nothing to answer.
+					Dropped++;
+					continue;
+				}
+
+				// **Rewound to what that client was looking at**, which is its
+				// input's tick less the interpolation delay it renders behind
+				// and the half round trip the snapshot took to reach it.
+				const double seen = Rewind::TickSeenBy(
+					input.Tick,
+					engine::replication::InterpolationSettings{}.DelayTicks,
+					latency,
+					Settings.TickRate
+				);
+
+				// The candidates are the *history's*, not the world's, and that
+				// is the whole reason a hit test uses one: an entity destroyed
+				// between the tick the client saw and now is still a legitimate
+				// thing to have shot at, and the world no longer has it.
+				Candidates.clear();
+				History.Each(seen, [this](engine::ecs::Entity entity, const engine::core::Vector3 &at) {
+					engine::examples::Target target;
+					target.Entity = entity;
+					target.At = at;
+					Candidates.push_back(target);
+				});
+
+				const engine::examples::Hit hit = engine::examples::NearestHit(shot, Candidates);
+				if (!hit.Struck) {
+					continue;
+				}
+
+				// The effect, and it is deliberately the smallest visible one:
+				// the part is recoloured. `scene.Visual` replicates, so every
+				// client sees the server's verdict rather than the shooter's.
+				Worlds().Enter(PrimaryWorld, [&hit](engine::ecs::Store &store) {
+					if (auto *visual = store.GetMutable<engine::scene::Visual>(hit.Entity)) {
+						visual->Tint = engine::core::Color3{1.0f, 0.2f, 0.1f};
+					}
+				});
+				Struck++;
+			}
+		}
 	}
 
 	void Server::SetClientViewpoint(engine::replication::ClientId client, const engine::core::Vector3 &at) {
@@ -746,11 +857,7 @@ namespace server {
 			Replication->Publish(store, store.Time().Tick, nowSeconds);
 		});
 
-		// Nothing consumes inputs yet: the placeholder scene has no notion of a
-		// player, so an input has nowhere to be applied. Dropped rather than
-		// left to accumulate, which would be a slow leak per connected client
-		// for a feature that does not exist. A game file at v0.5 is what turns
-		// this into an apply.
+		ApplyInputs();
 		Replication->ClearInputs();
 
 		Replication->Advance(nowSeconds);

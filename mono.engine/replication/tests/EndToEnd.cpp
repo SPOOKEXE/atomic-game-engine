@@ -290,3 +290,36 @@ TEST_CASE("nothing malformed crosses a healthy link", "[replication]") {
 	REQUIRE(wire.ServerSide->Stats().Refused == 0);
 	REQUIRE(wire.ClientSide->Stats().Refused == 0);
 }
+
+TEST_CASE("a real session writes the round trip it measured", "[replication]") {
+	// **The end of a gap that lasted from v0.3 to v0.9.**
+	// `ConnectionStats::RoundTripMilliseconds` was declared and never assigned,
+	// so it read zero on every connection there has ever been — and
+	// `Rewind::TickSeenBy` read it, which meant lag compensation corrected for
+	// the interpolation delay and not for travel.
+	//
+	// **A loopback measures zero, honestly.** This harness carries a packet and
+	// its acknowledgement inside one step and advances its clock at the end, so
+	// the true round trip really is instant — and asserting "greater than zero"
+	// would be asserting that the wire is slow rather than that the code works.
+	//
+	// So the test is that the field is *written*: seeded with a value no
+	// measurement would produce, and replaced by one that would. Before the
+	// fix the seed survived, because nothing ever assigned it.
+	Wire wire;
+	REQUIRE(wire.Join());
+
+	wire.ServerSide->Link().RecordRoundTrip(9.0);
+	REQUIRE(wire.ServerSide->Link().Stats().RoundTripMilliseconds > 8000.0f);
+
+	for (int step = 0; step < 8; step++) {
+		wire.Tick();
+	}
+
+	const float trip = wire.ServerSide->Link().Stats().RoundTripMilliseconds;
+
+	// Replaced by a real sample, which on a loopback is a small number rather
+	// than the nine seconds it was seeded with.
+	CHECK(trip < 200.0f);
+	CHECK(trip >= 0.0f);
+}

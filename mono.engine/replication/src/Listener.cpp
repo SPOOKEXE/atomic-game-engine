@@ -42,6 +42,44 @@ namespace engine::replication {
 			);
 		}
 
+		// **The identity check, installed here so it exists for every client
+		// this listener ever admits.** The authority parses the claim, because
+		// that is where every other client-to-server message is parsed; the
+		// verification is here, because the transcript it has to be checked
+		// against belongs to a connection.
+		Authority_.SetIdentityCheck([this](ClientId client, const Identify &claim) {
+			Peer *peer = nullptr;
+			for (Peer &candidate : Peers) {
+				if (candidate.Client == client) {
+					peer = &candidate;
+					break;
+				}
+			}
+			if (peer == nullptr) {
+				return false;
+			}
+
+			if (!assets::VerifySessionTranscript(peer->Transcript, claim.Signature, claim.Key)) {
+				// **Not a policy question.** A forged claim is a client that is
+				// not who it says, and asking a game whether to allow it would
+				// be asking a game to re-implement a signature check.
+				ENGINE_WARN("replication: a client's identity claim did not verify — dropping it.");
+				Stats_.Refused++;
+				return false;
+			}
+
+			if (ClientPolicy && !ClientPolicy(client, claim.Key)) {
+				ENGINE_INFO("replication: a client proved an identity the game does not admit.");
+				Stats_.Rejected++;
+				return false;
+			}
+
+			// **Recorded even with no policy**, which is a server that wants to
+			// know who its clients are without turning any away.
+			peer->Identity = claim.Key;
+			return true;
+		});
+
 		// The authority's cap and the link's budget spend the same packets, and
 		// nothing else in the build relates the two numbers. Set the cap above
 		// what the link will carry and the authority stops being the thing that
@@ -70,6 +108,23 @@ namespace engine::replication {
 
 	void Listener::SetIdentity(const assets::SigningKey *key) {
 		Identity = key;
+	}
+
+	void Listener::SetClientPolicy(std::function<bool(ClientId, const assets::PublicKey &)> policy) {
+		ClientPolicy = std::move(policy);
+	}
+
+	void Listener::RequireClientIdentity(bool required) {
+		RequireIdentity = required;
+	}
+
+	std::optional<assets::PublicKey> Listener::IdentityOf(ClientId client) const {
+		for (const Peer &peer : Peers) {
+			if (peer.Client == client) {
+				return peer.Identity;
+			}
+		}
+		return std::nullopt;
 	}
 
 	void Listener::SetAdmission(AdmissionPolicy policy) {
@@ -230,6 +285,7 @@ namespace engine::replication {
 		Peer peer;
 		peer.Where = from;
 		peer.PublicKey = answer.PublicKey;
+		peer.Transcript = transcript;
 		peer.Client = Authority_.Admit();
 		peer.Wire = std::make_unique<Session>(
 			*Transport_, from, net::ConnectionId{NextConnection++, 1}, nowSeconds, Settings.Session
@@ -396,6 +452,15 @@ namespace engine::replication {
 			}
 		}
 		return submissions;
+	}
+
+	float Listener::RoundTripMilliseconds(ClientId client) const {
+		for (const Peer &peer : Peers) {
+			if (peer.Client == client && peer.Wire != nullptr) {
+				return peer.Wire->Link().Stats().RoundTripMilliseconds;
+			}
+		}
+		return 0.0f;
 	}
 
 	void Listener::ClearInputs() {

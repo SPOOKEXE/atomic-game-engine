@@ -19,6 +19,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/Shooting.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Rewind.hpp>
@@ -277,6 +278,16 @@ namespace server {
 	class Server {
 	  public:
 		Server();
+
+		// Applies every pending input, server-authoritatively.
+		void ApplyInputs();
+
+		// Where an entity is, for the priority score and its occlusion query.
+		// Not `const`: it enters a world, which takes it.
+		bool PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out);
+
+		// Where a client is looking from, or `false` when nothing placed it.
+		bool ViewpointOf(engine::replication::ClientId client, engine::core::Vector3 &out) const;
 
 		// Where moving things were, for judging a client's action against what
 		// that client actually saw.
@@ -589,6 +600,20 @@ namespace server {
 		// second. It costs one map insert per moving entity per tick and no
 		// allocation after the ring has filled.
 		engine::replication::Rewind History;
+
+		// Reused across ticks so resolving a shot allocates nothing after the
+		// first one, which is the same reason every other per-tick buffer in
+		// this engine is a member rather than a local.
+		std::vector<engine::examples::Target> Candidates;
+
+		// How many inputs were resolved and how many were not this encoding.
+		//
+		// **Two counters and not one.** A shot that hit nothing is an ordinary
+		// event; a payload that did not decode is a client running a different
+		// game or probing, and burying the second in the first is how an
+		// unusual number stops being noticed.
+		uint64_t Struck = 0;
+		uint64_t Dropped = 0;
 
 		// Where one client is looking from.
 		struct Viewpoint {

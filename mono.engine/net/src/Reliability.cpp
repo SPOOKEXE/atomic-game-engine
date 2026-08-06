@@ -3,6 +3,7 @@
 #include <engine/net/Reliability.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace engine::net {
 
@@ -47,13 +48,49 @@ namespace engine::net {
 		return true;
 	}
 
-	size_t ReliableSender::OnAcknowledge(const PacketHeader &header) {
+	size_t ReliableSender::OnAcknowledge(const PacketHeader &header, double nowSeconds) {
 		ENGINE_PROFILE_CAT("ReliableSender::OnAcknowledge", core::ProfileCategory::Network);
 
+		// **Karn's rule, and it is the whole reason `Attempts` is consulted
+		// here.** An acknowledgement of a resent packet does not say which
+		// transmission it answers, so a sample from one is either the true trip
+		// or the trip plus a retransmit timeout — and there is no way to tell.
+		// Measuring them makes the estimate worst on exactly the links that
+		// need it most.
+		const auto sample = [this, nowSeconds](const Held &entry) {
+			// **Zero, because `Attempts` counts *re*sends and not sends.**
+			// `Track` starts it at zero and `OnResent` increments it, so a
+			// packet that went out once and was never repeated has zero — and a
+			// check for one measures precisely the packets Karn's rule exists
+			// to exclude, which is the inversion this first shipped as.
+			if (entry.Attempts != 0) {
+				return;
+			}
+
+			const double trip = nowSeconds - entry.SentAtSeconds;
+			if (trip < 0.0 || !std::isfinite(trip)) {
+				// A clock that went backwards, or a caller passing nonsense.
+				// Dropped rather than folded in: one bad sample survives in a
+				// smoothed value for dozens of good ones.
+				return;
+			}
+
+			// RFC 6298's weight. The first sample is taken whole, because
+			// smoothing towards zero would make the estimate say "instant" for
+			// the first several round trips of every connection.
+			constexpr double WEIGHT = 0.125;
+			SmoothedRoundTrip =
+				SmoothedRoundTrip <= 0.0 ? trip : SmoothedRoundTrip * (1.0 - WEIGHT) + trip * WEIGHT;
+		};
+
 		const size_t before = Pending.size();
-		std::erase_if(Pending, [&header](const Held &entry) {
-			if (entry.Sequence == header.Acknowledge) {
+		std::erase_if(Pending, [&header, &sample](const Held &entry) {
+			const auto retire = [&sample, &entry]() {
+				sample(entry);
 				return true;
+			};
+			if (entry.Sequence == header.Acknowledge) {
+				return retire();
 			}
 
 			// Wrap-aware, and not optional: at 16 bits a plain comparison reads
@@ -67,7 +104,10 @@ namespace engine::net {
 			if (behind > ACKNOWLEDGE_BITS) {
 				return false;
 			}
-			return (header.AcknowledgeBits & (1u << (behind - 1))) != 0;
+			if ((header.AcknowledgeBits & (1u << (behind - 1))) == 0) {
+				return false;
+			}
+			return retire();
 		});
 
 		return before - Pending.size();

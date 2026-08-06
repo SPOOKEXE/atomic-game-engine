@@ -34,6 +34,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
@@ -64,6 +65,35 @@ namespace engine::replication {
 	//
 	// @since v0.9
 	class Rewind {
+	  private:
+		// One tick's placements.
+		//
+		// **The maps are reused rather than freed**, so a server recording
+		// sixty times a second allocates for the first `HistoryTicks` ticks and
+		// then never again. `Clear` on an `unordered_map` keeps its buckets,
+		// which is the whole reason a ring of them beats a deque of fresh ones.
+		struct Frame {
+			uint64_t Tick = 0;
+			bool Filled = false;
+			std::unordered_map<uint64_t, core::Vector3> Placements;
+		};
+
+		const Frame *Find(uint64_t tick) const;
+
+		std::vector<Frame> Frames;
+		size_t Cursor = 0;
+		size_t Held = 0;
+		uint64_t Latest = 0;
+		bool Open = false;
+
+		// **The private section comes first, which is unusual here and is the
+		// price of one template.** `Each` is a template on the public surface
+		// and calls `Find`, so `Find` has to be declared before it — and a
+		// member declared after its first use inside a member *template* is not
+		// found, unlike an ordinary member function. Splitting `Each` out into
+		// a free function taking the frame would leak `Frame` into the header
+		// instead, which is worse.
+
 	  public:
 		// Builds a history.
 		//
@@ -121,6 +151,53 @@ namespace engine::replication {
 		static double
 		TickSeenBy(uint64_t inputTick, double delayTicks, double latencyMilliseconds, double tickRate);
 
+		// Walks everything recorded at a tick, interpolated the same way
+		// `Sample` interpolates.
+		//
+		// **The enumeration a hit test needs and `Sample` cannot give it.** A
+		// caller testing a shot has a ray and no candidate list — and walking
+		// the *world* instead would miss exactly the entities lag compensation
+		// exists for: the ones destroyed between the tick the client saw and
+		// now. The history remembers them; the world does not.
+		//
+		// The frame walked is the one at or before `tick`, so an entity present
+		// then is offered even if it is gone by the next.
+		//
+		// @param tick  The tick to walk, fractional.
+		// @param visit Called as `visit(ecs::Entity, const core::Vector3 &)`.
+		// @return How many were visited.
+		template <class Visitor> size_t Each(double tick, Visitor &&visit) const {
+			if (Held == 0 || !std::isfinite(tick) || tick < 0.0) {
+				return 0;
+			}
+
+			const double floored = std::floor(tick);
+			if (floored < 0.0 || floored > static_cast<double>(Latest)) {
+				return 0;
+			}
+
+			const Frame *frame = Find(static_cast<uint64_t>(floored));
+			if (frame == nullptr) {
+				return 0;
+			}
+
+			size_t visited = 0;
+			for (const auto &[id, placement] : frame->Placements) {
+				ecs::Entity entity;
+				entity.Id = id;
+
+				// Through `Sample` rather than handing back the stored value,
+				// so the fraction is honoured and there is one interpolation
+				// rather than two that could disagree.
+				core::Vector3 at;
+				if (Sample(tick, entity, at)) {
+					visit(entity, at);
+					visited++;
+				}
+			}
+			return visited;
+		}
+
 		// The oldest tick held, or zero when nothing has been recorded.
 		uint64_t Oldest() const;
 
@@ -140,26 +217,5 @@ namespace engine::replication {
 		// history spanning a discontinuity would answer with placements from
 		// before it, which is worse than answering with nothing.
 		void Clear();
-
-	  private:
-		// One tick's placements.
-		//
-		// **The maps are reused rather than freed**, so a server recording
-		// sixty times a second allocates for the first `HistoryTicks` ticks and
-		// then never again. `Clear` on an `unordered_map` keeps its buckets,
-		// which is the whole reason a ring of them beats a deque of fresh ones.
-		struct Frame {
-			uint64_t Tick = 0;
-			bool Filled = false;
-			std::unordered_map<uint64_t, core::Vector3> Placements;
-		};
-
-		const Frame *Find(uint64_t tick) const;
-
-		std::vector<Frame> Frames;
-		size_t Cursor = 0;
-		size_t Held = 0;
-		uint64_t Latest = 0;
-		bool Open = false;
 	};
 }

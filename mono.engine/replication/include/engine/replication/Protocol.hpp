@@ -22,6 +22,7 @@
 //
 // @tier L12 · shared
 
+#include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -66,6 +67,19 @@ namespace engine::replication {
 		// What lets the server stop resending and what prediction replays
 		// from.
 		Applied,
+
+		// Client to server: who it is, proved against the exchange.
+		//
+		// **The mirror of `Welcome::Identity`, and it has to arrive after the
+		// welcome rather than with the answer.** The transcript names both
+		// ephemeral keys, and a client does not have the server's until the
+		// welcome — so there is no earlier message it could sign. It rides the
+		// encrypted stream as the client's first act instead, which costs no
+		// extra round trip: the connection is already usable and the server
+		// simply has not decided whether to keep it.
+		//
+		// @since v0.9
+		Identify,
 	};
 
 	// Returns a stable, human-readable name for a message kind.
@@ -73,6 +87,28 @@ namespace engine::replication {
 	// @param kind The kind to name.
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(MessageKind kind);
+
+	// A client proving which identity it holds.
+	//
+	// @since v0.9
+	struct Identify {
+		// The client's public key.
+		//
+		// **Sent rather than pinned, unlike the server's.** A server has one
+		// identity and every client knows which one to expect; a server expects
+		// *many* clients and cannot pin them all in a setting. So the key
+		// travels and `Listener::SetClientPolicy` decides whether it is
+		// welcome — which is how a client certificate has always worked.
+		assets::PublicKey Key;
+
+		// Its signature over `AdmissionTranscript`, the same bytes the welcome
+		// was signed and tagged over.
+		//
+		// Binding to the transcript is what stops this being replayable: a
+		// signature lifted from one session names two ephemeral keys and a
+		// cookie that appear in no other.
+		assets::SignatureBytes Signature;
+	};
 
 	// The wire format version.
 	//
@@ -96,7 +132,7 @@ namespace engine::replication {
 	// bytes as the first ten of twenty-eight and take the next entity's value
 	// for the rest of it. That is the worst kind of format change to leave
 	// undeclared, because it parses.
-	inline constexpr uint16_t PROTOCOL_VERSION = 4;
+	inline constexpr uint16_t PROTOCOL_VERSION = 5;
 
 	// One piece of a snapshot.
 	//
@@ -238,6 +274,13 @@ namespace engine::replication {
 		uint64_t Tick = 0;
 	};
 
+	// Writes an identity claim.
+	//
+	// @param writer   Where the bytes go.
+	// @param identify The claim to write.
+	// @since v0.9
+	void WriteMessage(core::ByteWriter &writer, const Identify &identify);
+
 	// Writes a message, including its kind and the protocol version.
 	//
 	// @param writer Where the bytes go.
@@ -298,6 +341,9 @@ namespace engine::replication {
 
 		// Meaningful when `Kind` is `Applied`.
 		replication::Applied Applied;
+
+		// Meaningful when `Kind` is `Identify`.
+		replication::Identify Identify;
 	};
 
 	// Reads a message, refusing anything that is not one.

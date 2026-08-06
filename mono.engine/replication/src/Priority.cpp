@@ -39,6 +39,23 @@ namespace engine::replication {
 		}
 
 		const float distance = std::sqrt(squared);
-		return std::clamp(1.0f - distance / FalloffMetres, 0.0f, 1.0f);
+		const float score = std::clamp(1.0f - distance / FalloffMetres, 0.0f, 1.0f);
+
+		// **The cheap test gates the expensive one.** A raycast is orders of
+		// magnitude dearer than the subtraction above it, and something already
+		// scoring near nothing cannot be moved far enough by occlusion to
+		// change its place in the order.
+		if (!Blocked || score <= OcclusionFloor) {
+			return score;
+		}
+		if (!Blocked(client, entity)) {
+			return score;
+		}
+
+		// Scaled rather than zeroed: a hidden thing should update *less*, not
+		// never, or a player rounding a corner meets a wall of objects snapping
+		// into place.
+		const float kept = std::isfinite(HiddenFraction) ? std::clamp(HiddenFraction, 0.0f, 1.0f) : 0.0f;
+		return score * kept;
 	}
 }

@@ -194,6 +194,10 @@ namespace engine::replication {
 		Interest = std::move(predicate);
 	}
 
+	void Authority::SetIdentityCheck(std::function<bool(ClientId, const Identify &)> check) {
+		IdentityCheck = std::move(check);
+	}
+
 	void Authority::SetPriority(std::function<float(ClientId, ecs::Entity)> score) {
 		Priority = std::move(score);
 	}
@@ -1368,6 +1372,12 @@ namespace engine::replication {
 				}
 			}
 			return true;
+
+		case MessageKind::Identify:
+			// **Judged elsewhere, because the transcript lives elsewhere.**
+			// Without a check installed the claim is accepted and ignored,
+			// which is a server that does not care who its clients are.
+			return !IdentityCheck || IdentityCheck(client, read.Identify);
 
 		case MessageKind::SnapshotChunk:
 		case MessageKind::Delta:

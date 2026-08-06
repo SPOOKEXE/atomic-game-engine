@@ -187,3 +187,67 @@ TEST_CASE("two clients in different places order the world differently", "[repli
 	CHECK(score(Client(0), At(10)) > score(Client(0), At(90)));
 	CHECK(score(Client(1), At(90)) > score(Client(1), At(10)));
 }
+
+TEST_CASE("something out of sight scores less but not nothing", "[replication][priority]") {
+	// **Not zero, and that is the whole design.** An entity scored at nothing
+	// is one the rotation alone ever sends — so a player walking round a corner
+	// finds everything behind it stale, and the first thing they see is a wall
+	// of objects snapping into place. A hidden thing should update *less*.
+	DistancePriority score = Ramp(100.0f);
+	score.Blocked = [](ClientId, Entity entity) { return entity.Id >= 50; };
+
+	const float visible = score(Client(), At(10));
+	const float hidden = score(Client(), At(60));
+
+	CHECK(visible == Approx(0.9f));
+	CHECK(hidden == Approx(0.4f * 0.25f));
+
+	// It still beats the far half of the world.
+	CHECK(hidden > score(Client(), At(95)));
+	CHECK(hidden < visible);
+}
+
+TEST_CASE("occlusion is not asked about below the floor", "[replication][priority]") {
+	// **The cheap test gates the expensive one.** A raycast is orders of
+	// magnitude dearer than a subtraction, and something already scoring near
+	// nothing cannot be moved far enough by occlusion to change its place.
+	int asked = 0;
+
+	DistancePriority score = Ramp(100.0f);
+	score.OcclusionFloor = 0.5f;
+	score.Blocked = [&asked](ClientId, Entity) {
+		asked++;
+		return true;
+	};
+
+	// Well inside the floor: asked, and scaled.
+	CHECK(score(Client(), At(10)) == Approx(0.9f * 0.25f));
+	CHECK(asked == 1);
+
+	// Below it: not asked at all, and the distance score stands.
+	CHECK(score(Client(), At(70)) == Approx(0.3f));
+	CHECK(asked == 1);
+}
+
+TEST_CASE("no occlusion query is the behaviour from before there was one", "[replication][priority]") {
+	const DistancePriority score = Ramp(100.0f);
+	CHECK(score(Client(), At(10)) == Approx(0.9f));
+}
+
+TEST_CASE("a nonsense hidden fraction cannot break the ordering", "[replication][priority]") {
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+
+	DistancePriority score = Ramp(100.0f);
+	score.Blocked = [](ClientId, Entity) { return true; };
+
+	score.HiddenFraction = nan;
+	CHECK(std::isfinite(score(Client(), At(10))));
+
+	// Clamped rather than trusted: a fraction above one would score a hidden
+	// thing *higher* than the same thing in plain sight.
+	score.HiddenFraction = 5.0f;
+	CHECK(score(Client(), At(10)) == Approx(0.9f));
+
+	score.HiddenFraction = -1.0f;
+	CHECK(score(Client(), At(10)) == Approx(0.0f));
+}

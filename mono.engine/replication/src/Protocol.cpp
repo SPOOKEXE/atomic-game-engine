@@ -73,9 +73,17 @@ namespace engine::replication {
 			return "input";
 		case MessageKind::Applied:
 			return "applied";
+		case MessageKind::Identify:
+			return "identify";
 		}
 		// No default label, so adding a kind is a compiler warning here.
 		return "?";
+	}
+
+	void WriteMessage(core::ByteWriter &writer, const Identify &identify) {
+		WriteFront(writer, MessageKind::Identify);
+		writer.WriteRaw(identify.Key.Value.data(), identify.Key.Value.size());
+		writer.WriteRaw(identify.Signature.Value.data(), identify.Signature.Value.size());
 	}
 
 	void WriteMessage(core::ByteWriter &writer, const SnapshotChunk &chunk) {
@@ -133,7 +141,12 @@ namespace engine::replication {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Applied)) {
+		// **The last kind, and it has to be updated when one is appended.** This
+		// is the one place adding a `MessageKind` fails silently: the switches
+		// below are `-Wswitch`-checked and this comparison is not, so a new kind
+		// parses as out of range and every message of it is dropped as
+		// malformed. `Identify` did exactly that.
+		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Identify)) {
 			// Range-checked before the cast. Casting anyway produces a value no
 			// switch handles, and every `Describe` and dispatch downstream then
 			// reads something the type says cannot exist.
@@ -214,6 +227,15 @@ namespace engine::replication {
 
 		case MessageKind::Applied:
 			read.Applied.Tick = reader.ReadUInt64();
+			break;
+
+		case MessageKind::Identify:
+			// Fixed length both, so there is no count a sender chooses and
+			// nothing to bound.
+			if (!reader.ReadRaw(read.Identify.Key.Value.data(), read.Identify.Key.Value.size()) ||
+				!reader.ReadRaw(read.Identify.Signature.Value.data(), read.Identify.Signature.Value.size())) {
+				return false;
+			}
 			break;
 		}
 
