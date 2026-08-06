@@ -87,6 +87,37 @@ namespace engine::gui {
 			const Scale *Factor = nullptr;
 		};
 
+		// Everything one walk of a node's child list produces.
+		//
+		// **The walk is the expensive thing in this file, so there is exactly
+		// one of them per element.** `Store::EachChild` follows an intrusive
+		// `FirstChild`/`NextSibling` chain through a `std::function`, which is a
+		// type-erased call and a pointer chase into another table per child —
+		// and both halves of laying a node out want that list. Measuring it
+		// needs its scale, aspect and limits; placing it needs its padding, its
+		// layout, and the children themselves.
+		//
+		// Splitting those into two walks was the last structural cost in
+		// `engine.gui.bench.interface`: every element in the tree was chasing
+		// its child chain twice per frame, once from its parent's measure loop
+		// and once from its own `Place`. Producing both answers at once is the
+		// whole of this struct.
+		struct Scan {
+			// The modifier children, which are the ones with no `Element`.
+			Modifiers Mods;
+
+			// Where this node's `GuiObject` children sit in the arena, as an
+			// index and a count rather than pointers or a span.
+			//
+			// **Indices, because the arena grows while this is held.** Measuring
+			// a sibling appends that sibling's children, which may reallocate —
+			// so anything holding a pointer into it would dangle halfway through
+			// the measure loop, on trees large enough to force a reallocation
+			// and not on the small ones a test builds.
+			size_t ChildFirst = 0;
+			uint32_t ChildCount = 0;
+		};
+
 		// One child of a container, with what the layout needs to place it.
 		struct Item {
 			Entity Node;
@@ -102,63 +133,102 @@ namespace engine::gui {
 			// orders never read.
 			core::Name Label;
 
-			// This child's own modifiers, found while it was measured.
-			//
-			// **Carried rather than looked up again.** Measuring a child needs
-			// its scale, aspect and limits; placing it needs its padding and its
-			// layout. Those are the same walk of the same child list, and before
-			// this field every element in the tree paid for it twice — once from
-			// its parent's `ChildItems` and once from its own `Place`.
-			Modifiers Mods;
+			// What measuring this child found, carried through to placing it.
+			Scan Found;
 		};
 
-		Modifiers ModifiersOf(const Store &store, Entity instance) {
-			Modifiers found;
+		// The `GuiObject` children of every node currently being laid out.
+		//
+		// **A stack, and the discipline is exact.** `Place` on a node marks the
+		// arena, measures each of its children — which appends each child's own
+		// children — places them in turn, and then releases back to the mark.
+		// A child's run therefore outlives the whole measure loop, which is what
+		// it has to do: the run is read when that child is *placed*, long after
+		// its siblings were measured on top of it.
+		//
+		// `thread_local` for `ScratchAt`'s reason: a `Store` binds its owning
+		// thread, so two worlds laying out at once are two threads.
+		std::vector<Entity> &ChildArena() {
+			static thread_local std::vector<Entity> arena;
+			return arena;
+		}
 
-			// One walk of the child list rather than seven, because
-			// `EachChild` chases a handle per sibling through the directory and
-			// a container with a padding, a layout and a constraint would
-			// otherwise pay for that walk three times.
+		// Returns the arena to where it was, however the scope exits.
+		//
+		// **RAII rather than a `resize` at the end, because the alternative
+		// fails silently and unboundedly.** `Place` already has three early
+		// returns and will grow more; one of them added below the mark and above
+		// the release would leak a child run per element per frame, for the life
+		// of the process. Nothing would crash, no test would fail, and the only
+		// symptom would be a session that slowly ate memory — which is the worst
+		// way to find out, and the same reasoning `MAXIMUM_DEPTH` gives a few
+		// lines above about hangs.
+		//
+		// The destructor cannot be skipped, so the invariant holds by
+		// construction rather than by every future edit remembering it.
+		class ArenaScope {
+		  public:
+			explicit ArenaScope(std::vector<Entity> &arena) : Storage(arena), Mark(arena.size()) {}
+
+			~ArenaScope() {
+				Storage.resize(Mark);
+			}
+
+			ArenaScope(const ArenaScope &) = delete;
+			ArenaScope &operator=(const ArenaScope &) = delete;
+			ArenaScope(ArenaScope &&) = delete;
+			ArenaScope &operator=(ArenaScope &&) = delete;
+
+		  private:
+			std::vector<Entity> &Storage;
+			size_t Mark;
+		};
+
+		// Walks one node's children once, sorting them into the two things any
+		// caller wants: the modifiers, and the `GuiObject`s a layout arranges.
+		//
+		// **The split is `Element`, and that is a rule rather than a shortcut.**
+		// A `UIPadding` under a frame is a child in the tree, and a list layout
+		// that stacked it would leave a blank row where the modifier was. "Does
+		// it have an `Element`" is exactly what makes something a `GuiObject`,
+		// so the same test that finds the children rules out all seven modifier
+		// lookups for each of them — which matters because the common container
+		// is a frame full of frames and seven misses against one hit is the
+		// ratio in every real interface.
+		Scan ScanChildren(const Store &store, Entity instance, std::vector<Entity> &arena) {
+			Scan found;
+			found.ChildFirst = arena.size();
+
 			store.EachChild(instance, [&](Entity child) {
-				// **A modifier is a `UIComponent` and never a `GuiObject`, so
-				// one lookup rules out all seven.** `ChildItems` already relies
-				// on exactly this — "does it have an `Element`" is what makes
-				// something a `GuiObject` there — and without the same test here
-				// the common container pays the full seven per child to
-				// discover that a frame is not a padding.
-				//
-				// The common container is a frame full of frames: an inventory
-				// grid, a list of rows, a panel of buttons. Measured over a
-				// thousand-element tree this test is most of what `Layout`
-				// costs, because seven misses against one hit is the ratio in
-				// every real interface — see `engine.gui.bench.interface`.
 				if (store.Get<Element>(child) != nullptr) {
+					arena.push_back(child);
 					return;
 				}
 
-				if (found.Inset == nullptr) {
-					found.Inset = store.Get<Padding>(child);
+				if (found.Mods.Inset == nullptr) {
+					found.Mods.Inset = store.Get<Padding>(child);
 				}
-				if (found.List == nullptr) {
-					found.List = store.Get<ListLayout>(child);
+				if (found.Mods.List == nullptr) {
+					found.Mods.List = store.Get<ListLayout>(child);
 				}
-				if (found.Grid == nullptr) {
-					found.Grid = store.Get<GridLayout>(child);
+				if (found.Mods.Grid == nullptr) {
+					found.Mods.Grid = store.Get<GridLayout>(child);
 				}
-				if (found.Aspect == nullptr) {
-					found.Aspect = store.Get<AspectRatio>(child);
+				if (found.Mods.Aspect == nullptr) {
+					found.Mods.Aspect = store.Get<AspectRatio>(child);
 				}
-				if (found.Limits == nullptr) {
-					found.Limits = store.Get<SizeLimits>(child);
+				if (found.Mods.Limits == nullptr) {
+					found.Mods.Limits = store.Get<SizeLimits>(child);
 				}
-				if (found.TextLimits == nullptr) {
-					found.TextLimits = store.Get<TextSizeLimits>(child);
+				if (found.Mods.TextLimits == nullptr) {
+					found.Mods.TextLimits = store.Get<TextSizeLimits>(child);
 				}
-				if (found.Factor == nullptr) {
-					found.Factor = store.Get<Scale>(child);
+				if (found.Mods.Factor == nullptr) {
+					found.Mods.Factor = store.Get<Scale>(child);
 				}
 			});
 
+			found.ChildCount = static_cast<uint32_t>(arena.size() - found.ChildFirst);
 			return found;
 		}
 
@@ -264,7 +334,7 @@ namespace engine::gui {
 			const Rect &clip,
 			int depth,
 			float rotation,
-			const Modifiers *known
+			const Scan &scan
 		);
 
 		// Resolves one node's size against the rectangle it sits in.
@@ -274,26 +344,26 @@ namespace engine::gui {
 		// go — which is the one thing that cannot be done in a single top-down
 		// sweep and is why this function exists at all.
 		//
-		// @param modifiers Filled in with what the walk found, so that `Place`
-		//        can be handed it rather than repeating the walk.
-		Vector2 Measure(const Store &store, Entity instance, const Vector2 &parent, Modifiers &modifiers) {
+		// @param scan Filled in with the whole of what the walk found — the
+		//        modifiers this uses, and the child run `Place` will — so that
+		//        placing the node afterwards costs no second walk.
+		Vector2 Measure(
+			const Store &store,
+			Entity instance,
+			const Vector2 &parent,
+			Scan &scan,
+			std::vector<Entity> &arena
+		) {
 			const Element *element = store.Get<Element>(instance);
 			if (element == nullptr) {
 				return Vector2::Zero;
 			}
 
-			modifiers = ModifiersOf(store, instance);
+			scan = ScanChildren(store, instance, arena);
 			const Vector2 size = element->Size.Resolve(Basis(element->Constraint, parent));
-			return Constrain(size, modifiers, parent);
+			return Constrain(size, scan.Mods, parent);
 		}
 
-		// The children a layout arranges, in the order it arranges them.
-		//
-		// **`UIComponent`s are excluded and that is not an optimisation.** A
-		// `UIPadding` under a frame is a child in the tree; if a list layout
-		// stacked it, every padded list would have a blank row where the
-		// modifier was. The test is "does it have an `Element`", which is what
-		// makes something a `GuiObject`.
 		// The item list one level of the walk uses, reused across frames.
 		//
 		// **The recursion is depth first, so exactly one list is live at each
@@ -319,6 +389,16 @@ namespace engine::gui {
 			return pool[static_cast<size_t>(std::clamp(depth, 0, MAXIMUM_DEPTH + 1))];
 		}
 
+		// Measures the children this node's own scan already found.
+		//
+		// **No walk here, which is the point.** The child run was collected when
+		// this node was measured; all that is left is to read it and measure
+		// each entry, which is what appends the *grandchildren* for the level
+		// below.
+		//
+		// @param scan  What scanning this node produced. Its child run is read
+		//        by index rather than held as a span, because measuring each
+		//        child appends to the same arena and may reallocate it.
 		// @param named Whether the container's sort order reads `Item::Label`.
 		//        Only `SortOrder::Name` does, and the lookup is a trip through
 		//        the process-wide name registry — so it is asked for rather than
@@ -326,14 +406,22 @@ namespace engine::gui {
 		// @param items Cleared and filled. Owned by the caller so that the
 		//        per-level scratch above can be handed in.
 		void ChildItems(
-			const Store &store, Entity instance, const Vector2 &area, bool named, std::vector<Item> &items
+			const Store &store,
+			const Scan &scan,
+			const Vector2 &area,
+			bool named,
+			std::vector<Item> &items,
+			std::vector<Entity> &arena
 		) {
 			items.clear();
+			items.reserve(scan.ChildCount);
 
-			store.EachChild(instance, [&](Entity child) {
+			for (uint32_t index = 0; index < scan.ChildCount; index++) {
+				const Entity child = arena[scan.ChildFirst + index];
+
 				const Element *element = store.Get<Element>(child);
 				if (element == nullptr || !element->Visible) {
-					return;
+					continue;
 				}
 
 				Item item;
@@ -342,9 +430,9 @@ namespace engine::gui {
 				if (named) {
 					item.Label = store.InstanceNameOf(child);
 				}
-				item.Size = Measure(store, child, area, item.Mods);
+				item.Size = Measure(store, child, area, item.Found, arena);
 				items.push_back(item);
-			});
+			}
 		}
 
 		// Whether a container's sort order needs each child's name.
@@ -432,7 +520,7 @@ namespace engine::gui {
 												  : Vector2{area.Min.X + across, area.Min.Y + along};
 
 				placed += Place(
-					store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation, &item.Mods
+					store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation, item.Found
 				);
 				along += (horizontal ? item.Size.X : item.Size.Y) + gap;
 			}
@@ -529,7 +617,7 @@ namespace engine::gui {
 
 				placed += Place(
 					store, items[index].Node, FromCorner(corner, cell), clip, depth, rotation,
-					&items[index].Mods
+					items[index].Found
 				);
 			}
 
@@ -552,7 +640,7 @@ namespace engine::gui {
 			const Rect &clip,
 			int depth,
 			float rotation,
-			const Modifiers *known
+			const Scan &scan
 		) {
 			if (depth > MAXIMUM_DEPTH) {
 				return 0;
@@ -572,12 +660,7 @@ namespace engine::gui {
 				return 0;
 			}
 
-			Modifiers walked;
-			if (known == nullptr) {
-				walked = ModifiersOf(store, instance);
-				known = &walked;
-			}
-			const Modifiers &modifiers = *known;
+			const Modifiers &modifiers = scan.Mods;
 
 			const float total = rotation + element->Rotation;
 
@@ -607,7 +690,18 @@ namespace engine::gui {
 			// it: every recursive call uses the next level's, and by the time
 			// this one returns nothing is reading it.
 			std::vector<Item> &items = ScratchAt(depth);
-			ChildItems(store, instance, area.Size(), SortsByName(modifiers), items);
+
+			// **Marked before the children are measured and released after they
+			// are placed.** Measuring each child appends that child's own
+			// children, and every one of those runs has to survive until its
+			// owner is placed — which is after all of its siblings were measured
+			// on top of it. Releasing to the mark at the end drops the whole
+			// generation at once, so the arena's high-water mark is the widest
+			// path through the tree rather than the tree.
+			std::vector<Entity> &arena = ChildArena();
+			const ArenaScope scope(arena);
+
+			ChildItems(store, scan, area.Size(), SortsByName(modifiers), items, arena);
 
 			if (modifiers.List != nullptr) {
 				placed += RunList(store, *modifiers.List, items, area, inner, depth + 1, total);
@@ -622,7 +716,7 @@ namespace engine::gui {
 						area.Min.Y + anchored.Y - child->AnchorPoint.Y * item.Size.Y,
 					};
 					placed += Place(
-						store, item.Node, FromCorner(corner, item.Size), inner, depth + 1, total, &item.Mods
+						store, item.Node, FromCorner(corner, item.Size), inner, depth + 1, total, item.Found
 					);
 				}
 			}
@@ -742,21 +836,29 @@ namespace engine::gui {
 					continue;
 				}
 
-				Modifiers modifiers;
-				const Vector2 size = Measure(store, root, canvas.Size(), modifiers);
+				// **The top of the arena's stack discipline.** Every `Place`
+				// below releases what it added, but a root's own child run is
+				// added *here* — so without this mark it would survive the call
+				// and the arena would grow by one run per root per frame, for as
+				// long as the process lived. A leak that is invisible in a test
+				// and unbounded in a session is exactly the shape worth spelling
+				// out at the one place the recursion is entered.
+				std::vector<Entity> &arena = ChildArena();
+				const ArenaScope scope(arena);
+
+				Scan scan;
+				const Vector2 size = Measure(store, root, canvas.Size(), scan, arena);
 				const Vector2 anchored = element->Position.Resolve(canvas.Size());
 				const Vector2 corner{
 					canvas.Min.X + anchored.X - element->AnchorPoint.X * size.X,
 					canvas.Min.Y + anchored.Y - element->AnchorPoint.Y * size.Y,
 				};
 
-				// Handed on, like every other call: measuring the root is what
-				// found these, so `Place`'s own walk would be the second one.
-				// Nothing in this file reaches `Place` without having measured
-				// first, which is why the fallback inside it never runs today —
-				// it is there so that a future caller that has not measured is
-				// correct rather than fast.
-				placed += Place(store, root, FromCorner(corner, size), canvas, 1, 0.0f, &modifiers);
+				// Handed on, like every other call: measuring a node is what
+				// finds its scan, and there is no path to `Place` that has not
+				// measured first — which is what lets `Place` take a `const
+				// Scan &` rather than a pointer it has to test.
+				placed += Place(store, root, FromCorner(corner, size), canvas, 1, 0.0f, scan);
 			}
 		}
 

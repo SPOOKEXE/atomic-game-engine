@@ -41,15 +41,28 @@
 //     `InstanceNameOf` took the process-wide name registry's lock for every
 //     child whether or not the container sorted by name. → 200 to 173.
 //
-// **What is left is structural rather than wasteful.** `EachChild` walks an
-// intrusive `FirstChild`/`NextSibling` list through a `std::function`, so each
-// child costs a type-erased call and a pointer chase into another table — and
-// two such walks per element remain, because measuring a node and placing it
-// both need its child list and the two happen at different times. Merging them
-// needs either contiguous child storage in `ecs` or a scratch arena holding one
-// child list per element rather than per depth. Both are larger decisions than
-// a benchmark should make on its own; this note is here so the next person
-// starts from the analysis rather than from the number.
+// That left one structural cost: `EachChild` walks an intrusive
+// `FirstChild`/`NextSibling` list through a `std::function`, so each child is a
+// type-erased call and a pointer chase into another table — and *two* such walks
+// per element remained, because measuring a node and placing it both need its
+// child list and the two happen at different times.
+//
+//   - Merged, by having the one walk produce both answers at once and parking
+//     the child run in a shared arena that `Place` reads back. The arena is a
+//     stack: a node marks it, measures its children — which appends each
+//     child's own children on top — places them, and releases to the mark
+//     through a destructor rather than a statement. → 173 to **152**.
+//
+// **So the pass now walks each child list exactly once, and 152 ns is what a
+// walk costs rather than what waste costs.** Going further means changing where
+// children live: contiguous per-parent storage in `ecs` would turn the walk
+// into a linear scan of a span and would benefit every consumer of `EachChild`,
+// not just this one. That is a decision about the entity store rather than
+// about layout, which is why it is written down here and not attempted.
+//
+// A 10 000-element interface went from 2.9 ms a frame to 1.5 ms over these four
+// changes, with the whole steady-state frame — layout plus the compile
+// signature — at about 179 ns an element.
 
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>

@@ -396,3 +396,91 @@ TEST_CASE("display order decides which collector lays out last", "[gui][layout]"
 	CHECK(world.Where(behind).Rendered);
 	CHECK(world.Where(front).Rendered);
 }
+
+TEST_CASE("siblings with different child counts each place their own children", "[gui][layout]") {
+	// **The case the child arena introduced, and the one nothing else here
+	// covers.** `Layout` walks a node's child list exactly once and stores the
+	// `GuiObject`s it found as a run in one shared buffer, because measuring a
+	// node and placing it both want that list and chasing the intrusive sibling
+	// chain twice per element was the largest cost in the pass.
+	//
+	// That makes several sibling runs live at the same moment: a container
+	// measures *all* of its children before it places any, so child 0's run sits
+	// under child 1's, which sits under child 2's, and child 0 is not read back
+	// until long after the other two were written on top of it. An off-by-one in
+	// that bookkeeping does not crash and does not produce nonsense — it places
+	// one container's children inside a *sibling's* rectangle, which reads as a
+	// layout bug in whatever authored the interface rather than as an engine
+	// one.
+	//
+	// The three containers below hold one, two and three children, so a run
+	// whose length or offset is wrong cannot line up by accident.
+	World world("gui_layout.siblingruns");
+	const Entity screen = world.Make("ScreenGui");
+
+	// Three containers side by side, each a fixed 200 wide and anchored to a
+	// different third of the screen, so every child's expected rectangle is a
+	// different number.
+	std::vector<Entity> containers;
+	for (int index = 0; index < 3; index++) {
+		const Entity container = world.Make("Frame", screen);
+
+		Element element;
+		element.Position = UDim2{0.0f, static_cast<float>(index) * 200.0f, 0.0f, 0.0f};
+		element.Size = UDim2{0.0f, 200.0f, 0.0f, 300.0f};
+		world.Data.Set(container, element);
+		containers.push_back(container);
+	}
+
+	// One, two and three children respectively, each filling its parent so its
+	// resolved rectangle is its parent's — which is what makes a crossed run
+	// immediately visible as the wrong X.
+	std::vector<std::vector<Entity>> children(containers.size());
+	for (size_t index = 0; index < containers.size(); index++) {
+		for (size_t child = 0; child <= index; child++) {
+			const Entity leaf = world.Make("Frame", containers[index]);
+
+			Element element;
+			element.Size = UDim2{1.0f, 0.0f, 1.0f, 0.0f};
+			world.Data.Set(leaf, element);
+			children[index].push_back(leaf);
+		}
+	}
+
+	Layout(world.Data, world.Display);
+
+	for (size_t index = 0; index < containers.size(); index++) {
+		const Resolved &parent = world.Where(containers[index]);
+		CHECK(parent.AbsolutePosition.X == Approx(static_cast<float>(index) * 200.0f));
+
+		REQUIRE(children[index].size() == index + 1);
+		for (const Entity leaf : children[index]) {
+			const Resolved &where = world.Where(leaf);
+
+			// Inside its own parent and nobody else's.
+			CHECK(where.Rendered);
+			CHECK(where.AbsolutePosition.X == Approx(parent.AbsolutePosition.X));
+			CHECK(where.AbsoluteSize.X == Approx(200.0f));
+			CHECK(where.AbsoluteSize.Y == Approx(300.0f));
+		}
+	}
+
+	// **And it has to hold on repeated passes**, because the arena is reused
+	// across calls rather than rebuilt: a run whose offset drifted between
+	// frames would give a first frame that is right and a later one that is not.
+	//
+	// This does *not* test that the arena is released — a run left behind grows
+	// the buffer without moving any offset already recorded, so it is a memory
+	// bug with no output a test can see. That one is held by `ArenaScope` making
+	// the release a destructor instead of a statement somebody has to remember,
+	// which is a stronger guarantee than a case here could give anyway.
+	const size_t placed = Layout(world.Data, world.Display);
+	CHECK(placed == Layout(world.Data, world.Display));
+
+	for (size_t index = 0; index < containers.size(); index++) {
+		const Resolved &parent = world.Where(containers[index]);
+		for (const Entity leaf : children[index]) {
+			CHECK(world.Where(leaf).AbsolutePosition.X == Approx(parent.AbsolutePosition.X));
+		}
+	}
+}
