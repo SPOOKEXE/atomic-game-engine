@@ -3,9 +3,47 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+
+#include <cmath>
 #include <engine/gui/Registration.hpp>
 
 namespace engine::gui {
+
+	namespace {
+		// A point in an element's own unrotated space.
+		//
+		// Turns `point` backwards about the command's centre by its rotation, so
+		// a caller can use the axis-aligned `Bounds` it already has. Returns the
+		// point unchanged for the overwhelmingly common unrotated case, which is
+		// one comparison rather than two transcendentals.
+		core::Vector2 Unrotated(const DrawCommand &command, const core::Vector2 &point) {
+			if (command.Rotation == 0.0f) {
+				return point;
+			}
+
+			const core::Vector2 pivot{
+				(command.Bounds.Min.X + command.Bounds.Max.X) * 0.5f,
+				(command.Bounds.Min.Y + command.Bounds.Max.Y) * 0.5f,
+			};
+
+			// **Negated, because this undoes the rotation rather than applying
+			// it.** Degrees on the property and radians in the arithmetic, for
+			// `InterfaceMesh::TurnOf`'s reason — the two must agree about the
+			// sign or a rotated button is clickable in its mirror image.
+			constexpr float TO_RADIANS = 3.14159265f / 180.0f;
+			const float angle = -command.Rotation * TO_RADIANS;
+			const float sine = std::sin(angle);
+			const float cosine = std::cos(angle);
+
+			const float x = point.X - pivot.X;
+			const float y = point.Y - pivot.Y;
+
+			return core::Vector2{
+				pivot.X + x * cosine - y * sine,
+				pivot.Y + x * sine + y * cosine,
+			};
+		}
+	}
 
 	namespace {
 		using core::Vector2;
@@ -50,7 +88,24 @@ namespace engine::gui {
 			// out of its parent still has a rectangle — `Resolved` keeps it
 			// deliberately — and clicking where it would have been must not
 			// find it.
-			if (!command.Bounds.Contains(point) || !command.Clip.Contains(point)) {
+			// **The point is turned into the element's own space, not the
+			// rectangle into the screen's.** A rotated rectangle is not a
+			// rectangle and testing one needs a polygon; rotating the *point*
+			// back by the same angle makes the test the axis-aligned one it
+			// already was, exactly.
+			//
+			// This was `D00025`: `Bounds` is the unrotated rectangle and
+			// `Rotation` sat beside it unread, so a rotated button drew in one
+			// place and answered a pointer in another — the kind of bug people
+			// file twice, once against the drawing and once against the input.
+			//
+			// **The clip is deliberately not rotated.** A clip is a scissor
+			// rectangle and a scissor is axis-aligned on every backend there is,
+			// so an element rotated inside a clipped container is still cut by
+			// an upright rectangle — which is what the painter does and what the
+			// hit test therefore has to agree with.
+			const core::Vector2 local = Unrotated(command, point);
+			if (!command.Bounds.Contains(local) || !command.Clip.Contains(point)) {
 				continue;
 			}
 

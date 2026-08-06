@@ -23,11 +23,20 @@
 // a headless test asserts. So the backend draws at `Resolved::TextSize` and
 // does not second-guess it.
 //
-// **`AutomaticSize` measures children and never text.** A container grows to
-// hold what is in it; a label does not grow to hold its string, because that is
-// the measurement above and being wrong about a container's size by a few
-// pixels is visible in a way that being wrong about a fitted label is not.
-// Filed as `D00021`.
+// **`AutomaticSize` measures children and never text**, and the second half of
+// that sentence follows from the first. A container grows to hold what is in
+// it — a stack to the sum of its rows, a grid to its lines, a free container to
+// the far edge of the furthest child. A *label* does not grow to hold its
+// string, because the only measurement available is the estimate above, and a
+// box sized to an estimate of the text inside it is a box the text spills out
+// of. That is worse than the box the author typed.
+//
+// Refused rather than approximated, which also rules out the failure that would
+// otherwise be silent: a `TextLabel` has no children, so an implementation that
+// measured children and did not notice the text would collapse every labelled
+// element the property was set on to nothing at all. `D00021` closed the
+// container half; the text half needs *shared* metrics rather than merely real
+// ones, and the entry says why.
 //
 // @tier L7 · shared
 

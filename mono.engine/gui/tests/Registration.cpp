@@ -22,6 +22,8 @@ using engine::core::Name;
 using engine::ecs::Classes;
 using engine::ecs::ClassId;
 using engine::ecs::Components;
+using engine::ecs::Entity;
+using engine::ecs::Store;
 using engine::ecs::TypeDescriptor;
 
 using namespace engine::gui;
@@ -109,7 +111,7 @@ TEST_CASE("a fully populated Label round-trips through its serialiser", "[gui][r
 	// a default-valued component passes whatever the serialiser forgot, which
 	// is exactly the bug `scene::WriteVisuals` records having shipped twice.
 	Label written;
-	written.Text = Name("Hello, cave");
+	written.Text = "Hello, cave";
 	written.Color = engine::core::Color3{0.1f, 0.2f, 0.3f};
 	written.Transparency = 0.25f;
 	written.Size = 37;
@@ -189,7 +191,7 @@ TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {
 	// restored a text box mid-edit would be restoring a session, and a replica
 	// that received one would move the local player's caret.
 	Entry written;
-	written.PlaceholderText = Name("type here");
+	written.PlaceholderText = "type here";
 	written.CursorPosition = 4;
 	written.SelectionStart = 2;
 
@@ -205,4 +207,64 @@ TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {
 	CHECK(read.PlaceholderText == written.PlaceholderText);
 	CHECK(read.CursorPosition == -1);
 	CHECK(read.SelectionStart == -1);
+}
+
+TEST_CASE("writing text every frame interns nothing", "[gui][registration]") {
+	// **`D00020` closed, and this is the case that says so in the only terms
+	// that matter.** `Label::Text` was a `core::Name`, and `core::Name` never
+	// releases: `label.Text = tostring(score)` at sixty hertz grew the
+	// process-wide registry forever and took its mutex inside the frame loop to
+	// do it. A score counter is the first thing anybody writes, so the leak was
+	// not exotic.
+	//
+	// Counted rather than reasoned about. A thousand distinct strings through
+	// the property surface — the same path a script takes — and the registry
+	// must not have moved at all.
+	RegisterGuiClasses();
+
+	Store store("gui_registration.owned_text");
+	const Entity label = store.CreateInstance(GuiClass("TextLabel"), "Score");
+
+	// One write first, so any interning the *path* does — the property name,
+	// the class name, a lazily built table — has already happened and is not
+	// counted against the text.
+	const std::string first = "warm";
+	REQUIRE(store.SetProperty(label, Name("Text"), &first, sizeof(first)));
+
+	const size_t before = Name::Count();
+
+	for (int frame = 0; frame < 1000; frame++) {
+		const std::string value = "Score: " + std::to_string(frame);
+		REQUIRE(store.SetProperty(label, Name("Text"), &value, sizeof(value)));
+	}
+
+	CHECK(Name::Count() == before);
+
+	// And the last one is what the component holds, so the writes were real
+	// rather than being refused a thousand times in a row.
+	const Label *state = store.Get<Label>(label);
+	REQUIRE(state != nullptr);
+	CHECK(state->Text == "Score: 999");
+}
+
+TEST_CASE("an image name still interns, and should", "[gui][registration]") {
+	// **The other half of the split, pinned so it cannot drift.** An asset id
+	// is one of the bounded set of things a game shipped, so interning it is
+	// what makes it an integer comparison everywhere downstream — the same trade
+	// `Material` and every class name make. A change that converted every string
+	// in this module to owned storage would pass the case above and quietly cost
+	// this.
+	RegisterGuiClasses();
+
+	Store store("gui_registration.interned_image");
+	const Entity picture = store.CreateInstance(GuiClass("ImageLabel"), "Wall");
+
+	const Name warm("rbxasset://textures/warm");
+	REQUIRE(store.SetProperty(picture, Name("Image"), &warm, sizeof(warm)));
+
+	const size_t before = Name::Count();
+	const Name fresh("rbxasset://textures/a-name-no-other-case-here-uses");
+	REQUIRE(store.SetProperty(picture, Name("Image"), &fresh, sizeof(fresh)));
+
+	CHECK(Name::Count() > before);
 }

@@ -31,11 +31,35 @@ namespace engine::render {
 		}
 	}
 
+	InterfaceMesh::Rotation InterfaceMesh::TurnOf(const gui::DrawCommand &command) {
+	Rotation turn;
+		turn.Pivot = core::Vector2{
+			(command.Bounds.Min.X + command.Bounds.Max.X) * 0.5f,
+			(command.Bounds.Min.Y + command.Bounds.Max.Y) * 0.5f,
+		};
+
+		if (command.Rotation == 0.0f) {
+			return turn;
+		}
+
+		// **Degrees on the wire, radians in the arithmetic.**
+		// `Element::Rotation` is degrees because that is what a Roblox
+		// author types, and converting at each use is how one of them ends
+		// up missing the factor.
+		constexpr float TO_RADIANS = 3.14159265f / 180.0f;
+		const float angle = command.Rotation * TO_RADIANS;
+		turn.Sine = std::sin(angle);
+		turn.Cosine = std::cos(angle);
+		return turn;
+	}
+
 	Vector2 InterfaceMesh::WhiteUV(const GlyphAtlas &atlas) {
 		return atlas.WhiteTexel();
 	}
 
-	void InterfaceMesh::Push(const Rect &bounds, const Rect &uv, uint32_t colour) {
+	void InterfaceMesh::Push(
+		const Rect &bounds, const Rect &uv, uint32_t colour, const Rotation &turn
+	) {
 		// **Sixteen-bit indices, so a quad past 65 532 vertices is dropped
 		// rather than wrapped.** Wrapping would draw a triangle between three
 		// unrelated corners of the interface — a stripe across the screen that
@@ -60,10 +84,33 @@ namespace engine::render {
 			VertexData.push_back(made);
 		};
 
-		vertex(bounds.Min.X, bounds.Min.Y, uv.Min.X, uv.Min.Y);
-		vertex(bounds.Max.X, bounds.Min.Y, uv.Max.X, uv.Min.Y);
-		vertex(bounds.Max.X, bounds.Max.Y, uv.Max.X, uv.Max.Y);
-		vertex(bounds.Min.X, bounds.Max.Y, uv.Min.X, uv.Max.Y);
+		// **Turned about the element's own centre, not the quad's.** A glyph
+		// inside a rotated label rotates *with the label* — around the label's
+		// middle — and a per-quad rotation would spin every letter on the spot
+		// while leaving the run in a straight line, which is a distinctive and
+		// completely wrong look. That is why the pivot is passed in rather than
+		// derived from `bounds` here.
+		const auto placed = [&](float x, float y, float u, float v) {
+			if (turn.Sine == 0.0f && turn.Cosine == 1.0f) {
+				vertex(x, y, u, v);
+				return;
+			}
+
+			const float localX = x - turn.Pivot.X;
+			const float localY = y - turn.Pivot.Y;
+
+			vertex(
+				turn.Pivot.X + localX * turn.Cosine - localY * turn.Sine,
+				turn.Pivot.Y + localX * turn.Sine + localY * turn.Cosine,
+				u,
+				v
+			);
+		};
+
+		placed(bounds.Min.X, bounds.Min.Y, uv.Min.X, uv.Min.Y);
+		placed(bounds.Max.X, bounds.Min.Y, uv.Max.X, uv.Min.Y);
+		placed(bounds.Max.X, bounds.Max.Y, uv.Max.X, uv.Max.Y);
+		placed(bounds.Min.X, bounds.Max.Y, uv.Min.X, uv.Max.Y);
 
 		// Two triangles, wound the same way as everything else this renderer
 		// submits. A quad wound the other way is invisible under back-face
@@ -105,6 +152,7 @@ namespace engine::render {
 			}
 
 			const uint32_t colour = Packed(command);
+			const InterfaceMesh::Rotation turn = TurnOf(command);
 
 			switch (command.Kind) {
 			case gui::DrawKind::Rectangle:
@@ -115,7 +163,7 @@ namespace engine::render {
 				// than being tessellated into a fan whose segment count nobody
 				// chose. Until that shader exists a corner draws square, which
 				// is visibly plain rather than wrong.
-				Push(command.Bounds, solid, colour);
+				Push(command.Bounds, solid, colour, turn);
 				break;
 
 			case gui::DrawKind::Outline: {
@@ -126,8 +174,8 @@ namespace engine::render {
 				const float thickness = std::max(command.Thickness, 1.0f);
 				const Rect &box = command.Bounds;
 
-				Push(Rect{box.Min, Vector2{box.Max.X, box.Min.Y + thickness}}, solid, colour);
-				Push(Rect{Vector2{box.Min.X, box.Max.Y - thickness}, box.Max}, solid, colour);
+				Push(Rect{box.Min, Vector2{box.Max.X, box.Min.Y + thickness}}, solid, colour, turn);
+				Push(Rect{Vector2{box.Min.X, box.Max.Y - thickness}, box.Max}, solid, colour, turn);
 				Push(
 					Rect{
 						Vector2{box.Min.X, box.Min.Y + thickness},
@@ -135,7 +183,7 @@ namespace engine::render {
 					},
 					solid,
 					colour
-				);
+				, turn);
 				Push(
 					Rect{
 						Vector2{box.Max.X - thickness, box.Min.Y + thickness},
@@ -143,7 +191,7 @@ namespace engine::render {
 					},
 					solid,
 					colour
-				);
+				, turn);
 				break;
 			}
 
@@ -155,7 +203,7 @@ namespace engine::render {
 				// `gui::DrawCommand::Image` being a content name says it must
 				// not. The batch carries the name; the backend that resolved it
 				// has the size.
-				Push(command.Bounds, Rect{Vector2{0.0f, 0.0f}, Vector2{1.0f, 1.0f}}, colour);
+				Push(command.Bounds, Rect{Vector2{0.0f, 0.0f}, Vector2{1.0f, 1.0f}}, colour, turn);
 				break;
 
 			case gui::DrawKind::Text: {
@@ -166,7 +214,7 @@ namespace engine::render {
 					break;
 				}
 
-				const std::string_view text = command.Text.Text();
+				const std::string_view text = command.Text;
 				const Typeface face = Typeface::Interface;
 
 				// Placed from the top-left of `Bounds`, on the baseline.
@@ -211,7 +259,7 @@ namespace engine::render {
 								}
 							},
 							colour
-						);
+						, turn);
 					}
 
 					penX += glyph->Advance;

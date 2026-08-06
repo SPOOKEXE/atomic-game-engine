@@ -979,6 +979,16 @@ namespace client {
 			request.Pressed = InterfaceRouter.Pressed();
 
 			Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+				// **Before the layout, and that order is the whole of it.** A
+				// `SurfaceGui` sized in pixels-per-stud and a `BillboardGui`
+				// sized in studs both need numbers `gui` cannot reach — the
+				// adornee's stud extent and the live camera's distance — so
+				// this resolves them into `gui::SpatialCanvas` and the layout
+				// reads that instead of the authored pixels. Running it *after*
+				// would draw every billboard at the previous frame's size,
+				// which on one a player is walking towards is a visible lag on
+				// everything inside it.
+				engine::render::ResolveSpatialCanvases(store, request.Display);
 				engine::gui::Layout(store, request.Display);
 				InterfaceList.Rebuild(store, request);
 			});

@@ -140,6 +140,8 @@ namespace engine::game {
 		case PropertyType::Name:
 		case PropertyType::Enum:
 			return store.GetProperty(instance, descriptor, &out.Name, sizeof(out.Name));
+		case PropertyType::String:
+			return store.GetProperty(instance, descriptor, &out.String, sizeof(out.String));
 		case PropertyType::Reference:
 			return store.GetProperty(instance, descriptor, &out.Reference, sizeof(out.Reference));
 		case PropertyType::Vector3:
@@ -187,6 +189,8 @@ namespace engine::game {
 			return store.SetProperty(instance, descriptor, &value.Double, sizeof(value.Double));
 		case PropertyType::Name:
 			return store.SetProperty(instance, descriptor, &value.Name, sizeof(value.Name));
+		case PropertyType::String:
+			return store.SetProperty(instance, descriptor, &value.String, sizeof(value.String));
 		case PropertyType::Enum:
 			// **Checked here as well as at the binding.** A game file is
 			// text somebody could have edited, so `Material` reading
@@ -235,6 +239,8 @@ namespace engine::game {
 		case PropertyType::Name:
 		case PropertyType::Enum:
 			return value.Name.IsValid() ? std::string(value.Name.Text()) : std::string{};
+		case PropertyType::String:
+			return value.String;
 		case PropertyType::Vector3:
 			return Number(value.Vector3.X) + ", " + Number(value.Vector3.Y) + ", " + Number(value.Vector3.Z);
 		case PropertyType::Color3:
@@ -333,6 +339,13 @@ namespace engine::game {
 			out.Name = text.empty() ? core::Name{} : core::Name(text);
 			return true;
 		}
+
+		case PropertyType::String:
+			// Untrimmed for the same reason and one more: this is the type text
+			// a *person* typed lands in, so the spaces are theirs. Nothing is
+			// interned, which is the whole difference.
+			out.String = std::string(text);
+			return true;
 
 		case PropertyType::Vector3: {
 			float parts[3]{};
@@ -440,6 +453,8 @@ namespace engine::game {
 		case PropertyType::Name:
 		case PropertyType::Enum:
 			return left.Name == right.Name;
+		case PropertyType::String:
+			return left.String == right.String;
 		case PropertyType::Reference:
 			return left.Reference == right.Reference;
 		case PropertyType::Vector3:
@@ -486,6 +501,13 @@ namespace engine::game {
 		case PropertyType::Double:
 			return "double";
 		case PropertyType::Name:
+		case PropertyType::String:
+			// **Both, deliberately.** Whether the engine interns a string or
+			// owns it is a storage decision; a file holds text either way, and a
+			// tag that distinguished them would make moving one property from
+			// one to the other a format break for no reader's benefit. The
+			// mismatch check in `Game.cpp` compares tags rather than enum
+			// members so that stays true.
 			return "string";
 		case PropertyType::Enum:
 			return "enum";

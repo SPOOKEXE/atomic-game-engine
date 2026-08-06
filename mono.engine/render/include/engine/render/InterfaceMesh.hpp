@@ -128,7 +128,25 @@ namespace engine::render {
 		static core::Vector2 WhiteUV(const GlyphAtlas &atlas);
 
 	  private:
-		void Push(const core::Rect &bounds, const core::Rect &uv, uint32_t colour);
+		// One element's rotation, resolved once per command.
+		//
+		// **Sine and cosine computed once rather than per corner**, and the
+		// pivot is the *element's* centre rather than each quad's — a glyph
+		// inside a rotated label turns with the label, and a per-quad pivot
+		// would spin every letter on the spot while leaving the run in a
+		// straight line.
+		struct Rotation {
+			core::Vector2 Pivot;
+			float Sine = 0.0f;
+			float Cosine = 1.0f;
+		};
+
+		// The rotation one command asks for, resolved once.
+		static Rotation TurnOf(const gui::DrawCommand &command);
+
+		void Push(
+			const core::Rect &bounds, const core::Rect &uv, uint32_t colour, const Rotation &turn
+		);
 
 		std::vector<InterfaceVertex> VertexData;
 		std::vector<uint16_t> IndexData;

@@ -93,6 +93,23 @@ namespace engine::gui {
 			return Fold(running, static_cast<uint64_t>(value.Id()));
 		}
 
+		// **Every byte, because an owned string has no id to stand in for it.**
+		// That is the cost of `Label::Text` no longer interning, and it is the
+		// right one to pay here: this hash is what stops the list being rebuilt,
+		// and a label whose text changed by one character has to be seen to have
+		// changed. Folding the length alone would keep a stale rectangle on
+		// screen for a score that went from 19 to 91.
+		//
+		// The length is folded first so that "ab" and "a" + "b" in adjacent
+		// fields cannot collide.
+		uint64_t Fold(uint64_t running, const std::string &value) {
+			running = Fold(running, static_cast<uint64_t>(value.size()));
+			for (const char letter : value) {
+				running = Fold(running, static_cast<uint64_t>(static_cast<unsigned char>(letter)));
+			}
+			return running;
+		}
+
 		uint64_t Fold(uint64_t running, Entity value) {
 			return Fold(running, static_cast<uint64_t>(value.Id));
 		}
@@ -533,19 +550,19 @@ namespace engine::gui {
 				// placeholder's colour. One command either way, because a
 				// backend drawing "the text" should not have to know which of
 				// the two strings it is.
-				core::Name text = label->Text;
+				const std::string *text = &label->Text;
 				Color3 colour = label->Color;
 
 				if (const Entry *entry = store.Get<Entry>(instance);
-					entry != nullptr && text.Text().empty()) {
-					text = entry->PlaceholderText;
+					entry != nullptr && text->empty()) {
+					text = &entry->PlaceholderText;
 					colour = entry->PlaceholderColor;
 				}
 
-				if (text.IsValid() && !text.Text().empty() && label->Transparency < 1.0f) {
+				if (!text->empty() && label->Transparency < 1.0f) {
 					DrawCommand run = base;
 					run.Kind = DrawKind::Text;
-					run.Text = text;
+					run.Text = *text;
 					run.Tint = colour;
 					run.Transparency = label->Transparency;
 					run.TextSize = resolved.TextSize;

@@ -390,7 +390,7 @@ TEST_CASE("scaled text shrinks to fit and never reaches zero", "[gui][layout]") 
 	world.Data.Set(label, element);
 
 	Label text;
-	text.Text = engine::core::Name("a rather long string indeed");
+	text.Text = "a rather long string indeed";
 	text.Size = 48;
 	text.Scaled = true;
 	world.Data.Set(label, text);
@@ -647,4 +647,302 @@ TEST_CASE("the container names are the ones scene registers", "[gui][layout]") {
 	CHECK(WORKSPACE == "Workspace");
 	CHECK(STARTER_GUI == "StarterGui");
 	CHECK(PLAYER_GUI == "PlayerGui");
+}
+
+// `AutomaticSize`, which closes `D00021`.
+//
+// **The reopen trigger it was filed with was "the first UI that wants a list to
+// fit its rows"**, so that is the first case below and the shape the rest are
+// arranged around. The property has been declared, saved and bound since the
+// tree went in with nothing reading it; these are the cases that make it mean
+// something, and they fail if it stops working rather than if it stops
+// compiling.
+
+TEST_CASE("a container grows to fit the rows stacked inside it", "[gui][layout][automatic]") {
+	// The case the entry names. A menu is a frame full of buttons and its height
+	// is whatever the buttons come to — an author should not have to keep a
+	// literal in sync with how many rows there are.
+	World world("gui_layout.automatic_list");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity menu = world.Make("Frame", screen);
+
+	Element frame;
+	frame.Size = UDim2{0.0f, 200.0f, 0.0f, 0.0f};
+	frame.Automatic = AutomaticSize::Y;
+	world.Data.Set(menu, frame);
+
+	ListLayout list;
+	list.Direction = FillDirection::Vertical;
+	list.Padding = UDim{0.0f, 8.0f};
+	world.Data.Set(world.Make("UIListLayout", menu), list);
+
+	for (int index = 0; index < 3; index++) {
+		Element row;
+		row.Size = UDim2{1.0f, 0.0f, 0.0f, 30.0f};
+		world.Data.Set(world.Make("TextButton", menu), row);
+	}
+
+	Layout(world.Data, world.Display);
+
+	// Three thirty-pixel rows and the two gaps *between* them — not three gaps,
+	// which is the off-by-one every stack layout gets wrong once.
+	CHECK(world.Where(menu).AbsoluteSize.Y == Approx(3.0f * 30.0f + 2.0f * 8.0f));
+
+	// **The authored axis is untouched.** `AutomaticSize::Y` is one axis, and a
+	// container that also collapsed its width would be obeying a property the
+	// author did not set.
+	CHECK(world.Where(menu).AbsoluteSize.X == Approx(200.0f));
+}
+
+TEST_CASE("a scale-sized child contributes nothing to the axis it is inside", "[gui][layout][automatic]") {
+	// **The circularity, and the one decision this feature cannot avoid making.**
+	// A child asking to be as wide as the thing whose width it is deciding has
+	// no fixed point. Roblox resolves the scale against zero; so does this, so
+	// the child measures as empty and then fills the grown parent once placed.
+	//
+	// Asserting both halves, because either alone is satisfied by a bug: a
+	// container that grew to 800 took the screen's width by mistake, and a child
+	// left at zero never got the second resolve.
+	World world("gui_layout.automatic_circular");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = world.Make("Frame", screen);
+
+	Element frame;
+	frame.Size = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	frame.Automatic = AutomaticSize::XY;
+	world.Data.Set(box, frame);
+
+	const Entity wide = world.Make("Frame", box);
+	Element child;
+	child.Size = UDim2{1.0f, 0.0f, 0.0f, 40.0f};
+	world.Data.Set(wide, child);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(box).AbsoluteSize.X == Approx(0.0f));
+	CHECK(world.Where(box).AbsoluteSize.Y == Approx(40.0f));
+	CHECK(world.Where(wide).AbsoluteSize.X == Approx(0.0f));
+}
+
+TEST_CASE("an automatic container grows to the far edge of a free child", "[gui][layout][automatic]") {
+	// With no list and no grid, children sit where their own `UDim2` puts them,
+	// so the content is a bounding box rather than a sum.
+	//
+	// **The near edge is deliberately ignored.** The second child hangs off the
+	// top-left at a negative offset, and the container does not move its origin
+	// to swallow it — this is a growth rule, not a reflow, and a parent that
+	// shifted under its children would drag everything beside it.
+	World world("gui_layout.automatic_free");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = world.Make("Frame", screen);
+
+	Element frame;
+	frame.Size = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	frame.Automatic = AutomaticSize::XY;
+	world.Data.Set(box, frame);
+
+	Element far;
+	far.Position = UDim2{0.0f, 60.0f, 0.0f, 20.0f};
+	far.Size = UDim2{0.0f, 40.0f, 0.0f, 10.0f};
+	world.Data.Set(world.Make("Frame", box), far);
+
+	Element behind;
+	behind.Position = UDim2{0.0f, -25.0f, 0.0f, -25.0f};
+	behind.Size = UDim2{0.0f, 5.0f, 0.0f, 5.0f};
+	world.Data.Set(world.Make("Frame", box), behind);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(box).AbsoluteSize.X == Approx(100.0f));
+	CHECK(world.Where(box).AbsoluteSize.Y == Approx(30.0f));
+}
+
+TEST_CASE("padding is added back to what an automatic container grew to", "[gui][layout][automatic]") {
+	// **Both halves, which is what makes this more than an arithmetic check.**
+	// The padding comes off the basis the child resolves against *and* goes back
+	// onto the extent — an implementation that did one and not the other is off
+	// by exactly the padding, and looks right on every case where the padding is
+	// zero.
+	World world("gui_layout.automatic_padding");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = world.Make("Frame", screen);
+
+	Element frame;
+	frame.Size = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	frame.Automatic = AutomaticSize::XY;
+	world.Data.Set(box, frame);
+
+	Padding inset;
+	inset.Left = UDim{0.0f, 4.0f};
+	inset.Right = UDim{0.0f, 6.0f};
+	inset.Top = UDim{0.0f, 2.0f};
+	inset.Bottom = UDim{0.0f, 8.0f};
+	world.Data.Set(world.Make("UIPadding", box), inset);
+
+	Element child;
+	child.Size = UDim2{0.0f, 50.0f, 0.0f, 20.0f};
+	const Entity inner = world.Make("Frame", box);
+	world.Data.Set(inner, child);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(box).AbsoluteSize.X == Approx(50.0f + 4.0f + 6.0f));
+	CHECK(world.Where(box).AbsoluteSize.Y == Approx(20.0f + 2.0f + 8.0f));
+
+	// And the child sits inside the padding rather than at the container's own
+	// corner, which is the half that proves the basis was reduced.
+	CHECK(world.Where(inner).AbsolutePosition.X == Approx(world.Where(box).AbsolutePosition.X + 4.0f));
+	CHECK(world.Where(inner).AbsolutePosition.Y == Approx(world.Where(box).AbsolutePosition.Y + 2.0f));
+}
+
+TEST_CASE("a size limit bounds what an automatic container grows to", "[gui][layout][automatic]") {
+	// The growth happens before the constraint, so a `UISizeConstraint` on an
+	// automatic container is a ceiling on the content — which is the only
+	// reading under which putting both on one element means anything.
+	World world("gui_layout.automatic_limits");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = world.Make("Frame", screen);
+
+	Element frame;
+	frame.Size = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	frame.Automatic = AutomaticSize::Y;
+	world.Data.Set(box, frame);
+
+	SizeLimits limits;
+	limits.Max = Vector2{10000.0f, 100.0f};
+	world.Data.Set(world.Make("UISizeConstraint", box), limits);
+
+	Element tall;
+	tall.Size = UDim2{0.0f, 50.0f, 0.0f, 400.0f};
+	world.Data.Set(world.Make("Frame", box), tall);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(box).AbsoluteSize.Y == Approx(100.0f));
+}
+
+TEST_CASE("an element that draws text keeps the size it was given", "[gui][layout][automatic]") {
+	// **The refusal, and it is the case worth having most.** This module
+	// measures a string with `AVERAGE_ADVANCE`, which is an estimate on purpose
+	// — so a label grown to that estimate is a box its own text spills out of.
+	//
+	// The alternative failure is worse and is what this branch exists to stop: a
+	// `TextLabel` has no children, so an implementation that measured children
+	// and did not notice the text would collapse every labelled element an
+	// author set the property on to nothing at all.
+	World world("gui_layout.automatic_text");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+
+	Element element;
+	element.Size = UDim2{0.0f, 120.0f, 0.0f, 24.0f};
+	element.Automatic = AutomaticSize::XY;
+	world.Data.Set(label, element);
+
+	Label text;
+	text.Text = "Score: 0";
+	world.Data.Set(label, text);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(label).AbsoluteSize.X == Approx(120.0f));
+	CHECK(world.Where(label).AbsoluteSize.Y == Approx(24.0f));
+}
+
+TEST_CASE("automatic sizing nests", "[gui][layout][automatic]") {
+	// **The property that makes this a second phase rather than a special
+	// case.** The outer container's height is a function of the inner one's,
+	// which is a function of the rows — so the measure has to recurse, and an
+	// implementation that measured only its immediate children reports the
+	// inner frame's authored zero and collapses.
+	World world("gui_layout.automatic_nested");
+	const Entity screen = world.Make("ScreenGui");
+
+	const Entity outer = world.Make("Frame", screen);
+	Element outerFrame;
+	outerFrame.Size = UDim2{0.0f, 200.0f, 0.0f, 0.0f};
+	outerFrame.Automatic = AutomaticSize::Y;
+	world.Data.Set(outer, outerFrame);
+
+	const Entity inner = world.Make("Frame", outer);
+	Element innerFrame;
+	innerFrame.Size = UDim2{0.0f, 200.0f, 0.0f, 0.0f};
+	innerFrame.Automatic = AutomaticSize::Y;
+	world.Data.Set(inner, innerFrame);
+
+	ListLayout list;
+	list.Direction = FillDirection::Vertical;
+	world.Data.Set(world.Make("UIListLayout", inner), list);
+
+	for (int index = 0; index < 4; index++) {
+		Element row;
+		row.Size = UDim2{1.0f, 0.0f, 0.0f, 25.0f};
+		world.Data.Set(world.Make("TextButton", inner), row);
+	}
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(inner).AbsoluteSize.Y == Approx(100.0f));
+	CHECK(world.Where(outer).AbsoluteSize.Y == Approx(100.0f));
+}
+
+TEST_CASE("an automatic container grows to its grid's rows", "[gui][layout][automatic]") {
+	// A grid decides both axes of every cell, so the extent is a count rather
+	// than a measurement — seven cells three to a line is three lines, the last
+	// of them short.
+	World world("gui_layout.automatic_grid");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = world.Make("Frame", screen);
+
+	Element frame;
+	frame.Size = UDim2{0.0f, 300.0f, 0.0f, 0.0f};
+	frame.Automatic = AutomaticSize::Y;
+	world.Data.Set(box, frame);
+
+	GridLayout grid;
+	grid.CellSize = UDim2{0.0f, 80.0f, 0.0f, 40.0f};
+	grid.CellPadding = UDim2{0.0f, 10.0f, 0.0f, 10.0f};
+	grid.MaxCells = 3;
+	world.Data.Set(world.Make("UIGridLayout", box), grid);
+
+	for (int index = 0; index < 7; index++) {
+		Element cell;
+		world.Data.Set(world.Make("Frame", box), cell);
+	}
+
+	Layout(world.Data, world.Display);
+
+	// Three rows of forty with two ten-pixel gaps between them.
+	CHECK(world.Where(box).AbsoluteSize.Y == Approx(3.0f * 40.0f + 2.0f * 10.0f));
+}
+
+TEST_CASE("an invisible child is not measured into its parent", "[gui][layout][automatic]") {
+	// `Element::Visible` is a branch the compile stops at, so a hidden row is
+	// not drawn — and a container that still reserved its height would leave a
+	// gap where the author asked for nothing.
+	World world("gui_layout.automatic_hidden");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = world.Make("Frame", screen);
+
+	Element frame;
+	frame.Size = UDim2{0.0f, 200.0f, 0.0f, 0.0f};
+	frame.Automatic = AutomaticSize::Y;
+	world.Data.Set(box, frame);
+
+	ListLayout list;
+	list.Direction = FillDirection::Vertical;
+	world.Data.Set(world.Make("UIListLayout", box), list);
+
+	Element shown;
+	shown.Size = UDim2{1.0f, 0.0f, 0.0f, 30.0f};
+	world.Data.Set(world.Make("Frame", box), shown);
+
+	Element hidden;
+	hidden.Size = UDim2{1.0f, 0.0f, 0.0f, 30.0f};
+	hidden.Visible = false;
+	world.Data.Set(world.Make("Frame", box), hidden);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(box).AbsoluteSize.Y == Approx(30.0f));
 }

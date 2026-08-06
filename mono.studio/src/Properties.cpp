@@ -410,6 +410,19 @@ namespace studio {
 							break;
 						}
 
+						case PropertyType::String:
+							// **The same widget as `Name` and a different
+							// meaning**, which is the whole of the distinction
+							// showing up in the one place a person can see it:
+							// the field is edited character by character, and
+							// each keystroke used to intern a string that never
+							// went away. Typing a sentence into a `Name`
+							// property leaks it a letter at a time.
+							if (TextField("##v", changed.String)) {
+								wrote = true;
+							}
+							break;
+
 						case PropertyType::Reference: {
 							// Read-only for now, and it says so rather than
 							// offering a control that does nothing. Picking a

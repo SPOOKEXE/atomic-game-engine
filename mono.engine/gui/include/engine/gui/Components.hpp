@@ -22,20 +22,25 @@
 // rectangle anywhere else in the engine is the stale-cache bug `scene::Bounds`
 // refuses in as many words.
 //
-// ## Text and image names are `core::Name`, and that has a cost
+// ## Text is owned; an image name is interned
 //
-// `Label::Text`, `Picture::Image` and `Entry::PlaceholderText` intern. That is
-// what makes them `PropertyType::Name` — saved into a game file as text, sent
-// over a wire as text, readable and writable from both bindings, and shown in
-// the properties panel — with no new property type and no new wire form, which
-// is exactly what `ecs::InstanceName` already trades for the same reasons.
+// **The split is what a value *is*, not what it is made of.** `Picture::Image`
+// is an asset id — one of the bounded set of things a game shipped — so it is a
+// `core::Name`, interned once and compared as an integer, exactly as
+// `Material` and a class name are.
 //
-// The cost is real and is stated rather than discovered: **text that changes
-// every frame interns a new string every frame, and `core::Name` never
-// releases one.** A score counter written as `label.Text = tostring(score)` is
-// an unbounded growth in the process-wide registry, plus its mutex on every
-// write. Filed as `D00020`; the fix is a string property type with its own
-// storage, and it is a change to `ecs` rather than to this module.
+// `Label::Text` and `Entry::PlaceholderText` are `std::string`, and that is
+// `D00020` closed. They were `core::Name` too, and the cost was stated in this
+// comment for a version before it was paid: **`core::Name` never releases**, so
+// `label.Text = tostring(score)` at sixty hertz interned a new string every
+// frame, forever, and took the process-wide registry's mutex inside the frame
+// loop to do it. A score counter is the first thing anybody writes.
+//
+// What it costs instead: `Label` and `Entry` are no longer trivially copyable,
+// so both carry a written serialiser — which both already did, because a
+// `core::Name`'s id is process-local and could never have been memcpy'd to a
+// file either. The storage change is therefore paid entirely in `ecs::Column`'s
+// non-trivial path, which has existed since v0.2 and had no user until now.
 //
 // @tier L7 · shared
 
@@ -50,6 +55,7 @@
 #include <engine/gui/Enums.hpp>
 
 #include <cstdint>
+#include <string>
 
 namespace engine::gui {
 
@@ -146,8 +152,9 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Label {
-		// The string. Interned — see the note at the top of this file.
-		core::Name Text;
+		// The string. Owned rather than interned — see the note at the top of
+		// this file, and `ecs::PropertyType::String`.
+		std::string Text;
 
 		// The glyph colour.
 		core::Color3 Color{0.105f, 0.164f, 0.207f};
@@ -281,8 +288,11 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Entry {
-		// Shown when the text is empty. Interned — see the top of this file.
-		core::Name PlaceholderText;
+		// Shown when the text is empty. Owned, like `Label::Text` — a
+		// placeholder is authored rather than chosen from a set, and having
+		// the two strings a text box holds be two different types would be a
+		// distinction with nothing behind it.
+		std::string PlaceholderText;
 
 		// The placeholder's colour.
 		core::Color3 PlaceholderColor{0.69f, 0.69f, 0.69f};
@@ -339,6 +349,31 @@ namespace engine::gui {
 	struct Canvas {
 		// The rectangle this collector's roots lay out inside, in pixels.
 		core::Rect Area;
+	};
+
+	// The pixel canvas a spatial collector was resolved to.
+	//
+	// **The seam `D00022` named, and it is a slot rather than an answer.** A
+	// `SurfaceGui` sized in pixels-per-stud needs the stud extent of the face it
+	// is on, which is `scene::Bounds`; a `BillboardGui`'s scale is against the
+	// screen it is projected onto, which is a fact about a camera and a
+	// viewport. This module is L7 `shared` and links neither, so it declares
+	// where the answer goes and whoever holds both operands writes it —
+	// `render::ResolveSpatialCanvases` is that writer today.
+	//
+	// **Derived, like `Canvas` and `Resolved`.** Nothing authors it, nothing
+	// saves a meaningful value into it and nothing replicates it: a host
+	// recomputes it every frame from the camera it is drawing with, and two
+	// hosts with different viewports are *supposed* to disagree.
+	//
+	// Absent means "nobody resolved one", and `CanvasFor` then falls back to the
+	// authored pixel size — which is the right answer for a headless world, a
+	// test, and a `SurfaceGui` whose sizing mode is `FixedSize` anyway.
+	//
+	// @since v0.8
+	struct SpatialCanvas {
+		// The canvas size in pixels.
+		core::Vector2 Size;
 	};
 
 	// A collector projected onto a face of a part.

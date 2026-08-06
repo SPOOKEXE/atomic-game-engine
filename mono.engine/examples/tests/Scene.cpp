@@ -410,7 +410,7 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	REQUIRE(hint != engine::ecs::NULL_ENTITY);
 	const engine::gui::Label *label = store.Get<engine::gui::Label>(hint);
 	REQUIRE(label != nullptr);
-	CHECK(std::string(label->Text.Text()).find("0 clicks") != std::string::npos);
+	CHECK(label->Text.find("0 clicks") != std::string::npos);
 
 	// **And it actually lays out**, which is a stronger claim than that the tree
 	// exists and is the one containment can break.

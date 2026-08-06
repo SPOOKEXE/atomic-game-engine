@@ -9,6 +9,7 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -938,6 +939,14 @@ namespace studio {
 		size_t commands = 0;
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
+			// **Per panel, because a panel is a canvas with its own camera.**
+			// A billboard is as many pixels across as the viewport it is
+			// projected into makes it, so two panels looking at one world from
+			// two distances are *supposed* to disagree — which is why this is
+			// resolved here rather than once for the world.
+			//
+			// Before `Rebuild`, which runs the layout inside itself.
+			engine::render::ResolveSpatialCanvases(store, request.Display);
 			GuiLists[index].Rebuild(store, request);
 
 			// **Copied out of the router's span before the world is left.**

@@ -64,6 +64,8 @@ namespace {
 			return "double";
 		case PropertyType::Name:
 			return "Name";
+		case PropertyType::String:
+			return "String";
 		case PropertyType::Enum:
 			return "enum";
 		case PropertyType::Reference:
@@ -124,6 +126,12 @@ namespace {
 		case PropertyType::Double:
 			return "number";
 		case PropertyType::Name:
+		case PropertyType::String:
+			// **The same word in both languages, and it should be.** Whether
+			// the engine interns text or owns it is a storage decision an
+			// author has no way to observe from a script — `label.Text` is a
+			// string either way. A declaration file that spelled them
+			// differently would be leaking a C++ concern into a type position.
 			return "string";
 		case PropertyType::Vector3:
 			return "Vector3";
@@ -162,6 +170,12 @@ namespace {
 		case PropertyType::Double:
 			return "number";
 		case PropertyType::Name:
+		case PropertyType::String:
+			// **The same word in both languages, and it should be.** Whether
+			// the engine interns text or owns it is a storage decision an
+			// author has no way to observe from a script — `label.Text` is a
+			// string either way. A declaration file that spelled them
+			// differently would be leaking a C++ concern into a type position.
 			return "string";
 		case PropertyType::Vector3:
 			return "Vector3";

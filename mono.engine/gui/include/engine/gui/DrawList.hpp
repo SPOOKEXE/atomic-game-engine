@@ -30,6 +30,7 @@
 #include <engine/gui/Enums.hpp>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace engine::gui {
@@ -115,7 +116,13 @@ namespace engine::gui {
 		// --- `Text` ----------------------------------------------------------
 
 		// The string.
-		core::Name Text;
+		//
+		// **Owned, which follows from `Label::Text` being owned** and is worth a
+		// word because it makes a `DrawCommand` non-trivial. The list is rebuilt
+		// only when the tree's hash changes — the cache is the whole of
+		// `Compiled` — so this allocates on a rebuild rather than per frame, and
+		// a run short enough for the small-string buffer never allocates at all.
+		std::string Text;
 
 		// The em size to draw at, already fitted and clamped. **A backend uses
 		// this rather than measuring again** — see `Layout.hpp` on why there is

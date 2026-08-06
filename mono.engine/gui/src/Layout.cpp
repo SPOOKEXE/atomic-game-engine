@@ -297,6 +297,31 @@ namespace engine::gui {
 			return found;
 		}
 
+		// What a container's padding takes out of each edge.
+		//
+		// Split out of `ContentArea` because the measure phase needs the same
+		// four numbers and has no `Rect` yet — an automatically sized container
+		// is being asked how big to be, so its rectangle is the answer rather
+		// than the input. One function, so the two phases cannot disagree about
+		// what a scale padding resolves against.
+		struct Insets {
+			float Left = 0.0f;
+			float Right = 0.0f;
+			float Top = 0.0f;
+			float Bottom = 0.0f;
+		};
+
+		Insets InsetsOf(const Padding *padding, const Vector2 &size) {
+			Insets out;
+			if (padding != nullptr) {
+				out.Left = padding->Left.Resolve(size.X);
+				out.Right = padding->Right.Resolve(size.X);
+				out.Top = padding->Top.Resolve(size.Y);
+				out.Bottom = padding->Bottom.Resolve(size.Y);
+			}
+			return out;
+		}
+
 		// The rectangle a container's children are placed inside.
 		//
 		// The container's own rectangle, less its padding, less any scroll
@@ -306,14 +331,13 @@ namespace engine::gui {
 			Vector2 size = own.Size();
 			Vector2 origin = own.Min;
 
-			if (modifiers.Inset != nullptr) {
-				const float left = modifiers.Inset->Left.Resolve(size.X);
-				const float right = modifiers.Inset->Right.Resolve(size.X);
-				const float top = modifiers.Inset->Top.Resolve(size.Y);
-				const float bottom = modifiers.Inset->Bottom.Resolve(size.Y);
-
-				origin = Vector2{origin.X + left, origin.Y + top};
-				size = Vector2{size.X - left - right, size.Y - top - bottom};
+			{
+				const Insets insets = InsetsOf(modifiers.Inset, size);
+				origin = Vector2{origin.X + insets.Left, origin.Y + insets.Top};
+				size = Vector2{
+					size.X - insets.Left - insets.Right,
+					size.Y - insets.Top - insets.Bottom,
+				};
 			}
 
 			if (const Scrolling *scrolling = store.Get<Scrolling>(instance)) {
@@ -373,7 +397,7 @@ namespace engine::gui {
 			int32_t size = label.Size;
 
 			if (label.Scaled) {
-				const size_t characters = std::max<size_t>(label.Text.Text().size(), 1);
+				const size_t characters = std::max<size_t>(label.Text.size(), 1);
 				const float byWidth = box.X / (static_cast<float>(characters) * AVERAGE_ADVANCE);
 				const float byHeight = box.Y / LINE_SPACING;
 
@@ -402,6 +426,160 @@ namespace engine::gui {
 			const Scan &scan
 		);
 
+		Vector2 Measure(
+			const Store &store,
+			Entity instance,
+			const Vector2 &parent,
+			int depth,
+			Scan &scan,
+			std::vector<Entity> &arena
+		);
+
+		// How many cells a grid puts on one line.
+		//
+		// Shared by the placement and by the measure, because a grid that
+		// wrapped at one count while being sized and another while being placed
+		// would produce a container the wrong number of rows tall — which reads
+		// as the last row falling off the bottom rather than as an arithmetic
+		// disagreement between two functions.
+		int32_t CellsPerLine(const GridLayout &layout, float track, float cell, float gap) {
+			if (layout.MaxCells > 0) {
+				return layout.MaxCells;
+			}
+
+			// As many as fit, at least one. Zero would divide by nothing below
+			// and is the value Roblox's own default carries.
+			const float step = cell + gap;
+			const int32_t fits = step > 0.0f ? static_cast<int32_t>((track + gap) / step) : 1;
+			return std::max(fits, 1);
+		}
+
+		// How much room what is inside a container actually takes.
+		//
+		// **The second phase `AutomaticSize` needs, and the only one in this
+		// file.** Everything else here is a single top-down sweep; a container
+		// that grows to its content cannot be, because its size is a function of
+		// its children's sizes and theirs are a function of its.
+		//
+		// Accumulated rather than collected: the extent of a stack is a sum and a
+		// maximum, and of a grid a count — all of them single-pass. So this
+		// measures each child, folds the answer in, and keeps no list, which is
+		// what stops an automatically sized container allocating per frame.
+		//
+		// @param basis  What the children resolve their `UDim2` against — the
+		//        container's own size with the automatic axes already zeroed and
+		//        the padding already taken out.
+		// @return The extent inside the padding. The caller adds it back.
+		Vector2 ContentExtent(
+			const Store &store,
+			const Scan &scan,
+			const Vector2 &basis,
+			int depth,
+			std::vector<Entity> &arena
+		) {
+			// **Marked here, after this node's own child run was appended.**
+			// Measuring a child appends that child's children, and none of those
+			// runs outlive this function — the placement pass measures again with
+			// the final rectangle and produces its own. Without the release the
+			// arena would carry a whole discarded generation per automatic
+			// container per frame.
+			const ArenaScope scope(arena);
+
+			const Modifiers &modifiers = scan.Mods;
+
+			if (modifiers.Grid != nullptr) {
+				// **The cell decides both axes, so no child is measured at all**
+				// — the same reason `RunGrid` does not consult `Measure`. What is
+				// needed is the count, and how the count wraps.
+				const Vector2 cell = modifiers.Grid->CellSize.Resolve(basis);
+				const Vector2 gap = modifiers.Grid->CellPadding.Resolve(basis);
+				const bool horizontal = modifiers.Grid->Direction == FillDirection::Horizontal;
+
+				int32_t counted = 0;
+				for (uint32_t index = 0; index < scan.ChildCount; index++) {
+					const Element *child = store.Get<Element>(arena[scan.ChildFirst + index]);
+					if (child != nullptr && child->Visible) {
+						counted++;
+					}
+				}
+
+				if (counted == 0) {
+					return Vector2::Zero;
+				}
+
+				const int32_t perLine = CellsPerLine(
+					*modifiers.Grid, horizontal ? basis.X : basis.Y, horizontal ? cell.X : cell.Y,
+					horizontal ? gap.X : gap.Y
+				);
+				const int32_t onLine = std::min(counted, perLine);
+				const int32_t lines = (counted + perLine - 1) / perLine;
+
+				const float along =
+					static_cast<float>(onLine) * ((horizontal ? cell.X : cell.Y) + (horizontal ? gap.X : gap.Y)) -
+					(horizontal ? gap.X : gap.Y);
+				const float across =
+					static_cast<float>(lines) * ((horizontal ? cell.Y : cell.X) + (horizontal ? gap.Y : gap.X)) -
+					(horizontal ? gap.Y : gap.X);
+
+				return horizontal ? Vector2{along, across} : Vector2{across, along};
+			}
+
+			const bool stacked = modifiers.List != nullptr;
+			const bool horizontal = stacked && modifiers.List->Direction == FillDirection::Horizontal;
+
+			float along = 0.0f;
+			float across = 0.0f;
+			uint32_t counted = 0;
+
+			// Free positioning accumulates a bounding box instead, which is what
+			// the two locals above hold when `stacked` is false.
+			for (uint32_t index = 0; index < scan.ChildCount; index++) {
+				const Entity node = arena[scan.ChildFirst + index];
+
+				const Element *child = store.Get<Element>(node);
+				if (child == nullptr || !child->Visible) {
+					continue;
+				}
+
+				Scan found;
+				const Vector2 size = Measure(store, node, basis, depth, found, arena);
+
+				if (stacked) {
+					along += horizontal ? size.X : size.Y;
+					across = std::max(across, horizontal ? size.Y : size.X);
+					counted++;
+					continue;
+				}
+
+				// **The far edge, not the size**, because a child placed at an
+				// offset needs room for the offset as well — and the near edge is
+				// deliberately ignored: a child at a negative position hangs out
+				// of its parent rather than pushing the parent's origin, which is
+				// what keeps this a growth rule and not a reflow.
+				const Vector2 anchored = child->Position.Resolve(basis);
+				along = std::max(along, anchored.X + (1.0f - child->AnchorPoint.X) * size.X);
+				across = std::max(across, anchored.Y + (1.0f - child->AnchorPoint.Y) * size.Y);
+			}
+
+			if (!stacked) {
+				return Vector2{std::max(along, 0.0f), std::max(across, 0.0f)};
+			}
+
+			if (counted > 1) {
+				const float gap = modifiers.List->Padding.Resolve(horizontal ? basis.X : basis.Y);
+				along += gap * static_cast<float>(counted - 1);
+			}
+
+			return horizontal ? Vector2{along, across} : Vector2{across, along};
+		}
+
+		bool Grows(AutomaticSize automatic, bool horizontal) {
+			if (automatic == AutomaticSize::XY) {
+				return true;
+			}
+			return automatic == (horizontal ? AutomaticSize::X : AutomaticSize::Y);
+		}
+
 		// Resolves one node's size against the rectangle it sits in.
 		//
 		// Split from `Place` because a container running a list or a grid layout
@@ -416,6 +594,7 @@ namespace engine::gui {
 			const Store &store,
 			Entity instance,
 			const Vector2 &parent,
+			int depth,
 			Scan &scan,
 			std::vector<Entity> &arena
 		) {
@@ -425,7 +604,59 @@ namespace engine::gui {
 			}
 
 			scan = ScanChildren(store, instance, arena);
-			const Vector2 size = element->Size.Resolve(Basis(element->Constraint, parent));
+			Vector2 size = element->Size.Resolve(Basis(element->Constraint, parent));
+
+			// **Refused on anything that draws text, and that is the rule rather
+			// than an omission.** The content of a `TextLabel` is its string, and
+			// this module measures a string with `AVERAGE_ADVANCE` — an estimate,
+			// deliberately, for the reason `Layout.hpp` gives at length. Growing
+			// a box to an estimate of what goes in it produces a box the text
+			// does not fit, which is the one outcome worse than not growing.
+			//
+			// So a labelled element keeps the size its `UDim2` resolved to.
+			// Silently sizing it to its *children* instead would collapse every
+			// `TextLabel` an author set this on to nothing, which is the failure
+			// mode this branch exists to refuse rather than to risk.
+			const bool textual = store.Get<Label>(instance) != nullptr;
+
+			if (element->Automatic != AutomaticSize::None && !textual && depth < MAXIMUM_DEPTH) {
+				const bool growX = Grows(element->Automatic, true);
+				const bool growY = Grows(element->Automatic, false);
+
+				// **The growing axes are zero for everything inside**, which is
+				// the circularity this feature cannot avoid and Roblox's answer
+				// to it: a child sized `{1, 0}` inside a parent sized by its
+				// content is asking to be as wide as the thing it is deciding the
+				// width of. Resolving that scale against zero makes the child
+				// contribute nothing rather than diverging — so a scale-sized
+				// child in an automatic parent measures as empty here, and then
+				// fills the grown parent when it is placed.
+				const Vector2 own{growX ? 0.0f : size.X, growY ? 0.0f : size.Y};
+
+				const Insets insets = InsetsOf(scan.Mods.Inset, own);
+				const Vector2 inner{
+					own.X - insets.Left - insets.Right,
+					own.Y - insets.Top - insets.Bottom,
+				};
+
+				// **`Scrolling` is not consulted, on purpose.** A scrolling
+				// frame's canvas is larger than the frame by definition, and a
+				// frame that grew to its own canvas would have nothing left to
+				// scroll. Roblox splits the two properties for the same reason.
+				const Vector2 content = ContentExtent(store, scan, inner, depth + 1, arena);
+
+				if (growX) {
+					size.X = std::max(content.X + insets.Left + insets.Right, 0.0f);
+				}
+				if (growY) {
+					size.Y = std::max(content.Y + insets.Top + insets.Bottom, 0.0f);
+				}
+			}
+
+			// After the growth rather than before it, so a `UISizeConstraint` on
+			// an automatic container is a bound on what it grows to — which is
+			// the only reading under which putting both on one element means
+			// anything.
 			return Constrain(size, scan.Mods, parent);
 		}
 
@@ -474,6 +705,7 @@ namespace engine::gui {
 			const Store &store,
 			const Scan &scan,
 			const Vector2 &area,
+			int depth,
 			bool named,
 			std::vector<Item> &items,
 			std::vector<Entity> &arena
@@ -495,7 +727,7 @@ namespace engine::gui {
 				if (named) {
 					item.Label = store.InstanceNameOf(child);
 				}
-				item.Size = Measure(store, child, area, item.Found, arena);
+				item.Size = Measure(store, child, area, depth, item.Found, arena);
 				items.push_back(item);
 			}
 		}
@@ -616,14 +848,9 @@ namespace engine::gui {
 			const float track = horizontal ? span.X : span.Y;
 			const float step = (horizontal ? cell.X : cell.Y) + (horizontal ? gap.X : gap.Y);
 
-			int32_t perLine = layout.MaxCells;
-			if (perLine <= 0) {
-				// As many as fit, at least one. Zero would divide by nothing a
-				// line later and is the value Roblox's own default carries.
-				perLine =
-					step > 0.0f ? static_cast<int32_t>((track + (horizontal ? gap.X : gap.Y)) / step) : 1;
-				perLine = std::max(perLine, 1);
-			}
+			const int32_t perLine = CellsPerLine(
+				layout, track, horizontal ? cell.X : cell.Y, horizontal ? gap.X : gap.Y
+			);
 
 			const bool fromRight =
 				layout.Corner == StartCorner::TopRight || layout.Corner == StartCorner::BottomRight;
@@ -766,7 +993,7 @@ namespace engine::gui {
 			std::vector<Entity> &arena = ChildArena();
 			const ArenaScope scope(arena);
 
-			ChildItems(store, scan, area.Size(), SortsByName(modifiers), items, arena);
+			ChildItems(store, scan, area.Size(), depth, SortsByName(modifiers), items, arena);
 
 			if (modifiers.List != nullptr) {
 				placed += RunList(store, *modifiers.List, items, area, inner, depth + 1, total);
@@ -804,24 +1031,35 @@ namespace engine::gui {
 				return true;
 			}
 
+			// **What a host resolved wins, and its absence is not a failure.**
+			// `SpatialCanvas` is written by whoever holds the camera and the
+			// world — the multiplication `D00022` said belongs to whoever has
+			// both operands — and a world nobody is drawing simply has none. The
+			// authored fallbacks below are then the answer rather than a
+			// degraded one: a `SurfaceGui` in `FixedSize` mode wanted its pixel
+			// size all along, and a headless test asserting a layout wants a
+			// number that does not depend on where a camera happens to be.
+			const SpatialCanvas *resolved = store.Get<SpatialCanvas>(collector);
+
 			if (const Surface *surface = store.Get<Surface>(collector);
 				surface != nullptr && store.IsA(collector, ids.SurfaceGui)) {
-				// **`PixelsPerStud` resolves to the fixed size for now**, and
-				// that is stated rather than silently approximated: the stud
-				// extent of the face comes from the adornee's `Bounds`, which
-				// is `scene`'s component and an edge this module may not have.
-				// Whoever draws a surface gui knows both and is where the
-				// multiplication belongs. Filed as `D00022`.
-				out = Rect{Vector2::Zero, surface->CanvasSize};
+				out = Rect{
+					Vector2::Zero, resolved != nullptr ? resolved->Size : surface->CanvasSize
+				};
 				return true;
 			}
 
 			if (const Billboard *billboard = store.Get<Billboard>(collector);
 				billboard != nullptr && store.IsA(collector, ids.BillboardGui)) {
-				// Offset only. A billboard's scale is against the *screen* it is
-				// projected onto, which is a fact about a camera — so the same
-				// argument as the surface case, and the same answer.
-				out = Rect{Vector2::Zero, Vector2{billboard->Size.X.Offset, billboard->Size.Y.Offset}};
+				// Offset only when nothing resolved one — a billboard's scale is
+				// in studs against the screen it is projected onto, so without a
+				// camera there is no number to multiply it by.
+				out = Rect{
+					Vector2::Zero,
+					resolved != nullptr
+						? resolved->Size
+						: Vector2{billboard->Size.X.Offset, billboard->Size.Y.Offset},
+				};
 				return true;
 			}
 
@@ -923,7 +1161,7 @@ namespace engine::gui {
 				const ArenaScope scope(arena);
 
 				Scan scan;
-				const Vector2 size = Measure(store, root, canvas.Size(), scan, arena);
+				const Vector2 size = Measure(store, root, canvas.Size(), 1, scan, arena);
 				const Vector2 anchored = element->Position.Resolve(canvas.Size());
 				const Vector2 corner{
 					canvas.Min.X + anchored.X - element->AnchorPoint.X * size.X,

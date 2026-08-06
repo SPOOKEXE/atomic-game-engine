@@ -66,6 +66,19 @@ namespace engine::control {
 		// point of this surface is that somebody who has never seen the engine
 		// can read the reply, and `{"X":0,"Y":5,"Z":0}` needs no schema.
 		json ReadProperty(Store &store, ecs::Entity instance, const PropertyDescriptor &property) {
+			// **Before the shared buffer**, because a `PropertyType::String`
+			// getter assigns into its destination rather than filling bytes —
+			// and assigning a `std::string` into uninitialised storage is
+			// undefined behaviour. Both script bindings take the same exception
+			// in the same shape.
+			if (property.Type == PropertyType::String) {
+				std::string text;
+				if (!store.GetProperty(instance, property, &text, sizeof(text))) {
+					return nullptr;
+				}
+				return text;
+			}
+
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 			if (property.Size > sizeof(bytes) ||
 				!store.GetProperty(instance, property, bytes, property.Size)) {
@@ -86,6 +99,9 @@ namespace engine::control {
 			case PropertyType::Name:
 			case PropertyType::Enum:
 				return std::string(reinterpret_cast<const core::Name *>(bytes)->Text());
+			case PropertyType::String:
+				// Never reached — served by the branch above the buffer.
+				return nullptr;
 			case PropertyType::Vector3: {
 				const auto &value = *reinterpret_cast<const core::Vector3 *>(bytes);
 				return json{{"X", value.X}, {"Y", value.Y}, {"Z", value.Z}};
@@ -234,6 +250,21 @@ namespace engine::control {
 			const json &value,
 			std::string &failure
 		) {
+			// The write half of the read path's exception — see `ReadProperty`.
+			if (property.Type == PropertyType::String) {
+				if (!value.is_string()) {
+					failure = "that property takes a string";
+					return false;
+				}
+
+				const std::string text = value.get<std::string>();
+				if (!store.SetProperty(instance, property, &text, sizeof(text))) {
+					failure = "the world refused the write — it may be running or a replica";
+					return false;
+				}
+				return true;
+			}
+
 			// Sized from the descriptor, exactly as the script bindings are, so
 			// this cannot be the place a size mismatch is introduced.
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
@@ -272,6 +303,10 @@ namespace engine::control {
 				*reinterpret_cast<core::Name *>(bytes) = core::Name(text.c_str());
 				break;
 			}
+			case PropertyType::String:
+				// Never reached — served by the branch above the buffer.
+				failure = "a string property is written through its own path";
+				return false;
 			case PropertyType::Vector3:
 				*reinterpret_cast<core::Vector3 *>(bytes) = core::Vector3{
 					number(value.value("X", json(0.0)), 0.0f),

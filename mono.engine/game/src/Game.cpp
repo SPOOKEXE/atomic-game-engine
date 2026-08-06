@@ -331,7 +331,13 @@ namespace engine::game {
 				PropertyType type = descriptor->Type;
 				if (child->HasAttribute("type")) {
 					PropertyType declared = PropertyType::Opaque;
-					if (TypeFromTag(child->Attribute("type"), declared) && declared != descriptor->Type) {
+					// **Compared as tags rather than as enum members.** `Name` and
+					// `String` are both written `string`, because whether the
+					// engine interns text is a storage decision and a file holds
+					// text either way — so moving a property between them must
+					// not turn every saved game into a load error.
+					if (TypeFromTag(child->Attribute("type"), declared) &&
+						TypeTag(declared) != TypeTag(descriptor->Type)) {
 						error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
 								"' is a " + std::string(TypeTag(descriptor->Type)) + " and the file has a " +
 								std::string(TypeTag(declared));

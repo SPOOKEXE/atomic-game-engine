@@ -21,6 +21,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/SpatialCanvas.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>

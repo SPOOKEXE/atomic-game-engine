@@ -188,7 +188,7 @@ TEST_CASE("text without an atlas draws nothing and breaks nothing", "[render][in
 
 	auto label = Rectangle(0.0f, 0.0f, 100.0f, 20.0f);
 	label.Kind = engine::gui::DrawKind::Text;
-	label.Text = engine::core::Name("hello");
+	label.Text = "hello";
 	list.Commands.push_back(label);
 	list.Commands.push_back(Rectangle(0.0f, 40.0f, 10.0f, 10.0f));
 
@@ -216,7 +216,7 @@ TEST_CASE("text with an atlas advances the pen per glyph", "[render][interfaceme
 	engine::gui::DrawList list;
 	auto label = Rectangle(0.0f, 0.0f, 200.0f, 20.0f);
 	label.Kind = engine::gui::DrawKind::Text;
-	label.Text = engine::core::Name("AB");
+	label.Text = "AB";
 	list.Commands.push_back(label);
 
 	InterfaceMesh mesh;
@@ -265,4 +265,86 @@ TEST_CASE("a solid quad samples the atlas's white texel", "[render][interfacemes
 		CHECK(vertex.U == Approx(white.X));
 		CHECK(vertex.V == Approx(white.Y));
 	}
+}
+
+TEST_CASE("a rotated command rotates its geometry", "[render][interfacemesh]") {
+	// **`D00023`, closed.** `Element::Rotation` and `Resolved::AbsoluteRotation`
+	// were correct and carried on every command since the tree went in, and no
+	// backend used them: imgui's `AddText` walks an atlas and appends
+	// axis-aligned quads with no transform, so a rotated label drew its box
+	// turned and its contents upright.
+	//
+	// The entry's own reopen trigger was "the quad pipeline — a pass that emits
+	// its own vertices can apply the rotation to all four kinds in one place".
+	// This is that place, and this is that assertion.
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+
+	// A wide, short rectangle centred at (50, 20), turned a quarter turn. After
+	// rotation it must be tall and narrow — a quad that ignored the angle stays
+	// wide, and one that rotated about the wrong pivot moves off centre.
+	auto turned = Rectangle(0.0f, 10.0f, 100.0f, 20.0f);
+	turned.Rotation = 90.0f;
+	list.Commands.push_back(turned);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+	REQUIRE(mesh.Vertices().size() == 4);
+
+	float minX = 1e9f;
+	float maxX = -1e9f;
+	float minY = 1e9f;
+	float maxY = -1e9f;
+	for (const auto &vertex : mesh.Vertices()) {
+		minX = std::min(minX, vertex.X);
+		maxX = std::max(maxX, vertex.X);
+		minY = std::min(minY, vertex.Y);
+		maxY = std::max(maxY, vertex.Y);
+	}
+
+	// Swapped: 100 wide by 20 tall becomes 20 by 100.
+	CHECK(maxX - minX == Approx(20.0f).margin(0.01f));
+	CHECK(maxY - minY == Approx(100.0f).margin(0.01f));
+
+	// **About its own centre**, which is what keeps a rotated element where the
+	// layout put it. A rotation about the origin would fling it across the
+	// canvas, and about a corner would slide it by half its size.
+	CHECK((minX + maxX) * 0.5f == Approx(50.0f).margin(0.01f));
+	CHECK((minY + maxY) * 0.5f == Approx(20.0f).margin(0.01f));
+}
+
+TEST_CASE("a rotated label turns as a run rather than per glyph", "[render][interfacemesh]") {
+	// **The pivot is the element's centre and not each quad's**, which is the
+	// one thing about rotating text that is easy to get wrong and unmistakable
+	// when it is: per-quad rotation spins every letter on the spot and leaves
+	// the run in a straight line.
+	const StagedAssets assets;
+	if (!std::filesystem::exists(engine::core::Paths::Assets() / "fonts" / "Inter.ttf")) {
+		SUCCEED("no staged fonts");
+		return;
+	}
+
+	GlyphAtlas atlas;
+	REQUIRE(atlas.Build(16.0f));
+
+	engine::gui::DrawList list;
+	auto label = Rectangle(0.0f, 0.0f, 200.0f, 20.0f);
+	label.Kind = engine::gui::DrawKind::Text;
+	label.Text = "AB";
+	label.Rotation = 90.0f;
+	list.Commands.push_back(label);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+	REQUIRE(mesh.Vertices().size() == 8);
+
+	// Unrotated the second glyph is to the *right* of the first. Turned a
+	// quarter turn clockwise it must be *below* it instead — which only holds if
+	// both glyphs turned about one shared pivot.
+	const float firstY = mesh.Vertices()[0].Y;
+	const float secondY = mesh.Vertices()[4].Y;
+	CHECK(secondY > firstY);
+
+	// And barely apart on X, because the run now goes down rather than across.
+	CHECK(std::abs(mesh.Vertices()[4].X - mesh.Vertices()[0].X) < 12.0f);
 }

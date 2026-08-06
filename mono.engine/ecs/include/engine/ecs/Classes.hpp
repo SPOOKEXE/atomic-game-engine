@@ -42,6 +42,7 @@
 
 #include <cstddef>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace engine::ecs {
@@ -65,6 +66,12 @@ namespace engine::ecs {
 		Double,
 
 		// `core::Name` — written as text, never as its process-local id.
+		//
+		// **For text drawn from a bounded set**, which is what interning is for:
+		// a material, an asset id, a class name. Every distinct string ever
+		// assigned to one of these is kept for the life of the process, so a
+		// property whose value a game *computes* is the wrong shape for it — see
+		// `String` below, which exists because that was found the hard way.
 		Name,
 
 		// A `core::Name` that must be one of a registered set.
@@ -81,6 +88,28 @@ namespace engine::ecs {
 		// a decision about what userland can hold rather than an implementation
 		// detail, which is exactly why `PropertyType` is a closed list.
 		Enum,
+
+		// An owned string, stored in the component rather than interned.
+		//
+		// **Added at v0.8 because `Name` is a leak for text that changes**, which
+		// is `D00020` and is the reason this member is not simply "the same as
+		// `Name` with a different spelling". `core::Name` is a process-wide
+		// registry that never releases: `label.Text = tostring(score)` at sixty
+		// hertz interns a new string every frame, forever, and takes that
+		// registry's mutex inside the frame loop to do it. A score counter is not
+		// an exotic case — it is the first thing anybody writes.
+		//
+		// So the two are a real choice rather than a stylistic one, and the rule
+		// is short: **a value the game picks from a set is a `Name`; a value the
+		// game computes is a `String`.** A material, an asset id and a face are
+		// the first; a score, a timer and a chat line are the second.
+		//
+		// The cost is paid where it belongs. A `String` property makes its
+		// component non-trivial — an allocation per row rather than a shared id —
+		// so a component holding one needs a written serialiser and does not
+		// memcpy. `ecs::Column` has carried that path since v0.2 and this is the
+		// first component set to use it.
+		String,
 
 		// `Entity` — a handle within this world, and meaningless outside it.
 		Reference,
@@ -473,6 +502,8 @@ namespace engine::ecs {
 				return PropertyType::Double;
 			} else if constexpr (std::is_same_v<Bare, core::Name>) {
 				return PropertyType::Name;
+			} else if constexpr (std::is_same_v<Bare, std::string>) {
+				return PropertyType::String;
 			} else if constexpr (std::is_same_v<Bare, Entity>) {
 				return PropertyType::Reference;
 			} else {

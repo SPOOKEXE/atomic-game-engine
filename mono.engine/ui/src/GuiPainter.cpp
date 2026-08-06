@@ -280,7 +280,7 @@ namespace engine::ui {
 		}
 
 		size_t PaintText(const DrawCommand &command, ImDrawList *into, const Space &space) {
-			const std::string_view text = command.Text.Text();
+			const std::string_view text = command.Text;
 			if (text.empty() || command.TextSize <= 0) {
 				return 0;
 			}

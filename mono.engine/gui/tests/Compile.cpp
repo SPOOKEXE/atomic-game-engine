@@ -127,6 +127,18 @@ namespace {
 			return store.SetProperty(instance, property.Name, &next, sizeof(next));
 		}
 
+		// **Before the byte buffer below, and this is the branch whose absence
+		// crashed rather than failing.** A `PropertyType::String` setter takes a
+		// live `std::string` and assigns from it; handing it a span of zeroed
+		// bytes makes it read a length and a pointer out of nothing. Every
+		// production caller takes the same exception for the same reason, and
+		// this one exists because the walk above reaches *every* declared
+		// property — which is the whole point of the case.
+		if (property.Type == PropertyType::String) {
+			const std::string next = "a value nothing else here uses";
+			return store.SetProperty(instance, property.Name, &next, sizeof(next));
+		}
+
 		if (property.Type == PropertyType::Bool) {
 			bool current = false;
 			store.GetProperty(instance, property.Name, &current, sizeof(current));
@@ -493,7 +505,7 @@ TEST_CASE("a text box shows its placeholder when empty", "[gui][compile]") {
 	const Entity box = world.Make("TextBox", screen);
 
 	Entry entry;
-	entry.PlaceholderText = Name("type here");
+	entry.PlaceholderText = "type here";
 	world.Data.Set(box, entry);
 
 	REQUIRE(world.Rebuild());
@@ -501,7 +513,7 @@ TEST_CASE("a text box shows its placeholder when empty", "[gui][compile]") {
 	bool found = false;
 	for (const DrawCommand &command : world.List.Commands().Commands) {
 		if (command.Kind == DrawKind::Text) {
-			CHECK(command.Text == Name("type here"));
+			CHECK(command.Text == "type here");
 			found = true;
 		}
 	}
@@ -510,13 +522,13 @@ TEST_CASE("a text box shows its placeholder when empty", "[gui][compile]") {
 	// One command either way, so a backend drawing "the text" does not have to
 	// know which of the two strings it is.
 	Label label;
-	label.Text = Name("typed");
+	label.Text = "typed";
 	world.Data.Set(box, label);
 
 	REQUIRE(world.Rebuild());
 	for (const DrawCommand &command : world.List.Commands().Commands) {
 		if (command.Kind == DrawKind::Text) {
-			CHECK(command.Text == Name("typed"));
+			CHECK(command.Text == "typed");
 		}
 	}
 }

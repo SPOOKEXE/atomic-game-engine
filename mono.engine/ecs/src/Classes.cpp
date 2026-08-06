@@ -394,6 +394,8 @@ namespace engine::ecs {
 			return "double";
 		case PropertyType::Name:
 			return "name";
+		case PropertyType::String:
+			return "string";
 		case PropertyType::Enum:
 			return "enum";
 		case PropertyType::Reference:

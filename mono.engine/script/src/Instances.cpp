@@ -91,6 +91,14 @@ namespace engine::script {
 				// hazard `core::Name` exists around.
 				lua_pushstring(state, static_cast<const Name *>(bytes)->Text().data());
 				return true;
+			case PropertyType::String:
+				// **Never reached, and refused rather than handled.** The caller
+				// takes a `std::string` down its own path before it gets here,
+				// because these `bytes` are uninitialised storage and a
+				// `std::string` cannot be assigned into that. Returning false
+				// makes a future caller that forgot the branch fail loudly
+				// rather than corrupt a heap.
+				return false;
 			case PropertyType::Enum:
 				// An `EnumItem`, not a string — that is the whole difference
 				// this type buys. The value is an interned `Name` exactly as
@@ -165,6 +173,10 @@ namespace engine::script {
 			case PropertyType::Name:
 				*static_cast<Name *>(out) = Name(luaL_checkstring(state, index));
 				return true;
+			case PropertyType::String:
+				// Refused here for `PushValue`'s reason, and the caller's own
+				// branch is what actually serves this type.
+				return false;
 			case PropertyType::Enum:
 				// **A string is accepted as well as an `EnumItem`**, because
 				// `part.Material = "Plastic"` is what Roblox accepts and what a
@@ -578,6 +590,26 @@ namespace engine::script {
 
 			const PropertyDescriptor *property = Find(store, instance, field);
 			if (property != nullptr) {
+				// **The one type that cannot ride the shared byte buffer**, and
+				// it is worth saying why rather than leaving it to look like an
+				// inconsistency. Every other property is trivially copyable, so
+				// a `descriptor.Get` into raw bytes is a copy into storage that
+				// needed no construction. A `PropertyType::String` value owns an
+				// allocation and its getter *assigns* — assigning into
+				// uninitialised bytes is undefined behaviour, not a fast path.
+				//
+				// So this one gets a real object to be assigned into. The cost
+				// is one `std::string` on the stack, on the path that already
+				// scanned a class's property list.
+				if (property->Type == PropertyType::String) {
+					std::string text;
+					if (!store.GetProperty(instance, *property, &text, sizeof(text))) {
+						luaL_errorL(state, "could not read '%s'", field);
+					}
+					lua_pushlstring(state, text.data(), text.size());
+					return 1;
+				}
+
 				// Sized from the descriptor rather than from a guess, so this
 				// cannot be the place a size mismatch is introduced.
 				// **Through the descriptor this function already found**, not
@@ -668,6 +700,21 @@ namespace engine::script {
 			}
 			if (!property->Writable) {
 				luaL_errorL(state, "'%s' is read-only", field);
+			}
+
+			// The write half of the same exception — see the getter above.
+			// `luaL_checklstring` rather than `luaL_checkstring`, so an embedded
+			// zero in a string a script built survives instead of truncating the
+			// value at it.
+			if (property->Type == PropertyType::String) {
+				size_t length = 0;
+				const char *text = luaL_checklstring(state, 3, &length);
+				const std::string value(text, length);
+
+				if (!store.SetProperty(instance, *property, &value, sizeof(value))) {
+					luaL_errorL(state, "could not write '%s'", field);
+				}
+				return 0;
 			}
 
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};

@@ -27,7 +27,7 @@ namespace engine::gui {
 			const auto *labels = static_cast<const Label *>(source);
 			for (size_t index = 0; index < count; index++) {
 				const Label &label = labels[index];
-				writer.WriteName(label.Text);
+				writer.WriteString(label.Text);
 				writer.WriteFloat(label.Color.R);
 				writer.WriteFloat(label.Color.G);
 				writer.WriteFloat(label.Color.B);
@@ -51,7 +51,7 @@ namespace engine::gui {
 			auto *labels = static_cast<Label *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				Label &label = labels[index];
-				label.Text = reader.ReadName();
+				label.Text = std::string(reader.ReadString());
 				label.Color.R = reader.ReadFloat();
 				label.Color.G = reader.ReadFloat();
 				label.Color.B = reader.ReadFloat();
@@ -127,7 +127,7 @@ namespace engine::gui {
 			const auto *entries = static_cast<const Entry *>(source);
 			for (size_t index = 0; index < count; index++) {
 				const Entry &entry = entries[index];
-				writer.WriteName(entry.PlaceholderText);
+				writer.WriteString(entry.PlaceholderText);
 				writer.WriteFloat(entry.PlaceholderColor.R);
 				writer.WriteFloat(entry.PlaceholderColor.G);
 				writer.WriteFloat(entry.PlaceholderColor.B);
@@ -149,7 +149,7 @@ namespace engine::gui {
 			auto *entries = static_cast<Entry *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				Entry &entry = entries[index];
-				entry.PlaceholderText = reader.ReadName();
+				entry.PlaceholderText = std::string(reader.ReadString());
 				entry.PlaceholderColor.R = reader.ReadFloat();
 				entry.PlaceholderColor.G = reader.ReadFloat();
 				entry.PlaceholderColor.B = reader.ReadFloat();
@@ -202,6 +202,12 @@ namespace engine::gui {
 		// spelling is one two processes cannot agree on, and a snapshot taken
 		// in a studio and restored in a test would be one of those two.
 		ecs::Components::Register<Resolved>("gui.Resolved");
+
+		// **Derived too, and at the end for the reason the block below repeats.**
+		// Written by whoever holds a camera and a world — `render` today — and
+		// read by `CanvasFor`. A world that nobody draws never gets one, which is
+		// exactly the case the authored fallback is for.
+		ecs::Components::Register<SpatialCanvas>("gui.SpatialCanvas");
 
 		// **After `Resolved`, because the rule above is "add at the end".** The
 		// order decides component ids, which decide the column order an

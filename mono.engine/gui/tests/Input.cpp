@@ -304,3 +304,40 @@ TEST_CASE("an invisible button is not hit", "[gui][input]") {
 	world.Compile();
 	CHECK(Pick(world.Data, world.List.Commands(), Vector2{50.0f, 50.0f}) == NULL_ENTITY);
 }
+
+TEST_CASE("a rotated element is clickable where it is drawn", "[gui][input]") {
+	// **`D00025`, closed, and it is the half no backend could fix.** `Pick`
+	// tested `DrawCommand::Bounds` as an axis-aligned rectangle and ignored
+	// `Rotation` beside it, so a rotated button drew in one place and answered a
+	// pointer in another — the kind of bug people file twice, once against the
+	// drawing and once against the input.
+	//
+	// A wide, short button turned a quarter turn is tall and narrow. The two
+	// points below are chosen so that *each* is inside exactly one of the two
+	// interpretations: a hit test that ignored the rotation gets both answers
+	// backwards, which is the strongest form this check takes.
+	World world("gui_input.rotated");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+
+	Element element;
+	element.Position = UDim2{0.0f, 100.0f, 0.0f, 190.0f};
+	element.Size = UDim2{0.0f, 200.0f, 0.0f, 20.0f};
+	element.Rotation = 90.0f;
+	world.Data.Set(button, element);
+
+	world.Compile();
+
+	// The unrotated box spans x 100..300, y 190..210 — centred at (200, 200).
+	// Turned, it spans x 190..210, y 100..300.
+	const Vector2 alongTurned{200.0f, 120.0f};   // inside turned, outside flat
+	const Vector2 alongFlat{280.0f, 200.0f};     // inside flat, outside turned
+
+	CHECK(Pick(world.Data, world.List.Commands(), alongTurned) == button);
+	CHECK(Pick(world.Data, world.List.Commands(), alongFlat) == NULL_ENTITY);
+
+	// **The centre is in both**, so it is asserted separately rather than being
+	// allowed to stand in for either — a test that only checked the middle would
+	// pass against a hit test that ignored rotation entirely.
+	CHECK(Pick(world.Data, world.List.Commands(), Vector2{200.0f, 200.0f}) == button);
+}

@@ -73,6 +73,14 @@ namespace engine::game {
 		// `ecs::EnumTable` on the way in.
 		core::Name Name;
 
+		// A `PropertyType::String` value.
+		//
+		// **The one field here that owns an allocation**, which is the whole
+		// point of the type: a `Name` is a shared id into a registry that never
+		// releases, and text a game computes has to be able to go away. See
+		// `ecs::PropertyType::String`.
+		std::string String;
+
 		// A handle within one world, meaningless outside it. A document turns
 		// this into its own local id; see `Game.hpp`.
 		ecs::Entity Reference;
@@ -187,8 +195,16 @@ namespace engine::game {
 
 	// The `PropertyType` a document's tag names.
 	//
+	// **Not the inverse of `TypeTag`, on purpose.** `Name` and `String` are both
+	// written `string`, so this answers `Name` for both — whether the engine
+	// interns a value is a storage decision and a file holds text either way. A
+	// caller checking a file's tag against a schema must therefore compare
+	// *tags* rather than the types they map back to, which is what `Game.cpp`
+	// does; comparing the types would reject every `String` property in every
+	// file ever written.
+	//
 	// @param tag  The tag, as `TypeTag` wrote it.
-	// @param out  Filled in on success.
+	// @param out  Filled in on success. `string` yields `Name`.
 	// @return `false` when this build has no such type.
 	bool TypeFromTag(std::string_view tag, ecs::PropertyType &out);
 }

@@ -150,6 +150,13 @@ namespace engine::script {
 				// Text, never the interned id — the number means a different
 				// string in the next process.
 				return JS_NewString(context, static_cast<const Name *>(bytes)->Text().data());
+			case PropertyType::String:
+				// **Never reached, and refused rather than handled**, exactly as
+				// the Luau side refuses it: the caller takes a `std::string`
+				// down its own path before it gets here, and these `bytes` are
+				// uninitialised storage. Throwing makes a future caller that
+				// forgot the branch fail loudly instead of corrupting a heap.
+				return JS_ThrowTypeError(context, "a string property is read through its own path");
 			case PropertyType::Enum:
 				// An `EnumItem`, not a string — the same value the Luau side
 				// hands back, so a property declared once behaves the same in
@@ -229,6 +236,10 @@ namespace engine::script {
 				return JS_ToInt32(context, static_cast<int32_t *>(out), value) == 0;
 			case PropertyType::Int64:
 				return JS_ToInt64(context, static_cast<int64_t *>(out), value) == 0;
+			case PropertyType::String:
+				// Refused here for `ToJs`'s reason; the caller's own branch is
+				// what actually serves this type.
+				return false;
 			case PropertyType::Name: {
 				const char *text = JS_ToCString(context, value);
 				if (text == nullptr) {
@@ -360,6 +371,19 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "no such property");
 			}
 
+			// **The one type that cannot ride the shared byte buffer**, and the
+			// Luau side takes the same exception for the same reason: a
+			// `PropertyType::String` getter *assigns* into its destination, and
+			// assigning a `std::string` into uninitialised bytes is undefined
+			// behaviour rather than a fast path. So it gets a real object.
+			if (property->Type == PropertyType::String) {
+				std::string text;
+				if (!bound.World->GetProperty(instance, *property, &text, sizeof(text))) {
+					return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
+				}
+				return JS_NewStringLen(context, text.data(), text.size());
+			}
+
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 			if (property->Size > sizeof(bytes) ||
 				!bound.World->GetProperty(instance, *property, bytes, property->Size)) {
@@ -386,6 +410,25 @@ namespace engine::script {
 			}
 			if (!property->Writable) {
 				return JS_ThrowTypeError(context, "'%s' is read-only", property->Name.Text().data());
+			}
+
+			// The write half of the same exception — see the getter above.
+			if (property->Type == PropertyType::String) {
+				size_t length = 0;
+				const char *text = JS_ToCStringLen(context, &length, argv[0]);
+				if (text == nullptr) {
+					return JS_ThrowTypeError(
+						context, "'%s' cannot take that value", property->Name.Text().data()
+					);
+				}
+
+				const std::string value(text, length);
+				JS_FreeCString(context, text);
+
+				if (!bound.World->SetProperty(instance, *property, &value, sizeof(value))) {
+					return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
+				}
+				return JS_UNDEFINED;
 			}
 
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
