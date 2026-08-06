@@ -782,7 +782,7 @@ The rendering and camera work this version already carried, unchanged:
 - [x] **an origin attached to the server, and a client that can be pointed at one** — `server --content-store DIR --content-grant-key HEX` runs CDN.md §6's local store in-process; the grant is issued by one half and opened by the other **across a function call with both halves real**, which is §16.6's argument about the loopback transport applied to content. `client --cdn HOST:PORT --publisher-key HEX` points a game at content, repeatable and in priority order, `dir:PATH` for a local store. The studio gets the same list as a Preferences page with reorder arrows, because the order *is* the policy
 - [_] mesh importing, baking and rendering pipeline
 - [_] texture importing, baking and rendering
-- [_] importing node pipeline (input nodes, processing nodes, export nodes)
+- [_] create node pipeline (input nodes, processing nodes, export nodes) for meshes, textures and rendering attachements
 - [_] auto export to assets folder
 - [_] MeshPart + SurfaceAppearance (but as components) + Tagging => Render pipeline capabilities for filtering tagged objects for redirected pipeline work
 - [_] put infront mirrors to see if it works with texture rendering
