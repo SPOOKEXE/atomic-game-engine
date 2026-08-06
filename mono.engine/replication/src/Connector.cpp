@@ -20,6 +20,17 @@ namespace engine::replication {
 		// **The link stays `Connecting` until the welcome verifies**, which is
 		// what stops payload leaving before there is anybody proven to be on the
 		// other end. This used to be an unconditional `CompleteHandshake`.
+		// **Said once, when the connection is attempted, and it is worth the
+		// line.** A client with no pinned identity is safe against a listener
+		// and not against a relay, and a mode that weak should be visible in a
+		// log rather than inferred from a setting nobody set.
+		if (!Settings.ServerIdentity.has_value()) {
+			ENGINE_WARN(
+				"replication: no server identity pinned — the exchange is encrypted but "
+				"authenticates nobody, so a relay in the path can read everything."
+			);
+		}
+
 		Exchange = net::Handshake::Begin(net::HandshakeRole::Initiator);
 		if (!Exchange.has_value()) {
 			// No entropy is a refusal to connect, never a fallback to a weaker
@@ -161,6 +172,39 @@ namespace engine::replication {
 				Stats_.Refused++;
 				Refuse();
 				return;
+			}
+
+			// **And who the server is, which the tag above cannot say.** The
+			// confirmation proves the sender reached these keys; a relay does
+			// too, because it reached them by holding one exchange with each
+			// side and reading everything that passes between. A signature over
+			// the same transcript proves *which* server reached them, because a
+			// relay cannot produce one over a transcript carrying its own
+			// ephemeral key that verifies under the pinned identity.
+			//
+			// **Checked after the tag and before the keys are adopted.** After,
+			// because a peer that did not even reach the same keys is a duller
+			// failure and deserves the duller message; before, because adopting
+			// the keys is the step that makes this a connection.
+			if (Settings.ServerIdentity.has_value()) {
+				assets::SignatureBytes signature;
+				for (size_t index = 0; index < signature.Value.size(); index++) {
+					signature.Value[index] = static_cast<uint8_t>(message.Welcome.Identity[index]);
+				}
+
+				if (!assets::VerifySessionTranscript(transcript, signature, *Settings.ServerIdentity)) {
+					// **Refused rather than downgraded.** A client that pinned a
+					// key and then connected anyway would have a setting that
+					// looks like security and is not — which is worse than not
+					// having the setting, because somebody would rely on it.
+					ENGINE_ERROR(
+						"replication: this is not the server that was pinned — refusing to connect. "
+						"An unsigned or wrongly signed welcome is what a relay in the path looks like."
+					);
+					Stats_.Refused++;
+					Refuse();
+					return;
+				}
 			}
 
 			// **The ciphers move into the session and stay there.** From here

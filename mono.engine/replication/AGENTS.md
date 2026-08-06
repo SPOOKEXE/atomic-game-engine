@@ -402,21 +402,85 @@ through two different sequences of insertions.
 
 ## Not here yet
 
-- **Lag compensation** — rewinding the server to what a client saw when it
-  fired. Its own plan, and it needs the history buffer this does not keep.
-- **A distance or a line of sight in the priority score.** `SetPriority` is the
-  hook and nothing in this engine fills it in, because the two scores worth
-  having are read off a transform and this module carries named components
-  without knowing which of them is a position. The same argument
-  `SetInterest` is built on. Until a game supplies one the rotation is in sole
-  charge, which is a plain round robin.
-- **Authenticating a client, and authenticating the server.** The exchange is
-  wired in, the stream that follows it is encrypted, and a stranger no longer
-  gets a slot for a datagram — but the agreement still binds to no identity, so
-  a peer on the path can hold one exchange with each side and read everything.
-  **Encryption without that binding is protection against a listener and not
-  against a relay**, and the two are worth keeping apart in one's head. Closing
-  it means binding the transcript to a server identity — the Ed25519 key
-  `assets` already verifies manifests with — which `net/Handshake.hpp` marks as
-  its own item. Until then the honest statement is the one in `Listener.hpp`:
-  the default admits anybody who completes the handshake.
+- **Applying an input to anything.** `Rewind` answers *where things were*; what
+  a game does with that is a game's. This engine has no notion of a shot, so
+  nothing consumes the answer yet — and a hit test invented here would be a
+  game rule in a network module.
+- **A line of sight in the priority score.** Distance is supplied now —
+  `replication::DistancePriority` — and the split it is built on is the thing to
+  preserve: **the arithmetic is here and the lookup is not.** A caller hands in
+  two accessors, one for where a client is looking and one for where an entity
+  is, and this module still names no component and links no simulation module.
+  A scorer that reached for `scene::Transform` directly would be the coupling
+  `SetInterest` and `SetPriority` were both shaped to avoid.
+
+  Line of sight is the one still missing, and it stays missing for a reason
+  rather than for want of time: it needs a broad phase and a game's own idea of
+  what occludes, neither of which this module has any business holding.
+- **Authenticating a *client*.** The server is authenticated at v0.9 — see
+  below — and the other direction is not: `SetAdmission` still decides who gets
+  in on whatever a game knows, and the default admits anybody who completes the
+  handshake. A client identity would be a second key pair and a second pin, and
+  it is a different problem from the relay one.
+
+## The server's identity is what makes the encryption worth having
+
+`Welcome::Identity` is an Ed25519 signature over the same transcript the
+confirmation tag is computed on, and `ConnectorSettings::ServerIdentity` is the
+pin a client checks it against.
+
+**The tag and the signature are not the same check and neither replaces the
+other.** The tag proves the sender reached these keys — which a relay also does,
+because it reaches them by holding one exchange with each side and reading
+everything in between. The signature proves *which* server reached them, because
+a relay cannot make the server sign a transcript naming the relay's own
+ephemeral key.
+
+`tests/Admission.cpp` models that relay properly and the first version of the
+case did not: it had the relay forward the server's welcome unchanged, which is
+refused at the *tag* and proves nothing about the signature. The case that
+matters runs two exchanges, so the tag passes and only the signature stands in
+the way — and there is a control beside it that removes the pin and watches the
+same bytes get in.
+
+**Both ends default to the weaker mode and both say so.** A listener with no
+identity signs nothing; a connector with no pin checks nothing and logs a
+warning when it dials. Refusing to run without a key would refuse every
+deployment in this engine today; refusing *quietly* would be worse than either.
+
+**A pinned client refuses rather than downgrades.** A setting that looks like
+security and is not is worse than no setting, because somebody relies on it.
+
+## `Rewind` records and does not restore
+
+Lag compensation here is a *record* of past placements and a query against it.
+Nothing is re-simulated and no state is put back, and that is the line to hold:
+rollback is a much larger idea with a much larger blast radius, and a hit test
+does not need one.
+
+**The lookup is the caller's, as `DistancePriority`'s is.** `Record` is handed a
+position rather than reading one, so this module still names no component. A
+version that reached for `scene::Transform` would be the coupling `SetInterest`
+and `SetPriority` were both shaped to avoid.
+
+**A fractional tick, because a client's view is fractional.** A renderer sits
+between two ticks and blends — `SnapshotBuffer::RenderTick` returns a `double`
+for exactly that reason — so sampling a whole tick answers with a pose the
+client never saw. The error is largest for the fastest things, which is where a
+hit test is already hardest.
+
+**Half the round trip, not all of it.** The gap between what a client saw and
+what the server holds is the time the *snapshot* took to get out; the input's
+journey back is already accounted for by the tick the input names. Doubling it
+is the classic way to make compensation too generous, and the suite pins the
+number.
+
+**Refusals are refusals.** A tick older than the history, or an entity that was
+not recorded at the tick asked for, answers `false` rather than reaching for a
+neighbouring frame. Answering with a nearby placement would be inventing
+something the client never saw, and it would be invisible — the caller cannot
+tell an interpolated answer from a fabricated one.
+
+**A repeated or out-of-order `Begin` is refused.** A frame is identified only by
+the tick stamped on it, so one landing in the slot the next tick wanted makes
+every later query find the wrong frame with nothing saying so.

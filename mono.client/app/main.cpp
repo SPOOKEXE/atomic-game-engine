@@ -67,11 +67,22 @@ int main(int argc, char **argv) {
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
 	arguments.Value(
+		"server-key",
+		"HEX",
+		"64 hex characters — the server identity to pin. Without it a relay in the path can read "
+		"everything"
+	);
+	arguments.Value(
 		"cdn", "HOST:PORT", "A content origin, in priority order. 'dir:PATH' for a local store. Repeatable"
 	);
 	arguments.Value("content-cache", "DIR", "Keep verified content here between runs");
 	arguments.Value("publisher-key", "HEX", "64 hex characters — the key whose manifests this client trusts");
 	arguments.Value("sound", "PATH", "Play this .wav on a loop — proves audio runs in-game");
+	arguments.Value(
+		"capture",
+		"PATH",
+		"Write a BMP of the scene near the end of the run. Needs --frames; renders offscreen"
+	);
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -143,12 +154,18 @@ int main(int argc, char **argv) {
 	if (auto server = arguments.Get("connect")) {
 		options.ConnectAddress = std::string(*server);
 	}
+	if (auto key = arguments.Get("server-key")) {
+		options.ServerKey = std::string(*key);
+	}
 
 	for (const std::string_view source : arguments.GetAll("cdn")) {
 		options.ContentSources.emplace_back(source);
 	}
 	if (auto cache = arguments.Get("content-cache")) {
 		options.ContentCache = std::filesystem::path(*cache);
+	}
+	if (auto capture = arguments.Get("capture")) {
+		options.Capture = std::filesystem::path(*capture);
 	}
 	if (auto sound = arguments.Get("sound")) {
 		options.SoundPath = std::filesystem::path(*sound);

@@ -17,4 +17,15 @@ mono_add_library(replication
 		Engine::ecs
 		Engine::net
 		Engine::world
+
+		# **The server's identity, and it is the same key a publisher signs
+		# manifests with.** `net::Handshake` has said since v0.3 that closing
+		# the relay gap means binding the exchange to a server identity — 'the
+		# Ed25519 key `assets` already verifies manifests with' — and this row
+		# is that sentence becoming an edge.
+		#
+		# A server and the content it serves are one identity as far as a player
+		# is concerned. Two keys would be two things to distribute and two
+		# chances to pin the wrong one.
+		Engine::assets
 )

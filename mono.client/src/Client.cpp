@@ -4,6 +4,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Layout.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -14,8 +15,6 @@
 
 #include <algorithm>
 #include <client/Client.hpp>
-
-#include <engine/gui/Layout.hpp>
 #include <client/Replicated.hpp>
 #include <fstream>
 
@@ -299,6 +298,86 @@ namespace client {
 		return true;
 	}
 
+	void Client::PumpContent() {
+		if (!Content) {
+			return;
+		}
+
+		// **Asked for once, when the catalogue first arrives.** A request per
+		// frame would re-issue everything before the first one had landed;
+		// `Ready` is the manifest having been fetched and verified, which is the
+		// moment there is something to ask *for*.
+		if (!ContentRequested && Content->Ready()) {
+			ContentRequested = true;
+
+			// By kind rather than by name, which is what `AssetKind` was added
+			// to the manifest for: a client wants "every mesh this game has"
+			// and has no list to work from.
+			for (const engine::assets::AssetKind kind :
+				 {engine::assets::AssetKind::Mesh, engine::assets::AssetKind::Texture}) {
+				const std::vector<engine::delivery::RequestId> issued = Content->RequestKind(kind);
+				ContentPending.insert(ContentPending.end(), issued.begin(), issued.end());
+			}
+
+			ENGINE_INFO("content: asked for {} mesh and texture asset(s)", ContentPending.size());
+		}
+
+		// **The barrier.** A completion becomes visible here and nowhere else,
+		// which is the whole shape `delivery::Client` was built around — and it
+		// is what makes registering into the renderer safe: this runs between
+		// frames, so no upload lands while a pass is recording.
+		Content->Pump();
+
+		size_t kept = 0;
+		for (const engine::delivery::RequestId id : ContentPending) {
+			const engine::delivery::RequestState state = Content->StateOf(id);
+			if (state == engine::delivery::RequestState::Pending) {
+				ContentPending[kept++] = id;
+				continue;
+			}
+
+			std::optional<engine::delivery::Asset> asset = Content->Take(id);
+			if (!asset) {
+				// Failed, or already taken. Either way there is nothing more to
+				// wait for; `delivery` has already counted it.
+				continue;
+			}
+
+			// **The name is published as-is, extension included.** A
+			// `SurfaceAppearance` naming `characters/skin.atex` and a manifest
+			// carrying `characters/skin.atex` have to be the same string or the
+			// lookup misses — and the one place that could diverge is here.
+			const engine::core::Name name(asset->Name);
+			engine::core::ByteReader reader(asset->Bytes);
+
+			if (asset->Kind == engine::assets::AssetKind::Mesh) {
+				engine::assets::MeshData mesh;
+				if (!engine::assets::Mesh::Read(reader, mesh)) {
+					ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
+					continue;
+				}
+				if (Renderer.AddMesh(name, mesh)) {
+					ContentMeshes++;
+				}
+			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
+				engine::assets::TextureData image;
+				if (!engine::assets::Texture::Read(reader, image)) {
+					ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
+					continue;
+				}
+				if (Renderer.AddTexture(name, image)) {
+					ContentTextures++;
+				}
+			}
+		}
+		ContentPending.resize(kept);
+
+		if (ContentRequested && ContentPending.empty() && !ContentReported) {
+			ContentReported = true;
+			ENGINE_INFO("content: {} mesh(es) and {} texture(s) registered", ContentMeshes, ContentTextures);
+		}
+	}
+
 	bool Client::BeginAudio() {
 		// **The sound is validated before the device is consulted**, so a
 		// typo'd path is reported on a machine with no output as well as on one
@@ -489,8 +568,17 @@ namespace client {
 			BuildReplicatedWorld(store, systems, interpolation);
 		});
 
+		engine::replication::ConnectorSettings connector;
+		if (!Settings.ServerKey.empty()) {
+			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
+			if (!connector.ServerIdentity.has_value()) {
+				ENGINE_ERROR("client: --server-key is not 64 hex characters");
+				return false;
+			}
+		}
+
 		Connection = std::make_unique<engine::replication::Connector>(
-			*Socket, *server, engine::core::Clock::Seconds()
+			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
 
 		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
@@ -683,6 +771,12 @@ namespace client {
 		FrameGraph::BeginFrame();
 
 		PumpEvents();
+
+		// **Before the simulation and outside every pass.** Content becoming
+		// visible mid-tick is `AGENTS.md` rule 5's desync, and content
+		// registering mid-frame is an upload into a buffer a render pass may be
+		// reading.
+		PumpContent();
 
 		// Simulation and rendering advance at different rates, and this is
 		// where they separate. The frame runs as fast as the display and the
@@ -1002,15 +1096,33 @@ namespace client {
 			}
 		}
 
-		LastFrame =
-			Renderer.Render(
-				Views.CameraFrame(),
-				Views.Camera(),
-				Views.Instances(),
-				Overlay,
-				Surfaces,
-				hook
-			);
+		// **A capture needs an offscreen target, so asking for one turns the
+		// client into a two-step render.** The scene goes into a texture, the
+		// texture is what gets copied back, and the window is presented from
+		// it. A game does not want that cost, which is why it happens only when
+		// `--capture` was passed — and why the flag is a diagnostic rather than
+		// a feature.
+		engine::render::SceneTarget target{};
+		const engine::render::SceneTarget *sceneTarget = nullptr;
+		if (!Settings.Capture.empty()) {
+			target.Width = static_cast<uint32_t>(Settings.Width);
+			target.Height = static_cast<uint32_t>(Settings.Height);
+			sceneTarget = &target;
+		}
+
+		LastFrame = Renderer.Render(
+			Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, Surfaces, hook, sceneTarget
+		);
+
+		// **After the frame rather than before it**, so the capture is of a
+		// frame whose scene texture exists — the studio's own capture states
+		// the same thing for the same reason. One frame before the last, so the
+		// request is made on one frame and written by the next while the run
+		// still ends when it was told to.
+		if (!Settings.Capture.empty() && Settings.MaximumFrames > 1 &&
+			FramesDrawn == Settings.MaximumFrames - 2) {
+			Renderer.RequestSceneCapture(Settings.Capture);
+		}
 
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();
@@ -1018,6 +1130,22 @@ namespace client {
 		if (LastFrame.Presented) {
 			FramesDrawn++;
 		}
+
+		// **What was actually drawn, as counters.** Both are per frame and both
+		// are the numbers that say whether the mesh path is doing anything: a
+		// world of cubes is twelve triangles an instance and a world of imported
+		// meshes is thousands, so a run whose triangle count did not move is one
+		// where every `MeshId` resolved to the fallback.
+		using engine::core::Metrics;
+		Metrics::Count("render.triangles", static_cast<double>(LastFrame.Triangles));
+		Metrics::Count("render.draw-calls", static_cast<double>(LastFrame.DrawCalls));
+
+		// **The peak rather than the latest.** The frame a run exits on is
+		// often one that presented nothing — the window is going away — so the
+		// last frame's counters are zero on almost every bounded run, which
+		// makes them useless as the one number a log can carry.
+		PeakTriangles = std::max(PeakTriangles, LastFrame.Triangles);
+		PeakDrawCalls = std::max<uint32_t>(PeakDrawCalls, LastFrame.DrawCalls);
 	}
 
 	int Client::Run() {
@@ -1062,6 +1190,15 @@ namespace client {
 				Statistics.Average(),
 				Statistics.Minimum(),
 				Statistics.Maximum()
+			);
+
+			// **What the last frame actually drew.** A world of cubes is twelve
+			// triangles an instance; a world of imported meshes is tens of
+			// thousands. A run whose triangle count did not move from the first
+			// is one where every `MeshId` resolved to the fallback, and that is
+			// the only cheap way to tell from a log.
+			ENGINE_INFO(
+				"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
 			);
 			ENGINE_INFO(
 				"{} tick(s) at {:.0f} Hz · {:.1f} achieved · {} dropped",

@@ -30,6 +30,8 @@
 //
 // @tier L12 · client
 
+#include <engine/assets/Mesh.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/render/Overlay.hpp>
@@ -171,6 +173,16 @@ namespace engine::render {
 		// shader multiplies by; the flip happens once, where the component is
 		// read, rather than in a shader nobody can put a breakpoint in.
 		float ImageOpacity = 1.0f;
+
+		// Which tags an instance must carry to be drawn into this surface, or
+		// zero for all of them.
+		//
+		// From `scene::SurfaceCamera::TagFilter`. **Applied per instance in the
+		// draw loop rather than by re-ordering the draw list**, because the
+		// order is shared by every view and a filter is per view: partitioning
+		// it for one surface would be partitioning it for all of them, and the
+		// screen pass would then draw the group instead of the world.
+		uint32_t TagFilter = 0;
 	};
 
 	// An offscreen colour target the world is drawn into instead of the window.
@@ -412,6 +424,48 @@ namespace engine::render {
 		//
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
+
+		// Registers a mesh under the name a `DrawInstance` will ask for.
+		//
+		// **The one door content comes in through**, and it is on the renderer
+		// rather than on the table so that `MeshTable` stays an implementation
+		// detail behind the pimpl like everything else here. A caller holding a
+		// `delivery::Asset` reads it into an `assets::MeshData` and hands it
+		// over; nothing about the device reaches them.
+		//
+		// Registering a name twice replaces it. The old geometry stays in the
+		// buffer as dead space — nothing evicts yet, and `MeshTable`'s header
+		// says so.
+		//
+		// @param name The name to publish it under.
+		// @param mesh The geometry. An invalid one is refused.
+		// @return `false` for an invalid mesh, a full table or a failed upload.
+		bool AddMesh(const core::Name &name, const assets::MeshData &mesh);
+
+		// Registers a texture under the name a `SurfaceAppearance` or a submesh
+		// will ask for.
+		//
+		// @param name  The name to publish it under.
+		// @param image The pixels. An invalid one is refused.
+		// @return `false` for an invalid image, a full table or a failed
+		//         upload.
+		bool AddTexture(const core::Name &name, const assets::TextureData &image);
+
+		// Whether a mesh has been registered under a name.
+		//
+		// **For a caller deciding what to fetch**, not for the draw path: an
+		// unregistered mesh draws as a cube rather than failing, so the renderer
+		// itself never asks.
+		//
+		// @param name The name.
+		// @return `true` when it is registered.
+		bool HasMesh(const core::Name &name) const;
+
+		// Whether a texture has been registered under a name.
+		//
+		// @param name The name.
+		// @return `true` when it is registered.
+		bool HasTexture(const core::Name &name) const;
 
 		// Waits for the display and claims this frame's image, before the caller
 		// has read a single event.

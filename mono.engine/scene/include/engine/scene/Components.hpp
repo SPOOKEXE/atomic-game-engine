@@ -319,6 +319,78 @@ namespace engine::scene {
 		uint8_t Reserved[1] = {};
 	};
 
+	// What a surface is made of, beyond the flat colour `Visual` carries.
+	//
+	// Roblox's `SurfaceAppearance`, and `ROADMAP.md` v0.9 asks for it "as
+	// components" rather than as a child instance — which is the right shape
+	// here for `Surface`'s reason: it is read once per drawable per frame, and
+	// a child object would make that a tree walk.
+	//
+	// **On `BasePart` rather than on `MeshPart`, so every drawable has one.**
+	// That is a real cost — a name and two more fields on a column that holds
+	// four thousand cubes — and it is paid deliberately. The alternative is an
+	// optional component, which means the draw-list pass either joins it per
+	// row or walks the world twice; `client::CollectInstances` is a batched
+	// parallel loop over a fixed signature, and an optional column is precisely
+	// what that shape cannot express. A dense column of mostly-invalid names is
+	// sixteen bytes an entity and no branches.
+	//
+	// **Only `ColourMap` is sampled today**, and the other maps a physically
+	// based pipeline wants are deliberately absent rather than declared and
+	// ignored. `RENDER_PIPELINE.md` puts the G-buffer at v0.10; a
+	// `MetalnessMap` field that nothing reads would be half a feature somebody
+	// would reasonably assume worked.
+	//
+	// @since v0.9
+	struct SurfaceAppearance {
+		// The texture sampled for base colour, multiplied by `Visual::Tint` and
+		// by the submesh's own base colour.
+		//
+		// A name, for `Visual::Mesh`'s reason: a texture reference has to
+		// survive a save file and a wire. An invalid name means the submesh's
+		// own texture is used, and a submesh with none draws its base colour
+		// flat — which is how an untextured import looks right rather than
+		// black.
+		core::Name ColourMap;
+
+		// Below this alpha a fragment is discarded rather than blended, when
+		// `Mode` is `Clip`.
+		float AlphaCutoff = 0.5f;
+
+		// How the alpha channel of `ColourMap` is treated.
+		//
+		// **Three modes and not a bool**, because the third is the one a
+		// character model needs: hair and eyelashes are authored as cut-out
+		// planes, and blending them costs a per-pane sort that a discard does
+		// not.
+		AlphaMode Mode = AlphaMode::Opaque;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
+	};
+
+	// Which tags an entity carries, as a bitmask.
+	//
+	// **A mask and not a list of names, and the names live in a `TagTable`
+	// resource.** `AGENTS.md` rule 4 in both directions: a tag crosses a save
+	// file as its string, and inside one process it is a bit — so a render pass
+	// asking "is this instance in the group this surface draws" is an `and`
+	// rather than a string compare per instance per view.
+	//
+	// The alternative was a `std::vector<core::Name>` per entity, which is a
+	// heap allocation on a component that has to survive being memcpy'd across
+	// a process boundary — rule 3 forbids it outright.
+	//
+	// Thirty-two tags per world is the ceiling, and it is a real one:
+	// `Tagging.hpp` says what happens at thirty-three.
+	//
+	// @since v0.9
+	struct Tags {
+		// One bit per registered tag. Zero is untagged, which is every entity
+		// nobody has said anything about.
+		uint32_t Mask = 0;
+	};
+
 	// A point of view on a world.
 	//
 	// **A component, and there may be several** — a spectator, a cutscene, a
@@ -382,6 +454,24 @@ namespace engine::scene {
 		// still shows its reflection, which is what a mirror is. At 1 the image
 		// is gone and the part draws as itself.
 		float ImageTransparency = 0.0f;
+
+		// Which tags an instance must carry to appear in this camera's texture.
+		//
+		// **The half of tagging `ROADMAP.md` v0.9 asks for by name** — "render
+		// pipeline capabilities for filtering tagged objects for redirected
+		// pipeline work". A surface camera with a filter draws its group and
+		// nothing else, which is what makes a second pipeline *redirected*
+		// rather than merely a second copy of the same scene.
+		//
+		// **Zero means everything**, so filtering costs nothing for the scenes
+		// that do not use it and a mirror stays a mirror without being told to
+		// reflect the world.
+		//
+		// A mask rather than a name, for `Tags::Mask`'s reason: this is compared
+		// against every instance in the view, and a name would be a lookup per
+		// instance per pass. `TagTable::Register` is what turns one into the
+		// other, once, wherever the camera is authored.
+		uint32_t TagFilter = 0;
 
 		// Which surface index this camera writes.
 		//

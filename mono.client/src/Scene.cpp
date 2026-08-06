@@ -36,6 +36,8 @@ namespace client {
 	using engine::scene::DrawInstance;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
+	using engine::scene::SurfaceAppearance;
+	using engine::scene::Tags;
 	using engine::scene::Transform;
 	using engine::scene::Visual;
 	using engine::scene::WorldBounds;
@@ -192,7 +194,14 @@ namespace client {
 			size_t matching = 0;
 			{
 				ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-				matching = store.CountMatching<Transform, PreviousTransform, Bounds, Visual, Rendered>();
+				matching = store.CountMatching<
+					Transform,
+					PreviousTransform,
+					Bounds,
+					Visual,
+					SurfaceAppearance,
+					Tags,
+					Rendered>();
 			}
 
 			{
@@ -244,11 +253,19 @@ namespace client {
 				// so that no two workers touch the same bytes, and skipping a
 				// row would leave a hole in the draw list and make `written` a
 				// lie. `scene/Visibility.hpp` has the whole argument.
+				// **`SurfaceAppearance` and `Tags` are columns rather than an
+				// optional join**, which is the whole reason both live on
+				// `BasePart` rather than on `MeshPart`. A batched parallel walk
+				// is handed columns and no entity; a component that only some
+				// rows had could not be read here at all without walking the
+				// world a second time.
 				written = store.EachBatchParallel<
 					const Transform,
 					const PreviousTransform,
 					const Bounds,
 					const Visual,
+					const SurfaceAppearance,
+					const Tags,
 					const Rendered>(
 					[out, capacity, alpha](
 						size_t first,
@@ -257,6 +274,8 @@ namespace client {
 						const PreviousTransform *previous,
 						const Bounds *bounds,
 						const Visual *visuals,
+						const SurfaceAppearance *appearances,
+						const Tags *tags,
 						const Rendered *
 					) {
 						// The count came from a different query than the one
@@ -291,6 +310,8 @@ namespace client {
 								visuals[row].Tint,
 								visuals[row].Mesh,
 								visuals[row].Material,
+								appearances[row].ColourMap,
+								tags[row].Mask,
 
 								// Copied rather than resolved here. Which pass this
 								// instance lands in is the renderer's decision,
@@ -300,6 +321,7 @@ namespace client {
 								visuals[row].Transparency,
 								visuals[row].Surface,
 								visuals[row].CastShadow,
+								appearances[row].Mode,
 							};
 						}
 					},
@@ -409,6 +431,12 @@ namespace client {
 				// in between makes none of the three read as the authority, and
 				// a future widening of the range has to find all of them.
 				view.ImageOpacity = 1.0f - target.ImageTransparency;
+
+				// **Copied rather than resolved.** The filter is already a mask
+				// on the component, because a name would be a lookup per
+				// instance per pass; whatever authored the camera did the
+				// registration once.
+				view.TagFilter = target.TagFilter;
 
 				// **Kept beside its entity id, because `SurfaceView` does not
 				// carry one and should not.** It is what the renderer takes, and

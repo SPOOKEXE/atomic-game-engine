@@ -15,14 +15,23 @@
 // secrecy is the reason for an agreement here rather than a configured shared
 // key, which would make every past session readable from one file on one server.
 //
-// **This authenticates nobody, and that is a real gap rather than an
-// oversight.** An unauthenticated agreement is safe against a listener and not
-// against a relay: whoever carries the two messages can substitute their own key
-// and hold a session with each side. Closing it means binding the exchange to a
-// server identity — the session descriptor and the Ed25519 key `assets` already
-// verifies manifests with — and that belongs in the layer that knows what a
-// server is.
-// TODO(D00006): bind the transcript to the server's Ed25519 identity.
+// **This authenticates nobody on its own, and the layer above closes that.** An
+// unauthenticated agreement is safe against a listener and not against a relay:
+// whoever carries the two messages can substitute their own key and hold a
+// session with each side.
+//
+// It is closed at v0.9, and **not here** — which was always the plan: the fix is
+// to bind the exchange to a *server identity*, and this module has no idea what
+// a server is. `replication::Admission` signs its transcript with the Ed25519
+// key `assets` verifies manifests with, and `ConnectorSettings::ServerIdentity`
+// is the pin a client checks it against. What this file supplies is the
+// transcript that makes such a signature meaningful: the session keys are
+// already a function of the exact bytes exchanged, so a signature over those
+// bytes commits to this exchange and no other.
+//
+// **A handshake with no identity above it is still unauthenticated.** That is
+// the default, both ends log it, and it is a deployment choice rather than a
+// property of this code.
 //
 // Time is passed in, never read — the module rule, and here it costs nothing.
 // No step of this has a deadline of its own; a handshake that never finishes is

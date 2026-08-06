@@ -35,6 +35,11 @@ add_subdirectory(mcpbridge)
 # it needs a program to be installed.
 add_subdirectory(linecount)
 
+# The asset compiler. Declared always: it links `bake`, which is `shared` and
+# reaches a decompressor and a JSON parser and nothing that wants a device — so
+# it configures on the same machines `--preset cdn` does.
+add_subdirectory(assetc)
+
 # --- architecture ------------------------------------------------------------
 #
 # A CMake script rather than a compiled tool: its input is a JSON file CMake

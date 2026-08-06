@@ -59,6 +59,13 @@ namespace unified {
 			{"scene.Motion", engine::replication::ChangeDetection::Observed},
 			{"scene.Bounds", engine::replication::ChangeDetection::Signature},
 			{"scene.Visual", engine::replication::ChangeDetection::Signature},
+
+			// v0.9's two. See `mono.server/src/Server.cpp` for the whole
+			// argument; the short form is that a mesh name without a texture
+			// name is half a model, and that a replica's `TagTable` stays empty
+			// because resources have no wire form.
+			{"scene.SurfaceAppearance", engine::replication::ChangeDetection::Signature},
+			{"scene.Tags", engine::replication::ChangeDetection::Signature},
 		};
 	}
 

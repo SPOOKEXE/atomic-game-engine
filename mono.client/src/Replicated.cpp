@@ -13,14 +13,18 @@
 namespace client {
 
 	using engine::core::CFrame;
+	using engine::core::Name;
 	using engine::ecs::Entity;
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
 	using engine::replication::InterpolationSettings;
 	using engine::replication::SnapshotBuffer;
+	using engine::scene::AlphaMode;
 	using engine::scene::Bounds;
 	using engine::scene::DrawInstance;
+	using engine::scene::SurfaceAppearance;
+	using engine::scene::Tags;
 	using engine::scene::Transform;
 	using engine::scene::Visual;
 
@@ -84,8 +88,14 @@ namespace client {
 			//
 			// `Visible` is a different matter and is honoured below: it rides
 			// inside `Visual`, so this process genuinely was told.
+			// **`SurfaceAppearance` and `Tags` are read through the store rather
+			// than joined into the query**, and this is the one place that is
+			// right: a replica adopts whatever archetypes the wire produced, and
+			// `Server.cpp` decides which components those are. Requiring them in
+			// the signature would silently drop every replicated part on a
+			// server build that has not been taught to send them.
 			store.Each<const Transform, const Bounds, const Visual>(
-				[drawList, buffer](
+				[drawList, buffer, &store](
 					Entity entity, const Transform &transform, const Bounds &bounds, const Visual &visual
 				) {
 					if (!visual.Visible) {
@@ -97,6 +107,9 @@ namespace client {
 					// received pose to draw and the second must not be delayed
 					// at all.
 					const std::optional<CFrame> interpolated = buffer->Sample(entity);
+
+					const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(entity);
+					const Tags *tags = store.Get<Tags>(entity);
 
 					// **Every field of the `Visual`, not the first five.** The
 					// tail of this list used to be left at its defaults, so a
@@ -111,9 +124,12 @@ namespace client {
 							visual.Tint,
 							visual.Mesh,
 							visual.Material,
+							appearance != nullptr ? appearance->ColourMap : Name(),
+							tags != nullptr ? tags->Mask : 0u,
 							visual.Transparency,
 							visual.Surface,
 							visual.CastShadow,
+							appearance != nullptr ? appearance->Mode : AlphaMode::Opaque,
 						}
 					);
 				}

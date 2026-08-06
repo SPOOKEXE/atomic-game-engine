@@ -10,6 +10,7 @@
 #include <engine/game/Game.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/replication/Priority.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
@@ -24,6 +25,32 @@
 #include <thread>
 
 namespace server {
+
+	namespace {
+		// Fills `out` from `text`, which must be exactly twice its length in
+		// hex.
+		//
+		// **One spelling rather than three.** This loop was written inline for
+		// the grant key and was about to be written again for the identity key;
+		// two copies of a parser is two places for a length check to be
+		// forgotten, and the failure that produces is a key silently half
+		// read.
+		bool ParseHex(std::string_view text, std::span<std::byte> out) {
+			if (text.size() != out.size() * 2) {
+				return false;
+			}
+			for (size_t index = 0; index < out.size(); index++) {
+				const std::string byte(text.substr(index * 2, 2));
+				char *end = nullptr;
+				const long value = std::strtol(byte.c_str(), &end, 16);
+				if (end != byte.c_str() + 2) {
+					return false;
+				}
+				out[index] = static_cast<std::byte>(value);
+			}
+			return true;
+		}
+	}
 
 	namespace {
 		// Read between ticks by the loop, written by Stop from anywhere.
@@ -135,15 +162,9 @@ namespace server {
 			);
 			return false;
 		}
-		for (size_t index = 0; index < secret.size(); ++index) {
-			const std::string byte = Settings.ContentGrantKey.substr(index * 2, 2);
-			char *end = nullptr;
-			const long value = std::strtol(byte.c_str(), &end, 16);
-			if (end != byte.c_str() + 2) {
-				ENGINE_ERROR("server: --content-grant-key is not hex");
-				return false;
-			}
-			secret[index] = static_cast<std::byte>(value);
+		if (!ParseHex(Settings.ContentGrantKey, secret)) {
+			ENGINE_ERROR("server: --content-grant-key is not hex");
+			return false;
 		}
 
 		auto key = engine::assets::GrantKey::FromSecret(secret);
@@ -550,6 +571,27 @@ namespace server {
 		Replication->Authority().Replicate(engine::core::Name("scene.Bounds"), ChangeDetection::Signature);
 		Replication->Authority().Replicate(engine::core::Name("scene.Visual"), ChangeDetection::Signature);
 
+		// **What v0.9's meshes are drawn with**, and the reason they are here at
+		// all is the reason `scene.Bounds` is: a client that received a mesh
+		// name and no texture name has half a model. Without these two a replica
+		// draws every imported mesh untextured and untagged, which reads as a
+		// broken texture path rather than as a component nobody sent.
+		//
+		// `Signature`, because neither changes on a steady world — a colour map
+		// and a tag set are authored once and then sit still, and observing them
+		// would pay a comparison per part per tick to learn nothing.
+		//
+		// **The tag *names* do not cross, and that is a stated gap rather than a
+		// bug.** `scene::TagTable` is a resource and resources have no wire form,
+		// so a replica's table stays empty and `HasTag(name)` there answers
+		// false. Mask-against-mask filtering is unaffected — a surface camera's
+		// filter and an instance's mask both come from this authority, so the
+		// bits mean the same thing on both ends whatever they are called.
+		Replication->Authority().Replicate(
+			engine::core::Name("scene.SurfaceAppearance"), ChangeDetection::Signature
+		);
+		Replication->Authority().Replicate(engine::core::Name("scene.Tags"), ChangeDetection::Signature);
+
 		// The mirror and the tree that says what it is a mirror of. See the
 		// same three lines in `studio/PlayLink.cpp` for why the *aim* is not
 		// among them: a reflection is of the viewer, and every client has its
@@ -559,6 +601,58 @@ namespace server {
 		);
 		Replication->Authority().Replicate(engine::core::Name("scene.Camera"), ChangeDetection::Signature);
 		Replication->Authority().Replicate(engine::core::Name("ecs.Hierarchy"), ChangeDetection::Signature);
+
+		// **The priority score, and it is the first thing ever to fill this
+		// hook in.** `Authority::SetPriority` has existed since v0.4 with
+		// nothing supplying it, so the rotation has been in sole charge and the
+		// order a plain round robin — which is fine for a world that fits and
+		// wrong for one that does not, because the thing a player is standing
+		// next to updates no more often than the thing across the map.
+		//
+		// **The arithmetic is `replication`'s and the lookup is this
+		// program's**, which is the division `SetPriority`'s own documentation
+		// asks for: that module carries named components and has no idea which
+		// of them is a position. `DistancePriority` supplies the falloff and the
+		// guards; the two lambdas below are the part that knows what a
+		// `scene::Transform` is.
+		{
+			engine::replication::DistancePriority score;
+
+			score.Position = [this](engine::ecs::Entity entity, engine::core::Vector3 &out) {
+				bool found = false;
+				Worlds().Enter(PrimaryWorld, [entity, &out, &found](engine::ecs::Store &store) {
+					if (const auto *placement = store.Get<engine::scene::Transform>(entity)) {
+						out = placement->Frame.Position;
+						found = true;
+					}
+				});
+				return found;
+			};
+
+			// **Where a client is looking from, and this server does not know
+			// yet.** There is no per-client avatar here — the placeholder world
+			// is cubes and nobody is in it — so a host tells the authority where
+			// each client is through `SetClientViewpoint`, and a client nothing
+			// has placed scores everything the same. That is the round robin
+			// this replaces, kept as the honest answer rather than pretending
+			// every client is at the origin.
+			score.Viewpoint = [this](engine::replication::ClientId client, engine::core::Vector3 &out) {
+				const auto found = Viewpoints.find(client.Index);
+
+				// **The generation is checked, not just the slot.** A slot is
+				// reused when a client leaves and another joins, so keying on
+				// the index alone would hand the new client the old one's
+				// viewpoint — and it would sort *its* world by where somebody
+				// else had been standing.
+				if (found == Viewpoints.end() || found->second.Generation != client.Generation) {
+					return false;
+				}
+				out = found->second.At;
+				return true;
+			};
+
+			Replication->Authority().SetPriority(score);
+		}
 
 		// A delta is the third reader of the dirty bits, so the components that
 		// travel *and change every tick* have to be observed or nothing ever
@@ -570,8 +664,47 @@ namespace server {
 			store.Observe<engine::scene::Motion>();
 		});
 
+		// **The identity, and the log line says which mode this server is in.**
+		// A deployment that meant to sign and typo'd the flag would otherwise
+		// look identical to one that meant not to.
+		if (!Settings.IdentityKey.empty()) {
+			std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+			if (!ParseHex(Settings.IdentityKey, seed)) {
+				ENGINE_ERROR("server: --identity-key is not {} hex characters", seed.size() * 2);
+				return false;
+			}
+
+			Identity = engine::assets::SigningKey::FromSeed(seed);
+			if (!Identity.has_value()) {
+				ENGINE_ERROR("server: --identity-key is not a usable Ed25519 seed");
+				return false;
+			}
+
+			Replication->SetIdentity(&*Identity);
+			ENGINE_INFO("replication identity {}", Identity->Public().ToHex());
+		} else {
+			ENGINE_WARN(
+				"replication: no --identity-key, so the exchange authenticates nobody. "
+				"It is encrypted against a listener and open to a relay."
+			);
+		}
+
 		ENGINE_INFO("replication listening on {}", Socket->Local().Text());
 		return true;
+	}
+
+	void Server::SetClientViewpoint(engine::replication::ClientId client, const engine::core::Vector3 &at) {
+		if (!client.IsValid()) {
+			return;
+		}
+		Viewpoints[client.Index] = Viewpoint{at, client.Generation};
+	}
+
+	void Server::ForgetClientViewpoint(engine::replication::ClientId client) {
+		const auto found = Viewpoints.find(client.Index);
+		if (found != Viewpoints.end() && found->second.Generation == client.Generation) {
+			Viewpoints.erase(found);
+		}
 	}
 
 	engine::net::Endpoint Server::ListeningOn() const {
@@ -588,6 +721,25 @@ namespace server {
 		Replication->Poll(nowSeconds);
 
 		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
+			// **The rewind history, recorded beside the delta and from the same
+			// state.** Both answer questions about this tick, so taking them at
+			// two different moments is how a hit test starts disagreeing with
+			// what was actually sent.
+			//
+			// Only where something *moved*: a `Motion` is what makes a
+			// placement worth remembering, and recording the static geometry
+			// would fill the history with rows whose answer is the same at
+			// every tick.
+			if (History.Begin(store.Time().Tick)) {
+				store.Each<const engine::scene::Transform, const engine::scene::Motion>(
+					[this](
+						engine::ecs::Entity entity,
+						const engine::scene::Transform &placement,
+						const engine::scene::Motion &
+					) { History.Record(entity, placement.Frame.Position); }
+				);
+			}
+
 			// Before `ClearChanges`, which the world does at the start of its
 			// next tick — the bits are the delta source and reading them after
 			// they are cleared is how a tick's worth of movement goes missing.

@@ -16,10 +16,12 @@
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
@@ -230,6 +232,15 @@ namespace server {
 		// Empty means the attached origin generates one at start-up and keeps
 		// it to itself, which is right when this process is the only issuer.
 		std::string ContentGrantKey;
+
+		// The Ed25519 seed this server proves its identity with, as 64 hex
+		// characters, or empty for none.
+		//
+		// **Without it the exchange authenticates nobody**, which is protection
+		// against a listener and not against a relay — see
+		// `Listener::SetIdentity`. The same key a publisher signs manifests
+		// with, so a deployment distributes one public key and not two.
+		std::string IdentityKey;
 	};
 
 	// What the run produced. Returned rather than logged only, so a test can
@@ -266,6 +277,39 @@ namespace server {
 	class Server {
 	  public:
 		Server();
+
+		// Where moving things were, for judging a client's action against what
+		// that client actually saw.
+		//
+		// **The query is a game's to make and the answer is a game's to act
+		// on.** This engine has no notion of a shot, so nothing here consumes
+		// it; what the server owes is an accurate record and
+		// `Rewind::TickSeenBy` to turn a client's input tick and its link's
+		// round trip into the moment to sample.
+		//
+		// @return The history.
+		const engine::replication::Rewind &Rewound() const {
+			return History;
+		}
+
+		// Tells the authority where a client is looking from, for the priority
+		// score.
+		//
+		// **A host's job rather than the authority's**, because a client's
+		// viewpoint is a game's idea and this engine has no per-client avatar
+		// yet: the placeholder world is cubes and nobody is in it. A client
+		// nothing has placed scores everything the same, which is the round
+		// robin the score replaces and the honest answer rather than pretending
+		// every client stands at the origin.
+		//
+		// @param client The client.
+		// @param at     Where it is looking from, in world space.
+		void SetClientViewpoint(engine::replication::ClientId client, const engine::core::Vector3 &at);
+
+		// Forgets where a client was looking.
+		//
+		// @param client The client.
+		void ForgetClientViewpoint(engine::replication::ClientId client);
 
 		// Declared so the content attachment can stay an incomplete type in
 		// this header. `mono.server` links `Mono::cdn`, and a server's public
@@ -530,6 +574,40 @@ namespace server {
 		// from binding a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
 		std::unique_ptr<engine::replication::Listener> Replication;
+
+		// The identity `Replication` signs transcripts with, held here because
+		// `Listener::SetIdentity` borrows rather than copies: a `SigningKey` is
+		// move-only and zeroes itself, and a copy would be a second place a
+		// secret lives.
+		std::optional<engine::assets::SigningKey> Identity;
+
+		// Where moving things were, for the last `RewindSettings::HistoryTicks`
+		// ticks.
+		//
+		// **Recorded whether or not anything asks**, because the alternative is
+		// a game turning it on and finding the history empty for the first half
+		// second. It costs one map insert per moving entity per tick and no
+		// allocation after the ring has filled.
+		engine::replication::Rewind History;
+
+		// Where one client is looking from.
+		struct Viewpoint {
+			engine::core::Vector3 At;
+
+			// **Kept beside the position and checked on every read.** A slot is
+			// reused when a client leaves and another joins, so an entry keyed
+			// on the index alone would hand the new client the old one's
+			// viewpoint — and sort its world by where somebody else stood.
+			uint32_t Generation = 0;
+		};
+
+		// Where each client is looking from, for `DistancePriority`.
+		//
+		// **Keyed by the slot rather than by the whole handle**, so the map is
+		// bounded by the client limit rather than growing once per connection
+		// for the life of the process. A client absent from here has no
+		// viewpoint, which the score reads as "order these by rotation alone".
+		std::unordered_map<uint32_t, Viewpoint> Viewpoints;
 
 		// Present only in host mode. A driver holds one of these per host; a
 		// host holds exactly one, to whoever started it.

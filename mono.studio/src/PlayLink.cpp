@@ -1,13 +1,13 @@
-#include <client/Replicated.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
-#include <studio/PlayLink.hpp>
 
 #include <algorithm>
+#include <client/Replicated.hpp>
 #include <string>
+#include <studio/PlayLink.hpp>
 
 namespace studio {
 
@@ -51,6 +51,25 @@ namespace studio {
 			{"scene.Bounds", ChangeDetection::Signature},
 			{"scene.Visual", ChangeDetection::Signature},
 
+			// **What v0.9's meshes are drawn with**, and the reason they are here at
+			// all is the reason `scene.Bounds` is: a client that received a mesh
+			// name and no texture name has half a model. Without these two a replica
+			// draws every imported mesh untextured and untagged, which reads as a
+			// broken texture path rather than as a component nobody sent.
+			//
+			// `Signature`, because neither changes on a steady world — a colour map
+			// and a tag set are authored once and then sit still, and observing them
+			// would pay a comparison per part per tick to learn nothing.
+			//
+			// **The tag *names* do not cross, and that is a stated gap rather than a
+			// bug.** `scene::TagTable` is a resource and resources have no wire form,
+			// so a replica's table stays empty and `HasTag(name)` there answers
+			// false. Mask-against-mask filtering is unaffected — a surface camera's
+			// filter and an instance's mask both come from this authority, so the
+			// bits mean the same thing on both ends whatever they are called.
+			{"scene.SurfaceAppearance", ChangeDetection::Signature},
+			{"scene.Tags", ChangeDetection::Signature},
+
 			// **The mirror, and the tree that says what it is a mirror of.** A
 			// `SurfaceCamera` names a face; which part's face it is comes from
 			// the parent link and nowhere else, so replicating the camera
@@ -78,9 +97,9 @@ namespace studio {
 		// means on both sides of the link.
 		size_t PosedEntities(Store &store) {
 			size_t count = 0;
-			store.Each<const engine::scene::Transform>([&count](engine::ecs::Entity, const engine::scene::Transform &) {
-				count++;
-			});
+			store.Each<const engine::scene::Transform>(
+				[&count](engine::ecs::Entity, const engine::scene::Transform &) { count++; }
+			);
 			return count;
 		}
 	}

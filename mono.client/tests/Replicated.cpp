@@ -49,6 +49,8 @@ using engine::ecs::Store;
 using engine::replication::InterpolationSettings;
 using engine::replication::SnapshotBuffer;
 using engine::scene::Bounds;
+using engine::scene::SurfaceAppearance;
+using engine::scene::Tags;
 using engine::scene::Transform;
 using engine::scene::Visual;
 
@@ -85,6 +87,20 @@ namespace {
 			World.Set<Transform>(entity, Transform{});
 			World.Set<Bounds>(entity, Bounds{Vector3{0.5f, 0.5f, 0.5f}});
 			World.Set<Visual>(entity, visual);
+			return entity;
+		}
+
+		// The same again, with v0.9's two components on it as well.
+		//
+		// **Separate from `SpawnLooking` on purpose**, because the case that
+		// matters is a replica receiving a `Visual` and *not* these — a server
+		// that has not been taught to send them, which was every server until
+		// they were added to the authority lists. That case has to keep working
+		// and is what `SpawnLooking` covers.
+		Entity SpawnSurfaced(const Visual &visual, const SurfaceAppearance &appearance, uint32_t tags) {
+			const Entity entity = SpawnLooking(visual);
+			World.Set<SurfaceAppearance>(entity, appearance);
+			World.Set<Tags>(entity, Tags{tags});
 			return entity;
 		}
 
@@ -272,6 +288,47 @@ TEST_CASE("a replica draws every field of what it was sent", "[client][replicati
 	CHECK(drawn.Transparency == Approx(sent.Transparency));
 	CHECK(drawn.Surface == sent.Surface);
 	CHECK_FALSE(drawn.CastShadow);
+
+	// **The two v0.9 added, and their defaults are the ones that matter here.**
+	// This entity was spawned without either component — which is exactly a
+	// server that has not been taught to send them — so the draw instance must
+	// come out with an invalid texture and no tags rather than with whatever the
+	// last row happened to hold.
+	CHECK_FALSE(drawn.Texture.IsValid());
+	CHECK(drawn.TagMask == 0);
+	CHECK(drawn.Alpha == engine::scene::AlphaMode::Opaque);
+}
+
+TEST_CASE("a replica draws the surface appearance and tags it was sent", "[client][replication]") {
+	// The other half of the case above: an authority that *does* send them.
+	// Without this the imported meshes v0.9 added arrive on a replica with a
+	// mesh name and no texture name, which is half a model and reads as a
+	// broken texture path rather than as a component nobody sent.
+	Replica replica;
+
+	Visual sent;
+	sent.Mesh = engine::core::Name("replicated_test.Fox");
+
+	SurfaceAppearance appearance;
+	appearance.ColourMap = engine::core::Name("replicated_test.FoxTexture");
+	appearance.Mode = engine::scene::AlphaMode::Clip;
+	appearance.AlphaCutoff = 0.4f;
+
+	replica.SpawnSurfaced(sent, appearance, 0b101);
+	replica.Draw();
+
+	REQUIRE(replica.Instances().size() == 1);
+	const engine::scene::DrawInstance &drawn = replica.Instances()[0];
+
+	CHECK(drawn.Mesh == sent.Mesh);
+	CHECK(drawn.Texture == appearance.ColourMap);
+	CHECK(drawn.Alpha == engine::scene::AlphaMode::Clip);
+
+	// **The mask crosses and the names do not.** A `TagTable` is a resource and
+	// resources have no wire form, so a replica cannot say what bit one is —
+	// but a surface camera's filter and this mask both came from one authority,
+	// so comparing them is still meaningful.
+	CHECK(drawn.TagMask == 0b101);
 }
 
 // **`Visible` is the one half of the render gate a replica can honour**, and it

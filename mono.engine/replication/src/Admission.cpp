@@ -65,6 +65,7 @@ namespace engine::replication {
 		WriteBlock(writer, welcome.PublicKey);
 		writer.WriteUInt64(welcome.Counter);
 		WriteBlock(writer, welcome.Confirmation);
+		WriteBlock(writer, welcome.Identity);
 	}
 
 	bool ReadAdmission(core::ByteReader &reader, Admission &message) {
@@ -109,6 +110,9 @@ namespace engine::replication {
 			}
 			read.Welcome.Counter = reader.ReadUInt64();
 			if (reader.Failed() || !ReadBlock(reader, read.Welcome.Confirmation)) {
+				return false;
+			}
+			if (!ReadBlock(reader, read.Welcome.Identity)) {
 				return false;
 			}
 			break;

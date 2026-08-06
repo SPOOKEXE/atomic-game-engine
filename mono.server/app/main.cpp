@@ -61,6 +61,12 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"content-grant-key", "HEX", "64 hex characters — the secret grants are issued and checked with"
 	);
+	arguments.Value(
+		"identity-key",
+		"HEX",
+		"64 hex characters — the Ed25519 seed this server proves its identity with. Without it a "
+		"relay in the path can read everything"
+	);
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -110,6 +116,9 @@ int main(int argc, char **argv) {
 	options.ContentPort = static_cast<uint16_t>(arguments.GetInteger("content-port", 0));
 	if (auto key = arguments.Get("content-grant-key")) {
 		options.ContentGrantKey = std::string(*key);
+	}
+	if (auto key = arguments.Get("identity-key")) {
+		options.IdentityKey = std::string(*key);
 	}
 
 	if (auto game = arguments.Get("game")) {

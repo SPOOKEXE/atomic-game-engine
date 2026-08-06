@@ -68,6 +68,10 @@ namespace engine::replication {
 		return nullptr;
 	}
 
+	void Listener::SetIdentity(const assets::SigningKey *key) {
+		Identity = key;
+	}
+
 	void Listener::SetAdmission(AdmissionPolicy policy) {
 		Policy = std::move(policy);
 	}
@@ -200,6 +204,26 @@ namespace engine::replication {
 
 		welcome.Counter = sealed->Counter;
 		std::copy(sealed->Bytes.begin(), sealed->Bytes.end(), welcome.Confirmation.begin());
+
+		// **The signature over the same transcript, which is what the tag above
+		// cannot be.** The confirmation proves the sender reached these keys — a
+		// relay does too, because it reached them by holding one exchange with
+		// each side. This proves *who* reached them.
+		//
+		// Signed over the identical bytes the tag authenticates, so there is one
+		// transcript rather than two that could disagree about what the exchange
+		// was. Left as zeroes when this server has no identity, which verifies
+		// under no key and is exactly what a pinned client should refuse.
+		if (Identity != nullptr) {
+			const assets::SignatureBytes signature = Identity->SignSessionTranscript(transcript);
+			for (size_t index = 0; index < signature.Value.size(); index++) {
+				// `SignatureBytes` is `uint8_t` and the wire block is
+				// `std::byte`. Converted a byte at a time rather than through a
+				// cast, because a `reinterpret_cast` here would be the one place
+				// this file stopped being obviously correct.
+				welcome.Identity[index] = static_cast<std::byte>(signature.Value[index]);
+			}
+		}
 
 		// Everything that could refuse has refused. Only now does this peer
 		// cost anything: a slot, a session, a link and two reliability windows.

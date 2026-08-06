@@ -6,12 +6,16 @@
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inTexCoord;
 
-layout(location = 2) in vec4 inModel0;
-layout(location = 3) in vec4 inModel1;
-layout(location = 4) in vec4 inModel2;
-layout(location = 5) in vec4 inModel3;
-layout(location = 6) in vec4 inColour;
+layout(location = 3) in vec4 inModel0;
+layout(location = 4) in vec4 inModel1;
+layout(location = 5) in vec4 inModel2;
+layout(location = 6) in vec4 inModel3;
+layout(location = 7) in vec4 inColour;
+
+// One over the square of each axis' scale. See the normal below.
+layout(location = 8) in vec4 inInverseScaleSquared;
 
 // SDL's GPU API puts vertex uniform buffers in set 1 for SPIR-V.
 layout(set = 1, binding = 0) uniform Frame {
@@ -32,15 +36,26 @@ layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec4 outColour;
 layout(location = 2) out vec4 outLightPosition;
 layout(location = 3) out vec4 outSurfacePosition;
+layout(location = 4) out vec2 outTexCoord;
 
 void main() {
 	mat4 model = mat4(inModel0, inModel1, inModel2, inModel3);
 
-	// The transforms are rigid — rotation and translation, no scale — so the
-	// upper 3x3 is orthonormal and doubles as the normal matrix. An inverse
-	// transpose here would be three wasted matrix operations per vertex.
-	outNormal = mat3(model) * inNormal;
+	// **The model matrix is not rigid — a half-extent is folded into it — so
+	// the upper 3x3 is not the normal matrix.** For `M = R * S` the normal
+	// transform is `R * inverse(S)`, and since `mat3(M) * v` is `R * S * v`,
+	// scaling the normal by one over S squared first gets there: `R * S * (S^-2
+	// n)` is `R * S^-1 n`. That is three multiplies rather than an inverse
+	// transpose per vertex.
+	//
+	// It cost nothing while everything was a cube — an axis-aligned normal
+	// comes out of the wrong matrix pointing the right way and is renormalised
+	// in the fragment — and it is visibly wrong the moment a sphere or an
+	// imported mesh is scaled unevenly, where the shading tilts away from the
+	// surface.
+	outNormal = mat3(model) * (inNormal * inInverseScaleSquared.xyz);
 	outColour = inColour;
+	outTexCoord = inTexCoord;
 
 	vec4 world = model * vec4(inPosition, 1.0);
 

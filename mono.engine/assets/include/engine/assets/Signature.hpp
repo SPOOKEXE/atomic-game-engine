@@ -138,6 +138,29 @@ namespace engine::assets {
 		// @return The signature.
 		SignatureBytes SignManifestRoot(const ContentHash &root) const;
 
+		// Signs a session transcript, so a peer can prove which server it is.
+		//
+		// **The second purpose this key has, and it is the one `net::Handshake`
+		// has been asking for since v0.3.** An X25519 agreement is safe against
+		// a listener and not against a relay: whoever carries the two messages
+		// can substitute its own key and hold a session with each side. A
+		// signature over the transcript closes that, because a relay cannot
+		// produce one over a transcript containing *its* key that verifies
+		// under the server's.
+		//
+		// The same key a publisher signs manifests with, deliberately: a server
+		// and the content it serves are one identity as far as a player is
+		// concerned, and two keys would be two things to distribute and two
+		// chances to pin the wrong one. **Domain-separated with its own tag**,
+		// so a signature over a manifest root can never be replayed as one over
+		// a transcript — the reason `VerifyManifestRoot` gives, now that there
+		// is a second purpose to be confused with.
+		//
+		// @param transcript The bytes both sides agree the exchange was.
+		// @return The signature.
+		// @since v0.9
+		SignatureBytes SignSessionTranscript(std::span<const std::byte> transcript) const;
+
 	  private:
 		SigningKey() = default;
 
@@ -160,4 +183,18 @@ namespace engine::assets {
 	// @param key The publisher's public key.
 	// @return True only if the signature is valid for exactly this root.
 	bool VerifyManifestRoot(const ContentHash &root, const SignatureBytes &signature, const PublicKey &key);
+
+	// Whether `signature` really is `key`'s signature over `transcript`.
+	//
+	// The call a client makes to learn that the server it agreed keys with is
+	// the server it meant to. Takes no signing key and needs none.
+	//
+	// @param transcript The transcript being checked.
+	// @param signature  The signature to check.
+	// @param key        The server's pinned public key.
+	// @return True only if the signature is valid for exactly this transcript.
+	// @since v0.9
+	bool VerifySessionTranscript(
+		std::span<const std::byte> transcript, const SignatureBytes &signature, const PublicKey &key
+	);
 }

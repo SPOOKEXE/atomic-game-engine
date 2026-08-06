@@ -658,6 +658,39 @@ a function of elapsed time and is deterministic, so two runs with the same
 arguments simulate the same thing — which is what makes comparing them mean
 anything.
 
+**`--entities` is also the view channel's ceiling**, which is worth knowing
+before it bites: it sizes the buffer a world publishes its draw list through, so
+a scripted scene with more parts than that number publishes nothing at all and
+the window is empty. The log says so — *"N instances is past this channel's
+maximum"* — and the fix is to raise `--entities`, not to shrink the scene.
+
+### Seeing a frame — `--capture`
+
+```sh
+just run --frames 60 --capture shot.bmp
+```
+
+Writes a BMP of the scene near the end of the run and carries on. **A diagnostic
+rather than a feature, and it changes how the frame is rendered**: a capture
+needs an offscreen target, so asking for one puts the scene into a texture and
+presents the window from that. A game pays nothing for it because the flag is
+off.
+
+Needs `--frames`, because the capture is requested one frame before the last so
+that it is written by the next and the run still ends when it was told to.
+
+```sh
+just run --frames 60 --entities 2048 \
+  --script assets/examples/Meshes.luau \
+  --cdn dir:store --publisher-key PUBLIC --capture meshes.bmp
+```
+
+The closing log line is the other half of the same question: *"88302 triangle(s)
+in 136 draw call(s) at the busiest frame"*. A world of cubes is twelve triangles
+an instance and a world of imported meshes is tens of thousands, so a run whose
+triangle count did not move is one where every `MeshId` resolved to the fallback
+cube — which is the deliberate degraded state and looks like a scene of boxes.
+
 ---
 
 # The server
@@ -772,6 +805,44 @@ just host --unpaced --ticks 1000 --entities 50000
 `--unpaced` removes the sleep between ticks, so `mean` measures the simulation
 rather than the pacing. Use it for any comparison; leave it off to check that a
 given entity count actually holds a given tick rate.
+
+---
+
+## Proving which server a client reached
+
+```sh
+server --listen 9000 --identity-key $SEED     # 64 hex characters, an Ed25519 seed
+client --connect HOST:9000 --server-key $PUB  # the public half the server logs
+```
+
+**Without these two the exchange authenticates nobody.** It is encrypted, so a
+listener on the path learns nothing; but whoever *carries* the two key-exchange
+messages can substitute their own key, hold one session with each side and read
+everything. `net/Handshake.hpp` has said so since v0.3.
+
+With them, every `Welcome` carries an Ed25519 signature over the transcript, and
+a relay cannot produce one — it would have to make the server sign a transcript
+naming the relay's own ephemeral key. A client whose pin does not match refuses
+outright rather than connecting anyway:
+
+```
+replication: this is not the server that was pinned — refusing to connect.
+```
+
+The server prints the public half on start-up, which is what to give a client:
+
+```
+replication identity f78b1da9b3dfb3fa3a3e54c43e79389d2f04d6bccb62984f28bd6f91798a750d
+```
+
+**It is the same key a publisher signs content with** — `cdn --signing-key` and
+`client --publisher-key`. A server and the content it serves are one identity as
+far as a player is concerned, and two keys would be two things to distribute and
+two chances to pin the wrong one.
+
+**Both ends default to the weaker mode and both say so**, because refusing to
+run without a key would refuse every deployment in this engine today, and
+refusing quietly would be worse than either.
 
 ---
 
@@ -1296,6 +1367,46 @@ see what Doxygen is being shown:
 
 `mono.tools/docgen/AGENTS.md` is the reasoning, including why the line count is
 an invariant and why the filter is scoped to `*.hpp`.
+
+## Baking content — `assetc`
+
+```sh
+assetc --input ART --output content            # a whole tree
+assetc --input ART --output content --quiet    # the summary only
+assetc --input ART --output content --model-size 0 --max-texture 0   # leave both alone
+```
+
+Reads a directory of source art and writes one a content origin can publish.
+Models — `.glb`, `.gltf`, `.obj`, `.pmx` — become `.amesh`; images — `.png`,
+`.jpg`, `.bmp` — become `.atex`; **anything else is copied across unchanged**,
+because the output tree is what gets published and a baker that dropped every
+sound and script would produce a directory missing half the game.
+
+```sh
+assetc --input ~/art --output content
+cdn --publish content --store store --signing-key HEX
+client --cdn dir:store --publisher-key PUBLIC --script Meshes.luau
+```
+
+The second command has no idea the first ran. That is the contract: this
+produces a directory, and a publisher publishes directories.
+
+**Two defaults do something and both can be turned off.** `--model-size 4`
+scales every model so its longest axis measures four metres, because the formats
+disagree by an order of magnitude about what a unit is — a PMX character is
+about twenty units tall and a glTF one about two — so a tree baked without it
+gives a scene where one model fills the sky. `--max-texture 2048` shrinks
+anything larger, because a character pack routinely carries several 4096-pixel
+sheets and four of those is a hundred megabytes of video memory.
+
+**A file that fails is a row, not an abort**, and the exit code is non-zero so a
+build script notices. One unreadable model in a directory of four hundred should
+cost that model.
+
+The importers live in `mono.engine/bake`, which is the only code in the engine
+that reads a foreign format — and **nothing a shipped game links may link it**.
+`mono.engine/bake/AGENTS.md` is the reasoning; `mono.tools/architecture/` is the
+enforcement.
 
 ## Counting the lines
 

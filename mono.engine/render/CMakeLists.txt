@@ -31,6 +31,26 @@ mono_add_library(render
 
 		Engine::scene
 
+		# **What a mesh and a texture *are*.** `MeshTable` and `TextureTable`
+		# take `assets::MeshData` and `assets::TextureData` and hand back a
+		# buffer range and a device texture, which is the whole of what v0.9
+		# added here: a `DrawInstance::Mesh` was a name nothing could resolve.
+		#
+		# Public rather than private, because both tables are public headers and
+		# both name the asset types in their signatures — a caller registering a
+		# fetched mesh has to be able to spell one.
+		Engine::assets
+
+		# **What a mesh and a texture *are*.** `MeshTable` and `TextureTable`
+		# take `assets::MeshData` and `assets::TextureData` and hand back a
+		# buffer range and a device texture, which is the whole of what v0.9
+		# added here: a `DrawInstance::Mesh` was a name nothing could resolve.
+		#
+		# Public rather than private, because both tables are public headers and
+		# both name the asset types in their signatures — a caller registering a
+		# fetched mesh has to be able to spell one.
+		Engine::assets
+
 	# Both private. SDL's GPU types are behind the pimpl in Renderer.cpp — only
 	# `struct SDL_Window;` reaches a public header, as a forward declaration —
 	# and no shaderc type appears in ShaderCompiler.hpp at all, which is the

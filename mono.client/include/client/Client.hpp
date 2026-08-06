@@ -13,12 +13,12 @@
 #include <engine/delivery/Client.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/input/Actions.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
-#include <engine/gui/Compile.hpp>
-#include <engine/gui/Input.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/SpatialCanvas.hpp>
@@ -181,6 +181,22 @@ namespace client {
 		// smallest honest one: it decodes a delivered format, builds a routing,
 		// and plays it through the same device a game would.
 		std::filesystem::path SoundPath;
+
+		// The server's Ed25519 public key, as 64 hex characters, or empty to
+		// accept any server.
+		//
+		// **Set it and a relay cannot get in; leave it and one can.** The
+		// exchange is encrypted either way; what a pin adds is knowing *who*
+		// the other end is. See `replication::ConnectorSettings::ServerIdentity`.
+		std::string ServerKey;
+
+		// Where to write a BMP of the scene, or empty for none.
+		//
+		// **A diagnostic rather than a feature**, and it changes how the frame
+		// is rendered: a capture needs an offscreen target, so asking for one
+		// puts the scene into a texture and presents the window from it. A game
+		// pays nothing for it because the flag is off.
+		std::filesystem::path Capture;
 	};
 
 	// The window, the renderer and the frame loop over one world.
@@ -279,6 +295,12 @@ namespace client {
 		//         No configuration at all is not a failure.
 		bool BeginContentDelivery();
 
+		// Advances content delivery and registers whatever arrived.
+		//
+		// Called once a frame, before the simulation and outside every render
+		// pass — the two constraints that decide where this can go at all.
+		void PumpContent();
+
 		// Opens the audio device and builds the mixer's routing.
 		//
 		// @return `false` only when a sound was asked for and cannot be played.
@@ -376,6 +398,25 @@ namespace client {
 
 		// The delivery client, when content sources were configured.
 		std::unique_ptr<engine::delivery::AssetClient> Content;
+
+		// Requests issued for meshes and textures and not yet taken.
+		//
+		// **A list rather than a count**, because a request that failed has to
+		// be dropped from it and a count could not say which.
+		std::vector<engine::delivery::RequestId> ContentPending;
+
+		// Whether the catalogue has arrived and the requests have been issued.
+		// Once, not per frame — see `PumpContent`.
+		bool ContentRequested = false;
+		bool ContentReported = false;
+
+		size_t ContentMeshes = 0;
+		size_t ContentTextures = 0;
+
+		// The busiest frame's counters, for the run's closing line. See where
+		// they are folded for why the *last* frame's would be zero.
+		uint64_t PeakTriangles = 0;
+		uint32_t PeakDrawCalls = 0;
 
 		// The audio device, when one opened. Null runs silently.
 		std::unique_ptr<engine::audio::Device> Sound;

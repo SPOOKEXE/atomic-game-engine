@@ -77,6 +77,20 @@
 		"configuring on a container with no Vulkan SDK, no SDL and no shader",
 		"compiler. `just check-cdn-is-bare` is the standing proof.",
 		"",
+		"v0.9 also gave `replication` an `assets` row, and it is the one that closes",
+		"a TODO `net::Handshake` has carried since v0.3. An X25519 agreement",
+		"authenticates nobody, so a relay can hold one exchange with each side and",
+		"read everything; the fix binds the exchange to a *server identity*, and",
+		"`net` has no idea what a server is. `replication` does, so the signature",
+		"lives there — over the transcript its own `Welcome` already carries a tag",
+		"on, with the Ed25519 key `assets` verifies manifests with.",
+		"",
+		"One key rather than two, deliberately: a server and the content it serves",
+		"are one identity as far as a player is concerned, and two would be two",
+		"things to distribute and two chances to pin the wrong one. The edge is L12",
+		"to L8, which the layer rule allows and which nothing else about the row",
+		"makes surprising — `delivery` has had the same one since v0.9's first half.",
+		"",
 		"`server` gained `cdn`, and that is the row worth arguing about. An attached",
 		"origin is CDN.md §6's 'local store' — the self-hosted case — and it is the",
 		"same library `mono.cdn` deploys alone, so a client cannot tell them apart.",
@@ -95,6 +109,32 @@
 		"row keeps its `requires`: that is still gated, which is why `--preset",
 		"server` stages no origin binary.",
 		"",
+		"v0.9's second half added two modules and widened two rows, all for the",
+		"mesh and texture pipeline.",
+		"",
+		"`bake` is new and is L9 `shared`, linking core and assets. It is the only",
+		"code in the engine that reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a",
+		"`.jpg` or a `.bmp`. **The row worth policing is the one that is not here:**",
+		"`client`, `server` and `cdn` must not name it. A parser for a foreign",
+		"format is the largest attack surface a content pipeline has, and",
+		"`assets/Texture.hpp` argued from the first day that a shipped game must",
+		"not carry one. The build cannot enforce that — both tiers are `shared` —",
+		"so this file and `bake/AGENTS.md` are the enforcement.",
+		"",
+		"`assetc` is the tool that gives `bake` its filesystem. The module has no",
+		"`std::filesystem` anywhere in it so that its whole pipeline is testable",
+		"without opening a file; everything that opens one is in the tool.",
+		"",
+		"`render` gained `assets`, and it is the row that makes v0.9 visible at",
+		"all: `MeshTable` and `TextureTable` take an `assets::MeshData` and an",
+		"`assets::TextureData` and hand back a buffer range and a device texture.",
+		"`scene::DrawInstance::Mesh` had been a name since v0.4 with nothing able",
+		"to resolve it. `ui` gained the same edge transitively, through `render`.",
+		"",
+		"`render` links `assets` and **not** `bake`, which is the whole division:",
+		"the renderer reads the engine's own formats and nothing else knows how to",
+		"produce them.",
+		"",
 		"v0.9 also added `audio` at L12 `client`. It declares `core` alone. It is",
 		"`client` tier because repo_layout.md §5.2 puts it there beside render, text,",
 		"ui and input — a server does not mix, it decides what is audible and",
@@ -111,6 +151,21 @@
 		"assets": {
 			"tier": "shared",
 			"links": [
+				"core"
+			]
+		},
+		"bake": {
+			"tier": "shared",
+			"links": [
+				"assets",
+				"core"
+			]
+		},
+		"assetc": {
+			"tier": "shared",
+			"links": [
+				"assets",
+				"bake",
 				"core"
 			]
 		},
@@ -274,25 +329,25 @@
 		"render": {
 			"tier": "client",
 			"links": [
+				"assets",
 				"core",
 				"ecs",
 				"graph",
 				"gui",
 				"parallel",
 				"scene",
-				"spatial"
-			],
+				"spatial"],
 			"requires": "MONO_BUILD_CLIENT"
 		},
 		"replication": {
 			"tier": "shared",
 			"links": [
+				"assets",
 				"core",
 				"ecs",
 				"net",
 				"parallel",
-				"world"
-			]
+				"world"]
 		},
 		"scene": {
 			"tier": "shared",
@@ -384,6 +439,7 @@
 		"ui": {
 			"tier": "client",
 			"links": [
+				"assets",
 				"core",
 				"ecs",
 				"graph",
@@ -391,8 +447,7 @@
 				"parallel",
 				"render",
 				"scene",
-				"spatial"
-			],
+				"spatial"],
 			"requires": "MONO_BUILD_CLIENT"
 		},
 		"unified_server_client": {

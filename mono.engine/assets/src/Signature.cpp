@@ -27,6 +27,20 @@ namespace engine::assets {
 		constexpr std::byte SIGNING_TAG{0x03};
 		constexpr std::string_view SIGNING_CONTEXT = "atomic-manifest-v1";
 
+		// **The second purpose this key has, and it gets its own tag.** The
+		// paragraph above is not a hypothetical any more: a server signs a
+		// session transcript with the same Ed25519 identity it publishes
+		// content under, and without a distinct tag a signature over a
+		// manifest root would verify as a signature over a transcript that
+		// happened to hash to the same thing.
+		//
+		// `0x05` because `HashTree` has `0x01` and `0x02`, this file has `0x03`
+		// and the manifest's descriptor root has `0x04`. They are listed
+		// together in `assets/AGENTS.md` precisely so a new one cannot be
+		// chosen by accident.
+		constexpr std::byte SESSION_TAG{0x05};
+		constexpr std::string_view SESSION_CONTEXT = "atomic-session-v1";
+
 		ContentHash SigningMessage(const ContentHash &root) {
 			Hasher hasher;
 			hasher.Update(std::span<const std::byte>(&SIGNING_TAG, 1));
@@ -40,6 +54,25 @@ namespace engine::assets {
 					reinterpret_cast<const std::byte *>(root.Digest.data()), ContentHash::BYTES
 				)
 			);
+			return hasher.Finish();
+		}
+
+		// The same construction for a session transcript.
+		//
+		// **The transcript is hashed rather than signed directly**, so this
+		// takes a span of any length and the Ed25519 call sees a fixed
+		// thirty-two bytes exactly as the manifest path does. A transcript is
+		// short today and the length is the caller's, which is reason enough
+		// not to let it decide how much goes through the signer.
+		ContentHash SessionMessage(std::span<const std::byte> transcript) {
+			Hasher hasher;
+			hasher.Update(std::span<const std::byte>(&SESSION_TAG, 1));
+			hasher.Update(
+				std::span<const std::byte>(
+					reinterpret_cast<const std::byte *>(SESSION_CONTEXT.data()), SESSION_CONTEXT.size()
+				)
+			);
+			hasher.Update(transcript);
 			return hasher.Finish();
 		}
 	}
@@ -126,6 +159,41 @@ namespace engine::assets {
 			signature.Value.data()
 		);
 		return signature;
+	}
+
+	SignatureBytes SigningKey::SignSessionTranscript(std::span<const std::byte> transcript) const {
+		ENGINE_PROFILE_CAT("SigningKey::SignSessionTranscript", core::ProfileCategory::Assets);
+
+		const ContentHash message = SessionMessage(transcript);
+
+		SignatureBytes signature;
+		CryptoPP::Donna::ed25519_sign(
+			message.Digest.data(),
+			ContentHash::BYTES,
+			Seed.data(),
+			Verifier.Value.data(),
+			signature.Value.data()
+		);
+		return signature;
+	}
+
+	bool VerifySessionTranscript(
+		std::span<const std::byte> transcript, const SignatureBytes &signature, const PublicKey &key
+	) {
+		ENGINE_PROFILE_CAT("assets::VerifySessionTranscript", core::ProfileCategory::Assets);
+
+		const ContentHash message = SessionMessage(transcript);
+		const bool passed =
+			CryptoPP::Donna::ed25519_sign_open(
+				message.Digest.data(), ContentHash::BYTES, key.Value.data(), signature.Value.data()
+			) == 0;
+
+		// **A rejection here is a relay, or a server that is not the one this
+		// client pinned.** Neither is an ordinary event, and both are the
+		// alarm this counter exists to raise rather than bury in the noise of
+		// a handshake that failed for a dull reason.
+		core::Metrics::Count(passed ? "net.session.verified" : "net.session.rejected", 1.0);
+		return passed;
 	}
 
 	bool VerifyManifestRoot(const ContentHash &root, const SignatureBytes &signature, const PublicKey &key) {

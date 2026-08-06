@@ -51,6 +51,7 @@
 //
 // @tier L12 · shared
 
+#include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/net/Cipher.hpp>
 #include <engine/net/Cookie.hpp>
@@ -140,6 +141,25 @@ namespace engine::replication {
 		// substituted or corrupted public key is accepted and the failure moves
 		// to whatever first depends on the keys, which is nothing at all today.
 		std::array<std::byte, net::Cipher::TAG_BYTES> Confirmation{};
+
+		// The server's Ed25519 signature over the same transcript, or zeroes.
+		//
+		// **This is what the tag above cannot do.** `Confirmation` proves the
+		// sender reached the same keys — which a relay also does, because it
+		// reached them by holding one exchange with each side. A signature
+		// proves *who* reached them: a relay cannot produce one over a
+		// transcript containing its own ephemeral key that verifies under the
+		// server's identity.
+		//
+		// **Always present, and zero when the server has no identity.** A
+		// variable-length body would make `ReadAdmission` choose between
+		// lengths on a message parsed before anything is known about the sender
+		// — the one place this protocol is strict rather than forgiving. Sixty
+		// four zero bytes verify under no key, so a client that pins one
+		// refuses an unsigned server without a special case.
+		//
+		// @since v0.9
+		std::array<std::byte, assets::SignatureBytes::BYTES> Identity{};
 	};
 
 	// What a successful read produced.

@@ -147,6 +147,32 @@ namespace engine::replication {
 		//        default above.
 		void SetAdmission(AdmissionPolicy policy);
 
+		// Gives this server an identity, so a client can tell it from a relay.
+		//
+		// **Without one the exchange is unauthenticated, which is protection
+		// against a listener and not against a relay.** Whoever carries the two
+		// key-exchange messages can substitute its own key and hold a session
+		// with each side, reading everything; `net::Handshake`'s header has said
+		// so since v0.3. With an identity, every `Welcome` carries a signature
+		// over the transcript, and a relay cannot produce one over a transcript
+		// containing *its* ephemeral key that verifies under this key.
+		//
+		// **The same key a publisher signs manifests with.** A server and the
+		// content it serves are one identity as far as a player is concerned,
+		// and two keys would be two things to distribute and two chances to pin
+		// the wrong one.
+		//
+		// Signing costs one Ed25519 operation per admitted client — per
+		// *connection*, not per packet — which is why it can sit on the path
+		// that already does an X25519 agreement.
+		//
+		// @param key The server's signing key. Kept by reference to the
+		//        caller's storage, which must outlive this listener: a
+		//        `SigningKey` is move-only and zeroes itself, and copying one
+		//        into here would be a second place a secret lives.
+		// @since v0.9
+		void SetIdentity(const assets::SigningKey *key);
+
 		// Whether this listener can admit anybody at all.
 		//
 		// `false` when the operating system refused the entropy the challenge
@@ -294,6 +320,9 @@ namespace engine::replication {
 
 		net::Transport *Transport_;
 		ListenerSettings Settings;
+
+		// What this server signs its transcripts with, or null for none.
+		const assets::SigningKey *Identity = nullptr;
 		replication::Authority Authority_;
 
 		// The challenge secret, or nothing when the operating system refused

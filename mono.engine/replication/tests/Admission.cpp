@@ -15,6 +15,7 @@
 //
 // Every deadline here is stated rather than waited for.
 
+#include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Cookie.hpp>
@@ -61,6 +62,7 @@ using engine::replication::Answer;
 using engine::replication::Applicant;
 using engine::replication::Challenge;
 using engine::replication::Connector;
+using engine::replication::ConnectorSettings;
 using engine::replication::FrameAdmission;
 using engine::replication::Hello;
 using engine::replication::Listener;
@@ -186,9 +188,30 @@ namespace admission_test {
 		}
 	};
 
+	// A signing key from a fixed seed, so a suite gets the same identity twice.
+	engine::assets::SigningKey Identity(uint8_t fill) {
+		std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+		seed.fill(static_cast<std::byte>(fill));
+
+		std::optional<engine::assets::SigningKey> key = engine::assets::SigningKey::FromSeed(seed);
+		REQUIRE(key.has_value());
+		return std::move(*key);
+	}
+
 	// The responder's half, by hand, so a suite can hand a client a welcome
 	// that is wrong in exactly one way. Mirrors `Listener::Accept`.
-	Welcome Serve(const Answer &answer, uint8_t secret) {
+	//
+	// **`clientKey` is separate from `answer.PublicKey` and that is the whole
+	// point of the parameter.** A relay answers the server with *its own*
+	// ephemeral key, so the transcript the server signs names the relay's key
+	// and not the client's. Passing them apart is how a suite builds exactly
+	// that welcome.
+	Welcome Serve(
+		const Answer &answer,
+		uint8_t secret,
+		const engine::assets::SigningKey *identity = nullptr,
+		const std::array<std::byte, Handshake::MESSAGE_BYTES> *clientKey = nullptr
+	) {
 		auto exchange = Handshake::BeginFromSecret(HandshakeRole::Responder, Seed(secret));
 		REQUIRE(exchange.has_value());
 		REQUIRE(exchange->Consume(answer.PublicKey));
@@ -200,13 +223,22 @@ namespace admission_test {
 		auto keys = exchange->TakeKeys();
 		REQUIRE(keys.has_value());
 
-		const auto transcript = AdmissionTranscript(answer.PublicKey, welcome.PublicKey, answer.Cookie);
+		const auto transcript = AdmissionTranscript(
+			clientKey != nullptr ? *clientKey : answer.PublicKey, welcome.PublicKey, answer.Cookie
+		);
 		const auto sealed = keys->Sending.Seal({}, transcript);
 		REQUIRE(sealed.has_value());
 		REQUIRE(sealed->Bytes.size() == welcome.Confirmation.size());
 
 		welcome.Counter = sealed->Counter;
 		std::copy(sealed->Bytes.begin(), sealed->Bytes.end(), welcome.Confirmation.begin());
+
+		if (identity != nullptr) {
+			const engine::assets::SignatureBytes signature = identity->SignSessionTranscript(transcript);
+			for (size_t index = 0; index < signature.Value.size(); index++) {
+				welcome.Identity[index] = static_cast<std::byte>(signature.Value[index]);
+			}
+		}
 		return welcome;
 	}
 
@@ -221,13 +253,14 @@ namespace admission_test {
 		std::optional<Cookie> Issuer;
 		Answer Answered;
 		Endpoint ClientAt;
+		ConnectorSettings Options;
 
-		Dialogue() {
+		explicit Dialogue(const ConnectorSettings &settings = {}) : Options(settings) {
 			REQUIRE(Transports.size() == 2);
 			Issuer = Cookie::Begin();
 			REQUIRE(Issuer.has_value());
 
-			Client.emplace(*Transports[1], Transports[0]->Local(), Now);
+			Client.emplace(*Transports[1], Transports[0]->Local(), Now, Options);
 
 			// Hello out, challenge back.
 			Client->Poll(Replica, Now);
@@ -942,4 +975,171 @@ TEST_CASE("a session refuses a handshake packet outright", "[replication][admiss
 	CHECK_FALSE(session.Receive(datagram.Bytes(), 1.0));
 	CHECK(session.Stats().Refused == 1);
 	CHECK(session.Link().Stats().PacketsReceived == 0);
+}
+
+// --- who the server is --------------------------------------------------------
+//
+// **The gap `net::Handshake` has carried since v0.3, and what closes it.** An
+// X25519 agreement proves the peer can do arithmetic; the cookie proves it can
+// receive at the address it wrote; the welcome's tag proves it reached the same
+// keys. None of the three says *who* it is — and a relay satisfies all three,
+// because it reaches the keys by holding one exchange with each side.
+//
+// A signature over the transcript is what a relay cannot forge, and these cases
+// are the difference between having that sentence in a comment and having it be
+// true.
+
+TEST_CASE("a signed welcome from the pinned server is accepted", "[replication][admission]") {
+	const engine::assets::SigningKey server = Identity(0x40);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue dialogue(pinned);
+	dialogue.Finish(Serve(dialogue.Answered, 110, &server));
+
+	CHECK(dialogue.Client->Admitted());
+	CHECK_FALSE(dialogue.Client->Rejected());
+}
+
+TEST_CASE("an unsigned welcome is refused by a client that pinned a key", "[replication][admission]") {
+	// **Refused rather than downgraded.** A client that pinned a key and then
+	// connected to a server that could not prove it would have a setting that
+	// looks like security and is not — which is worse than not having the
+	// setting, because somebody would rely on it.
+	const engine::assets::SigningKey server = Identity(0x41);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue dialogue(pinned);
+
+	// The welcome a listener with no identity sends: sixty-four zeroes, which
+	// verify under no key.
+	dialogue.Finish(Serve(dialogue.Answered, 111));
+
+	CHECK_FALSE(dialogue.Client->Admitted());
+	CHECK(dialogue.Client->Rejected());
+}
+
+TEST_CASE("a welcome signed by another key is refused", "[replication][admission]") {
+	const engine::assets::SigningKey expected = Identity(0x42);
+	const engine::assets::SigningKey other = Identity(0x43);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = expected.Public();
+
+	Dialogue dialogue(pinned);
+	dialogue.Finish(Serve(dialogue.Answered, 112, &other));
+
+	CHECK_FALSE(dialogue.Client->Admitted());
+	CHECK(dialogue.Client->Rejected());
+}
+
+TEST_CASE("a relay in the path is refused, which is the whole point", "[replication][admission]") {
+	// **The attack the tag alone cannot catch, modelled the way it actually
+	// works.** A relay runs *two* exchanges: one with the client, one with the
+	// server. Each half is internally consistent, so each end's confirmation
+	// tag verifies — the client's against keys it shares with the relay, the
+	// server's against keys it shares with the relay — and the relay reads
+	// everything in between.
+	//
+	// A first attempt at this case had the relay simply forward the server's
+	// welcome, and it was refused at the *tag* rather than at the signature —
+	// which proves nothing about the signature, because that is a relay too
+	// incompetent to be worth defending against. What follows is the competent
+	// one: the tag passes and only the signature stands in the way.
+	const engine::assets::SigningKey server = Identity(0x44);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue dialogue(pinned);
+
+	// The relay's half with the client: it answers as though it were the
+	// server, so the client derives keys with *it* and the tag verifies.
+	Welcome forwarded = Serve(dialogue.Answered, 113);
+
+	// The relay's half with the server, which it holds separately. The server
+	// signs what it saw — a transcript naming the relay's ephemeral key, not
+	// the client's — and that signature is the only thing the relay has to
+	// offer, because it cannot make the server sign anything else.
+	std::array<std::byte, Handshake::MESSAGE_BYTES> relayKey{};
+	relayKey.fill(std::byte{0x5A});
+
+	Answer toServer = dialogue.Answered;
+	toServer.PublicKey = relayKey;
+	const Welcome fromServer = Serve(toServer, 114, &server, &relayKey);
+
+	// The best a relay can do: its own welcome, with the server's real
+	// signature stapled on.
+	forwarded.Identity = fromServer.Identity;
+
+	dialogue.Finish(forwarded);
+
+	// The tag verified — the client and the relay really do share keys — and
+	// the signature did not, because it commits to an exchange this client was
+	// not part of.
+	CHECK_FALSE(dialogue.Client->Admitted());
+	CHECK(dialogue.Client->Rejected());
+}
+
+TEST_CASE("without a pin that same relay succeeds", "[replication][admission]") {
+	// **The control for the case above, and the reason the pin is not
+	// optional in anything that matters.** Identical bytes, one setting
+	// removed: the relay gets in, and the client cannot tell.
+	const engine::assets::SigningKey server = Identity(0x47);
+
+	Dialogue dialogue;
+	Welcome forwarded = Serve(dialogue.Answered, 113);
+
+	std::array<std::byte, Handshake::MESSAGE_BYTES> relayKey{};
+	relayKey.fill(std::byte{0x5A});
+
+	Answer toServer = dialogue.Answered;
+	toServer.PublicKey = relayKey;
+	forwarded.Identity = Serve(toServer, 114, &server, &relayKey).Identity;
+
+	dialogue.Finish(forwarded);
+	CHECK(dialogue.Client->Admitted());
+}
+
+TEST_CASE("an unpinned client still connects, and that is the weaker mode", "[replication][admission]") {
+	// The default, stated rather than hidden: a client with no pinned identity
+	// is safe against a listener and not against a relay. `Connector` logs a
+	// warning when it starts one of these, so the mode is visible rather than
+	// inferred from a setting nobody set.
+	Dialogue dialogue;
+	dialogue.Finish(Serve(dialogue.Answered, 114));
+
+	CHECK(dialogue.Client->Admitted());
+
+	// And a signature it did not ask for is not a reason to refuse: a signed
+	// server talking to an unpinned client is an ordinary deployment.
+	const engine::assets::SigningKey server = Identity(0x45);
+	Dialogue second;
+	second.Finish(Serve(second.Answered, 115, &server));
+	CHECK(second.Client->Admitted());
+}
+
+TEST_CASE("a signature is over the transcript, so it does not move", "[replication][admission]") {
+	// A signature lifted from one exchange verifies in no other, because the
+	// transcript names both ephemeral keys and the cookie. This is the same
+	// property the tag has, checked for the signature because the two are
+	// separate mechanisms over the same bytes.
+	const engine::assets::SigningKey server = Identity(0x46);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue first(pinned);
+	const Welcome stolen = Serve(first.Answered, 116, &server);
+
+	Dialogue second(pinned);
+	Welcome forged = Serve(second.Answered, 117, &server);
+	forged.Identity = stolen.Identity;
+
+	second.Finish(forged);
+	CHECK_FALSE(second.Client->Admitted());
+	CHECK(second.Client->Rejected());
 }

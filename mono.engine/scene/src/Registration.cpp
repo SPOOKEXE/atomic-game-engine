@@ -7,6 +7,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
@@ -125,6 +126,70 @@ namespace engine::scene {
 			}
 		}
 
+		void WriteSurfaceAppearances(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *appearances = static_cast<const SurfaceAppearance *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(appearances[index].ColourMap);
+				writer.WriteFloat(appearances[index].AlphaCutoff);
+				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Mode));
+			}
+		}
+
+		void ReadSurfaceAppearances(core::ByteReader &reader, void *destination, size_t count) {
+			auto *appearances = static_cast<SurfaceAppearance *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				appearances[index].ColourMap = reader.ReadName();
+				appearances[index].AlphaCutoff = reader.ReadFloat();
+
+				const uint8_t mode = reader.ReadUInt8();
+
+				// Range-checked before the cast, for `assets::Texture::Read`'s
+				// reason: a cast of an out-of-range byte produces a value no
+				// switch handles, and every consumer downstream then reads
+				// something the type says cannot exist.
+				appearances[index].Mode = mode <= static_cast<uint8_t>(AlphaMode::Blend)
+											  ? static_cast<AlphaMode>(mode)
+											  : AlphaMode::Opaque;
+			}
+		}
+
+		// **The tag names, and they have to travel with the masks.** A `Tags`
+		// component is a bare integer whose bits mean whatever this table says
+		// they mean, so a world restored with the masks and without the table
+		// would have every tagged object in a group with no name — and a surface
+		// camera filtering by name would match nothing, silently.
+		void WriteTagTables(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *tables = static_cast<const TagTable *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteUInt32(static_cast<uint32_t>(tables[index].Names.size()));
+
+				// In registration order, because the index *is* the bit. Sorting
+				// here would renumber every mask already stored on a row —
+				// `WriteSurfaceTables` says the same about its own.
+				for (const core::Name &name : tables[index].Names) {
+					writer.WriteName(name);
+				}
+			}
+		}
+
+		void ReadTagTables(core::ByteReader &reader, void *destination, size_t count) {
+			auto *tables = static_cast<TagTable *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				tables[index].Names.clear();
+
+				const uint32_t names = reader.ReadUInt32();
+				for (uint32_t at = 0; at < names && !reader.Failed(); at++) {
+					if (tables[index].Names.size() >= TagTable::MAXIMUM) {
+						// A file claiming more tags than a mask has bits. Dropped
+						// rather than read, because a bit past thirty-two cannot be
+						// referenced by any mask anyway.
+						break;
+					}
+					tables[index].Names.push_back(reader.ReadName());
+				}
+			}
+		}
+
 		void WriteSurfaceTables(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *tables = static_cast<const SurfaceTable *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -218,6 +283,21 @@ namespace engine::scene {
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);
 		ecs::Components::Register<Visual>("scene.Visual", WriteVisuals, ReadVisuals);
+
+		// **A hand-written pair, because it holds a name.** The lesson
+		// `WriteVisuals` records above applies here from the first line: a
+		// field added to a type with a hand-written pair crosses only if
+		// somebody remembers, and nothing in the build checks. Three fields
+		// today, and all three are written.
+		ecs::Components::Register<SurfaceAppearance>(
+			"scene.SurfaceAppearance", WriteSurfaceAppearances, ReadSurfaceAppearances
+		);
+
+		// **The default POD form, and that is right here.** A `Tags` is one
+		// integer and no name — the *names* are in the `TagTable` resource,
+		// which is serialised beside it, so the mask and the meanings of its
+		// bits travel together or not at all.
+		ecs::Components::Register<Tags>("scene.Tags");
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 		ecs::Components::Register<Camera>("scene.Camera");
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
@@ -256,6 +336,7 @@ namespace engine::scene {
 		// `Store::SetResource` — under the compiler's spelling of the type, and
 		// aborting outright once the table is sealed.
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
+		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
 

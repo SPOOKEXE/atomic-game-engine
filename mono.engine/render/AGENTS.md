@@ -296,3 +296,60 @@ A store is picked up by a different worker every tick and a device is not, so a
 public rebind here would be a seam for exactly the thing the contract forbids.
 Revisit when a viewport's *record* is measurable; at the sizes measured it is
 not.
+
+## One buffer pair for every mesh, and a name resolves to a range
+
+`MeshTable` packs every registered mesh into a single vertex buffer and a single
+index buffer. A buffer pair per mesh would make every change of mesh a rebind,
+which a driver cannot batch across; with one pair a mesh is `(firstIndex,
+indexCount, vertexOffset)` and switching costs three integers on a draw call
+that was going to be issued anyway.
+
+The price is that adding a mesh re-uploads the whole thing, and that is the
+right trade while meshes arrive when *content* does — a handful of times over a
+session and never inside a frame. **Growth is a full re-upload rather than a
+suballocator**: a free list over device memory is a real allocator with real
+fragmentation, and the thing it buys is cheap eviction, which nothing does yet.
+
+`MeshTable::Resolve` never returns null. A mesh that has not arrived is the
+ordinary state of a streaming game, and an unknown name draws as a cube —
+visibly — rather than making the inner loop branch on null.
+
+## `TextureTable::Find` *does* return null, and the asymmetry is deliberate
+
+A missing mesh has to draw as something or the object vanishes. A missing
+texture has an honest answer already: the submesh's flat base colour, which is
+what an untextured model is meant to look like. Giving textures a fallback would
+turn "this model has no texture" into "this model is white".
+
+## `DrawSlots` splits consecutive runs and must not sort them
+
+Sorting each run by mesh would produce fewer draw calls, and the blended pass
+may not have it: that order is back-to-front from the eye, and reordering it is
+exactly the transparency bug the sort exists to prevent. One rule for both
+passes is worth more than the draw calls — and a rule that held for one pass and
+not the other is the kind that gets applied to the wrong one later.
+
+## The model matrix is not rigid, and the normal matrix is not its upper 3x3
+
+`ToGpu` folds the half-extent into the model matrix, so `mat3(model)` scales
+normals as well as rotating them. `opaque.vert` corrects for it by scaling the
+normal by one over the square of each axis first — three multiplies rather than
+an inverse transpose per vertex.
+
+**This was wrong for four versions and invisible**, because an axis-aligned
+normal comes out of the wrong matrix pointing the right way and is renormalised
+in the fragment. It became visible the moment a sphere or an imported mesh was
+scaled unevenly. The comment in the shader that said the transforms were rigid
+was describing what the code assumed rather than what it did.
+
+## What is not here yet
+
+- **No mipmaps.** A 2048-pixel sheet minified onto forty pixels shimmers.
+  `assets::Texture` is one image and has no place to put the levels, so the fix
+  is a format change that should arrive with sampler work rather than ahead of
+  it.
+- **No filter on the screen pass, and there must not be one.** A surface camera
+  filters by tag; the window shows the world. `DrawSlots` takes a filter and
+  every screen-pass call site passes zero, deliberately — a filtered window is a
+  game where the player sees a group and cannot tell why.

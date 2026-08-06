@@ -447,3 +447,64 @@ TEST_CASE("Face is an enum, so a misspelling is refused where it was written", "
 	REQUIRE(Write(store, camera, "Face", Name("Bottom")));
 	CHECK(Read<Name>(store, camera, "Face") == Name("Bottom"));
 }
+
+TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") {
+	Store store("meshpart_test");
+	RegisterSceneClasses();
+
+	const ClassId meshPart = engine::ecs::Classes::Find(Name("MeshPart"));
+	REQUIRE(meshPart.IsValid());
+
+	// **It adds no component**, and that is the whole shape of the class:
+	// `Visual::Mesh` and `SurfaceAppearance::ColourMap` already sit on
+	// `BasePart`, because a plain `Part` may name a built-in and a texture just
+	// as legitimately. What `MeshPart` is *for* is the vocabulary a ported
+	// script uses.
+	CHECK(engine::ecs::Classes::IsA(meshPart, engine::ecs::Classes::Find(Name("BasePart"))));
+
+	const Entity part = store.CreateInstance(meshPart, "Fox");
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// Every drawable has both components, which is what lets the draw-list pass
+	// read them as columns rather than joining them per row.
+	REQUIRE(store.Get<engine::scene::SurfaceAppearance>(part) != nullptr);
+	REQUIRE(store.Get<engine::scene::Tags>(part) != nullptr);
+
+	REQUIRE(Write(store, part, "MeshId", Name("props/fox.amesh")));
+	CHECK(Read<Name>(store, part, "MeshId") == Name("props/fox.amesh"));
+
+	// **The alias and the component agree because there is one component.**
+	// `MeshId` and `Mesh` project the same field, so a script setting one and a
+	// loader reading the other cannot disagree — which is the whole reason the
+	// class carries no storage of its own.
+	CHECK(Read<Name>(store, part, "Mesh") == Name("props/fox.amesh"));
+
+	REQUIRE(Write(store, part, "TextureID", Name("props/fox.atex")));
+	CHECK(Read<Name>(store, part, "TextureID") == Name("props/fox.atex"));
+	CHECK(Read<Name>(store, part, "ColorMap") == Name("props/fox.atex"));
+}
+
+TEST_CASE("AlphaMode is an enum, so a misspelling is refused", "[scene][part]") {
+	Store store("alpha_mode_test");
+	RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("MeshPart")), "Hair");
+
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Opaque"));
+
+	// `Clip` is the mode a character model needs: hair and eyelashes are cut-out
+	// planes, and blending them costs a sort a discard does not.
+	REQUIRE(Write(store, part, "AlphaMode", Name("Clip")));
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Clip"));
+
+	CHECK_FALSE(Write(store, part, "AlphaMode", Name("Clpi")));
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Clip"));
+
+	REQUIRE(Write(store, part, "AlphaCutoff", 0.25f));
+	CHECK(Read<float>(store, part, "AlphaCutoff") == 0.25f);
+
+	// Clamped, for `Transparency`'s reason: a cutoff outside zero to one is a
+	// surface that is entirely there or entirely gone.
+	REQUIRE(Write(store, part, "AlphaCutoff", 4.0f));
+	CHECK(Read<float>(store, part, "AlphaCutoff") == 1.0f);
+}

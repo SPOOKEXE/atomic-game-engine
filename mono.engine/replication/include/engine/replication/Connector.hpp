@@ -62,6 +62,26 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ConnectorSettings {
+		// The server's public key, or nothing to accept any server.
+		//
+		// **Set it and a relay cannot get in; leave it and one can.** The X25519
+		// agreement proves the peer can do arithmetic and the cookie proves it
+		// can receive at the address it wrote; neither says *who* it is. With a
+		// key here, the `Welcome`'s signature over the transcript is checked and
+		// a connection that fails the check is refused outright.
+		//
+		// **The default is nothing, and that is stated rather than hidden.** A
+		// client that refused every unpinned server would refuse every server in
+		// this engine today, because a listener with no identity is still the
+		// ordinary case. `Connector` logs once when it connects without a pin,
+		// so the weaker mode is visible rather than assumed.
+		//
+		// The same key the content origin is pinned with — see
+		// `delivery::DeliverySettings::Publisher`.
+		//
+		// @since v0.9
+		std::optional<assets::PublicKey> ServerIdentity;
+
 		// How the session frames and resends.
 		SessionSettings Session;
 

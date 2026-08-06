@@ -291,3 +291,60 @@ policy.
 - **No predicted-entity index range.** That changes how the entity directory is
   laid out and belongs in `ecs`; `Store::SetAdoptOnly` is what guards the hole
   meanwhile.
+
+## `SurfaceAppearance` and `Tags` are on `BasePart`, and that is a paid-for choice
+
+Both are in `BasePart`'s class set rather than `MeshPart`'s, which puts sixteen
+bytes on every part in the world including four thousand plain cubes. The
+alternative is an optional component, and it does not work here:
+`client::CollectInstances` is a batched parallel walk over a fixed signature —
+`EachBatchParallel` is handed columns and deliberately no entity — so a
+component only some rows had could not be read at all without walking the world
+a second time and joining by entity.
+
+A dense column of mostly-invalid names is sixteen bytes and no branches. Moving
+either of them down to `MeshPart` would mean rewriting the draw-list pass, and
+the reviewer's question is whether that rewrite was actually done rather than
+whether the move looks tidier.
+
+## A tag's bit is its index, so the table is never sorted and a name never leaves
+
+`TagTable::Names` is in registration order because **the index is the bit**.
+Sorting it renumbers every mask already stored on a row — the same rule
+`SurfaceTable::Rows` carries — and `RemoveTag` deliberately leaves the name in
+the table for the same reason: freeing a bit would let the next registration
+reuse it while another row's mask still had it set.
+
+**The thirty-third tag is refused rather than aliased.** An alias is one tag's
+objects appearing in another tag's pass, which is invisible until somebody
+notices the wrong thing reflected in a mirror. If the ceiling ever needs
+raising, raise the mask's width; do not make registration wrap.
+
+## The tag names travel with the masks or neither is meaningful
+
+`Tags` is a bare integer whose bits mean whatever the `TagTable` resource says.
+A world restored with the masks and without the table has every tagged object in
+a group with no name, and a filter by name matches nothing — silently. Both are
+registered in `RegisterSceneComponents` and the table has an explicit writer.
+
+## A tag filter is authored by name and compared as a bit
+
+`SurfaceCamera::TagFilter` is a mask, and `TagFilterProperty` is what turns a
+name into one — once, where the name is written. The alternative is a name on
+the component and a lookup per instance per pass, which is a string compare in
+the draw loop.
+
+**A filter names several tags, comma-separated.** A mask holds thirty-two and a
+property holds one value, so the list lives in the string rather than in a new
+`ecs::PropertyType` that exactly one property would use. The setter builds the
+whole mask in a local and assigns once — a loop writing straight into the
+component leaves a half-built filter behind when the table fills part way
+through, and a redirected pass drawing *some* of its group is harder to notice
+than one drawing none of it.
+
+**The property's type is `PropertyType::Name` and not `String`.** The two
+marshal different payloads — a `core::Name` and an owning `std::string` — and
+declaring the wrong one compiles, passes any test that writes raw bytes through
+`SetProperty`, and fails at the first script that assigns to it. That is how it
+was found. A test on a computed property should assert the declared type, not
+only the round-trip.

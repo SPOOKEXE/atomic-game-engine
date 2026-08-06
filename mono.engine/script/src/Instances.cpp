@@ -5,6 +5,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Tagging.hpp>
 
 #include <lualib.h>
 #include <string_view>
@@ -284,6 +285,40 @@ namespace engine::script {
 			}
 
 			lua_pushboolean(state, ecs::Classes::IsA(store.ClassOf(instance), wanted));
+			return 1;
+		}
+
+		// `instance:AddTag(name)`, `instance:RemoveTag(name)`, `instance:HasTag(name)`
+		//
+		// **Roblox puts these on `CollectionService` and they are methods here**,
+		// which is the one place this binding departs from that vocabulary
+		// deliberately. A service would need a world to be found through, and
+		// the thing being tagged is already in hand; `scene::AddTag` takes the
+		// store and the entity and there is nothing a service would add but a
+		// lookup.
+		//
+		// `AddTag` answers `false` when the world's tag table is full — see
+		// `TagTable::MAXIMUM` — rather than erroring, because a scene that has
+		// run out of tags is a scene mistake and not a script one, and a script
+		// that wanted to know can read the answer.
+		int InstanceAddTag(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			lua_pushboolean(state, scene::AddTag(store, instance, Name(luaL_checkstring(state, 2))));
+			return 1;
+		}
+
+		int InstanceRemoveTag(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			lua_pushboolean(state, scene::RemoveTag(store, instance, Name(luaL_checkstring(state, 2))));
+			return 1;
+		}
+
+		int InstanceHasTag(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			lua_pushboolean(state, scene::HasTag(store, instance, Name(luaL_checkstring(state, 2))));
 			return 1;
 		}
 
@@ -813,6 +848,9 @@ namespace engine::script {
 			lua_CFunction Function;
 		} METHODS[] = {
 			{"IsA", InstanceIsA},
+			{"AddTag", InstanceAddTag},
+			{"RemoveTag", InstanceRemoveTag},
+			{"HasTag", InstanceHasTag},
 			{"Destroy", InstanceDestroy},
 			{"Clone", InstanceClone},
 			{"GetChildren", InstanceGetChildren},
@@ -1007,11 +1045,10 @@ namespace engine::script {
 			case gui::EventKind::MouseLeave:
 			case gui::EventKind::MouseMoved: {
 				// `(x, y)` in canvas pixels, which is Roblox's signature.
-				const SignalKind kind = event.Kind == gui::EventKind::MouseEnter
-											? SignalKind::GuiMouseEnter
-											: event.Kind == gui::EventKind::MouseLeave
-												  ? SignalKind::GuiMouseLeave
-												  : SignalKind::GuiMouseMoved;
+				const SignalKind kind = event.Kind == gui::EventKind::MouseEnter ? SignalKind::GuiMouseEnter
+										: event.Kind == gui::EventKind::MouseLeave
+											? SignalKind::GuiMouseLeave
+											: SignalKind::GuiMouseMoved;
 				lua_pushnumber(state, event.Position.X);
 				lua_pushnumber(state, event.Position.Y);
 				note(FireSignal(state, kind, event.Instance, 2));

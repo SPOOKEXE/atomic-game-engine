@@ -8,6 +8,7 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -461,6 +462,177 @@ namespace engine::scene {
 			return property;
 		}
 
+		// How a surface's texture alpha is treated, as an enum member.
+		//
+		// Interned once, for `NormalIdEnum`'s reason: a properties panel reads
+		// this every frame and constructing from a literal takes the global
+		// name-registry mutex each time.
+		const core::Name &AlphaModeEnum() {
+			static const core::Name name("AlphaMode");
+			return name;
+		}
+
+		PropertyDescriptor AlphaModeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("AlphaMode");
+			property.Type = PropertyType::Enum;
+			property.EnumName = AlphaModeEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(AlphaModeEnum(), static_cast<size_t>(appearance->Mode));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						AlphaModeEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					// Refused where it was written rather than landing in the
+					// component as a mode nobody chose.
+					return false;
+				}
+
+				appearance->Mode = static_cast<AlphaMode>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
+		// Which tags a surface camera draws, as a name a script writes.
+		//
+		// **The property is a name and the storage is a bit**, which is the
+		// whole of `AGENTS.md` rule 4 applied to a filter: a script says
+		// `camera.TagFilter = "Reflective"` and the component holds a mask that
+		// a draw loop can `and` against. The registration happens here, once,
+		// where the name is written — so the hot path never sees a string.
+		//
+		// **Several tags, comma-separated**, because a mask holds thirty-two and
+		// a property holds one value. `"Imported, Reflective"` is the whole
+		// syntax: a list in a string, which is what a property type of `Name`
+		// can carry without inventing a list type in `ecs::PropertyType` that
+		// exactly one property would use.
+		//
+		// Spaces around a comma are ignored, so the separator reads the way
+		// somebody would type it. An empty entry is skipped rather than
+		// registering a blank tag.
+		//
+		// Reading it back gives every name in the mask, in bit order, joined the
+		// same way — so a filter written from a script round-trips exactly and
+		// one assembled another way reads as the tags it includes rather than as
+		// a number.
+		PropertyDescriptor TagFilterProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TagFilter");
+
+			// **`Name` and not `String`, and the difference is the payload.**
+			// `PropertyType::String` marshals a `std::string`, which the script
+			// binding hands to a setter as an owning object; this getter and
+			// setter move a `core::Name`, which is what `PropertyType::Name`
+			// means. Declaring the wrong one type-checks, passes a test that
+			// writes raw bytes, and fails at the first script that assigns to
+			// it — which is exactly how it was found.
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceCamera *surface = store.Get<SurfaceCamera>(instance);
+				const TagTable *table = store.Resource<TagTable>();
+				if (surface == nullptr) {
+					return false;
+				}
+
+				const std::vector<core::Name> named =
+					table == nullptr ? std::vector<core::Name>{} : table->Describe(surface->TagFilter);
+
+				std::string joined;
+				for (const core::Name &name : named) {
+					if (!joined.empty()) {
+						joined += ", ";
+					}
+					joined += name.Text();
+				}
+
+				// An empty mask reads back as an invalid name rather than as an
+				// empty string, so "no filter" is the same value clearing it
+				// takes.
+				*static_cast<core::Name *>(out) = joined.empty() ? core::Name() : core::Name(joined);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				SurfaceCamera *surface = store.GetMutable<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+
+				const core::Name &name = *static_cast<const core::Name *>(value);
+				if (!name.IsValid()) {
+					// An empty filter is a camera that draws the world, which is
+					// what every mirror is and what clearing the property has to
+					// mean.
+					surface->TagFilter = 0;
+					return true;
+				}
+
+				// **Assembled into a local and assigned once.** A loop writing
+				// straight into the component would leave a half-built filter
+				// behind when the table filled part way through — a redirected
+				// pass drawing some of its group, which is harder to notice than
+				// one drawing none of it.
+				uint32_t mask = 0;
+				const std::string_view text = name.Text();
+
+				for (size_t start = 0; start <= text.size();) {
+					const size_t comma = std::min(text.find(',', start), text.size());
+					std::string_view entry = text.substr(start, comma - start);
+					start = comma + 1;
+
+					while (!entry.empty() && entry.front() == ' ') {
+						entry.remove_prefix(1);
+					}
+					while (!entry.empty() && entry.back() == ' ') {
+						entry.remove_suffix(1);
+					}
+					if (entry.empty()) {
+						continue;
+					}
+
+					const uint32_t bit = TagsOf(store).Register(core::Name(entry));
+					if (bit == 0) {
+						// The table is full. Refused rather than left partly
+						// applied: a filter that silently became "everything" is
+						// a redirected pass quietly drawing the whole world.
+						return false;
+					}
+					mask |= bit;
+				}
+
+				surface->TagFilter = mask;
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor SurfaceSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("SurfaceSize");
@@ -567,6 +739,12 @@ namespace engine::scene {
 			}
 			ecs::EnumTable::Register(NormalIdEnum().Text(), normals);
 
+			// The alpha modes, by the same rule: a member list registered once
+			// so a script setting `.AlphaMode = "Clip"` is checked against it.
+			ecs::EnumTable::Register(
+				AlphaModeEnum().Text(), std::array<std::string_view, 3>{"Opaque", "Clip", "Blend"}
+			);
+
 			// The default collision group, so `CollisionGroup` reads back
 			// something a script can compare rather than an invalid name on a
 			// part nobody configured.
@@ -606,6 +784,14 @@ namespace engine::scene {
 				// the class does not have is a class with a footnote. This is
 				// the footnote paid off.
 				ecs::Components::Of<PreviousTransform>(),
+
+				// **What a surface is made of, and what groups it belongs to.**
+				// Both are on `BasePart` rather than on `MeshPart`, which costs
+				// sixteen bytes on every part in the world and buys a draw-list
+				// pass with no optional join — `SurfaceAppearance`'s own header
+				// carries the whole argument.
+				ecs::Components::Of<SurfaceAppearance>(),
+				ecs::Components::Of<Tags>(),
 			};
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
 
@@ -616,6 +802,21 @@ namespace engine::scene {
 			// `PartDesc::Anchored`'s decision, and putting them in the class
 			// set would land static geometry in the dynamic archetype.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
+
+			// **A `MeshPart` is a `BasePart` whose mesh came from somewhere
+			// else**, and that is the whole of the difference. It adds no
+			// component: `Visual::Mesh` already names a mesh and
+			// `SurfaceAppearance::ColourMap` already names a texture, both on
+			// `BasePart`, because a plain `Part` may name a built-in and a
+			// texture just as legitimately.
+			//
+			// So what the class is *for* is the vocabulary. A script written
+			// against Roblox says `Instance.new("MeshPart")` and reads
+			// `.MeshId` and `.TextureID`, and a class tree that made it say
+			// `Part` and `.Mesh` would be a migration nobody asked for —
+			// `scene/AGENTS.md`'s argument for keeping the tree Roblox's,
+			// applied to the class v0.9 exists to add.
+			const ecs::ClassId meshPart = ecs::Classes::Register("MeshPart", basePart, {});
 
 			// **A camera is an instance, because a camera is a row.**
 			// `scene::Camera` has been a component since v0.4 precisely so a
@@ -690,6 +891,14 @@ namespace engine::scene {
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
 			ecs::Classes::Property<&Visual::Mesh>(basePart, "Mesh");
 
+			// The surface a part is drawn with. On `BasePart` because the
+			// component is, so a plain `Part` may carry a texture too.
+			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(basePart, "ColorMap");
+			ecs::Classes::ClampedProperty<&SurfaceAppearance::AlphaCutoff, 0.0f, 1.0f>(
+				basePart, "AlphaCutoff"
+			);
+			ecs::Classes::Computed(basePart, AlphaModeProperty());
+
 			// **`Transparency` has a field to project onto now**, and it arrived
 			// with the sorted pass that makes it mean something rather than
 			// ahead of it. A float nothing draws is a field that lies, and it
@@ -729,6 +938,13 @@ namespace engine::scene {
 			// Roblox's is and because `Orientation` already reproduces that same
 			// split — the component stores radians and the conversion is where
 			// the unit changes, which is the whole shape of a property here.
+			// Roblox's names for the same two fields, on the class a script
+			// asks for by name. Aliases rather than a second storage: both
+			// project the components `BasePart` already holds, so setting
+			// `.MeshId` and reading `.Mesh` cannot disagree.
+			ecs::Classes::Property<&Visual::Mesh>(meshPart, "MeshId");
+			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(meshPart, "TextureID");
+
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
@@ -740,6 +956,7 @@ namespace engine::scene {
 				surfaceCameraClass, "ImageTransparency"
 			);
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
+			ecs::Classes::Computed(surfaceCameraClass, TagFilterProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.
