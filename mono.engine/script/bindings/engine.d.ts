@@ -86,6 +86,23 @@ declare interface PropertyChangedSignal {
 	Equals(other: PropertyChangedSignal): boolean;
 }
 
+// The 2D tree's input, in two shapes because the arguments differ. See the Luau
+// half for why the three input signals take none: Roblox hands them an
+// `InputObject`, this engine has no such datatype, and a different one invented
+// now would have to change the day one arrives.
+declare interface GuiSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: GuiSignal): boolean;
+}
+
+// `(x, y)` in canvas pixels, which is Roblox's signature exactly.
+declare interface PointerSignal {
+	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
+	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
+	Equals(other: PointerSignal): boolean;
+}
+
 // --- queries ---------------------------------------------------------------
 
 declare interface RaycastParams {
@@ -105,13 +122,50 @@ declare interface RaycastResult {
 }
 
 declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
+declare interface Enum_AspectType extends EnumItem { readonly __enum: "AspectType"; }
+declare interface Enum_AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
+declare interface Enum_BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
+declare interface Enum_DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
 declare interface Enum_EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
 declare interface Enum_EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
+declare interface Enum_FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
+declare interface Enum_Font extends EnumItem { readonly __enum: "Font"; }
+declare interface Enum_HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
 declare interface Enum_Material extends EnumItem { readonly __enum: "Material"; }
 declare interface Enum_NormalId extends EnumItem { readonly __enum: "NormalId"; }
+declare interface Enum_ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
+declare interface Enum_ScrollingDirection extends EnumItem { readonly __enum: "ScrollingDirection"; }
 declare interface Enum_ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
+declare interface Enum_SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
+declare interface Enum_SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
+declare interface Enum_StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
+declare interface Enum_SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
+declare interface Enum_TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
+declare interface Enum_TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
+declare interface Enum_TextYAlignment extends EnumItem { readonly __enum: "TextYAlignment"; }
+declare interface Enum_VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
+declare interface Enum_ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 declare namespace Enum {
+	const AspectType: {
+		readonly FitWithinMaxSize: Enum_AspectType;
+		readonly ScaleWithParentSize: Enum_AspectType;
+	};
+	const AutomaticSize: {
+		readonly None: Enum_AutomaticSize;
+		readonly X: Enum_AutomaticSize;
+		readonly Y: Enum_AutomaticSize;
+		readonly XY: Enum_AutomaticSize;
+	};
+	const BorderMode: {
+		readonly Outline: Enum_BorderMode;
+		readonly Middle: Enum_BorderMode;
+		readonly Inset: Enum_BorderMode;
+	};
+	const DominantAxis: {
+		readonly Width: Enum_DominantAxis;
+		readonly Height: Enum_DominantAxis;
+	};
 	const EasingDirection: {
 		readonly In: Enum_EasingDirection;
 		readonly Out: Enum_EasingDirection;
@@ -129,6 +183,21 @@ declare namespace Enum {
 		readonly Back: Enum_EasingStyle;
 		readonly Elastic: Enum_EasingStyle;
 		readonly Bounce: Enum_EasingStyle;
+	};
+	const FillDirection: {
+		readonly Horizontal: Enum_FillDirection;
+		readonly Vertical: Enum_FillDirection;
+	};
+	const Font: {
+		readonly Regular: Enum_Font;
+		readonly Bold: Enum_Font;
+		readonly Italic: Enum_Font;
+		readonly Code: Enum_Font;
+	};
+	const HorizontalAlignment: {
+		readonly Left: Enum_HorizontalAlignment;
+		readonly Center: Enum_HorizontalAlignment;
+		readonly Right: Enum_HorizontalAlignment;
 	};
 	const Material: {
 		readonly Plastic: Enum_Material;
@@ -157,10 +226,65 @@ declare namespace Enum {
 		readonly Bottom: Enum_NormalId;
 		readonly Front: Enum_NormalId;
 	};
+	const ScaleType: {
+		readonly Stretch: Enum_ScaleType;
+		readonly Slice: Enum_ScaleType;
+		readonly Tile: Enum_ScaleType;
+		readonly Fit: Enum_ScaleType;
+		readonly Crop: Enum_ScaleType;
+	};
+	const ScrollingDirection: {
+		readonly X: Enum_ScrollingDirection;
+		readonly Y: Enum_ScrollingDirection;
+		readonly XY: Enum_ScrollingDirection;
+	};
 	const ServiceScope: {
 		readonly Shared: Enum_ServiceScope;
 		readonly Server: Enum_ServiceScope;
 		readonly Client: Enum_ServiceScope;
+	};
+	const SizeConstraint: {
+		readonly RelativeXY: Enum_SizeConstraint;
+		readonly RelativeXX: Enum_SizeConstraint;
+		readonly RelativeYY: Enum_SizeConstraint;
+	};
+	const SortOrder: {
+		readonly Name: Enum_SortOrder;
+		readonly Custom: Enum_SortOrder;
+		readonly LayoutOrder: Enum_SortOrder;
+	};
+	const StartCorner: {
+		readonly TopLeft: Enum_StartCorner;
+		readonly TopRight: Enum_StartCorner;
+		readonly BottomLeft: Enum_StartCorner;
+		readonly BottomRight: Enum_StartCorner;
+	};
+	const SurfaceSizingMode: {
+		readonly FixedSize: Enum_SurfaceSizingMode;
+		readonly PixelsPerStud: Enum_SurfaceSizingMode;
+	};
+	const TextTruncate: {
+		readonly None: Enum_TextTruncate;
+		readonly AtEnd: Enum_TextTruncate;
+	};
+	const TextXAlignment: {
+		readonly Left: Enum_TextXAlignment;
+		readonly Center: Enum_TextXAlignment;
+		readonly Right: Enum_TextXAlignment;
+	};
+	const TextYAlignment: {
+		readonly Top: Enum_TextYAlignment;
+		readonly Center: Enum_TextYAlignment;
+		readonly Bottom: Enum_TextYAlignment;
+	};
+	const VerticalAlignment: {
+		readonly Top: Enum_VerticalAlignment;
+		readonly Center: Enum_VerticalAlignment;
+		readonly Bottom: Enum_VerticalAlignment;
+	};
+	const ZIndexBehavior: {
+		readonly Global: Enum_ZIndexBehavior;
+		readonly Sibling: Enum_ZIndexBehavior;
 	};
 }
 
@@ -333,6 +457,12 @@ declare interface Instance {
 	IsDescendantOf(ancestor: Instance): boolean;
 	ClearAllChildren(): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
+	readonly Activated: GuiSignal;
+	readonly InputBegan: GuiSignal;
+	readonly InputEnded: GuiSignal;
+	readonly MouseEnter: PointerSignal;
+	readonly MouseLeave: PointerSignal;
+	readonly MouseMoved: PointerSignal;
 }
 
 declare interface PVInstance extends Instance {
@@ -380,6 +510,311 @@ declare interface Script extends LuaSourceContainer {
 declare interface LocalScript extends LuaSourceContainer {
 }
 
+declare interface ModuleScript extends LuaSourceContainer {
+}
+
+declare interface GuiBase extends Instance {
+}
+
+declare interface GuiService extends Instance {
+	AutoSelectGuiEnabled: boolean;
+	MenuIsOpen: boolean;
+	SelectedObject: Instance;
+}
+
+declare interface GuiBase3d extends GuiBase {
+}
+
+declare interface PVAdornment extends GuiBase3d {
+	Adornee: Instance;
+	AlwaysOnTop: boolean;
+	Color3: Color3;
+	Transparency: number;
+	Visible: boolean;
+	ZIndex: number;
+}
+
+declare interface SelectionBox extends PVAdornment {
+	LineThickness: number;
+	SurfaceColor3: Color3;
+	SurfaceTransparency: number;
+}
+
+declare interface SelectionSphere extends PVAdornment {
+}
+
+declare interface HandleAdornment extends PVAdornment {
+	CFrame: CFrame;
+	Size: Vector3;
+}
+
+declare interface BoxHandleAdornment extends HandleAdornment {
+}
+
+declare interface SphereHandleAdornment extends HandleAdornment {
+}
+
+declare interface CylinderHandleAdornment extends HandleAdornment {
+}
+
+declare interface LineHandleAdornment extends HandleAdornment {
+}
+
+declare interface Handles extends PVAdornment {
+}
+
+declare interface ArcHandles extends PVAdornment {
+}
+
+declare interface GuiBase2d extends GuiBase {
+	readonly AbsolutePosition: Vector2;
+	readonly AbsoluteRotation: number;
+	readonly AbsoluteSize: Vector2;
+}
+
+declare interface GuiObject extends GuiBase2d {
+	Active: boolean;
+	AnchorPoint: Vector2;
+	AutomaticSize: Enum_AutomaticSize;
+	BackgroundColor3: Color3;
+	BackgroundTransparency: number;
+	BorderColor3: Color3;
+	BorderMode: Enum_BorderMode;
+	BorderSizePixel: number;
+	ClipsDescendants: boolean;
+	LayoutOrder: number;
+	Position: UDim2;
+	Rotation: number;
+	Selectable: boolean;
+	Size: UDim2;
+	SizeConstraint: Enum_SizeConstraint;
+	Visible: boolean;
+	ZIndex: number;
+}
+
+declare interface Frame extends GuiObject {
+}
+
+declare interface CanvasGroup extends Frame {
+	GroupColor3: Color3;
+	GroupTransparency: number;
+}
+
+declare interface ScrollingFrame extends Frame {
+	AutomaticCanvasSize: Enum_AutomaticSize;
+	CanvasPosition: Vector2;
+	CanvasSize: UDim2;
+	ScrollBarImageColor3: Color3;
+	ScrollBarImageTransparency: number;
+	ScrollBarThickness: number;
+	ScrollingDirection: Enum_ScrollingDirection;
+	ScrollingEnabled: boolean;
+}
+
+declare interface GuiButton extends GuiObject {
+	AutoButtonColor: boolean;
+	Modal: boolean;
+	Selected: boolean;
+}
+
+declare interface TextButton extends GuiButton {
+	Font: Enum_Font;
+	LineHeight: number;
+	Text: string;
+	TextColor3: Color3;
+	TextScaled: boolean;
+	TextSize: number;
+	TextStrokeColor3: Color3;
+	TextStrokeTransparency: number;
+	TextTransparency: number;
+	TextTruncate: Enum_TextTruncate;
+	TextWrapped: boolean;
+	TextXAlignment: Enum_TextXAlignment;
+	TextYAlignment: Enum_TextYAlignment;
+}
+
+declare interface ImageButton extends GuiButton {
+	Image: string;
+	ImageColor3: Color3;
+	ImageRectOffset: Vector2;
+	ImageRectSize: Vector2;
+	ImageTransparency: number;
+	ScaleType: Enum_ScaleType;
+	SliceCenter: Rect;
+	SliceScale: number;
+	TileSize: UDim2;
+}
+
+declare interface GuiLabel extends GuiObject {
+}
+
+declare interface TextLabel extends GuiLabel {
+	Font: Enum_Font;
+	LineHeight: number;
+	Text: string;
+	TextColor3: Color3;
+	TextScaled: boolean;
+	TextSize: number;
+	TextStrokeColor3: Color3;
+	TextStrokeTransparency: number;
+	TextTransparency: number;
+	TextTruncate: Enum_TextTruncate;
+	TextWrapped: boolean;
+	TextXAlignment: Enum_TextXAlignment;
+	TextYAlignment: Enum_TextYAlignment;
+}
+
+declare interface ImageLabel extends GuiLabel {
+	Image: string;
+	ImageColor3: Color3;
+	ImageRectOffset: Vector2;
+	ImageRectSize: Vector2;
+	ImageTransparency: number;
+	ScaleType: Enum_ScaleType;
+	SliceCenter: Rect;
+	SliceScale: number;
+	TileSize: UDim2;
+}
+
+declare interface TextBox extends GuiObject {
+	ClearTextOnFocus: boolean;
+	CursorPosition: number;
+	Font: Enum_Font;
+	LineHeight: number;
+	MultiLine: boolean;
+	PlaceholderColor3: Color3;
+	PlaceholderText: string;
+	SelectionStart: number;
+	Text: string;
+	TextColor3: Color3;
+	TextEditable: boolean;
+	TextScaled: boolean;
+	TextSize: number;
+	TextStrokeColor3: Color3;
+	TextStrokeTransparency: number;
+	TextTransparency: number;
+	TextTruncate: Enum_TextTruncate;
+	TextWrapped: boolean;
+	TextXAlignment: Enum_TextXAlignment;
+	TextYAlignment: Enum_TextYAlignment;
+}
+
+declare interface ViewportFrame extends GuiObject {
+	Ambient: Color3;
+	CurrentCamera: Instance;
+	ImageColor3: Color3;
+	ImageTransparency: number;
+	LightColor: Color3;
+	LightDirection: Vector3;
+}
+
+declare interface LayerCollector extends GuiBase2d {
+	DisplayOrder: number;
+	Enabled: boolean;
+	ResetOnSpawn: boolean;
+	ZIndexBehavior: Enum_ZIndexBehavior;
+}
+
+declare interface ScreenGui extends LayerCollector {
+	IgnoreGuiInset: boolean;
+}
+
+declare interface SurfaceGui extends LayerCollector {
+	Adornee: Instance;
+	AlwaysOnTop: boolean;
+	Brightness: number;
+	CanvasSize: Vector2;
+	Face: Enum_NormalId;
+	LightInfluence: number;
+	PixelsPerStud: number;
+	SizingMode: Enum_SurfaceSizingMode;
+}
+
+declare interface BillboardGui extends LayerCollector {
+	Adornee: Instance;
+	AlwaysOnTop: boolean;
+	ExtentsOffset: Vector3;
+	LightInfluence: number;
+	MaxDistance: number;
+	Size: UDim2;
+	StudsOffset: Vector3;
+	StudsOffsetWorldSpace: Vector3;
+}
+
+declare interface PluginGui extends LayerCollector {
+}
+
+declare interface DockWidgetPluginGui extends PluginGui {
+}
+
+declare interface UIBase extends Instance {
+}
+
+declare interface UIComponent extends UIBase {
+}
+
+declare interface UILayout extends UIComponent {
+}
+
+declare interface UIListLayout extends UILayout {
+	FillDirection: Enum_FillDirection;
+	HorizontalAlignment: Enum_HorizontalAlignment;
+	Padding: UDim;
+	SortOrder: Enum_SortOrder;
+	VerticalAlignment: Enum_VerticalAlignment;
+}
+
+declare interface UIGridLayout extends UILayout {
+	CellPadding: UDim2;
+	CellSize: UDim2;
+	FillDirection: Enum_FillDirection;
+	FillDirectionMaxCells: number;
+	HorizontalAlignment: Enum_HorizontalAlignment;
+	SortOrder: Enum_SortOrder;
+	StartCorner: Enum_StartCorner;
+	VerticalAlignment: Enum_VerticalAlignment;
+}
+
+declare interface UIConstraint extends UIComponent {
+}
+
+declare interface UIAspectRatioConstraint extends UIConstraint {
+	AspectRatio: number;
+	AspectType: Enum_AspectType;
+	DominantAxis: Enum_DominantAxis;
+}
+
+declare interface UISizeConstraint extends UIConstraint {
+	MaxSize: Vector2;
+	MinSize: Vector2;
+}
+
+declare interface UITextSizeConstraint extends UIConstraint {
+	MaxTextSize: number;
+	MinTextSize: number;
+}
+
+declare interface UIPadding extends UIComponent {
+	PaddingBottom: UDim;
+	PaddingLeft: UDim;
+	PaddingRight: UDim;
+	PaddingTop: UDim;
+}
+
+declare interface UICorner extends UIComponent {
+	CornerRadius: UDim;
+}
+
+declare interface UIStroke extends UIComponent {
+	Color: Color3;
+	Thickness: number;
+	Transparency: number;
+}
+
+declare interface UIScale extends UIComponent {
+	Scale: number;
+}
+
 declare interface Service extends Instance {
 	Fixture: boolean;
 	Scope: Enum_ServiceScope;
@@ -420,6 +855,13 @@ declare interface StarterPlayer extends Service {
 }
 
 declare interface StarterPlayerScripts extends Service {
+}
+
+declare interface Players extends Service {
+	readonly LocalPlayer: Instance;
+}
+
+declare interface Player extends Instance {
 }
 
 // --- the bus services ------------------------------------------------------
@@ -491,7 +933,18 @@ declare const task: {
 };
 
 declare const game: {
+	readonly JobId: string;
 	GetService: {
+		(service: "Workspace"): Workspace;
+		(service: "Lighting"): Lighting;
+		(service: "ReplicatedFirst"): ReplicatedFirst;
+		(service: "ReplicatedStorage"): ReplicatedStorage;
+		(service: "ServerScriptService"): ServerScriptService;
+		(service: "ServerStorage"): ServerStorage;
+		(service: "StarterGui"): StarterGui;
+		(service: "StarterPlayer"): StarterPlayer;
+		(service: "StarterPlayerScripts"): StarterPlayerScripts;
+		(service: "Players"): Players;
 		(service: "RunService"): RunService;
 		(service: "MessagingService"): MessagingService;
 		(service: "MemoryStoreService"): MemoryStoreService;
@@ -510,5 +963,52 @@ declare const Instance: {
 		(className: "LuaSourceContainer", parent?: Instance): LuaSourceContainer;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;
+		(className: "ModuleScript", parent?: Instance): ModuleScript;
+		(className: "GuiBase", parent?: Instance): GuiBase;
+		(className: "GuiService", parent?: Instance): GuiService;
+		(className: "GuiBase3d", parent?: Instance): GuiBase3d;
+		(className: "PVAdornment", parent?: Instance): PVAdornment;
+		(className: "SelectionBox", parent?: Instance): SelectionBox;
+		(className: "SelectionSphere", parent?: Instance): SelectionSphere;
+		(className: "HandleAdornment", parent?: Instance): HandleAdornment;
+		(className: "BoxHandleAdornment", parent?: Instance): BoxHandleAdornment;
+		(className: "SphereHandleAdornment", parent?: Instance): SphereHandleAdornment;
+		(className: "CylinderHandleAdornment", parent?: Instance): CylinderHandleAdornment;
+		(className: "LineHandleAdornment", parent?: Instance): LineHandleAdornment;
+		(className: "Handles", parent?: Instance): Handles;
+		(className: "ArcHandles", parent?: Instance): ArcHandles;
+		(className: "GuiBase2d", parent?: Instance): GuiBase2d;
+		(className: "GuiObject", parent?: Instance): GuiObject;
+		(className: "Frame", parent?: Instance): Frame;
+		(className: "CanvasGroup", parent?: Instance): CanvasGroup;
+		(className: "ScrollingFrame", parent?: Instance): ScrollingFrame;
+		(className: "GuiButton", parent?: Instance): GuiButton;
+		(className: "TextButton", parent?: Instance): TextButton;
+		(className: "ImageButton", parent?: Instance): ImageButton;
+		(className: "GuiLabel", parent?: Instance): GuiLabel;
+		(className: "TextLabel", parent?: Instance): TextLabel;
+		(className: "ImageLabel", parent?: Instance): ImageLabel;
+		(className: "TextBox", parent?: Instance): TextBox;
+		(className: "ViewportFrame", parent?: Instance): ViewportFrame;
+		(className: "LayerCollector", parent?: Instance): LayerCollector;
+		(className: "ScreenGui", parent?: Instance): ScreenGui;
+		(className: "SurfaceGui", parent?: Instance): SurfaceGui;
+		(className: "BillboardGui", parent?: Instance): BillboardGui;
+		(className: "PluginGui", parent?: Instance): PluginGui;
+		(className: "DockWidgetPluginGui", parent?: Instance): DockWidgetPluginGui;
+		(className: "UIBase", parent?: Instance): UIBase;
+		(className: "UIComponent", parent?: Instance): UIComponent;
+		(className: "UILayout", parent?: Instance): UILayout;
+		(className: "UIListLayout", parent?: Instance): UIListLayout;
+		(className: "UIGridLayout", parent?: Instance): UIGridLayout;
+		(className: "UIConstraint", parent?: Instance): UIConstraint;
+		(className: "UIAspectRatioConstraint", parent?: Instance): UIAspectRatioConstraint;
+		(className: "UISizeConstraint", parent?: Instance): UISizeConstraint;
+		(className: "UITextSizeConstraint", parent?: Instance): UITextSizeConstraint;
+		(className: "UIPadding", parent?: Instance): UIPadding;
+		(className: "UICorner", parent?: Instance): UICorner;
+		(className: "UIStroke", parent?: Instance): UIStroke;
+		(className: "UIScale", parent?: Instance): UIScale;
+		(className: "Player", parent?: Instance): Player;
 	};
 };

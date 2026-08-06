@@ -26,6 +26,19 @@ mono_add_library(ui
 		# because both are `client`.
 		Engine::render
 
+		# L7, `shared`, added at v0.8 for `GuiPainter`. **Downward, and the
+		# direction is the whole of why it is allowed**: `gui` is the engine's
+		# own widget tree and knows nothing about this module, exactly as
+		# `render` knows nothing about it. What arrives here is a flat
+		# `gui::DrawList` — no store, no tree, no class table — which is what
+		# lets a second backend draw the same list without either learning
+		# about the other.
+		#
+		# It does not make this module a game's UI layer. `ui/AGENTS.md`'s rule
+		# stands: nothing in `mono.engine` may depend on `ui`, and `mono.client`
+		# still does not link it.
+		Engine::gui
+
 	# SDL_Window and SDL_Event appear in the public header as forward
 	# declarations only, exactly as `render` declares SDL_Window. The GPU types
 	# are behind the pimpl.

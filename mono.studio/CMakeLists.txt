@@ -48,6 +48,13 @@ mono_add_library(studio
 		Engine::render
 		Engine::ui
 
+		# L7, `shared`. The engine's own widget tree, which the viewport panels
+		# compile and paint over the world image. Named here rather than taken
+		# transitively through `Engine::ui`, because this target includes
+		# `engine/gui/Compile.hpp` in its own header — a dependency a file
+		# includes is one its build file should say out loud.
+		Engine::gui
+
 		# The client's presentation seam: `client::InstallPresentation` and
 		# `client::DrawList`. **Reused rather than reimplemented** — a second
 		# draw-list collector would be a second answer to what a world hands its
@@ -67,3 +74,52 @@ mono_add_program(studio
 		Mono::studio
 		Engine::core
 )
+
+# --- the studio's own panels, authored in TypeScript --------------------------
+#
+# **Staged as stripped JavaScript, exactly as the examples are**, and for the
+# reason `script/Runtime.hpp` has always given: the engine loads what a toolchain
+# emitted and does not compile TypeScript itself. `mono.engine/examples`'s own
+# staging carries the argument at length; this is the second caller of it.
+#
+# These are not yet the editor's panels. `mono.studio` keeps Dear ImGui until the
+# engine's tree can draw a property grid, because an editor half on each is two
+# widget sets — so what is staged here is the proof that the tree *can*, which is
+# what has to be true before any of them move.
+file(GLOB studio_panels CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/panels/*.ts")
+
+set(_mono_panel_tsc "${CMAKE_SOURCE_DIR}/node_modules/.bin/tsc")
+if(NOT EXISTS "${_mono_panel_tsc}")
+	set(_mono_panel_tsc "")
+	message(STATUS "studio: no node_modules/.bin/tsc — TypeScript panels will not be staged")
+endif()
+
+if(studio_panels AND _mono_panel_tsc)
+	set(staged_panels "")
+	foreach(panel IN LISTS studio_panels)
+		get_filename_component(panel_stem "${panel}" NAME_WE)
+		set(staged "${MONO_STAGE_ROOT}/assets/panels/${panel_stem}.js")
+
+		add_custom_command(
+			OUTPUT "${staged}"
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/panels"
+			COMMAND "${_mono_panel_tsc}"
+				--target ES2020
+				--module ESNext
+				--isolatedModules
+				--skipLibCheck
+				--ignoreConfig
+				--noResolve
+				--noCheck
+				--outDir "${MONO_STAGE_ROOT}/assets/panels"
+				"${panel}"
+			DEPENDS "${panel}"
+			COMMENT "Transpiling studio panel ${panel_stem}.ts"
+			VERBATIM)
+
+		list(APPEND staged_panels "${staged}")
+	endforeach()
+
+	add_custom_target(studio_typescript_panels ALL DEPENDS ${staged_panels})
+	add_dependencies(studio studio_typescript_panels)
+endif()

@@ -77,6 +77,47 @@ namespace engine::script {
 		// of parents changed, which is what moved *and everything under it*,
 		// and the handler is called with the instance and its new parent.
 		AncestryChanged,
+
+		// --- the 2D tree's input, from `gui::Router` ------------------------
+		//
+		// **The six below are one mechanism and it is not the tree's.** Every
+		// signal above is recorded by the store and fanned out at the barrier;
+		// these arrive from outside the world entirely — a host polls a pointer,
+		// `gui::Router` decides what that means, and the events are handed to
+		// `Runtime::DeliverGuiEvents`. Nothing in `ecs` knows they happened.
+		//
+		// They are still *queued* rather than fired on arrival, and that is the
+		// same decision `Changes.hpp` argues for one door along: a handler may
+		// destroy the instance it was called about, and the router is mid-walk
+		// of a compiled draw list that names it. Delivering at the next
+		// heartbeat puts them where every other resume happens, which is what
+		// `docs/SCRIPT_CONCURRENCY.md` §1 permits and what keeps two runs of one
+		// recording in step.
+		//
+		// The subject is the element, for all six.
+
+		// `guiObject.Activated` — pressed and released on the same element.
+		// The one nearly every script connects to.
+		GuiActivated,
+
+		// `guiObject.InputBegan` — the button went down over it.
+		GuiInputBegan,
+
+		// `guiObject.InputEnded` — the button came up. Fired on the element the
+		// press *began* on, which is `gui::Router`'s rule and is what makes a
+		// drag off a button and back one interaction rather than two.
+		GuiInputEnded,
+
+		// `guiObject.MouseEnter` — the pointer entered its rectangle.
+		GuiMouseEnter,
+
+		// `guiObject.MouseLeave` — it left. Fired before the matching
+		// `MouseEnter` on whatever it moved onto, so a handler that puts
+		// something back on leave runs before the one reacting to the arrival.
+		GuiMouseLeave,
+
+		// `guiObject.MouseMoved` — it moved while over the element.
+		GuiMouseMoved,
 	};
 
 	// A callable, as the VM that owns it names one.

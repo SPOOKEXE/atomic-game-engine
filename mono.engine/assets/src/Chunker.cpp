@@ -117,13 +117,34 @@ namespace engine::assets {
 		const size_t maximum = Envelope.MaximumBytes < available ? Envelope.MaximumBytes : available;
 
 		// The window has to have run over the bytes before the minimum for the
-		// hash at the minimum to mean anything, so it is fed from zero and only
-		// *tested* from the minimum onward. Skipping the bytes entirely — which
-		// some implementations do for speed — makes the boundary depend on where
-		// the previous chunk happened to end, and boundaries that depend on
-		// history do not dedup.
+		// hash at the minimum to mean anything, so it is fed before the minimum
+		// and only *tested* from the minimum onward. Skipping the warm-up
+		// entirely — which some implementations do for speed — makes the
+		// boundary depend on where the previous chunk happened to end, and
+		// boundaries that depend on history do not dedup.
+		//
+		// **But it does not have to start at zero, and starting there was most
+		// of what this function cost.** `hash = (hash << 1) + GEAR[byte]` is a
+		// 64-bit shift register: a byte at position *p* contributes
+		// `GEAR[b] << (index - p)`, so once `index - p` reaches 64 its
+		// contribution has been shifted out entirely and the hash cannot depend
+		// on it. The table's own comment already says this — "the hash after any
+		// point depends on the last 64 bytes" — it simply was not being used.
+		//
+		// So warming from `minimum - 64` produces a **bit-identical** hash at
+		// every tested position, and therefore bit-identical boundaries, the
+		// same chunks and the same dedup. What it skips is `minimum - 64`
+		// iterations whose result is provably discarded: at the default envelope
+		// that is 16 320 bytes of every 64 KiB chunk, a quarter of the work.
+		//
+		// This is *not* the history-dependent shortcut the paragraph above
+		// refuses. The window still begins inside this chunk at an offset fixed
+		// by `MinimumBytes` alone, so it does not move with where the previous
+		// chunk ended.
+		constexpr size_t WINDOW_BYTES = 64;
+
 		uint64_t hash = 0;
-		size_t index = 0;
+		size_t index = minimum > WINDOW_BYTES ? minimum - WINDOW_BYTES : 0;
 
 		for (; index < minimum; ++index) {
 			hash = (hash << 1) + GEAR[static_cast<uint8_t>(data[index])];

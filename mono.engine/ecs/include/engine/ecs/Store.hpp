@@ -383,6 +383,45 @@ namespace engine::ecs {
 			return static_cast<T *>(GetRawMutable(entity, Components::Of<T>()));
 		}
 
+		// Mutable access that deliberately does **not** count as a write.
+		//
+		// `GetMutable` cannot know whether the caller used the pointer it
+		// handed back, so it reports the write unconditionally — a change
+		// reported that did not happen costs a consumer one wasted rebuild,
+		// where a change missed costs it correctness. That is the right
+		// default. This is the one documented exception to it, and it exists
+		// because the default has a cost nothing was paying for:
+		// `ChangeVersion` moves for **any** component that happens to sit in a
+		// table carrying `DirtyBits`, not only for an observed one. So writing
+		// a derived per-frame tag through `GetMutable` advances the world's
+		// change counter every frame, and every gate built on "an unchanged
+		// counter means nothing authored has happened" — `physics`'s static
+		// broadphase and `gui`'s compile are the two — is falsified for good.
+		//
+		// **Legitimate only for a component nothing may observe**, which means
+		// all three of these hold and a reviewer should check all three:
+		//
+		//  1. no caller does or may call `Observe<T>()` for it;
+		//  2. no caller does or may call `Changed<T>()` or `EachChanged<T>()`
+		//     for it;
+		//  3. the type's own header says who is allowed to write it, so a
+		//     future consumer cannot appear without reading that first.
+		//
+		// `scene::Rendered` is the one caller and satisfies all three:
+		// `scene/Visibility.hpp` states that nothing outside `SyncRendered`
+		// may add, remove or write one, so there is no second party whose
+		// change could be lost here.
+		//
+		// If the component might ever be observed, use `GetMutable`. A missed
+		// change is not recoverable by the consumer that missed it.
+		//
+		// @param entity The entity whose component is requested.
+		// @return A mutable component pointer, or `nullptr` when absent.
+		template <class T> T *GetUnobserved(Entity entity) {
+			RequireOwningThread("GetUnobserved");
+			return const_cast<T *>(static_cast<const T *>(GetRaw(entity, Components::Of<T>())));
+		}
+
 		// Removes one component type without destroying the entity.
 		//
 		// Deferred when called from inside Each.
@@ -801,6 +840,54 @@ namespace engine::ecs {
 		// @param instance The instance to describe.
 		// @return The descriptors, or an empty span when it is not an instance.
 		std::span<const PropertyDescriptor> PropertiesOf(Entity instance) const;
+
+		// --- the same two, for a caller that already holds the descriptor ----
+		//
+		// **The by-name pair above look up the descriptor, and a binding has
+		// already done that.** A script write goes `__newindex` → find the
+		// property by name → marshal the value → `SetProperty(name)` → find the
+		// property by name *again*. Each of those finds is a `Classes::Describe`
+		// — which takes the class table's lock — plus a linear scan of the
+		// class's merged property list.
+		//
+		// So the by-name pair are for a caller holding a string, and these are
+		// for one holding a descriptor. Roughly half the class-table traffic in
+		// a scripted frame was the second lookup of a descriptor the caller was
+		// standing on.
+		//
+		// **The descriptor must be one of this instance's.** It is not
+		// re-validated against the class, because the only way to get one is
+		// `PropertiesOf` or the by-name lookup, and a caller that mixed two
+		// instances' descriptors would be reaching past the only API that
+		// produces them. What *is* still checked is everything a wrong value
+		// could do: the size, the enum membership, and whether this store may be
+		// written at all.
+
+		// Reads one property of an instance through a descriptor already found.
+		//
+		// @param instance   The instance to read.
+		// @param descriptor One of this instance's class's property descriptors.
+		// @param out        Where to write the value.
+		// @param bytes      The size of `out`, which must match the descriptor.
+		// @return `false` when the size disagrees or the instance does not carry
+		//         what the conversion reads.
+		// @since v0.8
+		bool
+		GetProperty(Entity instance, const PropertyDescriptor &descriptor, void *out, size_t bytes) const;
+
+		// Writes one property of an instance through a descriptor already found.
+		//
+		// @param instance   The instance to write.
+		// @param descriptor One of this instance's class's property descriptors.
+		// @param value      The value to write.
+		// @param bytes      The size of `value`, which must match the descriptor.
+		// @return `false` when the size disagrees, the property is read-only,
+		//         this store is adopt-only, the value is not a member of the
+		//         named enum, or the instance does not carry what the conversion
+		//         writes.
+		// @since v0.8
+		bool
+		SetProperty(Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes);
 
 		// Moves an instance under a new parent, or to no parent.
 		//

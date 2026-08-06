@@ -28,6 +28,8 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+
+#include <string_view>
 #include <engine/scene/Enums.hpp>
 
 #include <cstdint>
@@ -197,6 +199,20 @@ namespace engine::scene {
 	//        should be marked local; the last one marked wins.
 	// @return The player instance, or `NULL_ENTITY` when there is no `Players`.
 	ecs::Entity AddPlayer(ecs::Store &store, std::string_view name, bool local = false);
+
+	// What a player's interface container is called.
+	//
+	// **Spelled here and again in `gui::PLAYER_GUI`**, because `gui` decides
+	// whether a `ScreenGui` draws by walking its ancestors and comparing names,
+	// and the two modules may not link each other — `gui/AGENTS.md` refuses the
+	// edge, and this is the other side of the same refusal.
+	//
+	// `examples/tests/Scene.cpp` pins the two against each other from the one
+	// place both are linked. A rename on either side without the other would not
+	// break a build; it would make every client interface stop drawing.
+	//
+	// @since v0.8
+	inline constexpr std::string_view PLAYER_GUI_NAME = "PlayerGui";
 
 	// The `Player` class id, registering the service tree on first call.
 	//

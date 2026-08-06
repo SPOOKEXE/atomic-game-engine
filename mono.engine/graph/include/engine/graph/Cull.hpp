@@ -39,6 +39,16 @@ namespace engine::graph {
 
 	// Fills `visible` with the indices of the instances a frustum may see.
 	//
+	// **The ascending order of `visible` is part of the contract.** It is the
+	// world's own order, and `scene::OrderForDrawing` leaves the opaque head in
+	// it so that a recorded frame replays as itself. A pass that filled this
+	// list in any other order would be correct on screen and wrong on replay.
+	//
+	// A caller that also needs the whole list's bound — the shadow fit does —
+	// should call `Shadow.hpp`'s `CullAndBound` rather than this and
+	// `BoundsOfAll`. Both walks derive the same `BoundsOf` per instance, and
+	// that bound is the expensive half of either.
+	//
 	// @param instances The draw list.
 	// @param frustum   The view.
 	// @param visible   Filled in with indices into `instances`. Cleared first.

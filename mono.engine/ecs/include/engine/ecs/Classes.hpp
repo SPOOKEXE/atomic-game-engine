@@ -32,6 +32,9 @@
 // than anything about a scene. Nothing here reads a field of one.
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Rect.hpp>
+#include <engine/core/types/UDim.hpp>
+#include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/ComponentSet.hpp>
 #include <engine/ecs/Components.hpp>
@@ -39,6 +42,7 @@
 
 #include <cstddef>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace engine::ecs {
@@ -62,6 +66,12 @@ namespace engine::ecs {
 		Double,
 
 		// `core::Name` — written as text, never as its process-local id.
+		//
+		// **For text drawn from a bounded set**, which is what interning is for:
+		// a material, an asset id, a class name. Every distinct string ever
+		// assigned to one of these is kept for the life of the process, so a
+		// property whose value a game *computes* is the wrong shape for it — see
+		// `String` below, which exists because that was found the hard way.
 		Name,
 
 		// A `core::Name` that must be one of a registered set.
@@ -79,6 +89,28 @@ namespace engine::ecs {
 		// detail, which is exactly why `PropertyType` is a closed list.
 		Enum,
 
+		// An owned string, stored in the component rather than interned.
+		//
+		// **Added at v0.8 because `Name` is a leak for text that changes**, which
+		// is `D00020` and is the reason this member is not simply "the same as
+		// `Name` with a different spelling". `core::Name` is a process-wide
+		// registry that never releases: `label.Text = tostring(score)` at sixty
+		// hertz interns a new string every frame, forever, and takes that
+		// registry's mutex inside the frame loop to do it. A score counter is not
+		// an exotic case — it is the first thing anybody writes.
+		//
+		// So the two are a real choice rather than a stylistic one, and the rule
+		// is short: **a value the game picks from a set is a `Name`; a value the
+		// game computes is a `String`.** A material, an asset id and a face are
+		// the first; a score, a timer and a chat line are the second.
+		//
+		// The cost is paid where it belongs. A `String` property makes its
+		// component non-trivial — an allocation per row rather than a shared id —
+		// so a component holding one needs a written serialiser and does not
+		// memcpy. `ecs::Column` has carried that path since v0.2 and this is the
+		// first component set to use it.
+		String,
+
 		// `Entity` — a handle within this world, and meaningless outside it.
 		Reference,
 
@@ -91,6 +123,23 @@ namespace engine::ecs {
 		Vector3,
 		CFrame,
 		Color3,
+
+		// The four a 2D tree is authored in, added at v0.8 for `gui`.
+		//
+		// **They are here because a `UDim2` has to be a property, not because
+		// `core/types` gained four headers.** All four have existed since v0.6
+		// and none of them was a `PropertyType`, so a component holding one
+		// could not be saved, could not appear in a properties panel and could
+		// not be set from a script — which makes `Frame.Size` unauthorable, and
+		// an unauthorable size is a widget set nobody can use.
+		//
+		// The list stays closed and this is what growing it looks like: four
+		// cases in `game::Values`, four widgets in the properties panel, four
+		// in each binding, and this comment saying why.
+		Vector2,
+		UDim,
+		UDim2,
+		Rect,
 	};
 
 	// How a property reaches the components underneath it.
@@ -139,6 +188,31 @@ namespace engine::ecs {
 	struct PropertyDescriptor {
 		// The property's name, as scripts and files spell it.
 		core::Name Name;
+
+		// That same name's text, resolved once when the property is declared.
+		//
+		// **`core::Name::Text()` takes the process-wide name registry's lock**,
+		// and a binding matching a script's key against a class's property list
+		// calls it once per descriptor it walks — five times for `Position` on a
+		// `Part`, thirteen for `CFrame`, and the whole list on a miss. At two
+		// hundred property writes a frame that is over a thousand lock
+		// acquisitions to compare strings that never change.
+		//
+		// `script/src/Instances.cpp` compares keys as *text* rather than
+		// interning them, and its comment records the measurement behind that:
+		// interning takes the same registry lock plus a hash. That reasoning is
+		// still right — what it assumed was that reading the text was free, and
+		// it is not. This is what makes it free.
+		//
+		// Safe to hold forever: `core/src/Name.cpp` keeps its strings in a deque
+		// that never moves an element and never removes one, which is the same
+		// property `Text()`'s own return relies on.
+		//
+		// Filled by `Declare`, so every path that can produce a descriptor fills
+		// it — `Property`, `ClampedProperty` and `Computed` all go through it.
+		//
+		// @since v0.8
+		std::string_view Spelling;
 
 		// The type of the value that crosses, not of anything stored.
 		PropertyType Type = PropertyType::Opaque;
@@ -311,6 +385,23 @@ namespace engine::ecs {
 			Declare(owner, descriptor);
 		}
 
+		// The `Instance` root, with `Name` and `Parent` on it.
+		//
+		// **Here rather than in whichever module registers a tree first**, and
+		// that is the same correction `ecs.Hierarchy` already went through:
+		// `InstanceName` and `Hierarchy` are this module's own types, so the two
+		// properties projecting them are this module's to declare. `scene` owned
+		// them until v0.8, which was fine while `scene` was the only class tree
+		// — and stopped being fine the moment `gui` needed the same root without
+		// being allowed to link `scene`.
+		//
+		// Idempotent, like every registration here: the second caller gets the
+		// same id, and the two property declarations are one declaration rather
+		// than two that agree until somebody edits one.
+		//
+		// @return The `Instance` class id.
+		static ClassId RegisterInstanceRoot();
+
 		// The defaults a class's instances start from.
 		//
 		// Setting a default before any instance exists is the ordinary case.
@@ -391,6 +482,14 @@ namespace engine::ecs {
 				return PropertyType::CFrame;
 			} else if constexpr (std::is_same_v<Bare, core::Color3>) {
 				return PropertyType::Color3;
+			} else if constexpr (std::is_same_v<Bare, core::Vector2>) {
+				return PropertyType::Vector2;
+			} else if constexpr (std::is_same_v<Bare, core::UDim>) {
+				return PropertyType::UDim;
+			} else if constexpr (std::is_same_v<Bare, core::UDim2>) {
+				return PropertyType::UDim2;
+			} else if constexpr (std::is_same_v<Bare, core::Rect>) {
+				return PropertyType::Rect;
 			} else if constexpr (std::is_same_v<Bare, bool>) {
 				return PropertyType::Bool;
 			} else if constexpr (std::is_same_v<Bare, int32_t> || std::is_same_v<Bare, uint32_t>) {
@@ -403,6 +502,8 @@ namespace engine::ecs {
 				return PropertyType::Double;
 			} else if constexpr (std::is_same_v<Bare, core::Name>) {
 				return PropertyType::Name;
+			} else if constexpr (std::is_same_v<Bare, std::string>) {
+				return PropertyType::String;
 			} else if constexpr (std::is_same_v<Bare, Entity>) {
 				return PropertyType::Reference;
 			} else {

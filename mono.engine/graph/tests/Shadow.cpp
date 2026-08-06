@@ -1,10 +1,14 @@
+#include <engine/graph/Cull.hpp>
+#include <engine/graph/Frustum.hpp>
 #include <engine/graph/Shadow.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 TEST_SUITE_ID("engine.graph.shadow")
@@ -14,7 +18,11 @@ using engine::core::AABB;
 using engine::core::CFrame;
 using engine::core::Vector3;
 using engine::graph::BoundsOfAll;
+using engine::graph::Cull;
+using engine::graph::CullAndBound;
 using engine::graph::FitDirectionalLight;
+using engine::graph::Frustum;
+using engine::scene::Camera;
 using engine::scene::DrawInstance;
 
 namespace {
@@ -29,6 +37,19 @@ namespace {
 		instance.Frame = CFrame{position};
 		instance.HalfExtent = Vector3{halfExtent, halfExtent, halfExtent};
 		return instance;
+	}
+
+	// A camera at the origin looking down -Z, built through `ResolveCamera` for
+	// the reason `tests/Frustum.cpp` gives: it is the one place the engine
+	// decides what a camera's matrices are.
+	Frustum Looking() {
+		Camera camera;
+		camera.NearPlane = 0.1f;
+		camera.FarPlane = 100.0f;
+
+		return Frustum::FromViewProjection(
+			engine::scene::ResolveCamera(CFrame{Vector3::Zero}, camera, 16.0f / 9.0f).ViewProjection
+		);
 	}
 }
 
@@ -150,4 +171,58 @@ TEST_CASE("an empty draw list gives a unit box rather than an inverted one", "[g
 
 	CHECK(bounds.Minimum.X <= bounds.Maximum.X);
 	CHECK(bounds.Size().X == Approx(2.0f));
+}
+
+TEST_CASE("the fused walk answers exactly what the two separate ones did", "[graph][shadow]") {
+	// **`CullAndBound` is an optimisation, so the only property worth pinning is
+	// that it changed nothing.** It exists because the two passes it replaces
+	// each derived the same `BoundsOf` per instance, and that bound is the
+	// expensive half of both.
+	//
+	// The box is compared for **exact** equality rather than approximately: the
+	// unions run over the same instances in the same order, so the floats have
+	// to be identical, and an `Approx` here would let a reordering through.
+	const std::vector<DrawInstance> instances{
+		At(Vector3{0.0f, 0.0f, -5.0f}),
+		At(Vector3{0.0f, 0.0f, 5.0f}),
+		At(Vector3{2.0f, 1.0f, -20.0f}, 1.5f),
+		At(Vector3{0.0f, 0.0f, -400.0f}),
+		At(Vector3{-3.0f, -2.0f, -8.0f}),
+	};
+
+	const Frustum frustum = Looking();
+
+	std::vector<uint32_t> expected;
+	const size_t expectedCount = Cull(instances, frustum, expected);
+	const AABB expectedBounds = BoundsOfAll(instances);
+
+	std::vector<uint32_t> visible;
+	AABB bounds;
+	const size_t count = CullAndBound(instances, frustum, visible, bounds);
+
+	// Something has to survive and something has to be rejected, or this passes
+	// against a function that always says one thing.
+	REQUIRE(expectedCount > 0);
+	REQUIRE(expectedCount < instances.size());
+
+	CHECK(count == expectedCount);
+
+	// **The order, not just the membership.** `scene::OrderForDrawing` keeps the
+	// opaque head in world order so a recording replays as itself, and this list
+	// is where that order comes from.
+	CHECK(visible == expected);
+	CHECK(bounds == expectedBounds);
+}
+
+TEST_CASE("the fused walk gives the same unit box for an empty draw list", "[graph][shadow]") {
+	// The sentinel has one definition and both entry points have to reach it.
+	// Seeded with rubbish so a function that writes nothing fails here.
+	std::vector<uint32_t> visible{7, 7, 7};
+	AABB bounds{Vector3{5.0f, 5.0f, 5.0f}, Vector3{6.0f, 6.0f, 6.0f}};
+
+	const size_t count = CullAndBound({}, Looking(), visible, bounds);
+
+	CHECK(count == 0);
+	CHECK(visible.empty());
+	CHECK(bounds == BoundsOfAll({}));
 }

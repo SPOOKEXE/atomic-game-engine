@@ -3,6 +3,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
@@ -253,6 +254,7 @@ namespace studio {
 		// A loader that depended on somebody else having registered `Part`
 		// first would fail with "no class named Part" on a perfectly good file.
 		engine::scene::RegisterSceneClasses();
+		engine::gui::RegisterGuiClasses();
 		engine::script::ScriptClass();
 
 		Universe = std::make_unique<engine::world::Universe>();
@@ -1208,6 +1210,18 @@ namespace studio {
 		// the thing it was written to be.
 		Universe->Enter(grid, [this](Store &store) {
 			InstallExampleScript(store, "SkyGrid.luau", "SkyGridScene");
+
+			// **The 2D tree beside the 3D one, in the same world.** v0.8's
+			// widget set is the version's headline and a template that did not
+			// show it would leave `Instance.new("Frame")` as a thing you have
+			// to know about — which is the "an API with no caller" the roadmap
+			// refuses. The example builds its own `ScreenGui` from a script, so
+			// it exercises the bindings as well as the layout.
+			//
+			// In the skygrid world rather than the mirror one: the skygrid is
+			// mostly empty sky, so a panel over it is legible, and the mirror
+			// scene is already the busy half of the template.
+			InstallExampleScript(store, "Interface.luau", "InterfaceScene");
 		});
 
 		// **No baseplate here either, and the reason is specific rather than

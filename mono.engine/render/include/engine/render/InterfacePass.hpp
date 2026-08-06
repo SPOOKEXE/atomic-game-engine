@@ -1,0 +1,142 @@
+#pragma once
+
+// Drawing a compiled interface, on the device.
+//
+// **The half a shipped client needs, and the last piece of the seam.**
+// `mono.client` does not link `Engine::ui` and must not, so a game draws no
+// `ScreenGui` until something other than imgui consumes a `gui::DrawList`. This
+// is that something: it implements `FrameOverlayHook`, which is the same slot
+// the editor's chrome occupies, so a client hands one of these where the studio
+// hands its imgui recorder and the renderer knows the difference not at all.
+//
+// **The second backend is a new consumer, not a second compile.** Everything
+// above this is shared with `ui::PaintGui`: one `gui::Compiled`, one
+// `gui::DrawList`, one `render::InterfaceMesh`. What differs is only what the
+// triangles are handed to. That is what stops the two halves drifting about
+// where an element is — the failure a second layout pass would guarantee.
+//
+// **A class rather than a branch inside `Renderer`.** The renderer already
+// takes a hook for exactly this, and adding an interface path to its own
+// recording would put a `gui` concern inside three thousand lines of pipeline
+// state — where the tier check would not have caught the edge and a reviewer
+// would have had to.
+//
+// @tier L12 · client
+
+#include <engine/core/Name.hpp>
+#include <engine/gui/DrawList.hpp>
+#include <engine/render/GlyphAtlas.hpp>
+#include <engine/render/InterfaceMesh.hpp>
+#include <engine/render/Renderer.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+
+namespace engine::render {
+
+	// Draws a compiled `gui::DrawList` into the swapchain.
+	//
+	// @since v0.8
+	class InterfacePass : public FrameOverlayHook {
+	  public:
+		InterfacePass() = default;
+		~InterfacePass() override;
+
+		InterfacePass(const InterfacePass &) = delete;
+		InterfacePass &operator=(const InterfacePass &) = delete;
+		InterfacePass(InterfacePass &&) = delete;
+		InterfacePass &operator=(InterfacePass &&) = delete;
+
+		// Creates the pipeline, the sampler and the atlas texture.
+		//
+		// **The atlas is uploaded once here rather than per frame.** It changes
+		// only when the size it was baked at does, which is a settings change
+		// and not a frame event — re-uploading a megabyte every frame to save a
+		// dirty flag would be the whole cost of the design.
+		//
+		// @param device         The `SDL_GPUDevice *` the renderer opened.
+		// @param swapchainFormat The `SDL_GPUTextureFormat` of the window.
+		// @param pixelSize      The em size to bake glyphs at.
+		// @return `false` when a shader, the pipeline or the atlas failed. The
+		//         caller draws no interface rather than failing the frame.
+		bool Initialise(void *device, uint32_t swapchainFormat, float pixelSize = 16.0f);
+
+		// Releases everything, in the order the device wants it.
+		void Shutdown();
+
+		// The list to draw next frame, and the canvas it was compiled against.
+		//
+		// **Copied rather than held by reference.** The list belongs to a
+		// `gui::Compiled` the caller owns and rebuilds; a pointer kept across
+		// the frame boundary would dangle the first time an element was added.
+		//
+		// @param list   This frame's compiled list.
+		// @param canvas The target size in pixels, which the vertex shader
+		//        divides by.
+		void Submit(const gui::DrawList &list, const core::Vector2 &canvas);
+
+		// Uploads this frame's vertices and indices.
+		//
+		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
+		// @return `false` when there is nothing to draw.
+		bool Prepare(void *commandBuffer) override;
+
+		// Records the batches.
+		//
+		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
+		// @param renderPass    An open pass bound to the swapchain.
+		void Record(void *commandBuffer, void *renderPass) override;
+
+		// How to resolve a content name to a texture.
+		//
+		// **The hook `ui::ImageSource` is on this side of the seam**, and it is
+		// the caller's for the same reason: this module has no business
+		// resolving a game's content names, and `gui::DrawCommand::Image` is a
+		// name rather than a handle precisely so that whoever owns the textures
+		// decides. Unset means every image draws the atlas's white texel — a
+		// visible flat rectangle rather than nothing, so a missing image reads
+		// as missing.
+		//
+		// @param resolve Called with a content name; returns an
+		//        `SDL_GPUTexture *` or null.
+		void SetImageSource(std::function<void *(const core::Name &)> resolve) {
+			Images = std::move(resolve);
+		}
+
+		// The atlas, for a caller that wants to measure text with it.
+		const GlyphAtlas &Atlas() const {
+			return Glyphs;
+		}
+
+		// How many batches the last recorded frame submitted.
+		size_t LastBatchCount() const {
+			return Recorded;
+		}
+
+	  private:
+		bool UploadAtlas(void *commandBuffer);
+
+		void *Device = nullptr;
+		void *Pipeline = nullptr;
+		void *Sampler = nullptr;
+		void *AtlasTexture = nullptr;
+
+		void *VertexBuffer = nullptr;
+		void *IndexBuffer = nullptr;
+		void *TransferBuffer = nullptr;
+		uint32_t VertexCapacity = 0;
+		uint32_t IndexCapacity = 0;
+		uint32_t TransferCapacity = 0;
+
+		GlyphAtlas Glyphs;
+		InterfaceMesh Mesh;
+		gui::DrawList Pending;
+		core::Vector2 Canvas;
+
+		std::function<void *(const core::Name &)> Images;
+
+		bool AtlasUploaded = false;
+		size_t Recorded = 0;
+	};
+}

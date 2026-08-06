@@ -1996,14 +1996,6 @@ namespace engine::render {
 		// cannot disagree with what was actually projected. A frustum built from
 		// a field of view and an aspect ratio kept separately is the bug that
 		// pops geometry at the screen edge on one machine and not another.
-		// **Fitted to the whole draw list, not to what survived culling.** A
-		// caster outside the camera's frustum still shadows into it, so the
-		// light has to see everything — and fitting to the culled set is the
-		// classic version of this bug: shadows that vanish as their casters
-		// leave the screen.
-		const glm::mat4 lightViewProjection = graph::FitDirectionalLight(
-			graph::BoundsOfAll(instances), core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
-		);
 
 		// **Every surface camera's view, resolved before any pass runs.** Each
 		// is used twice: to render into its own texture now, and — one frame
@@ -2074,6 +2066,15 @@ namespace engine::render {
 		}
 
 		size_t visibleCount = 0;
+
+		// **What the light has to see, out of the walk the culler was making
+		// anyway.** Deriving an instance's world box is three quaternion
+		// rotations and nine abs-mul-adds, and this frame used to pay for it
+		// twice over the same span — once to fit the light and once to test the
+		// frustum. `graph::CullAndBound` is those two passes fused; the union is
+		// six comparisons on a box that already exists. See its comment for why
+		// this is not a cache.
+		core::AABB sceneBounds;
 		{
 			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
 
@@ -2081,8 +2082,22 @@ namespace engine::render {
 			const graph::Frustum frustum = graph::Frustum::FromViewProjection(
 				scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
 			);
-			visibleCount = graph::Cull(instances, frustum, State->Visible);
+			visibleCount = graph::CullAndBound(instances, frustum, State->Visible, sceneBounds);
 		}
+
+		// **Fitted to the whole draw list, not to what survived culling.** A
+		// caster outside the camera's frustum still shadows into it, so the
+		// light has to see everything — and fitting to the culled set is the
+		// classic version of this bug: shadows that vanish as their casters
+		// leave the screen. That is why `sceneBounds` is the union over
+		// `instances` and not over `State->Visible`.
+		//
+		// Built here rather than before the cull only because the cull is now
+		// what produces the bound. Nothing between the two reads it, and its
+		// first use is the shadow pass.
+		const glm::mat4 lightViewProjection = graph::FitDirectionalLight(
+			sceneBounds, core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
+		);
 
 		// Ordered over the survivors, so the two passes are two ranges of one
 		// buffer. Opaque first in whatever order the world produced, then the

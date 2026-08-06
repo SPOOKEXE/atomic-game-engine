@@ -512,30 +512,41 @@ namespace engine::ecs {
 
 	bool Store::GetProperty(Entity instance, core::Name property, void *out, size_t bytes) const {
 		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
-		if (descriptor == nullptr || descriptor->Get == nullptr) {
+		if (descriptor == nullptr) {
 			return false;
 		}
+		return GetProperty(instance, *descriptor, out, bytes);
+	}
 
-		// A size that disagrees is a caller holding a different type than the
-		// one this property is. Refused rather than truncated: a short write
-		// into a `CFrame` leaves a rotation from the previous value, which
-		// looks like a physics bug a long way from here.
-		if (bytes != descriptor->Size || out == nullptr) {
+	bool
+	Store::GetProperty(Entity instance, const PropertyDescriptor &descriptor, void *out, size_t bytes) const {
+		if (descriptor.Get == nullptr) {
 			return false;
 		}
-
-		return descriptor->Get(*this, instance, out);
+		if (bytes != descriptor.Size || out == nullptr) {
+			return false;
+		}
+		return descriptor.Get(*this, instance, out);
 	}
 
 	bool Store::SetProperty(Entity instance, core::Name property, const void *value, size_t bytes) {
+		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
+		if (descriptor == nullptr) {
+			return false;
+		}
+		return SetProperty(instance, *descriptor, value, bytes);
+	}
+
+	bool Store::SetProperty(
+		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes
+	) {
 		RequireOwningThread("SetProperty");
 
-		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
-		if (descriptor == nullptr || descriptor->Set == nullptr || !descriptor->Writable) {
+		if (descriptor.Set == nullptr || !descriptor.Writable) {
 			return false;
 		}
 
-		if (bytes != descriptor->Size || value == nullptr) {
+		if (bytes != descriptor.Size || value == nullptr) {
 			return false;
 		}
 
@@ -552,7 +563,7 @@ namespace engine::ecs {
 				"store '{}': refusing to set '{}' in a replica. The authority owns this row, and "
 				"a value written here survives until its next delta and no longer.",
 				Name(),
-				property.Text()
+				descriptor.Name.Text()
 			);
 			return false;
 		}
@@ -562,20 +573,20 @@ namespace engine::ecs {
 		// written and surfaces later as a part that renders with a default
 		// nobody asked for. Refused here rather than in each binding, so both
 		// VMs and a future editor get one answer.
-		if (descriptor->Type == PropertyType::Enum) {
+		if (descriptor.Type == PropertyType::Enum) {
 			const auto member = *static_cast<const core::Name *>(value);
-			if (!EnumTable::Has(descriptor->EnumName, member)) {
+			if (!EnumTable::Has(descriptor.EnumName, member)) {
 				ENGINE_ERROR(
 					"store '{}': '{}' is not a member of Enum.{}",
 					Name(),
 					member.IsValid() ? member.Text() : std::string_view("(none)"),
-					descriptor->EnumName.Text()
+					descriptor.EnumName.Text()
 				);
 				return false;
 			}
 		}
 
-		return descriptor->Set(*this, instance, value);
+		return descriptor.Set(*this, instance, value);
 	}
 
 	core::Name Store::InstanceNameOf(Entity instance) const {

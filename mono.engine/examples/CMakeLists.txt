@@ -23,6 +23,13 @@ mono_add_library(examples
 		Engine::core
 		Engine::ecs
 		Engine::scene
+
+		# L7, `shared`. **The other class tree.** `Interface.luau` is built
+		# entirely out of `ScreenGui` and `Frame`, so `LoadScene` has to be able
+		# to register the 2D tree as well as the 3D one — a loader that knew
+		# only `Part` refused a shipped example with "not a registered class".
+		Engine::gui
+
 		Engine::script
 )
 
@@ -33,8 +40,85 @@ file(GLOB example_scenes CONFIGURE_DEPENDS
 	"${CMAKE_CURRENT_SOURCE_DIR}/*.js"
 	"${CMAKE_CURRENT_SOURCE_DIR}/*.ts")
 
+# **A `.ts` file is staged as stripped JavaScript, not copied.**
+#
+# `script/Runtime.hpp` has always said a `.ts` file "is expected to have been
+# type-stripped already — nothing in the C++ build compiles TypeScript, and
+# nothing should: the engine loads what a toolchain emitted". Nothing emitted
+# it. `tsconfig.json` sets `noEmit` and `just typecheck` runs `tsc --noEmit`, so
+# every `.ts` example was copied verbatim and QuickJS refused it at the first
+# type annotation — `Mirrors-1-world.ts` since the day it was written.
+#
+# This is the toolchain half, and it stays a toolchain: `tsc` transpiles, the
+# build copies the result. `--isolatedModules` transpiles file by file with no
+# type checking, which is the right split — `just typecheck` is where types are
+# checked, and doing it twice would make a build fail for a reason a typechecker
+# already reported better.
+#
+# **A missing `tsc` is not fatal.** A checkout without `bun install` still
+# builds and runs every Luau example; what is lost is the JavaScript twins, and
+# the configure says so once rather than failing over a dependency that is only
+# needed to author in the second language.
+set(_mono_tsc "${CMAKE_SOURCE_DIR}/node_modules/.bin/tsc")
+if(NOT EXISTS "${_mono_tsc}")
+	set(_mono_tsc "")
+	message(STATUS "examples: no node_modules/.bin/tsc — .ts scenes will not be staged")
+endif()
+
 foreach(scene IN LISTS example_scenes)
 	get_filename_component(scene_name "${scene}" NAME)
+	get_filename_component(scene_extension "${scene}" LAST_EXT)
+
+	if(scene_extension STREQUAL ".ts")
+		if(NOT _mono_tsc)
+			continue()
+		endif()
+
+		# Emitted under the same stem with a `.js` suffix, because that is what
+		# was actually produced — naming the output `.ts` would put stripped
+		# JavaScript in a file whose extension claims otherwise, and the next
+		# person to open it would be reading a lie.
+		get_filename_component(scene_stem "${scene}" NAME_WE)
+		set(staged "${MONO_STAGE_ROOT}/assets/examples/${scene_stem}.js")
+
+		add_custom_command(
+			OUTPUT "${staged}"
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples"
+			COMMAND "${_mono_tsc}"
+				--target ES2020
+				--module ESNext
+				--isolatedModules
+				--skipLibCheck
+
+				# **`--ignoreConfig`, because naming a file on the command line
+				# and having a `tsconfig.json` present is an error in tsc 7.**
+				# The config is for the editor and for `just typecheck`; this
+				# invocation is a transpile of one file and wants none of it.
+				--ignoreConfig
+
+				# **`--noResolve` and `--noCheck`, because this is a transpile.**
+				# Without the config there is no `engine.d.ts` on the include
+				# path, so every global the bindings declare — `game`, `Color3`,
+				# `Instance` — reports as an unknown name. Those are *type*
+				# errors and this step emits regardless, so they were noise on a
+				# build that had already succeeded: the stripped file was
+				# correct and the log said otherwise.
+				#
+				# Types are checked by `just typecheck`, against the config, with
+				# the declarations loaded. Checking them here too would be two
+				# answers to one question, and the worse one.
+				--noResolve
+				--noCheck
+				--outDir "${MONO_STAGE_ROOT}/assets/examples"
+				"${scene}"
+			DEPENDS "${scene}"
+			COMMENT "Transpiling example scene ${scene_name}"
+			VERBATIM)
+
+		list(APPEND staged_scenes "${staged}")
+		continue()
+	endif()
+
 	add_custom_command(
 		OUTPUT "${MONO_STAGE_ROOT}/assets/examples/${scene_name}"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples"

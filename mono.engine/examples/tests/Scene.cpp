@@ -11,6 +11,8 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Layout.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -87,6 +89,34 @@ namespace {
 		store.Each<const Visual>([&](Entity entity, const Visual &) {
 			if (store.InstanceNameOf(entity) == Name(name)) {
 				found++;
+			}
+		});
+		return found;
+	}
+
+	// The same count over the 2D tree.
+	//
+	// **A separate helper rather than a wider query, because the two trees have
+	// no component in common and that is the design.** A `Part` is named by its
+	// `scene::Visual` and a `TextButton` by its `gui::Element`; a counter that
+	// took both would have to name a class rather than a component, which is
+	// the coupling `gui/AGENTS.md` spends a section refusing.
+	size_t CountElements(Store &store, const std::string &name) {
+		size_t found = 0;
+		store.Each<const engine::gui::Element>([&](Entity entity, const engine::gui::Element &) {
+			if (store.InstanceNameOf(entity) == Name(name)) {
+				found++;
+			}
+		});
+		return found;
+	}
+
+	// The first element of a given name, or null.
+	Entity FirstElement(Store &store, const char *name) {
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.Each<const engine::gui::Element>([&](Entity entity, const engine::gui::Element &) {
+			if (found == engine::ecs::NULL_ENTITY && store.InstanceNameOf(entity) == Name(name)) {
+				found = entity;
 			}
 		});
 		return found;
@@ -332,4 +362,295 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 		CHECK(reflected->Frame.Position.Y == Approx(viewer->Frame.Position.Y));
 		CHECK(reflected->Frame.Position.Z == Approx(viewer->Frame.Position.Z));
 	}
+}
+
+TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
+	// **The scene that proves the 2D branch, and now the join under it.**
+	// `Interface.luau` builds a `ScreenGui` entirely from a script — every
+	// element exists because one specific thing looks correct without it — and
+	// since v0.8's last step it also *connects*: `.Activated` on two named
+	// buttons and on six swatches made in a loop.
+	//
+	// **What this case is for is the loop.** A join that only worked for
+	// instances a script held a local for would pass every hand-written case and
+	// fail on generated elements, which is most of a real interface. The
+	// swatches are found by name through the tree, exactly as a script does.
+	//
+	// The dispatch itself — that a delivered event becomes a call, at the
+	// barrier, in the router's order — is `engine.script.scripting`'s, where a
+	// runtime can be driven directly. What cannot be checked there is that this
+	// file is valid against the real class tree, which is this case's whole job:
+	// a `.Activated` on a class that does not declare one, or a handler
+	// referring to a local declared later, fails here and nowhere else.
+	const StagedAssets assets;
+
+	Store store("interface");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Interface.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The tree the script describes, spot-checked at the two ends that matter:
+	// the named buttons the handlers are attached to by local, and the
+	// generated ones they are attached to by lookup.
+	CHECK(CountElements(store, "Confirm") == 1);
+	CHECK(CountElements(store, "Cancel") == 1);
+	for (int index = 1; index <= 6; index++) {
+		CHECK(CountElements(store, "Swatch" + std::to_string(index)) == 1);
+	}
+
+	// `refresh()` runs at the top level, so the hint carries the click count
+	// rather than the authored placeholder. That is the cheapest proof the
+	// handlers' shared state was reachable at all — a `refresh` that raised
+	// would have failed the load above, and one that never ran would leave the
+	// original text.
+	const Entity hint = FirstElement(store, "Hint");
+	REQUIRE(hint != engine::ecs::NULL_ENTITY);
+	const engine::gui::Label *label = store.Get<engine::gui::Label>(hint);
+	REQUIRE(label != nullptr);
+	CHECK(label->Text.find("0 clicks") != std::string::npos);
+
+	// **And it actually lays out**, which is a stronger claim than that the tree
+	// exists and is the one containment can break.
+	//
+	// A `ScreenGui` draws only from `StarterGui` or a player's `PlayerGui`. This
+	// file left its own unparented for a version and drew anyway, because the
+	// engine was more permissive than the thing it models — so an author could
+	// have shipped an interface that appeared in the studio and was missing in
+	// the client. Asserting the tree alone would not have noticed either state.
+	engine::gui::Screen display;
+	display.Width = 1920.0f;
+	display.Height = 1080.0f;
+
+	const size_t rendered = engine::gui::Layout(store, display);
+	CHECK(rendered > 0);
+
+	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(hint);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Rendered);
+	CHECK(placed->AbsoluteSize.X > 0.0f);
+
+	// **The close button disables the collector rather than hiding the card**,
+	// which is what makes closing cost nothing afterwards: `Layout` skips a
+	// disabled `ScreenGui` before it asks how big anything under it is. Hiding
+	// the card instead would leave the whole subtree measured and compiled every
+	// frame for something nobody can see.
+	const Entity close = FirstElement(store, "Close");
+	REQUIRE(close != engine::ecs::NULL_ENTITY);
+
+	// **Found by `Layer`, not by `Element`.** A `ScreenGui` is a
+	// `LayerCollector` rather than a `GuiObject` — it has a canvas and no
+	// rectangle of its own — which is the split `GuiBase2d` exists to hold, and
+	// `FirstElement` would never see one.
+	Entity screen = engine::ecs::NULL_ENTITY;
+	store.Each<const engine::gui::Layer>([&](Entity entity, const engine::gui::Layer &) {
+		if (screen == engine::ecs::NULL_ENTITY &&
+			store.InstanceNameOf(entity) == engine::core::Name("InterfaceExample")) {
+			screen = entity;
+		}
+	});
+	REQUIRE(screen != engine::ecs::NULL_ENTITY);
+
+	engine::gui::Layer *layer = store.GetMutable<engine::gui::Layer>(screen);
+	REQUIRE(layer != nullptr);
+	CHECK(layer->Enabled);
+
+	layer->Enabled = false;
+	CHECK(engine::gui::Layout(store, display) == 0);
+	CHECK_FALSE(store.Get<engine::gui::Resolved>(hint)->Rendered);
+}
+
+TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][worlds]") {
+	// **What this scene is for is the arrangement, not the room.** `--worlds N`
+	// runs one script in N worlds and composites their views side by side; four
+	// identical rooms in a row would look correct whatever order they were
+	// placed in, so the file distinguishes itself by `game.JobId` and this case
+	// is what says it actually does.
+	//
+	// Two worlds, built from the *same file*, asserted to differ. A script that
+	// ignored its identity would give both the same caster count and pass every
+	// check that only looked at one of them.
+	const StagedAssets assets;
+
+	const auto casterCount = [&](const char *worldName) {
+		Store store(worldName);
+		Scheduler systems;
+
+		std::string error;
+		const bool loaded = LoadScene(store, systems, ExamplePath("Mirrors-4-worlds.luau"), error);
+		INFO(error);
+		REQUIRE(loaded);
+
+		// The parts every world has, whichever index it is.
+		CHECK(CountNamed(store, "Baseplate") == 1);
+		CHECK(CountNamed(store, "Mirror") == 1);
+
+		// A surface camera on the pane, which is what makes it a mirror rather
+		// than a coloured wall — the same pairing `Mirrors-1-world` asserts.
+		size_t surfaces = 0;
+		store.Each<const SurfaceCamera>([&](Entity, const SurfaceCamera &) { surfaces++; });
+		CHECK(surfaces == 1);
+
+		return CountNamed(store, "Caster");
+	};
+
+	// The palette table runs six, nine, twelve, fifteen. World 0 has no suffix
+	// at all — `Client::BuildDemoWorlds` keeps the original name — so this also
+	// covers the one index whose name a naive parse would get wrong.
+	CHECK(casterCount("client.world") == 6);
+	CHECK(casterCount("client.world.1") == 9);
+	CHECK(casterCount("client.world.2") == 12);
+	CHECK(casterCount("client.world.3") == 15);
+
+	// **Wraps rather than clamps**, so a fifth world is a distinguishable room
+	// rather than a fourth copy. `--worlds 6` is a thing somebody will type.
+	CHECK(casterCount("client.world.4") == 6);
+}
+
+TEST_CASE("the four-world scene builds the same way in TypeScript", "[examples][scene][worlds][js]") {
+	// **The roadmap's gate: each item lands in Luau *and* JavaScript, or it is
+	// not done** — and this case could not exist until the staging step did.
+	//
+	// `Runtime.hpp` has always said a `.ts` file "is expected to have been
+	// type-stripped already — nothing in the C++ build compiles TypeScript, and
+	// nothing should: the engine loads what a toolchain emitted". Nothing
+	// emitted it, so every `.ts` example was copied verbatim and QuickJS refused
+	// it at the first type annotation. `Mirrors-1-world.ts` had been in that
+	// state since the day it was written: typechecked, shipped, and unable to
+	// run.
+	//
+	// `mono.engine/examples/CMakeLists.txt` transpiles them now, which is why
+	// this loads `.js` — that is the file the toolchain actually produced, and
+	// naming it `.ts` would have been a lie about its contents.
+	//
+	// **The strongest form of the parity check**, because the two files compute
+	// the placement hash with different primitives — `bit32` against
+	// `Math.imul` — so a mismatch there shows as a different scene rather than
+	// as an error.
+	const StagedAssets assets;
+
+	const std::filesystem::path transpiled = ExamplePath("Mirrors-4-worlds.js");
+	if (!std::filesystem::exists(transpiled)) {
+		// A checkout without `bun install` has no `tsc`, so the configure said
+		// so and staged no JavaScript twins. Recorded as skipped rather than
+		// passed: the Luau case above still proves the scene builds.
+		SUCCEED("no transpiled twin; tsc was not available at configure time");
+		return;
+	}
+
+	Store store("client.world.2");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, transpiled.string(), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	CHECK(CountNamed(store, "Baseplate") == 1);
+	CHECK(CountNamed(store, "Mirror") == 1);
+	CHECK(CountNamed(store, "Caster") == 12);
+}
+
+TEST_CASE("the gui containment names match the services scene installs", "[examples][scene][gui]") {
+	// **A duplicated constant is only safe while something fails when the two
+	// copies disagree, and this is that something.**
+	//
+	// `gui::Layout` decides whether a `ScreenGui` draws by walking its ancestors
+	// and comparing *names* against `Workspace`, `StarterGui` and a player's
+	// `PlayerGui`. It compares names rather than class ids because
+	// `gui/AGENTS.md` refuses an edge to `scene` — the same refusal that made
+	// `gui::Face` re-declare `NormalId`'s six members, pinned the same way by
+	// `gui/tests/Enums.cpp`.
+	//
+	// **The check lives here because this is where both ends are linked.**
+	// `scene` may not link `gui` and `gui` may not link `scene`, so neither
+	// module's own tests can compare the two; `examples` links both, which makes
+	// it the lowest place the comparison can be made at all.
+	//
+	// Renaming a service without renaming its copy would not break a build. It
+	// would produce an engine in which every interface silently stops drawing —
+	// a bug found by looking at a black screen rather than by running anything.
+	Store store("examples_test.gui_names");
+	engine::scene::InstallServices(store);
+
+	CHECK(store.FindFirstRoot(engine::gui::WORKSPACE) != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstRoot(engine::gui::STARTER_GUI) != engine::ecs::NULL_ENTITY);
+
+	// **`PlayerGui` is not a root**, so it is pinned differently: it is a child
+	// of a `Player`, created by `scene::AddPlayer`, and what the two ends have
+	// to agree on is the spelling.
+	CHECK(engine::gui::PLAYER_GUI == engine::scene::PLAYER_GUI_NAME);
+
+	// And a player actually gets one. A client whose player had no `PlayerGui`
+	// could never be shown an interface, and the symptom would be a black
+	// overlay rather than an error — which is why this is asserted here rather
+	// than left to whoever adds a player.
+	const Entity player = engine::scene::AddPlayer(store, "Someone", true);
+	REQUIRE(player != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(player, engine::gui::PLAYER_GUI) != engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][scene][gui][panel]") {
+	// **The point of the whole 2D branch, and deliberately the last step.**
+	// `mono.studio` keeps Dear ImGui until the engine's own tree can draw a
+	// property grid — because an editor half on each is two widget sets — so
+	// this is not a replacement for the imgui panels. It is the proof that the
+	// tree can carry one, which is what has to be true before any of them move.
+	//
+	// **Loaded as `.js`, because that is what the toolchain produced.**
+	// `mono.studio/panels/*.ts` is transpiled at staging, the same way the
+	// examples are and for the reason `Runtime.hpp` has always given: the engine
+	// loads what a toolchain emitted and compiles no TypeScript itself.
+	//
+	// What it exercises, and none of it had a caller before this version:
+	// `UIListLayout` stacking rows, `UIPadding` insetting them, a
+	// `ScrollingFrame` whose canvas is longer than its panel, `.Activated` on a
+	// generated row — the `gui`-to-`script` join — and `StarterGui` containment,
+	// without which the whole thing draws nothing.
+	const StagedAssets assets;
+
+	const std::filesystem::path panel =
+		engine::core::Paths::Assets() / "panels" / "Properties.js";
+	if (!std::filesystem::exists(panel)) {
+		SUCCEED("no transpiled panel; tsc was not available at configure time");
+		return;
+	}
+
+	Store store("studio.panel");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, panel.string(), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// Ten rows, each a `TextButton` with a key and a value label under it. The
+	// count is asserted so that a panel which silently built nothing — the
+	// failure a containment or layout regression produces — cannot pass.
+	CHECK(CountElements(store, "Position") == 1);
+	CHECK(CountElements(store, "Transparency") == 1);
+	CHECK(CountElements(store, "Key") == 10);
+	CHECK(CountElements(store, "Value") == 10);
+
+	// **And it lays out**, which is the claim the tree existing does not make.
+	engine::gui::Screen display;
+	display.Width = 1920.0f;
+	display.Height = 1080.0f;
+	CHECK(engine::gui::Layout(store, display) > 0);
+
+	const Entity rows = FirstElement(store, "Rows");
+	REQUIRE(rows != engine::ecs::NULL_ENTITY);
+
+	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(rows);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Rendered);
+
+	// The panel is anchored to the right edge, so its rows sit in the right half
+	// of a 1920-wide screen. A layout that ignored `AnchorPoint` would put them
+	// at the far right *edge* rather than inset from it, and one that ignored
+	// `Position` would put them at zero — this separates all three.
+	CHECK(placed->AbsolutePosition.X > 960.0f);
+	CHECK(placed->AbsolutePosition.X < 1920.0f - 300.0f);
 }

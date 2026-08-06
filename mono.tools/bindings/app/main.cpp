@@ -20,6 +20,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
@@ -63,6 +64,8 @@ namespace {
 			return "double";
 		case PropertyType::Name:
 			return "Name";
+		case PropertyType::String:
+			return "String";
 		case PropertyType::Enum:
 			return "enum";
 		case PropertyType::Reference:
@@ -73,6 +76,14 @@ namespace {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		case PropertyType::Opaque:
 			break;
 		}
@@ -115,6 +126,12 @@ namespace {
 		case PropertyType::Double:
 			return "number";
 		case PropertyType::Name:
+		case PropertyType::String:
+			// **The same word in both languages, and it should be.** Whether
+			// the engine interns text or owns it is a storage decision an
+			// author has no way to observe from a script — `label.Text` is a
+			// string either way. A declaration file that spelled them
+			// differently would be leaking a C++ concern into a type position.
 			return "string";
 		case PropertyType::Vector3:
 			return "Vector3";
@@ -122,6 +139,14 @@ namespace {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		case PropertyType::Reference:
 			return "Instance";
 		case PropertyType::Enum:
@@ -145,6 +170,12 @@ namespace {
 		case PropertyType::Double:
 			return "number";
 		case PropertyType::Name:
+		case PropertyType::String:
+			// **The same word in both languages, and it should be.** Whether
+			// the engine interns text or owns it is a storage decision an
+			// author has no way to observe from a script — `label.Text` is a
+			// string either way. A declaration file that spelled them
+			// differently would be leaking a C++ concern into a type position.
 			return "string";
 		case PropertyType::Vector3:
 			return "Vector3";
@@ -152,6 +183,14 @@ namespace {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		case PropertyType::Reference:
 			return "Instance";
 		case PropertyType::Enum:
@@ -219,6 +258,38 @@ namespace {
 	bool Constructible(ClassId id) {
 		const ClassId service = Classes::Find(engine::core::Name("Service"));
 		return !service.IsValid() || !Classes::IsA(id, service);
+	}
+
+	// The classes a script reaches through `GetService`.
+	//
+	// **Derived from the class table rather than listed by hand, and that is
+	// the fix rather than the tidy-up.** `GetService` resolves a name against
+	// the world's roots — `RunService.cpp` says so — so *every* service
+	// `scene::InstallServices` furnishes is reachable, and the hand-written
+	// list of five said otherwise. `Interface.luau` asking for `StarterGui`
+	// typechecked as an error against an engine that answers it perfectly well.
+	//
+	// A hand-written list has to be edited every time a service is added, and
+	// nothing fails when it is not: the run time keeps working and only the
+	// types disagree. That is the drift this file exists to prevent everywhere
+	// else, arriving through the one list that was still manual.
+	//
+	// The bus services are *not* here — they are globals installed by the
+	// bindings rather than instances in the tree — so they are appended by the
+	// caller. Everything derived from `Service` is.
+	std::vector<ClassId> ServiceClasses() {
+		const ClassId service = Classes::Find(engine::core::Name("Service"));
+		if (!service.IsValid()) {
+			return {};
+		}
+
+		std::vector<ClassId> ids;
+		for (const ClassId id : AllClasses()) {
+			if (id != service && Classes::IsA(id, service)) {
+				ids.push_back(id);
+			}
+		}
+		return ids;
 	}
 
 	// The classes a script can construct, which is what both `Instance.new`
@@ -484,6 +555,25 @@ end
 declare extern type PropertyChangedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
 	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- The 2D tree's input, in two shapes because the arguments differ.
+--
+-- **`GuiSignal` takes no arguments and that is deliberate rather than
+-- unfinished.** Roblox hands `Activated`, `InputBegan` and `InputEnded` an
+-- `InputObject`; this engine has no such datatype, and inventing a different
+-- one now would have to change the day one arrives. A handler that cannot rely
+-- on an argument is better than one relying on an argument that will move.
+declare extern type GuiSignal with
+	function Connect(self, handler: () -> ()): RBXScriptConnection
+	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- `(x, y)` in canvas pixels, which is Roblox's signature for the three pointer
+-- signals exactly.
+declare extern type PointerSignal with
+	function Connect(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
+	function Once(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
 end
 
 -- --- queries ---------------------------------------------------------------
@@ -845,6 +935,25 @@ declare task: {
 				out << "\tfunction ClearAllChildren(self): ()\n";
 				out << "\tfunction GetPropertyChangedSignal(self, property: string): "
 					   "PropertyChangedSignal\n";
+
+				// **The 2D tree's input, declared on `Instance` rather than on
+				// `GuiObject`.** That is what the run time does — `InstanceIndex`
+				// answers these for any instance, because gating them by class
+				// would put a class test on a lookup that runs for every field
+				// access on every instance, to produce a connection that never
+				// fires instead of an error. `gui::Router` only ever names
+				// elements it found in a compiled draw list, so one on a `Part`
+				// is inert by construction.
+				//
+				// Declaring them here keeps the two in step: a type that
+				// offered them only on `GuiObject` would refuse code the engine
+				// accepts, which is worse than the reverse.
+				out << "\tActivated: GuiSignal\n";
+				out << "\tInputBegan: GuiSignal\n";
+				out << "\tInputEnded: GuiSignal\n";
+				out << "\tMouseEnter: PointerSignal\n";
+				out << "\tMouseLeave: PointerSignal\n";
+				out << "\tMouseMoved: PointerSignal\n";
 			}
 
 			// The two members only the Workspace answers, for the reason
@@ -886,7 +995,16 @@ declare task: {
 		out << "-- --- what a name resolves to --------------------------------------------\n\n";
 
 		out << "type Services = {\n";
-		out << "\tWorkspace: Workspace,\n";
+
+		// Everything in the tree, from the class table — see `ServiceClasses`
+		// for why this is derived rather than listed.
+		for (const ClassId id : ServiceClasses()) {
+			const std::string_view name = Classes::Describe(id).Name.Text();
+			out << "\t" << name << ": " << name << ",\n";
+		}
+
+		// The bus services, which are globals rather than instances and so are
+		// not in the tree for the walk above to find.
 		out << "\tRunService: RunService,\n";
 		out << "\tMessagingService: MessagingService,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
@@ -913,6 +1031,14 @@ declare task: {
 		// concrete `self` is what makes the singleton argument reach `T`.
 		out << "type DataModel = {\n";
 		out << "\tWorkspace: Workspace,\n";
+
+		// **Which world this script is standing on**, by name. Roblox's
+		// `JobId` identifies the server instance, and a world here *is* that
+		// instance — see `RunService.cpp`. `Mirrors-4-worlds` is the caller:
+		// `--worlds N` runs one file in every world, so without this every view
+		// would be identical and a compositor that placed them in the wrong
+		// order would look correct.
+		out << "\tJobId: string,\n";
 		out << "\tGetService: <T>(self: DataModel, service: keyof<Services> & T) "
 			   "-> index<Services, T>,\n";
 		out << "}\n\n";
@@ -1010,6 +1136,23 @@ declare interface PropertyChangedSignal {
 	Connect(handler: () => void): RBXScriptConnection;
 	Once(handler: () => void): RBXScriptConnection;
 	Equals(other: PropertyChangedSignal): boolean;
+}
+
+// The 2D tree's input, in two shapes because the arguments differ. See the Luau
+// half for why the three input signals take none: Roblox hands them an
+// `InputObject`, this engine has no such datatype, and a different one invented
+// now would have to change the day one arrives.
+declare interface GuiSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: GuiSignal): boolean;
+}
+
+// `(x, y)` in canvas pixels, which is Roblox's signature exactly.
+declare interface PointerSignal {
+	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
+	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
+	Equals(other: PointerSignal): boolean;
 }
 
 // --- queries ---------------------------------------------------------------
@@ -1379,6 +1522,17 @@ declare const task: {
 				out << "\tIsDescendantOf(ancestor: Instance): boolean;\n";
 				out << "\tClearAllChildren(): void;\n";
 				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
+
+				// The 2D tree's input, on `Instance` for the reason the Luau
+				// half states at length: the run time answers them for any
+				// instance, and a type narrower than the run time refuses code
+				// the engine accepts.
+				out << "\treadonly Activated: GuiSignal;\n";
+				out << "\treadonly InputBegan: GuiSignal;\n";
+				out << "\treadonly InputEnded: GuiSignal;\n";
+				out << "\treadonly MouseEnter: PointerSignal;\n";
+				out << "\treadonly MouseLeave: PointerSignal;\n";
+				out << "\treadonly MouseMoved: PointerSignal;\n";
 			}
 
 			// The two members only the Workspace answers, matching the Luau half.
@@ -1402,7 +1556,27 @@ declare const task: {
 		// `JsBindings.cpp` builds a plain object with one property, so this one
 		// does not.
 		out << "declare const game: {\n";
+
+		// Which world this script is standing on, by name — the same value the
+		// Luau half answers and for the same reason. `JsBindings.cpp` sets it
+		// as a plain string property rather than a getter, because a world's
+		// name is fixed for its life and a getter would imply otherwise.
+		out << "\treadonly JobId: string;\n";
+		// **Every service in the tree, from the class table.** This was a
+		// hand-written four while the Luau half had already been made to derive
+		// its list, and the two drifted immediately: a panel asking for
+		// `StarterGui` typechecked as an error against an engine that answers it
+		// perfectly well, and the overloads collapsed to an intersection that
+		// was not an `Instance` at all.
+		//
+		// A list edited by hand is a list nothing fails to update — the run time
+		// keeps working and only the types disagree, which is the drift this
+		// whole file exists to prevent.
 		out << "\tGetService: {\n";
+		for (const ClassId id : ServiceClasses()) {
+			const std::string_view name = Classes::Describe(id).Name.Text();
+			out << "\t\t(service: \"" << name << "\"): " << name << ";\n";
+		}
 		out << "\t\t(service: \"RunService\"): RunService;\n";
 		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";
@@ -1479,6 +1653,13 @@ int main(int argc, char **argv) {
 	// would be describing what a script can *build* and not what a world can
 	// *hold*, and the second is the half a save file needs.
 	(void)engine::script::ScriptClass();
+
+	// **And the 2D tree, which a game file can carry and a script can build.**
+	// A manifest that stopped at `Part` and `Script` would leave every
+	// `TextLabel` property untyped in both declaration files — so an author
+	// gets no completion for the half of v0.8 that is meant to be authored from
+	// TypeScript, which is the point of generating this at all.
+	(void)engine::gui::RegisterGuiClasses();
 
 	// **And the services, because `workspace` is one.** Every script opens by
 	// reaching into the world through the `Workspace` global, and a manifest

@@ -373,6 +373,83 @@ namespace engine::script {
 		return *static_cast<core::CFrame *>(value);
 	}
 
+	// --- the four the 2D tree is authored in ---------------------------------
+	//
+	// **The metatables are `LuauDatatypes.cpp`'s and only the accessors are
+	// here**, which is the same split the three above already have: that file
+	// owns what a `UDim2` *is* to a script, and this one owns handing a
+	// property's bytes across. Two definitions of the metatable would be two
+	// answers to `typeof(value)`.
+	//
+	// The tag is what makes the check safe rather than the size. `Vector2`,
+	// `UDim` and the two halves of a `UDim2` are all pairs of floats, so a check
+	// on shape would accept any of them for any other — and `frame.Position =
+	// Vector2.new(0, 0)` would silently mean an offset of zero at scale zero.
+
+	core::Vector2 *PushVector2(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::Vector2), TAG_VECTOR2);
+		auto *value = new (memory) core::Vector2();
+		luaL_getmetatable(state, "Vector2");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::UDim *PushUDim(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::UDim), TAG_UDIM);
+		auto *value = new (memory) core::UDim();
+		luaL_getmetatable(state, "UDim");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::UDim2 *PushUDim2(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::UDim2), TAG_UDIM2);
+		auto *value = new (memory) core::UDim2();
+		luaL_getmetatable(state, "UDim2");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::Rect *PushRect(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::Rect), TAG_RECT);
+		auto *value = new (memory) core::Rect();
+		luaL_getmetatable(state, "Rect");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::Vector2 &CheckVector2Value(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_VECTOR2);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "Vector2");
+		}
+		return *static_cast<core::Vector2 *>(value);
+	}
+
+	core::UDim &CheckUDim(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_UDIM);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "UDim");
+		}
+		return *static_cast<core::UDim *>(value);
+	}
+
+	core::UDim2 &CheckUDim2(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_UDIM2);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "UDim2");
+		}
+		return *static_cast<core::UDim2 *>(value);
+	}
+
+	core::Rect &CheckRect(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_RECT);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "Rect");
+		}
+		return *static_cast<core::Rect *>(value);
+	}
+
 	void OpenValues(lua_State *state) {
 		static const luaL_Reg vectorConstructors[] = {{"new", Vector3New}, {nullptr, nullptr}};
 		static const luaL_Reg colorConstructors[] = {

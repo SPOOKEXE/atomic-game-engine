@@ -1,15 +1,18 @@
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Visibility.hpp>
 
+#include <cstdint>
 #include <vector>
 
 namespace engine::scene {
 
 	namespace {
 		using ecs::Entity;
+		using ecs::Hierarchy;
 		using ecs::NULL_ENTITY;
 		using ecs::Store;
 
@@ -26,12 +29,164 @@ namespace engine::scene {
 			static thread_local std::vector<Entity> stack;
 			return stack;
 		}
+
+		// --- the fold --------------------------------------------------------
+		//
+		// `gui/Compile.cpp`'s and `studio/Hierarchy.cpp`'s, kept identical on
+		// purpose: the same constant, the same finaliser, the same order
+		// dependence. Three signatures in one repository that mix differently
+		// are three things a reviewer has to hold separately, and none of them
+		// is more correct than the others.
+
+		constexpr uint64_t GOLDEN = 0x9E3779B97F4A7C15ull;
+
+		// splitmix64's finaliser: the cheapest mix that avalanches every input
+		// bit across all sixty-four output ones.
+		//
+		// **Not `std::hash`.** The standard says nothing about what it
+		// produces, so two builds of this program may disagree. Nothing here
+		// crosses a process — the comparison is this frame against the last,
+		// in one store — but a hash whose value is a property of the compiler
+		// is one nobody can write a test for, and the test is what keeps the
+		// field list honest.
+		constexpr uint64_t Scramble(uint64_t value) {
+			value ^= value >> 30;
+			value *= 0xBF58476D1CE4E5B9ull;
+			value ^= value >> 27;
+			value *= 0x94D049BB133111EBull;
+			value ^= value >> 31;
+			return value;
+		}
+
+		// Folds one term in, order included.
+		//
+		// **Order-dependent deliberately.** Two archetypes that swap their rows
+		// hold the same instances and would walk to the same answer, so an
+		// order-independent fold would be the more accurate one — and would
+		// also collide far more readily, because commutative folds do. A
+		// reshuffle costs one walk nobody sees; a collision is a hidden part
+		// still drawing.
+		constexpr uint64_t Fold(uint64_t running, uint64_t term) {
+			return (running ^ Scramble(term)) * GOLDEN;
+		}
+
+		constexpr uint64_t Fold(uint64_t running, Entity value) {
+			return Fold(running, value.Id);
+		}
+
+		// Everything the walk's answer depends on, in two linear column scans.
+		//
+		// **No store address folded in, unlike `gui` and `studio`.** Both of
+		// those keep their stamp in an object a caller can point at either
+		// world, so they have to tell the worlds apart. This one lives on the
+		// world it describes, so there is no second world to confuse it with —
+		// and an address is precisely the term that differs between two runs of
+		// one scene, which is what `just determinism` compares. Folding one in
+		// would buy nothing and make the *decision* run-dependent.
+		//
+		// A collision keeps a stale answer and a spurious change costs one
+		// walk, so everything here leans towards folding more rather than less:
+		// the `Visual` pass covers rows that are not in `Workspace` at all, and
+		// the `Hierarchy` pass covers every instance in the world rather than
+		// only the drawable ones. Restricting either would be an ancestry test
+		// per row, which is the cost this exists to avoid.
+		//
+		// @param store     The world.
+		// @param workspace What `WorkspaceOf` resolved to, folded because the
+		//        walk starts there and a world that gains or loses a
+		//        `Workspace` changes every answer at once.
+		// @return The fold.
+		uint64_t Signature(Store &store, Entity workspace) {
+			uint64_t stamp = Fold(uint64_t{0}, workspace);
+
+			// The tree the walk descends. `Parent` is not read by `EachChild`
+			// and is folded anyway: it is the field a reparent writes on the
+			// row that moved, and one term costs less than reasoning about
+			// which end of a relink is guaranteed to be visible here.
+			//
+			// **Destruction needs nothing of its own.** A destroyed instance's
+			// row leaves this pass, so the count moves whether or not the
+			// links around it were tidied — and `DestroyInstance` does unparent
+			// on the way out, so both halves move.
+			size_t nodes = 0;
+			store.Each<const Hierarchy>([&stamp, &nodes](Entity entity, const Hierarchy &node) {
+				nodes++;
+				stamp = Fold(stamp, entity);
+				stamp = Fold(stamp, node.Parent);
+				stamp = Fold(stamp, node.FirstChild);
+				stamp = Fold(stamp, node.NextSibling);
+			});
+			stamp = Fold(stamp, static_cast<uint64_t>(nodes));
+
+			// **The second half, and a `Hierarchy`-only signature is wrong
+			// without it.** `Visible` is read by the walk and a script or a
+			// wire delta can toggle it without touching a single link, which
+			// would leave a part somebody hid still drawing. The entity id
+			// covers the other direction: `Instance.new("Part")` parented and
+			// then given its `Visual` changes the answer with no tree change
+			// at all, and the id appearing in this pass is what says so.
+			size_t visuals = 0;
+			store.Each<const Visual>([&stamp, &visuals](Entity entity, const Visual &visual) {
+				visuals++;
+				stamp = Fold(stamp, entity);
+
+				// **1 and 2, not 1 and 0.** A zero term folds to a value that
+				// depends only on the running total, so a `false` beside a
+				// missing row would be indistinguishable — and telling those
+				// apart is the whole job here.
+				stamp = Fold(stamp, static_cast<uint64_t>(visual.Visible ? 1 : 2));
+			});
+			stamp = Fold(stamp, static_cast<uint64_t>(visuals));
+
+			return stamp;
+		}
 	}
 
 	size_t SyncRendered(Store &store) {
 		ENGINE_PROFILE_CAT("sync rendered", engine::core::ProfileCategory::ECS);
 
 		const Entity workspace = WorkspaceOf(store);
+
+		// --- the early-out: has anything the answer depends on moved? --------
+		//
+		// On almost every frame this is all that happens. Two linear passes
+		// over packed columns, no random lookups and no `std::function`, and
+		// what they produce is a number to compare against the last one.
+		//
+		// **A memo, not a hook.** `scene/AGENTS.md` argues that this tag is
+		// derived by a sweep rather than maintained at every reparent, because
+		// ancestry is not local and no set of hooks is ever complete. Nothing
+		// here maintains anything: the walk below runs in full the moment the
+		// tree or a `Visual` moves, and what is skipped is a walk that would
+		// have written back exactly the rows already present. The argument
+		// survives, which is the thing a reviewer should check first.
+		//
+		// The resource is created here rather than by `InstallServices`,
+		// because this function is the only thing that reads or writes it and
+		// a fixture nobody could explain is worse than a lazy one. It is
+		// registered explicitly in `RegisterSceneComponents` — an unregistered
+		// resource type is minted under the compiler's spelling and
+		// `Store::Save` then refuses the world.
+		if (!store.HasResource<RenderedSignature>()) {
+			store.SetResource(RenderedSignature{});
+		}
+
+		const uint64_t stamp = Signature(store, workspace);
+		RenderedSignature &memo = *store.ResourceMutable<RenderedSignature>();
+
+		if (memo.Fresh != 0 && memo.Stamp == stamp) {
+			// **Counted rather than remembered.** The sweep leaves every
+			// surviving row with `Mark` at zero, so the number of rows
+			// carrying the tag *is* the answer this returns, and
+			// `CountMatching` keeps its query per store rather than building
+			// one per call. Caching the count in the resource instead would be
+			// a second copy of a derived fact, which is the thing `ecs`'s own
+			// invariants open by refusing.
+			return store.CountMatching<Rendered>();
+		}
+
+		memo.Stamp = stamp;
+		memo.Fresh = 1;
 
 		// --- the walk: mark every visible descendant of Workspace ------------
 		//
@@ -77,7 +232,25 @@ namespace engine::scene {
 					continue;
 				}
 
-				if (Rendered *mark = store.GetMutable<Rendered>(current); mark != nullptr) {
+				// **`GetUnobserved` and not `GetMutable`, and the difference is
+				// not a micro-optimisation.** A mutable pointer handed out by
+				// `GetMutable` counts as a write, and a write marks a dirty bit
+				// in any table carrying a `DirtyBits` column — which in the
+				// studio is every table holding a `Transform`, because that one
+				// is watched. So this line used to do `state.Changes++` once per
+				// rendered entity per `PreRender` frame, setting a bit nothing
+				// reads and permanently falsifying the invariant
+				// `physics/SyncBroadphase.cpp` states and depends on: *"an
+				// unchanged counter means nothing authored has happened."* Its
+				// outer gate never held and two dirty-bit scans ran every tick
+				// for nothing. `gui/Compile.hpp` rests on the same counter.
+				//
+				// Safe here **only** because of the rule in `Visibility.hpp`:
+				// nothing outside this function may add, remove or write a
+				// `Rendered`, so there is no observer whose change could be
+				// lost by not reporting this one. If that rule is ever relaxed,
+				// this line goes back to `GetMutable` in the same commit.
+				if (Rendered *mark = store.GetUnobserved<Rendered>(current); mark != nullptr) {
 					mark->Mark = 1;
 				} else {
 					store.Set(current, Rendered{1, {}});

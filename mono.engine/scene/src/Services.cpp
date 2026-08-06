@@ -259,6 +259,28 @@ namespace engine::scene {
 
 		store.SetParent(player, players);
 
+		// **A `PlayerGui`, because a client's interface has nowhere else to
+		// live.** `gui::Layout` draws a `ScreenGui` only from `StarterGui` or
+		// from a player's `PlayerGui` — Roblox's containment rule — so a player
+		// without one is a viewer that can never be shown an interface, and the
+		// symptom is a black overlay rather than an error.
+		//
+		// Made here rather than by whoever adds the player, for
+		// `InstallServices`' reason: a container every consumer has to remember
+		// to create is one somebody will not, and the failure is silent.
+		//
+		// **A plain `Instance` rather than a `gui` class.** `scene` may not link
+		// `gui` — the refusal runs both ways, and `gui/AGENTS.md` states this
+		// side of it — and what the containment test reads is the *name*. So the
+		// spelling is what matters, and `examples/tests/Scene.cpp` pins it
+		// against `gui::PLAYER_GUI` from the one place both are linked.
+		const Entity playerGui = store.CreateInstance(
+			Classes::Find(core::Name("Instance")), std::string(PLAYER_GUI_NAME)
+		);
+		if (playerGui != NULL_ENTITY) {
+			store.SetParent(playerGui, player);
+		}
+
 		if (local) {
 			// One per world, and the last marked wins. A resource rather than a
 			// tag because there is one of it — `ecs/AGENTS.md`'s rule — and

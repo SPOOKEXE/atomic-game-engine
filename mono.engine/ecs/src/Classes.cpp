@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <deque>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -42,7 +43,23 @@ namespace engine::ecs {
 		};
 
 		struct Table {
-			std::mutex Guard;
+			// **A shared mutex, and the asymmetry is the whole reason.** This
+			// table is written during startup and read on every property access
+			// for the rest of the process — `Store::GetProperty` and
+			// `SetProperty` both go through `Describe`, and a script animating a
+			// scene does that hundreds of times a frame.
+			//
+			// With a plain mutex those reads *serialise against each other*, and
+			// with `ExecutionMode::WorldParallel` two worlds ticking on two
+			// workers contend on this one lock for every property either of them
+			// touches. Nothing about a read needs that: the merged list a reader
+			// walks is not being written while it walks.
+			//
+			// The one wrinkle is that `Describe` is not a pure read — it merges
+			// lazily. That is handled where it is: a shared lock first, and the
+			// unique one taken only on the rare pass that actually has merging
+			// to do. See `Describe`.
+			std::shared_mutex Guard;
 			std::deque<Entry> Entries;
 			std::unordered_map<uint32_t, ClassId> ByName;
 			bool Closed = false;
@@ -187,19 +204,27 @@ namespace engine::ecs {
 
 		Entry &entry = table.Entries[owner.Index];
 
+		// **Resolved once, here, because this is the only way a descriptor gets
+		// into the table.** `Property`, `ClampedProperty` and `Computed` all
+		// funnel through `Declare`, so filling it here means no caller can
+		// produce one without it — which is what lets a binding compare against
+		// it without checking whether it is set.
+		PropertyDescriptor resolved = descriptor;
+		resolved.Spelling = resolved.Name.Text();
+
 		// Redeclaring a name on the same class replaces it. Redeclaring one a
 		// base already has is also a replacement, but that happens in the
 		// merge — this list is only what *this* class said.
 		const auto existing = std::find_if(
-			entry.Declared.begin(), entry.Declared.end(), [&descriptor](const PropertyDescriptor &property) {
-				return property.Name == descriptor.Name;
+			entry.Declared.begin(), entry.Declared.end(), [&resolved](const PropertyDescriptor &property) {
+				return property.Name == resolved.Name;
 			}
 		);
 
 		if (existing != entry.Declared.end()) {
-			*existing = descriptor;
+			*existing = resolved;
 		} else {
-			entry.Declared.push_back(descriptor);
+			entry.Declared.push_back(resolved);
 		}
 
 		// Every merged list in the table is now potentially stale, including
@@ -238,7 +263,42 @@ namespace engine::ecs {
 
 	const ClassInfo &Classes::Describe(ClassId id) {
 		auto &table = Get();
-		std::lock_guard lock(table.Guard);
+
+		// **Two passes, and the second one almost never runs.** This is the
+		// hottest read in the engine — every `Store::GetProperty` and
+		// `SetProperty` goes through it, so a script animating two hundred parts
+		// arrives here hundreds of times a frame, from as many threads as there
+		// are worlds ticking.
+		//
+		// The merge it does is lazy but it is also *done*: declarations happen
+		// while a class tree is being built and reads happen for the rest of the
+		// process, so after startup `MergedAt == Revision` on every call and the
+		// only thing the exclusive lock was buying was that comparison.
+		//
+		// So: take the shared lock, check, and leave. Two worlds reading at once
+		// no longer serialise against each other, which with
+		// `ExecutionMode::WorldParallel` was contention on one process-wide
+		// mutex for every property either world touched.
+		{
+			std::shared_lock lock(table.Guard);
+
+			if (!id.IsValid() || id.Index >= table.Entries.size()) {
+				return Missing();
+			}
+
+			const Entry &entry = table.Entries[id.Index];
+			if (entry.MergedAt == table.Revision) {
+				return entry.Info;
+			}
+		}
+
+		// Stale, so the merge has to happen and it is a write. **Re-checked
+		// under the exclusive lock rather than assumed**, because the shared
+		// lock was dropped to take this one and another thread may have merged
+		// the same entry in between — `Remerge` already returns early on that,
+		// which is what makes the double check free rather than a second copy of
+		// the condition.
+		std::unique_lock lock(table.Guard);
 
 		if (!id.IsValid() || id.Index >= table.Entries.size()) {
 			return Missing();
@@ -251,7 +311,7 @@ namespace engine::ecs {
 
 	ClassId Classes::Find(core::Name name) {
 		auto &table = Get();
-		std::lock_guard lock(table.Guard);
+		std::shared_lock lock(table.Guard);
 
 		const auto found = table.ByName.find(name.Id());
 		return found == table.ByName.end() ? ClassId{} : found->second;
@@ -263,7 +323,7 @@ namespace engine::ecs {
 		}
 
 		auto &table = Get();
-		std::lock_guard lock(table.Guard);
+		std::shared_lock lock(table.Guard);
 
 		if (derived.Index >= table.Entries.size()) {
 			return false;
@@ -275,7 +335,7 @@ namespace engine::ecs {
 
 	const void *Classes::DefaultOf(ClassId id, ComponentId component) {
 		auto &table = Get();
-		std::lock_guard lock(table.Guard);
+		std::shared_lock lock(table.Guard);
 
 		if (!id.IsValid() || id.Index >= table.Entries.size()) {
 			return nullptr;
@@ -296,7 +356,7 @@ namespace engine::ecs {
 
 	size_t Classes::Count() {
 		auto &table = Get();
-		std::lock_guard lock(table.Guard);
+		std::shared_lock lock(table.Guard);
 		return table.Entries.size();
 	}
 
@@ -314,7 +374,7 @@ namespace engine::ecs {
 
 	bool Classes::Sealed() {
 		auto &table = Get();
-		std::lock_guard lock(table.Guard);
+		std::shared_lock lock(table.Guard);
 		return table.Closed;
 	}
 
@@ -334,6 +394,8 @@ namespace engine::ecs {
 			return "double";
 		case PropertyType::Name:
 			return "name";
+		case PropertyType::String:
+			return "string";
 		case PropertyType::Enum:
 			return "enum";
 		case PropertyType::Reference:
@@ -344,6 +406,14 @@ namespace engine::ecs {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		}
 		return "?";
 	}

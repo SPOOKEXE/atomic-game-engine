@@ -312,6 +312,33 @@ function(mono_add_tests name)
 	set_target_properties(${target} PROPERTIES
 		RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/tests")
 
+	# The vendored typefaces, for a test of something that reads them.
+	#
+	# **Same rule as a program's, applied to the one place it was not.** A
+	# program links `ui` or `render` and gets fonts staged beside it; a *test*
+	# of `render::GlyphAtlas` linked the same module and got nothing, so every
+	# case that needed a real .ttf took its "no staged fonts" branch and passed
+	# without asserting anything. A test that skips silently is worse than one
+	# that fails: it reports green for a rasteriser nobody ran.
+	get_target_property(_mono_test_deps ${target} LINK_LIBRARIES)
+	if("Engine::render" IN_LIST _mono_test_deps OR "Engine::ui" IN_LIST _mono_test_deps)
+		file(GLOB _mono_test_fonts "${CMAKE_SOURCE_DIR}/mono.vendor/fonts/*.ttf")
+
+		# The directory first, for the reason the program-side copy gives:
+		# `copy_if_different` given a destination that does not exist writes a
+		# *file* under that name.
+		add_custom_command(TARGET ${target} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/tests/fonts"
+			VERBATIM)
+
+		foreach(_font IN LISTS _mono_test_fonts)
+			add_custom_command(TARGET ${target} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different
+					"${_font}" "${MONO_STAGE_ROOT}/tests/fonts/"
+				VERBATIM)
+		endforeach()
+	endif()
+
 	add_test(NAME ${name} COMMAND ${target})
 	set_property(GLOBAL APPEND PROPERTY MONO_ALL_TEST_TARGETS ${target})
 endfunction()
@@ -474,8 +501,16 @@ function(mono_add_program name)
 	# link line has nothing that opens a .ttf, and staging three megabytes of
 	# fonts into a dedicated server would be three megabytes of a claim that it
 	# draws.
+	# **Either module reads them now, and the gate says so rather than naming
+	# one.** `engine_ui` opens the .ttf files through imgui's atlas; since v0.8
+	# `render::GlyphAtlas` opens the same four directly, so that a shipped
+	# client can draw a `ScreenGui` without linking the editor's toolkit. A gate
+	# that still named only `ui` staged nothing for a program that draws text
+	# through the other one — and the symptom is a client whose interface has no
+	# glyphs in it.
 	list(FIND all_deps engine_ui links_ui)
-	if(links_ui GREATER_EQUAL 0)
+	list(FIND all_deps engine_render links_render)
+	if(links_ui GREATER_EQUAL 0 OR links_render GREATER_EQUAL 0)
 		file(GLOB _mono_fonts "${CMAKE_SOURCE_DIR}/mono.vendor/fonts/*.ttf")
 
 		# The directory first. `copy_if_different` given a destination that does

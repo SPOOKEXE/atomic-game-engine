@@ -83,6 +83,47 @@ namespace engine::script {
 		return ValueOf<core::CFrame>(context, value, JsOf(context).CFrameClass);
 	}
 
+	// The four `gui` is authored in. `JsDatatypes.cpp` already installs all
+	// four constructors and their class ids; what was missing was the pair that
+	// carries a property's bytes across, which is why a `UDim2` could be built
+	// in a script and not assigned to anything.
+	//
+	// The class id is the check, exactly as the Luau tag is: `Vector2` and
+	// `UDim` are both two floats, and `JS_GetOpaque2` against the wrong id
+	// returns null rather than reinterpreting the pair.
+
+	JSValue MakeVector2(JSContext *context, const core::Vector2 &value) {
+		return MakeValue(context, JsOf(context).Vector2Class, value);
+	}
+
+	JSValue MakeUDim(JSContext *context, const core::UDim &value) {
+		return MakeValue(context, JsOf(context).UDimClass, value);
+	}
+
+	JSValue MakeUDim2(JSContext *context, const core::UDim2 &value) {
+		return MakeValue(context, JsOf(context).UDim2Class, value);
+	}
+
+	JSValue MakeRect(JSContext *context, const core::Rect &value) {
+		return MakeValue(context, JsOf(context).RectClass, value);
+	}
+
+	core::Vector2 *AsVector2(JSContext *context, JSValueConst value) {
+		return ValueOf<core::Vector2>(context, value, JsOf(context).Vector2Class);
+	}
+
+	core::UDim *AsUDim(JSContext *context, JSValueConst value) {
+		return ValueOf<core::UDim>(context, value, JsOf(context).UDimClass);
+	}
+
+	core::UDim2 *AsUDim2(JSContext *context, JSValueConst value) {
+		return ValueOf<core::UDim2>(context, value, JsOf(context).UDim2Class);
+	}
+
+	core::Rect *AsRect(JSContext *context, JSValueConst value) {
+		return ValueOf<core::Rect>(context, value, JsOf(context).RectClass);
+	}
+
 	namespace {
 		JSValue MakeEnumItem(JSContext *context, const Name &enumName, const Name &member);
 		bool ReadEnumValueImpl(JSContext *context, JSValueConst value, const Name &enumName, Name &out);
@@ -109,6 +150,13 @@ namespace engine::script {
 				// Text, never the interned id — the number means a different
 				// string in the next process.
 				return JS_NewString(context, static_cast<const Name *>(bytes)->Text().data());
+			case PropertyType::String:
+				// **Never reached, and refused rather than handled**, exactly as
+				// the Luau side refuses it: the caller takes a `std::string`
+				// down its own path before it gets here, and these `bytes` are
+				// uninitialised storage. Throwing makes a future caller that
+				// forgot the branch fail loudly instead of corrupting a heap.
+				return JS_ThrowTypeError(context, "a string property is read through its own path");
 			case PropertyType::Enum:
 				// An `EnumItem`, not a string — the same value the Luau side
 				// hands back, so a property declared once behaves the same in
@@ -121,6 +169,14 @@ namespace engine::script {
 				return MakeColor3(context, *static_cast<const core::Color3 *>(bytes));
 			case PropertyType::CFrame:
 				return MakeCFrame(context, *static_cast<const core::CFrame *>(bytes));
+			case PropertyType::Vector2:
+				return MakeVector2(context, *static_cast<const core::Vector2 *>(bytes));
+			case PropertyType::UDim:
+				return MakeUDim(context, *static_cast<const core::UDim *>(bytes));
+			case PropertyType::UDim2:
+				return MakeUDim2(context, *static_cast<const core::UDim2 *>(bytes));
+			case PropertyType::Rect:
+				return MakeRect(context, *static_cast<const core::Rect *>(bytes));
 			case PropertyType::Reference: {
 				// **Null, and it means nil rather than "a root".** This handed
 				// back `workspace` before v0.7, because `workspace` *was* the
@@ -180,6 +236,10 @@ namespace engine::script {
 				return JS_ToInt32(context, static_cast<int32_t *>(out), value) == 0;
 			case PropertyType::Int64:
 				return JS_ToInt64(context, static_cast<int64_t *>(out), value) == 0;
+			case PropertyType::String:
+				// Refused here for `ToJs`'s reason; the caller's own branch is
+				// what actually serves this type.
+				return false;
 			case PropertyType::Name: {
 				const char *text = JS_ToCString(context, value);
 				if (text == nullptr) {
@@ -217,6 +277,38 @@ namespace engine::script {
 					return false;
 				}
 				*static_cast<core::CFrame *>(out) = *frame;
+				return true;
+			}
+			case PropertyType::Vector2: {
+				const core::Vector2 *vector = AsVector2(context, value);
+				if (vector == nullptr) {
+					return false;
+				}
+				*static_cast<core::Vector2 *>(out) = *vector;
+				return true;
+			}
+			case PropertyType::UDim: {
+				const core::UDim *length = AsUDim(context, value);
+				if (length == nullptr) {
+					return false;
+				}
+				*static_cast<core::UDim *>(out) = *length;
+				return true;
+			}
+			case PropertyType::UDim2: {
+				const core::UDim2 *size = AsUDim2(context, value);
+				if (size == nullptr) {
+					return false;
+				}
+				*static_cast<core::UDim2 *>(out) = *size;
+				return true;
+			}
+			case PropertyType::Rect: {
+				const core::Rect *rect = AsRect(context, value);
+				if (rect == nullptr) {
+					return false;
+				}
+				*static_cast<core::Rect *>(out) = *rect;
 				return true;
 			}
 			case PropertyType::Reference: {
@@ -279,9 +371,22 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "no such property");
 			}
 
+			// **The one type that cannot ride the shared byte buffer**, and the
+			// Luau side takes the same exception for the same reason: a
+			// `PropertyType::String` getter *assigns* into its destination, and
+			// assigning a `std::string` into uninitialised bytes is undefined
+			// behaviour rather than a fast path. So it gets a real object.
+			if (property->Type == PropertyType::String) {
+				std::string text;
+				if (!bound.World->GetProperty(instance, *property, &text, sizeof(text))) {
+					return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
+				}
+				return JS_NewStringLen(context, text.data(), text.size());
+			}
+
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 			if (property->Size > sizeof(bytes) ||
-				!bound.World->GetProperty(instance, property->Name, bytes, property->Size)) {
+				!bound.World->GetProperty(instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
 			}
 			return ToJs(context, *property, bytes);
@@ -307,6 +412,25 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "'%s' is read-only", property->Name.Text().data());
 			}
 
+			// The write half of the same exception — see the getter above.
+			if (property->Type == PropertyType::String) {
+				size_t length = 0;
+				const char *text = JS_ToCStringLen(context, &length, argv[0]);
+				if (text == nullptr) {
+					return JS_ThrowTypeError(
+						context, "'%s' cannot take that value", property->Name.Text().data()
+					);
+				}
+
+				const std::string value(text, length);
+				JS_FreeCString(context, text);
+
+				if (!bound.World->SetProperty(instance, *property, &value, sizeof(value))) {
+					return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
+				}
+				return JS_UNDEFINED;
+			}
+
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 			if (property->Size > sizeof(bytes) || !FromJs(context, argv[0], *property, bytes)) {
 				return JS_ThrowTypeError(
@@ -317,7 +441,7 @@ namespace engine::script {
 			// Refused loudly. A replica rejecting the write is the case that
 			// matters: a script author cannot tell "rejected" from "applied and
 			// overwritten by the next delta" without being told.
-			if (!bound.World->SetProperty(instance, property->Name, bytes, property->Size)) {
+			if (!bound.World->SetProperty(instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
 			}
 			return JS_UNDEFINED;
@@ -700,10 +824,28 @@ namespace engine::script {
 			JS_FreeValue(context, global);
 
 			if (JS_IsUndefined(service)) {
+				JS_FreeValue(context, service);
+
+				// **Then the tree, which the Luau half has always done and this
+				// one did not.** `Players`, `StarterGui` and the rest are
+				// ordinary instances `InstallServices` puts at the root, so
+				// looking them up by name is looking them up the way everything
+				// else in the world is looked up.
+				//
+				// Without this the two languages disagreed about what a service
+				// *is*: a Luau script reached `StarterGui` and a JavaScript one
+				// was told the engine does not provide it — which is the parity
+				// the roadmap's gate exists to refuse, and it was found by the
+				// first TypeScript panel that tried to parent a `ScreenGui`.
+				const ecs::Entity found = JsOf(context).World->FindFirstRoot(name);
+				if (found != ecs::NULL_ENTITY) {
+					JS_FreeCString(context, name);
+					return MakeJsInstance(context, found);
+				}
+
 				JSValue error =
 					JS_ThrowTypeError(context, "'%s' is not a service this engine provides", name);
 				JS_FreeCString(context, name);
-				JS_FreeValue(context, service);
 				return error;
 			}
 
@@ -1261,6 +1403,18 @@ namespace engine::script {
 			JS_SetPropertyStr(
 				context, table, "GetService", JS_NewCFunction(context, GetService, "GetService", 1)
 			);
+
+			// Which world this script is standing on — see the Luau side for
+			// why a world's name is what `JobId` answers with. A plain string
+			// property rather than a getter, because the name is fixed for the
+			// life of the world and a getter would imply otherwise.
+			{
+				const std::string_view name = JsOf(context).World->Name();
+				JS_SetPropertyStr(
+					context, table, "JobId", JS_NewStringLen(context, name.data(), name.size())
+				);
+			}
+
 			JS_SetPropertyStr(context, global, "game", table);
 		}
 

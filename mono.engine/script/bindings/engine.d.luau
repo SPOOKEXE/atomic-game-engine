@@ -84,6 +84,25 @@ declare extern type PropertyChangedSignal with
 	function Once(self, handler: () -> ()): RBXScriptConnection
 end
 
+-- The 2D tree's input, in two shapes because the arguments differ.
+--
+-- **`GuiSignal` takes no arguments and that is deliberate rather than
+-- unfinished.** Roblox hands `Activated`, `InputBegan` and `InputEnded` an
+-- `InputObject`; this engine has no such datatype, and inventing a different
+-- one now would have to change the day one arrives. A handler that cannot rely
+-- on an argument is better than one relying on an argument that will move.
+declare extern type GuiSignal with
+	function Connect(self, handler: () -> ()): RBXScriptConnection
+	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- `(x, y)` in canvas pixels, which is Roblox's signature for the three pointer
+-- signals exactly.
+declare extern type PointerSignal with
+	function Connect(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
+	function Once(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
+end
+
 -- --- queries ---------------------------------------------------------------
 
 declare extern type RaycastParams with
@@ -101,10 +120,31 @@ declare extern type EnumItem with
 	EnumType: string
 end
 
+declare extern type Enum_AspectType extends EnumItem with
+end
+
+declare extern type Enum_AutomaticSize extends EnumItem with
+end
+
+declare extern type Enum_BorderMode extends EnumItem with
+end
+
+declare extern type Enum_DominantAxis extends EnumItem with
+end
+
 declare extern type Enum_EasingDirection extends EnumItem with
 end
 
 declare extern type Enum_EasingStyle extends EnumItem with
+end
+
+declare extern type Enum_FillDirection extends EnumItem with
+end
+
+declare extern type Enum_Font extends EnumItem with
+end
+
+declare extern type Enum_HorizontalAlignment extends EnumItem with
 end
 
 declare extern type Enum_Material extends EnumItem with
@@ -113,10 +153,62 @@ end
 declare extern type Enum_NormalId extends EnumItem with
 end
 
+declare extern type Enum_ScaleType extends EnumItem with
+end
+
+declare extern type Enum_ScrollingDirection extends EnumItem with
+end
+
 declare extern type Enum_ServiceScope extends EnumItem with
 end
 
+declare extern type Enum_SizeConstraint extends EnumItem with
+end
+
+declare extern type Enum_SortOrder extends EnumItem with
+end
+
+declare extern type Enum_StartCorner extends EnumItem with
+end
+
+declare extern type Enum_SurfaceSizingMode extends EnumItem with
+end
+
+declare extern type Enum_TextTruncate extends EnumItem with
+end
+
+declare extern type Enum_TextXAlignment extends EnumItem with
+end
+
+declare extern type Enum_TextYAlignment extends EnumItem with
+end
+
+declare extern type Enum_VerticalAlignment extends EnumItem with
+end
+
+declare extern type Enum_ZIndexBehavior extends EnumItem with
+end
+
 declare Enum: {
+	AspectType: {
+		FitWithinMaxSize: Enum_AspectType,
+		ScaleWithParentSize: Enum_AspectType,
+	},
+	AutomaticSize: {
+		None: Enum_AutomaticSize,
+		X: Enum_AutomaticSize,
+		Y: Enum_AutomaticSize,
+		XY: Enum_AutomaticSize,
+	},
+	BorderMode: {
+		Outline: Enum_BorderMode,
+		Middle: Enum_BorderMode,
+		Inset: Enum_BorderMode,
+	},
+	DominantAxis: {
+		Width: Enum_DominantAxis,
+		Height: Enum_DominantAxis,
+	},
 	EasingDirection: {
 		In: Enum_EasingDirection,
 		Out: Enum_EasingDirection,
@@ -134,6 +226,21 @@ declare Enum: {
 		Back: Enum_EasingStyle,
 		Elastic: Enum_EasingStyle,
 		Bounce: Enum_EasingStyle,
+	},
+	FillDirection: {
+		Horizontal: Enum_FillDirection,
+		Vertical: Enum_FillDirection,
+	},
+	Font: {
+		Regular: Enum_Font,
+		Bold: Enum_Font,
+		Italic: Enum_Font,
+		Code: Enum_Font,
+	},
+	HorizontalAlignment: {
+		Left: Enum_HorizontalAlignment,
+		Center: Enum_HorizontalAlignment,
+		Right: Enum_HorizontalAlignment,
 	},
 	Material: {
 		Plastic: Enum_Material,
@@ -162,10 +269,65 @@ declare Enum: {
 		Bottom: Enum_NormalId,
 		Front: Enum_NormalId,
 	},
+	ScaleType: {
+		Stretch: Enum_ScaleType,
+		Slice: Enum_ScaleType,
+		Tile: Enum_ScaleType,
+		Fit: Enum_ScaleType,
+		Crop: Enum_ScaleType,
+	},
+	ScrollingDirection: {
+		X: Enum_ScrollingDirection,
+		Y: Enum_ScrollingDirection,
+		XY: Enum_ScrollingDirection,
+	},
 	ServiceScope: {
 		Shared: Enum_ServiceScope,
 		Server: Enum_ServiceScope,
 		Client: Enum_ServiceScope,
+	},
+	SizeConstraint: {
+		RelativeXY: Enum_SizeConstraint,
+		RelativeXX: Enum_SizeConstraint,
+		RelativeYY: Enum_SizeConstraint,
+	},
+	SortOrder: {
+		Name: Enum_SortOrder,
+		Custom: Enum_SortOrder,
+		LayoutOrder: Enum_SortOrder,
+	},
+	StartCorner: {
+		TopLeft: Enum_StartCorner,
+		TopRight: Enum_StartCorner,
+		BottomLeft: Enum_StartCorner,
+		BottomRight: Enum_StartCorner,
+	},
+	SurfaceSizingMode: {
+		FixedSize: Enum_SurfaceSizingMode,
+		PixelsPerStud: Enum_SurfaceSizingMode,
+	},
+	TextTruncate: {
+		None: Enum_TextTruncate,
+		AtEnd: Enum_TextTruncate,
+	},
+	TextXAlignment: {
+		Left: Enum_TextXAlignment,
+		Center: Enum_TextXAlignment,
+		Right: Enum_TextXAlignment,
+	},
+	TextYAlignment: {
+		Top: Enum_TextYAlignment,
+		Center: Enum_TextYAlignment,
+		Bottom: Enum_TextYAlignment,
+	},
+	VerticalAlignment: {
+		Top: Enum_VerticalAlignment,
+		Center: Enum_VerticalAlignment,
+		Bottom: Enum_VerticalAlignment,
+	},
+	ZIndexBehavior: {
+		Global: Enum_ZIndexBehavior,
+		Sibling: Enum_ZIndexBehavior,
 	},
 }
 
@@ -344,6 +506,12 @@ declare extern type Instance with
 	function IsDescendantOf(self, ancestor: Instance): boolean
 	function ClearAllChildren(self): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
+	Activated: GuiSignal
+	InputBegan: GuiSignal
+	InputEnded: GuiSignal
+	MouseEnter: PointerSignal
+	MouseLeave: PointerSignal
+	MouseMoved: PointerSignal
 end
 
 declare extern type PVInstance extends Instance with
@@ -389,6 +557,311 @@ declare extern type Script extends LuaSourceContainer with
 end
 
 declare extern type LocalScript extends LuaSourceContainer with
+end
+
+declare extern type ModuleScript extends LuaSourceContainer with
+end
+
+declare extern type GuiBase extends Instance with
+end
+
+declare extern type GuiService extends Instance with
+	AutoSelectGuiEnabled: boolean
+	MenuIsOpen: boolean
+	SelectedObject: Instance
+end
+
+declare extern type GuiBase3d extends GuiBase with
+end
+
+declare extern type PVAdornment extends GuiBase3d with
+	Adornee: Instance
+	AlwaysOnTop: boolean
+	Color3: Color3
+	Transparency: number
+	Visible: boolean
+	ZIndex: number
+end
+
+declare extern type SelectionBox extends PVAdornment with
+	LineThickness: number
+	SurfaceColor3: Color3
+	SurfaceTransparency: number
+end
+
+declare extern type SelectionSphere extends PVAdornment with
+end
+
+declare extern type HandleAdornment extends PVAdornment with
+	CFrame: CFrame
+	Size: Vector3
+end
+
+declare extern type BoxHandleAdornment extends HandleAdornment with
+end
+
+declare extern type SphereHandleAdornment extends HandleAdornment with
+end
+
+declare extern type CylinderHandleAdornment extends HandleAdornment with
+end
+
+declare extern type LineHandleAdornment extends HandleAdornment with
+end
+
+declare extern type Handles extends PVAdornment with
+end
+
+declare extern type ArcHandles extends PVAdornment with
+end
+
+declare extern type GuiBase2d extends GuiBase with
+	AbsolutePosition: Vector2
+	AbsoluteRotation: number
+	AbsoluteSize: Vector2
+end
+
+declare extern type GuiObject extends GuiBase2d with
+	Active: boolean
+	AnchorPoint: Vector2
+	AutomaticSize: Enum_AutomaticSize
+	BackgroundColor3: Color3
+	BackgroundTransparency: number
+	BorderColor3: Color3
+	BorderMode: Enum_BorderMode
+	BorderSizePixel: number
+	ClipsDescendants: boolean
+	LayoutOrder: number
+	Position: UDim2
+	Rotation: number
+	Selectable: boolean
+	Size: UDim2
+	SizeConstraint: Enum_SizeConstraint
+	Visible: boolean
+	ZIndex: number
+end
+
+declare extern type Frame extends GuiObject with
+end
+
+declare extern type CanvasGroup extends Frame with
+	GroupColor3: Color3
+	GroupTransparency: number
+end
+
+declare extern type ScrollingFrame extends Frame with
+	AutomaticCanvasSize: Enum_AutomaticSize
+	CanvasPosition: Vector2
+	CanvasSize: UDim2
+	ScrollBarImageColor3: Color3
+	ScrollBarImageTransparency: number
+	ScrollBarThickness: number
+	ScrollingDirection: Enum_ScrollingDirection
+	ScrollingEnabled: boolean
+end
+
+declare extern type GuiButton extends GuiObject with
+	AutoButtonColor: boolean
+	Modal: boolean
+	Selected: boolean
+end
+
+declare extern type TextButton extends GuiButton with
+	Font: Enum_Font
+	LineHeight: number
+	Text: string
+	TextColor3: Color3
+	TextScaled: boolean
+	TextSize: number
+	TextStrokeColor3: Color3
+	TextStrokeTransparency: number
+	TextTransparency: number
+	TextTruncate: Enum_TextTruncate
+	TextWrapped: boolean
+	TextXAlignment: Enum_TextXAlignment
+	TextYAlignment: Enum_TextYAlignment
+end
+
+declare extern type ImageButton extends GuiButton with
+	Image: string
+	ImageColor3: Color3
+	ImageRectOffset: Vector2
+	ImageRectSize: Vector2
+	ImageTransparency: number
+	ScaleType: Enum_ScaleType
+	SliceCenter: Rect
+	SliceScale: number
+	TileSize: UDim2
+end
+
+declare extern type GuiLabel extends GuiObject with
+end
+
+declare extern type TextLabel extends GuiLabel with
+	Font: Enum_Font
+	LineHeight: number
+	Text: string
+	TextColor3: Color3
+	TextScaled: boolean
+	TextSize: number
+	TextStrokeColor3: Color3
+	TextStrokeTransparency: number
+	TextTransparency: number
+	TextTruncate: Enum_TextTruncate
+	TextWrapped: boolean
+	TextXAlignment: Enum_TextXAlignment
+	TextYAlignment: Enum_TextYAlignment
+end
+
+declare extern type ImageLabel extends GuiLabel with
+	Image: string
+	ImageColor3: Color3
+	ImageRectOffset: Vector2
+	ImageRectSize: Vector2
+	ImageTransparency: number
+	ScaleType: Enum_ScaleType
+	SliceCenter: Rect
+	SliceScale: number
+	TileSize: UDim2
+end
+
+declare extern type TextBox extends GuiObject with
+	ClearTextOnFocus: boolean
+	CursorPosition: number
+	Font: Enum_Font
+	LineHeight: number
+	MultiLine: boolean
+	PlaceholderColor3: Color3
+	PlaceholderText: string
+	SelectionStart: number
+	Text: string
+	TextColor3: Color3
+	TextEditable: boolean
+	TextScaled: boolean
+	TextSize: number
+	TextStrokeColor3: Color3
+	TextStrokeTransparency: number
+	TextTransparency: number
+	TextTruncate: Enum_TextTruncate
+	TextWrapped: boolean
+	TextXAlignment: Enum_TextXAlignment
+	TextYAlignment: Enum_TextYAlignment
+end
+
+declare extern type ViewportFrame extends GuiObject with
+	Ambient: Color3
+	CurrentCamera: Instance
+	ImageColor3: Color3
+	ImageTransparency: number
+	LightColor: Color3
+	LightDirection: Vector3
+end
+
+declare extern type LayerCollector extends GuiBase2d with
+	DisplayOrder: number
+	Enabled: boolean
+	ResetOnSpawn: boolean
+	ZIndexBehavior: Enum_ZIndexBehavior
+end
+
+declare extern type ScreenGui extends LayerCollector with
+	IgnoreGuiInset: boolean
+end
+
+declare extern type SurfaceGui extends LayerCollector with
+	Adornee: Instance
+	AlwaysOnTop: boolean
+	Brightness: number
+	CanvasSize: Vector2
+	Face: Enum_NormalId
+	LightInfluence: number
+	PixelsPerStud: number
+	SizingMode: Enum_SurfaceSizingMode
+end
+
+declare extern type BillboardGui extends LayerCollector with
+	Adornee: Instance
+	AlwaysOnTop: boolean
+	ExtentsOffset: Vector3
+	LightInfluence: number
+	MaxDistance: number
+	Size: UDim2
+	StudsOffset: Vector3
+	StudsOffsetWorldSpace: Vector3
+end
+
+declare extern type PluginGui extends LayerCollector with
+end
+
+declare extern type DockWidgetPluginGui extends PluginGui with
+end
+
+declare extern type UIBase extends Instance with
+end
+
+declare extern type UIComponent extends UIBase with
+end
+
+declare extern type UILayout extends UIComponent with
+end
+
+declare extern type UIListLayout extends UILayout with
+	FillDirection: Enum_FillDirection
+	HorizontalAlignment: Enum_HorizontalAlignment
+	Padding: UDim
+	SortOrder: Enum_SortOrder
+	VerticalAlignment: Enum_VerticalAlignment
+end
+
+declare extern type UIGridLayout extends UILayout with
+	CellPadding: UDim2
+	CellSize: UDim2
+	FillDirection: Enum_FillDirection
+	FillDirectionMaxCells: number
+	HorizontalAlignment: Enum_HorizontalAlignment
+	SortOrder: Enum_SortOrder
+	StartCorner: Enum_StartCorner
+	VerticalAlignment: Enum_VerticalAlignment
+end
+
+declare extern type UIConstraint extends UIComponent with
+end
+
+declare extern type UIAspectRatioConstraint extends UIConstraint with
+	AspectRatio: number
+	AspectType: Enum_AspectType
+	DominantAxis: Enum_DominantAxis
+end
+
+declare extern type UISizeConstraint extends UIConstraint with
+	MaxSize: Vector2
+	MinSize: Vector2
+end
+
+declare extern type UITextSizeConstraint extends UIConstraint with
+	MaxTextSize: number
+	MinTextSize: number
+end
+
+declare extern type UIPadding extends UIComponent with
+	PaddingBottom: UDim
+	PaddingLeft: UDim
+	PaddingRight: UDim
+	PaddingTop: UDim
+end
+
+declare extern type UICorner extends UIComponent with
+	CornerRadius: UDim
+end
+
+declare extern type UIStroke extends UIComponent with
+	Color: Color3
+	Thickness: number
+	Transparency: number
+end
+
+declare extern type UIScale extends UIComponent with
+	Scale: number
 end
 
 declare extern type Service extends Instance with
@@ -437,6 +910,13 @@ declare extern type StarterPlayer extends Service with
 end
 
 declare extern type StarterPlayerScripts extends Service with
+end
+
+declare extern type Players extends Service with
+	LocalPlayer: Instance
+end
+
+declare extern type Player extends Instance with
 end
 
 -- --- the bus services ------------------------------------------------------
@@ -505,6 +985,15 @@ declare task: {
 
 type Services = {
 	Workspace: Workspace,
+	Lighting: Lighting,
+	ReplicatedFirst: ReplicatedFirst,
+	ReplicatedStorage: ReplicatedStorage,
+	ServerScriptService: ServerScriptService,
+	ServerStorage: ServerStorage,
+	StarterGui: StarterGui,
+	StarterPlayer: StarterPlayer,
+	StarterPlayerScripts: StarterPlayerScripts,
+	Players: Players,
 	RunService: RunService,
 	MessagingService: MessagingService,
 	MemoryStoreService: MemoryStoreService,
@@ -521,10 +1010,58 @@ type CreatableInstances = {
 	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,
+	ModuleScript: ModuleScript,
+	GuiBase: GuiBase,
+	GuiService: GuiService,
+	GuiBase3d: GuiBase3d,
+	PVAdornment: PVAdornment,
+	SelectionBox: SelectionBox,
+	SelectionSphere: SelectionSphere,
+	HandleAdornment: HandleAdornment,
+	BoxHandleAdornment: BoxHandleAdornment,
+	SphereHandleAdornment: SphereHandleAdornment,
+	CylinderHandleAdornment: CylinderHandleAdornment,
+	LineHandleAdornment: LineHandleAdornment,
+	Handles: Handles,
+	ArcHandles: ArcHandles,
+	GuiBase2d: GuiBase2d,
+	GuiObject: GuiObject,
+	Frame: Frame,
+	CanvasGroup: CanvasGroup,
+	ScrollingFrame: ScrollingFrame,
+	GuiButton: GuiButton,
+	TextButton: TextButton,
+	ImageButton: ImageButton,
+	GuiLabel: GuiLabel,
+	TextLabel: TextLabel,
+	ImageLabel: ImageLabel,
+	TextBox: TextBox,
+	ViewportFrame: ViewportFrame,
+	LayerCollector: LayerCollector,
+	ScreenGui: ScreenGui,
+	SurfaceGui: SurfaceGui,
+	BillboardGui: BillboardGui,
+	PluginGui: PluginGui,
+	DockWidgetPluginGui: DockWidgetPluginGui,
+	UIBase: UIBase,
+	UIComponent: UIComponent,
+	UILayout: UILayout,
+	UIListLayout: UIListLayout,
+	UIGridLayout: UIGridLayout,
+	UIConstraint: UIConstraint,
+	UIAspectRatioConstraint: UIAspectRatioConstraint,
+	UISizeConstraint: UISizeConstraint,
+	UITextSizeConstraint: UITextSizeConstraint,
+	UIPadding: UIPadding,
+	UICorner: UICorner,
+	UIStroke: UIStroke,
+	UIScale: UIScale,
+	Player: Player,
 }
 
 type DataModel = {
 	Workspace: Workspace,
+	JobId: string,
 	GetService: <T>(self: DataModel, service: keyof<Services> & T) -> index<Services, T>,
 }
 

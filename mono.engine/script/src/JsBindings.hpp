@@ -36,11 +36,15 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Rect.hpp>
 #include <engine/core/types/TweenInfo.hpp>
+#include <engine/core/types/UDim.hpp>
+#include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
 
 #include <quickjs.h>
+#include <span>
 #include <string>
 
 namespace engine::script {
@@ -97,6 +101,15 @@ namespace engine::script {
 	// @return The first error a handler raised, or empty.
 	std::string PumpJsTree(JSContext *context);
 
+	// The JavaScript half of `PumpGuiEvents`, with the same argument rule:
+	// `MouseEnter`, `MouseLeave` and `MouseMoved` get `(x, y)`, and the three
+	// input signals get nothing until there is an `InputObject` to hand them.
+	//
+	// @param context The VM to deliver into.
+	// @param events  What the host collected since the last beat.
+	// @return The first error a handler raised, or empty.
+	std::string PumpJsGuiEvents(JSContext *context, std::span<const gui::GuiEvent> events);
+
 	// Resolves every task due at the world's current tick.
 	std::string PumpJsTasks(JSContext *context);
 
@@ -119,6 +132,17 @@ namespace engine::script {
 	core::Vector3 *AsVector3(JSContext *context, JSValueConst value);
 	core::Color3 *AsColor3(JSContext *context, JSValueConst value);
 	core::CFrame *AsCFrame(JSContext *context, JSValueConst value);
+
+	// The four `gui` is authored in, added at v0.8 with the property types.
+	JSValue MakeVector2(JSContext *context, const core::Vector2 &value);
+	JSValue MakeUDim(JSContext *context, const core::UDim &value);
+	JSValue MakeUDim2(JSContext *context, const core::UDim2 &value);
+	JSValue MakeRect(JSContext *context, const core::Rect &value);
+
+	core::Vector2 *AsVector2(JSContext *context, JSValueConst value);
+	core::UDim *AsUDim(JSContext *context, JSValueConst value);
+	core::UDim2 *AsUDim2(JSContext *context, JSValueConst value);
+	core::Rect *AsRect(JSContext *context, JSValueConst value);
 
 	// One instance object for an entity, prototype and all.
 	JSValue MakeJsInstance(JSContext *context, ecs::Entity instance);
