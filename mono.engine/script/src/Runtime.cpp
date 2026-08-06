@@ -26,6 +26,16 @@ namespace engine::script {
 		return Language::Luau;
 	}
 
+	void Runtime::DeliverGuiEvents(std::span<const gui::GuiEvent> events) {
+		// **Appended rather than assigned**, because a host may poll more than
+		// one canvas between beats. The studio compiles and routes one
+		// `gui::Router` per viewport panel — a panel *is* a canvas — so two
+		// panels open is two calls here before a single heartbeat, and an
+		// assignment would deliver whichever ran last and silently drop the
+		// other.
+		PendingGuiEvents.insert(PendingGuiEvents.end(), events.begin(), events.end());
+	}
+
 	bool Runtime::RunFile(const std::string &path) {
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {

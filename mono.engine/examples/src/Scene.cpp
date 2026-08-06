@@ -5,6 +5,7 @@
 #include <engine/ecs/Enums.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
@@ -88,10 +89,24 @@ namespace engine::examples {
 	}
 
 	bool LoadScene(Store &store, Scheduler &scheduler, const std::string &path, std::string &error) {
-		// The class tree a script names, and this module's own components for the
-		// C++ path. A script builds out of `Part`; nothing it touches is
+		// The class trees a script names, and this module's own components for
+		// the C++ path. A script builds out of `Part`; nothing it touches is
 		// registered here.
 		scene::PartClass();
+
+		// **Both trees, because there are two and a scene may use either.**
+		// `Interface.luau` is built entirely out of `ScreenGui` and `Frame` and
+		// touches no `Part` at all — so registering only the 3D tree made a
+		// shipped example unloadable through the one entry point every program
+		// shares, with "'ScreenGui' is not a registered class" as the whole
+		// diagnosis. It loaded in the editor because `Editor::NewGame`
+		// registers the gui classes on its own path, which is exactly the shape
+		// of gap that survives: it works everywhere somebody looked.
+		//
+		// Idempotent, and the cost of a scene that uses neither is one
+		// already-registered check.
+		gui::RegisterGuiClasses();
+
 		RegisterExampleComponents();
 
 		// The extension picks the VM. `Rings.luau` and `Rings.js` build the

@@ -11,6 +11,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -87,6 +88,34 @@ namespace {
 		store.Each<const Visual>([&](Entity entity, const Visual &) {
 			if (store.InstanceNameOf(entity) == Name(name)) {
 				found++;
+			}
+		});
+		return found;
+	}
+
+	// The same count over the 2D tree.
+	//
+	// **A separate helper rather than a wider query, because the two trees have
+	// no component in common and that is the design.** A `Part` is named by its
+	// `scene::Visual` and a `TextButton` by its `gui::Element`; a counter that
+	// took both would have to name a class rather than a component, which is
+	// the coupling `gui/AGENTS.md` spends a section refusing.
+	size_t CountElements(Store &store, const std::string &name) {
+		size_t found = 0;
+		store.Each<const engine::gui::Element>([&](Entity entity, const engine::gui::Element &) {
+			if (store.InstanceNameOf(entity) == Name(name)) {
+				found++;
+			}
+		});
+		return found;
+	}
+
+	// The first element of a given name, or null.
+	Entity FirstElement(Store &store, const char *name) {
+		Entity found = engine::ecs::NULL_ENTITY;
+		store.Each<const engine::gui::Element>([&](Entity entity, const engine::gui::Element &) {
+			if (found == engine::ecs::NULL_ENTITY && store.InstanceNameOf(entity) == Name(name)) {
+				found = entity;
 			}
 		});
 		return found;
@@ -332,4 +361,53 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 		CHECK(reflected->Frame.Position.Y == Approx(viewer->Frame.Position.Y));
 		CHECK(reflected->Frame.Position.Z == Approx(viewer->Frame.Position.Z));
 	}
+}
+
+TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
+	// **The scene that proves the 2D branch, and now the join under it.**
+	// `Interface.luau` builds a `ScreenGui` entirely from a script — every
+	// element exists because one specific thing looks correct without it — and
+	// since v0.8's last step it also *connects*: `.Activated` on two named
+	// buttons and on six swatches made in a loop.
+	//
+	// **What this case is for is the loop.** A join that only worked for
+	// instances a script held a local for would pass every hand-written case and
+	// fail on generated elements, which is most of a real interface. The
+	// swatches are found by name through the tree, exactly as a script does.
+	//
+	// The dispatch itself — that a delivered event becomes a call, at the
+	// barrier, in the router's order — is `engine.script.scripting`'s, where a
+	// runtime can be driven directly. What cannot be checked there is that this
+	// file is valid against the real class tree, which is this case's whole job:
+	// a `.Activated` on a class that does not declare one, or a handler
+	// referring to a local declared later, fails here and nowhere else.
+	const StagedAssets assets;
+
+	Store store("interface");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Interface.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The tree the script describes, spot-checked at the two ends that matter:
+	// the named buttons the handlers are attached to by local, and the
+	// generated ones they are attached to by lookup.
+	CHECK(CountElements(store, "Confirm") == 1);
+	CHECK(CountElements(store, "Cancel") == 1);
+	for (int index = 1; index <= 6; index++) {
+		CHECK(CountElements(store, "Swatch" + std::to_string(index)) == 1);
+	}
+
+	// `refresh()` runs at the top level, so the hint carries the click count
+	// rather than the authored placeholder. That is the cheapest proof the
+	// handlers' shared state was reachable at all — a `refresh` that raised
+	// would have failed the load above, and one that never ran would leave the
+	// original text.
+	const Entity hint = FirstElement(store, "Hint");
+	REQUIRE(hint != engine::ecs::NULL_ENTITY);
+	const engine::gui::Label *label = store.Get<engine::gui::Label>(hint);
+	REQUIRE(label != nullptr);
+	CHECK(std::string(label->Text.Text()).find("0 clicks") != std::string::npos);
 }

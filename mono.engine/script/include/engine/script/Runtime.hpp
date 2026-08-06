@@ -36,6 +36,7 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/script/Debugger.hpp>
 
 #include <cstddef>
@@ -236,6 +237,42 @@ namespace engine::script {
 		//         filled in. Remaining connections still run.
 		virtual bool Heartbeat(float delta) = 0;
 
+		// Hands this VM what a pointer did to the 2D tree.
+		//
+		// **The one way gui input reaches a script, and the reason it is here
+		// rather than in whoever owns the pointer.** `gui` is L7 and produces
+		// events; this module is L9 and owns every path into a VM. A host that
+		// turned a `gui::GuiEvent` into a call itself would be the second such
+		// path, and the two would disagree about ordering the first time one was
+		// fixed — which is the same argument `Signals.hpp` makes about two
+		// hand-written copies of the connection rules.
+		//
+		// **Queued, not dispatched.** The events are held until the next
+		// `Heartbeat`, where they are delivered alongside the tree signals and
+		// the property changes. Firing them on arrival would call a script from
+		// inside the caller's walk of its own compiled draw list — and a handler
+		// that destroys the element it was called about would then invalidate
+		// the list the caller is still reading. The barrier is where every other
+		// resume happens and this is not worth making an exception of.
+		//
+		// **A copy, because the router's span is not the caller's to keep.**
+		// `Router::Update` returns a view into a vector it reuses every frame,
+		// so anything held past the call has to own its bytes.
+		//
+		// Safe to call with an empty span, which is most frames.
+		//
+		// @param events What the router produced this frame.
+		void DeliverGuiEvents(std::span<const gui::GuiEvent> events);
+
+		// How many gui events are waiting for the next beat.
+		//
+		// For a test and for a panel. A number that only grows is a host
+		// delivering events to a runtime whose `Heartbeat` nothing calls, which
+		// is a wiring mistake that otherwise reads as "the buttons do nothing".
+		size_t PendingGuiEventCount() const {
+			return PendingGuiEvents.size();
+		}
+
 		// Which VM this is.
 		//
 		// @return The language.
@@ -335,6 +372,19 @@ namespace engine::script {
 		// What each script cost, rebuilt by every `RunWorldScripts`. Read
 		// through `Costs`.
 		std::vector<ScriptCost> ScriptCosts;
+
+		// Gui events waiting for the next beat, in the order the router
+		// produced them.
+		//
+		// **In the base rather than in either VM's context, because it holds
+		// nothing either VM owns** — a kind, an entity and two points. Both
+		// runtimes drain it from their own `Heartbeat`, which is the same split
+		// `SignalTable` uses: the ordering lives once, the calling lives twice.
+		//
+		// Order is the router's and is never sorted. `MouseLeave` before
+		// `MouseEnter` is a rule `gui::Router` already decided, and re-deriving
+		// it here would be a second answer to it.
+		std::vector<gui::GuiEvent> PendingGuiEvents;
 
 		// Where execution should be reported from. Read through `Debug`.
 		Debugger Breakpoints;

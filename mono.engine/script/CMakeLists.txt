@@ -28,6 +28,19 @@ mono_add_library(script
 		Engine::ecs
 		Engine::scene
 
+		# L7, `shared`. **The same edge as `scene`, one dimension down.** A
+		# script's vocabulary is the class tree, and there are two of them: a
+		# `Part` comes from `scene` and a `TextButton` from `gui`. Depending on
+		# one and not the other would make `.Activated` reachable only through
+		# something above this module — and that something would be a second
+		# path into a VM, which is exactly what `gui/Input.hpp` refuses to
+		# invent when it says the join belongs to whoever owns the scripting
+		# layer.
+		#
+		# What crosses is `gui::GuiEvent`: a kind, an entity and two points.
+		# Nothing here draws, resolves a texture or knows what a canvas is.
+		Engine::gui
+
 		# L4, `shared`. **The Universe's services sit on these buses.** A script
 		# reaches another world through `MessagingService` and through nothing
 		# else — `world::Postbox` is the crossing, and rule 3 is why there is no

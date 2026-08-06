@@ -465,11 +465,37 @@ refuses everywhere else. In order:
   drew nothing would look like the label was broken rather than like the image
   was missing. What is needed is a content name resolved through `assets` and
   `delivery` to something a backend can sample
-- [_] **Connecting `gui::GuiEvent` to `script::Signals`.** The routing produces
-  events and nothing turns them into a `.Activated`. `gui` is L7 and
-  `script::Signals` is L9, so the join belongs above both — and it is
-  deliberately not in the editor, which is not the place to invent a second
-  path into a VM
+- [x] **Connecting `gui::GuiEvent` to `script::Signals`.** The routing produced
+  events and nothing turned them into a `.Activated`. **The join is in `script`
+  itself, which is "above both" read correctly**: `gui` is L7 and `script` is
+  L9, so the edge is legal by tier and it is the *same* edge `script` already
+  has to `scene` — a script's vocabulary is the class tree and there are two of
+  them, so depending on one and not the other would have put `.Activated` behind
+  something higher up, and that something would have been the second path into a
+  VM this line refuses. Six `SignalKind`s, both VMs, and one queue on `Runtime`
+  holding nothing either VM owns.
+  **Queued rather than fired on arrival**, for `Changes.hpp`'s reason one door
+  along: the events are produced while a host walks a compiled draw list, and a
+  handler that destroys the element it was called about would pull that list out
+  from under the walk. They are delivered at the barrier, last within "what the
+  previous barrier recorded" and before the tasks, so a click that defers
+  belongs to the tick it happened on. **A dead element is skipped rather than
+  dispatched to** — a close button destroying its own panel is the ordinary case,
+  not an edge one, and the same delivery carries events about what went with it.
+  **`Activated`, `InputBegan` and `InputEnded` are called with no arguments**,
+  and that is the version of this decision the file's own rule produces: Roblox
+  passes an `InputObject`, there is no such datatype here, and a different shape
+  invented now would have to change the day one arrives — `VideoFrame`'s trade
+  rather than `AutomaticSize`'s. `MouseEnter`/`MouseLeave`/`MouseMoved` get
+  `(x, y)` in canvas pixels, which is Roblox's signature exactly.
+  **The studio forwards and does not dispatch**, which is what keeps the editor
+  out of it: `Overlay.cpp` hands the router's events to the running world's
+  runtime and that is all it knows. Found while wiring it: `examples::LoadScene`
+  registered the 3D class tree and not the 2D one, so `Interface.luau` — a
+  shipped example built entirely from `ScreenGui` and `Frame` — could not load
+  through the entry point every program shares. It worked in the editor, because
+  `Editor::NewGame` registers them on its own path, which is the shape of gap
+  that survives: it works everywhere somebody looked
 - [_] **`GuiBase3d` and the adornments** — `SelectionBox`, `Handles`,
   `ArcHandles`, `BoxHandleAdornment` and the rest. **This is what gives the
   editor gizmos and viewport selection**, which v0.7 deferred, and it is worth

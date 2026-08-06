@@ -30,6 +30,7 @@
 #include <engine/script/Runtime.hpp>
 
 #include <lua.h>
+#include <span>
 #include <string>
 #include <unordered_map>
 
@@ -395,6 +396,28 @@ namespace engine::script {
 	// @param state The VM to deliver into.
 	// @return The first error a handler raised, or empty.
 	std::string PumpTree(lua_State *state);
+
+	// Delivers what a pointer did to the 2D tree since the last beat.
+	//
+	// **Beside `PumpTree` and for the same reason one door along**: the events
+	// were produced by `gui::Router` while a host walked a compiled draw list,
+	// and a handler that destroys the element it was called about would pull
+	// that list out from under the walk. `Runtime::DeliverGuiEvents` writes them
+	// down and this hands them over at the barrier.
+	//
+	// **The arguments each signal gets, and the one that is deliberately
+	// empty.** `MouseEnter`, `MouseLeave` and `MouseMoved` are called with
+	// `(x, y)` in canvas pixels, which is Roblox's signature exactly.
+	// `Activated`, `InputBegan` and `InputEnded` are called with **nothing**:
+	// Roblox passes an `InputObject`, this engine has no such datatype yet, and
+	// a different shape invented here would have to change the day one arrives.
+	// An argument nobody can rely on is worse than an argument that is not
+	// there — the same trade `VideoFrame` and `AutomaticSize` were decided on.
+	//
+	// @param state  The VM to deliver into.
+	// @param events What the host collected since the last beat.
+	// @return The first error a handler raised, or empty.
+	std::string PumpGuiEvents(lua_State *state, std::span<const gui::GuiEvent> events);
 
 	// Resumes every task due at the world's current tick.
 	//

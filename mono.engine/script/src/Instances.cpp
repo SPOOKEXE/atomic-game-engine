@@ -540,6 +540,42 @@ namespace engine::script {
 				return 1;
 			}
 
+			// The 2D tree's input, in the same place and for the same reason:
+			// none of these projects onto a component either.
+			//
+			// **Offered on every instance rather than only on a `GuiObject`.**
+			// Roblox does gate them by class, and matching that would mean a
+			// class test on a lookup that already runs for every field access on
+			// every instance — to produce, in the failing case, a connection
+			// that never fires instead of an error. `gui::Router` only ever
+			// names elements it found in a compiled draw list, so a connection
+			// on a `Part` is inert by construction, which is the same answer at
+			// none of the cost.
+			if (name == "Activated") {
+				PushSignal(state, SignalKind::GuiActivated, instance);
+				return 1;
+			}
+			if (name == "InputBegan") {
+				PushSignal(state, SignalKind::GuiInputBegan, instance);
+				return 1;
+			}
+			if (name == "InputEnded") {
+				PushSignal(state, SignalKind::GuiInputEnded, instance);
+				return 1;
+			}
+			if (name == "MouseEnter") {
+				PushSignal(state, SignalKind::GuiMouseEnter, instance);
+				return 1;
+			}
+			if (name == "MouseLeave") {
+				PushSignal(state, SignalKind::GuiMouseLeave, instance);
+				return 1;
+			}
+			if (name == "MouseMoved") {
+				PushSignal(state, SignalKind::GuiMouseMoved, instance);
+				return 1;
+			}
+
 			const PropertyDescriptor *property = Find(store, instance, field);
 			if (property != nullptr) {
 				// Sized from the descriptor rather than from a guess, so this
@@ -889,6 +925,64 @@ namespace engine::script {
 
 			ancestry(change.Instance);
 			context.World->EachDescendant(change.Instance, ancestry);
+		}
+
+		return firstError;
+	}
+
+	std::string PumpGuiEvents(lua_State *state, std::span<const gui::GuiEvent> events) {
+		if (events.empty()) {
+			return {};
+		}
+
+		LuauContext &context = ContextOf(state);
+
+		std::string firstError;
+		const auto note = [&](std::string message) {
+			if (firstError.empty()) {
+				firstError = std::move(message);
+			}
+		};
+
+		for (const gui::GuiEvent &event : events) {
+			// **An element may have been destroyed since the router named it.**
+			// The events were produced from the previous frame's compiled list
+			// and a handler earlier in *this* loop may have deleted what a later
+			// one is about — which is the ordinary case for a close button, not
+			// an edge one. Firing at a dead entity would push a userdata for a
+			// row that is gone.
+			if (!context.World->Alive(event.Instance)) {
+				continue;
+			}
+
+			switch (event.Kind) {
+			case gui::EventKind::MouseEnter:
+			case gui::EventKind::MouseLeave:
+			case gui::EventKind::MouseMoved: {
+				// `(x, y)` in canvas pixels, which is Roblox's signature.
+				const SignalKind kind = event.Kind == gui::EventKind::MouseEnter
+											? SignalKind::GuiMouseEnter
+											: event.Kind == gui::EventKind::MouseLeave
+												  ? SignalKind::GuiMouseLeave
+												  : SignalKind::GuiMouseMoved;
+				lua_pushnumber(state, event.Position.X);
+				lua_pushnumber(state, event.Position.Y);
+				note(FireSignal(state, kind, event.Instance, 2));
+				break;
+			}
+
+			case gui::EventKind::InputBegan:
+				note(FireSignal(state, SignalKind::GuiInputBegan, event.Instance, 0));
+				break;
+
+			case gui::EventKind::InputEnded:
+				note(FireSignal(state, SignalKind::GuiInputEnded, event.Instance, 0));
+				break;
+
+			case gui::EventKind::Activated:
+				note(FireSignal(state, SignalKind::GuiActivated, event.Instance, 0));
+				break;
+			}
 		}
 
 		return firstError;

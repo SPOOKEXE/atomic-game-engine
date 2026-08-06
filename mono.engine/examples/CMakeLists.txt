@@ -23,6 +23,13 @@ mono_add_library(examples
 		Engine::core
 		Engine::ecs
 		Engine::scene
+
+		# L7, `shared`. **The other class tree.** `Interface.luau` is built
+		# entirely out of `ScreenGui` and `Frame`, so `LoadScene` has to be able
+		# to register the 2D tree as well as the 3D one — a loader that knew
+		# only `Part` refused a shipped example with "not a registered class".
+		Engine::gui
+
 		Engine::script
 )
 

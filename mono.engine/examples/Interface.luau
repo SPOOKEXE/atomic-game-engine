@@ -252,8 +252,66 @@ local function button(name: string, order: number, label: string, fill: Color3):
 	return made
 end
 
-button("Cancel", 2, "Cancel", RAISED)
-button("Confirm", 3, "Confirm", ACCENT)
+local cancel = button("Cancel", 2, "Cancel", RAISED)
+local confirm = button("Confirm", 3, "Confirm", ACCENT)
+
+-- --- what the buttons do, which is the part that was missing ------------------
+--
+-- **This is the whole of the gui→script join, seen from a script.** Everything
+-- above describes an interface; until `gui::Router`'s events reached a VM, none
+-- of it could answer. `.Activated` is `SignalKind::GuiActivated` and arrives at
+-- the barrier like every other signal, so a handler here sees the same world a
+-- `Heartbeat` handler does.
+--
+-- The swatches are the proof that a *generated* element connects: they are made
+-- in a loop above and nothing distinguishes them from the two named buttons.
+-- If the join only worked for instances a script held a local for, this is the
+-- half that would silently do nothing.
+local picked = SWATCHES[1]
+local clicks = 0
+
+local function refresh()
+	hint.Text = string.format("%d click%s · picked", clicks, clicks == 1 and "" or "s")
+	card.BackgroundColor3 = picked
+end
+
+for index, colour in SWATCHES do
+	local swatch = palette:FindFirstChild("Swatch" .. tostring(index))
+	if swatch then
+		swatch.Activated:Connect(function()
+			picked = colour
+			clicks += 1
+			refresh()
+		end)
+	end
+end
+
+confirm.Activated:Connect(function()
+	clicks += 1
+	-- Something a person can see without reading a number: the card takes the
+	-- accent, which is the one colour nothing else in this scene sets it to.
+	picked = ACCENT
+	refresh()
+end)
+
+cancel.Activated:Connect(function()
+	clicks = 0
+	picked = SWATCHES[1]
+	refresh()
+end)
+
+-- `MouseEnter` and `MouseLeave` carry `(x, y)` in canvas pixels, which is the
+-- Roblox signature. Written onto the hint so the two arguments are visibly
+-- arriving rather than merely declared.
+confirm.MouseEnter:Connect(function(x: number, y: number)
+	hint.Text = string.format("confirm @ %d, %d", x, y)
+end)
+
+confirm.MouseLeave:Connect(function()
+	refresh()
+end)
+
+refresh()
 
 -- --- the one thing that moves ------------------------------------------------
 

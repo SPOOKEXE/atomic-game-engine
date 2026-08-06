@@ -936,11 +936,41 @@ namespace studio {
 						 );
 
 		size_t commands = 0;
+		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
 			GuiLists[index].Rebuild(store, request);
-			GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
+
+			// **Copied out of the router's span before the world is left.**
+			// `Router::Update` returns a view into a vector it reuses every
+			// frame, and the runtime this is about to be handed to is reached
+			// outside this callback.
+			const std::span<const engine::gui::GuiEvent> produced =
+				GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
+			events.assign(produced.begin(), produced.end());
+
 			commands = GuiLists[index].Commands().Commands.size();
 		});
+
+		// **Handed to the VM, which is what turns a click into a `.Activated`.**
+		// This is the join the v0.8 plan left last, and the editor is still not
+		// the place that makes it: `Runtime::DeliverGuiEvents` queues, and the
+		// runtime's own `Heartbeat` dispatches at the barrier alongside every
+		// other signal. What the editor does is forward, which is the only part
+		// it is allowed to know about.
+		//
+		// **Only for a world that is running**, because a runtime is what a
+		// `WorldRun` holds — an edit-mode viewport routes and paints so that
+		// hover and press shades behave while authoring, and there is no VM to
+		// tell. That is the same split `RunMode` already draws everywhere else.
+		if (!events.empty()) {
+			for (const WorldRun &run : Runs) {
+				if (run.World != shown || run.Runtime == nullptr) {
+					continue;
+				}
+				run.Runtime->DeliverGuiEvents(events);
+				break;
+			}
+		}
 
 		if (commands == 0) {
 			return;
@@ -949,11 +979,6 @@ namespace studio {
 		engine::ui::PaintTarget target;
 		target.Origin = ImVec2(slot.X, slot.Y);
 
-		// **The events are produced and not yet dispatched.** Turning a
-		// `gui::GuiEvent` into a `.Activated` is `script`'s job at L9 and the
-		// editor is not the place to invent a second path into a VM — the
-		// routing exists here so that a play test behaves, and the connection is
-		// the last step of the v0.8 plan rather than this one.
 		engine::ui::PaintGui(GuiLists[index].Commands(), slot.List, target);
 	}
 }

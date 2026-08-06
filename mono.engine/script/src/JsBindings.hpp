@@ -44,6 +44,7 @@
 #include <engine/ecs/Store.hpp>
 
 #include <quickjs.h>
+#include <span>
 #include <string>
 
 namespace engine::script {
@@ -99,6 +100,15 @@ namespace engine::script {
 	// @param context The VM to deliver into.
 	// @return The first error a handler raised, or empty.
 	std::string PumpJsTree(JSContext *context);
+
+	// The JavaScript half of `PumpGuiEvents`, with the same argument rule:
+	// `MouseEnter`, `MouseLeave` and `MouseMoved` get `(x, y)`, and the three
+	// input signals get nothing until there is an `InputObject` to hand them.
+	//
+	// @param context The VM to deliver into.
+	// @param events  What the host collected since the last beat.
+	// @return The first error a handler raised, or empty.
+	std::string PumpJsGuiEvents(JSContext *context, std::span<const gui::GuiEvent> events);
 
 	// Resolves every task due at the world's current tick.
 	std::string PumpJsTasks(JSContext *context);
