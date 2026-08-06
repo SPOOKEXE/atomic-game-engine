@@ -4,8 +4,10 @@
 #include <engine/net/Reliability.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -13,6 +15,8 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.net.reliability")
+
+using Catch::Approx;
 TEST_DEPENDS("engine.net.packet")
 TEST_DEPENDS("engine.net.link")
 TEST_DEPENDS("engine.core.random")
@@ -85,7 +89,7 @@ TEST_CASE("a payload is retired by a direct acknowledgement", "[net][reliability
 	REQUIRE(sender.Track(0, body, 0.0));
 	REQUIRE(sender.Waiting() == 1);
 
-	CHECK(sender.OnAcknowledge(Ack(0)) == 1);
+	CHECK(sender.OnAcknowledge(Ack(0), 0.0) == 1);
 	CHECK(sender.Waiting() == 0);
 }
 
@@ -99,10 +103,10 @@ TEST_CASE("a payload is retired by a bit in the acknowledgement window", "[net][
 
 	// One packet acknowledges up to 33, which is what stops a single lost
 	// acknowledgement forcing a resend of something that did in fact arrive.
-	CHECK(sender.OnAcknowledge(Ack(12, BitFor(12, 10))) == 2);
+	CHECK(sender.OnAcknowledge(Ack(12, BitFor(12, 10)), 0.0) == 2);
 	CHECK(sender.Waiting() == 1);
 
-	CHECK(sender.OnAcknowledge(Ack(12, BitFor(12, 11))) == 1);
+	CHECK(sender.OnAcknowledge(Ack(12, BitFor(12, 11)), 0.0) == 1);
 	CHECK(sender.Waiting() == 0);
 }
 
@@ -113,10 +117,10 @@ TEST_CASE("an acknowledgement retires nothing it does not name", "[net][reliabil
 	REQUIRE(sender.Track(5, body, 0.0));
 
 	// Older than anything sent, and with an empty window.
-	CHECK(sender.OnAcknowledge(Ack(4)) == 0);
+	CHECK(sender.OnAcknowledge(Ack(4), 0.0) == 0);
 
 	// Newer, but the bit for 5 is not set — 5 is what was lost.
-	CHECK(sender.OnAcknowledge(Ack(9, BitFor(9, 8))) == 0);
+	CHECK(sender.OnAcknowledge(Ack(9, BitFor(9, 8)), 0.0) == 0);
 	CHECK(sender.Waiting() == 1);
 }
 
@@ -130,7 +134,7 @@ TEST_CASE("a receiver that has heard nothing acknowledges nothing", "[net][relia
 	// that payload is then never resent. It starts one behind instead.
 	const PacketHeader header = receiver.Acknowledging(PacketHeader{});
 	CHECK(header.Acknowledge == 0xFFFF);
-	CHECK(sender.OnAcknowledge(header) == 0);
+	CHECK(sender.OnAcknowledge(header, 0.0) == 0);
 	CHECK(sender.Waiting() == 1);
 }
 
@@ -160,7 +164,7 @@ TEST_CASE("a resend restarts the clock and stops once acknowledged", "[net][reli
 	CHECK(sender.Due(0.15).empty());
 	CHECK(sender.Due(0.2).size() == 1);
 
-	REQUIRE(sender.OnAcknowledge(Ack(3)) == 1);
+	REQUIRE(sender.OnAcknowledge(Ack(3), 0.0) == 1);
 	CHECK(sender.Due(100.0).empty());
 	CHECK(sender.OnResent(3, 100.0) == false);
 }
@@ -211,7 +215,7 @@ TEST_CASE("a full send window is backpressure rather than an ending", "[net][rel
 	CHECK(sender.Overflow() == DisconnectReason::None);
 	CHECK(sender.Waiting() == 8);
 
-	REQUIRE(sender.OnAcknowledge(Ack(0)) == 1);
+	REQUIRE(sender.OnAcknowledge(Ack(0), 0.0) == 1);
 	CHECK(sender.HasRoom());
 }
 
@@ -288,7 +292,7 @@ TEST_CASE("a resend is acknowledged even though it is refused", "[net][reliabili
 	// original arrived. Refusing the duplicate and also refusing to
 	// acknowledge it would leave it resending until it gave up.
 	CHECK_FALSE(receiver.Accept(0, Body(0)));
-	CHECK(sender.OnAcknowledge(receiver.Acknowledging(PacketHeader{})) == 1);
+	CHECK(sender.OnAcknowledge(receiver.Acknowledging(PacketHeader{}), 0.0) == 1);
 }
 
 TEST_CASE("the receiver acknowledges a run with a gap in it", "[net][reliability]") {
@@ -308,7 +312,7 @@ TEST_CASE("the receiver acknowledges a run with a gap in it", "[net][reliability
 	CHECK((header.AcknowledgeBits & BitFor(3, 2)) == 0);
 
 	// Three retired, and 2 left to be resent.
-	CHECK(sender.OnAcknowledge(header) == 3);
+	CHECK(sender.OnAcknowledge(header, 0.0) == 3);
 	REQUIRE(sender.Waiting() == 1);
 	CHECK(sender.Due(0.1)[0].Sequence == 2);
 }
@@ -379,7 +383,7 @@ TEST_CASE("sequences wrap across 65536", "[net][reliability]") {
 	// for the rest of the connection.
 	const PacketHeader header = receiver.Acknowledging(PacketHeader{});
 	CHECK(header.Acknowledge == 2);
-	CHECK(sender.OnAcknowledge(header) == 5);
+	CHECK(sender.OnAcknowledge(header, 0.0) == 5);
 	REQUIRE(sender.Waiting() == 1);
 	CHECK(sender.Due(0.1)[0].Sequence == 1);
 }
@@ -560,7 +564,7 @@ namespace {
 					++at;
 					continue;
 				}
-				sender.OnAcknowledge(at->Header);
+				sender.OnAcknowledge(at->Header, 0.0);
 				at = toSender.erase(at);
 			}
 
@@ -665,4 +669,104 @@ TEST_CASE("many independent streams all arrive intact", "[net][reliability][fuzz
 	}
 
 	REQUIRE(failures == 0);
+}
+
+// --- the round trip ----------------------------------------------------------
+//
+// **This is what `ConnectionStats::RoundTripMilliseconds` was declared for and
+// never filled in.** The field sat at zero from v0.3 to v0.9 while
+// `replication::Rewind::TickSeenBy` read it, so lag compensation corrected for
+// the interpolation delay and not for travel — a conservative rewind, and one
+// nothing said was conservative.
+
+TEST_CASE("an acknowledgement measures the round trip", "[net][reliability]") {
+	ReliableSender sender(Quick());
+
+	// Nothing measured yet reads as zero, which a caller must take as
+	// "unknown" rather than as "instant".
+	CHECK(sender.SmoothedRoundTripSeconds() == 0.0);
+
+	REQUIRE(sender.Track(0, Body(4), 1.0));
+	REQUIRE(sender.OnAcknowledge(Ack(0), 1.05) == 1);
+
+	// The first sample is taken whole. Smoothing towards zero would make the
+	// estimate say "instant" for the first several round trips of every
+	// connection, which is exactly when a game is deciding how much to
+	// interpolate.
+	CHECK(sender.SmoothedRoundTripSeconds() == Approx(0.05));
+}
+
+TEST_CASE("the estimate is smoothed rather than jumping to the last sample", "[net][reliability]") {
+	ReliableSender sender(Quick());
+
+	REQUIRE(sender.Track(0, Body(1), 0.0));
+	REQUIRE(sender.OnAcknowledge(Ack(0), 0.1) == 1);
+	REQUIRE(sender.SmoothedRoundTripSeconds() == Approx(0.1));
+
+	// One spike, which is whatever the far side happened to be doing. A number
+	// that jumped forty milliseconds between two reads is one no interface can
+	// show.
+	REQUIRE(sender.Track(1, Body(1), 1.0));
+	REQUIRE(sender.OnAcknowledge(Ack(1), 1.9) == 1);
+
+	// RFC 6298's one eighth: 0.1 * 0.875 + 0.9 * 0.125.
+	const double smoothed = sender.SmoothedRoundTripSeconds();
+	CHECK(smoothed == Approx(0.1 * 0.875 + 0.9 * 0.125));
+
+	// **Nearer the settled value than the spike**, which is the property the
+	// exact number above happens to have and the reason for smoothing at all.
+	// Stated as a comparison rather than as a bound: the bound this was first
+	// written with was `< 0.2`, and the answer is exactly 0.2.
+	CHECK(std::abs(smoothed - 0.1) < std::abs(smoothed - 0.9));
+}
+
+TEST_CASE("a resent payload is never measured, which is Karn's rule", "[net][reliability]") {
+	// **The detail that decides whether this is right or merely present.** An
+	// acknowledgement of a resent packet does not say *which* transmission it
+	// answers, so a sample from one is either the true trip or the trip plus a
+	// retransmit timeout — and there is no way to tell. Measuring them makes
+	// the estimate worst on exactly the links that need it most.
+	ReliableSender sender(Quick());
+
+	REQUIRE(sender.Track(0, Body(1), 0.0));
+
+	// Time it out and resend it.
+	const std::span<const ReliableSender::Unacknowledged> due = sender.Due(10.0);
+	REQUIRE(due.size() == 1);
+	REQUIRE(sender.OnResent(0, 10.0));
+
+	// The acknowledgement arrives. It may be answering either transmission.
+	REQUIRE(sender.OnAcknowledge(Ack(0), 10.01) == 1);
+	CHECK(sender.SmoothedRoundTripSeconds() == 0.0);
+
+	// A packet that was never resent still measures.
+	REQUIRE(sender.Track(1, Body(1), 20.0));
+	REQUIRE(sender.OnAcknowledge(Ack(1), 20.02) == 1);
+	CHECK(sender.SmoothedRoundTripSeconds() == Approx(0.02));
+}
+
+TEST_CASE("a window acknowledgement measures too", "[net][reliability]") {
+	// Retiring through the bitfield is the common case on a busy link — one
+	// packet retires up to thirty-three — so measuring only the direct
+	// acknowledgement would sample a small and unrepresentative slice.
+	ReliableSender sender(Quick());
+
+	REQUIRE(sender.Track(10, Body(1), 0.0));
+	REQUIRE(sender.Track(11, Body(1), 0.0));
+
+	REQUIRE(sender.OnAcknowledge(Ack(11, BitFor(11, 10)), 0.04) == 2);
+	CHECK(sender.SmoothedRoundTripSeconds() > 0.0);
+}
+
+TEST_CASE("a clock that went backwards is not folded in", "[net][reliability]") {
+	// One bad sample survives in a smoothed value for dozens of good ones.
+	ReliableSender sender(Quick());
+
+	REQUIRE(sender.Track(0, Body(1), 5.0));
+	REQUIRE(sender.OnAcknowledge(Ack(0), 1.0) == 1);
+	CHECK(sender.SmoothedRoundTripSeconds() == 0.0);
+
+	REQUIRE(sender.Track(1, Body(1), 10.0));
+	REQUIRE(sender.OnAcknowledge(Ack(1), 10.03) == 1);
+	CHECK(sender.SmoothedRoundTripSeconds() == Approx(0.03));
 }

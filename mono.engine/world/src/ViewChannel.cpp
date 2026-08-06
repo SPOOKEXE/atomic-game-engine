@@ -6,15 +6,28 @@ namespace engine::world {
 
 	ViewChannel::ViewChannel(size_t maximumPayload) : Maximum(maximumPayload) {
 		for (Slot &slot : Slots) {
-			// Reserved once, at the maximum, so publishing never allocates.
-			// A producer that hit the allocator inside its own render phase
-			// would be paying for it every frame.
+			// Reserved up front, so publishing a frame that fits never
+			// allocates. A producer that hit the allocator inside its own
+			// render phase would be paying for it every frame.
 			slot.Payload.reserve(maximumPayload);
 		}
 	}
 
+	void ViewChannel::Reserve(size_t maximumPayload) {
+		// **The number moves and no buffer is touched.** The slots grow on
+		// their next write, each on the producer's own thread, and `Publish`
+		// only ever writes the slot that is neither published nor held.
+		// Reserving all three here would resize a vector the consumer may be
+		// copying out of.
+		if (maximumPayload <= Maximum.load(std::memory_order_relaxed)) {
+			return;
+		}
+		Maximum.store(maximumPayload, std::memory_order_relaxed);
+		Grown.fetch_add(1, std::memory_order_relaxed);
+	}
+
 	bool ViewChannel::Publish(const ViewHeader &header, std::span<const std::byte> payload) {
-		if (payload.size() > Maximum) {
+		if (payload.size() > Maximum.load(std::memory_order_relaxed)) {
 			return false;
 		}
 

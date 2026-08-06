@@ -29,14 +29,17 @@
 #include <engine/core/Paths.hpp>
 #include <engine/delivery/Source.hpp>
 
+#include <cdn/Dashboard.hpp>
 #include <cdn/Origin.hpp>
 #include <cdn/Publisher.hpp>
 #include <cdn/Service.hpp>
+#include <cdn/Terminal.hpp>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -53,6 +56,29 @@ namespace {
 		using namespace std::chrono;
 		return static_cast<uint64_t>(duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
 	}
+
+	// The dashboard's clock, and it is deliberately not the one above.
+	//
+	// A grant is checked against wall time because the server that issued it
+	// used wall time. A *rate* must not be: a clock that steps back an hour
+	// would put an hour of traffic into one bucket and draw a spike nothing
+	// caused. `steady_clock` cannot step, so the only thing this loses is the
+	// ability to say what o'clock a bucket was, which nothing here displays.
+	uint64_t NowMilliseconds() {
+		using namespace std::chrono;
+		return static_cast<uint64_t>(
+			duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count()
+		);
+	}
+
+	// How often the dashboard is redrawn.
+	//
+	// Four a second: fast enough that a rate looks live, slow enough that the
+	// redraw is nothing next to the serving it is watching. Sampling happens
+	// every pump regardless — the history is built from differences, and
+	// sampling at the redraw rate would put traffic in the wrong minute at
+	// every bucket boundary.
+	constexpr uint64_t REDRAW_MILLISECONDS = 250;
 
 	// How long a pump that did nothing waits before pumping again.
 	//
@@ -121,6 +147,7 @@ int main(int argc, char **argv) {
 	arguments.Value("compression-level", "N", "Zstd level groups are prepared at (default: 9)");
 	arguments.Value("cache-bytes", "N", "What the prepared-group cache may hold");
 	arguments.Value("frames", "N", "Serve this many pumps and exit. For a smoke test");
+	arguments.Flag("gui", "Watch it serve in the terminal — content, traffic and rates");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -267,6 +294,11 @@ int main(int argc, char **argv) {
 		service.Port = static_cast<uint16_t>(std::atoi(std::string(*port).c_str()));
 	}
 
+	// Read before the store is handed over, and read once: counting chunks
+	// walks every fan-out directory in the tree, which is a start-up cost and
+	// would be a per-redraw one.
+	const cdn::StoreFootprint footprint{store->Bytes(), store->Count()};
+
 	std::unique_ptr<cdn::Service> serving = cdn::Serve(origin, std::move(*store), service);
 	if (!serving) {
 		return 1;
@@ -286,10 +318,83 @@ int main(int argc, char **argv) {
 		settings.AllowUpstream ? "on" : "off"
 	);
 
+	// --- the dashboard, when one was asked for -------------------------------
+
+	std::unique_ptr<cdn::Terminal> screen;
+	std::optional<cdn::Dashboard> dashboard;
+	cdn::Viewport view;
+	std::string typed;
+	uint64_t drawnAtMilliseconds = 0;
+
+	if (arguments.Has("gui")) {
+		screen = cdn::Terminal::Open();
+		if (!screen) {
+			// Not a terminal: a pipe, a log file, a service manager. Serving is
+			// the job and the dashboard is not, so this says so and carries on
+			// rather than refusing to start.
+			ENGINE_WARN("cdn: --gui needs a terminal on stdin and stdout — serving without it");
+		} else {
+			dashboard.emplace(*origin.Current(), footprint, serving->Local().Text());
+			// The log and the dashboard share one screen and the log would win,
+			// a line at a time, in the middle of a frame. Errors still get
+			// through, because a frame with a stray line in it is better than an
+			// origin that has stopped serving and cannot say so.
+			engine::core::Log::SetLevel(engine::core::LogLevel::Error);
+		}
+	}
+
 	for (long frame = 0; frames < 0 || frame < frames; ++frame) {
-		if (serving->Pump(NowSeconds()) == 0) {
+		const size_t answered = serving->Pump(NowSeconds());
+
+		if (dashboard) {
+			const uint64_t nowMilliseconds = NowMilliseconds();
+			const cdn::CacheUsage cache{
+				origin.Cache().Bytes(), origin.Cache().Count(), origin.Cache().Capacity()
+			};
+			dashboard->Sample(serving->Counters(), cache, nowMilliseconds);
+
+			const cdn::ScreenSize size = screen->Size();
+			const size_t visibleRows = size.Rows > 1 ? size.Rows - 1 : 1;
+
+			// Whatever is not a whole keypress yet stays in the buffer: an
+			// arrow key is three bytes and they do not always arrive together.
+			typed += screen->Read();
+			bool leaving = false;
+			for (;;) {
+				const cdn::KeyPress press = cdn::DecodeKey(typed);
+				if (press.Consumed == 0) {
+					break;
+				}
+				typed.erase(0, press.Consumed);
+				if (press.Pressed == cdn::Key::Quit) {
+					leaving = true;
+					break;
+				}
+				view.Apply(press.Pressed, dashboard->Lines(), visibleRows);
+			}
+			if (leaving) {
+				break;
+			}
+
+			if (nowMilliseconds - drawnAtMilliseconds >= REDRAW_MILLISECONDS) {
+				drawnAtMilliseconds = nowMilliseconds;
+				screen->Present(cdn::RenderFrame(*dashboard, view, size));
+			}
+		}
+
+		if (answered == 0) {
 			std::this_thread::sleep_for(IDLE_SLEEP);
 		}
+	}
+
+	if (screen) {
+		// Put the terminal back before anything else is printed, so the summary
+		// below lands on the operator's own screen rather than on one that is
+		// about to be thrown away with the alternate buffer.
+		screen->Close();
+		engine::core::Log::SetLevel(
+			arguments.Has("verbose") ? engine::core::LogLevel::Trace : engine::core::LogLevel::Info
+		);
 	}
 
 	const cdn::ServiceCounters &counters = serving->Counters();
@@ -300,5 +405,6 @@ int main(int argc, char **argv) {
 		counters.Refused,
 		counters.Missing
 	);
+	ENGINE_INFO("cdn: {} bytes out, {} bytes in", counters.SentBytes, counters.ReceivedBytes);
 	return 0;
 }

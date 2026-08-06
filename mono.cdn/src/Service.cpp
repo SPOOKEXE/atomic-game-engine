@@ -114,6 +114,8 @@ namespace cdn {
 				const http::ServeReport served =
 					Listener->Pump([this](const http::Request &request) { return Answer(request); });
 				Tally.Rejected += served.Rejected;
+				Tally.SentBytes += served.SentBytes;
+				Tally.ReceivedBytes += served.ReceivedBytes;
 				return served.Served;
 			}
 

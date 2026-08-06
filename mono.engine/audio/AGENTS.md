@@ -121,9 +121,49 @@ inaudible until somebody wonders why a footstep got quieter.
 
 **A codec this engine does not have is refused, never guessed at.** A decoder
 that guessed would produce noise at full volume, which is the single worst
-failure this subsystem has. `.ogg`, `.flac` and `.mp3` are classified by the
-manifest and are not decoded here — each is a vendored codec and a licence
-decision.
+failure this subsystem has. `.ogg` and `.flac` are classified by the manifest
+and are still not decoded here — each is a vendored codec and a licence
+decision, and listing an extension is not the same as decoding it.
+
+### MP3 is decoded, and the licence is why
+
+`.mp3` moved out of that list at v0.9 because **minimp3 is CC0** — no
+attribution obligation, no patent grant to read, nothing that follows a shipped
+game. A codec is usually where a licence question ends the conversation, so
+when one does not, take it: the format a person actually has a music file in is
+this one. Ogg and FLAC are still open, and their answer is a licence check
+before a submodule, not a decoder written first.
+
+**`DecodeMp3`'s bound is on its output, and that is the whole difference from
+`DecodeWav`.** A RIFF chunk length is checked against the bytes that arrived, so
+the worst a malformed file does is decode short. An MPEG frame is about a
+hundred bytes and expands to 1152 frames of stereo — nine kilobytes — so the
+input's length bounds nothing and a small file can ask for gigabytes.
+`MAXIMUM_MP3_SAMPLES` is checked before each append, which is the same rule
+`CDN.md` §5 puts on a Zstd frame: size the result from something other than the
+attacker's number, and refuse rather than truncate.
+
+**An ID3v2 tag is skipped, never scanned past.** A tag carrying cover art
+carries a JPEG, a JPEG is arbitrary bytes, and arbitrary bytes contain frame
+syncs — eleven set bits occur once in every 2048 random byte pairs. A decoder
+hunting for its first frame through an embedded image would sometimes start
+decoding one.
+
+**A stream that changes sample rate or channel count mid-file is refused.**
+MPEG allows it and nothing anybody authored does it. Honouring it means
+resampling inside the decode loop; ignoring it means writing mono frames into a
+stereo buffer and shifting every channel after them. Refusing is the only one of
+the three that cannot be quietly wrong.
+
+**A truncated MP3 keeps what arrived and a truncated WAV does not**, and the
+asymmetry is the format's rather than a decision here: every MPEG frame is
+independently decodable, so half a file is half a song. A short `data` chunk
+means a RIFF header lied about its length, and nothing after that is trustworthy.
+
+The suite's fixture is 731 bytes of real MPEG and its assertions are **pinned
+against ffmpeg's decode of the same bytes** — the same 8064 frames, the same
+peak to seven figures. A decoder checked only against its own output is a
+decoder nobody has checked.
 
 ## Why this graph is not `engine::graph`
 

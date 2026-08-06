@@ -5,9 +5,6 @@
 namespace engine::replication {
 
 	namespace {
-		// Written first on every message, so a reader that has been handed
-		// something else fails on its first field rather than interpreting
-		// arbitrary bytes as a count.
 		void WriteFront(core::ByteWriter &writer, MessageKind kind) {
 			writer.WriteUInt16(PROTOCOL_VERSION);
 			writer.WriteUInt8(static_cast<uint8_t>(kind));
@@ -18,9 +15,6 @@ namespace engine::replication {
 			writer.WriteRaw(bytes.data(), bytes.size());
 		}
 
-		// Sized from the reader's state rather than from the claimed length: a
-		// truncated stream can claim any size, and resizing to a claim is how a
-		// corrupt message becomes an allocation failure.
 		bool ReadBytes(core::ByteReader &reader, std::vector<std::byte> &into) {
 			const uint32_t count = reader.ReadUInt32();
 			if (reader.Failed() || count > reader.Remaining()) {
@@ -47,8 +41,6 @@ namespace engine::replication {
 				return false;
 			}
 
-			// Eight bytes each, so a count claiming more than the buffer holds
-			// is refused before anything is reserved for it.
 			if (static_cast<size_t>(count) * sizeof(uint64_t) > reader.Remaining()) {
 				return false;
 			}
@@ -73,9 +65,16 @@ namespace engine::replication {
 			return "input";
 		case MessageKind::Applied:
 			return "applied";
+		case MessageKind::Identify:
+			return "identify";
 		}
-		// No default label, so adding a kind is a compiler warning here.
 		return "?";
+	}
+
+	void WriteMessage(core::ByteWriter &writer, const Identify &identify) {
+		WriteFront(writer, MessageKind::Identify);
+		writer.WriteRaw(identify.Key.Value.data(), identify.Key.Value.size());
+		writer.WriteRaw(identify.Signature.Value.data(), identify.Signature.Value.size());
 	}
 
 	void WriteMessage(core::ByteWriter &writer, const SnapshotChunk &chunk) {
@@ -91,17 +90,11 @@ namespace engine::replication {
 		writer.WriteUInt64(delta.Tick);
 		writer.WriteUInt64(delta.Baseline);
 
-		// Three bytes on every part of every tick, which is what it costs to
-		// let a receiver tell "that is all of tick N" from "that is all of tick
-		// N that arrived". Fixed width, so re-encoding a part to set the marker
-		// cannot change the size the packing already budgeted for.
 		writer.WriteUInt16(delta.Part);
 		writer.WriteBool(delta.Final);
 
 		writer.WriteUInt32(static_cast<uint32_t>(delta.Components.size()));
 		for (const ComponentDelta &component : delta.Components) {
-			// By name. An id is a dense counter assigned in registration order
-			// and means something else in the process reading this.
 			writer.WriteName(component.Component);
 			WriteEntities(writer, component.Entities);
 			WriteBytes(writer, component.Values);
@@ -133,15 +126,10 @@ namespace engine::replication {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Applied)) {
-			// Range-checked before the cast. Casting anyway produces a value no
-			// switch handles, and every `Describe` and dispatch downstream then
-			// reads something the type says cannot exist.
+		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Identify)) {
 			return false;
 		}
 
-		// Built here and assigned at the end, so a message that failed part-way
-		// leaves the caller's object as it was.
 		Message read;
 		read.Kind = static_cast<MessageKind>(kind);
 
@@ -154,8 +142,6 @@ namespace engine::replication {
 				return false;
 			}
 
-			// A chunk that runs past the total it declares is either a bug or
-			// somebody probing the reassembly buffer.
 			const uint64_t end = static_cast<uint64_t>(read.Chunk.Offset) + read.Chunk.Bytes.size();
 			if (end > read.Chunk.TotalBytes) {
 				return false;
@@ -169,9 +155,6 @@ namespace engine::replication {
 			read.Delta.Part = reader.ReadUInt16();
 			read.Delta.Final = reader.ReadBool();
 
-			// Bounded before anything is remembered about it. A receiver keeps
-			// one bit per part of the tick it is counting, so an unbounded part
-			// number is a peer deciding how large that record is.
 			if (reader.Failed() || read.Delta.Part >= MAXIMUM_PARTS) {
 				return false;
 			}
@@ -214,6 +197,13 @@ namespace engine::replication {
 
 		case MessageKind::Applied:
 			read.Applied.Tick = reader.ReadUInt64();
+			break;
+
+		case MessageKind::Identify:
+			if (!reader.ReadRaw(read.Identify.Key.Value.data(), read.Identify.Key.Value.size()) ||
+				!reader.ReadRaw(read.Identify.Signature.Value.data(), read.Identify.Signature.Value.size())) {
+				return false;
+			}
 			break;
 		}
 

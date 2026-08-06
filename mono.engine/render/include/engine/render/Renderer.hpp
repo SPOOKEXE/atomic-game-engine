@@ -1,35 +1,11 @@
 #pragma once
 
-// The RHI, such as it is at v0.7.
-//
-// Six passes — shadow, surface, opaque, transparent, overlay, interface — over
-// a frustum-culled draw list. That is enough to prove the staged-shader path,
-// the depth buffer, an offscreen target and the swapchain, and it is where the
-// render graph at L9 will attach — the passes below become nodes, and this
-// class becomes the backend they compile to.
-//
-// **The sixth draws nothing this module owns.** `interface` is a
-// `FrameOverlayHook`, which is what lets `mono.engine/ui` record an editor's
-// chrome into this frame without Dear ImGui appearing anywhere in the engine.
-// A game runs five.
-//
-// SDL's GPU API is the backend rather than Vulkan directly. The API can target
-// Vulkan, Metal and D3D12, but v0.1 supplies SPIR-V and therefore requests the
-// Vulkan path; the other backends need their platform shader formats first.
-//
-// No SDL GPU type appears here. The public surface is a window pointer, a
-// camera, and a span of `scene::DrawInstance`.
-//
-// **This module does not describe a frame; it consumes one.** What crosses from
-// simulation to presentation is `scene::DrawInstance` at L7, because a
-// `server`-tier host writes it and a `client`-tier consumer reads it and a type
-// only one of those tiers can name cannot be the thing they hand between them.
-// There used to be a `render::Instance` and a `render::Camera` here, and the
-// client converted into them; the conversion into a GPU layout now happens once,
-// below, at the point of upload.
+// Client renderer. GPU types remain private to the implementation.
 //
 // @tier L12 · client
 
+#include <engine/assets/Mesh.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/render/Overlay.hpp>
@@ -49,21 +25,7 @@ namespace engine::render {
 
 	// The stages `Render` submits, in submission order.
 	//
-	// **This exists so that the two descriptions of a frame can be compared.**
-	// `graph::StandardPipeline` is the same six stages as data and
-	// `Pipeline::Validate` checks them for a stage reading what nothing wrote —
-	// but until v0.6 nothing tied that list to the function that actually draws,
-	// so keeping them in step was a sentence in `AGENTS.md`. A sentence is
-	// documentation; `tests/Passes.cpp` compares this enum's names against that
-	// pipeline's, in order, and fails the build when they disagree.
-	//
-	// **What it does not do is make the frame run from data.** That is the
-	// render-node system, and this is deliberately not a small version of it —
-	// two competing executors would be worse than the one hand-rolled list. What
-	// is checked is the *description*: a sixth stage added to the pipeline and
-	// not to this enum, or the reverse, stops the build. Adding a pass without
-	// entering it through `PassRecorder` is still possible and is the hole this
-	// leaves open, named here rather than implied. See `D00016`.
+	// Tests compare this order with graph::StandardPipeline.
 	//
 	// @since v0.6
 	enum class Pass : uint8_t {
@@ -76,10 +38,7 @@ namespace engine::render {
 		// The screen, with depth written.
 		Opaque,
 
-		// Blended, depth-tested and not depth-written. **Its own stage even
-		// though it shares a render pass with `Opaque`** — a separate pass would
-		// have to reload the depth buffer — because what the list describes is
-		// what is drawn and in what order, not how many times a target is bound.
+		// Blended, depth-tested, and not depth-written; shares Opaque's pass.
 		Transparent,
 
 		// The overlay texture, loaded over the frame rather than clearing it.
@@ -88,9 +47,7 @@ namespace engine::render {
 		// Whatever a `FrameOverlayHook` records — the editor's chrome, and
 		// nothing a game ships with.
 		//
-		// **Last, and it has to be.** Everything above it draws the world; this
-		// draws the thing you look at the world *through*. A pass that put
-		// panels underneath geometry would be a window you cannot read.
+		// Last, so interface content stays above the world.
 		//
 		// @since v0.7
 		Interface,
@@ -101,35 +58,12 @@ namespace engine::render {
 
 	// The names of those stages, in the same order.
 	//
-	// `core::Name` rather than `const char *` for rule 4's reason and for the
-	// comparison's: `graph::Stage::Name` is a `core::Name`, and comparing two of
-	// them is an integer compare rather than a string one.
-	//
 	// @return The six names, valid for the life of the program.
 	std::span<const core::Name> PassOrder();
 
 	// A second view, rendered into a texture instead of the swapchain.
 	//
-	// **`world::ViewChannel`'s shape, with a texture on the far end.** v0.2
-	// built the seam for a hosted world publishing a view to a client; this is
-	// the same idea with the consumer inside the process — and the one-frame
-	// staleness that design already assumed is what makes a mirror cheap: the
-	// surface shows the frame *before* the one being drawn, so there is no
-	// dependency cycle between a mirror and what it reflects.
-	//
-	// **Several per frame since v0.8, one per surface index.** It was one, and
-	// the sentence here used to say that several were the render-node system's
-	// job. What several actually needed was a texture pair per index and a
-	// sampler binding per draw — the mirror runs are grouped by index in
-	// `scene::ScenePlan::Runs`, so each is one contiguous draw — and none of
-	// that needed a render graph to arrive first.
-	//
-	// A mirror seen in another mirror shows that other mirror's **previous**
-	// frame. That is not an approximation to be fixed later: a surface pass that
-	// sampled this frame's textures would depend on an order of surfaces that
-	// does not exist, because each is being rendered for the others. One frame
-	// of staleness per bounce is what makes the cycle a line, and it is the same
-	// staleness `world::ViewChannel` was built around at v0.2.
+	// Surface textures are double-buffered; nested reflections are one frame stale.
 	//
 	// @since v0.6
 	struct SurfaceView {
@@ -171,6 +105,16 @@ namespace engine::render {
 		// shader multiplies by; the flip happens once, where the component is
 		// read, rather than in a shader nobody can put a breakpoint in.
 		float ImageOpacity = 1.0f;
+
+		// Which tags an instance must carry to be drawn into this surface, or
+		// zero for all of them.
+		//
+		// From `scene::SurfaceCamera::TagFilter`. **Applied per instance in the
+		// draw loop rather than by re-ordering the draw list**, because the
+		// order is shared by every view and a filter is per view: partitioning
+		// it for one surface would be partitioning it for all of them, and the
+		// screen pass would then draw the group instead of the world.
+		uint32_t TagFilter = 0;
 	};
 
 	// An offscreen colour target the world is drawn into instead of the window.
@@ -413,6 +357,48 @@ namespace engine::render {
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
 
+		// Registers a mesh under the name a `DrawInstance` will ask for.
+		//
+		// **The one door content comes in through**, and it is on the renderer
+		// rather than on the table so that `MeshTable` stays an implementation
+		// detail behind the pimpl like everything else here. A caller holding a
+		// `delivery::Asset` reads it into an `assets::MeshData` and hands it
+		// over; nothing about the device reaches them.
+		//
+		// Registering a name twice replaces it. The old geometry stays in the
+		// buffer as dead space — nothing evicts yet, and `MeshTable`'s header
+		// says so.
+		//
+		// @param name The name to publish it under.
+		// @param mesh The geometry. An invalid one is refused.
+		// @return `false` for an invalid mesh, a full table or a failed upload.
+		bool AddMesh(const core::Name &name, const assets::MeshData &mesh);
+
+		// Registers a texture under the name a `SurfaceAppearance` or a submesh
+		// will ask for.
+		//
+		// @param name  The name to publish it under.
+		// @param image The pixels. An invalid one is refused.
+		// @return `false` for an invalid image, a full table or a failed
+		//         upload.
+		bool AddTexture(const core::Name &name, const assets::TextureData &image);
+
+		// Whether a mesh has been registered under a name.
+		//
+		// **For a caller deciding what to fetch**, not for the draw path: an
+		// unregistered mesh draws as a cube rather than failing, so the renderer
+		// itself never asks.
+		//
+		// @param name The name.
+		// @return `true` when it is registered.
+		bool HasMesh(const core::Name &name) const;
+
+		// Whether a texture has been registered under a name.
+		//
+		// @param name The name.
+		// @return `true` when it is registered.
+		bool HasTexture(const core::Name &name) const;
+
 		// Waits for the display and claims this frame's image, before the caller
 		// has read a single event.
 		//
@@ -442,23 +428,7 @@ namespace engine::render {
 
 		// Reports whether the caller is the thread that owns this renderer.
 		//
-		// **Recording is single-threaded by contract, and this is the contract
-		// rather than a note about it.** v0.7 decided that a studio with several
-		// viewports draws them one after another — the passes share one command
-		// buffer and one device, so parallel recording would serialise at submit
-		// and buy nothing, and it would cost the property that makes a viewport
-		// correct: the world pass writes a scene target before the interface pass
-		// samples it *in the same buffer*. That decision was written down and
-		// nothing enforced it, which is the state this engine has twice found a
-		// stale claim in.
-		//
-		// The owner is the thread that called `Initialise`, or the constructing
-		// thread before that — a renderer is often built by whoever owns the
-		// object and initialised by whoever owns the window, and it is the
-		// device rather than the C++ object that this is about. There is
-		// deliberately no `BindToCallingThread` beside `ecs::Store`'s: a store
-		// is picked up by a different worker every tick and a device is not, so
-		// a public rebind would be a seam for exactly what the contract forbids.
+		// Recording is single-threaded; the owner is the thread that initialised it.
 		//
 		// @return `true` when the current thread may record and submit.
 		// @threadsafe
@@ -483,18 +453,7 @@ namespace engine::render {
 		// window because the swapchain belongs to the GPU device, and the
 		// device is behind the pimpl.
 		//
-		// **Answered now and applied at the start of the next frame**, which is
-		// a distinction a caller may ignore and a caller writing a test may not.
-		// Whether the mode exists is a query and is resolved before this returns;
-		// setting it destroys and rebuilds every swapchain image, and this is
-		// called from panels drawn in the middle of a frame that is already
-		// holding one of those images. Applying it there freed the texture the
-		// frame had acquired and the next `Render` bound it — a crash on the
-		// frame the box was ticked. So the request is queued and honoured by the
-		// next `WaitForFrame` or `Render`, before anything is acquired.
-		//
-		// A true return therefore means "the backend has this mode and it is
-		// queued", not "the swapchain is in it as of this line".
+		// The request is queued because applying it recreates the swapchain.
 		//
 		// @param enabled True to wait for vertical blank; false to request immediate presentation.
 		// @return True when the requested mode was supported and taken.
@@ -540,16 +499,7 @@ namespace engine::render {
 		//                    do not reallocate one shared texture twice a frame.
 		//                    See `SceneTexture`.
 		//
-		//                    **It also selects the surface textures**, which is
-		//                    what makes a mirror right in more than one panel. A
-		//                    reflection is of the viewer — `scene::
-		//                    AimSurfaceCameras` mirrors the live camera through
-		//                    each pane — so two panels showing one world want two
-		//                    images out of the same `SurfaceCamera`. They shared
-		//                    one set until v0.75, and the panel that drew most
-		//                    recently wrote all of them: flying either camera
-		//                    moved the mirrors in both windows. A caller that
-		//                    passes a slot per view gets a set per view.
+		//                    Selects the surface texture bank for this viewport.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,

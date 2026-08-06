@@ -272,6 +272,43 @@ nothing draws. `CollisionGroup` waits on a name-to-layer registry that does not
 exist, because inventing one here would be this module deciding a physics
 policy.
 
+## A `Sound` has no place, and the omission is the whole design
+
+`Sound` derives from `Instance` and **not** from `PVInstance`. Where it is heard
+from is its parent's: under a service it is heard everywhere at one level, and
+inside something with a `Transform` it is heard from that thing and falls off
+with distance. Roblox's rule, kept for this file's standing reason — a tree that
+differs from the one scripts expect is a migration nobody asked for — and it is
+also the right rule here.
+
+**Do not give it a position.** A `Sound` with coordinates of its own would be a
+second opinion about where a thing is, which is rule 2 with a speaker attached,
+and it would turn "attach a sound to a thing" from `Parent = thing` into a field
+somebody has to keep in step with a hierarchy that already says it.
+
+**Nothing in this module plays anything, and nothing here may.** `scene` is
+`shared` and a server has no mixer — it decides what is audible and replicates
+that, and the sound is produced where somebody is listening. The client walks
+these rows and drives `Engine::audio`; that is the same split `Visual::Mesh`
+already has against the renderer, and it is why this module still does not
+depend on `audio`.
+
+**`Playing` is a property rather than a `Play()` method**, and that is a fact
+about the script binding rather than about audio: methods live on one metatable
+shared by every instance, so a `Play` there would be a method on every `Part` in
+the world. The day classes can carry their own methods, `Play()` sets this
+property and nothing else changes.
+
+**`Volume` clamps at 10 rather than at 1**, which is Roblox's ceiling and the
+honest one: the graph works in floats precisely so a value over full scale
+passes through harmlessly and is clamped once at the device. Refusing above 1
+would make a quietly authored sound impossible to bring up.
+
+`Sound` holds a `core::Name`, so it is registered with a **hand-written wire
+pair** and every field is written the day it is added — including `Playing`, so
+that a level whose ambience is a looping sound comes back sounding rather than
+mute with nothing in the file saying why.
+
 ## Not here yet, so do not add half of one
 
 - **No systems.** `IntegrateMotion`, `SyncBroadphase` and the rest of
@@ -291,3 +328,93 @@ policy.
 - **No predicted-entity index range.** That changes how the entity directory is
   laid out and belongs in `ecs`; `Store::SetAdoptOnly` is what guards the hole
   meanwhile.
+
+## `SurfaceAppearance` and `Tags` are on `BasePart`, and that is a paid-for choice
+
+Both are in `BasePart`'s class set rather than `MeshPart`'s, which puts sixteen
+bytes on every part in the world including four thousand plain cubes. The
+alternative is an optional component, and it does not work here:
+`client::CollectInstances` is a batched parallel walk over a fixed signature —
+`EachBatchParallel` is handed columns and deliberately no entity — so a
+component only some rows had could not be read at all without walking the world
+a second time and joining by entity.
+
+A dense column of mostly-invalid names is sixteen bytes and no branches. Moving
+either of them down to `MeshPart` would mean rewriting the draw-list pass, and
+the reviewer's question is whether that rewrite was actually done rather than
+whether the move looks tidier.
+
+## A tag's bit is its index, so the table is never sorted and a name never leaves
+
+`TagTable::Names` is in registration order because **the index is the bit**.
+Sorting it renumbers every mask already stored on a row — the same rule
+`SurfaceTable::Rows` carries — and `RemoveTag` deliberately leaves the name in
+the table for the same reason: freeing a bit would let the next registration
+reuse it while another row's mask still had it set.
+
+**The thirty-third tag is refused rather than aliased.** An alias is one tag's
+objects appearing in another tag's pass, which is invisible until somebody
+notices the wrong thing reflected in a mirror. If the ceiling ever needs
+raising, raise the mask's width; do not make registration wrap.
+
+## The tag names travel with the masks or neither is meaningful
+
+`Tags` is a bare integer whose bits mean whatever the `TagTable` resource says.
+A world restored with the masks and without the table has every tagged object in
+a group with no name, and a filter by name matches nothing — silently. Both are
+registered in `RegisterSceneComponents` and the table has an explicit writer.
+
+## A tag filter is authored by name and compared as a bit
+
+`SurfaceCamera::TagFilter` is a mask, and `TagFilterProperty` is what turns a
+name into one — once, where the name is written. The alternative is a name on
+the component and a lookup per instance per pass, which is a string compare in
+the draw loop.
+
+**A filter names several tags, comma-separated.** A mask holds thirty-two and a
+property holds one value, so the list lives in the string rather than in a new
+`ecs::PropertyType` that exactly one property would use. The setter builds the
+whole mask in a local and assigns once — a loop writing straight into the
+component leaves a half-built filter behind when the table fills part way
+through, and a redirected pass drawing *some* of its group is harder to notice
+than one drawing none of it.
+
+**The property's type is `PropertyType::Name` and not `String`.** The two
+marshal different payloads — a `core::Name` and an owning `std::string` — and
+declaring the wrong one compiles, passes any test that writes raw bytes through
+`SetProperty`, and fails at the first script that assigns to it. That is how it
+was found. A test on a computed property should assert the declared type, not
+only the round-trip.
+
+## A mesh's size is a fact about the mesh, so it is keyed by name and never cached on a row
+
+`MeshCatalogue` holds triangles per mesh name; `MeshPart::TrianglesCount` reads
+`Visual::Mesh` and looks the answer up. Refuse the two obvious-looking
+alternatives:
+
+- **A count on the component.** A thousand parts naming one mesh would hold a
+  thousand copies of one number, and repointing `MeshId` would leave every one
+  of them reporting the old mesh. This file already refuses the same shape for a
+  cached world AABB, and for the same reason: a derived fact stored beside the
+  thing it was derived from goes stale silently.
+- **Reaching into `render::MeshTable` for it.** That is the tier edge the first
+  section of this file exists to refuse, and it would also make the property
+  answer nothing on a server. A triangle count is `Indices.size() / 3` of a file
+  on disk — a headless server could produce it and mean it — which is exactly
+  why it is allowed to live here at all, and why a GPU buffer offset is not.
+
+**Zero means "this world has not been told".** Not "empty": `assets::Mesh::Read`
+refuses a mesh with no triangles, so the two cannot be confused. It is the
+honest answer on a server, on a client before the content pump has run, and for
+a `MeshId` naming something no publisher published — and that last case is the
+same condition that draws the fallback cube, so a part reading zero and drawing
+a cube is one fact reported twice rather than two faults.
+
+**`TrianglesOf` never creates the resource and `MeshesOf` may.** The property
+getter calls the first. A getter that acquired a resource would be a structural
+write from inside a read, on every mesh part in the scene, during `PreRender`.
+
+**The catalogue is not saved.** Its registration writes nothing and reads back
+empty, as `RenderedSignature`'s does. A file carrying last run's counts would
+disagree with the content sitting beside it, and a wrong number is worse than a
+zero that says it does not know.

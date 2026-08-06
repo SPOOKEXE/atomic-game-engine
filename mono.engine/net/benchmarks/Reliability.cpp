@@ -95,7 +95,7 @@ BENCH("sender · track then acknowledge, 10k packets", PACKETS) {
 	for (size_t index = 0; index < PACKETS; index++) {
 		const auto sequence = static_cast<uint16_t>(index);
 		Consume(sender.Track(sequence, payload, now));
-		retired += sender.OnAcknowledge(AcknowledgingAll(sequence));
+		retired += sender.OnAcknowledge(AcknowledgingAll(sequence), 0.0);
 		now += 1.0 / 60.0;
 	}
 	Consume(retired);
@@ -177,7 +177,7 @@ BENCH("sender · 20% loss, 10k packets", PACKETS) {
 		// Four packets in five are acknowledged. The fifth is not, so it stays
 		// held until its retransmit clock expires.
 		if (index % 5 != 0) {
-			Consume(sender.OnAcknowledge(AcknowledgingAll(sequence)));
+			Consume(sender.OnAcknowledge(AcknowledgingAll(sequence), 0.0));
 		}
 
 		now += 1.0 / 60.0;
@@ -297,7 +297,7 @@ BENCH("tick · 100 connections, reliable bookkeeping", 100) {
 		if (sender.HasRoom()) {
 			Consume(sender.Track(sequence, payload, now));
 		}
-		Consume(sender.OnAcknowledge(AcknowledgingAll(sequence)));
+		Consume(sender.OnAcknowledge(AcknowledgingAll(sequence), 0.0));
 		Consume(sender.Due(now).size());
 
 		Consume(receiver.Accept(sequence, payload));

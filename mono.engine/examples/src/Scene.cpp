@@ -73,6 +73,60 @@ namespace engine::examples {
 		}
 	}
 
+	namespace {
+		// Where the staged Luau libraries are, resolved the same two ways
+		// `ExamplePath` resolves a scene — and for the same layout mismatch,
+		// which is written out in full there.
+		std::filesystem::path LibraryRoot() {
+			const std::filesystem::path preferred = core::Paths::Assets() / "lib";
+			if (std::filesystem::exists(preferred)) {
+				return preferred;
+			}
+			return core::Paths::Base().parent_path() / "assets" / "lib";
+		}
+
+		// Mirrors every staged library into `ReplicatedStorage`.
+		//
+		// **Idempotent by name.** A world that came out of a file already has
+		// its tree, and mounting a second one beside it would give `require` two
+		// copies of every module — which is worse than either, because a module
+		// is cached per instance and two instances share no state.
+		void MountSharedLibraries(Store &store) {
+			const Entity replicated = store.FindFirstRoot("ReplicatedStorage");
+			if (replicated == ecs::NULL_ENTITY) {
+				return;
+			}
+
+			const std::filesystem::path root = LibraryRoot();
+
+			std::error_code failure;
+			if (!std::filesystem::is_directory(root, failure)) {
+				// Not an error: a program staged without the libraries still
+				// runs every scene that does not require one.
+				return;
+			}
+
+			std::vector<std::filesystem::path> directories;
+			for (const auto &entry : std::filesystem::directory_iterator(root, failure)) {
+				if (entry.is_directory()) {
+					directories.push_back(entry.path());
+				}
+			}
+
+			// Sorted, so two runs mint the same instance ids. `MountModuleTree`
+			// sorts within a directory for the same reason.
+			std::sort(directories.begin(), directories.end());
+
+			for (const std::filesystem::path &directory : directories) {
+				const std::string name = directory.filename().string();
+				if (store.FindFirstChild(replicated, name) != ecs::NULL_ENTITY) {
+					continue;
+				}
+				script::MountModuleTree(store, directory, name, replicated);
+			}
+		}
+	}
+
 	void RegisterExampleComponents() {
 		// The shared set first, and under `scene`'s names. Every program
 		// registers the same strings, which is what lets a snapshot resolve on
@@ -121,6 +175,18 @@ namespace engine::examples {
 		// than behind a check: a world that came out of a file already has its
 		// nine roots and this leaves them alone.
 		scene::InstallServices(store);
+
+		// **The shipped Luau libraries, mounted before anything runs.**
+		//
+		// A Rojo place maps `shared/MagicCore` to `ReplicatedStorage.MagicCore`
+		// and a script just finds it there. This is that mapping: every
+		// directory under the staged `lib/` becomes a tree of `ModuleScript`s in
+		// the same place under the same name, so a file that came from such a
+		// project requires its way around unchanged.
+		//
+		// Before `RunWorldScripts`, because a scene's first line is a `require`.
+		// Idempotent by name — a world that already has the tree keeps it.
+		MountSharedLibraries(store);
 
 		// The extension picks the VM. `Rings.luau` and `Rings.js` build the
 		// same world through the same bindings, and this loader never learns

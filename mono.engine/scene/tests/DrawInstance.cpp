@@ -77,9 +77,17 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 	visual.Material = Name("drawinstance_test.Oak");
 	visual.Tint = engine::core::Color3(0.25f, 0.5f, 0.75f);
 
-	const DrawInstance instance{
-		transform.Frame, bounds.HalfExtent, visual.Tint, visual.Mesh, visual.Material
-	};
+	// **Every field named, because `-Werror=missing-field-initializers` is on
+	// under the `ci` preset.** A partial aggregate initialiser is silently fine
+	// under `dev` and fatal there, which is exactly what happened when v0.9
+	// widened this type — so the fields are spelled out rather than trailing
+	// off and relying on the defaults.
+	DrawInstance instance;
+	instance.Frame = transform.Frame;
+	instance.HalfExtent = bounds.HalfExtent;
+	instance.Tint = visual.Tint;
+	instance.Mesh = visual.Mesh;
+	instance.Material = visual.Material;
 
 	CHECK(instance.Frame.Position == transform.Frame.Position);
 	CHECK(instance.HalfExtent == bounds.HalfExtent);

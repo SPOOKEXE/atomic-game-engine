@@ -225,8 +225,21 @@ namespace engine::ecs {
 		// What a write costs, and where it is legal.
 		PropertyKind Kind = PropertyKind::Field;
 
-		// False for a property that can be read and not written. None today;
-		// the field exists because the manifest has to be able to say it.
+		// False for a property that can be read and not written.
+		//
+		// **This flag is the whole enforcement, which is why it is worth
+		// naming what checks it.** `Store::SetProperty`, both script bindings
+		// and the properties panel each refuse on this alone, and the bindings
+		// generator turns it into `readonly` in TypeScript and `read` in Luau —
+		// so a script that tries is stopped at typecheck rather than at run
+		// time. A read-only property therefore needs no `Set`, and leaving that
+		// pointer null is the second refusal for a caller that reached past the
+		// flag.
+		//
+		// `Services::LocalPlayer` (who you are is not yours to assign), the
+		// `GuiObject` absolutes (derived from a layout pass) and
+		// `MeshPart::TrianglesCount` (a fact about the mesh, which a publisher
+		// owns) are the three today.
 		bool Writable = true;
 
 		// Which set an `Enum` property's value must belong to.

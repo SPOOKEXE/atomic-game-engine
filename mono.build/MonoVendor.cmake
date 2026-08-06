@@ -94,6 +94,32 @@ add_library(vendor_json INTERFACE)
 add_library(Vendor::json ALIAS vendor_json)
 target_include_directories(vendor_json SYSTEM INTERFACE "${MONO_VENDOR}/json/single_include")
 
+# --- minimp3 ------------------------------------------------------------------
+# MP3 decoding, for `Engine::audio`. Two headers, no build system, CC0.
+#
+# **The licence is why this one exists at all.** `audio/AGENTS.md` said MP3 was
+# "a vendored codec and a licence decision" and left the gap honest rather than
+# listing an extension it could not decode; CC0 is what makes the decision cheap
+# — no attribution obligation, no patent grant to read, nothing that reaches a
+# shipped game. A codec is usually where that question ends the conversation.
+#
+# Header-only and declared here for asio's reason: upstream ships a test
+# harness, a player and a fuzzer, none of which anybody here wants configured.
+#
+# **`MINIMP3_ONLY_MP3` and `MINIMP3_NO_SIMD` are not set, and that is
+# deliberate.** The first would drop MP1 and MP2 layer support, which costs
+# nothing to keep and is what a file with a `.mp3` extension sometimes actually
+# is; the second would turn off the SSE and NEON paths that make a five-minute
+# track decode in well under a second. `MINIMP3_IMPLEMENTATION` is defined in
+# exactly one translation unit — `audio/src/Mp3.cpp` — because these headers are
+# a single-header library and defining it twice is a duplicate-symbol link
+# error.
+#
+# `client` in engine terms: `audio` is L12 and only the client links it.
+add_library(vendor_minimp3 INTERFACE)
+add_library(Vendor::minimp3 ALIAS vendor_minimp3)
+target_include_directories(vendor_minimp3 SYSTEM INTERFACE "${MONO_VENDOR}/minimp3")
+
 # --- Dear ImGui -----------------------------------------------------------
 # Editor and tooling UI, not game UI. `ui` at L12 is a retained-mode tree that a
 # game author builds interfaces with; this is what mono.studio's shell, docking

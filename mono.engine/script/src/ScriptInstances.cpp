@@ -8,6 +8,9 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
+#include <system_error>
+#include <vector>
 
 namespace engine::script {
 
@@ -161,6 +164,116 @@ namespace engine::script {
 
 		store.Set(instance, Source{core::Name(path)});
 		return instance;
+	}
+
+	namespace {
+		// The class a directory becomes.
+		//
+		// **A bare `Instance`, because this engine has no `Folder`.** Roblox's
+		// `Folder` is a class whose whole content is "a thing with children",
+		// which every instance already is here. Registering one so that a mounted
+		// directory could have a familiar `ClassName` would put a class in the
+		// tree that nothing else names, and a script asking `IsA("Folder")` is
+		// asking a question the engine has no other reason to answer.
+		ecs::ClassId ContainerClass() {
+			ScriptClass();
+			return ecs::Classes::Find(core::Name("Instance"));
+		}
+
+		// One directory, sorted so a mount produces the same world twice.
+		//
+		// `directory_iterator` yields in whatever order the filesystem hands
+		// back, which differs between machines and between runs on the same
+		// machine. A world whose instance ids depended on that would not replay,
+		// and `ScriptsIn` sorts by id for exactly this reason.
+		std::vector<std::filesystem::path> SortedEntries(const std::filesystem::path &directory) {
+			std::vector<std::filesystem::path> entries;
+
+			std::error_code failure;
+			for (const auto &entry : std::filesystem::directory_iterator(directory, failure)) {
+				entries.push_back(entry.path());
+			}
+			if (failure) {
+				entries.clear();
+			}
+
+			std::sort(entries.begin(), entries.end());
+			return entries;
+		}
+
+		bool IsLuau(const std::filesystem::path &path) {
+			return path.extension() == ".luau" || path.extension() == ".lua";
+		}
+	}
+
+	ecs::Entity MountModuleTree(
+		ecs::Store &store, const std::filesystem::path &directory, std::string_view name, ecs::Entity parent
+	) {
+		std::error_code failure;
+		if (!std::filesystem::is_directory(directory, failure)) {
+			return ecs::NULL_ENTITY;
+		}
+
+		const std::vector<std::filesystem::path> entries = SortedEntries(directory);
+
+		// **`init.luau` decides what this directory *is*, so it is found before
+		// anything is created.** A directory holding one becomes a
+		// `ModuleScript` with children; without one it becomes a container. Both
+		// end up with the same name and the same children, which is what makes
+		// the rule invisible to everything downstream.
+		std::filesystem::path init;
+		for (const std::filesystem::path &entry : entries) {
+			if (IsLuau(entry) && entry.stem() == "init") {
+				init = entry;
+				break;
+			}
+		}
+
+		ecs::Entity root;
+		if (!init.empty()) {
+			root = MakeModule(store, std::filesystem::absolute(init).string(), name);
+		} else {
+			root = store.CreateInstance(ContainerClass(), name);
+		}
+
+		if (root == ecs::NULL_ENTITY) {
+			return ecs::NULL_ENTITY;
+		}
+
+		size_t mounted = 0;
+		for (const std::filesystem::path &entry : entries) {
+			if (std::filesystem::is_directory(entry, failure)) {
+				if (MountModuleTree(store, entry, entry.filename().string(), root) != ecs::NULL_ENTITY) {
+					mounted++;
+				}
+				continue;
+			}
+
+			if (!IsLuau(entry) || entry == init) {
+				continue;
+			}
+
+			const ecs::Entity module =
+				MakeModule(store, std::filesystem::absolute(entry).string(), entry.stem().string());
+			if (module != ecs::NULL_ENTITY && store.SetParent(module, root)) {
+				mounted++;
+			}
+		}
+
+		// A directory with nothing in it to mount leaves no instance behind. An
+		// empty container would be indistinguishable from a library whose files
+		// failed to stage, and the second is worth noticing.
+		if (mounted == 0 && init.empty()) {
+			store.Destroy(root);
+			return ecs::NULL_ENTITY;
+		}
+
+		if (parent != ecs::NULL_ENTITY && !store.SetParent(root, parent)) {
+			store.Destroy(root);
+			return ecs::NULL_ENTITY;
+		}
+
+		return root;
 	}
 
 	ecs::Entity MakeScript(ecs::Store &store, std::string_view path, std::string_view name, bool local) {

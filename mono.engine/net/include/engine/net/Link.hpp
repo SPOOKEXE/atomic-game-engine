@@ -101,6 +101,22 @@ namespace engine::net {
 		}
 
 		// What it has cost and lost.
+		// Records the round trip whatever measured it.
+		//
+		// **A `Link` cannot measure this itself**, and that is why it is set
+		// rather than computed: the acknowledgement that closes a round trip is
+		// matched against a packet a `ReliableSender` is holding, and a link
+		// holds none — it stamps sequences and counts what arrives. Whoever owns
+		// both halves tells it.
+		//
+		// @param seconds The smoothed estimate. Ignored when negative.
+		// @since v0.9
+		void RecordRoundTrip(double seconds) {
+			if (seconds >= 0.0) {
+				Totals.RoundTripMilliseconds = static_cast<float>(seconds * 1000.0);
+			}
+		}
+
 		const ConnectionStats &Stats() const {
 			return Totals;
 		}

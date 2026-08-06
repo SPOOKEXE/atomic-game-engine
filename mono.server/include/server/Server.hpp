@@ -1,25 +1,17 @@
 #pragma once
 
-// The server program's own code — an attachment on top of the engine, not a
-// layer of it.
-//
-// It owns the fixed tick, the world set and the shutdown path. It contains no
-// renderer: `mono.server` links no `client`-tier target, so `render`, `ui`,
-// `audio`, `input`, `text` and `vfx` are absent from the link line entirely. A
-// server-side script that reaches for input will fail because the class was
-// never registered into this binary, not because a check rejected it.
-//
-// There is no window, no swapchain and no SDL here. That is checkable rather
-// than aspirational: the `server` preset configures with no graphics stack and
-// the staged `server/` directory has no `shaders/` folder.
+// Headless server-owned tick, world set and shutdown path.
 
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/Shooting.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
@@ -47,17 +39,11 @@ namespace engine::assets {
 
 namespace server {
 
-	// Everything the command line decides, in one place.
-	//
-	// Parsed once and copied into the Server by Initialise, so nothing reads the
-	// argument list again after start-up and there is one answer to "what is
-	// this process configured to do".
+	// Command-line configuration copied into Server during Initialise.
 	struct Options {
 		// The loopback port the control surface listens on, or -1 for off.
 		//
-		// **Off by default, and that is the security boundary.** The surface
-		// reads and writes world state for whatever connects to it, with no
-		// authentication — see `SECURITY.md`. `--mcp-port` is the opting in.
+		// Unauthenticated world control; disabled by default.
 		int ControlPort = -1;
 
 		// Ticks per second. A world ticks at its own rate; this is the rate the
@@ -81,15 +67,7 @@ namespace server {
 
 		// The scene to host. Empty means the placeholder world.
 		//
-		// **A scene script, not yet a game file.** Since v0.3 this runs through
-		// the same loader the client's `--script` does, over the same file, so
-		// both ends author the world identically — a server that built it its
-		// own way would disagree with its replicas once a tick and every side
-		// would look self-consistent while doing it.
-		//
-		// The flag keeps the name it will have when `mono.gamefile` lands and a
-		// universe of worlds is what this points at, rather than being renamed
-		// twice. Until then a game is one scene.
+		// Scene script loaded with the same path as the client.
 		std::string GamePath;
 
 		// Read assets from here instead of from beside the binary. Empty means
@@ -119,15 +97,7 @@ namespace server {
 
 		// Run as a supervised host under a driver, rather than as a driver.
 		//
-		// **A host is not a different program.** It is this one, holding some
-		// of a universe's worlds in its own address space so that a hard fault
-		// in one of them takes this process rather than the server. That is
-		// what makes the grouping a deployment decision instead of an engine
-		// one, and it is the reason there is no `mono.host`.
-		//
-		// Empty means this process is a driver. Set, it names this host to its
-		// driver — and the process then expects a channel it was started with,
-		// and refuses to start without one.
+		// Empty means driver; set means this process is a supervised host.
 		std::string HostName;
 
 		// The worlds this host was granted, by name.
@@ -158,15 +128,7 @@ namespace server {
 
 		// How many processes share this machine, including this one.
 		//
-		// **Every process calling `Jobs::Start(0)` is the bug this prevents.**
-		// That asks for one worker per hardware thread, so a driver and seven
-		// hosts on a twenty-four core machine run a hundred and ninety threads
-		// over twenty-four cores, and every one of them is slower than it would
-		// have been alone.
-		//
-		// Zero means work it out: a driver counts the hosts it is about to
-		// spawn and tells each of them the total, so the arithmetic is done
-		// once by the only process that knows the answer.
+		// Zero lets the driver size one shared worker budget for all processes.
 		uint32_t Processes = 0;
 
 		// Whether to serve the primary world to clients at all.
@@ -201,16 +163,7 @@ namespace server {
 
 		// A content store this server serves to its own clients.
 		//
-		// **CDN.md §6's "local store", and it is an attachment rather than a
-		// second program.** `mono.cdn` is the same library deployed on its own
-		// and scaled; running one in-process is the self-hosted case — a small
-		// game, a LAN session, development — and the client cannot tell the
-		// difference, which is the property §11 asks for. One store, one
-		// manifest format, three deployments.
-		//
-		// Empty serves no content, which is what every existing recipe gets:
-		// a server that bound a port because nobody said not to would be a
-		// behaviour change in the determinism run, for `Listening`'s reason.
+		// Empty disables the attached origin.
 		std::filesystem::path ContentStore;
 
 		// The port the attached origin listens on. Only read when
@@ -220,16 +173,17 @@ namespace server {
 		// The secret shared with whoever issues grants — which, for an attached
 		// origin, is this same process.
 		//
-		// **Still checked, and still a real MAC over a real token.** CDN.md §4
-		// is explicit that single-player and LAN use the same flow with the
-		// server in-process: the grant is issued and verified across a function
-		// call and both halves are real. A path skipped in the configuration
-		// people develop against is a path that breaks the first time somebody
-		// ships the other one — §16.6's argument, applied to content.
-		//
-		// Empty means the attached origin generates one at start-up and keeps
-		// it to itself, which is right when this process is the only issuer.
+		// Empty generates an in-process-only grant key at startup.
 		std::string ContentGrantKey;
+
+		// The Ed25519 seed this server proves its identity with, as 64 hex
+		// characters, or empty for none.
+		//
+		// **Without it the exchange authenticates nobody**, which is protection
+		// against a listener and not against a relay — see
+		// `Listener::SetIdentity`. The same key a publisher signs manifests
+		// with, so a deployment distributes one public key and not two.
+		std::string IdentityKey;
 	};
 
 	// What the run produced. Returned rather than logged only, so a test can
@@ -266,6 +220,49 @@ namespace server {
 	class Server {
 	  public:
 		Server();
+
+		// Applies every pending input, server-authoritatively.
+		void ApplyInputs();
+
+		// Where an entity is, for the priority score and its occlusion query.
+		// Not `const`: it enters a world, which takes it.
+		bool PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out);
+
+		// Where a client is looking from, or `false` when nothing placed it.
+		bool ViewpointOf(engine::replication::ClientId client, engine::core::Vector3 &out) const;
+
+		// Where moving things were, for judging a client's action against what
+		// that client actually saw.
+		//
+		// **The query is a game's to make and the answer is a game's to act
+		// on.** This engine has no notion of a shot, so nothing here consumes
+		// it; what the server owes is an accurate record and
+		// `Rewind::TickSeenBy` to turn a client's input tick and its link's
+		// round trip into the moment to sample.
+		//
+		// @return The history.
+		const engine::replication::Rewind &Rewound() const {
+			return History;
+		}
+
+		// Tells the authority where a client is looking from, for the priority
+		// score.
+		//
+		// **A host's job rather than the authority's**, because a client's
+		// viewpoint is a game's idea and this engine has no per-client avatar
+		// yet: the placeholder world is cubes and nobody is in it. A client
+		// nothing has placed scores everything the same, which is the round
+		// robin the score replaces and the honest answer rather than pretending
+		// every client stands at the origin.
+		//
+		// @param client The client.
+		// @param at     Where it is looking from, in world space.
+		void SetClientViewpoint(engine::replication::ClientId client, const engine::core::Vector3 &at);
+
+		// Forgets where a client was looking.
+		//
+		// @param client The client.
+		void ForgetClientViewpoint(engine::replication::ClientId client);
 
 		// Declared so the content attachment can stay an incomplete type in
 		// this header. `mono.server` links `Mono::cdn`, and a server's public
@@ -530,6 +527,54 @@ namespace server {
 		// from binding a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
 		std::unique_ptr<engine::replication::Listener> Replication;
+
+		// The identity `Replication` signs transcripts with, held here because
+		// `Listener::SetIdentity` borrows rather than copies: a `SigningKey` is
+		// move-only and zeroes itself, and a copy would be a second place a
+		// secret lives.
+		std::optional<engine::assets::SigningKey> Identity;
+
+		// Where moving things were, for the last `RewindSettings::HistoryTicks`
+		// ticks.
+		//
+		// **Recorded whether or not anything asks**, because the alternative is
+		// a game turning it on and finding the history empty for the first half
+		// second. It costs one map insert per moving entity per tick and no
+		// allocation after the ring has filled.
+		engine::replication::Rewind History;
+
+		// Reused across ticks so resolving a shot allocates nothing after the
+		// first one, which is the same reason every other per-tick buffer in
+		// this engine is a member rather than a local.
+		std::vector<engine::examples::Target> Candidates;
+
+		// How many inputs were resolved and how many were not this encoding.
+		//
+		// **Two counters and not one.** A shot that hit nothing is an ordinary
+		// event; a payload that did not decode is a client running a different
+		// game or probing, and burying the second in the first is how an
+		// unusual number stops being noticed.
+		uint64_t Struck = 0;
+		uint64_t Dropped = 0;
+
+		// Where one client is looking from.
+		struct Viewpoint {
+			engine::core::Vector3 At;
+
+			// **Kept beside the position and checked on every read.** A slot is
+			// reused when a client leaves and another joins, so an entry keyed
+			// on the index alone would hand the new client the old one's
+			// viewpoint — and sort its world by where somebody else stood.
+			uint32_t Generation = 0;
+		};
+
+		// Where each client is looking from, for `DistancePriority`.
+		//
+		// **Keyed by the slot rather than by the whole handle**, so the map is
+		// bounded by the client limit rather than growing once per connection
+		// for the life of the process. A client absent from here has no
+		// viewpoint, which the score reads as "order these by rotation alone".
+		std::unordered_map<uint32_t, Viewpoint> Viewpoints;
 
 		// Present only in host mode. A driver holds one of these per host; a
 		// host holds exactly one, to whoever started it.

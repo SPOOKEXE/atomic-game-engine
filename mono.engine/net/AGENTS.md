@@ -331,6 +331,23 @@ byte of a group arriving between two polls is not.
 **A handler runs inside `Pump` with every other connection waiting, so it must
 not block.**
 
+### `ServeReport`'s byte counters are measured at the socket
+
+`ReceivedBytes` and `SentBytes` are counted where `read_some` and `write_some`
+return, not where a message parses. **That is the whole point of them** and it
+is the one thing to preserve if they are ever moved: a count taken from parsed
+requests reports zero for a peer that is filling a connection buffer and never
+finishing a message, which is precisely the traffic an operator is looking for.
+
+A partial write counts what actually left rather than what was queued — the
+remainder is counted on the poll it goes out on, and bytes still in an outbox
+when a connection drops were never sent and are never counted.
+
+**Say what they are not.** TCP and IP headers, the handshake and every
+retransmission are the kernel's and are invisible here, so this is the payload
+this module moved rather than what the interface carried. A reader that took it
+for the second would find it quietly low and never know by how much.
+
 ### The bounds are the security surface
 
 A public port with no connection ceiling, no per-connection buffer bound and no
@@ -338,3 +355,30 @@ message size limit is a denial-of-service primitive with a friendly name. All
 three are in `ServerSettings` and none is optional. Timeouts are counted in
 *polls* rather than wall time, for this module's standing reason: time is passed
 in, so a suite states a timeout instead of sleeping for one.
+
+## The round trip is measured, and Karn's rule is why it is right
+
+`ReliableSender` samples the gap between a reliable packet going out and its
+acknowledgement retiring it, smoothed at RFC 6298's one eighth.
+`ConnectionStats::RoundTripMilliseconds` had been declared since v0.3 and
+assigned by nothing, so it read zero on every connection there has ever been —
+while `replication::Rewind` read it and compensated for interpolation alone.
+
+**Only packets that were never resent are measured.** An acknowledgement of a
+resent packet does not say *which* transmission it answers, so a sample from one
+is either the true trip or the trip plus a retransmit timeout, with no way to
+tell — and measuring them makes the estimate worst on exactly the links that
+need it most.
+
+**`Held::Attempts` counts resends and starts at zero.** The first version of the
+check read `Attempts != 1` and therefore skipped every clean sample and measured
+every ambiguous one — the exact inversion of the rule it was written for. The
+suite catches it; the comment beside the check says which number means what.
+
+**A `Link` cannot measure this itself**, which is why `RecordRoundTrip` is a
+setter. The acknowledgement that closes a trip is matched against a packet a
+`ReliableSender` holds, and a link holds none. `replication::Session` owns both
+and carries the number across.
+
+**Zero means unknown, not instant.** A connection that has sent nothing reliable
+has nothing to measure, and a loopback honestly measures nothing at all.

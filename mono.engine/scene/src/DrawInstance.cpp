@@ -103,10 +103,14 @@ namespace engine::scene {
 			// `Surface` is signed and -1 means "no surface", so it is widened
 			// through `uint8_t` exactly as it was before: sign-extending it
 			// would fold in twenty-four bits that say nothing.
-			a = MixSignature(
-				a,
-				Pair(static_cast<uint8_t>(instance.Surface), instance.CastShadow ? 1u : 0u)
-			);
+			a = MixSignature(a, Pair(static_cast<uint8_t>(instance.Surface), instance.CastShadow ? 1u : 0u));
+
+			// The three fields v0.9 added. Folded in for the reason every other
+			// field is: this signature answers "would drawing this again produce
+			// the same image", and a texture swap, a tag change or an alpha mode
+			// change all produce a different one.
+			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
+			c = MixSignature(c, static_cast<uint64_t>(instance.Alpha));
 		}
 
 		// Combined in a fixed order, so the four lanes give one value. The

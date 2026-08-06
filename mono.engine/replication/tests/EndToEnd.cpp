@@ -1,14 +1,3 @@
-// A server and a client, over a real transport, with real framing.
-//
-// Everything in `Replication.cpp` hands byte vectors from one half to the
-// other, which is the right way to test the protocol and says nothing about
-// whether it survives a wire. This runs the same join and the same stream
-// through `net` — the harness is `Wire.hpp`, shared with `Loss.cpp`.
-//
-// That is `repo_layout.md` §16.6's claim made checkable — single-player rides
-// the loopback with **real encoding**, so there is no configuration in which
-// this path is skipped and no second lifecycle only a socket exercises.
-
 #include "Wire.hpp"
 
 #include <engine/ecs/Store.hpp>
@@ -52,9 +41,6 @@ TEST_CASE("a client joins over a real transport", "[replication]") {
 }
 
 TEST_CASE("a snapshot crosses in chunks that each fit a datagram", "[replication]") {
-	// The reason a snapshot is chunked at all. A world is megabytes and a
-	// datagram is about twelve hundred bytes; a chunk that did not fit would be
-	// refused by the transport and the client would never join.
 	Wire wire;
 	for (int index = 0; index < 600; index++) {
 		wire.Server.Set<Spot>(wire.Server.Create(), Spot{static_cast<float>(index), 0.0f});
@@ -66,18 +52,6 @@ TEST_CASE("a snapshot crosses in chunks that each fit a datagram", "[replication
 }
 
 TEST_CASE("a snapshot chunk the link refuses is sent again", "[replication]") {
-	// **The regression, stated rather than waited for.** `net`'s budgets are
-	// per tick and are numbers a suite sets, so "the link will carry four
-	// packets and the authority wants to send eight" is a fact this case
-	// declares — no load, no timing, no flake. A world of two hundred entities
-	// is about two hundred chunks, and half of every tick's eight were refused.
-	//
-	// Before the fix the cursor moved when a chunk was *built*, so a refused
-	// chunk was a hole nothing ever filled: the client applied almost all of
-	// the snapshot, never reached the last byte, never joined, and then refused
-	// every delta that followed as stale. The counts from the server suite were
-	// 184 chunks applied against 17865 refusals, which reads like a protocol
-	// error and was a cursor.
 	engine::replication::SessionSettings session;
 	session.Link.PacketsPerTick = 4;
 
@@ -91,24 +65,12 @@ TEST_CASE("a snapshot chunk the link refuses is sent again", "[replication]") {
 
 	REQUIRE(wire.Join(512));
 
-	// The budget really was exceeded, so this case is testing the recovery
-	// rather than a link that happened to have room. If this is ever zero the
-	// case above proves nothing.
 	REQUIRE(wire.ServerSide->Link().Stats().SendsOverBudget > 0);
 
-	// And the world that arrived is the whole one. A snapshot reassembled from
-	// chunks that were re-sent must not differ from one that went first time.
 	REQUIRE(wire.Client.CountMatching<Spot>() == 200);
 }
 
 TEST_CASE("the listener's own send loop hands refusals back", "[replication]") {
-	// The case above drives `Authority` and `Session` by hand, which is the
-	// right shape for a protocol suite and proves nothing about the loop a
-	// program actually runs. **`Listener::Publish` is where the return value of
-	// `Send` used to be dropped on the floor**, and dropping it there is what
-	// turned a refused chunk into a client that never joined — so this stands up
-	// the real `Listener` and the real `Connector` over a loopback and squeezes
-	// the same budget.
 	engine::replication::ListenerSettings serving;
 	serving.Session.Link.PacketsPerTick = 4;
 	serving.Authority.ChunksPerTick = 8;
@@ -149,16 +111,6 @@ TEST_CASE("the listener's own send loop hands refusals back", "[replication]") {
 }
 
 TEST_CASE("a creation the link refused is announced again", "[replication]") {
-	// **A creation is said exactly once, and the known set moves when it is
-	// built.** So a delta message carrying creations that the link would not
-	// take used to leave the server believing a client had been told about
-	// entities it had never heard of — and every component value for them after
-	// that is a value for a row the replica does not hold, which `Replica` drops
-	// without a word. There is no re-snapshot either: the client is
-	// acknowledging happily and is not behind.
-	//
-	// Three hundred entities appearing at once against a link that will carry
-	// two packets a tick is that case, stated rather than waited for.
 	engine::replication::SessionSettings session;
 	session.Link.PacketsPerTick = 2;
 
@@ -184,20 +136,10 @@ TEST_CASE("a creation the link refused is announced again", "[replication]") {
 		REQUIRE(wire.Client.Alive(entity));
 	}
 
-	// **And by being told again, not by being sent the world again.** A client
-	// holding entities the server thinks it announced falls behind and is
-	// eventually re-snapshotted, which does repair it — two seconds later and
-	// at the cost of the whole world twice over. A repair that expensive
-	// looks like a working system from every angle except the bandwidth graph,
-	// which is why this is asserted rather than left to the count above.
 	REQUIRE(restarts == 0);
 }
 
 TEST_CASE("the refusal counter moves only when the link is really over", "[replication]") {
-	// The other half of the case above, and the reason it is a separate one:
-	// `SendsOverBudget` is what `docs/DEFERRED.md` calls the reopen signal, so
-	// a build that moved it on an ordinary tick would make the signal useless.
-	// Under the default budgets a small world never touches it.
 	Wire wire;
 
 	std::vector<Entity> entities;
@@ -244,9 +186,6 @@ TEST_CASE("movement streams as deltas after the join", "[replication]") {
 }
 
 TEST_CASE("an input reaches the server over the reliable channel", "[replication]") {
-	// Reliable because a lost input is a jump that never happened, and nothing
-	// later covers it — unlike a delta, where the next one is already on its
-	// way and is more correct.
 	Wire wire;
 	wire.Server.Set<Spot>(wire.Server.Create(), Spot{1.0f, 0.0f});
 	REQUIRE(wire.Join());
@@ -268,7 +207,6 @@ TEST_CASE("the acknowledgement gets back and the server sees it", "[replication]
 		wire.Tick();
 	}
 
-	// Not zero, and not ahead of what the client actually applied.
 	const auto status = wire.Authority_.StatusOf(wire.Handle);
 	REQUIRE(status.Applied > 0);
 	REQUIRE(status.Applied <= wire.Replica_.Applied());
@@ -289,4 +227,21 @@ TEST_CASE("nothing malformed crosses a healthy link", "[replication]") {
 	REQUIRE(wire.Authority_.Stats().Refused == 0);
 	REQUIRE(wire.ServerSide->Stats().Refused == 0);
 	REQUIRE(wire.ClientSide->Stats().Refused == 0);
+}
+
+TEST_CASE("a real session writes the round trip it measured", "[replication]") {
+	Wire wire;
+	REQUIRE(wire.Join());
+
+	wire.ServerSide->Link().RecordRoundTrip(9.0);
+	REQUIRE(wire.ServerSide->Link().Stats().RoundTripMilliseconds > 8000.0f);
+
+	for (int step = 0; step < 8; step++) {
+		wire.Tick();
+	}
+
+	const float trip = wire.ServerSide->Link().Stats().RoundTripMilliseconds;
+
+	CHECK(trip < 200.0f);
+	CHECK(trip >= 0.0f);
 }

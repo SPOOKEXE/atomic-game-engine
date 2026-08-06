@@ -214,3 +214,18 @@
 	url = https://github.com/nlohmann/json.git
 	branch = master
 	shallow = true
+; MP3 decoding, for `Engine::audio`. Two headers and no build system.
+;
+; `master` rather than a release branch because upstream cuts none — there is no
+; tag in the repository and the last commit is from 2022. That is a finished
+; decoder rather than an abandoned one: MP3 has not changed since 1993. The
+; superproject pins the SHA either way, so a clone is still reproducible.
+;
+; CC0-1.0, which is why this was addable at all — `mono.vendor/AGENTS.md` asks
+; for the licence check before the submodule, and a codec is where that question
+; usually ends the conversation.
+[submodule "mono.vendor/minimp3"]
+	path = mono.vendor/minimp3
+	url = https://github.com/lieff/minimp3.git
+	branch = master
+	shallow = true
