@@ -1,44 +1,8 @@
 #pragma once
 
-// One peer's connection, from the wire up to a replication message.
-//
-// **This is the joint.** `net` gives a `Transport` that moves datagrams, a
-// `Link` that owns the lifecycle and the acknowledgement window, and a
-// `ReliableSender`/`ReliableReceiver` pair that turns a lossy channel into an
-// ordered one. `replication` gives messages. Nothing above knew how to put them
-// together and nothing below was allowed to, because `net` must not know what a
-// component is — so the joint is here, once, rather than in the server and
-// again in the client.
-//
-// **Which channel a message goes on is decided here and not by the caller.**
-// A snapshot chunk, an input and a structural change are reliable, because a
-// lost chunk is a client that never joins, a lost input is a jump that never
-// happened, and a lost creation is an entity the client never hears of again. A
-// delta is unreliable, because the next one is already on its way and is more
-// correct than the one being waited for — that is `net/AGENTS.md`'s rule about
-// state against events, and putting the decision in the caller's hands is how
-// somebody eventually makes everything reliable and turns one lost packet into
-// a visible stall.
-//
-// **Every payload is sealed, and a session with no keys sends and accepts
-// nothing.** `Admission.hpp`'s exchange ends with two directional ciphers and
-// `AdoptKeys` is where they land; from that moment the payload of every packet
-// is ChaCha20-Poly1305 over the plaintext with the packet header as associated
-// data. There is no flag on the wire saying whether a packet is sealed and no
-// call that sends one that is not — **a downgrade is only possible if a receiver
-// can be asked for it, and nothing here can be asked.** A session that never
-// adopted keys fails closed rather than falling back, because "in the clear just
-// this once" is the whole of the attack.
-//
-// The one channel that stays clear is `net::ChannelKind::Handshake`, which is
-// what establishes the keys and therefore cannot be sealed under them. It never
-// passes through here at all: `Listener` and `Connector` frame it straight to
-// the transport, and a handshake packet arriving at a session is refused before
-// anything else looks at it.
-//
-// **Time is passed in, never read.** The same rule the two layers under this
-// follow, and for the same reason: it makes a timeout something a suite states
-// rather than waits for.
+// Owns framing, channel selection, reliability, and encryption for one peer.
+// Payloads require adopted keys; handshake packets bypass this class.
+// Message kind selects reliable or unreliable delivery so callers cannot drift.
 //
 // @tier L12 · shared
 

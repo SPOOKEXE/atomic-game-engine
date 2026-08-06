@@ -183,3 +183,42 @@ part you most want to see.
 `Actions::BeginFrame` clears the edge-triggered state and runs *before* the
 event pump, not after. Clearing afterwards discards actions fired during the
 frame before anything reads them.
+
+`PumpSounds` runs **after the tick and the replica's apply, and before
+presentation** — so a `Sound` a script started this frame is heard this frame
+rather than next, and the state it reads has stopped moving.
+
+## Sound is a seam, and it holds the state neither side can
+
+`scene::Sound` is rows in a world and `engine::audio` is nodes in a graph.
+Neither knows the other exists, and `Sounds.hpp` is the only thing that knows
+both: it owns the mapping from an entity to the nodes standing in for it,
+because the world must not hold node ids and the mixer must not hold entities.
+
+**One `SoundStage` per world.** Node ids are minted per mixer and an entity is
+only unique inside its own store, so one stage across two worlds collides on
+both counts.
+
+**Post only what changed.** The command queue is bounded and a full one drops
+rather than blocks — right, because the consumer has a deadline — so a pass that
+reposted its whole state every frame would fill it with no-ops and start
+dropping the commands that were real changes. That is what the last-posted
+values on `Voice` are for, and they are the values the *mixer* was told rather
+than the values the world holds.
+
+**Decode and resample once, at delivery.** The graph must never resample on the
+device thread, and a buffer converted per voice would pay for it again for every
+part playing one footstep. `DecodeAudio` picks its decoder from the **bytes**
+rather than from the manifest's name, because a name is what a publisher typed
+and the content is what arrived — and a decoder handed the wrong format produces
+noise at full volume rather than nothing.
+
+**Nothing distinguishes a replicated `Sound` from a locally created one**, and
+that is why "under Workspace, in sync for everyone" and "made by a LocalScript,
+heard by that player alone" need no audio rule at all. They are the same rows;
+which client has them is replication's answer, already given.
+
+**A start is scheduled against the sample clock**, never applied at the top of
+whichever block it lands in. `audio/AGENTS.md` names that as the one place
+"close enough to the frame" is wrong, and a `Play` posted without a deadline is
+exactly the convenience it warns will be reached for.

@@ -1,3 +1,4 @@
+#include <engine/assets/Builtin.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -11,6 +12,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -36,6 +38,8 @@ namespace client {
 	using engine::scene::DrawInstance;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
+	using engine::scene::SurfaceAppearance;
+	using engine::scene::Tags;
 	using engine::scene::Transform;
 	using engine::scene::Visual;
 	using engine::scene::WorldBounds;
@@ -192,7 +196,14 @@ namespace client {
 			size_t matching = 0;
 			{
 				ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-				matching = store.CountMatching<Transform, PreviousTransform, Bounds, Visual, Rendered>();
+				matching = store.CountMatching<
+					Transform,
+					PreviousTransform,
+					Bounds,
+					Visual,
+					SurfaceAppearance,
+					Tags,
+					Rendered>();
 			}
 
 			{
@@ -244,11 +255,19 @@ namespace client {
 				// so that no two workers touch the same bytes, and skipping a
 				// row would leave a hole in the draw list and make `written` a
 				// lie. `scene/Visibility.hpp` has the whole argument.
+				// **`SurfaceAppearance` and `Tags` are columns rather than an
+				// optional join**, which is the whole reason both live on
+				// `BasePart` rather than on `MeshPart`. A batched parallel walk
+				// is handed columns and no entity; a component that only some
+				// rows had could not be read here at all without walking the
+				// world a second time.
 				written = store.EachBatchParallel<
 					const Transform,
 					const PreviousTransform,
 					const Bounds,
 					const Visual,
+					const SurfaceAppearance,
+					const Tags,
 					const Rendered>(
 					[out, capacity, alpha](
 						size_t first,
@@ -257,6 +276,8 @@ namespace client {
 						const PreviousTransform *previous,
 						const Bounds *bounds,
 						const Visual *visuals,
+						const SurfaceAppearance *appearances,
+						const Tags *tags,
 						const Rendered *
 					) {
 						// The count came from a different query than the one
@@ -291,6 +312,8 @@ namespace client {
 								visuals[row].Tint,
 								visuals[row].Mesh,
 								visuals[row].Material,
+								appearances[row].ColourMap,
+								tags[row].Mask,
 
 								// Copied rather than resolved here. Which pass this
 								// instance lands in is the renderer's decision,
@@ -300,6 +323,7 @@ namespace client {
 								visuals[row].Transparency,
 								visuals[row].Surface,
 								visuals[row].CastShadow,
+								appearances[row].Mode,
 							};
 						}
 					},
@@ -350,6 +374,33 @@ namespace client {
 			store.Set<Transform>(camera, Transform{});
 			store.Set<engine::scene::Camera>(camera, engine::scene::Camera{});
 			return camera;
+		}
+
+		// Built-in mesh counts are available before scripts load, without delivery.
+		void RecordBuiltinMeshes(Store &store) {
+			engine::scene::RegisterSceneComponents();
+
+			struct Counted {
+				engine::core::Name Name;
+				uint32_t Triangles = 0;
+			};
+
+			static const std::vector<Counted> BUILTINS = [] {
+				std::vector<Counted> counted;
+				for (uint8_t index = 0; index < engine::assets::BUILTIN_MESH_COUNT; index++) {
+					const auto builtin = static_cast<engine::assets::BuiltinMesh>(index);
+					const engine::assets::MeshData mesh = engine::assets::MakeBuiltin(builtin);
+					counted.push_back(
+						{engine::core::Name(engine::assets::BuiltinName(builtin)),
+						 static_cast<uint32_t>(mesh.Indices.size() / 3)}
+					);
+				}
+				return counted;
+			}();
+
+			for (const Counted &builtin : BUILTINS) {
+				engine::scene::RecordMesh(store, builtin.Name, builtin.Triangles);
+			}
 		}
 
 		void InstallResources(Store &store, Entity camera, float extent, uint32_t reserve) {
@@ -410,6 +461,12 @@ namespace client {
 				// a future widening of the range has to find all of them.
 				view.ImageOpacity = 1.0f - target.ImageTransparency;
 
+				// **Copied rather than resolved.** The filter is already a mask
+				// on the component, because a name would be a lookup per
+				// instance per pass; whatever authored the camera did the
+				// registration once.
+				view.TagFilter = target.TagFilter;
+
 				// **Kept beside its entity id, because `SurfaceView` does not
 				// carry one and should not.** It is what the renderer takes, and
 				// an entity handle in it would be a world's identifier in a type
@@ -442,6 +499,9 @@ namespace client {
 		// type per process, so an explicit registration that arrives second
 		// aborts rather than quietly leaving two names for one thing.
 		RegisterClientComponents();
+
+		// Register built-in metadata before the script can query it.
+		RecordBuiltinMeshes(store);
 
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
@@ -527,6 +587,9 @@ namespace client {
 
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {
 		RegisterClientComponents();
+
+		// Game-file and studio worlds need the same built-in metadata.
+		RecordBuiltinMeshes(store);
 
 		if (!store.HasResource<DrawList>()) {
 			store.SetResource(DrawList{});

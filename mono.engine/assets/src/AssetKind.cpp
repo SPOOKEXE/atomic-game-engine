@@ -15,27 +15,37 @@ namespace engine::assets {
 		//
 		// `.agame` and `.aworld` are here because the studio already writes
 		// them and a game file is content a client fetches like any other.
-		constexpr std::array<std::pair<std::string_view, AssetKind>, 27> EXTENSIONS{{
-			{"mesh", AssetKind::Mesh},	   {"glb", AssetKind::Mesh},		 {"gltf", AssetKind::Mesh},
-			{"obj", AssetKind::Mesh},	   {"fbx", AssetKind::Mesh},
+		//
+		// **`.amesh` and `.atex` are the baked forms and the rest are sources.**
+		// Both sides are in one table on purpose: a publisher pointed at a
+		// source tree and one pointed at a baked tree must classify the same
+		// way, or the kind-filtered request that fetches "every mesh" would
+		// return a different set depending on which was published. What is
+		// *inside* an entry is the importer's problem — `bake::ReadModel` is the
+		// one thing that reads a `.glb` — and this table has never claimed
+		// otherwise.
+		constexpr std::array<std::pair<std::string_view, AssetKind>, 31> EXTENSIONS{{
+			{"amesh", AssetKind::Mesh},	  {"mesh", AssetKind::Mesh},		{"glb", AssetKind::Mesh},
+			{"gltf", AssetKind::Mesh},	  {"obj", AssetKind::Mesh},			{"fbx", AssetKind::Mesh},
+			{"pmx", AssetKind::Mesh},
 
-			{"png", AssetKind::Texture},   {"jpg", AssetKind::Texture},		 {"jpeg", AssetKind::Texture},
-			{"tga", AssetKind::Texture},   {"ktx2", AssetKind::Texture},	 {"dds", AssetKind::Texture},
-			{"basis", AssetKind::Texture},
+			{"atex", AssetKind::Texture}, {"png", AssetKind::Texture},		{"jpg", AssetKind::Texture},
+			{"jpeg", AssetKind::Texture}, {"bmp", AssetKind::Texture},		{"tga", AssetKind::Texture},
+			{"ktx2", AssetKind::Texture}, {"dds", AssetKind::Texture},		{"basis", AssetKind::Texture},
 
-			{"wav", AssetKind::Audio},	   {"ogg", AssetKind::Audio},		 {"flac", AssetKind::Audio},
+			{"wav", AssetKind::Audio},	  {"ogg", AssetKind::Audio},		{"flac", AssetKind::Audio},
 			{"mp3", AssetKind::Audio},
 
-			{"mat", AssetKind::Material},  {"surface", AssetKind::Material},
+			{"mat", AssetKind::Material}, {"surface", AssetKind::Material},
 
-			{"ttf", AssetKind::Font},	   {"otf", AssetKind::Font},
+			{"ttf", AssetKind::Font},	  {"otf", AssetKind::Font},
 
-			{"luau", AssetKind::Script},   {"lua", AssetKind::Script},		 {"ts", AssetKind::Script},
+			{"luau", AssetKind::Script},  {"lua", AssetKind::Script},		{"ts", AssetKind::Script},
 			{"js", AssetKind::Script},
 
 			{"mp4", AssetKind::Video},
 
-			{"agame", AssetKind::Data},	   {"aworld", AssetKind::Data},
+			{"agame", AssetKind::Data},	  {"aworld", AssetKind::Data},
 		}};
 	}
 

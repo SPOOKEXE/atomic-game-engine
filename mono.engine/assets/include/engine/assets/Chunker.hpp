@@ -1,24 +1,7 @@
 #pragma once
 
-// Where one chunk ends and the next begins.
-//
-// Boundaries are decided by the *content* rather than by a byte count, using a
-// rolling hash over a short window. That is the whole reason dedup works: with
-// fixed-size chunks, inserting one byte near the front of a file shifts every
-// later boundary and makes every later chunk new. Content-defined boundaries
-// move with the content, so an insertion changes the chunks around it and
-// nothing else. DATATYPES_LIBRARIES.md §1.1 names the class — rolling, gear.
-//
-// **The gear table and the mask construction below are part of the format.**
-// Change either and every chunk boundary in the world moves, which means every
-// stored chunk, every manifest and every client's cache is invalidated at once.
-// They are generated from a stated seed rather than pasted as 256 magic numbers
-// so that the thing being frozen is an algorithm somebody can review.
-//
-// This is *not* a hash anybody trusts. It decides where to cut and nothing
-// else; the address of the resulting chunk is BLAKE3 over its bytes. A rolling
-// hash is trivially collidable and must never name content — ContentHash.hpp.
-//
+// Content-defined chunking. The rolling hash chooses boundaries; BLAKE3 names
+// the resulting bytes. The gear table and seed are format constants.
 // @tier L8 · shared
 
 #include <cstddef>
@@ -28,12 +11,7 @@
 
 namespace engine::assets {
 
-	// The size envelope a chunker cuts within.
-	//
-	// The defaults are a starting point rather than a measurement — CDN.md §9
-	// carries that as an open question, and AGENTS.md asks for a number in a
-	// comment beside an algorithm choice. There is not one here yet, and saying
-	// so is better than implying the values were derived.
+	// Size envelope for chunking.
 	struct ChunkLimits {
 		// No boundary is taken before this many bytes. Small chunks cost more
 		// in per-chunk hashing and manifest rows than they save in dedup.

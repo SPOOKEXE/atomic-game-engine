@@ -137,6 +137,34 @@ namespace engine::scene {
 		return core::Vector3{0.0f, 0.0f, -1.0f};
 	}
 
+	// How a surface's alpha channel is treated.
+	//
+	// **A closed list whose ordinals are on the wire**, so an entry may be
+	// appended and never reordered — `assets::TextureFormat`'s rule and for the
+	// same reason.
+	//
+	// @since v0.9
+	enum class AlphaMode : uint8_t {
+		// The alpha channel is ignored and the surface is solid. What almost
+		// every texture is, and the only mode that costs nothing.
+		Opaque = 0,
+
+		// A fragment below `SurfaceAppearance::AlphaCutoff` is discarded and
+		// everything else is solid.
+		//
+		// **The mode a character model needs.** Hair, eyelashes and foliage are
+		// authored as cut-out planes on a sheet with a mask; blending them puts
+		// every plane in the sorted pass, where a hundred overlapping strands
+		// cost a hundred sorted draws and still get the order wrong. A discard
+		// keeps them opaque, keeps them in the depth buffer and keeps them out
+		// of the sort.
+		Clip = 1,
+
+		// The alpha channel is a blend factor, so the surface joins the sorted
+		// transparent pass.
+		Blend = 2,
+	};
+
 	// Who may see what a service holds.
 	//
 	// **Replication is not implemented from this yet, and the field is here

@@ -1,0 +1,330 @@
+#include <engine/audio/Mixer.hpp>
+#include <engine/audio/Sample.hpp>
+#include <engine/core/Name.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/testing/Suite.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <client/Sounds.hpp>
+#include <cstddef>
+#include <memory>
+#include <string_view>
+#include <vector>
+
+TEST_SUITE_ID("client.sounds")
+TEST_DEPENDS("engine.scene.sound")
+TEST_DEPENDS("engine.audio.mixer")
+
+using client::DecodeAudio;
+using client::SoundCatalogue;
+using client::SoundStage;
+using client::Voice;
+using engine::audio::AudioMixer;
+using engine::audio::SampleBuffer;
+using engine::core::Name;
+using engine::core::Vector3;
+using engine::ecs::Entity;
+using engine::ecs::NULL_ENTITY;
+using engine::ecs::Store;
+using engine::scene::MakePart;
+using engine::scene::PartDesc;
+using engine::scene::SoundClass;
+
+namespace {
+	constexpr Vector3 EAR{0.0f, 0.0f, 0.0f};
+
+	// A second of something audible, in the mixer's own format.
+	std::shared_ptr<const SampleBuffer> Tone(size_t frames = 48000) {
+		std::vector<float> samples(frames * 2, 0.25f);
+		return std::make_shared<const SampleBuffer>(engine::audio::AudioFormat{}, samples);
+	}
+
+	Entity NewSound(Store &store, std::string_view id, bool playing = true) {
+		const Entity instance = store.CreateInstance(SoundClass());
+		REQUIRE(instance != NULL_ENTITY);
+
+		engine::scene::Sound *sound = store.GetMutable<engine::scene::Sound>(instance);
+		REQUIRE(sound != nullptr);
+		sound->SoundId = Name(id);
+		sound->Playing = playing;
+		return instance;
+	}
+
+	// A catalogue holding one track under the name a script would write.
+	SoundCatalogue With(std::string_view id) {
+		SoundCatalogue catalogue;
+		REQUIRE(catalogue.Add(Name(id), Tone()));
+		return catalogue;
+	}
+}
+
+TEST_CASE("a decoder is picked from the bytes, not from a name", "[client][sounds]") {
+	// The name is what a publisher typed and the content is what arrived, and
+	// the two disagree the first time somebody renames a file.
+	const std::vector<std::byte> nothing;
+	CHECK_FALSE(DecodeAudio(nothing).has_value());
+
+	const char text[] = "this is not audio at all, by any reading of it";
+	const std::span<const std::byte> prose(
+		reinterpret_cast<const std::byte *>(text), reinterpret_cast<const std::byte *>(text) + sizeof(text)
+	);
+	CHECK_FALSE(DecodeAudio(prose).has_value());
+}
+
+TEST_CASE("a catalogue refuses what it cannot key or hold", "[client][sounds]") {
+	SoundCatalogue catalogue;
+
+	CHECK_FALSE(catalogue.Add(Name(), Tone()));
+	CHECK_FALSE(catalogue.Add(Name("audio/track.mp3"), nullptr));
+	CHECK(catalogue.Count() == 0);
+
+	REQUIRE(catalogue.Add(Name("audio/track.mp3"), Tone()));
+	CHECK(catalogue.Count() == 1);
+	CHECK(catalogue.Find(Name("audio/track.mp3")) != nullptr);
+
+	// A miss is the ordinary state while content is still streaming, not an
+	// error — which is what lets a script set `Playing` before the asset has
+	// arrived and still have it start when it does.
+	CHECK(catalogue.Find(Name("audio/other.mp3")) == nullptr);
+}
+
+TEST_CASE("a playing sound opens a voice", "[client][sounds]") {
+	Store store("sounds_test.play");
+	AudioMixer mixer;
+	SoundStage stage;
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, With("audio/track.mp3"), EAR, mixer.Format().SampleRate);
+
+	CHECK(stage.Count() == 1);
+	const Voice *voice = stage.Find(sound);
+	REQUIRE(voice != nullptr);
+	CHECK(voice->Player.IsValid());
+	CHECK(voice->Fader.IsValid());
+
+	// **No emitter**, because nothing gave this sound a parent with a place in
+	// the world. Under a service it is heard everywhere at one level, which is
+	// the case a music track is.
+	CHECK_FALSE(voice->Placement.IsValid());
+}
+
+TEST_CASE("a sound whose asset has not arrived waits", "[client][sounds]") {
+	Store store("sounds_test.waiting");
+	AudioMixer mixer;
+	SoundStage stage;
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+
+	// An empty catalogue: the content is still streaming. Not an error and not
+	// a refusal — the row keeps asking, and the frame the asset lands is the
+	// frame it starts.
+	const SoundCatalogue nothing;
+	stage.Sync(store, mixer, nothing, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Count() == 0);
+
+	stage.Sync(store, mixer, With("audio/track.mp3"), EAR, mixer.Format().SampleRate);
+	CHECK(stage.Find(sound) != nullptr);
+}
+
+TEST_CASE("a sound that is not playing has no voice", "[client][sounds]") {
+	Store store("sounds_test.silent");
+	AudioMixer mixer;
+	SoundStage stage;
+
+	const Entity sound = NewSound(store, "audio/track.mp3", false);
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Count() == 0);
+
+	store.GetMutable<engine::scene::Sound>(sound)->Playing = true;
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Count() == 1);
+
+	// And stopping releases the nodes rather than leaving a silent player
+	// walking a buffer forever.
+	store.GetMutable<engine::scene::Sound>(sound)->Playing = false;
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Count() == 0);
+}
+
+TEST_CASE("a sound inside a part is positional", "[client][sounds]") {
+	// The whole of the parent rule, arriving where it is acted on: a sound
+	// inside something with a place in the world gets an emitter and falls off
+	// from that thing's position.
+	Store store("sounds_test.positional");
+	AudioMixer mixer;
+	SoundStage stage;
+
+	const Entity part = MakePart(store, PartDesc{});
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	REQUIRE(store.SetParent(sound, part));
+
+	stage.Sync(store, mixer, With("audio/track.mp3"), EAR, mixer.Format().SampleRate);
+
+	const Voice *voice = stage.Find(sound);
+	REQUIRE(voice != nullptr);
+	CHECK(voice->Placement.IsValid());
+}
+
+TEST_CASE("reparenting between a service and a part rebuilds the chain", "[client][sounds]") {
+	Store store("sounds_test.reparent");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	const engine::audio::NodeId first = stage.Find(sound)->Player;
+	CHECK_FALSE(stage.Find(sound)->Placement.IsValid());
+
+	const Entity part = MakePart(store, PartDesc{});
+	REQUIRE(store.SetParent(sound, part));
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+
+	// A different chain shape, so a rebuild rather than a repoint — the
+	// emitter has to sit between the fader and the output and there is no
+	// command that inserts one.
+	REQUIRE(stage.Find(sound) != nullptr);
+	CHECK(stage.Find(sound)->Placement.IsValid());
+	CHECK_FALSE(stage.Find(sound)->Player == first);
+}
+
+TEST_CASE("changing SoundId rebuilds rather than repoints", "[client][sounds]") {
+	Store store("sounds_test.swap");
+	AudioMixer mixer;
+	SoundStage stage;
+
+	SoundCatalogue catalogue;
+	REQUIRE(catalogue.Add(Name("audio/one.mp3"), Tone()));
+	REQUIRE(catalogue.Add(Name("audio/two.mp3"), Tone()));
+
+	const Entity sound = NewSound(store, "audio/one.mp3");
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	const engine::audio::NodeId first = stage.Find(sound)->Player;
+
+	// `SetSound` rewinds, and somebody who wrote a different name meant a
+	// different sound rather than a seek.
+	store.GetMutable<engine::scene::Sound>(sound)->SoundId = Name("audio/two.mp3");
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+
+	REQUIRE(stage.Find(sound) != nullptr);
+	CHECK_FALSE(stage.Find(sound)->Player == first);
+	CHECK(stage.Find(sound)->Sound == Name("audio/two.mp3"));
+}
+
+TEST_CASE("a destroyed sound takes its voice with it", "[client][sounds]") {
+	Store store("sounds_test.destroy");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	REQUIRE(stage.Count() == 1);
+
+	store.Destroy(sound);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+
+	// Otherwise the mixer accumulates players walking buffers nothing
+	// references — a leak that is inaudible right up until it is not.
+	CHECK(stage.Count() == 0);
+	CHECK(stage.Find(sound) == nullptr);
+}
+
+TEST_CASE("a pass that changed nothing posts nothing", "[client][sounds]") {
+	// The property the whole file is shaped around. The queue is bounded and a
+	// full one drops rather than blocks, so a sync that reposted its state
+	// every frame would fill it with no-ops and start dropping the commands
+	// that were real changes.
+	Store store("sounds_test.quiet");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+
+	// Drain what opening the voice posted, so what follows is measured against
+	// an empty queue.
+	SampleBuffer block(mixer.Format(), 512);
+	mixer.Render(block);
+	const size_t settled = mixer.Commands().Pending();
+
+	for (int pass = 0; pass < 8; ++pass) {
+		stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	}
+
+	// One `SetListener` per pass and nothing else: the ear may have moved and
+	// the mixer is the only thing that knows it did not.
+	CHECK(mixer.Commands().Pending() == settled + 8);
+}
+
+TEST_CASE("what the stage built actually mixes", "[client][sounds]") {
+	// **The case that proves the chain rather than the bookkeeping.** Every
+	// test above checks that the right nodes exist; this one renders past the
+	// scheduled start and asks whether anything came out. A wiring mistake —
+	// the fader connected to nothing, the player never told to play, the start
+	// scheduled at a deadline that never arrives — passes all of them and
+	// produces silence.
+	Store store("sounds_test.audible");
+	AudioMixer mixer;
+	SoundStage stage;
+
+	NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, With("audio/track.mp3"), EAR, mixer.Format().SampleRate);
+
+	// The start is a tenth of a second ahead, on purpose: a command applied at
+	// the top of whichever block it lands in quantises to the block. So render
+	// past it rather than once.
+	SampleBuffer block(mixer.Format(), 512);
+	float loudest = 0.0f;
+	for (int rendered = 0; rendered < 32; ++rendered) {
+		block.Silence();
+		mixer.Render(block);
+		loudest = std::max(loudest, block.Peak());
+	}
+
+	CHECK(loudest > 0.0f);
+}
+
+TEST_CASE("nothing is mixed before the scheduled start", "[client][sounds]") {
+	// The other half of the same property. A `Play` carries a sample deadline
+	// and `audio/AGENTS.md` names this as the one place "close enough to the
+	// frame" is wrong — so a block rendered before the deadline must be silent
+	// rather than nearly so.
+	Store store("sounds_test.deadline");
+	AudioMixer mixer;
+	SoundStage stage;
+
+	NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, With("audio/track.mp3"), EAR, mixer.Format().SampleRate);
+
+	// One block is 512 frames and the start is 4800 away, so this is well
+	// inside the wait.
+	SampleBuffer block(mixer.Format(), 512);
+	mixer.Render(block);
+	CHECK(block.Peak() == 0.0f);
+}
+
+TEST_CASE("clearing a stage releases every voice", "[client][sounds]") {
+	Store store("sounds_test.clear");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	NewSound(store, "audio/track.mp3");
+	NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	REQUIRE(stage.Count() == 2);
+
+	// What a world teardown calls. Without it the nodes outlive the entities
+	// they stood in for.
+	stage.Clear(mixer);
+	CHECK(stage.Count() == 0);
+}

@@ -3,10 +3,12 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
@@ -125,6 +127,115 @@ namespace engine::scene {
 			}
 		}
 
+		// Derived resource: do not persist stale mesh counts.
+		void WriteMeshCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadMeshCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<MeshCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].Triangles.clear();
+			}
+		}
+
+		void WriteSurfaceAppearances(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *appearances = static_cast<const SurfaceAppearance *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(appearances[index].ColourMap);
+				writer.WriteFloat(appearances[index].AlphaCutoff);
+				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Mode));
+			}
+		}
+
+		// **A hand-written pair, because it holds a name**, and every field is
+		// written the day it is added rather than a release later — the lesson
+		// `WriteVisuals` records above, applied from this function's first line.
+		void WriteSounds(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *sounds = static_cast<const Sound *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const Sound &sound = sounds[index];
+				writer.WriteName(sound.SoundId);
+				writer.WriteFloat(sound.Volume);
+				writer.WriteFloat(sound.RollOffMinDistance);
+				writer.WriteFloat(sound.RollOffMaxDistance);
+				writer.WriteBool(sound.Looped);
+
+				// **Written, so a save file remembers what was playing.** The
+				// alternative reads as tidier — a loaded world starts silent —
+				// and is the wrong default: a level whose ambience is a looping
+				// `Sound` under `Workspace` would come back mute, and nothing
+				// in the file would say why.
+				writer.WriteBool(sound.Playing);
+			}
+		}
+
+		void ReadSounds(core::ByteReader &reader, void *destination, size_t count) {
+			auto *sounds = static_cast<Sound *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				Sound &sound = sounds[index];
+				sound.SoundId = reader.ReadName();
+				sound.Volume = reader.ReadFloat();
+				sound.RollOffMinDistance = reader.ReadFloat();
+				sound.RollOffMaxDistance = reader.ReadFloat();
+				sound.Looped = reader.ReadBool();
+				sound.Playing = reader.ReadBool();
+			}
+		}
+
+		void ReadSurfaceAppearances(core::ByteReader &reader, void *destination, size_t count) {
+			auto *appearances = static_cast<SurfaceAppearance *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				appearances[index].ColourMap = reader.ReadName();
+				appearances[index].AlphaCutoff = reader.ReadFloat();
+
+				const uint8_t mode = reader.ReadUInt8();
+
+				// Range-checked before the cast, for `assets::Texture::Read`'s
+				// reason: a cast of an out-of-range byte produces a value no
+				// switch handles, and every consumer downstream then reads
+				// something the type says cannot exist.
+				appearances[index].Mode = mode <= static_cast<uint8_t>(AlphaMode::Blend)
+											  ? static_cast<AlphaMode>(mode)
+											  : AlphaMode::Opaque;
+			}
+		}
+
+		// **The tag names, and they have to travel with the masks.** A `Tags`
+		// component is a bare integer whose bits mean whatever this table says
+		// they mean, so a world restored with the masks and without the table
+		// would have every tagged object in a group with no name — and a surface
+		// camera filtering by name would match nothing, silently.
+		void WriteTagTables(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *tables = static_cast<const TagTable *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteUInt32(static_cast<uint32_t>(tables[index].Names.size()));
+
+				// In registration order, because the index *is* the bit. Sorting
+				// here would renumber every mask already stored on a row —
+				// `WriteSurfaceTables` says the same about its own.
+				for (const core::Name &name : tables[index].Names) {
+					writer.WriteName(name);
+				}
+			}
+		}
+
+		void ReadTagTables(core::ByteReader &reader, void *destination, size_t count) {
+			auto *tables = static_cast<TagTable *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				tables[index].Names.clear();
+
+				const uint32_t names = reader.ReadUInt32();
+				for (uint32_t at = 0; at < names && !reader.Failed(); at++) {
+					if (tables[index].Names.size() >= TagTable::MAXIMUM) {
+						// A file claiming more tags than a mask has bits. Dropped
+						// rather than read, because a bit past thirty-two cannot be
+						// referenced by any mask anyway.
+						break;
+					}
+					tables[index].Names.push_back(reader.ReadName());
+				}
+			}
+		}
+
 		void WriteSurfaceTables(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *tables = static_cast<const SurfaceTable *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -218,8 +329,26 @@ namespace engine::scene {
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);
 		ecs::Components::Register<Visual>("scene.Visual", WriteVisuals, ReadVisuals);
+
+		// **A hand-written pair, because it holds a name.** The lesson
+		// `WriteVisuals` records above applies here from the first line: a
+		// field added to a type with a hand-written pair crosses only if
+		// somebody remembers, and nothing in the build checks. Three fields
+		// today, and all three are written.
+		ecs::Components::Register<SurfaceAppearance>(
+			"scene.SurfaceAppearance", WriteSurfaceAppearances, ReadSurfaceAppearances
+		);
+
+		// **The default POD form, and that is right here.** A `Tags` is one
+		// integer and no name — the *names* are in the `TagTable` resource,
+		// which is serialised beside it, so the mask and the meanings of its
+		// bits travel together or not at all.
+		ecs::Components::Register<Tags>("scene.Tags");
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 		ecs::Components::Register<Camera>("scene.Camera");
+
+		// A name again, so a hand-written pair again. See `WriteSounds`.
+		ecs::Components::Register<Sound>("scene.Sound", WriteSounds, ReadSounds);
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
 
 		// The service fixtures, added at the end because that is the rule this
@@ -256,8 +385,12 @@ namespace engine::scene {
 		// `Store::SetResource` — under the compiler's spelling of the type, and
 		// aborting outright once the table is sealed.
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
+		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
+		ecs::Components::Register<MeshCatalogue>(
+			"scene.MeshCatalogue", WriteMeshCatalogues, ReadMeshCatalogues
+		);
 
 		// What `SyncRendered` compares this frame's tree against, at the end of
 		// the list for the reason it opens with. A resource, because a stamp

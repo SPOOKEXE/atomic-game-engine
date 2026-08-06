@@ -3,9 +3,11 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
-#include <engine/render/Primitives.hpp>
+#include <engine/render/MeshTable.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/TextureTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Tagging.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_iostream.h>
@@ -22,59 +24,58 @@ namespace engine::render {
 
 	namespace {
 
-		using Vertex = MeshVertex;
+		// Keep the GPU vertex layout identical to the asset vertex layout.
+		using Vertex = assets::MeshVertex;
 
 		// One instance as the vertex shader reads it.
 		//
-		// The device layout, and the reason it is private: a `mat4` and a packed
-		// RGBA are what a GPU wants and are exactly what may not appear in the
-		// `shared` type a headless world publishes. `scene::DrawInstance` is that
-		// type; this is what it becomes, once, on the way into the transfer
-		// buffer.
+		// Private GPU layout; scene data must not expose device types.
 		struct GpuInstance {
 			glm::mat4 Model{1.0f};
 			glm::vec4 Colour{1.0f, 1.0f, 1.0f, 1.0f};
+
+			// One over the square of each axis' scale, for the normal matrix.
+			// The model includes scale, so its upper 3x3 is not a normal matrix.
+			glm::vec4 InverseScaleSquared{1.0f, 1.0f, 1.0f, 0.0f};
 		};
 
 		// A draw instance in the layout the opaque pipeline binds.
 		//
-		// The half-extent is folded into the matrix rather than sent beside it:
-		// the cube in `Primitives.hpp` is a unit cube about its own origin, so
-		// scaling its columns is what turns one mesh into every box size in the
-		// scene. Scale on the right of the rotation, so it stays a scale rather
-		// than becoming a shear.
+		// Built-in meshes are unit shapes; scale is folded into the model matrix.
 		GpuInstance ToGpu(const scene::DrawInstance &instance) {
 			GpuInstance gpu;
 			gpu.Model = instance.Frame.ToMatrix();
 
-			// Twice the half-extent, because the mesh is one metre across and
-			// the field is half of what the box measures.
+			// Built-in geometry is one unit across.
 			gpu.Model[0] *= instance.HalfExtent.X * 2.0f;
 			gpu.Model[1] *= instance.HalfExtent.Y * 2.0f;
 			gpu.Model[2] *= instance.HalfExtent.Z * 2.0f;
 
-			// **Alpha is one minus transparency**, because a shader blends by
-			// coverage and an author authors by see-through-ness. Roblox's
-			// `Transparency` is the same inversion, so a script's number means
-			// what its author expects on the way in and what the blender wants
-			// on the way out.
+			// Convert author-facing transparency to shader alpha.
 			gpu.Colour =
 				glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency};
+
+			// Avoid infinities for zero-scale geometry.
+			const auto reciprocal = [](float extent) {
+				const float scale = extent * 2.0f;
+				return scale * scale > 1e-12f ? 1.0f / (scale * scale) : 1.0f;
+			};
+			gpu.InverseScaleSquared = glm::vec4{
+				reciprocal(instance.HalfExtent.X),
+				reciprocal(instance.HalfExtent.Y),
+				reciprocal(instance.HalfExtent.Z),
+				0.0f,
+			};
 			return gpu;
 		}
 
 		struct FrameUniforms {
 			glm::mat4 ViewProjection;
 
-			// World space to the light's clip space. Passed rather than
-			// recomputed in the shader, because a second derivation is a second
-			// chance to disagree — and the symptom would be shadows offset from
-			// what casts them.
+			// Matches the matrix used by the shadow pass.
 			glm::mat4 LightViewProjection;
 
-			// World space to the surface camera's clip space, for the planar
-			// projection a mirror samples with. Identity when nothing renders to
-			// a surface.
+			// Surface-camera projection, or identity for ordinary geometry.
 			glm::mat4 SurfaceViewProjection;
 		};
 
@@ -86,21 +87,16 @@ namespace engine::render {
 			// z: whether this draw samples the surface texture. w: unused, and
 			// named so the struct's size is stated rather than implied.
 			glm::vec4 Flags;
+
+			// The submesh's own colour, white for a draw with no material.
+			glm::vec4 BaseColour{1.0f, 1.0f, 1.0f, 1.0f};
+
+			// x: whether `colourMap` holds this draw's texture. y: the alpha
+			// below which a fragment is discarded, or zero to discard none.
+			glm::vec4 Surface{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
-		// --- the surface signature -------------------------------------------
-		//
-		// **The list's half is `scene::SignatureOf` and only the view's half is
-		// here**, for the reason every other piece of draw arithmetic sits in
-		// `scene`: a renderer is the one module a headless suite cannot exercise,
-		// so the part that is pure arithmetic over a `shared` type belongs where
-		// a test can reach it. What is left is what genuinely is not shared — a
-		// projection matrix and the opacity it composites with, both `glm` and
-		// both this tier's.
-		//
-		// `scene::MixSignature` is the fold, rather than a second one written
-		// here, so the combined number cannot depend on which file computed
-		// which half.
+		// Mix renderer-owned view data into the scene signature.
 		uint64_t MixFloat(uint64_t hash, float value) {
 			uint32_t bits = 0;
 			std::memcpy(&bits, &value, sizeof(bits));
@@ -118,40 +114,14 @@ namespace engine::render {
 
 		// The one directional light this pipeline has.
 		//
-		// **A constant, and it is honest about being one.** A light is a row in
-		// a world the moment anything needs two, and `scene` is where that row
-		// would live — putting it there now would be a component nothing writes.
-		// What this buys today is that the shadow fit and the shading agree
-		// about which way the sun points, which they did not have to before
-		// because only one of them existed.
+		// One directional light; shadow fitting and shading share its direction.
 		constexpr glm::vec3 SUN_DIRECTION{-0.45f, -0.8f, -0.4f};
 		constexpr glm::vec4 SUN_AMBIENT{0.26f, 0.28f, 0.34f, 1.0f};
 
-		// **2048, which is a resolution rather than a guess.** The map covers
-		// the whole scene, so its texel size is the scene's extent over this —
-		// about six centimetres across a 128-metre world, which is under the
-		// size of the smallest thing the demo draws. Halving it doubles that and
-		// the stair-stepping becomes visible on a cube edge.
+		// Measured shadow-map resolution for the current scene scale.
 		constexpr uint32_t SHADOW_RESOLUTION = 2048;
 
-		// **What a scene target's size is rounded up to, and 64 is the number
-		// that makes a drag free.** A target allocated to the panel's exact size
-		// changes identity on every frame the panel changes size, and a viewport
-		// being dragged changes size every frame — so the interface, which
-		// recorded its bind before the renderer ran, spends the whole drag
-		// showing the previous frame's image stretched onto a rectangle it was
-		// not drawn for. That is what "laggy while resizing" looks like from the
-		// outside, and no amount of frame time explains it: the measurement is a
-		// flat 16.7 ms throughout.
-		//
-		// Rounding up means the texture survives 64 pixels of drag rather than
-		// one, so the panel samples the image *this* frame drew. What it costs
-		// is a border nothing draws into — at 1600x900 the allocation becomes
-		// 1600x960, under a megabyte — and one `SDL_SetGPUViewport` so the pass
-		// fills the corner rather than the texture.
-		//
-		// Bigger blocks buy fewer reallocations and waste more; 64 is one drag
-		// second at a comfortable pointer speed, which is where the returns stop.
+		// Measured resize threshold; keeps targets stable during viewport drags.
 		constexpr uint32_t SCENE_TARGET_BLOCK = 64;
 
 		// Rounds up to the next whole block, saturating rather than wrapping.
@@ -178,25 +148,7 @@ namespace engine::render {
 
 		// Walks `PassOrder()` as the frame is submitted.
 		//
-		// **Two things are checked and they are checked by different means.**
-		// That this list matches `graph::StandardPipeline` is a *test* — it is
-		// arithmetic over names and needs no device, so it belongs in one.
-		// That `Render`'s body submits in this order is a *runtime* check,
-		// because the body is the one thing a headless test cannot look at.
-		//
-		// Skips are allowed and are the normal case: every pass here is
-		// conditional, and `graph::Stage::Optional` already says so. What is
-		// refused is going backwards — a pass submitted before one that
-		// preceded it in the list. That is not pedantry about bookkeeping: the
-		// order *is* the correctness. The colour pass samples the shadow map,
-		// so a shadow pass moved below it draws a frame lit by whatever was in
-		// that memory, which on a GPU is a plausible image rather than an
-		// error. `Pipeline::Validate` catches that in the description; this
-		// catches it in the submission.
-		//
-		// Logged rather than fatal. A renderer that kills the process over its
-		// own bookkeeping is worse than the bug it found, and the mismatch is
-		// visible in `FrameResult::Passes` either way.
+		// Runtime guard for pass order; optional passes may be skipped.
 		struct PassRecorder {
 			uint8_t Ran = 0;
 			uint8_t Furthest = 0;
@@ -258,10 +210,7 @@ namespace engine::render {
 
 		// What survived culling: the indices, and the instances themselves.
 		//
-		// **The copy is what buys the second pass a contiguous range.** Ordering
-		// over a scattered index list would leave the draw unable to say "these
-		// N in a row are opaque", and `first_instance` is the only thing that
-		// splits one buffer into two draws.
+		// The copy makes scene and camera ranges contiguous in one buffer.
 		std::vector<uint32_t> Visible;
 		std::vector<scene::DrawInstance> VisibleInstances;
 
@@ -273,22 +222,27 @@ namespace engine::render {
 		std::vector<uint32_t> SceneOrder;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
-		SDL_GPUBuffer *VertexBuffer = nullptr;
-		SDL_GPUBuffer *IndexBuffer = nullptr;
+		// Every mesh and texture available to the renderer.
+		MeshTable Meshes;
+		TextureTable Textures;
+
+		// What is in each slot of the instance buffer, filled in the same loop
+		// that fills the buffer itself.
+		//
+		// **Parallel arrays rather than a struct**, because the draw loop
+		// compares consecutive entries to find its runs and does it far more
+		// often than it reads them.
+		std::vector<const MeshEntry *> SlotMesh;
+		std::vector<core::Name> SlotTexture;
+
+		// Each slot's tag mask, for the surface passes that filter by one.
+		std::vector<uint32_t> SlotTags;
 
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
 
-		// **Which depth format this device actually supports.** `SDL_gpu.h` is
-		// blunt about it: "Unless D16_UNORM is sufficient for your purposes,
-		// always check which of D24/D32 is supported before creating a
-		// depth-stencil texture!" D16_UNORM is the only one guaranteed. This was
-		// hard-coded to D32_FLOAT in four places, which works on every desktop
-		// GPU anybody here has and fails as a black window on the first one that
-		// does not — the texture creation fails, the frame is dropped, and
-		// nothing says why. Chosen once at start-up so the pipelines and the
-		// textures cannot disagree.
+		// Chosen once so pipelines and depth textures use one supported format.
 		SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
 
 		SDL_GPUTexture *DepthTexture = nullptr;
@@ -320,20 +274,7 @@ namespace engine::render {
 			uint32_t DrawnWidth = 0;
 			uint32_t DrawnHeight = 0;
 
-			// **This slot's depth buffer, and it is per slot for the same
-			// reason the colour target is.** One shared depth texture is fine
-			// for one viewport and catastrophic for two: the panels are
-			// different sizes, so each `Render` found the other's dimensions and
-			// reallocated — a colour-sized D32 texture destroyed and created
-			// *twice per frame, every frame*. That is a megabyte and a half of
-			// device memory churned a hundred and twenty times a second, and it
-			// does not stay inside this process: thrashing the driver's
-			// allocator stalls the GPU for everything sharing it, which is what
-			// "resizing makes my whole desktop lag" was.
-			//
-			// Sized to `Width`/`Height` — the block-rounded allocation, not the
-			// drawn rectangle — because SDL requires the depth target's
-			// dimensions to match the colour target it is bound beside.
+		// Per-slot depth matches the block-rounded colour target dimensions.
 			SDL_GPUTexture *Depth = nullptr;
 			uint32_t DepthWidth = 0;
 			uint32_t DepthHeight = 0;
@@ -353,21 +294,7 @@ namespace engine::render {
 
 		// Scene targets that have been replaced but may still be referenced.
 		//
-		// **A resized viewport used to be a use-after-free, and this is the
-		// grace period that fixes it.** An interface hook records
-		// `ImGui::Image(SceneTexture())` — last frame's texture, deliberately,
-		// because imgui builds its draw lists before the renderer runs. So on
-		// the frame a panel changes size the order is: the hook records a bind
-		// of the *old* texture, then `EnsureScene` notices the new size, and
-		// then those draw lists are replayed. Releasing the old texture in the
-		// middle of that hands SDL a freed `TextureContainer` to bind, which
-		// segfaults inside the Vulkan backend rather than anywhere near here.
-		//
-		// One frame of grace is exactly enough: draw lists never outlive the
-		// frame that recorded them, and `SDL_ReleaseGPUTexture` already defers
-		// the GPU-side destruction until the commands using it have retired —
-		// what it does *not* do is keep the container addressable, and that is
-		// the half this covers.
+		// Keep replaced targets alive until interface draw lists finish this frame.
 		std::vector<SDL_GPUTexture *> RetiredScenes;
 
 		// Frees what the previous frame retired. Called once at the top of a
@@ -382,16 +309,7 @@ namespace engine::render {
 
 		// --- the frame that has been waited for but not yet recorded ----------
 		//
-		// **A frame is claimed before the caller reads its input, and that is the
-		// whole point of holding this here.** `SDL_WaitAndAcquireGPUSwapchainTexture`
-		// blocks until the display is ready; a loop that pumps events and *then*
-		// waits builds every frame out of input that is already one frame old,
-		// because the wait sits between reading the input and showing what it
-		// produced. Waiting first turns that dead time into time the input has
-		// not happened yet.
-		//
-		// Held rather than passed because the two halves are now two calls and
-		// SDL's own handles are not something a public header may name.
+		// Hold the claimed frame between WaitForFrame and Render.
 		SDL_GPUCommandBuffer *PendingCommand = nullptr;
 		SDL_GPUTexture *PendingSwapchain = nullptr;
 		uint32_t PendingWidth = 0;
@@ -403,24 +321,7 @@ namespace engine::render {
 
 		// A present mode asked for, waiting for a legal moment to be set.
 		//
-		// **Because changing it recreates the swapchain, and the caller asks
-		// from the middle of a frame.** `SDL_SetGPUSwapchainParameters` destroys
-		// every swapchain image and builds new ones — and this renderer claims
-		// its frame up front, so between `BeginFrame` and `Render` there is an
-		// acquired `PendingSwapchain` pointing into exactly those images.
-		//
-		// The studio's Preferences page sits in that gap: `WaitForFrame` runs at
-		// the top of the editor's loop and the panels are drawn afterwards, so
-		// ticking "Vertical sync" applied the mode immediately, freed the texture
-		// this frame had already acquired, and `Render` bound it. It crashed on
-		// the frame the box was clicked, every time, which read as the toggle
-		// itself being broken rather than as a lifetime.
-		//
-		// Deferring is the whole fix: the request is honoured at the top of the
-		// next frame, before anything is acquired, where recreating the swapchain
-		// invalidates nothing anybody is holding. One frame of latency on a
-		// setting a person just clicked is not observable — the frame it would
-		// have applied to is the one being drawn as they let go of the mouse.
+		// Changing present mode recreates the swapchain; apply only before acquire.
 		SDL_GPUPresentMode PendingPresentMode = SDL_GPU_PRESENTMODE_VSYNC;
 		bool PresentModePending = false;
 
@@ -606,32 +507,8 @@ namespace engine::render {
 
 		// --- the surface target ----------------------------------------------
 		//
-		// Where a `SurfaceView` renders. Colour and depth, because a view is a
-		// view: the geometry it draws needs sorting by depth exactly as the
-		// swapchain's does.
-		// **Two of them, ping-ponged, for one reason and not the two this
-		// comment used to claim.** With a single texture the surface pass bound
-		// its own render target as a sampler, which is undefined behaviour on
-		// every backend that checks. Writing one and binding the other makes
-		// that legal.
-		//
-		// **And it is what buys a mirror inside a mirror, which it did not until
-		// v0.8.** The exclusion used to be "every surface", so no mirror was
-		// ever drawn into a mirror's texture and there was no recursion to be
-		// one bounce deep. It is per view now — a pass excludes only the index
-		// it is rendering *for* — and every other mirror is drawn from the pair
-		// it is not writing to. That is the previous frame's image, which is
-		// exactly what makes the cycle a line: each surface is being rendered
-		// for the others, so there is no order in which this frame's could be
-		// ready first.
-		//
-		// The bug the old claim produced is worth keeping, because the fix is
-		// what the loop below is shaped around: the flag that says "sample the
-		// surface texture" was set for the *whole* surface pass, so the floor
-		// sampled the previous frame's reflection and came out as its clear
-		// colour wherever that projection landed on untouched texels. A black
-		// wedge in the mirror, found by eye and not by a test. The flag is per
-		// draw and set for exactly the mirror runs, never for the world.
+		// Surface targets use colour and depth, with ping-pong textures to prevent
+		// render-target self-sampling. The surface flag is per draw.
 		struct SurfaceSlotState {
 			SDL_GPUTexture *Texture[2] = {nullptr, nullptr};
 			SDL_GPUTexture *Depth = nullptr;
@@ -759,6 +636,47 @@ namespace engine::render {
 		) const;
 
 		bool CreatePipelines();
+		// Issues the draws for one contiguous run of instance-buffer slots.
+		//
+		// **The loop v0.9 exists to add.** Every draw used to be one call over
+		// one cube; now a run may hold several meshes and each mesh several
+		// material submeshes, so this splits the run wherever the mesh or the
+		// instance's texture override changes and issues a call per resulting
+		// piece. The instances themselves never move — the split is entirely in
+		// `first_instance` and a count.
+		//
+		// **Consecutive-run splitting rather than grouping.** Sorting the run by
+		// mesh would produce fewer draw calls and is exactly what the blended
+		// pass may not have: that order is back-to-front from the eye and
+		// reordering it is the transparency bug the sort exists to prevent. One
+		// rule for both passes is worth more here than a draw call.
+		//
+		// @param command    The frame's command buffer, for the uniform pushes.
+		// @param pass       The open render pass.
+		// @param first      The first slot.
+		// @param count      How many slots.
+		// @param lighting   The pass's uniforms, or null for a depth-only pass
+		//                   that binds no samplers and pushes nothing.
+		// @param shadow     The shadow map to bind, or null.
+		// @param shadowSampler   Its sampler.
+		// @param surface    The surface texture to bind, or null.
+		// @param surfaceSampler  Its sampler.
+		// @param triangles  Incremented by what was actually drawn.
+		// @return How many draw calls were issued.
+		uint32_t DrawSlots(
+			SDL_GPUCommandBuffer *command,
+			SDL_GPURenderPass *pass,
+			uint32_t first,
+			uint32_t count,
+			const LightingUniforms *lighting,
+			SDL_GPUTexture *shadow,
+			SDL_GPUSampler *shadowSampler,
+			SDL_GPUTexture *surface,
+			SDL_GPUSampler *surfaceSampler,
+			uint32_t tagFilter,
+			uint64_t &triangles
+		);
+
 		bool CreateGeometry();
 		bool EnsureInstanceCapacity(uint32_t count);
 		bool EnsureDepth(uint32_t width, uint32_t height);
@@ -835,7 +753,7 @@ namespace engine::render {
 		// part of the shader object rather than of the pipeline, so a mismatch
 		// with the `layout(set = 2, binding = n)` declarations is a bind that
 		// silently reads nothing rather than a validation error.
-		SDL_GPUShader *opaqueFragment = LoadShader("opaque.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+		SDL_GPUShader *opaqueFragment = LoadShader("opaque.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 
 		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
@@ -861,13 +779,15 @@ namespace engine::render {
 		const SDL_GPUVertexAttribute attributes[] = {
 			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Position)},
 			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Normal)},
+			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, TexCoord)},
 			// A mat4 attribute is four float4 locations; there is no matrix
 			// vertex format.
-			{2, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
-			{3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 4},
-			{4, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 8},
-			{5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 12},
-			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuInstance, Colour)},
+			{3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
+			{4, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 4},
+			{5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 8},
+			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 12},
+			{7, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuInstance, Colour)},
+			{8, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuInstance, InverseScaleSquared)},
 		};
 
 		SDL_GPUColorTargetDescription opaqueTarget{};
@@ -880,7 +800,7 @@ namespace engine::render {
 		opaque.vertex_input_state.vertex_buffer_descriptions = vertexBuffers;
 		opaque.vertex_input_state.num_vertex_buffers = 2;
 		opaque.vertex_input_state.vertex_attributes = attributes;
-		opaque.vertex_input_state.num_vertex_attributes = 7;
+		opaque.vertex_input_state.num_vertex_attributes = 9;
 		opaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 		opaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 		// The cube winds counter-clockwise when seen from outside.
@@ -1001,22 +921,117 @@ namespace engine::render {
 			   OverlayPipeline != nullptr;
 	}
 
+	uint32_t Renderer::Impl::DrawSlots(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPURenderPass *pass,
+		uint32_t first,
+		uint32_t count,
+		const LightingUniforms *lighting,
+		SDL_GPUTexture *shadow,
+		SDL_GPUSampler *shadowSampler,
+		SDL_GPUTexture *surface,
+		SDL_GPUSampler *surfaceSampler,
+		uint32_t tagFilter,
+		uint64_t &triangles
+	) {
+		if (count == 0 || first + count > SlotMesh.size()) {
+			return 0;
+		}
+
+		uint32_t calls = 0;
+
+		// One draw for one range of one mesh, over `run` consecutive instances.
+		const auto emit = [&](const MeshRange &range,
+							  const core::Name &texture,
+							  const std::array<float, 4> &colour,
+							  uint32_t slot,
+							  uint32_t run) {
+			if (range.IndexCount == 0) {
+				return;
+			}
+
+			if (lighting != nullptr) {
+				SDL_GPUTexture *const sampled = Textures.Find(texture);
+
+				// **The fallback texel is bound rather than the binding being
+				// skipped**, because a sampler a pipeline declares must have
+				// something in it — an unbound one is undefined behaviour on
+				// some backends and a validation error on others. The uniform
+				// flag is what tells the shader to ignore it.
+				const SDL_GPUTextureSamplerBinding samplers[] = {
+					{shadow != nullptr ? shadow : FallbackTexture, shadowSampler},
+					{surface != nullptr ? surface : FallbackTexture, surfaceSampler},
+					{sampled != nullptr ? sampled : FallbackTexture, Textures.Sampler()},
+				};
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 3);
+
+				LightingUniforms uniforms = *lighting;
+				uniforms.BaseColour = glm::vec4{colour[0], colour[1], colour[2], colour[3]};
+				uniforms.Surface = glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+			}
+
+			SDL_DrawGPUIndexedPrimitives(
+				pass, range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot
+			);
+			calls++;
+			triangles += static_cast<uint64_t>(range.IndexCount / 3) * run;
+		};
+
+		uint32_t slot = first;
+		while (slot < first + count) {
+			// **A filtered-out slot ends the run and is stepped over.** The draw
+			// list is not re-ordered for it: the order is shared by every view
+			// and a filter is per view, so partitioning for one surface would
+			// partition for all of them and the screen pass would draw the group
+			// instead of the world. The cost is a run break wherever an excluded
+			// instance sits between two included ones, which is a draw call and
+			// not a wrong picture.
+			if (!scene::MatchesTags(SlotTags[slot], tagFilter)) {
+				slot++;
+				continue;
+			}
+
+			const MeshEntry *const mesh = SlotMesh[slot];
+			const core::Name texture = SlotTexture[slot];
+
+			uint32_t run = 1;
+			while (slot + run < first + count && SlotMesh[slot + run] == mesh &&
+				   SlotTexture[slot + run] == texture &&
+				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
+				run++;
+			}
+
+			if (mesh->Runs.empty()) {
+				// A mesh with no materials of its own — every built-in.
+				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, run);
+			} else {
+				for (size_t index = 0; index < mesh->Runs.size(); index++) {
+					// **The instance's texture wins when it has one.** That is
+					// what `MeshPart.TextureID` means: an imported mesh's own
+					// per-material sheets are the default, and a part may
+					// replace all of them at once.
+					emit(
+						mesh->Runs[index],
+						texture.IsValid() ? texture : mesh->Textures[index],
+						mesh->Colours[index],
+						slot,
+						run
+					);
+				}
+			}
+
+			slot += run;
+		}
+
+		return calls;
+	}
+
 	bool Renderer::Impl::CreateGeometry() {
-		constexpr uint32_t VERTEX_BYTES = sizeof(CUBE_VERTICES);
-		constexpr uint32_t INDEX_BYTES = sizeof(CUBE_INDICES);
-
-		SDL_GPUBufferCreateInfo vertexInfo{};
-		vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-		vertexInfo.size = VERTEX_BYTES;
-		VertexBuffer = SDL_CreateGPUBuffer(Device, &vertexInfo);
-
-		SDL_GPUBufferCreateInfo indexInfo{};
-		indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
-		indexInfo.size = INDEX_BYTES;
-		IndexBuffer = SDL_CreateGPUBuffer(Device, &indexInfo);
-
-		if (!VertexBuffer || !IndexBuffer) {
-			ENGINE_ERROR("cube buffers: {}", SDL_GetError());
+		// The built-in meshes and the sampler every texture shares. What used
+		// to be an unconditional upload of one cube is now a table that starts
+		// with six shapes and grows as content arrives.
+		if (!Meshes.Initialise(Device) || !Textures.Initialise(Device)) {
 			return false;
 		}
 
@@ -1040,11 +1055,11 @@ namespace engine::render {
 			}
 		}
 
-		// The mesh never changes, so the transfer buffer is temporary — unlike
-		// the instance one, which is kept for the life of the renderer.
+		// One texel, and the transfer buffer is temporary because nothing
+		// rewrites it.
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-		transferInfo.size = VERTEX_BYTES + INDEX_BYTES + OverlayImage::BYTES_PER_PIXEL;
+		transferInfo.size = OverlayImage::BYTES_PER_PIXEL;
 
 		SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
 		if (!transfer) {
@@ -1059,25 +1074,15 @@ namespace engine::render {
 		constexpr uint8_t FALLBACK_TEXEL[OverlayImage::BYTES_PER_PIXEL] = {255, 255, 255, 255};
 
 		auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(Device, transfer, false));
-		std::memcpy(mapped, CUBE_VERTICES.data(), VERTEX_BYTES);
-		std::memcpy(mapped + VERTEX_BYTES, CUBE_INDICES.data(), INDEX_BYTES);
-		std::memcpy(mapped + VERTEX_BYTES + INDEX_BYTES, FALLBACK_TEXEL, sizeof(FALLBACK_TEXEL));
+		std::memcpy(mapped, FALLBACK_TEXEL, sizeof(FALLBACK_TEXEL));
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
-		SDL_GPUTransferBufferLocation source{transfer, 0};
-		SDL_GPUBufferRegion destination{VertexBuffer, 0, VERTEX_BYTES};
-		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
-
-		source.offset = VERTEX_BYTES;
-		destination = SDL_GPUBufferRegion{IndexBuffer, 0, INDEX_BYTES};
-		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
-
 		SDL_GPUTextureTransferInfo texel{};
 		texel.transfer_buffer = transfer;
-		texel.offset = VERTEX_BYTES + INDEX_BYTES;
+		texel.offset = 0;
 		texel.pixels_per_row = 1;
 		texel.rows_per_layer = 1;
 
@@ -1716,12 +1721,8 @@ namespace engine::render {
 		if (State->OverlayPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OverlayPipeline);
 		}
-		if (State->VertexBuffer) {
-			SDL_ReleaseGPUBuffer(device, State->VertexBuffer);
-		}
-		if (State->IndexBuffer) {
-			SDL_ReleaseGPUBuffer(device, State->IndexBuffer);
-		}
+		State->Meshes.Shutdown();
+		State->Textures.Shutdown();
 		if (State->InstanceBuffer) {
 			SDL_ReleaseGPUBuffer(device, State->InstanceBuffer);
 		}
@@ -1749,7 +1750,40 @@ namespace engine::render {
 		}
 		SDL_DestroyGPUDevice(device);
 
-		*State = Impl{};
+		// **Rebuilt in place rather than assigned from a fresh one.** The two
+		// tables own device resources and are deliberately not copyable, so
+		// `*State = Impl{}` no longer compiles — and it should not: an
+		// assignment would have released their buffers a second time, after
+		// `Shutdown` above already did.
+		State = std::make_unique<Impl>();
+	}
+
+	bool Renderer::AddMesh(const core::Name &name, const assets::MeshData &mesh) {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+
+		// Uploaded on the spot rather than at the next frame's barrier.
+		// Registration happens when content arrives, which a caller has already
+		// arranged to be a moment it controls — `delivery::Client::Pump` is the
+		// whole design of that — so deferring would add a second barrier for a
+		// caller that already had one.
+		return State->Meshes.Add(name, mesh) && State->Meshes.Flush();
+	}
+
+	bool Renderer::AddTexture(const core::Name &name, const assets::TextureData &image) {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+		return State->Textures.Add(name, image);
+	}
+
+	bool Renderer::HasMesh(const core::Name &name) const {
+		return State != nullptr && State->Meshes.Has(name);
+	}
+
+	bool Renderer::HasTexture(const core::Name &name) const {
+		return State != nullptr && State->Textures.Find(name) != nullptr;
 	}
 
 	bool Renderer::Impl::WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const {
@@ -2358,13 +2392,34 @@ namespace engine::render {
 
 					auto *out = static_cast<GpuInstance *>(mapped);
 
+					// **What is in each slot, recorded in the same pass that
+					// fills it.** The draw loop needs the mesh and the texture
+					// of every slot to find its runs, and the only place that
+					// mapping exists is here — after this loop the order is a
+					// buffer offset and the instance it came from is gone.
+					State->SlotMesh.resize(uploadCount);
+					State->SlotTexture.resize(uploadCount);
+					State->SlotTags.resize(uploadCount);
+
+					const auto record = [&](size_t slot, const scene::DrawInstance &instance) {
+						State->SlotMesh[slot] = &State->Meshes.Resolve(instance.Mesh);
+						State->SlotTexture[slot] = instance.Texture;
+						State->SlotTags[slot] = instance.TagMask;
+					};
+
 					for (size_t index = 0; index < State->SceneOrder.size(); index++) {
-						out[index] = ToGpu(State->SceneInstances[State->SceneOrder[index]]);
+						const scene::DrawInstance &instance = State->SceneInstances[State->SceneOrder[index]];
+						out[index] = ToGpu(instance);
+						record(index, instance);
 					}
 
-					auto *camera = out + State->SceneOrder.size();
+					const size_t cameraBase = State->SceneOrder.size();
+					auto *camera = out + cameraBase;
 					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
-						camera[index] = ToGpu(State->VisibleInstances[State->DrawOrder[index]]);
+						const scene::DrawInstance &instance =
+							State->VisibleInstances[State->DrawOrder[index]];
+						camera[index] = ToGpu(instance);
+						record(cameraBase + index, instance);
 					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
@@ -2506,13 +2561,13 @@ namespace engine::render {
 			SDL_BindGPUGraphicsPipeline(pass, State->ShadowPipeline);
 
 			const SDL_GPUBufferBinding vertexBindings[] = {
-				{State->VertexBuffer, 0},
+				{State->Meshes.Vertices(), 0},
 				{State->InstanceBuffer, 0},
 			};
 			SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
 
-			const SDL_GPUBufferBinding indexBinding{State->IndexBuffer, 0};
-			SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+			const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+			SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
 			SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
 
@@ -2526,17 +2581,38 @@ namespace engine::render {
 			// Two draws because the two runs are not adjacent — the surface
 			// partition sits between them. The second is empty in every scene
 			// with no mirror in it, which is almost all of them.
+			// Depth only, so no samplers and no fragment uniforms — the null
+			// lighting pointer is what says so.
+			uint64_t shadowTriangles = 0;
 			if (reflectedCasters > 0) {
-				SDL_DrawGPUIndexedPrimitives(
-					pass, static_cast<uint32_t>(CUBE_INDICES.size()), reflectedCasters, 0, 0, 0
+				result.DrawCalls += State->DrawSlots(
+					command,
+					pass,
+					0,
+					reflectedCasters,
+					nullptr,
+					nullptr,
+					nullptr,
+					nullptr,
+					nullptr,
+					0,
+					shadowTriangles
 				);
-				result.DrawCalls++;
 			}
 			if (surfaceCasters > 0) {
-				SDL_DrawGPUIndexedPrimitives(
-					pass, static_cast<uint32_t>(CUBE_INDICES.size()), surfaceCasters, 0, 0, sceneReflected
+				result.DrawCalls += State->DrawSlots(
+					command,
+					pass,
+					sceneReflected,
+					surfaceCasters,
+					nullptr,
+					nullptr,
+					nullptr,
+					nullptr,
+					nullptr,
+					0,
+					shadowTriangles
 				);
-				result.DrawCalls++;
 			}
 
 			SDL_EndGPURenderPass(pass);
@@ -2600,6 +2676,12 @@ namespace engine::render {
 				}
 
 				const uint8_t self = accepted[index].Index;
+
+				// **Taken here rather than at each draw**, because `drawMirrors`
+				// below shadows `index` with its own loop over surfaces — so
+				// `accepted[index]` inside it would name a different view
+				// entirely, and the filter would silently be another surface's.
+				const uint32_t surfaceFilter = accepted[index].View->TagFilter;
 				Impl::SurfaceSlotState &state = bank.Surfaces[self];
 
 				SDL_GPUColorTargetInfo surfaceColour{};
@@ -2622,13 +2704,13 @@ namespace engine::render {
 				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
 				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->VertexBuffer, 0},
+					{State->Meshes.Vertices(), 0},
 					{State->InstanceBuffer, 0},
 				};
 				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
 
-				const SDL_GPUBufferBinding indexBinding{State->IndexBuffer, 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
 				// **Shadowed, and pointedly not surfaced.** The mirror's own view
 				// gets the shadow map, so what it reflects is lit the way the
@@ -2656,13 +2738,13 @@ namespace engine::render {
 				SDL_GPUSampler *const shadowSampler =
 					State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
 
-				const auto bindSurface = [&](SDL_GPUTexture *texture) {
-					const SDL_GPUTextureSamplerBinding samplers[] = {
-						{fallback, shadowSampler},
-						{texture != nullptr ? texture : fallback, State->SurfaceSampler},
-					};
-					SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
-				};
+				// **The samplers are bound per draw now rather than per run**,
+				// because the third one — the colour map — changes with the
+				// mesh being drawn and the other two do not. `DrawSlots` binds
+				// all three together; what is left here is remembering which
+				// surface texture the next draws should sample.
+				SDL_GPUTexture *surfaceTexture = nullptr;
+				const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
 
 				const FrameUniforms worldFrame{
 					state.ViewProjection,
@@ -2672,7 +2754,6 @@ namespace engine::render {
 
 				const auto plainly = [&]() {
 					SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
-					SDL_PushGPUFragmentUniformData(command, 0, &surfaceLighting, sizeof(surfaceLighting));
 					bindSurface(nullptr);
 				};
 
@@ -2681,10 +2762,19 @@ namespace engine::render {
 				// The world, minus every mirror. `plan.Reflected` is the
 				// non-mirror opaque run.
 				if (sceneReflected > 0) {
-					SDL_DrawGPUIndexedPrimitives(
-						pass, static_cast<uint32_t>(CUBE_INDICES.size()), sceneReflected, 0, 0, 0
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
+						0,
+						sceneReflected,
+						&surfaceLighting,
+						fallback,
+						shadowSampler,
+						surfaceTexture,
+						State->SurfaceSampler,
+						surfaceFilter,
+						result.Triangles
 					);
-					result.DrawCalls++;
 				}
 
 				// **Every mirror except this one, one draw each.** `self` is
@@ -2719,10 +2809,19 @@ namespace engine::render {
 						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
 						if (!shown.Ready || !claimed[index]) {
 							plainly();
-							SDL_DrawGPUIndexedPrimitives(
-								pass, static_cast<uint32_t>(CUBE_INDICES.size()), count, 0, 0, first
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								first,
+								count,
+								&surfaceLighting,
+								fallback,
+								shadowSampler,
+								surfaceTexture,
+								State->SurfaceSampler,
+								surfaceFilter,
+								result.Triangles
 							);
-							result.DrawCalls++;
 							continue;
 						}
 
@@ -2743,13 +2842,21 @@ namespace engine::render {
 						};
 
 						SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-						SDL_PushGPUFragmentUniformData(command, 0, &mirrorLighting, sizeof(mirrorLighting));
 						bindSurface(shown.Texture[shown.Slot ^ 1u]);
 
-						SDL_DrawGPUIndexedPrimitives(
-							pass, static_cast<uint32_t>(CUBE_INDICES.size()), count, 0, 0, first
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							first,
+							count,
+							&mirrorLighting,
+							fallback,
+							shadowSampler,
+							surfaceTexture,
+							State->SurfaceSampler,
+							surfaceFilter,
+							result.Triangles
 						);
-						result.DrawCalls++;
 					}
 				};
 
@@ -2766,15 +2873,19 @@ namespace engine::render {
 
 				if (blendedPlain > 0) {
 					plainly();
-					SDL_DrawGPUIndexedPrimitives(
+					result.DrawCalls += State->DrawSlots(
+						command,
 						pass,
-						static_cast<uint32_t>(CUBE_INDICES.size()),
+						static_cast<uint32_t>(sceneOpaque),
 						blendedPlain,
-						0,
-						0,
-						static_cast<uint32_t>(sceneOpaque)
+						&surfaceLighting,
+						fallback,
+						shadowSampler,
+						surfaceTexture,
+						State->SurfaceSampler,
+						surfaceFilter,
+						result.Triangles
 					);
-					result.DrawCalls++;
 				}
 
 				// And the blended mirrors that are not this one, last of
@@ -2894,13 +3005,13 @@ namespace engine::render {
 				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
 				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->VertexBuffer, 0},
+					{State->Meshes.Vertices(), 0},
 					{State->InstanceBuffer, 0},
 				};
 				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
 
-				const SDL_GPUBufferBinding indexBinding{State->IndexBuffer, 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
 				const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 
@@ -2976,18 +3087,11 @@ namespace engine::render {
 				SDL_GPUSampler *const surfaceSampler =
 					State->SurfaceSampler != nullptr ? State->SurfaceSampler : shadowSampler;
 
-				const auto bindScreen = [&](SDL_GPUTexture *texture) {
-					SDL_GPUTexture *const surfaceMap = texture != nullptr ? texture : shadow;
-					if (shadow == nullptr || surfaceMap == nullptr) {
-						return;
-					}
-
-					const SDL_GPUTextureSamplerBinding samplers[] = {
-						{shadow, shadowSampler},
-						{surfaceMap, surfaceSampler},
-					};
-					SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
-				};
+				// Remembered rather than bound, for the surface pass's reason:
+				// `DrawSlots` binds all three samplers together because the
+				// third changes per mesh.
+				SDL_GPUTexture *screenSurface = nullptr;
+				const auto bindScreen = [&](SDL_GPUTexture *texture) { screenSurface = texture; };
 
 				bindScreen(nullptr);
 
@@ -2997,10 +3101,19 @@ namespace engine::render {
 				// per-instance vertex data, so the offset picks up where the
 				// opaque range left off.
 				if (plainOpaque > 0) {
-					SDL_DrawGPUIndexedPrimitives(
-						pass, static_cast<uint32_t>(CUBE_INDICES.size()), plainOpaque, 0, 0, sceneCount
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
+						sceneCount,
+						plainOpaque,
+						&lighting,
+						shadow,
+						shadowSampler,
+						screenSurface,
+						surfaceSampler,
+						0,
+						result.Triangles
 					);
-					result.DrawCalls++;
 				}
 
 				// **The surface draws, one per index rather than one for "the
@@ -3014,6 +3127,7 @@ namespace engine::render {
 				// passes have already run, so the screen shows a reflection that
 				// is current. Only what a mirror sees *of another mirror* is a
 				// frame behind, and that is the staleness the pair exists for.
+				LightingUniforms mirroredUniforms{};
 				const auto drawScreenMirrors = [&](bool blended) {
 					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
 						const scene::SurfaceRun &run = cameraRuns[index];
@@ -3030,8 +3144,8 @@ namespace engine::render {
 						// instead would leave a hole in the geometry, which reads
 						// as a culling bug rather than as a mirror that has not
 						// warmed up.
+						const LightingUniforms *uniforms = &lighting;
 						if (!shown.Ready) {
-							SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 							bindScreen(nullptr);
 						} else {
 							const FrameUniforms mirrorFrame{
@@ -3051,21 +3165,34 @@ namespace engine::render {
 							};
 
 							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-							SDL_PushGPUFragmentUniformData(command, 0, &mirrored, sizeof(mirrored));
 							bindScreen(shown.Texture[shown.Slot]);
+
+							// Held rather than pushed: `DrawSlots` pushes the
+							// fragment uniforms itself, because it has to write
+							// the submesh's colour into them.
+							mirroredUniforms = mirrored;
+							uniforms = &mirroredUniforms;
 
 							result.SurfaceInstances += count;
 						}
 
-						SDL_DrawGPUIndexedPrimitives(
-							pass, static_cast<uint32_t>(CUBE_INDICES.size()), count, 0, 0, sceneCount + first
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							sceneCount + first,
+							count,
+							uniforms,
+							shadow,
+							shadowSampler,
+							screenSurface,
+							surfaceSampler,
+							0,
+							result.Triangles
 						);
-						result.DrawCalls++;
 
 						// Back to the ordinary uniforms, so the next draw does
-						// not inherit this mirror's flag or projection.
+						// not inherit this mirror's projection.
 						SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
-						SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 					}
 				};
 
@@ -3089,15 +3216,19 @@ namespace engine::render {
 					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
 
 					if (plainTransparent > 0) {
-						SDL_DrawGPUIndexedPrimitives(
+						result.DrawCalls += State->DrawSlots(
+							command,
 							pass,
-							static_cast<uint32_t>(CUBE_INDICES.size()),
+							sceneCount + static_cast<uint32_t>(opaqueCount),
 							plainTransparent,
+							&lighting,
+							shadow,
+							shadowSampler,
+							screenSurface,
+							surfaceSampler,
 							0,
-							0,
-							sceneCount + static_cast<uint32_t>(opaqueCount)
+							result.Triangles
 						);
-						result.DrawCalls++;
 					}
 
 					// **The blended mirrors, last of everything.** Same pipeline
@@ -3110,7 +3241,13 @@ namespace engine::render {
 					}
 				}
 
-				result.Triangles = static_cast<uint64_t>(CUBE_INDICES.size() / 3) * instanceCount;
+				// **Counted as it is drawn rather than derived from the instance
+				// count.** While everything was a cube, triangles were thirty-six
+				// indices times however many instances; with a mesh per instance
+				// there is no such multiplier, and the honest number is the one
+				// `DrawSlots` accumulated. `instanceCount` is still what the
+				// instance counter reports.
+				(void)instanceCount;
 			}
 
 			SDL_EndGPURenderPass(pass);

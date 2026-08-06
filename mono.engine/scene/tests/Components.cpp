@@ -80,8 +80,16 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// above: a float needs four-byte alignment, so it could not sit in the three
 	// bytes after `Surface` — the struct grew — while `Face` is a byte-wide enum
 	// and took one of them for nothing. Two are left.
+	//
+	// **`TagFilter` widened it again, by four**, and it could not have been
+	// paid for out of those two: a `uint32_t` needs four-byte alignment and the
+	// remaining padding is a tail after a pair of bytes. That is a real cost on
+	// a component every mirror in a world carries, and it is worth it because
+	// the alternative — a name resolved per instance per pass — is a lookup in
+	// the draw loop rather than four bytes in a row that is already sixteen.
 	CHECK(
-		sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(float) + sizeof(int8_t) + sizeof(NormalId) + 2
+		sizeof(SurfaceCamera) ==
+		2 * sizeof(uint16_t) + sizeof(float) + sizeof(uint32_t) + sizeof(int8_t) + sizeof(NormalId) + 2
 	);
 	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
 

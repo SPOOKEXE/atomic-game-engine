@@ -1,20 +1,4 @@
-// Who gets in, and what it costs to be turned away.
-//
-// `EndToEnd.cpp` proves a client that behaves reaches a world. This is the
-// other half — the cases where it does not behave, which is the half D00006
-// existed for. The claims each case is here to hold:
-//
-// - A stranger's first datagram admits nothing. It used to admit everything.
-// - **An unanswered challenge allocates nothing**, and that is asserted against
-//   the slot count and the session count rather than against a comment.
-// - A forged, replayed or expired cookie is refused.
-// - A welcome tampered with in flight is refused rather than half-accepted.
-// - `MaximumClients` still turns away the peer past it and still counts it.
-// - The game's policy is asked, and the default is exactly what the header
-//   says it is.
-//
-// Every deadline here is stated rather than waited for.
-
+#include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Cookie.hpp>
@@ -24,6 +8,7 @@
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/replication/Protocol.hpp>
 #include <engine/replication/Session.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -61,6 +46,7 @@ using engine::replication::Answer;
 using engine::replication::Applicant;
 using engine::replication::Challenge;
 using engine::replication::Connector;
+using engine::replication::ConnectorSettings;
 using engine::replication::FrameAdmission;
 using engine::replication::Hello;
 using engine::replication::Listener;
@@ -71,8 +57,6 @@ using engine::replication::WriteAdmission;
 
 namespace admission_test {
 
-	// Encodes one admission message and puts it on the wire, framed exactly as
-	// both real ends frame it.
 	template <class T> void Post(Transport &from, const Endpoint &to, const T &message) {
 		ByteWriter body;
 		WriteAdmission(body, message);
@@ -82,14 +66,11 @@ namespace admission_test {
 		REQUIRE(from.Send(to, datagram.Bytes()) == TransportStatus::Ok);
 	}
 
-	// One arrived admission message and who sent it.
 	struct Arrival {
 		Endpoint From;
 		Admission Message;
 	};
 
-	// The next admission message waiting on an end, dropping anything that is
-	// not one.
 	std::optional<Arrival> Take(Transport &end) {
 		std::vector<std::byte> datagram;
 		while (end.Receive(datagram).Status == TransportStatus::Ok) {
@@ -102,8 +83,6 @@ namespace admission_test {
 			ByteReader body(packet->Payload);
 			Arrival arrival;
 			if (ReadAdmission(body, arrival.Message)) {
-				// The loopback reports the sender, which is the whole reason
-				// this suite can tell one stranger from another.
 				arrival.From = end.Local();
 				return arrival;
 			}
@@ -111,7 +90,6 @@ namespace admission_test {
 		return std::nullopt;
 	}
 
-	// The same, keeping the sender the transport reported.
 	std::optional<Arrival> TakeFrom(Transport &end) {
 		std::vector<std::byte> datagram;
 		for (;;) {
@@ -141,8 +119,6 @@ namespace admission_test {
 		return seed;
 	}
 
-	// A peer that speaks the exchange by hand, so a suite can send a step that
-	// is wrong in exactly one way.
 	struct Stranger {
 		Transport *Wire = nullptr;
 		Endpoint Server;
@@ -186,9 +162,21 @@ namespace admission_test {
 		}
 	};
 
-	// The responder's half, by hand, so a suite can hand a client a welcome
-	// that is wrong in exactly one way. Mirrors `Listener::Accept`.
-	Welcome Serve(const Answer &answer, uint8_t secret) {
+	engine::assets::SigningKey Identity(uint8_t fill) {
+		std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+		seed.fill(static_cast<std::byte>(fill));
+
+		std::optional<engine::assets::SigningKey> key = engine::assets::SigningKey::FromSeed(seed);
+		REQUIRE(key.has_value());
+		return std::move(*key);
+	}
+
+	Welcome Serve(
+		const Answer &answer,
+		uint8_t secret,
+		const engine::assets::SigningKey *identity = nullptr,
+		const std::array<std::byte, Handshake::MESSAGE_BYTES> *clientKey = nullptr
+	) {
 		auto exchange = Handshake::BeginFromSecret(HandshakeRole::Responder, Seed(secret));
 		REQUIRE(exchange.has_value());
 		REQUIRE(exchange->Consume(answer.PublicKey));
@@ -200,19 +188,25 @@ namespace admission_test {
 		auto keys = exchange->TakeKeys();
 		REQUIRE(keys.has_value());
 
-		const auto transcript = AdmissionTranscript(answer.PublicKey, welcome.PublicKey, answer.Cookie);
+		const auto transcript = AdmissionTranscript(
+			clientKey != nullptr ? *clientKey : answer.PublicKey, welcome.PublicKey, answer.Cookie
+		);
 		const auto sealed = keys->Sending.Seal({}, transcript);
 		REQUIRE(sealed.has_value());
 		REQUIRE(sealed->Bytes.size() == welcome.Confirmation.size());
 
 		welcome.Counter = sealed->Counter;
 		std::copy(sealed->Bytes.begin(), sealed->Bytes.end(), welcome.Confirmation.begin());
+
+		if (identity != nullptr) {
+			const engine::assets::SignatureBytes signature = identity->SignSessionTranscript(transcript);
+			for (size_t index = 0; index < signature.Value.size(); index++) {
+				welcome.Identity[index] = static_cast<std::byte>(signature.Value[index]);
+			}
+		}
 		return welcome;
 	}
 
-	// A real connector on one end and a hand-written server on the other, run
-	// as far as the answer. What is left is the welcome, which is the message
-	// each of these cases wants to get wrong.
 	struct Dialogue {
 		std::vector<std::unique_ptr<Transport>> Transports = MakeLoopbackTransport(2);
 		Store Replica{"client"};
@@ -221,15 +215,15 @@ namespace admission_test {
 		std::optional<Cookie> Issuer;
 		Answer Answered;
 		Endpoint ClientAt;
+		ConnectorSettings Options;
 
-		Dialogue() {
+		explicit Dialogue(const ConnectorSettings &settings = {}) : Options(settings) {
 			REQUIRE(Transports.size() == 2);
 			Issuer = Cookie::Begin();
 			REQUIRE(Issuer.has_value());
 
-			Client.emplace(*Transports[1], Transports[0]->Local(), Now);
+			Client.emplace(*Transports[1], Transports[0]->Local(), Now, Options);
 
-			// Hello out, challenge back.
 			Client->Poll(Replica, Now);
 			const std::optional<Arrival> hello = TakeFrom(*Transports[0]);
 			REQUIRE(hello.has_value());
@@ -240,7 +234,6 @@ namespace admission_test {
 			challenge.Cookie = Issuer->Issue(Now, ClientAt, hello->Message.Hello.PublicKey);
 			Post(*Transports[0], ClientAt, challenge);
 
-			// Answer out.
 			Client->Poll(Replica, Now);
 			const std::optional<Arrival> answered = TakeFrom(*Transports[0]);
 			REQUIRE(answered.has_value());
@@ -251,14 +244,12 @@ namespace admission_test {
 			Answered = answered->Message.Answer;
 		}
 
-		// Hands the client a welcome and lets it decide.
 		void Finish(const Welcome &welcome) {
 			Post(*Transports[0], ClientAt, welcome);
 			Client->Poll(Replica, Now);
 		}
 	};
 
-	// A listener on end zero of a loopback with `peers` other ends beside it.
 	struct Port {
 		std::vector<std::unique_ptr<Transport>> Transports;
 		std::optional<Listener> Server;
@@ -282,7 +273,6 @@ namespace admission_test {
 
 using namespace admission_test;
 
-// --- the framing -------------------------------------------------------------
 
 TEST_CASE("every admission message survives the round trip", "[replication][admission]") {
 	Admission read;
@@ -343,8 +333,6 @@ TEST_CASE("every admission message survives the round trip", "[replication][admi
 }
 
 TEST_CASE("a malformed admission message is refused whole", "[replication][admission]") {
-	// Read before anything at all is known about the sender, so this is the one
-	// parser to be strict rather than forgiving in.
 	Hello hello;
 	hello.PublicKey.fill(std::byte{0x77});
 
@@ -386,11 +374,8 @@ TEST_CASE("a malformed admission message is refused whole", "[replication][admis
 	}
 }
 
-// --- what a stranger costs ----------------------------------------------------
 
 TEST_CASE("a stranger's first datagram admits nothing", "[replication][admission]") {
-	// **The whole of D00006's first line.** This used to reserve a slot, build
-	// a session and complete the link, on any datagram from any address.
 	Port port(1);
 
 	ByteWriter writer;
@@ -409,11 +394,6 @@ TEST_CASE("a stranger's first datagram admits nothing", "[replication][admission
 }
 
 TEST_CASE("an unanswered challenge allocates nothing", "[replication][admission]") {
-	// **The claim D00006 asks to be true and this suite asserts against a real
-	// measure of it**: sessions held, and slots reserved in the authority.
-	// Two hundred peers say hello and none of them answers, which is three
-	// times `MaximumClients` — so a build that reserved anything per hello
-	// would show up here as a slot count, and past sixty-four as `Turned`.
 	constexpr size_t STRANGERS = 200;
 	Port port(STRANGERS);
 
@@ -433,15 +413,10 @@ TEST_CASE("an unanswered challenge allocates nothing", "[replication][admission]
 	CHECK(port.Server->Stats().Turned == 0);
 	CHECK(port.Server->Stats().Refused == 0);
 
-	// And every one of them was answered, so the cost really was a datagram
-	// each rather than a silent drop that would make the counts above trivial.
 	for (Stranger &stranger : crowd) {
 		CHECK(stranger.TakeCookie());
 	}
 
-	// **Nothing was evicted either**, which is what separates "remembers
-	// nothing" from "remembers a bounded number". The first peer to be
-	// challenged, two hundred challenges ago, answers and gets in.
 	crowd.front().SayAnswer();
 	port.Server->Poll(0.0);
 
@@ -468,8 +443,6 @@ TEST_CASE("a peer that answers the challenge is admitted", "[replication][admiss
 }
 
 TEST_CASE("a peer that never answers is never admitted", "[replication][admission]") {
-	// Hello after hello, for as long as it likes. Each is answered with a
-	// cookie and none of them is a slot.
 	Port port(1);
 	Stranger stranger = port.Peer(0, 6);
 
@@ -484,7 +457,6 @@ TEST_CASE("a peer that never answers is never admitted", "[replication][admissio
 	CHECK(port.Server->Stats().Admitted == 0);
 }
 
-// --- forging and replaying ----------------------------------------------------
 
 TEST_CASE("a forged cookie is refused", "[replication][admission]") {
 	Port port(1);
@@ -516,9 +488,6 @@ TEST_CASE("a forged cookie is refused", "[replication][admission]") {
 }
 
 TEST_CASE("an answer replayed from another address is refused", "[replication][admission]") {
-	// The property the cookie exists for. One machine gets a cookie honestly;
-	// another machine sends the same answer and is refused, because the cookie
-	// only verifies against the address it was issued to.
 	Port port(2);
 	Stranger honest = port.Peer(0, 8);
 	Stranger thief = port.Peer(1, 9);
@@ -527,7 +496,6 @@ TEST_CASE("an answer replayed from another address is refused", "[replication][a
 	port.Server->Poll(0.0);
 	REQUIRE(honest.TakeCookie());
 
-	// Same key exchange message, same cookie, different address.
 	thief.Mine = honest.Mine;
 	thief.Cookie_ = honest.Cookie_;
 	thief.SayAnswer();
@@ -536,19 +504,12 @@ TEST_CASE("an answer replayed from another address is refused", "[replication][a
 	CHECK(port.Server->Count() == 0);
 	CHECK(port.Server->Stats().Refused == 1);
 
-	// And the peer it was issued to is still able to use it.
 	honest.SayAnswer();
 	port.Server->Poll(0.0);
 	CHECK(port.Server->Count() == 1);
 }
 
 TEST_CASE("a cookie answered with a different key is refused", "[replication][admission]") {
-	// A relay reading a cookie off the wire and presenting it with an ephemeral
-	// key of its own, from the address the cookie was issued to. The cookie
-	// covers the key exchange message, so the answer does not verify — and this
-	// case is here rather than only in `engine.net.cookie` because what it
-	// checks is the *wiring*: that the listener passes the peer's key as the
-	// evidence rather than issuing a cookie for the address alone.
 	Port port(1);
 	Stranger stranger = port.Peer(0, 19);
 
@@ -571,9 +532,6 @@ TEST_CASE("a cookie answered with a different key is refused", "[replication][ad
 }
 
 TEST_CASE("a cookie stops being answerable", "[replication][admission]") {
-	// Stated rather than waited for: the rotation is driven by the time the
-	// caller passes in, so a suite can move a server forty seconds forward
-	// between two lines.
 	ListenerSettings settings;
 	settings.Cookie.RotateEverySeconds = 10.0;
 
@@ -592,9 +550,6 @@ TEST_CASE("a cookie stops being answerable", "[replication][admission]") {
 }
 
 TEST_CASE("a key exchange message this build will not agree with is refused", "[replication][admission]") {
-	// A low-order point, which RFC 7748 §6.1 asks implementations to check for
-	// and which `net::Handshake` refuses. The cookie is honest, so this is the
-	// step *after* return routability failing — and it still costs no slot.
 	Port port(1);
 	Stranger stranger = port.Peer(0, 11);
 
@@ -628,7 +583,6 @@ TEST_CASE("a server-to-client message from a client is refused", "[replication][
 	CHECK(port.Server->Stats().Refused == 2);
 }
 
-// --- the client's half --------------------------------------------------------
 
 TEST_CASE("a connector that gets its welcome is admitted", "[replication][admission]") {
 	Dialogue dialogue;
@@ -642,10 +596,6 @@ TEST_CASE("a connector that gets its welcome is admitted", "[replication][admiss
 }
 
 TEST_CASE("a tampered welcome is refused rather than half-accepted", "[replication][admission]") {
-	// **The reason the welcome carries a tag at all.** Without it a rewritten
-	// public key is accepted, the two ends derive different keys, and nothing
-	// says so — the failure moves to whatever first depends on the keys, which
-	// is a long way from the message that caused it.
 	Dialogue dialogue;
 	Welcome welcome = Serve(dialogue.Answered, 101);
 
@@ -677,8 +627,6 @@ TEST_CASE("a tampered welcome is refused rather than half-accepted", "[replicati
 }
 
 TEST_CASE("a welcome bound to another cookie does not verify", "[replication][admission]") {
-	// The cookie is in the transcript, so a welcome that agreed with a
-	// different one is a welcome for a different exchange.
 	Dialogue dialogue;
 
 	Answer elsewhere = dialogue.Answered;
@@ -690,8 +638,6 @@ TEST_CASE("a welcome bound to another cookie does not verify", "[replication][ad
 }
 
 TEST_CASE("a connector sends nothing of the world before it is admitted", "[replication][admission]") {
-	// The link refuses payload while it is `Connecting`, and this is the case
-	// that says the connector does not try to route around that.
 	Dialogue dialogue;
 
 	Store scratch("client");
@@ -700,16 +646,12 @@ TEST_CASE("a connector sends nothing of the world before it is admitted", "[repl
 }
 
 TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][admission]") {
-	// **Stated, not waited for.** `LinkSettings::HandshakeTimeoutSeconds` is the
-	// deadline and this moves a clock past it in one line, which is the whole
-	// reason time is passed in.
 	std::vector<std::unique_ptr<Transport>> transports = MakeLoopbackTransport(2);
 	REQUIRE(transports.size() == 2);
 
 	Store replica("client");
 	Connector client(*transports[1], transports[0]->Local(), 0.0);
 
-	// Nobody is listening on end zero, so the hello goes nowhere.
 	for (int tick = 0; tick < 8; tick++) {
 		const double now = static_cast<double>(tick) * 0.25;
 		client.Poll(replica, now);
@@ -724,7 +666,6 @@ TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][adm
 	CHECK(client.Link().State() == engine::net::ConnectionState::Disconnected);
 	CHECK(client.Link().Reason() == engine::net::DisconnectReason::HandshakeFailed);
 
-	// And it falls silent rather than repeating into a link that has ended.
 	std::vector<std::byte> scratch;
 	while (transports[0]->Receive(scratch).Status == TransportStatus::Ok) {}
 
@@ -733,12 +674,8 @@ TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][adm
 	CHECK(client.Rejected());
 }
 
-// --- the bound, and the policy -----------------------------------------------
 
 TEST_CASE("the bound still turns away the peer past it", "[replication][admission]") {
-	// **`MaximumClients` is defence the handshake sits in front of, not defence
-	// the handshake replaces.** Every one of these peers completes the exchange
-	// honestly; the sixty-fifth is still refused and still counted.
 	ListenerSettings settings;
 	settings.MaximumClients = 64;
 
@@ -768,11 +705,6 @@ TEST_CASE("the bound still turns away the peer past it", "[replication][admissio
 }
 
 TEST_CASE("the default admits anybody who completes the handshake", "[replication][admission]") {
-	// **Asserted because the header states it, and a stated security property
-	// that nothing checks is a claim rather than a behaviour.** Completing the
-	// exchange proves the peer can receive where it says it can and can do
-	// X25519. It proves nothing about who it is, and with no policy set that is
-	// enough to get in.
 	Port port(1);
 	CHECK(port.Server->Stats().Rejected == 0);
 
@@ -793,8 +725,6 @@ TEST_CASE("the policy refuses a peer the game rejects", "[replication][admission
 	Stranger welcome = port.Peer(0, 13);
 	Stranger unwanted = port.Peer(1, 14);
 
-	// The game's answer, and the engine has none of its own. Everything the
-	// policy is given is here: a proven address, the count, and the time.
 	const Endpoint banned = port.Transports[2]->Local();
 	size_t asked = 0;
 	port.Server->SetAdmission([banned, &asked](const Applicant &applicant) {
@@ -820,15 +750,11 @@ TEST_CASE("the policy refuses a peer the game rejects", "[replication][admission
 	CHECK(port.Server->Stats().Admitted == 1);
 	CHECK(port.Server->Stats().Rejected == 1);
 
-	// Refused in silence. Telling a stranger why it was turned away is telling
-	// it what to change.
 	CHECK_FALSE(unwanted.TakeWelcome());
 	CHECK(welcome.TakeWelcome());
 }
 
 TEST_CASE("a rejected peer costs no slot", "[replication][admission]") {
-	// The policy is asked before the agreement and before the slot, so a server
-	// with a ban list is not paying an X25519 per banned datagram either.
 	Port port(1);
 	port.Server->SetAdmission([](const Applicant &) { return false; });
 
@@ -845,12 +771,8 @@ TEST_CASE("a rejected peer costs no slot", "[replication][admission]") {
 	CHECK(port.Server->Stats().Refused == 0);
 }
 
-// --- after the exchange -------------------------------------------------------
 
 TEST_CASE("a welcome that was lost is sent again", "[replication][admission]") {
-	// The responder keeps nothing for a peer that has not answered, so the
-	// initiator is the only thing that can cover a loss — including a loss of
-	// the welcome itself, which arrives *after* the peer has been admitted.
 	Port port(1);
 	Stranger stranger = port.Peer(0, 16);
 
@@ -863,15 +785,11 @@ TEST_CASE("a welcome that was lost is sent again", "[replication][admission]") {
 	REQUIRE(stranger.TakeWelcome());
 	REQUIRE(port.Server->Count() == 1);
 
-	// The client never saw it, so it says the same thing again.
 	stranger.SayAnswer();
 	port.Server->Poll(0.0);
 
 	CHECK(stranger.TakeWelcome());
 
-	// **And it is the same connection, not a second one.** A fresh agreement
-	// for a live peer would be somebody at that address taking the slot from
-	// whoever holds it.
 	CHECK(port.Server->Count() == 1);
 	CHECK(port.Server->Stats().Admitted == 1);
 }
@@ -896,10 +814,6 @@ TEST_CASE("a fresh hello from an admitted peer is refused", "[replication][admis
 }
 
 TEST_CASE("a different peer at an admitted address is refused", "[replication][admission]") {
-	// Same address, different key exchange message. Either the client restarted
-	// and the old session has not timed out, or somebody is trying to displace
-	// it — and answering with the welcome that belongs to the live connection
-	// would tell them what they wanted to know.
 	Port port(1);
 	Stranger stranger = port.Peer(0, 18);
 
@@ -921,10 +835,6 @@ TEST_CASE("a different peer at an admitted address is refused", "[replication][a
 }
 
 TEST_CASE("a session refuses a handshake packet outright", "[replication][admission]") {
-	// The other side of the same rule, one layer down. A session exists because
-	// an admission already succeeded, so a key exchange arriving on it must not
-	// even reach the link — letting it would let whoever sent it reset the idle
-	// timeout of a connection they do not own.
 	std::vector<std::unique_ptr<Transport>> transports = MakeLoopbackTransport(2);
 	REQUIRE(transports.size() == 2);
 
@@ -942,4 +852,169 @@ TEST_CASE("a session refuses a handshake packet outright", "[replication][admiss
 	CHECK_FALSE(session.Receive(datagram.Bytes(), 1.0));
 	CHECK(session.Stats().Refused == 1);
 	CHECK(session.Link().Stats().PacketsReceived == 0);
+}
+
+
+TEST_CASE("a signed welcome from the pinned server is accepted", "[replication][admission]") {
+	const engine::assets::SigningKey server = Identity(0x40);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue dialogue(pinned);
+	dialogue.Finish(Serve(dialogue.Answered, 110, &server));
+
+	CHECK(dialogue.Client->Admitted());
+	CHECK_FALSE(dialogue.Client->Rejected());
+}
+
+TEST_CASE("an unsigned welcome is refused by a client that pinned a key", "[replication][admission]") {
+	const engine::assets::SigningKey server = Identity(0x41);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue dialogue(pinned);
+
+	dialogue.Finish(Serve(dialogue.Answered, 111));
+
+	CHECK_FALSE(dialogue.Client->Admitted());
+	CHECK(dialogue.Client->Rejected());
+}
+
+TEST_CASE("a welcome signed by another key is refused", "[replication][admission]") {
+	const engine::assets::SigningKey expected = Identity(0x42);
+	const engine::assets::SigningKey other = Identity(0x43);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = expected.Public();
+
+	Dialogue dialogue(pinned);
+	dialogue.Finish(Serve(dialogue.Answered, 112, &other));
+
+	CHECK_FALSE(dialogue.Client->Admitted());
+	CHECK(dialogue.Client->Rejected());
+}
+
+TEST_CASE("a relay in the path is refused, which is the whole point", "[replication][admission]") {
+	const engine::assets::SigningKey server = Identity(0x44);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue dialogue(pinned);
+
+	Welcome forwarded = Serve(dialogue.Answered, 113);
+
+	std::array<std::byte, Handshake::MESSAGE_BYTES> relayKey{};
+	relayKey.fill(std::byte{0x5A});
+
+	Answer toServer = dialogue.Answered;
+	toServer.PublicKey = relayKey;
+	const Welcome fromServer = Serve(toServer, 114, &server, &relayKey);
+
+	forwarded.Identity = fromServer.Identity;
+
+	dialogue.Finish(forwarded);
+
+	CHECK_FALSE(dialogue.Client->Admitted());
+	CHECK(dialogue.Client->Rejected());
+}
+
+TEST_CASE("without a pin that same relay succeeds", "[replication][admission]") {
+	const engine::assets::SigningKey server = Identity(0x47);
+
+	Dialogue dialogue;
+	Welcome forwarded = Serve(dialogue.Answered, 113);
+
+	std::array<std::byte, Handshake::MESSAGE_BYTES> relayKey{};
+	relayKey.fill(std::byte{0x5A});
+
+	Answer toServer = dialogue.Answered;
+	toServer.PublicKey = relayKey;
+	forwarded.Identity = Serve(toServer, 114, &server, &relayKey).Identity;
+
+	dialogue.Finish(forwarded);
+	CHECK(dialogue.Client->Admitted());
+}
+
+TEST_CASE("an unpinned client still connects, and that is the weaker mode", "[replication][admission]") {
+	Dialogue dialogue;
+	dialogue.Finish(Serve(dialogue.Answered, 114));
+
+	CHECK(dialogue.Client->Admitted());
+
+	const engine::assets::SigningKey server = Identity(0x45);
+	Dialogue second;
+	second.Finish(Serve(second.Answered, 115, &server));
+	CHECK(second.Client->Admitted());
+}
+
+TEST_CASE("a signature is over the transcript, so it does not move", "[replication][admission]") {
+	const engine::assets::SigningKey server = Identity(0x46);
+
+	ConnectorSettings pinned;
+	pinned.ServerIdentity = server.Public();
+
+	Dialogue first(pinned);
+	const Welcome stolen = Serve(first.Answered, 116, &server);
+
+	Dialogue second(pinned);
+	Welcome forged = Serve(second.Answered, 117, &server);
+	forged.Identity = stolen.Identity;
+
+	second.Finish(forged);
+	CHECK_FALSE(second.Client->Admitted());
+	CHECK(second.Client->Rejected());
+}
+
+
+TEST_CASE("a client's claim verifies against the transcript", "[replication][admission]") {
+	const engine::assets::SigningKey client = Identity(0x60);
+
+	std::array<std::byte, Handshake::MESSAGE_BYTES> clientKey{};
+	std::array<std::byte, Handshake::MESSAGE_BYTES> serverKey{};
+	std::array<std::byte, Cookie::COOKIE_BYTES> cookie{};
+	clientKey.fill(std::byte{0x11});
+	serverKey.fill(std::byte{0x22});
+	cookie.fill(std::byte{0x33});
+
+	const auto transcript = AdmissionTranscript(clientKey, serverKey, cookie);
+	const engine::assets::SignatureBytes signature = client.SignSessionTranscript(transcript);
+
+	CHECK(engine::assets::VerifySessionTranscript(transcript, signature, client.Public()));
+
+	std::array<std::byte, Handshake::MESSAGE_BYTES> otherKey{};
+	otherKey.fill(std::byte{0x44});
+	const auto elsewhere = AdmissionTranscript(clientKey, otherKey, cookie);
+	CHECK_FALSE(engine::assets::VerifySessionTranscript(elsewhere, signature, client.Public()));
+
+	const engine::assets::SigningKey impostor = Identity(0x61);
+	CHECK_FALSE(engine::assets::VerifySessionTranscript(transcript, signature, impostor.Public()));
+}
+
+TEST_CASE("an identity claim round-trips on the wire", "[replication][admission]") {
+	const engine::assets::SigningKey client = Identity(0x62);
+
+	engine::replication::Identify sent;
+	sent.Key = client.Public();
+	sent.Signature.Value.fill(0xAB);
+
+	ByteWriter writer;
+	WriteMessage(writer, sent);
+
+	engine::replication::Message read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(engine::replication::ReadMessage(reader, read));
+
+	CHECK(read.Kind == engine::replication::MessageKind::Identify);
+	CHECK(read.Identify.Key == sent.Key);
+	CHECK(read.Identify.Signature.Value == sent.Signature.Value);
+}
+
+TEST_CASE("a claim rides the reliable channel", "[replication][admission]") {
+	CHECK(
+		engine::replication::ChannelFor(engine::replication::MessageKind::Identify) ==
+		engine::net::ChannelKind::Reliable
+	);
 }

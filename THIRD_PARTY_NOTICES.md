@@ -37,6 +37,7 @@ it is built in a tree of its own — `.gitmodules` carries the reasoning.
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | the monospace typeface the script editor uses, from v0.7 | as above |
 | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display typeface, from v0.7 | as above |
 | [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | the coverage face merged into the others, from v0.7 | as above |
+| [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only — nothing else links `audio` |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They

@@ -36,6 +36,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/scene/Enums.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -72,6 +73,29 @@ namespace engine::scene {
 		// Which material, by name. Invalid means the consumer's default.
 		core::Name Material;
 
+		// Which texture overrides whatever the mesh's own submeshes name.
+		//
+		// **An override rather than the only answer**, and the two-level rule
+		// is what makes an imported model work at all: a `.pmx` character has
+		// twenty submeshes each naming its own sheet, and no single field on an
+		// instance can say that. So the mesh carries a texture per run and this
+		// replaces it for the whole instance when it is set — which is exactly
+		// what Roblox's `MeshPart.TextureID` does to an imported mesh, and
+		// exactly what a recoloured variant of one model needs.
+		//
+		// From `SurfaceAppearance::ColourMap`. Invalid means the submeshes
+		// decide.
+		core::Name Texture;
+
+		// Which tag bits this instance carries, against the world's `TagTable`.
+		//
+		// **The mask travels rather than the names**, so a pass filtering by
+		// tag is an `and` per instance instead of a set lookup — see
+		// `MatchesTags`. It is on the instance rather than looked up per view
+		// because a view is drawn several times a frame and the world is walked
+		// once.
+		uint32_t TagMask = 0;
+
 		// How much of what is behind shows through, 0 to 1.
 		//
 		// **The field is cheap and the ordering is not.** A non-zero value puts
@@ -100,14 +124,25 @@ namespace engine::scene {
 		// `Visual::CastShadow`, which is where it is authored.
 		bool CastShadow = true;
 
+		// How this instance's alpha channel is treated.
+		//
+		// **From `SurfaceAppearance::Mode`, and it is here rather than derived
+		// from `Transparency` because they answer different questions.**
+		// `Transparency` is how see-through the *part* is and puts it in the
+		// sorted pass; this is what the *texture's* alpha means, and `Clip` is
+		// the mode that keeps a hair card opaque and out of that pass entirely.
+		AlphaMode Alpha = AlphaMode::Opaque;
+
 		// Explicit padding, for the reason every other `Reserved` in the engine
 		// exists: this type crosses as its object representation the day a world
 		// is a process, and uninitialised bytes make two runs of one scene
 		// produce different files.
 		//
-		// Two now, not three. `CastShadow` took one of them, and the type is the
-		// size it was.
-		uint8_t Reserved[2] = {};
+		// One now, not two. `Alpha` took the second, which is what named
+		// padding is for — a field that fits goes in the hole rather than
+		// widening the row. `Texture` and `TagMask` did not fit and the type
+		// grew by eight for them.
+		uint8_t Reserved[1] = {};
 	};
 
 	// Produces the order a draw list should be submitted in.

@@ -1,0 +1,70 @@
+--!strict
+-- The ported libraries' own test suite, run by this engine's Luau.
+--
+-- **This is the parity check, and it is the reason the port is credible.**
+-- `MagicCore` and `TerrainCore` came from a Rojo project with 183 data tests
+-- that ran in Studio. Those tests came across with the libraries and are run
+-- here, unmodified apart from one line: `WaitForChild` does not exist in this
+-- engine, so `Run.luau` uses `FindFirstChild`. Everything else — the harness,
+-- every spec, the inventory guard — is the file that shipped.
+--
+-- A failure raises, so `LoadScene` returns false with the first failure in its
+-- error. `mono.engine/examples/tests/Scene.cpp` loads this scene, which is what
+-- makes the suite part of `just test` rather than something somebody remembers
+-- to run.
+--
+-- ## What is not here
+--
+-- The `live` suite, which built real `ParticleEmitter`, `Beam`, `Trail`,
+-- `PointLight` and `Attachment` instances and asserted the particle-tail release
+-- deadline. This engine has none of those classes, so the suite was **dropped
+-- rather than stubbed** — a mock that asserted against a fake emitter would
+-- report a pass for a pipeline that does not exist, which is worse than an
+-- honest gap. `MagicRuntime` is absent for the same reason.
+--
+-- Everything the live suite covered is about turning compiled data into
+-- Instances. Nothing it covered is about whether the data is right, and that is
+-- the whole of what runs here.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local MagicCore = ReplicatedStorage:FindFirstChild("MagicCore")
+assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted — is assets/lib staged?")
+
+local TerrainCore = ReplicatedStorage:FindFirstChild("TerrainCore")
+assert(TerrainCore ~= nil, "ReplicatedStorage.TerrainCore was not mounted")
+
+local MagicTests = ReplicatedStorage:FindFirstChild("MagicTests")
+assert(MagicTests ~= nil, "ReplicatedStorage.MagicTests was not mounted")
+
+local Run = require((MagicTests :: any):FindFirstChild("Run") :: any)
+
+local report = Run.data(MagicCore, TerrainCore)
+
+print(report.summary)
+
+for _, failure in report.failures do
+	warn(`magic tests: {failure}`)
+end
+
+-- The world still has to build something, or `LoadScene` measures a scene one
+-- unit across. One part, named after the outcome, so a run that reported nothing
+-- is distinguishable from a run that did not happen.
+local marker = Instance.new("Part")
+marker.Name = if report.failed > 0 then "MagicTestsFailed" else "MagicTestsPassed"
+marker.Anchored = true
+marker.Size = Vector3.new(4, 4, 4)
+marker.Color = if report.failed > 0 then Color3.new(0.8, 0.2, 0.2) else Color3.new(0.2, 0.75, 0.35)
+marker.Parent = workspace
+
+local eye = Instance.new("Camera")
+eye.Name = "Eye"
+eye.CFrame = CFrame.lookAt(Vector3.new(8, 6, 12), Vector3.new(0, 0, 0))
+eye.Parent = workspace
+workspace.CurrentCamera = eye
+
+-- Raised last, so the marker and the log survive a failing run.
+assert(
+	report.failed == 0,
+	`{report.failed} of {report.executed} magic test(s) failed; the first is: {report.failures[1]}`
+)

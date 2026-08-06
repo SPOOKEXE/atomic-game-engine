@@ -72,13 +72,19 @@ namespace client {
 	  public:
 		// Starts tracking a world's view.
 		//
-		// The channel is sized once, at the maximum, so publishing never
-		// allocates — which is what keeps a producer off the allocator inside
-		// its own render phase.
+		// The channel is reserved at this size, so publishing a list that fits
+		// never allocates — which is what keeps a producer off the allocator
+		// inside its own render phase.
+		//
+		// **A starting size, not a ceiling.** A world that outgrows it grows
+		// the channel in steps rather than being refused: the number a caller
+		// has at this point is a guess about a world a script has not built
+		// yet, and a guess that stops a world being drawn is worse than an
+		// occasional reallocation. `Publish` says when it grows.
 		//
 		// @param id               The world's handle.
 		// @param world            Its name, which is what crosses.
-		// @param maximumInstances The largest draw list it may publish.
+		// @param maximumInstances The draw list size to reserve for.
 		void Track(engine::world::WorldId id, engine::core::Name world, size_t maximumInstances);
 
 		// Publishes one world's view.
@@ -92,7 +98,8 @@ namespace client {
 		// @param list    What it drew.
 		// @param tick    The tick that produced it.
 		// @param alpha   The interpolation position it used.
-		// @return `false` for an untracked world, or a list too large.
+		// @return `false` only for an untracked world. A list larger than the
+		//         channel grows it rather than being refused.
 		bool Publish(
 			engine::world::WorldId id,
 			const engine::core::CFrame &frame,

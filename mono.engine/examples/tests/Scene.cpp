@@ -18,15 +18,19 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("engine.examples.scene")
 TEST_DEPENDS("engine.script.scripting")
@@ -213,26 +217,10 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 		}
 	}
 
-	// The wall the viewer faces is still built first, which is worth keeping as
-	// an assertion even though nothing depends on it any more: it used to decide
-	// which of the four mirrors was the live one, because the pipeline drew a
-	// single surface view and picked the lowest entity id to fill it. All four
-	// are live now, so this is a statement about the scene's build order and no
-	// longer about what renders.
 	CHECK(lowest == north);
 
-	// Every pane is aimed, and every one of them can now be rendered.
 	REQUIRE(engine::scene::AimSurfaceCameras(store) == 4);
 
-	// **A surface each, and the indices are the script's rather than the
-	// engine's.** This is what makes four walls four mirrors: they shared index
-	// 0 until v0.8, so all four cameras wrote into one texture and three of them
-	// projected the fourth's image across themselves.
-	//
-	// Asserted against the *camera's* authored index rather than against a
-	// literal, because what is being checked is the copy — `AimSurfaceCameras`
-	// putting the camera's number onto the pane it is parented to is the step
-	// that makes a mirror a camera parented to a part and nothing else.
 	bool seen[engine::scene::MAX_SURFACES] = {};
 	for (const Wall &wall : walls) {
 		INFO(wall.Name);
@@ -247,34 +235,18 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 
 		CHECK(store.Get<Visual>(pane)->Surface == index);
 
-		// **Distinct, which is the half an equality check cannot see.** Four
-		// panes each carrying the index of the camera above them would pass
-		// every check so far while all four indices were 0 — which is exactly
-		// the state this scene was in before, and exactly what looked like three
-		// broken mirrors.
 		CHECK_FALSE(seen[index]);
 		seen[index] = true;
 	}
 
-	// **The live camera is not a surface one.** That is the distinction
-	// `ActiveCamera` exists for, and getting it wrong would render the scene
-	// from inside a mirror.
 	const auto *active = store.Resource<ActiveCamera>();
 	REQUIRE(active != nullptr);
 	CHECK(active->Entity == InScene(store, "Viewer"));
 	CHECK(active->Entity != north);
 
-	// A baseplate, because a shadow needs something to fall on — a scene of
-	// floating cubes has nothing, and the shadow pass would look broken.
 	CHECK(InScene(store, "Baseplate") != engine::ecs::NULL_ENTITY);
 	CHECK(CountNamed(store, "Caster") == 24);
 
-	// **The cubes are in the middle, and this is the assertion that says so.**
-	// The enclosure is only legible while the casters stay clear of the glass:
-	// one drifting into a pane reads as a broken reflection rather than as a
-	// cube in the wrong place, and the two look identical from the viewer's
-	// chair. The bound is the authored spread plus the largest half-edge, so it
-	// fails on a placement change rather than on a rendering one.
 	constexpr float FURTHEST = 13.0f;
 	size_t counted = 0;
 	store.Each<const engine::scene::Transform, const Visual>(
@@ -291,10 +263,6 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 }
 
 TEST_CASE("the reflected camera is the eye mirrored through the plane", "[examples][scene]") {
-	// **The whole of planar reflection**, and the one number in the scene that
-	// is easy to get subtly wrong: the same distance behind the plane as the
-	// eye is in front. An offset here reads as a reflection that slides across
-	// the pane as the camera moves, which looks like a projection bug.
 	const StagedAssets assets;
 
 	Store store("mirrors");
@@ -303,21 +271,11 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 	std::string error;
 	REQUIRE(LoadScene(store, systems, ExamplePath("Mirrors-1-world.luau"), error));
 
-	// **Placed by the engine now, so the pass has to run first.** The script
-	// used to compute this itself and the assertion held straight after
-	// loading; moving the arithmetic into `scene` is what made the reflection
-	// follow a moving viewer, and it means the camera is wherever it was left
-	// until something aims it.
 	REQUIRE(engine::scene::AimSurfaceCameras(store) == 4);
 
 	const auto *viewer = store.Get<engine::scene::Transform>(InScene(store, "Viewer"));
 	REQUIRE(viewer != nullptr);
 
-	// **Both axes, because the enclosure is the first scene to reflect off
-	// one that is not Z.** A single pane facing -Z could not tell an axis-generic
-	// `NormalOf` from a hard-coded one, so the wall on +X is doing the work here:
-	// it is the same assertion with the roles of the components swapped, and a
-	// reflection that only ever mirrored Z would pass the first and fail this.
 	SECTION("the north wall, mirroring Z") {
 		const Entity pane_ = InScene(store, "MirrorNorth");
 		const auto *pane = store.Get<engine::scene::Transform>(pane_);
@@ -328,12 +286,6 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 		REQUIRE(bounds != nullptr);
 		REQUIRE(reflected != nullptr);
 
-		// **The plane is the face, not the middle of the slab**, and the face
-		// here is `Back` — so the half thickness is *added*, putting the plane on
-		// the inward side where the baseplate ends. Getting the sign wrong
-		// mirrors through a plane four tenths of a unit outside the room, which
-		// reads as a reflection that slides across the glass rather than as an
-		// arithmetic error.
 		const float plane = pane->Frame.Position.Z + bounds->HalfExtent.Z;
 
 		CHECK(reflected->Frame.Position.Z == Approx(2.0f * plane - viewer->Frame.Position.Z));
@@ -353,9 +305,6 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 		REQUIRE(bounds != nullptr);
 		REQUIRE(reflected != nullptr);
 
-		// `Left` is -X, so the plane is the pane's centre pulled *back* towards
-		// the room by its half thickness — the mirror image of the north wall's
-		// sign, for the mirror image of the reason.
 		const float plane = pane->Frame.Position.X - bounds->HalfExtent.X;
 
 		CHECK(reflected->Frame.Position.X == Approx(2.0f * plane - viewer->Frame.Position.X));
@@ -365,23 +314,6 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 }
 
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
-	// **The scene that proves the 2D branch, and now the join under it.**
-	// `Interface.luau` builds a `ScreenGui` entirely from a script — every
-	// element exists because one specific thing looks correct without it — and
-	// since v0.8's last step it also *connects*: `.Activated` on two named
-	// buttons and on six swatches made in a loop.
-	//
-	// **What this case is for is the loop.** A join that only worked for
-	// instances a script held a local for would pass every hand-written case and
-	// fail on generated elements, which is most of a real interface. The
-	// swatches are found by name through the tree, exactly as a script does.
-	//
-	// The dispatch itself — that a delivered event becomes a call, at the
-	// barrier, in the router's order — is `engine.script.scripting`'s, where a
-	// runtime can be driven directly. What cannot be checked there is that this
-	// file is valid against the real class tree, which is this case's whole job:
-	// a `.Activated` on a class that does not declare one, or a handler
-	// referring to a local declared later, fails here and nowhere else.
 	const StagedAssets assets;
 
 	Store store("interface");
@@ -392,34 +324,18 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	INFO(error);
 	REQUIRE(loaded);
 
-	// The tree the script describes, spot-checked at the two ends that matter:
-	// the named buttons the handlers are attached to by local, and the
-	// generated ones they are attached to by lookup.
 	CHECK(CountElements(store, "Confirm") == 1);
 	CHECK(CountElements(store, "Cancel") == 1);
 	for (int index = 1; index <= 6; index++) {
 		CHECK(CountElements(store, "Swatch" + std::to_string(index)) == 1);
 	}
 
-	// `refresh()` runs at the top level, so the hint carries the click count
-	// rather than the authored placeholder. That is the cheapest proof the
-	// handlers' shared state was reachable at all — a `refresh` that raised
-	// would have failed the load above, and one that never ran would leave the
-	// original text.
 	const Entity hint = FirstElement(store, "Hint");
 	REQUIRE(hint != engine::ecs::NULL_ENTITY);
 	const engine::gui::Label *label = store.Get<engine::gui::Label>(hint);
 	REQUIRE(label != nullptr);
 	CHECK(label->Text.find("0 clicks") != std::string::npos);
 
-	// **And it actually lays out**, which is a stronger claim than that the tree
-	// exists and is the one containment can break.
-	//
-	// A `ScreenGui` draws only from `StarterGui` or a player's `PlayerGui`. This
-	// file left its own unparented for a version and drew anyway, because the
-	// engine was more permissive than the thing it models — so an author could
-	// have shipped an interface that appeared in the studio and was missing in
-	// the client. Asserting the tree alone would not have noticed either state.
 	engine::gui::Screen display;
 	display.Width = 1920.0f;
 	display.Height = 1080.0f;
@@ -432,18 +348,9 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	CHECK(placed->Rendered);
 	CHECK(placed->AbsoluteSize.X > 0.0f);
 
-	// **The close button disables the collector rather than hiding the card**,
-	// which is what makes closing cost nothing afterwards: `Layout` skips a
-	// disabled `ScreenGui` before it asks how big anything under it is. Hiding
-	// the card instead would leave the whole subtree measured and compiled every
-	// frame for something nobody can see.
 	const Entity close = FirstElement(store, "Close");
 	REQUIRE(close != engine::ecs::NULL_ENTITY);
 
-	// **Found by `Layer`, not by `Element`.** A `ScreenGui` is a
-	// `LayerCollector` rather than a `GuiObject` — it has a canvas and no
-	// rectangle of its own — which is the split `GuiBase2d` exists to hold, and
-	// `FirstElement` would never see one.
 	Entity screen = engine::ecs::NULL_ENTITY;
 	store.Each<const engine::gui::Layer>([&](Entity entity, const engine::gui::Layer &) {
 		if (screen == engine::ecs::NULL_ENTITY &&
@@ -463,15 +370,6 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 }
 
 TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][worlds]") {
-	// **What this scene is for is the arrangement, not the room.** `--worlds N`
-	// runs one script in N worlds and composites their views side by side; four
-	// identical rooms in a row would look correct whatever order they were
-	// placed in, so the file distinguishes itself by `game.JobId` and this case
-	// is what says it actually does.
-	//
-	// Two worlds, built from the *same file*, asserted to differ. A script that
-	// ignored its identity would give both the same caster count and pass every
-	// check that only looked at one of them.
 	const StagedAssets assets;
 
 	const auto casterCount = [&](const char *worldName) {
@@ -483,12 +381,9 @@ TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][wor
 		INFO(error);
 		REQUIRE(loaded);
 
-		// The parts every world has, whichever index it is.
 		CHECK(CountNamed(store, "Baseplate") == 1);
 		CHECK(CountNamed(store, "Mirror") == 1);
 
-		// A surface camera on the pane, which is what makes it a mirror rather
-		// than a coloured wall — the same pairing `Mirrors-1-world` asserts.
 		size_t surfaces = 0;
 		store.Each<const SurfaceCamera>([&](Entity, const SurfaceCamera &) { surfaces++; });
 		CHECK(surfaces == 1);
@@ -496,46 +391,19 @@ TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][wor
 		return CountNamed(store, "Caster");
 	};
 
-	// The palette table runs six, nine, twelve, fifteen. World 0 has no suffix
-	// at all — `Client::BuildDemoWorlds` keeps the original name — so this also
-	// covers the one index whose name a naive parse would get wrong.
 	CHECK(casterCount("client.world") == 6);
 	CHECK(casterCount("client.world.1") == 9);
 	CHECK(casterCount("client.world.2") == 12);
 	CHECK(casterCount("client.world.3") == 15);
 
-	// **Wraps rather than clamps**, so a fifth world is a distinguishable room
-	// rather than a fourth copy. `--worlds 6` is a thing somebody will type.
 	CHECK(casterCount("client.world.4") == 6);
 }
 
 TEST_CASE("the four-world scene builds the same way in TypeScript", "[examples][scene][worlds][js]") {
-	// **The roadmap's gate: each item lands in Luau *and* JavaScript, or it is
-	// not done** — and this case could not exist until the staging step did.
-	//
-	// `Runtime.hpp` has always said a `.ts` file "is expected to have been
-	// type-stripped already — nothing in the C++ build compiles TypeScript, and
-	// nothing should: the engine loads what a toolchain emitted". Nothing
-	// emitted it, so every `.ts` example was copied verbatim and QuickJS refused
-	// it at the first type annotation. `Mirrors-1-world.ts` had been in that
-	// state since the day it was written: typechecked, shipped, and unable to
-	// run.
-	//
-	// `mono.engine/examples/CMakeLists.txt` transpiles them now, which is why
-	// this loads `.js` — that is the file the toolchain actually produced, and
-	// naming it `.ts` would have been a lie about its contents.
-	//
-	// **The strongest form of the parity check**, because the two files compute
-	// the placement hash with different primitives — `bit32` against
-	// `Math.imul` — so a mismatch there shows as a different scene rather than
-	// as an error.
 	const StagedAssets assets;
 
 	const std::filesystem::path transpiled = ExamplePath("Mirrors-4-worlds.js");
 	if (!std::filesystem::exists(transpiled)) {
-		// A checkout without `bun install` has no `tsc`, so the configure said
-		// so and staged no JavaScript twins. Recorded as skipped rather than
-		// passed: the Luau case above still proves the scene builds.
 		SUCCEED("no transpiled twin; tsc was not available at configure time");
 		return;
 	}
@@ -554,39 +422,14 @@ TEST_CASE("the four-world scene builds the same way in TypeScript", "[examples][
 }
 
 TEST_CASE("the gui containment names match the services scene installs", "[examples][scene][gui]") {
-	// **A duplicated constant is only safe while something fails when the two
-	// copies disagree, and this is that something.**
-	//
-	// `gui::Layout` decides whether a `ScreenGui` draws by walking its ancestors
-	// and comparing *names* against `Workspace`, `StarterGui` and a player's
-	// `PlayerGui`. It compares names rather than class ids because
-	// `gui/AGENTS.md` refuses an edge to `scene` — the same refusal that made
-	// `gui::Face` re-declare `NormalId`'s six members, pinned the same way by
-	// `gui/tests/Enums.cpp`.
-	//
-	// **The check lives here because this is where both ends are linked.**
-	// `scene` may not link `gui` and `gui` may not link `scene`, so neither
-	// module's own tests can compare the two; `examples` links both, which makes
-	// it the lowest place the comparison can be made at all.
-	//
-	// Renaming a service without renaming its copy would not break a build. It
-	// would produce an engine in which every interface silently stops drawing —
-	// a bug found by looking at a black screen rather than by running anything.
 	Store store("examples_test.gui_names");
 	engine::scene::InstallServices(store);
 
 	CHECK(store.FindFirstRoot(engine::gui::WORKSPACE) != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstRoot(engine::gui::STARTER_GUI) != engine::ecs::NULL_ENTITY);
 
-	// **`PlayerGui` is not a root**, so it is pinned differently: it is a child
-	// of a `Player`, created by `scene::AddPlayer`, and what the two ends have
-	// to agree on is the spelling.
 	CHECK(engine::gui::PLAYER_GUI == engine::scene::PLAYER_GUI_NAME);
 
-	// And a player actually gets one. A client whose player had no `PlayerGui`
-	// could never be shown an interface, and the symptom would be a black
-	// overlay rather than an error — which is why this is asserted here rather
-	// than left to whoever adds a player.
 	const Entity player = engine::scene::AddPlayer(store, "Someone", true);
 	REQUIRE(player != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(player, engine::gui::PLAYER_GUI) != engine::ecs::NULL_ENTITY);
@@ -611,8 +454,7 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 	// without which the whole thing draws nothing.
 	const StagedAssets assets;
 
-	const std::filesystem::path panel =
-		engine::core::Paths::Assets() / "panels" / "Properties.js";
+	const std::filesystem::path panel = engine::core::Paths::Assets() / "panels" / "Properties.js";
 	if (!std::filesystem::exists(panel)) {
 		SUCCEED("no transpiled panel; tsc was not available at configure time");
 		return;
@@ -653,4 +495,215 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 	// `Position` would put them at zero — this separates all three.
 	CHECK(placed->AbsolutePosition.X > 960.0f);
 	CHECK(placed->AbsolutePosition.X < 1920.0f - 300.0f);
+}
+
+namespace {
+
+	// Every voxel box the terrain scene built, as a canonical sorted list.
+	//
+	// Sorted rather than taken in iteration order, because two worlds built the
+	// same way are only guaranteed to hold the same *set* of rows — an
+	// archetype walk is free to visit them in a different sequence, and a
+	// determinism check that compared sequences would fail for a reason that has
+	// nothing to do with the generator.
+	std::vector<std::array<float, 6>> VoxelBoxes(Store &store) {
+		std::vector<std::array<float, 6>> boxes;
+
+		store.Each<const engine::scene::Transform, const engine::scene::Bounds, const Visual>(
+			[&](Entity entity,
+				const engine::scene::Transform &transform,
+				const engine::scene::Bounds &bounds,
+				const Visual &visual) {
+				if (store.InstanceNameOf(entity) != Name("Voxels") || !visual.Visible) {
+					return;
+				}
+
+				const engine::core::Vector3 &at = transform.Frame.Position;
+				boxes.push_back(
+					{at.X, at.Y, at.Z, bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z}
+				);
+			}
+		);
+
+		std::sort(boxes.begin(), boxes.end());
+		return boxes;
+	}
+}
+
+TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("terrain");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Terrain.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The prefill runs before the first frame, so a world exists the moment the
+	// scene is loaded rather than one beat later. Nine chunks of it — the exact
+	// count depends on the terrain the camera starts over, so this asserts the
+	// order of magnitude and not a number that would have to be edited every
+	// time a constant moved.
+	const std::vector<std::array<float, 6>> boxes = VoxelBoxes(store);
+	CHECK(boxes.size() > 100);
+	CHECK(boxes.size() < 20000);
+
+	// **The merge actually merged.** A box wider or deeper than one metre is a
+	// run of voxels that became one part, and this is the assertion that
+	// separates "the generator emitted something" from "the generator emitted a
+	// quarter of a million one-metre cubes". Half-extents, so 0.5 is one block.
+	size_t merged = 0;
+	for (const std::array<float, 6> &box : boxes) {
+		if (box[3] > 0.5f || box[5] > 0.5f) {
+			merged++;
+		}
+	}
+	CHECK(merged > boxes.size() / 4);
+
+	// Nothing reaches below bedrock or above the height field's ceiling. A
+	// generator that produced a column stretching to the origin is the failure
+	// this catches, and it is invisible in a part count.
+	for (const std::array<float, 6> &box : boxes) {
+		const float bottom = box[1] - box[4];
+		const float top = box[1] + box[4];
+		CHECK(bottom >= -8.0f);
+		CHECK(top <= 200.0f);
+	}
+
+	// The camera the scene placed, above the ground rather than inside it.
+	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
+
+	const Entity eye = InScene(store, "Surveyor");
+	REQUIRE(eye != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 34.0f);
+
+	// Measured bounds, not declared. A streamed world reaches as far as what is
+	// loaded, which is the camera's neighbourhood rather than the whole map —
+	// the 16384-block extent exists as a function and never as geometry.
+	REQUIRE(store.Resource<WorldBounds>() != nullptr);
+	CHECK(store.Resource<WorldBounds>()->HalfExtent > 100.0f);
+}
+
+TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
+	const StagedAssets assets;
+
+	// **Rule 5, asserted rather than asserted-in-a-comment.** The map is
+	// 268 million columns and is never stored, so every block anybody ever sees
+	// comes out of `HeightAt` — which means a recording replays if and only if
+	// two runs of that function agree. The integer hashing exists for this, and
+	// a change that reached for `math.random` or wall time would pass every
+	// other check in this file.
+	std::vector<std::array<float, 6>> first;
+	std::vector<std::array<float, 6>> second;
+
+	for (std::vector<std::array<float, 6>> *into : {&first, &second}) {
+		Store store("terrain.determinism");
+		Scheduler systems;
+
+		std::string error;
+		const bool loaded = LoadScene(store, systems, ExamplePath("Terrain.luau"), error);
+		INFO(error);
+		REQUIRE(loaded);
+
+		// Ten fixed ticks each, so the camera moves and the streaming runs —
+		// comparing only the prefill would pin the generator and leave the part
+		// of the file that decides *when* a chunk is built untested.
+		for (int tick = 0; tick < 10; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
+
+		*into = VoxelBoxes(store);
+	}
+
+	REQUIRE(first.size() == second.size());
+	CHECK(first == second);
+}
+
+TEST_CASE("the shipped Luau libraries mount and run", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("libraries");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Libraries.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// **Mounted where a Rojo place would put them**, which is the whole contract
+	// the ported libraries were written against.
+	const Entity replicated = store.FindFirstRoot("ReplicatedStorage");
+	REQUIRE(replicated != engine::ecs::NULL_ENTITY);
+
+	const Entity magic = store.FindFirstChild(replicated, "MagicCore");
+	REQUIRE(magic != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(magic, "Compiler") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(magic, "SpellSolver") != engine::ecs::NULL_ENTITY);
+
+	// `Presets/init.luau` collapsed, so the presets are children of the module
+	// rather than of a folder beside it. Every preset reaches its library
+	// through `script.Parent.Parent`, which only resolves if this is right.
+	const Entity presets = store.FindFirstChild(magic, "Presets");
+	REQUIRE(presets != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(presets) == engine::script::ModuleScriptClass());
+	CHECK(store.FindFirstChild(presets, "ChainLightning") != engine::ecs::NULL_ENTITY);
+
+	const Entity terrain = store.FindFirstChild(replicated, "TerrainCore");
+	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(terrain, "Noise") != engine::ecs::NULL_ENTITY);
+
+	// Scene loading reached the generated voxel geometry.
+	CHECK(CountNamed(store, "Voxels") > 0);
+}
+
+TEST_CASE("the ported libraries pass their own test suite", "[examples][scene]") {
+	// The ported libraries run their data tests in this engine's Luau runtime.
+	const StagedAssets assets;
+
+	Store store("magic.tests");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("MagicTests.luau"), error);
+
+	// The script reports the first failure in its error message.
+	INFO(error);
+	REQUIRE(loaded);
+
+	CHECK(CountNamed(store, "MagicTestsPassed") == 1);
+	CHECK(CountNamed(store, "MagicTestsFailed") == 0);
+}
+
+TEST_CASE("the magic scene fires spells that crater terrain", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("magic");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Magic.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The arena exists before the first beat.
+	const size_t terrainBefore = CountNamed(store, "Voxels");
+	CHECK(terrainBefore > 500);
+
+	// A changed voxel mesh proves the spell reached the world.
+	size_t sampled = terrainBefore;
+	bool changed = false;
+	for (int tick = 0; tick < 60 * 8 && !changed; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+		const size_t now = CountNamed(store, "Voxels");
+		if (now != sampled) {
+			changed = true;
+		}
+		sampled = now;
+	}
+	CHECK(changed);
+
+	// Every lane compiled; skipped lanes would leave an empty arena.
+	CHECK(CountNamed(store, "Muzzle") == 5);
 }

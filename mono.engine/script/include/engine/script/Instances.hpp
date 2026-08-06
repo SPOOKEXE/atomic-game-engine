@@ -29,6 +29,7 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -122,4 +123,45 @@ namespace engine::script {
 	// @param name  The instance's name, which is what `require` reaches it by.
 	// @return The instance, or `NULL_ENTITY` when the world refused it.
 	ecs::Entity MakeModule(ecs::Store &store, std::string_view path, std::string_view name);
+
+	// Mirrors a directory of `.luau` files into a tree of `ModuleScript`s.
+	//
+	// **This is what makes a library of many files reachable from a script.**
+	// `require` takes an instance and never a path, deliberately — so a
+	// thousand-file library has to *be* a thousand instances before anything can
+	// require the first one, and until this existed the only way to get one was
+	// to hand-build the tree in C++ or to write the whole library into one file.
+	//
+	// **Rojo's layout rule, because that is the one authors already know.** A
+	// directory becomes a plain `Instance` acting as a folder; a `.luau` file
+	// becomes a `ModuleScript` named after its stem; and an `init.luau` collapses
+	// into its own directory, so `Presets/init.luau` *is* the `Presets` module
+	// and its siblings become its children. Getting that last rule wrong is
+	// silent: `script.Parent.X` resolves one level off and every module in the
+	// library fails at its first require.
+	//
+	// **Absolute paths, and that is not incidental.** `ReadSource` resolves a
+	// relative `Source` against `core::Paths::Assets()`, which defaults to the
+	// running program's own directory — while a staged library sits in a
+	// *sibling* of it. `examples::ExamplePath` documents that mismatch and works
+	// around it by looking in both places; a `Source` cannot, because it is one
+	// name. Resolving here, once, where the directory is already known, keeps
+	// the layout out of every file that gets mounted.
+	//
+	// Entries that are neither a directory nor a `.luau` file are skipped, and a
+	// directory holding nothing to mount produces no instance rather than an
+	// empty one.
+	//
+	// @param store     The world.
+	// @param directory The directory to mirror. Read once, at call time.
+	// @param name      What the root instance is called.
+	// @param parent    What to parent the root to, or `NULL_ENTITY` for a root.
+	// @return The root instance, or `NULL_ENTITY` when the directory held
+	//         nothing or the world refused an instance.
+	ecs::Entity MountModuleTree(
+		ecs::Store &store,
+		const std::filesystem::path &directory,
+		std::string_view name,
+		ecs::Entity parent = ecs::NULL_ENTITY
+	);
 }

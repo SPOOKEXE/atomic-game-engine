@@ -4,12 +4,14 @@ layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inColour;
 layout(location = 2) in vec4 inLightPosition;
 layout(location = 3) in vec4 inSurfacePosition;
+layout(location = 4) in vec2 inTexCoord;
 
 layout(location = 0) out vec4 outColour;
 
 // Fragment samplers are set 2 for SPIR-V; uniform buffers are set 3.
 layout(set = 2, binding = 0) uniform sampler2D shadowMap;
 layout(set = 2, binding = 1) uniform sampler2D surfaceMap;
+layout(set = 2, binding = 2) uniform sampler2D colourMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -20,6 +22,15 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// z: 1 when this draw samples the surface texture rather than its own tint.
 	// w: how opaque the projected image is, 0 to 1. See the composite below.
 	vec4 Flags;
+
+	// The submesh's own colour, multiplied into whatever the texture gives.
+	// White for a draw that has no material of its own.
+	vec4 BaseColour;
+
+	// x: 1 when `colourMap` holds this draw's texture rather than the one-texel
+	//    stand-in.
+	// y: the alpha below which a fragment is discarded, or 0 to discard none.
+	vec4 Surface;
 } lighting;
 
 // How much light reaches this fragment, 0 fully shadowed to 1 fully lit.
@@ -28,21 +39,10 @@ float ShadowFactor(vec3 normal, vec3 toLight) {
 		return 1.0;
 	}
 
-	// The perspective divide, done here rather than in the vertex shader: see
-	// `opaque.vert`. For the orthographic light matrix `w` is one and this
-	// costs nothing, but doing it correctly means the projection can change
-	// without this becoming subtly wrong.
+	// Divide here so the lookup remains perspective-correct if the projection changes.
 	vec3 projected = inLightPosition.xyz / inLightPosition.w;
 
-	// **Y is flipped, and that is SDL's viewport rather than a convention
-	// mistake.** SDL's Vulkan backend submits a negative-height viewport "for
-	// consistency with other backends", so a vertex at `ndc.y = +1` lands at the
-	// *top* of the target — where a texture's `v = 0` is. Sampling with
-	// `ndc.y * 0.5 + 0.5` reads the image upside down.
-	//
-	// Depth needs no remap: Vulkan clip space is already 0..1 there, and an
-	// OpenGL-convention rescale of z would push every comparison half a unit and
-	// shadow the whole scene.
+	// SDL's viewport convention maps the top of the target to texture v = 0.
 	vec2 uv = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
 
 	// Outside the map is lit, not shadowed. The map covers what the scene
@@ -52,11 +52,7 @@ float ShadowFactor(vec3 normal, vec3 toLight) {
 		return 1.0;
 	}
 
-	// **A slope-scaled bias, not a constant one.** A surface nearly edge-on to
-	// the light spans many depth values within one shadow texel, so a constant
-	// bias large enough to stop it self-shadowing is large enough to detach
-	// shadows from their casters everywhere else. Scaling by the angle pays the
-	// cost only where it is needed.
+	// Scale the bias with the light angle to reduce acne without detached shadows.
 	float slope = 1.0 - max(dot(normal, toLight), 0.0);
 	float bias = 0.0015 + 0.0045 * slope;
 
@@ -88,7 +84,23 @@ void main() {
 	// rather than flat. Cheaper than a second light and enough to read shape.
 	float bounce = max(normal.y, 0.0) * 0.15;
 
-	vec3 albedo = inColour.rgb;
+	// **The three colour sources multiply rather than one winning.** The
+	// texture is what the artist painted, the base colour is what the *material*
+	// says that run is — which is the whole of an untextured import — and the
+	// instance tint is what the scene says this copy of it is. A pipeline that
+	// let any of them replace the others would lose a different thing in each
+	// of the three cases.
+	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, inTexCoord) : vec4(1.0);
+
+	// Cut-out before anything else is computed. A hair card is authored as a
+	// plane with a mask, and discarding is what keeps it opaque and out of the
+	// sorted pass — see `scene::AlphaMode`.
+	float alpha = inColour.a * sampled.a * lighting.BaseColour.a;
+	if (lighting.Surface.y > 0.0 && alpha < lighting.Surface.y) {
+		discard;
+	}
+
+	vec3 albedo = inColour.rgb * sampled.rgb * lighting.BaseColour.rgb;
 
 	// Ambient is unshadowed and direct light is not, which is what makes a
 	// shadow dark rather than black.
@@ -114,26 +126,11 @@ void main() {
 			vec3 image = texture(surfaceMap, surfaceUv).rgb * inColour.rgb;
 			float imageAlpha = lighting.Flags.w;
 
-			// **Composited over the part rather than replacing it, and the
-			// alphas are combined rather than one winning.** This is the fix for
-			// a mirror that vanished when it was faded: the image used to be
-			// written with the *part's* alpha, so a pane at `Transparency = 0.9`
-			// drew its reflection at one tenth strength and a fully transparent
-			// pane showed no reflection at all — which is not what glass does.
-			//
-			// The two are independent facts. `inColour.a` is how much of the
-			// world behind shows through the pane; `imageAlpha` is how much of
-			// the pane shows through the reflection. Taking the max means the
-			// image is as solid as it was authored to be **whatever the part's
-			// own transparency is**, so a reflection on invisible glass is a
-			// floating reflection — which is exactly what a mirror is.
-			//
-			// The colour is mixed in the same proportion, so a half-opaque image
-			// on a tinted pane is half of each rather than one or the other.
-			outColour = vec4(mix(lit, image, imageAlpha), max(inColour.a, imageAlpha));
+			// Preserve the image opacity independently from the pane transparency.
+			outColour = vec4(mix(lit, image, imageAlpha), max(alpha, imageAlpha));
 			return;
 		}
 	}
 
-	outColour = vec4(lit, inColour.a);
+	outColour = vec4(lit, alpha);
 }

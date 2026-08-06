@@ -129,6 +129,30 @@ foreach(scene IN LISTS example_scenes)
 	list(APPEND staged_scenes "${MONO_STAGE_ROOT}/assets/examples/${scene_name}")
 endforeach()
 
+# The Luau *libraries*, staged with their directory structure intact.
+#
+# **Recursive, and the tree shape is the point.** `script::MountModuleTree`
+# mirrors a directory into ModuleScript instances following Rojo's rule, so
+# `lib/MagicCore/Presets/init.luau` has to still be inside `Presets` when it
+# lands — flattening the way the scene glob does would leave `require` unable to
+# find a single sibling.
+file(GLOB_RECURSE example_libraries CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/lib/*.luau")
+
+foreach(library IN LISTS example_libraries)
+	file(RELATIVE_PATH library_relative "${CMAKE_CURRENT_SOURCE_DIR}/lib" "${library}")
+	set(library_staged "${MONO_STAGE_ROOT}/assets/lib/${library_relative}")
+	get_filename_component(library_directory "${library_staged}" DIRECTORY)
+
+	add_custom_command(
+		OUTPUT "${library_staged}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${library_directory}"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${library}" "${library_staged}"
+		DEPENDS "${library}"
+		COMMENT "Staging example library ${library_relative}"
+		VERBATIM)
+	list(APPEND staged_scenes "${library_staged}")
+endforeach()
+
 if(staged_scenes)
 	add_custom_target(example_scenes ALL DEPENDS ${staged_scenes})
 	add_dependencies(engine_examples example_scenes)

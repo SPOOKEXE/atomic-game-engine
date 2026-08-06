@@ -120,6 +120,9 @@ declare extern type EnumItem with
 	EnumType: string
 end
 
+declare extern type Enum_AlphaMode extends EnumItem with
+end
+
 declare extern type Enum_AspectType extends EnumItem with
 end
 
@@ -190,6 +193,11 @@ declare extern type Enum_ZIndexBehavior extends EnumItem with
 end
 
 declare Enum: {
+	AlphaMode: {
+		Opaque: Enum_AlphaMode,
+		Clip: Enum_AlphaMode,
+		Blend: Enum_AlphaMode,
+	},
 	AspectType: {
 		FitWithinMaxSize: Enum_AspectType,
 		ScaleWithParentSize: Enum_AspectType,
@@ -498,6 +506,9 @@ declare extern type Instance with
 	Parent: Instance
 	Changed: ChangedSignal
 	function IsA(self, className: string): boolean
+	function AddTag(self, tag: string): boolean
+	function RemoveTag(self, tag: string): boolean
+	function HasTag(self, tag: string): boolean
 	function Destroy(self): ()
 	function Clone(self): Instance
 	function GetChildren(self): { Instance }
@@ -521,11 +532,14 @@ declare extern type PVInstance extends Instance with
 end
 
 declare extern type BasePart extends PVInstance with
+	AlphaCutoff: number
+	AlphaMode: Enum_AlphaMode
 	Anchored: boolean
 	CanCollide: boolean
 	CastShadow: boolean
 	CollisionGroup: string
 	Color: Color3
+	ColorMap: string
 	Material: Enum_Material
 	Mesh: string
 	Size: Vector3
@@ -534,6 +548,12 @@ declare extern type BasePart extends PVInstance with
 end
 
 declare extern type Part extends BasePart with
+end
+
+declare extern type MeshPart extends BasePart with
+	MeshId: string
+	TextureID: string
+	read TrianglesCount: number
 end
 
 declare extern type Camera extends PVInstance with
@@ -546,6 +566,16 @@ end
 declare extern type SurfaceCamera extends Camera with
 	Face: Enum_NormalId
 	ImageTransparency: number
+	TagFilter: string
+end
+
+declare extern type Sound extends Instance with
+	Looped: boolean
+	Playing: boolean
+	RollOffMaxDistance: number
+	RollOffMinDistance: number
+	SoundId: string
+	Volume: number
 end
 
 declare extern type LuaSourceContainer extends Instance with
@@ -616,9 +646,9 @@ declare extern type ArcHandles extends PVAdornment with
 end
 
 declare extern type GuiBase2d extends GuiBase with
-	AbsolutePosition: Vector2
-	AbsoluteRotation: number
-	AbsoluteSize: Vector2
+	read AbsolutePosition: Vector2
+	read AbsoluteRotation: number
+	read AbsoluteSize: Vector2
 end
 
 declare extern type GuiObject extends GuiBase2d with
@@ -913,7 +943,7 @@ declare extern type StarterPlayerScripts extends Service with
 end
 
 declare extern type Players extends Service with
-	LocalPlayer: Instance
+	read LocalPlayer: Instance
 end
 
 declare extern type Player extends Instance with
@@ -965,6 +995,22 @@ declare workspace: Workspace
 -- The instance this chunk was loaded from, set on the thread after the sandbox.
 declare script: LuaSourceContainer
 
+-- `require(moduleScript)`, and declaring it here is what makes it checkable.
+--
+-- **Upstream's `require` is resolved by the *frontend* rather than typed by the
+-- checker**: seeing a call to the global, it hands the argument to a module
+-- resolver expecting a path, and reports `Unknown require: unsupported path` for
+-- anything else. Every argument in this engine is an instance, so every module
+-- a script loaded was an error — which made `require` unusable under
+-- `scriptcheck` even where it worked perfectly at run time.
+--
+-- Declaring it overrides the global and the resolver leaves it alone. The return
+-- is `any` because it genuinely is: a module returns one value of whatever type
+-- it likes, and there is no static link from an instance to the file behind it.
+-- That is the cost of `require` taking an instance, and it is the same cost
+-- Roblox pays.
+declare require: (module: Instance) -> any
+
 declare warn: (...any) -> ()
 declare wait: (seconds: number?) -> number
 declare spawn: (callback: (...any) -> (), ...any) -> thread
@@ -1005,8 +1051,10 @@ type CreatableInstances = {
 	PVInstance: PVInstance,
 	BasePart: BasePart,
 	Part: Part,
+	MeshPart: MeshPart,
 	Camera: Camera,
 	SurfaceCamera: SurfaceCamera,
+	Sound: Sound,
 	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,

@@ -10,32 +10,16 @@
 #include <system_error>
 #include <utility>
 
-// The listening socket, and one of the two files in this module that knows what
-// asio is.
+// Non-blocking, caller-thread-polled socket implementation.
 //
-// **Synchronous and non-blocking, exactly as `UdpTransport` is, and for a
-// related reason.** That file wants datagrams to arrive on the tick's thread; a
-// server has no tick but does have a handler that runs user code, and a handler
-// firing on an asio reactor thread would put every caller of this class into a
-// conversation about thread safety it should not have to have. So sockets are
-// non-blocking, `io_context` exists only because a socket has to be constructed
-// against one, and nothing here ever calls `run()` or `poll()`.
-//
-// **Every failure is a status, never an exception.** A peer that vanishes
-// mid-response is an ordinary event on a public port.
-//
-// **A connection is dropped whole, never half-parsed.** Once a message's
-// framing is in doubt there is nowhere to resume from: finding "the next
-// message" means guessing, and a parser that guesses is the desync that request
-// smuggling is built out of.
+// All socket work stays on the caller's thread. Malformed framing is never
+// resumed from mid-buffer.
 
 namespace engine::net::http {
 	namespace {
-		// How many read or write system calls one connection gets per pump.
-		// Bounded so one fast peer cannot hold the pump while others wait.
+		// Bounds per-connection work in one pump.
 		constexpr int MAXIMUM_IO_PER_PUMP = 16;
 
-		// How much is asked for per read call.
 		constexpr size_t READ_CHUNK_BYTES = 16u * 1024u;
 
 		Endpoint FromAsio(const asio::ip::tcp::endpoint &source) {
@@ -49,7 +33,6 @@ namespace engine::net::http {
 			return {};
 		}
 
-		// One accepted peer, and everything owed to it.
 		struct Connection {
 			explicit Connection(asio::ip::tcp::socket socket) : Socket(std::move(socket)) {}
 
@@ -57,18 +40,12 @@ namespace engine::net::http {
 			std::vector<std::byte> Inbox;
 			std::vector<std::byte> Outbox;
 
-			// How much of Outbox has actually left. A partial write is the
-			// normal case on a large body — the kernel's send buffer is smaller
-			// than a compressed group — so the remainder is kept rather than
-			// retried from the start.
+			// Bytes already written; the remainder is retried next pump.
 			size_t Sent = 0;
 
-			// Set once the response is queued and the peer asked not to keep
-			// the connection. The socket stays open until Outbox has drained,
-			// or the last bytes of the answer are lost.
+			// Close after the queued response drains.
 			bool CloseWhenDrained = false;
 
-			// Polls since anything moved, for the idle bound.
 			uint32_t Quiet = 0;
 		};
 
@@ -88,9 +65,7 @@ namespace engine::net::http {
 				if (failure) {
 					return false;
 				}
-				// Without this a restarted origin cannot rebind its own port
-				// until the kernel's TIME_WAIT expires, which reads as "the
-				// port is taken" for a minute after a deploy.
+				// Allow rebinding during the kernel's TIME_WAIT period.
 				Acceptor.set_option(asio::socket_base::reuse_address(true), failure);
 				Acceptor.bind(local, failure);
 				if (failure) {
@@ -113,8 +88,6 @@ namespace engine::net::http {
 					Acceptor.close(failure);
 					return false;
 				}
-				// Cached at bind: a port of zero becomes a real one exactly
-				// once, and local_endpoint is a system call.
 				Address = FromAsio(bound);
 				return true;
 			}
@@ -164,22 +137,18 @@ namespace engine::net::http {
 			}
 
 		  private:
-			// Takes whatever the backlog is holding, up to the ceiling.
+			// Accepts ready connections up to the configured ceiling.
 			void Accept(ServeReport &report) {
 				for (int attempt = 0; attempt < MAXIMUM_IO_PER_PUMP; ++attempt) {
 					std::error_code failure;
 					asio::ip::tcp::socket socket(Context);
 					Acceptor.accept(socket, failure);
 					if (failure) {
-						// would_block is the ordinary "nothing waiting".
 						return;
 					}
 
 					if (Live.size() >= Limits.MaximumConnections) {
-						// Accepted and closed rather than left in the backlog:
-						// a client waiting for a timeout is worse off than one
-						// told immediately, and the kernel's queue is not a
-						// place to store a refusal.
+						// Reject immediately rather than leaving the client queued.
 						std::error_code ignored;
 						socket.close(ignored);
 						++report.Rejected;
@@ -188,9 +157,6 @@ namespace engine::net::http {
 
 					std::error_code sizing;
 					socket.non_blocking(true, sizing);
-					// Nagle would hold a small response back waiting for more
-					// to coalesce with, which on a request/response protocol is
-					// latency bought with nothing.
 					socket.set_option(asio::ip::tcp::no_delay(true), sizing);
 
 					Live.push_back(std::make_unique<Connection>(std::move(socket)));
@@ -212,7 +178,7 @@ namespace engine::net::http {
 				if (!Dispatch(connection, handler, dispatched, report)) {
 					return false;
 				}
-				if (!Write(connection)) {
+				if (!Write(connection, report)) {
 					++report.Closed;
 					return false;
 				}
@@ -234,10 +200,7 @@ namespace engine::net::http {
 			}
 
 			bool Read(Connection &connection, ServeReport &report) {
-				// A connection with an answer still going out is not read from.
-				// Reading the next request before this one has been written is
-				// pipelining, and the queue it needs is a second place for the
-				// framing to get out of step.
+				// Do not pipeline while the current response is pending.
 				if (connection.Sent < connection.Outbox.size()) {
 					return true;
 				}
@@ -245,10 +208,7 @@ namespace engine::net::http {
 				for (int attempt = 0; attempt < MAXIMUM_IO_PER_PUMP; ++attempt) {
 					const size_t offset = connection.Inbox.size();
 					if (offset >= Limits.ConnectionBufferBytes) {
-						// A peer that sends header bytes forever without ever
-						// finishing a message. Bounded here rather than by the
-						// message limits, which bound one message rather than a
-						// peer that never completes one.
+						// Bound peers that never finish a request.
 						++report.Rejected;
 						return false;
 					}
@@ -260,13 +220,12 @@ namespace engine::net::http {
 						asio::buffer(connection.Inbox.data() + offset, room), failure
 					);
 					connection.Inbox.resize(offset + received);
+					report.ReceivedBytes += received;
 
 					if (failure == asio::error::would_block || failure == asio::error::try_again) {
 						return true;
 					}
 					if (failure) {
-						// eof or a reset. Either way the peer is gone, and a
-						// partial request it left behind is not a message.
 						return false;
 					}
 					if (received == 0) {
@@ -294,10 +253,7 @@ namespace engine::net::http {
 					return true;
 				}
 				if (parsed != ParseResult::Ok) {
-					// Answered rather than dropped silently, then closed: a
-					// client that sent something malformed learns which of the
-					// two it was, and the connection ends because there is no
-					// safe place to resume parsing from.
+					// Report the parse error, then close because framing cannot resume.
 					Response refusal;
 					refusal.Code =
 						parsed == ParseResult::TooLarge ? Status::ContentTooLarge : Status::BadRequest;
@@ -314,14 +270,11 @@ namespace engine::net::http {
 
 				Response answer;
 				if (request.Verb == Method::Unknown) {
-					// Well-formed and not something this subset does. Answered
-					// rather than refused at the parser, so a client sending
-					// POST gets a status instead of a dropped socket.
+					// Well-formed but unsupported methods receive 501.
 					answer.Code = Status::NotImplemented;
 				} else {
 					answer = handler ? handler(request) : Response{};
 					if (answer.Code == Status::Unknown) {
-						// A handler that fell through is a bug at this end.
 						answer = Response{};
 						answer.Code = Status::InternalError;
 					}
@@ -345,7 +298,7 @@ namespace engine::net::http {
 				WriteResponse(answer, bodyOmitted, connection.Outbox);
 			}
 
-			bool Write(Connection &connection) {
+			bool Write(Connection &connection, ServeReport &report) {
 				for (int attempt = 0; attempt < MAXIMUM_IO_PER_PUMP; ++attempt) {
 					if (connection.Sent >= connection.Outbox.size()) {
 						return true;
@@ -359,11 +312,10 @@ namespace engine::net::http {
 						failure
 					);
 					connection.Sent += written;
+					report.SentBytes += written;
 
 					if (failure == asio::error::would_block || failure == asio::error::try_again) {
-						// The kernel's send buffer is full, which on a
-						// multi-megabyte group is the normal case rather than
-						// an error. The remainder goes out next pump.
+						// Retry the unsent remainder next pump.
 						return true;
 					}
 					if (failure) {
@@ -375,16 +327,12 @@ namespace engine::net::http {
 
 			ServerSettings Limits;
 
-			// Declared before the acceptor and the sockets, which are
-			// constructed against it and destroyed before it.
+			// Must outlive the acceptor and its sockets.
 			asio::io_context Context;
 			asio::ip::tcp::acceptor Acceptor;
 
 			Endpoint Address;
 
-			// unique_ptr rather than by value: a socket is not movable on every
-			// standard library this builds against, and a connection's buffers
-			// must not move under a partially completed write.
 			std::vector<std::unique_ptr<Connection>> Live;
 		};
 	}
@@ -392,9 +340,7 @@ namespace engine::net::http {
 	std::unique_ptr<Server> Listen(uint16_t port, const ServerSettings &settings) {
 		auto server = std::make_unique<TcpServer>(settings);
 		if (!server->Bind(port)) {
-			// A null rather than a throw: a port already in use is an ordinary
-			// outcome of starting a second origin on one machine, and a caller
-			// can pick another.
+			// Binding failure is reported as null.
 			return nullptr;
 		}
 		return server;

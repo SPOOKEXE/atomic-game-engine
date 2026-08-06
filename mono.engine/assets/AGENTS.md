@@ -236,3 +236,46 @@ asset starts.
 - Grants. They are the origin's, and they name content hashes from here.
 
 `ROADMAP.md` v0.8 carries the rest.
+
+## The mesh format's bounds are derived, and must stay derived
+
+`Mesh::Write` writes no bounding box and `Mesh::Read` computes one. That is not
+an omission to be tidied up later: a stored bound is a second copy of a fact the
+vertices already carry, and it is **the one field of a published mesh an
+attacker gets to choose**. A mesh claiming a zero box disappears from every
+frustum test; one claiming a kilometre draws from everywhere. Both are invisible
+in the file and both read as renderer bugs.
+
+Adding the field "so the reader does not have to walk the vertices" would be
+buying a pass the reader is already making.
+
+## `Submesh` holds strings where the rest of the engine holds names
+
+`Material` and `Texture` are `std::string` and this is the one place the format
+departs from rule 4's usual answer. Interning takes a process-wide mutex and
+grows a registry nothing empties, and every byte here arrives from an origin
+anybody may run — so a mesh naming ten thousand distinct materials would be an
+unbounded allocation in a shared table, reachable from content.
+`delivery::Asset::Name` is a `std::string` for the same reason.
+
+The consumer interns when it **registers** the mesh, which is the point where
+the name has already been accepted. `render::MeshTable::Add` is that point.
+
+## The built-ins are generated, and the suite checks the winding
+
+`MakeBuiltin` produces geometry rather than reading a table, and the reason is
+what the suite can then check: every triangle of every built-in points outwards,
+and every closed one is a manifold — each edge shared by exactly two triangles
+that traverse it in opposite directions. That single property subsumes "no
+hole", "no duplicated face", "no face wound backwards relative to its neighbour"
+and "no missing pole triangle", none of which a picture would show.
+
+A face wound the wrong way is culled when you look at it and drawn when you
+cannot. It shipped exactly once, in the cube, and the check that caught it is
+the ancestor of `tests/Builtin.cpp`.
+
+**Everything is a unit shape about its own origin**, spanning -0.5 to +0.5.
+`render::Renderer` folds `DrawInstance::HalfExtent` into the model matrix, so a
+generator returning a radius-one sphere would make every part twice the size it
+says it is — and the mistake would read as a physics bug, because the collider
+would still be right.

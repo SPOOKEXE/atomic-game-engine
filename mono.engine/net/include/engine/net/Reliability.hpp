@@ -219,8 +219,33 @@ namespace engine::net {
 		//        channel does not matter — the acknowledgement rides every
 		//        packet, which is what keeps a mostly one-way conversation from
 		//        needing packets of its own.
+		// @param nowSeconds The current time, which every retired entry that
+		//        has never been resent becomes a round-trip sample against.
 		// @return How many payloads were retired.
-		size_t OnAcknowledge(const PacketHeader &header);
+		size_t OnAcknowledge(const PacketHeader &header, double nowSeconds);
+
+		// The smoothed round trip, in seconds, or zero before the first sample.
+		//
+		// **Smoothed rather than instantaneous**, because one sample includes
+		// whatever the far side happened to be doing and a number that jumps by
+		// forty milliseconds between two reads is one no interface can show.
+		// The weight is RFC 6298's one eighth, which is what every TCP has used
+		// for thirty years and is a better default than a number invented here.
+		//
+		// **Only packets that were never resent are measured**, which is Karn's
+		// rule and is not optional: an acknowledgement of a resent packet does
+		// not say *which* transmission it answers, so a sample from one is
+		// either the true trip or the trip plus a retransmit timeout, and there
+		// is no way to tell. Measuring them makes the estimate worst on exactly
+		// the links that need it most.
+		//
+		// @return The estimate in seconds. Zero means nothing has been measured
+		//         yet, which a caller should read as "unknown" rather than as
+		//         "instant".
+		// @since v0.9
+		double SmoothedRoundTripSeconds() const {
+			return SmoothedRoundTrip;
+		}
 
 		// What is due to be sent again, oldest first.
 		//
@@ -254,6 +279,9 @@ namespace engine::net {
 			double SentAtSeconds = 0.0;
 			std::vector<std::byte> Payload;
 		};
+
+		// The smoothed round trip in seconds, or zero before the first sample.
+		double SmoothedRoundTrip = 0.0;
 
 		ReliabilitySettings Paced;
 		DisconnectReason Overflowed = DisconnectReason::None;

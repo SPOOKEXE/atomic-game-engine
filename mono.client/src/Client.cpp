@@ -4,20 +4,22 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Layout.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <chrono>
 #include <client/Client.hpp>
-
-#include <engine/gui/Layout.hpp>
 #include <client/Replicated.hpp>
 #include <fstream>
+#include <thread>
 
 namespace client {
 
@@ -176,15 +178,7 @@ namespace client {
 				return false;
 			}
 
-			// **There is one path now, and it is the scripted one.**
-			// `BuildDemoWorld` built the ring scene in C++ and died at v0.6:
-			// `Rings.luau` builds the same scene through the same class table,
-			// and keeping both would have been two ways to do one job — the
-			// most expensive kind of debt in a monorepo, because both accumulate
-			// callers.
-			//
-			// `--script` with no argument therefore falls back to the example
-			// rather than to a second implementation.
+			// The scripted path is the only demo-world implementation.
 			const std::string scenePath = Settings.ScriptPath.empty()
 											  ? engine::examples::ExamplePath("Rings.luau")
 											  : Settings.ScriptPath;
@@ -193,10 +187,7 @@ namespace client {
 			Universe_->Enter(
 				id,
 				[this, &scripted, &scenePath](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-					// A script that fails leaves an empty world rather than a
-					// half-built one, so the failure is reported here and the
-					// client stops instead of presenting a black screen and
-					// letting somebody wonder why.
+					// Do not present a partially built world.
 					scripted = BuildScriptedWorld(store, systems, scenePath, Settings.Entities);
 				}
 			);
@@ -206,9 +197,7 @@ namespace client {
 				return false;
 			}
 
-			// Sized at the world's entity count rather than at what it drew
-			// this frame, so publishing never allocates. A demo world draws at
-			// most one instance per entity.
+			// Size once so publishing does not allocate per frame.
 			Views.Track(id, world.Name, Settings.Entities);
 			Simulated.push_back(id);
 		}
@@ -299,12 +288,168 @@ namespace client {
 		return true;
 	}
 
+	void Client::PumpContent() {
+		if (!Content) {
+			return;
+		}
+
+		// Request each kind once, after the verified catalogue arrives.
+		if (!ContentRequested && Content->Ready()) {
+			ContentRequested = true;
+
+			// Request by kind because the catalogue owns the asset list.
+			for (const engine::assets::AssetKind kind :
+				 {engine::assets::AssetKind::Mesh,
+				  engine::assets::AssetKind::Texture,
+				  engine::assets::AssetKind::Audio}) {
+				const std::vector<engine::delivery::RequestId> issued = Content->RequestKind(kind);
+				ContentPending.insert(ContentPending.end(), issued.begin(), issued.end());
+			}
+
+			ENGINE_INFO("content: asked for {} mesh, texture and audio asset(s)", ContentPending.size());
+		}
+
+		// Apply completions between frames, outside render passes.
+		Content->Pump();
+
+		size_t kept = 0;
+		for (const engine::delivery::RequestId id : ContentPending) {
+			const engine::delivery::RequestState state = Content->StateOf(id);
+			if (state == engine::delivery::RequestState::Pending) {
+				ContentPending[kept++] = id;
+				continue;
+			}
+
+			std::optional<engine::delivery::Asset> asset = Content->Take(id);
+			if (!asset) {
+				// Failed, or already taken. Either way there is nothing more to
+				// wait for; `delivery` has already counted it.
+				continue;
+			}
+
+			// **The name is published as-is, extension included.** A
+			// `SurfaceAppearance` naming `characters/skin.atex` and a manifest
+			// carrying `characters/skin.atex` have to be the same string or the
+			// lookup misses — and the one place that could diverge is here.
+			const engine::core::Name name(asset->Name);
+			engine::core::ByteReader reader(asset->Bytes);
+
+			if (asset->Kind == engine::assets::AssetKind::Mesh) {
+				engine::assets::MeshData mesh;
+				if (!engine::assets::Mesh::Read(reader, mesh)) {
+					ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
+					continue;
+				}
+				if (Renderer.AddMesh(name, mesh)) {
+					ContentMeshes++;
+
+					// Mesh metadata is world data, not renderer state.
+					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
+					for (const engine::world::WorldId id : Simulated) {
+						Universe_->Enter(id, [&name, triangles](engine::ecs::Store &store) {
+							engine::scene::RecordMesh(store, name, triangles);
+						});
+					}
+					if (ReportedJoin) {
+						Universe_->Enter(Replicated, [&name, triangles](engine::ecs::Store &store) {
+							engine::scene::RecordMesh(store, name, triangles);
+						});
+					}
+				}
+			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
+				engine::assets::TextureData image;
+				if (!engine::assets::Texture::Read(reader, image)) {
+					ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
+					continue;
+				}
+				if (Renderer.AddTexture(name, image)) {
+					ContentTextures++;
+				}
+			} else if (asset->Kind == engine::assets::AssetKind::Audio) {
+				// **Decoded and converted here, once.** The graph must never resample
+				// on the device thread, and a buffer converted per voice would pay
+				// for it again for every part playing a footstep. `DecodeAudio` picks
+				// its decoder from the bytes rather than from the name — Sounds.hpp.
+				std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(asset->Bytes);
+				if (!samples) {
+					ENGINE_WARN("content: {} is not audio this engine decodes", asset->Name);
+					continue;
+				}
+
+				// The device's format when there is one, and the graph's default when
+				// there is not. A machine with no output still registers its sounds,
+				// so a headless run exercises everything but the last hop.
+				const engine::audio::AudioFormat target =
+					Sound ? Sound->Format() : engine::audio::AudioFormat{};
+				auto ready = std::make_shared<const engine::audio::SampleBuffer>(samples->ConvertTo(target));
+
+				if (Audible.Add(name, ready)) {
+					ContentSounds++;
+					ENGINE_INFO(
+						"content: {} decoded ({:.1f}s, {} Hz, {} channel(s))",
+						asset->Name,
+						ready->Seconds(),
+						target.SampleRate,
+						target.Channels
+					);
+				}
+			}
+		}
+		ContentPending.resize(kept);
+
+		if (ContentRequested && ContentPending.empty() && !ContentReported) {
+			ContentReported = true;
+			ENGINE_INFO(
+				"content: {} mesh(es), {} texture(s) and {} sound(s) registered",
+				ContentMeshes,
+				ContentTextures,
+				ContentSounds
+			);
+		}
+	}
+
+	void Client::PumpSounds() {
+		// **Runs with or without a device.** A null device drains the queue like
+		// a real one, so a machine with no output still exercises every hop but
+		// the last — which is the property that keeps this path from only working
+		// on the developer's laptop.
+		if (Sound == nullptr) {
+			return;
+		}
+
+		// The listener is the composed camera's position, which is **last
+		// frame's**. One frame of latency on an ear is inaudible; reading a live
+		// camera out of a store here would be reading something a world is
+		// writing, which is the whole reason the compositor exists.
+		const engine::core::Vector3 ear = Views.CameraFrame().Position;
+		const uint32_t rate = Sound->Format().SampleRate;
+
+		const auto sync = [&](engine::world::WorldId id) {
+			if (!id.IsValid()) {
+				return;
+			}
+			SoundStage &stage = Stages[id.Index];
+			Universe_->Enter(id, [&](engine::ecs::Store &store) {
+				stage.Sync(store, Sound->Mixer(), Audible, ear, rate);
+			});
+		};
+
+		for (const engine::world::WorldId id : Simulated) {
+			sync(id);
+		}
+
+		// The server's world too, so a `Sound` the authority replicated is heard
+		// on the client that received it. Nothing here distinguishes the two —
+		// a replicated `Sound` row and a locally created one are the same rows,
+		// which is what makes "made by a LocalScript, heard by that player alone"
+		// fall out of replication rather than out of an audio rule.
+		if (ReportedJoin) {
+			sync(Replicated);
+		}
+	}
+
 	bool Client::BeginAudio() {
-		// **The sound is validated before the device is consulted**, so a
-		// typo'd path is reported on a machine with no output as well as on one
-		// with speakers. Ordering it the other way round means a developer on a
-		// headless box is told only that nothing can be heard — which is true,
-		// unhelpful, and hides a mistake they could have fixed.
+		// Validate before opening the device so headless runs report file errors.
 		std::shared_ptr<const engine::audio::SampleBuffer> decoded;
 		if (!Settings.SoundPath.empty()) {
 			std::ifstream file(Settings.SoundPath, std::ios::binary | std::ios::ate);
@@ -319,9 +464,13 @@ namespace client {
 				file.read(reinterpret_cast<char *>(bytes.data()), size);
 			}
 
-			const auto samples = engine::audio::DecodeWav(bytes);
+			// **The same decoder the delivery path uses**, picked from the
+			// bytes rather than from the extension. A second decode path here
+			// would be a second opinion about what a file is, and the two would
+			// disagree the day one of them learned a format.
+			const auto samples = DecodeAudio(bytes);
 			if (!samples) {
-				ENGINE_ERROR("audio: {} is not a wav this engine decodes", Settings.SoundPath.string());
+				ENGINE_ERROR("audio: {} is not audio this engine decodes", Settings.SoundPath.string());
 				return false;
 			}
 			decoded = std::make_shared<const engine::audio::SampleBuffer>(*samples);
@@ -349,14 +498,12 @@ namespace client {
 			return true;
 		}
 
-		// Converted once, here, at load time — never on the device thread.
+		// Convert once at load time, never on the device thread.
 		auto &mixer = Sound->Mixer();
 		const auto sample =
 			std::make_shared<const engine::audio::SampleBuffer>(decoded->ConvertTo(Sound->Format()));
 
-		// Player -> fader -> output. The fader is not decoration: it is where a
-		// master volume goes, and building it now means a level control is a
-		// parameter rather than a refactor.
+		// Keep a fader node for future master-volume control.
 		const engine::audio::NodeId player = mixer.Commands().Allocate();
 		const engine::audio::NodeId fader = mixer.Commands().Allocate();
 
@@ -395,10 +542,7 @@ namespace client {
 		command = {};
 		command.Kind = engine::audio::CommandKind::Play;
 		command.Target = player;
-		// **On the sample clock, not "now".** The device is already running, so
-		// scheduling a little ahead is what lets the start land on a known
-		// sample rather than wherever the callback happens to be — which is the
-		// whole point of the queue carrying a deadline.
+		// Schedule against the sample clock for deterministic start timing.
 		command.AtSample = mixer.Clock() + Sound->Format().SampleRate / 10;
 		mixer.Commands().Post(command);
 
@@ -407,15 +551,10 @@ namespace client {
 	}
 
 	void Client::Shutdown() {
-		// Before the renderer and SDL: the device holds a callback that is
-		// inside this object, and tearing SDL down underneath it is a crash on
-		// exit.
+		// Stop dependants before renderer and SDL teardown.
 		Sound.reset();
 		Content.reset();
 
-		// The connection before the socket it borrows, and both before the
-		// universe holding the world it writes into. A connector outliving its
-		// transport is a dangling reference in a destructor.
 		Connection.reset();
 		if (Socket != nullptr) {
 			Socket->Close();
@@ -423,8 +562,6 @@ namespace client {
 		}
 
 		if (Window) {
-			// Before SDL_Quit: the renderer holds a device that holds the
-			// window, and tearing SDL down underneath it is a crash on exit.
 			Renderer.Shutdown();
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
@@ -445,8 +582,7 @@ namespace client {
 			return false;
 		}
 
-		// Port zero: the client does not need a known address, only the server
-		// does. Binding a fixed one would stop two clients sharing a machine.
+		// Let the OS choose the client port so multiple clients can coexist.
 		Socket = engine::net::MakeUdpTransport(0);
 		if (Socket == nullptr) {
 			ENGINE_ERROR("could not open a socket to connect from");
@@ -489,8 +625,17 @@ namespace client {
 			BuildReplicatedWorld(store, systems, interpolation);
 		});
 
+		engine::replication::ConnectorSettings connector;
+		if (!Settings.ServerKey.empty()) {
+			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
+			if (!connector.ServerIdentity.has_value()) {
+				ENGINE_ERROR("client: --server-key is not 64 hex characters");
+				return false;
+			}
+		}
+
 		Connection = std::make_unique<engine::replication::Connector>(
-			*Socket, *server, engine::core::Clock::Seconds()
+			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
 
 		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
@@ -665,6 +810,36 @@ namespace client {
 	}
 
 	void Client::Step() {
+		// **The limiter sleeps here, before anything else in the frame.** Ahead
+		// of the swapchain wait because the two are alternatives rather than a
+		// sequence: with vblank on, the display paces the loop and this does
+		// nothing; with it off, this is the pacing and the wait below returns
+		// immediately.
+		//
+		// Against a deadline that advances by a fixed step, not by sleeping a
+		// computed amount each frame. The difference is drift: a sleep
+		// overshoots by whatever the scheduler felt like, and a loop that
+		// recomputed from "now" every frame would accumulate every one of those
+		// overshoots and settle below the rate it was asked for.
+		if (Settings.Uncapped && Settings.MaximumFrameRate > 0) {
+			using namespace std::chrono;
+			const auto period = nanoseconds(1'000'000'000ull / Settings.MaximumFrameRate);
+			const auto now = steady_clock::now();
+
+			if (NextFrameAt.time_since_epoch().count() == 0) {
+				NextFrameAt = now;
+			} else if (now < NextFrameAt) {
+				std::this_thread::sleep_until(NextFrameAt);
+			} else if (now - NextFrameAt > period * 4) {
+				// A stall — a resize, a hitch, a debugger. Catching up on four
+				// frames of deficit by running four frames flat out is worse
+				// than the stall was, so the deadline is reset rather than
+				// chased.
+				NextFrameAt = now;
+			}
+			NextFrameAt += period;
+		}
+
 		// **The display is waited for before the input is read**, for the reason
 		// `Editor::Run` gives at length: the swapchain wait is most of a frame
 		// with vertical sync on, and doing it after the pump means every frame is
@@ -683,6 +858,12 @@ namespace client {
 		FrameGraph::BeginFrame();
 
 		PumpEvents();
+
+		// **Before the simulation and outside every pass.** Content becoming
+		// visible mid-tick is `AGENTS.md` rule 5's desync, and content
+		// registering mid-frame is an upload into a buffer a render pass may be
+		// reading.
+		PumpContent();
 
 		// Simulation and rendering advance at different rates, and this is
 		// where they separate. The frame runs as fast as the display and the
@@ -712,6 +893,11 @@ namespace client {
 			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::Network);
 			PollServer(engine::core::Clock::Seconds());
 		}
+
+		// After the tick and the replica's apply, so what a script set this
+		// frame is heard this frame rather than next. Before presentation
+		// because presentation is where the frame stops being about state.
+		PumpSounds();
 
 		{
 			// Once per frame, and separate from the tick because a client draws
@@ -1002,15 +1188,33 @@ namespace client {
 			}
 		}
 
-		LastFrame =
-			Renderer.Render(
-				Views.CameraFrame(),
-				Views.Camera(),
-				Views.Instances(),
-				Overlay,
-				Surfaces,
-				hook
-			);
+		// **A capture needs an offscreen target, so asking for one turns the
+		// client into a two-step render.** The scene goes into a texture, the
+		// texture is what gets copied back, and the window is presented from
+		// it. A game does not want that cost, which is why it happens only when
+		// `--capture` was passed — and why the flag is a diagnostic rather than
+		// a feature.
+		engine::render::SceneTarget target{};
+		const engine::render::SceneTarget *sceneTarget = nullptr;
+		if (!Settings.Capture.empty()) {
+			target.Width = static_cast<uint32_t>(Settings.Width);
+			target.Height = static_cast<uint32_t>(Settings.Height);
+			sceneTarget = &target;
+		}
+
+		LastFrame = Renderer.Render(
+			Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, Surfaces, hook, sceneTarget
+		);
+
+		// **After the frame rather than before it**, so the capture is of a
+		// frame whose scene texture exists — the studio's own capture states
+		// the same thing for the same reason. One frame before the last, so the
+		// request is made on one frame and written by the next while the run
+		// still ends when it was told to.
+		if (!Settings.Capture.empty() && Settings.MaximumFrames > 1 &&
+			FramesDrawn == Settings.MaximumFrames - 2) {
+			Renderer.RequestSceneCapture(Settings.Capture);
+		}
 
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();
@@ -1018,6 +1222,22 @@ namespace client {
 		if (LastFrame.Presented) {
 			FramesDrawn++;
 		}
+
+		// **What was actually drawn, as counters.** Both are per frame and both
+		// are the numbers that say whether the mesh path is doing anything: a
+		// world of cubes is twelve triangles an instance and a world of imported
+		// meshes is thousands, so a run whose triangle count did not move is one
+		// where every `MeshId` resolved to the fallback.
+		using engine::core::Metrics;
+		Metrics::Count("render.triangles", static_cast<double>(LastFrame.Triangles));
+		Metrics::Count("render.draw-calls", static_cast<double>(LastFrame.DrawCalls));
+
+		// **The peak rather than the latest.** The frame a run exits on is
+		// often one that presented nothing — the window is going away — so the
+		// last frame's counters are zero on almost every bounded run, which
+		// makes them useless as the one number a log can carry.
+		PeakTriangles = std::max(PeakTriangles, LastFrame.Triangles);
+		PeakDrawCalls = std::max<uint32_t>(PeakDrawCalls, LastFrame.DrawCalls);
 	}
 
 	int Client::Run() {
@@ -1062,6 +1282,15 @@ namespace client {
 				Statistics.Average(),
 				Statistics.Minimum(),
 				Statistics.Maximum()
+			);
+
+			// **What the last frame actually drew.** A world of cubes is twelve
+			// triangles an instance; a world of imported meshes is tens of
+			// thousands. A run whose triangle count did not move from the first
+			// is one where every `MeshId` resolved to the fallback, and that is
+			// the only cheap way to tell from a log.
+			ENGINE_INFO(
+				"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
 			);
 			ENGINE_INFO(
 				"{} tick(s) at {:.0f} Hz · {:.1f} achieved · {} dropped",
