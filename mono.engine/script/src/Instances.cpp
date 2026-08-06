@@ -234,7 +234,15 @@ namespace engine::script {
 		// here stores the name.
 		const PropertyDescriptor *Find(const Store &store, Entity instance, std::string_view name) {
 			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-				if (property.Name.Text() == name) {
+				// **`Spelling`, not `Name.Text()`.** The comment above is right
+				// that interning the key would take the process-wide name
+				// registry's lock — and `Text()` takes that same lock, once per
+				// descriptor this loop walks. Five acquisitions to find
+				// `Position` on a `Part`, and the whole list on a miss. The
+				// spelling is resolved once at declaration, so the scan is now
+				// what that comment claims it is: no lock, no hash, no
+				// allocation.
+				if (property.Spelling == name) {
 					return &property;
 				}
 			}

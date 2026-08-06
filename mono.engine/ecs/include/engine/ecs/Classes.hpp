@@ -160,6 +160,31 @@ namespace engine::ecs {
 		// The property's name, as scripts and files spell it.
 		core::Name Name;
 
+		// That same name's text, resolved once when the property is declared.
+		//
+		// **`core::Name::Text()` takes the process-wide name registry's lock**,
+		// and a binding matching a script's key against a class's property list
+		// calls it once per descriptor it walks — five times for `Position` on a
+		// `Part`, thirteen for `CFrame`, and the whole list on a miss. At two
+		// hundred property writes a frame that is over a thousand lock
+		// acquisitions to compare strings that never change.
+		//
+		// `script/src/Instances.cpp` compares keys as *text* rather than
+		// interning them, and its comment records the measurement behind that:
+		// interning takes the same registry lock plus a hash. That reasoning is
+		// still right — what it assumed was that reading the text was free, and
+		// it is not. This is what makes it free.
+		//
+		// Safe to hold forever: `core/src/Name.cpp` keeps its strings in a deque
+		// that never moves an element and never removes one, which is the same
+		// property `Text()`'s own return relies on.
+		//
+		// Filled by `Declare`, so every path that can produce a descriptor fills
+		// it — `Property`, `ClampedProperty` and `Computed` all go through it.
+		//
+		// @since v0.8
+		std::string_view Spelling;
+
 		// The type of the value that crosses, not of anything stored.
 		PropertyType Type = PropertyType::Opaque;
 

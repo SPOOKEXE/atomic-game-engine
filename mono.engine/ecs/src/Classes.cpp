@@ -204,19 +204,27 @@ namespace engine::ecs {
 
 		Entry &entry = table.Entries[owner.Index];
 
+		// **Resolved once, here, because this is the only way a descriptor gets
+		// into the table.** `Property`, `ClampedProperty` and `Computed` all
+		// funnel through `Declare`, so filling it here means no caller can
+		// produce one without it — which is what lets a binding compare against
+		// it without checking whether it is set.
+		PropertyDescriptor resolved = descriptor;
+		resolved.Spelling = resolved.Name.Text();
+
 		// Redeclaring a name on the same class replaces it. Redeclaring one a
 		// base already has is also a replacement, but that happens in the
 		// merge — this list is only what *this* class said.
 		const auto existing = std::find_if(
-			entry.Declared.begin(), entry.Declared.end(), [&descriptor](const PropertyDescriptor &property) {
-				return property.Name == descriptor.Name;
+			entry.Declared.begin(), entry.Declared.end(), [&resolved](const PropertyDescriptor &property) {
+				return property.Name == resolved.Name;
 			}
 		);
 
 		if (existing != entry.Declared.end()) {
-			*existing = descriptor;
+			*existing = resolved;
 		} else {
-			entry.Declared.push_back(descriptor);
+			entry.Declared.push_back(resolved);
 		}
 
 		// Every merged list in the table is now potentially stale, including

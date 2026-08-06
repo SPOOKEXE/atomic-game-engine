@@ -2,6 +2,7 @@
 
 #include <deque>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -10,7 +11,22 @@ namespace engine::core {
 	namespace {
 
 		struct Registry {
-			std::mutex Guard;
+			// **A shared mutex, because reading a name's text is one of the
+			// hottest things in the engine and needs nothing exclusive.**
+			//
+			// `Text()` is called on every property comparison, every log line,
+			// every panel row and every save-file field. The registry it reads
+			// is append-only — the deque never moves what it holds and nothing
+			// is ever removed, which `Text()`'s own return comment already
+			// relies on — so concurrent readers do not interfere with each
+			// other at all. With a plain mutex they serialised anyway, and with
+			// `ExecutionMode::WorldParallel` two worlds ticking on two workers
+			// contended on this one lock for every name either of them touched.
+			//
+			// `Slots` is the one thing a reader indexes that a writer can
+			// *reallocate*, which is why this is a shared lock rather than no
+			// lock: the deque could be read unsynchronised, that vector cannot.
+			std::shared_mutex Guard;
 
 			// A deque, not a vector: references into it stay valid when it
 			// grows, which is what lets Text() hand out a string_view that
@@ -130,7 +146,7 @@ namespace engine::core {
 
 	size_t Name::Count() {
 		auto &registry = Get();
-		std::lock_guard lock(registry.Guard);
+		std::shared_lock lock(registry.Guard);
 		return registry.Texts.size();
 	}
 
@@ -140,7 +156,7 @@ namespace engine::core {
 		}
 
 		auto &registry = Get();
-		std::lock_guard lock(registry.Guard);
+		std::shared_lock lock(registry.Guard);
 
 		if (Identifier >= registry.Slots.size()) {
 			return {};
