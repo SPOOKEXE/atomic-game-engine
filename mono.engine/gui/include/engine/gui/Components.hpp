@@ -40,6 +40,7 @@
 // @tier L7 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Rect.hpp>
 #include <engine/core/types/UDim.hpp>
@@ -614,5 +615,119 @@ namespace engine::gui {
 		// every parenting path is where one gets missed and an element draws
 		// after being detached.
 		bool Rendered = false;
+	};
+
+	// What every 3D adornment carries.
+	//
+	// **An adornment is a `GuiBase3d`, which is a description and not a
+	// drawing.** It says what to outline, in what colour, and how solid — and
+	// nothing here resolves that into geometry, because resolving it needs the
+	// adornee's `CFrame` and stud extent and those are `scene::Transform` and
+	// `scene::Bounds`. `gui` links neither and `gui/AGENTS.md` refuses the edge.
+	//
+	// That split is `D00022`'s, arrived at for a `SurfaceGui`'s canvas and the
+	// same one word for word here: **whoever draws an adornment has both
+	// operands, and this module has one.** What `gui` owns is the tree half —
+	// which instance an adornment is about, and whether it is anywhere it may
+	// be drawn from at all.
+	//
+	// @since v0.8
+	struct Adornment {
+		// What it is drawn around, or null to mean "my parent".
+		//
+		// **Null is a meaningful value rather than an unset one.** Roblox
+		// resolves an unset `Adornee` to the adornment's parent, which is what
+		// makes `SelectionBox` usable by parenting it to the thing it outlines
+		// and setting nothing else. `AdorneeOf` is where that resolution
+		// happens, once, rather than at each of the places that would otherwise
+		// each have to remember it.
+		ecs::Entity Adornee;
+
+		// The outline colour.
+		core::Color3 Color{0.0f, 0.65f, 1.0f};
+
+		// 0 is opaque and 1 is invisible. Roblox's sense, kept for the reason
+		// every other transparency here keeps it.
+		float Transparency = 0.0f;
+
+		// Whether it is drawn at all.
+		bool Visible = true;
+
+		// Whether it draws over the world rather than being occluded by it.
+		//
+		// **On by default, which is the opposite of a `Part`.** An adornment is
+		// an editor affordance before it is a scene element: a selection box a
+		// wall hides is a selection box that does not tell you what is
+		// selected, which is the one thing it is for.
+		bool AlwaysOnTop = true;
+
+		// Draw order among adornments. Higher draws later, so on top.
+		int32_t ZIndex = 0;
+	};
+
+	// The box a `SelectionBox` draws.
+	//
+	// Separate from `Adornment` because the handle adornments carry none of it:
+	// a `SelectionBox` is an outline with an optional filled face, and a handle
+	// is a grab target.
+	//
+	// @since v0.8
+	struct SelectionOutline {
+		// How thick the edges are, in studs.
+		float LineThickness = 0.05f;
+
+		// The fill drawn over the adornee's faces.
+		core::Color3 SurfaceColor{0.0f, 0.65f, 1.0f};
+
+		// 1 by default, which means no fill — an outline alone. A filled
+		// selection hides what it selected, and an author who wants one asks.
+		float SurfaceTransparency = 1.0f;
+	};
+
+	// Where a handle adornment sits relative to its adornee, and how big.
+	//
+	// @since v0.8
+	struct HandleShape {
+		// The offset from the adornee's own frame.
+		core::CFrame Offset;
+
+		// The handle's extent, in studs. What it means depends on the class: a
+		// box uses all three, a sphere the largest, a line the Z.
+		core::Vector3 Size{1.0f, 1.0f, 1.0f};
+	};
+
+	// What `GuiService` holds.
+	//
+	// **A component on the service instance rather than a resource**, which is
+	// the opposite of what `ecs/AGENTS.md`'s one-of-a-kind rule usually asks
+	// for — and the reason is that a service *is* an instance here. `scene`'s
+	// services are rows in the tree that `GetService` finds by name, so their
+	// state has to be reachable the same way a `Part`'s is: through a property
+	// on the thing a script is holding. A resource would make
+	// `GuiService.SelectedObject` a property with nothing behind it.
+	//
+	// @since v0.8
+	struct GuiServiceState {
+		// The element a gamepad or keyboard has selected, or null.
+		//
+		// **This is what makes `GuiObject::Selectable` mean something.** The
+		// property has existed since the tree was registered and nothing read
+		// it, which is the state the roadmap refuses to leave a property in —
+		// `Select` and `SelectNext` are the readers.
+		ecs::Entity SelectedObject;
+
+		// Whether a platform menu is covering the game.
+		//
+		// Set by a host, read by a script that wants to pause. Nothing in this
+		// engine opens one yet; it is here because a script asking "is the menu
+		// up" during a pause handler is the ordinary use and answering `false`
+		// truthfully is better than not answering.
+		bool MenuIsOpen = false;
+
+		// Whether moving the selection is allowed to pick something on its own.
+		//
+		// Roblox's `AutoSelectGuiEnabled`. False means a game drives selection
+		// itself and `SelectNext` refuses to seed one from nothing.
+		bool AutoSelectGuiEnabled = true;
 	};
 }

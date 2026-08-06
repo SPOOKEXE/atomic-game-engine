@@ -1,3 +1,4 @@
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
@@ -29,15 +30,45 @@ namespace {
 
 		explicit World(std::string_view name) : Data(name) {
 			RegisterGuiClasses();
+
+			// **A bare `Instance`, because `StarterGui` is not a `gui` class.**
+			// It is `scene`'s service and this module may not link `scene`; what
+			// the containment test reads is the *name*, so an instance carrying
+			// that name is exactly as contained as the real service would be.
+			// That is the same duplication `NormalId` already makes here.
+			Container = Data.CreateInstance(
+				engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui"
+			);
 			Request.Display.Width = 800.0f;
 			Request.Display.Height = 600.0f;
 		}
 
+		// The world's `StarterGui`, which is where a collector has to live to
+		// draw at all.
+		//
+		// **Made by the fixture rather than by each case.** Containment is a
+		// rule every case is now subject to, and parenting by hand in thirty of
+		// them would be thirty chances to forget — and a forgotten one lays out
+		// to nothing, which reads as the case being wrong rather than the
+		// fixture being incomplete.
+		//
+		// Named rather than classed, for `Layout.cpp`'s reason: `StarterGui` is
+		// `scene`'s service and this module may not link `scene`, so the string
+		// is duplicated here and pinned by a test.
+		Entity Container;
+
 		Entity Make(std::string_view klass, Entity parent = Entity{}) {
 			const Entity made = Data.CreateInstance(GuiClass(klass), klass);
-			if (parent != NULL_ENTITY) {
+
+			if (parent != engine::ecs::NULL_ENTITY) {
 				Data.SetParent(made, parent);
+			} else if (Data.IsA(made, GuiClass("LayerCollector"))) {
+				// An unparented collector draws nothing, so a case that did not
+				// say where its `ScreenGui` lives gets the ordinary answer
+				// rather than the degenerate one.
+				Data.SetParent(made, Container);
 			}
+
 			return made;
 		}
 

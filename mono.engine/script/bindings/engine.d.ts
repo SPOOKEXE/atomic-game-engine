@@ -86,6 +86,23 @@ declare interface PropertyChangedSignal {
 	Equals(other: PropertyChangedSignal): boolean;
 }
 
+// The 2D tree's input, in two shapes because the arguments differ. See the Luau
+// half for why the three input signals take none: Roblox hands them an
+// `InputObject`, this engine has no such datatype, and a different one invented
+// now would have to change the day one arrives.
+declare interface GuiSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: GuiSignal): boolean;
+}
+
+// `(x, y)` in canvas pixels, which is Roblox's signature exactly.
+declare interface PointerSignal {
+	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
+	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
+	Equals(other: PointerSignal): boolean;
+}
+
 // --- queries ---------------------------------------------------------------
 
 declare interface RaycastParams {
@@ -440,6 +457,12 @@ declare interface Instance {
 	IsDescendantOf(ancestor: Instance): boolean;
 	ClearAllChildren(): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
+	readonly Activated: GuiSignal;
+	readonly InputBegan: GuiSignal;
+	readonly InputEnded: GuiSignal;
+	readonly MouseEnter: PointerSignal;
+	readonly MouseLeave: PointerSignal;
+	readonly MouseMoved: PointerSignal;
 }
 
 declare interface PVInstance extends Instance {
@@ -491,6 +514,56 @@ declare interface ModuleScript extends LuaSourceContainer {
 }
 
 declare interface GuiBase extends Instance {
+}
+
+declare interface GuiService extends Instance {
+	AutoSelectGuiEnabled: boolean;
+	MenuIsOpen: boolean;
+	SelectedObject: Instance;
+}
+
+declare interface GuiBase3d extends GuiBase {
+}
+
+declare interface PVAdornment extends GuiBase3d {
+	Adornee: Instance;
+	AlwaysOnTop: boolean;
+	Color3: Color3;
+	Transparency: number;
+	Visible: boolean;
+	ZIndex: number;
+}
+
+declare interface SelectionBox extends PVAdornment {
+	LineThickness: number;
+	SurfaceColor3: Color3;
+	SurfaceTransparency: number;
+}
+
+declare interface SelectionSphere extends PVAdornment {
+}
+
+declare interface HandleAdornment extends PVAdornment {
+	CFrame: CFrame;
+	Size: Vector3;
+}
+
+declare interface BoxHandleAdornment extends HandleAdornment {
+}
+
+declare interface SphereHandleAdornment extends HandleAdornment {
+}
+
+declare interface CylinderHandleAdornment extends HandleAdornment {
+}
+
+declare interface LineHandleAdornment extends HandleAdornment {
+}
+
+declare interface Handles extends PVAdornment {
+}
+
+declare interface ArcHandles extends PVAdornment {
 }
 
 declare interface GuiBase2d extends GuiBase {
@@ -860,7 +933,18 @@ declare const task: {
 };
 
 declare const game: {
+	readonly JobId: string;
 	GetService: {
+		(service: "Workspace"): Workspace;
+		(service: "Lighting"): Lighting;
+		(service: "ReplicatedFirst"): ReplicatedFirst;
+		(service: "ReplicatedStorage"): ReplicatedStorage;
+		(service: "ServerScriptService"): ServerScriptService;
+		(service: "ServerStorage"): ServerStorage;
+		(service: "StarterGui"): StarterGui;
+		(service: "StarterPlayer"): StarterPlayer;
+		(service: "StarterPlayerScripts"): StarterPlayerScripts;
+		(service: "Players"): Players;
 		(service: "RunService"): RunService;
 		(service: "MessagingService"): MessagingService;
 		(service: "MemoryStoreService"): MemoryStoreService;
@@ -881,6 +965,18 @@ declare const Instance: {
 		(className: "LocalScript", parent?: Instance): LocalScript;
 		(className: "ModuleScript", parent?: Instance): ModuleScript;
 		(className: "GuiBase", parent?: Instance): GuiBase;
+		(className: "GuiService", parent?: Instance): GuiService;
+		(className: "GuiBase3d", parent?: Instance): GuiBase3d;
+		(className: "PVAdornment", parent?: Instance): PVAdornment;
+		(className: "SelectionBox", parent?: Instance): SelectionBox;
+		(className: "SelectionSphere", parent?: Instance): SelectionSphere;
+		(className: "HandleAdornment", parent?: Instance): HandleAdornment;
+		(className: "BoxHandleAdornment", parent?: Instance): BoxHandleAdornment;
+		(className: "SphereHandleAdornment", parent?: Instance): SphereHandleAdornment;
+		(className: "CylinderHandleAdornment", parent?: Instance): CylinderHandleAdornment;
+		(className: "LineHandleAdornment", parent?: Instance): LineHandleAdornment;
+		(className: "Handles", parent?: Instance): Handles;
+		(className: "ArcHandles", parent?: Instance): ArcHandles;
 		(className: "GuiBase2d", parent?: Instance): GuiBase2d;
 		(className: "GuiObject", parent?: Instance): GuiObject;
 		(className: "Frame", parent?: Instance): Frame;

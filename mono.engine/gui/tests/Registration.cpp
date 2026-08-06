@@ -65,7 +65,13 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
-	CHECK(GuiClassNames().size() == 33);
+	//
+	// **Forty-five**: the thirty-three of the 2D tree, `GuiService`, and the
+	// eleven of the 3D branch. The service is in this list rather than in
+	// `scene`'s because it is a `gui` class — the two modules may not link each
+	// other — and it is registered at all because it owns the selection, which
+	// is what finally gave `GuiObject::Selectable` a reader.
+	CHECK(GuiClassNames().size() == 45);
 }
 
 TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]") {

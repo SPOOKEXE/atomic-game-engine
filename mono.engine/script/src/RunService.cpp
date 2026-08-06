@@ -111,6 +111,34 @@ namespace engine::script {
 				return 1;
 			}
 
+			// **Which world this script is running on, by name.**
+			//
+			// Roblox's `JobId` identifies the server instance a script is
+			// standing on, and a world here *is* that instance — one clock, one
+			// store, one set of scripts. So the mapping is the same one `game`
+			// and `workspace` already use rather than a new idea:
+			//
+			//     game.JobId -> `ecs::Store::Name()`
+			//
+			// **This is what lets one script build four different worlds**, and
+			// `Mirrors-4-worlds.luau` is why it exists: `--worlds N` runs the
+			// same file in every world, so without an identity every view is
+			// identical and a compositor that placed them in the wrong order
+			// would look correct.
+			//
+			// A name rather than Roblox's GUID, because a name is what a bus
+			// envelope, a snapshot and a view header already carry — a second
+			// identifier for one world would be the two-sources-of-truth
+			// problem, and this one is already the key everything else uses.
+			if (field == "JobId") {
+				const auto &context = *static_cast<LuauContext *>(
+					lua_tolightuserdata(state, lua_upvalueindex(1))
+				);
+				const std::string_view name = context.World->Name();
+				lua_pushlstring(state, name.data(), name.size());
+				return 1;
+			}
+
 			luaL_errorL(state, "game has no member '%s'", std::string(field).c_str());
 		}
 	}

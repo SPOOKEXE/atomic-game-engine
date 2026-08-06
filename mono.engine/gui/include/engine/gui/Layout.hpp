@@ -34,6 +34,8 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Entity.hpp>
 
+#include <string_view>
+
 namespace engine::ecs {
 	class Store;
 }
@@ -76,6 +78,34 @@ namespace engine::gui {
 
 	// How much taller than its em size a line of text is drawn.
 	constexpr float LINE_SPACING = 1.2f;
+
+	// The containers a `LayerCollector` may draw from, by name.
+	//
+	// **Roblox's containment rule, and it is a rule rather than a style
+	// choice.** A `ScreenGui` parented to a `Part` draws nothing — not because
+	// it is invisible but because nothing is looking at that part of the tree —
+	// and an engine that drew it anyway would let an author ship a game whose
+	// interface appears in the studio and not in the client, which is the worst
+	// direction for a difference like that to run.
+	//
+	//   - a `ScreenGui` draws from `STARTER_GUI` or from a player's
+	//     `PLAYER_GUI`. The studio shows the first; a client shows the second.
+	//   - a `SurfaceGui` or a `BillboardGui` draws from those *and* from
+	//     `WORKSPACE`, because each is attached to something in the world and
+	//     the world is where that something lives.
+	//
+	// **These are `scene`'s service names, spelled again here**, because
+	// `gui/AGENTS.md` refuses an edge to `scene` — the same refusal that made
+	// `SurfaceGui::Face` re-declare `NormalId`'s six members. They are exposed
+	// rather than kept in the source file so a test can pin them against the
+	// service table they are copied from, which is the arrangement that turns a
+	// rename into a failing test instead of an interface that quietly stops
+	// drawing.
+	//
+	// @since v0.8
+	inline constexpr std::string_view WORKSPACE = "Workspace";
+	inline constexpr std::string_view STARTER_GUI = "StarterGui";
+	inline constexpr std::string_view PLAYER_GUI = "PlayerGui";
 
 	// Resolves every `LayerCollector` in the store and everything under it.
 	//

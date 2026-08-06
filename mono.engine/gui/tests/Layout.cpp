@@ -32,15 +32,45 @@ namespace {
 
 		explicit World(std::string_view name) : Data(name) {
 			RegisterGuiClasses();
+
+			// **A bare `Instance`, because `StarterGui` is not a `gui` class.**
+			// It is `scene`'s service and this module may not link `scene`; what
+			// the containment test reads is the *name*, so an instance carrying
+			// that name is exactly as contained as the real service would be.
+			// That is the same duplication `NormalId` already makes here.
+			Container = Data.CreateInstance(
+				engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui"
+			);
 			Display.Width = 800.0f;
 			Display.Height = 600.0f;
 		}
 
+		// The world's `StarterGui`, which is where a collector has to live to
+		// draw at all.
+		//
+		// **Made by the fixture rather than by each case.** Containment is a
+		// rule every case is now subject to, and parenting by hand in thirty of
+		// them would be thirty chances to forget — and a forgotten one lays out
+		// to nothing, which reads as the case being wrong rather than the
+		// fixture being incomplete.
+		//
+		// Named rather than classed, for `Layout.cpp`'s reason: `StarterGui` is
+		// `scene`'s service and this module may not link `scene`, so the string
+		// is duplicated here and pinned by a test.
+		Entity Container;
+
 		Entity Make(std::string_view klass, Entity parent = Entity{}) {
 			const Entity made = Data.CreateInstance(GuiClass(klass), klass);
+
 			if (parent != engine::ecs::NULL_ENTITY) {
 				Data.SetParent(made, parent);
+			} else if (Data.IsA(made, GuiClass("LayerCollector"))) {
+				// An unparented collector draws nothing, so a case that did not
+				// say where its `ScreenGui` lives gets the ordinary answer
+				// rather than the degenerate one.
+				Data.SetParent(made, Container);
 			}
+
 			return made;
 		}
 
@@ -483,4 +513,138 @@ TEST_CASE("siblings with different child counts each place their own children", 
 			CHECK(world.Where(leaf).AbsolutePosition.X == Approx(parent.AbsolutePosition.X));
 		}
 	}
+}
+
+// --- containment --------------------------------------------------------------
+//
+// **Where a collector sits decides whether it draws at all**, and Roblox's rule
+// is the one implemented: a `ScreenGui` draws from `StarterGui` or a player's
+// `PlayerGui`, and the two collectors attached to something in the world draw
+// from `Workspace` as well.
+//
+// The failure this prevents is specific and nasty: an engine that drew a
+// `ScreenGui` wherever it found one lets an author parent it somewhere Roblox
+// would not, see it in the studio, and ship a game whose interface is missing
+// in the client. A difference between the two that runs *that* way round is the
+// worst kind, because the place it works is the place it is checked.
+
+TEST_CASE("a screen gui outside a container does not draw", "[gui][layout]") {
+	World world("gui_layout.uncontained");
+
+	// Parented to nothing at all, which is where a script leaves an element
+	// between `Instance.new` and setting `Parent`.
+	const Entity orphan = world.Data.CreateInstance(GuiClass("ScreenGui"), "ScreenGui");
+	const Entity child = world.Make("Frame", orphan);
+
+	Element element;
+	element.Size = UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+	world.Data.Set(child, element);
+
+	// **The count is over placed *elements*, and the child is what makes it
+	// meaningful.** A collector with nothing under it places nothing whether or
+	// not it was allowed to draw, so a case asserting zero without one would
+	// pass against an engine that ignored containment entirely.
+	CHECK(Layout(world.Data, world.Display) == 0);
+
+	// **Not rendered rather than not present.** `Resolved` is cleared by the
+	// sweep and the rectangle is left alone, so an element that stopped being
+	// contained is distinguishable from one that was never laid out.
+	const Resolved *resolved = world.Data.Get<Resolved>(orphan);
+	CHECK((resolved == nullptr || !resolved->Rendered));
+}
+
+TEST_CASE("a screen gui under a part does not draw", "[gui][layout]") {
+	// The mistake this rule exists for: a `ScreenGui` parented into the world.
+	// It is a legal tree and Roblox draws nothing from it.
+	World world("gui_layout.underpart");
+
+	const Entity somewhere =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "Rock");
+	const Entity screen = world.Make("ScreenGui", somewhere);
+
+	const Entity child = world.Make("Frame", screen);
+	Element element;
+	element.Size = UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+	world.Data.Set(child, element);
+
+	// Zero *because* nothing under a part is reachable, not because there was
+	// nothing to place — the child above is what separates the two.
+	CHECK(Layout(world.Data, world.Display) == 0);
+	CHECK_FALSE(world.Data.Get<Resolved>(screen)->Rendered);
+	CHECK_FALSE(world.Data.Get<Resolved>(child)->Rendered);
+}
+
+TEST_CASE("a screen gui nested inside a container still draws", "[gui][layout]") {
+	// **Walked upward rather than tested against the immediate parent**, because
+	// authors nest: a folder of screens under `StarterGui` is ordinary.
+	World world("gui_layout.nested");
+
+	const Entity folder = world.Data.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("Instance")), "Screens"
+	);
+	world.Data.SetParent(folder, world.Container);
+
+	const Entity screen = world.Make("ScreenGui", folder);
+
+	Layout(world.Data, world.Display);
+	CHECK(world.Where(screen).Rendered);
+}
+
+TEST_CASE("a screen gui under a player's PlayerGui draws", "[gui][layout]") {
+	// The client's half of the rule. A `PlayerGui` is a child of a `Player`
+	// rather than a service, so this is the case that proves the test is over
+	// the *name* and not over a fixed set of roots.
+	World world("gui_layout.playergui");
+
+	const Entity player =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "Someone");
+	const Entity playerGui = world.Data.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("Instance")), std::string(PLAYER_GUI)
+	);
+	world.Data.SetParent(playerGui, player);
+
+	const Entity screen = world.Make("ScreenGui", playerGui);
+
+	Layout(world.Data, world.Display);
+	CHECK(world.Where(screen).Rendered);
+}
+
+TEST_CASE("only the world-attached collectors draw from the Workspace", "[gui][layout]") {
+	// **The one asymmetry in the rule, and the reason it is not one test.** A
+	// `SurfaceGui` and a `BillboardGui` hang off something in the world, so the
+	// world is a legal home for them; a `ScreenGui` is the viewer's own overlay
+	// and is not in the world at all.
+	//
+	// All three in one case, under one `Workspace`, so a change that collapsed
+	// the distinction — accepting every collector, or refusing every one —
+	// fails here whichever way it went.
+	World world("gui_layout.workspace");
+
+	const Entity workspace = world.Data.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("Instance")), std::string(WORKSPACE)
+	);
+
+	const Entity screen = world.Make("ScreenGui", workspace);
+	const Entity surface = world.Make("SurfaceGui", workspace);
+	const Entity billboard = world.Make("BillboardGui", workspace);
+
+	Layout(world.Data, world.Display);
+
+	CHECK_FALSE(world.Data.Get<Resolved>(screen)->Rendered);
+	CHECK(world.Data.Get<Resolved>(surface)->Rendered);
+	CHECK(world.Data.Get<Resolved>(billboard)->Rendered);
+}
+
+TEST_CASE("the container names are the ones scene registers", "[gui][layout]") {
+	// **The pin at this end**, and `scene/tests/Services.cpp` holds the other.
+	//
+	// These three strings are `scene`'s service names spelled again here,
+	// because `gui/AGENTS.md` refuses an edge to `scene` — the same refusal that
+	// made `gui::Face` re-declare `NormalId`'s six members. A duplicated
+	// constant is only safe while something fails when the two disagree, and a
+	// rename on either side would otherwise produce an interface that silently
+	// stops drawing rather than a build that stops working.
+	CHECK(WORKSPACE == "Workspace");
+	CHECK(STARTER_GUI == "StarterGui");
+	CHECK(PLAYER_GUI == "PlayerGui");
 }

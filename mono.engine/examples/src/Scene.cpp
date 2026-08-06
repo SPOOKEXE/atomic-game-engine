@@ -10,6 +10,7 @@
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
@@ -108,6 +109,18 @@ namespace engine::examples {
 		gui::RegisterGuiClasses();
 
 		RegisterExampleComponents();
+
+		// **The service instances, not just the classes above.** A scene that
+		// parents a `ScreenGui` into `StarterGui` needs one to exist, and
+		// registering the class only makes the name resolvable — `GetService`
+		// looks for a *root* of that name and there was none, so a scene got
+		// "'StarterGui' is not a service this engine provides" from a loader
+		// that had just registered the class.
+		//
+		// Idempotent, which is what lets it sit beside the registrations rather
+		// than behind a check: a world that came out of a file already has its
+		// nine roots and this leaves them alone.
+		scene::InstallServices(store);
 
 		// The extension picks the VM. `Rings.luau` and `Rings.js` build the
 		// same world through the same bindings, and this loader never learns

@@ -59,6 +59,21 @@ local SWATCHES = {
 local screen = Instance.new("ScreenGui")
 screen.Name = "InterfaceExample"
 
+-- **Parented into `StarterGui`, which is what makes it draw at all.**
+--
+-- A `ScreenGui` is only laid out when it sits under `StarterGui` or under a
+-- player's `PlayerGui` — Roblox's containment rule, and `gui::Layout` enforces
+-- it. This file left it unparented for a version and drew anyway, which was the
+-- engine being more permissive than the thing it is modelled on: an author
+-- could have shipped an interface that appeared in the studio and was missing
+-- in the client, because the place it worked was the place it was checked.
+--
+-- `GetService` finds it in the tree, the same way `Players` and
+-- `ReplicatedStorage` are found. It is `StarterGui` rather than a `PlayerGui`
+-- because this is a scene an editor opens, and a player's copy is made when a
+-- player spawns.
+screen.Parent = game:GetService("StarterGui")
+
 -- The card everything else sits in. Anchored at its own centre and placed at
 -- the screen's centre, so it stays centred at any window size — which is the
 -- assertion, not the decoration.

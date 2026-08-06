@@ -55,6 +55,71 @@ namespace engine::gui {
 			return ids;
 		}
 
+		// The containers a collector may draw from, by name.
+		//
+		// **Names rather than class ids, and that is this module's existing
+		// arrangement rather than a shortcut.** `Workspace`, `StarterGui` and a
+		// player's `PlayerGui` are `scene`'s services, and `gui/AGENTS.md`
+		// refuses an edge to `scene` — the same refusal that made
+		// `SurfaceGui::Face` re-declare `NormalId`'s six members here, "pinned
+		// by a test at each end, which is the arrangement `DefaultMaterial`'s
+		// duplicated 'Plastic' already uses".
+		//
+		// So these three strings are duplicated from `scene/Services.cpp` and
+		// `gui/tests/Layout.cpp` pins them against it. A rename on either side
+		// fails a test rather than silently drawing nothing, which is the
+		// failure this shape is chosen to make loud.
+		struct Containers {
+			core::Name Workspace{WORKSPACE};
+			core::Name StarterGui{STARTER_GUI};
+			core::Name PlayerGui{PLAYER_GUI};
+		};
+
+		const Containers &Roots() {
+			static const Containers names;
+			return names;
+		}
+
+		// Whether a collector sits somewhere it is allowed to draw from.
+		//
+		// **Roblox's rule, and it is a containment rule rather than a style
+		// one.** A `ScreenGui` parented to a `Part` draws nothing — not because
+		// it is invisible but because nothing is looking at that part of the
+		// tree — and an engine that drew it anyway would let an author ship a
+		// game whose interface appears in the studio and not in the client.
+		//
+		//   - a `ScreenGui` draws from **`StarterGui`** or from a player's
+		//     **`PlayerGui`**. The studio shows the first; a client shows the
+		//     second, which is the copy Roblox makes when a player spawns.
+		//   - a `SurfaceGui` or a `BillboardGui` draws from those *and* from
+		//     **`Workspace`**, because both are attached to something in the
+		//     world and the world is where that something lives.
+		//
+		// Walked upward rather than tested against the immediate parent: a
+		// `ScreenGui` inside a `Folder` inside `StarterGui` is contained, and
+		// authors nest.
+		//
+		// @param collector The `LayerCollector` being considered.
+		// @param spatial   Whether `Workspace` counts, which is true for the
+		//        two collectors that hang off something in the world.
+		bool Contained(const Store &store, Entity collector, bool spatial) {
+			const Containers &roots = Roots();
+
+			for (Entity above = store.ParentOf(collector); above != ecs::NULL_ENTITY;
+				 above = store.ParentOf(above)) {
+				const core::Name name = store.InstanceNameOf(above);
+
+				if (name == roots.StarterGui || name == roots.PlayerGui) {
+					return true;
+				}
+				if (spatial && name == roots.Workspace) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+
 		Rect FromCorner(const Vector2 &topLeft, const Vector2 &size) {
 			return Rect{topLeft, Vector2{topLeft.X + size.X, topLeft.Y + size.Y}};
 		}
@@ -807,12 +872,23 @@ namespace engine::gui {
 
 		size_t placed = 0;
 
+		const Ids &ids = Classes();
+
 		for (const Entity collector : collectors) {
 			const Layer *layer = store.Get<Layer>(collector);
 			Rect canvas;
 
-			const bool drawn =
-				layer != nullptr && layer->Enabled && CanvasFor(store, collector, screen, canvas);
+			// **Where it sits decides whether it draws at all**, before
+			// anything asks how big it is. A `SurfaceGui` or a `BillboardGui`
+			// hangs off something in the world, so `Workspace` is a legal home
+			// for it; a `ScreenGui` is the viewer's own overlay and is not in
+			// the world at all, so it is not.
+			const bool spatial =
+				store.IsA(collector, ids.SurfaceGui) || store.IsA(collector, ids.BillboardGui);
+
+			const bool drawn = layer != nullptr && layer->Enabled &&
+							   Contained(store, collector, spatial) &&
+							   CanvasFor(store, collector, screen, canvas);
 
 			if (!drawn) {
 				continue;

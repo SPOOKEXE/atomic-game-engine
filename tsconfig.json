@@ -33,5 +33,5 @@
 		"forceConsistentCasingInFileNames": true
 	},
 	"files": ["mono.engine/script/bindings/engine.d.ts"],
-	"include": ["mono.engine/examples/**/*.ts"]
+	"include": ["mono.engine/examples/**/*.ts", "mono.studio/panels/**/*.ts"]
 }

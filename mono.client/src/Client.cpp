@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <client/Client.hpp>
+
+#include <engine/gui/Layout.hpp>
 #include <client/Replicated.hpp>
 #include <fstream>
 
@@ -57,6 +59,18 @@ namespace client {
 
 		if (!Renderer.Initialise(Window)) {
 			return false;
+		}
+
+		// **The interface pass, built against the renderer's own device.** A
+		// failure here is not fatal and must not be: a client that refused to
+		// start because a shader or a typeface was missing would be worse than
+		// one that draws a world with no interface over it, and the log says
+		// which happened.
+		{
+			const engine::render::BackendHandles backend = Renderer.Backend();
+			if (!Interface.Initialise(backend.Device, backend.ColourFormat)) {
+				ENGINE_WARN("no interface pass; a ScreenGui will not be drawn");
+			}
 		}
 
 		if (Settings.Uncapped && !Renderer.SetVerticalSync(false)) {
@@ -944,8 +958,49 @@ namespace client {
 		// view the option does not know about. Two views drawn on top of each
 		// other is two scenes inside one, which reads as a rendering fault.
 		Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
+		// **The world's own interface, compiled here.** The studio does this
+		// per viewport panel because a panel *is* a canvas; a client has one
+		// canvas, which is the window.
+		//
+		// **An instance is an entity and a class is a set of components**, so
+		// the `ScreenGui` this walks is the same storage a system iterates —
+		// there is no second tree to keep in step, which is what makes one
+		// `Layout` pass over the store the whole of it.
+		engine::render::InterfacePass *hook = nullptr;
+		if (Rendered.IsValid()) {
+			engine::gui::CompileRequest request;
+			request.Display.Width = static_cast<float>(Settings.Width);
+			request.Display.Height = static_cast<float>(Settings.Height);
+
+			// Fed back from the previous frame's routing, deliberately: the
+			// hover comes from the list a compile produced, so a compile
+			// reading this frame's hover would depend on its own output.
+			request.Hovered = InterfaceRouter.Hovered();
+			request.Pressed = InterfaceRouter.Pressed();
+
+			Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+				engine::gui::Layout(store, request.Display);
+				InterfaceList.Rebuild(store, request);
+			});
+
+			if (!InterfaceList.Commands().Commands.empty()) {
+				Interface.Submit(
+					InterfaceList.Commands(),
+					engine::core::Vector2{request.Display.Width, request.Display.Height}
+				);
+				hook = &Interface;
+			}
+		}
+
 		LastFrame =
-			Renderer.Render(Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, Surfaces);
+			Renderer.Render(
+				Views.CameraFrame(),
+				Views.Camera(),
+				Views.Instances(),
+				Overlay,
+				Surfaces,
+				hook
+			);
 
 		FrameGraph::EndFrame();
 		ENGINE_PROFILE_FRAME();

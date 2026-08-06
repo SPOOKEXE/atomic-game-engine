@@ -781,10 +781,28 @@ namespace engine::script {
 			JS_FreeValue(context, global);
 
 			if (JS_IsUndefined(service)) {
+				JS_FreeValue(context, service);
+
+				// **Then the tree, which the Luau half has always done and this
+				// one did not.** `Players`, `StarterGui` and the rest are
+				// ordinary instances `InstallServices` puts at the root, so
+				// looking them up by name is looking them up the way everything
+				// else in the world is looked up.
+				//
+				// Without this the two languages disagreed about what a service
+				// *is*: a Luau script reached `StarterGui` and a JavaScript one
+				// was told the engine does not provide it — which is the parity
+				// the roadmap's gate exists to refuse, and it was found by the
+				// first TypeScript panel that tried to parent a `ScreenGui`.
+				const ecs::Entity found = JsOf(context).World->FindFirstRoot(name);
+				if (found != ecs::NULL_ENTITY) {
+					JS_FreeCString(context, name);
+					return MakeJsInstance(context, found);
+				}
+
 				JSValue error =
 					JS_ThrowTypeError(context, "'%s' is not a service this engine provides", name);
 				JS_FreeCString(context, name);
-				JS_FreeValue(context, service);
 				return error;
 			}
 
@@ -1342,6 +1360,18 @@ namespace engine::script {
 			JS_SetPropertyStr(
 				context, table, "GetService", JS_NewCFunction(context, GetService, "GetService", 1)
 			);
+
+			// Which world this script is standing on — see the Luau side for
+			// why a world's name is what `JobId` answers with. A plain string
+			// property rather than a getter, because the name is fixed for the
+			// life of the world and a getter would imply otherwise.
+			{
+				const std::string_view name = JsOf(context).World->Name();
+				JS_SetPropertyStr(
+					context, table, "JobId", JS_NewStringLen(context, name.data(), name.size())
+				);
+			}
+
 			JS_SetPropertyStr(context, global, "game", table);
 		}
 

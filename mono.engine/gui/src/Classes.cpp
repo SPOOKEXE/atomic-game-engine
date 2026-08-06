@@ -291,6 +291,21 @@ namespace engine::gui {
 			"UICorner",
 			"UIStroke",
 			"UIScale",
+			"GuiService",
+
+			// The 3D branch. `GuiBase3d` and `PVAdornment` are abstract in
+			// Roblox and are listed because a script may `:IsA` either.
+			"GuiBase3d",
+			"PVAdornment",
+			"SelectionBox",
+			"SelectionSphere",
+			"HandleAdornment",
+			"BoxHandleAdornment",
+			"SphereHandleAdornment",
+			"CylinderHandleAdornment",
+			"LineHandleAdornment",
+			"Handles",
+			"ArcHandles",
 		};
 
 		// The tree, built once for the process.
@@ -337,6 +352,57 @@ namespace engine::gui {
 			// arrive, and a tree that had flattened the two would have to grow
 			// the split back at exactly the point somebody is adding a feature.
 			const ClassId guiBase = Classes::Register("GuiBase", instance, {});
+
+			// **A service, so it hangs off `Instance` rather than off
+			// `GuiBase`.** It is not a thing that draws — it is the thing that
+			// *owns the selection*, which is what finally gives
+			// `GuiObject::Selectable` a reader. `scene`'s services sit at the
+			// root the same way, and `GetService` finds either by name.
+			const std::array guiServiceState{Components::Of<GuiServiceState>()};
+			const ClassId guiService = Classes::Register("GuiService", instance, guiServiceState);
+
+			// --- the 3D branch -----------------------------------------------
+			//
+			// **Hung off `GuiBase`, which is what that class was kept for.** The
+			// comment above said so when the 2D branch went in: `GuiBase` and
+			// `GuiBase2d` add no components of their own and a tree that had
+			// collapsed the two "would have to grow the split back at exactly
+			// the point somebody is adding a feature". This is that point.
+			//
+			// An adornment is a description rather than a drawing — see
+			// `Adornment` — so what is registered here is what to outline and
+			// how, and nothing that resolves it into geometry.
+			const ClassId guiBase3d = Classes::Register("GuiBase3d", guiBase, {});
+
+			// `PVAdornment` is Roblox's name for "an adornment about a
+			// `BasePart`", and the `Adornee` lives here rather than on
+			// `GuiBase3d` because that is where Roblox puts it.
+			const std::array adornment{Components::Of<Adornment>()};
+			const ClassId pvAdornment = Classes::Register("PVAdornment", guiBase3d, adornment);
+
+			const std::array outline{Components::Of<SelectionOutline>()};
+			const ClassId selectionBox = Classes::Register("SelectionBox", pvAdornment, outline);
+			const ClassId selectionSphere = Classes::Register("SelectionSphere", pvAdornment, outline);
+
+			// A handle is an adornment with a shape and an offset. The four
+			// leaves below differ only in what a drawer makes of `HandleShape`,
+			// which is why they add no components of their own — the same shape
+			// `Frame` and `CanvasGroup` have on the 2D side.
+			const std::array handle{Components::Of<HandleShape>()};
+			const ClassId handleAdornment = Classes::Register("HandleAdornment", pvAdornment, handle);
+
+			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, {});
+			const ClassId sphereHandle = Classes::Register("SphereHandleAdornment", handleAdornment, {});
+			const ClassId cylinderHandle =
+				Classes::Register("CylinderHandleAdornment", handleAdornment, {});
+			const ClassId lineHandle = Classes::Register("LineHandleAdornment", handleAdornment, {});
+
+			// `Handles` and `ArcHandles` are the draggable ones — the editor's
+			// move and rotate gizmos. They carry the same `Adornment` their
+			// siblings do and differ in what a drawer offers to grab, which is
+			// the drawer's business rather than the tree's.
+			const ClassId handles = Classes::Register("Handles", pvAdornment, {});
+			const ClassId arcHandles = Classes::Register("ArcHandles", pvAdornment, {});
 
 			// `Resolved` arrives here because both halves below need it: a
 			// `LayerCollector` has an absolute rectangle just as an element
@@ -607,12 +673,39 @@ namespace engine::gui {
 
 			Classes::Property<&Scale::Factor>(uiScale, "Scale");
 
+			Classes::Property<&Adornment::Adornee>(pvAdornment, "Adornee");
+			Classes::Property<&Adornment::Color>(pvAdornment, "Color3");
+			Classes::Property<&Adornment::Transparency>(pvAdornment, "Transparency");
+			Classes::Property<&Adornment::Visible>(pvAdornment, "Visible");
+			Classes::Property<&Adornment::AlwaysOnTop>(pvAdornment, "AlwaysOnTop");
+			Classes::Property<&Adornment::ZIndex>(pvAdornment, "ZIndex");
+
+			Classes::Property<&SelectionOutline::LineThickness>(selectionBox, "LineThickness");
+			Classes::Property<&SelectionOutline::SurfaceColor>(selectionBox, "SurfaceColor3");
+			Classes::Property<&SelectionOutline::SurfaceTransparency>(
+				selectionBox, "SurfaceTransparency"
+			);
+
+			Classes::Property<&HandleShape::Offset>(handleAdornment, "CFrame");
+			Classes::Property<&HandleShape::Size>(handleAdornment, "Size");
+
+			Classes::Property<&GuiServiceState::SelectedObject>(guiService, "SelectedObject");
+			Classes::Property<&GuiServiceState::MenuIsOpen>(guiService, "MenuIsOpen");
+			Classes::Property<&GuiServiceState::AutoSelectGuiEnabled>(guiService, "AutoSelectGuiEnabled");
+
 			// Referenced so the compiler does not warn about ids the tree needs
 			// and no property hangs off. Each is a real class a script may
 			// name; none of them adds a property its base has not got.
 			(void)canvasGroup;
 			(void)dockWidget;
 			(void)uiScale;
+			(void)selectionSphere;
+			(void)boxHandle;
+			(void)sphereHandle;
+			(void)cylinderHandle;
+			(void)lineHandle;
+			(void)handles;
+			(void)arcHandles;
 
 			return guiObject;
 		}

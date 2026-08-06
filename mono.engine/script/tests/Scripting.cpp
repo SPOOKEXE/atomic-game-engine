@@ -3299,3 +3299,39 @@ TEST_CASE("javascript reaches the same gui signals", "[scripting][js][gui]") {
 
 	CHECK(Trace(store, log) == "c@7,9");
 }
+
+TEST_CASE("game.JobId names the world the script is standing on", "[scripting]") {
+	// **What lets one file build four different worlds.** `--worlds N` runs the
+	// same script in every world it creates, so without an identity every view
+	// is identical — and a compositor that placed them in the wrong order would
+	// look exactly like one that did not. `Mirrors-4-worlds.luau` is the caller.
+	//
+	// The world's *name* rather than a fresh identifier, because a name is what
+	// a bus envelope, a snapshot and a view header already carry. A second
+	// identifier for one world would be two sources of truth for the same fact.
+	RegisterClasses();
+	Store store("mirrors.world.2");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity log = MakeLog(store);
+	MustRun(*runtime, R"(
+		local log = game:GetService('Workspace'):FindFirstChild('Log')
+		log.Name = log.Name .. game.JobId
+	)");
+
+	CHECK(Trace(store, log) == "mirrors.world.2");
+}
+
+TEST_CASE("javascript reads the same JobId", "[scripting][js]") {
+	RegisterClasses();
+	Store store("mirrors.world.3");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	const Entity log = MakeLog(store);
+	MustRun(*runtime, R"(
+		const log = workspace.FindFirstChild('Log');
+		log.Name = log.Name + game.JobId;
+	)");
+
+	CHECK(Trace(store, log) == "mirrors.world.3");
+}

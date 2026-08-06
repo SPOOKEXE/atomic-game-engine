@@ -84,6 +84,25 @@ declare extern type PropertyChangedSignal with
 	function Once(self, handler: () -> ()): RBXScriptConnection
 end
 
+-- The 2D tree's input, in two shapes because the arguments differ.
+--
+-- **`GuiSignal` takes no arguments and that is deliberate rather than
+-- unfinished.** Roblox hands `Activated`, `InputBegan` and `InputEnded` an
+-- `InputObject`; this engine has no such datatype, and inventing a different
+-- one now would have to change the day one arrives. A handler that cannot rely
+-- on an argument is better than one relying on an argument that will move.
+declare extern type GuiSignal with
+	function Connect(self, handler: () -> ()): RBXScriptConnection
+	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- `(x, y)` in canvas pixels, which is Roblox's signature for the three pointer
+-- signals exactly.
+declare extern type PointerSignal with
+	function Connect(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
+	function Once(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
+end
+
 -- --- queries ---------------------------------------------------------------
 
 declare extern type RaycastParams with
@@ -487,6 +506,12 @@ declare extern type Instance with
 	function IsDescendantOf(self, ancestor: Instance): boolean
 	function ClearAllChildren(self): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
+	Activated: GuiSignal
+	InputBegan: GuiSignal
+	InputEnded: GuiSignal
+	MouseEnter: PointerSignal
+	MouseLeave: PointerSignal
+	MouseMoved: PointerSignal
 end
 
 declare extern type PVInstance extends Instance with
@@ -538,6 +563,56 @@ declare extern type ModuleScript extends LuaSourceContainer with
 end
 
 declare extern type GuiBase extends Instance with
+end
+
+declare extern type GuiService extends Instance with
+	AutoSelectGuiEnabled: boolean
+	MenuIsOpen: boolean
+	SelectedObject: Instance
+end
+
+declare extern type GuiBase3d extends GuiBase with
+end
+
+declare extern type PVAdornment extends GuiBase3d with
+	Adornee: Instance
+	AlwaysOnTop: boolean
+	Color3: Color3
+	Transparency: number
+	Visible: boolean
+	ZIndex: number
+end
+
+declare extern type SelectionBox extends PVAdornment with
+	LineThickness: number
+	SurfaceColor3: Color3
+	SurfaceTransparency: number
+end
+
+declare extern type SelectionSphere extends PVAdornment with
+end
+
+declare extern type HandleAdornment extends PVAdornment with
+	CFrame: CFrame
+	Size: Vector3
+end
+
+declare extern type BoxHandleAdornment extends HandleAdornment with
+end
+
+declare extern type SphereHandleAdornment extends HandleAdornment with
+end
+
+declare extern type CylinderHandleAdornment extends HandleAdornment with
+end
+
+declare extern type LineHandleAdornment extends HandleAdornment with
+end
+
+declare extern type Handles extends PVAdornment with
+end
+
+declare extern type ArcHandles extends PVAdornment with
 end
 
 declare extern type GuiBase2d extends GuiBase with
@@ -910,6 +985,15 @@ declare task: {
 
 type Services = {
 	Workspace: Workspace,
+	Lighting: Lighting,
+	ReplicatedFirst: ReplicatedFirst,
+	ReplicatedStorage: ReplicatedStorage,
+	ServerScriptService: ServerScriptService,
+	ServerStorage: ServerStorage,
+	StarterGui: StarterGui,
+	StarterPlayer: StarterPlayer,
+	StarterPlayerScripts: StarterPlayerScripts,
+	Players: Players,
 	RunService: RunService,
 	MessagingService: MessagingService,
 	MemoryStoreService: MemoryStoreService,
@@ -928,6 +1012,18 @@ type CreatableInstances = {
 	LocalScript: LocalScript,
 	ModuleScript: ModuleScript,
 	GuiBase: GuiBase,
+	GuiService: GuiService,
+	GuiBase3d: GuiBase3d,
+	PVAdornment: PVAdornment,
+	SelectionBox: SelectionBox,
+	SelectionSphere: SelectionSphere,
+	HandleAdornment: HandleAdornment,
+	BoxHandleAdornment: BoxHandleAdornment,
+	SphereHandleAdornment: SphereHandleAdornment,
+	CylinderHandleAdornment: CylinderHandleAdornment,
+	LineHandleAdornment: LineHandleAdornment,
+	Handles: Handles,
+	ArcHandles: ArcHandles,
 	GuiBase2d: GuiBase2d,
 	GuiObject: GuiObject,
 	Frame: Frame,
@@ -965,6 +1061,7 @@ type CreatableInstances = {
 
 type DataModel = {
 	Workspace: Workspace,
+	JobId: string,
 	GetService: <T>(self: DataModel, service: keyof<Services> & T) -> index<Services, T>,
 }
 

@@ -202,5 +202,22 @@ namespace engine::gui {
 		// spelling is one two processes cannot agree on, and a snapshot taken
 		// in a studio and restored in a test would be one of those two.
 		ecs::Components::Register<Resolved>("gui.Resolved");
+
+		// **After `Resolved`, because the rule above is "add at the end".** The
+		// order decides component ids, which decide the column order an
+		// archetype iterates — so inserting this among the authored ones to keep
+		// the grouping tidy would renumber everything after it and change what a
+		// recording made before this version means.
+		//
+		// It carries an `ecs::Entity`, which crosses as an id and a generation
+		// and needs no hand-written serialiser: unlike a `core::Name`, an entity
+		// id means the same thing in the file it was written from and the world
+		// it is read into, because that is what `ecs::Store::Load` remaps.
+		ecs::Components::Register<GuiServiceState>("gui.GuiServiceState");
+
+		// The 3D branch, at the end for the reason the rule above gives.
+		ecs::Components::Register<Adornment>("gui.Adornment");
+		ecs::Components::Register<SelectionOutline>("gui.SelectionOutline");
+		ecs::Components::Register<HandleShape>("gui.HandleShape");
 	}
 }
