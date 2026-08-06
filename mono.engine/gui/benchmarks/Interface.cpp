@@ -21,6 +21,35 @@
 // worth having if that pass is far cheaper than the rebuild it avoids. Both are
 // measured. If they are close, the class is doing twice the work on every frame
 // that *does* change and saving nothing on the frames that do not.
+//
+// --- what these rows have already been used for -------------------------------
+//
+// The first run of this suite reported **275 ns per element**, which is around a
+// hundred times what iterating an entity costs in `engine.ecs.bench.iteration`
+// and made a ten-thousand-element interface 2.9 ms of every frame while sitting
+// perfectly still. Three things in `Layout.cpp` accounted for a third of it, and
+// none of them were visible without a per-element figure to divide by:
+//
+//   - `ModifiersOf` tested seven component types against every child, when a
+//     modifier is a `UIComponent` and one `Get<Element>` rules out all seven.
+//     A container is usually a frame full of frames, so that was seven misses
+//     per child per frame. → 275 to 243.
+//   - It then ran **twice per element** — once to measure the node and once to
+//     place it — over the same child list. The result is carried on `Item` now.
+//     → 243 to 200.
+//   - `ChildItems` heap-allocated a fresh list per container per frame, and
+//     `InstanceNameOf` took the process-wide name registry's lock for every
+//     child whether or not the container sorted by name. → 200 to 173.
+//
+// **What is left is structural rather than wasteful.** `EachChild` walks an
+// intrusive `FirstChild`/`NextSibling` list through a `std::function`, so each
+// child costs a type-erased call and a pointer chase into another table — and
+// two such walks per element remain, because measuring a node and placing it
+// both need its child list and the two happen at different times. Merging them
+// needs either contiguous child storage in `ecs` or a scratch arena holding one
+// child list per element rather than per depth. Both are larger decisions than
+// a benchmark should make on its own; this note is here so the next person
+// starts from the analysis rather than from the number.
 
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>

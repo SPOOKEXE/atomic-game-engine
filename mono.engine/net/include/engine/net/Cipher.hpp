@@ -7,6 +7,20 @@
 // hardware with no AES instructions — a phone, which is exactly where AES-GCM in
 // software is both slow and a timing risk.
 //
+// **That constant time is now measured rather than asserted.**
+// `engine.net.bench.crypto` opens the same frame authentic, forged, and under
+// rewritten associated data, and reports 1656, 1664 and 1728 nanoseconds — the
+// same figure to within the noise of the machine. A refusal that came back
+// *faster* than an accept would be the bug, not the good news it looks like: it
+// would mean the tag comparison returns on the first differing byte, which
+// hands the tag over one byte at a time to anybody willing to send a few
+// million guesses. Those rows are the regression test for that, and they are
+// the one place in this repository where a smaller number is a failure.
+//
+// The one refusal that is allowed to be cheap is a frame shorter than the tag —
+// 31 ns against 1656 — because there is nothing to compare in constant time
+// against, and the length it leaks is the length the attacker chose.
+//
 // **A nonce must never repeat under one key, and this file is built so that it
 // cannot rather than asking you to remember.** A repeat is not a degraded mode:
 // two frames sealed under the same key and nonce leak the XOR of their

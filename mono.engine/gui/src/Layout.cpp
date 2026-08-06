@@ -76,14 +76,6 @@ namespace engine::gui {
 			return parent;
 		}
 
-		// One child of a container, with what the layout needs to place it.
-		struct Item {
-			Entity Node;
-			Vector2 Size;
-			int32_t Order = 0;
-			core::Name Label;
-		};
-
 		// Everything the layout of a container needs from its modifiers.
 		struct Modifiers {
 			const Padding *Inset = nullptr;
@@ -95,6 +87,31 @@ namespace engine::gui {
 			const Scale *Factor = nullptr;
 		};
 
+		// One child of a container, with what the layout needs to place it.
+		struct Item {
+			Entity Node;
+			Vector2 Size;
+			int32_t Order = 0;
+
+			// Only filled in when the container sorts by name.
+			//
+			// **`InstanceNameOf` reaches the process-wide name registry**, which
+			// is a shared lock and a hash lookup — and `SortOrder::Name` is the
+			// rarest of the three. Fetching it for every child of every
+			// container on every frame paid that cost for a field two sort
+			// orders never read.
+			core::Name Label;
+
+			// This child's own modifiers, found while it was measured.
+			//
+			// **Carried rather than looked up again.** Measuring a child needs
+			// its scale, aspect and limits; placing it needs its padding and its
+			// layout. Those are the same walk of the same child list, and before
+			// this field every element in the tree paid for it twice — once from
+			// its parent's `ChildItems` and once from its own `Place`.
+			Modifiers Mods;
+		};
+
 		Modifiers ModifiersOf(const Store &store, Entity instance) {
 			Modifiers found;
 
@@ -103,6 +120,22 @@ namespace engine::gui {
 			// a container with a padding, a layout and a constraint would
 			// otherwise pay for that walk three times.
 			store.EachChild(instance, [&](Entity child) {
+				// **A modifier is a `UIComponent` and never a `GuiObject`, so
+				// one lookup rules out all seven.** `ChildItems` already relies
+				// on exactly this — "does it have an `Element`" is what makes
+				// something a `GuiObject` there — and without the same test here
+				// the common container pays the full seven per child to
+				// discover that a frame is not a padding.
+				//
+				// The common container is a frame full of frames: an inventory
+				// grid, a list of rows, a panel of buttons. Measured over a
+				// thousand-element tree this test is most of what `Layout`
+				// costs, because seven misses against one hit is the ratio in
+				// every real interface — see `engine.gui.bench.interface`.
+				if (store.Get<Element>(child) != nullptr) {
+					return;
+				}
+
 				if (found.Inset == nullptr) {
 					found.Inset = store.Get<Padding>(child);
 				}
@@ -224,8 +257,15 @@ namespace engine::gui {
 			return std::max(size, 1);
 		}
 
-		size_t
-		Place(Store &store, Entity instance, const Rect &area, const Rect &clip, int depth, float rotation);
+		size_t Place(
+			Store &store,
+			Entity instance,
+			const Rect &area,
+			const Rect &clip,
+			int depth,
+			float rotation,
+			const Modifiers *known
+		);
 
 		// Resolves one node's size against the rectangle it sits in.
 		//
@@ -233,14 +273,18 @@ namespace engine::gui {
 		// has to know how big its children are *before* it can decide where they
 		// go — which is the one thing that cannot be done in a single top-down
 		// sweep and is why this function exists at all.
-		Vector2 Measure(const Store &store, Entity instance, const Vector2 &parent) {
+		//
+		// @param modifiers Filled in with what the walk found, so that `Place`
+		//        can be handed it rather than repeating the walk.
+		Vector2 Measure(const Store &store, Entity instance, const Vector2 &parent, Modifiers &modifiers) {
 			const Element *element = store.Get<Element>(instance);
 			if (element == nullptr) {
 				return Vector2::Zero;
 			}
 
+			modifiers = ModifiersOf(store, instance);
 			const Vector2 size = element->Size.Resolve(Basis(element->Constraint, parent));
-			return Constrain(size, ModifiersOf(store, instance), parent);
+			return Constrain(size, modifiers, parent);
 		}
 
 		// The children a layout arranges, in the order it arranges them.
@@ -250,22 +294,70 @@ namespace engine::gui {
 		// stacked it, every padded list would have a blank row where the
 		// modifier was. The test is "does it have an `Element`", which is what
 		// makes something a `GuiObject`.
-		std::vector<Item> ChildItems(const Store &store, Entity instance, const Vector2 &area) {
-			std::vector<Item> items;
+		// The item list one level of the walk uses, reused across frames.
+		//
+		// **The recursion is depth first, so exactly one list is live at each
+		// depth at any moment**: `Place` at depth *n* holds its children while
+		// it recurses into one of them at depth *n+1*, and that child's own list
+		// is a different level. One vector per level therefore serves the whole
+		// walk, and because they keep their capacity between frames, a tree
+		// whose shape has settled stops allocating entirely. Before this, every
+		// container heap-allocated an item list on every frame.
+		//
+		// Sized to `MAXIMUM_DEPTH` once rather than grown on demand, because
+		// growing it would reallocate the outer vector and dangle the reference
+		// an outer level of the recursion is still holding — a bug that would
+		// appear only on trees deeper than whatever the pool happened to have
+		// reached.
+		//
+		// `thread_local` because a `Store` binds its owning thread, so two
+		// worlds laying out at once are two threads and must not share this.
+		std::vector<Item> &ScratchAt(int depth) {
+			static thread_local std::vector<std::vector<Item>> pool(
+				static_cast<size_t>(MAXIMUM_DEPTH) + 2
+			);
+			return pool[static_cast<size_t>(std::clamp(depth, 0, MAXIMUM_DEPTH + 1))];
+		}
+
+		// @param named Whether the container's sort order reads `Item::Label`.
+		//        Only `SortOrder::Name` does, and the lookup is a trip through
+		//        the process-wide name registry — so it is asked for rather than
+		//        taken.
+		// @param items Cleared and filled. Owned by the caller so that the
+		//        per-level scratch above can be handed in.
+		void ChildItems(
+			const Store &store, Entity instance, const Vector2 &area, bool named, std::vector<Item> &items
+		) {
+			items.clear();
 
 			store.EachChild(instance, [&](Entity child) {
 				const Element *element = store.Get<Element>(child);
 				if (element == nullptr || !element->Visible) {
 					return;
 				}
-				items.push_back(
-					Item{
-						child, Measure(store, child, area), element->LayoutOrder, store.InstanceNameOf(child)
-					}
-				);
-			});
 
-			return items;
+				Item item;
+				item.Node = child;
+				item.Order = element->LayoutOrder;
+				if (named) {
+					item.Label = store.InstanceNameOf(child);
+				}
+				item.Size = Measure(store, child, area, item.Mods);
+				items.push_back(item);
+			});
+		}
+
+		// Whether a container's sort order needs each child's name.
+		bool SortsByName(const Modifiers &modifiers) {
+			if (modifiers.List != nullptr) {
+				return modifiers.List->Order == SortOrder::Name;
+			}
+			if (modifiers.Grid != nullptr) {
+				return modifiers.Grid->Order == SortOrder::Name;
+			}
+			// A container with neither runs no sort at all — its children are
+			// placed by their own `UDim2` — so no name is read.
+			return false;
 		}
 
 		void Sort(std::vector<Item> &items, SortOrder order) {
@@ -339,7 +431,9 @@ namespace engine::gui {
 				const Vector2 corner = horizontal ? Vector2{area.Min.X + along, area.Min.Y + across}
 												  : Vector2{area.Min.X + across, area.Min.Y + along};
 
-				placed += Place(store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation);
+				placed += Place(
+					store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation, &item.Mods
+				);
 				along += (horizontal ? item.Size.X : item.Size.Y) + gap;
 			}
 
@@ -433,7 +527,10 @@ namespace engine::gui {
 										   ? Vector2{area.Min.X + alongOffset, area.Min.Y + acrossOffset}
 										   : Vector2{area.Min.X + acrossOffset, area.Min.Y + alongOffset};
 
-				placed += Place(store, items[index].Node, FromCorner(corner, cell), clip, depth, rotation);
+				placed += Place(
+					store, items[index].Node, FromCorner(corner, cell), clip, depth, rotation,
+					&items[index].Mods
+				);
 			}
 
 			return placed;
@@ -444,8 +541,19 @@ namespace engine::gui {
 		// `rect` is where this node goes and is already final — a list layout
 		// decided it, or the caller resolved the node's own `UDim2`. Splitting
 		// the decision out is what lets one function serve both.
-		size_t
-		Place(Store &store, Entity instance, const Rect &rect, const Rect &clip, int depth, float rotation) {
+		// @param known The node's modifiers when the caller already walked for
+		//        them — which every recursive caller has, because measuring a
+		//        child is what produced its size. Null at the roots, where
+		//        nothing has measured anything yet.
+		size_t Place(
+			Store &store,
+			Entity instance,
+			const Rect &rect,
+			const Rect &clip,
+			int depth,
+			float rotation,
+			const Modifiers *known
+		) {
 			if (depth > MAXIMUM_DEPTH) {
 				return 0;
 			}
@@ -464,7 +572,13 @@ namespace engine::gui {
 				return 0;
 			}
 
-			const Modifiers modifiers = ModifiersOf(store, instance);
+			Modifiers walked;
+			if (known == nullptr) {
+				walked = ModifiersOf(store, instance);
+				known = &walked;
+			}
+			const Modifiers &modifiers = *known;
+
 			const float total = rotation + element->Rotation;
 
 			Resolved value;
@@ -488,7 +602,12 @@ namespace engine::gui {
 			const Rect area = ContentArea(store, instance, rect, modifiers);
 
 			size_t placed = 1;
-			std::vector<Item> items = ChildItems(store, instance, area.Size());
+
+			// This level's scratch. Live only until the loops below finish with
+			// it: every recursive call uses the next level's, and by the time
+			// this one returns nothing is reading it.
+			std::vector<Item> &items = ScratchAt(depth);
+			ChildItems(store, instance, area.Size(), SortsByName(modifiers), items);
 
 			if (modifiers.List != nullptr) {
 				placed += RunList(store, *modifiers.List, items, area, inner, depth + 1, total);
@@ -502,7 +621,9 @@ namespace engine::gui {
 						area.Min.X + anchored.X - child->AnchorPoint.X * item.Size.X,
 						area.Min.Y + anchored.Y - child->AnchorPoint.Y * item.Size.Y,
 					};
-					placed += Place(store, item.Node, FromCorner(corner, item.Size), inner, depth + 1, total);
+					placed += Place(
+						store, item.Node, FromCorner(corner, item.Size), inner, depth + 1, total, &item.Mods
+					);
 				}
 			}
 
@@ -621,14 +742,21 @@ namespace engine::gui {
 					continue;
 				}
 
-				const Vector2 size = Measure(store, root, canvas.Size());
+				Modifiers modifiers;
+				const Vector2 size = Measure(store, root, canvas.Size(), modifiers);
 				const Vector2 anchored = element->Position.Resolve(canvas.Size());
 				const Vector2 corner{
 					canvas.Min.X + anchored.X - element->AnchorPoint.X * size.X,
 					canvas.Min.Y + anchored.Y - element->AnchorPoint.Y * size.Y,
 				};
 
-				placed += Place(store, root, FromCorner(corner, size), canvas, 1, 0.0f);
+				// Handed on, like every other call: measuring the root is what
+				// found these, so `Place`'s own walk would be the second one.
+				// Nothing in this file reaches `Place` without having measured
+				// first, which is why the fallback inside it never runs today —
+				// it is there so that a future caller that has not measured is
+				// correct rather than fast.
+				placed += Place(store, root, FromCorner(corner, size), canvas, 1, 0.0f, &modifiers);
 			}
 		}
 

@@ -27,6 +27,24 @@
 // stable, portable, well-distributed number and no attempt is made to keep the
 // seed secret.
 //
+// **It costs about 47 nanoseconds a call, and that is a load-time budget rather
+// than a per-frame one.** Every function here is a full SHA-256 compression, so
+// `engine.core.bench.values` measures it at roughly fifty times the integer
+// mixer it replaced — a position built from three salts is around 146 ns, which
+// makes spawning a hundred thousand entities about fifteen milliseconds of
+// hashing on its own.
+//
+// That is the right price for determinism at a spawn point, a world seed or a
+// content generator, all of which run once. It is the wrong price inside a
+// system that runs every tick: calling this per entity per frame costs more
+// than iterating the entire world does — compare the figure against
+// `engine.ecs.bench.iteration`, where `Each` over a hundred thousand entities
+// is a couple of nanoseconds a row.
+//
+// If a per-frame call site ever genuinely needs this, the answer is to compute
+// the values once at spawn and store them on the entity, not to make this
+// function cheaper: the specified algorithm is exactly what the type is for.
+//
 // @tier L0 · shared
 
 #include <cstdint>

@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -271,4 +272,122 @@ TEST_CASE(
 
 	CHECK(total("assets.chunks.cut") == static_cast<double>(chunks.size()));
 	CHECK(total("assets.chunks.bytes") == static_cast<double>(data.size()));
+}
+
+TEST_CASE("the warm-up window does not move a boundary", "[assets][chunker]") {
+	// **This is a format test wearing a performance test's clothes.**
+	//
+	// `NextBoundary` used to feed its rolling hash from byte zero up to
+	// `MinimumBytes` before testing anything, and now feeds it from only 64
+	// bytes before. The justification is arithmetic: the hash is
+	// `(hash << 1) + GEAR[byte]`, so a byte 64 positions back has been shifted
+	// out of a 64-bit register entirely and cannot affect any tested position.
+	//
+	// If that arithmetic is wrong, nothing crashes and no other test fails. What
+	// happens instead is that every chunk boundary moves — so a client and an
+	// origin on different builds share no chunks, every fetch is a full
+	// download, and the dedup the whole content system is built on silently
+	// stops working. That failure is invisible from inside one build, which is
+	// exactly why it needs pinning against an independent implementation rather
+	// than against a recorded number somebody could regenerate.
+	//
+	// The reference below is the old walk, written out in full: same table, same
+	// masks, warmed from zero. It has to agree on every boundary of a body of
+	// content large enough to contain thousands of them.
+
+	// The gear table, rebuilt here rather than shared. A test that imported the
+	// production constant would still pass if the constant itself were the
+	// thing that changed.
+	std::vector<uint64_t> gear(256);
+	{
+		uint64_t state = 0x9E3779B97F4A7C15ull;
+		for (uint64_t &entry : gear) {
+			state += 0x9E3779B97F4A7C15ull;
+			uint64_t mixed = state;
+			mixed = (mixed ^ (mixed >> 30)) * 0xBF58476D1CE4E5B9ull;
+			mixed = (mixed ^ (mixed >> 27)) * 0x94D049BB133111EBull;
+			entry = mixed ^ (mixed >> 31);
+		}
+	}
+
+	const auto spreadMask = [](int bits) {
+		uint64_t mask = 0;
+		for (int index = 0; index < bits; ++index) {
+			mask |= uint64_t{1} << (63 - index * 3);
+		}
+		return mask;
+	};
+
+	const ChunkLimits limits = Small();
+
+	// The same derivation the constructor runs: log2 of the target, plus and
+	// minus two, clamped to 21.
+	const auto clamp = [](int bits) { return bits < 1 ? 1 : (bits > 21 ? 21 : bits); };
+	const int target = clamp(static_cast<int>(std::bit_width(limits.TargetBytes) - 1));
+	const uint64_t strict = spreadMask(clamp(target + 2));
+	const uint64_t loose = spreadMask(clamp(target - 2));
+
+	// The old walk: warmed from byte zero.
+	const auto fromZero = [&](std::span<const std::byte> data) -> size_t {
+		if (data.empty()) {
+			return 0;
+		}
+		const size_t available = data.size();
+		const size_t minimum = std::min(limits.MinimumBytes, available);
+		const size_t targetBytes = std::min(limits.TargetBytes, available);
+		const size_t maximum = std::min(limits.MaximumBytes, available);
+
+		uint64_t hash = 0;
+		size_t index = 0;
+		for (; index < minimum; ++index) {
+			hash = (hash << 1) + gear[static_cast<uint8_t>(data[index])];
+		}
+		for (; index < targetBytes; ++index) {
+			hash = (hash << 1) + gear[static_cast<uint8_t>(data[index])];
+			if ((hash & strict) == 0) {
+				return index + 1;
+			}
+		}
+		for (; index < maximum; ++index) {
+			hash = (hash << 1) + gear[static_cast<uint8_t>(data[index])];
+			if ((hash & loose) == 0) {
+				return index + 1;
+			}
+		}
+		return maximum;
+	};
+
+	const Chunker chunker(limits);
+	const std::vector<std::byte> data = Content(2 * 1024 * 1024, 0x5EED'1234ull);
+
+	// Every boundary, not merely the first: an error that only bites once the
+	// window has been fed a particular way would show up somewhere in the middle
+	// rather than at the start.
+	size_t offset = 0;
+	size_t compared = 0;
+	while (offset < data.size()) {
+		const std::span<const std::byte> rest(data.data() + offset, data.size() - offset);
+		const size_t reference = fromZero(rest);
+		const size_t produced = chunker.NextBoundary(rest);
+		REQUIRE(produced == reference);
+		offset += produced;
+		compared++;
+	}
+
+	// A body of content this size at these limits cuts into thousands. Asserted
+	// so that a future change making `NextBoundary` return the whole input in
+	// one piece cannot pass this test by comparing one boundary against itself.
+	CHECK(compared > 500);
+
+	// The degenerate stream too, where no boundary is ever found and every chunk
+	// is forced at the maximum — a different path through the same function, and
+	// the one where the warm-up is the largest share of the work.
+	const std::vector<std::byte> zeroes(64 * 1024);
+	offset = 0;
+	while (offset < zeroes.size()) {
+		const std::span<const std::byte> rest(zeroes.data() + offset, zeroes.size() - offset);
+		const size_t produced = chunker.NextBoundary(rest);
+		REQUIRE(produced == fromZero(rest));
+		offset += produced;
+	}
 }

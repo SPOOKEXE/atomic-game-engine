@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -188,4 +189,80 @@ TEST_CASE("interning the same text from many threads yields one id", "[name]") {
 		REQUIRE(name == results.front());
 	}
 	REQUIRE(results.front().IsValid());
+}
+
+TEST_CASE("a racing first sighting still yields one id and one entry", "[name]") {
+	// **The case the lookup's fast path opened, pinned so it cannot close
+	// silently.** `Name(text)` looks the registry up under a *shared* lock,
+	// because the hit is almost every call and excluding readers for it made
+	// eight threads slower than one. A `shared_mutex` cannot upgrade, so a miss
+	// drops that lock and takes an exclusive one — and in the gap between the
+	// two, another thread may have interned the very same text.
+	//
+	// The re-check under the exclusive lock is what handles that. Without it,
+	// both threads insert: `Texts` gains two rows, `AllocateId` hands out two
+	// ids, and `Ids` keeps whichever landed first. The two threads then hold
+	// different ids for one string, which is the single thing this type exists
+	// to make impossible — and everything downstream that compares names by
+	// integer is quietly wrong for the rest of the process.
+	//
+	// The case above races one text with threads started in a loop, which is a
+	// narrow window: the first thread has usually finished before the last has
+	// started. This one holds every thread at a gate and releases them together,
+	// and does it over many texts, so the interleaving is actually attempted
+	// rather than hoped for.
+	constexpr size_t THREADS = 8;
+	constexpr size_t TEXTS = 256;
+
+	std::vector<std::string> texts;
+	texts.reserve(TEXTS);
+	for (size_t index = 0; index < TEXTS; index++) {
+		texts.push_back(Unique("raced"));
+	}
+
+	// None of them are interned yet, so every one is a first sighting and every
+	// one is a chance to hit the window.
+	const size_t before = Name::Count();
+
+	std::atomic<bool> go{false};
+	std::atomic<size_t> ready{0};
+	std::vector<std::vector<Name>> seen(THREADS, std::vector<Name>(TEXTS));
+
+	std::vector<std::thread> threads;
+	threads.reserve(THREADS);
+	for (size_t worker = 0; worker < THREADS; worker++) {
+		threads.emplace_back([&, worker] {
+			ready.fetch_add(1);
+			while (!go.load(std::memory_order_acquire)) {
+				// Spun rather than waited on a condition variable: what this
+				// needs is for every thread to be inside the registry at the
+				// same instant, and a wake-up that queues them is the opposite.
+			}
+			for (size_t index = 0; index < TEXTS; index++) {
+				seen[worker][index] = Name(texts[index]);
+			}
+		});
+	}
+
+	while (ready.load() < THREADS) {
+	}
+	go.store(true, std::memory_order_release);
+
+	for (std::thread &thread : threads) {
+		thread.join();
+	}
+
+	// Every thread agrees on every text.
+	for (size_t index = 0; index < TEXTS; index++) {
+		REQUIRE(seen[0][index].IsValid());
+		for (size_t worker = 1; worker < THREADS; worker++) {
+			REQUIRE(seen[worker][index] == seen[0][index]);
+		}
+	}
+
+	// **And exactly one entry was made per text.** This is the half the
+	// id-equality check above cannot see on its own: a duplicate insert that
+	// happened to lose the `Ids` race would leave an orphaned row in `Texts`
+	// and an id bound to it, so the count is what says the double-check ran.
+	REQUIRE(Name::Count() == before + TEXTS);
 }

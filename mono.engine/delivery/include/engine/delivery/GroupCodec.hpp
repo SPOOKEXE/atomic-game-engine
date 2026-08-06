@@ -50,7 +50,25 @@ namespace engine::delivery {
 		// 110 KiB is Zstd's own suggested size and is chosen rather than
 		// derived. It ships to every client once and then improves the ratio of
 		// every group forever, so it is the cheapest large thing in the format —
-		// but it is still a number CDN.md §9 has no measurement behind.
+		// but the *size* is still a number CDN.md §9 has no measurement behind.
+		//
+		// **What has been measured is that the dictionary works, and on which
+		// groups.** `engine.delivery.bench.compression` reports it as worthless
+		// on a 4 MiB group — 5.06x either way — and worth a fifth of the bytes
+		// on small ones: two hundred 4 KiB groups compress 3.90x plain and 4.86x
+		// against a dictionary.
+		//
+		// That is not a contradiction, it is what a dictionary is for. Zstd
+		// builds its own history as it goes, so by a few kilobytes into a large
+		// payload it has learned the content's vocabulary and a supplied one
+		// adds nothing. A dictionary earns its keep only on payloads too short
+		// to build that history — which is exactly what a group of small assets
+		// is, and the case the format ships them in.
+		//
+		// So the row to watch when tuning this constant is the *small*-group
+		// one. Measuring a dictionary against a multi-megabyte group will always
+		// say it does nothing, and concluding that from it would be reading the
+		// wrong benchmark rather than a fact about dictionaries.
 		static constexpr size_t DEFAULT_TRAINED_BYTES = 110 * 1024;
 
 		// Trains a dictionary over a sample of a game's content.
@@ -119,12 +137,46 @@ namespace engine::delivery {
 	  public:
 		// The compression level.
 		//
-		// Chosen rather than derived, and CDN.md §9 carries it as an open
-		// question — there is no measurement behind it yet and saying so is
-		// better than implying there is. 9 is above Zstd's default of 3 because
-		// preparation happens once and streaming happens many times, so the
-		// origin's CPU is the cheap side of that trade.
-		static constexpr int DEFAULT_LEVEL = 9;
+		// **Measured, and the measurement overturned the previous value.** This
+		// was 9, on the reasoning that "preparation happens once and streaming
+		// happens many times, so the origin's CPU is the cheap side of that
+		// trade". Both halves of that turned out to be wrong.
+		//
+		// `engine.delivery.bench.compression` over 4 MiB of scene-shaped content
+		// reports, as ratio against nanoseconds per kibibyte:
+		//
+		//     level  1     4.82x        1463 ns/KiB
+		//     level  3     5.00x        1647 ns/KiB   <- zstd's default
+		//     level  9     5.06x        8837 ns/KiB   <- what this used to be
+		//     level 15     5.53x      100272 ns/KiB
+		//     level 19     5.80x      256786 ns/KiB
+		//
+		// **Level 9 was dominated in both directions.** Against 3 it cost 5.4
+		// times the CPU for 1.2% fewer bytes; against 15 it gave up most of the
+		// ratio that is actually available. It was the one setting on the curve
+		// that bought neither thing.
+		//
+		// And the trade is not "once against many", because `cdn::Origin::Pump`
+		// compresses **on a cache miss, with a client waiting**. For one 4 MiB
+		// group that is the difference between a 6.7 ms first request and a 36 ms
+		// one — and level 19 would make it 1.05 seconds, which is why the levels
+		// where the ratio genuinely improves are unreachable from here rather
+		// than merely expensive. Only once the prepared-group cache is warm does
+		// the origin's CPU stop being a latency the player sees, and a default
+		// cannot assume the warm case.
+		//
+		// So: 3, which is within 1.2% of what 9 achieved at a fifth of the miss
+		// latency. Raise it per deployment through `Origin::CompressionLevel` if
+		// that origin prepares ahead of demand rather than on it — that is the
+		// arrangement the old reasoning described, and it is a deployment's to
+		// choose rather than this constant's to assume.
+		//
+		// The corpus is synthetic — a repeating markup vocabulary with scattered
+		// numeric noise. It stands in for scene and manifest text, and it does
+		// **not** stand in for already-compressed textures or audio, where every
+		// level converges on no gain. Re-measure against a real build before
+		// treating the ratios above as anything but the shape of the curve.
+		static constexpr int DEFAULT_LEVEL = 3;
 
 		// Compresses a group payload.
 		//

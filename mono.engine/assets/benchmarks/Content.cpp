@@ -172,10 +172,19 @@ BENCH("Chunker::NextBoundary · 16 MiB one chunk at a time", ASSET_BYTES / 1024)
 BENCH("Chunker::Split · 16 MiB of zeroes", ASSET_BYTES / 1024) {
 	// **The degenerate stream, and it is not a contrived one** — a sparse file,
 	// a zero-filled texture mip, a padded archive. The rolling hash never finds
-	// a boundary, so every chunk is forced at `MaximumBytes` and the walk takes
-	// its cheapest path. A figure far below the real-data row is the correct
-	// result; a figure *above* it would mean the forced-boundary path is doing
-	// more work than the found-boundary one.
+	// a boundary, so every chunk is forced at `MaximumBytes`.
+	//
+	// **This row is dearer than the real-data one, and that is the correct
+	// result rather than a regression.** A content-defined chunker has to hash
+	// every byte — you cannot know a boundary is absent without looking — so
+	// there is no early-out to be had here and the two rows once reported the
+	// same figure. What separates them now is the warm-up window: `NextBoundary`
+	// only feeds its hash for the 64 bytes before `MinimumBytes` rather than
+	// from byte zero, so the skipped share is fixed per chunk while the tested
+	// share grows with how long the chunk runs. A forced 256 KiB chunk therefore
+	// skips proportionally less than a found 64 KiB one.
+	//
+	// The gap between these two rows is that saving, read from the other side.
 	static const std::vector<std::byte> zeroes(ASSET_BYTES);
 	static const Chunker chunker;
 	Consume(chunker.Split(zeroes).size());
