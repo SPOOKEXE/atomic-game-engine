@@ -57,6 +57,27 @@ namespace server {
 			// touching the rotation would be inventing one. `Motion::Angular`
 			// is what a physics step at L8 will integrate, and it is deliberately
 			// left alone until that exists rather than half-implemented here.
+			//
+			// **Takes `Jobs::DEFAULT_GRAIN` deliberately, and the resemblance to
+			// `physics::INTEGRATE_GRAIN` is the trap rather than the argument.**
+			// That constant is 1024 because *its* body carries a whole `CFrame`
+			// through a quaternion product and a normalise — about forty flops
+			// and a reciprocal square root — and crosses over at 8,000 rows. This
+			// body is the line below: three multiply-adds and a store, which is
+			// exactly the cheap body `engine.ecs.bench.iteration` measures at a
+			// crossover near 262,144 rows. The two load the same two components
+			// and do a twentieth of the work, and it is the work that sets the
+			// crossover.
+			//
+			// Borrowing 1024 would put the floor at 8192 rows, where this loop's
+			// serial cost is a couple of microseconds against a handover
+			// `engine.parallel.bench.dispatch` fits at 6.2 us to wake the pool
+			// plus 0.19 us a range — a loss bought on the strength of a
+			// measurement of somebody else's body, which is the mistake
+			// `Jobs::DEFAULT_GRAIN`'s own comment is about. Of the two constants
+			// the default's floor of 32,768 is the nearer, and unmeasured either
+			// way. The day this loop integrates `Motion::Angular` is the day it
+			// becomes the `CFrame` body and the day to re-take the number.
 			store.EachParallel<Transform, const Motion>(
 				[delta](Entity, Transform &transform, const Motion &motion) {
 					transform.Frame.Position = transform.Frame.Position + motion.Linear * delta;
@@ -79,6 +100,13 @@ namespace server {
 			// loop's inner body for a number the loop already knew.
 			const float halfExtent = store.Resource<WorldBounds>()->HalfExtent;
 
+			// Default grain, for the reason `Integrate` above gives at length:
+			// six compares and an occasional pair of stores is *cheaper* per row
+			// than the `CFrame` body `physics::INTEGRATE_GRAIN` was measured
+			// against, not more expensive, so borrowing that constant would
+			// dispatch this four times too early rather than correcting
+			// anything. Unmeasured in either direction —
+			// `engine.ecs.bench.iteration` over this body is what would say.
 			store.EachParallel<Transform, Motion>([halfExtent](Entity, Transform &transform, Motion &motion) {
 				// Reflect off each wall independently. The position is
 				// clamped as well as the velocity flipped, because

@@ -101,6 +101,30 @@ namespace engine::scene {
 			}
 		}
 
+		// **A `RenderedSignature` is derived state, and its serialisation says
+		// so by writing nothing.**
+		//
+		// It is not merely redundant to save — it is dangerous. The stamp says
+		// "the walk has already been run against a tree that folds to this",
+		// and a world restored from a snapshot has had no walk run against it
+		// at all. Carrying a live value across a load would let the very first
+		// `SyncRendered` match, skip, and leave the tag as whatever the file
+		// happened to hold. The symptom is a loaded game that renders wrong
+		// once, and nothing in the frame it renders wrong in explains why.
+		//
+		// So the reader zeroes the whole thing rather than reading anything:
+		// `Fresh` back to zero is what forces the first sync after a load to be
+		// a real one. `client::DrawList` writes nothing for the related but
+		// weaker reason that its value is recomputed before anybody looks.
+		void WriteRenderedSignatures(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadRenderedSignatures(core::ByteReader &, void *destination, size_t count) {
+			auto *memos = static_cast<RenderedSignature *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				memos[index] = RenderedSignature{};
+			}
+		}
+
 		void WriteSurfaceTables(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *tables = static_cast<const SurfaceTable *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -234,6 +258,19 @@ namespace engine::scene {
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
+
+		// What `SyncRendered` compares this frame's tree against, at the end of
+		// the list for the reason it opens with. A resource, because a stamp
+		// per world cannot be a static: two worlds exist and a world is ticked
+		// by whichever worker claimed it.
+		//
+		// Registered rather than left to be minted from the compiler's
+		// spelling, which is the failure `client::DrawList` was found in — and
+		// with a writer that stores nothing, which is the other half. See the
+		// pair above.
+		ecs::Components::Register<RenderedSignature>(
+			"scene.RenderedSignature", WriteRenderedSignatures, ReadRenderedSignatures
+		);
 	}
 
 	void RegisterSceneClasses() {

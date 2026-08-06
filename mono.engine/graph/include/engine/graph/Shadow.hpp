@@ -23,11 +23,15 @@
 
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/graph/Cull.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
 #include <glm/mat4x4.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <span>
+#include <vector>
 
 namespace engine::graph {
 
@@ -57,8 +61,51 @@ namespace engine::graph {
 	// deriving one per frame from the draw list is the fallback rather than the
 	// intent.
 	//
+	// **A caller that also culls the same list should call `CullAndBound`
+	// instead**, which is this walk and that one fused. This one stays for the
+	// caller that only wants the bound: a shadow-only pass, a headless host
+	// sizing a light, and the tests that pin the empty-list answer.
+	//
 	// @param instances The draw list.
 	// @return The union of every instance's world box, or a unit box at the
 	//         origin for an empty list.
 	core::AABB BoundsOfAll(std::span<const scene::DrawInstance> instances);
+
+	// `Cull` and `BoundsOfAll` over one walk of the draw list.
+	//
+	// **The two used to be two passes over the same span, and the bound is the
+	// expensive half of both.** `BoundsOf` is three quaternion rotations and
+	// nine abs-mul-adds — `benchmarks/Cull.cpp` measured nine of the seventeen
+	// nanoseconds an instance at it, against eight for the six planes — so
+	// deriving it twice cost more than the frustum test it was paid for. Fused,
+	// the union is six float comparisons on a box the culler had already built.
+	//
+	// It is one function rather than a bound cached on the side because the
+	// cache is the thing that goes stale: the bound is a function of `Frame`
+	// and `HalfExtent`, and nothing here is told when a world changes those.
+	// `ecs::ChangeChannel` is what a real cache would hang on, and it does not
+	// exist yet.
+	//
+	// **`visible` comes out exactly as `Cull` fills it** — ascending, one entry
+	// per survivor — and that is not an implementation detail. It is the order
+	// the world produced, which `scene::OrderForDrawing` then keeps for the
+	// opaque head so that a recording of a frame replays as that frame. A pass
+	// that filled this list in any other order would be right on screen and
+	// wrong on replay. Neither is the bound narrowed to the survivors: a
+	// caster outside the view still shadows into it, which is why the light is
+	// fitted to the whole list.
+	//
+	// @param instances The draw list.
+	// @param frustum   The view.
+	// @param visible   Filled in with indices into `instances`. Cleared first.
+	// @param bounds    Set to the union of every instance's world box — the
+	//                  whole list, not the survivors — or to a unit box at the
+	//                  origin for an empty list.
+	// @return How many are visible.
+	size_t CullAndBound(
+		std::span<const scene::DrawInstance> instances,
+		const Frustum &frustum,
+		std::vector<uint32_t> &visible,
+		core::AABB &bounds
+	);
 }

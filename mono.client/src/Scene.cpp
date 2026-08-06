@@ -135,6 +135,40 @@ namespace client {
 			(void)engine::scene::AimSurfaceCameras(store);
 		}
 
+		// The smallest run of instances worth handing to another worker.
+		//
+		// **Reasoned by analogy and not measured, which is the whole of what is
+		// known about it.** The number it is copied from is
+		// `physics::INTEGRATE_GRAIN`, and the analogy is close enough to be worth
+		// making: that body carries a whole `core::CFrame` per row through a
+		// quaternion product and a normalise, and this one carries two through an
+		// `NLerp` — the same shape of arithmetic, the same reciprocal square
+		// root, over roughly three times the bytes. `Integrate.hpp` measures its
+		// crossover at 8,000 rows, and 1024 puts this loop's floor at the same
+		// 8192.
+		//
+		// **What it replaces is the default, and the default was certainly
+		// wrong.** `Jobs::DEFAULT_GRAIN` is calibrated for three float adds per
+		// row; taking it put this loop's floor at 32,768 instances, so a scene of
+		// twenty thousand parts ran the whole draw list on one thread — the exact
+		// failure `Integrate.hpp` records for the same reason, where the default
+		// cost 73.5 us against 27.3 us for a dispatch it declined to make. Being
+		// approximately right beats being precisely calibrated for somebody
+		// else's body.
+		//
+		// **1024 rather than the 512 the analogy would also allow**, because a
+		// range is not free: `engine.parallel.bench.dispatch` fits the handover at
+		// about 6.2 us to wake the pool plus 0.19 us a range, and `Integrate.hpp`
+		// measured 9 to 18 per cent lost above the floor when its grain was the
+		// narrower one. Halving the grain doubles the ranges to buy a floor this
+		// loop has no measurement for.
+		//
+		// **`engine.ecs.bench.iteration` is the suite that would settle it**, over
+		// this body rather than over three float adds, laddering either side of
+		// 8192. Until that exists this constant is an estimate, and a reading that
+		// disagrees with it should win.
+		constexpr size_t DRAW_LIST_GRAIN = 1024;
+
 		// The one phase that turns simulation state into something to draw. It
 		// reads the simulation and writes only the draw list, which is what
 		// "PreRender never mutates simulation state" means in practice.
@@ -185,6 +219,11 @@ namespace client {
 				// A memory-bound loop is the case where more threads means more
 				// loads in flight, so it is the one that crosses over soonest.
 				//
+				// **Which is why it passes `DRAW_LIST_GRAIN` and stopped taking
+				// the default.** This paragraph and a dispatch floor of 32,768
+				// instances contradicted each other for as long as both were
+				// here, and the floor was the one winning.
+				//
 				// Each slice is told where its rows land in the output, so the
 				// workers never touch the same bytes and the array comes out in
 				// the same order every frame. No atomic, no locking, no
@@ -210,59 +249,62 @@ namespace client {
 					const PreviousTransform,
 					const Bounds,
 					const Visual,
-					const Rendered>([out, capacity, alpha](
-										size_t first,
-										size_t rows,
-										const Transform *transforms,
-										const PreviousTransform *previous,
-										const Bounds *bounds,
-										const Visual *visuals,
-										const Rendered *
-									) {
-					// The count came from a different query than the one
-					// being walked. They agree, and this is what happens if
-					// they ever stop: instances go missing and the number on
-					// the panel drops, rather than a worker writing past the
-					// end of the buffer.
-					if (first >= capacity) {
-						return;
-					}
-					rows = std::min(rows, capacity - first);
+					const Rendered>(
+					[out, capacity, alpha](
+						size_t first,
+						size_t rows,
+						const Transform *transforms,
+						const PreviousTransform *previous,
+						const Bounds *bounds,
+						const Visual *visuals,
+						const Rendered *
+					) {
+						// The count came from a different query than the one
+						// being walked. They agree, and this is what happens if
+						// they ever stop: instances go missing and the number on
+						// the panel drops, rather than a worker writing past the
+						// end of the buffer.
+						if (first >= capacity) {
+							return;
+						}
+						rows = std::min(rows, capacity - first);
 
-					for (size_t row = 0; row < rows; row++) {
-						// Interpolated, not the tick position. At 300 fps
-						// against a 60 Hz tick, drawing tick positions shows
-						// each one five times and then jumps — which reads as
-						// a frame-rate problem rather than as a tick-rate one.
-						//
-						// NLerp, not Lerp. The endpoints are one simulation
-						// tick apart — a few degrees at most — and over an arc
-						// that short the two agree to well inside a pixel.
-						// Lerp's constant angular speed costs an acos and
-						// three sin calls per entity, which on this loop was
-						// the single most expensive thing in the frame.
-						//
-						// A `CFrame` and a half-extent, not a matrix: this is
-						// what the world knows, and `render` is what turns it
-						// into something a GPU binds.
-						out[first + row] = DrawInstance{
-							previous[row].Frame.NLerp(transforms[row].Frame, alpha),
-							bounds[row].HalfExtent,
-							visuals[row].Tint,
-							visuals[row].Mesh,
-							visuals[row].Material,
+						for (size_t row = 0; row < rows; row++) {
+							// Interpolated, not the tick position. At 300 fps
+							// against a 60 Hz tick, drawing tick positions shows
+							// each one five times and then jumps — which reads as
+							// a frame-rate problem rather than as a tick-rate one.
+							//
+							// NLerp, not Lerp. The endpoints are one simulation
+							// tick apart — a few degrees at most — and over an arc
+							// that short the two agree to well inside a pixel.
+							// Lerp's constant angular speed costs an acos and
+							// three sin calls per entity, which on this loop was
+							// the single most expensive thing in the frame.
+							//
+							// A `CFrame` and a half-extent, not a matrix: this is
+							// what the world knows, and `render` is what turns it
+							// into something a GPU binds.
+							out[first + row] = DrawInstance{
+								previous[row].Frame.NLerp(transforms[row].Frame, alpha),
+								bounds[row].HalfExtent,
+								visuals[row].Tint,
+								visuals[row].Mesh,
+								visuals[row].Material,
 
-							// Copied rather than resolved here. Which pass this
-							// instance lands in is the renderer's decision,
-							// because it depends on where the camera is — and
-							// this loop runs once for a world that may be drawn
-							// from several views.
-							visuals[row].Transparency,
-							visuals[row].Surface,
-							visuals[row].CastShadow,
-						};
-					}
-				});
+								// Copied rather than resolved here. Which pass this
+								// instance lands in is the renderer's decision,
+								// because it depends on where the camera is — and
+								// this loop runs once for a world that may be drawn
+								// from several views.
+								visuals[row].Transparency,
+								visuals[row].Surface,
+								visuals[row].CastShadow,
+							};
+						}
+					},
+					DRAW_LIST_GRAIN
+				);
 			}
 
 			{

@@ -140,13 +140,30 @@ namespace engine::parallel {
 		// both directions at once.** For the cheapest body there is, three float
 		// adds per row, `engine.ecs.bench.iteration` puts the crossover near
 		// 262,144 rows — this default's floor is 32,768, and at that count the
-		// dispatched loop measures 31 us against 5.5 us run serially. Raising the
+		// dispatched loop measured 31 us against 5.5 us run serially. That 31 us
+		// predates the pool's join rewrite and MINIMUM_GRAINS below carries the
+		// current figure; it is a smaller loss now and still a loss. Raising the
 		// grain to 32,768 would move the floor to where that body wants it and
-		// break the only long-lived caller that takes the default:
-		// `mono.client/src/Replicated.cpp` writes a `CFrame`, two vectors and two
-		// ids per row where this body writes three floats, so its span is worth
-		// dispatching an order of magnitude sooner and a raised floor would
-		// refuse a handover that pays.
+		// break the long-lived caller the default was defended for:
+		// `mono.client/src/Scene.cpp`'s draw-list loop writes a `CFrame`, two
+		// vectors and two ids per row where this body writes three floats, so its
+		// span is worth dispatching an order of magnitude sooner and a raised
+		// floor would refuse a handover that pays.
+		//
+		// **That citation named `mono.client/src/Replicated.cpp` until v0.8 and
+		// the file was wrong, not the argument.** `Replicated.cpp` contains no
+		// parallel dispatch at all — it walks with `Store::Each` and says at its
+		// own comment why a batched walk cannot serve it — and the body being
+		// described is `scene::DrawInstance`, which is written by the loop above.
+		// The loop changed files and the reference did not follow.
+		//
+		// **And that loop now passes 1024 of its own, which sharpens this rather
+		// than retiring it.** The caller that could name its cost stopped taking
+		// the default, so what is left taking it is the callers that have not
+		// measured — `scene::CapturePreviousTransforms` is one, and says so at
+		// its own call. Raising the grain to suit the cheap body would refuse
+		// every one of their handovers on the strength of a measurement taken
+		// against a body none of them runs.
 		//
 		// **One number cannot move in two directions, and this one is two
 		// numbers wearing one name** — the range size once dispatched, and the
@@ -158,7 +175,7 @@ namespace engine::parallel {
 		// How many grains of work a span must hold before the pool is woken.
 		//
 		// **Waking the pool costs the same whatever the work is, and it is
-		// bigger than it reads.** `engine.parallel.bench.dispatch` measures an
+		// bigger than it reads.** `engine.parallel.bench.dispatch` measured an
 		// empty dispatch at 31 us against 48 ns for the decision not to
 		// dispatch, and at 2.3 us against a pool of one — so the cost was about
 		// 1.3 us per *worker*, and only about 95 ns per range. It was linear in
@@ -166,24 +183,68 @@ namespace engine::parallel {
 		// `Pool::Guard` whether it took a range or not; that join, not the
 		// notify, was what a short span could not repay.
 		//
-		// **The per-worker term is gone and this number has not been re-derived
-		// from it.** The barrier counts ranges rather than workers now, and only
-		// as many workers are woken as there are ranges to give them, so a
-		// dispatch no longer pays for the threads it had no work for — a two-
-		// range batch across twenty-three workers measured 0.35 ms of pure join
-		// in `studio`'s frame graph and should now measure the imbalance alone.
-		// The floor below is still the measured one, so it is now conservative
-		// rather than wrong: it refuses handovers that may well pay. Re-measure
-		// `engine.parallel.bench.dispatch` before moving it.
+		// **The per-worker term is gone, and it has been re-measured.** The
+		// barrier counts ranges rather than workers now, and only as many
+		// workers are woken as there are ranges to give them, so a dispatch no
+		// longer pays for the threads it had no work for — a two-range batch
+		// across twenty-three workers measured 0.35 ms of pure join in
+		// `studio`'s frame graph. `engine.parallel.bench.dispatch`, re-run at
+		// `-O3` against the figures above:
+		//
+		// | | | |
+		// |---|---|---|
+		// | below the floor, so inline | 50 ns | unchanged |
+		// | dispatched, 8 empty ranges | **7.74 us** | 69.7% faster |
+		// | dispatched, 128 empty ranges | 30.85 us | unchanged |
+		// | dispatched, 8 empty ranges, **one** worker | 865 ns | 57.7% faster |
+		//
+		// **It is linear in the ranges now and not in the pool, which is what
+		// removing the per-worker join predicted.** 128 ranges cost what 8 used
+		// to and did not move at all; 8 ranges fell by a factor of four; the
+		// one-worker case, which never had many workers to pay for, still fell
+		// from 2.3 us to 865 ns because the guard it queued on is gone. Fitting
+		// the two dispatched rows gives about **6.2 us to wake the pool and
+		// 0.19 us a range** on top, against 95 ns a range when the join
+		// dominated everything. A range costs twice what it did and a handover
+		// costs a quarter.
+		//
+		// **The constant stays at 8, because the floor's job is the cheap body
+		// and it is still doing it.** A cheaper handover is an argument for
+		// lowering this only if something was being refused that now pays, and
+		// the body this floor is calibrated against is not it: three float adds
+		// per row cross near 262,144 rows and the floor sits at 32,768, where
+		// `engine.ecs.bench.iteration` measured 5.5 us of serial work. Against
+		// 31 us of handover that was a measured 5.7x loss; against 7.74 us it
+		// works out at 1.4x, which is arithmetic rather than a reading because
+		// the ECS suite has not been re-run. Smaller either way, and still a
+		// loss on both — and lowering the floor would move
+		// that body's dispatch earlier still, which is the wrong direction from
+		// a number that is already eight times too eager for it.
+		//
+		// **So the answer for the callers this got cheaper for is a grain, not a
+		// smaller multiplier.** This constant multiplies *every* caller's floor,
+		// so it cannot come down for the expensive bodies without coming down
+		// for the cheap one at the same time. The 7.74 us belongs to whoever
+		// passes their own grain and says what their row costs.
 		//
 		// **The crossover is an amount of time, and this expresses it as a row
 		// count.** Re-measured at `-O3`: three float adds per row cross near
 		// 262,144 rows, and `physics::IntegrateMotion`'s `CFrame` step near
 		// 8,000. Thirty-two times apart in rows; 49 us and 29 us in serial work,
-		// which is one handover either way. A row count can only be right for
-		// one row cost, and nothing in the signature can know that cost — which
-		// is why both callers that measured pass a grain of their own, and why
-		// `minimum` exists for the ones whose index is not a row at all.
+		// which was one handover either way at the 31 us the pool then cost. A
+		// row count can only be right for one row cost, and nothing in the
+		// signature can know that cost — which is why both callers that measured
+		// pass a grain of their own, and why `minimum` exists for the ones whose
+		// index is not a row at all.
+		//
+		// **Both of those crossovers are owed a re-take and neither has had
+		// one.** They were measured against a 31 us handover and it is 7.74 us
+		// now, so the arithmetic says both should fall — perhaps to a quarter of
+		// the serial work, which would be tens of thousands of rows for the cheap
+		// body and a couple of thousand for the `CFrame` one. That is a
+		// prediction and not a reading: `engine.ecs.bench.iteration` and
+		// `engine.physics.bench.integrate` are where it gets settled, and until
+		// they are re-run the constants stay where the last measurement put them.
 		//
 		// **Eight is kept rather than raised, because it multiplies every
 		// caller's floor and one of those was measured.** `physics` passes 1024

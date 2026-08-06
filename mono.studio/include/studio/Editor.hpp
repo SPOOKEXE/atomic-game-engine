@@ -27,6 +27,8 @@
 // `world::Universe::Save` and `Load` are exactly that operation and already
 // exist; this program is the first caller with a reason to use them.
 
+#include <engine/control/Server.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -35,28 +37,26 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
-#include <engine/scene/Components.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/world/Universe.hpp>
+
+#include <array>
+#include <cstdint>
+#include <deque>
+#include <filesystem>
+#include <memory>
 #include <nlohmann/json_fwd.hpp>
-#include <engine/control/Server.hpp>
-#include <engine/control/Surface.hpp>
+#include <string>
 #include <studio/Commands.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
-
-#include <cstdint>
-#include <array>
-#include <deque>
-#include <filesystem>
-#include <memory>
-#include <string>
 #include <vector>
 
 struct SDL_Window;
@@ -323,10 +323,7 @@ namespace studio {
 	//                 result row. Cleared when the query named neither.
 	// @return `true` when it satisfies every filled-in field of the query.
 	bool MatchesQuery(
-		const engine::ecs::Store &store,
-		Entity instance,
-		const FindQuery &query,
-		std::string &matched
+		const engine::ecs::Store &store, Entity instance, const FindQuery &query, std::string &matched
 	);
 
 	// Which side of a comparison a line came from.
@@ -622,9 +619,7 @@ namespace studio {
 		// @param anchor Where the range starts, from the last plain click.
 		// @param to     Where it ends, being the row just clicked.
 		// @param add    Whether to keep what was already selected.
-		void SelectRange(
-			WorldId world, const HierarchyView &view, Entity anchor, Entity to, bool add
-		);
+		void SelectRange(WorldId world, const HierarchyView &view, Entity anchor, Entity to, bool add);
 
 		// The right-click menu shared by the tree and the Insert menu.
 		//
@@ -779,6 +774,14 @@ namespace studio {
 		// Built from the camera `PresentWorld` is about to use, so the two
 		// agree. See `studio::PanelProjection`.
 		//
+		// **Call it once per panel per frame.** It resolves a camera — a matrix
+		// inverse, a projection and a product, plus a `Universe::Enter` when the
+		// panel follows a camera instance — so it is not the sort of thing to
+		// ask twice for the same answer. `DrawViewportOverlays` resolves every
+		// panel up front and hands the result to the passes that need it, which
+		// is also what makes the gizmo and the pick adjudicate one click against
+		// one matrix.
+		//
 		// @param viewport 0 is the main panel, 1..EXTRA_VIEWPORTS the others.
 		// @return The mapping, invalid when that panel did not draw.
 		PanelProjection ProjectionFor(size_t viewport);
@@ -792,10 +795,16 @@ namespace studio {
 		// run left. A grid built from the drawables at the moment of the click
 		// is correct for both, and a click is not a per-frame cost.
 		//
+		// **Takes the projection rather than resolving its own.** The click has
+		// already been adjudicated against one — the gizmo pass decided it was
+		// not a handle grab — and a second `ProjectionFor` would judge the two
+		// halves of one click by two matrices that are only equal by argument.
+		//
 		// @param viewport Which panel.
 		// @param point    Where, in screen coordinates.
 		// @param add      Whether to add to the selection rather than replace.
-		void PickInViewport(size_t viewport, float x, float y, bool add);
+		// @param panel    That panel's mapping for this frame.
+		void PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel);
 
 		// Fills `Operators` in. Called once, from `Start`, after the universe
 		// exists — several polls read it.
@@ -919,9 +928,8 @@ namespace studio {
 		// @param store The world to install it into.
 		// @param file The staged example's file name, e.g. `SkyGrid.luau`.
 		// @param instanceName What the `Script` is called in the tree.
-		void InstallExampleScript(
-			engine::ecs::Store &store, std::string_view file, std::string_view instanceName
-		);
+		void
+		InstallExampleScript(engine::ecs::Store &store, std::string_view file, std::string_view instanceName);
 
 		// Marks every instance in a world as expanded in the explorer.
 		//
@@ -1040,7 +1048,8 @@ namespace studio {
 			"worth calling first: the universe is the game and each world under it is a scene, which "
 			"is the same mapping a script sees through `game` and `workspace`. Worlds run "
 			"independently — `world_run` starts one without starting the rest, and stopping restores "
-			"the snapshot taken when it started."};
+			"the snapshot taken when it started."
+		};
 
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
