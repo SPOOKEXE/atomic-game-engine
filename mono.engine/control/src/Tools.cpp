@@ -101,6 +101,31 @@ namespace engine::control {
 					 json{{"X", value.Position.X}, {"Y", value.Position.Y}, {"Z", value.Position.Z}}},
 				};
 			}
+			// Named numbers, same rule as `Vector3` above: the reply is for
+			// somebody who has never seen the engine, so `{"Scale":0.5,
+			// "Offset":-8}` needs no schema where `[0.5,-8]` would.
+			case PropertyType::Vector2: {
+				const auto &value = *reinterpret_cast<const core::Vector2 *>(bytes);
+				return json{{"X", value.X}, {"Y", value.Y}};
+			}
+			case PropertyType::UDim: {
+				const auto &value = *reinterpret_cast<const core::UDim *>(bytes);
+				return json{{"Scale", value.Scale}, {"Offset", value.Offset}};
+			}
+			case PropertyType::UDim2: {
+				const auto &value = *reinterpret_cast<const core::UDim2 *>(bytes);
+				return json{
+					{"X", json{{"Scale", value.X.Scale}, {"Offset", value.X.Offset}}},
+					{"Y", json{{"Scale", value.Y.Scale}, {"Offset", value.Y.Offset}}},
+				};
+			}
+			case PropertyType::Rect: {
+				const auto &value = *reinterpret_cast<const core::Rect *>(bytes);
+				return json{
+					{"Min", json{{"X", value.Min.X}, {"Y", value.Min.Y}}},
+					{"Max", json{{"X", value.Max.X}, {"Y", value.Max.Y}}},
+				};
+			}
 			case PropertyType::Reference:
 				return reinterpret_cast<const ecs::Entity *>(bytes)->Id;
 			case PropertyType::Opaque:
@@ -268,6 +293,45 @@ namespace engine::control {
 					number(position.value("Y", json(0.0)), 0.0f),
 					number(position.value("Z", json(0.0)), 0.0f),
 				}};
+				break;
+			}
+			case PropertyType::Vector2:
+				*reinterpret_cast<core::Vector2 *>(bytes) = core::Vector2{
+					number(value.value("X", json(0.0)), 0.0f),
+					number(value.value("Y", json(0.0)), 0.0f),
+				};
+				break;
+			case PropertyType::UDim:
+				*reinterpret_cast<core::UDim *>(bytes) = core::UDim{
+					number(value.value("Scale", json(0.0)), 0.0f),
+					number(value.value("Offset", json(0.0)), 0.0f),
+				};
+				break;
+			case PropertyType::UDim2: {
+				// **Missing axes default to zero rather than to what is
+				// already there.** A caller sending only `{"X":...}` is
+				// setting a size, and a half-write that kept the old Y would
+				// be a value nobody authored — the read-modify-write belongs
+				// in the caller, which can see both halves.
+				const json x = value.value("X", json::object());
+				const json y = value.value("Y", json::object());
+				*reinterpret_cast<core::UDim2 *>(bytes) = core::UDim2{
+					number(x.value("Scale", json(0.0)), 0.0f),
+					number(x.value("Offset", json(0.0)), 0.0f),
+					number(y.value("Scale", json(0.0)), 0.0f),
+					number(y.value("Offset", json(0.0)), 0.0f),
+				};
+				break;
+			}
+			case PropertyType::Rect: {
+				const json min = value.value("Min", json::object());
+				const json max = value.value("Max", json::object());
+				*reinterpret_cast<core::Rect *>(bytes) = core::Rect{
+					number(min.value("X", json(0.0)), 0.0f),
+					number(min.value("Y", json(0.0)), 0.0f),
+					number(max.value("X", json(0.0)), 0.0f),
+					number(max.value("Y", json(0.0)), 0.0f),
+				};
 				break;
 			}
 			case PropertyType::Reference:

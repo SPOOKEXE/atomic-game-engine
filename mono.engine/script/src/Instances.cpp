@@ -108,6 +108,18 @@ namespace engine::script {
 			case PropertyType::CFrame:
 				*PushCFrame(state) = *static_cast<const core::CFrame *>(bytes);
 				return true;
+			case PropertyType::Vector2:
+				*PushVector2(state) = *static_cast<const core::Vector2 *>(bytes);
+				return true;
+			case PropertyType::UDim:
+				*PushUDim(state) = *static_cast<const core::UDim *>(bytes);
+				return true;
+			case PropertyType::UDim2:
+				*PushUDim2(state) = *static_cast<const core::UDim2 *>(bytes);
+				return true;
+			case PropertyType::Rect:
+				*PushRect(state) = *static_cast<const core::Rect *>(bytes);
+				return true;
 			case PropertyType::Reference: {
 				// **Nil, and this is where "an orphan is not in the world"
 				// begins.** This used to hand back `workspace` for a null
@@ -168,6 +180,18 @@ namespace engine::script {
 				return true;
 			case PropertyType::CFrame:
 				*static_cast<core::CFrame *>(out) = CheckCFrame(state, index);
+				return true;
+			case PropertyType::Vector2:
+				*static_cast<core::Vector2 *>(out) = CheckVector2Value(state, index);
+				return true;
+			case PropertyType::UDim:
+				*static_cast<core::UDim *>(out) = CheckUDim(state, index);
+				return true;
+			case PropertyType::UDim2:
+				*static_cast<core::UDim2 *>(out) = CheckUDim2(state, index);
+				return true;
+			case PropertyType::Rect:
+				*static_cast<core::Rect *>(out) = CheckRect(state, index);
 				return true;
 			case PropertyType::Reference:
 				// `part.Parent = nil` detaches. `part.Parent = workspace` is now

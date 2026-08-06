@@ -48,6 +48,13 @@ mono_add_library(studio
 		Engine::render
 		Engine::ui
 
+		# L7, `shared`. The engine's own widget tree, which the viewport panels
+		# compile and paint over the world image. Named here rather than taken
+		# transitively through `Engine::ui`, because this target includes
+		# `engine/gui/Compile.hpp` in its own header — a dependency a file
+		# includes is one its build file should say out loud.
+		Engine::gui
+
 		# The client's presentation seam: `client::InstallPresentation` and
 		# `client::DrawList`. **Reused rather than reimplemented** — a second
 		# draw-list collector would be a second answer to what a world hands its

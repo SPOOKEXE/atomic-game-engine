@@ -142,6 +142,7 @@
 				"examples",
 				"game",
 				"graph",
+				"gui",
 				"input",
 				"net",
 				"parallel",
@@ -207,6 +208,7 @@
 			"links": [
 				"core",
 				"ecs",
+				"gui",
 				"parallel",
 				"physics",
 				"scene",
@@ -223,6 +225,14 @@
 				"parallel",
 				"scene",
 				"spatial"
+			]
+		},
+		"gui": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel"
 			]
 		},
 		"input": {
@@ -314,6 +324,7 @@
 				"ecs",
 				"examples",
 				"game",
+				"gui",
 				"net",
 				"parallel",
 				"physics",
@@ -345,6 +356,7 @@
 				"examples",
 				"game",
 				"graph",
+				"gui",
 				"input",
 				"net",
 				"parallel",
@@ -372,6 +384,7 @@
 				"core",
 				"ecs",
 				"graph",
+				"gui",
 				"parallel",
 				"render",
 				"scene",
@@ -393,6 +406,7 @@
 				"examples",
 				"game",
 				"graph",
+				"gui",
 				"input",
 				"net",
 				"parallel",
@@ -439,6 +453,7 @@
 				"examples",
 				"game",
 				"graph",
+				"gui",
 				"input",
 				"net",
 				"parallel",
@@ -463,6 +478,7 @@
 				"ecs",
 				"examples",
 				"game",
+				"gui",
 				"net",
 				"parallel",
 				"physics",
@@ -488,6 +504,7 @@
 				"examples",
 				"game",
 				"graph",
+				"gui",
 				"input",
 				"net",
 				"parallel",
@@ -517,6 +534,7 @@
 				"examples",
 				"game",
 				"graph",
+				"gui",
 				"input",
 				"net",
 				"parallel",

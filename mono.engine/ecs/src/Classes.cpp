@@ -344,6 +344,14 @@ namespace engine::ecs {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		}
 		return "?";
 	}

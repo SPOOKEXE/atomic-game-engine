@@ -356,37 +356,120 @@ Those classes are shims until three things exist underneath them, and a shim
 that nothing draws is an API with no caller — which is the thing this repository
 refuses everywhere else. In order:
 
-- [_] **`core` gains the value types the tree is made of.** `UDim`, `UDim2`,
-  `Vector2` and `Rect` are already in `core/types` and **none of them is a
-  `PropertyType`** — so a component holding a `UDim2` cannot be a property, cannot
-  be saved, cannot appear in the properties panel and cannot be set from a
-  script. `ecs::PropertyType` is a closed list that grows when userland gains a
-  value, and this is that. Four cases in `game::Values`, four widgets in the
-  properties panel, four in each binding. Small, and everything below needs it
-- [_] **`mono.engine/gui` at L7 `shared` — what a 2D thing *is*.** The class tree
-  as `ecs::Classes` registrations over real components, exactly as `scene` does
-  for `Part`: `GuiBase` → `GuiBase2d` → `GuiObject` → `Frame`, `CanvasGroup`,
-  `GuiButton`(`TextButton`, `ImageButton`), `GuiLabel`(`TextLabel`,
-  `ImageLabel`), `ScrollingFrame`, `TextBox`, `ViewportFrame`, `VideoFrame`;
-  `LayerCollector` → `ScreenGui`, `BillboardGui`, `SurfaceGui`, `PluginGui` →
-  `DockWidgetPluginGui`. **`shared`, not `client`** — a server authors a
-  `ScreenGui` and replicates it, so a type only a client could name would be a
-  type only a client could build one out of. That is `scene`'s argument and it
-  is the same one
-- [_] **Layout, which is arithmetic and belongs beside the tree.** `UDim2`
+- [x] **`core` gained the value types the tree is made of.** `UDim`, `UDim2`,
+  `Vector2` and `Rect` were already in `core/types` and **none of them was a
+  `PropertyType`** — so a component holding a `UDim2` could not be a property,
+  could not be saved, could not appear in the properties panel and could not be
+  set from a script. `ecs::PropertyType` is a closed list that grows when
+  userland gains a value, and this was that. Four cases in `game::Values`, four
+  widgets in the properties panel, four in each binding, and the manifest
+  regenerated. **The `UDim` widget is two controls rather than a `DragFloat2`**,
+  which is the one part that was not mechanical: scale is a fraction and offset
+  is pixels, so one drag step cannot serve both — a hundredth of a pixel is a
+  drag that never arrives and a whole unit of scale crosses the parent in one
+  mouse movement
+- [x] **`mono.engine/gui` at L7 `shared` — what a 2D thing *is*.** Thirty-three
+  classes as `ecs::Classes` registrations over twenty-three real components,
+  exactly as `scene` does for `Part`: `GuiBase` → `GuiBase2d` → `GuiObject` →
+  `Frame`, `CanvasGroup`, `GuiButton`(`TextButton`, `ImageButton`),
+  `GuiLabel`(`TextLabel`, `ImageLabel`), `ScrollingFrame`, `TextBox`,
+  `ViewportFrame`; `LayerCollector` → `ScreenGui`, `BillboardGui`, `SurfaceGui`,
+  `PluginGui` → `DockWidgetPluginGui`; and the nine `UIComponent` modifiers.
+  `shared`, so a server authors a `ScreenGui` and replicates it. **`core` and
+  `ecs` are the whole dependency list**, and the one thing that looked like a
+  reason to link `scene` — `NormalId` for a surface gui — is a six-member enum
+  registered by name, pinned by a test at each end, which is the arrangement
+  `DefaultMaterial`'s duplicated "Plastic" already uses.
+  **`Instance`, `Name` and `Parent` moved down into `ecs`** as
+  `Classes::RegisterInstanceRoot`: they project components `ecs` owns and were
+  only in `scene` because `scene` had the first class tree, and a second tree
+  that may not link the first made one declaration necessary rather than
+  tidier. **`VideoFrame` is deliberately absent** — there is no decoder, and a
+  class that draws nothing forever is what the paragraph below refuses
+- [x] **Layout, which is arithmetic and belongs beside the tree.** `UDim2`
   against a parent's absolute rect, `AnchorPoint`, `SizeConstraint`, and the
-  `UIListLayout`/`UIGridLayout`/`UIPadding`/`UIAspectRatioConstraint` modifiers.
-  One pass, parent before child, producing an `AbsolutePosition` and an
-  `AbsoluteSize` per node — which is a component, so the renderer reads it with
-  a query and nothing walks the tree twice
-- [_] **`gui` rendering at L12, as a render pass.** Rectangles, nine-slice,
-  text and clipping — which is a batched quad pipeline plus a glyph atlas. The
-  atlas is the part with a decision in it: `ui` already owns four faces for Dear
-  ImGui, and a second rasteriser for the same four files would be two answers to
-  "what does this glyph look like". `Pass::Interface` is the seam it attaches to
-- [_] **Input routing.** Hit testing back to front, `ZIndex`, `Active`,
-  `Selectable`, and the `InputBegan`/`InputEnded`/`Activated` signals — which is
-  `script::Signals`' shape applied to a tree rather than a new mechanism
+  `UIListLayout`/`UIGridLayout`/`UIPadding`/`UIAspectRatioConstraint` modifiers,
+  plus `UISizeConstraint`, `UITextSizeConstraint`, `UIScale`, `UICorner` and
+  `UIStroke`. One pass, parent before child, producing a `Resolved` component
+  the renderer reads with a query. **The order the constraints apply in is
+  load-bearing and was arrived at rather than assumed**: scale multiplies what
+  the `UDim2` said, the aspect ratio reshapes that, and the size limits clamp
+  the result — clamping first produces a rectangle that obeys neither, which
+  reads as "the constraint does not work". **`Measure` is split from `Place`**
+  for one reason: a list or a grid has to know how big a child is before
+  deciding where it goes, and that is the only thing a single top-down sweep
+  cannot do. `AutomaticSize` is declared, saved and bound and is **not**
+  implemented — it needs that second phase over the subtree, and `D00021`
+  carries the argument rather than leaving it to be discovered
+- [x] **The compiled draw list, which was not on this list and is the thing
+  that makes the rest affordable.** `gui::Compiled` computes a rolling
+  signature over every field the compile reads and keeps the flattened,
+  sorted, clipped `DrawList` while it matches — `scene::QuickHash`'s pattern
+  and `studio::HierarchyView`'s, for the same reason both give:
+  `ecs::Hierarchy` and `gui::Element` are not observed components, so
+  `Store::ChangeVersion` does not move when an element is reparented or
+  resized, and it *does* move when a physics tick writes a transform, which
+  would rebuild the UI sixty times a second for nothing. **The rule that a
+  field added to a component must be added to the fold is checked rather than
+  written down**: `gui/tests/Compile.cpp` walks every property the class tree
+  declares, writes each one and asserts the signature moved
+- [x] **Input routing.** Hit testing back to front, `ZIndex`, `Active`,
+  `Selectable`, and `InputBegan`/`InputEnded`/`Activated` plus
+  `MouseEnter`/`MouseLeave`/`MouseMoved`. **The hit test is a backwards walk of
+  the compiled list rather than a tree walk**, because the list is already in
+  paint order — a second traversal that re-derived that order would be a second
+  answer to "what is on top", and the two would disagree the first time
+  somebody changed a sort in one of them. Two rules inside it were arrived at:
+  `InputEnded` goes to where the press *began* rather than where the release
+  happened, which is what makes dragging off a button and back one interaction;
+  and `MouseLeave` fires before `MouseEnter`, so a handler that moves something
+  on leave runs before the one reacting to the arrival
+- [x] **`gui` drawn on screen, through the atlas that already exists.**
+  `ui::PaintGui` takes a `gui::DrawList` and an `ImDrawList` and nothing else —
+  rectangles with rounded corners, outlines, nine-slice, tiling, fit, crop,
+  text with both alignment axes, and clipping pushed with *intersection* so a
+  panel's own clip survives. The atlas decision the plan flagged came out the
+  way it stated: `ui` already owns four faces and a second rasteriser over the
+  same four files would be two answers to what a glyph looks like, so the edge
+  runs `ui` → `gui` and the painter is the only thing that knows both. The
+  studio's viewport panels compile and paint the world's own `ScreenGui` over
+  the world image and under the editor's chrome, one `gui::Compiled` and one
+  `gui::Router` per panel — per panel because a panel *is* a canvas, and two
+  viewports at different sizes resolve every `UDim2` differently
+- [x] **`mono.engine/examples/Interface.luau`, and it is the proof rather than
+  a demo.** A `ScreenGui` built entirely from a script, so it exercises
+  `Instance.new` over the new class tree, `UDim2` and `Vector2` as real
+  property types, the layout pass, the compile and the painter in one run. Every
+  element in it exists because one specific thing looks correct without it:
+  the centred card catches an anchor point applied backwards, the strip's
+  content is four times its own width and catches a clip that replaces rather
+  than intersects, and the grid's cells catch a wrap that counts cells without
+  counting the padding. **Its clock writes at ten hertz rather than sixty**,
+  which is both `D00020`'s workaround and what keeps the compiled-list cache
+  measurable — a scene that changed every frame would rebuild every frame and
+  prove nothing about it. It is installed into the skygrid world by
+  `Editor::NewGame`, so a new game shows it
+- [_] **`gui` rendering as a render pass at L12, which is the half a shipped
+  client needs.** `mono.client` does not link `Engine::ui` and must not —
+  `ui/Interface.hpp` gives the reason, and it is the same one that keeps imgui
+  out of a game binary — so a shipped client draws no `ScreenGui` until there
+  is a batched quad pipeline plus a glyph atlas behind `Pass::Interface`. **The
+  seam is already the right one and that is what makes this a renderer rather
+  than a feature**: the second backend is a new consumer of `gui::DrawList`,
+  not a second compile, so neither half can drift from the other about where an
+  element is. The atlas is the decision inside it, unchanged: whichever module
+  ends up owning the four faces, only one does
+- [_] **Texture resolution for `ImageLabel` and `ImageButton`.**
+  `ui::ImageSource` is the hook and nothing supplies one, so an image draws the
+  missing-texture marker — visible on purpose, because an `ImageLabel` that
+  drew nothing would look like the label was broken rather than like the image
+  was missing. What is needed is a content name resolved through `assets` and
+  `delivery` to something a backend can sample
+- [_] **Connecting `gui::GuiEvent` to `script::Signals`.** The routing produces
+  events and nothing turns them into a `.Activated`. `gui` is L7 and
+  `script::Signals` is L9, so the join belongs above both — and it is
+  deliberately not in the editor, which is not the place to invent a second
+  path into a VM
 - [_] **`GuiBase3d` and the adornments** — `SelectionBox`, `Handles`,
   `ArcHandles`, `BoxHandleAdornment` and the rest. **This is what gives the
   editor gizmos and viewport selection**, which v0.7 deferred, and it is worth
@@ -402,12 +485,21 @@ refuses everywhere else. In order:
   the tree once the tree exists; `react-lua` or a hand-written reconciler are
   both reasonable and neither is a decision that has to be made yet
 
-**Why not do the shims now, stated so nobody re-asks.** Fifty registered classes
-with no layout, no rendering and no input would put `TextLabel` in the insert
-palette, let somebody parent one under a `Part`, save it into a game file — and
-then draw nothing, forever, with no error. That is worse than not having it: it
-is a feature that looks present and is not. The order above is the order in
-which each step has a caller.
+**Why not do the shims now, stated so nobody re-asks — and what it turned out
+to buy.** Fifty registered classes with no layout, no rendering and no input
+would put `TextLabel` in the insert palette, let somebody parent one under a
+`Part`, save it into a game file — and then draw nothing, forever, with no
+error. That is worse than not having it: it is a feature that looks present and
+is not. The order above is the order in which each step has a caller.
+
+**The rule was applied twice while doing it, both times against something that
+would have been easy to ship.** `VideoFrame` is not registered, because there
+is no decoder and never was going to be one this version. `AutomaticSize` *is*
+declared, and that is the case where the trade came out the other way: it is a
+property rather than a class, it crosses a save file and both bindings, so
+adding it later is a format change and adding it now costs a byte — but a
+property that is declared and does nothing is still a thing somebody will set
+and wonder about, so it is filed as `D00021` rather than left to be found.
 
 The rendering and camera work this version already carried, unchanged:
 

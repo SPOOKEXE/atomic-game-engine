@@ -20,6 +20,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
@@ -73,6 +74,14 @@ namespace {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		case PropertyType::Opaque:
 			break;
 		}
@@ -122,6 +131,14 @@ namespace {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		case PropertyType::Reference:
 			return "Instance";
 		case PropertyType::Enum:
@@ -152,6 +169,14 @@ namespace {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		case PropertyType::Reference:
 			return "Instance";
 		case PropertyType::Enum:
@@ -1479,6 +1504,13 @@ int main(int argc, char **argv) {
 	// would be describing what a script can *build* and not what a world can
 	// *hold*, and the second is the half a save file needs.
 	(void)engine::script::ScriptClass();
+
+	// **And the 2D tree, which a game file can carry and a script can build.**
+	// A manifest that stopped at `Part` and `Script` would leave every
+	// `TextLabel` property untyped in both declaration files — so an author
+	// gets no completion for the half of v0.8 that is meant to be authored from
+	// TypeScript, which is the point of generating this at all.
+	(void)engine::gui::RegisterGuiClasses();
 
 	// **And the services, because `workspace` is one.** Every script opens by
 	// reaching into the world through the `Workspace` global, and a manifest

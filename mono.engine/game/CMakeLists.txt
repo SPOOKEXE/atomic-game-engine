@@ -31,6 +31,11 @@ mono_add_library(game
 		# fail with "no class named Part" on a perfectly good file.
 		Engine::scene
 
+		# L7, `shared`. The 2D class tree, for the same reason `scene` is here:
+		# a game file names its classes and this module resolves the names, so
+		# a tree a file can carry is a tree this target has to know about.
+		Engine::gui
+
 		# L9. `script::SourceCache` is where a document's script text lands, and
 		# it is the field `script/Instances.hpp` predicted this version would
 		# need.

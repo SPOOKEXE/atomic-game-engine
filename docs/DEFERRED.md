@@ -31,6 +31,44 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00023
+
+**A rotated `gui` element rotates its box and not its contents.**
+
+- `ui::PaintGui` draws a rotated `Rectangle` or `Outline` as a convex quad and draws `Image` and `Text` upright at the rotated rectangle's centre. `Element::Rotation` and `Resolved::AbsoluteRotation` are correct and are carried on every command; what is missing is a backend that uses them for the other two kinds.
+- **Why it stops there rather than being finished.** Rotating a glyph run means per-glyph quads, which imgui's `AddText` cannot emit — it walks the atlas and appends axis-aligned quads with no transform. Rotating a nine-slice means rotating each of the nine pieces individually with its own uv rectangle. Both are real work in the *backend*, and the backend that is going to matter is the batched quad pipeline `ROADMAP.md` schedules at L12, rather than this one.
+- **The hit test rotates with neither.** `gui::Pick` tests `DrawCommand::Bounds` as an axis-aligned rectangle, so a rotated button is clickable on its unrotated box. Stated because a rotated button that draws in one place and clicks in another is a bug people file twice.
+- **Reopen trigger: the quad pipeline.** A pass that emits its own vertices can apply the rotation to all four kinds in one place, which is where this belongs.
+
+### [_] D00022
+
+**A `SurfaceGui` and a `BillboardGui` lay out against a canvas whose 3D half nothing supplies.**
+
+- `gui::CanvasFor` gives a `SurfaceGui` its `CanvasSize` in pixels and ignores `SizingMode::PixelsPerStud`; it gives a `BillboardGui` the offset half of its `Size` and ignores the scale half. Everything under either lays out correctly *against that canvas* — what is missing is the number the canvas should have been.
+- **Why it is not resolved in `gui`.** `PixelsPerStud` needs the stud extent of the adornee's face, which is `scene::Bounds`; a billboard's scale is against the screen it is projected onto, which is a fact about a camera. `gui` is L7 `shared` and links neither, and the edge to `scene` is refused in `gui/AGENTS.md` for the same reason `scene` refuses the edge to `physics`.
+- **Where it belongs.** Whoever draws a surface gui knows both the part and the camera. The shape is a caller that computes the canvas and writes it into `Surface::CanvasSize` before the layout runs — one multiplication, in the module that has both operands.
+- **Reopen trigger: the first `SurfaceGui` in a scene.** Nothing draws either class yet, so the wrong number is not currently visible to anybody.
+
+### [_] D00021
+
+**`AutomaticSize` is declared, saved, bound and read by nothing.**
+
+- `Element::Automatic` is a real property with a real enum and it reaches the layout pass, which does not act on it. An author setting `AutomaticSize = "Y"` gets the size their `UDim2` resolved to.
+- **Why it is declared anyway, which is the part that needs defending.** The roadmap's rule is that a class registered with nothing behind it is worse than no class — "a feature that looks present and is not". A *property* is a weaker case than a class and the trade came out the other way: the field crosses a save file and both bindings, so adding it later is a format change, and adding it now costs a byte. What is not acceptable is leaving it undocumented, which is what this entry is.
+- **What the work actually is.** Growing a container to its content needs the children measured before the parent is placed, which is a second phase over the subtree. The recursive shape is straightforward; the case that needs a decision is a child sized by scale inside a parent sized by content, which is circular and which Roblox breaks by resolving the scale against zero.
+- **Text is a separate and harder half.** Growing a label to its string needs real glyph metrics, and `Layout.hpp`'s constant advance is deliberately an estimate. That half waits on the same thing D00020 does.
+- **Reopen trigger: the first UI that wants a list to fit its rows.** That is the case people hit immediately and the one worth doing first.
+
+### [_] D00020
+
+**`gui` text is a `core::Name`, and `core::Name` never releases a string.**
+
+- `Label::Text`, `Picture::Image` and `Entry::PlaceholderText` intern. That is what makes each a `PropertyType::Name` — saved as text, sent as text, readable from both bindings, editable in the properties panel — with no new property type and no new wire form. `ecs::InstanceName` already makes the same trade for the same reasons.
+- **The cost, stated rather than discovered.** Text that changes every frame interns a new string every frame, forever, plus the process-wide registry's mutex on every write. `label.Text = tostring(score)` at 60 Hz is an unbounded leak and a lock in the frame loop.
+- **`examples/Interface.luau` works around it and says so.** Its clock writes at ten hertz rather than sixty, which is also what keeps the compiled-list cache doing something measurable — so the example is not evidence that the problem is small.
+- **The fix is in `ecs`, not here.** A string property type with its own storage: a component holding an owned buffer, a `PropertyType::String`, a case in `game::Values`, a widget, and a case in each binding. That is the same shape as v0.8's four value types and roughly the same size.
+- **Reopen trigger: the first game that writes text per frame.** A score counter, a timer, a chat log — whichever arrives first.
+
 ### [_] D00019
 
 **The engine's Luau is held one release behind upstream so that the editor and the type check agree, and what holds it there is luau-lsp rather than anything here.**

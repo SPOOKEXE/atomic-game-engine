@@ -14,6 +14,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
+#include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -152,6 +153,19 @@ namespace studio {
 			if (!overHandle) {
 				PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add);
 			}
+		}
+
+		// **The game's own UI, before the editor's furniture below it.** The
+		// grid, the axes and the selection outline are tools for looking at the
+		// world; a `ScreenGui` is part of the game. Drawing the tools last is
+		// what keeps a selection outline visible through a full-screen menu the
+		// game happens to have open.
+		//
+		// Outside the projection loop below, because a `ScreenGui` has no
+		// camera: it is laid out against the panel rectangle and nothing else,
+		// so a panel whose camera cannot be resolved still draws its UI.
+		for (size_t index = 0; index < Overlays.size(); index++) {
+			DrawViewportGui(index);
 		}
 
 		for (size_t index = 0; index < Overlays.size(); index++) {
@@ -814,5 +828,74 @@ namespace studio {
 		// the question. Studio reveals it; so does this.
 		OpenPathTo(shown, picked);
 		RevealSelection = true;
+	}
+
+	void Editor::DrawViewportGui(size_t index) {
+		if (index >= Overlays.size() || Universe == nullptr) {
+			return;
+		}
+
+		OverlaySlot &slot = Overlays[index];
+		if (!slot.Drawn || slot.List == nullptr || slot.Width <= 0.0f || slot.Height <= 0.0f) {
+			return;
+		}
+
+		const WorldId shown = ViewportWorld(index);
+		if (!shown.IsValid()) {
+			return;
+		}
+
+		engine::gui::CompileRequest request;
+		request.Display.Width = slot.Width;
+		request.Display.Height = slot.Height;
+
+		// **Fed back from the previous frame's routing, deliberately.** The
+		// hover is computed from the list a compile produced, so a compile that
+		// read this frame's hover would depend on its own output.
+		// `Router::Hovered` says so at length; the cost is that a button
+		// appearing under a stationary pointer lights up one frame later.
+		request.Hovered = GuiRouters[index].Hovered();
+		request.Pressed = GuiRouters[index].Pressed();
+
+		// The pointer in canvas space, which is the panel's own corner as the
+		// origin. A `ScreenGui` inside a panel is laid out from that corner, so
+		// anything else would hit-test against a canvas nobody drew.
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		engine::gui::Pointer pointer;
+		pointer.Position = engine::core::Vector2{mouse.x - slot.X, mouse.y - slot.Y};
+		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+
+		// **imgui owns the mouse whenever it is over its own chrome**, and a
+		// panel docked over the viewport is exactly that. Without this the
+		// game's UI would receive clicks meant for the explorer sitting on top
+		// of it — the keyboard twin of which `DrawShortcuts` already fixed.
+		pointer.Inside = ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)
+							 ? ImGui::IsMouseHoveringRect(
+								   ImVec2(slot.X, slot.Y),
+								   ImVec2(slot.X + slot.Width, slot.Y + slot.Height),
+								   false
+							   )
+							 : false;
+
+		size_t commands = 0;
+		Universe->Enter(shown, [&](Store &store) {
+			GuiLists[index].Rebuild(store, request);
+			GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
+			commands = GuiLists[index].Commands().Commands.size();
+		});
+
+		if (commands == 0) {
+			return;
+		}
+
+		engine::ui::PaintTarget target;
+		target.Origin = ImVec2(slot.X, slot.Y);
+
+		// **The events are produced and not yet dispatched.** Turning a
+		// `gui::GuiEvent` into a `.Activated` is `script`'s job at L9 and the
+		// editor is not the place to invent a second path into a VM — the
+		// routing exists here so that a play test behaves, and the connection is
+		// the last step of the v0.8 plan rather than this one.
+		engine::ui::PaintGui(GuiLists[index].Commands(), slot.List, target);
 	}
 }

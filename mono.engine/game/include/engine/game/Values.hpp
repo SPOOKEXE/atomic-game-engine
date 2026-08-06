@@ -24,6 +24,9 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Rect.hpp>
+#include <engine/core/types/UDim.hpp>
+#include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -82,6 +85,18 @@ namespace engine::game {
 
 		// A `PropertyType::Color3` value.
 		core::Color3 Color3;
+
+		// A `PropertyType::Vector2` value.
+		core::Vector2 Vector2;
+
+		// A `PropertyType::UDim` value.
+		core::UDim UDim;
+
+		// A `PropertyType::UDim2` value.
+		core::UDim2 UDim2;
+
+		// A `PropertyType::Rect` value.
+		core::Rect Rect;
 	};
 
 	// Reads one property off an instance.

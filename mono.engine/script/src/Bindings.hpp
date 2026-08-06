@@ -258,6 +258,24 @@ namespace engine::script {
 	core::Color3 &CheckColor3(lua_State *state, int index);
 	core::CFrame &CheckCFrame(lua_State *state, int index);
 
+	// The four `gui` is authored in. Same split as the three above: the
+	// metatable is `LuauDatatypes.cpp`'s and these only carry a property's
+	// bytes across.
+	//
+	// `CheckVector2Value` rather than `CheckVector2` because that name is
+	// already taken by a file-local in `LuauDatatypes.cpp` doing exactly this;
+	// merging the two is a tidy-up worth doing and not one to do inside the
+	// change that adds four property types.
+	core::Vector2 *PushVector2(lua_State *state);
+	core::UDim *PushUDim(lua_State *state);
+	core::UDim2 *PushUDim2(lua_State *state);
+	core::Rect *PushRect(lua_State *state);
+
+	core::Vector2 &CheckVector2Value(lua_State *state, int index);
+	core::UDim &CheckUDim(lua_State *state, int index);
+	core::UDim2 &CheckUDim2(lua_State *state, int index);
+	core::Rect &CheckRect(lua_State *state, int index);
+
 	// --- signals --------------------------------------------------------------
 
 	// Pushes a signal object onto the stack.

@@ -213,39 +213,6 @@ namespace engine::scene {
 			return property;
 		}
 
-		// Parent: where the instance sits in the tree.
-		//
-		// A real property over the hierarchy `ecs` already keeps, not a
-		// courtesy. **What it does not do is decide whether the part is
-		// drawn** — `ecs/Instance.hpp` states the model: the tree is
-		// organisational, exactly as Roblox's is, and parenting moves nothing
-		// and re-resolves nothing. Drawing is decided by components, which is
-		// what buys a world with no transform-hierarchy pass.
-		//
-		// That is a genuine divergence from Roblox, where an unparented part is
-		// not rendered. It is written down here rather than left for somebody
-		// to infer from a part that draws before it has a parent.
-		PropertyDescriptor ParentProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("Parent");
-			property.Type = PropertyType::Reference;
-			property.Size = sizeof(ecs::Entity);
-			property.Kind = PropertyKind::Computed;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ecs::Hierarchy>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				*static_cast<ecs::Entity *>(out) = store.ParentOf(instance);
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				return store.SetParent(instance, *static_cast<const ecs::Entity *>(value));
-			};
-
-			return property;
-		}
-
 		// Anchored: whether the world may move it — and the one property that
 		// is not stored anywhere.
 		//
@@ -605,7 +572,14 @@ namespace engine::scene {
 			// part nobody configured.
 			spatial::CollisionGroups::Register(spatial::CollisionGroups::DEFAULT);
 
-			const ecs::ClassId instance = ecs::Classes::Register("Instance", {});
+			// **`ecs`'s, not this module's.** `Instance`, `Name` and `Parent`
+			// all project components `ecs` owns, and they were declared here
+			// only because `scene` happened to be the first module with a class
+			// tree. v0.8 added a second — `gui`, which is `shared` and may not
+			// link this one — so the root moved down to where its components
+			// already live. Same correction `ecs.Hierarchy`'s registration went
+			// through, and the `ParentProperty` this file used to hold is gone with it.
+			const ecs::ClassId instance = ecs::Classes::RegisterInstanceRoot();
 
 			// PVInstance is everything with a place in the world. Roblox's
 			// split, kept because v0.6 binds `Instance.new` to this same table
@@ -695,8 +669,7 @@ namespace engine::scene {
 			// declared property prevents: one declaration, both languages, and
 			// it appears in the manifest like everything else. A Roblox script
 			// sets `.Name`, so it has to be writable rather than readable.
-			ecs::Classes::Property<&ecs::InstanceName::Value>(instance, "Name");
-			ecs::Classes::Computed(instance, ParentProperty());
+			// `Name` and `Parent` are declared by `RegisterInstanceRoot` above.
 
 			ecs::Classes::Property<&Transform::Frame>(pvInstance, "CFrame");
 			ecs::Classes::Computed(pvInstance, PositionProperty());

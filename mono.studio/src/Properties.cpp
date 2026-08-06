@@ -286,6 +286,96 @@ namespace studio {
 							break;
 						}
 
+						case PropertyType::Vector2: {
+							float parts[2]{changed.Vector2.X, changed.Vector2.Y};
+							if (ImGui::DragFloat2("##v", parts, StepFor(parts[0]))) {
+								changed.Vector2 = engine::core::Vector2{parts[0], parts[1]};
+								wrote = true;
+							}
+							break;
+						}
+
+						case PropertyType::UDim: {
+							// **Scale and offset get different steps.** Scale is
+							// a fraction, so a drag in whole numbers moves it
+							// past the parent in one pixel of mouse travel;
+							// offset is pixels and a hundredth of one is a drag
+							// that never arrives. Two controls rather than a
+							// `DragFloat2` is what buys the two steps.
+							float scale = changed.UDim.Scale;
+							float offset = changed.UDim.Offset;
+							const float half = ImGui::GetContentRegionAvail().x * 0.5f - 2.0f;
+
+							ImGui::SetNextItemWidth(half);
+							if (ImGui::DragFloat("##s", &scale, 0.01f)) {
+								changed.UDim.Scale = scale;
+								wrote = true;
+							}
+							ImGui::SameLine(0.0f, 4.0f);
+							ImGui::SetNextItemWidth(half);
+							if (ImGui::DragFloat("##o", &offset, 1.0f, 0.0f, 0.0f, "%.0f")) {
+								changed.UDim.Offset = offset;
+								wrote = true;
+							}
+							break;
+						}
+
+						case PropertyType::UDim2: {
+							// Two rows of the pair above, X then Y — which is
+							// the shape Roblox's own property grid uses, and the
+							// one an author reading `UDim2.new(0.5, -8, 0, 24)`
+							// already has in their head.
+							const float half = ImGui::GetContentRegionAvail().x * 0.5f - 2.0f;
+							float axes[4]{
+								changed.UDim2.X.Scale,
+								changed.UDim2.X.Offset,
+								changed.UDim2.Y.Scale,
+								changed.UDim2.Y.Offset,
+							};
+
+							ImGui::SetNextItemWidth(half);
+							if (ImGui::DragFloat("##xs", &axes[0], 0.01f)) {
+								wrote = true;
+							}
+							ImGui::SameLine(0.0f, 4.0f);
+							ImGui::SetNextItemWidth(half);
+							if (ImGui::DragFloat("##xo", &axes[1], 1.0f, 0.0f, 0.0f, "%.0f")) {
+								wrote = true;
+							}
+							ImGui::SetNextItemWidth(half);
+							if (ImGui::DragFloat("##ys", &axes[2], 0.01f)) {
+								wrote = true;
+							}
+							ImGui::SameLine(0.0f, 4.0f);
+							ImGui::SetNextItemWidth(half);
+							if (ImGui::DragFloat("##yo", &axes[3], 1.0f, 0.0f, 0.0f, "%.0f")) {
+								wrote = true;
+							}
+
+							if (wrote) {
+								changed.UDim2 = engine::core::UDim2{axes[0], axes[1], axes[2], axes[3]};
+							}
+							break;
+						}
+
+						case PropertyType::Rect: {
+							// Four pixel offsets into an image, so one step and
+							// one control. `%.0f` because a fractional texel in
+							// a slice centre is an author's typo rather than an
+							// intent.
+							float parts[4]{
+								changed.Rect.Min.X,
+								changed.Rect.Min.Y,
+								changed.Rect.Max.X,
+								changed.Rect.Max.Y,
+							};
+							if (ImGui::DragFloat4("##v", parts, 1.0f, 0.0f, 0.0f, "%.0f")) {
+								changed.Rect = engine::core::Rect{parts[0], parts[1], parts[2], parts[3]};
+								wrote = true;
+							}
+							break;
+						}
+
 						case PropertyType::Enum: {
 							// **The registered set, not a text field.** That is
 							// the whole reason `PropertyType::Enum` exists: a

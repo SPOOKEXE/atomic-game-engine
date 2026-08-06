@@ -32,6 +32,8 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/render/FrameStatistics.hpp>
@@ -758,6 +760,19 @@ namespace studio {
 		// reintroduces the one-frame swim silently — it still draws, and it
 		// still looks right whenever the camera is still.
 		void DrawViewportOverlays();
+
+		// Compiles and paints the world's own `ScreenGui` tree over one panel.
+		//
+		// **Over the world image and under the editor's chrome**, which is
+		// where a player would see it: it is the game's interface, so it
+		// belongs on top of the game and beneath the tools looking at the game.
+		//
+		// Runs from `DrawViewportOverlays` rather than from `DrawViewport` for
+		// the reason `OverlaySlot` gives about the gizmo — the panel rectangle
+		// is only settled once every panel has drawn.
+		//
+		// @param index Which viewport panel.
+		void DrawViewportGui(size_t index);
 
 		// How one panel maps between the world and itself, this frame.
 		//
@@ -1499,6 +1514,23 @@ namespace studio {
 		// What each panel handed this frame's overlay pass. Cleared as each
 		// panel draws, so a closed one contributes nothing.
 		std::array<OverlaySlot, 1 + EXTRA_VIEWPORTS> Overlays;
+
+		// The game's own UI, compiled per panel and kept between frames.
+		//
+		// **One per panel and not one per editor**, because a panel is a canvas:
+		// two viewports showing the same world at different sizes resolve every
+		// `UDim2` differently, and a shared compile would give whichever panel
+		// drew second the other one's rectangles.
+		//
+		// Kept across frames deliberately — that is the whole of what
+		// `gui::Compiled` is for. A fresh one per frame would compute a
+		// signature, find nothing to compare it against and rebuild every time.
+		std::array<engine::gui::Compiled, 1 + EXTRA_VIEWPORTS> GuiLists;
+
+		// The hover and press state behind those lists, per panel for the same
+		// reason. Editor state, not world state: nobody replicates where a
+		// mouse is.
+		std::array<engine::gui::Router, 1 + EXTRA_VIEWPORTS> GuiRouters;
 
 		// A click in a viewport, waiting to be turned into a selection.
 		//

@@ -2,6 +2,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
@@ -652,6 +653,13 @@ namespace engine::game {
 		// anyway. Naming both is what makes the order impossible to get wrong
 		// from outside.
 		scene::RegisterSceneClasses();
+
+		// **The 2D tree, because a game file carries one.** A server authors a
+		// `ScreenGui` and saves it; a loader that had not registered the class
+		// would refuse a perfectly good file with "no class named ScreenGui",
+		// which reads as a corrupt save rather than as a missing registration.
+		gui::RegisterGuiClasses();
+
 		script::ScriptClass();
 	}
 

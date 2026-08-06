@@ -2,6 +2,8 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Property.hpp>
+#include <engine/ecs/Store.hpp>
 
 #include <string>
 #include <vector>
@@ -229,6 +231,52 @@ namespace engine::ecs {
 				}
 			}
 		);
+	}
+
+	ClassId Classes::RegisterInstanceRoot() {
+		// The components have to exist before a property can name them, and
+		// this is reachable before any store has been built — a test that
+		// registers a class tree and never creates a world is the ordinary case
+		// in `gui/tests`.
+		RegisterInstanceComponents();
+
+		const ClassId instance = Classes::Register("Instance", {});
+
+		// **A real property over the hierarchy, not a courtesy.**
+		// `Instance.hpp` states the model: the tree is organisational, exactly
+		// as Roblox's is, and parenting moves nothing and re-resolves nothing.
+		//
+		// What that costs is written down where it was found — a `scene` part
+		// draws before it has a parent, which is a genuine divergence from
+		// Roblox. `gui` does not inherit that divergence, because a 2D element
+		// is drawn exactly when it descends from an enabled `LayerCollector`,
+		// which is a fact about ancestry and is derived per frame.
+		PropertyDescriptor parent;
+		parent.Name = core::Name("Parent");
+		parent.Type = PropertyType::Reference;
+		parent.Size = sizeof(Entity);
+		parent.Kind = PropertyKind::Computed;
+		parent.Reads = &ComponentSet::Intern({Components::Of<Hierarchy>()});
+		parent.Writes = parent.Reads;
+
+		parent.Get = [](const Store &store, Entity subject, void *out) -> bool {
+			*static_cast<Entity *>(out) = store.ParentOf(subject);
+			return true;
+		};
+
+		parent.Set = [](Store &store, Entity subject, const void *value) -> bool {
+			return store.SetParent(subject, *static_cast<const Entity *>(value));
+		};
+
+		Classes::Computed(instance, parent);
+
+		// Everything has a name, and a Roblox script sets `.Name`, so it is
+		// writable rather than readable. Declared rather than special-cased in
+		// a binding, which is the drift this stopped: it was special-cased in
+		// the Luau binding and absent from the JavaScript one.
+		Classes::Property<&InstanceName::Value>(instance, "Name");
+
+		return instance;
 	}
 
 	Entity CreateInstance(StoreState &state, ClassId id, std::string_view name) {

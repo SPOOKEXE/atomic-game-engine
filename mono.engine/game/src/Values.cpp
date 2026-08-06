@@ -148,6 +148,14 @@ namespace engine::game {
 			return store.GetProperty(instance, descriptor.Name, &out.CFrame, sizeof(out.CFrame));
 		case PropertyType::Color3:
 			return store.GetProperty(instance, descriptor.Name, &out.Color3, sizeof(out.Color3));
+		case PropertyType::Vector2:
+			return store.GetProperty(instance, descriptor.Name, &out.Vector2, sizeof(out.Vector2));
+		case PropertyType::UDim:
+			return store.GetProperty(instance, descriptor.Name, &out.UDim, sizeof(out.UDim));
+		case PropertyType::UDim2:
+			return store.GetProperty(instance, descriptor.Name, &out.UDim2, sizeof(out.UDim2));
+		case PropertyType::Rect:
+			return store.GetProperty(instance, descriptor.Name, &out.Rect, sizeof(out.Rect));
 		case PropertyType::Opaque:
 			// Readable as bytes and not as a value. Nothing here can show
 			// it and nothing here should pretend to.
@@ -198,6 +206,14 @@ namespace engine::game {
 			return store.SetProperty(instance, descriptor.Name, &value.CFrame, sizeof(value.CFrame));
 		case PropertyType::Color3:
 			return store.SetProperty(instance, descriptor.Name, &value.Color3, sizeof(value.Color3));
+		case PropertyType::Vector2:
+			return store.SetProperty(instance, descriptor.Name, &value.Vector2, sizeof(value.Vector2));
+		case PropertyType::UDim:
+			return store.SetProperty(instance, descriptor.Name, &value.UDim, sizeof(value.UDim));
+		case PropertyType::UDim2:
+			return store.SetProperty(instance, descriptor.Name, &value.UDim2, sizeof(value.UDim2));
+		case PropertyType::Rect:
+			return store.SetProperty(instance, descriptor.Name, &value.Rect, sizeof(value.Rect));
 		case PropertyType::Opaque:
 			return false;
 		}
@@ -234,6 +250,25 @@ namespace engine::game {
 				   Number(value.CFrame.Position.Z) + ", " + Number(value.CFrame.QuaternionX) + ", " +
 				   Number(value.CFrame.QuaternionY) + ", " + Number(value.CFrame.QuaternionZ) + ", " +
 				   Number(value.CFrame.QuaternionW);
+		case PropertyType::Vector2:
+			return Number(value.Vector2.X) + ", " + Number(value.Vector2.Y);
+		case PropertyType::UDim:
+			// Scale then offset, which is `UDim.new`'s argument order. The
+			// comma-separated list is the same shape every other value here
+			// uses, so one parser reads all of them.
+			return Number(value.UDim.Scale) + ", " + Number(value.UDim.Offset);
+		case PropertyType::UDim2:
+			// Four numbers in `UDim2.new`'s order — xScale, xOffset, yScale,
+			// yOffset — and **not** two `UDim` texts joined, which would be a
+			// second nesting the parser would have to learn.
+			return Number(value.UDim2.X.Scale) + ", " + Number(value.UDim2.X.Offset) + ", " +
+				   Number(value.UDim2.Y.Scale) + ", " + Number(value.UDim2.Y.Offset);
+		case PropertyType::Rect:
+			// `Rect.new`'s order: minX, minY, maxX, maxY. `core::Rect` stores
+			// two corners and not a corner and an extent, so this is the fields
+			// in order rather than a conversion.
+			return Number(value.Rect.Min.X) + ", " + Number(value.Rect.Min.Y) + ", " +
+				   Number(value.Rect.Max.X) + ", " + Number(value.Rect.Max.Y);
 		case PropertyType::Reference:
 		case PropertyType::Opaque:
 			return {};
@@ -333,6 +368,46 @@ namespace engine::game {
 			return true;
 		}
 
+		case PropertyType::Vector2: {
+			float parts[2]{};
+			if (!Numbers(text, 2, parts)) {
+				reason = "expected x, y";
+				return false;
+			}
+			out.Vector2 = core::Vector2{parts[0], parts[1]};
+			return true;
+		}
+
+		case PropertyType::UDim: {
+			float parts[2]{};
+			if (!Numbers(text, 2, parts)) {
+				reason = "expected scale, offset";
+				return false;
+			}
+			out.UDim = core::UDim{parts[0], parts[1]};
+			return true;
+		}
+
+		case PropertyType::UDim2: {
+			float parts[4]{};
+			if (!Numbers(text, 4, parts)) {
+				reason = "expected xScale, xOffset, yScale, yOffset";
+				return false;
+			}
+			out.UDim2 = core::UDim2{parts[0], parts[1], parts[2], parts[3]};
+			return true;
+		}
+
+		case PropertyType::Rect: {
+			float parts[4]{};
+			if (!Numbers(text, 4, parts)) {
+				reason = "expected minX, minY, maxX, maxY";
+				return false;
+			}
+			out.Rect = core::Rect{parts[0], parts[1], parts[2], parts[3]};
+			return true;
+		}
+
 		case PropertyType::Reference:
 			reason = "a reference has no text form";
 			return false;
@@ -375,6 +450,20 @@ namespace engine::game {
 				   left.Color3.B == right.Color3.B;
 		case PropertyType::CFrame:
 			return std::memcmp(&left.CFrame, &right.CFrame, sizeof(core::CFrame)) == 0;
+		// **Their own `operator==`, not a `memcmp`.** All four are packed floats
+		// today and a byte compare would agree — until one of them gains a
+		// padding byte, at which point a byte compare reports two equal values
+		// as different and the document writes a property that did not change.
+		// The `CFrame` case above is the exception and is a `memcmp` because
+		// `core::CFrame` declares no equality.
+		case PropertyType::Vector2:
+			return left.Vector2 == right.Vector2;
+		case PropertyType::UDim:
+			return left.UDim == right.UDim;
+		case PropertyType::UDim2:
+			return left.UDim2 == right.UDim2;
+		case PropertyType::Rect:
+			return left.Rect == right.Rect;
 		case PropertyType::Opaque:
 			// Two values nobody can read are never equal, so an `Opaque`
 			// property is always written. There are none today; when there
@@ -408,6 +497,14 @@ namespace engine::game {
 			return "CFrame";
 		case PropertyType::Color3:
 			return "Color3";
+		case PropertyType::Vector2:
+			return "Vector2";
+		case PropertyType::UDim:
+			return "UDim";
+		case PropertyType::UDim2:
+			return "UDim2";
+		case PropertyType::Rect:
+			return "Rect";
 		case PropertyType::Opaque:
 			return "opaque";
 		}
@@ -415,7 +512,7 @@ namespace engine::game {
 	}
 
 	bool TypeFromTag(std::string_view tag, ecs::PropertyType &out) {
-		static constexpr std::array<std::pair<std::string_view, PropertyType>, 12> TAGS{{
+		static constexpr std::array<std::pair<std::string_view, PropertyType>, 16> TAGS{{
 			{"bool", PropertyType::Bool},
 			{"int", PropertyType::Int32},
 			{"int64", PropertyType::Int64},
@@ -427,6 +524,10 @@ namespace engine::game {
 			{"Vector3", PropertyType::Vector3},
 			{"CFrame", PropertyType::CFrame},
 			{"Color3", PropertyType::Color3},
+			{"Vector2", PropertyType::Vector2},
+			{"UDim", PropertyType::UDim},
+			{"UDim2", PropertyType::UDim2},
+			{"Rect", PropertyType::Rect},
 			{"opaque", PropertyType::Opaque},
 		}};
 

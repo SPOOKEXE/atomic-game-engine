@@ -32,6 +32,9 @@
 // than anything about a scene. Nothing here reads a field of one.
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Rect.hpp>
+#include <engine/core/types/UDim.hpp>
+#include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/ComponentSet.hpp>
 #include <engine/ecs/Components.hpp>
@@ -91,6 +94,23 @@ namespace engine::ecs {
 		Vector3,
 		CFrame,
 		Color3,
+
+		// The four a 2D tree is authored in, added at v0.8 for `gui`.
+		//
+		// **They are here because a `UDim2` has to be a property, not because
+		// `core/types` gained four headers.** All four have existed since v0.6
+		// and none of them was a `PropertyType`, so a component holding one
+		// could not be saved, could not appear in a properties panel and could
+		// not be set from a script — which makes `Frame.Size` unauthorable, and
+		// an unauthorable size is a widget set nobody can use.
+		//
+		// The list stays closed and this is what growing it looks like: four
+		// cases in `game::Values`, four widgets in the properties panel, four
+		// in each binding, and this comment saying why.
+		Vector2,
+		UDim,
+		UDim2,
+		Rect,
 	};
 
 	// How a property reaches the components underneath it.
@@ -311,6 +331,23 @@ namespace engine::ecs {
 			Declare(owner, descriptor);
 		}
 
+		// The `Instance` root, with `Name` and `Parent` on it.
+		//
+		// **Here rather than in whichever module registers a tree first**, and
+		// that is the same correction `ecs.Hierarchy` already went through:
+		// `InstanceName` and `Hierarchy` are this module's own types, so the two
+		// properties projecting them are this module's to declare. `scene` owned
+		// them until v0.8, which was fine while `scene` was the only class tree
+		// — and stopped being fine the moment `gui` needed the same root without
+		// being allowed to link `scene`.
+		//
+		// Idempotent, like every registration here: the second caller gets the
+		// same id, and the two property declarations are one declaration rather
+		// than two that agree until somebody edits one.
+		//
+		// @return The `Instance` class id.
+		static ClassId RegisterInstanceRoot();
+
 		// The defaults a class's instances start from.
 		//
 		// Setting a default before any instance exists is the ordinary case.
@@ -391,6 +428,14 @@ namespace engine::ecs {
 				return PropertyType::CFrame;
 			} else if constexpr (std::is_same_v<Bare, core::Color3>) {
 				return PropertyType::Color3;
+			} else if constexpr (std::is_same_v<Bare, core::Vector2>) {
+				return PropertyType::Vector2;
+			} else if constexpr (std::is_same_v<Bare, core::UDim>) {
+				return PropertyType::UDim;
+			} else if constexpr (std::is_same_v<Bare, core::UDim2>) {
+				return PropertyType::UDim2;
+			} else if constexpr (std::is_same_v<Bare, core::Rect>) {
+				return PropertyType::Rect;
 			} else if constexpr (std::is_same_v<Bare, bool>) {
 				return PropertyType::Bool;
 			} else if constexpr (std::is_same_v<Bare, int32_t> || std::is_same_v<Bare, uint32_t>) {
