@@ -108,11 +108,19 @@ namespace engine::scene {
 
 	// Present exactly on the entities a draw list should contain.
 	//
-	// **Maintained, never authored.** Nothing outside `SyncRendered` may add or
-	// remove one: it is a derived fact about the tree, and a second writer would
-	// be a second opinion about what is on screen. It is deliberately absent
-	// from every class's component set for the same reason — `Instance.new`
-	// must not mint a part that is already claiming to be drawn.
+	// **Maintained, never authored.** Nothing outside `SyncRendered` may add,
+	// remove or write one: it is a derived fact about the tree, and a second
+	// writer would be a second opinion about what is on screen. It is
+	// deliberately absent from every class's component set for the same reason —
+	// `Instance.new` must not mint a part that is already claiming to be drawn.
+	//
+	// **Nothing may observe one either, and that is load-bearing rather than
+	// incidental.** `SyncRendered` writes the mark through
+	// `Store::GetUnobserved`, which deliberately does not advance
+	// `Store::ChangeVersion` — safe only because this rule means there is no
+	// second party whose change could be lost by the write going unreported.
+	// A caller that starts observing `Rendered` has to send that line back to
+	// `Store::GetMutable` in the same change.
 	//
 	// Carries a mark rather than being empty so that the sweep can find what has
 	// gone stale without a side table. See `SyncRendered`.
@@ -140,6 +148,88 @@ namespace engine::scene {
 		uint8_t Reserved[3] = {};
 	};
 
+	// What the tree looked like the last time the walk ran.
+	//
+	// The walk is O(descendants of `Workspace`) and each node costs three or
+	// four *random-access* lookups — `EachChild` through a `std::function`,
+	// `Get<Visual>`, then the tag — each one an alive check, a directory
+	// locate and a binary search over an archetype's id list. At ~300 nodes
+	// that measured 0.037 ms, the largest single item in `PreRender`, and it
+	// was paid in full on every frame of a scene where nothing had moved.
+	//
+	// So `SyncRendered` first folds a rolling hash of everything its answer
+	// depends on and compares it against this. Two linear column scans with
+	// no random lookups and no `std::function` decide whether the walk has
+	// anything to do.
+	//
+	// ## What the signature covers, which is the whole correctness argument
+	//
+	// | Folded in | Why it has to be |
+	// |---|---|
+	// | Which entity `WorkspaceOf` resolves to | It is the root the walk starts from |
+	// | `ecs::Hierarchy` parent, first child, next sibling, per row | The links `EachChild` descends |
+	// | The instance count | A destroyed row leaves the pass, which is also how a dangling link is caught |
+	// | Entity id in the `Visual` pass | `Set<Visual>` on an already-parented row changes the answer with no
+	// hierarchy change at all | | `Visual::Visible` | Read by the walk, and a script or the wire can toggle
+	// it without touching the tree |
+	//
+	// **A `Hierarchy`-only signature is unsafe** and is the mistake to refuse:
+	// it leaves a part that a script hid still drawing, and it leaves a part
+	// that gained its `Visual` after being parented never drawn. Dropping
+	// either `Visual` term turns a case in `scene/tests/Visibility.cpp` red,
+	// which is what makes this a check rather than a paragraph.
+	//
+	// **A memo is not a hook.** `scene/AGENTS.md` argues that `Rendered` is
+	// derived by a sweep rather than maintained at the point of every write,
+	// because ancestry is not local and a complete set of hooks would still
+	// have to walk a subtree. That argument survives untouched here: nothing
+	// is maintained incrementally, and the walk still runs in full whenever
+	// anything the answer depends on has moved. What is skipped is a walk
+	// whose output is already on the rows.
+	//
+	// ## Why a resource and not a static
+	//
+	// Two worlds exist and a world is ticked by whichever worker claimed it,
+	// so a `thread_local` would let two worlds share one stamp — the same
+	// argument `Visibility.cpp` makes about the walk's stack, except that this
+	// one carries meaning between calls and would therefore be wrong rather
+	// than merely shared.
+	//
+	// **Registered under an explicit name**, in `RegisterSceneComponents`,
+	// because a resource is keyed by a component id and an unregistered type
+	// gets one minted from the compiler's spelling — which `Store::Save` then
+	// refuses, taking out every snapshot of every world that has one.
+	// `client::DrawList` learned that the expensive way.
+	//
+	// @since v0.8
+	struct RenderedSignature {
+		// The fold of the last tree the walk was run against.
+		//
+		// **Serialised as zero, deliberately.** A world restored from a
+		// snapshot would otherwise carry a stamp that still matches a tree the
+		// walk has never actually been run against in this store — the rows
+		// are there, the tag is not necessarily right for them, and the sync it
+		// needs would be skipped. A loaded game would render wrong, once, in a
+		// way nothing else would explain. See `RegisterSceneComponents`, which
+		// writes nothing for the same reason `DrawList` does.
+		uint64_t Stamp = 0;
+
+		// Whether `Stamp` came from a real scan rather than from the initial
+		// zero.
+		//
+		// Without it a world whose tree genuinely folds to zero would be
+		// treated as already synced and would draw nothing, forever.
+		// `gui::Compiled::Fresh` is the same field for the same reason.
+		uint8_t Fresh = 0;
+
+		// Explicit padding, so the object representation holds no
+		// uninitialised bytes. Nothing is written for this type today, and
+		// naming the hole costs nothing and stops the day somebody gives it a
+		// plain registration from being a determinism failure reported a very
+		// long way from here.
+		uint8_t Reserved[7] = {};
+	};
+
 	// Brings `Rendered` in step with the tree.
 	//
 	// Adds the tag to every descendant of `Workspace` that carries a `Visual`
@@ -155,7 +245,21 @@ namespace engine::scene {
 	// called from inside iteration, exactly as any other `Set` or `Remove` is —
 	// but it is meant to be called between systems, where they apply at once.
 	//
-	// @param store The world to bring in step.
-	// @return How many entities carry `Rendered` when this returns.
+	// **Idempotence is what makes the early-out safe rather than merely
+	// cheap.** A second call on an unchanged world adds and removes nothing,
+	// so a frame that skips the walk leaves exactly the rows the walk would
+	// have left: no archetype changes, no `Mark` left set, and therefore not
+	// one snapshot byte different. That is what `just determinism` and
+	// `just replay-check` compare, and it is why they are unaffected by this.
+	//
+	// **It still runs for a world that is not ticking.** The early-out is a
+	// function of the tree rather than of the clock, so a suspended world an
+	// author drags a part into syncs on the very next `PreRender` — which is
+	// the property `## Where it runs` above exists to protect.
+	//
+	// @param store The world to bring in step. Gains a `RenderedSignature`
+	//        resource on its first call.
+	// @return How many entities carry `Rendered` when this returns, whether or
+	//         not this call walked anything.
 	size_t SyncRendered(ecs::Store &store);
 }

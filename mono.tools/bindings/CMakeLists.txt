@@ -15,6 +15,7 @@ add_executable(bindings app/main.cpp)
 target_link_libraries(bindings PRIVATE
 	Engine::core
 	Engine::ecs
+	Engine::gui
 	Engine::scene
 
 	# **Because `script` registers classes a script can name.** `Script`,

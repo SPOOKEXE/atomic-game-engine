@@ -12,6 +12,37 @@ Insert the NEWEST items to the front, so older are towards the back.
 If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
 
 ```
+### [_] D00027
+
+**The mirror flashes once per orbit, and it is a sign flip rather than a projection fault.**
+
+- `scene::AimSurfaceCameras` sets `facing = distance >= 0 ? 1 : -1` and points the reflected camera along `unit * facing`. That is correct on either side of a pane — a face can be looked at from behind and the reflection belongs on that side — and it is discontinuous *at* the plane.
+- **Measured, not inferred.** `scene/tests/SurfaceCameras.cpp` orbits the eye a full lap at 360 samples and records the worst single-step change. The field of view moves by 0.027 radians at worst; the camera's look vector moves by **exactly 2.0** at 1.588 radians, which is a 180° turn in one frame at precisely the plane crossing. Orbiting a pane centred on the origin crosses twice a lap.
+- **Skipping the crossing was tried and does not work.** Returning early leaves the camera at its previous transform, so the flip lands a frame later instead of not happening; the discontinuity belongs to the sign, not to when it is evaluated. There is no continuous path between facing -Z and facing +Z.
+- **What would fix it.** A pane seen edge-on subtends zero pixels, so the honest answer is that its surface renders *nothing* — disabling the `SurfaceView` rather than re-aiming its camera. That is a change to what a surface view means to the renderer, not to the arithmetic in `AimSurfaceCameras`.
+- The test asserts the current value rather than the desired one, so closing this fails it and forces the bound to be tightened in the same change.
+- **Reopen trigger: filed against v0.8 and ready now.** Nothing blocks it; it wants a decision about `SurfaceView` and a person to look at the result.
+
+### [_] D00026
+
+**`assets::Texture` is a format nothing writes and nothing uploads.**
+
+- v0.8 answered what an `AssetKind::Texture`'s bytes *are* — a header and the pixels a GPU wants — because the gap was never a missing decoder. What it did not do is either end of the pipe.
+- **The publishing end.** Nothing converts a PNG into one. That belongs in `mono.tools` and not in a game binary, which is the whole reason the runtime format is raw: a client that decoded PNGs would pay for a Huffman tree on the frame a texture streamed in.
+- **The upload end.** `render::InterfaceBatch` carries an unresolved `core::Name` and `InterfacePass::SetImageSource` is the hook; nothing supplies one, so an `ImageLabel` samples the atlas's white texel and draws a flat tinted rectangle. Visible on purpose, for the reason the missing-texture marker was: an image that drew nothing would look like the label was broken rather than like the image was missing.
+- **Reopen trigger: the interface pass verified on hardware.** The upload is the same device work the pass is, and doing it before the pass is known to draw would be debugging two things at once.
+
+### [CLOSED] D00025
+
+**`gui::Pick` tests an axis-aligned rectangle, so a rotated button clicks where it is not.**
+
+- Split out of `D00023` rather than left inside it, because the two close in different modules: that one is a *backend* emitting rotated geometry, and this one is `gui`'s own hit test, which no backend can fix.
+- `DrawCommand::Bounds` is the unrotated rectangle and `Rotation` sits beside it. `Pick` reads the first and ignores the second, so a rotated element draws in one place and answers a pointer in another.
+- **A rotated button that draws in one place and clicks in another is a bug people file twice**, which is why it is written down separately from the drawing half.
+- **Closed at v0.8, in the same change as `D00023`** — rotating the geometry without rotating the test would have made the mismatch visible rather than merely present.
+- **The point is turned into the element's space, not the rectangle into the screen's.** A rotated rectangle is not a rectangle and testing one needs a polygon; rotating the *point* back by the same angle makes the test the axis-aligned one it already was, exactly.
+- **The clip is deliberately still not rotated.** A scissor is axis-aligned on every backend there is, so an element rotated inside a clipped container is cut by an upright rectangle — which is what the painter does and what the hit test therefore has to agree with.
+
 ### [_] D00101
 
 - item 1
@@ -30,6 +61,57 @@ and for deleted marked items;
 ```
 
 ## Deferred Items
+
+### [CLOSED] D00023
+
+**A rotated `gui` element rotates its box and not its contents.**
+
+- `ui::PaintGui` draws a rotated `Rectangle` or `Outline` as a convex quad and draws `Image` and `Text` upright at the rotated rectangle's centre. `Element::Rotation` and `Resolved::AbsoluteRotation` are correct and are carried on every command; what is missing is a backend that uses them for the other two kinds.
+- **Why it stops there rather than being finished.** Rotating a glyph run means per-glyph quads, which imgui's `AddText` cannot emit — it walks the atlas and appends axis-aligned quads with no transform. Rotating a nine-slice means rotating each of the nine pieces individually with its own uv rectangle. Both are real work in the *backend*, and the backend that is going to matter is the batched quad pipeline `ROADMAP.md` schedules at L12, rather than this one.
+- **The hit test rotates with neither.** `gui::Pick` tests `DrawCommand::Bounds` as an axis-aligned rectangle, so a rotated button is clickable on its unrotated box. Stated because a rotated button that draws in one place and clicks in another is a bug people file twice.
+- **Closed at v0.8 by `render::InterfaceMesh`**, which is the pass this entry predicted: it emits its own vertices, so the rotation is applied to all four kinds in one place — `Push` turns each corner and every kind goes through `Push`.
+- **The pivot is the element's centre, not each quad's**, which is the one thing about rotating text that is easy to get wrong and unmistakable when it is: a per-quad pivot spins every letter on the spot and leaves the run in a straight line. Pinned by a case that rotates a two-glyph label and asserts the run goes *down* rather than across.
+- **`ui::PaintGui` is unchanged and still draws rotated contents upright**, which is now a difference between the two backends rather than a gap in both. It is the editor's, imgui cannot emit a transformed glyph run without a per-glyph path, and the backend that matters for a shipped game is the one that was fixed.
+- The hit test moved with it — see `D00025`, closed in the same change.
+
+### [CLOSED] D00022
+
+**A `SurfaceGui` and a `BillboardGui` lay out against a canvas whose 3D half nothing supplies.**
+
+- `gui::CanvasFor` gave a `SurfaceGui` its `CanvasSize` in pixels and ignored `SizingMode::PixelsPerStud`; it gave a `BillboardGui` the offset half of its `Size` and ignored the scale half. Everything under either laid out correctly *against that canvas* — what was missing was the number the canvas should have been.
+- **Closed at v0.8 by `render::ResolveSpatialCanvases`**, which is the shape this entry predicted and the same split `AdornmentGeometry` already makes one dimension up: `gui` is L7 `shared` and links neither `scene` nor a camera, `render` links both, and the multiplication went to the module with both operands.
+- **A component rather than `Surface::CanvasSize`, which is where the entry's own suggestion was wrong.** Writing the resolved pixels back into the authored field clobbers a saved property — toggle `Sizing` back to `FixedSize` and the canvas an author typed is gone, replaced by whatever the last pixels-per-stud frame computed. `gui::SpatialCanvas` is a derived component beside `Canvas` and `Resolved`: nothing authors it, nothing replicates it, and two hosts with different viewports are *supposed* to disagree about it.
+- **Absence is the interface, and it does more work than the value.** A collector nothing can measure — a `SurfaceGui` on a `Folder`, a billboard in a world with no live camera, a headless test — simply has no component, and `CanvasFor` then uses the authored pixels, which is exactly the behaviour that was there before. So the feature is additive: no caller had to change to keep working, and the one that did not call it kept the old answer rather than a zero.
+- **Stale ones are removed, which is the half that is cheap to skip and expensive to skip.** A resolved canvas nobody refreshes keeps working — it keeps the size of the last frame that could measure it — so a `SurfaceGui` switched back to `FixedSize`, or one whose adornee was deleted, would look right until somebody moved the part it is no longer attached to. Pinned by a case that resolves, changes the mode, and asserts the component is gone.
+- **Both hosts call it, and the studio calls it per panel.** A viewport panel *is* a canvas with its own camera, so two panels looking at one world from two distances give one billboard two sizes — which is correct, and is the reason this is resolved at the draw site rather than once for the world.
+- Nine cases in `render/tests/SpatialCanvas.cpp`, including one that runs the whole seam: `render` writes the component, `gui::Layout` reads it, and a frame inside a pixels-per-stud surface lands on the resolved rectangle. Neither module can assert that alone.
+
+### [PARTIAL] D00021
+
+**`AutomaticSize` is declared, saved, bound and read by nothing.** The container half closed at v0.8; the text half is still open and is the harder one.
+
+- `Element::Automatic` was a real property with a real enum that reached the layout pass and got ignored. An author setting `AutomaticSize = "Y"` got the size their `UDim2` resolved to.
+- **Why it is declared anyway, which is the part that needs defending.** The roadmap's rule is that a class registered with nothing behind it is worse than no class — "a feature that looks present and is not". A *property* is a weaker case than a class and the trade came out the other way: the field crosses a save file and both bindings, so adding it later is a format change, and adding it now costs a byte. What is not acceptable is leaving it undocumented, which is what this entry is.
+- **The container half is done**, and it is the second phase this entry predicted: `gui::ContentExtent` measures a node's children against a basis with the growing axes zeroed, and `Measure` adds the padding back and then constrains. A stack sums along its fill axis and takes the maximum across it, a grid counts its lines, and a container with neither grows to the far edge of the furthest child. Nine cases in `gui/tests/Layout.cpp` carry it.
+- **The circularity got Roblox's answer, stated rather than inherited.** A child sized `{1, 0}` inside a parent sized by its content is asking to be as wide as the thing whose width it is deciding, and there is no fixed point. The growing axes resolve to zero for everything inside, so such a child measures as empty and then fills the grown parent when it is placed. Pinned by a case that asserts *both* halves, because either alone is satisfied by a different bug.
+- **The extent is accumulated, not collected.** A sum, a maximum and a count are all single-pass, so an automatically sized container allocates nothing per frame — which is what keeps this off the layout benchmark for every tree that does not use it. The cost it does add is real and bounded: measuring is linear in the subtree and placing measures again, so a fully automatic tree of *N* nodes and depth *d* is O(N·d) rather than O(N). Only elements that set the property pay it.
+- **Text is a separate and harder half, and the reason sharpened.** The obvious reading — "it needs real glyph metrics, and `render::GlyphAtlas` now has them" — is wrong, and wrong in a way worth writing down. `gui` is L7 and `render` is L12, so the metrics would have to arrive through an injected measurer; and the moment they do, a client with an atlas lays a tree out differently from a headless server, a studio and a test that do not. `Layout.hpp`'s stated invariant is not that the measurement is exact but that **there is one answer**. So this half needs metrics that are *shared* — a font table below L7, or the glyph advances themselves as engine data — and not merely metrics that exist.
+- **Meanwhile a labelled element refuses to grow rather than approximating**, which is the branch that keeps the failure loud: growing to the estimate makes a box the text spills out of, and measuring the (absent) children of a `TextLabel` would collapse it to nothing.
+- **Reopen trigger for what is left: the first author who sets `AutomaticSize` on a `TextLabel` and files it as a bug.** That is now a documented refusal rather than a silent no-op, so it will arrive as a question rather than as a mystery.
+
+### [CLOSED] D00020
+
+**`gui` text is a `core::Name`, and `core::Name` never releases a string.**
+
+- `Label::Text`, `Picture::Image` and `Entry::PlaceholderText` all interned. That is what made each a `PropertyType::Name` — saved as text, sent as text, readable from both bindings, editable in the properties panel — with no new property type and no new wire form. `ecs::InstanceName` makes the same trade for the same reasons and still does.
+- **The cost, stated rather than discovered.** Text that changes every frame interned a new string every frame, forever, plus the process-wide registry's mutex on every write. `label.Text = tostring(score)` at 60 Hz was an unbounded leak and a lock in the frame loop.
+- **Closed at v0.8 by `ecs::PropertyType::String`**, which is exactly the shape this entry predicted and very nearly the size: the type, a case in `game::Values` at six sites, a widget in the properties panel, a case in each binding, two in the control surface and three in the manifest generator. Sixteen sites, and the compiler found every one of them — which is the dividend of `PropertyType` being a closed list that everything switches over exhaustively.
+- **`Label::Text` and `Entry::PlaceholderText` are `std::string`; `Picture::Image` is still a `core::Name`, and that split is the actual decision.** An asset id is one of the bounded set of things a game shipped, so interning it buys an integer comparison everywhere downstream. A score is computed. The rule is short enough to apply without thinking about it: **a value the game picks from a set is a `Name`; a value the game computes is a `String`.** Both halves are pinned — one case asserts a thousand distinct labels move `core::Name::Count()` by zero, the other asserts a fresh image name still moves it.
+- **The storage change cost nothing that was not already paid.** `Label` and `Entry` stop being trivially copyable, so they need written serialisers — which they already had, because a `core::Name`'s id is process-local and could never have been memcpy'd to a file either. `ecs::Column`'s non-trivial path has existed since v0.2 and this is its first user.
+- **The one genuinely sharp edge, and it bit in a test before it could bite anywhere else.** Every binding reads a property into a shared `alignas(16) unsigned char bytes[...]` buffer and lets the descriptor fill it. A `String` getter *assigns* rather than filling bytes, and assigning a `std::string` into uninitialised storage is undefined behaviour — so all four callers take an explicit branch before the buffer, and the `PushValue`/`ToJs` switches refuse the type loudly rather than handling it. `gui/tests/Compile.cpp` walks *every* declared property and segfaulted on the first run, which is the failure arriving where it is cheap.
+- **Nothing an author can see changed.** `engine.d.luau` and `engine.d.ts` are byte-identical across the change: both said `string` before and after, because whether the engine interns text is a storage concern and a type position should not leak one. A game file is unchanged too — `TypeTag` writes `string` for both and the schema check in `Game.cpp` now compares tags rather than enum members, so moving a property between the two is not a format break.
+- **Measured, since it is a per-frame path.** `DrawCommand::Text` is owned as well, which makes a draw command non-trivial — but the compiled list is rebuilt only when the tree's hash moves, and `Compiled::Rebuild · 1k elements` went 136 → 139 ns per element, inside the run-to-run noise. The hash now folds every byte of a label rather than an interned id, which is the one real cost and is the one that has to be paid: a score going from 19 to 91 has to be seen to have changed.
+- **`examples/Interface.luau` keeps its ten-hertz clock**, and its comment is unchanged because it never cited this: the throttle is about the compiled-list cache doing something measurable, and that reason survives the leak going away.
 
 ### [_] D00019
 

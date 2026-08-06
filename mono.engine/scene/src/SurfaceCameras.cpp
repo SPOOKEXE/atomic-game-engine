@@ -92,6 +92,17 @@ namespace engine::scene {
 		// either; it is the geometry, not the parameterisation.
 		constexpr float FIT_MAXIMUM = 3.0f;
 
+		// The closest a corner may be treated as being, in studs.
+		//
+		// **A floor rather than a rejection**, for the reason `FitFieldOfView`
+		// gives at the clamp: a corner at zero depth needs an infinite frustum,
+		// and the useful answer is "the widest one" arrived at *continuously*.
+		// Small enough that a corner this close is already asking for more than
+		// `FIT_MAXIMUM` allows, so the floor never changes an answer that was
+		// not already saturated.
+		constexpr float MINIMUM_DEPTH = 1e-3f;
+
+
 		// And the narrowest, so a distant pane still has a frustum with a shape.
 		constexpr float FIT_MINIMUM = 0.02f;
 
@@ -192,12 +203,27 @@ namespace engine::scene {
 					// the viewer approaches the plane of the pane: the reflected
 					// camera approaches it too, and a corner at ninety degrees is
 					// the 180° case arriving. Nothing finite covers that, so the
-					// widest frustum is the answer rather than a division that
-					// produces one.
-					const float depth = toCorner.Dot(forward);
-					if (!(depth > 1e-4f)) {
-						return FIT_MAXIMUM;
-					}
+					// widest frustum is the answer.
+					//
+					// **Clamped rather than returned early, and that is the whole
+					// of a bug that read as the mirror flashing.** This used to
+					// bail to `FIT_MAXIMUM` the instant one corner reached zero
+					// depth, which makes the fit a *step function*: orbiting the
+					// camera at a constant distance sweeps the reflected camera
+					// toward the pane's plane, a corner crosses the threshold,
+					// and the field of view jumps from a fitted half-radian to
+					// 172° between one frame and the next — then back. The
+					// projection was never wrong; the fit was discontinuous, and
+					// a discontinuity once per orbit is exactly what a flash is.
+					//
+					// A floor on the depth is continuous instead: as a corner
+					// approaches the plane the tangent grows without bound and
+					// the clamp at the bottom of this function saturates it at
+					// `FIT_MAXIMUM` smoothly. A corner genuinely *behind* the
+					// camera has a negative depth and lands on the same floor,
+					// so it reaches the same answer from the same side rather
+					// than by a different path.
+					const float depth = std::max(toCorner.Dot(forward), MINIMUM_DEPTH);
 
 					// The vertical constraint directly, and the horizontal one
 					// divided by the aspect — because `ResolveCamera` builds a

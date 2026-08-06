@@ -29,6 +29,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::audio {
@@ -162,6 +163,21 @@ namespace engine::audio {
 		// allocates nothing.
 		std::vector<SampleBuffer> Scratch;
 		std::vector<NodeId> ScratchFor;
+
+		// Which scratch slot each node's id occupies.
+		//
+		// **Because the alternative was a linear scan of `ScratchFor`, per
+		// input, per node, per segment.** Summing what is wired into a node
+		// means finding each input's scratch, and searching for it made the mix
+		// quadratic in the node count — an output with sixty-four inputs over a
+		// hundred-and-thirty-node graph is eight thousand comparisons to move
+		// sixty-four buffers, and a block split by commands paid all of it again
+		// per piece.
+		//
+		// Rebuilt only alongside `ScratchFor`, which is to say only when the
+		// node set changes — far less often than a block is rendered, and never
+		// on the device thread's critical path for an unchanged graph.
+		std::unordered_map<uint32_t, size_t> SlotOfNode;
 
 		// Reused across renders for the same reason.
 		std::vector<Command> Taken;

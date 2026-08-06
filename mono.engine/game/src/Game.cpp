@@ -2,6 +2,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
@@ -330,7 +331,13 @@ namespace engine::game {
 				PropertyType type = descriptor->Type;
 				if (child->HasAttribute("type")) {
 					PropertyType declared = PropertyType::Opaque;
-					if (TypeFromTag(child->Attribute("type"), declared) && declared != descriptor->Type) {
+					// **Compared as tags rather than as enum members.** `Name` and
+					// `String` are both written `string`, because whether the
+					// engine interns text is a storage decision and a file holds
+					// text either way — so moving a property between them must
+					// not turn every saved game into a load error.
+					if (TypeFromTag(child->Attribute("type"), declared) &&
+						TypeTag(declared) != TypeTag(descriptor->Type)) {
 						error = "'" + std::string(info.Name.Text()) + "." + std::string(property.Text()) +
 								"' is a " + std::string(TypeTag(descriptor->Type)) + " and the file has a " +
 								std::string(TypeTag(declared));
@@ -652,6 +659,13 @@ namespace engine::game {
 		// anyway. Naming both is what makes the order impossible to get wrong
 		// from outside.
 		scene::RegisterSceneClasses();
+
+		// **The 2D tree, because a game file carries one.** A server authors a
+		// `ScreenGui` and saves it; a loader that had not registered the class
+		// would refuse a perfectly good file with "no class named ScreenGui",
+		// which reads as a corrupt save rather than as a missing registration.
+		gui::RegisterGuiClasses();
+
 		script::ScriptClass();
 	}
 

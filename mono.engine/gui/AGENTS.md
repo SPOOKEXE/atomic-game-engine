@@ -1,0 +1,192 @@
+# gui — module invariants
+
+L7, `shared` tier. What a 2D thing in a *game* is: the class tree, the layout
+arithmetic, the compiled draw list and the input routing. `scene` answers the
+same question for a part, and most of what follows is that module's argument
+one dimension down.
+
+## This is not `mono.engine/ui`, and the two must not converge
+
+`ui` is Dear ImGui at L12 `client` — the **editor's** toolkit, the only target
+that links imgui, and nothing a game ships touches it. This is the widget set a
+game builds its own interface out of, and it is `shared` because a server
+authors a `ScreenGui` and replicates it.
+
+They coexist for a version deliberately. `ui/AGENTS.md` gives the reason: the
+studio keeps Dear ImGui until this tree can draw a property grid, because an
+editor half on each is two widget sets and the rule against two ways to do one
+job applies hardest to the thing you look at all day.
+
+**The one thing they share is the glyph atlas**, and the edge that carries it
+runs `ui` → `gui` and never back. `ui::PaintGui` takes a `gui::DrawList` and an
+`ImDrawList` and nothing else — no store, no class table, no tree. A reviewer
+should refuse any include of an `engine/ui/` header from this module, and the
+tier check will not catch it, because a `shared` module including a `client`
+one fails at the link and not at the include.
+
+## `shared`, and the tier check only half covers it
+
+A `shared` module may not link a `client` one, so the build catches
+`Engine::render` or `Engine::ui` on the link line. What it cannot catch is the
+*shape*: a font handle, a texture id, a packed RGBA8 colour, a field sized to
+match a vertex layout. Every one of those compiles and passes the tier check.
+
+The test to apply is `scene/AGENTS.md`'s: **could a server with no graphics
+stack installed produce this value, and mean it?** A `Rect` in canvas pixels
+yes; an `ImTextureID` no. `DrawCommand::Image` is a `core::Name` for exactly
+that reason, and resolving it to a texture is the backend's job.
+
+## What it deliberately does not depend on, and cannot be made to
+
+`core` and `ecs` are the whole dependency list. Both refusals below are
+`shared`-to-`shared`, so **the build cannot catch either** — by rule 6 that
+makes them conventions, and this is where they are written down.
+
+- **`scene`.** It looks necessary twice and is not. `SurfaceGui::Face` wants
+  `NormalId`, which is a six-member enum registered by name — `gui::Face`
+  declares the same six in the same order and `gui/tests/Enums.cpp` pins them,
+  which is the arrangement `DefaultMaterial`'s "Plastic" already uses. And a
+  surface gui's canvas wants the adornee's stud extent, which is `D00022`: it
+  belongs to whoever draws one and has both operands, not here.
+- **`world`.** Legal by height and still wrong, for the reason `scene` refuses
+  it: a component set is data, and a data module that knows about universes and
+  ticking is one the layout tests cannot use without standing a world up.
+  `Layout` and `Compiled::Rebuild` take an `ecs::Store &` and nothing larger.
+
+## `Resolved` is the only derived component, and nothing may keep a second copy
+
+One pass writes it, parent before child. The draw list, the hit test and a
+script asking `AbsoluteSize` all read that component with a query.
+
+A cached rectangle anywhere else is the stale-cache bug `scene::Bounds` refuses
+in as many words, and here it has a specific failure: the compiled list and the
+hit test would disagree about where a button is, which reads as "clicking is
+off by a bit" and is close to undebuggable from the outside.
+
+**`Rendered` is cleared by a sweep and never maintained at the write.**
+Ancestry is not local — reparenting one frame moves everything beneath it — and
+the alternative is hooking `SetParent`, the explorer's drag, the loader and
+`DestroyInstance`, where missing one gives an element that draws after being
+detached. `scene::Visibility` reached the same conclusion for the same reason.
+
+## The signature covers exactly what the compile reads
+
+`Compile.hpp` carries the table. The rule it states is the load-bearing one: a
+field added to a component has to be added to the fold in `Compile.cpp`, and
+the failure if it is not is a UI one edit stale — a panel that updates on the
+*next* unrelated change.
+
+That is a rule the build cannot check, so `gui/tests/Compile.cpp` checks it:
+it walks every property the class tree declares, writes each one, and asserts
+the signature moved. **A property added without a fold fails that test.** Do
+not weaken it by listing property names in the test — the walk is what makes it
+cover things nobody thought to list.
+
+The direction matters and only one way round is safe. A collision keeps a list
+the world has moved on from; a spurious change costs one rebuild nobody sees.
+Lean the second way, always.
+
+## Enums are stored as ordinals, so their order is the save format
+
+Every enum in `Enums.hpp` sits in a trivially-copied component as its ordinal.
+Reordering one loads cleanly and lays everything out somewhere plausible, and
+nothing at load time could catch it.
+
+`gui/tests/Enums.cpp` pins every member of every set, in order. Two of them are
+worth knowing about before touching anything:
+
+- `TextYAlignment` is `Top, Center, Bottom` and `TextXAlignment` is
+  `Left, Center, Right`. Not the same order, deliberately — Roblox's numbering.
+- `ScrollingDirection` starts at **one**: it is a bit pair, not a counter.
+  `Classes.cpp`'s `EnumOrigin` applies the offset in both directions.
+
+## The class tree is Roblox's, including the parts that look wrong
+
+`GuiBase` and `GuiBase2d` add no components. Do not collapse them: `GuiBase3d`
+and the adornments hang off `GuiBase` when they arrive, and a flattened tree
+would have to grow the split back at exactly the point somebody is adding a
+feature.
+
+**A `LayerCollector` is not a `GuiObject`.** That is the relation everybody
+assumes and Roblox does not have. A `ScreenGui` has no `Position` and no
+`BackgroundColor3`; giving it `Element` would make the layout resolve a `UDim2`
+against a parent it does not have.
+
+**`Text` is declared on three classes rather than on a shared base**, because
+there is no base to put it on — `TextButton` derives from `GuiButton`,
+`TextLabel` from `GuiLabel`, `TextBox` from `GuiObject`. A synthetic
+"TextThing" base would be a class no script has heard of appearing in `:IsA`
+and in the bindings manifest, which is the worse trade.
+
+## Layout is one pass and must stay one
+
+A `UDim2` needs a parent rectangle, so resolving one is inherently top-down;
+that is the single place the tree's shape is unavoidable, and everything
+downstream wants a flat list.
+
+Two things keep it to one pass and both are easy to break:
+
+- **`Element::Rotation` does not affect layout.** A rotated child whose
+  bounding box fed back into a list layout would need the layout to run twice
+  to settle. Roblox does the same.
+- **`Measure` is separate from `Place`** only because a list or a grid has to
+  know how big a child is before deciding where it goes. Do not let `Measure`
+  grow side effects; it is called speculatively.
+
+`AutomaticSize` is the one property that genuinely needs a second phase, which
+is why it is declared and not implemented. `D00021` carries the argument.
+
+## Text is measured with a constant, and there is exactly one answer
+
+`AVERAGE_ADVANCE` in `Layout.hpp` is a fraction of an em, and `TextScaled`
+fits against it. The exact answer needs a glyph atlas, which is `client` and
+cannot be here.
+
+**A backend must draw at `Resolved::TextSize` rather than measuring again.**
+Not because the estimate is good — because a backend with real metrics would
+disagree with the hit test and with what a headless test asserts, and two
+answers is the failure this module is arranged to avoid everywhere else.
+
+## Input produces events; it does not fire signals
+
+`script::Signals` is L9 and this is L7, so nothing here can fire a
+`.Activated`. `Router::Update` returns a list of `GuiEvent` and whoever owns
+the scripting layer turns each into a signal.
+
+That is not a workaround. An editor driving a UI with no scripts running wants
+the hit testing and none of the dispatch, and a test wants to assert on the
+events rather than on what a Luau handler did with them.
+
+Two rules inside it are worth keeping:
+
+- **`InputEnded` goes to where the press began, not where the release
+  happened.** That is what makes dragging off a button and back one
+  interaction. A release routed by position leaves the pressed button stuck
+  looking pressed.
+- **`MouseLeave` fires before `MouseEnter`.** A handler that moves something on
+  leave has to run before the one reacting to the arrival, or a swap between
+  two adjacent buttons produces an enter against state the leave is about to
+  undo.
+
+## The hover is fed back and is one frame late, deliberately
+
+`CompileRequest::Hovered` is an *input* to the compile, and the compile is what
+produces the list the hit test reads. Feeding this frame's hover into this
+frame's compile would make it depend on its own output.
+
+So a button appearing under a stationary pointer lights up on the frame after
+it appears. One frame, and the alternative is a cycle.
+
+**The lit colour never goes back into `Background::Color`.** A hover written
+into the component would make `BackgroundColor3` read differently depending on
+where the mouse is, which is a script bug nobody could see from the script.
+
+## Text and image names intern, and that has a stated cost
+
+`Label::Text`, `Picture::Image` and `Entry::PlaceholderText` are `core::Name`,
+so text that changes every frame interns a new string every frame and takes the
+process-wide registry's mutex doing it. `D00020` carries the fix and it is a
+change to `ecs`, not to this module.
+
+Until then: an example that writes text per frame is teaching the wrong habit.
+`examples/Interface.luau` writes at ten hertz and says why.

@@ -574,7 +574,17 @@ namespace engine::world {
 		// --- 3. the only parallel step ---
 		Ticking = true;
 
-		if (Settings_.Mode == ExecutionMode::WorldParallel && ActiveList.size() > 1) {
+		// **The flag is read here as well as inside `Jobs::For`, and one is not
+		// enough.** Forcing the dispatch inline would already put every world on
+		// this thread — but this branch would still report an aggregate
+		// `worlds (workers)` bar *beside* the real spans that are now being
+		// kept, and the flame graph would count the tick twice. A measurement
+		// instrument that makes the picture wrong in a new way is worse than no
+		// instrument, so the shape goes serial with the execution.
+		const bool parallel =
+			Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute();
+
+		if (parallel && ActiveList.size() > 1) {
 			// Grain of one: a world is the unit of work, and there is no
 			// smaller division of it. Whichever worker claims a world runs it,
 			// which is why the store rebinds every tick.

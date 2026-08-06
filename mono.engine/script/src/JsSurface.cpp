@@ -1148,6 +1148,65 @@ namespace engine::script {
 		return firstError;
 	}
 
+	std::string PumpJsGuiEvents(JSContext *context, std::span<const gui::GuiEvent> events) {
+		if (events.empty()) {
+			return {};
+		}
+
+		JsContext &bound = JsOf(context);
+
+		std::string firstError;
+		const auto note = [&](std::string message) {
+			if (firstError.empty()) {
+				firstError = std::move(message);
+			}
+		};
+
+		for (const gui::GuiEvent &event : events) {
+			// The Luau pump's reason, unchanged: a handler earlier in this loop
+			// may have destroyed what a later one is about, and a close button
+			// is the ordinary case rather than an edge one.
+			if (!bound.World->Alive(event.Instance)) {
+				continue;
+			}
+
+			switch (event.Kind) {
+			case gui::EventKind::MouseEnter:
+			case gui::EventKind::MouseLeave:
+			case gui::EventKind::MouseMoved: {
+				const SignalKind kind = event.Kind == gui::EventKind::MouseEnter
+											? SignalKind::GuiMouseEnter
+											: event.Kind == gui::EventKind::MouseLeave
+												  ? SignalKind::GuiMouseLeave
+												  : SignalKind::GuiMouseMoved;
+
+				JSValue arguments[2] = {
+					JS_NewFloat64(context, static_cast<double>(event.Position.X)),
+					JS_NewFloat64(context, static_cast<double>(event.Position.Y)),
+				};
+				note(FireJsSignal(context, kind, event.Instance, 2, arguments));
+				JS_FreeValue(context, arguments[0]);
+				JS_FreeValue(context, arguments[1]);
+				break;
+			}
+
+			case gui::EventKind::InputBegan:
+				note(FireJsSignal(context, SignalKind::GuiInputBegan, event.Instance, 0, nullptr));
+				break;
+
+			case gui::EventKind::InputEnded:
+				note(FireJsSignal(context, SignalKind::GuiInputEnded, event.Instance, 0, nullptr));
+				break;
+
+			case gui::EventKind::Activated:
+				note(FireJsSignal(context, SignalKind::GuiActivated, event.Instance, 0, nullptr));
+				break;
+			}
+		}
+
+		return firstError;
+	}
+
 	std::string PumpJsTasks(JSContext *context) {
 		JsContext &bound = JsOf(context);
 		std::string firstError;
@@ -1256,6 +1315,17 @@ namespace engine::script {
 			JS_CGETSET_DEF("DescendantAdded", InstanceTreeSignal<SignalKind::DescendantAdded>, nullptr),
 			JS_CGETSET_DEF("DescendantRemoving", InstanceTreeSignal<SignalKind::DescendantRemoving>, nullptr),
 			JS_CGETSET_DEF("AncestryChanged", InstanceTreeSignal<SignalKind::AncestryChanged>, nullptr),
+
+			// The 2D tree's input. Same template, because a gui signal is a
+			// handle onto `SignalTable` exactly as a tree signal is — what
+			// differs is only who records it, and that is the pump's business
+			// rather than this getter's.
+			JS_CGETSET_DEF("Activated", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
+			JS_CGETSET_DEF("InputBegan", InstanceTreeSignal<SignalKind::GuiInputBegan>, nullptr),
+			JS_CGETSET_DEF("InputEnded", InstanceTreeSignal<SignalKind::GuiInputEnded>, nullptr),
+			JS_CGETSET_DEF("MouseEnter", InstanceTreeSignal<SignalKind::GuiMouseEnter>, nullptr),
+			JS_CGETSET_DEF("MouseLeave", InstanceTreeSignal<SignalKind::GuiMouseLeave>, nullptr),
+			JS_CGETSET_DEF("MouseMoved", InstanceTreeSignal<SignalKind::GuiMouseMoved>, nullptr),
 		};
 		// **`std::size`, not a number somebody has to remember.** This read
 		// `10` while the list held sixteen, so the last six — including

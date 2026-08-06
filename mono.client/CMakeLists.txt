@@ -14,6 +14,10 @@ mono_add_library(client
 		Engine::ecs
 		Engine::world
 		Engine::input
+		# L7, `shared`. The tree a shipped client draws its own interface from.
+		# `Engine::ui` is the editor's toolkit and is deliberately absent.
+		Engine::gui
+
 		Engine::render
 
 		# L7, `shared`. The component set both programs share: the demo world is

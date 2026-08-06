@@ -5,10 +5,12 @@
 #include <engine/ecs/Enums.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
@@ -88,11 +90,37 @@ namespace engine::examples {
 	}
 
 	bool LoadScene(Store &store, Scheduler &scheduler, const std::string &path, std::string &error) {
-		// The class tree a script names, and this module's own components for the
-		// C++ path. A script builds out of `Part`; nothing it touches is
+		// The class trees a script names, and this module's own components for
+		// the C++ path. A script builds out of `Part`; nothing it touches is
 		// registered here.
 		scene::PartClass();
+
+		// **Both trees, because there are two and a scene may use either.**
+		// `Interface.luau` is built entirely out of `ScreenGui` and `Frame` and
+		// touches no `Part` at all — so registering only the 3D tree made a
+		// shipped example unloadable through the one entry point every program
+		// shares, with "'ScreenGui' is not a registered class" as the whole
+		// diagnosis. It loaded in the editor because `Editor::NewGame`
+		// registers the gui classes on its own path, which is exactly the shape
+		// of gap that survives: it works everywhere somebody looked.
+		//
+		// Idempotent, and the cost of a scene that uses neither is one
+		// already-registered check.
+		gui::RegisterGuiClasses();
+
 		RegisterExampleComponents();
+
+		// **The service instances, not just the classes above.** A scene that
+		// parents a `ScreenGui` into `StarterGui` needs one to exist, and
+		// registering the class only makes the name resolvable — `GetService`
+		// looks for a *root* of that name and there was none, so a scene got
+		// "'StarterGui' is not a service this engine provides" from a loader
+		// that had just registered the class.
+		//
+		// Idempotent, which is what lets it sit beside the registrations rather
+		// than behind a check: a world that came out of a file already has its
+		// nine roots and this leaves them alone.
+		scene::InstallServices(store);
 
 		// The extension picks the VM. `Rings.luau` and `Rings.js` build the
 		// same world through the same bindings, and this loader never learns

@@ -24,6 +24,9 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Rect.hpp>
+#include <engine/core/types/UDim.hpp>
+#include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -70,6 +73,14 @@ namespace engine::game {
 		// `ecs::EnumTable` on the way in.
 		core::Name Name;
 
+		// A `PropertyType::String` value.
+		//
+		// **The one field here that owns an allocation**, which is the whole
+		// point of the type: a `Name` is a shared id into a registry that never
+		// releases, and text a game computes has to be able to go away. See
+		// `ecs::PropertyType::String`.
+		std::string String;
+
 		// A handle within one world, meaningless outside it. A document turns
 		// this into its own local id; see `Game.hpp`.
 		ecs::Entity Reference;
@@ -82,6 +93,18 @@ namespace engine::game {
 
 		// A `PropertyType::Color3` value.
 		core::Color3 Color3;
+
+		// A `PropertyType::Vector2` value.
+		core::Vector2 Vector2;
+
+		// A `PropertyType::UDim` value.
+		core::UDim UDim;
+
+		// A `PropertyType::UDim2` value.
+		core::UDim2 UDim2;
+
+		// A `PropertyType::Rect` value.
+		core::Rect Rect;
 	};
 
 	// Reads one property off an instance.
@@ -172,8 +195,16 @@ namespace engine::game {
 
 	// The `PropertyType` a document's tag names.
 	//
+	// **Not the inverse of `TypeTag`, on purpose.** `Name` and `String` are both
+	// written `string`, so this answers `Name` for both — whether the engine
+	// interns a value is a storage decision and a file holds text either way. A
+	// caller checking a file's tag against a schema must therefore compare
+	// *tags* rather than the types they map back to, which is what `Game.cpp`
+	// does; comparing the types would reject every `String` property in every
+	// file ever written.
+	//
 	// @param tag  The tag, as `TypeTag` wrote it.
-	// @param out  Filled in on success.
+	// @param out  Filled in on success. `string` yields `Name`.
 	// @return `false` when this build has no such type.
 	bool TypeFromTag(std::string_view tag, ecs::PropertyType &out);
 }

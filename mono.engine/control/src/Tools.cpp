@@ -66,9 +66,22 @@ namespace engine::control {
 		// point of this surface is that somebody who has never seen the engine
 		// can read the reply, and `{"X":0,"Y":5,"Z":0}` needs no schema.
 		json ReadProperty(Store &store, ecs::Entity instance, const PropertyDescriptor &property) {
+			// **Before the shared buffer**, because a `PropertyType::String`
+			// getter assigns into its destination rather than filling bytes —
+			// and assigning a `std::string` into uninitialised storage is
+			// undefined behaviour. Both script bindings take the same exception
+			// in the same shape.
+			if (property.Type == PropertyType::String) {
+				std::string text;
+				if (!store.GetProperty(instance, property, &text, sizeof(text))) {
+					return nullptr;
+				}
+				return text;
+			}
+
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 			if (property.Size > sizeof(bytes) ||
-				!store.GetProperty(instance, property.Name, bytes, property.Size)) {
+				!store.GetProperty(instance, property, bytes, property.Size)) {
 				return nullptr;
 			}
 
@@ -86,6 +99,9 @@ namespace engine::control {
 			case PropertyType::Name:
 			case PropertyType::Enum:
 				return std::string(reinterpret_cast<const core::Name *>(bytes)->Text());
+			case PropertyType::String:
+				// Never reached — served by the branch above the buffer.
+				return nullptr;
 			case PropertyType::Vector3: {
 				const auto &value = *reinterpret_cast<const core::Vector3 *>(bytes);
 				return json{{"X", value.X}, {"Y", value.Y}, {"Z", value.Z}};
@@ -99,6 +115,31 @@ namespace engine::control {
 				return json{
 					{"Position",
 					 json{{"X", value.Position.X}, {"Y", value.Position.Y}, {"Z", value.Position.Z}}},
+				};
+			}
+			// Named numbers, same rule as `Vector3` above: the reply is for
+			// somebody who has never seen the engine, so `{"Scale":0.5,
+			// "Offset":-8}` needs no schema where `[0.5,-8]` would.
+			case PropertyType::Vector2: {
+				const auto &value = *reinterpret_cast<const core::Vector2 *>(bytes);
+				return json{{"X", value.X}, {"Y", value.Y}};
+			}
+			case PropertyType::UDim: {
+				const auto &value = *reinterpret_cast<const core::UDim *>(bytes);
+				return json{{"Scale", value.Scale}, {"Offset", value.Offset}};
+			}
+			case PropertyType::UDim2: {
+				const auto &value = *reinterpret_cast<const core::UDim2 *>(bytes);
+				return json{
+					{"X", json{{"Scale", value.X.Scale}, {"Offset", value.X.Offset}}},
+					{"Y", json{{"Scale", value.Y.Scale}, {"Offset", value.Y.Offset}}},
+				};
+			}
+			case PropertyType::Rect: {
+				const auto &value = *reinterpret_cast<const core::Rect *>(bytes);
+				return json{
+					{"Min", json{{"X", value.Min.X}, {"Y", value.Min.Y}}},
+					{"Max", json{{"X", value.Max.X}, {"Y", value.Max.Y}}},
 				};
 			}
 			case PropertyType::Reference:
@@ -209,6 +250,21 @@ namespace engine::control {
 			const json &value,
 			std::string &failure
 		) {
+			// The write half of the read path's exception — see `ReadProperty`.
+			if (property.Type == PropertyType::String) {
+				if (!value.is_string()) {
+					failure = "that property takes a string";
+					return false;
+				}
+
+				const std::string text = value.get<std::string>();
+				if (!store.SetProperty(instance, property, &text, sizeof(text))) {
+					failure = "the world refused the write — it may be running or a replica";
+					return false;
+				}
+				return true;
+			}
+
 			// Sized from the descriptor, exactly as the script bindings are, so
 			// this cannot be the place a size mismatch is introduced.
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
@@ -247,6 +303,10 @@ namespace engine::control {
 				*reinterpret_cast<core::Name *>(bytes) = core::Name(text.c_str());
 				break;
 			}
+			case PropertyType::String:
+				// Never reached — served by the branch above the buffer.
+				failure = "a string property is written through its own path";
+				return false;
 			case PropertyType::Vector3:
 				*reinterpret_cast<core::Vector3 *>(bytes) = core::Vector3{
 					number(value.value("X", json(0.0)), 0.0f),
@@ -270,13 +330,52 @@ namespace engine::control {
 				}};
 				break;
 			}
+			case PropertyType::Vector2:
+				*reinterpret_cast<core::Vector2 *>(bytes) = core::Vector2{
+					number(value.value("X", json(0.0)), 0.0f),
+					number(value.value("Y", json(0.0)), 0.0f),
+				};
+				break;
+			case PropertyType::UDim:
+				*reinterpret_cast<core::UDim *>(bytes) = core::UDim{
+					number(value.value("Scale", json(0.0)), 0.0f),
+					number(value.value("Offset", json(0.0)), 0.0f),
+				};
+				break;
+			case PropertyType::UDim2: {
+				// **Missing axes default to zero rather than to what is
+				// already there.** A caller sending only `{"X":...}` is
+				// setting a size, and a half-write that kept the old Y would
+				// be a value nobody authored — the read-modify-write belongs
+				// in the caller, which can see both halves.
+				const json x = value.value("X", json::object());
+				const json y = value.value("Y", json::object());
+				*reinterpret_cast<core::UDim2 *>(bytes) = core::UDim2{
+					number(x.value("Scale", json(0.0)), 0.0f),
+					number(x.value("Offset", json(0.0)), 0.0f),
+					number(y.value("Scale", json(0.0)), 0.0f),
+					number(y.value("Offset", json(0.0)), 0.0f),
+				};
+				break;
+			}
+			case PropertyType::Rect: {
+				const json min = value.value("Min", json::object());
+				const json max = value.value("Max", json::object());
+				*reinterpret_cast<core::Rect *>(bytes) = core::Rect{
+					number(min.value("X", json(0.0)), 0.0f),
+					number(min.value("Y", json(0.0)), 0.0f),
+					number(max.value("X", json(0.0)), 0.0f),
+					number(max.value("Y", json(0.0)), 0.0f),
+				};
+				break;
+			}
 			case PropertyType::Reference:
 			case PropertyType::Opaque:
 				failure = "that property cannot be written through this surface yet";
 				return false;
 			}
 
-			if (!store.SetProperty(instance, property.Name, bytes, property.Size)) {
+			if (!store.SetProperty(instance, property, bytes, property.Size)) {
 				// The store refuses a write on an adopt-only world, which is what
 				// a replica is. Said plainly rather than as a bare false.
 				failure = "the world refused the write — it may be running or a replica";

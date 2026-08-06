@@ -87,6 +87,24 @@ namespace engine::game {
 	// @since v0.7
 	struct XmlLimits {
 		// The largest document, in bytes. 64 MiB.
+		//
+		// **This is the one limit that does not bound the work, and a caller on
+		// a request path should know that before it trusts the number.** The
+		// depth and element limits stop the parse where they are hit —
+		// `engine.game.bench.documents` measures a document 300 levels deep
+		// being refused in about 4.8 microseconds and one over the element bound
+		// in 1.8, both far under what parsing the same bytes costs. Truncation
+		// is different in kind: a document that simply stops has nothing wrong
+		// with it until the end, so the parser runs the whole way there before
+		// it can say so. A half-megabyte truncated file measured at 270
+		// microseconds to refuse, which is about what parsing it whole costs.
+		//
+		// For a save file opened by the person who owns it that is exactly
+		// right — the work was going to happen anyway. For anything parsing
+		// documents that arrived from elsewhere, it means the cost of a refusal
+		// scales with this constant rather than with the bound that was
+		// violated, and 64 MiB of "no" is seconds. Lower it at those call sites
+		// to what that path actually accepts rather than relying on the default.
 		size_t MaximumBytes = 64u * 1024u * 1024u;
 
 		// The deepest nesting. A game file's tree is instances inside

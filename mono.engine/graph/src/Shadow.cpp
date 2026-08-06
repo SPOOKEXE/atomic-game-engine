@@ -13,20 +13,33 @@ namespace engine::graph {
 		glm::vec3 ToGlm(const core::Vector3 &value) {
 			return glm::vec3{value.X, value.Y, value.Z};
 		}
+
+		// The bound of nothing, in one place because two of them answer the
+		// same question.
+		//
+		// A unit box rather than an inverted one. Nothing here accumulates from
+		// an empty sentinel — `AABB.hpp` says so and says why — and a caller
+		// handed an inverted box would fit a light to a volume that contains
+		// nothing.
+		core::AABB BoundsOfNothing() {
+			return core::AABB::FromCentre(core::Vector3::Zero, core::Vector3::One);
+		}
 	}
 
 	core::AABB BoundsOfAll(std::span<const scene::DrawInstance> instances) {
 		// A pass over the whole draw list rather than the culled set, which
 		// is deliberate and is why it is worth a row of its own: it does not
 		// get cheaper when the camera turns away.
+		//
+		// **The renderer does not take this path; `CullAndBound` does the same
+		// walk beside the frustum test.** So a profile with no `graph.light-bounds`
+		// row in it has not lost the work — look for `graph.cull-bound`. This
+		// stays the entry point for a caller that wants the bound alone, and it
+		// is what the tests pin.
 		ENGINE_PROFILE_CAT("graph.light-bounds", core::ProfileCategory::Render);
 
 		if (instances.empty()) {
-			// A unit box rather than an inverted one. Nothing here accumulates
-			// from an empty sentinel — `AABB.hpp` says so and says why — and a
-			// caller handed an inverted box would fit a light to a volume that
-			// contains nothing.
-			return core::AABB::FromCentre(core::Vector3::Zero, core::Vector3::One);
+			return BoundsOfNothing();
 		}
 
 		core::AABB bounds = BoundsOf(instances[0]);
@@ -34,6 +47,55 @@ namespace engine::graph {
 			bounds = bounds.Union(BoundsOf(instances[index]));
 		}
 		return bounds;
+	}
+
+	size_t CullAndBound(
+		std::span<const scene::DrawInstance> instances,
+		const Frustum &frustum,
+		std::vector<uint32_t> &visible,
+		core::AABB &bounds
+	) {
+		// One row where there used to be two — `graph.cull` and
+		// `graph.light-bounds` — because there is now one walk. Still a pass
+		// over the whole draw list that does not get cheaper when the camera
+		// turns away: culling decides what is *drawn*, not what is *looked at*.
+		ENGINE_PROFILE_CAT("graph.cull-bound", core::ProfileCategory::Render);
+
+		// Sized to the worst case once rather than grown as it fills, for the
+		// reason `Cull` gives: the worst case is "everything is visible", which
+		// is also the common case for a camera framing its own scene.
+		visible.clear();
+		visible.reserve(instances.size());
+
+		if (instances.empty()) {
+			bounds = BoundsOfNothing();
+			return 0;
+		}
+
+		// **The first instance is unrolled out of the loop rather than seeded
+		// from an empty box**, which is the same shape `BoundsOfAll` has and for
+		// the same reason: there is no empty `AABB` to accumulate from, and
+		// inventing one here would be the inverted sentinel `AABB.hpp` refuses.
+		core::AABB total = BoundsOf(instances[0]);
+		if (frustum.Intersects(total)) {
+			visible.push_back(0);
+		}
+
+		for (size_t index = 1; index < instances.size(); index++) {
+			// Derived once and used twice, which is the whole point of this
+			// function. The union is unconditional and the test is not: the
+			// light is fitted to everything that casts, and the frustum only
+			// decides what the eye draws.
+			const core::AABB box = BoundsOf(instances[index]);
+			total = total.Union(box);
+
+			if (frustum.Intersects(box)) {
+				visible.push_back(static_cast<uint32_t>(index));
+			}
+		}
+
+		bounds = total;
+		return visible.size();
 	}
 
 	glm::mat4 FitDirectionalLight(const core::AABB &bounds, const core::Vector3 &direction) {

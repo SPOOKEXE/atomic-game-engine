@@ -356,62 +356,413 @@ Those classes are shims until three things exist underneath them, and a shim
 that nothing draws is an API with no caller — which is the thing this repository
 refuses everywhere else. In order:
 
-- [_] **`core` gains the value types the tree is made of.** `UDim`, `UDim2`,
-  `Vector2` and `Rect` are already in `core/types` and **none of them is a
-  `PropertyType`** — so a component holding a `UDim2` cannot be a property, cannot
-  be saved, cannot appear in the properties panel and cannot be set from a
-  script. `ecs::PropertyType` is a closed list that grows when userland gains a
-  value, and this is that. Four cases in `game::Values`, four widgets in the
-  properties panel, four in each binding. Small, and everything below needs it
-- [_] **`mono.engine/gui` at L7 `shared` — what a 2D thing *is*.** The class tree
-  as `ecs::Classes` registrations over real components, exactly as `scene` does
-  for `Part`: `GuiBase` → `GuiBase2d` → `GuiObject` → `Frame`, `CanvasGroup`,
-  `GuiButton`(`TextButton`, `ImageButton`), `GuiLabel`(`TextLabel`,
-  `ImageLabel`), `ScrollingFrame`, `TextBox`, `ViewportFrame`, `VideoFrame`;
-  `LayerCollector` → `ScreenGui`, `BillboardGui`, `SurfaceGui`, `PluginGui` →
-  `DockWidgetPluginGui`. **`shared`, not `client`** — a server authors a
-  `ScreenGui` and replicates it, so a type only a client could name would be a
-  type only a client could build one out of. That is `scene`'s argument and it
-  is the same one
-- [_] **Layout, which is arithmetic and belongs beside the tree.** `UDim2`
+- [x] **`core` gained the value types the tree is made of.** `UDim`, `UDim2`,
+  `Vector2` and `Rect` were already in `core/types` and **none of them was a
+  `PropertyType`** — so a component holding a `UDim2` could not be a property,
+  could not be saved, could not appear in the properties panel and could not be
+  set from a script. `ecs::PropertyType` is a closed list that grows when
+  userland gains a value, and this was that. Four cases in `game::Values`, four
+  widgets in the properties panel, four in each binding, and the manifest
+  regenerated. **The `UDim` widget is two controls rather than a `DragFloat2`**,
+  which is the one part that was not mechanical: scale is a fraction and offset
+  is pixels, so one drag step cannot serve both — a hundredth of a pixel is a
+  drag that never arrives and a whole unit of scale crosses the parent in one
+  mouse movement
+- [x] **`mono.engine/gui` at L7 `shared` — what a 2D thing *is*.** Thirty-three
+  classes as `ecs::Classes` registrations over twenty-three real components,
+  exactly as `scene` does for `Part`: `GuiBase` → `GuiBase2d` → `GuiObject` →
+  `Frame`, `CanvasGroup`, `GuiButton`(`TextButton`, `ImageButton`),
+  `GuiLabel`(`TextLabel`, `ImageLabel`), `ScrollingFrame`, `TextBox`,
+  `ViewportFrame`; `LayerCollector` → `ScreenGui`, `BillboardGui`, `SurfaceGui`,
+  `PluginGui` → `DockWidgetPluginGui`; and the nine `UIComponent` modifiers.
+  `shared`, so a server authors a `ScreenGui` and replicates it. **`core` and
+  `ecs` are the whole dependency list**, and the one thing that looked like a
+  reason to link `scene` — `NormalId` for a surface gui — is a six-member enum
+  registered by name, pinned by a test at each end, which is the arrangement
+  `DefaultMaterial`'s duplicated "Plastic" already uses.
+  **`Instance`, `Name` and `Parent` moved down into `ecs`** as
+  `Classes::RegisterInstanceRoot`: they project components `ecs` owns and were
+  only in `scene` because `scene` had the first class tree, and a second tree
+  that may not link the first made one declaration necessary rather than
+  tidier. **`VideoFrame` is deliberately absent** — there is no decoder, and a
+  class that draws nothing forever is what the paragraph below refuses
+- [x] **Layout, which is arithmetic and belongs beside the tree.** `UDim2`
   against a parent's absolute rect, `AnchorPoint`, `SizeConstraint`, and the
-  `UIListLayout`/`UIGridLayout`/`UIPadding`/`UIAspectRatioConstraint` modifiers.
-  One pass, parent before child, producing an `AbsolutePosition` and an
-  `AbsoluteSize` per node — which is a component, so the renderer reads it with
-  a query and nothing walks the tree twice
-- [_] **`gui` rendering at L12, as a render pass.** Rectangles, nine-slice,
-  text and clipping — which is a batched quad pipeline plus a glyph atlas. The
-  atlas is the part with a decision in it: `ui` already owns four faces for Dear
-  ImGui, and a second rasteriser for the same four files would be two answers to
-  "what does this glyph look like". `Pass::Interface` is the seam it attaches to
-- [_] **Input routing.** Hit testing back to front, `ZIndex`, `Active`,
-  `Selectable`, and the `InputBegan`/`InputEnded`/`Activated` signals — which is
-  `script::Signals`' shape applied to a tree rather than a new mechanism
-- [_] **`GuiBase3d` and the adornments** — `SelectionBox`, `Handles`,
-  `ArcHandles`, `BoxHandleAdornment` and the rest. **This is what gives the
-  editor gizmos and viewport selection**, which v0.7 deferred, and it is worth
-  doing after the 2D branch rather than before: an adornment is a 3D thing drawn
-  with the 2D tree's input model
-- [_] **`GuiService`, `Path2D`, `GuidRegistryService`** — the services around
-  the tree, once there is a tree for them to be around
-- [_] **The studio's own panels, authored in TypeScript.** This is the point of
-  all of it and it is the *last* step, not the first. `mono.studio` keeps Dear
-  ImGui until the engine's own UI can draw a property grid — because an editor
-  half on each is two widget sets, and the rule against two ways to do one job
-  applies hardest to the thing you look at all day. React is a reconciler over
-  the tree once the tree exists; `react-lua` or a hand-written reconciler are
-  both reasonable and neither is a decision that has to be made yet
+  `UIListLayout`/`UIGridLayout`/`UIPadding`/`UIAspectRatioConstraint` modifiers,
+  plus `UISizeConstraint`, `UITextSizeConstraint`, `UIScale`, `UICorner` and
+  `UIStroke`. One pass, parent before child, producing a `Resolved` component
+  the renderer reads with a query. **The order the constraints apply in is
+  load-bearing and was arrived at rather than assumed**: scale multiplies what
+  the `UDim2` said, the aspect ratio reshapes that, and the size limits clamp
+  the result — clamping first produces a rectangle that obeys neither, which
+  reads as "the constraint does not work". **`Measure` is split from `Place`**
+  for one reason: a list or a grid has to know how big a child is before
+  deciding where it goes, and that is the only thing a single top-down sweep
+  cannot do. `AutomaticSize` is declared, saved and bound and is **not**
+  implemented — it needs that second phase over the subtree, and `D00021`
+  carries the argument rather than leaving it to be discovered
+- [x] **The compiled draw list, which was not on this list and is the thing
+  that makes the rest affordable.** `gui::Compiled` computes a rolling
+  signature over every field the compile reads and keeps the flattened,
+  sorted, clipped `DrawList` while it matches — `scene::QuickHash`'s pattern
+  and `studio::HierarchyView`'s, for the same reason both give:
+  `ecs::Hierarchy` and `gui::Element` are not observed components, so
+  `Store::ChangeVersion` does not move when an element is reparented or
+  resized, and it *does* move when a physics tick writes a transform, which
+  would rebuild the UI sixty times a second for nothing. **The rule that a
+  field added to a component must be added to the fold is checked rather than
+  written down**: `gui/tests/Compile.cpp` walks every property the class tree
+  declares, writes each one and asserts the signature moved
+- [x] **Input routing.** Hit testing back to front, `ZIndex`, `Active`,
+  `Selectable`, and `InputBegan`/`InputEnded`/`Activated` plus
+  `MouseEnter`/`MouseLeave`/`MouseMoved`. **The hit test is a backwards walk of
+  the compiled list rather than a tree walk**, because the list is already in
+  paint order — a second traversal that re-derived that order would be a second
+  answer to "what is on top", and the two would disagree the first time
+  somebody changed a sort in one of them. Two rules inside it were arrived at:
+  `InputEnded` goes to where the press *began* rather than where the release
+  happened, which is what makes dragging off a button and back one interaction;
+  and `MouseLeave` fires before `MouseEnter`, so a handler that moves something
+  on leave runs before the one reacting to the arrival
+- [x] **`gui` drawn on screen, through the atlas that already exists.**
+  `ui::PaintGui` takes a `gui::DrawList` and an `ImDrawList` and nothing else —
+  rectangles with rounded corners, outlines, nine-slice, tiling, fit, crop,
+  text with both alignment axes, and clipping pushed with *intersection* so a
+  panel's own clip survives. The atlas decision the plan flagged came out the
+  way it stated: `ui` already owns four faces and a second rasteriser over the
+  same four files would be two answers to what a glyph looks like, so the edge
+  runs `ui` → `gui` and the painter is the only thing that knows both. The
+  studio's viewport panels compile and paint the world's own `ScreenGui` over
+  the world image and under the editor's chrome, one `gui::Compiled` and one
+  `gui::Router` per panel — per panel because a panel *is* a canvas, and two
+  viewports at different sizes resolve every `UDim2` differently
+- [x] **`mono.engine/examples/Interface.luau`, and it is the proof rather than
+  a demo.** A `ScreenGui` built entirely from a script, so it exercises
+  `Instance.new` over the new class tree, `UDim2` and `Vector2` as real
+  property types, the layout pass, the compile and the painter in one run. Every
+  element in it exists because one specific thing looks correct without it:
+  the centred card catches an anchor point applied backwards, the strip's
+  content is four times its own width and catches a clip that replaces rather
+  than intersects, and the grid's cells catch a wrap that counts cells without
+  counting the padding. **Its clock writes at ten hertz rather than sixty**,
+  which is both `D00020`'s workaround and what keeps the compiled-list cache
+  measurable — a scene that changed every frame would rebuild every frame and
+  prove nothing about it. It is installed into the skygrid world by
+  `Editor::NewGame`, so a new game shows it
+- [x] **`gui` rendering as a render pass at L12, which is the half a shipped
+  client needs.** `mono.client` does not link `Engine::ui` and must not —
+  `ui/Interface.hpp` gives the reason, and it is the same one that keeps imgui
+  out of a game binary — so a shipped client draws no `ScreenGui` until there
+  is a batched quad pipeline plus a glyph atlas behind `Pass::Interface`. **The
+  seam is already the right one and that is what makes this a renderer rather
+  than a feature**: the second backend is a new consumer of `gui::DrawList`,
+  not a second compile, so neither half can drift from the other about where an
+  element is.
 
-**Why not do the shims now, stated so nobody re-asks.** Fifty registered classes
-with no layout, no rendering and no input would put `TextLabel` in the insert
-palette, let somebody parent one under a `Part`, save it into a game file — and
-then draw nothing, forever, with no error. That is worse than not having it: it
-is a feature that looks present and is not. The order above is the order in
-which each step has a caller.
+  **The atlas decision is made: `render` owns the four faces.** `ui` owned them
+  through imgui, which was right while the editor was the only thing drawing
+  text and stops being right the moment a shipped client draws a `ScreenGui`.
+  `ui` already depends on `render`, so the edge runs the way it needs to and
+  there is one rasteriser rather than two answers to what a glyph looks like.
+  **The dependency that seemed to block it was already in the tree.**
+  `imstb_truetype.h` and `imstb_rectpack.h` are standalone public-domain single
+  headers `mono.vendor/imgui` bundles rather than parts of imgui — a rasteriser
+  and a bin packer — so `render::GlyphAtlas` includes them through
+  `VENDOR_INCLUDES` and links no imgui symbol. Nothing new was vendored and
+  nothing of the editor's toolkit reaches a game binary.
+  `GlyphAtlas` is built and tested headlessly, which is why it came first: a
+  wrong glyph would otherwise be found by looking at a screen. Coverage rather
+  than colour, so one sheet serves every colour of text; grown by powers of two
+  until the pack fits rather than sized by a formula that is either wasteful or
+  occasionally too small; a pixel of padding checked *in the sheet* rather than
+  trusted from the constant, because atlas bleed only shows at non-integer
+  scales, which is to say on somebody else's machine. Latin-1 only, and the rest
+  is filed rather than pretended at.
+  Found while testing it: the font staging gate named `engine_ui` alone, so a
+  test of the new rasteriser linked the module that reads .ttf files and got
+  none staged — every case took its "no fonts" branch and reported green
+  without asserting anything. The gate names both modules now and
+  `mono_add_tests` stages them too; the suite went from 8 assertions to 574.
+
+  **`render::InterfaceMesh` is the rest of it that a device is not needed
+  for**, and it is a type rather than a loop inside a recording function for
+  exactly that reason: quad generation, outline construction, batching and text
+  layout are arithmetic, and arithmetic found wrong headlessly is arithmetic not
+  found by looking at a screen. It produces vertices, 16-bit indices and the
+  runs between scissor changes.
+  The decisions inside it. **Batches split on the scissor and on the texture
+  and merge otherwise**, because a clip is pipeline state rather than a vertex
+  attribute — two elements clipped differently cannot be one draw however alike
+  their pixels are. **An outline is four quads and never a line primitive**,
+  because a line's width is a device setting with no portable guarantee and one
+  that is a pixel on one driver and three on another is a difference nobody
+  reproduces. **A solid quad samples a white texel packed into the atlas**, so a
+  filled rectangle and a glyph share one pipeline — two would be two places for
+  the blend state to be set differently, which shows as panels at subtly the
+  wrong opacity and nowhere else. That texel takes a rect from the packer rather
+  than a corner somebody picked: `stbrp` fills the whole sheet, so a hand-picked
+  texel is one a large glyph can land on, putting a letter's coverage under
+  every filled rectangle — a bug that appears only once the atlas is full enough,
+  which is to say on the machine with the wider font.
+  **The shaders are written and compiling.** `interface.vert` and
+  `interface.frag` build to SPIR-V and stage into both the client and studio
+  trees. Two decisions in them. Positions arrive in **canvas pixels** and become
+  clip space in the vertex shader, so the only thing that knows the target's
+  size is the shader — a panel at a different resolution needs no rebuild of the
+  mesh. And Y is flipped where X is not, because SDL's GPU clip space is Y-up on
+  every backend while a canvas has its origin at the top left: the one asymmetry
+  in the file, and the one everybody writes symmetrically the first time.
+  The fragment shader is `inColour * sampled` for all three kinds, not a branch.
+  The atlas's white texel is (1,1,1,1), so a rectangle multiplies its tint by
+  white and gets its tint while a glyph multiplies by (1,1,1,coverage) and gets
+  its tint at that coverage — branching on which would be a divergent branch per
+  fragment to avoid a multiply by one.
+  **`render::InterfacePass` is the recording loop, and it is a
+  `FrameOverlayHook` rather than a branch inside `Renderer`.** That is the same
+  slot the editor's chrome occupies, so a client hands one of these where the
+  studio hands its imgui recorder and the renderer knows the difference not at
+  all — adding an interface path to the renderer's own recording would have put
+  a `gui` concern inside three thousand lines of pipeline state, where the tier
+  check would not have caught the edge and a reviewer would have had to.
+  The decisions in it. **Straight alpha rather than premultiplied**, which is
+  the opposite of the overlay pipeline beside it and is deliberate:
+  `gui::DrawCommand` carries a tint and a transparency as separate numbers, so
+  the vertex colour reaching the blend has never had alpha folded into it, and
+  premultiplying would mean a per-vertex multiply on the CPU for no gain.
+  **No depth and no culling**, because the interface is drawn back to front in
+  compile order — a depth test would hide a panel behind a wall, and a quad
+  wound the other way is invisible under culling, which looks exactly like an
+  element that failed to lay out. **Buffers grow and never shrink**, so a panel
+  opened once and closed does not reallocate the frame it opens again. **The
+  transfer buffer is cycled**, because it was written last frame and may still
+  be in flight — without that the copy overwrites bytes a queued frame has not
+  read, drawing last frame's interface at this frame's positions, a tearing that
+  only appears under load. The atlas uploads once rather than per frame; it
+  changes only when the size it was baked at does, which is a settings change.
+  **An unresolved image name falls back to the atlas's white texel**, drawing
+  the bounds as a flat tinted rectangle — visible on purpose, for the reason the
+  entry below gives.
+  **And `mono.client` constructs one**, which is the half that makes the rest
+  reachable: a pass nothing hands to the renderer is unreachable code that
+  compiles. The client builds it from `Renderer::Backend()` after the renderer
+  is up, compiles the rendered world's `ScreenGui` each frame, and passes it as
+  the `interfaceHook` — the same slot the studio fills with imgui. A failure to
+  initialise is warned and not fatal: a client that refused to start over a
+  missing typeface would be worse than one that draws a world with no interface
+  over it.
+  **`mono.client` still links no imgui**, which was the point of the whole
+  entry, and the architecture check pins it.
+  **What is not verified is that it draws.** Every piece compiles, every piece
+  above it is tested headlessly, and the pass itself needs a device and an eye —
+  which is the one check in this version that a test cannot stand in for. Corner
+  rounding and the image fit modes travel to that backend rather than being
+  tessellated here — a radius belongs in a shader, and nine-slice needs the
+  image's pixel size, which is precisely what a content name says this layer
+  must not know
+- [~] **Texture resolution for `ImageLabel` and `ImageButton` — the format,
+  not yet the upload.** `ui::ImageSource` is the hook and nothing supplies one,
+  so an image draws the missing-texture marker — visible on purpose, because an
+  `ImageLabel` that drew nothing would look like the label was broken rather
+  than like the image was missing.
+  **The gap was never a missing decoder, and it was diagnosed as one twice.**
+  `AssetKind::Texture` named a kind and nothing said what those bytes *are*, so
+  there was nothing for a backend to sample even once they had arrived.
+  Vendoring a PNG reader would have answered how to read somebody else's format
+  when what was needed was to have one. `assets::Texture` is that format, and it
+  is deliberately the dullest possible: a header and the pixels a GPU wants, in
+  the order it wants them.
+  **A runtime does not decode.** Turning a PNG into this is a publishing step —
+  the division `Chunker` and `Manifest` already draw, where the origin does the
+  work once and every client does none. That is why a decoder belongs in
+  `mono.tools` rather than in a game binary: a client that decoded PNGs would
+  pay for a Huffman tree on the frame a texture streamed in, and a shipped game
+  would carry a decompressor for a format it never has to read. Uncompressed on
+  disk and compressed in transit, because `delivery::GroupCodec` already runs
+  zstd over whatever a group holds.
+  Every header field is checked against the bytes actually present before one is
+  allocated — the decompression-bomb check `Packet` and `GroupCodec` both carry —
+  and the format byte is range-checked before the cast for `ReadMessage`'s
+  reason. **What is left is the upload**, which is the same device half the
+  render pass is waiting on: `InterfaceBatch` already carries the content name
+  unresolved, so the seam is open at both ends
+- [x] **Connecting `gui::GuiEvent` to `script::Signals`.** The routing produced
+  events and nothing turned them into a `.Activated`. **The join is in `script`
+  itself, which is "above both" read correctly**: `gui` is L7 and `script` is
+  L9, so the edge is legal by tier and it is the *same* edge `script` already
+  has to `scene` — a script's vocabulary is the class tree and there are two of
+  them, so depending on one and not the other would have put `.Activated` behind
+  something higher up, and that something would have been the second path into a
+  VM this line refuses. Six `SignalKind`s, both VMs, and one queue on `Runtime`
+  holding nothing either VM owns.
+  **Queued rather than fired on arrival**, for `Changes.hpp`'s reason one door
+  along: the events are produced while a host walks a compiled draw list, and a
+  handler that destroys the element it was called about would pull that list out
+  from under the walk. They are delivered at the barrier, last within "what the
+  previous barrier recorded" and before the tasks, so a click that defers
+  belongs to the tick it happened on. **A dead element is skipped rather than
+  dispatched to** — a close button destroying its own panel is the ordinary case,
+  not an edge one, and the same delivery carries events about what went with it.
+  **`Activated`, `InputBegan` and `InputEnded` are called with no arguments**,
+  and that is the version of this decision the file's own rule produces: Roblox
+  passes an `InputObject`, there is no such datatype here, and a different shape
+  invented now would have to change the day one arrives — `VideoFrame`'s trade
+  rather than `AutomaticSize`'s. `MouseEnter`/`MouseLeave`/`MouseMoved` get
+  `(x, y)` in canvas pixels, which is Roblox's signature exactly.
+  **The studio forwards and does not dispatch**, which is what keeps the editor
+  out of it: `Overlay.cpp` hands the router's events to the running world's
+  runtime and that is all it knows. Found while wiring it: `examples::LoadScene`
+  registered the 3D class tree and not the 2D one, so `Interface.luau` — a
+  shipped example built entirely from `ScreenGui` and `Frame` — could not load
+  through the entry point every program shares. It worked in the editor, because
+  `Editor::NewGame` registers them on its own path, which is the shape of gap
+  that survives: it works everywhere somebody looked
+- [x] **`GuiBase3d` and the adornments.** Eleven classes
+  hung off `GuiBase`, which is the split that class was kept for: the 2D
+  branch's own comment said `GuiBase3d` "and the adornments hang off `GuiBase`
+  when they arrive, and a tree that had flattened the two would have to grow the
+  split back at exactly the point somebody is adding a feature". This is that
+  point, and `gui/tests/Adornments.cpp` asserts the promise was kept — a
+  `SelectionBox` `:IsA` a `GuiBase` and deliberately **not** a `GuiBase2d`.
+  **An adornment is a description and `gui` owns one half of it.** Turning
+  "outline this, in this colour" into geometry needs the adornee's `CFrame` and
+  stud extent, which are `scene::Transform` and `scene::Bounds`; this module
+  links neither and the edge is refused. That is not a gap but `D00022`'s split
+  arrived at again, word for word: **whoever draws an adornment has both
+  operands and this module has one.** So what is here is the tree logic a drawer
+  would otherwise each answer differently — `AdorneeOf`, `AdornmentDrawn`,
+  `EachAdornment` — and the drawing is the render pass's.
+  Two rules inside it were arrived at rather than assumed. **An unset `Adornee`
+  means the parent**, which is what makes a `SelectionBox` usable by parenting
+  it to the thing it outlines and setting nothing else; and **a dangling one
+  does not fall back to the parent**, because quietly re-aiming an adornment at
+  whatever it happens to be parented to would draw a box around the wrong
+  object — a wrong answer to "what am I about to delete" is worse than no
+  answer. Ordering is `ZIndex`, stable, decided here rather than by each drawer,
+  because two drawers sorting independently is two answers to what covers what.
+  **And the drawing half is `render::AdornmentGeometry`**, which is where
+  `D00022` said it would be: this module links both `gui` and `scene`, so it is
+  the first place with both operands. It resolves each adornment against its
+  adornee's `CFrame` and `Bounds` into world-space lines — twelve edges of a
+  box, not six faces, because filling one would hide what it is drawn around,
+  which is the one thing a selection box exists to leave visible.
+  Three decisions in it. **Corners go through the adornee's own frame** rather
+  than being built in world space from a position and an extent, so a rotated
+  part gets a rotated box — the axis-aligned version reads as the selection
+  being wrong rather than the renderer. **The box is swollen a hair**, because
+  edges coplanar with the surface z-fight along every side and a flickering
+  selection box reads as a driver fault. **An adornee with no `Transform`
+  produces nothing** rather than a box at the origin: a `Folder` can legally be
+  an `Adornee`, and outlining it at (0,0,0) looks like a bug in the selection.
+  Containment and the adornee fallback are not re-derived here — they are
+  `gui::EachAdornment`'s, and a second answer would disagree with the first the
+  day one was fixed
+- [x] **Containment: where a collector has to live to draw at all.** Roblox's
+  rule, and the engine was more permissive than it: a `ScreenGui` drew wherever
+  it was found, including parented to a `Part` or to nothing. That let an author
+  ship a game whose interface appears in the studio and is missing in the
+  client — a difference running the worst way round, because the place it works
+  is the place it is checked. A `ScreenGui` now draws from `StarterGui` or a
+  player's `PlayerGui`; a `SurfaceGui` or `BillboardGui` from those and from
+  `Workspace`, because each hangs off something in the world.
+  **Tested by ancestor *name*, which is this module's existing arrangement
+  rather than a shortcut**: those three are `scene`'s services and
+  `gui/AGENTS.md` refuses the edge, the same refusal that made `gui::Face`
+  re-declare `NormalId`'s six members. The names are exposed on both headers and
+  pinned against each other from `examples/tests/Scene.cpp` — the lowest place
+  both modules are linked — so a rename fails a test instead of making every
+  interface silently stop drawing. `scene::AddPlayer` creates the `PlayerGui`,
+  because a container each caller has to remember is one somebody will not.
+  Found by it immediately: `Interface.luau` never parented its own `ScreenGui`
+  and had been drawing on the permissive path since it was written
+
+- [x] **`GuiService`** — and **not** `Path2D` or `GuidRegistryService`, which
+  is this version's own rule applied to its own plan rather than to somebody
+  else's. "Fifty registered classes with no layout, no rendering and no input
+  ... draw nothing, forever, with no error" is what kept `VideoFrame` out, and
+  it disqualifies two of these three: `gui::DrawKind` has four members and none
+  of them is a stroked polyline, so a `Path2D` would be control points nothing
+  ever looked at; and there is nothing here for a GUID registry to keep, so
+  every method would return nothing. `Path2D` arrives with a fifth `DrawKind`
+  and `ui::PaintGui`'s support for it, together.
+  **`GuiService` is here because it has something to do.**
+  `GuiObject::Selectable` had been a declared, saved, bound property with no
+  reader since the tree was registered — the exact state the rule refuses — and
+  the selection is that reader. `Select` refuses an element that cannot hold the
+  selection rather than stranding a gamepad somewhere no direction can leave;
+  `SelectNext` moves directionally over the **compiled draw list** rather than
+  the tree, for `Pick`'s reason: the list is already what says an element is on
+  screen, and a second traversal would be a second answer to that.
+  **Scored rather than sorted**, because "is above" is not a total order — B can
+  be above A while A is above C — and the across-axis term is weighted so it
+  only ever breaks ties, never overrules distance. `GetGuiInset` reads the
+  `Screen` rather than storing a copy that would drift on the first resize.
+  Found while wiring it: the generated `Services` type was a hand-written list
+  of five, so `game:GetService("StarterGui")` typechecked as an error against an
+  engine that answers it perfectly well. It is derived from the class table now
+- [x] **The studio's own panels, authored in TypeScript.** The point of all of
+  it and deliberately the *last* step. `mono.studio/panels/Properties.ts` is a
+  property grid — rows of key and value in a `ScrollingFrame`, stacked by a
+  `UIListLayout`, inset by `UIPadding`, selecting on `.Activated`.
+  **It is not a replacement for the imgui panels and must not be read as one.**
+  `mono.studio` keeps Dear ImGui until the engine's tree can draw a property
+  grid, because an editor half on each is two widget sets. This is the proof
+  that it *can*, which is what has to be true before any of them move.
+  **React is still an open decision and this is what it would be made
+  against.** A reconciler's job is to produce this tree from a description, so
+  the tree has to be known to work first — building it imperatively is how you
+  find out, and `react-lua` or a hand-written one remain both reasonable.
+  **Three things had to be fixed before a `.ts` panel could exist at all**, and
+  each was a gap nothing failed over. `script/Runtime.hpp` had always said a
+  `.ts` file "is expected to have been type-stripped already"; nothing emitted
+  it, so every `.ts` in the tree was copied verbatim and QuickJS refused it at
+  the first annotation — `Mirrors-1-world.ts` since the day it was written.
+  Staging transpiles them now, through the `tsc` the repository already carries,
+  with a missing one degrading to "no JavaScript twins" rather than a failed
+  build. The generated `game.GetService` overloads were a hand-written four
+  while the Luau half had been made to derive its list, so a panel asking for
+  `StarterGui` typechecked as an error against an engine that answers it; both
+  derive from the class table now. And **JavaScript's `GetService` never
+  resolved from the tree** — the Luau half always had — so the two languages
+  disagreed about what a service *is*, found by the first panel that tried to
+  parent a `ScreenGui`
+
+**Why not do the shims now, stated so nobody re-asks — and what it turned out
+to buy.** Fifty registered classes with no layout, no rendering and no input
+would put `TextLabel` in the insert palette, let somebody parent one under a
+`Part`, save it into a game file — and then draw nothing, forever, with no
+error. That is worse than not having it: it is a feature that looks present and
+is not. The order above is the order in which each step has a caller.
+
+**The rule was applied twice while doing it, both times against something that
+would have been easy to ship.** `VideoFrame` is not registered, because there
+is no decoder and never was going to be one this version. `AutomaticSize` *is*
+declared, and that is the case where the trade came out the other way: it is a
+property rather than a class, it crosses a save file and both bindings, so
+adding it later is a format change and adding it now costs a byte — but a
+property that is declared and does nothing is still a thing somebody will set
+and wonder about, so it is filed as `D00021` rather than left to be found.
 
 The rendering and camera work this version already carried, unchanged:
 
-- [_] `mono.engine/examples/Mirrors-4-worlds.luau` and `.ts` — split-screen across worlds running in parallel via multi-process. Four `ViewChannel` producers and one compositor, which v0.2 already built and `--worlds N` already drives with a synthetic scene. This demo is what proves the cross-process view path end to end. Both files exist and are empty, same as the v0.6 pair. **Four rather than the two this line used to say**, because the names in the tree are the ones the ports will take and two of anything is the count at which a bug in the placement loop still looks like correct behaviour
+- [x] `mono.engine/examples/Mirrors-4-worlds.luau` and `.ts` — split-screen across worlds running in parallel. Four `ViewChannel` producers and one compositor, which v0.2 already built and `--worlds N` already drives with a synthetic scene. This demo is what proves the view path end to end. **Four rather than two**, because two of anything is the count at which a bug in the placement loop still looks like correct behaviour: two rooms side by side are symmetric, so swapping them or getting the sign of the offset wrong still reads as two rooms side by side. The four differ by an *ordered* palette running warm to cool and by caster count, so a wrong order reads as a wrong order and a view drawn twice reads as two rooms with the same population.
+
+  **One file builds four different worlds, and `game.JobId` is what lets it.**
+  `--worlds N` runs the same script in every world it creates; without an
+  identity every view would be identical and the bug above would be invisible.
+  Roblox's `JobId` names the server instance a script is standing on and a world
+  here *is* that instance, so it answers `ecs::Store::Name()` — a name rather
+  than a fresh GUID, because a name is already what a bus envelope, a snapshot
+  and a view header carry. Both VMs, and pinned by a case in each.
+
+  **The `.ts` twin is typechecked and not executed, and that is a gap rather
+  than a choice.** `Runtime.hpp` says a `.ts` file "is expected to have been
+  type-stripped already — nothing in the C++ build compiles TypeScript". Nothing
+  in this repository emits it either: `tsconfig.json` sets `noEmit` and `just
+  typecheck` runs `tsc --noEmit`. So every `.ts` example, including
+  `Mirrors-1-world.ts` since it was written, is a file QuickJS cannot parse — it
+  fails on the first type annotation. Closing it is a staging step that emits
+  stripped JavaScript beside the source, which is the toolchain's half rather
+  than the engine's
 
 ### v0.9
 

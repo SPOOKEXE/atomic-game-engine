@@ -77,4 +77,5 @@ echo "starting the $preset studio: studio $*"
 
 # exec, so that Ctrl-C and the exit status belong to the studio rather than to a
 # shell sitting in front of it.
-exec "$studio" "$@"
+# NOTE: forcing serial compute to optimise
+exec "$studio" --force-serial-compute "$@"

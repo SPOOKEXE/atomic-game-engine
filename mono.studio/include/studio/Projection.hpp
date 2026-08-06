@@ -101,10 +101,7 @@ namespace studio {
 	// @param along  Filled in with the signed distance along `axis`.
 	// @return `false` when the axis and the ray are too near parallel to tell.
 	bool ClosestPointOnAxis(
-		engine::core::Vector3 origin,
-		engine::core::Vector3 axis,
-		const engine::core::Ray &ray,
-		float &along
+		engine::core::Vector3 origin, engine::core::Vector3 axis, const engine::core::Ray &ray, float &along
 	);
 
 	// One viewport panel's mapping, for one frame.
@@ -116,12 +113,27 @@ namespace studio {
 	//
 	// @since v0.7
 	struct PanelProjection {
-		// `Projection * View` — the matrix that produced the displayed texture,
-		// as `scene::CameraMatrices::ViewProjection` gives it.
+		// `Projection * View`, in the form `scene::CameraMatrices::ViewProjection`
+		// gives it.
 		//
-		// **Shared with the renderer rather than rebuilt.** A second call to
-		// `scene::ResolveCamera` with the same inputs would give the same answer
-		// right up until somebody changed a near plane in one place.
+		// **Rebuilt by a second `scene::ResolveCamera`, not handed over by the
+		// renderer.** `Editor::ProjectionFor` resolves the same camera frame,
+		// the same lens and the same aspect ratio that `PresentWorld` is about
+		// to resolve, so the two agree by construction rather than by being one
+		// object. Sharing the renderer's copy would mean the overlay pass
+		// reading a matrix produced after it — the frame order the header note
+		// describes runs the wrong way for that.
+		//
+		// The usual objection to computing a thing twice is that the two copies
+		// drift. Here they cannot, because the only inputs that could diverge
+		// are ones the answer does not use: under a perspective divide `w` is
+		// `-z_view`, so where a point lands in x and y comes from the frame, the
+		// field of view and the aspect ratio and from neither clipping plane. A
+		// near or far plane changed in one place and not the other moves nothing
+		// this struct projects — which is why `ProjectionFor` deliberately omits
+		// `PresentWorld`'s far-plane stretch rather than copying it. `Near`
+		// below is carried explicitly for the one thing that does need a plane,
+		// the clip in `ProjectSegment`.
 		glm::mat4 Matrix{1.0f};
 
 		// Where the camera was when that matrix was made. Carried rather than
@@ -189,10 +201,7 @@ namespace studio {
 		// @param outTo   Filled in with the panel-space end.
 		// @return `false` when the whole segment is behind the eye plane.
 		bool ProjectSegment(
-			engine::core::Vector3 from,
-			engine::core::Vector3 to,
-			glm::vec2 &outFrom,
-			glm::vec2 &outTo
+			engine::core::Vector3 from, engine::core::Vector3 to, glm::vec2 &outFrom, glm::vec2 &outTo
 		) const;
 
 		// Builds the world-space ray under a panel point.

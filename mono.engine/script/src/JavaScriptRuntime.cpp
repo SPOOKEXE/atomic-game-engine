@@ -296,6 +296,15 @@ namespace engine::script {
 		// one world rather than two.
 		note(PumpJsTree(Context));
 
+		// Last within step 2 and before the tasks, exactly as the Luau side
+		// orders it — see `LuauRuntime::Heartbeat`, which also gives the reason
+		// the queue is moved out before the walk rather than drained in place.
+		{
+			std::vector<gui::GuiEvent> events;
+			events.swap(PendingGuiEvents);
+			note(PumpJsGuiEvents(Context, events));
+		}
+
 		note(PumpJsTasks(Context));
 		note(PumpJsHeartbeat(Context, delta));
 

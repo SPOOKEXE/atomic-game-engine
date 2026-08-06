@@ -701,6 +701,35 @@ namespace engine::script {
 			note(PumpTree(State));
 		}
 		{
+			// **Still inside step 2 — "what the previous barrier recorded" —
+			// and last within it.** A pointer event is about an element whose
+			// rectangle came from the last frame's layout, so it belongs with
+			// the other things the world already settled rather than with the
+			// beat that is about to move it.
+			//
+			// After the tree rather than before, because a click that reparents
+			// something should see the world its `.Changed` and
+			// `AncestryChanged` handlers already agreed on. Before the tasks,
+			// because a handler here may `task.defer`, and a resume scheduled by
+			// a click belongs to this tick rather than the next.
+			//
+			// **Taken before a single handler runs, so the span cannot dangle.**
+			// `PumpGuiEvents` walks what it is given; handing it the live vector
+			// would mean a `DeliverGuiEvents` arriving mid-pass could reallocate
+			// under the walk.
+			//
+			// No script can cause that today — only a host calls
+			// `DeliverGuiEvents`, and a host is inside this call. So this is
+			// structural rather than load-bearing, and a test cannot reach it:
+			// removing the swap keeps the suite green. It stays because the
+			// cost is one move of a vector per beat and the failure it prevents
+			// is a use-after-free rather than a wrong answer.
+			ENGINE_PROFILE_CAT("script gui", core::ProfileCategory::Script);
+			std::vector<gui::GuiEvent> events;
+			events.swap(PendingGuiEvents);
+			note(PumpGuiEvents(State, events));
+		}
+		{
 			ENGINE_PROFILE_CAT("script tasks", core::ProfileCategory::Script);
 			note(PumpTasks(State));
 		}

@@ -8,22 +8,23 @@
 // the arithmetic and the two traps it exists to avoid.
 
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Values.hpp>
+#include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/game/Values.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
+#include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 
-#include <imgui.h>
-
-#include <studio/Editor.hpp>
-
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <imgui.h>
+#include <studio/Editor.hpp>
 #include <vector>
 
 namespace studio {
@@ -123,6 +124,34 @@ namespace studio {
 	}
 
 	void Editor::DrawViewportOverlays() {
+		// **One projection per panel, resolved once and shared by everything
+		// below.** Three passes want it — the gizmo, the pending pick, and the
+		// grid and outline — and each `ProjectionFor` is a `glm::inverse`, a
+		// `glm::perspective`, a matrix product and, for a followed camera, a
+		// `Universe::Enter` that builds two `std::function`s. Resolving it once
+		// per panel per frame turns two-and-a-bit computations into one.
+		//
+		// It also makes the pick provably honest. The gizmo loop decides
+		// whether a click landed on a handle; `PickInViewport` then decides
+		// what that click hit in the world. Those two used to adjudicate the
+		// same click against two separately built matrices that merely ought to
+		// agree.
+		//
+		// **This is not the cached world state `mono.studio/AGENTS.md` forbids.**
+		// A local dies at the end of this function, so nothing here can be one
+		// frame stale — it cannot outlive the frame that read the camera. The
+		// rule is about a panel keeping a copy of something the store owns
+		// *between* frames; a value read once and used three times inside one
+		// frame is the same read the three call sites were each making.
+		//
+		// Safe only because nothing between the passes moves a camera, and
+		// nothing does: `DriveCamera` ran earlier in the `camera` span and this
+		// function only draws.
+		std::array<PanelProjection, 1 + EXTRA_VIEWPORTS> projections;
+		for (size_t index = 0; index < Overlays.size(); index++) {
+			projections[index] = ProjectionFor(index);
+		}
+
 		// **The gizmo goes first, and it can swallow the pending pick.** A
 		// click that lands on a handle is a drag, not a selection — and which
 		// it is cannot be known in `DrawViewport`, because the handle's screen
@@ -135,7 +164,7 @@ namespace studio {
 				continue;
 			}
 
-			const PanelProjection panel = ProjectionFor(index);
+			const PanelProjection &panel = projections[index];
 			if (!panel.IsValid()) {
 				continue;
 			}
@@ -149,9 +178,25 @@ namespace studio {
 			const PendingPickAction pick = PendingPick;
 			PendingPick = PendingPickAction{};
 
-			if (!overHandle) {
-				PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add);
+			// The bound check replaces the one `ProjectionFor` used to make on
+			// the pick's behalf, now that the projection arrives as an argument
+			// rather than being fetched by index inside.
+			if (!overHandle && pick.Viewport < projections.size()) {
+				PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add, projections[pick.Viewport]);
 			}
+		}
+
+		// **The game's own UI, before the editor's furniture below it.** The
+		// grid, the axes and the selection outline are tools for looking at the
+		// world; a `ScreenGui` is part of the game. Drawing the tools last is
+		// what keeps a selection outline visible through a full-screen menu the
+		// game happens to have open.
+		//
+		// Outside the projection loop below, because a `ScreenGui` has no
+		// camera: it is laid out against the panel rectangle and nothing else,
+		// so a panel whose camera cannot be resolved still draws its UI.
+		for (size_t index = 0; index < Overlays.size(); index++) {
+			DrawViewportGui(index);
 		}
 
 		for (size_t index = 0; index < Overlays.size(); index++) {
@@ -160,7 +205,7 @@ namespace studio {
 				continue;
 			}
 
-			const PanelProjection panel = ProjectionFor(index);
+			const PanelProjection &panel = projections[index];
 			if (!panel.IsValid()) {
 				continue;
 			}
@@ -206,8 +251,8 @@ namespace studio {
 
 					// Fade with distance from the camera so the grid ends in a
 					// horizon rather than a rectangle.
-					const float fade = 1.0f - std::abs(static_cast<float>(step)) /
-												  static_cast<float>(GRID_RADIUS);
+					const float fade =
+						1.0f - std::abs(static_cast<float>(step)) / static_cast<float>(GRID_RADIUS);
 					const bool major = step % GRID_MAJOR == 0;
 					const ImU32 colour = GridColour(fade, major);
 
@@ -264,8 +309,7 @@ namespace studio {
 			// because two viewports showing the same world both have to show it
 			// and they have different projections.
 			const WorldId shown = ViewportWorld(index);
-			if (shown.IsValid() && shown == SelectionWorld && !Selection.empty() &&
-				Universe != nullptr) {
+			if (shown.IsValid() && shown == SelectionWorld && !Selection.empty() && Universe != nullptr) {
 				const ImU32 outline = engine::ui::AccentColour();
 
 				Universe->Enter(shown, [&](Store &store) {
@@ -295,8 +339,18 @@ namespace studio {
 						}
 
 						static constexpr int EDGES[12][2] = {
-							{0, 1}, {1, 3}, {3, 2}, {2, 0}, {4, 5}, {5, 7},
-							{7, 6}, {6, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}
+							{0, 1},
+							{1, 3},
+							{3, 2},
+							{2, 0},
+							{4, 5},
+							{5, 7},
+							{7, 6},
+							{6, 4},
+							{0, 4},
+							{1, 5},
+							{2, 6},
+							{3, 7}
 						};
 
 						for (const auto &edge : EDGES) {
@@ -455,9 +509,8 @@ namespace studio {
 				}
 
 				const glm::vec2 toCursor = cursor - origin;
-				const float t = std::clamp(
-					(toCursor.x * along.x + toCursor.y * along.y) / lengthSquared, 0.0f, 1.0f
-				);
+				const float t =
+					std::clamp((toCursor.x * along.x + toCursor.y * along.y) / lengthSquared, 0.0f, 1.0f);
 				const glm::vec2 nearest = origin + along * t;
 				const glm::vec2 gap = cursor - nearest;
 
@@ -491,10 +544,7 @@ namespace studio {
 			}
 
 			list->AddLine(
-				ImVec2(origin.x, origin.y),
-				ImVec2(tips[axis].x, tips[axis].y),
-				colour,
-				lit ? 4.0f : 2.5f
+				ImVec2(origin.x, origin.y), ImVec2(tips[axis].x, tips[axis].y), colour, lit ? 4.0f : 2.5f
 			);
 
 			// **A cube for scale, a dot for move**, so the two modes are told
@@ -513,7 +563,21 @@ namespace studio {
 
 		// --- the drag ---------------------------------------------------------
 
-		const Ray ray = panel.PanelToRay(cursor);
+		// **Built only when something below will read it.** `PanelToRay`
+		// inverts the matrix, and `Projection.cpp` declines to cache that
+		// inverse on the grounds that a panel issues one ray per click rather
+		// than one per pixel — which was true of the ray's *consumers* and not
+		// of this line, which ran every frame for every panel with a selection
+		// in it. The guard is what makes the premise hold again.
+		//
+		// It is strictly wider than the two branches that use `ray`: the grab
+		// below needs `hovered >= 0`, and the live drag needs
+		// `Dragging.Axis >= 0`. Neither can run with this false, so the
+		// degenerate default is never read.
+		Ray ray;
+		if (Dragging.Axis >= 0 || hovered >= 0) {
+			ray = panel.PanelToRay(cursor);
+		}
 
 		if (Dragging.Axis < 0 && hovered >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 			bool grabbedOk = false;
@@ -544,9 +608,7 @@ namespace studio {
 							Dragging.Before.push_back(transform->Frame);
 
 							const auto *bounds = store.Get<engine::scene::Bounds>(instance);
-							Dragging.BeforeSize.push_back(
-								bounds != nullptr ? bounds->HalfExtent : Vector3{}
-							);
+							Dragging.BeforeSize.push_back(bounds != nullptr ? bounds->HalfExtent : Vector3{});
 						}
 					}
 				});
@@ -641,8 +703,8 @@ namespace studio {
 								const glm::quat spin =
 									glm::angleAxis(radians, glm::vec3(axis.X, axis.Y, axis.Z));
 
-								const CFrame turn = CFrame(centre) * CFrame(Vector3{}, spin) *
-													CFrame(centre).Inverse();
+								const CFrame turn =
+									CFrame(centre) * CFrame(Vector3{}, spin) * CFrame(centre).Inverse();
 
 								moved.Frame = turn * Dragging.Before[index];
 								break;
@@ -667,9 +729,7 @@ namespace studio {
 									grown.Z = std::max(was.Z + half, 0.01f);
 								}
 
-								store.Set<engine::scene::Bounds>(
-									instance, engine::scene::Bounds{grown}
-								);
+								store.Set<engine::scene::Bounds>(instance, engine::scene::Bounds{grown});
 								break;
 							}
 
@@ -694,9 +754,9 @@ namespace studio {
 					// undo that reports success and reverses nothing.
 					const bool scaling = Dragging.Mode == ToolMode::Scale;
 					const engine::core::Name property(scaling ? "Size" : "CFrame");
-					const char *what = scaling	? "Resize"
-										: Dragging.Mode == ToolMode::Rotate ? "Rotate"
-																			: "Move";
+					const char *what = scaling							   ? "Resize"
+									   : Dragging.Mode == ToolMode::Rotate ? "Rotate"
+																		   : "Move";
 
 					Universe->Enter(world, [&](Store &store) {
 						for (size_t index = 0; index < Dragging.Instances.size(); index++) {
@@ -752,13 +812,12 @@ namespace studio {
 		return hovered >= 0 || Dragging.Axis >= 0;
 	}
 
-	void Editor::PickInViewport(size_t viewport, float x, float y, bool add) {
+	void Editor::PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel) {
 		const WorldId shown = ViewportWorld(viewport);
 		if (!shown.IsValid() || Universe == nullptr) {
 			return;
 		}
 
-		const PanelProjection panel = ProjectionFor(viewport);
 		if (!panel.IsValid() || !panel.ContainsPanel(glm::vec2(x, y))) {
 			return;
 		}
@@ -790,8 +849,7 @@ namespace studio {
 		engine::spatial::HashGrid grid;
 		grid.Rebuild(proxies);
 
-		const std::optional<engine::core::RayHit> hit =
-			engine::spatial::Raycast(grid, ray, PICK_REACH);
+		const std::optional<engine::core::RayHit> hit = engine::spatial::Raycast(grid, ray, PICK_REACH);
 
 		if (!hit.has_value()) {
 			// **A click on nothing clears the selection**, unless it is adding
@@ -814,5 +872,122 @@ namespace studio {
 		// the question. Studio reveals it; so does this.
 		OpenPathTo(shown, picked);
 		RevealSelection = true;
+	}
+
+	void Editor::DrawViewportGui(size_t index) {
+		if (index >= Overlays.size() || Universe == nullptr) {
+			return;
+		}
+
+		OverlaySlot &slot = Overlays[index];
+		if (!slot.Drawn || slot.List == nullptr || slot.Width <= 0.0f || slot.Height <= 0.0f) {
+			return;
+		}
+
+		const WorldId shown = ViewportWorld(index);
+		if (!shown.IsValid()) {
+			return;
+		}
+
+		engine::gui::CompileRequest request;
+		request.Display.Width = slot.Width;
+		request.Display.Height = slot.Height;
+
+		// **Fed back from the previous frame's routing, deliberately.** The
+		// hover is computed from the list a compile produced, so a compile that
+		// read this frame's hover would depend on its own output.
+		// `Router::Hovered` says so at length; the cost is that a button
+		// appearing under a stationary pointer lights up one frame later.
+		request.Hovered = GuiRouters[index].Hovered();
+		request.Pressed = GuiRouters[index].Pressed();
+
+		// The pointer in canvas space, which is the panel's own corner as the
+		// origin. A `ScreenGui` inside a panel is laid out from that corner, so
+		// anything else would hit-test against a canvas nobody drew.
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		engine::gui::Pointer pointer;
+		pointer.Position = engine::core::Vector2{mouse.x - slot.X, mouse.y - slot.Y};
+		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+
+		// **imgui owns the mouse whenever it is over its own chrome**, and a
+		// panel docked over the viewport is exactly that. Without this the
+		// game's UI would receive clicks meant for the explorer sitting on top
+		// of it — the keyboard twin of which `DrawShortcuts` already fixed.
+		//
+		// **And it owns the mouse while an item is held, which used to swallow
+		// every press.** `IsWindowHovered` is false whenever *any* item is
+		// active — imgui's `g.ActiveId != 0` test — and the item active through
+		// a click in the viewport is this panel's own `##surface`, the button
+		// `DrawViewport` lays over the image so the camera can be driven. So on
+		// the frame the mouse went down, `Inside` went false, `Pick` found
+		// nothing and `Router::Holding` never latched: no press shade on an
+		// `AutoButtonColor` button, and no `Activated` ever.
+		//
+		// **This panel's own drag is the one blocked item worth seeing
+		// through**, rather than `AllowWhenBlockedByActiveItem`, which would
+		// see through all of them — a slider being dragged in the properties
+		// panel is imgui's mouse and the game's UI should not light up under it
+		// on the way past.
+		const ViewportState *held = ExtraAt(index);
+		const bool driving = held != nullptr ? held->Active : ViewportActive;
+
+		pointer.Inside = (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
+						 ImGui::IsMouseHoveringRect(
+							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
+						 );
+
+		size_t commands = 0;
+		std::vector<engine::gui::GuiEvent> events;
+		Universe->Enter(shown, [&](Store &store) {
+			// **Per panel, because a panel is a canvas with its own camera.**
+			// A billboard is as many pixels across as the viewport it is
+			// projected into makes it, so two panels looking at one world from
+			// two distances are *supposed* to disagree — which is why this is
+			// resolved here rather than once for the world.
+			//
+			// Before `Rebuild`, which runs the layout inside itself.
+			engine::render::ResolveSpatialCanvases(store, request.Display);
+			GuiLists[index].Rebuild(store, request);
+
+			// **Copied out of the router's span before the world is left.**
+			// `Router::Update` returns a view into a vector it reuses every
+			// frame, and the runtime this is about to be handed to is reached
+			// outside this callback.
+			const std::span<const engine::gui::GuiEvent> produced =
+				GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
+			events.assign(produced.begin(), produced.end());
+
+			commands = GuiLists[index].Commands().Commands.size();
+		});
+
+		// **Handed to the VM, which is what turns a click into a `.Activated`.**
+		// This is the join the v0.8 plan left last, and the editor is still not
+		// the place that makes it: `Runtime::DeliverGuiEvents` queues, and the
+		// runtime's own `Heartbeat` dispatches at the barrier alongside every
+		// other signal. What the editor does is forward, which is the only part
+		// it is allowed to know about.
+		//
+		// **Only for a world that is running**, because a runtime is what a
+		// `WorldRun` holds — an edit-mode viewport routes and paints so that
+		// hover and press shades behave while authoring, and there is no VM to
+		// tell. That is the same split `RunMode` already draws everywhere else.
+		if (!events.empty()) {
+			for (const WorldRun &run : Runs) {
+				if (run.World != shown || run.Runtime == nullptr) {
+					continue;
+				}
+				run.Runtime->DeliverGuiEvents(events);
+				break;
+			}
+		}
+
+		if (commands == 0) {
+			return;
+		}
+
+		engine::ui::PaintTarget target;
+		target.Origin = ImVec2(slot.X, slot.Y);
+
+		engine::ui::PaintGui(GuiLists[index].Commands(), slot.List, target);
 	}
 }

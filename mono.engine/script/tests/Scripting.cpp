@@ -15,6 +15,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/gui/Input.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -3032,4 +3034,304 @@ TEST_CASE("javascript announces a destroyed subtree once", "[scripting][js]") {
 	CHECK(counted("model-Part") == 1);
 	CHECK(counted("model-Nested") == 1);
 	CHECK(counted("model-Model") == 0);
+}
+
+// --- the 2D tree's input ----------------------------------------------------
+//
+// **These are the join `gui/Input.hpp` refused to make and this module owns.**
+// `gui::Router` produces events and knows nothing about a VM; `SignalTable`
+// holds connections and knows nothing about a pointer. What is asserted here is
+// the seam between them: that a script's `.Activated` runs, that it runs *when*
+// the barrier says rather than when the pointer moved, and that the router's
+// own ordering rules survive the crossing unchanged.
+//
+// A `gui::Router` is deliberately **not** used to produce the events. Its rules
+// — which element an `InputEnded` goes to, that `MouseLeave` precedes
+// `MouseEnter` — are `gui`'s and are tested there. Feeding hand-built events in
+// is what makes these cases about delivery: a test that drove a real pointer
+// would fail for either module's reasons and name neither.
+//
+// **Handlers record into the world rather than into a global**, because both
+// VMs freeze their globals — `script/AGENTS.md` calls that the design rather
+// than a hardening pass, and a test that wanted `_G` would be asking for the
+// one thing a loaded script may not have. A part's `Name` is appended to, which
+// records order as well as count in one readable value.
+
+namespace {
+	// One gui event, spelled out.
+	engine::gui::GuiEvent
+	Happened(engine::gui::EventKind kind, Entity instance, float x = 0.0f, float y = 0.0f) {
+		engine::gui::GuiEvent event;
+		event.Kind = kind;
+		event.Instance = instance;
+		event.Position = engine::core::Vector2{x, y};
+		return event;
+	}
+
+	// A `TextButton` under the workspace, which is where a script can find it.
+	Entity MakeButton(Store &store, const char *name) {
+		engine::gui::RegisterGuiClasses();
+		const Entity button = store.CreateInstance(engine::gui::GuiClass("TextButton"), name);
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		store.SetParent(button, workspace);
+		return button;
+	}
+
+	// The name the trace part starts with, and the prefix `Trace` strips.
+	//
+	// **Not the empty string**, which was the obvious choice and is the one
+	// thing that cannot work: `Instances.cpp` refuses `FindFirstChild(x, "")`
+	// because `core::Name("")` is the invalid name and would match anything
+	// unnamed. A handler looking the log up would get `nil`, fail at beat time
+	// rather than at `Run` time, and record nothing — which reads exactly like
+	// the signal never firing.
+	constexpr const char *LOG_NAME = "Log";
+
+	// The part handlers write their trace onto.
+	Entity MakeLog(Store &store) {
+		const Entity log = store.CreateInstance(PartClass(), LOG_NAME);
+		store.SetParent(log, engine::scene::WorkspaceOf(store));
+		return log;
+	}
+
+	// What the handlers recorded, in order, with the starting name removed.
+	std::string Trace(Store &store, Entity log) {
+		const std::string name(store.InstanceNameOf(log).Text());
+		const std::string prefix(LOG_NAME);
+		return name.rfind(prefix, 0) == 0 ? name.substr(prefix.size()) : name;
+	}
+}
+
+TEST_CASE("a gui event reaches a script's Activated", "[scripting][gui]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity button = MakeButton(store, "Go");
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		local workspace = game:GetService('Workspace')
+		local button = workspace:FindFirstChild('Go')
+		assert(button, 'the button should be findable')
+		local log = workspace:FindFirstChild('Log')
+		button.Activated:Connect(function()
+			log.Name = log.Name .. 'c'
+		end)
+	)");
+
+	const engine::gui::GuiEvent click = Happened(engine::gui::EventKind::Activated, button);
+	runtime->DeliverGuiEvents(std::span(&click, 1));
+
+	// **Nothing has run yet, and that is the contract.** The event is queued
+	// until the barrier, so a host that delivered and never beat gets no calls.
+	CHECK(Trace(store, log).empty());
+	CHECK(runtime->PendingGuiEventCount() == 1);
+
+	Beat(store, *runtime);
+
+	CHECK(Trace(store, log) == "c");
+	CHECK(runtime->PendingGuiEventCount() == 0);
+
+	// And it fires once rather than every beat — the queue is drained, not read.
+	Beat(store, *runtime);
+	CHECK(Trace(store, log) == "c");
+}
+
+TEST_CASE("gui events keep the router's order across the queue", "[scripting][gui]") {
+	// **`MouseLeave` before `MouseEnter` is `gui::Router`'s rule** — a handler
+	// that puts something back on leave runs before the one reacting to the
+	// arrival — and a queue that sorted, bucketed by element or delivered by
+	// kind would quietly reverse it. Two elements, one move between them.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity left = MakeButton(store, "Left");
+	const Entity right = MakeButton(store, "Right");
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		local workspace = game:GetService('Workspace')
+		local log = workspace:FindFirstChild('Log')
+		workspace:FindFirstChild('Left').MouseLeave:Connect(function()
+			log.Name = log.Name .. 'L'
+		end)
+		workspace:FindFirstChild('Right').MouseEnter:Connect(function()
+			log.Name = log.Name .. 'E'
+		end)
+	)");
+
+	const engine::gui::GuiEvent events[2] = {
+		Happened(engine::gui::EventKind::MouseLeave, left, 10.0f, 20.0f),
+		Happened(engine::gui::EventKind::MouseEnter, right, 10.0f, 20.0f),
+	};
+	runtime->DeliverGuiEvents(events);
+	Beat(store, *runtime);
+
+	CHECK(Trace(store, log) == "LE");
+}
+
+TEST_CASE("a pointer signal is called with the canvas position", "[scripting][gui]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity button = MakeButton(store, "Tracked");
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		local workspace = game:GetService('Workspace')
+		local log = workspace:FindFirstChild('Log')
+		workspace:FindFirstChild('Tracked').MouseMoved:Connect(function(x, y)
+			log.Name = log.Name .. tostring(x) .. ',' .. tostring(y)
+		end)
+	)");
+
+	const engine::gui::GuiEvent moved =
+		Happened(engine::gui::EventKind::MouseMoved, button, 123.0f, 456.0f);
+	runtime->DeliverGuiEvents(std::span(&moved, 1));
+	Beat(store, *runtime);
+
+	CHECK(Trace(store, log) == "123,456");
+}
+
+TEST_CASE("an event for a destroyed element is dropped rather than dispatched", "[scripting][gui]") {
+	// **The ordinary case, not an edge one.** A close button destroys the panel
+	// it sits in, and the same delivery may carry a later event about something
+	// that went with it — the router named both from a list compiled before
+	// either handler ran. Firing at a dead entity would hand a script a userdata
+	// for a row that is gone.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity closer = MakeButton(store, "Closer");
+	const Entity doomed = MakeButton(store, "Doomed");
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		local workspace = game:GetService('Workspace')
+		local log = workspace:FindFirstChild('Log')
+		local doomed = workspace:FindFirstChild('Doomed')
+		workspace:FindFirstChild('Closer').Activated:Connect(function()
+			log.Name = log.Name .. 'x'
+			doomed:Destroy()
+		end)
+		doomed.Activated:Connect(function()
+			log.Name = log.Name .. '!'
+		end)
+	)");
+
+	const engine::gui::GuiEvent events[2] = {
+		Happened(engine::gui::EventKind::Activated, closer),
+		Happened(engine::gui::EventKind::Activated, doomed),
+	};
+	runtime->DeliverGuiEvents(events);
+	Beat(store, *runtime);
+
+	// The closer ran; the destroyed element was skipped rather than dispatched.
+	CHECK(Trace(store, log) == "x");
+}
+
+TEST_CASE("two deliveries before one beat both arrive", "[scripting][gui]") {
+	// **Two panels routing into one runtime is the studio's ordinary
+	// arrangement** — one `gui::Router` per viewport panel, per
+	// `ROADMAP.md`'s v0.8 entry — so a second delivery before the beat has to
+	// queue behind the first rather than replace it.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity button = MakeButton(store, "Twice");
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		local workspace = game:GetService('Workspace')
+		local log = workspace:FindFirstChild('Log')
+		workspace:FindFirstChild('Twice').Activated:Connect(function()
+			log.Name = log.Name .. 'c'
+		end)
+	)");
+
+	const engine::gui::GuiEvent click = Happened(engine::gui::EventKind::Activated, button);
+	runtime->DeliverGuiEvents(std::span(&click, 1));
+	runtime->DeliverGuiEvents(std::span(&click, 1));
+	CHECK(runtime->PendingGuiEventCount() == 2);
+
+	Beat(store, *runtime);
+	CHECK(Trace(store, log) == "cc");
+}
+
+TEST_CASE("javascript reaches the same gui signals", "[scripting][js][gui]") {
+	// The roadmap's gate: each item lands in Luau *and* JavaScript, or it is not
+	// done. The ordering is shared by construction — one `SignalTable`, one
+	// queue on `Runtime` — so what this checks is that the binding exists and
+	// that the arguments arrive.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	const Entity button = MakeButton(store, "JsGo");
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		// The `workspace` global rather than `game.GetService('Workspace')`,
+		// which the JavaScript surface does not answer — the existing parity
+		// cases above reach it the same way.
+		const button = workspace.FindFirstChild('JsGo');
+		if (!button) throw new Error('the button should be findable');
+		const log = workspace.FindFirstChild('Log');
+		button.Activated.Connect(() => { log.Name = log.Name + 'c'; });
+		button.MouseMoved.Connect((x, y) => { log.Name = log.Name + '@' + x + ',' + y; });
+	)");
+
+	const engine::gui::GuiEvent events[2] = {
+		Happened(engine::gui::EventKind::Activated, button),
+		Happened(engine::gui::EventKind::MouseMoved, button, 7.0f, 9.0f),
+	};
+	runtime->DeliverGuiEvents(events);
+
+	CHECK(Trace(store, log).empty());
+
+	Beat(store, *runtime);
+
+	CHECK(Trace(store, log) == "c@7,9");
+}
+
+TEST_CASE("game.JobId names the world the script is standing on", "[scripting]") {
+	// **What lets one file build four different worlds.** `--worlds N` runs the
+	// same script in every world it creates, so without an identity every view
+	// is identical — and a compositor that placed them in the wrong order would
+	// look exactly like one that did not. `Mirrors-4-worlds.luau` is the caller.
+	//
+	// The world's *name* rather than a fresh identifier, because a name is what
+	// a bus envelope, a snapshot and a view header already carry. A second
+	// identifier for one world would be two sources of truth for the same fact.
+	RegisterClasses();
+	Store store("mirrors.world.2");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity log = MakeLog(store);
+	MustRun(*runtime, R"(
+		local log = game:GetService('Workspace'):FindFirstChild('Log')
+		log.Name = log.Name .. game.JobId
+	)");
+
+	CHECK(Trace(store, log) == "mirrors.world.2");
+}
+
+TEST_CASE("javascript reads the same JobId", "[scripting][js]") {
+	RegisterClasses();
+	Store store("mirrors.world.3");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	const Entity log = MakeLog(store);
+	MustRun(*runtime, R"(
+		const log = workspace.FindFirstChild('Log');
+		log.Name = log.Name + game.JobId;
+	)");
+
+	CHECK(Trace(store, log) == "mirrors.world.3");
 }

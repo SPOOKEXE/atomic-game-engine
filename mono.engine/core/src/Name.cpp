@@ -2,6 +2,7 @@
 
 #include <deque>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -10,7 +11,22 @@ namespace engine::core {
 	namespace {
 
 		struct Registry {
-			std::mutex Guard;
+			// **A shared mutex, because reading a name's text is one of the
+			// hottest things in the engine and needs nothing exclusive.**
+			//
+			// `Text()` is called on every property comparison, every log line,
+			// every panel row and every save-file field. The registry it reads
+			// is append-only — the deque never moves what it holds and nothing
+			// is ever removed, which `Text()`'s own return comment already
+			// relies on — so concurrent readers do not interfere with each
+			// other at all. With a plain mutex they serialised anyway, and with
+			// `ExecutionMode::WorldParallel` two worlds ticking on two workers
+			// contended on this one lock for every name either of them touched.
+			//
+			// `Slots` is the one thing a reader indexes that a writer can
+			// *reallocate*, which is why this is a shared lock rather than no
+			// lock: the deque could be read unsynchronised, that vector cannot.
+			std::shared_mutex Guard;
 
 			// A deque, not a vector: references into it stay valid when it
 			// grows, which is what lets Text() hand out a string_view that
@@ -65,6 +81,35 @@ namespace engine::core {
 		}
 
 		auto &registry = Get();
+
+		// **The hit is a read, and it is almost every call.** A process interns
+		// each distinct name once and then constructs from that text for the
+		// life of the run — a component name, a property name, a service name —
+		// so the miss below happens a few thousand times at load and the lookup
+		// here happens continuously.
+		//
+		// Taking the registry exclusively for that lookup is what the `Guard`
+		// was made a `shared_mutex` to avoid, and it was still happening:
+		// `engine.core.bench.names` measured the same total work at 23 ns a
+		// lookup on one thread and 136 on eight, which is worse than serial and
+		// is what full exclusion looks like. `Text()` on the same ladder went 10
+		// to 30, because it was already taking the lock shared.
+		{
+			std::shared_lock lock(registry.Guard);
+
+			const auto existing = registry.Ids.find(text);
+			if (existing != registry.Ids.end()) {
+				Identifier = existing->second;
+				return;
+			}
+		}
+
+		// A miss. `shared_mutex` cannot upgrade, so the shared lock is dropped
+		// and an exclusive one taken — which means another thread may have
+		// interned this very text in between, and the lookup has to happen
+		// again. **Without the re-check two threads that both missed would both
+		// insert, and one text would have two ids** — which is precisely the
+		// thing `Name` exists to make impossible.
 		std::lock_guard lock(registry.Guard);
 
 		const auto existing = registry.Ids.find(text);
@@ -114,7 +159,11 @@ namespace engine::core {
 
 	Name Name::FromId(uint32_t id) {
 		auto &registry = Get();
-		std::lock_guard lock(registry.Guard);
+
+		// Shared: this reads `Slots` and writes nothing. It was exclusive, which
+		// meant a deserialiser resolving ids on two worlds' threads serialised
+		// on a bounds check.
+		std::shared_lock lock(registry.Guard);
 
 		if (id >= registry.Slots.size() || registry.Slots[id] == INVALID) {
 			return {};
@@ -124,13 +173,17 @@ namespace engine::core {
 
 	bool Name::Exists(std::string_view text) {
 		auto &registry = Get();
-		std::lock_guard lock(registry.Guard);
+
+		// Shared, and the header already promises it: "Whether `text` has been
+		// interned, **without interning it**." A method that cannot write has no
+		// business excluding the ones that only read.
+		std::shared_lock lock(registry.Guard);
 		return registry.Ids.find(text) != registry.Ids.end();
 	}
 
 	size_t Name::Count() {
 		auto &registry = Get();
-		std::lock_guard lock(registry.Guard);
+		std::shared_lock lock(registry.Guard);
 		return registry.Texts.size();
 	}
 
@@ -140,7 +193,7 @@ namespace engine::core {
 		}
 
 		auto &registry = Get();
-		std::lock_guard lock(registry.Guard);
+		std::shared_lock lock(registry.Guard);
 
 		if (Identifier >= registry.Slots.size()) {
 			return {};

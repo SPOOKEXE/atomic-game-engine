@@ -4,8 +4,35 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 namespace engine::audio {
+
+	namespace {
+		// The part of a scratch buffer one segment actually uses.
+		//
+		// **Scratch is sized to the largest block the mixer will ever be asked
+		// for, and a segment is usually far shorter than that.** A command with a
+		// deadline inside the block splits it, and every piece re-renders every
+		// node — so a node touching all 512 frames when the segment is eight of
+		// them does sixty-four times the memory traffic the audio needs.
+		//
+		// That was measurable and large: `engine.audio.bench.mixing` reported 64
+		// voices at 102 microseconds with no commands and 693 with sixty-four of
+		// them, against a block deadline of 10.67 milliseconds. The work scaled
+		// with the number of splits rather than with the number of frames, which
+		// is the wrong axis entirely — the audio in a split block is exactly the
+		// audio in an unsplit one.
+		//
+		// Nothing reads past `frames`: `MixSegment` copies that many and the
+		// input-summing loop sums that many, and every segment re-silences from
+		// zero before it writes. So the tail is not stale, it is simply never
+		// looked at.
+		std::span<float> Used(SampleBuffer &buffer, size_t frames, uint16_t channels) {
+			const std::span<float> all = buffer.Data();
+			return all.first(std::min(frames * static_cast<size_t>(channels), all.size()));
+		}
+	}
 
 	AudioMixer::AudioMixer(AudioFormat format, size_t blockFrames)
 		: Shape(format.IsValid() ? format : AudioFormat{}),
@@ -27,8 +54,11 @@ namespace engine::audio {
 		ScratchFor.assign(order.begin(), order.end());
 		Scratch.clear();
 		Scratch.reserve(order.size());
+		SlotOfNode.clear();
+		SlotOfNode.reserve(order.size());
 		for (size_t index = 0; index < order.size(); ++index) {
 			Scratch.emplace_back(Shape, BlockFrames);
+			SlotOfNode.emplace(order[index].Value, index);
 		}
 	}
 
@@ -138,7 +168,10 @@ namespace engine::audio {
 		const NodeId id = ScratchFor[index];
 		Node *node = Nodes.Find(id);
 		SampleBuffer &out = Scratch[index];
-		out.Silence();
+
+		// Only this segment's frames, per `Used` above.
+		const std::span<float> used = Used(out, frames, Shape.Channels);
+		std::fill(used.begin(), used.end(), 0.0f);
 
 		if (node == nullptr) {
 			return;
@@ -194,24 +227,20 @@ namespace engine::audio {
 		// thing to the sum. Gathering first is what makes a bus and a fader the
 		// same code with one extra step.
 		for (const NodeId source : Nodes.InputsOf(id)) {
-			for (size_t other = 0; other < ScratchFor.size(); ++other) {
-				if (ScratchFor[other] != source) {
-					continue;
-				}
-				// The topological order guarantees `other` was rendered before
-				// this node, which is the whole reason the order exists.
-				std::span<float> written = out.Data();
-				const std::span<const float> from = Scratch[other].Data();
-				const size_t count = frames * Shape.Channels;
-				for (size_t sample = 0; sample < count; ++sample) {
-					written[sample] += from[sample];
-				}
-				break;
+			const auto found = SlotOfNode.find(source.Value);
+			if (found == SlotOfNode.end()) {
+				continue;
+			}
+			// The topological order guarantees the input was rendered before
+			// this node, which is the whole reason the order exists.
+			const std::span<const float> from = Scratch[found->second].Data();
+			for (size_t sample = 0; sample < used.size(); ++sample) {
+				used[sample] += from[sample];
 			}
 		}
 
 		if (node->Muted) {
-			out.Silence();
+			std::fill(used.begin(), used.end(), 0.0f);
 			return;
 		}
 
@@ -246,7 +275,7 @@ namespace engine::audio {
 			// one costs a multiply, which is cheaper than the branch that
 			// would skip it.
 			if (node->Gain != 1.0f) {
-				for (float &sample : out.Data()) {
+				for (float &sample : used) {
 					sample *= node->Gain;
 				}
 			}
@@ -267,19 +296,16 @@ namespace engine::audio {
 			RenderNode(index, frames);
 		}
 
-		// Find the output's scratch and copy it into place.
-		const NodeId sink = Nodes.Output();
-		for (size_t index = 0; index < ScratchFor.size(); ++index) {
-			if (ScratchFor[index] != sink) {
-				continue;
-			}
-			const std::span<const float> from = Scratch[index].Data();
-			std::span<float> written = out.Data();
-			const size_t count = frames * Shape.Channels;
-			for (size_t sample = 0; sample < count; ++sample) {
-				written[offset * Shape.Channels + sample] = from[sample];
-			}
-			break;
+		// Copy the output's scratch into place.
+		const auto found = SlotOfNode.find(Nodes.Output().Value);
+		if (found == SlotOfNode.end()) {
+			return;
+		}
+		const std::span<const float> from = Scratch[found->second].Data();
+		std::span<float> written = out.Data();
+		const size_t count = frames * Shape.Channels;
+		for (size_t sample = 0; sample < count; ++sample) {
+			written[offset * Shape.Channels + sample] = from[sample];
 		}
 	}
 

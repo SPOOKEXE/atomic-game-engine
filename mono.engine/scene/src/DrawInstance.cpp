@@ -19,22 +19,24 @@ namespace engine::scene {
 		//
 		// NaN falls the same way — two NaNs with different payloads hash apart —
 		// and for the same reason it does not matter.
-		uint64_t MixFloat(uint64_t hash, float value) {
+		uint32_t BitsOf(float value) {
 			uint32_t bits = 0;
 			std::memcpy(&bits, &value, sizeof(bits));
-			return MixSignature(hash, bits);
+			return bits;
 		}
 
-		uint64_t MixVector(uint64_t hash, const core::Vector3 &value) {
-			return MixFloat(MixFloat(MixFloat(hash, value.X), value.Y), value.Z);
-		}
-
-		uint64_t MixFrame(uint64_t hash, const core::CFrame &frame) {
-			hash = MixVector(hash, frame.Position);
-			hash = MixFloat(hash, frame.QuaternionX);
-			hash = MixFloat(hash, frame.QuaternionY);
-			hash = MixFloat(hash, frame.QuaternionZ);
-			return MixFloat(hash, frame.QuaternionW);
+		// Two 32-bit fields as one 64-bit word.
+		//
+		// **`MixSignature` costs the same for one bit as for sixty-four**, so
+		// feeding it a 32-bit value wastes half of every mix — and every field
+		// on a `DrawInstance` that a surface can see is 32 bits or fewer. Pairing
+		// them halves the number of mixes without folding in one bit less.
+		//
+		// Order within the pair is fixed and arbitrary; what matters is that it
+		// is the same on both sides of every comparison, which it is because
+		// there is one function.
+		constexpr uint64_t Pair(uint32_t high, uint32_t low) {
+			return (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
 		}
 
 		// The seed. FNV's 64-bit offset basis, used as a starting constant
@@ -58,22 +60,59 @@ namespace engine::scene {
 	}
 
 	uint64_t SignatureOf(std::span<const DrawInstance> instances) {
-		uint64_t hash = SIGNATURE_SEED;
+		// **Four chains rather than one, because this is latency-bound and not
+		// throughput-bound.** `MixSignature` is a shift, a shift, an add and an
+		// xor, and every one of them needs the previous hash — so folding
+		// eighteen fields into one accumulator is an eighteen-deep dependency
+		// chain per instance that a superscalar core can do nothing with. It
+		// measured at 13 ns an instance in `engine.scene.bench.ordering`, which
+		// is thirteen times what ordering the whole opaque list costs and made
+		// the guard dearer than the redraw it exists to skip: sixteen surfaces
+		// over a ten-thousand-instance list is about 2 ms of a frame spent
+		// deciding that nothing had changed.
+		//
+		// Independent lanes let four mixes be in flight at once, and pairing the
+		// 32-bit fields halves how many there are. Both are pure rearrangement —
+		// every field still lands in the result, still by its bit pattern, and
+		// still field-wise rather than over the object representation, which is
+		// what `tests/DrawInstance.cpp` pins and what keeps `Reserved` out of it.
+		//
+		// **The value changes, and nothing may depend on the old one.** A
+		// signature is compared against another produced by this same function
+		// within one run; `scene/Registration.cpp` deliberately serialises a
+		// `RenderedSignature` as nothing and reads it back as a default, so
+		// there is no file and no wire carrying one.
+		uint64_t a = SIGNATURE_SEED;
+		uint64_t b = SIGNATURE_SEED;
+		uint64_t c = SIGNATURE_SEED;
+		uint64_t d = SIGNATURE_SEED;
 
 		for (const DrawInstance &instance : instances) {
-			hash = MixFrame(hash, instance.Frame);
-			hash = MixVector(hash, instance.HalfExtent);
-			hash = MixFloat(hash, instance.Tint.R);
-			hash = MixFloat(hash, instance.Tint.G);
-			hash = MixFloat(hash, instance.Tint.B);
-			hash = MixFloat(hash, instance.Transparency);
-			hash = MixSignature(hash, instance.Mesh.Id());
-			hash = MixSignature(hash, instance.Material.Id());
-			hash = MixSignature(hash, static_cast<uint8_t>(instance.Surface));
-			hash = MixSignature(hash, instance.CastShadow ? 1u : 0u);
+			const core::CFrame &frame = instance.Frame;
+
+			a = MixSignature(a, Pair(BitsOf(frame.Position.X), BitsOf(frame.Position.Y)));
+			b = MixSignature(b, Pair(BitsOf(frame.Position.Z), BitsOf(frame.QuaternionX)));
+			c = MixSignature(c, Pair(BitsOf(frame.QuaternionY), BitsOf(frame.QuaternionZ)));
+			d = MixSignature(d, Pair(BitsOf(frame.QuaternionW), BitsOf(instance.HalfExtent.X)));
+
+			a = MixSignature(a, Pair(BitsOf(instance.HalfExtent.Y), BitsOf(instance.HalfExtent.Z)));
+			b = MixSignature(b, Pair(BitsOf(instance.Tint.R), BitsOf(instance.Tint.G)));
+			c = MixSignature(c, Pair(BitsOf(instance.Tint.B), BitsOf(instance.Transparency)));
+			d = MixSignature(d, Pair(instance.Mesh.Id(), instance.Material.Id()));
+
+			// `Surface` is signed and -1 means "no surface", so it is widened
+			// through `uint8_t` exactly as it was before: sign-extending it
+			// would fold in twenty-four bits that say nothing.
+			a = MixSignature(
+				a,
+				Pair(static_cast<uint8_t>(instance.Surface), instance.CastShadow ? 1u : 0u)
+			);
 		}
 
-		return hash;
+		// Combined in a fixed order, so the four lanes give one value. The
+		// combine is four mixes for the whole list rather than per instance, so
+		// its cost rounds to nothing.
+		return MixSignature(MixSignature(a, b), MixSignature(c, d));
 	}
 
 	size_t OrderForDrawing(

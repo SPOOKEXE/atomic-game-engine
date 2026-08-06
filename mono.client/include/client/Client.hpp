@@ -17,7 +17,11 @@
 #include <engine/net/Transport.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Input.hpp>
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/SpatialCanvas.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
@@ -312,6 +316,27 @@ namespace client {
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
 		engine::render::OverlayImage Overlay;
+
+		// **What draws a `ScreenGui` in a shipped client.** `mono.client` does
+		// not link `Engine::ui` and must not — that is what keeps Dear ImGui out
+		// of a game binary — so the interface hook here is the engine's own
+		// renderer over `gui::DrawList` rather than the editor's.
+		//
+		// One per client rather than one per world, because a client draws one
+		// interface however many worlds it composites: a `ScreenGui` belongs to
+		// the viewer, and `--worlds N` places four *views* rather than four
+		// overlays.
+		engine::render::InterfacePass Interface;
+
+		// The compiled list the pass draws, kept across frames so its signature
+		// can be compared. Holding one per frame would compute a signature, find
+		// nothing to compare it against and rebuild every time — every cost of
+		// the design and none of its benefit.
+		engine::gui::Compiled InterfaceList;
+
+		// Where the pointer is, for the world's own interface. Long-lived: it
+		// holds the hover and the press across frames.
+		engine::gui::Router InterfaceRouter;
 		engine::render::FrameStatistics Statistics;
 
 		engine::input::Actions Actions;

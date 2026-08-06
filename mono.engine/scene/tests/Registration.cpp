@@ -64,6 +64,7 @@ namespace registration_test {
 		"scene.SurfaceTable",
 		"scene.ActiveCamera",
 		"scene.WorldBounds",
+		"scene.RenderedSignature",
 	};
 }
 
