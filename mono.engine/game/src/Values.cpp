@@ -128,34 +128,34 @@ namespace engine::game {
 		// this switch hands it would otherwise write past the end of a local.
 		switch (descriptor.Type) {
 		case PropertyType::Bool:
-			return store.GetProperty(instance, descriptor.Name, &out.Bool, sizeof(out.Bool));
+			return store.GetProperty(instance, descriptor, &out.Bool, sizeof(out.Bool));
 		case PropertyType::Int32:
-			return store.GetProperty(instance, descriptor.Name, &out.Int32, sizeof(out.Int32));
+			return store.GetProperty(instance, descriptor, &out.Int32, sizeof(out.Int32));
 		case PropertyType::Int64:
-			return store.GetProperty(instance, descriptor.Name, &out.Int64, sizeof(out.Int64));
+			return store.GetProperty(instance, descriptor, &out.Int64, sizeof(out.Int64));
 		case PropertyType::Float:
-			return store.GetProperty(instance, descriptor.Name, &out.Float, sizeof(out.Float));
+			return store.GetProperty(instance, descriptor, &out.Float, sizeof(out.Float));
 		case PropertyType::Double:
-			return store.GetProperty(instance, descriptor.Name, &out.Double, sizeof(out.Double));
+			return store.GetProperty(instance, descriptor, &out.Double, sizeof(out.Double));
 		case PropertyType::Name:
 		case PropertyType::Enum:
-			return store.GetProperty(instance, descriptor.Name, &out.Name, sizeof(out.Name));
+			return store.GetProperty(instance, descriptor, &out.Name, sizeof(out.Name));
 		case PropertyType::Reference:
-			return store.GetProperty(instance, descriptor.Name, &out.Reference, sizeof(out.Reference));
+			return store.GetProperty(instance, descriptor, &out.Reference, sizeof(out.Reference));
 		case PropertyType::Vector3:
-			return store.GetProperty(instance, descriptor.Name, &out.Vector3, sizeof(out.Vector3));
+			return store.GetProperty(instance, descriptor, &out.Vector3, sizeof(out.Vector3));
 		case PropertyType::CFrame:
-			return store.GetProperty(instance, descriptor.Name, &out.CFrame, sizeof(out.CFrame));
+			return store.GetProperty(instance, descriptor, &out.CFrame, sizeof(out.CFrame));
 		case PropertyType::Color3:
-			return store.GetProperty(instance, descriptor.Name, &out.Color3, sizeof(out.Color3));
+			return store.GetProperty(instance, descriptor, &out.Color3, sizeof(out.Color3));
 		case PropertyType::Vector2:
-			return store.GetProperty(instance, descriptor.Name, &out.Vector2, sizeof(out.Vector2));
+			return store.GetProperty(instance, descriptor, &out.Vector2, sizeof(out.Vector2));
 		case PropertyType::UDim:
-			return store.GetProperty(instance, descriptor.Name, &out.UDim, sizeof(out.UDim));
+			return store.GetProperty(instance, descriptor, &out.UDim, sizeof(out.UDim));
 		case PropertyType::UDim2:
-			return store.GetProperty(instance, descriptor.Name, &out.UDim2, sizeof(out.UDim2));
+			return store.GetProperty(instance, descriptor, &out.UDim2, sizeof(out.UDim2));
 		case PropertyType::Rect:
-			return store.GetProperty(instance, descriptor.Name, &out.Rect, sizeof(out.Rect));
+			return store.GetProperty(instance, descriptor, &out.Rect, sizeof(out.Rect));
 		case PropertyType::Opaque:
 			// Readable as bytes and not as a value. Nothing here can show
 			// it and nothing here should pretend to.
@@ -176,17 +176,17 @@ namespace engine::game {
 
 		switch (descriptor.Type) {
 		case PropertyType::Bool:
-			return store.SetProperty(instance, descriptor.Name, &value.Bool, sizeof(value.Bool));
+			return store.SetProperty(instance, descriptor, &value.Bool, sizeof(value.Bool));
 		case PropertyType::Int32:
-			return store.SetProperty(instance, descriptor.Name, &value.Int32, sizeof(value.Int32));
+			return store.SetProperty(instance, descriptor, &value.Int32, sizeof(value.Int32));
 		case PropertyType::Int64:
-			return store.SetProperty(instance, descriptor.Name, &value.Int64, sizeof(value.Int64));
+			return store.SetProperty(instance, descriptor, &value.Int64, sizeof(value.Int64));
 		case PropertyType::Float:
-			return store.SetProperty(instance, descriptor.Name, &value.Float, sizeof(value.Float));
+			return store.SetProperty(instance, descriptor, &value.Float, sizeof(value.Float));
 		case PropertyType::Double:
-			return store.SetProperty(instance, descriptor.Name, &value.Double, sizeof(value.Double));
+			return store.SetProperty(instance, descriptor, &value.Double, sizeof(value.Double));
 		case PropertyType::Name:
-			return store.SetProperty(instance, descriptor.Name, &value.Name, sizeof(value.Name));
+			return store.SetProperty(instance, descriptor, &value.Name, sizeof(value.Name));
 		case PropertyType::Enum:
 			// **Checked here as well as at the binding.** A game file is
 			// text somebody could have edited, so `Material` reading
@@ -197,23 +197,23 @@ namespace engine::game {
 			if (descriptor.EnumName.IsValid() && !ecs::EnumTable::Has(descriptor.EnumName, value.Name)) {
 				return false;
 			}
-			return store.SetProperty(instance, descriptor.Name, &value.Name, sizeof(value.Name));
+			return store.SetProperty(instance, descriptor, &value.Name, sizeof(value.Name));
 		case PropertyType::Reference:
-			return store.SetProperty(instance, descriptor.Name, &value.Reference, sizeof(value.Reference));
+			return store.SetProperty(instance, descriptor, &value.Reference, sizeof(value.Reference));
 		case PropertyType::Vector3:
-			return store.SetProperty(instance, descriptor.Name, &value.Vector3, sizeof(value.Vector3));
+			return store.SetProperty(instance, descriptor, &value.Vector3, sizeof(value.Vector3));
 		case PropertyType::CFrame:
-			return store.SetProperty(instance, descriptor.Name, &value.CFrame, sizeof(value.CFrame));
+			return store.SetProperty(instance, descriptor, &value.CFrame, sizeof(value.CFrame));
 		case PropertyType::Color3:
-			return store.SetProperty(instance, descriptor.Name, &value.Color3, sizeof(value.Color3));
+			return store.SetProperty(instance, descriptor, &value.Color3, sizeof(value.Color3));
 		case PropertyType::Vector2:
-			return store.SetProperty(instance, descriptor.Name, &value.Vector2, sizeof(value.Vector2));
+			return store.SetProperty(instance, descriptor, &value.Vector2, sizeof(value.Vector2));
 		case PropertyType::UDim:
-			return store.SetProperty(instance, descriptor.Name, &value.UDim, sizeof(value.UDim));
+			return store.SetProperty(instance, descriptor, &value.UDim, sizeof(value.UDim));
 		case PropertyType::UDim2:
-			return store.SetProperty(instance, descriptor.Name, &value.UDim2, sizeof(value.UDim2));
+			return store.SetProperty(instance, descriptor, &value.UDim2, sizeof(value.UDim2));
 		case PropertyType::Rect:
-			return store.SetProperty(instance, descriptor.Name, &value.Rect, sizeof(value.Rect));
+			return store.SetProperty(instance, descriptor, &value.Rect, sizeof(value.Rect));
 		case PropertyType::Opaque:
 			return false;
 		}

@@ -355,14 +355,15 @@ namespace engine::gui {
 			return ids;
 		}
 
-		// How much a hovered or pressed button's fill shifts.
+		// How far a hovered or pressed button's fill shifts.
 		//
-		// Roblox lightens on hover and darkens on press by a fixed factor.
-		// Named here rather than written at the point of use, which is
-		// `ui/Theme.cpp`'s rule: a literal at a point of use is one that cannot
-		// be changed without finding every copy.
-		constexpr float HOVER_LIGHTEN = 0.12f;
-		constexpr float PRESS_DARKEN = 0.18f;
+		// Press moves further than hover and in the same direction, so holding
+		// a button reads as more of what hovering it started rather than as a
+		// reversal. Named here rather than written at the point of use, which
+		// is `ui/Theme.cpp`'s rule: a literal at a point of use is one that
+		// cannot be changed without finding every copy.
+		constexpr float HOVER_SHIFT = 0.12f;
+		constexpr float PRESS_SHIFT = 0.20f;
 
 		Color3 Shift(const Color3 &colour, float amount) {
 			return Color3{
@@ -370,6 +371,25 @@ namespace engine::gui {
 				std::clamp(colour.G + amount, 0.0f, 1.0f),
 				std::clamp(colour.B + amount, 0.0f, 1.0f),
 			};
+		}
+
+		// Which way an `AutoButtonColor` shift goes for a given fill.
+		//
+		// **Away from the end the fill is already at, rather than always
+		// lighter.** Lightening on hover is the obvious rule and it is
+		// invisible on the one button that matters most: `Background::Color`
+		// defaults to white, so `1.0 + 0.12` clamps back to `1.0` and hovering
+		// a freshly created `TextButton` did nothing at all. Always darkening
+		// has the same hole at the other end, against a black fill. Choosing by
+		// luminance is what gives every fill somewhere to go, and it is one
+		// branch rather than a special case per palette.
+		//
+		// Rec. 709 weights, because a shift judged by eye is judged against
+		// perceived brightness — a saturated green reads as light and a
+		// saturated blue as dark at the same numeric value.
+		float ShiftDirection(const Color3 &colour) {
+			const float luminance = 0.2126f * colour.R + 0.7152f * colour.G + 0.0722f * colour.B;
+			return luminance > 0.5f ? -1.0f : 1.0f;
 		}
 
 		// The border rectangle for a `BorderMode`.
@@ -456,10 +476,11 @@ namespace engine::gui {
 				// `Button::AutoButtonColor` says so at the field.
 				if (const Button *button = store.Get<Button>(instance);
 					button != nullptr && button->AutoButtonColor) {
+					const float direction = ShiftDirection(fill);
 					if (instance == request.Pressed) {
-						fill = Shift(fill, -PRESS_DARKEN);
+						fill = Shift(fill, direction * PRESS_SHIFT);
 					} else if (instance == request.Hovered) {
-						fill = Shift(fill, HOVER_LIGHTEN);
+						fill = Shift(fill, direction * HOVER_SHIFT);
 					}
 				}
 

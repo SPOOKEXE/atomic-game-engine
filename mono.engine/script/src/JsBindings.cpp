@@ -362,7 +362,7 @@ namespace engine::script {
 
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 			if (property->Size > sizeof(bytes) ||
-				!bound.World->GetProperty(instance, property->Name, bytes, property->Size)) {
+				!bound.World->GetProperty(instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
 			}
 			return ToJs(context, *property, bytes);
@@ -398,7 +398,7 @@ namespace engine::script {
 			// Refused loudly. A replica rejecting the write is the case that
 			// matters: a script author cannot tell "rejected" from "applied and
 			// overwritten by the next delta" without being told.
-			if (!bound.World->SetProperty(instance, property->Name, bytes, property->Size)) {
+			if (!bound.World->SetProperty(instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
 			}
 			return JS_UNDEFINED;

@@ -282,32 +282,57 @@ TEST_CASE("the hovered element is an input to the compile", "[gui][compile]") {
 	const Entity screen = world.Make("ScreenGui");
 	const Entity button = world.Make("TextButton", screen);
 
-	// **Mid-grey rather than the default.** A button's default fill is white,
-	// and lightening white clamps to white — so the default would make this
-	// case pass whether the shift ran or not.
-	Background background;
-	background.Color = Color3{0.5f, 0.5f, 0.5f};
-	world.Data.Set(button, background);
-
+	// **The default fill, deliberately.** `Background::Color` is white, so a
+	// button created in the explorer is white — and a shift that only ever
+	// lightened clamped straight back to white and did nothing under the
+	// pointer, which is every button anybody makes. This case used to be run
+	// against a mid-grey, which is exactly the fill that hid it.
 	REQUIRE(world.Rebuild());
 	const Color3 plain = world.List.Commands().Commands.front().Tint;
+	REQUIRE(plain.R == Approx(1.0f));
 
 	world.Request.Hovered = button;
 	CHECK(world.Rebuild());
 
-	// **Lit in the command and not in the component.** A hover written back
-	// into `BackgroundColor3` would make the property read differently
+	// **Shifted in the command and not in the component.** A hover written
+	// back into `BackgroundColor3` would make the property read differently
 	// depending on where the mouse is.
 	const Color3 lit = world.List.Commands().Commands.front().Tint;
-	CHECK(lit.R > plain.R);
+	CHECK(lit.R < plain.R);
 	CHECK(world.Data.Get<Background>(button)->Color.R == Approx(plain.R));
 
-	// And pressed darkens, which is the other half and the one that cannot be
-	// confused with a clamp.
+	// And a press goes further the same way, so holding a button reads as more
+	// of what hovering it started rather than as a reversal.
 	world.Request.Hovered = engine::ecs::NULL_ENTITY;
 	world.Request.Pressed = button;
 	CHECK(world.Rebuild());
-	CHECK(world.List.Commands().Commands.front().Tint.R < plain.R);
+	CHECK(world.List.Commands().Commands.front().Tint.R < lit.R);
+}
+
+TEST_CASE("a dark button shifts as far as a light one", "[gui][compile]") {
+	World world("gui_compile.hover.dark");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+
+	// The same hole at the other end: darkening black is no shift either, so
+	// the direction is chosen per fill rather than fixed once for all of them.
+	Background background;
+	background.Color = Color3{0.0f, 0.0f, 0.0f};
+	world.Data.Set(button, background);
+
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.Commands().Commands.front().Tint.R == Approx(0.0f));
+
+	world.Request.Hovered = button;
+	CHECK(world.Rebuild());
+
+	const Color3 lit = world.List.Commands().Commands.front().Tint;
+	CHECK(lit.R > 0.0f);
+
+	world.Request.Hovered = engine::ecs::NULL_ENTITY;
+	world.Request.Pressed = button;
+	CHECK(world.Rebuild());
+	CHECK(world.List.Commands().Commands.front().Tint.R > lit.R);
 }
 
 TEST_CASE("paint order is parent first, then siblings by ZIndex", "[gui][compile]") {

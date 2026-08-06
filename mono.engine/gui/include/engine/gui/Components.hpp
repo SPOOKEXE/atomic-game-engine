@@ -226,7 +226,13 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Button {
-		// Whether the background lightens on hover and darkens on press.
+		// Whether the background shifts under the pointer, further on press
+		// than on hover.
+		//
+		// **Away from whichever end the fill is already at, not always
+		// lighter**, because the default fill is white and lightening white is
+		// no shift at all. `Compile.cpp`'s `ShiftDirection` is where that is
+		// decided and says why.
 		//
 		// **Applied in the compile and not stored back**, so the authored
 		// colour is what a script reads however the pointer is behaving. A

@@ -869,13 +869,29 @@ namespace studio {
 		// panel docked over the viewport is exactly that. Without this the
 		// game's UI would receive clicks meant for the explorer sitting on top
 		// of it — the keyboard twin of which `DrawShortcuts` already fixed.
-		pointer.Inside = ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)
-							 ? ImGui::IsMouseHoveringRect(
-								   ImVec2(slot.X, slot.Y),
-								   ImVec2(slot.X + slot.Width, slot.Y + slot.Height),
-								   false
-							   )
-							 : false;
+		//
+		// **And it owns the mouse while an item is held, which used to swallow
+		// every press.** `IsWindowHovered` is false whenever *any* item is
+		// active — imgui's `g.ActiveId != 0` test — and the item active through
+		// a click in the viewport is this panel's own `##surface`, the button
+		// `DrawViewport` lays over the image so the camera can be driven. So on
+		// the frame the mouse went down, `Inside` went false, `Pick` found
+		// nothing and `Router::Holding` never latched: no press shade on an
+		// `AutoButtonColor` button, and no `Activated` ever.
+		//
+		// **This panel's own drag is the one blocked item worth seeing
+		// through**, rather than `AllowWhenBlockedByActiveItem`, which would
+		// see through all of them — a slider being dragged in the properties
+		// panel is imgui's mouse and the game's UI should not light up under it
+		// on the way past.
+		const ViewportState *held = ExtraAt(index);
+		const bool driving = held != nullptr ? held->Active : ViewportActive;
+
+		pointer.Inside =
+			(ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
+			ImGui::IsMouseHoveringRect(
+				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
+			);
 
 		size_t commands = 0;
 		Universe->Enter(shown, [&](Store &store) {

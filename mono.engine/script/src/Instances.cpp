@@ -536,9 +536,14 @@ namespace engine::script {
 			if (property != nullptr) {
 				// Sized from the descriptor rather than from a guess, so this
 				// cannot be the place a size mismatch is introduced.
+				// **Through the descriptor this function already found**, not
+				// through its name. The by-name overload would call
+				// `Classes::Describe` and scan the class's property list a
+				// second time, for a descriptor that is in scope — which is
+				// half the class-table traffic of a scripted frame.
 				alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 				if (property->Size > sizeof(bytes) ||
-					!store.GetProperty(instance, property->Name, bytes, property->Size)) {
+					!store.GetProperty(instance, *property, bytes, property->Size)) {
 					luaL_errorL(state, "could not read '%s'", field);
 				}
 
@@ -630,7 +635,7 @@ namespace engine::script {
 			// rejecting the write is the case that matters: a script author
 			// cannot tell "rejected" from "applied and then overwritten by the
 			// next delta" without being told.
-			if (!store.SetProperty(instance, property->Name, bytes, property->Size)) {
+			if (!store.SetProperty(instance, *property, bytes, property->Size)) {
 				if (store.AdoptOnly()) {
 					luaL_errorL(
 						state,

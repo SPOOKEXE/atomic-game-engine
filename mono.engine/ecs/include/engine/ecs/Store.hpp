@@ -802,6 +802,54 @@ namespace engine::ecs {
 		// @return The descriptors, or an empty span when it is not an instance.
 		std::span<const PropertyDescriptor> PropertiesOf(Entity instance) const;
 
+		// --- the same two, for a caller that already holds the descriptor ----
+		//
+		// **The by-name pair above look up the descriptor, and a binding has
+		// already done that.** A script write goes `__newindex` → find the
+		// property by name → marshal the value → `SetProperty(name)` → find the
+		// property by name *again*. Each of those finds is a `Classes::Describe`
+		// — which takes the class table's lock — plus a linear scan of the
+		// class's merged property list.
+		//
+		// So the by-name pair are for a caller holding a string, and these are
+		// for one holding a descriptor. Roughly half the class-table traffic in
+		// a scripted frame was the second lookup of a descriptor the caller was
+		// standing on.
+		//
+		// **The descriptor must be one of this instance's.** It is not
+		// re-validated against the class, because the only way to get one is
+		// `PropertiesOf` or the by-name lookup, and a caller that mixed two
+		// instances' descriptors would be reaching past the only API that
+		// produces them. What *is* still checked is everything a wrong value
+		// could do: the size, the enum membership, and whether this store may be
+		// written at all.
+
+		// Reads one property of an instance through a descriptor already found.
+		//
+		// @param instance   The instance to read.
+		// @param descriptor One of this instance's class's property descriptors.
+		// @param out        Where to write the value.
+		// @param bytes      The size of `out`, which must match the descriptor.
+		// @return `false` when the size disagrees or the instance does not carry
+		//         what the conversion reads.
+		// @since v0.8
+		bool
+		GetProperty(Entity instance, const PropertyDescriptor &descriptor, void *out, size_t bytes) const;
+
+		// Writes one property of an instance through a descriptor already found.
+		//
+		// @param instance   The instance to write.
+		// @param descriptor One of this instance's class's property descriptors.
+		// @param value      The value to write.
+		// @param bytes      The size of `value`, which must match the descriptor.
+		// @return `false` when the size disagrees, the property is read-only,
+		//         this store is adopt-only, the value is not a member of the
+		//         named enum, or the instance does not carry what the conversion
+		//         writes.
+		// @since v0.8
+		bool
+		SetProperty(Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes);
+
 		// Moves an instance under a new parent, or to no parent.
 		//
 		// Appends to the end of the sibling list, so `EachChild` yields

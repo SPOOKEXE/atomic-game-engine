@@ -68,7 +68,7 @@ namespace engine::control {
 		json ReadProperty(Store &store, ecs::Entity instance, const PropertyDescriptor &property) {
 			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
 			if (property.Size > sizeof(bytes) ||
-				!store.GetProperty(instance, property.Name, bytes, property.Size)) {
+				!store.GetProperty(instance, property, bytes, property.Size)) {
 				return nullptr;
 			}
 
@@ -340,7 +340,7 @@ namespace engine::control {
 				return false;
 			}
 
-			if (!store.SetProperty(instance, property.Name, bytes, property.Size)) {
+			if (!store.SetProperty(instance, property, bytes, property.Size)) {
 				// The store refuses a write on an adopt-only world, which is what
 				// a replica is. Said plainly rather than as a bare false.
 				failure = "the world refused the write — it may be running or a replica";
