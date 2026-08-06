@@ -401,3 +401,108 @@ TEST_CASE("the reflection follows the eye that is live when it is aimed", "[scen
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
 	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-40.4f, TOLERANCE));
 }
+
+TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][surfacecameras]") {
+	// **The mirror flashing, as an assertion.**
+	//
+	// `FitFieldOfView` used to bail to `FIT_MAXIMUM` the instant one corner of
+	// the pane reached zero depth from the reflected camera. That makes the fit
+	// a *step function*: orbiting the viewer at a constant distance sweeps the
+	// reflected camera toward the pane's plane, a corner crosses the threshold,
+	// and the field of view jumps from a fitted half-radian to 172° between one
+	// frame and the next — then back on the frame after. The projection was
+	// never wrong. The fit was discontinuous, and a discontinuity once per orbit
+	// is exactly what a flash is.
+	//
+	// **Tested as a bound on the frame-to-frame *change*, not on the value.**
+	// The value is allowed to grow enormously — a corner going edge-on genuinely
+	// needs the widest frustum there is — and asserting a ceiling would forbid
+	// the correct answer. What must not happen is arriving there in one step.
+	//
+	// The orbit is fine-grained on purpose: at a degree per sample the honest
+	// change between neighbours is small everywhere, so a single large jump is
+	// unambiguous rather than a matter of how coarsely it was sampled.
+	Mirror mirror(NormalId::Front);
+
+	constexpr float RADIUS = 14.0f;
+	constexpr int SAMPLES = 360;
+
+	float previous = 0.0f;
+	float worst = 0.0f;
+	float worstAt = 0.0f;
+	Vector3 previousLook;
+	float worstTurn = 0.0f;
+	float worstTurnAt = 0.0f;
+
+	for (int step = 0; step <= SAMPLES; step++) {
+		const float angle = static_cast<float>(step) * (6.2831853f / static_cast<float>(SAMPLES));
+
+		// A constant distance from the origin, which is what the pane is
+		// centred on — the motion the flash was reported under.
+		mirror.World.Set<Transform>(
+			mirror.Eye,
+			Transform{CFrame(Vector3{std::sin(angle) * RADIUS, 0.0f, std::cos(angle) * RADIUS})}
+		);
+
+		AimSurfaceCameras(mirror.World);
+
+		const Camera *camera = mirror.World.Get<Camera>(mirror.Reflection);
+		REQUIRE(camera != nullptr);
+
+		// Radians, which is what the fit produces and clamps.
+		const float fov = camera->FieldOfViewRadians;
+		REQUIRE(std::isfinite(fov));
+
+		// **The look direction as well as the field of view**, because the two
+		// discontinuities this pass can have are different things: the fit
+		// stepping, and the camera *turning round*. `facing` flips sign when the
+		// viewer crosses the pane's plane, and orbiting a pane centred on the
+		// origin crosses it twice a lap — so the reflected camera whips 180° and
+		// the frame after it is unrelated to the frame before.
+		const Vector3 look = mirror.World.Get<Transform>(mirror.Reflection)->Frame.LookVector();
+		if (step > 0) {
+			const float change = std::abs(fov - previous);
+			if (change > worst) {
+				worst = change;
+				worstAt = angle;
+			}
+
+			const float turned = (look - previousLook).Magnitude();
+			if (turned > worstTurn) {
+				worstTurn = turned;
+				worstTurnAt = angle;
+			}
+		}
+		previous = fov;
+		previousLook = look;
+	}
+
+	INFO("worst single-step change " << worst << " radians of FOV, at " << worstAt << " radians");
+
+	// **A degree of orbit must not move the field of view by a radian.** The old
+	// step was the whole span between a fitted frustum and the 3.0-radian
+	// maximum, in one sample. A smooth sweep stays far below a tenth of that.
+	CHECK(worst < 0.25f);
+
+	// **And here is the flash, measured but not yet fixed.**
+	//
+	// A degree of orbit turns the reflected camera by about a degree — except
+	// once a lap, where it turns by 180. `facing` flips sign when the viewer
+	// crosses the pane's plane, and orbiting a pane centred on the origin
+	// crosses it twice: the camera whips round and the frame after is unrelated
+	// to the frame before.
+	//
+	// **Skipping the crossing does not fix it and was tried.** Leaving the
+	// camera at its last transform for the frames inside the band just moves the
+	// flip a frame later; the discontinuity is inherent to the sign, not to when
+	// it is evaluated. Facing -Z on one side and +Z on the other are both
+	// correct, and there is no continuous path between them.
+	//
+	// What would fix it is deciding a pane seen edge-on renders *nothing* —
+	// disabling the surface rather than re-aiming it — which is a change to what
+	// `SurfaceView` means to the renderer and not to the arithmetic here. Filed
+	// rather than guessed at, because a half-fix that moved the flash by a frame
+	// is worse than a measurement that says where it is.
+	INFO("worst single-step turn " << worstTurn << " at " << worstTurnAt << " radians");
+	CHECK(worstTurn <= 2.001f);
+}

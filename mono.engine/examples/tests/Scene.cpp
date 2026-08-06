@@ -431,6 +431,35 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	REQUIRE(placed != nullptr);
 	CHECK(placed->Rendered);
 	CHECK(placed->AbsoluteSize.X > 0.0f);
+
+	// **The close button disables the collector rather than hiding the card**,
+	// which is what makes closing cost nothing afterwards: `Layout` skips a
+	// disabled `ScreenGui` before it asks how big anything under it is. Hiding
+	// the card instead would leave the whole subtree measured and compiled every
+	// frame for something nobody can see.
+	const Entity close = FirstElement(store, "Close");
+	REQUIRE(close != engine::ecs::NULL_ENTITY);
+
+	// **Found by `Layer`, not by `Element`.** A `ScreenGui` is a
+	// `LayerCollector` rather than a `GuiObject` — it has a canvas and no
+	// rectangle of its own — which is the split `GuiBase2d` exists to hold, and
+	// `FirstElement` would never see one.
+	Entity screen = engine::ecs::NULL_ENTITY;
+	store.Each<const engine::gui::Layer>([&](Entity entity, const engine::gui::Layer &) {
+		if (screen == engine::ecs::NULL_ENTITY &&
+			store.InstanceNameOf(entity) == engine::core::Name("InterfaceExample")) {
+			screen = entity;
+		}
+	});
+	REQUIRE(screen != engine::ecs::NULL_ENTITY);
+
+	engine::gui::Layer *layer = store.GetMutable<engine::gui::Layer>(screen);
+	REQUIRE(layer != nullptr);
+	CHECK(layer->Enabled);
+
+	layer->Enabled = false;
+	CHECK(engine::gui::Layout(store, display) == 0);
+	CHECK_FALSE(store.Get<engine::gui::Resolved>(hint)->Rendered);
 }
 
 TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][worlds]") {

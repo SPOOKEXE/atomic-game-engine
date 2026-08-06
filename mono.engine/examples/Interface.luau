@@ -315,6 +315,43 @@ cancel.Activated:Connect(function()
 	refresh()
 end)
 
+-- --- the close button ---------------------------------------------------------
+--
+-- **`Enabled` on the collector, not `Visible` on the card.** A `ScreenGui` that
+-- is disabled is not laid out at all — `gui::Layout` skips it before it asks how
+-- big anything is — so closing this way costs nothing per frame afterwards.
+-- Hiding the card instead would leave the whole subtree being measured and
+-- compiled for something nobody can see, which is the difference between a
+-- closed panel and an invisible one.
+--
+-- **And it cannot be reopened from inside itself**, which is correct rather than
+-- a limitation: nothing under a disabled collector receives input either, so a
+-- reopen has to come from somewhere that is still live. That is what a menu bar
+-- is for, and this scene has none.
+local close = Instance.new("TextButton")
+close.Name = "Close"
+
+-- Anchored to the card's own top-right corner, so it stays there whatever the
+-- card's size resolves to.
+close.AnchorPoint = Vector2.new(1, 0)
+close.Position = UDim2.new(1, 0, 0, 0)
+close.Size = UDim2.new(0, 22, 0, 22)
+close.BackgroundColor3 = RAISED
+close.BorderSizePixel = 0
+close.Text = "X"
+close.TextColor3 = MUTED
+close.TextSize = 13
+close.ZIndex = 2
+close.Parent = card
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 4)
+closeCorner.Parent = close
+
+close.Activated:Connect(function()
+	screen.Enabled = false
+end)
+
 -- `MouseEnter` and `MouseLeave` carry `(x, y)` in canvas pixels, which is the
 -- Roblox signature. Written onto the hint so the two arguments are visibly
 -- arriving rather than merely declared.
