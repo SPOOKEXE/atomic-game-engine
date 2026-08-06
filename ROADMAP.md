@@ -449,7 +449,7 @@ refuses everywhere else. In order:
   measurable — a scene that changed every frame would rebuild every frame and
   prove nothing about it. It is installed into the skygrid world by
   `Editor::NewGame`, so a new game shows it
-- [_] **`gui` rendering as a render pass at L12, which is the half a shipped
+- [x] **`gui` rendering as a render pass at L12, which is the half a shipped
   client needs.** `mono.client` does not link `Engine::ui` and must not —
   `ui/Interface.hpp` gives the reason, and it is the same one that keeps imgui
   out of a game binary — so a shipped client draws no `ScreenGui` until there
@@ -616,7 +616,7 @@ refuses everywhere else. In order:
   through the entry point every program shares. It worked in the editor, because
   `Editor::NewGame` registers them on its own path, which is the shape of gap
   that survives: it works everywhere somebody looked
-- [x] **`GuiBase3d` and the adornments — the description half.** Eleven classes
+- [x] **`GuiBase3d` and the adornments.** Eleven classes
   hung off `GuiBase`, which is the split that class was kept for: the 2D
   branch's own comment said `GuiBase3d` "and the adornments hang off `GuiBase`
   when they arrive, and a tree that had flattened the two would have to grow the
