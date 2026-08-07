@@ -1,15 +1,21 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <imgui.h>
+#include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
 namespace studio {
+
+	// The one asset picker in this panel, opened for whichever property
+	// asked. One id because one modal can be up at a time.
+	static constexpr const char *ASSET_PICKER = "Choose content";
 
 	using engine::core::Name;
 	using engine::ecs::ClassId;
@@ -403,9 +409,53 @@ namespace studio {
 						case PropertyType::Name: {
 							std::string text =
 								changed.Name.IsValid() ? std::string(Label(changed.Name)) : std::string{};
+
+							// **A picker for the handful of properties that name
+							// content, and a plain field for every other `Name`.**
+							// `Mesh`, `TextureID`, `Texture`, `SoundId` and `Image`
+							// take a string a publisher wrote — rule 4 — and getting
+							// one wrong has no visible failure: an unknown mesh draws
+							// the missing-mesh marker, which is also what a mesh that
+							// has not streamed in yet looks like. Every other `Name`
+							// property is an ordinary label, and a modal over one
+							// would be a dialog in the way.
+							const engine::assets::AssetKind content =
+								ContentKindOfProperty(descriptor->Spelling);
+
+							if (content == engine::assets::AssetKind::Unknown) {
+								if (TextField("##v", text)) {
+									changed.Name = text.empty() ? Name{} : Name(text);
+									wrote = true;
+								}
+								break;
+							}
+
+							// **The field stays, narrowed.** Somebody who knows the
+							// name should still be able to paste it, and a property
+							// only settable through a modal would be one a script can
+							// write and a person cannot.
+							const float browse = engine::ui::Scaled(28.0f);
+							ImGui::SetNextItemWidth(-(browse + ImGui::GetStyle().ItemSpacing.x));
 							if (TextField("##v", text)) {
 								changed.Name = text.empty() ? Name{} : Name(text);
 								wrote = true;
+							}
+
+							ImGui::SameLine();
+							if (ImGui::Button("...", ImVec2(browse, 0.0f)) && !locked) {
+								// **Opened after the loop rather than here.** An
+								// `OpenPopup` inside the table is inside this
+								// property's `PushID`, so its id would not be the one
+								// `BeginPopupModal` computes at the window's root, and
+								// the popup would never appear. Recorded here and
+								// opened where the modal is drawn.
+								PickerWanted = true;
+								PickerKind = content;
+								PickerProperty = descriptor->Name;
+								PickerChoice = text;
+							}
+							if (ImGui::IsItemHovered()) {
+								ImGui::SetTooltip("choose from the content store");
 							}
 							break;
 						}
@@ -507,6 +557,25 @@ namespace studio {
 				ImGui::EndTable();
 			}
 		});
+
+		// **Drawn at the window's root, which is the only place its id
+		// matches the `OpenPopup` beside it.** See the `...` button for why
+		// the open is deferred rather than done where it is clicked.
+		if (PickerWanted) {
+			ImGui::OpenPopup(ASSET_PICKER);
+			PickerWanted = false;
+		}
+
+		if (DrawAssetPicker(ASSET_PICKER, PickerKind, PickerChoice) && PickerProperty.IsValid()) {
+			// The picker spans frames, so what it confirms feeds the same
+			// `edit` a widget would have — one path applies a property write
+			// and it stays one path, including undo.
+			edit.Property = PickerProperty;
+			edit.Value = PropertyValue{};
+			edit.Value.Name = PickerChoice.empty() ? Name{} : Name(PickerChoice);
+			edit.Wanted = true;
+			PickerProperty = Name{};
+		}
 
 		ImGui::End();
 

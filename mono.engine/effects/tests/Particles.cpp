@@ -13,6 +13,7 @@
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -36,6 +37,7 @@ using engine::effects::CURVE_SAMPLES;
 using engine::effects::EmitterSlot;
 using engine::effects::FlipbookCells;
 using engine::effects::FlipbookLayout;
+using engine::effects::FlipbookMode;
 using engine::effects::MAX_PARTICLE_SIZE;
 using engine::effects::NO_SLOT;
 using engine::effects::PackParticleSize;
@@ -309,10 +311,14 @@ TEST_CASE("a flipbook plays only the cells that hold a frame", "[effects]") {
 	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
 	Settings(store, emitter).Flipbook = FlipbookLayout::Grid8x8;
 
-	// **Twenty-four, which is what `fox_dance.gif` actually decodes to.** The grid
-	// is the next square power of two that fits, so without this the animation
-	// would spend five eighths of every particle's life on the forty empty cells
-	// — an effect that flashes on and vanishes rather than one that plays.
+	// **Twenty-four of the grid's sixty-four cells.** The grid is the next square
+	// power of two that fits a source's frames, so a sheet that does not fill it
+	// would otherwise spend the difference showing nothing — an effect that
+	// flashes on and vanishes rather than one that plays.
+	//
+	// A flat number here rather than `fox_dance.gif`'s own, because this suite
+	// has no content: what it pins is that the count is honoured, and the count
+	// arriving from a texture is `scene::TextureCatalogue`'s to answer for.
 	Settings(store, emitter).FlipbookFrames = 24;
 
 	const auto cellOf = [](uint32_t packed) { return packed >> 16; };
@@ -467,4 +473,126 @@ TEST_CASE("the pool holds the scale the roadmap asks for", "[effects]") {
 	}
 
 	engine::parallel::Jobs::Stop();
+}
+
+// --- what a flipbook takes from its texture, added at v0.10 -------------------
+
+TEST_CASE("an emitter adopts the frame count its texture states", "[effects]") {
+	// **The bug this closes played half a dance and looked fine.**
+	// `fox_dance.gif` has forty-eight frames and the scene using it said
+	// twenty-four, so the animation stopped at the halfway pose and held it —
+	// which on screen is indistinguishable from a shorter animation. The number
+	// is in the baked texture; the client records it into the world; an emitter
+	// that says nothing adopts it, and nobody has to keep two copies in step.
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	const engine::core::Name texture("effects/fox_dance.atex");
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store, texture, engine::scene::FlipbookFacts{.Side = 8, .Frames = 24, .FrameRate = 24.0f}
+		)
+	);
+
+	Settings(store, emitter).Texture = texture;
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Flipbook = FlipbookLayout::Grid8x8;
+
+	// Said nothing, which is the case under test.
+	REQUIRE(Settings(store, emitter).FlipbookFrames == 0);
+
+	const auto cellOf = [](uint32_t packed) { return packed >> 16; };
+	const auto *system = store.Resource<ParticleSystem>();
+
+	Frame(store, 1.0f / 60.0f);
+
+	uint32_t highest = 0;
+	for (int step = 0; step < 59; step++) {
+		Frame(store, 1.0f / 60.0f);
+		highest = std::max(highest, cellOf(system->Instances[0].RotationAndCell));
+	}
+
+	// Twenty-four cells hold a frame, so the last one drawn is 23 — not 63,
+	// which is what the grid would give.
+	CHECK(highest == 23);
+}
+
+TEST_CASE("what the emitter says beats what the texture says", "[effects]") {
+	// **An author overriding a number means it.** The texture is the default,
+	// not the authority — a scene deliberately playing the first eight cells of
+	// a sheet is a legitimate thing to want.
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	const engine::core::Name texture("effects/fox_dance.atex");
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store, texture, engine::scene::FlipbookFacts{.Side = 8, .Frames = 48, .FrameRate = 24.0f}
+		)
+	);
+
+	Settings(store, emitter).Texture = texture;
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Flipbook = FlipbookLayout::Grid8x8;
+	Settings(store, emitter).FlipbookFrames = 8;
+
+	const auto cellOf = [](uint32_t packed) { return packed >> 16; };
+	const auto *system = store.Resource<ParticleSystem>();
+
+	Frame(store, 1.0f / 60.0f);
+
+	uint32_t highest = 0;
+	for (int step = 0; step < 59; step++) {
+		Frame(store, 1.0f / 60.0f);
+		highest = std::max(highest, cellOf(system->Instances[0].RotationAndCell));
+	}
+	CHECK(highest == 7);
+}
+
+TEST_CASE("a looping flipbook runs at the rate its texture was drawn at", "[effects]") {
+	// **Where an imported frame rate actually matters.** `OneShot` paces itself
+	// off the particle's lifetime and ignores every rate — that is Roblox's
+	// arrangement and it is unchanged — so a source's authored fps is for
+	// `Loop` and `PingPong`, which is what this walks.
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	const engine::core::Name texture("effects/slow.atex");
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store, texture, engine::scene::FlipbookFacts{.Side = 4, .Frames = 16, .FrameRate = 4.0f}
+		)
+	);
+
+	Settings(store, emitter).Texture = texture;
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Flipbook = FlipbookLayout::Grid4x4;
+	Settings(store, emitter).FlipbookPlayback = FlipbookMode::Loop;
+
+	const auto cellOf = [](uint32_t packed) { return packed >> 16; };
+	const auto *system = store.Resource<ParticleSystem>();
+
+	Frame(store, 1.0f / 60.0f);
+
+	// The oldest particle is born on the first frame, so after twenty-nine more
+	// it has aged 29/60 of a second. At four cells a second that is 1.93, which
+	// floors to cell 1.
+	uint32_t highest = 0;
+	for (int step = 0; step < 29; step++) {
+		Frame(store, 1.0f / 60.0f);
+		highest = std::max(highest, cellOf(system->Instances[0].RotationAndCell));
+	}
+	CHECK(highest == 1);
+
+	// **And the number that would have been wrong.** The twelve-a-second
+	// fallback puts the same age at 5.8, so this is not a test that would pass
+	// whatever rate was used — which is the only thing that makes the one above
+	// worth asserting.
+	CHECK(static_cast<uint32_t>((29.0f / 60.0f) * 12.0f) == 5);
 }

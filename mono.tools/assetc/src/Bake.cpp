@@ -293,6 +293,17 @@ namespace assetc {
 				continue;
 			}
 
+			// **After the resize, because the resize carries the fields across
+			// and this one overwrites one of them.** The other order would work
+			// today and would break the first time a resize stopped preserving
+			// the rate — which is exactly the failure `ResizeImage`'s note is
+			// about.
+			if (image && settings.FlipbookFps > 0.0f) {
+				const engine::bake::NodeId retime = graph.AddRetime(settings.FlipbookFps);
+				graph.Connect(tail, retime);
+				tail = retime;
+			}
+
 			const engine::bake::NodeId write = graph.AddWrite(baked.Output);
 			graph.Connect(tail, write);
 

@@ -35,6 +35,24 @@ namespace assetc {
 		//
 		uint32_t MaximumTexture = 2048;
 
+		// The frame rate to stamp on every imported flipbook, overriding what
+		// the source said. Zero keeps what the source said.
+		//
+		// **An override and not a default**, which is why zero means "leave it
+		// alone" rather than "use twelve": a GIF states a delay per frame and
+		// the decoder averages those into a rate, so the common case needs
+		// nothing said here. This exists for the case where the source is wrong
+		// — an exporter that wrote 100ms on every frame of something drawn at
+		// 24fps, which is a thing exporters do — and for re-timing an animation
+		// without re-exporting it.
+		//
+		// It applies to every flipbook in the run, because `assetc` bakes a
+		// tree and has no per-file switches. Re-timing one animation means
+		// baking it on its own.
+		//
+		// @since v0.10
+		float FlipbookFps = 0.0f;
+
 		// Whether to copy files the baker does not understand.
 		//
 		// The output tree is also the publisher's input.

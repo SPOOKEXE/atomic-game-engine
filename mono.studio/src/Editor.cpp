@@ -153,6 +153,7 @@ namespace studio {
 		// is a flag that gets stuck.
 		ShowStatistics = Settings.ShowStatistics;
 		ShowFrameGraph = Settings.ShowFrameGraph;
+		ShowAssets = Settings.ShowAssetsPanel;
 		IdleCloseSeconds = Settings.IdleCloseSeconds;
 		Extras[0].Open = Settings.ShowSecondViewport;
 
@@ -234,6 +235,12 @@ namespace studio {
 			// works with nothing else running — `DeliverySettings::Default`.
 			Content = ContentSources::Default();
 		}
+
+		// **Built here rather than lazily on the first fetch**, so a
+		// misconfigured source says so at start-up in the log rather than as a
+		// stream of individually plausible failures later — `ContentRoot::Mount`'s
+		// rule, which every other resolver in this stack already follows.
+		RebuildContentClients();
 
 		KeybindPath = engine::core::Paths::Base() / "studio-keybinds.ini";
 		if (Keybinds::Load(KeybindPath)) {
@@ -457,6 +464,21 @@ namespace studio {
 			if (event.type == SDL_EVENT_QUIT) {
 				Running = false;
 			}
+
+			// **One event per dropped path, which is what makes multi-select
+			// drag and drop free.** SDL brackets a multi-file drop with
+			// `DROP_BEGIN` and `DROP_COMPLETE` and sends a `DROP_FILE` for each
+			// path between them, so importing each as it arrives handles one
+			// file, forty files and a folder without a special case for any of
+			// them.
+			//
+			// **Not filtered by whether imgui wanted the event.** A drop has no
+			// keyboard or mouse capture to respect — imgui does not consume
+			// them — and a drop that only worked when the pointer was over the
+			// right panel would be a rule nobody could guess.
+			if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
+				DropAssetPath(event.drop.data);
+			}
 			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
 				event.window.windowID == SDL_GetWindowID(Window)) {
 				Running = false;
@@ -579,6 +601,18 @@ namespace studio {
 		// *was* the interface, and `unmarked` was already counting it. A hole in
 		// a flame graph reads as a broken widget, which is exactly how it was
 		// reported.
+		// **Before the interface, so a panel drawn this frame reads this
+		// frame's numbers.** Pumping after would show the counters as they were
+		// a frame ago, which for a rate row is the difference between a
+		// transfer that looks stalled and one that is.
+		//
+		// Cheap when nothing is configured: both are absent and this is two
+		// null checks.
+		{
+			ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
+			PumpContent(frameSeconds);
+		}
+
 		{
 			ENGINE_PROFILE_CAT("build interface", engine::core::ProfileCategory::Render);
 

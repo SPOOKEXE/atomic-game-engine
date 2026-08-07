@@ -5,11 +5,13 @@
 // into the developer's own `~/Documents`, and a suite that *cleared* it first
 // would delete their content.
 
+#include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cdn/LocalStore.hpp>
 #include <cstddef>
@@ -201,4 +203,106 @@ TEST_CASE("publishing the raw folder fills the processed one", "[cdn]") {
 	REQUIRE(entries.size() == 3);
 	REQUIRE(entries[2].Action == "publish");
 	REQUIRE(entries[2].Hash == report->Root.ToHex());
+}
+
+// --- listing the store, added at v0.10 ----------------------------------------
+//
+// **What the assets panel and the mesh picker both read.** The panel used to
+// list the *log*, whose subjects are the paths files came from — so most of what
+// it showed was somewhere else on the disk and some of it no longer existed.
+// These two are the store describing itself.
+
+TEST_CASE("the raw listing is the folder, labelled by the log", "[cdn]") {
+	const Scratch scratch("rawlist");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+
+	const std::filesystem::path first = WriteFile(scratch.Path / "art" / "Fox Diffuse.png", "pixels");
+	REQUIRE(cdn::ImportFile(paths, first, 100).has_value());
+
+	const std::filesystem::path second = WriteFile(scratch.Path / "audio" / "hit.wav", "samples");
+	REQUIRE(cdn::ImportFile(paths, second, 200).has_value());
+
+	const std::vector<cdn::RawEntry> raw = cdn::RawContents(paths);
+	REQUIRE(raw.size() == 2);
+
+	// **The original names, which only the log can supply**: `raw/` is
+	// hash-named, so a listing without the log would be two rows of hex.
+	std::vector<std::string> names;
+	for (const cdn::RawEntry &entry : raw) {
+		names.push_back(entry.Original);
+		CHECK(entry.Path.parent_path() == paths.Raw);
+		CHECK(entry.Bytes > 0);
+	}
+	std::sort(names.begin(), names.end());
+	CHECK(names[0] == "Fox Diffuse.png");
+	CHECK(names[1] == "hit.wav");
+}
+
+TEST_CASE("a file dropped into raw by hand is still listed", "[cdn]") {
+	// **The log labels and never enumerates**, which is the whole distinction:
+	// a listing built *from* the log would miss this file entirely, and would
+	// show rows for files somebody had since deleted.
+	const Scratch scratch("rawhand");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+	REQUIRE(cdn::EnsureLocalStore(paths));
+
+	WriteFile(paths.Raw / "deadbeef.png", "pixels");
+
+	const std::vector<cdn::RawEntry> raw = cdn::RawContents(paths);
+	REQUIRE(raw.size() == 1);
+
+	// With no log line, the file name is the best label there is — and it is
+	// the honest one rather than a blank.
+	CHECK(raw[0].Original == "deadbeef.png");
+}
+
+TEST_CASE("a store with nothing in it lists nothing rather than failing", "[cdn]") {
+	const Scratch scratch("rawempty");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+
+	// Never created at all: the panel calls this before anything exists.
+	CHECK(cdn::RawContents(paths).empty());
+	CHECK(cdn::PublishedContents(paths).empty());
+
+	REQUIRE(cdn::EnsureLocalStore(paths));
+	CHECK(cdn::RawContents(paths).empty());
+	CHECK(cdn::PublishedContents(paths).empty());
+}
+
+TEST_CASE("the published listing gives the names and kinds a scene writes", "[cdn]") {
+	const Scratch scratch("published");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+	REQUIRE(cdn::EnsureLocalStore(paths));
+
+	// Written straight into `raw/` under names a publisher can classify, which
+	// is what `ImportFile` produces once `assetc` has baked a tree.
+	WriteFile(paths.Raw / "rock.mesh", "vertices");
+	WriteFile(paths.Raw / "grass.atex", "texels");
+	WriteFile(paths.Raw / "step.wav", "samples");
+
+	std::array<std::byte, 32> seed{};
+	seed.fill(std::byte{9});
+	const auto signing = engine::assets::SigningKey::FromSeed(seed);
+	REQUIRE(signing.has_value());
+	REQUIRE(cdn::PublishLocal(paths, *signing, 1).has_value());
+
+	const std::vector<cdn::PublishedEntry> published = cdn::PublishedContents(paths);
+	REQUIRE(published.size() == 3);
+
+	// **Name order**, which is what a picker wants — and sorted here rather
+	// than relied upon, because the manifest happening to be sorted is a
+	// property of the publisher and not of the format.
+	CHECK(published[0].Name == "grass.atex");
+	CHECK(published[1].Name == "rock.mesh");
+	CHECK(published[2].Name == "step.wav");
+
+	// The kinds are what makes a picker able to offer meshes to a `Mesh`
+	// property and textures to a `Texture` one.
+	CHECK(published[0].Kind == engine::assets::AssetKind::Texture);
+	CHECK(published[1].Kind == engine::assets::AssetKind::Mesh);
+	CHECK(published[2].Kind == engine::assets::AssetKind::Audio);
+
+	for (const cdn::PublishedEntry &entry : published) {
+		CHECK_FALSE(entry.Root.IsZero());
+	}
 }

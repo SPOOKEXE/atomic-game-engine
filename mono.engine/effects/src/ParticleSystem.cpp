@@ -5,6 +5,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -200,9 +201,70 @@ namespace engine::effects {
 		// Zero on the emitter means the whole grid, which is what an authored
 		// sheet is; a GIF import says how many it actually decoded. Clamped to the
 		// grid, because a count larger than the grid would index past the sheet.
-		uint8_t ResolvedFrames(const ParticleEmitter &emitter) {
+		uint8_t ResolvedFrames(const ParticleEmitter &emitter, const scene::FlipbookFacts &facts) {
 			const auto cells = static_cast<uint8_t>(FlipbookCells(emitter.Flipbook));
-			return emitter.FlipbookFrames == 0 ? cells : std::min(emitter.FlipbookFrames, cells);
+			if (emitter.FlipbookFrames != 0) {
+				return std::min(emitter.FlipbookFrames, cells);
+			}
+
+			// **What the texture said, when the emitter did not.** A GIF states
+			// how many of its grid's cells hold a frame and the bake carries the
+			// number through — `scene::TextureCatalogue` — so a scene pointing an
+			// emitter at one does not have to repeat it. The alternative is a
+			// script with `FlipbookFrames = 24` in it, which is wrong the moment
+			// somebody re-exports the animation with a frame added.
+			if (facts.Frames != 0) {
+				return std::min(facts.Frames, cells);
+			}
+			return cells;
+		}
+
+		// What a flipbook plays at when neither the emitter nor the texture says.
+		//
+		// Twelve, because that is what this engine used before either could.
+		constexpr float DEFAULT_FLIPBOOK_RATE = 12.0f;
+
+		// How fast the block's flipbook advances, in cells a second.
+		//
+		// **Three answers in priority order, and the middle one is the point.**
+		// What the emitter says wins, because an author overriding a rate means
+		// it; what the texture says is next, because a GIF states a delay per
+		// frame and nothing else in the chain knows it; and twelve is the
+		// fallback, which is what this engine used before there was anything to
+		// ask.
+		//
+		// **`FlipbookMode::OneShot` ignores all three**, which is unchanged and
+		// deliberate: a one-shot sheet paces itself off the particle's lifetime,
+		// so a frame rate would be a second and contradictory way of saying how
+		// long it takes — `ParticleEmitter::FlipbookFramerate` carries that
+		// argument. The rate matters for `Loop` and `PingPong`, which is where a
+		// source's authored fps actually belongs.
+		float ResolvedRate(const ParticleEmitter &emitter, const scene::FlipbookFacts &facts) {
+			if (emitter.FlipbookFramerate.Maximum > 0.0f) {
+				return emitter.FlipbookFramerate.Maximum;
+			}
+			if (facts.FrameRate > 0.0f) {
+				return facts.FrameRate;
+			}
+			return DEFAULT_FLIPBOOK_RATE;
+		}
+
+		// Everything a block takes from its emitter every refresh.
+		//
+		// **One function because there are two callers that must not drift** —
+		// the block being reused and the block being created — and a field added
+		// to one and not the other is a difference that only shows on the frame
+		// an emitter is first enabled.
+		void ApplyPlayback(const ecs::Store &store, const ParticleEmitter &emitter, EmitterBlock &block) {
+			const scene::FlipbookFacts facts = scene::FlipbookOf(store, emitter.Texture);
+
+			block.Acceleration = emitter.Acceleration;
+			block.Drag = emitter.Drag;
+			block.Locked = emitter.LockedToPart;
+			block.Flipbook = emitter.Flipbook;
+			block.FlipbookPlayback = emitter.FlipbookPlayback;
+			block.FlipbookRate = ResolvedRate(emitter, facts);
+			block.Frames = ResolvedFrames(emitter, facts);
 		}
 
 		uint32_t FlipbookCell(const EmitterBlock &block, float age, float lifetime, uint32_t seed) {
@@ -469,13 +531,7 @@ namespace engine::effects {
 					if (store.Changed<ParticleEmitter>(entity)) {
 						SampleCurves(emitter, block.Curves);
 					}
-					block.Acceleration = emitter.Acceleration;
-					block.Drag = emitter.Drag;
-					block.Locked = emitter.LockedToPart;
-					block.Flipbook = emitter.Flipbook;
-					block.FlipbookPlayback = emitter.FlipbookPlayback;
-					block.FlipbookRate = emitter.FlipbookFramerate.Maximum;
-					block.Frames = ResolvedFrames(emitter);
+					ApplyPlayback(store, emitter, block);
 
 					// Where the emitter is now. An emitter on an `Attachment`
 					// takes the attachment's resolved world frame; one on a part
@@ -517,13 +573,7 @@ namespace engine::effects {
 				// and only the first particle moves.
 				block.Pending = 1.0f;
 				SampleCurves(emitter, block.Curves);
-				block.Acceleration = emitter.Acceleration;
-				block.Drag = emitter.Drag;
-				block.Locked = emitter.LockedToPart;
-				block.Flipbook = emitter.Flipbook;
-				block.FlipbookPlayback = emitter.FlipbookPlayback;
-				block.FlipbookRate = emitter.FlipbookFramerate.Maximum;
-				block.Frames = ResolvedFrames(emitter);
+				ApplyPlayback(store, emitter, block);
 				block.Frame = EmitterFrame(store, entity);
 
 				slot.Index = static_cast<uint16_t>(system->Blocks.size());

@@ -98,6 +98,23 @@ namespace engine::bake {
 		resized.Width = width;
 		resized.Height = height;
 		resized.Format = source.Format;
+
+		// **Carried across, because a resize does not change what the cells
+		// are.** A flipbook sheet shrunk to fit a texture budget is the same
+		// animation at a lower resolution — same grid, same frame count, same
+		// rate — and dropping the three fields here would turn every imported
+		// GIF larger than `--max-texture` back into an anonymous atlas. That is
+		// the whole failure this note exists to prevent: it would look like the
+		// decoder was broken, and the decoder would be fine.
+		//
+		// **A non-uniform resize is still legal and still carried.** The grid is
+		// a count, not a pixel size, so cells stay cells whatever the aspect
+		// becomes — anything sampling the sheet divides by `FlipbookSide` rather
+		// than by a stored cell width.
+		resized.FlipbookSide = source.FlipbookSide;
+		resized.FlipbookFrames = source.FlipbookFrames;
+		resized.FlipbookFrameRate = source.FlipbookFrameRate;
+
 		resized.Pixels.resize(static_cast<size_t>(width) * height * channels);
 
 		for (uint32_t row = 0; row < height; row++) {

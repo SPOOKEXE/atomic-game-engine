@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
 	arguments.Flag("stats", "Open the statistics panel (F7)");
 	arguments.Flag("graph", "Open the frame graph (F8)");
+	arguments.Flag("assets", "Open the assets manager");
 	arguments.Flag("viewport2", "Open the second viewport");
 
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
@@ -87,6 +88,7 @@ int main(int argc, char **argv) {
 	options.Uncapped = arguments.Has("uncapped");
 	options.ShowStatistics = arguments.Has("stats");
 	options.ShowFrameGraph = arguments.Has("graph");
+	options.ShowAssetsPanel = arguments.Has("assets");
 	options.ShowSecondViewport = arguments.Has("viewport2");
 
 	// A headless run has no window to close, so without a budget it would never

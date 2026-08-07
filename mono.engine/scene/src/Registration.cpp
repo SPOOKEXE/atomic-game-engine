@@ -11,6 +11,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
@@ -136,6 +137,19 @@ namespace engine::scene {
 			auto *catalogues = static_cast<MeshCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].Triangles.clear();
+			}
+		}
+
+		// Derived resource, the same as the mesh one above and for the same
+		// reason: the frame counts came from whatever registered the textures
+		// this run, and a save file carrying last run's would be numbers that
+		// agree with nothing on disk.
+		void WriteTextureCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadTextureCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<TextureCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].Flipbooks.clear();
 			}
 		}
 
@@ -431,6 +445,9 @@ namespace engine::scene {
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
 		ecs::Components::Register<MeshCatalogue>(
 			"scene.MeshCatalogue", WriteMeshCatalogues, ReadMeshCatalogues
+		);
+		ecs::Components::Register<TextureCatalogue>(
+			"scene.TextureCatalogue", WriteTextureCatalogues, ReadTextureCatalogues
 		);
 
 		// What `SyncRendered` compares this frame's tree against, at the end of

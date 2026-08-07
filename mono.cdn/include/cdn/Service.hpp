@@ -8,7 +8,7 @@
 // it, everything between a request and its compressed group was built and
 // tested and nothing could reach any of it.
 //
-// The surface is four routes and no more:
+// The surface is six routes and no more:
 //
 // | Route | Answers |
 // |---|---|
@@ -16,12 +16,21 @@
 // | `GET /manifest` | the signature and the manifest, in that order |
 // | `GET /dictionary` | the trained dictionary, or 404 when there is none |
 // | `GET /bundle/<root>` | one prepared group, against a grant |
+// | `HEAD /ingest/<hash>` | whether that file is already here, against an ingest key |
+// | `PUT /ingest/<hash>` | stores the body under that hash, against an ingest key |
 //
-// **A path never becomes a filesystem path.** `/bundle/<root>` parses a
-// 64-character hex hash or refuses; there is no route that takes a name, and
-// there must not be. CDN.md §8: a request layer taking a path would have to
-// repeat `ContentRoot`'s traversal checking, and a repeated check is one that
-// will eventually differ.
+// **The two write routes are off unless configured** — `IngestSettings` — and
+// an origin with them off is byte-for-byte the read-only origin that existed
+// before them. That is what makes "one server takes the writes, another serves
+// the reads" a pair of config files rather than a pair of programs.
+//
+// **A path never becomes a filesystem path.** `/bundle/<root>` and
+// `/ingest/<hash>` parse a 64-character hex hash or refuse; there is no route
+// that takes a name, and there must not be. CDN.md §8: a request layer taking a
+// path would have to repeat `ContentRoot`'s traversal checking, and a repeated
+// check is one that will eventually differ. The ingest route is the place that
+// rule earns its keep twice over, because it *writes*: the filename is built
+// from the parsed hash and never from anything the client spelled.
 //
 // **A refusal says nothing about which check failed.** `cdn::Gate`'s rule
 // reaching the wire: the counters distinguish a forged grant from an expired
@@ -42,7 +51,9 @@
 
 #include <cdn/Origin.hpp>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <string>
 
 namespace cdn {
 
@@ -95,6 +106,88 @@ namespace cdn {
 
 		// Bytes read off sockets.
 		uint64_t ReceivedBytes = 0;
+
+		// Files accepted at `/ingest/<hash>`.
+		//
+		// @since v0.10
+		uint64_t Ingested = 0;
+
+		// Uploads that named content already in the inbox.
+		//
+		// **Counted apart from an accepted one**, and it is the counter an
+		// operator actually watches: a publisher that re-uploads its whole tree
+		// every run should be almost entirely this, and a number near zero
+		// means the `HEAD` probe that is supposed to skip them is not working.
+		//
+		// @since v0.10
+		uint64_t IngestDuplicates = 0;
+
+		// Bytes written to the inbox, uploads that were already there excluded.
+		//
+		// @since v0.10
+		uint64_t IngestedBytes = 0;
+
+		// Uploads refused: no key, a wrong key, a body that did not hash to the
+		// target, or a service not accepting writes at all.
+		//
+		// **One counter, unlike the read side's `Refused`/`Missing` split.** On
+		// the read path those separate a misconfigured client from somebody
+		// probing; here every one of them is the same event — something tried
+		// to write and was not allowed to — and the reason belongs in the log,
+		// where it does not have to be answered back to the caller.
+		//
+		// @since v0.10
+		uint64_t IngestRefused = 0;
+	};
+
+	// Whether this origin accepts uploads, and on what terms.
+	//
+	// **Off unless a key is set, and that default is the feature.** An origin
+	// reachable on a network that accepts writes because somebody left a field
+	// blank is an open dropbox, so "no key" means "no writes" rather than "no
+	// check" — the same shape `DeliverySettings` uses for its publisher key,
+	// where absent trust fetches nothing rather than trusting everything.
+	//
+	// **What the key does and does not buy.** It is admission and nothing more:
+	// it says who may spend this origin's disk. It is *not* what makes an
+	// upload trustworthy — the target is a content address and the service
+	// hashes what arrives, so a client that uploads bytes not matching the hash
+	// it named is refused whatever key it holds. That is why this can be a
+	// shared secret rather than a signature: forging it gets you the ability to
+	// store your own bytes under their own true names, not the ability to
+	// substitute anybody else's.
+	//
+	// **Nothing published here is trusted by a reader either.** A client
+	// verifies against a manifest the publisher signed — CDN.md §1 — so content
+	// that reached this inbox still has to be published and signed before any
+	// client will look at it. An ingest key that leaks costs disk, not trust.
+	//
+	// @since v0.10
+	struct IngestSettings {
+		// Where accepted files land, named `<hash>` with the extension the
+		// uploader gave. Empty refuses every upload.
+		//
+		// This is `LocalPaths::Raw`'s shape and deliberately so: what arrives
+		// here is what `PublishLocal` reads.
+		std::filesystem::path Inbox;
+
+		// The shared secret an uploader sends as `x-atomic-ingest`. Empty
+		// refuses every upload, whatever `Inbox` says.
+		std::string Key;
+
+		// The largest single file this origin will take.
+		//
+		// **This bounds a socket buffer and not just a file.** A request is
+		// parsed whole, so `Serve` raises `ConnectionBufferBytes` to fit one of
+		// these — which means a large value here is a large value times however
+		// many connections are uploading at once. Sixteen megabytes covers a
+		// texture, a mesh or a script; an hour of audio needs it raised, and
+		// raising it is a deliberate act rather than a default somebody
+		// inherits.
+		uint64_t MaximumFileBytes = 16ull * 1024u * 1024u;
+
+		// Whether this describes an origin that accepts anything at all.
+		bool Accepts() const;
 	};
 
 	// How a service is set up.
@@ -107,6 +200,17 @@ namespace cdn {
 
 		// How the listening socket is sized and bounded.
 		engine::net::http::ServerSettings Server;
+
+		// Whether this origin takes uploads. Off by default.
+		//
+		// **A write origin and a read origin are the same program with
+		// different settings**, which is what lets one machine take every write
+		// and a second serve every read without either being a special build.
+		// Separating them is then a deployment decision and a
+		// `delivery::SourceRole` on the client, rather than two codebases.
+		//
+		// @since v0.10
+		IngestSettings Ingest;
 	};
 
 	// An origin on a port.

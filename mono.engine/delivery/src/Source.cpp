@@ -63,6 +63,18 @@ namespace engine::delivery {
 		return "unknown";
 	}
 
+	const char *Describe(SourceRole role) {
+		switch (role) {
+		case SourceRole::Both:
+			return "both";
+		case SourceRole::Read:
+			return "read";
+		case SourceRole::Write:
+			return "write";
+		}
+		return "unknown";
+	}
+
 	bool Source::IsValid() const {
 		if (Name.empty() || Location.empty()) {
 			return false;
@@ -104,6 +116,12 @@ namespace engine::delivery {
 				.Kind = SourceKind::Http,
 				.Location = "127.0.0.1:" + std::to_string(DEFAULT_ORIGIN_PORT),
 				.Enabled = true,
+				// **`Both`, because that is what every configuration written
+				// before roles existed meant.** A default of `Read` would
+				// quietly stop a single-origin setup from taking uploads, and
+				// the symptom would be an upload button that does nothing.
+				.Role = SourceRole::Both,
+				.IngestKey = {},
 			}
 		);
 		// No publisher key: there is no sensible default for a root of trust,
@@ -112,18 +130,38 @@ namespace engine::delivery {
 		return settings;
 	}
 
-	std::vector<Source> DeliverySettings::Usable() const {
-		std::vector<Source> usable;
-		for (const Source &source : Sources) {
-			if (!source.Enabled || !source.IsValid()) {
-				continue;
+	namespace {
+		// The shared half of `Usable` and `Writable`: enabled, valid, and on a
+		// host the allow-list admits, in list order.
+		//
+		// One walk with a predicate rather than two walks, because the *order*
+		// is the policy — see `SourceRole` — and two loops that drifted would
+		// silently make uploads prefer a different origin than downloads for a
+		// reason nobody wrote down.
+		template <typename Predicate>
+		std::vector<Source> Filtered(
+			const std::vector<Source> &sources, const std::vector<std::string> &allowed, Predicate keep
+		) {
+			std::vector<Source> chosen;
+			for (const Source &source : sources) {
+				if (!source.Enabled || !source.IsValid() || !keep(source)) {
+					continue;
+				}
+				if (source.Kind == SourceKind::Http && !HostPermitted(source.Location, allowed)) {
+					continue;
+				}
+				chosen.push_back(source);
 			}
-			if (source.Kind == SourceKind::Http && !HostPermitted(source.Location, AllowedHosts)) {
-				continue;
-			}
-			usable.push_back(source);
+			return chosen;
 		}
-		return usable;
+	}
+
+	std::vector<Source> DeliverySettings::Usable() const {
+		return Filtered(Sources, AllowedHosts, [](const Source &source) { return source.Readable(); });
+	}
+
+	std::vector<Source> DeliverySettings::Writable() const {
+		return Filtered(Sources, AllowedHosts, [](const Source &source) { return source.Writable(); });
 	}
 
 	bool DeliverySettings::IsValid() const {

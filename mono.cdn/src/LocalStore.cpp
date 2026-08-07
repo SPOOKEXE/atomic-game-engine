@@ -1,11 +1,15 @@
+#include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/Manifest.hpp>
 #include <engine/core/Log.hpp>
 
+#include <algorithm>
 #include <cdn/LocalStore.hpp>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <system_error>
+#include <unordered_map>
 #include <vector>
 
 namespace cdn {
@@ -217,5 +221,98 @@ namespace cdn {
 		(void)AppendLog(paths, entry);
 
 		return report;
+	}
+
+	std::vector<RawEntry> RawContents(const LocalPaths &paths) {
+		std::vector<RawEntry> entries;
+
+		std::error_code failure;
+		if (!std::filesystem::is_directory(paths.Raw, failure)) {
+			return entries;
+		}
+
+		// **The log read once into a map, not once per file.** A store with the
+		// roadmap's own seed import in it is 289 files and the log is at least
+		// that many lines; a lookup per file would be a quadratic walk every
+		// time somebody opened the assets panel.
+		std::unordered_map<std::string, std::string> named;
+		for (const LogEntry &entry : ReadLog(paths)) {
+			if (!entry.Hash.empty() && !entry.Subject.empty()) {
+				// Last writer wins, which is right: a file re-imported from a
+				// new place is most usefully labelled with the new one.
+				named[entry.Hash] = entry.Subject;
+			}
+		}
+
+		for (const auto &file : std::filesystem::directory_iterator(paths.Raw, failure)) {
+			if (failure) {
+				break;
+			}
+			if (!file.is_regular_file(failure)) {
+				continue;
+			}
+
+			RawEntry entry;
+			entry.Path = file.path();
+			entry.Bytes = static_cast<uint64_t>(file.file_size(failure));
+
+			// `<hash><extension>`, so the stem is the hash.
+			const auto found = named.find(file.path().stem().string());
+			entry.Original = found == named.end() ? file.path().filename().string()
+												  : std::filesystem::path(found->second).filename().string();
+
+			entries.push_back(std::move(entry));
+		}
+
+		// **Newest first, by the clock on the file.** Somebody looking at this
+		// has just added something, and the thing they added should not be
+		// wherever the hash happens to sort.
+		std::sort(entries.begin(), entries.end(), [&](const RawEntry &left, const RawEntry &right) {
+			std::error_code ignored;
+			const auto leftTime = std::filesystem::last_write_time(left.Path, ignored);
+			const auto rightTime = std::filesystem::last_write_time(right.Path, ignored);
+			if (leftTime != rightTime) {
+				return leftTime > rightTime;
+			}
+			// A tiebreak that does not depend on the filesystem's timestamp
+			// resolution, which on some of them is a whole second — so a bulk
+			// import would otherwise come back in an arbitrary order.
+			return left.Original < right.Original;
+		});
+
+		return entries;
+	}
+
+	std::vector<PublishedEntry> PublishedContents(const LocalPaths &paths) {
+		std::vector<PublishedEntry> entries;
+
+		std::optional<engine::assets::ChunkStore> store =
+			engine::assets::ChunkStore::Open(paths.Processed, false);
+		if (!store) {
+			return entries;
+		}
+
+		engine::assets::SignatureBytes signature;
+		const std::optional<engine::assets::Manifest> manifest = store->ReadManifest(signature);
+		if (!manifest) {
+			return entries;
+		}
+
+		entries.reserve(manifest->Assets().size());
+		for (const engine::assets::AssetEntry &asset : manifest->Assets()) {
+			entries.push_back(PublishedEntry{.Name = asset.Name, .Kind = asset.Kind, .Root = asset.Root});
+		}
+
+		// Name order, which is what a picker wants and what a manifest already
+		// is — sorted here anyway rather than relying on it, because "the
+		// manifest happens to be sorted" is a property of the publisher rather
+		// than of the format.
+		std::sort(
+			entries.begin(), entries.end(), [](const PublishedEntry &left, const PublishedEntry &right) {
+				return left.Name < right.Name;
+			}
+		);
+
+		return entries;
 	}
 }

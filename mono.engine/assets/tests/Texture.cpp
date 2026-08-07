@@ -202,3 +202,120 @@ TEST_CASE("a truncated file is refused rather than half read", "[assets][texture
 	CHECK_FALSE(Texture::Read(reader, read));
 	CHECK(read.Pixels.empty());
 }
+
+// --- flipbook layout, added at v0.10 ------------------------------------------
+
+TEST_CASE("a flipbook's grid, frame count and rate round-trip", "[assets][texture]") {
+	// Without these three a 4x4 animation sheet and a 4x4 tile atlas are the
+	// same file, and everything downstream has to be told the numbers by hand.
+	TextureData source = Made(8, 8);
+	source.FlipbookSide = 4;
+	source.FlipbookFrames = 13;
+	source.FlipbookFrameRate = 24.0f;
+	REQUIRE(source.IsFlipbook());
+
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, source));
+
+	TextureData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, read));
+
+	CHECK(read.FlipbookSide == 4);
+	CHECK(read.FlipbookFrames == 13);
+	CHECK(read.FlipbookFrameRate == 24.0f);
+	CHECK(read.Pixels == source.Pixels);
+
+	// **The three fields are before the pixels**, and this is what pins it: the
+	// pixels have no length of their own, so anything written after them would
+	// be unreachable.
+	CHECK(reader.AtEnd());
+}
+
+TEST_CASE("a still image writes zeroes and reads back a still", "[assets][texture]") {
+	const TextureData source = Made(4, 4);
+	CHECK_FALSE(source.IsFlipbook());
+
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, source));
+
+	TextureData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, read));
+
+	CHECK(read.FlipbookSide == 0);
+	CHECK(read.FlipbookFrames == 0);
+	CHECK_FALSE(read.IsFlipbook());
+}
+
+TEST_CASE("a version 1 file still reads, as a still image", "[assets][texture]") {
+	// **Not compatibility for its own sake** — this is pre-release and a format
+	// break is acceptable. The absent case has an obviously right answer: a v1
+	// file is a still image, which is what zeroes already mean, so refusing one
+	// would make every baked texture on disk unreadable to buy nothing.
+	ByteWriter writer;
+	writer.WriteUInt32(Texture::MAGIC);
+	writer.WriteUInt16(1);
+	writer.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
+	writer.WriteUInt32(2);
+	writer.WriteUInt32(1);
+	for (size_t index = 0; index < 2 * 1 * 4; index++) {
+		writer.WriteUInt8(static_cast<uint8_t>(index));
+	}
+
+	TextureData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, read));
+
+	CHECK(read.Width == 2);
+	CHECK(read.Height == 1);
+	CHECK(read.FlipbookSide == 0);
+	CHECK(read.FlipbookFrameRate == 0.0f);
+	CHECK(reader.AtEnd());
+}
+
+TEST_CASE("a frame count past the grid is clamped rather than refusing the file", "[assets][texture]") {
+	// **The opposite of how every other field here is treated, and right for the
+	// same reason the rest are not.** The others decide how many bytes to
+	// allocate; this one decides which cell to sample. A wrong count is a
+	// shorter animation, a wrong dimension is a buffer overrun.
+	ByteWriter writer;
+	writer.WriteUInt32(Texture::MAGIC);
+	writer.WriteUInt16(Texture::VERSION);
+	writer.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
+	writer.WriteUInt32(2);
+	writer.WriteUInt32(2);
+	writer.WriteUInt8(2);	// A 2x2 grid: four cells.
+	writer.WriteUInt8(200); // Claiming two hundred frames.
+	writer.WriteFloat(24.0f);
+	for (size_t index = 0; index < 2 * 2 * 4; index++) {
+		writer.WriteUInt8(0);
+	}
+
+	TextureData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, read));
+	CHECK(read.FlipbookFrames == 4);
+
+	// A rate that is not a rate reads as "unknown" rather than being refused,
+	// because every consumer already has to handle zero.
+	{
+		ByteWriter bad;
+		bad.WriteUInt32(Texture::MAGIC);
+		bad.WriteUInt16(Texture::VERSION);
+		bad.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
+		bad.WriteUInt32(1);
+		bad.WriteUInt32(1);
+		bad.WriteUInt8(1);
+		bad.WriteUInt8(1);
+		bad.WriteFloat(-5.0f);
+		for (size_t index = 0; index < 4; index++) {
+			bad.WriteUInt8(0);
+		}
+
+		TextureData negative;
+		ByteReader again(bad.Bytes());
+		REQUIRE(Texture::Read(again, negative));
+		CHECK(negative.FlipbookFrameRate == 0.0f);
+	}
+}

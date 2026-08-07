@@ -37,6 +37,9 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/assets/AssetKind.hpp>
+#include <engine/delivery/Client.hpp>
+#include <engine/delivery/Uploader.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/Components.hpp>
@@ -51,6 +54,7 @@
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
+#include <cdn/LocalStore.hpp>
 #include <studio/Commands.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
@@ -65,6 +69,80 @@ namespace studio {
 
 	using engine::ecs::Entity;
 	using engine::world::WorldId;
+
+	// Bytes a second in each direction, over a measured window.
+	//
+	// @since v0.10
+	struct NetworkRates {
+		double DownPerSecond = 0.0;
+		double UpPerSecond = 0.0;
+
+		// How long the window actually was. Zero means there is not one yet,
+		// which the panel says rather than drawing a zero that looks like idle.
+		double WindowSeconds = 0.0;
+	};
+
+	// What crossed the wire over the last few seconds, and when.
+	//
+	// **A short ring, because a total cannot say whether a transfer is
+	// moving.** Bytes-since-start divided by editor-uptime is a number that
+	// only falls, and it is useless at the moment somebody actually asks — "is
+	// this download progressing". `cdn::Dashboard` makes the same decision at a
+	// minute's resolution for a terminal; this is the same arithmetic at the
+	// resolution a panel is read at.
+	//
+	// **Holds no clock.** Every sample is stamped with a time the caller passes
+	// in, which is `net`'s and `assets::Grant`'s standing rule and is what lets
+	// a suite state ten seconds of traffic rather than wait them out.
+	//
+	// @since v0.10
+	struct NetworkSamples {
+		// How many seconds of history the ring holds, at one sample a second.
+		static constexpr size_t CAPACITY = 8;
+
+		// The shortest gap between two samples.
+		static constexpr double INTERVAL = 1.0;
+
+		// One reading of the running totals.
+		struct Sample {
+			double Seconds = 0.0;
+			uint64_t Down = 0;
+			uint64_t Up = 0;
+		};
+
+		std::array<Sample, CAPACITY> Points{};
+
+		// Where the newest sample is.
+		size_t At = 0;
+
+		// How many of the ring's entries hold a reading.
+		size_t Filled = 0;
+
+		// Records the running totals, if enough time has passed.
+		//
+		// @param nowSeconds Seconds since the editor started.
+		// @param down Bytes fetched over this client's life.
+		// @param up Bytes uploaded over this uploader's life.
+		void Observe(double nowSeconds, uint64_t down, uint64_t up);
+
+		// What crossed per second across the whole window.
+		//
+		// The oldest sample against the newest rather than the last two: a pair
+		// one interval apart is one frame's noise, and what the panel is being
+		// read for is whether a transfer is moving.
+		//
+		// @return The rates, with a zero window when there are fewer than two
+		//         samples.
+		NetworkRates Rates() const;
+	};
+
+	// An asset asked for and not yet arrived.
+	//
+	// @since v0.10
+	struct PendingDownload {
+		std::string Name;
+		engine::delivery::RequestId Id;
+	};
 
 	// What the editor is doing to the game right now.
 	//
@@ -154,6 +232,16 @@ namespace studio {
 
 		// The frame graph, which is the second of the two panels above.
 		bool ShowFrameGraph = false;
+
+		// The assets manager, open at startup.
+		//
+		// **The same reason the two above take flags**, said in their own
+		// comment: it makes the panel reachable without a keyboard, which is
+		// what lets a capture prove it draws. A panel that had only ever been
+		// compiled is what the roadmap's own `[~]` on this one was about.
+		//
+		// @since v0.10
+		bool ShowAssetsPanel = false;
 
 		// The loopback port the control server listens on, or -1 for off.
 		//
@@ -840,13 +928,86 @@ namespace studio {
 
 		// Brings one file, or every file under one folder, into the store.
 		//
-		// @param given What the person typed or dropped.
+		// @param given What the person chose or dropped.
 		void ImportAssetPath(const std::string &given);
+
+		// What a dropped path does.
+		//
+		// **Opens the panel as well as importing.** A drop onto a closed one
+		// would otherwise be silent: the file lands, the status line updates,
+		// and nothing the person can see says so.
+		//
+		// @param path One dropped file or folder. SDL delivers one event per
+		//        path, so a multi-file drop is several calls.
+		void DropAssetPath(const std::string &path);
+
+		// The published manifest, as a table somebody can filter and copy from.
+		void DrawPublishedList();
+
+		// What is sitting in `raw/`, waiting to be published.
+		void DrawRawList();
+
+		// Re-reads both halves of the store.
+		//
+		// **Called when the panel opens and after anything changes it**, never
+		// per frame: listing `raw/` stats every file and reading the manifest
+		// parses one.
+		void RefreshStoreContents();
 
 		// Publishes `raw/` into `processed/`.
 		//
 		// @param hexSeed 64 hex characters of Ed25519 seed. Not stored.
 		void PublishAssets(const std::string &hexSeed);
+
+		// A modal listing the store's published assets of one kind.
+		//
+		// **What replaces typing a mesh name and finding out later.** An unknown
+		// name is a part drawn with the missing-mesh marker, which is also what
+		// a mesh that has not streamed in yet looks like — so the old text field
+		// had no failure a person could see. See `AssetPicker.cpp`.
+		//
+		// @param title  The popup id, which `OpenPopup` was given.
+		// @param kind   Which assets to list.
+		// @param chosen The selection, in and out. Emptied by Clear.
+		// @return `true` on the frame it is confirmed.
+		bool DrawAssetPicker(const char *title, engine::assets::AssetKind kind, std::string &chosen);
+
+		// Re-reads the store's manifest into `PickerContents`.
+		//
+		// **Called when a picker opens and by its Refresh button, never per
+		// frame.** Reading a manifest is opening and parsing a file.
+		void RefreshPickerContents();
+
+		// What is moving between this editor and its origins.
+		//
+		// **The panel that makes `ContentSources` observable.** The settings
+		// were saved and loaded since v0.9 and nothing ever built a client from
+		// them, so a wrong key and a working one looked identical. See
+		// `Network.cpp`.
+		void DrawNetwork();
+
+		// Builds the delivery client and the uploader from the current sources.
+		//
+		// Called at start-up and whenever the Content page is edited, because a
+		// role or an address changed there decides which of the two a row
+		// belongs to.
+		void RebuildContentClients();
+
+		// Drives both, and samples what they have moved.
+		//
+		// @param frameSeconds How long the last frame took.
+		void PumpContent(double frameSeconds);
+
+		// Queues every file in the local store's `raw/` for every write source.
+		void UploadStore();
+
+		// Asks the delivery client for one asset by name.
+		//
+		// @param name The content name, as the signed manifest spells it.
+		void DownloadAsset(const std::string &name);
+
+		// Files what has arrived into the local store.
+		void CollectDownloads();
 
 		// What crosses between worlds, which is the one thing they share.
 		//
@@ -1943,12 +2104,15 @@ namespace studio {
 		// The local content store. See `DrawAssets`.
 		bool ShowAssets = false;
 
-		// What the person last typed into the import field.
+		// Where the add-file and add-folder dialogs are looking.
 		//
-		// **A fixed buffer, because that is what `ImGui::InputText` takes.** A
-		// `std::string` needs the resize callback, which is worth having for the
-		// script editor and is not for a path somebody pastes once.
-		char AssetImportPath[512] = {};
+		// **A `std::string` and no longer a fixed buffer**, because it is no
+		// longer typed into: `FilePrompt` and `FolderPrompt` own the text field
+		// and hand back what was browsed to.
+		std::string AssetBrowsePath;
+
+		// What the person typed into the store list's filter.
+		std::string AssetFilter;
 
 		// The signing seed, for a publish.
 		//
@@ -1959,6 +2123,83 @@ namespace studio {
 
 		// What the last import or publish said.
 		std::string AssetStatus;
+
+		// What the store has published, as of the last refresh.
+		//
+		// Held rather than re-read, for `RefreshPickerContents`' reason. Shared
+		// by every picker and by the Assets panel, because they are looking at
+		// one store and two copies would disagree the moment one refreshed.
+		std::vector<cdn::PublishedEntry> PickerContents;
+
+		// What is sitting in `raw/`, as of the last refresh.
+		std::vector<cdn::RawEntry> PickerRaw;
+
+		// What the person typed into a picker's filter.
+		std::string PickerFilter;
+
+		// Whether a `...` button was pressed this frame.
+		//
+		// **The open is deferred because of imgui's id stack.** A property's
+		// widget is inside a `PushID`, so an `OpenPopup` there computes a
+		// different id than the `BeginPopupModal` at the window's root — and the
+		// modal would silently never appear.
+		bool PickerWanted = false;
+
+		// Which kind the open picker is listing.
+		engine::assets::AssetKind PickerKind = engine::assets::AssetKind::Unknown;
+
+		// Which property it was opened for, so the frame it is confirmed knows
+		// what to write.
+		//
+		// **A name rather than a descriptor pointer.** A modal spans frames and
+		// the class table is rebuilt by registration — rule 3, and the reason
+		// every handle in this editor is a value.
+		engine::core::Name PickerProperty;
+
+		// The name a picker is currently offering.
+		std::string PickerChoice;
+
+		// What is moving to and from the origins. See `DrawNetwork`.
+		bool ShowNetwork = false;
+
+		// The editor's own delivery client, built from `Content`.
+		//
+		// **Absent when the settings are not valid**, which is an ordinary
+		// state and not an error: an editor with no publisher key configured
+		// has a source list and no trust, and nothing should be fetched through
+		// it — `MakeAssetClient` is the one that refuses.
+		std::unique_ptr<engine::delivery::AssetClient> ContentClient;
+
+		// The other direction. Absent when no source has the write role.
+		//
+		// **Built even when `ContentClient` is not.** An uploader verifies nothing,
+		// so it needs no publisher key — and seeding an origin is exactly the
+		// case where no manifest has been signed yet.
+		std::unique_ptr<engine::delivery::Uploader> ContentUploads;
+
+		// Seconds since the editor started, for the sample ring's timestamps.
+		//
+		// Accumulated from frame times rather than read from a clock, which is
+		// `NetworkSamples`' rule and is what lets a suite state a window.
+		double ContentSeconds = 0.0;
+
+		// The last few seconds of transfer, for the rate rows.
+		NetworkSamples ContentSamples;
+
+		// What the last upload, download or rebuild said.
+		std::string ContentStatus;
+
+		// Assets asked for and not yet arrived.
+		std::vector<PendingDownload> Downloads;
+
+		// What the person typed into the fetch field.
+		char DownloadName[256] = {};
+
+		// How many files the last upload queued, for the progress line.
+		size_t UploadQueued = 0;
+
+		// How many of them did not arrive.
+		size_t UploadFailures = 0;
 
 		// What crosses between worlds. See `DrawBus`.
 		bool ShowBus = false;

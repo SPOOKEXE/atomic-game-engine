@@ -38,6 +38,9 @@
 //
 // @tier shared
 
+#include <engine/assets/AssetKind.hpp>
+#include <engine/assets/ContentHash.hpp>
+
 #include <cdn/Publisher.hpp>
 #include <cstdint>
 #include <filesystem>
@@ -212,4 +215,69 @@ namespace cdn {
 		uint64_t seconds,
 		const PublishSettings &settings = {}
 	);
+
+	// One file sitting in `raw/`, waiting to be published.
+	//
+	// @since v0.10
+	struct RawEntry {
+		// The file, as it is on disk: `<hash><extension>`.
+		std::filesystem::path Path;
+
+		// The name somebody gave it before it was imported, from the log, or
+		// the file name when the log does not say.
+		//
+		// **The log is used to label and never to enumerate.** The folder is
+		// the index — this header opens by saying so — and `raw/` holds hashes,
+		// so the only thing that can answer "what was this called" is the log.
+		// A listing built *from* the log would show rows for files that are no
+		// longer there and miss ones dropped in by hand.
+		std::string Original;
+
+		// What it weighs.
+		uint64_t Bytes = 0;
+	};
+
+	// What is actually in `raw/`, newest first.
+	//
+	// **The folder, labelled by the log** — see `RawEntry::Original`. Newest
+	// first because somebody looking at this has just added something.
+	//
+	// @param paths The store.
+	// @return The files. Empty when there is no store or nothing in it.
+	// @since v0.10
+	std::vector<RawEntry> RawContents(const LocalPaths &paths);
+
+	// One asset the last publish put in `processed/`.
+	//
+	// @since v0.10
+	struct PublishedEntry {
+		// The name a game author writes, extension included — exactly the
+		// string an emitter's `Texture` or a part's `Mesh` takes. AGENTS.md
+		// rule 4: this is the thing that crosses, and there is no table
+		// anywhere mapping it to anything.
+		std::string Name;
+
+		// What subsystem it belongs to, as the publisher decided.
+		engine::assets::AssetKind Kind = engine::assets::AssetKind::Unknown;
+
+		// Its content address.
+		engine::assets::ContentHash Root;
+	};
+
+	// What the store has published, in name order.
+	//
+	// **Read from the signed manifest rather than from the folder**, because
+	// `processed/` is content-addressed and a folder of hashes cannot say what
+	// anything is called. The manifest is the only thing in the store that
+	// knows both the name and the kind, which is exactly what a picker needs.
+	//
+	// **The signature is read and not checked.** This is the store on this
+	// machine being shown to the person who owns it, not an origin's manifest
+	// being trusted — `delivery::AssetClient` is where verification belongs and
+	// it stays the only place, because two verifiers are two opinions.
+	//
+	// @param paths The store.
+	// @return The assets. Empty when nothing has been published.
+	// @since v0.10
+	std::vector<PublishedEntry> PublishedContents(const LocalPaths &paths);
 }

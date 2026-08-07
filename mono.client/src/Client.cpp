@@ -13,6 +13,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <SDL3/SDL.h>
@@ -368,6 +369,33 @@ namespace client {
 				}
 				if (Renderer.AddTexture(name, image)) {
 					ContentTextures++;
+				}
+
+				// **Flipbook layout is world data, not renderer state**, exactly
+				// as the triangle count above is. A 4x4 animation sheet and a 4x4
+				// tile atlas are the same pixels, so the grid, the frame count
+				// and the authored rate are what tell an emitter how to play one
+				// — and without them every scene using a GIF would have to state
+				// numbers the file already holds. See `scene::TextureCatalogue`.
+				//
+				// Recorded whether or not the upload succeeded: a headless run
+				// has no device and still knows what it read.
+				if (image.IsFlipbook()) {
+					const engine::scene::FlipbookFacts facts{
+						.Side = image.FlipbookSide,
+						.Frames = image.FlipbookFrames,
+						.FrameRate = image.FlipbookFrameRate,
+					};
+					for (const engine::world::WorldId id : Simulated) {
+						Universe_->Enter(id, [&name, &facts](engine::ecs::Store &store) {
+							engine::scene::RecordTexture(store, name, facts);
+						});
+					}
+					if (ReportedJoin) {
+						Universe_->Enter(Replicated, [&name, &facts](engine::ecs::Store &store) {
+							engine::scene::RecordTexture(store, name, facts);
+						});
+					}
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Audio) {
 				// **Decoded and converted here, once.** The graph must never resample

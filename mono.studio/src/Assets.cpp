@@ -1,28 +1,44 @@
 // The assets manager: what is in the local content store, and how to add to it.
 //
 // **A view over `cdn::LocalStore` and nothing of its own.** The folder is the
-// index — `LocalStore.hpp` says so — so this panel reads the log to say where
-// things came from, reads `raw/` to say what is actually there, and calls
-// `ImportFile` and `PublishLocal`. It keeps no list, caches nothing between
-// frames that it cannot rebuild, and has no opinion the store does not already
-// have.
+// index — `LocalStore.hpp` says so — so this panel reads `raw/` to say what is
+// actually there, reads the published manifest to say what an author can name,
+// and calls `ImportFile` and `PublishLocal`. It keeps no list it cannot rebuild
+// and has no opinion the store does not already have.
 //
-// **The upload "button" takes a typed path rather than opening a file dialog**,
-// and that is a real limitation rather than a preference. There is no portable
-// file picker in this stack: SDL3 has `SDL_ShowOpenFileDialog`, which is
-// asynchronous and platform-backed, and wiring it means a callback crossing back
-// into the frame loop and a dependency the studio does not have today. A text
-// field plus drag-and-drop — which SDL *does* deliver as an event — covers the
-// same ground, and the field is what a person uses when they have a path in the
-// clipboard, which for content coming out of another tool is most of the time.
+// **Every row is a file in `~/Documents/atomic-game-engine/cdn` and nowhere
+// else.** That is a rule and not a default. This panel used to list the *log*,
+// whose subjects are the paths files came from — `~/Music/...`, `~/art/...` —
+// so most of what it showed was somewhere else entirely, and half of it was
+// paths that no longer existed. The store is what the store contains. The log is
+// still read, but only to *label* a row: `raw/` is hash-named, so nothing else
+// can say what a file was called before it came in.
+//
+// ## Getting files in
+//
+// Three ways, and all three end at `ImportFile`:
+//
+// - **Drag and drop**, single or many. SDL delivers one `SDL_EVENT_DROP_FILE`
+//   per path, so a multi-file drop arrives as several events and a dropped
+//   folder arrives as one path that is walked.
+// - **Add files…**, which browses and takes one file at a time.
+// - **Add folder…**, which browses and takes everything under a directory.
+//
+// The typed-path field is gone. It was there because there was no portable file
+// dialog — and there is one, `studio::FilePrompt`, which six other dialogs in
+// this editor already use. Keeping a text field beside a browser would be two
+// places to say the same thing.
 
 #include <cdn/LocalStore.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/ui/Metrics.hpp>
+#include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <imgui.h>
+#include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 
@@ -55,6 +71,33 @@ namespace studio {
 			std::snprintf(text, sizeof(text), unit == 0 ? "%.0f %s" : "%.1f %s", scaled, UNITS[unit]);
 			return text;
 		}
+
+		const char *KindName(engine::assets::AssetKind kind) {
+			switch (kind) {
+			case engine::assets::AssetKind::Mesh:
+				return "mesh";
+			case engine::assets::AssetKind::Texture:
+				return "texture";
+			case engine::assets::AssetKind::Audio:
+				return "audio";
+			case engine::assets::AssetKind::Material:
+				return "material";
+			case engine::assets::AssetKind::Font:
+				return "font";
+			case engine::assets::AssetKind::Script:
+				return "script";
+			case engine::assets::AssetKind::Unknown:
+				break;
+			}
+			// **Named rather than blank**, because "unknown" is a thing a
+			// publisher decided from an extension it did not recognise — and a
+			// row that looked empty would read as a bug in this panel instead of
+			// as a file nothing will claim.
+			return "unknown";
+		}
+
+		constexpr const char *ADD_FILE = "Add a file";
+		constexpr const char *ADD_FOLDER = "Add a folder";
 	}
 
 	void Editor::DrawAssets() {
@@ -69,35 +112,54 @@ namespace studio {
 
 		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
 
+		// **Read when the panel opens and after anything changes it**, not every
+		// frame: listing `raw/` stats every file and reading the manifest parses
+		// one, and a store with the roadmap's own seed import is 289 files.
+		if (ImGui::IsWindowAppearing()) {
+			RefreshStoreContents();
+		}
+
 		ImGui::TextUnformatted(paths.Root.string().c_str());
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Refresh")) {
+			RefreshStoreContents();
+		}
+
 		ImGui::Separator();
 
-		// --- adding -----------------------------------------------------------
+		// --- getting things in ------------------------------------------------
 
-		ImGui::TextUnformatted("Add content");
+		const ImVec2 button(engine::ui::Scaled(120.0f), 0.0f);
 
-		// **Wide enough for a real path**, because the thing a person pastes here
-		// is forty characters more often than ten and a field they have to scroll
-		// inside is one they cannot check before pressing the button.
-		ImGui::SetNextItemWidth(-120.0f);
-		ImGui::InputTextWithHint(
-			"##import", "a file or a folder to import", AssetImportPath, sizeof(AssetImportPath)
-		);
+		if (ImGui::Button("Add files...", button)) {
+			AssetBrowsePath = paths.Root.string();
+			ImGui::OpenPopup(ADD_FILE);
+		}
 
 		ImGui::SameLine();
-
-		// **Disabled rather than hidden when the field is empty**, so the button
-		// is in the same place whether or not it can be pressed — a control that
-		// moves is one somebody clicks by accident.
-		const bool hasPath = AssetImportPath[0] != '\0';
-		ImGui::BeginDisabled(!hasPath);
-		if (ImGui::Button("Import", ImVec2(110.0f, 0.0f))) {
-			ImportAssetPath(AssetImportPath);
+		if (ImGui::Button("Add folder...", button)) {
+			AssetBrowsePath = paths.Root.string();
+			ImGui::OpenPopup(ADD_FOLDER);
 		}
-		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextUnformatted("or drop files and folders onto the window");
+		ImGui::PopStyleColor();
+
+		// **No extension filter.** A content store takes whatever somebody has —
+		// `assetc` decides what it can bake and `Publish` decides what kind a
+		// name is, and a dialog that hid a format the pipeline would have handled
+		// would be a third opinion about what content is.
+		if (FilePrompt(ADD_FILE, AssetBrowsePath, "Import", {}, true)) {
+			ImportAssetPath(AssetBrowsePath);
+		}
+		if (FolderPrompt(ADD_FOLDER, AssetBrowsePath, "Import all")) {
+			ImportAssetPath(AssetBrowsePath);
+		}
 
 		if (!AssetStatus.empty()) {
-			ImGui::TextUnformatted(AssetStatus.c_str());
+			ImGui::TextWrapped("%s", AssetStatus.c_str());
 		}
 
 		ImGui::Separator();
@@ -107,10 +169,11 @@ namespace studio {
 		// **The key is asked for and never stored**, which is `PublishLocal`'s own
 		// rule surfacing: a manifest signs what a client will trust, and a key kept
 		// in the editor's preferences file is a key that signs anything anybody
-		// drops in the folder.
+		// drops in the folder. The *ingest* key on the Content page is saved and
+		// that is not an inconsistency — `ContentSources.hpp` carries why.
 		ImGui::TextUnformatted("Publish raw/ into processed/");
 
-		ImGui::SetNextItemWidth(-120.0f);
+		ImGui::SetNextItemWidth(-engine::ui::Scaled(130.0f));
 		ImGui::InputTextWithHint(
 			"##key",
 			"64 hex characters of signing seed",
@@ -121,81 +184,200 @@ namespace studio {
 
 		ImGui::SameLine();
 		ImGui::BeginDisabled(AssetSigningKey[0] == '\0');
-		if (ImGui::Button("Publish", ImVec2(110.0f, 0.0f))) {
+		if (ImGui::Button("Publish", button)) {
 			PublishAssets(AssetSigningKey);
 		}
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
 
+		// --- sending it somewhere ---------------------------------------------
+		//
+		// **Uploading and publishing are two acts and stay two.** What an
+		// origin's inbox receives is unsigned content, and no client will look
+		// at it until a publisher has signed a manifest naming it — CDN.md §1.
+		// A single button doing both would need the signing seed to be around
+		// for the upload, which is the one thing this panel refuses to keep.
+		ImGui::BeginDisabled(ContentUploads == nullptr || ContentUploads->Remaining() > 0);
+		if (ImGui::Button("Upload", button)) {
+			UploadStore();
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ContentUploads == nullptr) {
+			ImGui::TextDisabled("no write source — Preferences > Content");
+		} else if (ContentUploads->Remaining() > 0) {
+			ImGui::Text("%zu left", ContentUploads->Remaining());
+		} else {
+			ImGui::TextDisabled(
+				"%zu destination(s) — the Network panel says how it went",
+				ContentUploads->Destinations().size()
+			);
+		}
+
+		if (!ContentStatus.empty()) {
+			ImGui::TextWrapped("%s", ContentStatus.c_str());
+		}
+
+		ImGui::Separator();
+
 		// --- what is there ----------------------------------------------------
 		//
-		// **The log rather than a directory walk**, because the log is the only
-		// thing that knows where a file came from — `raw/` holds hashes. Newest
-		// first, which is the order somebody looking for what they just added
-		// wants.
-		const std::vector<cdn::LogEntry> entries = cdn::ReadLog(paths);
-
-		ImGui::Text("%zu entr%s", entries.size(), entries.size() == 1 ? "y" : "ies");
-
-		if (ImGui::BeginTable(
-				"assets", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
-			)) {
-			ImGui::TableSetupColumn("What", ImGuiTableColumnFlags_WidthFixed, 110.0f);
-			ImGui::TableSetupColumn("Came from");
-			ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-			ImGui::TableSetupColumn("Hash", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-			ImGui::TableSetupScrollFreeze(0, 1);
-			ImGui::TableHeadersRow();
-
-			// **A clipper, because the roadmap's own seed import is 289 rows** and
-			// a store somebody has used for a while is thousands. Drawing every
-			// row of a scrolled table is the cost imgui's clipper exists to
-			// remove, and at this count it is the difference between a panel that
-			// opens and one that drops the frame rate while it is open.
-			ImGuiListClipper clipper;
-			clipper.Begin(static_cast<int>(entries.size()));
-
-			while (clipper.Step()) {
-				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-					// Newest first.
-					const cdn::LogEntry &entry = entries[entries.size() - 1 - static_cast<size_t>(row)];
-
-					ImGui::TableNextRow();
-
-					ImGui::TableNextColumn();
-					ImGui::TextUnformatted(entry.Action.c_str());
-
-					ImGui::TableNextColumn();
-					ImGui::TextUnformatted(entry.Subject.c_str());
-
-					// The whole path when it is elided, because that is the field
-					// somebody is squinting at.
-					if (ImGui::IsItemHovered()) {
-						ImGui::SetTooltip("%s", entry.Subject.c_str());
-					}
-
-					ImGui::TableNextColumn();
-					ImGui::TextUnformatted(Readable(entry.Bytes).c_str());
-
-					ImGui::TableNextColumn();
-
-					// The first eight characters, which is enough to recognise one
-					// and short enough to fit. The whole hash is a click away.
-					ImGui::TextUnformatted(entry.Hash.substr(0, 8).c_str());
-					if (ImGui::IsItemHovered() && !entry.Hash.empty()) {
-						ImGui::SetTooltip("%s", entry.Hash.c_str());
-					}
-					if (ImGui::IsItemClicked() && !entry.Hash.empty()) {
-						ImGui::SetClipboardText(entry.Hash.c_str());
-					}
-				}
+		// Two tabs because they are two different questions. `raw/` answers "did
+		// my file get in"; the manifest answers "what can I name in a scene", and
+		// nothing is in the second until somebody publishes.
+		if (ImGui::BeginTabBar("##store")) {
+			if (ImGui::BeginTabItem("Published")) {
+				DrawPublishedList();
+				ImGui::EndTabItem();
 			}
-
-			ImGui::EndTable();
+			if (ImGui::BeginTabItem("Raw")) {
+				DrawRawList();
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
 		}
 
 		ImGui::End();
+	}
+
+	void Editor::DrawPublishedList() {
+		ImGui::Text("%zu asset(s)", PickerContents.size());
+
+		if (PickerContents.empty()) {
+			ImGui::TextDisabled("nothing published yet — import files above, then Publish");
+			return;
+		}
+
+		ImGui::SetNextItemWidth(-1.0f);
+		TextField("##published-filter", AssetFilter, "filter");
+
+		if (!ImGui::BeginTable(
+				"published",
+				3,
+				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+			)) {
+			return;
+		}
+
+		ImGui::TableSetupColumn("Name");
+		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
+		ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(90.0f));
+		ImGui::TableSetupScrollFreeze(0, 1);
+		ImGui::TableHeadersRow();
+
+		for (const cdn::PublishedEntry &entry : PickerContents) {
+			int score = 0;
+			if (!FuzzyMatch(AssetFilter, entry.Name, score)) {
+				continue;
+			}
+
+			ImGui::TableNextRow();
+
+			ImGui::TableNextColumn();
+
+			// **The name is what a scene writes**, so it is the thing worth
+			// copying — one click rather than reading it off and retyping.
+			ImGui::TextUnformatted(entry.Name.c_str());
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s\nclick to copy", entry.Name.c_str());
+			}
+			if (ImGui::IsItemClicked()) {
+				ImGui::SetClipboardText(entry.Name.c_str());
+			}
+
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(KindName(entry.Kind));
+
+			ImGui::TableNextColumn();
+			const std::string hex = entry.Root.ToHex();
+			ImGui::TextUnformatted(hex.substr(0, 8).c_str());
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", hex.c_str());
+			}
+		}
+
+		ImGui::EndTable();
+	}
+
+	void Editor::DrawRawList() {
+		uint64_t total = 0;
+		for (const cdn::RawEntry &entry : PickerRaw) {
+			total += entry.Bytes;
+		}
+
+		ImGui::Text("%zu file(s), %s", PickerRaw.size(), Readable(total).c_str());
+
+		if (PickerRaw.empty()) {
+			ImGui::TextDisabled("nothing imported yet — drop files on the window, or use the buttons above");
+			return;
+		}
+
+		ImGui::SetNextItemWidth(-1.0f);
+		TextField("##raw-filter", AssetFilter, "filter");
+
+		if (!ImGui::BeginTable(
+				"raw", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+			)) {
+			return;
+		}
+
+		ImGui::TableSetupColumn("Was called");
+		ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
+		ImGui::TableSetupColumn("Stored as", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(90.0f));
+		ImGui::TableSetupScrollFreeze(0, 1);
+		ImGui::TableHeadersRow();
+
+		// **A clipper, because the roadmap's own seed import is 289 rows** and a
+		// store somebody has used for a while is thousands. Drawing every row of
+		// a scrolled table is the cost imgui's clipper exists to remove.
+		//
+		// The filter is applied first so the clipper counts what is actually
+		// drawn — a clipper over the unfiltered list would leave gaps.
+		std::vector<const cdn::RawEntry *> shown;
+		shown.reserve(PickerRaw.size());
+		for (const cdn::RawEntry &entry : PickerRaw) {
+			int score = 0;
+			if (FuzzyMatch(AssetFilter, entry.Original, score)) {
+				shown.push_back(&entry);
+			}
+		}
+
+		ImGuiListClipper clipper;
+		clipper.Begin(static_cast<int>(shown.size()));
+
+		while (clipper.Step()) {
+			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+				const cdn::RawEntry &entry = *shown[static_cast<size_t>(row)];
+
+				ImGui::TableNextRow();
+
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(entry.Original.c_str());
+
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(Readable(entry.Bytes).c_str());
+
+				ImGui::TableNextColumn();
+
+				// The hash-named file this actually is, which is what somebody
+				// looking in the folder with a terminal will see.
+				const std::string stored = entry.Path.filename().string();
+				ImGui::TextUnformatted(stored.substr(0, 8).c_str());
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", entry.Path.string().c_str());
+				}
+			}
+		}
+
+		ImGui::EndTable();
+	}
+
+	void Editor::RefreshStoreContents() {
+		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		PickerRaw = cdn::RawContents(paths);
+		PickerContents = cdn::PublishedContents(paths);
 	}
 
 	void Editor::ImportAssetPath(const std::string &given) {
@@ -225,10 +407,10 @@ namespace studio {
 		};
 
 		if (std::filesystem::is_directory(source, failure)) {
-			// **A folder is walked**, because that is what a person drags. Skipping
-			// what cannot be read rather than stopping, for `contentimport`'s
-			// reason: a real content directory has a broken symlink in it
-			// eventually.
+			// **A folder is walked**, because that is what a person drags and
+			// what "Add folder" is for. Skipping what cannot be read rather than
+			// stopping, for `contentimport`'s reason: a real content directory
+			// has a broken symlink in it eventually.
 			for (std::filesystem::recursive_directory_iterator walk(
 					 source, std::filesystem::directory_options::skip_permission_denied, failure
 				 );
@@ -252,11 +434,17 @@ namespace studio {
 					  " already there, " + std::to_string(failures) + " failed";
 		ENGINE_INFO("assets: {}", AssetStatus);
 
-		// **Cleared on success so the next import starts empty**, and kept on
-		// failure so somebody can fix a typo rather than retype the path.
-		if (failures == 0) {
-			AssetImportPath[0] = '\0';
-		}
+		// The list on screen is now wrong, and this is the only place that knows
+		// it changed.
+		RefreshStoreContents();
+	}
+
+	void Editor::DropAssetPath(const std::string &path) {
+		// **Opened rather than only imported.** A person dropping a file on a
+		// closed panel gets no feedback at all otherwise — the import happens,
+		// the status line updates, and nothing they can see says so.
+		ShowAssets = true;
+		ImportAssetPath(path);
 	}
 
 	void Editor::PublishAssets(const std::string &hexSeed) {
@@ -294,5 +482,10 @@ namespace studio {
 					  std::to_string(report->Bundles) + " bundle(s), root " +
 					  report->Root.ToHex().substr(0, 8);
 		ENGINE_INFO("assets: {}", AssetStatus);
+
+		// **Refreshed here rather than left for the next open.** Publishing is
+		// what fills the picker, and a picker that still said "nothing
+		// published" straight after would read as the publish having failed.
+		RefreshStoreContents();
 	}
 }

@@ -225,20 +225,29 @@ end
 --     cdn --publish content --store store --signing-key HEX
 --     client --cdn dir:store --publisher-key PUB --script Particles.luau
 --
--- `bake` decodes the GIF into **one flipbook sheet** — 24 frames of a 420x420
+-- `bake` decodes the GIF into **one flipbook sheet** — 48 frames of a 420x420
 -- animation laid out as an 8x8 grid — so by the time it reaches here it is an
 -- ordinary texture and nothing downstream knows it animates.
 --
 -- ## Why the numbers are these numbers
 --
--- **`FlipbookFrames = 24` and not 64.** The grid is the next square power of two
--- that fits, so 24 frames land in an 8x8 with 40 cells empty. Without this the
--- animation would spend five eighths of every particle's life on blank cells and
--- read as an effect that flashes and vanishes.
+-- **The frame count is not written here at all, and that is a fix.** It used to
+-- say 24; the GIF has 48. Half the dance never played, and nothing looked broken
+-- — a flipbook that stops early is just a shorter animation, which is the whole
+-- reason the number should never have been copied. The bake puts it on the
+-- texture, the client records it into the world, and an emitter that leaves
+-- `FlipbookFrames` at zero adopts it.
+--
+-- It still matters that 48 is not 64: the grid is the next square power of two
+-- that fits, so sixteen of the cells are empty and playing them would spend a
+-- quarter of every particle's life on blanks.
 --
 -- **`Lifetime = 5` with `OneShot`.** A one-shot flipbook is stretched over the
 -- particle's whole life, so five seconds of life is five seconds of dance at
--- about 4.8 frames a second — the whole loop, once, per particle.
+-- about 9.6 frames a second — the whole loop, once, per particle. The GIF's own
+-- rate is 24fps and is deliberately not used here: `OneShot` paces itself off
+-- the lifetime, which is what makes "it lasts five seconds and plays the whole
+-- thing" true regardless of how many frames the source has.
 --
 -- **`Rate = 0.2`, which is one particle every five seconds.** Exactly one fox on
 -- screen at a time: a new one is born as the last expires, so the dance appears
@@ -262,7 +271,13 @@ do
 
 	emitter.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid8x8
 	emitter.FlipbookMode = Enum.ParticleFlipbookMode.OneShot
-	emitter.FlipbookFrames = 24
+
+	-- **The frame count is not stated here, and that is the fix.** It used to say
+	-- 24 and the GIF has 48, so half the dance never played and nothing looked
+	-- broken — a flipbook that stops early is just a shorter animation. The
+	-- number is in the baked texture, the client records it into the world, and
+	-- an emitter that leaves `FlipbookFrames` at zero adopts it. Writing it down
+	-- here would be a second copy of a fact, which is the thing that was wrong.
 
 	emitter.Rate = 0.2
 	emitter.Lifetime = NumberRange.new(5, 5)

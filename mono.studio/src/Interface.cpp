@@ -263,6 +263,7 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			DrawHistory();
 			DrawAssets();
+			DrawNetwork();
 			DrawBus();
 			DrawFindInstances();
 			DrawScriptProfile();
@@ -888,6 +889,7 @@ namespace studio {
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);

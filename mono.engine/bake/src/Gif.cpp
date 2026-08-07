@@ -44,6 +44,14 @@ namespace engine::bake {
 		// would turn a usable asset into a failed import.
 		constexpr uint32_t MAX_SIDE = 8;
 
+		// What a delay of 0 or 1 is taken to mean, in hundredths of a second.
+		//
+		// **The de-facto rule and not the specification's.** GIF says zero is
+		// "no delay"; every browser since Netscape has read 0 and 1 as 100ms,
+		// so an encoder emitting zero expected 10fps rather than an infinite
+		// frame rate — and reading it literally would divide by zero.
+		constexpr uint16_t DEFAULT_HUNDREDTHS = 10;
+
 		// A cursor over the file that cannot run off the end.
 		//
 		// **Every read is checked, which is the whole of what a decoder owes.** A
@@ -319,6 +327,18 @@ namespace engine::bake {
 		int32_t transparentIndex = -1;
 		uint8_t disposal = 0;
 
+		// The delay the last graphic control block named, in hundredths of a
+		// second, and the sum of the ones that were actually used.
+		//
+		// **Summed rather than kept per frame, because a flipbook has one
+		// rate.** GIF permits a different delay on every frame and encoders
+		// occasionally use it; a grid sampled by cell index cannot express that,
+		// so the total over the whole animation is what a single rate is derived
+		// from. That is a real approximation and `TextureData::FlipbookFrameRate`
+		// says so rather than pretending the conversion is lossless.
+		uint16_t pendingDelay = 0;
+		uint64_t totalHundredths = 0;
+
 		std::vector<uint8_t> blocks;
 		std::vector<uint8_t> indices;
 		std::vector<Pixel> local;
@@ -341,7 +361,13 @@ namespace engine::bake {
 						return false;
 					}
 					const uint8_t flags = reader.Byte();
-					reader.Skip(2); // Delay, which a flipbook does not carry.
+
+					// **The delay, which used to be skipped and is the whole of
+					// the frame rate.** It is hundredths of a second and it
+					// applies to the frame that follows this block, so it is
+					// held here and banked when that frame is captured.
+					pendingDelay = reader.Short();
+
 					const uint8_t index = reader.Byte();
 					reader.Byte(); // Block terminator.
 
@@ -438,6 +464,14 @@ namespace engine::bake {
 
 			frames.push_back(canvas);
 
+			// **A delay of 0 or 1 means "as fast as the viewer can", and every
+			// browser reads that as 100ms.** Following the de-facto rule rather
+			// than the specification is the right call here: an encoder writing
+			// zero expected the thing everybody actually does, and taking it
+			// literally would divide by zero or claim a hundred frames a second.
+			totalHundredths += pendingDelay < 2 ? DEFAULT_HUNDREDTHS : pendingDelay;
+			pendingDelay = 0;
+
 			if (disposal == 2) {
 				// Restore to background: the frame's own rectangle goes clear.
 				for (uint32_t y = 0; y < height; y++) {
@@ -478,6 +512,24 @@ namespace engine::bake {
 		out.Width = sheetWidth;
 		out.Height = sheetHeight;
 		out.Format = assets::TextureFormat::RGBA8;
+
+		// **The grid, how much of it holds a frame, and how fast it plays.**
+		// Without these three the sheet is just pixels: a 4x4 flipbook and a 4x4
+		// tile atlas are the same image, and every scene that wanted to play one
+		// would have to be told the numbers by hand. `TextureData` carries why
+		// they belong on the texture rather than on whatever draws it.
+		out.FlipbookSide = static_cast<uint8_t>(side);
+		out.FlipbookFrames = static_cast<uint8_t>(frames.size());
+
+		// Total duration over frame count, which is a mean and is stated as one.
+		// A GIF whose frames each name a different delay cannot be a flipbook
+		// without this approximation, and the alternative — refusing it — would
+		// turn a usable asset into a failed import for a property nothing in the
+		// engine could have used anyway.
+		const double seconds = static_cast<double>(totalHundredths) / 100.0;
+		out.FlipbookFrameRate =
+			seconds > 0.0 ? static_cast<float>(static_cast<double>(frames.size()) / seconds) : 0.0f;
+
 		out.Pixels.assign(static_cast<size_t>(sheetWidth) * sheetHeight * 4, std::byte{0});
 
 		for (size_t frame = 0; frame < frames.size(); frame++) {

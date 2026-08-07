@@ -248,7 +248,19 @@ namespace engine::effects {
 		// arrangement and it is the right one: a one-shot sheet is authored to
 		// cover a life, so a frame rate would be a second, contradictory way to
 		// say how long it takes.
-		core::NumberRange FlipbookFramerate{12.0f, 12.0f};
+		//
+		// **Zero means "ask the texture, then fall back to twelve".** An
+		// imported animation states its own rate — a GIF has a delay per frame,
+		// and `scene::TextureCatalogue` carries what those average to — so a
+		// scene pointing an emitter at one should not have to repeat a number
+		// the file already holds. An author who sets this means it and wins;
+		// `ResolvedRate` in `ParticleSystem.cpp` is the order.
+		//
+		// It used to default to twelve, which read as "the author asked for
+		// twelve" and would have quietly overridden every imported rate.
+		//
+		// @since v0.10 the default is zero rather than twelve.
+		core::NumberRange FlipbookFramerate{0.0f, 0.0f};
 
 		// A constant push, in metres per second squared. Gravity, wind, a
 		// draught.
@@ -339,8 +351,11 @@ namespace engine::effects {
 		// the symptom is an effect that flashes on and vanishes rather than one
 		// that animates.
 		//
-		// **Zero means the whole grid**, so an authored sheet needs nothing said
-		// and only an import that knows better has to say it.
+		// **Zero means "ask the texture, then the whole grid"**, so an authored
+		// sheet needs nothing said, an imported one needs nothing said either —
+		// the bake put the number on the texture and `scene::TextureCatalogue`
+		// carries it — and only a scene that knows better than both has to
+		// speak.
 		//
 		// A `uint8_t` because the ceiling is 64 — the widest grid this engine
 		// draws. It sits here rather than beside `Flipbook` because it fits the

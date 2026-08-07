@@ -40,11 +40,15 @@ namespace studio {
 	// The string grows as the field does, through imgui's resize callback, so
 	// there is no fixed buffer and no truncation at a length nobody chose.
 	//
-	// @param label The imgui label, `##`-prefixed to hide it.
-	// @param text  The string to edit, in place.
-	// @param hint  Placeholder text shown while the field is empty.
+	// @param label  The imgui label, `##`-prefixed to hide it.
+	// @param text   The string to edit, in place.
+	// @param hint   Placeholder text shown while the field is empty.
+	// @param secret Whether to draw the characters as dots. For a shared
+	//        secret somebody pastes into a preferences page — it hides the
+	//        value from a shoulder or a screen recording and does nothing else,
+	//        because the string itself is stored in the clear either way.
 	// @return `true` on a frame the text changed.
-	bool TextField(const char *label, std::string &text, const char *hint = nullptr);
+	bool TextField(const char *label, std::string &text, const char *hint = nullptr, bool secret = false);
 
 	// A multi-line text field bound to a `std::string`.
 	//
@@ -107,6 +111,25 @@ namespace studio {
 		const std::vector<std::string> &extensions,
 		bool mustExist
 	);
+
+	// A modal that browses for a *folder* rather than a file.
+	//
+	// **Beside `FilePrompt` rather than a flag on it**, because the two differ
+	// in more than a filter: a file dialog returns what is selected in the list
+	// and a folder dialog returns where the list *is*. Folding them together
+	// would mean a click on a row meaning "descend" in one mode and "choose" in
+	// the other, from the same widget, which is how a dialog gets a mode nobody
+	// can see.
+	//
+	// Files are listed, greyed, and not selectable — a folder browser that hid
+	// them would make it impossible to tell an empty folder from the right one.
+	//
+	// @param title  The popup id, which is also its heading.
+	// @param path   The folder, in and out. Where browsing starts.
+	// @param accept What the confirm button says.
+	// @return `true` on the frame it is confirmed.
+	// @since v0.10
+	bool FolderPrompt(const char *title, std::string &path, const char *accept);
 
 	// A case-insensitive subsequence match, with exact and prefix hits promoted.
 	//

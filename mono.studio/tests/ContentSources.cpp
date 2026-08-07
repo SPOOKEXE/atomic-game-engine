@@ -24,6 +24,7 @@ TEST_SUITE_ID("studio.contentsources")
 
 using engine::delivery::Source;
 using engine::delivery::SourceKind;
+using engine::delivery::SourceRole;
 using studio::ContentSources;
 
 namespace {
@@ -166,4 +167,112 @@ TEST_CASE("an unparsable publisher key yields settings with no trust", "[studio]
 	// And the list a person typed carries no host restriction: that check is
 	// for a source list a *server* sent, not one from these preferences.
 	CHECK(settings.AllowedHosts.empty());
+}
+
+// --- roles: which direction a source is used in ----------------------------
+
+TEST_CASE("a role and an ingest key survive a save and a load", "[studio][contentsources]") {
+	const std::filesystem::path path = ScratchFile("atomic-sources-roles.ini");
+	std::filesystem::remove(path);
+
+	ContentSources sources;
+	sources.PublisherKey = std::string(64, 'a');
+
+	Source reader = Origin("reads", "127.0.0.1:9080");
+	reader.Role = SourceRole::Read;
+
+	Source writer = Origin("writes", "127.0.0.1:9081");
+	writer.Role = SourceRole::Write;
+	writer.IngestKey = "a shared secret";
+
+	sources.Sources = {reader, writer};
+	REQUIRE(sources.Save(path));
+
+	ContentSources loaded;
+	REQUIRE(loaded.Load(path));
+	REQUIRE(loaded.Sources.size() == 2);
+
+	CHECK(loaded.Sources[0].Role == SourceRole::Read);
+	CHECK(loaded.Sources[0].IngestKey.empty());
+	CHECK(loaded.Sources[1].Role == SourceRole::Write);
+
+	// **A key with a space in it**, which is why the field is the line's
+	// remainder rather than one more pipe-separated column: a secret somebody
+	// pasted is not this parser's business to constrain.
+	CHECK(loaded.Sources[1].IngestKey == "a shared secret");
+
+	std::filesystem::remove(path);
+}
+
+TEST_CASE("a list written before roles existed loads as both", "[studio][contentsources]") {
+	// **Not compatibility for its own sake.** The absent case has an obviously
+	// right answer: a list written when there was no choice meant `Both`, and
+	// reading it as anything else would silently stop a working single-origin
+	// setup from either fetching or uploading.
+	const std::filesystem::path path = ScratchFile("atomic-sources-old.ini");
+	std::filesystem::remove(path);
+
+	{
+		std::ofstream out(path, std::ios::trunc);
+		out << "source = old | http | 127.0.0.1:9080 | on\n";
+	}
+
+	ContentSources sources;
+	REQUIRE(sources.Load(path));
+	REQUIRE(sources.Sources.size() == 1);
+	CHECK(sources.Sources.front().Role == SourceRole::Both);
+	CHECK(sources.Sources.front().Enabled);
+
+	std::filesystem::remove(path);
+}
+
+TEST_CASE("reads and writes go to different origins", "[studio][contentsources]") {
+	// The point of the whole feature, from the editor's end: one list, one
+	// order, and each row saying which directions it is in.
+	ContentSources sources;
+	sources.PublisherKey = std::string(64, 'a');
+
+	Source reader = Origin("reads", "127.0.0.1:9080");
+	reader.Role = SourceRole::Read;
+
+	Source writer = Origin("writes", "127.0.0.1:9081");
+	writer.Role = SourceRole::Write;
+	writer.IngestKey = "secret";
+
+	sources.Sources = {reader, writer};
+
+	const engine::delivery::DeliverySettings settings = sources.ToSettings();
+
+	// Both rows reach the settings — the split happens when they are asked for,
+	// not when they are written down, so a row keeps its address whichever
+	// direction it is in.
+	REQUIRE(settings.Sources.size() == 2);
+
+	const std::vector<Source> readable = settings.Usable();
+	REQUIRE(readable.size() == 1);
+	CHECK(readable[0].Name == "reads");
+
+	const std::vector<Source> writable = settings.Writable();
+	REQUIRE(writable.size() == 1);
+	CHECK(writable[0].Name == "writes");
+}
+
+TEST_CASE("an unrecognised role reads as both rather than dropping the row", "[studio][contentsources]") {
+	const std::filesystem::path path = ScratchFile("atomic-sources-badrole.ini");
+	std::filesystem::remove(path);
+
+	{
+		std::ofstream out(path, std::ios::trunc);
+		out << "source = odd | http | 127.0.0.1:9080 | on | sideways |\n";
+	}
+
+	ContentSources sources;
+	REQUIRE(sources.Load(path));
+	REQUIRE(sources.Sources.size() == 1);
+
+	// The permissive answer is the one that keeps a list working — a row
+	// dropped over a word nobody recognises is an origin that vanished.
+	CHECK(sources.Sources.front().Role == SourceRole::Both);
+
+	std::filesystem::remove(path);
 }

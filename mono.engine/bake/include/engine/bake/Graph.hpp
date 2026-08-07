@@ -74,6 +74,11 @@ namespace engine::bake {
 		// Force a texture's alpha opaque.
 		Opaque,
 
+		// Restate a flipbook's frame rate.
+		//
+		// @since v0.10
+		Retime,
+
 		// Serialize input into the engine format.
 		Write,
 	};
@@ -173,6 +178,22 @@ namespace engine::bake {
 		//
 		// @param name The name the asset is published under.
 		// @return The node, or an invalid id.
+		// Restates an imported flipbook's frame rate.
+		//
+		// **A node rather than a mutation on the way past**, because everything
+		// else that changes a payload is one — and the graph's whole property is
+		// that what a bake did is the list of nodes it ran. A rate rewritten by
+		// the caller between `Run` calls would be a step nothing records.
+		//
+		// A rate of zero, or a payload that is not a flipbook, passes through
+		// untouched: an override applies to a tree and most of a tree is still
+		// images.
+		//
+		// @param fps Frames a second to stamp on.
+		// @return The node.
+		// @since v0.10
+		NodeId AddRetime(float fps);
+
 		NodeId AddWrite(std::string_view name);
 
 		// Wires one node's output into another's input.
