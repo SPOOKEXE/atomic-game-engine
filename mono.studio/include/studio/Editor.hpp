@@ -1130,6 +1130,20 @@ namespace studio {
 		// Decodes, uploads and measures one mesh.
 		PreviewState BuildPreviewMesh(const std::string &name);
 
+		// Reads a material and uploads its colour map for the preview sphere.
+		//
+		// **Ready with an invalid `texture` is a real outcome, not a failure**: a
+		// material that names no colour map previews as a bare sphere, which is
+		// what that material actually puts on a part. A material that names one
+		// this machine does not have is `Unavailable` instead, because a grey
+		// ball would be a picture of something the material is not.
+		//
+		// @param name    The `.amat`'s published name.
+		// @param texture Filled with the name the sheet was registered under, and
+		//                left alone when there is nothing to sample.
+		// @return Whether a preview can be drawn.
+		PreviewState BuildPreviewMaterial(const std::string &name, engine::core::Name &texture);
+
 		// What a preview mesh is registered under, prefixed so it can never be
 		// drawn as content.
 		static std::string PreviewMeshName(const std::string &name);
@@ -1138,6 +1152,16 @@ namespace studio {
 		struct PreviewBounds {
 			engine::core::Vector3 Centre;
 			float Radius = 1.0f;
+
+			// The texture the preview samples, or an invalid name for none.
+			//
+			// **Set for a material and left empty for a mesh**, which is the
+			// whole of the difference between the two previews: a material is
+			// the engine's sphere wearing its colour map, and a mesh is its own
+			// geometry wearing nothing. Both are one instance in one slot, so
+			// carrying the texture on the record rather than branching in
+			// `RenderPreviewSlot` keeps that function about the camera.
+			engine::core::Name Texture;
 		};
 
 		// Which meshes have been tried, and how each went.

@@ -122,19 +122,25 @@ namespace engine::render {
 
 	// How many local lights one frame may carry.
 	//
-	// Sixteen, matching `MAX_LIGHTS` in `opaque.frag`.
+	// **This is the one home of the number, and `opaque.frag` is told it.**
+	// `mono.engine/render/CMakeLists.txt` reads the value out of this
+	// declaration and passes `-DMAX_LIGHTS` to glslc, so the shader's loop bound
+	// and the uniform buffer this sizes cannot disagree — there is no second
+	// literal left to drift. Changing it here changes both.
 	//
-	// **The two are spelled twice and nothing checks it**, which is a real gap
-	// rather than an accepted convention: one is a GLSL constant and the other is
-	// C++, there is no header a shader can include, and what gets staged is
-	// SPIR-V — so a test cannot read the source back and compare. `AGENTS.md`
-	// rule 6 names this exact shape, and the honest label is that this is
-	// documentation. `DEFERRED.md` D00029 carries the fix, which is to inject the
-	// count as a preprocessor define at shader compile time so the number has one
-	// home.
+	// It was spelled twice until v0.10 and nothing checked it, which `AGENTS.md`
+	// rule 6 calls documentation rather than a constraint. The reason it is
+	// arranged so a mismatch is impossible, rather than tested for, is that it
+	// could not be tested for: what gets staged is SPIR-V, and the constant is
+	// folded away by then.
 	//
-	// A mismatch is not a validation error. It is a light set that silently reads
-	// past its own count or stops short of it.
+	// A mismatch was never a validation error. It is a light set that silently
+	// reads past its own count or stops short of it — which looks like one lamp
+	// not working.
+	//
+	// **Keep this a plain integer literal on one line.** The configure step
+	// matches it with a regex and fails loudly if it cannot, so an expression
+	// here is a configure error rather than a silent revert to a stale value.
 	//
 	// @since v0.10
 	inline constexpr size_t MAX_SCENE_LIGHTS = 16;

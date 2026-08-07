@@ -50,7 +50,19 @@ layout(set = 3, binding = 0) uniform Lighting {
 //
 // Sixteen because a room has a handful of lamps and because a fourth `vec4` per
 // light would put the buffer past what some drivers keep in fast memory.
-const int MAX_LIGHTS = 16;
+//
+// **The number is not spelled here.** The build passes `-DMAX_LIGHTS` read out
+// of `render::MAX_SCENE_LIGHTS`, which sizes `LightUniforms` on the C++ side —
+// so the array below and the buffer it is fed from cannot disagree. A cap
+// smaller than the uniform silently ignores the tail of the set; a larger one
+// reads past it. Both look like "that lamp does not work", which is why this is
+// arranged so neither can happen rather than checked afterwards.
+//
+// The fallback is for compiling this file by hand, and is never what the build
+// uses.
+#ifndef MAX_LIGHTS
+	#define MAX_LIGHTS 16
+#endif
 
 // The point, spot and surface lights near this draw.
 //

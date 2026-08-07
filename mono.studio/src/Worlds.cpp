@@ -1,6 +1,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/Lifecycle.hpp>
 #include <engine/world/Enums.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -431,30 +432,27 @@ namespace studio {
 				continue;
 			}
 
-			const engine::world::WorldState state = Universe->StateOf(world);
+			// **What this host knows, handed to the policy that both hosts
+			// share.** The decision itself is `world::DecideLifecycle` — see
+			// `Lifecycle.hpp` and `DEFERRED.md` D00017: an editor that closes a
+			// world and a server that does not would be one policy written
+			// twice, and the copy nobody compares is the one that drifts.
+			engine::world::LifecycleInputs inputs;
+			inputs.State = Universe->StateOf(world);
+			inputs.IdleLimit = static_cast<double>(IdleCloseSeconds);
+			inputs.LastWorld = Universe->Count() <= 1;
 
 			// **A suspended world's inbox is the one queue nothing drains**,
 			// which is exactly what makes this reliable rather than a poll that
-			// races the tick. A running world replaces its inbox every barrier,
-			// so a message can come and go between two frames; a suspended one
-			// holds whatever arrived until it runs again. So anything sitting
-			// here is a teleport — or a message — waiting on a world that is
-			// closed, and the answer is to open it.
-			if (state == engine::world::WorldState::Suspended) {
-				bool waiting = false;
-				Universe->Enter(world, [&waiting](Store &store) {
+			// races the tick. Read only while suspended, because a running
+			// world replaces its inbox every barrier — so the same read on an
+			// active world would be a coin toss about when the frame landed.
+			if (inputs.State == engine::world::WorldState::Suspended) {
+				Universe->Enter(world, [&inputs](Store &store) {
 					if (const auto *inbox = store.Resource<engine::world::Inbox>()) {
-						waiting = !inbox->Arrived.empty();
+						inputs.InboxWaiting = !inbox->Arrived.empty();
 					}
 				});
-
-				if (waiting) {
-					Universe->SetState(world, engine::world::WorldState::Active);
-					Touch(world);
-					Say("opened '" + std::string(Label(Universe->NameOf(world))) +
-						"' — something arrived for it");
-				}
-				continue;
 			}
 
 			// Occupied, or being looked at *in either viewport*. Any of those is
@@ -465,6 +463,9 @@ namespace studio {
 			// caught.** With two panels open on two worlds, the one that was
 			// not the active scene was closed under the panel showing it —
 			// which looks exactly like the second viewport being broken.
+			//
+			// **This is the half that stays here**, because "somebody is looking
+			// at it" is a question only an editor can ask.
 			bool watched = false;
 			for (const ViewportState &view : Extras) {
 				if (view.Open && view.World == world) {
@@ -472,30 +473,44 @@ namespace studio {
 					break;
 				}
 			}
+			inputs.Occupied = world == PlayerWorld || world == Active || watched;
 
-			if (world == PlayerWorld || world == Active || watched) {
+			// **Only a running world has an idle clock, and only it needs one.**
+			// Doing this for a suspended world would make waking it wait for a
+			// `Lives` entry it has no use for — one frame of delay on a teleport,
+			// on the first pass after the world was seen.
+			if (inputs.State == engine::world::WorldState::Active) {
+				const auto found =
+					std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
+						return life.World == world;
+					});
+
+				if (found == Lives.end()) {
+					// First seen. Its clock starts now rather than at zero, so a
+					// world created during a run is not immediately eligible.
+					Lives.push_back(WorldLife{world, now});
+					continue;
+				}
+				inputs.IdleSeconds = now - found->LastActivity;
+			}
+
+			const engine::world::LifecycleAction action = engine::world::DecideLifecycle(inputs);
+
+			if (action == engine::world::LifecycleAction::Resume) {
+				Universe->SetState(world, engine::world::WorldState::Active);
 				Touch(world);
+				Say("opened '" + std::string(Label(Universe->NameOf(world))) +
+					"' — something arrived for it");
 				continue;
 			}
 
-			const auto found = std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
-				return life.World == world;
-			});
-
-			if (found == Lives.end()) {
-				// First seen. Its clock starts now rather than at zero, so a
-				// world created during a run is not immediately eligible.
-				Lives.push_back(WorldLife{world, now});
-				continue;
-			}
-
-			if (now - found->LastActivity < static_cast<double>(IdleCloseSeconds)) {
-				continue;
-			}
-
-			// **Never the last one.** A universe with every world suspended is
-			// a game that has stopped without saying so.
-			if (Universe->Count() <= 1) {
+			if (action == engine::world::LifecycleAction::Leave) {
+				// An occupied world's clock is restarted rather than merely not
+				// read, which is what makes `IdleSeconds` mean "since somebody
+				// left" on the next pass instead of "since it was created".
+				if (inputs.Occupied) {
+					Touch(world);
+				}
 				continue;
 			}
 

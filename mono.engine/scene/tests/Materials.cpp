@@ -167,3 +167,66 @@ TEST_CASE("a material parented to nothing resolves onto nothing", "[scene][mater
 
 	CHECK(ResolveMaterials(store) == 0);
 }
+
+TEST_CASE("deleting a material clears the part it dressed", "[scene][materials]") {
+	Store store = Fresh("materials.deleted");
+
+	const Name asset("materials/oak.amat");
+	REQUIRE(RecordMaterial(store, asset, Name("materials/oak_Color.atex")));
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Crate");
+	const Entity material = Dress(store, part, asset);
+
+	REQUIRE(ResolveMaterials(store) == 1);
+	REQUIRE(store.Get<SurfaceAppearance>(part)->ColourMap.IsValid());
+
+	// **D00032, and the pass that fixes it never visits the part directly.**
+	// Nothing walks a part that has no material — the clear comes from the
+	// difference between what this pass wrote and what the last one did, so it
+	// costs the number of materials rather than the number of parts.
+	store.DestroyInstance(material);
+
+	CHECK(ResolveMaterials(store) == 0);
+	CHECK_FALSE(store.Get<SurfaceAppearance>(part)->ColourMap.IsValid());
+}
+
+TEST_CASE("a material moved to another part clears the first", "[scene][materials]") {
+	Store store = Fresh("materials.reparented");
+
+	const Name asset("materials/oak.amat");
+	const Name colour("materials/oak_Color.atex");
+	REQUIRE(RecordMaterial(store, asset, colour));
+
+	const engine::ecs::ClassId partClass = engine::ecs::Classes::Find(Name("Part"));
+	const Entity first = store.CreateInstance(partClass, "First");
+	const Entity second = store.CreateInstance(partClass, "Second");
+	const Entity material = Dress(store, first, asset);
+
+	REQUIRE(ResolveMaterials(store) == 1);
+	REQUIRE(store.Get<SurfaceAppearance>(first)->ColourMap == colour);
+
+	// **This is the case a destruction hook would not have caught**, and it is
+	// why the fix is a difference between passes rather than a hook on the row
+	// leaving. Nothing was destroyed: the row is alive and simply names a
+	// different parent, and the part it left keeps its texture for ever without
+	// this.
+	REQUIRE(store.SetParent(material, second));
+
+	CHECK(ResolveMaterials(store) == 1);
+	CHECK_FALSE(store.Get<SurfaceAppearance>(first)->ColourMap.IsValid());
+	CHECK(store.Get<SurfaceAppearance>(second)->ColourMap == colour);
+}
+
+TEST_CASE("a world with no materials acquires no catalogue", "[scene][materials]") {
+	Store store = Fresh("materials.noresource");
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Plain");
+	REQUIRE(part != NULL_ENTITY);
+
+	// **The pass leaves an untouched world untouched.** `ColourMapOf` is the
+	// non-creating reader precisely so this holds, and recording the resolved
+	// set would undo it for every world in a universe if it were written
+	// unconditionally rather than only when there is something to remember.
+	CHECK(ResolveMaterials(store) == 0);
+	CHECK_FALSE(store.HasResource<engine::scene::MaterialCatalogue>());
+}
