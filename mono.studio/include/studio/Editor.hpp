@@ -1933,11 +1933,8 @@ namespace studio {
 
 		// --- the viewport ------------------------------------------------------
 
-		// Where the eye is. Not an entity in any world: a camera that lived in
-		// the scene would be saved into the game file, replicated, and reset by
-		// Stop — three things an editor camera must not do.
-		// Makes this viewer's own camera in a world, and keeps it where the eye
-		// is.
+		// Puts this panel's own camera in the world it is showing, and names it
+		// the world's live one.
 		//
 		// **The camera is the viewer's, not the game's.** The editor makes one
 		// to show its point of view, a client makes one for its player, and when
@@ -1946,12 +1943,6 @@ namespace studio {
 		// Everything else about it is ordinary: it is in `Workspace`, the
 		// explorer shows it, the properties panel edits it, and a script sees it
 		// where it expects the current camera to be.
-		//
-		// @param world The world being viewed.
-		// @param eye   Where this viewport is looking from.
-		// @param lens  Its field of view and clip planes.
-		// Puts this panel's own camera in the world it is showing, and names it
-		// the world's live one.
 		//
 		// **One per panel, not one per world, and that is the whole point.** A
 		// single shared `Camera` instance was written by whichever panel drew

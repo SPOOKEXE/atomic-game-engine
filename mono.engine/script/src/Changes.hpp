@@ -34,7 +34,7 @@
 //      **queue** them,
 //   3. the next `Heartbeat` drains the queue and calls the script.
 //
-// **One tick of latency, and it buys determinism.** `docs/SCRIPT_CONCURRENCY.md`
+// **One tick of latency, and it buys determinism.** `docs/retired/SCRIPT_CONCURRENCY.md`
 // §1 permits a resume from a tick boundary and nothing else that is not a
 // barrier delivery; step 3 is that boundary. Firing at step 2 instead would put
 // the handler's own writes on the far side of the next `ClearChanges` — which

@@ -15,7 +15,7 @@
 //
 // **Ordering is insertion order and nothing else.** Not a priority, not a
 // per-instance bucket walked in hash order: a hash map's iteration order is
-// exactly the trap `docs/SCRIPT_CONCURRENCY.md` §3 names for the codec, and it
+// exactly the trap `docs/retired/SCRIPT_CONCURRENCY.md` §3 names for the codec, and it
 // is the same trap here. Two runs of one script must call the same functions in
 // the same sequence.
 //
@@ -91,7 +91,7 @@ namespace engine::script {
 		// destroy the instance it was called about, and the router is mid-walk
 		// of a compiled draw list that names it. Delivering at the next
 		// heartbeat puts them where every other resume happens, which is what
-		// `docs/SCRIPT_CONCURRENCY.md` §1 permits and what keeps two runs of one
+		// `docs/retired/SCRIPT_CONCURRENCY.md` §1 permits and what keeps two runs of one
 		// recording in step.
 		//
 		// The subject is the element, for all six.

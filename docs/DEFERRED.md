@@ -7,11 +7,152 @@ Each section has the header `[_] D00000`.
 
 The numerical is a counter that increments every item.
 
-Insert the NEWEST items to the front, so older are towards the back.
+Insert the NEWEST items at the front **of `## Deferred Items`**, so older ones
+are towards the back. The section is named because "the front" on its own is the
+front of this *format example*, which is where D00025 through D00032 spent v0.9
+and v0.10 — eight real entries, the newest of them, rendering as a code sample.
+Nothing checks this: a fenced block is valid Markdown whatever is inside it.
 
 If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
 
 ```
+### [_] D00101
+
+- item 1
+- item 2
+- item 3
+```
+
+and for deleted marked items;
+
+```
+### [DELETED] D00001
+
+- item 1
+- item 2
+- item 3
+```
+
+## Deferred Items
+
+### [_] D00035
+
+**`just docs-check` was red, and the thing it was red about was not the thing worth finding.**
+
+- Found by running it rather than by reading it, which is the whole point: the
+  recipe fails when `warnings.txt` is non-empty, and it held **19 lines**. One
+  was a genuinely broken link — `README.md` pointing at `docs/CPP_LINKER.md`
+  after that file moved to `docs/retired/` — and **the other eighteen are
+  Doxygen's markdown parser disagreeing with prose it is being handed.**
+- **The link half is closed and was larger than the one warning showed.** The
+  same move left **26 stale `docs/<name>.md` references across 20 files**,
+  almost all in source comments, where nothing checks them at all — `docs-check`
+  only resolves links reachable from the documented surface, so the one it
+  caught was the one in the mainpage. Two more dangling links were found by
+  sweeping every local Markdown link directly, including one *inside*
+  `docs/retired/v07v08.md` that broke by being moved beside the siblings it
+  names. That sweep is not a recipe and should probably become one.
+- **The rest are `end of comment block while expecting </strong>`, and one cause
+  of them is confirmed: Doxygen's Markdown will not match `**bold**` across a
+  line break.** Reduced to a minimal file and isolated by varying one thing at a
+  time — em-dash, quotes and hyphen make no difference, and the identical
+  sentence rewrapped so the bold opens and closes on **one** line produces no
+  warning at all. The warning is reported against the last line of the comment
+  block, which is why it lands on lines holding no `**` of their own.
+- **That does not explain all of them, and the residue is written down rather
+  than assumed away.** Three surviving sites — `Particles.hpp:473`,
+  `Editor.hpp:2088` and `Editor.hpp:2369` — have bolds that open and close on a
+  single line, so the confirmed cause does not apply. What the three share is
+  that each comment sits on something Doxygen does not emit at
+  `EXTRACT_ALL = NO`: a `static_assert`, a private `static constexpr`, and a
+  comment following an inline function body. **The working hypothesis is that a
+  comment on a skipped entity is carried forward and merged with the next
+  block**, and a merge splits a leading bold across the brief/detail boundary
+  that `JAVADOC_AUTOBRIEF` inserts. Untested — it is a hypothesis with an
+  obvious experiment, not a finding.
+- **This is a house-style collision rather than a typo, which is why it is not
+  simply fixed in place.** The prose here is bold-heavy by convention and
+  wrapped by `.clang-format` at `ColumnLimit: 110` with `ReflowComments` at its
+  default of on — so a bold phrase long enough to be reflowed is *reformatted
+  into* the broken form by `just format`. `Editor.hpp` alone has **27** bolds
+  spanning a line break; only the three on Doxygen-extracted members warn,
+  because `Doxyfile.check` runs `EXTRACT_ALL = NO`. Rewrapping the three fixes
+  today's log and leaves the other twenty-four to surface the moment their
+  members become documented.
+- **So the fix is a decision, not an edit, and there are three candidates.**
+  Keep every bold phrase under one line and let `docs-check` enforce it, which
+  costs nothing but constrains how a long emphasis may be phrased. Teach
+  `docgen::Promote` to join a bold that spans lines — attractive, and it
+  collides head-on with that filter's stated invariant that **line count is
+  preserved exactly**, since Doxygen numbers the source listing from the
+  filtered text. Or stop using `**` in extracted comments, which is the one
+  nobody wants.
+- **Why it is filed rather than pushed through.** The engine is unaffected:
+  these are warnings about generated documentation, `docs-check` is not part of
+  `just check`, and the eighteen predate this session. What is *not* acceptable
+  is leaving the recipe red, because this repository has already recorded that
+  failure twice — v0.2's `docs-check` cascade, where a pass nobody could get
+  green hid the coverage pass behind it entirely, and `D00005`'s correction,
+  where a sentence claiming a check passed aged into a false one.
+- **The count moved the wrong way first, and that is the v0.2 cascade repeating
+  in miniature.** 19 lines to start; fixing the mainpage link took it to **26**,
+  because the site pass had been stopping at that link and the seven it then
+  reported had been invisible behind it — including two live source defects,
+  where a new member's doc block had been inserted *inside* an existing one, so
+  `bake::Graph::AddWrite` and `render::Renderer::TextureHandle` were undocumented
+  while their prose was attached to the wrong function. It is now back to 19,
+  with every link and every `@param` defect gone and only the Markdown left.
+- **Reopen trigger: it is red now, at 19 lines that are all Doxygen Markdown.**
+  Either settle the bold question above, or make the recipe distinguish a broken
+  *link* from a malformed *comment* — that is the distinction that matters, one
+  non-empty log flattens it, and flattening it is what let a dangling link hide
+  two real defects for a version.
+
+### [_] D00034
+
+**One asset bakes and does not publish, and nothing in the pipeline will say which.**
+
+- v0.10's store re-bakes to **1974 baked, 0 dangling, 1973 published**. The
+  one-asset gap is real and has never been identified — and it is only visible
+  by *subtracting two numbers printed by two different tools*, which is why it
+  survived a whole version. Five Poly Haven materials were separately skipped at
+  import for having no diffuse map; that one is understood and this one is not.
+- **The reporting is the actual defect, not the missing asset.** `assetc` and
+  `cdn::Publish` both report a count of what they handled, and a count cannot be
+  subtracted from another count to get a *name*. Every stage that drops
+  something drops it for a stated reason it already knows, and then throws the
+  reason away — so the cheap fix is not an investigation, it is making a refusal
+  name its subject at the point of refusal, the way `Report::DanglingTextures`
+  now names a texture rather than counting one.
+- **Why this is filed rather than chased.** One asset in 1974 is invisible in a
+  viewport and the store is otherwise correct, so the cost of the bug is bounded
+  by whatever that asset is. The cost of the *silence* is not bounded, and it is
+  the thing that will still be here when the store is ten times the size.
+- **Reopen trigger: whichever comes first of somebody missing a specific asset,
+  or the next change to either tool's reporting** — the second is when naming
+  the subject is nearly free, and doing it then costs a line rather than a pass.
+
+### [_] D00033
+
+**A mesh has no cached thumbnail, so a picker row shows a glyph until it is hovered.**
+
+- `PaintPreview` renders the *hovered* row into the studio's one preview slot —
+  built-ins included — and every other row shows a letter. The rendering works;
+  what is missing is retention.
+- **The blocker is in `render` rather than in `mono.studio`, which is why this is
+  not a studio item.** A cached thumbnail means copying a scene target into a
+  texture that outlives the frame, and the renderer exposes no such copy. The
+  studio can ask for a slot to be drawn and cannot ask for the result to be kept.
+- **One slot is a deliberate floor and not an accident** — the alternative
+  reached for first is a slot per visible row, which is the mistake `D00028`'s
+  neighbour in the picker already made once: the thumbnail cache is 256 entries
+  and asking for 1,637 a frame evicted each picture before its turn came round.
+  A retained texture per *mesh* has the same shape and wants the same clipping.
+- **Reopen trigger: the renderer growing a target read-back for any reason.**
+  It has one plausible second caller already — v0.10's open material-preview line
+  wants a sphere rendered with a material and kept, which is the identical
+  mechanism pointed at a different asset kind.
+
 ### [_] D00032
 
 **Deleting a `Material` instance leaves the texture it last resolved on the part.**
@@ -92,25 +233,6 @@ the parser remains in `bake`.
 - **Closed at v0.8, in the same change as `D00023`** — rotating the geometry without rotating the test would have made the mismatch visible rather than merely present.
 - **The point is turned into the element's space, not the rectangle into the screen's.** A rotated rectangle is not a rectangle and testing one needs a polygon; rotating the *point* back by the same angle makes the test the axis-aligned one it already was, exactly.
 - **The clip is deliberately still not rotated.** A scissor is axis-aligned on every backend there is, so an element rotated inside a clipped container is cut by an upright rectangle — which is what the painter does and what the hit test therefore has to agree with.
-
-### [_] D00101
-
-- item 1
-- item 2
-- item 3
-```
-
-and for deleted marked items;
-
-```
-### [DELETED] D00001
-
-- item 1
-- item 2
-- item 3
-```
-
-## Deferred Items
 
 ### [CLOSED] D00023
 

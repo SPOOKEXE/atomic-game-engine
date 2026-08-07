@@ -330,7 +330,7 @@ Linking to another document is an ordinary markdown link, and it works both on
 GitHub and on the generated site:
 
 ```markdown
-See [RUNNING.md](RUNNING.md) and [the tier rule](#the-layer-stack-is-not-negotiable).
+See [RUNNING.md](../RUNNING.md) and [the tier rule](#the-layer-stack-is-not-negotiable).
 ```
 
 ---

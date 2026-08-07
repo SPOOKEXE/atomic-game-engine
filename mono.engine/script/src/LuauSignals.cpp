@@ -176,7 +176,7 @@ namespace engine::script {
 
 			// **No `:Wait()`, and the omission is the design.** Roblox's yields
 			// the calling thread until the signal next fires, and
-			// `docs/SCRIPT_CONCURRENCY.md` §1 permits a resume only from
+			// `docs/retired/SCRIPT_CONCURRENCY.md` §1 permits a resume only from
 			// something the barrier delivers. A signal fires from inside a
 			// handler pump, which is not a barrier — resuming there would put
 			// one script's continuation inside another's call, at a point that

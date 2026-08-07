@@ -46,7 +46,7 @@ namespace studio {
 			// same argument `Delete` is scoped by, which is a character in a
 			// field and an action in the tree.
 			//
-			// §4.6 of `docs/v07v08.md` gives the viewport its own editing, and
+			// §4.6 of `docs/retired/v07v08.md` gives the viewport its own editing, and
 			// this wants a second home there when it does — scopes are one per
 			// binding today, so that is a decision rather than a line.
 			{Action::Undo, "edit.undo", "Undo", "Reverse the last edit", Scope::Tree, {}},

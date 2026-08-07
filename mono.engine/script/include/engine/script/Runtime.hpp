@@ -23,7 +23,7 @@
 // what a script could otherwise rewrite. A game loads scripts it did not write.
 //
 // **A script may yield, and only from something that will resume it.**
-// `docs/SCRIPT_CONCURRENCY.md` §1 settles what a yield must mean — a script may
+// `docs/retired/SCRIPT_CONCURRENCY.md` §1 settles what a yield must mean — a script may
 // only resume from something the barrier delivers in a deterministic order —
 // and v0.6 built the three sources it names: a `Ticket` reply, a `Deliveries()`
 // entry, and a tick boundary through `task`. So a suspended thread with a

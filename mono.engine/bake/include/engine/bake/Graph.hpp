@@ -174,10 +174,6 @@ namespace engine::bake {
 		// @return The node, or an invalid id.
 		NodeId AddResize(uint32_t width, uint32_t height);
 
-		// Adds a `Write` node.
-		//
-		// @param name The name the asset is published under.
-		// @return The node, or an invalid id.
 		// Restates an imported flipbook's frame rate.
 		//
 		// **A node rather than a mutation on the way past**, because everything
@@ -194,6 +190,10 @@ namespace engine::bake {
 		// @since v0.10
 		NodeId AddRetime(float fps);
 
+		// Adds a `Write` node.
+		//
+		// @param name The name the asset is published under.
+		// @return The node, or an invalid id.
 		NodeId AddWrite(std::string_view name);
 
 		// Wires one node's output into another's input.

@@ -2,7 +2,7 @@
 
 // When a suspended script may run again.
 //
-// **`docs/SCRIPT_CONCURRENCY.md` §1 is the whole specification**: a script may
+// **`docs/retired/SCRIPT_CONCURRENCY.md` §1 is the whole specification**: a script may
 // only resume from something the barrier delivers in a deterministic order, and
 // a tick boundary is one of the three legal sources. So every queue here is
 // keyed on a *tick number*, never on a clock, and `Advance` is called once per

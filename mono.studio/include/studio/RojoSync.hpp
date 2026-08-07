@@ -34,7 +34,7 @@
 // it, and leaves the live-sync design to be taken deliberately.
 //
 // **It reads, it does not write back.** Two-way sync means conflict semantics
-// for every instance the editor can touch, which `docs/v07v08.md` files under
+// for every instance the editor can touch, which `docs/retired/v07v08.md` files under
 // v0.10 as a real piece of work rather than a flag.
 //
 // @tier client

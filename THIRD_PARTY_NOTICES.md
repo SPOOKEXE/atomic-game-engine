@@ -65,7 +65,7 @@ contains the `yes` rows and not the others:
   which is why the table says "once a caller exists" rather than "no".
 
   That mechanism, and how to re-check this claim after a version bump, is
-  `docs/CPP_LINKER.md`. Two things there bear on this file: dead-stripping
+  `docs/retired/CPP_LINKER.md`. Two things there bear on this file: dead-stripping
   happens per **object file**, not per function, and a library can have a floor
   it drags in regardless — a program calling only SHA-256 still links 36 of
   Crypto++'s 173 members. So "we only use one function from it" is never on its

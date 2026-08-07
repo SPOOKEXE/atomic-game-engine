@@ -527,6 +527,18 @@ namespace engine::render {
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image);
 
+		// How long animation has been running, for anything played on a clock.
+		//
+		// **The caller's clock, because this module holds none** — the rule the
+		// whole engine keeps. A client passes its own accumulated seconds and so
+		// does the studio; a paused editor simply stops advancing it, which is
+		// what makes a paused world's GIFs hold their frame with no second
+		// mechanism for it.
+		//
+		// @param seconds Seconds since the session began.
+		// @since v0.10
+		void SetAnimationTime(double seconds);
+
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.
 		//
@@ -545,18 +557,6 @@ namespace engine::render {
 		// @return The handle, or nullptr for a name this renderer has not been
 		//         given.
 		// @since v0.10
-		// How long animation has been running, for anything played on a clock.
-		//
-		// **The caller's clock, because this module holds none** — the rule the
-		// whole engine keeps. A client passes its own accumulated seconds and so
-		// does the studio; a paused editor simply stops advancing it, which is
-		// what makes a paused world's GIFs hold their frame with no second
-		// mechanism for it.
-		//
-		// @param seconds Seconds since the session began.
-		// @since v0.10
-		void SetAnimationTime(double seconds);
-
 		void *TextureHandle(const core::Name &name) const;
 
 		// Where a texture's current animation cell sits.

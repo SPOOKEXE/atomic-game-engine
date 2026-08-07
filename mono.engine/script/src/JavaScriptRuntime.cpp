@@ -279,7 +279,7 @@ namespace engine::script {
 		// world scripted in either language must see one sequence: the
 		// barrier's deliveries, then what changed, then the resumes due, then
 		// the beat. Each of the first three is one of
-		// `docs/SCRIPT_CONCURRENCY.md` §1's legal resume sources.
+		// `docs/retired/SCRIPT_CONCURRENCY.md` §1's legal resume sources.
 		Error = PumpJsDeliveries(Context, Store);
 
 		const auto note = [&](std::string message) {
