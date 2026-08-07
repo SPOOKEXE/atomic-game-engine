@@ -17,13 +17,25 @@ namespace client {
 		}
 	}
 
-	void CollectWantedTextures(engine::ecs::Store &store, std::vector<engine::core::Name> &out) {
-		// **`Each` over five component types rather than one batched walk.**
+	void CollectWantedContent(engine::ecs::Store &store, std::vector<engine::core::Name> &out) {
+		// **`Each` over seven component types rather than one batched walk.**
 		// This runs on the content pump and not in the frame — it answers "is
 		// there anything new to ask for", which changes when a scene is authored
 		// or streamed rather than every tick — so the constant factor is not
 		// where the cost is. `client::CollectInstances` is the loop that needed
 		// the batched form and it is a different loop.
+		store.Each<engine::scene::Visual>([&out](engine::ecs::Entity, engine::scene::Visual &visual) {
+			Want(out, visual.Mesh);
+		});
+
+		store.Each<engine::scene::MaterialRef>(
+			[&out](engine::ecs::Entity, engine::scene::MaterialRef &material) { Want(out, material.Asset); }
+		);
+
+		store.Each<engine::scene::Sound>([&out](engine::ecs::Entity, engine::scene::Sound &sound) {
+			Want(out, sound.SoundId);
+		});
+
 		store.Each<engine::scene::SurfaceAppearance>(
 			[&out](engine::ecs::Entity, engine::scene::SurfaceAppearance &appearance) {
 				Want(out, appearance.ColourMap);

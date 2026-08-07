@@ -306,38 +306,25 @@ namespace client {
 			ContentRequested = true;
 
 			// Request by kind because the catalogue owns the asset list.
-			// **Textures are not in this list, and that is the whole of what
-			// v0.10 changed here.** Asking for every texture in the catalogue
-			// spent `render::TextureTable::MAXIMUM_BYTES` in manifest order and
-			// refused the rest, so on a store of 1,637 sheets the ones a scene
-			// actually named were usually among the refused —
-			// `client/ContentDemand.hpp` carries how that looked and why.
+			// **Nothing is requested by kind, which is what v0.10 ended.** The
+			// unit that travels is a *bundle*, so asking for every mesh and
+			// every material asks for essentially every bundle in the store —
+			// and `AssetClient::Pump` resolves, verifies and decompresses all of
+			// it synchronously, because the contract forbids a background
+			// thread. On this repository's own store that was 6.9 GB through one
+			// function on the frame the client started.
 			//
-			// **`Material` is in it and it is small.** A `.amat` is a magic, a
-			// version and one name, and a material has to arrive before anything
-			// can know which texture it names — a demand pass waiting for
-			// materials to be demanded would wait on itself.
-			for (const engine::assets::AssetKind kind :
-				 {engine::assets::AssetKind::Mesh,
-				  engine::assets::AssetKind::Material,
-				  engine::assets::AssetKind::Audio}) {
-				const std::vector<engine::delivery::RequestId> issued = Content->RequestKind(kind);
-				ContentPending.insert(ContentPending.end(), issued.begin(), issued.end());
-			}
-
-			ENGINE_INFO(
-				"content: asked for {} mesh, material and audio asset(s); textures on demand",
-				ContentPending.size()
-			);
+			// `client/ContentDemand.hpp` carries both failures this replaces.
+			ENGINE_INFO("content: catalogue ready — assets are fetched as the world names them");
 		}
 
 		// **Every pump, and it is a diff rather than a walk of the catalogue.**
-		// A world's texture names change when a scene is authored, loaded or
+		// A world's content names change when a scene is authored, loaded or
 		// replicated, none of which this can observe cheaply — so the names are
 		// collected and everything already asked for is dropped. What survives is
 		// almost always nothing.
 		if (ContentRequested) {
-			RequestWantedTextures();
+			RequestWantedContent();
 		}
 
 		// Apply completions between frames, outside render passes.
@@ -378,7 +365,7 @@ namespace client {
 				// textures are demand-driven.
 				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
 					if (!submesh.Texture.empty()) {
-						RequestTexture(engine::core::Name(submesh.Texture));
+						RequestAsset(engine::core::Name(submesh.Texture));
 					}
 				}
 
@@ -520,28 +507,28 @@ namespace client {
 		}
 	}
 
-	void Client::RequestWantedTextures() {
+	void Client::RequestWantedContent() {
 		std::vector<engine::core::Name> wanted;
 		for (const engine::world::WorldId id : Simulated) {
 			Universe_->Enter(id, [&wanted](engine::ecs::Store &store) {
-				CollectWantedTextures(store, wanted);
+				CollectWantedContent(store, wanted);
 			});
 		}
 		if (ReportedJoin) {
 			Universe_->Enter(Replicated, [&wanted](engine::ecs::Store &store) {
-				CollectWantedTextures(store, wanted);
+				CollectWantedContent(store, wanted);
 			});
 		}
 
 		for (const engine::core::Name &name : wanted) {
-			RequestTexture(name);
+			RequestAsset(name);
 		}
 	}
 
-	void Client::RequestTexture(const engine::core::Name &texture) {
+	void Client::RequestAsset(const engine::core::Name &texture) {
 		// **Asked once and never again, whatever happened to it.** A name that
 		// failed — not in the manifest, refused by the table — must not be
-		// retried, or a scene naming one misspelled texture issues a request per
+		// retried, or a scene naming one misspelled asset issues a request per
 		// pump for the life of the process.
 		if (!Content || !texture.IsValid() || !ContentAsked.insert(texture.Id()).second) {
 			return;

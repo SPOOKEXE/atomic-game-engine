@@ -1655,17 +1655,39 @@ boundary.
 
 ## Content is fetched because something names it
 
-A client asks for every **mesh**, **material** and **sound** in the catalogue and
-for **no textures at all** until a world names one. That is not an optimisation:
-`render::TextureTable` holds 512 MB, an uncompressed 1K sheet is four megabytes,
-and a store of 1,637 textures spends the ceiling after about a hundred and forty
-of them — in *manifest* order, which has nothing to do with what the scene needs.
-The rest were refused, so the texture you asked for usually was not there.
+**Nothing is requested by kind.** A world names an asset or it is not fetched,
+and that is what makes a large store usable rather than an optimisation. Two
+separate failures forced it:
 
-Every place a texture can be named is in `client::CollectWantedTextures`. A
-mesh's own sheets are asked for when the mesh arrives, because the names live
-inside the mesh file. A material's sheet is *not* — it reaches a part through
-`ResolveMaterials`, which writes it into a field the collector already reads.
+- `render::TextureTable` holds 512 MB and an uncompressed 1K sheet is four
+  megabytes, so a store of 1,637 textures spends the ceiling after about a
+  hundred and forty — in *manifest* order, which has nothing to do with what the
+  scene needs. The rest were refused, so the texture you asked for usually was
+  not there.
+- **The unit that travels is a bundle, not an asset.** Asking for every mesh and
+  material by kind therefore asks for essentially every bundle in the store, and
+  `AssetClient::Pump` resolves, verifies and decompresses all of it *on the
+  calling thread* — the contract forbids a background thread, because a
+  completion arriving at a moment scheduling chose would be a desync. On this
+  repository's own store that was 6.9 GB through one function on the frame the
+  editor opened: about 29 seconds of frozen studio, now 1.4.
+
+Every place content can be named is in `client::CollectWantedContent`. Two things
+are asked for later rather than there, and both for the same reason — the name is
+not readable yet:
+
+- **A mesh's own sheets** are asked for when the mesh arrives, because
+  `Submesh::Texture` lives inside the mesh file.
+- **A material's sheet** is asked for by the *next* pass over the world, because
+  `ResolveMaterials` writes it into `SurfaceAppearance::ColourMap` — a field the
+  collector already reads. Asking on arrival instead is requesting by kind again
+  one step later, which is how it was written the first time.
+
+**"Asynchronously" means the asking is spread, not threaded.** The editor issues
+a bounded number of new requests per pump, so a place naming five hundred assets
+becomes five hundred assets arriving over a second or two rather than one frame
+that never ends. The collection is idempotent, so what is not issued this pump is
+issued on the next and there is no queue to keep in step.
 
 The fetcher is resumable: anything already on disk is skipped, so an interrupted
 run or a raised `--count` costs only what is new.

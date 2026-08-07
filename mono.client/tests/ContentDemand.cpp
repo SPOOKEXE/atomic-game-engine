@@ -1,10 +1,14 @@
-// Which textures a world asks for.
+// Which content a world asks for.
 //
-// **The failure this replaces was silent and looked like a broken renderer.**
-// The client asked for every texture in the catalogue, `render::TextureTable`
-// spent its 512 MB ceiling in manifest order, and the remaining 1,463 uploads
-// were refused — so a part naming a texture drew untextured and the only trace
-// was a warning per refusal in a log nobody reads.
+// **Two failures, and neither said anything.** The client asked for every
+// texture in the catalogue, `render::TextureTable` spent its 512 MB ceiling in
+// manifest order, and the remaining 1,463 uploads were refused — so a part
+// naming a texture drew untextured and the only trace was a warning per refusal
+// in a log nobody reads. And it asked for every mesh and material by kind, which
+// — because the unit that travels is a *bundle* — asks for essentially every
+// bundle in the store, decompressed synchronously on the calling thread. On this
+// repository's own store that is 6.9 GB on the frame the editor opens, which is
+// what "the studio freezes when I open it" was.
 //
 // So what is pinned here is the list: every place a texture can be named. A row
 // missing from it is a whole class of asset that never loads while everything
@@ -48,7 +52,7 @@ namespace {
 	}
 }
 
-TEST_CASE("every place a texture can be named is collected", "[client][contentdemand]") {
+TEST_CASE("every place content can be named is collected", "[client][contentdemand]") {
 	Store store = Fresh("contentdemand.all");
 
 	const Entity part = store.Create();
@@ -72,26 +76,72 @@ TEST_CASE("every place a texture can be named is collected", "[client][contentde
 	swoosh.Texture = Name("swoosh.atex");
 	store.Set(trail, swoosh);
 
+	// **The kinds that used to be fetched by kind**, which is what the freeze
+	// was: a mesh and a material are named by a world exactly as a texture is,
+	// and asking for all of them instead pulled the whole store.
+	const Entity meshPart = store.Create();
+	engine::scene::Visual visual;
+	visual.Mesh = Name("model.amesh");
+	store.Set(meshPart, visual);
+
+	const Entity material = store.Create();
+	store.Set(material, engine::scene::MaterialRef{.Asset = Name("oak.amat")});
+
+	const Entity speaker = store.Create();
+	engine::scene::Sound sound;
+	sound.SoundId = Name("theme.mp3");
+	store.Set(speaker, sound);
+
 	std::vector<Name> wanted;
-	client::CollectWantedTextures(store, wanted);
+	client::CollectWantedContent(store, wanted);
 
 	CHECK(Holds(wanted, "part.atex"));
 	CHECK(Holds(wanted, "label.atex"));
 	CHECK(Holds(wanted, "spark.atex"));
 	CHECK(Holds(wanted, "bolt.atex"));
 	CHECK(Holds(wanted, "swoosh.atex"));
+
+	CHECK(Holds(wanted, "model.amesh"));
+	CHECK(Holds(wanted, "oak.amat"));
+	CHECK(Holds(wanted, "theme.mp3"));
+}
+
+TEST_CASE("a world names nothing it does not use", "[client][contentdemand]") {
+	// **The property the whole change rests on.** A store of two thousand assets
+	// and a scene that uses three must ask for three — anything else is the
+	// by-kind fetch wearing a different hat, and the unit that travels is a
+	// bundle.
+	Store store = Fresh("contentdemand.bounded");
+
+	for (int index = 0; index < 50; index++) {
+		const Entity part = store.Create();
+		store.Set(part, engine::scene::SurfaceAppearance{});
+		store.Set(part, engine::scene::Visual{});
+	}
+
+	const Entity used = store.Create();
+	engine::scene::Visual visual;
+	visual.Mesh = Name("the_one.amesh");
+	store.Set(used, visual);
+
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+
+	// One name from fifty-one entities: the invalid ones are not asked for.
+	CHECK(wanted.size() == 1);
+	CHECK(Holds(wanted, "the_one.amesh"));
 }
 
 TEST_CASE("a world naming nothing asks for nothing", "[client][contentdemand]") {
 	// The case that makes demand loading worth anything: a scene with no
-	// textures fetches no textures, whatever the store holds.
+	// content fetches no content, whatever the store holds.
 	Store store = Fresh("contentdemand.empty");
 
 	const Entity part = store.Create();
 	store.Set(part, engine::scene::SurfaceAppearance{});
 
 	std::vector<Name> wanted;
-	client::CollectWantedTextures(store, wanted);
+	client::CollectWantedContent(store, wanted);
 	CHECK(wanted.empty());
 }
 
@@ -116,12 +166,12 @@ TEST_CASE("a material's texture is collected once it has resolved", "[client][co
 	store.GetMutable<engine::scene::MaterialRef>(material)->Asset = Name("oak.amat");
 
 	std::vector<Name> before;
-	client::CollectWantedTextures(store, before);
+	client::CollectWantedContent(store, before);
 	CHECK_FALSE(Holds(before, "oak_Color.atex"));
 
 	REQUIRE(engine::scene::ResolveMaterials(store) == 1);
 
 	std::vector<Name> after;
-	client::CollectWantedTextures(store, after);
+	client::CollectWantedContent(store, after);
 	CHECK(Holds(after, "oak_Color.atex"));
 }

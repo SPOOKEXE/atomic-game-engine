@@ -1314,11 +1314,15 @@ namespace studio {
 		// `MeshPart` drew the fallback cube however good its `MeshId` was.
 		void DrainContent();
 
-		// Asks for the textures the open worlds name and has not asked for.
-		void RequestShownTextures();
+		// Asks for what the open worlds name and has not been asked for, a
+		// bounded number of them per pump.
+		void RequestShownContent();
 
-		// Asks for one texture, once.
-		void RequestContentTexture(const engine::core::Name &texture);
+		// Asks for one asset, once.
+		//
+		// @return Whether this call issued a request, so the caller can bound
+		//         how many it starts in one pump.
+		bool RequestContentAsset(const engine::core::Name &asset);
 
 		// Runs `body` inside every open world.
 		void EachOpenWorld(const std::function<void(engine::ecs::Store &)> &body);

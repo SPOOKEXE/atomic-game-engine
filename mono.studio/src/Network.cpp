@@ -46,6 +46,17 @@
 namespace studio {
 
 	namespace {
+		// How many new fetches an editor starts in one pump.
+		//
+		// **Four, because a request pulls a bundle and a bundle is decompressed
+		// on this thread.** `delivery/Client.hpp` forbids a background thread, so
+		// the only lever is how much is asked for at once — and a place naming
+		// five hundred assets has to become five hundred assets arriving over a
+		// second, not one frame that never returns.
+		constexpr size_t REQUESTS_PER_PUMP = 4;
+	}
+
+	namespace {
 		// A byte count somebody can read at a glance.
 		//
 		// **Powers of 1024 under decimal names**, matching `cdn::Readable` and
@@ -221,22 +232,11 @@ namespace studio {
 		// `Client::PumpContent`'s policy, one program over.
 		if (!ContentRequested && ContentClient->Ready()) {
 			ContentRequested = true;
-
-			// Meshes and materials by kind, textures on demand. Not an
-			// optimisation: a 1K sheet is four uncompressed megabytes and
-			// `render::TextureTable` holds 512, so asking for every texture in a
-			// large store spends the ceiling in manifest order and refuses the
-			// rest — `client/ContentDemand.hpp` carries how that looked.
-			for (const engine::assets::AssetKind kind :
-				 {engine::assets::AssetKind::Mesh, engine::assets::AssetKind::Material}) {
-				const std::vector<engine::delivery::RequestId> issued = ContentClient->RequestKind(kind);
-				ContentPending.insert(ContentPending.end(), issued.begin(), issued.end());
-			}
-			ENGINE_INFO("assets: asked for {} mesh and material asset(s)", ContentPending.size());
+			ENGINE_INFO("assets: catalogue ready — content is fetched as the worlds name it");
 		}
 
 		if (ContentRequested) {
-			RequestShownTextures();
+			RequestShownContent();
 		}
 
 		size_t kept = 0;
@@ -265,7 +265,7 @@ namespace studio {
 				// cannot see them.
 				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
 					if (!submesh.Texture.empty()) {
-						RequestContentTexture(engine::core::Name(submesh.Texture));
+						(void)RequestContentAsset(engine::core::Name(submesh.Texture));
 					}
 				}
 
@@ -319,23 +319,42 @@ namespace studio {
 		}
 	}
 
-	void Editor::RequestShownTextures() {
+	void Editor::RequestShownContent() {
+		// **Bounded per pump, which is the whole of what "asynchronously" can
+		// mean here.** `delivery/Client.hpp` forbids a background thread — a
+		// completion arriving at a moment scheduling chose would be a desync —
+		// so `Pump` does its work on this thread, and the unit it fetches is a
+		// *bundle*. Issuing five hundred requests at once therefore asks for
+		// five hundred bundles' worth of decompression before the next frame.
+		//
+		// Issuing a few per pump turns the same load into content appearing over
+		// a second or two, which is what an editor opening a large place should
+		// look like. The collection is idempotent, so what is not issued this
+		// pump is simply issued on the next — there is no queue to keep in step.
 		std::vector<engine::core::Name> wanted;
 		EachOpenWorld([&wanted](engine::ecs::Store &store) {
-			client::CollectWantedTextures(store, wanted);
+			client::CollectWantedContent(store, wanted);
 		});
+
+		size_t issued = 0;
 		for (const engine::core::Name &name : wanted) {
-			RequestContentTexture(name);
+			if (issued >= REQUESTS_PER_PUMP) {
+				break;
+			}
+			if (RequestContentAsset(name)) {
+				issued++;
+			}
 		}
 	}
 
-	void Editor::RequestContentTexture(const engine::core::Name &texture) {
+	bool Editor::RequestContentAsset(const engine::core::Name &asset) {
 		// Asked once, whatever happened to it — a misspelled name must not
 		// issue a request per frame for the life of the session.
-		if (!ContentClient || !texture.IsValid() || !ContentAsked.insert(texture.Id()).second) {
-			return;
+		if (!ContentClient || !asset.IsValid() || !ContentAsked.insert(asset.Id()).second) {
+			return false;
 		}
-		ContentIssued.push_back(ContentClient->Request(texture.Text()));
+		ContentIssued.push_back(ContentClient->Request(asset.Text()));
+		return true;
 	}
 
 	void Editor::UploadStore() {

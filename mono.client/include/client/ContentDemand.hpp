@@ -1,35 +1,42 @@
 #pragma once
 
-// Which textures a world is actually asking for.
+// Which content a world is actually asking for.
 //
-// **Requesting by kind stopped working the moment a store got large, and the
-// failure was silent in the way that costs a day.** `Client::PumpContent` asked
-// for every asset of every kind the catalogue held, which was right while a
-// store was a demo's worth of content and is not right at 1,637 textures: an
-// uncompressed 1K sheet is four megabytes and a 2K one is sixteen, so
-// `render::TextureTable::MAXIMUM_BYTES` — 512 MB, a bound on device memory
-// reachable from content — is spent after about a hundred and forty of them.
+// **Requesting by kind stopped working the moment a store got large, and it
+// failed twice in two different ways.**
 //
-// The rest were refused, in arrival order, which is *manifest* order and has
-// nothing to do with what the scene names. So a part naming a texture drew
-// untextured, and the only trace was 1,463 identical warnings in a log nobody
-// reads while a scene looks wrong. The table was doing exactly its job.
+// The first was textures. `render::TextureTable::MAXIMUM_BYTES` is 512 MB — a
+// bound on device memory reachable from content — and an uncompressed 1K sheet
+// is four megabytes, so a store of 1,637 of them spends the ceiling after about
+// a hundred and forty. The rest were refused in *manifest* order, which has
+// nothing to do with what a scene names, so the texture somebody asked for was
+// usually among the refused and the only trace was 1,463 identical warnings in a
+// log nobody reads.
 //
-// **So a texture is fetched because something names it.** That is the shape the
-// engine wanted anyway — `ROADMAP.md` v0.11's streaming is this question asked
-// per view rather than per world — and it is what makes a store with a hundred
-// thousand assets behave the same as one with ten.
+// The second was everything else, and it is worse because it is not a ceiling
+// but a stall. **The unit that travels is a bundle**, not an asset — `delivery/
+// Client.hpp` says so, and it is the right design: per-asset requests would be
+// thousands of round trips. It means asking for one mesh fetches the bundle
+// carrying it. Asking for *every* mesh and material by kind therefore asks for
+// essentially every bundle in the store, and `AssetClient::Pump` resolves,
+// fetches, verifies and decompresses all of it **synchronously**, because the
+// same header forbids a background thread: a completion that arrived at a moment
+// scheduling chose would be a desync. On this repository's own store that is
+// 6.9 GB through one function on the frame the editor opens.
 //
-// ## What is still requested by kind, and why that is not an oversight
+// So: **nothing is fetched by kind. A world names it or it is not fetched.**
+// That is the shape `ROADMAP.md` v0.11's streaming wants anyway — this is the
+// same question asked per world rather than per view — and it is what makes a
+// store with a hundred thousand assets behave like one with ten.
 //
-// **Meshes, materials and audio.** Each is small in a way a texture is not: a
-// `.amat` is a magic, a version and one name; a mesh is geometry rather than
-// sheets; a sound is decoded once and shared. More to the point, a *material*
-// has to arrive before anything can know which texture it names — a demand pass
-// that waited for materials to be demanded would deadlock on itself.
+// ## Asynchrony, and what it can mean here
 //
-// The same ceiling will arrive for meshes on a big enough store, and it will
-// look exactly like this did. Said here rather than discovered again.
+// It cannot mean a thread. What it means is that the *asking* is spread: a
+// caller issues a bounded number of new requests per pump, so a scene naming
+// five hundred assets becomes five hundred assets arriving over several seconds
+// rather than one frame that never ends. The collection below is idempotent, so
+// a caller re-runs it each pump and picks up where it left off with no queue of
+// its own to keep in step.
 //
 // @tier L13 · client
 
@@ -43,23 +50,35 @@ namespace engine::ecs {
 
 namespace client {
 
-	// Appends every texture name the world currently mentions.
+	// Appends every content name the world currently mentions.
 	//
-	// **Every place a texture can be named, and the list is the point.** Missing
+	// **Every place content can be named, and the list is the point.** Missing
 	// one is a class of asset that never loads while everything else does, which
 	// reads as that asset being broken rather than as a name nobody asked for:
 	//
+	//   * `scene::Visual::Mesh` — a `MeshPart`'s geometry.
 	//   * `scene::SurfaceAppearance::ColourMap` — a part's texture, and the
-	//     field a `Material` instance resolves into, so materials are covered by
-	//     this row rather than by one of their own.
-	//   * `gui::Picture::Image` — an `ImageLabel`, which drew its missing-image
-	//     marker for exactly this reason.
+	//     field a `Material` instance resolves into, so a material's *sheet* is
+	//     covered by this row rather than by one of its own.
+	//   * `scene::MaterialRef::Asset` — the material itself.
+	//   * `scene::Sound::SoundId` — and audio is here rather than by kind
+	//     because one of this store's own files is a six-minute MP3 that costs a
+	//     decode on arrival.
+	//   * `gui::Picture::Image` — an `ImageLabel`.
 	//   * `effects::ParticleEmitter::Texture`, and a `Beam`'s and a `Trail`'s.
 	//
 	// **A mesh's own sheets are not here**, and cannot be: `Submesh::Texture`
-	// lives in the mesh file, so the name is not known until the mesh has
-	// arrived. `Client::PumpContent` asks for those when it registers the mesh,
-	// which is the one point where they are readable.
+	// lives inside the mesh file, so the name is not known until the mesh has
+	// arrived. A caller asks for those when it registers the mesh, which is the
+	// one point where they are readable.
+	//
+	// **A material's colour map is not here either, and for a different
+	// reason.** It is named inside the `.amat`, and it reaches a part through
+	// `scene::ResolveMaterials`, which writes it into `SurfaceAppearance::
+	// ColourMap` — a field this already reads. So the indirection needs no
+	// special case: the next pump asks for the sheets of the materials something
+	// is actually made of. Asking on arrival instead is requesting by kind again
+	// one step later, which is how it was written the first time.
 	//
 	// **A mutable store for a read-only walk**, because `Store::Each` is not
 	// `const` — it builds a query. Taking a `const&` here would mean a
@@ -70,5 +89,5 @@ namespace client {
 	// @param out   Appended to. Duplicates are left in — the caller is diffing
 	//              against what it has already asked for, and de-duplicating
 	//              twice is one place too many.
-	void CollectWantedTextures(engine::ecs::Store &store, std::vector<engine::core::Name> &out);
+	void CollectWantedContent(engine::ecs::Store &store, std::vector<engine::core::Name> &out);
 }

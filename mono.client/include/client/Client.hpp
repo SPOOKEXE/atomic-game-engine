@@ -285,18 +285,18 @@ namespace client {
 		// pass — the two constraints that decide where this can go at all.
 		void PumpContent();
 
-		// Asks for every texture the simulated worlds name and has not asked for.
+		// Asks for everything the simulated worlds name and has not asked for.
 		//
 		// **Demand rather than by kind**, which is what makes a large store
-		// usable at all — `client/ContentDemand.hpp` carries the failure that
-		// forced it.
-		void RequestWantedTextures();
+		// usable at all — `client/ContentDemand.hpp` carries the two failures
+		// that forced it.
+		void RequestWantedContent();
 
-		// Asks for one texture, once.
+		// Asks for one asset, once.
 		//
 		// @param texture The name. An invalid one, or one already asked for, is
 		//        ignored.
-		void RequestTexture(const engine::core::Name &texture);
+		void RequestAsset(const engine::core::Name &texture);
 
 		// Brings the mixer into line with every simulated world's `Sound` rows.
 		//
