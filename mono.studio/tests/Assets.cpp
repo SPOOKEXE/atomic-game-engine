@@ -23,12 +23,18 @@ using engine::assets::AssetKind;
 using studio::ContentKindOfProperty;
 
 TEST_CASE("the properties that name content are the ones that get a picker", "[studio][assets]") {
-	// `BasePart.Mesh` — what a `MeshPart` is made of, and the one this feature
-	// was asked for.
+	// **Both spellings of both aliases, which is what this case is really
+	// for.** `Visual::Mesh` is bound as `BasePart.Mesh` *and* as
+	// `MeshPart.MeshId`; `SurfaceAppearance::ColourMap` as `BasePart.ColorMap`
+	// *and* as `MeshPart.TextureID`. The first version of the table had one of
+	// each pair, so selecting a `MeshPart` — the whole reason the picker
+	// exists — showed a plain text field on the two names it actually
+	// displays. An alias is a row, because a person picks whichever name their
+	// class shows them.
 	CHECK(ContentKindOfProperty("Mesh") == AssetKind::Mesh);
+	CHECK(ContentKindOfProperty("MeshId") == AssetKind::Mesh);
 
-	// `MeshPart.TextureID`, spelled Roblox's way because a scene written
-	// against Roblox should load.
+	CHECK(ContentKindOfProperty("ColorMap") == AssetKind::Texture);
 	CHECK(ContentKindOfProperty("TextureID") == AssetKind::Texture);
 
 	// **One row covers `ParticleEmitter`, `Beam` and `Trail`**, which is the
@@ -38,6 +44,13 @@ TEST_CASE("the properties that name content are the ones that get a picker", "[s
 
 	CHECK(ContentKindOfProperty("SoundId") == AssetKind::Audio);
 	CHECK(ContentKindOfProperty("Image") == AssetKind::Texture);
+
+	// The `Material` instance's one property. **`MaterialId` and not
+	// `Material`**, which is the row below's other half: the class is called
+	// `Material` and a property of the same name would read as a
+	// self-reference, so this tree spells an asset name `<Thing>Id` — `MeshId`,
+	// `SoundId`.
+	CHECK(ContentKindOfProperty("MaterialId") == AssetKind::Material);
 }
 
 TEST_CASE("an ordinary property gets no picker", "[studio][assets]") {
@@ -45,6 +58,11 @@ TEST_CASE("an ordinary property gets no picker", "[studio][assets]") {
 	// dialog in the way.** `Name` itself is the case that would be worst: every
 	// instance in the tree has one.
 	CHECK(ContentKindOfProperty("Name") == AssetKind::Unknown);
+
+	// **`Material` is still not a content property, and now for a second
+	// reason.** It was an enum on `BasePart` and is not a property at all any
+	// more: `Surface::Material` is the only thing left spelled that way, and it
+	// names a `SurfaceTable` row rather than an asset.
 	CHECK(ContentKindOfProperty("Material") == AssetKind::Unknown);
 	CHECK(ContentKindOfProperty("Anchored") == AssetKind::Unknown);
 	CHECK(ContentKindOfProperty("") == AssetKind::Unknown);

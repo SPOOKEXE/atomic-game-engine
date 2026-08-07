@@ -256,6 +256,34 @@ TEST_CASE("a file dropped into raw by hand is still listed", "[cdn]") {
 	CHECK(raw[0].Original == "deadbeef.png");
 }
 
+TEST_CASE("a tree under raw is listed and labelled by its path", "[cdn]") {
+	// **`cdn::Publish` walks `raw/` recursively and names by relative path**, so
+	// a tree there has always been publishable — and v0.10's material import is
+	// the first thing that writes one, because a material has to *name* its
+	// texture and `ImportFile`'s hash rename gives it no name to write. The
+	// listing was not recursive, so a store full of materials read as empty.
+	const Scratch scratch("rawtree");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+	REQUIRE(cdn::EnsureLocalStore(paths));
+
+	WriteFile(paths.Raw / "materials" / "ambientcg" / "Bricks075A.amat", "material");
+	WriteFile(paths.Raw / "materials" / "ambientcg" / "Bricks075A_Color.atex", "pixels");
+
+	const std::vector<cdn::RawEntry> raw = cdn::RawContents(paths);
+	REQUIRE(raw.size() == 2);
+
+	// **The path relative to `raw/`, not the file name**, because that is what
+	// the publisher will call it — and two materials in different source folders
+	// routinely share a leaf.
+	std::vector<std::string> names;
+	for (const cdn::RawEntry &entry : raw) {
+		names.push_back(entry.Original);
+	}
+	std::sort(names.begin(), names.end());
+	CHECK(names[0] == "materials/ambientcg/Bricks075A.amat");
+	CHECK(names[1] == "materials/ambientcg/Bricks075A_Color.atex");
+}
+
 TEST_CASE("a store with nothing in it lists nothing rather than failing", "[cdn]") {
 	const Scratch scratch("rawempty");
 	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);

@@ -215,9 +215,6 @@ end
 declare extern type Enum_KeyCode extends EnumItem with
 end
 
-declare extern type Enum_Material extends EnumItem with
-end
-
 declare extern type Enum_MouseBehavior extends EnumItem with
 end
 
@@ -413,25 +410,6 @@ declare Enum: {
 		F10: Enum_KeyCode,
 		F11: Enum_KeyCode,
 		F12: Enum_KeyCode,
-	},
-	Material: {
-		Plastic: Enum_Material,
-		SmoothPlastic: Enum_Material,
-		Wood: Enum_Material,
-		WoodPlanks: Enum_Material,
-		Metal: Enum_Material,
-		CorrodedMetal: Enum_Material,
-		DiamondPlate: Enum_Material,
-		Concrete: Enum_Material,
-		Brick: Enum_Material,
-		Cobblestone: Enum_Material,
-		Grass: Enum_Material,
-		Sand: Enum_Material,
-		Slate: Enum_Material,
-		Ice: Enum_Material,
-		Glass: Enum_Material,
-		Neon: Enum_Material,
-		ForceField: Enum_Material,
 	},
 	MouseBehavior: {
 		Default: Enum_MouseBehavior,
@@ -797,7 +775,6 @@ declare extern type BasePart extends PVInstance with
 	CollisionGroup: string
 	Color: Color3
 	ColorMap: string
-	Material: Enum_Material
 	Mesh: string
 	Size: Vector3
 	Transparency: number
@@ -840,6 +817,10 @@ declare extern type Attachment extends Instance with
 	Position: Vector3
 	read WorldCFrame: CFrame
 	read WorldPosition: Vector3
+end
+
+declare extern type Material extends Instance with
+	MaterialId: string
 end
 
 declare extern type Humanoid extends Instance with
@@ -1265,7 +1246,7 @@ declare extern type Workspace extends Service with
 		Position: Vector3,
 		Normal: Vector3,
 		Distance: number,
-		Material: Enum_Material,
+		Material: string,
 	}?
 end
 
@@ -1330,6 +1311,29 @@ declare extern type DataStoreService with
 	function RemoveAsync(self, key: string): (any, BusStatus, number)
 end
 
+-- What content this world holds, which is the other half of naming an asset.
+--
+-- A `MeshId` is a name a publisher wrote — an id does not cross — and until
+-- this there was no way for a script to ask what those names were. Every list
+-- is sorted, so a scene that lays content out arranges itself the same way on
+-- every run.
+declare extern type ContentService with
+	-- Every mesh registered in this world, sorted. Empty on a headless server
+	-- and before content has arrived, which are the same honest answer.
+	function GetMeshes(self): { string }
+
+	-- Every texture registered in this world, sorted.
+	function GetTextures(self): { string }
+
+	-- A texture's flipbook grid and authored rate, or nil when it is a still
+	-- image or this world has not been told about it.
+	function GetFlipbook(self, texture: string): { Side: number, Frames: number, FrameRate: number }?
+
+	-- The same number `MeshPart.TrianglesCount` gives, asked about a mesh
+	-- rather than a part — so a layout can be sized before anything is built.
+	function GetTriangleCount(self, mesh: string): number
+end
+
 declare extern type RunService with
 	Heartbeat: HeartbeatSignal
 	function IsServer(self): boolean
@@ -1347,6 +1351,7 @@ declare MessagingService: MessagingService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare ContentService: ContentService
 
 -- The world this script runs on. `game` is the universe above it.
 declare workspace: Workspace
@@ -1401,6 +1406,7 @@ type Services = {
 	Players: Players,
 	RunService: RunService,
 	MessagingService: MessagingService,
+	ContentService: ContentService,
 	MemoryStoreService: MemoryStoreService,
 	DataStoreService: DataStoreService,
 }
@@ -1415,6 +1421,7 @@ type CreatableInstances = {
 	SurfaceCamera: SurfaceCamera,
 	Sound: Sound,
 	Attachment: Attachment,
+	Material: Material,
 	Humanoid: Humanoid,
 	Light: Light,
 	PointLight: PointLight,

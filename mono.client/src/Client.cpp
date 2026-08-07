@@ -1,3 +1,4 @@
+#include <engine/assets/Material.hpp>
 #include <engine/audio/Wav.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -12,6 +13,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
@@ -303,15 +305,23 @@ namespace client {
 			ContentRequested = true;
 
 			// Request by kind because the catalogue owns the asset list.
+			// **`Material` is in the list and it is small.** A `.amat` is a magic,
+			// a version and one name — a few dozen bytes — so asking for every
+			// one costs nothing beside the sheets they reference, and a material
+			// that arrived after the part naming it would leave that part drawing
+			// the default until something else changed.
 			for (const engine::assets::AssetKind kind :
 				 {engine::assets::AssetKind::Mesh,
 				  engine::assets::AssetKind::Texture,
+				  engine::assets::AssetKind::Material,
 				  engine::assets::AssetKind::Audio}) {
 				const std::vector<engine::delivery::RequestId> issued = Content->RequestKind(kind);
 				ContentPending.insert(ContentPending.end(), issued.begin(), issued.end());
 			}
 
-			ENGINE_INFO("content: asked for {} mesh, texture and audio asset(s)", ContentPending.size());
+			ENGINE_INFO(
+				"content: asked for {} mesh, texture, material and audio asset(s)", ContentPending.size()
+			);
 		}
 
 		// Apply completions between frames, outside render passes.
@@ -397,6 +407,31 @@ namespace client {
 						});
 					}
 				}
+			} else if (asset->Kind == engine::assets::AssetKind::Material) {
+				engine::assets::MaterialData material;
+				if (!engine::assets::Material::Read(reader, material)) {
+					ENGINE_WARN("content: {} is not a material this engine reads", asset->Name);
+					continue;
+				}
+
+				// **World data, not renderer state**, exactly as the triangle
+				// count and the flipbook layout above are — and for the sharper
+				// version of the same reason: the renderer never sees a material
+				// at all. `ResolveMaterials` turns one into a texture name on a
+				// part, in `shared`, so a headless server resolves the same
+				// materials the client does.
+				const engine::core::Name colour(material.ColourMap);
+				for (const engine::world::WorldId id : Simulated) {
+					Universe_->Enter(id, [&name, &colour](engine::ecs::Store &store) {
+						engine::scene::RecordMaterial(store, name, colour);
+					});
+				}
+				if (ReportedJoin) {
+					Universe_->Enter(Replicated, [&name, &colour](engine::ecs::Store &store) {
+						engine::scene::RecordMaterial(store, name, colour);
+					});
+				}
+				ContentMaterials++;
 			} else if (asset->Kind == engine::assets::AssetKind::Audio) {
 				// **Decoded and converted here, once.** The graph must never resample
 				// on the device thread, and a buffer converted per voice would pay
@@ -432,9 +467,10 @@ namespace client {
 		if (ContentRequested && ContentPending.empty() && !ContentReported) {
 			ContentReported = true;
 			ENGINE_INFO(
-				"content: {} mesh(es), {} texture(s) and {} sound(s) registered",
+				"content: {} mesh(es), {} texture(s), {} material(s) and {} sound(s) registered",
 				ContentMeshes,
 				ContentTextures,
+				ContentMaterials,
 				ContentSounds
 			);
 		}

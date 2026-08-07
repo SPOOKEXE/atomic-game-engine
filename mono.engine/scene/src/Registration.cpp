@@ -5,6 +5,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -19,22 +20,6 @@
 #include <cstdint>
 
 namespace engine::scene {
-
-	const core::Name &DefaultMaterial() {
-		// **`Plastic` spelled here and registered as an enum member in
-		// `Part.cpp`, which is two places holding one string.** They are not
-		// collapsible in the direction that would help: the enum list is
-		// registered when the class tree is built, and a `Visual` can be default
-		// constructed before that has happened — a replica's column grows from a
-		// wire delta, and nothing on that path builds a class tree. Reading the
-		// enum's first member instead would therefore return an invalid name on
-		// exactly the path this default exists to serve.
-		//
-		// `scene/tests/Components.cpp` asserts the two agree, which is the check
-		// that makes the duplication safe rather than merely stated.
-		static const core::Name name("Plastic");
-		return name;
-	}
 
 	namespace {
 		// `Surface`, `Visual` and `SurfaceTable` all hold a `core::Name`, and a
@@ -66,7 +51,6 @@ namespace engine::scene {
 				writer.WriteFloat(visual.Tint.G);
 				writer.WriteFloat(visual.Tint.B);
 				writer.WriteName(visual.Mesh);
-				writer.WriteName(visual.Material);
 				writer.WriteBool(visual.Visible);
 
 				// **Added at v0.7, and the reason it was missing is the reason
@@ -98,7 +82,6 @@ namespace engine::scene {
 				visual.Tint.G = reader.ReadFloat();
 				visual.Tint.B = reader.ReadFloat();
 				visual.Mesh = reader.ReadName();
-				visual.Material = reader.ReadName();
 				visual.Visible = reader.ReadBool();
 				visual.Transparency = reader.ReadFloat();
 				visual.Surface = reader.ReadInt8();
@@ -150,6 +133,34 @@ namespace engine::scene {
 			auto *catalogues = static_cast<TextureCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].Flipbooks.clear();
+			}
+		}
+
+		// Derived resource, the same as the two above and for the same reason:
+		// the texture names came from whatever registered the materials this run,
+		// and a save file carrying last run's would be names that resolve to
+		// nothing on a machine with different content.
+		void WriteMaterialCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadMaterialCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<MaterialCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].ColourMaps.clear();
+			}
+		}
+
+		// A name, so a hand-written pair. The rule this file opens with.
+		void WriteMaterialRefs(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *refs = static_cast<const MaterialRef *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(refs[index].Asset);
+			}
+		}
+
+		void ReadMaterialRefs(core::ByteReader &reader, void *destination, size_t count) {
+			auto *refs = static_cast<MaterialRef *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				refs[index].Asset = reader.ReadName();
 			}
 		}
 
@@ -411,6 +422,12 @@ namespace engine::scene {
 		// unusable the moment a world crosses a process.
 		ecs::Components::Register<LocalPlayer>("scene.LocalPlayer");
 
+		// **What a `Material` instance holds, added at the end** for the reason
+		// this list opens with: registration order decides component ids, and ids
+		// decide the order archetypes iterate their columns. A hand-written pair
+		// because it is a name.
+		ecs::Components::Register<MaterialRef>("scene.MaterialRef", WriteMaterialRefs, ReadMaterialRefs);
+
 		// The render gate, at the end for the reason this list opens with.
 		//
 		// **No wire form, and it is not an oversight.** This is a conclusion
@@ -448,6 +465,9 @@ namespace engine::scene {
 		);
 		ecs::Components::Register<TextureCatalogue>(
 			"scene.TextureCatalogue", WriteTextureCatalogues, ReadTextureCatalogues
+		);
+		ecs::Components::Register<MaterialCatalogue>(
+			"scene.MaterialCatalogue", WriteMaterialCatalogues, ReadMaterialCatalogues
 		);
 
 		// What `SyncRendered` compares this frame's tree against, at the end of

@@ -47,18 +47,39 @@ namespace studio {
 			AssetKind Kind;
 		};
 
+		// **Both spellings of every aliased property, and the aliases are why
+		// this list was wrong the first time.** `Visual::Mesh` is bound twice —
+		// as `BasePart.Mesh` and as `MeshPart.MeshId`, Roblox's name — and
+		// `SurfaceAppearance::ColourMap` is bound twice as `BasePart.ColorMap`
+		// and `MeshPart.TextureID`. The first version of this table had one of
+		// each pair, so selecting a `MeshPart` showed a picker on the two
+		// spellings nobody uses and a bare text field on the two they do.
+		//
+		// That is the exact cost `Assets.hpp` warns about, and it landed on the
+		// most obvious property in the editor. The rule it leaves behind: an
+		// alias is a row here too, because a person picks whichever name their
+		// class shows them.
 		static constexpr Row ROWS[] = {
-			// `BasePart.Mesh` — what a `MeshPart` is made of.
+			// `Visual::Mesh`, under both its names.
 			{"Mesh", AssetKind::Mesh},
+			{"MeshId", AssetKind::Mesh},
 
-			// `MeshPart.TextureID`. Roblox's spelling, kept because a scene
-			// written against Roblox should load.
+			// `SurfaceAppearance::ColourMap`, under both of its names. The
+			// American spelling is what `BasePart` shows; `TextureID` is what
+			// `MeshPart` shows, and it is Roblox's.
+			{"ColorMap", AssetKind::Texture},
 			{"TextureID", AssetKind::Texture},
 
 			// `ParticleEmitter`, `Beam` and `Trail` all spell it this way, and
 			// all three mean the same thing — which is why the key is the
 			// property and not the class.
 			{"Texture", AssetKind::Texture},
+
+			// `Material.MaterialId`, the one property of the instance that
+			// replaced `Enum.Material`. **The only row naming an
+			// `AssetKind::Material`**, and the reason the kind stopped being one
+			// nothing wrote — `scene/Materials.hpp`.
+			{"MaterialId", AssetKind::Material},
 
 			// `Sound.SoundId`.
 			{"SoundId", AssetKind::Audio},
@@ -168,12 +189,31 @@ namespace studio {
 				ImGui::PopStyleColor();
 			}
 
+			// **Rows are a picture and a name, and the row is as tall as the
+			// picture.** A store's names are hashes — a person importing
+			// `diffuse.png` gets `<64 hex>.png` — so a list of names alone is a
+			// list of identifiers nobody can choose between. The thumbnail is
+			// what makes this a picker rather than a lookup table.
+			const float side = engine::ui::Scaled(48.0f);
+			const float spacing = ImGui::GetStyle().ItemSpacing.x;
+
 			for (const Candidate &candidate : shown) {
 				const cdn::PublishedEntry &entry = *candidate.Entry;
 				ImGui::PushID(entry.Name.c_str());
 
 				const bool selected = entry.Name == chosen;
-				if (ImGui::Selectable(entry.Name.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick)) {
+
+				// **The whole row is the hit target, drawn before the contents
+				// and then rewound over.** A `Selectable` beside an `Image` is
+				// two things to aim at, and clicking the picture — which is what
+				// a person does — would miss.
+				const ImVec2 start = ImGui::GetCursorPos();
+				if (ImGui::Selectable(
+						"##row",
+						selected,
+						ImGuiSelectableFlags_AllowDoubleClick,
+						ImVec2(0.0f, side)
+					)) {
 					chosen = entry.Name;
 
 					// Double-click confirms, which is what a person tries first
@@ -187,6 +227,20 @@ namespace studio {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("%s\n%s", entry.Name.c_str(), entry.Root.ToHex().substr(0, 16).c_str());
 				}
+
+				ImGui::SetCursorPos(start);
+				DrawPreview(entry.Name, side);
+
+				ImGui::SameLine();
+
+				// Centred against the picture rather than sitting on its top
+				// edge, which is what makes a tall row read as one row.
+				ImGui::SetCursorPos(
+					ImVec2(start.x + side + spacing, start.y + (side - ImGui::GetTextLineHeight()) * 0.5f)
+				);
+				ImGui::TextUnformatted(entry.Name.c_str());
+
+				ImGui::SetCursorPos(ImVec2(start.x, start.y + side + ImGui::GetStyle().ItemSpacing.y));
 
 				ImGui::PopID();
 			}

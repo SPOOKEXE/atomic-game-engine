@@ -246,7 +246,6 @@ TEST_CASE("a replica draws every field of what it was sent", "[client][replicati
 	Visual sent;
 	sent.Tint = engine::core::Color3{0.25f, 0.5f, 0.75f};
 	sent.Mesh = engine::core::Name("replicated_test.Mesh");
-	sent.Material = engine::core::Name("replicated_test.Material");
 	sent.Transparency = 0.5f;
 	sent.Surface = 1;
 	sent.CastShadow = false;
@@ -261,7 +260,6 @@ TEST_CASE("a replica draws every field of what it was sent", "[client][replicati
 	CHECK(drawn.Tint.G == Approx(sent.Tint.G));
 	CHECK(drawn.Tint.B == Approx(sent.Tint.B));
 	CHECK(drawn.Mesh == sent.Mesh);
-	CHECK(drawn.Material == sent.Material);
 	CHECK(drawn.Transparency == Approx(sent.Transparency));
 	CHECK(drawn.Surface == sent.Surface);
 	CHECK_FALSE(drawn.CastShadow);

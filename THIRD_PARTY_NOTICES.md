@@ -159,6 +159,33 @@ They are used at their **default variable instance**, which for all four is the
 regular weight. Nothing here drives a weight axis, because stb_truetype — which
 is what Dear ImGui rasterises with — does not.
 
+## Art, and the one piece of it that is compiled in
+
+**`mono.engine/render/src/DefaultTexture.inl` is content, not code.** It is one
+channel of ambientCG's *Plastic 013 A* colour map, box-filtered from 1024 to 64
+and lifted so its brightest texel is white, as a C array. It is what every part
+with no material draws as — `render/DefaultTexture.hpp` says why it cannot be
+fetched like everything else — so it is in the binary rather than in a store.
+
+**CC0-1.0**, a public-domain dedication: no attribution is required and the row
+is here anyway, because "no attribution required" is a licence term and not a
+reason to leave the provenance of a shipped asset unrecorded.
+
+`scripts/fetch-materials.py` downloads from the same place and from two others,
+all three CC0:
+
+| Source | Licence | What comes from it |
+|---|---|---|
+| [ambientCG](https://ambientcg.com/) | CC0-1.0 | PBR material sets, and the compiled-in default above |
+| [Poly Haven](https://polyhaven.com/) | CC0-1.0 | PBR material sets |
+| [cgbookcase](https://www.cgbookcase.com/) | CC0-1.0 | PBR material sets |
+
+**None of that reaches the repository.** The script writes into `.cache/` and
+`assetc` bakes into a content store on the machine that ran it, which is where
+gigabytes of art belong — `mono.cdn/AGENTS.md` says a monorepo carrying them
+makes every clone slow forever. The one exception is the four-kilobyte tile
+above, and it is four kilobytes.
+
 ## If you add one
 
 1. Check the licence is compatible with MPL-2.0 **before** anything else.

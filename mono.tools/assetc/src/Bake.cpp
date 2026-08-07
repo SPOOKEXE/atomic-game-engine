@@ -1,3 +1,4 @@
+#include <engine/assets/Material.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
@@ -8,6 +9,8 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <span>
+#include <string_view>
 
 namespace assetc {
 
@@ -19,6 +22,7 @@ namespace assetc {
 		// Extensions recognized by the runtime asset catalogue.
 		constexpr std::string_view MESH_EXTENSION = ".amesh";
 		constexpr std::string_view TEXTURE_EXTENSION = ".atex";
+		constexpr std::string_view MATERIAL_EXTENSION = ".amat";
 
 		std::string Lowered(std::string text) {
 			std::transform(text.begin(), text.end(), text.begin(), [](char value) {
@@ -51,6 +55,14 @@ namespace assetc {
 
 		bool IsModel(std::string_view extension) {
 			return extension == ".glb" || extension == ".gltf" || extension == ".obj" || extension == ".pmx";
+		}
+
+		// **`.mat` is a source and `.amat` is what it bakes to**, the same split
+		// `.png` and `.atex` have. What is inside a `.mat` is three lines of text
+		// somebody or something wrote — see `ReadMaterialSource` — and a runtime
+		// parses no text.
+		bool IsMaterial(std::string_view extension) {
+			return extension == ".mat";
 		}
 
 		bool IsImage(std::string_view extension) {
@@ -135,6 +147,56 @@ namespace assetc {
 			}
 			return !out.empty();
 		}
+
+		// One `key = value` line at a time, `#` to end of line is a comment.
+		//
+		// **A hand-written parser and not a format with a library**, which is the
+		// boring option `AGENTS.md` asks for: a material source has one key today
+		// and the whole of what it must do is survive being written by
+		// `scripts/fetch-materials.py` and read here. JSON would be a vendor
+		// dependency in a tool for six lines of text; a binary source would not be
+		// editable, which is the one thing a *source* has to be.
+		//
+		// **Unknown keys are ignored rather than refused.** The fetcher writes
+		// `color` and nothing else today, and `ROADMAP.md` v0.11 adds four more
+		// when there is a pass that reads them — a baker that refused an unknown
+		// key would make every material written for the newer engine unbakeable by
+		// the older one, which is the wrong direction for a content tree that
+		// outlives a build.
+		std::string MaterialColourOf(std::span<const std::byte> bytes) {
+			const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+
+			size_t start = 0;
+			while (start < text.size()) {
+				size_t end = std::min(text.find('\n', start), text.size());
+				std::string_view line = text.substr(start, end - start);
+				start = end + 1;
+
+				line = line.substr(0, std::min(line.find('#'), line.size()));
+
+				const size_t equals = line.find('=');
+				if (equals == std::string_view::npos) {
+					continue;
+				}
+
+				const auto trim = [](std::string_view value) {
+					while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
+						value.remove_prefix(1);
+					}
+					while (!value.empty() &&
+						   (value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
+						value.remove_suffix(1);
+					}
+					return value;
+				};
+
+				const std::string key = Lowered(std::string(trim(line.substr(0, equals))));
+				if (key == "color" || key == "colour") {
+					return std::string(trim(line.substr(equals + 1)));
+				}
+			}
+			return {};
+		}
 	}
 
 	std::string BakedName(std::string_view path) {
@@ -144,6 +206,9 @@ namespace assetc {
 		}
 		if (IsImage(extension)) {
 			return WithoutExtension(path) + std::string(TEXTURE_EXTENSION);
+		}
+		if (IsMaterial(extension)) {
+			return WithoutExtension(path) + std::string(MATERIAL_EXTENSION);
 		}
 		return std::string(path);
 	}
@@ -189,6 +254,60 @@ namespace assetc {
 			const std::string extension = ExtensionOf(relative);
 			const bool model = IsModel(extension);
 			const bool image = IsImage(extension);
+
+			// **Handled before the graph, because a material has no pixels.**
+			// Everything below this decodes an image or a model; a material is a
+			// reference and the only work is resolving it, so running it through
+			// `bake::Graph` would need an import node for a format with nothing to
+			// import.
+			if (IsMaterial(extension)) {
+				const std::string colour = MaterialColourOf(bytes);
+
+				engine::assets::MaterialData material;
+				if (!colour.empty()) {
+					const size_t slash = relative.find_last_of('/');
+					const std::string directory =
+						slash == std::string::npos ? std::string() : relative.substr(0, slash);
+
+					// **Through the same `BakedName` a model's texture reference
+					// goes through**, which is the whole reason that function is
+					// exported. A material naming `Bricks_Color.png` and a baked
+					// tree holding `Bricks_Color.atex` have to line up, and two
+					// spellings of the rule is a material that resolves to nothing
+					// on a machine nobody tested.
+					std::string resolved;
+					if (Resolve(directory, colour, resolved)) {
+						material.ColourMap = BakedName(resolved);
+					} else {
+						// Refuse references outside the input tree, exactly as a
+						// model's are refused. An untextured material is a real
+						// state — `assets/Material.hpp` — so this is a material
+						// that draws the default rather than a failed row.
+						baked.Failure = "the colour map is outside the input tree";
+						report.Failures++;
+					}
+				}
+
+				engine::core::ByteWriter writer;
+				if (!engine::assets::Material::Write(writer, material)) {
+					baked.Failure = "the material is not one the format can hold";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+
+				baked.Output = BakedName(relative);
+				baked.Kind = AssetKind::Material;
+				baked.Bytes = writer.Size();
+				if (!WriteFile(settings.Output / baked.Output, writer.Bytes())) {
+					baked.Failure = "cannot write";
+					report.Failures++;
+				} else {
+					report.OutputBytes += writer.Size();
+				}
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
 
 			if (!model && !image) {
 				if (!settings.CopyUnknown) {

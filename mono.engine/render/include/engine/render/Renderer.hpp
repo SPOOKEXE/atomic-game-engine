@@ -512,6 +512,39 @@ namespace engine::render {
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image);
 
+		// The backend handle for a registered texture, for an interface pass to
+		// sample.
+		//
+		// **A `void *` for `SceneTexture`'s reason, written there in full**: the
+		// header must not name an `SDL_GPUTexture`, because that would put the
+		// backend's type in the interface every consumer of this header
+		// compiles against. A caller that draws it already knows which backend
+		// it is talking to — `ImGui::Image` takes the same opaque handle.
+		//
+		// **For an editor's thumbnail and not for the draw path.** The renderer
+		// resolves its own textures by name inside the frame; this exists so a
+		// panel can put a picture of one in a list, which is a thing only a tool
+		// does.
+		//
+		// @param name The name it was registered under.
+		// @return The handle, or nullptr for a name this renderer has not been
+		//         given.
+		// @since v0.10
+		void *TextureHandle(const core::Name &name) const;
+
+		// Forgets a registered texture and frees it.
+		//
+		// **Because a thumbnail cache has to have a ceiling.** Every other
+		// texture here is content that lives as long as the session; a preview
+		// is built for a row somebody scrolled past, and a table that only ever
+		// grew would hold a store's worth of images in video memory by the time
+		// somebody had browsed it.
+		//
+		// @param name The name to drop.
+		// @return `false` for a name this renderer does not hold.
+		// @since v0.10
+		bool DropTexture(const core::Name &name);
+
 		// Whether a mesh has been registered under a name.
 		//
 		// **For a caller deciding what to fetch**, not for the draw path: an

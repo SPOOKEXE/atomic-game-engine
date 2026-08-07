@@ -61,9 +61,20 @@
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
+#include <unordered_map>
 #include <vector>
 
 struct SDL_Window;
+
+// **Forward-declared rather than including imgui here.** `Editor.hpp` is
+// included by every panel and by the tests, and dragging imgui in to name one
+// parameter type would make a headless suite compile a UI library.
+struct ImGuiTableSortSpecs;
+
+// **Forward-declared rather than including imgui here.**  is
+// included by every panel and by the tests, and dragging imgui into all of them
+// to name one parameter type would make a headless suite compile a UI library.
+struct ImGuiTableSortSpecs;
 
 namespace studio {
 
@@ -947,12 +958,81 @@ namespace studio {
 		// What is sitting in `raw/`, waiting to be published.
 		void DrawRawList();
 
+		// One asset's picture, or a box of the same size when there is none.
+		//
+		// **The same size either way**, so a row does not change height when its
+		// picture arrives — a list that reflows while it loads is one nobody can
+		// click in.
+		//
+		// @param name The asset's name, which is its path under `raw/`.
+		// @param side How wide to draw it.
+		void DrawPreview(const std::string &name, float side);
+
+		// Orders the published view by whatever headers were clicked.
+		//
+		// **The view and never `PickerContents`.** That is what the manifest
+		// says, in the order it says it, and every picker reads it — a header
+		// click must not reorder what another panel is looking at.
+		void SortPublished(
+			std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs
+		);
+
+		// The same for the raw view.
+		void SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
+
 		// Re-reads both halves of the store.
 		//
 		// **Called when the panel opens and after anything changes it**, never
 		// per frame: listing `raw/` stats every file and reading the manifest
 		// parses one.
 		void RefreshStoreContents();
+
+		// A small picture of an asset, for a row in a list.
+		//
+		// **Asked for while drawing and built between frames.** Returning null
+		// is the ordinary answer the first time a row appears — the caller draws
+		// its placeholder and the picture arrives a frame or two later. See
+		// `Thumbnails.cpp` for why it is not built here.
+		//
+		// @param name The asset's name, which is also its path under `raw/`.
+		// @return The backend handle to draw, or nullptr when there is no
+		//         preview — not yet, or not ever, and a caller cannot tell the
+		//         two apart because it does not need to.
+		void *ThumbnailFor(const std::string &name);
+
+		// Builds a bounded number of queued thumbnails and evicts old ones.
+		void PumpThumbnails();
+
+		// What one asset's preview is registered under in the texture table.
+		//
+		// **Prefixed, so a preview can never be sampled as content**: the
+		// renderer resolves a part's texture out of the same table by name, and
+		// a 64-pixel thumbnail under the real name would replace the real one.
+		static std::string ThumbnailTextureName(const std::string &name);
+
+	  private:
+		// Decodes, scales and uploads one. Null when there is nothing to show.
+		void *BuildThumbnail(const std::string &name);
+
+		// One asset's preview, and when its row was last drawn.
+		struct Entry {
+			// Null for an asset with no preview — a mesh, an archive, a file
+			// from another machine. **Cached as null rather than retried**, or
+			// its row would queue a decode on every frame it is visible.
+			void *Handle = nullptr;
+
+			uint64_t LastSeen = 0;
+		};
+
+		std::unordered_map<std::string, Entry> Thumbnails;
+
+		// Asked for while drawing, built by `PumpThumbnails`.
+		std::vector<std::string> ThumbnailQueue;
+
+		// Frames, for the eviction order. Not a clock — nothing here needs one.
+		uint64_t ThumbnailClock = 0;
+
+	  public:
 
 		// Publishes `raw/` into `processed/`.
 		//

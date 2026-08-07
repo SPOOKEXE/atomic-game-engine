@@ -19,6 +19,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -318,7 +319,6 @@ namespace client {
 								bounds[row].HalfExtent,
 								visuals[row].Tint,
 								visuals[row].Mesh,
-								visuals[row].Material,
 								appearances[row].ColourMap,
 								tags[row].Mask,
 
@@ -839,6 +839,9 @@ namespace client {
 			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		}
 
+		scheduler.Add("resolve-materials", Phase::PreSimulation, [](Store &world) {
+			(void)engine::scene::ResolveMaterials(world);
+		});
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
@@ -917,6 +920,16 @@ namespace client {
 		// two copies of a system that writes `PreviousTransform` can both be
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+
+		// **`PreSimulation`, ahead of everything that reads a
+		// `SurfaceAppearance`** — `ResolveAttachments`' phase and its reason. A
+		// `Material` instance names an asset and the part it hangs off is what
+		// the draw-list pass reads, so resolving after collection would draw last
+		// tick's texture for a frame every time somebody changed one.
+		scheduler.Add("resolve-materials", Phase::PreSimulation, [](Store &world) {
+			(void)engine::scene::ResolveMaterials(world);
+		});
+
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
 
 		// **And the mirrors, which only `BuildScriptedWorld` was installing.**

@@ -54,7 +54,6 @@
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "ColorMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
-				{"name": "Material", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "Material", "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -80,7 +79,6 @@
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "ColorMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
-				{"name": "Material", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "Material", "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -106,7 +104,6 @@
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "ColorMap", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
-				{"name": "Material", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "Material", "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mesh", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "MeshId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -185,6 +182,17 @@
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Attachment"], "writes": ["scene.Attachment"]},
 				{"name": "WorldCFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": false, "reads": ["scene.Attachment"], "writes": ["scene.Attachment"]},
 				{"name": "WorldPosition", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": false, "reads": ["scene.Attachment"], "writes": ["scene.Attachment"]}
+			]
+		},
+		{
+			"name": "Material",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.MaterialRef"],
+			"properties": [
+				{"name": "MaterialId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
 			]
 		},
 		{
@@ -1519,7 +1527,6 @@
 		{"name": "Font", "members": ["Regular", "Bold", "Italic", "Code"]},
 		{"name": "HorizontalAlignment", "members": ["Left", "Center", "Right"]},
 		{"name": "KeyCode", "members": ["Unknown", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Space", "Return", "Escape", "Backspace", "Tab", "LeftShift", "RightShift", "LeftControl", "RightControl", "LeftAlt", "RightAlt", "Up", "Down", "Left", "Right", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]},
-		{"name": "Material", "members": ["Plastic", "SmoothPlastic", "Wood", "WoodPlanks", "Metal", "CorrodedMetal", "DiamondPlate", "Concrete", "Brick", "Cobblestone", "Grass", "Sand", "Slate", "Ice", "Glass", "Neon", "ForceField"]},
 		{"name": "MouseBehavior", "members": ["Default", "LockCenter", "LockCurrentPosition"]},
 		{"name": "NormalId", "members": ["Right", "Top", "Back", "Left", "Bottom", "Front"]},
 		{"name": "ParticleEmitterShape", "members": ["Box", "Sphere", "Cylinder", "Disc"]},

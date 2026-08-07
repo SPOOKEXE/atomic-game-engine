@@ -611,6 +611,12 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
 			PumpContent(frameSeconds);
+
+			// **After the panels drew and before they draw again**, which is
+			// what makes "only rows imgui actually drew" the bound: a row asks
+			// for a picture while drawing, and this builds a couple of them in
+			// the gap. See Thumbnails.cpp.
+			PumpThumbnails();
 		}
 
 		{

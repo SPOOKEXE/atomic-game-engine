@@ -328,42 +328,6 @@ namespace engine::scene {
 			return property;
 		}
 
-		// Material: the name, checked against a registered set.
-		//
-		// The storage is `Visual::Material`, a `core::Name`, exactly as it was.
-		// What `PropertyType::Enum` adds is that `part.Material = "Plsatic"` is
-		// refused where it was written instead of landing in the component and
-		// surfacing as a part drawn with the default for reasons nobody can see.
-		PropertyDescriptor MaterialProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("Material");
-			property.Type = PropertyType::Enum;
-			property.EnumName = core::Name("Material");
-			property.Size = sizeof(core::Name);
-			property.Kind = PropertyKind::Field;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const Visual *visual = store.Get<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				*static_cast<core::Name *>(out) = visual->Material;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				Visual *visual = store.GetMutable<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				visual->Material = *static_cast<const core::Name *>(value);
-				return true;
-			};
-			return property;
-		}
-
 		// FieldOfView: the camera's vertical angle, in degrees.
 		//
 		// Degrees out, radians stored — Roblox's `Camera.FieldOfView` is
@@ -891,35 +855,15 @@ namespace engine::scene {
 		ecs::ClassId RegisterTree() {
 			RegisterSceneComponents();
 
-			// The materials `Visual::Material` may name.
-			//
-			// **Roblox's set, and a subset of it**, which is the honest shape:
-			// every name here is one a renderer could plausibly be asked to
-			// draw, and adding a name the renderer ignores would be offering an
-			// author completion for something that does nothing. A game
-			// registers its own with `ecs::EnumTable::Register`, and the
-			// registry takes a second declaration of an existing member as
-			// agreement rather than conflict.
-			static const std::string_view MATERIALS[] = {
-				"Plastic",
-				"SmoothPlastic",
-				"Wood",
-				"WoodPlanks",
-				"Metal",
-				"CorrodedMetal",
-				"DiamondPlate",
-				"Concrete",
-				"Brick",
-				"Cobblestone",
-				"Grass",
-				"Sand",
-				"Slate",
-				"Ice",
-				"Glass",
-				"Neon",
-				"ForceField",
-			};
-			ecs::EnumTable::Register("Material", MATERIALS);
+			// **`Material` is not registered as an enum, and its absence is the
+			// point.** It held seventeen names — `Plastic`, `Wood`, `Metal` —
+			// and the membership check was the only thing it did: no renderer
+			// sampled anything different because a part said `Wood`. A material
+			// is content now, named by a `Material` instance and resolved
+			// against what a publisher published — `scene/Materials.hpp`. A game
+			// that wants its own named set still registers one with
+			// `ecs::EnumTable::Register`; the engine no longer ships one that
+			// promises something it cannot draw.
 
 			// The faces of a box, for `SurfaceCamera::Face`.
 			//
@@ -1082,6 +1026,21 @@ namespace engine::scene {
 			const std::array point{ecs::Components::Of<Attachment>()};
 			const ecs::ClassId attachmentClass = ecs::Classes::Register("Attachment", instance, point);
 
+			// **A `Material` is an `Instance` under a drawable**, which is
+			// Roblox's `SurfaceAppearance` arrangement and is what replaces the
+			// seventeen-name `Material` enum this tree used to register. Not a
+			// `PVInstance`, for `Attachment`'s reason: it has no place in the
+			// world of its own, and a `Transform` on this row would be a second
+			// opinion about where its parent is.
+			//
+			// **An instance rather than a property**, because `ROADMAP.md` v0.11
+			// grows this into something carrying several texture references, and
+			// a `core::Name` field on `BasePart` could never grow children.
+			// `scene/Materials.hpp` carries the whole argument, including what
+			// `ResolveMaterials` writes and what it costs.
+			const std::array binding{ecs::Components::Of<MaterialRef>()};
+			const ecs::ClassId materialClass = ecs::Classes::Register("Material", instance, binding);
+
 			// **One component, three classes**, which is `Collider`'s trade across
 			// three shapes. The three lights differ by two fields; three
 			// components would be three columns, three queries and three upload
@@ -1183,13 +1142,12 @@ namespace engine::scene {
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 
-			// The plain fields. `Color` and `Material` are renames rather than
-			// conversions — `Visual::Tint` is what a script calls `Color`, and
-			// `Visual::Material` is what it *looks* like. `Surface::Material`,
-			// which is what it *feels* like, is deliberately not bound: the two
-			// are separate facts that share a name, and `Visual::Material`'s own
-			// comment gives the case — a mirror-finish floor and a rubber floor
-			// may share a surface and never a material.
+			// The plain fields. `Color` is a rename rather than a conversion —
+			// `Visual::Tint` is what a script calls `Color`. `Surface::Material`,
+			// which is what a part *feels* like, is deliberately not bound: it is
+			// a separate fact that happens to share a word with the `Material`
+			// instance below, and a mirror-finish floor and a rubber floor may
+			// share a surface and never a material.
 			ecs::Classes::Property<&Visual::Tint>(basePart, "Color");
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
 			ecs::Classes::Property<&Visual::Mesh>(basePart, "Mesh");
@@ -1232,9 +1190,9 @@ namespace engine::scene {
 			// small fixed set, and a handle would have to be resolved back to an
 			// index every frame for every part.
 
-			// The two that were named as gaps at v0.5, both now closed with the
-			// thing they were waiting for rather than with a guess.
-			ecs::Classes::Computed(basePart, MaterialProperty());
+			// The last of the two that were named as gaps at v0.5. `Material` was
+			// the other and is no longer a property of a part at all: it is an
+			// instance under one — see the `Material` class below.
 			ecs::Classes::Computed(basePart, CollisionGroupProperty());
 
 			// The camera's own three. `FieldOfView` is **degrees**, because
@@ -1296,6 +1254,15 @@ namespace engine::scene {
 			ecs::Classes::Computed(attachmentClass, WorldCFrameProperty());
 			ecs::Classes::Computed(attachmentClass, WorldPositionProperty());
 
+			// The material's one. **`MaterialId` rather than `Material`**, which
+			// is this tree's spelling for "a name that is an asset" — `MeshId`,
+			// `SoundId`, `TextureID` — and is what puts the studio's content
+			// picker on it rather than a bare text field, through
+			// `studio::ContentKindOfProperty`. Calling it `Material` on a class
+			// called `Material` would also read as a self-reference at every call
+			// site: `material.Material = ...`.
+			ecs::Classes::Property<&MaterialRef::Asset>(materialClass, "MaterialId");
+
 			// The light's, declared on the base so all three inherit them.
 			//
 			// **`Angle` and `Face` are on `Light` rather than on the two classes
@@ -1343,12 +1310,12 @@ namespace engine::scene {
 			ecs::Classes::Computed(humanoidClass, GroundedProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
-			// **`Surface::Material`**, which is what a part *feels* like.
-			// `Visual::Material` above is what it looks like, and the two are
-			// separate facts that share a name — a mirror-finish floor and a
-			// rubber floor may share a surface and never a material. Binding
-			// both under one script name would make one of them unreachable and
-			// the other ambiguous.
+			// **`Surface::Material`**, which is what a part *feels* like. The
+			// `Material` class above is what it looks like, and the two are
+			// separate facts that share a word — a mirror-finish floor and a
+			// rubber floor may share a surface and never a material. Binding both
+			// under one script name would make one of them unreachable and the
+			// other ambiguous.
 			return part;
 		}
 	}

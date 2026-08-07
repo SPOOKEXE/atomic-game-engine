@@ -22,6 +22,14 @@
 // Putting both in one folder would mean either hashing the names or naming the
 // hashes, and each of those loses the half that made the other useful.
 //
+// **`ImportFile` is flat; `raw/` is not required to be.** `Publish` has always
+// walked it recursively and named each asset by its path relative to the root, so
+// a tool writing a tree there was always publishable — and v0.10's material
+// import is the first thing that does, because a material has to *name* its
+// texture and a hash rename gives it no name to write. `RawContents` was not
+// recursive and showed such a store as empty; it is now. What the paragraph below
+// is about is what a *person* drags in.
+//
 // **Flat, for now, and `ROADMAP.md` says so in as many words.** A tree under
 // `raw/` is what an author eventually wants — `characters/`, `props/` — and it is
 // a decision about how a manifest name is built, which is worth making once the

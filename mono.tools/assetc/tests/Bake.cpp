@@ -1,5 +1,6 @@
 // Covers baked-name consistency, filesystem handling and partial failures.
 
+#include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/testing/Suite.hpp>
@@ -95,6 +96,16 @@ f 1//1 3//1 2//1
 		return report;
 	}
 
+	engine::assets::MaterialData ReadMaterial(const fs::path &path) {
+		std::ifstream file(path, std::ios::binary);
+		const std::vector<char> raw((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+		engine::core::ByteReader reader({reinterpret_cast<const std::byte *>(raw.data()), raw.size()});
+		engine::assets::MaterialData material;
+		REQUIRE(engine::assets::Material::Read(reader, material));
+		return material;
+	}
+
 	engine::assets::MeshData ReadMesh(const fs::path &path) {
 		std::ifstream file(path, std::ios::binary);
 		const std::vector<char> raw((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -110,6 +121,7 @@ TEST_CASE("a baked name replaces the extension", "[assetc][bake]") {
 	CHECK(BakedName("characters/miku.pmx") == "characters/miku.amesh");
 	CHECK(BakedName("props/crate.glb") == "props/crate.amesh");
 	CHECK(BakedName("props/crate.OBJ") == "props/crate.amesh");
+	CHECK(BakedName("materials/oak.mat") == "materials/oak.amat");
 	CHECK(BakedName("tex/skin.png") == "tex/skin.atex");
 	CHECK(BakedName("tex/skin.jpg") == "tex/skin.atex");
 	CHECK(BakedName("tex/skin.bmp") == "tex/skin.atex");
@@ -245,4 +257,63 @@ TEST_CASE("a missing input directory is a run that does not start", "[assetc][ba
 	// Missing input is a run failure, not a failed row.
 	CHECK_FALSE(failure.empty());
 	CHECK(report.Assets.empty());
+}
+
+// --- materials ---------------------------------------------------------------
+
+TEST_CASE("a material's colour map is rewritten to the baked texture", "[assetc][bake]") {
+	// **The whole point of the `.mat` step.** A material source names the file
+	// beside it — `oak_Color.png` — and the baked tree holds `oak_Color.atex`. If
+	// the rewrite used any rule other than `BakedName`, the material would
+	// resolve to a name no manifest carries and the part would draw the engine
+	// default with nothing saying why.
+	const Scratch scratch("material");
+	scratch.Write("materials/oak_Color.bmp", BMP);
+	scratch.Write("materials/oak.mat", std::string_view("# a material\ncolor = oak_Color.bmp\n"));
+
+	const Report report = Baked(scratch, Settings{});
+	REQUIRE(report.Failures == 0);
+
+	REQUIRE(fs::exists(scratch.Out() / "materials/oak.amat"));
+	CHECK(ReadMaterial(scratch.Out() / "materials/oak.amat").ColourMap == "materials/oak_Color.atex");
+}
+
+TEST_CASE("a material may name no texture at all", "[assetc][bake]") {
+	// An untextured material is a real state rather than a malformed file —
+	// `assets/Material.hpp` — so this bakes and draws the engine's default.
+	const Scratch scratch("material-blank");
+	scratch.Write("materials/blank.mat", std::string_view("# nothing chosen yet\n"));
+
+	const Report report = Baked(scratch, Settings{});
+	CHECK(report.Failures == 0);
+	CHECK(ReadMaterial(scratch.Out() / "materials/blank.amat").ColourMap.empty());
+}
+
+TEST_CASE("a material's reference cannot escape the input tree", "[assetc][bake]") {
+	// The same refusal a model's texture reference gets, and for the same
+	// reason: a name that resolves outside the tree names something no publisher
+	// will publish.
+	const Scratch scratch("material-escape");
+	scratch.Write("materials/bad.mat", std::string_view("color = ../../etc/passwd\n"));
+
+	const Report report = Baked(scratch, Settings{});
+	CHECK(report.Failures == 1);
+	CHECK(ReadMaterial(scratch.Out() / "materials/bad.amat").ColourMap.empty());
+}
+
+TEST_CASE("an unknown key in a material is ignored rather than refused", "[assetc][bake]") {
+	// **The direction that matters.** `ROADMAP.md` v0.11 adds normal, roughness
+	// and the rest when there is a pass that reads them; a baker that refused an
+	// unknown key would make every material written for the newer engine
+	// unbakeable by the older one, on a content tree that outlives a build.
+	const Scratch scratch("material-forward");
+	scratch.Write("materials/oak_Color.bmp", BMP);
+	scratch.Write(
+		"materials/oak.mat",
+		std::string_view("normal = oak_Normal.png\ncolor = oak_Color.bmp\nroughness = oak_R.png\n")
+	);
+
+	const Report report = Baked(scratch, Settings{});
+	CHECK(report.Failures == 0);
+	CHECK(ReadMaterial(scratch.Out() / "materials/oak.amat").ColourMap == "materials/oak_Color.atex");
 }

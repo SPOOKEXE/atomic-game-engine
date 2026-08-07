@@ -1567,6 +1567,89 @@ cdn --publish content --store store --signing-key HEX
 client --cdn dir:store --publisher-key PUBLIC --script Meshes.luau
 ```
 
+**`.mat` bakes to `.amat`, and the colour map it names is rewritten by the same
+rule a model's texture is.** A material source is a few lines of text beside its
+textures:
+
+```
+# atomic material
+color = Bricks075A_Color.png
+```
+
+`assetc` turns that into `materials/…/Bricks075A.amat` naming
+`materials/…/Bricks075A_Color.atex` — through `BakedName`, the one function that
+decides what a baked file is called, because a second spelling of that rule is a
+material resolving to nothing. A `.mat` naming no texture bakes fine and draws
+the engine's own default; a reference that escapes the input tree is refused, as
+a model's is. Unknown keys are ignored, so a material written for a later engine
+still bakes on this one.
+
+## Filling the store with materials — `just materials`
+
+```sh
+just materials              # 100 per source, 1K, ~2.7 GB of source art
+just materials count=25     # a smaller pull
+```
+
+Downloads public-domain PBR material sets from **ambientCG**, **Poly Haven** and
+**cgbookcase** — all three CC0 — and bakes them into
+`~/Documents/atomic-game-engine/cdn/raw`. Two steps, and the recipe is the two:
+
+```sh
+python3 scripts/fetch-materials.py --out .cache/materials --count 100
+assetc --input .cache/materials --output ~/Documents/atomic-game-engine/cdn/raw --model-size 0
+```
+
+**Publishing is not one of them**, and that is deliberate: publishing needs a
+signing key, and a recipe carrying one would put a key in the repository. Publish
+from the studio's assets panel, or with `contentimport --publish --key HEX`.
+
+Each material lands as a `.amat` and its five maps beside it:
+
+```
+materials/ambientcg/Bricks075A.amat
+materials/ambientcg/Bricks075A_Color.atex
+materials/ambientcg/Bricks075A_Normal.atex
+materials/ambientcg/Bricks075A_Roughness.atex
+materials/ambientcg/Bricks075A_AO.atex
+materials/ambientcg/Bricks075A_Height.atex
+```
+
+**Only the colour map is sampled today.** The other four are published and
+fetchable and nothing reads them — `ROADMAP.md` v0.11's G-buffer is where they
+get a pass, and the `.mat` gains four keys with it.
+
+**A tree under `raw/`, not the flat hash-named import `contentimport` does.** A
+material has to *name* its texture, and a hash rename gives it no name to write.
+`cdn::Publish` has always walked `raw/` recursively and named assets by their
+path relative to it, so this needed nothing new — only the studio's raw listing,
+which was not recursive and showed the whole tree as empty.
+
+The fetcher is resumable: anything already on disk is skipped, so an interrupted
+run or a raised `--count` costs only what is new.
+
+## Using a material
+
+`Enum.Material` does not exist. A material is content, and a part names one
+through a `Material` instance under it:
+
+```lua
+local part = Instance.new("Part")
+part.Parent = workspace
+
+local material = Instance.new("Material")
+material.MaterialId = "materials/ambientcg/Bricks075A.amat"
+material.Parent = part
+```
+
+**A part with no `Material` draws the engine's own white plastic**, which is
+compiled in and needs no content store — so a fresh part looks like a fresh part
+on a machine with nothing published. Setting `MaterialId` back to `""` returns it
+to that.
+
+In the studio: select a part, **Insert Object → Material**, and the `MaterialId`
+row gets a content picker over everything published as a material.
+
 The second command has no idea the first ran. That is the contract: this
 produces a directory, and a publisher publishes directories.
 

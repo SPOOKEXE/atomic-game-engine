@@ -432,7 +432,13 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// whenever a system is added to the presentation phase, which is exactly
 	// when somebody should be asked whether a world that only presents — the
 	// studio's suspended scene — still does the right thing.
-	REQUIRE(timings.size() == 15);
+	//
+	// **Sixteen since v0.10's `resolve-materials`, and the question it forces was
+	// answered.** It runs in `PreSimulation`, so a suspended scene does not run
+	// it — which is right: a `Material` instance's texture is already on the part
+	// from the last tick that did, so a frozen world keeps the material it was
+	// frozen with rather than losing it.
+	REQUIRE(timings.size() == 16);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

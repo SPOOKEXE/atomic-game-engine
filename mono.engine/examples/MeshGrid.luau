@@ -48,28 +48,29 @@
 -- large. Leave it at the default and the channel refuses to publish anything,
 -- which looks exactly like a content failure and is not one.
 --
--- With no `--cdn` the scene still runs and every cell is a cube. That is the
--- honest degraded state, and it is the first thing to check when a cell is
--- wrong: if *every* cell is a cube the content never arrived, and if one is,
--- the name in `MODELS` below does not match what the publisher named.
+-- With no `--cdn` the scene runs and stands empty, and says so on the pedestal
+-- row. That is the honest degraded state.
+--
+-- ## Why this file no longer names any mesh
+--
+-- **It used to hold nine string literals, and on any store but the one it was
+-- written against every single cell drew a cube.** Nothing warned: an
+-- unregistered mesh falls back to a cube, which is also what a mesh that has
+-- not streamed in yet looks like — so a scene that had never worked and a scene
+-- that was still loading were the same picture.
+--
+-- The names were never this file's to know. A publisher decides them, and
+-- `ContentService:GetMeshes()` reports the ones that actually arrived in this
+-- world — so what the grid shows is exactly what loaded, which is the thing the
+-- demo is *for*. A cell on screen is proof; a cell that is missing is content
+-- that is not here, and there is no third case where a name was misspelt.
+--
+-- **Built as content arrives rather than at startup.** Delivery is asynchronous
+-- — a fetch spans frames and `AGENTS.md` rule 5 forbids it becoming visible
+-- mid-tick — so at the moment this chunk runs the catalogue is empty and stays
+-- empty for a while. The grid therefore grows on `Heartbeat` as meshes land.
 
 local RunService = game:GetService("RunService")
-
--- The names a publisher gave these are the names this asks for, verbatim. There
--- is no lookup table between the two anywhere — the manifest's name *is* the
--- mesh's name, which is `AGENTS.md` rule 4 surviving a signature and a network
--- hop.
-local MODELS = {
-	{ mesh = "props/fox.amesh", label = "fox (glTF)" },
-	{ mesh = "props/dragon.amesh", label = "dragon (glTF)" },
-	{ mesh = "characters/wizard.amesh", label = "wizard (glTF)" },
-	{ mesh = "characters/xiao/魈.amesh", label = "xiao (PMX)" },
-	{ mesh = "characters/barbara/芭芭拉.amesh", label = "barbara (PMX)" },
-	{ mesh = "characters/ruriki/梦见月瑞希.amesh", label = "ruriki (PMX)" },
-	{ mesh = "characters/ruriki/梦见月瑞希_垂尾.amesh", label = "ruriki tail (PMX)" },
-	{ mesh = "characters/ruriki/食梦貘.amesh", label = "baku (PMX)" },
-	{ mesh = "characters/ruriki/托盘.amesh", label = "tray (PMX)" },
-}
 
 local COLUMNS = 3
 local SPACING = 7
@@ -82,10 +83,14 @@ local SPACING = 7
 local MODEL_SIZE = 4
 
 local PEDESTAL_HEIGHT = 0.6
-local ROWS = math.ceil(#MODELS / COLUMNS)
 
--- Enough plate to stand on with a margin, derived rather than typed so adding a
--- tenth model does not leave it hanging off the edge.
+-- **How many cells the plate and the mirror are built for, rather than how many
+-- there are.** The grid grows as content arrives, and a floor that resized every
+-- time a mesh landed would be a scene that visibly rebuilds itself. Twelve is
+-- three full rows, which is more than this repository's seed content has.
+local CELLS = 12
+local ROWS = math.ceil(CELLS / COLUMNS)
+
 local PLATE_X = COLUMNS * SPACING + SPACING
 local PLATE_Z = ROWS * SPACING + SPACING
 
@@ -114,38 +119,45 @@ end
 
 local turntables: { { Part: MeshPart, Rate: number } } = {}
 
-for index, model in ipairs(MODELS) do
-	local at = cellPosition(index)
+-- What is on the plate already, keyed by mesh name, so a mesh that arrives
+-- twice is not built twice.
+local placed: { [string]: { Part: MeshPart, Pedestal: Part } } = {}
+local placedCount = 0
 
-	-- A pedestal per cell, and it earns its place twice: it separates the cells
-	-- visually, and it is a part the renderer definitely draws — so a cell
-	-- showing a pedestal and nothing above it is a mesh that failed, while a
-	-- cell showing nothing at all is a scene that never loaded.
+-- A label for a cell, from the name the publisher gave it.
+--
+-- **The file name and its extension**, because that is the only thing this
+-- knows about a mesh — and it is genuinely useful: `.amesh` is baked geometry
+-- and anything else is a source format that got published raw, which is a
+-- content-pipeline mistake worth being able to see from the scene.
+local function labelFor(mesh: string): string
+	local slash = string.find(mesh, "/[^/]*$")
+	if slash then
+		return string.sub(mesh, slash + 1)
+	end
+	return mesh
+end
+
+-- Builds one cell. Position is applied separately, because a cell's place
+-- depends on how many others exist and that changes as content lands.
+local function buildCell(mesh: string)
 	local pedestal = Instance.new("Part")
-	pedestal.Name = `Pedestal_{index}`
+	pedestal.Name = `Pedestal_{mesh}`
 	pedestal.Anchored = true
 	pedestal.Size = Vector3.new(SPACING * 0.7, PEDESTAL_HEIGHT, SPACING * 0.7)
-	pedestal.CFrame = CFrame.new(at + Vector3.new(0, PEDESTAL_HEIGHT / 2, 0))
-
-	-- Alternating, so the grid's rows and columns read as a grid. Nothing
-	-- depends on it.
-	local tint = (index % 2 == 0) and 0.42 or 0.34
-	pedestal.Color = Color3.new(tint, tint * 0.98, tint * 1.08)
 	pedestal.Parent = workspace
 
 	local part = Instance.new("MeshPart")
-	part.Name = model.label
+	part.Name = labelFor(mesh)
 	part.Anchored = true
 
-	-- **The one string that has to match.** Everything else in this file is
-	-- arithmetic; this is the name the publisher signed.
-	part.MeshId = model.mesh
+	-- **The one string that has to match, and it came from the engine.** This
+	-- is a name `ContentService` reported, so it is by construction a mesh this
+	-- world holds — which is the whole difference between this file and the
+	-- version that carried literals.
+	part.MeshId = mesh
 
 	part.Size = Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
-
-	-- Sat on top of its pedestal rather than at a fixed height, so the row
-	-- lines up whatever the pedestal is.
-	part.CFrame = CFrame.new(at + Vector3.new(0, PEDESTAL_HEIGHT + MODEL_SIZE / 2, 0))
 
 	-- **No `TextureID`.** A `MeshPart` that names none samples whatever texture
 	-- each of its own submeshes recorded at bake time — which is how a
@@ -161,14 +173,57 @@ for index, model in ipairs(MODELS) do
 
 	part:AddTag("Imported")
 
+	placed[mesh] = { Part = part, Pedestal = pedestal }
+
 	table.insert(turntables, {
 		Part = part,
 
 		-- Different rates, so two neighbouring cells are never in step. A grid
 		-- turning in unison reads as one object and hides which cell is which.
-		Rate = 0.35 + (index % 4) * 0.12,
+		Rate = 0.35 + (placedCount % 4) * 0.12,
 	})
 end
+
+-- Puts every cell where its place in the sorted list says.
+--
+-- **Re-applied whenever the set grows, and that is deliberate.**
+-- `ContentService` sorts, so the final layout is a function of the names alone
+-- and is the same on every run — but a mesh arriving mid-load may sort *before*
+-- ones already on the plate, so the cells shuffle while content streams and
+-- settle once it stops. The alternative, placing by arrival order, would be
+-- stable on screen and different every run.
+local function layout(names: { string })
+	for index, mesh in ipairs(names) do
+		local cell = placed[mesh]
+		if cell then
+			local at = cellPosition(index)
+			cell.Pedestal.CFrame = CFrame.new(at + Vector3.new(0, PEDESTAL_HEIGHT / 2, 0))
+			cell.Part.CFrame = CFrame.new(at + Vector3.new(0, PEDESTAL_HEIGHT + MODEL_SIZE / 2, 0))
+		end
+	end
+end
+
+-- **A sign, so an empty plate is a sentence rather than a mystery.** With no
+-- `--cdn` this scene has nothing to show, and a bare floor gives no clue
+-- whether the scene failed or the content did.
+local sign = Instance.new("Part")
+sign.Name = "Status"
+sign.Anchored = true
+sign.Size = Vector3.new(SPACING * 1.6, 1.2, 0.2)
+sign.CFrame = CFrame.new(Vector3.new(0, 1.2, PLATE_Z / 2 - 1))
+sign.Color = Color3.new(0.18, 0.2, 0.24)
+sign.Parent = workspace
+
+local label = Instance.new("SurfaceGui")
+label.Face = Enum.NormalId.Front
+label.Parent = sign
+
+local text = Instance.new("TextLabel")
+text.Size = UDim2.new(1, 0, 1, 0)
+text.BackgroundTransparency = 1
+text.TextColor3 = Color3.new(0.85, 0.87, 0.92)
+text.Text = "waiting for content..."
+text.Parent = label
 
 -- **A mirror across the back**, which is worth more here than it looks: it
 -- shows every model's far side at the same time as the camera shows the near
@@ -221,6 +276,47 @@ view.Parent = workspace
 -- built and merely badly framed rather than broken.
 workspace.CurrentCamera = view
 
+-- **The grid grows here, and this is the whole change.** Content is fetched
+-- across frames, so the catalogue is empty when this chunk runs and fills as
+-- bundles verify. Polling it is the honest shape: there is no callback a fetch
+-- could fire without becoming visible mid-tick, which is exactly what rule 5
+-- forbids.
+--
+-- Cheap when nothing changes: `GetMeshes` builds a sorted list of what this
+-- world holds, and the common case is that its length has not moved.
+local known = 0
+
+RunService.Heartbeat:Connect(function()
+	local meshes = ContentService:GetMeshes()
+	if #meshes == known then
+		return
+	end
+	known = #meshes
+
+	for index, mesh in ipairs(meshes) do
+		if index > CELLS then
+			-- **Said out loud rather than silently dropped.** A store with more
+			-- meshes than the plate has cells is an ordinary thing to have, and
+			-- a grid that quietly showed the first twelve would read as content
+			-- that failed to arrive.
+			print(`mesh grid: {#meshes - CELLS} more mesh(es) than the {CELLS}-cell plate holds`)
+			break
+		end
+		if not placed[mesh] then
+			buildCell(mesh)
+			placedCount += 1
+		end
+	end
+
+	layout(meshes)
+
+	text.Text = if placedCount == 0
+		then "no meshes in this world — run with --cdn"
+		else `{placedCount} mesh(es)`
+
+	print(`mesh grid: {placedCount} mesh(es) placed`)
+end)
+
 RunService.Heartbeat:Connect(function(deltaTime: number)
 	for _, turntable in turntables do
 		-- Composed onto the existing frame rather than recomputed from an
@@ -230,7 +326,7 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	end
 end)
 
-print(`mesh grid: {#MODELS} model(s) in a {COLUMNS}x{ROWS} grid, turning`)
+print(`mesh grid: waiting for content, {COLUMNS}x{ROWS} plate ready`)
 
 -- **What each cell actually got, once the content has landed.** `MeshId` is a
 -- string this file asks for and `TrianglesCount` is what the world found behind
@@ -246,8 +342,17 @@ print(`mesh grid: {#MODELS} model(s) in a {COLUMNS}x{ROWS} grid, turning`)
 -- still says what it found instead of staying silent.
 local REPORT_TIMEOUT = 10
 
+-- How long the cell count has to hold still before the report is believed.
+--
+-- **A bundle arrives all at once and the next one may not have started**, so a
+-- gap between two arrivals is ordinary and a report that fired in one would be
+-- describing half the content.
+local SETTLE_SECONDS = 2
+
 local reported = false
 local waited = 0
+local counted = -1
+local settled = 0
 
 RunService.Heartbeat:Connect(function(deltaTime: number)
 	if reported then
@@ -265,7 +370,24 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 		end
 	end
 
-	if missing > 0 and waited < REPORT_TIMEOUT then
+	-- **Nothing missing is no longer enough to report, and that is a bug this
+	-- change introduced.** The grid used to hold every cell from the first
+	-- frame, so "none are missing" meant "all of them arrived". Now the cells
+	-- appear as content does — so on the frame the built-in meshes resolve,
+	-- nothing is missing because nothing else exists yet, and the report fired
+	-- before a single import had landed. It said `0 unresolved` and was
+	-- describing six primitives.
+	--
+	-- So the report waits for the *set* to stop growing as well. `settled` is
+	-- how long the count has been unchanged; content arriving resets it.
+	if #turntables ~= counted then
+		counted = #turntables
+		settled = 0
+		return
+	end
+	settled += deltaTime
+
+	if (missing > 0 or settled < SETTLE_SECONDS) and waited < REPORT_TIMEOUT then
 		return
 	end
 	reported = true

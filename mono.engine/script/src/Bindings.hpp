@@ -425,6 +425,17 @@ namespace engine::script {
 	// precisely because the barrier applies replies in a deterministic order.
 	void OpenServices(lua_State *state);
 
+	// Installs `ContentService`, which answers what content this world holds.
+	//
+	// **The other half of rule 4.** A script names an asset and had no way to
+	// ask what the names were, so every demo carried string literals for files
+	// that only existed if somebody had baked that exact tree. See
+	// `ContentService.cpp`.
+	//
+	// @param state The VM.
+	// @since v0.10
+	void OpenContentService(lua_State *state);
+
 	// Installs `require`, which is the only route to a `ModuleScript`.
 	//
 	// **Defined beside the compiler rather than with the other globals**, because

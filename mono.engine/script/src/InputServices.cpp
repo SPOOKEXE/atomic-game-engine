@@ -50,7 +50,7 @@ namespace engine::script {
 		// `UserInputService:IsKeyDown(Enum.KeyCode.Space)`
 		//
 		// **Takes an `EnumItem` or a string**, which is the same latitude a
-		// property with `PropertyType::Enum` gives: `part.Material = "Plastic"` is
+		// property with `PropertyType::Enum` gives: `part.AlphaMode = "Clip"` is
 		// what a migrating script already contains, and refusing it here would
 		// make input the one surface that is stricter than the rest.
 		int IsKeyDown(lua_State *state) {

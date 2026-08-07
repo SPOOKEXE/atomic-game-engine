@@ -1298,13 +1298,22 @@ namespace engine::render {
 			}
 
 			if (lighting != nullptr) {
-				SDL_GPUTexture *const sampled = Textures.Find(texture);
+				// **The default, not the fallback texel, and not "do not
+				// sample".** A drawable naming no texture is not a drawable with
+				// nothing to draw — it is one made of the engine's default
+				// material, which `DefaultTexture.hpp` says is a real sheet of
+				// white plastic. So the slot always has content and the shader
+				// always samples it; what used to be the "no texture" branch is
+				// now the case where `Material = None` means something.
+				SDL_GPUTexture *const found = Textures.Find(texture);
+				SDL_GPUTexture *const sampled = found != nullptr ? found : Textures.Default();
 
 				// **The fallback texel is bound rather than the binding being
-				// skipped**, because a sampler a pipeline declares must have
-				// something in it — an unbound one is undefined behaviour on
-				// some backends and a validation error on others. The uniform
-				// flag is what tells the shader to ignore it.
+				// skipped** for the other two, because a sampler a pipeline
+				// declares must have something in it — an unbound one is
+				// undefined behaviour on some backends and a validation error on
+				// others. Those two are genuinely absent features rather than
+				// defaulted ones, and their uniform flags still say so.
 				const SDL_GPUTextureSamplerBinding samplers[] = {
 					{shadow != nullptr ? shadow : FallbackTexture, shadowSampler},
 					{surface != nullptr ? surface : FallbackTexture, surfaceSampler},
@@ -2537,6 +2546,20 @@ namespace engine::render {
 			return false;
 		}
 		return State->Textures.Add(name, image);
+	}
+
+	void *Renderer::TextureHandle(const core::Name &name) const {
+		if (State == nullptr) {
+			return nullptr;
+		}
+		return State->Textures.Find(name);
+	}
+
+	bool Renderer::DropTexture(const core::Name &name) {
+		if (State == nullptr) {
+			return false;
+		}
+		return State->Textures.Drop(name);
 	}
 
 	bool Renderer::HasMesh(const core::Name &name) const {

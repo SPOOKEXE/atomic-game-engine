@@ -14,7 +14,7 @@
 // **Matching is over `FormatValue`, which is what makes one predicate work for
 // every type.** `game::Values.hpp` already renders any property to text for the
 // properties panel and the `.agame` writer; comparing against that string means
-// `Transparency` `0.5`, `Material` `Plastic` and `Anchored` `true` are all the
+// `Transparency` `0.5`, `AlphaMode` `Clip` and `Anchored` `true` are all the
 // same operation. Exact comparison goes the other way — `ParseValue` into the
 // property's own type and `ValuesEqual` — so "0.5" does not match "0.50001"
 // when somebody asks for exactness.

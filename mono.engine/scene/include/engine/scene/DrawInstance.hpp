@@ -70,9 +70,6 @@ namespace engine::scene {
 		// Which mesh, by name. Invalid means the consumer's default.
 		core::Name Mesh;
 
-		// Which material, by name. Invalid means the consumer's default.
-		core::Name Material;
-
 		// Which texture overrides whatever the mesh's own submeshes name.
 		//
 		// **An override rather than the only answer**, and the two-level rule

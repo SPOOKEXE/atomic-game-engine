@@ -286,6 +286,7 @@
 			"links": [
 				"assets",
 				"audio",
+				"bake",
 				"cdn",
 				"client",
 				"control",
@@ -440,6 +441,7 @@
 			"links": [
 				"assets",
 				"audio",
+				"bake",
 				"cdn",
 				"client",
 				"control",

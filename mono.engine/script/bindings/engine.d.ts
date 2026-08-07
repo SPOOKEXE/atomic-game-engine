@@ -187,7 +187,10 @@ declare interface RaycastResult {
 	readonly Position: Vector3;
 	readonly Normal: Vector3;
 	readonly Distance: number;
-	readonly Material: Enum.Material;
+
+	// The `Surface` name — what the part is like to touch, not what it looks
+	// like. See the Luau declaration above for why it is a string.
+	readonly Material: string;
 }
 
 declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
@@ -205,7 +208,6 @@ declare namespace Enum {
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
-	interface Material extends EnumItem { readonly __enum: "Material"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
 	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
 	interface ParticleEmitterShape extends EnumItem { readonly __enum: "ParticleEmitterShape"; }
@@ -357,25 +359,6 @@ declare namespace Enum {
 		readonly F10: KeyCode;
 		readonly F11: KeyCode;
 		readonly F12: KeyCode;
-	};
-	const Material: {
-		readonly Plastic: Material;
-		readonly SmoothPlastic: Material;
-		readonly Wood: Material;
-		readonly WoodPlanks: Material;
-		readonly Metal: Material;
-		readonly CorrodedMetal: Material;
-		readonly DiamondPlate: Material;
-		readonly Concrete: Material;
-		readonly Brick: Material;
-		readonly Cobblestone: Material;
-		readonly Grass: Material;
-		readonly Sand: Material;
-		readonly Slate: Material;
-		readonly Ice: Material;
-		readonly Glass: Material;
-		readonly Neon: Material;
-		readonly ForceField: Material;
 	};
 	const MouseBehavior: {
 		readonly Default: MouseBehavior;
@@ -718,7 +701,6 @@ declare interface BasePart extends PVInstance {
 	CollisionGroup: string;
 	Color: Color3;
 	ColorMap: string;
-	Material: Enum.Material;
 	Mesh: string;
 	Size: Vector3;
 	Transparency: number;
@@ -761,6 +743,10 @@ declare interface Attachment extends Instance {
 	Position: Vector3;
 	readonly WorldCFrame: CFrame;
 	readonly WorldPosition: Vector3;
+}
+
+declare interface Material extends Instance {
+	MaterialId: string;
 }
 
 declare interface Humanoid extends Instance {
@@ -1322,6 +1308,7 @@ declare const Instance: {
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
 		(className: "Sound", parent?: Instance): Sound;
 		(className: "Attachment", parent?: Instance): Attachment;
+		(className: "Material", parent?: Instance): Material;
 		(className: "Humanoid", parent?: Instance): Humanoid;
 		(className: "Light", parent?: Instance): Light;
 		(className: "PointLight", parent?: Instance): PointLight;

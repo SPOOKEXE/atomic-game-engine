@@ -40,16 +40,14 @@
 
 local MagicRuntime = {}
 
--- The materials a spell presentation may name. `MagicCore`'s validator allows
--- exactly these four, and this engine has all of them -- so unlike terrain there
--- is no remap here and none should be added: widening it would let a spell
--- author a material the Roblox side would refuse.
-local MATERIALS: { [string]: Enum.Material } = {
-	Neon = Enum.Material.Neon,
-	SmoothPlastic = Enum.Material.SmoothPlastic,
-	ForceField = Enum.Material.ForceField,
-	Glass = Enum.Material.Glass,
-}
+-- `MagicCore`'s validator still allows exactly four material names, and nothing
+-- on this side reads them.
+--
+-- **No material is set, and `Enum.Material` no longer exists.** v0.10 removed
+-- it: seventeen names nothing sampled, replaced by a `Material` instance that
+-- names a published asset. A demo that shipped one would only draw right on a
+-- machine whose content store happened to hold that material, so the colour
+-- carries the look here exactly as it always actually did.
 
 export type Handle = {
 	part: BasePart,
@@ -120,10 +118,6 @@ function MagicRuntime.build(compiled: any, parent: Instance?, name: string?): Ha
 	part.Color = Color3.new(presentation.color.r, presentation.color.g, presentation.color.b)
 	part.Transparency = presentation.transparency or 0
 
-	local material = MATERIALS[presentation.material]
-	assert(material ~= nil, `unsupported spell material '{tostring(presentation.material)}'`)
-	part.Material = material
-
 	if parent ~= nil then
 		part.Parent = parent
 	else
@@ -182,7 +176,6 @@ function MagicRuntime.missingEmitters(graph: any): number
 end
 
 MagicRuntime.sampleCurve = sampleCurve
-MagicRuntime.Materials = MATERIALS
 MagicRuntime.Build = MagicRuntime.build
 
 return table.freeze(MagicRuntime)

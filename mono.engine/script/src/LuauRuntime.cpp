@@ -291,6 +291,7 @@ namespace engine::script {
 		OpenGame(State);
 		OpenWorkspace(State, Store);
 		OpenServices(State);
+		OpenContentService(State);
 		OpenQueries(State);
 		OpenTask(State);
 		OpenClock(State);

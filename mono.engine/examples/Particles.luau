@@ -93,7 +93,6 @@ plate.Anchored = true
 plate.Size = Vector3.new(GRID * SPACING + 40, 1, GRID * SPACING + 40)
 plate.CFrame = CFrame.new(Vector3.new(0, -0.5, 0))
 plate.Color = Color3.new(0.10, 0.11, 0.14)
-plate.Material = Enum.Material.Slate
 plate.Parent = workspace
 
 -- --- the demonstration row ---------------------------------------------------
@@ -108,7 +107,6 @@ local function pedestal(x: number, z: number, colour: Color3): Part
 	part.Size = Vector3.new(2, 1, 2)
 	part.CFrame = CFrame.new(Vector3.new(x, 0.5, z))
 	part.Color = colour
-	part.Material = Enum.Material.Metal
 	part.Parent = workspace
 	return part
 end

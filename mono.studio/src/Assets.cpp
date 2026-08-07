@@ -242,6 +242,31 @@ namespace studio {
 		ImGui::End();
 	}
 
+	void Editor::DrawPreview(const std::string &name, float side) {
+		const ImVec2 box(side, side);
+
+		if (void *handle = ThumbnailFor(name); handle != nullptr) {
+			ImGui::Image(reinterpret_cast<ImTextureID>(handle), box);
+			return;
+		}
+
+		// **A box of the same size rather than nothing**, so a row does not
+		// change height when its picture arrives — a list that reflows while it
+		// loads is one nobody can click in.
+		//
+		// Whether this is "not yet" or "never" is deliberately not
+		// distinguished: `Thumbnails.cpp` caches a failure as null, so asking
+		// again is free, and a spinner on a mesh that will never have a preview
+		// would be a promise the editor cannot keep.
+		const ImVec2 corner = ImGui::GetCursorScreenPos();
+		ImGui::Dummy(box);
+		ImGui::GetWindowDrawList()->AddRect(
+			corner,
+			ImVec2(corner.x + side, corner.y + side),
+			ImGui::GetColorU32(ImGuiCol_Border)
+		);
+	}
+
 	void Editor::DrawPublishedList() {
 		ImGui::Text("%zu asset(s)", PickerContents.size());
 
@@ -255,50 +280,129 @@ namespace studio {
 
 		if (!ImGui::BeginTable(
 				"published",
-				3,
-				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+				4,
+				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+					ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti
 			)) {
 			return;
 		}
 
-		ImGui::TableSetupColumn("Name");
+		// **The preview column is explicitly not sortable.** Every other column
+		// is a fact about the asset; this one is a picture, and a header that
+		// looked clickable and did nothing is worse than one that plainly is
+		// not.
+		ImGui::TableSetupColumn(
+			"", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, engine::ui::Scaled(40.0f)
+		);
+		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort);
 		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
 		ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(90.0f));
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableHeadersRow();
 
+		// Filtered first, so the sort below orders what is actually drawn.
+		std::vector<const cdn::PublishedEntry *> shown;
+		shown.reserve(PickerContents.size());
 		for (const cdn::PublishedEntry &entry : PickerContents) {
 			int score = 0;
-			if (!FuzzyMatch(AssetFilter, entry.Name, score)) {
-				continue;
+			if (FuzzyMatch(AssetFilter, entry.Name, score)) {
+				shown.push_back(&entry);
 			}
+		}
 
-			ImGui::TableNextRow();
+		// **The view is sorted and the store is not.** `PickerContents` is what
+		// the manifest says, in the order it says it; a click on a header must
+		// not reorder the thing every other panel reads.
+		if (const ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs()) {
+			SortPublished(shown, specs);
+		}
 
-			ImGui::TableNextColumn();
+		ImGuiListClipper clipper;
+		clipper.Begin(static_cast<int>(shown.size()));
 
-			// **The name is what a scene writes**, so it is the thing worth
-			// copying — one click rather than reading it off and retyping.
-			ImGui::TextUnformatted(entry.Name.c_str());
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s\nclick to copy", entry.Name.c_str());
-			}
-			if (ImGui::IsItemClicked()) {
-				ImGui::SetClipboardText(entry.Name.c_str());
-			}
+		while (clipper.Step()) {
+			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+				const cdn::PublishedEntry &entry = *shown[static_cast<size_t>(row)];
 
-			ImGui::TableNextColumn();
-			ImGui::TextUnformatted(KindName(entry.Kind));
+				ImGui::TableNextRow();
 
-			ImGui::TableNextColumn();
-			const std::string hex = entry.Root.ToHex();
-			ImGui::TextUnformatted(hex.substr(0, 8).c_str());
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", hex.c_str());
+				ImGui::TableNextColumn();
+
+				// **Only the rows the clipper drew ask for a picture**, which is
+				// the bound that makes previews affordable over a store of
+				// hundreds — Thumbnails.cpp.
+				DrawPreview(entry.Name, engine::ui::Scaled(32.0f));
+
+				ImGui::TableNextColumn();
+
+				// **The name is what a scene writes**, so it is the thing worth
+				// copying — one click rather than reading it off and retyping.
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(entry.Name.c_str());
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s\nclick to copy", entry.Name.c_str());
+				}
+				if (ImGui::IsItemClicked()) {
+					ImGui::SetClipboardText(entry.Name.c_str());
+				}
+
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(KindName(entry.Kind));
+
+				ImGui::TableNextColumn();
+				const std::string hex = entry.Root.ToHex();
+				ImGui::TextUnformatted(hex.substr(0, 8).c_str());
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", hex.c_str());
+				}
 			}
 		}
 
 		ImGui::EndTable();
+	}
+
+	void Editor::SortPublished(
+		std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs
+	) {
+		if (specs == nullptr || specs->SpecsCount == 0) {
+			return;
+		}
+
+		// **Stable, and the specs are walked backwards.** imgui lists the
+		// columns most-significant first; sorting stably from the least
+		// significant upward is what makes a multi-column sort mean "by kind,
+		// then by name" rather than "by whichever was clicked last".
+		for (int index = specs->SpecsCount - 1; index >= 0; index--) {
+			const ImGuiTableColumnSortSpecs &spec = specs->Specs[index];
+			const bool ascending = spec.SortDirection == ImGuiSortDirection_Ascending;
+
+			std::stable_sort(
+				rows.begin(),
+				rows.end(),
+				[&](const cdn::PublishedEntry *left, const cdn::PublishedEntry *right) {
+					bool less = false;
+					switch (spec.ColumnIndex) {
+					case 1:
+						less = left->Name < right->Name;
+						break;
+					case 2:
+						// **By the name a person reads, not by the enum's
+						// ordinal.** The column shows "mesh" and "texture", and
+						// a sort that ordered by the numbers behind them would
+						// look arbitrary to everybody but the compiler.
+						less = std::string_view(KindName(left->Kind)) <
+							   std::string_view(KindName(right->Kind));
+						break;
+					case 3:
+						less = left->Root.ToHex() < right->Root.ToHex();
+						break;
+					default:
+						return false;
+					}
+					return ascending ? less : !less && left != right;
+				}
+			);
+		}
 	}
 
 	void Editor::DrawRawList() {
@@ -318,11 +422,17 @@ namespace studio {
 		TextField("##raw-filter", AssetFilter, "filter");
 
 		if (!ImGui::BeginTable(
-				"raw", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+				"raw",
+				4,
+				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+					ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti
 			)) {
 			return;
 		}
 
+		ImGui::TableSetupColumn(
+			"", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, engine::ui::Scaled(40.0f)
+		);
 		ImGui::TableSetupColumn("Was called");
 		ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
 		ImGui::TableSetupColumn("Stored as", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(90.0f));
@@ -344,6 +454,14 @@ namespace studio {
 			}
 		}
 
+		// **The default order is newest first, which no column can express**, so
+		// the sort is applied only once somebody has clicked a header. Sorting
+		// by "Was called" the moment the tab opens would bury what they just
+		// imported.
+		if (const ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs()) {
+			SortRaw(shown, specs);
+		}
+
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(shown.size()));
 
@@ -354,6 +472,15 @@ namespace studio {
 				ImGui::TableNextRow();
 
 				ImGui::TableNextColumn();
+
+				// **The file name and not the original**, because that is what
+				// this file is called under `raw/` — which is the path
+				// `ThumbnailFor` resolves. The two differ: `Original` is what it
+				// was called before it came in.
+				DrawPreview(entry.Path.filename().string(), engine::ui::Scaled(32.0f));
+
+				ImGui::TableNextColumn();
+				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(entry.Original.c_str());
 
 				ImGui::TableNextColumn();
@@ -372,6 +499,43 @@ namespace studio {
 		}
 
 		ImGui::EndTable();
+	}
+
+	void Editor::SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs) {
+		if (specs == nullptr || specs->SpecsCount == 0) {
+			return;
+		}
+
+		// Least significant column first, stably — `SortPublished` carries why.
+		for (int index = specs->SpecsCount - 1; index >= 0; index--) {
+			const ImGuiTableColumnSortSpecs &spec = specs->Specs[index];
+			const bool ascending = spec.SortDirection == ImGuiSortDirection_Ascending;
+
+			std::stable_sort(
+				rows.begin(),
+				rows.end(),
+				[&](const cdn::RawEntry *left, const cdn::RawEntry *right) {
+					bool less = false;
+					switch (spec.ColumnIndex) {
+					case 1:
+						less = left->Original < right->Original;
+						break;
+					case 2:
+						// **Numerically, which is the whole reason this column
+						// is sortable.** The cell reads "1.4 MB"; sorting the
+						// text would put 900 B after 1.4 MB and read as broken.
+						less = left->Bytes < right->Bytes;
+						break;
+					case 3:
+						less = left->Path.filename() < right->Path.filename();
+						break;
+					default:
+						return false;
+					}
+					return ascending ? less : !less && left != right;
+				}
+			);
+		}
 	}
 
 	void Editor::RefreshStoreContents() {

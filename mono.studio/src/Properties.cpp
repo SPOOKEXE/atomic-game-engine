@@ -385,7 +385,7 @@ namespace studio {
 						case PropertyType::Enum: {
 							// **The registered set, not a text field.** That is
 							// the whole reason `PropertyType::Enum` exists: a
-							// typed `Material = "Plsatic"` is refused where it
+							// typed `AlphaMode = "Clipp"` is refused where it
 							// was written rather than landing in the component
 							// and surfacing as a part drawn with the default.
 							// A combo makes the typo impossible rather than

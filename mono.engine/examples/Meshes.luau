@@ -20,13 +20,16 @@
 local PLATE = 24
 local SURFACE_SIZE = Vector3.new(1024, 1024, 0)
 
--- The names a publisher gives these are the names this asks for. There is no
--- table anywhere that maps one to the other — the manifest's name *is* the
--- mesh's name, which is `AGENTS.md` rule 4 doing its job across a signature.
-local IMPORTS = {
-	{ mesh = "props/fox.amesh", texture = "", offset = -5 },
-	{ mesh = "characters/xiao_pack/芭芭拉.amesh", texture = "", offset = 5 },
-}
+-- **The imported half is discovered, not named.** This file used to hold two
+-- string literals for meshes that only existed if somebody had baked that exact
+-- tree — and on any other store both parts drew a cube, which is also what a
+-- mesh still streaming in looks like. `ContentService:GetMeshes()` reports what
+-- this world actually holds, so what stands on the plate is proof rather than a
+-- hope. `MeshGrid.luau` carries the argument in full.
+--
+-- Two of them, because this scene is the *narrow* check — one mesh in front of
+-- a mirror — and `MeshGrid.luau` is the wide one.
+local IMPORT_SLOTS = 2
 
 -- Generated meshes that need no published asset.
 local BUILTINS = {
@@ -59,14 +62,24 @@ for index, name in ipairs(BUILTINS) do
 end
 
 -- Imported meshes use textures named by their baked submeshes.
-for _, import in ipairs(IMPORTS) do
+--
+-- **Built as they arrive**, because delivery spans frames — the catalogue is
+-- empty when this chunk runs. See the loop at the bottom of the file.
+local imported: { [string]: MeshPart } = {}
+local importedCount = 0
+
+local function addImport(mesh: string, slot: number)
 	local part = Instance.new("MeshPart")
-	part.Name = import.mesh
+	part.Name = mesh
 	part.Anchored = true
-	part.MeshId = import.mesh
-	if import.texture ~= "" then
-		part.TextureID = import.texture
-	end
+
+	-- A name `ContentService` reported, so it is by construction a mesh this
+	-- world holds.
+	part.MeshId = mesh
+
+	-- **No `TextureID`.** A `MeshPart` that names none samples whatever texture
+	-- each of its own submeshes recorded at bake time, which is how a character
+	-- with six sheets works without this file knowing any of them.
 
 	-- Four metres, and metres only because the bake was `--model-size 1` — see
 	-- the header. `assetc` fitted every import's longest axis to one and
@@ -74,13 +87,15 @@ for _, import in ipairs(IMPORTS) do
 	-- built-in cube, which is what makes a PMX character and a glTF fox the
 	-- same height.
 	part.Size = Vector3.new(4, 4, 4)
-	part.CFrame = CFrame.new(Vector3.new(import.offset, 2, 0))
+	part.CFrame = CFrame.new(Vector3.new((slot - 1.5) * 10, 2, 0))
 	part.Parent = workspace
 
 	-- **Tagged, so the second mirror below has a group to redirect.** The tag
 	-- is a name here and a bit in the component; `scene::TagTable` is where the
 	-- two meet, and the draw loop only ever sees the bit.
 	part:AddTag("Imported")
+
+	imported[mesh] = part
 end
 
 -- **The mirror, in front of everything.** `ROADMAP.md` v0.9 asks in as many
@@ -138,3 +153,37 @@ view.Parent = workspace
 -- keeps orbiting its own placeholder — which is what was happening here, and it
 -- looks like bad framing rather than a missing line.
 workspace.CurrentCamera = view
+
+-- **The imported meshes appear as they arrive.** Content is fetched over
+-- frames, so nothing published is in this world when the chunk above runs —
+-- polling is the honest shape, because there is no callback a fetch could fire
+-- without becoming visible mid-tick and rule 5 forbids exactly that.
+local RunService = game:GetService("RunService")
+
+local known = 0
+
+RunService.Heartbeat:Connect(function()
+	local meshes = ContentService:GetMeshes()
+	if #meshes == known then
+		return
+	end
+	known = #meshes
+
+	for index, mesh in ipairs(meshes) do
+		if importedCount >= IMPORT_SLOTS then
+			break
+		end
+		if not imported[mesh] then
+			importedCount += 1
+			addImport(mesh, importedCount)
+			print(`meshes: {mesh} — {ContentService:GetTriangleCount(mesh)} triangle(s)`)
+		end
+		-- `index` is unused beyond the ordering `GetMeshes` already applied;
+		-- naming it keeps the loop reading as "in sorted order".
+		local _ = index
+	end
+
+	if importedCount == 0 then
+		print("meshes: nothing published in this world — run with --cdn to see imports")
+	end
+end)

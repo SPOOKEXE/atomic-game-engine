@@ -945,6 +945,29 @@ declare extern type DataStoreService with
 	function RemoveAsync(self, key: string): (any, BusStatus, number)
 end
 
+-- What content this world holds, which is the other half of naming an asset.
+--
+-- A `MeshId` is a name a publisher wrote — an id does not cross — and until
+-- this there was no way for a script to ask what those names were. Every list
+-- is sorted, so a scene that lays content out arranges itself the same way on
+-- every run.
+declare extern type ContentService with
+	-- Every mesh registered in this world, sorted. Empty on a headless server
+	-- and before content has arrived, which are the same honest answer.
+	function GetMeshes(self): { string }
+
+	-- Every texture registered in this world, sorted.
+	function GetTextures(self): { string }
+
+	-- A texture's flipbook grid and authored rate, or nil when it is a still
+	-- image or this world has not been told about it.
+	function GetFlipbook(self, texture: string): { Side: number, Frames: number, FrameRate: number }?
+
+	-- The same number `MeshPart.TrianglesCount` gives, asked about a mesh
+	-- rather than a part — so a layout can be sized before anything is built.
+	function GetTriangleCount(self, mesh: string): number
+end
+
 declare extern type RunService with
 	Heartbeat: HeartbeatSignal
 	function IsServer(self): boolean
@@ -962,6 +985,7 @@ declare MessagingService: MessagingService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare ContentService: ContentService
 
 -- The world this script runs on. `game` is the universe above it.
 declare workspace: Workspace
@@ -1201,7 +1225,13 @@ declare task: {
 				out << "\t\tPosition: Vector3,\n";
 				out << "\t\tNormal: Vector3,\n";
 				out << "\t\tDistance: number,\n";
-				out << "\t\tMaterial: Enum_Material,\n";
+
+				// **A string, where this said `Enum_Material` until v0.10.** The
+				// enum is gone and the field is `Surface::Material` now — the row
+				// a contact reads friction out of — which is a plain name.
+				// `script/LuauQuery.cpp` carries why a hit result reports that
+				// one rather than resolving the part's `Material` instance.
+				out << "\t\tMaterial: string,\n";
 				out << "\t}?\n";
 			}
 
@@ -1235,6 +1265,7 @@ declare task: {
 		// not in the tree for the walk above to find.
 		out << "\tRunService: RunService,\n";
 		out << "\tMessagingService: MessagingService,\n";
+		out << "\tContentService: ContentService,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
 		out << "\tDataStoreService: DataStoreService,\n";
 		out << "}\n\n";
@@ -1467,7 +1498,10 @@ declare interface RaycastResult {
 	readonly Position: Vector3;
 	readonly Normal: Vector3;
 	readonly Distance: number;
-	readonly Material: Enum.Material;
+
+	// The `Surface` name — what the part is like to touch, not what it looks
+	// like. See the Luau declaration above for why it is a string.
+	readonly Material: string;
 }
 
 )TS";

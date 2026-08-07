@@ -48,6 +48,24 @@ mono_add_library(studio
 		Engine::render
 		Engine::ui
 
+		# L10, `shared`. The content store this editor manages and lists.
+		# **Named here rather than taken transitively through `Mono::server`**,
+		# which is where it was arriving from: a dependency a file includes is
+		# one its build file should say out loud, and `src/Assets.cpp` includes
+		# `cdn/LocalStore.hpp` directly.
+		Mono::cdn
+
+		# L9, `shared`. Image decoding, for the asset previews.
+		#
+		# **A decoder in an editor is not the thing `assets::Texture` argues
+		# against.** That argument is about a *runtime*: a shipped game must not
+		# carry a Huffman tree to read a PNG, because publishing already turned
+		# it into pixels. This is authoring software showing somebody a picture
+		# of a file they have not published yet — the same reason `assetc` links
+		# it — and the alternative is a store browser whose rows are all blank
+		# until a publish has happened.
+		Engine::bake
+
 		# L7, `shared`. The engine's own widget tree, which the viewport panels
 		# compile and paint over the world image. Named here rather than taken
 		# transitively through `Engine::ui`, because this target includes

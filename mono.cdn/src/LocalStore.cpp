@@ -244,7 +244,14 @@ namespace cdn {
 			}
 		}
 
-		for (const auto &file : std::filesystem::directory_iterator(paths.Raw, failure)) {
+		// **Recursive, because `cdn::Publish` is.** The publisher names an asset
+		// by its path relative to `raw/`, so a tree under there has always been
+		// publishable — and v0.10's material import is the first thing that
+		// writes one, because a material has to *name* its texture and a
+		// hash-renamed flat import gives it no name to write. A non-recursive
+		// listing showed a store of six thousand files as empty, which reads as a
+		// broken panel rather than as a listing that stops at the top level.
+		for (const auto &file : std::filesystem::recursive_directory_iterator(paths.Raw, failure)) {
 			if (failure) {
 				break;
 			}
@@ -256,10 +263,19 @@ namespace cdn {
 			entry.Path = file.path();
 			entry.Bytes = static_cast<uint64_t>(file.file_size(failure));
 
-			// `<hash><extension>`, so the stem is the hash.
+			// `<hash><extension>` for an import, so the stem is the hash. A file
+			// written into a subdirectory by a tool has no log line and is
+			// labelled by its path relative to `raw/` — which is also the name it
+			// will be published under, and is the thing somebody is looking for.
 			const auto found = named.find(file.path().stem().string());
-			entry.Original = found == named.end() ? file.path().filename().string()
-												  : std::filesystem::path(found->second).filename().string();
+			if (found != named.end()) {
+				entry.Original = std::filesystem::path(found->second).filename().string();
+			} else {
+				std::error_code ignored;
+				const std::filesystem::path relative =
+					std::filesystem::relative(file.path(), paths.Raw, ignored);
+				entry.Original = ignored ? file.path().filename().string() : relative.generic_string();
+			}
 
 			entries.push_back(std::move(entry));
 		}

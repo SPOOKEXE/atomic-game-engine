@@ -12,6 +12,15 @@ Insert the NEWEST items to the front, so older are towards the back.
 If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
 
 ```
+### [_] D00032
+
+**Deleting a `Material` instance leaves the texture it last resolved on the part.**
+
+- `scene::ResolveMaterials` walks `MaterialRef` rows and writes the resolved texture into the parent's `SurfaceAppearance::ColourMap`. A part that no longer has a `Material` child has no row, so nothing visits it and the last resolved name stays — the part goes on drawing a texture nothing in the tree names any more.
+- **The three states that do work are the ones that matter day to day**, which is why this shipped rather than blocking: no material at all leaves an authored `BasePart.ColorMap` alone; a material naming an asset resolves to it; and a material set back to `None` *clears* the part, because the pass writes even when it resolves to nothing. Only the deletion is stale, and only until something writes the field again.
+- **The obvious fix is the wrong trade by two orders of magnitude.** Visiting every part every tick to ask whether it still has a material child is a child scan per drawable per tick, on the loop `client::CollectInstances` exists to keep flat, to correct an editor-time action.
+- **What would close it is a destruction hook**, which is the shape `ecs::Store::DestroyEntity` already carries for attributes — `ROADMAP.md` v0.10's attributes entry records the same bug in the same place, found the same way. A `MaterialRef` leaving a row is exactly the event this needs, and it is one hook rather than a pass.
+
 ### [_] D00030
 
 **A mutable property on a script *global* reads once and never again, because `luaL_sandbox` enables Luau's `safeenv`.**

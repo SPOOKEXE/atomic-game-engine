@@ -182,13 +182,11 @@ TEST_CASE("what the description does not name keeps its prototype default", "[sc
 	CHECK(visual->Visible);
 	CHECK(visual->Tint.R == 1.0f);
 
-	// **Named by nothing in the description, so it keeps the component's own
-	// default rather than picking up the mesh name.** `PartDesc::Material` is
-	// what a part *feels* like and lands in `Surface`; what it looks like is
-	// `Visual::Material`, which `PartDesc` does not describe at all — so this is
-	// the default arriving through `MakePart` untouched, which is the same
-	// default a script gets from `Instance.new("Part")`.
-	CHECK(visual->Material == engine::scene::DefaultMaterial());
+	// **`PartDesc::Material` is what a part *feels* like and lands in `Surface`
+	// alone.** What it looks like is not on a part at all any more — a `Material`
+	// instance under one names an asset, and `MakePart` creates no children — so
+	// a fresh part is drawn with `render::DefaultTexture` until somebody adds one.
+	CHECK_FALSE(store.Get<engine::scene::MaterialRef>(part) != nullptr);
 }
 
 TEST_CASE("a replica refuses to mint a part", "[scene][part]") {

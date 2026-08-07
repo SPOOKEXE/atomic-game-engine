@@ -241,8 +241,18 @@ presentation module is the change to refuse.
 ## The property surface is declared, and a property is a conversion
 
 `Part.cpp` declares what a script can name: `CFrame`, `Position`, `Orientation`,
-`Size`, `Color`, `Visible`, `Mesh`, `Material`, `CanCollide`, `Anchored`, and
-`Name`/`Parent` on `Instance`.
+`Size`, `Color`, `Visible`, `Mesh`, `CanCollide`, `Anchored`, and `Name`/`Parent`
+on `Instance`.
+
+**`Material` was on that list until v0.10 and is not a property at all now.** It
+was an `Enum` over seventeen names that no renderer sampled differently — a
+property that looked like it worked, on the most obvious control in the panel.
+A material is content: `Instance.new("Material")` under a part names an `.amat`,
+and `Materials.hpp` carries the whole design, including why the resolve pass
+writes into `SurfaceAppearance::ColourMap` rather than anywhere new. Do not
+reintroduce a material *word* beside it — two ways to say one thing is the debt
+`AGENTS.md` calls the most expensive kind, and this one has already been paid
+off once.
 
 This section used to forbid exactly that, and the reason it gave was right:
 *"the useful properties do not map to a field — Roblox's `Size` is a full extent

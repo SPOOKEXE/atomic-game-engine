@@ -778,26 +778,31 @@ TEST_CASE("an enum property takes a member and refuses a stranger", "[scripting]
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
+	// **`AlphaMode`, where this was `Material` until v0.10.** The enum is gone
+	// with the seventeen names nothing sampled — `scene/Materials.hpp` — and what
+	// is under test here was never the material: it is that a
+	// `PropertyType::Enum` property takes a member, takes the bare string a
+	// migrating script contains, and refuses everything else.
 	MustRun(*runtime, R"(
 		local part = Instance.new('Part')
-		part.Material = Enum.Material.Plastic
+		part.AlphaMode = Enum.AlphaMode.Clip
 
-		assert(typeof(part.Material) == 'EnumItem', typeof(part.Material))
-		assert(part.Material == Enum.Material.Plastic, 'the value did not round-trip')
-		assert(part.Material.Name == 'Plastic')
-		assert(part.Material.EnumType == 'Material')
+		assert(typeof(part.AlphaMode) == 'EnumItem', typeof(part.AlphaMode))
+		assert(part.AlphaMode == Enum.AlphaMode.Clip, 'the value did not round-trip')
+		assert(part.AlphaMode.Name == 'Clip')
+		assert(part.AlphaMode.EnumType == 'AlphaMode')
 
 		-- A bare string too, because that is what a migrating script contains.
-		part.Material = 'Metal'
-		assert(part.Material == Enum.Material.Metal, 'a string did not resolve')
+		part.AlphaMode = 'Blend'
+		assert(part.AlphaMode == Enum.AlphaMode.Blend, 'a string did not resolve')
 	)");
 
 	// The typo `PropertyType::Name` could never have caught.
-	CHECK_FALSE(runtime->Run("Instance.new('Part').Material = 'Plsatic'"));
+	CHECK_FALSE(runtime->Run("Instance.new('Part').AlphaMode = 'Clipp'"));
 
 	// And a member of the wrong enum, which a bare string could not have
 	// distinguished either.
-	CHECK_FALSE(runtime->Run("Instance.new('Part').Material = Enum.EasingStyle.Linear"));
+	CHECK_FALSE(runtime->Run("Instance.new('Part').AlphaMode = Enum.EasingStyle.Linear"));
 }
 
 TEST_CASE("javascript reaches the same enum through its own spelling", "[scripting][js]") {
@@ -811,19 +816,19 @@ TEST_CASE("javascript reaches the same enum through its own spelling", "[scripti
 
 	MustRun(*runtime, R"(
 		const part = Instance.new('Part');
-		part.Material = Enum.Material.Plastic;
+		part.AlphaMode = Enum.AlphaMode.Clip;
 
-		if (!part.Material.Equals(Enum.Material.Plastic)) throw new Error('did not round-trip');
-		if (part.Material.Name !== 'Plastic') throw new Error('wrong name');
-		if (part.Material.EnumType !== 'Material') throw new Error('wrong enum');
+		if (!part.AlphaMode.Equals(Enum.AlphaMode.Clip)) throw new Error('did not round-trip');
+		if (part.AlphaMode.Name !== 'Clip') throw new Error('wrong name');
+		if (part.AlphaMode.EnumType !== 'AlphaMode') throw new Error('wrong enum');
 
-		part.Material = 'Metal';
-		if (!part.Material.Equals(Enum.Material.Metal)) throw new Error('a string did not resolve');
+		part.AlphaMode = 'Blend';
+		if (!part.AlphaMode.Equals(Enum.AlphaMode.Blend)) throw new Error('a string did not resolve');
 	)");
 
 	// The same two refusals the Luau side gets, from the same storage check.
-	CHECK_FALSE(runtime->Run("Instance.new('Part').Material = 'Plsatic';"));
-	CHECK_FALSE(runtime->Run("Instance.new('Part').Material = Enum.EasingStyle.Linear;"));
+	CHECK_FALSE(runtime->Run("Instance.new('Part').AlphaMode = 'Clipp';"));
+	CHECK_FALSE(runtime->Run("Instance.new('Part').AlphaMode = Enum.EasingStyle.Linear;"));
 }
 
 TEST_CASE("javascript sees transparency and collision groups too", "[scripting][js]") {
@@ -879,12 +884,12 @@ TEST_CASE("an unregistered enum is an error rather than an empty table", "[scrip
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	CHECK_FALSE(runtime->Run("return Enum.Nonsense"));
-	CHECK_FALSE(runtime->Run("return Enum.Material.Nonsense"));
+	CHECK_FALSE(runtime->Run("return Enum.AlphaMode.Nonsense"));
 
 	MustRun(*runtime, R"(
-		local items = Enum.Material:GetEnumItems()
-		assert(#items > 0, 'Material has no members')
-		assert(items[1].EnumType == 'Material')
+		local items = Enum.AlphaMode:GetEnumItems()
+		assert(#items > 0, 'AlphaMode has no members')
+		assert(items[1].EnumType == 'AlphaMode')
 	)");
 }
 

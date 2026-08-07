@@ -11,7 +11,7 @@
 //
 //     Transform  ->  CFrame, Position, Orientation
 //     Bounds     ->  Size
-//     Visual     ->  Color, Visible, Mesh, Material, Transparency
+//     Visual     ->  Color, Visible, Mesh, Transparency
 //
 // A script told that `Transform` moved would have to learn the component layout
 // to make sense of it, which is exactly the coupling `PropertyDescriptor` exists

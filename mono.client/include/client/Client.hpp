@@ -422,6 +422,7 @@ namespace client {
 
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
+		size_t ContentMaterials = 0;
 		size_t ContentSounds = 0;
 
 		// The decoded audio this client has, by the name the manifest published

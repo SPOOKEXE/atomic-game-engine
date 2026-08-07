@@ -1,8 +1,10 @@
 #include <engine/core/Log.hpp>
+#include <engine/render/DefaultTexture.hpp>
 #include <engine/render/TextureTable.hpp>
 
 #include <SDL3/SDL_gpu.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -33,13 +35,26 @@ namespace engine::render {
 			ENGINE_ERROR("texture table: sampler: {}", SDL_GetError());
 			return false;
 		}
+
+		// **Uploaded here rather than lazily**, so the first frame that draws an
+		// untextured part costs a lookup and not a create-and-copy — and so a
+		// device that cannot make a 64-pixel texture fails at start-up rather
+		// than at the moment somebody selects a part.
+		size_t defaultBytes = 0;
+		DefaultHandle = Upload(DefaultTexture(), "default", defaultBytes);
+		if (DefaultHandle == nullptr) {
+			return false;
+		}
 		return true;
 	}
 
 	void TextureTable::Shutdown() {
 		if (Device != nullptr) {
-			for (const auto &[name, texture] : Textures) {
-				SDL_ReleaseGPUTexture(Device, texture);
+			for (const auto &[name, entry] : Textures) {
+				SDL_ReleaseGPUTexture(Device, entry.Texture);
+			}
+			if (DefaultHandle != nullptr) {
+				SDL_ReleaseGPUTexture(Device, DefaultHandle);
 			}
 			if (SharedSampler != nullptr) {
 				SDL_ReleaseGPUSampler(Device, SharedSampler);
@@ -47,22 +62,14 @@ namespace engine::render {
 		}
 
 		Textures.clear();
+		DefaultHandle = nullptr;
 		SharedSampler = nullptr;
 		UploadedBytes = 0;
 		Device = nullptr;
 	}
 
-	bool TextureTable::Add(const core::Name &name, const assets::TextureData &image) {
-		if (Device == nullptr || !name.IsValid() || !image.IsValid()) {
-			return false;
-		}
-
-		const size_t bytes = image.Pixels.size();
-		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
-			ENGINE_WARN("texture table: full, refusing {}", name.Text());
-			return false;
-		}
-
+	SDL_GPUTexture *
+	TextureTable::Upload(const assets::TextureData &image, std::string_view label, size_t &bytes) {
 		// Expand R8 assets so every texture uses the pipeline's RGBA format.
 		std::vector<std::byte> widened;
 		const std::byte *pixels = image.Pixels.data();
@@ -91,8 +98,8 @@ namespace engine::render {
 
 		SDL_GPUTexture *texture = SDL_CreateGPUTexture(Device, &info);
 		if (texture == nullptr) {
-			ENGINE_ERROR("texture table: {}: {}", name.Text(), SDL_GetError());
-			return false;
+			ENGINE_ERROR("texture table: {}: {}", label, SDL_GetError());
+			return nullptr;
 		}
 
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
@@ -103,7 +110,7 @@ namespace engine::render {
 		if (transfer == nullptr) {
 			ENGINE_ERROR("texture table: transfer buffer: {}", SDL_GetError());
 			SDL_ReleaseGPUTexture(Device, texture);
-			return false;
+			return nullptr;
 		}
 
 		void *mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
@@ -129,13 +136,40 @@ namespace engine::render {
 		SDL_SubmitGPUCommandBuffer(command);
 		SDL_ReleaseGPUTransferBuffer(Device, transfer);
 
+		bytes = uploadBytes;
+		return texture;
+	}
+
+	bool TextureTable::Add(const core::Name &name, const assets::TextureData &image) {
+		if (Device == nullptr || !name.IsValid() || !image.IsValid()) {
+			return false;
+		}
+
+		const size_t bytes = image.Pixels.size();
+		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
+			ENGINE_WARN("texture table: full, refusing {}", name.Text());
+			return false;
+		}
+
+		size_t uploadBytes = 0;
+		SDL_GPUTexture *texture = Upload(image, name.Text(), uploadBytes);
+		if (texture == nullptr) {
+			return false;
+		}
+
 		// Release the old texture only after the replacement upload succeeds.
 		const auto existing = Textures.find(name.Id());
 		if (existing != Textures.end()) {
-			SDL_ReleaseGPUTexture(Device, existing->second);
-			existing->second = texture;
+			SDL_ReleaseGPUTexture(Device, existing->second.Texture);
+
+			// **The old size comes off before the new one goes on**, which it
+			// did not before: the total only ever grew, so a session that
+			// replaced textures drifted up until the ceiling refused an upload
+			// that would have fit.
+			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
+			existing->second = Entry{.Texture = texture, .Bytes = uploadBytes};
 		} else {
-			Textures.emplace(name.Id(), texture);
+			Textures.emplace(name.Id(), Entry{.Texture = texture, .Bytes = uploadBytes});
 		}
 
 		UploadedBytes += uploadBytes;
@@ -147,6 +181,22 @@ namespace engine::render {
 			return nullptr;
 		}
 		const auto found = Textures.find(name.Id());
-		return found == Textures.end() ? nullptr : found->second;
+		return found == Textures.end() ? nullptr : found->second.Texture;
+	}
+
+	bool TextureTable::Drop(const core::Name &name) {
+		if (Device == nullptr || !name.IsValid()) {
+			return false;
+		}
+
+		const auto found = Textures.find(name.Id());
+		if (found == Textures.end()) {
+			return false;
+		}
+
+		SDL_ReleaseGPUTexture(Device, found->second.Texture);
+		UploadedBytes -= std::min(UploadedBytes, found->second.Bytes);
+		Textures.erase(found);
+		return true;
 	}
 }
