@@ -1327,11 +1327,21 @@ namespace studio {
 		// Runs `body` inside every open world.
 		void EachOpenWorld(const std::function<void(engine::ecs::Store &)> &body);
 
-		// Whether the by-kind requests have been issued. Once, not per frame.
+		// Whether the catalogue has been seen to open.
+		//
+		// **Not "whether the requests have been issued", which is what this used
+		// to mean.** Nothing is requested up front any more — a world names an
+		// asset or it is not fetched — so this only gates `RequestShownContent`
+		// on there being a catalogue to ask.
 		bool ContentRequested = false;
 
-		// Whether the one-line summary has been logged.
-		bool ContentReported = false;
+		// The total the summary last reported, so the next one is logged only
+		// when something has actually arrived since.
+		//
+		// **A total rather than a flag**, because an editor keeps naming content
+		// after start-up — see `DrainContent`, where a once-only report meant
+		// every asset chosen from a picker loaded without a word.
+		size_t ContentReportedTotal = 0;
 
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
@@ -2513,6 +2523,33 @@ namespace studio {
 		// the class table is rebuilt by registration — rule 3, and the reason
 		// every handle in this editor is a value.
 		engine::core::Name PickerProperty;
+
+		// What that property's type is, carried across the frames the modal is
+		// open.
+		//
+		// **Because `game::WriteProperty` refuses a value whose `Type` does not
+		// match the descriptor's, and a default-constructed `PropertyValue` is
+		// `Opaque`.** The confirm path used to build one from nothing and set
+		// only `Name` on it, so every choice made in this picker — mesh,
+		// texture, material, sound, image — was refused by the one line at the
+		// top of `WriteProperty` and nothing anywhere said so. The property
+		// stayed blank, the part kept the fallback cube, and typing the same
+		// string into the field beside it worked, because that path starts from
+		// the value it read and keeps its type.
+		//
+		// Carried rather than assumed to be `Name`: `ContentKindOfProperty` only
+		// happens to match `Name` properties today, and an assumption that holds
+		// by coincidence is how this broke in the first place.
+		engine::ecs::PropertyType PickerType = engine::ecs::PropertyType::Opaque;
+
+		// The engine's own meshes, offered beside the store's.
+		//
+		// **Separate from `PickerContents` because it means something else.**
+		// That one is the published manifest and its emptiness is a message
+		// somebody acts on; these six exist in every process whether or not
+		// anything has ever been published, so folding them in would make
+		// "nothing published" unsayable.
+		std::vector<cdn::PublishedEntry> PickerBuiltins;
 
 		// The name a picker is currently offering.
 		std::string PickerChoice;

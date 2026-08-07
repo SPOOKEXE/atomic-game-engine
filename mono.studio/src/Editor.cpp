@@ -64,6 +64,7 @@ namespace studio {
 		// there are two of them and why they are these two.
 		constexpr std::string_view SKYGRID_WORLD = "SkyGrid";
 		constexpr std::string_view MIRROR_WORLD = "Mirrors";
+		constexpr std::string_view MESHGRID_WORLD = "Meshes";
 	}
 
 	// The engine log, teed into the Output panel.
@@ -1273,6 +1274,21 @@ namespace studio {
 		const WorldId grid = AddWorld(Name(SKYGRID_WORLD));
 		const WorldId mirrors = AddWorld(Name(MIRROR_WORLD));
 
+		// **A third, and it is the one that shows what a `MeshPart` is.** The
+		// other two are made of `Part`s, so a new game contained no example of
+		// the class the mesh picker, the content pipeline and half of v0.9 exist
+		// to serve — somebody looking for "how do I use a mesh" found a menu
+		// item and no scene.
+		//
+		// **It costs nothing at start-up, which is the only reason it can be
+		// here.** `MeshGrid.luau` seeds from the six built-in ids, and a built-in
+		// is generated in-process and never fetched — `Editor::
+		// RequestContentAsset` refuses to ask a CDN for one. So this world names
+		// six meshes that are already registered and issues no request at all: a
+		// template that pulled content on open would put back the twenty-nine
+		// second start-up v0.10 spent a version removing.
+		const WorldId meshes = AddWorld(Name(MESHGRID_WORLD));
+
 		Active = grid;
 		SelectionWorld = Active;
 
@@ -1316,6 +1332,12 @@ namespace studio {
 			InstallExampleScript(store, "Mirrors-1-world.luau", "MirrorScene");
 		});
 
+		// The mesh grid lays its own plate and its own camera, so it needs the
+		// same nothing the other two do.
+		Universe->Enter(meshes, [this](Store &store) {
+			InstallExampleScript(store, "MeshGrid.luau", "MeshGridScene");
+		});
+
 		// **A viewport each, pinned rather than left following the active
 		// world.** An extra viewport with no world of its own draws whatever is
 		// being edited, so two panels would show one scene twice and the
@@ -1331,12 +1353,13 @@ namespace studio {
 		// unselected tab is a template nobody finds.
 		ExpandWorldTree(grid);
 		ExpandWorldTree(mirrors);
+		ExpandWorldTree(meshes);
 
 		// Enough frames to outlast a first-run layout rebuild. See
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: two worlds, skygrid and mirrors, ticking in parallel");
+		Say("new game: three worlds — skygrid, mirrors and meshes — ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {

@@ -452,6 +452,7 @@ namespace studio {
 								PickerWanted = true;
 								PickerKind = content;
 								PickerProperty = descriptor->Name;
+								PickerType = descriptor->Type;
 								PickerChoice = text;
 							}
 							if (ImGui::IsItemHovered()) {
@@ -571,8 +572,13 @@ namespace studio {
 			// `edit` a widget would have — one path applies a property write
 			// and it stays one path, including undo.
 			edit.Property = PickerProperty;
-			edit.Value = PropertyValue{};
-			edit.Value.Name = PickerChoice.empty() ? Name{} : Name(PickerChoice);
+
+			// **`ChosenContentValue` and not four lines here**, because those
+			// four lines left `Type` at `Opaque` for a whole version and
+			// `game::WriteProperty` refused every one of them without a word.
+			// The function takes the type, so there is no longer a way to write
+			// this and forget it.
+			edit.Value = ChosenContentValue(PickerType, PickerChoice);
 			edit.Wanted = true;
 			PickerProperty = Name{};
 		}

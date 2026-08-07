@@ -36,6 +36,7 @@
 // clones the same way — walk first, refuse with a sentence, never clone and
 // regret it.
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -102,31 +103,44 @@ namespace studio {
 	}
 
 	PreviewState Editor::BuildPreviewMesh(const std::string &name) {
-		// **`cdn::FindInStore` and not a folder spelled here.** This read
-		// `raw/<name>` and was right for as long as the publisher walked `raw/`;
-		// the day it walked `baked/`, every preview in the editor resolved to a
-		// missing file and turned into "no local pixels" with nothing said.
-		const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
-
-		std::error_code failure;
-		if (!std::filesystem::is_regular_file(source, failure)) {
-			return PreviewState::Unavailable;
-		}
-
-		const std::optional<std::vector<std::byte>> bytes = ReadWholeFile(source);
-		if (!bytes) {
-			return PreviewState::TooLarge;
-		}
-
-		// **`assets::Mesh` and nothing else.** A `.pmx` or a `.glb` in the store
-		// is a *source* format — the runtime does not decode those, which is
-		// `assets::Texture`'s standing rule one kind over — so an unbaked store
-		// previews nothing, and the caption says to run `assetc`. Reaching for
-		// `bake::ReadModel` here would put an importer behind a hover.
-		engine::core::ByteReader reader(*bytes);
 		engine::assets::MeshData mesh;
-		if (!engine::assets::Mesh::Read(reader, mesh)) {
-			return PreviewState::Unavailable;
+
+		// **A built-in is generated, not read**, and asking the store for one
+		// would have been a file that is deliberately not there. `engine.Cube`
+		// and its five siblings exist in every process with no content at all —
+		// which is the whole reason the picker offers them — so a preview that
+		// only knew how to open files would show the six meshes that are always
+		// available as the six that can never be previewed.
+		if (engine::assets::BuiltinMesh builtin; engine::assets::BuiltinFromName(name, builtin)) {
+			mesh = engine::assets::MakeBuiltin(builtin);
+		} else {
+			// **`cdn::FindInStore` and not a folder spelled here.** This read
+			// `raw/<name>` and was right for as long as the publisher walked
+			// `raw/`; the day it walked `baked/`, every preview in the editor
+			// resolved to a missing file and turned into "no local pixels" with
+			// nothing said.
+			const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
+
+			std::error_code failure;
+			if (!std::filesystem::is_regular_file(source, failure)) {
+				return PreviewState::Unavailable;
+			}
+
+			const std::optional<std::vector<std::byte>> bytes = ReadWholeFile(source);
+			if (!bytes) {
+				return PreviewState::TooLarge;
+			}
+
+			// **`assets::Mesh` and nothing else.** A `.pmx` or a `.glb` in the
+			// store is a *source* format — the runtime does not decode those,
+			// which is `assets::Texture`'s standing rule one kind over — so an
+			// unbaked store previews nothing, and the caption says to run
+			// `assetc`. Reaching for `bake::ReadModel` here would put an importer
+			// behind a hover.
+			engine::core::ByteReader reader(*bytes);
+			if (!engine::assets::Mesh::Read(reader, mesh)) {
+				return PreviewState::Unavailable;
+			}
 		}
 
 		const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);

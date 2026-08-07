@@ -51,7 +51,7 @@
 -- With no `--cdn` the scene runs and stands empty, and says so on the pedestal
 -- row. That is the honest degraded state.
 --
--- ## Why this file no longer names any mesh
+-- ## Which meshes it names, and which it discovers
 --
 -- **It used to hold nine string literals, and on any store but the one it was
 -- written against every single cell drew a cube.** Nothing warned: an
@@ -59,18 +59,63 @@
 -- not streamed in yet looks like — so a scene that had never worked and a scene
 -- that was still loading were the same picture.
 --
--- The names were never this file's to know. A publisher decides them, and
--- `ContentService:GetMeshes()` reports the ones that actually arrived in this
--- world — so what the grid shows is exactly what loaded, which is the thing the
--- demo is *for*. A cell on screen is proof; a cell that is missing is content
--- that is not here, and there is no third case where a name was misspelt.
+-- Then it named nothing at all and took whatever `ContentService:GetMeshes()`
+-- reported. That fixed the lie and introduced a different one: with no store,
+-- the grid was an empty plate and a sign saying so, which is the correct message
+-- and a useless *default scene*. A template that shows nothing until somebody
+-- has run a four-minute content pipeline is a template nobody sees working.
+--
+-- **So it does both, and the split is the whole idea an id is for.**
+--
+--   * `BUILTIN` below is six ids the engine resolves with no store, no manifest
+--     and no delivery client — `assets::MakeBuiltin` generates them and
+--     `MeshTable::Initialise` registers them before the first frame. Naming them
+--     is safe *because* they cannot be missing, which is exactly what the nine
+--     literals were not.
+--   * everything else comes from `ContentService:GetMeshes()`, which reports what
+--     this world actually holds. On this repository's own store those ids are
+--     64 hex characters and an extension — the content hash — and a cell drawn
+--     from one is proof the whole pipeline ran.
+--
+-- **The second half needs something else to have named the mesh first, and
+-- since v0.10 that is a real limit rather than a detail.** Content is fetched
+-- because a world names it — `client/ContentDemand.hpp` carries why asking by
+-- kind had to stop — so the catalogue holds what has been asked for, and a scene
+-- that only reads the catalogue can never be the thing that asks. With a store
+-- and no other scene naming anything, this plate is six built-ins.
+--
+-- That is a gap in the *service*, not in this file: a scene has no way to ask
+-- what a store published, only what this world already loaded. Listing the
+-- manifest is `ROADMAP.md`'s content-browser work. Until then, a grid of imports
+-- is what `--game` with an authored place gives you, and the six below are what
+-- a fresh install gives you.
+--
+-- A cell on screen is still proof and a missing cell is still content that is
+-- not here. What changed is that six cells are always proof of *something*, so
+-- an empty plate now means an empty store rather than a scene that might be
+-- broken.
 --
 -- **Built as content arrives rather than at startup.** Delivery is asynchronous
 -- — a fetch spans frames and `AGENTS.md` rule 5 forbids it becoming visible
--- mid-tick — so at the moment this chunk runs the catalogue is empty and stays
--- empty for a while. The grid therefore grows on `Heartbeat` as meshes land.
+-- mid-tick — so at the moment this chunk runs the catalogue holds the built-ins
+-- and nothing else. The grid therefore grows on `Heartbeat` as meshes land.
 
 local RunService = game:GetService("RunService")
+
+-- The ids that need no store.
+--
+-- **Written out rather than asked for, because there is no service that lists
+-- them** — and because a default scene should say in one place what it is made
+-- of. These are the same strings `MeshPart.MeshId` takes from the studio's mesh
+-- picker, which offers them at the top of the list for this reason.
+local BUILTIN: { string } = {
+	"engine.Cube",
+	"engine.Sphere",
+	"engine.Cylinder",
+	"engine.Wedge",
+	"engine.CornerWedge",
+	"engine.Plane",
+}
 
 local COLUMNS = 3
 local SPACING = 7
@@ -284,10 +329,32 @@ workspace.CurrentCamera = view
 --
 -- Cheap when nothing changes: `GetMeshes` builds a sorted list of what this
 -- world holds, and the common case is that its length has not moved.
-local known = 0
+local known = -1
+
+-- Every id to place, built-ins first and content after.
+--
+-- **The built-ins lead and are not sorted in with the rest.** `GetMeshes` sorts,
+-- so the content half has a layout that is a function of the names alone and is
+-- the same on every run — but the six that are always there should be the six
+-- leftmost cells whatever a store happens to hold, or adding one asset would
+-- reshuffle the part of the plate that never changes.
+local function everyMesh(): { string }
+	local ids = table.clone(BUILTIN)
+
+	for _, mesh in ipairs(ContentService:GetMeshes()) do
+		-- **Skipped rather than placed twice.** `GetMeshes` reports what the
+		-- world holds and the built-ins are registered into every world, so all
+		-- six come back from it as well.
+		if not table.find(BUILTIN, mesh) then
+			table.insert(ids, mesh)
+		end
+	end
+
+	return ids
+end
 
 RunService.Heartbeat:Connect(function()
-	local meshes = ContentService:GetMeshes()
+	local meshes = everyMesh()
 	if #meshes == known then
 		return
 	end
@@ -310,9 +377,14 @@ RunService.Heartbeat:Connect(function()
 
 	layout(meshes)
 
+	-- **Three states, not two.** "Only the built-ins" is the ordinary state of a
+	-- fresh install and is not a failure; saying "no meshes" there would send
+	-- somebody looking for a content bug that is not one, and saying nothing
+	-- would leave a plate of primitives looking like a plate of failed imports.
 	text.Text = if placedCount == 0
 		then "no meshes in this world — run with --cdn"
-		else `{placedCount} mesh(es)`
+		elseif placedCount <= #BUILTIN then `{placedCount} built-in mesh(es) — publish content for more`
+		else `{placedCount} mesh(es), {placedCount - #BUILTIN} imported`
 
 	print(`mesh grid: {placedCount} mesh(es) placed`)
 end)

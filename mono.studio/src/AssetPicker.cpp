@@ -21,6 +21,7 @@
 // manifest, and a name that is not in one is a name no client can fetch.
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/Builtin.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -99,6 +100,14 @@ namespace studio {
 		return AssetKind::Unknown;
 	}
 
+	engine::game::PropertyValue
+	ChosenContentValue(engine::ecs::PropertyType type, std::string_view chosen) {
+		engine::game::PropertyValue value;
+		value.Type = type;
+		value.Name = chosen.empty() ? engine::core::Name{} : engine::core::Name(chosen);
+		return value;
+	}
+
 	bool Editor::DrawAssetPicker(const char *title, AssetKind kind, std::string &chosen) {
 		bool confirmed = false;
 
@@ -149,6 +158,26 @@ namespace studio {
 			int Score;
 		};
 		std::vector<Candidate> shown;
+
+		// **The engine's own meshes first, and they are not published.** See
+		// `RefreshPickerContents`: six meshes exist in every process before any
+		// content is fetched, and leaving them out left this list empty on a
+		// machine with no store — a picker that appears not to work rather than
+		// a store that is not there. Sorted with everything else below, so a
+		// filter still finds what it matches.
+		for (const cdn::PublishedEntry &entry : PickerBuiltins) {
+			if (entry.Kind != kind) {
+				continue;
+			}
+			int score = 0;
+			if (FuzzyMatch(PickerFilter, entry.Name, score)) {
+				// **`+1`, so an equal match on a built-in wins.** Nothing is
+				// riding on this beyond a stable order somebody can predict:
+				// with no filter typed, the six that always resolve are the six
+				// at the top.
+				shown.push_back(Candidate{.Entry = &entry, .Score = score + 1});
+			}
+		}
 
 		for (const cdn::PublishedEntry &entry : PickerContents) {
 			if (entry.Kind != kind) {
@@ -432,5 +461,37 @@ namespace studio {
 		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
 		PickerContents = cdn::PublishedContents(paths);
 		PickerRaw = cdn::RawContents(paths);
+
+		// **The engine's own meshes, at the top, and they are not in any
+		// manifest.** `assets::MakeBuiltin` generates six of them in every
+		// process — `engine.Cube` through `engine.Cylinder` — and
+		// `MeshTable::Initialise` registers all six before a single byte of
+		// content has been fetched. They are the only geometry an editor is
+		// guaranteed to be able to resolve.
+		//
+		// Leaving them out made the mesh picker *empty* on a machine with no
+		// published store, which reads as a picker that does not work rather
+		// than as a store that is not there — and it made the six meshes every
+		// `Part` in the engine is already drawn with unreachable from the one
+		// panel whose job is to choose geometry.
+		//
+		// **Kept apart from `PickerContents` rather than mixed into it**, because
+		// that vector answers "what has this store published" — the empty-state
+		// message reads it, and six rows that are always there would make
+		// "nothing published" a sentence that could never be shown.
+		//
+		// `Root` is left at its default. A built-in has no content address
+		// because it has no content — nothing fetches one — and inventing a hash
+		// for it would be a value that looks like it could be looked up.
+		PickerBuiltins.clear();
+		PickerBuiltins.reserve(engine::assets::BUILTIN_MESH_COUNT);
+		for (uint8_t index = 0; index < engine::assets::BUILTIN_MESH_COUNT; index++) {
+			const auto builtin = static_cast<engine::assets::BuiltinMesh>(index);
+			PickerBuiltins.push_back(cdn::PublishedEntry{
+				.Name = std::string(engine::assets::BuiltinName(builtin)),
+				.Kind = engine::assets::AssetKind::Mesh,
+				.Root = {},
+			});
+		}
 	}
 }
