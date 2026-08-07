@@ -20,15 +20,23 @@ namespace engine::render {
 		// to -1 or +1 — which is why the table below is indices rather than
 		// vectors: the corners are derived and the *edges* are the fact.
 		constexpr std::array<std::pair<int, int>, 12> EDGES{{
-			{0, 1}, {2, 3}, {4, 5}, {6, 7},
-			{0, 2}, {1, 3}, {4, 6}, {5, 7},
-			{0, 4}, {1, 5}, {2, 6}, {3, 7},
+			{0, 1},
+			{2, 3},
+			{4, 5},
+			{6, 7},
+			{0, 2},
+			{1, 3},
+			{4, 6},
+			{5, 7},
+			{0, 4},
+			{1, 5},
+			{2, 6},
+			{3, 7},
 		}};
 	}
 
-	void AdornmentGeometry::AddBox(
-		const CFrame &frame, const Vector3 &halfExtent, const AdornmentLine &style
-	) {
+	void
+	AdornmentGeometry::AddBox(const CFrame &frame, const Vector3 &halfExtent, const AdornmentLine &style) {
 		std::array<Vector3, 8> corners{};
 		for (int index = 0; index < 8; index++) {
 			const Vector3 local{

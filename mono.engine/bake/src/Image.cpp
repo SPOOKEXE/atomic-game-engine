@@ -39,6 +39,13 @@ namespace engine::bake {
 			static_cast<uint8_t>(bytes[1]) == 0xD8 && static_cast<uint8_t>(bytes[2]) == 0xFF) {
 			return ImageFormat::Jpeg;
 		}
+
+		// `GIF87a` or `GIF89a`. Four bytes rather than six, because the version
+		// changes nothing this decoder does — see `Gif.cpp`.
+		if (bytes.size() >= 4 && static_cast<char>(bytes[0]) == 'G' && static_cast<char>(bytes[1]) == 'I' &&
+			static_cast<char>(bytes[2]) == 'F' && static_cast<char>(bytes[3]) == '8') {
+			return ImageFormat::Gif;
+		}
 		return ImageFormat::Unknown;
 	}
 
@@ -50,6 +57,8 @@ namespace engine::bake {
 			return "bmp";
 		case ImageFormat::Jpeg:
 			return "jpeg";
+		case ImageFormat::Gif:
+			return "gif";
 		case ImageFormat::Unknown:
 			break;
 		}
@@ -64,6 +73,8 @@ namespace engine::bake {
 			return ReadBmp(bytes, out, failure);
 		case ImageFormat::Jpeg:
 			return ReadJpeg(bytes, out, failure);
+		case ImageFormat::Gif:
+			return ReadGif(bytes, out, failure);
 		case ImageFormat::Unknown:
 			break;
 		}
@@ -87,6 +98,23 @@ namespace engine::bake {
 		resized.Width = width;
 		resized.Height = height;
 		resized.Format = source.Format;
+
+		// **Carried across, because a resize does not change what the cells
+		// are.** A flipbook sheet shrunk to fit a texture budget is the same
+		// animation at a lower resolution — same grid, same frame count, same
+		// rate — and dropping the three fields here would turn every imported
+		// GIF larger than `--max-texture` back into an anonymous atlas. That is
+		// the whole failure this note exists to prevent: it would look like the
+		// decoder was broken, and the decoder would be fine.
+		//
+		// **A non-uniform resize is still legal and still carried.** The grid is
+		// a count, not a pixel size, so cells stay cells whatever the aspect
+		// becomes — anything sampling the sheet divides by `FlipbookSide` rather
+		// than by a stored cell width.
+		resized.FlipbookSide = source.FlipbookSide;
+		resized.FlipbookFrames = source.FlipbookFrames;
+		resized.FlipbookFrameRate = source.FlipbookFrameRate;
+
 		resized.Pixels.resize(static_cast<size_t>(width) * height * channels);
 
 		for (uint32_t row = 0; row < height; row++) {

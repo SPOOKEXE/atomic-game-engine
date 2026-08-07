@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -35,10 +36,84 @@ namespace assetc {
 		//
 		uint32_t MaximumTexture = 2048;
 
+		// The frame rate to stamp on every imported flipbook, overriding what
+		// the source said. Zero keeps what the source said.
+		//
+		// **An override and not a default**, which is why zero means "leave it
+		// alone" rather than "use twelve": a GIF states a delay per frame and
+		// the decoder averages those into a rate, so the common case needs
+		// nothing said here. This exists for the case where the source is wrong
+		// — an exporter that wrote 100ms on every frame of something drawn at
+		// 24fps, which is a thing exporters do — and for re-timing an animation
+		// without re-exporting it.
+		//
+		// It applies to every flipbook in the run, because `assetc` bakes a
+		// tree and has no per-file switches. Re-timing one animation means
+		// baking it on its own.
+		//
+		// @since v0.10
+		float FlipbookFps = 0.0f;
+
+		// Finds the source a model's texture reference means, when the tree
+		// alone cannot say.
+		//
+		// **Because a flattened store destroys the relationship a model file
+		// relies on.** A `.pmx` names its sheets the way it was authored —
+		// `tex/体.png`, relative to the folder the model sat in — and that works
+		// perfectly while the bake walks an art tree with the `tex/` folder still
+		// beside the model. `cdn::ImportFile` renames every file to
+		// `<hash><extension>` in one flat directory, so after an import the
+		// model is `<hash>.pmx`, the sheet is a different `<hash>.png`, and
+		// nothing in the folder records that the two belong together.
+		//
+		// The lexical join then produced `tex/体.atex` — a name no manifest
+		// carries, written into the mesh without a word. Every PMX character in
+		// this repository's own store baked and published with dangling sheet
+		// references, and the symptom was models that arrive, draw, and are
+		// untextured: the mesh is right, the geometry is right, and the one
+		// string joining it to its pixels points at nothing.
+		//
+		// **The import log is the only surviving link**, so the resolver lives
+		// with whoever owns the log rather than here — `cdn::StoreTextureResolver`
+		// builds one. This module stays ignorant of `mono.cdn`, which the tier
+		// check would refuse anyway.
+		//
+		// Unset means "the tree is the truth", which is what a plain
+		// `assetc --input ART` run wants and what every bake did before v0.10.
+		//
+		// @param model     The model being baked, relative to `Input`.
+		// @param reference The texture as the model spelled it.
+		// @param out       Set to the *source* name, relative to `Input` — not
+		//        the baked one. `BakedName` is applied by the caller so the
+		//        naming rule stays in one place.
+		// @return `false` to fall back to resolving against the tree.
+		// @since v0.10
+		std::function<bool(std::string_view model, std::string_view reference, std::string &out)>
+			ResolveTexture;
+
 		// Whether to copy files the baker does not understand.
 		//
 		// The output tree is also the publisher's input.
 		bool CopyUnknown = true;
+
+		// Bake only this one source, as a path relative to `Input`.
+		//
+		// **For the editor, which bakes what somebody just picked.** A studio
+		// showing the raw folder has to turn one file into something a runtime
+		// reads *now* — re-walking a store of six thousand assets to do it would
+		// take minutes, and a picker that hung for minutes is one nobody uses.
+		//
+		// **A filter on the existing walk rather than a second entry point**,
+		// because everything that makes a bake correct is in that walk: a
+		// material's colour map is rewritten through `BakedName`, a model's
+		// textures likewise, and a second path would be a second chance to
+		// spell that rule differently. What it costs is a directory scan to find
+		// one file, which is microseconds against decoding it.
+		//
+		// Empty bakes the whole tree, which is what every other caller wants.
+		//
+		// @since v0.10
+		std::string Only;
 	};
 
 	// What one source file became.
@@ -75,6 +150,19 @@ namespace assetc {
 		// Source and output totals for completed rows.
 		uint64_t SourceBytes = 0;
 		uint64_t OutputBytes = 0;
+
+		// How many model texture references named something that is not in the
+		// input tree.
+		//
+		// **Counted rather than left to the log**, because this is the failure
+		// that produces a model which loads, draws, and is silently untextured —
+		// and a warning per submesh in a run of two thousand assets is a line
+		// nobody scrolls back to. A non-zero number here is the one thing that
+		// says "this bake produced references that cannot resolve", and
+		// `contentimport` reports it beside the failure count.
+		//
+		// @since v0.10
+		size_t DanglingTextures = 0;
 	};
 
 	// The baked name for a source path.

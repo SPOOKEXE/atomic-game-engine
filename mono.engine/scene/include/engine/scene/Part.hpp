@@ -75,6 +75,33 @@ namespace engine::scene {
 	// before the table has it. Later calls are a load.
 	//
 	// @return The registered class id for `"Part"`.
+	// Where an instance's handle is, in world space.
+	//
+	// **Roblox's `PVInstance:GetPivot()`.** A `Transform` says where the centre
+	// of something is; a pivot says where it is *held*, which is what an author
+	// places against — a door by its hinge, a lid by its rim. `Pivot::Offset`
+	// carries why that needs storage rather than being derivable.
+	//
+	// @param store    The world.
+	// @param instance The instance.
+	// @return The world pivot, or the identity for something with no placement.
+	// @since v0.10
+	core::CFrame PivotOf(const ecs::Store &store, ecs::Entity instance);
+
+	// Moves an instance so its handle lands on `target`.
+	//
+	// **The inverse of `PivotOf`, and that is the whole of it**: the placement
+	// that puts the pivot at the target is `target * Offset⁻¹`. Doing it the
+	// other way round — setting the transform to the target and hoping — is what
+	// "PivotTo does not respect the offset" bugs are.
+	//
+	// @param store    The world.
+	// @param instance The instance.
+	// @param target   Where the handle should end up.
+	// @return `false` for something with no placement to move.
+	// @since v0.10
+	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target);
+
 	ecs::ClassId PartClass();
 
 	// The `Camera` class id, registering the tree on first call.

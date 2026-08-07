@@ -11,7 +11,7 @@
 //
 //     Transform  ->  CFrame, Position, Orientation
 //     Bounds     ->  Size
-//     Visual     ->  Color, Visible, Mesh, Material, Transparency
+//     Visual     ->  Color, Visible, Mesh, Transparency
 //
 // A script told that `Transform` moved would have to learn the component layout
 // to make sense of it, which is exactly the coupling `PropertyDescriptor` exists
@@ -100,6 +100,32 @@ namespace engine::script {
 		//
 		// @param instance The instance to stop watching.
 		void Unwatch(ecs::Entity instance);
+
+		// Queues one notification directly, without a component write behind it.
+		//
+		// **For attributes, which are the one authored value that is not a
+		// component.** Everything else here arrives through
+		// `Store::OnChangedComponent` and is fanned out to the property names
+		// reading that component; an attribute has no component and no property
+		// descriptor, so there is nothing to fan from and the writer says what
+		// changed itself.
+		//
+		// **It goes through the same queue rather than firing on the spot**, and
+		// that is the whole reason this is a method here instead of a call to
+		// `FireSignal` at the write. The queue dedups — a value written three
+		// times in one tick signals once, with what it ended at — and it defers to
+		// the barrier, so a listener cannot mutate the world in the middle of a
+		// loop over it. An attribute that fired immediately would have neither
+		// property and would be the one signal in the engine that behaves
+		// differently from every other.
+		//
+		// Watching is not required: an attribute has no component to subscribe to,
+		// so the filter `Watch` exists for does not apply and a recorded change is
+		// always delivered.
+		//
+		// @param instance The instance the value is on.
+		// @param name     What changed.
+		void Record(ecs::Entity instance, core::Name name);
 
 		// Hands over everything the last barrier recorded and empties the queue.
 		//

@@ -353,3 +353,27 @@ was describing what the code assumed rather than what it did.
   filters by tag; the window shows the world. `DrawSlots` takes a filter and
   every screen-pass call site passes zero, deliberately — a filtered window is a
   game where the player sees a group and cannot tell why.
+
+## The fallback texel and the default texture are two things
+
+`FallbackTexture` is one white texel and exists so a sampler a pipeline declares
+is never unbound — undefined behaviour on some backends, a validation error on
+others. It is a stand-in for a **binding**.
+
+`DefaultTexture` is what a drawable with no material is *made of*: a real sheet
+of white plastic, compiled in, bound in the colour slot whenever `Textures.Find`
+answers nothing. `TextureTable::Default` holds it outside the map so no `Add` can
+replace it and no `Drop` can release it.
+
+**Conflating the two is the bug this split exists to record.** The colour slot
+took the fallback texel and set the shader's "no texture" flag, so every
+untextured part in every scene was flat, untextured white — which is what a
+seventeen-name `Material` enum was supposed to be fixing and could not, because a
+name is not a texture. Do not reach for `FallbackTexture` in the colour slot
+again; the shadow and surface slots are where it is still right, because those
+are genuinely absent features rather than defaulted ones.
+
+**It is compiled in and it must stay that way.** It is what a part draws with
+before any content has streamed, on a machine with no content store, and on the
+frame a fetch fails. A default that had to be fetched would be absent in exactly
+the cases it exists for.

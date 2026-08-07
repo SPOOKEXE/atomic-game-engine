@@ -20,6 +20,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -84,6 +85,12 @@ namespace {
 			return "UDim2";
 		case PropertyType::Rect:
 			return "Rect";
+		case PropertyType::NumberRange:
+			return "NumberRange";
+		case PropertyType::NumberSequence:
+			return "NumberSequence";
+		case PropertyType::ColorSequence:
+			return "ColorSequence";
 		case PropertyType::Opaque:
 			break;
 		}
@@ -111,9 +118,33 @@ namespace {
 	// given an author completion for every enum in the engine at once.
 	std::string LuauType(const PropertyDescriptor &property) {
 		if (property.Type == PropertyType::Enum) {
-			// The alias, not `Enum.Material` — that is a *value*, and a type
-			// position needs a type. The alias is what both declaration files
-			// emit above.
+			// **`Enum.Material`, the same as the TypeScript half**, and getting
+			// here took a correction worth recording rather than editing out.
+			//
+			// This used to emit `Enum_Material` with a comment arguing that Luau
+			// *could not* express the dotted form. That was wrong. What is true is
+			// that a **definitions file** cannot declare one: `loadDefinitionFile`
+			// only ever writes `exportedTypeBindings[name]`, a flat name, and
+			// there is no `declare` syntax for anything else.
+			//
+			// What resolves `Enum.Material` is `Scope::lookupImportedType("Enum",
+			// "Material")` — the `importedTypeBindings` map, which `require`
+			// populates and which a **host** may populate directly. That is
+			// precisely what Roblox does, and it is what
+			// `mono.tools/scriptcheck` now does: it walks the `Enum_*` types this
+			// file emits and aliases each under the `Enum` prefix.
+			//
+			// **The declaration file keeps the flat name and scripts get both**,
+			// which is forced by the order things happen in rather than chosen.
+			// The aliases are registered *after* `loadDefinitionFile` returns —
+			// they are built by walking the `Enum_*` types it created — so this
+			// file cannot use the dotted form in its own declarations. Emitting it
+			// here made the file fail to load with "Unknown type
+			// 'Enum.AspectType'" before a single script was checked.
+			//
+			// So: the vocabulary is declared flat, and `Enum.Material` is an alias
+			// pointing at the same `TypeFun`. A script may write either, and they
+			// are the same type rather than two that agree.
 			return std::string("Enum_") + property.EnumName.Text().data();
 		}
 
@@ -147,6 +178,12 @@ namespace {
 			return "UDim2";
 		case PropertyType::Rect:
 			return "Rect";
+		case PropertyType::NumberRange:
+			return "NumberRange";
+		case PropertyType::NumberSequence:
+			return "NumberSequence";
+		case PropertyType::ColorSequence:
+			return "ColorSequence";
 		case PropertyType::Reference:
 			return "Instance";
 		case PropertyType::Enum:
@@ -158,7 +195,14 @@ namespace {
 
 	std::string TypeScriptType(const PropertyDescriptor &property) {
 		if (property.Type == PropertyType::Enum) {
-			return std::string("Enum_") + property.EnumName.Text().data();
+			// **`Enum.Material`, which is what a Roblox script spells**, and this
+			// is the half of `ROADMAP.md` v0.10's rename that a type system can
+			// actually express. TypeScript merges an `interface Material` and a
+			// `const Material` inside `namespace Enum`, so one name is both the
+			// type and the table of members — see the namespace this emits below.
+			//
+			// The Luau half cannot do this and `LuauType` says why.
+			return std::string("Enum.") + property.EnumName.Text().data();
 		}
 
 		switch (property.Type) {
@@ -191,6 +235,12 @@ namespace {
 			return "UDim2";
 		case PropertyType::Rect:
 			return "Rect";
+		case PropertyType::NumberRange:
+			return "NumberRange";
+		case PropertyType::NumberSequence:
+			return "NumberSequence";
+		case PropertyType::ColorSequence:
+			return "ColorSequence";
 		case PropertyType::Reference:
 			return "Instance";
 		case PropertyType::Enum:
@@ -504,6 +554,12 @@ end
 
 declare Vector3: {
 	new: (x: number?, y: number?, z: number?) -> Vector3,
+
+	-- **Lowercase, because Roblox's are.** Every other member of this vocabulary
+	-- is capitalised and these two are not, which reads as a mistake until you
+	-- try to run a script written elsewhere.
+	zero: Vector3,
+	one: Vector3,
 }
 
 declare extern type Color3 with
@@ -551,6 +607,59 @@ declare extern type ChangedSignal with
 	function Connect(self, handler: (property: string) -> ()): RBXScriptConnection
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
 end
+
+-- --- input ------------------------------------------------------------------
+--
+-- **Hand-written, because these two are script globals rather than classes.**
+-- `RunService` and `MessagingService` are declared the same way for the same
+-- reason: nothing about them is in the class table, so the generator has no way
+-- to derive them and writing them out is the honest form.
+
+declare extern type UserInputServiceType with
+	MouseBehavior: Enum_MouseBehavior
+	MouseDeltaSensitivity: number
+	read KeyboardEnabled: boolean
+	read MouseEnabled: boolean
+
+	read InputBegan: PropertyChangedSignal
+	read InputEnded: PropertyChangedSignal
+	read InputChanged: PropertyChangedSignal
+
+	function IsKeyDown(self, key: Enum_KeyCode): boolean
+	function IsMouseButtonPressed(self, button: Enum_UserInputType): boolean
+	function GetMouseLocation(self): Vector2
+	function GetMouseDelta(self): Vector2
+	function GetKeysPressed(self): { Enum_KeyCode }
+end
+
+declare UserInputService: UserInputServiceType
+
+declare extern type ContextActionServiceType with
+	-- The touch-button argument is accepted and ignored: there is no touch
+	-- surface, and refusing it would make a Roblox script fail on a line that
+	-- describes something this engine simply does not have.
+	function BindAction(
+		self,
+		name: string,
+		handler: (string, Enum_UserInputState, Enum_KeyCode) -> (),
+		createTouchButton: boolean,
+		...: Enum_KeyCode
+	): ()
+
+	function BindActionAtPriority(
+		self,
+		name: string,
+		handler: (string, Enum_UserInputState, Enum_KeyCode) -> (),
+		createTouchButton: boolean,
+		priority: number,
+		...: Enum_KeyCode
+	): ()
+
+	function UnbindAction(self, name: string): ()
+	function UnbindAllActions(self): ()
+end
+
+declare ContextActionService: ContextActionServiceType
 
 declare extern type PropertyChangedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
@@ -674,25 +783,66 @@ declare NumberRange: {
 	new: (min: number, max: number?) -> NumberRange,
 }
 
+-- The stops, added at v0.10 because a sequence became a *property* and a value
+-- read back has to come back in a shape its own constructor accepts. Until then
+-- `Keypoints` handed out `{time, value, envelope}` tables, and those are still
+-- accepted by both constructors — the table form is how a gradient is written
+-- inline and is not deprecated.
+-- What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
+--
+-- At file scope because a `declare extern type ... with` block takes members and
+-- not aliases, and because the TypeScript half needs the same for its own reason.
+export type EngineAttribute =
+	boolean | number | string | Vector3 | Color3 | CFrame
+	| Vector2 | UDim | UDim2 | Rect | NumberRange | NumberSequence | ColorSequence
+
+declare extern type NumberSequenceKeypoint with
+	read Time: number
+	read Value: number
+	read Envelope: number
+end
+
+declare NumberSequenceKeypoint: {
+	new: (time: number, value: number, envelope: number?) -> NumberSequenceKeypoint,
+}
+
+declare extern type ColorSequenceKeypoint with
+	read Time: number
+	read Value: Color3
+end
+
+declare ColorSequenceKeypoint: {
+	-- No envelope: Roblox's colour keypoint has none and `core::ColorKeypoint`
+	-- has no field for one.
+	new: (time: number, value: Color3) -> ColorSequenceKeypoint,
+}
+
 declare extern type NumberSequence with
-	Keypoints: { { number } }
+	read Keypoints: { NumberSequenceKeypoint }
 	function Evaluate(self, time: number): number
 end
 
 declare NumberSequence: {
 	new: ((value: number) -> NumberSequence)
 		& ((from: number, to: number) -> NumberSequence)
+		-- **Two overloads rather than one over a union**, which is a Luau
+		-- inference limit rather than a design: `{ A | B }` does not unify
+		-- against a table literal whose elements are all `A`, so the union form
+		-- rejects the ordinary case to accept the mixed one. Both are listed and
+		-- the run time takes either, element by element.
+		& ((keypoints: { NumberSequenceKeypoint }) -> NumberSequence)
 		& ((keypoints: { { number } }) -> NumberSequence),
 }
 
 declare extern type ColorSequence with
-	Keypoints: { { number | Color3 } }
+	read Keypoints: { ColorSequenceKeypoint }
 	function Evaluate(self, time: number): Color3
 end
 
 declare ColorSequence: {
 	new: ((value: Color3) -> ColorSequence)
 		& ((from: Color3, to: Color3) -> ColorSequence)
+		& ((keypoints: { ColorSequenceKeypoint }) -> ColorSequence)
 		& ((keypoints: { { number | Color3 } }) -> ColorSequence),
 }
 
@@ -795,6 +945,43 @@ declare extern type DataStoreService with
 	function RemoveAsync(self, key: string): (any, BusStatus, number)
 end
 
+-- What content this world holds, which is the other half of naming an asset.
+--
+-- A `MeshId` is a name a publisher wrote — an id does not cross — and until
+-- this there was no way for a script to ask what those names were. Every list
+-- is sorted, so a scene that lays content out arranges itself the same way on
+-- every run.
+declare extern type ContentService with
+	-- Every mesh registered in this world, sorted. Empty on a headless server
+	-- and before content has arrived, which are the same honest answer.
+	function GetMeshes(self): { string }
+
+	-- Every mesh the *store* published, sorted — the signed manifest, which a
+	-- client verifies before it can fetch anything.
+	--
+	-- **This is what there is to name; `GetMeshes` is what has been named.** The
+	-- two were one question until v0.10, because content was fetched by kind and
+	-- so everything published arrived whether a scene wanted it or not. Nothing
+	-- is fetched by kind now, which means a scene reading only `GetMeshes` sees
+	-- what it has already asked for and can never discover anything.
+	--
+	-- Setting a `MeshId` from this list *is* the ask: the name enters the world
+	-- and the next content pump fetches that one asset. Empty on a process with
+	-- no content source, which is the honest answer.
+	function GetPublishedMeshes(self): { string }
+
+	-- Every texture registered in this world, sorted.
+	function GetTextures(self): { string }
+
+	-- A texture's flipbook grid and authored rate, or nil when it is a still
+	-- image or this world has not been told about it.
+	function GetFlipbook(self, texture: string): { Side: number, Frames: number, FrameRate: number }?
+
+	-- The same number `MeshPart.TrianglesCount` gives, asked about a mesh
+	-- rather than a part — so a layout can be sized before anything is built.
+	function GetTriangleCount(self, mesh: string): number
+end
+
 declare extern type RunService with
 	Heartbeat: HeartbeatSignal
 	function IsServer(self): boolean
@@ -812,6 +999,7 @@ declare MessagingService: MessagingService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare ContentService: ContentService
 
 -- The world this script runs on. `game` is the universe above it.
 declare workspace: Workspace
@@ -975,7 +1163,40 @@ declare task: {
 				out << "\tfunction FindFirstChild(self, name: string): Instance?\n";
 				out << "\tfunction IsDescendantOf(self, ancestor: Instance): boolean\n";
 				out << "\tfunction ClearAllChildren(self): ()\n";
+
+				// **The pivot pair, declared on `Instance` rather than on
+				// `PVInstance`.** Roblox puts them on the latter and the binding
+				// puts every method here for one reason: the method table is one
+				// table, shared by every instance userdata, so a declaration on a
+				// subclass would type-check something the run time does not
+				// enforce. `scene::PivotOf` answers the identity for anything
+				// with no placement, which is what makes that honest rather than
+				// merely convenient.
+				out << "\tfunction GetPivot(self): CFrame\n";
+				out << "\tfunction PivotTo(self, target: CFrame): ()\n";
 				out << "\tfunction GetPropertyChangedSignal(self, property: string): "
+					   "PropertyChangedSignal\n";
+
+				// **Attributes, and the value type is a union rather than
+				// `any`.** An attribute holds one of a closed set —
+				// `ecs::AttributeTypeAllowed` refuses everything else — so a
+				// union is what the run time actually accepts, and `any` would
+				// typecheck `part:SetAttribute("k", part)` which the binding
+				// refuses at run time.
+				//
+				// `nil` is in the union on the way *in* because that is how an
+				// attribute is removed, and on the way *out* because that is what
+				// an unset one reads as.
+				//
+				// **The alias is at file scope, not here.** A `declare extern
+				// type ... with` block takes members and not type aliases —
+				// putting one inside is a syntax error four lines later that
+				// reads as an unclosed function, which is exactly how it was
+				// found. `EngineAttribute` is declared beside the datatypes.
+				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
+				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
+				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
+				out << "\tfunction GetAttributeChangedSignal(self, name: string): "
 					   "PropertyChangedSignal\n";
 
 				// **The 2D tree's input, declared on `Instance` rather than on
@@ -998,24 +1219,44 @@ declare task: {
 				out << "\tMouseMoved: PointerSignal\n";
 			}
 
-			// The two members only the Workspace answers, for the reason
-			// `Instances.cpp` keeps them in a table of their own: a `Raycast` on
-			// a `Folder` would be an answer that means nothing.
+			// The member only the Workspace answers, for the reason
+			// `Instances.cpp` keeps it in a table of its own: a `Raycast` on a
+			// `Folder` would be an answer that means nothing.
 			//
 			// A raycast result is a plain table at run time — read once and
 			// discarded — so it is written inline rather than given a name.
+			//
+			// **`CurrentCamera` used to be written here too, and removing it was
+			// a fix rather than a tidy-up** — the same correction the `Name` line
+			// on `Instance` went through at v0.5, and it failed the same way. It
+			// was hand-written because it *was* a special case: `PushCurrentCamera`
+			// served it from the `ActiveCamera` resource and no property projected
+			// it. v0.10 declared one, so the loop below started emitting it as
+			// well — and an extern type with the member twice is not a warning,
+			// it is an assertion failure inside Luau's constraint generator, which
+			// `just typecheck` reports as `SIGILL` on every script in the tree.
+			//
+			// What is lost is the type: a declared `Reference` property is
+			// `Instance` and this said `Camera?`, so a script assigning a `Part`
+			// to `workspace.CurrentCamera` now typechecks and is refused at run
+			// time instead. That is the same trade every other reference property
+			// makes — `Parent: Instance` — and narrowing it needs
+			// `PropertyDescriptor` to carry which class a reference points at,
+			// which is a change to `ecs` rather than to this generator.
 			if (name == "Workspace") {
-				// Optional, because a world with no camera resolved genuinely
-				// has none — `PushCurrentCamera` answers nil rather than minting
-				// a row so the property has something to point at.
-				out << "\tCurrentCamera: Camera?\n";
 				out << "\tfunction Raycast(self, origin: Vector3, direction: Vector3, "
 					   "params: RaycastParams?): {\n";
 				out << "\t\tInstance: Instance,\n";
 				out << "\t\tPosition: Vector3,\n";
 				out << "\t\tNormal: Vector3,\n";
 				out << "\t\tDistance: number,\n";
-				out << "\t\tMaterial: Enum_Material,\n";
+
+				// **A string, where this said `Enum_Material` until v0.10.** The
+				// enum is gone and the field is `Surface::Material` now — the row
+				// a contact reads friction out of — which is a plain name.
+				// `script/LuauQuery.cpp` carries why a hit result reports that
+				// one rather than resolving the part's `Material` instance.
+				out << "\t\tMaterial: string,\n";
 				out << "\t}?\n";
 			}
 
@@ -1049,6 +1290,7 @@ declare task: {
 		// not in the tree for the walk above to find.
 		out << "\tRunService: RunService,\n";
 		out << "\tMessagingService: MessagingService,\n";
+		out << "\tContentService: ContentService,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
 		out << "\tDataStoreService: DataStoreService,\n";
 		out << "}\n\n";
@@ -1136,6 +1378,10 @@ declare interface CFrame {
 
 declare const Vector3: {
 	new: (x?: number, y?: number, z?: number) => Vector3;
+
+	// Lowercase, because Roblox's are. The Luau half carries the argument.
+	readonly zero: Vector3;
+	readonly one: Vector3;
 };
 
 declare const Color3: {
@@ -1173,6 +1419,71 @@ declare interface ChangedSignal {
 	Once(handler: (property: string) => void): RBXScriptConnection;
 	Equals(other: ChangedSignal): boolean;
 }
+
+// What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
+//
+// **Named at file scope rather than nested**, because TypeScript has no
+// interface-scoped type alias the way the Luau half does — so the name is
+// prefixed to say where it belongs rather than risking a collision with a game's
+// own `Attribute`.
+// --- input ------------------------------------------------------------------
+//
+// Hand-written for the Luau half's reason: these are globals, not classes.
+declare interface UserInputServiceType {
+	MouseBehavior: Enum.MouseBehavior;
+	MouseDeltaSensitivity: number;
+	readonly KeyboardEnabled: boolean;
+	readonly MouseEnabled: boolean;
+
+	readonly InputBegan: PropertyChangedSignal;
+	readonly InputEnded: PropertyChangedSignal;
+	readonly InputChanged: PropertyChangedSignal;
+
+	IsKeyDown(key: Enum.KeyCode): boolean;
+	IsMouseButtonPressed(button: Enum.UserInputType): boolean;
+	GetMouseLocation(): Vector2;
+	GetMouseDelta(): Vector2;
+	GetKeysPressed(): Enum.KeyCode[];
+}
+
+declare const UserInputService: UserInputServiceType;
+
+declare interface ContextActionServiceType {
+	BindAction(
+		name: string,
+		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
+		createTouchButton: boolean,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	BindActionAtPriority(
+		name: string,
+		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
+		createTouchButton: boolean,
+		priority: number,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	UnbindAction(name: string): void;
+	UnbindAllActions(): void;
+}
+
+declare const ContextActionService: ContextActionServiceType;
+
+declare type EngineAttribute =
+	| boolean
+	| number
+	| string
+	| Vector3
+	| Color3
+	| CFrame
+	| Vector2
+	| UDim
+	| UDim2
+	| Rect
+	| NumberRange
+	| NumberSequence
+	| ColorSequence;
 
 declare interface PropertyChangedSignal {
 	Connect(handler: () => void): RBXScriptConnection;
@@ -1212,7 +1523,10 @@ declare interface RaycastResult {
 	readonly Position: Vector3;
 	readonly Normal: Vector3;
 	readonly Distance: number;
-	readonly Material: Enum_Material;
+
+	// The `Surface` name — what the part is like to touch, not what it looks
+	// like. See the Luau declaration above for why it is a string.
+	readonly Material: string;
 }
 
 )TS";
@@ -1304,7 +1618,28 @@ declare const NumberRange: {
 	new: (min: number, max?: number) => NumberRange;
 };
 
+// The stops. See the Luau half for why these arrived at v0.10.
+declare interface NumberSequenceKeypoint {
+	readonly Time: number;
+	readonly Value: number;
+	readonly Envelope: number;
+}
+
+declare const NumberSequenceKeypoint: {
+	new: (time: number, value: number, envelope?: number) => NumberSequenceKeypoint;
+};
+
+declare interface ColorSequenceKeypoint {
+	readonly Time: number;
+	readonly Value: Color3;
+}
+
+declare const ColorSequenceKeypoint: {
+	new: (time: number, value: Color3) => ColorSequenceKeypoint;
+};
+
 declare interface NumberSequence {
+	readonly Keypoints: readonly NumberSequenceKeypoint[];
 	Evaluate(time: number): number;
 }
 
@@ -1312,13 +1647,15 @@ declare const NumberSequence: {
 	new: {
 		(value: number): NumberSequence;
 		(from: number, to: number): NumberSequence;
-		// `[time, value]`. The Luau half reads an envelope as a third element;
-		// this one does not.
-		(keypoints: [number, number][]): NumberSequence;
+		// Either form. `[time, value, envelope]` is the table one; the Luau half
+		// says the same thing in its own syntax.
+		(keypoints: (NumberSequenceKeypoint | [number, number] | [number, number, number])[]):
+			NumberSequence;
 	};
 };
 
 declare interface ColorSequence {
+	readonly Keypoints: readonly ColorSequenceKeypoint[];
 	Evaluate(time: number): Color3;
 }
 
@@ -1326,6 +1663,7 @@ declare const ColorSequence: {
 	new: {
 		(value: Color3): ColorSequence;
 		(from: Color3, to: Color3): ColorSequence;
+		(keypoints: (ColorSequenceKeypoint | [number, Color3])[]): ColorSequence;
 	};
 };
 
@@ -1340,8 +1678,8 @@ declare interface TweenInfo {
 declare const TweenInfo: {
 	new: (
 		time?: number,
-		style?: Enum_EasingStyle,
-		direction?: Enum_EasingDirection,
+		style?: Enum.EasingStyle,
+		direction?: Enum.EasingDirection,
 		repeatCount?: number,
 		reverses?: boolean,
 		delayTime?: number
@@ -1500,18 +1838,34 @@ declare const task: {
 		// the brand every `EnumItem` would be interchangeable, and the wrong-enum
 		// mistake the run time refuses would compile.
 		out << "declare interface EnumItem { readonly Name: string; readonly EnumType: string; ";
-		out << "Equals(other: EnumItem): boolean; }\n";
+		out << "Equals(other: EnumItem): boolean; }\n\n";
+
+		// **One namespace holding both declaration spaces**, which is what makes
+		// `Enum.Material` a type here where the Luau half could only have the
+		// alias. TypeScript keeps types and values in separate namespaces, so an
+		// `interface Material` and a `const Material` under `namespace Enum` are
+		// one name meaning two things rather than a redeclaration — the type in a
+		// type position, the table of members in an expression.
+		//
+		// **The brand stays.** `__enum` is what stops `Enum.Material.Plastic` and
+		// `Enum.EasingStyle.Linear` being assignable to one another; without it
+		// every `EnumItem` is interchangeable and the wrong-enum mistake the run
+		// time refuses would compile. Moving the interface inside the namespace
+		// changed where it is spelled and nothing about what it does.
+		out << "declare namespace Enum {\n";
 		for (const engine::core::Name enumName : SortedEnums()) {
-			out << "declare interface Enum_" << enumName.Text() << " extends EnumItem { ";
+			out << "\tinterface " << enumName.Text() << " extends EnumItem { ";
 			out << "readonly __enum: \"" << enumName.Text() << "\"; }\n";
 		}
 		out << "\n";
-
-		out << "declare namespace Enum {\n";
 		for (const engine::core::Name enumName : SortedEnums()) {
+			// Members are typed by the bare name rather than `Enum.Material`,
+			// because inside the namespace the bare name is already this
+			// interface. Both spell the same type; the short one is what a reader
+			// of a generated file wants to see repeated a few hundred times.
 			out << "\tconst " << enumName.Text() << ": {\n";
 			for (const engine::core::Name member : engine::ecs::EnumTable::MembersOf(enumName)) {
-				out << "\t\treadonly " << member.Text() << ": Enum_" << enumName.Text() << ";\n";
+				out << "\t\treadonly " << member.Text() << ": " << enumName.Text() << ";\n";
 			}
 			out << "\t};\n";
 		}
@@ -1569,7 +1923,19 @@ declare const task: {
 				out << "\tFindFirstChild(name: string): Instance | null;\n";
 				out << "\tIsDescendantOf(ancestor: Instance): boolean;\n";
 				out << "\tClearAllChildren(): void;\n";
+
+				// The pivot pair, matching the Luau half and declared in the
+				// same place for the same reason.
+				out << "\tGetPivot(): CFrame;\n";
+				out << "\tPivotTo(target: CFrame): void;\n";
 				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
+
+				// Attributes, matching the Luau half. The union is the same
+				// closed set and for the same reason.
+				out << "\tGetAttribute(name: string): EngineAttribute | null;\n";
+				out << "\tSetAttribute(name: string, value: EngineAttribute | null): void;\n";
+				out << "\tGetAttributes(): { [name: string]: EngineAttribute };\n";
+				out << "\tGetAttributeChangedSignal(name: string): PropertyChangedSignal;\n";
 
 				// The 2D tree's input, on `Instance` for the reason the Luau
 				// half states at length: the run time answers them for any
@@ -1583,13 +1949,15 @@ declare const task: {
 				out << "\treadonly MouseMoved: PointerSignal;\n";
 			}
 
-			// The two members only the Workspace answers, matching the Luau half.
+			// The member only the Workspace answers, matching the Luau half.
 			//
-			// `CurrentCamera` is `null` on a world with no camera resolved,
-			// rather than a camera minted so the property has something to point
-			// at — a headless world genuinely has none.
+			// `CurrentCamera` is gone from here for the reason the Luau half
+			// gives: it is a declared property now and the loop above emits it.
+			// TypeScript would have merged the duplicate rather than crashing,
+			// which is worse — the hand-written `Camera | null` and the generated
+			// `Instance` would have intersected to something no assignment
+			// satisfies.
 			if (name == "Workspace") {
-				out << "\tCurrentCamera: Camera | null;\n";
 				out << "\tRaycast(origin: Vector3, direction: Vector3, params?: RaycastParams): "
 					   "RaycastResult | null;\n";
 			}
@@ -1701,6 +2069,10 @@ int main(int argc, char **argv) {
 	// would be describing what a script can *build* and not what a world can
 	// *hold*, and the second is the half a save file needs.
 	(void)engine::script::ScriptClass();
+
+	// The particle and ribbon classes, for the reason above: they are part of
+	// what a script can name.
+	engine::effects::RegisterEffectClasses();
 
 	// **And the 2D tree, which a game file can carry and a script can build.**
 	// A manifest that stopped at `Part` and `Script` would leave every

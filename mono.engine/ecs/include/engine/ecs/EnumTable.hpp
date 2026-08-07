@@ -5,22 +5,27 @@
 // **Why this is a table and not a C++ enum.** `scene::BodyKind` and
 // `scene::ShapeKind` are closed sets the engine switches on, and they are the
 // right shape for that — adding a case is a compiler error everywhere it
-// matters. A *property* enum is a different thing: `Material` is a set userland
+// matters. A *property* enum is a different thing: `AlphaMode` is a set userland
 // picks from, a game may extend, and a manifest has to describe. A C++ enum can
 // do none of those, because the set has to be readable at run time by a binding
 // generator that never saw the header.
 //
 // So a property enum is a name and a list of member names, and both cross as
-// **text** — rule 4, and the reason `Visual::Material` was a `core::Name` to
-// begin with. What `PropertyType::Enum` adds is not a new storage form. It is
-// that userland gets a value it can compare and be told when it is wrong:
+// **text** — rule 4. What `PropertyType::Enum` adds is not a new storage form.
+// It is that userland gets a value it can compare and be told when it is wrong:
 //
-//     part.Material = "Plsatic"   -- refused, naming the enum
-//     part.Material = Enum.Material.Plastic
+//     part.AlphaMode = "Clipp"   -- refused, naming the enum
+//     part.AlphaMode = Enum.AlphaMode.Clip
 //
 // A `PropertyType::Name` property accepts any string at all, so that typo lands
-// in a component and surfaces as a part that renders with the default material
+// in a component and surfaces as a part that draws every cut-out plane opaque
 // for reasons nobody can see.
+//
+// **The engine registered a seventeen-member `Material` here until v0.10 and no
+// longer does**, which is worth a line because it was this file's own example:
+// the membership check was the only thing it did, and a material is content now
+// rather than a word. `scene/Materials.hpp` carries that change. A game that
+// wants its own named set still registers one.
 //
 // **Process-wide, like `Components` and `Classes`, and for the same reason**: a
 // property's enum has to mean the same thing in every world, because a snapshot
@@ -46,7 +51,7 @@ namespace engine::ecs {
 		// Registers a member of an enum, creating the enum if it is new.
 		//
 		// Registering the same member twice is a no-op rather than an error:
-		// two modules may both declare that `Material` has a `Plastic`, and the
+		// two modules may both declare that `AlphaMode` has a `Clip`, and the
 		// second is agreeing rather than conflicting.
 		//
 		// **Order is registration order and it is what a binding lists.** Not

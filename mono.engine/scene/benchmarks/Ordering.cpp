@@ -82,7 +82,6 @@ namespace ordering_bench {
 		}
 
 		static const Name mesh("engine.bench.scene.Mesh");
-		static const Name material("engine.bench.scene.Material");
 
 		std::vector<DrawInstance> made;
 		made.reserve(count);
@@ -96,7 +95,6 @@ namespace ordering_bench {
 			instance.HalfExtent = Vector3(1.0f, 1.0f, 1.0f);
 			instance.Tint = Color3(1.0f, 1.0f, 1.0f);
 			instance.Mesh = mesh;
-			instance.Material = material;
 
 			const uint32_t roll = Random::Bits(index, 11) % 100u;
 			instance.Transparency = roll < transparentPercent ? 0.5f : 0.0f;

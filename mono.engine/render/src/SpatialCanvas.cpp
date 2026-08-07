@@ -121,8 +121,7 @@ namespace engine::render {
 			}
 
 			const Entity part = AttachedTo(store, collector, surface.Adornee);
-			const scene::Bounds *bounds =
-				part != ecs::NULL_ENTITY ? store.Get<scene::Bounds>(part) : nullptr;
+			const scene::Bounds *bounds = part != ecs::NULL_ENTITY ? store.Get<scene::Bounds>(part) : nullptr;
 
 			if (bounds == nullptr || !(surface.PixelsPerStud > 0.0f)) {
 				pending.push_back(entry);

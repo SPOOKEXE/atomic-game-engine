@@ -98,7 +98,11 @@ namespace engine::scene {
 			a = MixSignature(a, Pair(BitsOf(instance.HalfExtent.Y), BitsOf(instance.HalfExtent.Z)));
 			b = MixSignature(b, Pair(BitsOf(instance.Tint.R), BitsOf(instance.Tint.G)));
 			c = MixSignature(c, Pair(BitsOf(instance.Tint.B), BitsOf(instance.Transparency)));
-			d = MixSignature(d, Pair(instance.Mesh.Id(), instance.Material.Id()));
+			// **The mesh alone, where it used to be the mesh and the material.**
+			// The material name is gone from a `DrawInstance` — a material is
+			// content now and what it resolves to is `Texture`, which is folded
+			// in below. Keeping both would have signed one fact twice.
+			d = MixSignature(d, Pair(instance.Mesh.Id(), 0u));
 
 			// `Surface` is signed and -1 means "no surface", so it is widened
 			// through `uint8_t` exactly as it was before: sign-extending it

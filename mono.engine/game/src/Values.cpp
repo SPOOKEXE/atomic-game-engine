@@ -1,6 +1,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/game/Values.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstring>
@@ -158,6 +159,12 @@ namespace engine::game {
 			return store.GetProperty(instance, descriptor, &out.UDim2, sizeof(out.UDim2));
 		case PropertyType::Rect:
 			return store.GetProperty(instance, descriptor, &out.Rect, sizeof(out.Rect));
+		case PropertyType::NumberRange:
+			return store.GetProperty(instance, descriptor, &out.NumberRange, sizeof(out.NumberRange));
+		case PropertyType::NumberSequence:
+			return store.GetProperty(instance, descriptor, &out.NumberSequence, sizeof(out.NumberSequence));
+		case PropertyType::ColorSequence:
+			return store.GetProperty(instance, descriptor, &out.ColorSequence, sizeof(out.ColorSequence));
 		case PropertyType::Opaque:
 			// Readable as bytes and not as a value. Nothing here can show
 			// it and nothing here should pretend to.
@@ -218,6 +225,14 @@ namespace engine::game {
 			return store.SetProperty(instance, descriptor, &value.UDim2, sizeof(value.UDim2));
 		case PropertyType::Rect:
 			return store.SetProperty(instance, descriptor, &value.Rect, sizeof(value.Rect));
+		case PropertyType::NumberRange:
+			return store.SetProperty(instance, descriptor, &value.NumberRange, sizeof(value.NumberRange));
+		case PropertyType::NumberSequence:
+			return store.SetProperty(
+				instance, descriptor, &value.NumberSequence, sizeof(value.NumberSequence)
+			);
+		case PropertyType::ColorSequence:
+			return store.SetProperty(instance, descriptor, &value.ColorSequence, sizeof(value.ColorSequence));
 		case PropertyType::Opaque:
 			return false;
 		}
@@ -275,6 +290,50 @@ namespace engine::game {
 			// in order rather than a conversion.
 			return Number(value.Rect.Min.X) + ", " + Number(value.Rect.Min.Y) + ", " +
 				   Number(value.Rect.Max.X) + ", " + Number(value.Rect.Max.Y);
+		case PropertyType::NumberRange:
+			// `NumberRange.new`'s order.
+			return Number(value.NumberRange.Minimum) + ", " + Number(value.NumberRange.Maximum);
+
+		// --- the two curves ---------------------------------------------------
+		//
+		// **Semicolons between stops, commas inside one**, which keeps the
+		// number separator the same one every other type in this file uses and
+		// adds exactly one level of nesting rather than a second syntax. A
+		// gradient reads as `0, 1, 0; 1, 0, 0` — three numbers, then three more —
+		// and `ParseValue` splits on the semicolon and hands each piece to the
+		// same `Numbers` every other case calls.
+		//
+		// **Only `Count` stops are written.** The array behind them is twenty
+		// long whatever a sequence holds, and writing the tail would put eighteen
+		// zeroed stops at time zero in every file — a gradient that steps to
+		// nothing, which is a different value from the one authored.
+		//
+		// An empty sequence writes as empty text and parses back as one, which is
+		// the honest round trip: `Evaluate` on an empty sequence is documented to
+		// return zero rather than to read past the end.
+		case PropertyType::NumberSequence: {
+			std::string text;
+			for (uint32_t index = 0; index < value.NumberSequence.Count; index++) {
+				const core::NumberKeypoint &stop = value.NumberSequence.Keypoints[index];
+				if (!text.empty()) {
+					text += "; ";
+				}
+				text += Number(stop.Time) + ", " + Number(stop.Value) + ", " + Number(stop.Envelope);
+			}
+			return text;
+		}
+		case PropertyType::ColorSequence: {
+			std::string text;
+			for (uint32_t index = 0; index < value.ColorSequence.Count; index++) {
+				const core::ColorKeypoint &stop = value.ColorSequence.Keypoints[index];
+				if (!text.empty()) {
+					text += "; ";
+				}
+				text += Number(stop.Time) + ", " + Number(stop.Value.R) + ", " + Number(stop.Value.G) + ", " +
+						Number(stop.Value.B);
+			}
+			return text;
+		}
 		case PropertyType::Reference:
 		case PropertyType::Opaque:
 			return {};
@@ -421,6 +480,65 @@ namespace engine::game {
 			return true;
 		}
 
+		case PropertyType::NumberRange: {
+			float parts[2]{};
+			if (!Numbers(text, 2, parts)) {
+				reason = "expected min, max";
+				return false;
+			}
+			// **Not reordered when the ends arrive backwards.** A range whose
+			// minimum exceeds its maximum is a mistake somebody made, and quietly
+			// swapping it puts a value in the file that nobody typed —
+			// `Numbers`'s own "exactly, not at least" argument, applied to order
+			// rather than to count. `Span()` goes negative and the consumer sees
+			// it.
+			out.NumberRange = core::NumberRange{parts[0], parts[1]};
+			return true;
+		}
+
+		// The two curves. See `FormatValue` for the syntax; this is its inverse,
+		// and it reuses `Numbers` per stop rather than growing a second parser.
+		case PropertyType::NumberSequence:
+		case PropertyType::ColorSequence: {
+			const bool colour = type == PropertyType::ColorSequence;
+			const size_t width = colour ? 4 : 3;
+
+			const std::string_view whole = Trim(text);
+			if (whole.empty()) {
+				// An empty sequence, which is what an empty text means and is a
+				// real value rather than a parse failure. `Evaluate` on one is
+				// specified.
+				return true;
+			}
+
+			for (size_t at = 0; at <= whole.size();) {
+				const size_t semicolon = std::min(whole.find(';', at), whole.size());
+				const std::string_view stop = whole.substr(at, semicolon - at);
+				at = semicolon + 1;
+
+				float parts[4]{};
+				if (!Numbers(stop, width, parts)) {
+					reason = colour ? "expected time, r, g, b per keypoint, separated by ';'"
+									: "expected time, value, envelope per keypoint, separated by ';'";
+					return false;
+				}
+
+				// Refused rather than truncated, for `NumberSequence.new`'s
+				// reason: a gradient silently missing its last stop is subtly
+				// wrong everywhere and obviously wrong nowhere.
+				const bool added =
+					colour ? out.ColorSequence.Add(
+								 core::ColorKeypoint{parts[0], core::Color3{parts[1], parts[2], parts[3]}}
+							 )
+						   : out.NumberSequence.Add(core::NumberKeypoint{parts[0], parts[1], parts[2]});
+				if (!added) {
+					reason = "at most 20 keypoints";
+					return false;
+				}
+			}
+			return true;
+		}
+
 		case PropertyType::Reference:
 			reason = "a reference has no text form";
 			return false;
@@ -479,6 +597,18 @@ namespace engine::game {
 			return left.UDim2 == right.UDim2;
 		case PropertyType::Rect:
 			return left.Rect == right.Rect;
+		case PropertyType::NumberRange:
+			return left.NumberRange == right.NumberRange;
+
+		// **The unused tail is not compared**, which is `Sequence.hpp`'s own
+		// rule and matters here more than there: this decides whether a property
+		// is written to a save file, and two sequences holding the same two stops
+		// in twenty slots differ in eighteen slots of zeroes that mean nothing.
+		// Comparing them would write every sequence to every file forever.
+		case PropertyType::NumberSequence:
+			return left.NumberSequence == right.NumberSequence;
+		case PropertyType::ColorSequence:
+			return left.ColorSequence == right.ColorSequence;
 		case PropertyType::Opaque:
 			// Two values nobody can read are never equal, so an `Opaque`
 			// property is always written. There are none today; when there
@@ -527,6 +657,12 @@ namespace engine::game {
 			return "UDim2";
 		case PropertyType::Rect:
 			return "Rect";
+		case PropertyType::NumberRange:
+			return "NumberRange";
+		case PropertyType::NumberSequence:
+			return "NumberSequence";
+		case PropertyType::ColorSequence:
+			return "ColorSequence";
 		case PropertyType::Opaque:
 			return "opaque";
 		}
@@ -534,7 +670,7 @@ namespace engine::game {
 	}
 
 	bool TypeFromTag(std::string_view tag, ecs::PropertyType &out) {
-		static constexpr std::array<std::pair<std::string_view, PropertyType>, 16> TAGS{{
+		static constexpr std::array<std::pair<std::string_view, PropertyType>, 19> TAGS{{
 			{"bool", PropertyType::Bool},
 			{"int", PropertyType::Int32},
 			{"int64", PropertyType::Int64},
@@ -550,6 +686,9 @@ namespace engine::game {
 			{"UDim", PropertyType::UDim},
 			{"UDim2", PropertyType::UDim2},
 			{"Rect", PropertyType::Rect},
+			{"NumberRange", PropertyType::NumberRange},
+			{"NumberSequence", PropertyType::NumberSequence},
+			{"ColorSequence", PropertyType::ColorSequence},
 			{"opaque", PropertyType::Opaque},
 		}};
 

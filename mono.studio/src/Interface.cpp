@@ -262,12 +262,21 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			DrawHistory();
+			DrawAssets();
+			DrawNetwork();
 			DrawBus();
 			DrawFindInstances();
 			DrawScriptProfile();
 			DrawDiff();
 			DrawDebugger();
 		}
+
+		// **After every panel, because any of them may be the one under the
+		// cursor.** `EndHoverPreview` settles the delay for the whole frame and
+		// `DrawHoverPreview` puts the panel on top of everything — which is why
+		// neither belongs inside a list's own loop.
+		EndHoverPreview(static_cast<double>(ImGui::GetIO().DeltaTime));
+		DrawHoverPreview();
 
 		{
 			ENGINE_PROFILE_CAT("dialogs", engine::core::ProfileCategory::Render);
@@ -886,6 +895,8 @@ namespace studio {
 		// somebody works in all day, because these are opened to answer a
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
+		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);

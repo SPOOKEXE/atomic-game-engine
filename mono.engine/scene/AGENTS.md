@@ -241,8 +241,37 @@ presentation module is the change to refuse.
 ## The property surface is declared, and a property is a conversion
 
 `Part.cpp` declares what a script can name: `CFrame`, `Position`, `Orientation`,
-`Size`, `Color`, `Visible`, `Mesh`, `Material`, `CanCollide`, `Anchored`, and
-`Name`/`Parent` on `Instance`.
+`PivotOffset`, `Size`, `Color`, `Visible`, `CanCollide`, `Anchored`, and
+`Name`/`Parent` on `Instance`. `MeshId` and `TextureID` are `MeshPart`'s.
+
+**A class declares what its *kind* of thing has, and v0.10 corrected `BasePart`
+against that.** `BasePart` is what `Part`, `MeshPart` and a future
+`UnionOperation` share; geometry loaded from a file is not shared by any of them,
+so `Mesh` and `ColorMap` moved to `MeshPart` under the names that class shows.
+Offering a mesh reference on a `Part` was worse than not having it — an author
+sets it, the six-sided box does not change, and nothing says the class was wrong.
+
+**The storage did not move and must not.** `Visual` and `SurfaceAppearance` stay
+on `BasePart`, because `client::CollectInstances` is a batched parallel walk over
+a fixed signature and an optional column is what that shape cannot express. A
+dense column of mostly-invalid names is sixteen bytes an entity and no branches;
+a per-class component is a join per row per frame. What moved is the vocabulary.
+
+**A pivot is storage and `GetPivot` is not.** `Pivot::Offset` is a column on
+every `PVInstance` — a placement says where a thing's *centre* is and almost
+nothing is placed by its centre. `PivotOf` and `PivotTo` are free functions over
+it, and `PivotTo` is `target * Offset⁻¹` rather than a plain move; getting that
+inverse the wrong way round is what "PivotTo ignores the offset" bugs are.
+
+**`Material` was on that list until v0.10 and is not a property at all now.** It
+was an `Enum` over seventeen names that no renderer sampled differently — a
+property that looked like it worked, on the most obvious control in the panel.
+A material is content: `Instance.new("Material")` under a part names an `.amat`,
+and `Materials.hpp` carries the whole design, including why the resolve pass
+writes into `SurfaceAppearance::ColourMap` rather than anywhere new. Do not
+reintroduce a material *word* beside it — two ways to say one thing is the debt
+`AGENTS.md` calls the most expensive kind, and this one has already been paid
+off once.
 
 This section used to forbid exactly that, and the reason it gave was right:
 *"the useful properties do not map to a field — Roblox's `Size` is a full extent

@@ -14,6 +14,7 @@
 #include <engine/bake/Image.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -276,13 +277,155 @@ namespace {
 	}
 }
 
+namespace {
+	// The smallest GIF that decodes to something checkable.
+	//
+	// Two pixels wide, one tall, two colours, one frame. Written byte by byte
+	// because that *is* the format — a helper that assembled it would be a second
+	// encoder to trust.
+	std::vector<std::byte> TinyGif() {
+		const std::vector<uint8_t> bytes{
+			// Header, then a 2x1 canvas with a 2-entry global table.
+			'G',
+			'I',
+			'F',
+			'8',
+			'9',
+			'a',
+			0x02,
+			0x00,
+			0x01,
+			0x00,
+			0x80,
+			0x00,
+			0x00,
+
+			// The table: red, then blue.
+			0xFF,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0xFF,
+
+			// Image descriptor at 0,0, 2x1, no local table.
+			0x2C,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0x02,
+			0x00,
+			0x01,
+			0x00,
+			0x00,
+
+			// LZW: minimum code width 2, one block of two bytes, then the block
+			// terminator.
+			//
+			// **The bytes are the codes clear(4), 0, 1, end(5) packed LSB-first at
+			// three bits each**, which comes out as 0x44 0x0A — and getting that
+			// wrong by one byte is exactly the mistake this test exists to catch,
+			// because a decoder that reads a shifted stream produces plausible
+			// garbage rather than an error.
+			0x02,
+			0x02,
+			0x44,
+			0x0A,
+			0x00,
+
+			// Trailer.
+			0x3B,
+		};
+
+		std::vector<std::byte> out;
+		out.reserve(bytes.size());
+		for (const uint8_t byte : bytes) {
+			out.push_back(static_cast<std::byte>(byte));
+		}
+		return out;
+	}
+
+	// A GIF of `delays.size()` frames, each 2x1, with the delay each one names.
+	//
+	// **Built byte by byte for `TinyGif`'s reason** — the format is the thing
+	// under test, so a helper that assembled it through a library would be a
+	// second encoder to trust. This is that GIF with a graphic control block in
+	// front of every frame, which is where a delay lives.
+	std::vector<std::byte> AnimatedGif(const std::vector<uint16_t> &delays) {
+		std::vector<uint8_t> bytes{
+			'G',
+			'I',
+			'F',
+			'8',
+			'9',
+			'a',
+			0x02,
+			0x00, // 2 wide
+			0x01,
+			0x00, // 1 tall
+			0x80,
+			0x00,
+			0x00,
+
+			// The global table: red, then blue.
+			0xFF,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0xFF,
+		};
+
+		for (const uint16_t delay : delays) {
+			// Graphic control: four bytes of payload, then the terminator. The
+			// delay is little-endian hundredths of a second.
+			bytes.insert(
+				bytes.end(),
+				{0x21,
+				 0xF9,
+				 0x04,
+				 0x00,
+				 static_cast<uint8_t>(delay & 0xFF),
+				 static_cast<uint8_t>(delay >> 8),
+				 0x00,
+				 0x00}
+			);
+
+			// The same 2x1 frame `TinyGif` uses, LZW and all.
+			bytes.insert(
+				bytes.end(),
+				{0x2C, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x0A, 0x00}
+			);
+		}
+
+		bytes.push_back(0x3B);
+
+		std::vector<std::byte> out;
+		out.reserve(bytes.size());
+		for (const uint8_t byte : bytes) {
+			out.push_back(static_cast<std::byte>(byte));
+		}
+		return out;
+	}
+}
+
 TEST_CASE("the format is sniffed from the bytes", "[bake][image]") {
 	CHECK(ImageFormatOfBytes(Bytes(PNG_RGB)) == ImageFormat::Png);
 	CHECK(ImageFormatOfBytes(Bytes(BMP_TOP_DOWN)) == ImageFormat::Bmp);
 
+	CHECK(ImageFormatOfBytes(TinyGif()) == ImageFormat::Gif);
+
 	// A file called `.png` that is a BMP is an ordinary art-pipeline accident,
 	// and the signature is what makes it a non-event.
-	constexpr std::array<uint8_t, 4> notAnImage{'G', 'I', 'F', '8'};
+	//
+	// **This example used to be `GIF8`**, back when a GIF was something this did
+	// not read. v0.10 added one, so the stand-in for "not an image" moved to a
+	// format that is still genuinely unsupported — WebP's `RIFF....WEBP`. That is
+	// the ordinary way this assertion ages: every format added takes one candidate
+	// off the list, and the test says so rather than being quietly weakened to
+	// checking nothing.
+	constexpr std::array<uint8_t, 4> notAnImage{'R', 'I', 'F', 'F'};
 	CHECK(ImageFormatOfBytes(Bytes(notAnImage)) == ImageFormat::Unknown);
 	CHECK(ImageFormatOfBytes({}) == ImageFormat::Unknown);
 }
@@ -545,4 +688,157 @@ TEST_CASE("a truncated jpeg is refused or whole, never half", "[bake][image]") {
 			CHECK_FALSE(failure.empty());
 		}
 	}
+}
+
+// --- GIF, added at v0.10 ------------------------------------------------------
+//
+// **A GIF built in the test rather than read from disk**, which is the rule every
+// other case in this file follows: a suite that needed a file beside it is a
+// suite that fails on a fresh clone.
+
+TEST_CASE("a GIF is recognised by its signature", "[bake]") {
+	const std::vector<std::byte> gif = TinyGif();
+	REQUIRE(engine::bake::ImageFormatOfBytes(gif) == engine::bake::ImageFormat::Gif);
+	REQUIRE(engine::bake::Describe(engine::bake::ImageFormat::Gif) == "gif");
+
+	// GIF87a too — the version changes nothing this decoder does.
+	std::vector<std::byte> older = gif;
+	older[4] = static_cast<std::byte>('7');
+	REQUIRE(engine::bake::ImageFormatOfBytes(older) == engine::bake::ImageFormat::Gif);
+}
+
+TEST_CASE("a single-frame GIF decodes to a one-cell sheet", "[bake]") {
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	REQUIRE(engine::bake::ReadImage(TinyGif(), texture, failure));
+	REQUIRE(failure.empty());
+
+	// **One frame is a 1x1 grid, so the sheet is the canvas.** A decoder that
+	// always rounded up to 2x2 would double every still image's memory to hold
+	// three empty cells.
+	REQUIRE(texture.Width == 2);
+	REQUIRE(texture.Height == 1);
+	REQUIRE(texture.Pixels.size() == 2 * 1 * 4);
+
+	// Red then blue, opaque.
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[0]) == 255);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[1]) == 0);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[3]) == 255);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[6]) == 255);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[7]) == 255);
+}
+
+TEST_CASE("a truncated GIF is refused rather than clamped", "[bake]") {
+	const std::vector<std::byte> whole = TinyGif();
+
+	// **Every prefix**, because a length running past the end is the failure mode
+	// a length-prefixed format read off disk actually has — `assets::Wav`'s rule,
+	// and the reason it is a refusal and never a clamp: a clamp turns a truncated
+	// file into a shorter animation that plays.
+	for (size_t length = 1; length < whole.size(); length++) {
+		engine::assets::TextureData texture;
+		std::string failure;
+
+		const std::span<const std::byte> prefix(whole.data(), length);
+		if (engine::bake::ReadImage(prefix, texture, failure)) {
+			// A prefix that happens to be a complete GIF minus its trailer is
+			// legitimately decodable — an encoder that omitted the end code is
+			// common. What must never happen is a *silent* wrong size.
+			REQUIRE(texture.Width == 2);
+			REQUIRE(texture.Height == 1);
+		} else {
+			REQUIRE_FALSE(failure.empty());
+		}
+	}
+}
+
+// --- flipbook layout and frame rate, added at v0.10 ---------------------------
+//
+// **The three fields that turn a sheet of pixels into an animation.** A 4x4
+// flipbook and a 4x4 tile atlas are the same image, so the grid, the frame count
+// and the rate are the whole of what tells anything how to play one — and
+// without them every scene using a GIF has to state numbers the file already
+// holds.
+
+TEST_CASE("a still image carries no flipbook", "[bake]") {
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	REQUIRE(engine::bake::ReadImage(TinyGif(), texture, failure));
+
+	// One frame is a still. **A zero side and a zero frame count mean the same
+	// thing as an unregistered texture on purpose** — neither is something to
+	// play — which is why a one-frame GIF is not dressed up as a 1x1 animation.
+	CHECK(texture.FlipbookSide == 1);
+	CHECK(texture.FlipbookFrames == 1);
+	CHECK_FALSE(texture.FlipbookFrameRate == 0.0f);
+}
+
+TEST_CASE("a GIF's delays become one frame rate", "[bake]") {
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	// Four frames at 4/100s each: 0.16 seconds for four frames is 25fps.
+	REQUIRE(engine::bake::ReadImage(AnimatedGif({4, 4, 4, 4}), texture, failure));
+	REQUIRE(failure.empty());
+
+	CHECK(texture.FlipbookSide == 2);
+	CHECK(texture.FlipbookFrames == 4);
+	CHECK(texture.FlipbookFrameRate == Catch::Approx(25.0f));
+
+	// The sheet is the canvas times the grid on each side.
+	CHECK(texture.Width == 4);
+	CHECK(texture.Height == 2);
+}
+
+TEST_CASE("frames with different delays average to one rate", "[bake]") {
+	// **A real approximation, stated rather than hidden.** GIF permits a delay
+	// per frame and a flipbook has one rate by construction, so a sheet cannot
+	// hold both — the total duration over the frame count is what a single rate
+	// can honestly be. `fox_dance.gif` is exactly this case: forty-eight frames
+	// alternating four and five hundredths, two seconds, 24fps.
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	REQUIRE(engine::bake::ReadImage(AnimatedGif({4, 5, 4, 5}), texture, failure));
+
+	// 0.18 seconds for four frames.
+	CHECK(texture.FlipbookFrames == 4);
+	CHECK(texture.FlipbookFrameRate == Catch::Approx(4.0f / 0.18f).epsilon(0.001));
+}
+
+TEST_CASE("a delay of zero is read the way every browser reads it", "[bake]") {
+	// **The de-facto rule and not the specification's.** GIF says zero is "no
+	// delay"; every browser since Netscape has read 0 and 1 as 100ms, so an
+	// encoder emitting zero expected 10fps — and taking it literally would
+	// divide by zero.
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	REQUIRE(engine::bake::ReadImage(AnimatedGif({0, 0, 0, 0}), texture, failure));
+	CHECK(texture.FlipbookFrameRate == Catch::Approx(10.0f));
+
+	REQUIRE(engine::bake::ReadImage(AnimatedGif({1, 1}), texture, failure));
+	CHECK(texture.FlipbookFrameRate == Catch::Approx(10.0f));
+}
+
+TEST_CASE("a resize keeps the flipbook it was given", "[bake]") {
+	// **The failure this pins would have looked like a broken decoder.** A GIF
+	// larger than `--max-texture` goes through a resize on its way to disk, and
+	// a resize that dropped these three fields would turn every big imported
+	// animation back into an anonymous atlas — with the decoder working
+	// perfectly the whole time.
+	engine::assets::TextureData source;
+	std::string failure;
+	REQUIRE(engine::bake::ReadImage(AnimatedGif({4, 4, 4}), source, failure));
+	REQUIRE(source.FlipbookFrames == 3);
+
+	engine::assets::TextureData smaller;
+	REQUIRE(engine::bake::ResizeImage(source, 2, 2, smaller));
+
+	CHECK(smaller.Width == 2);
+	CHECK(smaller.FlipbookSide == source.FlipbookSide);
+	CHECK(smaller.FlipbookFrames == 3);
+	CHECK(smaller.FlipbookFrameRate == source.FlipbookFrameRate);
 }

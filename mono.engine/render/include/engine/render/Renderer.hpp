@@ -7,7 +7,10 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/types/CFrame.hpp>
+#include <engine/effects/Particles.hpp>
+#include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -115,6 +118,114 @@ namespace engine::render {
 		// it for one surface would be partitioning it for all of them, and the
 		// screen pass would then draw the group instead of the world.
 		uint32_t TagFilter = 0;
+	};
+
+	// How many local lights one frame may carry.
+	//
+	// Sixteen, matching `MAX_LIGHTS` in `opaque.frag`.
+	//
+	// **The two are spelled twice and nothing checks it**, which is a real gap
+	// rather than an accepted convention: one is a GLSL constant and the other is
+	// C++, there is no header a shader can include, and what gets staged is
+	// SPIR-V — so a test cannot read the source back and compare. `AGENTS.md`
+	// rule 6 names this exact shape, and the honest label is that this is
+	// documentation. `DEFERRED.md` D00029 carries the fix, which is to inject the
+	// count as a preprocessor define at shader compile time so the number has one
+	// home.
+	//
+	// A mismatch is not a validation error. It is a light set that silently reads
+	// past its own count or stops short of it.
+	//
+	// @since v0.10
+	inline constexpr size_t MAX_SCENE_LIGHTS = 16;
+
+	// One local light, resolved into world space.
+	//
+	// **Resolved rather than an entity, for `SurfaceView`'s reason**: this is what
+	// the device layer takes, and a world's identifier in it would be a world's
+	// business leaking into a pipeline. `scene::Light` says what a light *is*;
+	// where it shines from is its parent's, and the client walks that.
+	//
+	// @since v0.10
+	struct SceneLight {
+		// Where it is, in world space.
+		core::Vector3 Position;
+
+		// How far it reaches, in metres. Past this it contributes nothing, which
+		// is what lets a fragment reject it with one compare.
+		float Range = 8.0f;
+
+		// Its colour, already multiplied by brightness.
+		//
+		// **Multiplied here rather than in the shader**, because brightness is a
+		// scalar an author sets and the shader wants a colour — folding them at
+		// the boundary is one multiply per light per frame against one per light
+		// per *fragment*.
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+
+		// Which way a spot points. Ignored when `ConeCosine` is -1.
+		core::Vector3 Direction{0.0f, -1.0f, 0.0f};
+
+		// The cosine of the cone's half-angle, or -1 for a point light.
+		//
+		// **A cosine and not an angle**, because the test is a dot product: an
+		// angle would be an `acos` per light per fragment to compare something the
+		// dot product already gives.
+		float ConeCosine = -1.0f;
+	};
+
+	// One emitter's worth of particles, and the state they share.
+	//
+	// **A batch rather than a per-particle description, and that is the whole of
+	// why `effects::ParticleInstance` is twenty-eight bytes.** Texture, blend mode
+	// and flipbook layout are the same for every particle of one emitter, so they
+	// travel once per emitter and the particles carry nothing but what varies.
+	// Half a million particles times the four bytes a texture name would have cost
+	// is two megabytes a frame.
+	//
+	// **A span and not a copy.** The pool is the caller's and the renderer reads
+	// it during the call; nothing is retained past `Render`, exactly as the draw
+	// list is not.
+	//
+	// @since v0.10
+	struct ParticleBatch {
+		// This emitter's live particles, contiguous.
+		//
+		// The pool's blocks are contiguous per emitter with the live ones a
+		// prefix — `effects::ParticleSystem` — so a batch is that prefix and
+		// nothing has to be copied to produce one.
+		std::span<const effects::ParticleInstance> Particles;
+
+		// Which texture, by name. Invalid draws an untextured quad, which is a
+		// visible flat square rather than nothing.
+		core::Name Texture;
+
+		// How many cells the flipbook has on each side. One is not a flipbook.
+		//
+		// **A side rather than a layout enum**, because that is what the shader
+		// divides by — converting an enum to a side in the renderer would be
+		// doing per emitter what `effects::FlipbookSide` already does at compile
+		// time on the other side of the boundary.
+		float FlipbookSide = 1.0f;
+
+		// How far towards the eye the quads are nudged, in metres.
+		float ZOffset = 0.0f;
+
+		// Whether the colour is added to the target rather than blended into it.
+		//
+		// **Selects a pipeline and not a uniform**, because blend state is baked
+		// into a pipeline. Batches are drawn blended-first then additive, so the
+		// pipeline is bound twice per frame rather than once per emitter.
+		bool Additive = false;
+
+		// Whether the quad keeps world up rather than the camera's.
+		//
+		// From `effects::ParticleOrientation::FacingCameraWorldUp`, which is what
+		// stops a column of smoke rolling when the camera does.
+		bool WorldUp = false;
+
+		// Explicit padding, for the reason every `Reserved` in the engine exists.
+		uint8_t Reserved[2] = {};
 	};
 
 	// An offscreen colour target the world is drawn into instead of the window.
@@ -281,6 +392,25 @@ namespace engine::render {
 		// @since v0.8
 		uint32_t SurfacePasses = 0;
 
+		// How many ribbon vertices were submitted this frame.
+		//
+		// Two per segment, so a beam is twenty-two and a trail is at most
+		// thirty-two. Reported beside the particle count because the two are the
+		// same question asked of the other half of the module.
+		//
+		// @since v0.10
+		uint32_t RibbonVertices = 0;
+
+		// How many particles were submitted this frame.
+		//
+		// **Reported because the number is the whole diagnosis for a scene that
+		// is slow and looks fine.** An emitter whose rate ran away is invisible —
+		// the particles are small and transparent — and shows up here as a count
+		// an order of magnitude above what the scene should have.
+		//
+		// @since v0.10
+		uint32_t Particles = 0;
+
 		// How many instances the frustum rejected.
 		//
 		// **Reported rather than inferred**, because the interesting number is
@@ -374,6 +504,20 @@ namespace engine::render {
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh);
 
+		// A registered mesh's own half-extent, in mesh space.
+		//
+		// **So an editor can make `Size` mean the mesh's proportions.** Since
+		// `Size` is a box the mesh is stretched into, a part whose box has the
+		// wrong shape distorts whatever is put in it — and the only thing that
+		// knows the right shape is the geometry. `render::MeshEntry::Extent`
+		// carries the whole argument.
+		//
+		// @param name The mesh.
+		// @param out  Set only when the mesh is registered.
+		// @return `false` for a name this table does not hold, so a caller can
+		//         tell "not loaded yet" from "flat on one axis".
+		bool MeshExtentOf(const core::Name &name, core::Vector3 &out) const;
+
 		// Registers a texture under the name a `SurfaceAppearance` or a submesh
 		// will ask for.
 		//
@@ -382,6 +526,78 @@ namespace engine::render {
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image);
+
+		// The backend handle for a registered texture, for an interface pass to
+		// sample.
+		//
+		// **A `void *` for `SceneTexture`'s reason, written there in full**: the
+		// header must not name an `SDL_GPUTexture`, because that would put the
+		// backend's type in the interface every consumer of this header
+		// compiles against. A caller that draws it already knows which backend
+		// it is talking to — `ImGui::Image` takes the same opaque handle.
+		//
+		// **For an editor's thumbnail and not for the draw path.** The renderer
+		// resolves its own textures by name inside the frame; this exists so a
+		// panel can put a picture of one in a list, which is a thing only a tool
+		// does.
+		//
+		// @param name The name it was registered under.
+		// @return The handle, or nullptr for a name this renderer has not been
+		//         given.
+		// @since v0.10
+		// How long animation has been running, for anything played on a clock.
+		//
+		// **The caller's clock, because this module holds none** — the rule the
+		// whole engine keeps. A client passes its own accumulated seconds and so
+		// does the studio; a paused editor simply stops advancing it, which is
+		// what makes a paused world's GIFs hold their frame with no second
+		// mechanism for it.
+		//
+		// @param seconds Seconds since the session began.
+		// @since v0.10
+		void SetAnimationTime(double seconds);
+
+		void *TextureHandle(const core::Name &name) const;
+
+		// Where a texture's current animation cell sits.
+		//
+		// **For an interface painter, which has a name and no table.** The
+		// opaque pass reads the same thing from the table directly; this is the
+		// same answer for the two callers outside this module.
+		//
+		// @param name    The texture.
+		// @param seconds How long animation has been running.
+		// @return The transform, or the identity for a still or an absent name.
+		// @since v0.10
+		FlipbookCell TextureCell(const core::Name &name, double seconds) const;
+
+		// How big a registered texture is, in source pixels.
+		//
+		// **Handed out with the handle, because an interface painter needs
+		// both.** A nine-sliced or tiled `ImageLabel` is laid out in source
+		// pixels — its slice insets are in them — so a resolver returning a
+		// handle alone makes every slice the wrong size, which reads as a
+		// corrupt image rather than as a missing measurement.
+		//
+		// @param name   The name.
+		// @param width  Set to the width, or left alone when the name is absent.
+		// @param height Set to the height, likewise.
+		// @return `false` for a texture this renderer does not hold.
+		// @since v0.10
+		bool TextureSize(const core::Name &name, uint32_t &width, uint32_t &height) const;
+
+		// Forgets a registered texture and frees it.
+		//
+		// **Because a thumbnail cache has to have a ceiling.** Every other
+		// texture here is content that lives as long as the session; a preview
+		// is built for a row somebody scrolled past, and a table that only ever
+		// grew would hold a store's worth of images in video memory by the time
+		// somebody had browsed it.
+		//
+		// @param name The name to drop.
+		// @return `false` for a name this renderer does not hold.
+		// @since v0.10
+		bool DropTexture(const core::Name &name);
 
 		// Whether a mesh has been registered under a name.
 		//
@@ -500,6 +716,43 @@ namespace engine::render {
 		//                    See `SceneTexture`.
 		//
 		//                    Selects the surface texture bank for this viewport.
+		// @param particles  One batch per emitter with live particles, drawn after
+		//                    the blended geometry and before the overlay. Empty
+		//                    for a scene with no effects in it, which is every
+		//                    scene that has not installed a particle pool.
+		//
+		//                    **After the blended pass and never sorted against
+		//                    it**, which is the same trade `ScenePlan::
+		//                    TransparentSurfaces` makes for mirrors: a particle in
+		//                    front of a pane of glass is drawn after it whatever
+		//                    the depths say. One sorted run per pipeline is what
+		//                    lets the blend mode be a pipeline binding instead of
+		//                    a per-fragment branch, and interleaving half a million
+		//                    particles into the geometry sort would cost more than
+		//                    the artefact does.
+		// @param ribbonVertices Every beam and trail vertex this world produced,
+		//                    as `effects::BuildRibbons` packed them. Passed as the
+		//                    whole stream rather than per run, because the runs
+		//                    index into it.
+		// @param ribbonRuns  Where each ribbon sits in that stream.
+		//
+		//                    **Drawn after the particles**, which is one more
+		//                    fixed ordering in a pass that has several — see the
+		//                    `particles` note above. A beam is usually the thing
+		//                    an author wants on top of its own sparks, so the
+		//                    order is the useful one rather than an accident, and
+		//                    it is fixed rather than sorted for the same reason
+		//                    every other run here is.
+		// @param lights     The point and spot lights near this view, at most
+		//                    `MAX_SCENE_LIGHTS`. **Added to the directional term
+		//                    rather than replacing it**, so a scene with no lamps
+		//                    looks exactly as it did before v0.10 — which is what
+		//                    makes this safe to switch on for every existing world.
+		//
+		//                    Anything past the cap is dropped, and the caller is
+		//                    the one that should be choosing which: the renderer
+		//                    has no idea which lamp matters. `client::CollectLights`
+		//                    picks the nearest to the eye.
 		// @return Submitted draw counts and whether the frame was presented.
 		FrameResult Render(
 			const core::CFrame &cameraFrame,
@@ -509,7 +762,11 @@ namespace engine::render {
 			std::span<const SurfaceView> surfaces = {},
 			FrameOverlayHook *interfaceHook = nullptr,
 			const SceneTarget *sceneTarget = nullptr,
-			size_t targetSlot = 0
+			size_t targetSlot = 0,
+			std::span<const ParticleBatch> particles = {},
+			std::span<const effects::RibbonVertex> ribbonVertices = {},
+			std::span<const effects::RibbonRun> ribbonRuns = {},
+			std::span<const SceneLight> lights = {}
 		);
 
 		// The texture the most recent `Render` drew that slot's world into.

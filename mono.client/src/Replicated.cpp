@@ -71,7 +71,6 @@ namespace client {
 							bounds.HalfExtent,
 							visual.Tint,
 							visual.Mesh,
-							visual.Material,
 							appearance != nullptr ? appearance->ColourMap : Name(),
 							tags != nullptr ? tags->Mask : 0u,
 							visual.Transparency,

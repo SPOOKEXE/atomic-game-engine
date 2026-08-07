@@ -1,3 +1,4 @@
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -5,8 +6,10 @@
 #include <algorithm>
 #include <cdn/Service.hpp>
 #include <fstream>
+#include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -90,8 +93,14 @@ namespace cdn {
 
 		class HttpService final : public Service {
 		  public:
-			HttpService(Origin &origin, ChunkStore store, std::unique_ptr<http::Server> listener)
-				: Serving(origin), Store(std::move(store)), Listener(std::move(listener)) {
+			HttpService(
+				Origin &origin,
+				ChunkStore store,
+				std::unique_ptr<http::Server> listener,
+				IngestSettings ingest
+			)
+				: Serving(origin), Store(std::move(store)), Listener(std::move(listener)),
+				  Writes(std::move(ingest)) {
 				// Read once at start-up rather than per request. The published
 				// file is the bytes that were signed, so serving it verbatim is
 				// what lets a client verify what the publisher actually signed
@@ -149,6 +158,9 @@ namespace cdn {
 				if (request.Target.starts_with("/bundle/")) {
 					return BundleOf(request);
 				}
+				if (request.Target.starts_with("/ingest/")) {
+					return IngestOf(request);
+				}
 
 				++Tally.Rejected;
 				return Refuse(http::Status::NotFound);
@@ -197,6 +209,182 @@ namespace cdn {
 				}
 				++Tally.Dictionaries;
 				return Body(*Codebook, request);
+			}
+
+			// `PUT` and `HEAD` at `/ingest/<hash>`.
+			//
+			// **The target is a content address and the body is checked against
+			// it**, which is what makes the shared secret only an admission
+			// check rather than a trust decision: whoever holds the key can
+			// spend this origin's disk, and cannot store anything under a name
+			// that is not its own true hash. `IngestSettings` carries the rest
+			// of that argument.
+			http::Response IngestOf(const http::Request &request) {
+				if (!Writes.Accepts()) {
+					// **`404`, as though the route were not there**, because on
+					// a read origin it is not: answering `403` would tell an
+					// unauthenticated caller that this build has an ingest path
+					// and only the key is missing.
+					++Tally.IngestRefused;
+					return Refuse(http::Status::NotFound);
+				}
+
+				const std::string_view target(request.Target);
+				const std::string_view hex = target.substr(std::string_view("/ingest/").size());
+
+				const std::optional<ContentHash> named = ContentHash::FromHex(hex);
+				if (!named) {
+					++Tally.Rejected;
+					return Refuse(http::Status::BadRequest);
+				}
+
+				// Constant time, because a byte-at-a-time compare on a secret
+				// leaks it one byte per round trip to anybody who can time a
+				// response — `assets::Grant`'s rule, and this is the one place
+				// in the service holding a secret to compare.
+				const std::string_view offered = request.Find("x-atomic-ingest").value_or(std::string_view{});
+				if (!SameSecret(offered, Writes.Key)) {
+					++Tally.IngestRefused;
+					return Refuse(http::Status::Forbidden);
+				}
+
+				const std::optional<std::string> suffix = IngestSuffix(request);
+				if (!suffix) {
+					// A suffix outside the closed set below. Refused rather
+					// than dropped, because the filename is the one part of
+					// this route built from something a client said.
+					++Tally.IngestRefused;
+					return Refuse(http::Status::BadRequest);
+				}
+
+				std::error_code failure;
+				std::filesystem::create_directories(Writes.Inbox, failure);
+				if (failure) {
+					ENGINE_ERROR(
+						"cdn: ingest inbox {} could not be created: {}",
+						Writes.Inbox.string(),
+						failure.message()
+					);
+					return Refuse(http::Status::InternalError);
+				}
+
+				// **The path is built from the parsed hash**, never from the
+				// target text — CDN.md §8. `ToHex` re-renders it, so even a
+				// target that parsed is not the thing that names the file.
+				const std::filesystem::path stored = Writes.Inbox / (named->ToHex() + *suffix);
+				const bool present = std::filesystem::exists(stored, failure);
+
+				if (request.Verb == http::Method::Head) {
+					// The probe that makes re-uploading a whole tree cheap: an
+					// uploader asks before it spends the bandwidth, which is
+					// what `IngestDuplicates` staying low is evidence of.
+					http::Response response;
+					response.Code = present ? http::Status::Ok : http::Status::NotFound;
+					return response;
+				}
+
+				if (request.Verb != http::Method::Put) {
+					++Tally.Rejected;
+					return Refuse(http::Status::NotFound);
+				}
+
+				if (request.Body.empty()) {
+					// An empty file has no chunks and `Publish` skips it, so
+					// accepting one would put a row in the inbox that can never
+					// become an asset.
+					++Tally.IngestRefused;
+					return Refuse(http::Status::BadRequest);
+				}
+
+				const ContentHash actual = engine::assets::Hasher::Of(request.Body);
+				if (!(actual == *named)) {
+					// **The check that lets the key be a shared secret.** Bytes
+					// that do not hash to the name they were sent under are not
+					// stored under any name at all.
+					++Tally.IngestRefused;
+					ENGINE_WARN("cdn: ingest refused — body did not hash to {}", named->ToHex());
+					return Refuse(http::Status::BadRequest);
+				}
+
+				if (present) {
+					// **Already here is a success.** The bytes are the identity
+					// — `LocalStore::ImportFile`'s rule — so a retry after a
+					// dropped socket costs a hash and nothing else.
+					++Tally.IngestDuplicates;
+					http::Response response;
+					response.Code = http::Status::Ok;
+					return response;
+				}
+
+				if (!WriteWholeFile(stored, request.Body)) {
+					ENGINE_ERROR("cdn: could not write {}", stored.string());
+					return Refuse(http::Status::InternalError);
+				}
+
+				++Tally.Ingested;
+				Tally.IngestedBytes += request.Body.size();
+
+				http::Response response;
+				response.Code = http::Status::Ok;
+				return response;
+			}
+
+			// The extension an upload asked to be stored under.
+			//
+			// **The extension is load-bearing rather than cosmetic**, which is
+			// why it travels at all: `Publish` derives an asset's kind from its
+			// name through `KindOfName`, so a file that lands without its
+			// suffix publishes as `Unknown` and no subsystem claims it.
+			//
+			// **A closed set, and that is the whole of the check.** This is the
+			// only part of the ingest path built from text a client chose, so
+			// it is validated as a shape rather than scanned for bad ones: a
+			// dot and up to fifteen lowercase alphanumerics. Nothing matching
+			// that can be `..`, a separator, or a second extension.
+			//
+			// @return The suffix, or nothing when it is outside that set. An
+			//         absent header is an empty suffix and not a refusal.
+			static std::optional<std::string> IngestSuffix(const http::Request &request) {
+				const std::optional<std::string_view> given = request.Find("x-atomic-suffix");
+				if (!given || given->empty()) {
+					return std::string{};
+				}
+				if (given->size() > 16 || given->front() != '.') {
+					return std::nullopt;
+				}
+				for (const char value : given->substr(1)) {
+					const bool allowed = (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9');
+					if (!allowed) {
+						return std::nullopt;
+					}
+				}
+				return std::string(*given);
+			}
+
+			// Compares a secret without leaking where it stopped matching.
+			static bool SameSecret(std::string_view offered, std::string_view expected) {
+				// The lengths are compared openly because a length is not the
+				// secret, and folding it into the loop would either read past
+				// the end or exit early.
+				if (offered.size() != expected.size() || expected.empty()) {
+					return false;
+				}
+				unsigned char difference = 0;
+				for (size_t index = 0; index < expected.size(); index++) {
+					difference |= static_cast<unsigned char>(offered[index] ^ expected[index]);
+				}
+				return difference == 0;
+			}
+
+			static bool WriteWholeFile(const std::filesystem::path &path, std::span<const std::byte> bytes) {
+				std::ofstream file(path, std::ios::binary | std::ios::trunc);
+				if (!file) {
+					return false;
+				}
+				file.write(
+					reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size())
+				);
+				return file.good();
 			}
 
 			http::Response BundleOf(const http::Request &request) {
@@ -321,6 +509,7 @@ namespace cdn {
 			Origin &Serving;
 			ChunkStore Store;
 			std::unique_ptr<http::Server> Listener;
+			IngestSettings Writes;
 
 			std::optional<std::vector<std::byte>> Published;
 			std::optional<std::vector<std::byte>> Codebook;
@@ -330,13 +519,53 @@ namespace cdn {
 		};
 	}
 
+	bool IngestSettings::Accepts() const {
+		// **Both, or neither.** A path with no key is an open dropbox and a key
+		// with no path has nowhere to put anything; either alone is a
+		// half-configured origin, and the safe reading of half-configured is
+		// off.
+		return !Inbox.empty() && !Key.empty();
+	}
+
 	std::unique_ptr<Service> Serve(Origin &origin, ChunkStore store, const ServiceSettings &settings) {
-		std::unique_ptr<http::Server> listener = http::Listen(settings.Port, settings.Server);
+		http::ServerSettings socket = settings.Server;
+
+		if (settings.Ingest.Accepts()) {
+			// **A request is parsed whole, so an upload has to fit in the
+			// connection's buffer before it can be answered at all.** Leaving
+			// the read-only default in place would make every upload past 64 KB
+			// die as a dropped socket — the worst diagnostic there is, because
+			// it points at the network rather than at a limit.
+			//
+			// Raising `Limits.BodyBytes` to the same ceiling is what turns an
+			// over-large upload into a `413`: the length is checked while the
+			// *headers* parse, so the refusal is answered before a byte of body
+			// is read. Order matters here — the buffer has to hold a file the
+			// limit will admit, or the limit would let through what the buffer
+			// then drops.
+			const uint64_t ceiling = settings.Ingest.MaximumFileBytes;
+			socket.Limits.BodyBytes = ceiling;
+
+			const uint64_t room = ceiling + socket.Limits.RequestLineBytes + socket.Limits.HeaderBytes;
+			socket.ConnectionBufferBytes =
+				std::max<size_t>(socket.ConnectionBufferBytes, static_cast<size_t>(room));
+		}
+
+		std::unique_ptr<http::Server> listener = http::Listen(settings.Port, socket);
 		if (!listener) {
 			ENGINE_ERROR("cdn: could not bind port {}", settings.Port);
 			return nullptr;
 		}
+
+		if (settings.Ingest.Accepts()) {
+			ENGINE_INFO(
+				"cdn: accepting uploads at /ingest into {} (up to {} bytes a file)",
+				settings.Ingest.Inbox.string(),
+				settings.Ingest.MaximumFileBytes
+			);
+		}
+
 		ENGINE_INFO("cdn: serving on {}", listener->Local().Text());
-		return std::make_unique<HttpService>(origin, std::move(store), std::move(listener));
+		return std::make_unique<HttpService>(origin, std::move(store), std::move(listener), settings.Ingest);
 	}
 }

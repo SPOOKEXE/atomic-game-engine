@@ -553,8 +553,7 @@ namespace engine::gui {
 				const std::string *text = &label->Text;
 				Color3 colour = label->Color;
 
-				if (const Entry *entry = store.Get<Entry>(instance);
-					entry != nullptr && text->empty()) {
+				if (const Entry *entry = store.Get<Entry>(instance); entry != nullptr && text->empty()) {
 					text = &entry->PlaceholderText;
 					colour = entry->PlaceholderColor;
 				}

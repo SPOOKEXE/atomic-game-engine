@@ -144,10 +144,27 @@ namespace engine::script {
 			lua_pushnumber(state, hit->Distance);
 			lua_setfield(state, -2, "Distance");
 
-			// The material the part is drawn with, which is what an author
-			// checking a surface reaches for.
-			if (const auto *visual = context.World->Get<scene::Visual>(hit->Owner); visual != nullptr) {
-				PushEnumItem(state, Name("Material"), visual->Material);
+			// **What the part is made of, as a `Surface` name rather than as an
+			// enum member.** Roblox's `RaycastResult.Material` is the *visual*
+			// material, and that is no longer a field on a part: v0.10 replaced
+			// the seventeen-name enum with a `Material` instance naming a
+			// published asset — `scene/Materials.hpp` — and resolving one from
+			// here would mean a child walk inside a query result.
+			//
+			// `Surface::Material` is the better answer for this caller anyway. A
+			// raycast is a contact query, this names the row a contact reads its
+			// friction and restitution out of, and "what did I hit and what is it
+			// like to touch" is the question an author asks a hit result. A part
+			// nobody gave a surface reads back an empty string, which is the same
+			// nothing an unregistered name has always meant.
+			if (const auto *surface = context.World->Get<scene::Surface>(hit->Owner); surface != nullptr) {
+				// **The empty view's pointer is null, and Luau asserts on one.**
+				// An invalid `core::Name` reads back a default `string_view`, so
+				// pushing `.data()` unchecked traps inside the VM rather than
+				// pushing an empty string — a part with no surface is the common
+				// case, not the edge one.
+				const std::string_view material = surface->Material.Text();
+				lua_pushlstring(state, material.empty() ? "" : material.data(), material.size());
 				lua_setfield(state, -2, "Material");
 			}
 

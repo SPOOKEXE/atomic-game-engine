@@ -45,8 +45,10 @@ sandbox on their own machine.
 **`--mcp-port` opens a socket that can read and write a running program's
 worlds.** It answers Model Context Protocol, which is what lets a language model
 or a script watch the engine and drive it: list scenes, read and write
-properties, start and stop a world, read the log, read the profile. That is a
-development surface and it is deliberately powerful.
+properties, start and stop a world, read the log, read the profile. The control
+surface is currently exposed by `server` and `studio`; `client`, the unified
+harness and `cdn` do not register this option. It is a development surface and
+it is deliberately powerful.
 
 It has **no authentication of any kind**. It does not need any, because of the
 three properties below — and it would need a great deal if any of them were
@@ -73,14 +75,11 @@ configuration that makes it safe to run in front of players; the flag exists so
 that a person building a game can see and steer the engine while they build it.
 
 The ports are conventional rather than enforced — any free port works, and the
-defaults only exist so five programs on one machine do not collide:
+defaults only exist so the two supported programs on one machine do not collide:
 
 | Program | Port |
 |---|---|
 | `server` | 8734 |
-| `client` | 8735 |
-| `unified_server_client` | 8736 |
-| `cdn` | 8737 |
 | `studio` | 8738 |
 
 ## How the code is meant to defend itself
@@ -98,8 +97,9 @@ dependencies are visible in one `CMakeLists.txt`, and its public surface is a
 handful of functions. Reading is what catches the bug where a length field is
 trusted before it is bounded.
 
-**Everything untrusted has a fuzz target.** Corpora live beside the targets. A
-crash found by fuzzing is a release blocker, not a bug report.
+**Every new untrusted parser needs a fuzz target.** Corpora belong beside the
+targets. The current tree has negative parser tests, but it does not yet carry
+first-party fuzz executables or corpora; do not describe those tests as fuzzing.
 
 **Capability, not trust.** Nothing is safe because of where it ran.
 
@@ -107,10 +107,13 @@ crash found by fuzzing is a release blocker, not a bug report.
 
 ## Current status
 
-v0.1. None of the untrusted paths above exist yet — there is no game file
-format, no network layer and no script VM, so there is nothing on those paths
-to attack. The rules are written down now because retrofitting them onto code
-that already exists is the expensive version.
+The current tree contains all of the major paths above: the XML game-file
+reader, baked asset readers, the replication and HTTP network readers, runtime
+shader compilation, Luau and QuickJS runtimes, and the loopback control surface.
+They are active attack surfaces and must be treated as hostile input paths.
 
-What does exist and is worth reporting: a crash or memory error in the shader
-loading path, the SPIR-V staging, or the command-line handling.
+The parser suites cover malformed game files, assets and network messages with
+negative cases. Dedicated first-party fuzz targets and corpora are still open,
+so a crash or memory error in any parser remains a release blocker. Crashes or
+memory errors in shader loading, SPIR-V staging, command-line handling or the
+control surface are also in scope.

@@ -18,6 +18,13 @@ target_link_libraries(bindings PRIVATE
 	Engine::gui
 	Engine::scene
 
+	# **Because `effects` registers three more classes a script can name.**
+	# `ParticleEmitter`, `Beam` and `Trail` are as much of the scripting surface
+	# as `Part` is, and the same argument the `script` row below makes applies
+	# unchanged: a manifest generated without them passes its own drift check
+	# while describing less than the tree has.
+	Engine::effects
+
 	# **Because `script` registers classes a script can name.** `Script`,
 	# `LocalScript` and `LuaSourceContainer` are as much of the scripting surface
 	# as `Part` is, and a manifest generated without them would pass its own

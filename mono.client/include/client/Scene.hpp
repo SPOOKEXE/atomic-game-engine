@@ -91,6 +91,57 @@ namespace client {
 	//         with no mirror in it, and is not a failure.
 	size_t CollectSurfaceViews(engine::ecs::Store &store, std::vector<engine::render::SurfaceView> &views);
 
+	// Turns a world's particle pool into the batches the renderer draws.
+	//
+	// **One batch per emitter that has live particles, and a span rather than a
+	// copy.** The pool's blocks are contiguous per emitter with the live ones a
+	// prefix — `effects::ParticleSystem` — so a batch is that prefix pointed at,
+	// and half a million particles reach the renderer without being moved.
+	//
+	// **Here rather than in `effects`, for `CollectSurfaceViews`'s reason.**
+	// `render::ParticleBatch` is a `client`-tier type and `effects` is `shared`;
+	// a module that named it would be a shared module naming a presentation type.
+	// So the pool knows nothing about batches and this is where the two meet.
+	//
+	// The emitter's shared half — texture, blend mode, flipbook layout, Z offset —
+	// is read off `ParticleEmitter` here, once per emitter rather than once per
+	// particle, which is the whole reason `ParticleInstance` is twenty-eight
+	// bytes.
+	//
+	// @param store   The world.
+	// @param batches Cleared and filled. Valid until the world's pool is stepped
+	//                again, which is why the caller submits within the frame.
+	// @return How many batches have something to draw.
+	size_t
+	CollectParticleBatches(engine::ecs::Store &store, std::vector<engine::render::ParticleBatch> &batches);
+
+	// Turns a world's `scene::Light` rows into the lights the renderer takes.
+	//
+	// **Resolves where each one shines from, which is its parent's business.**
+	// A `Light` carries no position — `scene/Components.hpp` refuses it one, for
+	// `Sound`'s reason — so this walks one step to the parent and takes its
+	// `Attachment`'s world frame or its `Transform`. A light parented to neither
+	// is skipped rather than placed at the origin, which would put a lamp in the
+	// middle of every world that had one lying loose in `ReplicatedStorage`.
+	//
+	// **Capped at `render::MAX_SCENE_LIGHTS`, nearest to the eye first.** The
+	// renderer drops anything past the cap and has no idea which lamp matters;
+	// choosing is the caller's, and distance is the only ordering that is right
+	// more often than it is wrong. A scene that needs a better rule — a boss's
+	// aura outranking a corridor sconce — wants an authored priority, which is
+	// the same shape `replication::DistancePriority` already has and is not in
+	// v0.10.
+	//
+	// @param store  The world.
+	// @param eye    Where the view is, for the ordering.
+	// @param lights Cleared and filled. Keeps its capacity between frames.
+	// @return How many lights were written.
+	size_t CollectLights(
+		engine::ecs::Store &store,
+		const engine::core::Vector3 &eye,
+		std::vector<engine::render::SceneLight> &lights
+	);
+
 	// Builds the scene by running a Luau file instead of a C++ loop.
 	//
 	// The entities, the components and the systems that move them all come from

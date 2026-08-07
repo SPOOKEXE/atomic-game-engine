@@ -192,8 +192,7 @@ BENCH("XmlElement::Attribute · 100k lookups", 100'000) {
 
 	size_t bytes = 0;
 	for (size_t index = 0; index < 100'000; index++) {
-		const engine::game::XmlElement &element =
-			document.Elements[index % document.Elements.size()];
+		const engine::game::XmlElement &element = document.Elements[index % document.Elements.size()];
 		bytes += element.Attribute("name").size();
 		bytes += element.Attribute("class").size();
 	}

@@ -1174,11 +1174,10 @@ namespace engine::script {
 			case gui::EventKind::MouseEnter:
 			case gui::EventKind::MouseLeave:
 			case gui::EventKind::MouseMoved: {
-				const SignalKind kind = event.Kind == gui::EventKind::MouseEnter
-											? SignalKind::GuiMouseEnter
-											: event.Kind == gui::EventKind::MouseLeave
-												  ? SignalKind::GuiMouseLeave
-												  : SignalKind::GuiMouseMoved;
+				const SignalKind kind = event.Kind == gui::EventKind::MouseEnter ? SignalKind::GuiMouseEnter
+										: event.Kind == gui::EventKind::MouseLeave
+											? SignalKind::GuiMouseLeave
+											: SignalKind::GuiMouseMoved;
 
 				JSValue arguments[2] = {
 					JS_NewFloat64(context, static_cast<double>(event.Position.X)),

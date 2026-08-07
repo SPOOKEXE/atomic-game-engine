@@ -56,14 +56,16 @@ namespace values_bench {
 					Random::Range(index, 5, -8.0f, 8.0f),
 					Random::Range(index, 7, -128.0f, 128.0f)
 				);
-				built.push_back(CFrame::LookAt(
-					position,
-					position + Vector3(
-								   Random::Range(index, 11, -1.0f, 1.0f),
-								   Random::Range(index, 13, -1.0f, 1.0f),
-								   Random::Range(index, 17, -1.0f, 1.0f)
-							   )
-				));
+				built.push_back(
+					CFrame::LookAt(
+						position,
+						position + Vector3(
+									   Random::Range(index, 11, -1.0f, 1.0f),
+									   Random::Range(index, 13, -1.0f, 1.0f),
+									   Random::Range(index, 17, -1.0f, 1.0f)
+								   )
+					)
+				);
 			}
 			return built;
 		}();

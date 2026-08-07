@@ -3,9 +3,12 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -48,6 +51,70 @@ namespace engine::scene {
 		// would write twelve bytes over the front of a `CFrame` and leave a
 		// quaternion that no longer matches — which is exactly what a member
 		// pointer cannot express and why this is a conversion.
+		// Writes a placement.
+		//
+		// **`PreviousTransform` is deliberately *not* written here, and that is
+		// a decision this function exists to record.** The obvious reading is
+		// that an authored write is a teleport and should move the frame it is
+		// interpolated from — and it was written that way first. It is wrong:
+		// `examples/Rings.luau` and every scripted animation in this engine set
+		// `CFrame` once per tick and rely on the draw list interpolating between
+		// ticks, which is what buys smooth motion at 300 frames a second over a
+		// 60 Hz simulation. Clearing the previous frame on every write turns all
+		// of it into stepped motion at the tick rate.
+		//
+		// `client.scene.tick`'s "rendering interpolates between the last two
+		// ticks" is the case that caught it, and it is the case that matters.
+		//
+		// **The editor's problem was a different one and is fixed where it
+		// belongs.** A suspended world never runs `capture-previous` — that is a
+		// `PreSimulation` system and `World::Present` runs `PreRender` alone —
+		// so its `PreviousTransform` is wherever each part was created. The fix
+		// is to present a world that is not ticking at alpha *one*, because
+		// there is no next tick to draw towards; `Editor::Present` does that.
+		//
+		// @param store    The world.
+		// @param instance The entity.
+		// @param frame    Where it now is.
+		void PlaceInstance(ecs::Store &store, ecs::Entity instance, const core::CFrame &frame) {
+			if (Transform *transform = store.GetMutable<Transform>(instance)) {
+				transform->Frame = frame;
+			}
+		}
+
+		// CFrame: the placement itself.
+		//
+		// A `Computed` over a field a member pointer could reach, which is the
+		// one case in this file where that is not a smell — see `PlaceInstance`.
+		PropertyDescriptor CFrameProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CFrame");
+			property.Type = PropertyType::CFrame;
+			property.Size = sizeof(core::CFrame);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Transform>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Transform *transform = store.Get<Transform>(instance);
+				if (transform == nullptr) {
+					return false;
+				}
+				*static_cast<core::CFrame *>(out) = transform->Frame;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				if (store.Get<Transform>(instance) == nullptr) {
+					return false;
+				}
+				PlaceInstance(store, instance, *static_cast<const core::CFrame *>(value));
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor PositionProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Position");
@@ -67,11 +134,13 @@ namespace engine::scene {
 			};
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				Transform *transform = store.GetMutable<Transform>(instance);
+				const Transform *transform = store.Get<Transform>(instance);
 				if (transform == nullptr) {
 					return false;
 				}
-				transform->Frame.Position = *static_cast<const core::Vector3 *>(value);
+				core::CFrame frame = transform->Frame;
+				frame.Position = *static_cast<const core::Vector3 *>(value);
+				PlaceInstance(store, instance, frame);
 				return true;
 			};
 
@@ -107,20 +176,19 @@ namespace engine::scene {
 
 			// Position kept, for the same reason Position keeps the rotation.
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				Transform *transform = store.GetMutable<Transform>(instance);
+				const Transform *transform = store.Get<Transform>(instance);
 				if (transform == nullptr) {
 					return false;
 				}
 				const core::Vector3 degrees = *static_cast<const core::Vector3 *>(value);
-				const core::CFrame rotation = core::CFrame::Angles(
+				core::CFrame frame = core::CFrame::Angles(
 					degrees.X * RADIANS_PER_DEGREE,
 					degrees.Y * RADIANS_PER_DEGREE,
 					degrees.Z * RADIANS_PER_DEGREE
 				);
 
-				const core::Vector3 kept = transform->Frame.Position;
-				transform->Frame = rotation;
-				transform->Frame.Position = kept;
+				frame.Position = transform->Frame.Position;
+				PlaceInstance(store, instance, frame);
 				return true;
 			};
 
@@ -320,42 +388,6 @@ namespace engine::scene {
 				// the part in a group whose configuration it then ignored.
 				collider->Layer = spatial::LayerMask::Only(index);
 				collider->Mask = spatial::CollisionGroups::MaskFor(index);
-				return true;
-			};
-			return property;
-		}
-
-		// Material: the name, checked against a registered set.
-		//
-		// The storage is `Visual::Material`, a `core::Name`, exactly as it was.
-		// What `PropertyType::Enum` adds is that `part.Material = "Plsatic"` is
-		// refused where it was written instead of landing in the component and
-		// surfacing as a part drawn with the default for reasons nobody can see.
-		PropertyDescriptor MaterialProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("Material");
-			property.Type = PropertyType::Enum;
-			property.EnumName = core::Name("Material");
-			property.Size = sizeof(core::Name);
-			property.Kind = PropertyKind::Field;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const Visual *visual = store.Get<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				*static_cast<core::Name *>(out) = visual->Material;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				Visual *visual = store.GetMutable<Visual>(instance);
-				if (visual == nullptr) {
-					return false;
-				}
-				visual->Material = *static_cast<const core::Name *>(value);
 				return true;
 			};
 			return property;
@@ -634,6 +666,175 @@ namespace engine::scene {
 			return property;
 		}
 
+		// --- the attachment's four ------------------------------------------
+		//
+		// **Two writable and two read-only, and the split is the design.**
+		// `CFrame` and `Position` are the local offset an author writes;
+		// `WorldCFrame` and `WorldPosition` are what `ResolveAttachments`
+		// computed from it. A writable world frame would be a second way to place
+		// an attachment, and the two would disagree the moment the parent moved —
+		// which is exactly the state `GuiObject`'s absolutes are read-only to
+		// prevent.
+		//
+		// **A getter that walked to the parent was tried and is what the derived
+		// field replaced.** It is one `CFrame` product per read, and a beam reads
+		// four of them per frame — but the cost is not the argument. The argument
+		// is that a read on the frame an attachment is created, before the pass
+		// has run, would answer a stale identity through the field and the right
+		// value through the walk, and a property that answers differently
+		// depending on when in the frame it is asked is a property nobody can
+		// reason about. So the getter resolves on the spot and the *draw path*
+		// reads the field: one authoritative answer for a script, one cheap one
+		// for a loop.
+		PropertyDescriptor AttachmentPositionProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Position");
+			property.Type = PropertyType::Vector3;
+			property.Size = sizeof(core::Vector3);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Attachment *point = store.Get<Attachment>(instance);
+				if (point == nullptr) {
+					return false;
+				}
+				*static_cast<core::Vector3 *>(out) = point->Frame.Position;
+				return true;
+			};
+
+			// The rotation is kept, for `PositionProperty`'s reason one file up:
+			// an attachment carries a direction as well as a place, and a setter
+			// that wrote twelve bytes over the front of a `CFrame` would leave a
+			// quaternion that no longer matches.
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Attachment *point = store.GetMutable<Attachment>(instance);
+				if (point == nullptr) {
+					return false;
+				}
+				point->Frame.Position = *static_cast<const core::Vector3 *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
+		PropertyDescriptor WorldCFrameProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("WorldCFrame");
+			property.Type = PropertyType::CFrame;
+			property.Size = sizeof(core::CFrame);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<Attachment>(instance) == nullptr) {
+					return false;
+				}
+				*static_cast<core::CFrame *>(out) = ResolveAttachment(store, instance);
+				return true;
+			};
+
+			return property;
+		}
+
+		PropertyDescriptor WorldPositionProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("WorldPosition");
+			property.Type = PropertyType::Vector3;
+			property.Size = sizeof(core::Vector3);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<Attachment>(instance) == nullptr) {
+					return false;
+				}
+				*static_cast<core::Vector3 *>(out) = ResolveAttachment(store, instance).Position;
+				return true;
+			};
+
+			return property;
+		}
+
+		// Which face a spot or surface light points out of.
+		//
+		// The same shape as `FaceProperty` above and deliberately not shared with
+		// it: that one reads a `SurfaceCamera` and this reads a `Light`, and a
+		// descriptor is a pair of function pointers over a specific component. A
+		// template over the component would save nine lines and cost the reader
+		// the ability to see what a property touches, which is what `Reads` and
+		// `Writes` exist to state.
+		PropertyDescriptor LightFaceProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Face");
+			property.Type = PropertyType::Enum;
+			property.EnumName = NormalIdEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Light>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Light *bulb = store.Get<Light>(instance);
+				if (bulb == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(NormalIdEnum(), static_cast<size_t>(bulb->Face));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Light *bulb = store.GetMutable<Light>(instance);
+				if (bulb == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						NormalIdEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				bulb->Face = static_cast<NormalId>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
+		// Whether the world found something under the character's feet.
+		//
+		// Read-only, for the reason the declaration site gives.
+		PropertyDescriptor GroundedProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Grounded");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Humanoid>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Humanoid *humanoid = store.Get<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				*static_cast<bool *>(out) = humanoid->Grounded;
+				return true;
+			};
+
+			return property;
+		}
+
 		// Read-only mesh metadata; zero means the catalogue has no entry.
 		PropertyDescriptor TrianglesCountProperty() {
 			PropertyDescriptor property;
@@ -719,35 +920,15 @@ namespace engine::scene {
 		ecs::ClassId RegisterTree() {
 			RegisterSceneComponents();
 
-			// The materials `Visual::Material` may name.
-			//
-			// **Roblox's set, and a subset of it**, which is the honest shape:
-			// every name here is one a renderer could plausibly be asked to
-			// draw, and adding a name the renderer ignores would be offering an
-			// author completion for something that does nothing. A game
-			// registers its own with `ecs::EnumTable::Register`, and the
-			// registry takes a second declaration of an existing member as
-			// agreement rather than conflict.
-			static const std::string_view MATERIALS[] = {
-				"Plastic",
-				"SmoothPlastic",
-				"Wood",
-				"WoodPlanks",
-				"Metal",
-				"CorrodedMetal",
-				"DiamondPlate",
-				"Concrete",
-				"Brick",
-				"Cobblestone",
-				"Grass",
-				"Sand",
-				"Slate",
-				"Ice",
-				"Glass",
-				"Neon",
-				"ForceField",
-			};
-			ecs::EnumTable::Register("Material", MATERIALS);
+			// **`Material` is not registered as an enum, and its absence is the
+			// point.** It held seventeen names — `Plastic`, `Wood`, `Metal` —
+			// and the membership check was the only thing it did: no renderer
+			// sampled anything different because a part said `Wood`. A material
+			// is content now, named by a `Material` instance and resolved
+			// against what a publisher published — `scene/Materials.hpp`. A game
+			// that wants its own named set still registers one with
+			// `ecs::EnumTable::Register`; the engine no longer ships one that
+			// promises something it cannot draw.
 
 			// The faces of a box, for `SurfaceCamera::Face`.
 			//
@@ -793,7 +974,7 @@ namespace engine::scene {
 			// split, kept because v0.6 binds `Instance.new` to this same table
 			// and a tree that differs from the one scripts expect is a
 			// migration nobody asked for.
-			const std::array pv{ecs::Components::Of<Transform>()};
+			const std::array pv{ecs::Components::Of<Transform>(), ecs::Components::Of<Pivot>()};
 			const ecs::ClassId pvInstance = ecs::Classes::Register("PVInstance", instance, pv);
 
 			const std::array base{
@@ -897,6 +1078,106 @@ namespace engine::scene {
 			const std::array emitter{ecs::Components::Of<Sound>()};
 			const ecs::ClassId soundClass = ecs::Classes::Register("Sound", instance, emitter);
 
+			// **An `Attachment` is an `Instance` and not a `PVInstance`**, which
+			// is `Sound`'s omission for a related reason. A `PVInstance` carries a
+			// `Transform` — a world-space placement — and an attachment already
+			// holds a `CFrame` relative to its parent. Two of those on one row is
+			// two opinions about where a point is, and `SetParent` would silently
+			// decide which one won.
+			//
+			// The whole reason this class exists before anything that uses it is
+			// that beams, trails and particle emitters are all parented to one.
+			// Building any of those first means building them twice.
+			const std::array point{ecs::Components::Of<Attachment>()};
+			const ecs::ClassId attachmentClass = ecs::Classes::Register("Attachment", instance, point);
+
+			// **A `Material` is an `Instance` under a drawable**, which is
+			// Roblox's `SurfaceAppearance` arrangement and is what replaces the
+			// seventeen-name `Material` enum this tree used to register. Not a
+			// `PVInstance`, for `Attachment`'s reason: it has no place in the
+			// world of its own, and a `Transform` on this row would be a second
+			// opinion about where its parent is.
+			//
+			// **An instance rather than a property**, because `ROADMAP.md` v0.11
+			// grows this into something carrying several texture references, and
+			// a `core::Name` field on `BasePart` could never grow children.
+			// `scene/Materials.hpp` carries the whole argument, including what
+			// `ResolveMaterials` writes and what it costs.
+			const std::array binding{ecs::Components::Of<MaterialRef>()};
+			const ecs::ClassId materialClass = ecs::Classes::Register("Material", instance, binding);
+
+			// **One component, three classes**, which is `Collider`'s trade across
+			// three shapes. The three lights differ by two fields; three
+			// components would be three columns, three queries and three upload
+			// paths for something a renderer packs into one array either way.
+			//
+			// Each class sets its own `Kind` as a *prototype default*, so
+			// `Instance.new("SpotLight")` is a spot light without a script saying
+			// so — which is the whole point of the prototype row. A `Kind`
+			// property is deliberately not declared: the class is the answer, and
+			// a second way to say it is the duplicate `AGENTS.md` warns about.
+			// **A `Humanoid` is an `Instance` under a character model**, which is
+			// Roblox's arrangement exactly: the humanoid is a sibling of the parts
+			// it drives rather than a component on one of them. That is what lets
+			// a character be a model of several parts with one thing steering it,
+			// and it is why `StepCharacters` walks `<Humanoid, Motion>` rather
+			// than looking for a humanoid on a part.
+			const std::array body{ecs::Components::Of<Humanoid>()};
+			const ecs::ClassId humanoidClass = ecs::Classes::Register("Humanoid", instance, body);
+
+			// The key names, so a script can say `Enum.KeyCode.Space` and be told
+			// when it is wrong. **Generated from `Describe` rather than typed out
+			// beside the enum**, which is the rule `NormalId` already follows here
+			// — one declaration, and adding a key means adding it in one place.
+			std::array<std::string_view, static_cast<size_t>(KeyCode::Count)> keys{};
+			for (size_t index = 0; index < keys.size(); index++) {
+				keys[index] = Describe(static_cast<KeyCode>(index));
+			}
+			ecs::EnumTable::Register("KeyCode", keys);
+
+			std::array<std::string_view, static_cast<size_t>(MouseButton::Count)> buttons{};
+			for (size_t index = 0; index < buttons.size(); index++) {
+				buttons[index] = Describe(static_cast<MouseButton>(index));
+			}
+			ecs::EnumTable::Register("UserInputType", buttons);
+
+			// **The states a bound action's handler is told about.** Registered
+			// here beside the other input enums rather than in
+			// `script::OpenInputServices`, because the bindings generator does not
+			// open a VM — an enum registered at VM-open time is one the manifest
+			// never sees, and `Enum_UserInputState` came out of the declaration
+			// file as an unknown type.
+			ecs::EnumTable::Register(
+				"UserInputState", std::array<std::string_view, 3>{"Begin", "Change", "End"}
+			);
+
+			ecs::EnumTable::Register(
+				"MouseBehavior",
+				std::array<std::string_view, 3>{"Default", "LockCenter", "LockCurrentPosition"}
+			);
+			ecs::EnumTable::Register(
+				"CameraType",
+				std::array<std::string_view, 4>{"Classic", "LockFirstPerson", "ShiftLock", "Scriptable"}
+			);
+
+			const std::array bulb{ecs::Components::Of<Light>()};
+			const ecs::ClassId lightClass = ecs::Classes::Register("Light", instance, bulb);
+			// **Registered and not kept**, because a point light declares no property of
+			// its own: everything it has is on `Light`, and the class exists so that
+			// `Instance.new("PointLight")` resolves and so that `:IsA("PointLight")`
+			// answers. The two below are kept only to hang a prototype default off.
+			(void)ecs::Classes::Register("PointLight", lightClass, {});
+			const ecs::ClassId spotLightClass = ecs::Classes::Register("SpotLight", lightClass, {});
+			const ecs::ClassId surfaceLightClass = ecs::Classes::Register("SurfaceLight", lightClass, {});
+
+			Light spot;
+			spot.Kind = LightKind::Spot;
+			ecs::Classes::Default(spotLightClass, spot);
+
+			Light surfaceLight;
+			surfaceLight.Kind = LightKind::Surface;
+			ecs::Classes::Default(surfaceLightClass, surfaceLight);
+
 			// --- properties, declared where the component arrives ------------
 			//
 			// Each on the class that first holds what it projects, so a derived
@@ -918,28 +1199,63 @@ namespace engine::scene {
 			// sets `.Name`, so it has to be writable rather than readable.
 			// `Name` and `Parent` are declared by `RegisterInstanceRoot` above.
 
-			ecs::Classes::Property<&Transform::Frame>(pvInstance, "CFrame");
+			// **Computed rather than a member projection**, which it was: a
+			// projection writes `Transform::Frame` and nothing else, and an
+			// authored placement has to move `PreviousTransform` with it or the
+			// part is drawn between where it was and where it was put.
+			// `PlaceInstance` carries the whole argument.
+			ecs::Classes::Computed(pvInstance, CFrameProperty());
 			ecs::Classes::Computed(pvInstance, PositionProperty());
 			ecs::Classes::Computed(pvInstance, OrientationProperty());
+
+			// **Roblox's `PivotOffset`, on `PVInstance` rather than on
+			// `BasePart`.** Roblox declares it on the latter; here the component
+			// is on the former, and a `Model` — when there is one — wants the
+			// same field for the same reason. Declaring it where the storage is
+			// keeps one answer to "what has a pivot".
+			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
 
 			ecs::Classes::Computed(basePart, SizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 
-			// The plain fields. `Color` and `Material` are renames rather than
-			// conversions — `Visual::Tint` is what a script calls `Color`, and
-			// `Visual::Material` is what it *looks* like. `Surface::Material`,
-			// which is what it *feels* like, is deliberately not bound: the two
-			// are separate facts that share a name, and `Visual::Material`'s own
-			// comment gives the case — a mirror-finish floor and a rubber floor
-			// may share a surface and never a material.
+			// The plain fields. `Color` is a rename rather than a conversion —
+			// `Visual::Tint` is what a script calls `Color`. `Surface::Material`,
+			// which is what a part *feels* like, is deliberately not bound: it is
+			// a separate fact that happens to share a word with the `Material`
+			// instance below, and a mirror-finish floor and a rubber floor may
+			// share a surface and never a material.
 			ecs::Classes::Property<&Visual::Tint>(basePart, "Color");
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
-			ecs::Classes::Property<&Visual::Mesh>(basePart, "Mesh");
 
-			// The surface a part is drawn with. On `BasePart` because the
-			// component is, so a plain `Part` may carry a texture too.
-			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(basePart, "ColorMap");
+			// **`Mesh` and `ColorMap` are not here, and that is v0.10's
+			// correction.** `BasePart` is what `Part`, `MeshPart` and a future
+			// `UnionOperation` *share*, and geometry loaded from a file is not
+			// shared by any of them: a `Part` is one of six built-in shapes and
+			// naming a mesh on it is a property that does nothing. Offering it
+			// is worse than not having it — an author sets it, the part does not
+			// change, and nothing says the class was the wrong one. Both are
+			// declared on `MeshPart` below, under the names that class actually
+			// shows.
+			//
+			// **The storage is unchanged and stays on `BasePart`.**
+			// `SurfaceAppearance`'s own comment carries why: `client::
+			// CollectInstances` is a batched parallel walk over a fixed
+			// signature, and an optional column is precisely what that shape
+			// cannot express. A dense column of mostly-invalid names is sixteen
+			// bytes an entity and no branches — where a per-class component
+			// would be a join per row per frame. What moved is the *vocabulary*,
+			// which is what a properties panel and a script see.
+			//
+			// A `Part` is textured by a `Material` instance under it, which is
+			// what `scene/Materials.hpp` is for.
+
+			// **The alpha pair stays on `BasePart`, and the asymmetry is
+			// deliberate.** These say how the alpha of whatever is being sampled
+			// is treated, and a plain `Part` samples something the moment it has
+			// a `Material` child — a cut-out material on a `Part` needs `Clip`
+			// exactly as one on a `MeshPart` does. They are not *content*, which
+			// is the line the two above fall on the far side of.
 			ecs::Classes::ClampedProperty<&SurfaceAppearance::AlphaCutoff, 0.0f, 1.0f>(
 				basePart, "AlphaCutoff"
 			);
@@ -975,19 +1291,25 @@ namespace engine::scene {
 			// small fixed set, and a handle would have to be resolved back to an
 			// index every frame for every part.
 
-			// The two that were named as gaps at v0.5, both now closed with the
-			// thing they were waiting for rather than with a guess.
-			ecs::Classes::Computed(basePart, MaterialProperty());
+			// The last of the two that were named as gaps at v0.5. `Material` was
+			// the other and is no longer a property of a part at all: it is an
+			// instance under one — see the `Material` class below.
 			ecs::Classes::Computed(basePart, CollisionGroupProperty());
 
 			// The camera's own three. `FieldOfView` is **degrees**, because
 			// Roblox's is and because `Orientation` already reproduces that same
 			// split — the component stores radians and the conversion is where
 			// the unit changes, which is the whole shape of a property here.
-			// Roblox's names for the same two fields, on the class a script
-			// asks for by name. Aliases rather than a second storage: both
-			// project the components `BasePart` already holds, so setting
-			// `.MeshId` and reading `.Mesh` cannot disagree.
+			// **Roblox's names, and since v0.10 the only names.** These were
+			// aliases of `BasePart.Mesh` and `BasePart.ColorMap`; those are gone
+			// — see the note where they used to be declared — so a mesh
+			// reference and its sheet are named on the one class that has
+			// either. One spelling rather than two also ends the trap
+			// `studio/Assets.hpp` warned about, where an alias missing from the
+			// picker's table gave a plain text field on the name people use.
+			//
+			// They still project the components `BasePart` holds, which is a
+			// storage decision and not a vocabulary one.
 			ecs::Classes::Property<&Visual::Mesh>(meshPart, "MeshId");
 			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(meshPart, "TextureID");
 
@@ -1029,15 +1351,108 @@ namespace engine::scene {
 			ecs::Classes::Property<&Sound::RollOffMinDistance>(soundClass, "RollOffMinDistance");
 			ecs::Classes::Property<&Sound::RollOffMaxDistance>(soundClass, "RollOffMaxDistance");
 
+			// The attachment's four. `CFrame` is the authored local offset and
+			// carries the same name a `PVInstance`'s does — which is correct
+			// rather than a collision: on both classes it means "where this thing
+			// is, in the terms that thing is placed in", and an attachment is
+			// placed relative to its parent.
+			ecs::Classes::Property<&Attachment::Frame>(attachmentClass, "CFrame");
+			ecs::Classes::Computed(attachmentClass, AttachmentPositionProperty());
+			ecs::Classes::Computed(attachmentClass, WorldCFrameProperty());
+			ecs::Classes::Computed(attachmentClass, WorldPositionProperty());
+
+			// The material's one. **`MaterialId` rather than `Material`**, which
+			// is this tree's spelling for "a name that is an asset" — `MeshId`,
+			// `SoundId`, `TextureID` — and is what puts the studio's content
+			// picker on it rather than a bare text field, through
+			// `studio::ContentKindOfProperty`. Calling it `Material` on a class
+			// called `Material` would also read as a self-reference at every call
+			// site: `material.Material = ...`.
+			ecs::Classes::Property<&MaterialRef::Asset>(materialClass, "MaterialId");
+
+			// The light's, declared on the base so all three inherit them.
+			//
+			// **`Angle` and `Face` are on `Light` rather than on the two classes
+			// that read them**, which is the shape the single component forces and
+			// is honest about it: a `PointLight` has an `Angle` property that does
+			// nothing. The alternative is declaring the same two descriptors on
+			// two classes, which is two declarations of one projection — and the
+			// component is shared either way, so the storage does not change. A
+			// point light's angle reads back what it was set to and is ignored,
+			// which is the same contract `SurfaceCamera::Face` has on a camera
+			// parented to the world.
+			ecs::Classes::Property<&Light::Colour>(lightClass, "Color");
+			ecs::Classes::Property<&Light::Enabled>(lightClass, "Enabled");
+			ecs::Classes::Property<&Light::Shadows>(lightClass, "Shadows");
+
+			// Clamped, because all three are quantities with an obvious nearest
+			// meaning outside their range — `ClampedProperty`'s own argument. The
+			// brightness ceiling is Roblox's; the range ceiling is the one past
+			// which a forward renderer's light culling stops rejecting anything.
+			ecs::Classes::ClampedProperty<&Light::Brightness, 0.0f, 10000.0f>(lightClass, "Brightness");
+			ecs::Classes::ClampedProperty<&Light::Range, 0.0f, 60.0f>(lightClass, "Range");
+			ecs::Classes::ClampedProperty<&Light::Angle, 0.0f, 180.0f>(lightClass, "Angle");
+			ecs::Classes::Computed(lightClass, LightFaceProperty());
+
+			// The humanoid's. All plain fields — nothing here is a doubled
+			// half-extent or an angle in the wrong unit, so there is no conversion
+			// to write and no place for one to be wrong in one direction.
+			//
+			// **`MoveDirection` is writable, which is what makes a scripted
+			// character possible.** A game driving an NPC writes it directly and
+			// never installs `UpdateCharacterControl`; a player's character has
+			// that system writing it every frame instead. One field, two writers,
+			// and only one of them installed per character — which is the same
+			// shape `MoveCamera` and a scripted camera already have.
+			ecs::Classes::Property<&Humanoid::MoveDirection>(humanoidClass, "MoveDirection");
+			ecs::Classes::ClampedProperty<&Humanoid::WalkSpeed, 0.0f, 1000.0f>(humanoidClass, "WalkSpeed");
+			ecs::Classes::ClampedProperty<&Humanoid::JumpSpeed, 0.0f, 1000.0f>(humanoidClass, "JumpPower");
+			ecs::Classes::ClampedProperty<&Humanoid::Height, 0.1f, 100.0f>(humanoidClass, "HipHeight");
+			ecs::Classes::Property<&Humanoid::Enabled>(humanoidClass, "Enabled");
+
+			// **Read-only, because it is what the world found rather than what an
+			// author wants.** A script setting `Grounded` would be telling the
+			// controller a lie it acts on immediately — the jump would fire in
+			// mid-air, which is the exploit this flag exists to gate.
+			ecs::Classes::Computed(humanoidClass, GroundedProperty());
+
 			// Still not declared, and for a reason rather than an oversight:
-			// **`Surface::Material`**, which is what a part *feels* like.
-			// `Visual::Material` above is what it looks like, and the two are
-			// separate facts that share a name — a mirror-finish floor and a
-			// rubber floor may share a surface and never a material. Binding
-			// both under one script name would make one of them unreachable and
-			// the other ambiguous.
+			// **`Surface::Material`**, which is what a part *feels* like. The
+			// `Material` class above is what it looks like, and the two are
+			// separate facts that share a word — a mirror-finish floor and a
+			// rubber floor may share a surface and never a material. Binding both
+			// under one script name would make one of them unreachable and the
+			// other ambiguous.
 			return part;
 		}
+	}
+
+	core::CFrame PivotOf(const ecs::Store &store, ecs::Entity instance) {
+		const Transform *transform = store.Get<Transform>(instance);
+		if (transform == nullptr) {
+			return {};
+		}
+
+		// **A missing `Pivot` is the identity rather than a refusal.** Every
+		// `PVInstance` has the column, but a replica's row grows from a wire
+		// delta and a headless world may hold an instance built by hand — and
+		// "no offset" is a complete answer, not an error.
+		const Pivot *pivot = store.Get<Pivot>(instance);
+		return pivot == nullptr ? transform->Frame : transform->Frame * pivot->Offset;
+	}
+
+	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target) {
+		if (store.Get<Transform>(instance) == nullptr) {
+			return false;
+		}
+
+		const Pivot *pivot = store.Get<Pivot>(instance);
+		const core::CFrame placement = pivot == nullptr ? target : target * pivot->Offset.Inverse();
+
+		// Through the same helper a property write uses, so a script pivoting a
+		// part and an author dragging one leave the world in the same state.
+		PlaceInstance(store, instance, placement);
+		return true;
 	}
 
 	ecs::ClassId PartClass() {

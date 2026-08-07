@@ -64,6 +64,7 @@ namespace studio {
 		// there are two of them and why they are these two.
 		constexpr std::string_view SKYGRID_WORLD = "SkyGrid";
 		constexpr std::string_view MIRROR_WORLD = "Mirrors";
+		constexpr std::string_view MESHGRID_WORLD = "Meshes";
 	}
 
 	// The engine log, teed into the Output panel.
@@ -153,6 +154,7 @@ namespace studio {
 		// is a flag that gets stuck.
 		ShowStatistics = Settings.ShowStatistics;
 		ShowFrameGraph = Settings.ShowFrameGraph;
+		ShowAssets = Settings.ShowAssetsPanel;
 		IdleCloseSeconds = Settings.IdleCloseSeconds;
 		Extras[0].Open = Settings.ShowSecondViewport;
 
@@ -235,6 +237,12 @@ namespace studio {
 			Content = ContentSources::Default();
 		}
 
+		// **Built here rather than lazily on the first fetch**, so a
+		// misconfigured source says so at start-up in the log rather than as a
+		// stream of individually plausible failures later — `ContentRoot::Mount`'s
+		// rule, which every other resolver in this stack already follows.
+		RebuildContentClients();
+
 		KeybindPath = engine::core::Paths::Base() / "studio-keybinds.ini";
 		if (Keybinds::Load(KeybindPath)) {
 			ENGINE_INFO("keybinds from {}", KeybindPath.string());
@@ -282,6 +290,27 @@ namespace studio {
 			}
 		} else {
 			NewGame();
+		}
+
+		// **The scene a capture was asked for, made the active one.** The
+		// capture photographs whichever world the drawing viewport shows, so
+		// naming one has to move the viewport rather than reach past it — there
+		// is one scene target per panel and only the panel that drew this frame
+		// has anything in it.
+		//
+		// Done here, before the first frame, so every frame of the run is of the
+		// scene under test rather than only the captured one. A name nothing
+		// answers to is ignored: a capture is a diagnostic, and one that aborted
+		// a run because a scene had been renamed would be worse than one that
+		// photographs the default.
+		if (!Settings.CaptureWorld.empty()) {
+			const WorldId wanted = Universe->Find(Name(Settings.CaptureWorld));
+			if (wanted.IsValid()) {
+				Active = wanted;
+				SelectionWorld = Active;
+			} else {
+				ENGINE_WARN("capture: no world called '{}' — capturing the active one", Settings.CaptureWorld);
+			}
 		}
 
 		// Back and up, looking at the origin — where a new scene's first part
@@ -457,6 +486,21 @@ namespace studio {
 			if (event.type == SDL_EVENT_QUIT) {
 				Running = false;
 			}
+
+			// **One event per dropped path, which is what makes multi-select
+			// drag and drop free.** SDL brackets a multi-file drop with
+			// `DROP_BEGIN` and `DROP_COMPLETE` and sends a `DROP_FILE` for each
+			// path between them, so importing each as it arrives handles one
+			// file, forty files and a folder without a special case for any of
+			// them.
+			//
+			// **Not filtered by whether imgui wanted the event.** A drop has no
+			// keyboard or mouse capture to respect — imgui does not consume
+			// them — and a drop that only worked when the pointer was over the
+			// right panel would be a rule nobody could guess.
+			if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
+				DropAssetPath(event.drop.data);
+			}
 			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
 				event.window.windowID == SDL_GetWindowID(Window)) {
 				Running = false;
@@ -579,6 +623,24 @@ namespace studio {
 		// *was* the interface, and `unmarked` was already counting it. A hole in
 		// a flame graph reads as a broken widget, which is exactly how it was
 		// reported.
+		// **Before the interface, so a panel drawn this frame reads this
+		// frame's numbers.** Pumping after would show the counters as they were
+		// a frame ago, which for a rate row is the difference between a
+		// transfer that looks stalled and one that is.
+		//
+		// Cheap when nothing is configured: both are absent and this is two
+		// null checks.
+		{
+			ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
+			PumpContent(frameSeconds);
+
+			// **After the panels drew and before they draw again**, which is
+			// what makes "only rows imgui actually drew" the bound: a row asks
+			// for a picture while drawing, and this builds a couple of them in
+			// the gap. See Thumbnails.cpp.
+			PumpThumbnails();
+		}
+
 		{
 			ENGINE_PROFILE_CAT("build interface", engine::core::ProfileCategory::Render);
 
@@ -812,6 +874,12 @@ namespace studio {
 		// stuttered.
 		Statistics.Record(Clock.Now(), frameSeconds);
 
+		// **Accumulated from the frame delta, and handed to the renderer that
+		// draws against it.** `Renderer::SetAnimationTime` carries why the clock
+		// is the caller's: a module holding one has a notion of "now" to drift.
+		AnimationSeconds += frameSeconds;
+		Renderer.SetAnimationTime(AnimationSeconds);
+
 		// **The frame graph is only collected while it is being read.**
 		// Recording every span of every frame costs real time, and the whole
 		// reason to look at that panel is that time is scarce. The client's
@@ -845,7 +913,7 @@ namespace studio {
 		//
 		// Skipping the closed ones matters: rotating through four slots with
 		// one panel open would redraw it every fourth frame for no reason.
-		size_t candidates[1 + EXTRA_VIEWPORTS];
+		size_t candidates[2 + EXTRA_VIEWPORTS];
 		size_t candidateCount = 0;
 
 		if (ShowViewport) {
@@ -855,6 +923,29 @@ namespace studio {
 			if (Extras[index].Open) {
 				candidates[candidateCount++] = index + 1;
 			}
+		}
+
+		// **The asset preview is one more slot in the rotation, and it took
+		// every frame instead.** It used to be tested before the loop and
+		// `return` on success — and because a hovered row re-asks for its
+		// preview on every frame it is hovered, that early return fired on
+		// *every* frame too. `Renderer::Render` owns the swapchain and the
+		// present, so the editor's own chrome was never drawn for as long as the
+		// cursor rested on a mesh: the whole window went black and came back the
+		// moment the pointer moved away.
+		//
+		// The comment that used to sit here said the cost was "a hovered row's
+		// worth of frames rather than a permanent share of the rotation". That
+		// was the intent and the code did the opposite — it took the whole
+		// rotation and left nothing for the panels.
+		//
+		// As a candidate it gets one turn in N like everything else, so a
+		// hovered preview refreshes at a share of the frame rate and the editor
+		// keeps drawing. A preview refreshing at a third of 120 fps is forty
+		// updates a second on a thing being looked at, which is not something an
+		// eye can see; a window that stops being drawn is.
+		if (!PreviewWanted.empty()) {
+			candidates[candidateCount++] = PREVIEW_SLOT;
 		}
 
 		// **A closed panel gives its camera back, every frame rather than on an
@@ -883,6 +974,23 @@ namespace studio {
 		} else {
 			RoundRobin = (RoundRobin + 1) % candidateCount;
 			DrawingViewport = candidates[RoundRobin];
+		}
+
+		// **This frame belongs to the preview**, and it is spent the same way a
+		// viewport spends one: `Render` owns the swapchain, so whichever slot the
+		// rotation picked gets the whole call. The difference from what this used
+		// to do is only that it had to be *picked*.
+		if (DrawingViewport == PREVIEW_SLOT) {
+			if (RenderPreviewSlot()) {
+				PreviewWanted.clear();
+				return;
+			}
+
+			// It asked and could not be drawn — an unloaded mesh, or a bounds
+			// entry that has gone. Fall through to the first viewport rather than
+			// spending the frame on nothing.
+			PreviewWanted.clear();
+			DrawingViewport = candidateCount > 1 ? candidates[0] : 0;
 		}
 
 		ViewportState *extra = ExtraAt(DrawingViewport);
@@ -1002,7 +1110,17 @@ namespace studio {
 			// never ticks, so a gate maintained by the simulation would leave a
 			// part dragged into `Workspace` invisible until somebody pressed
 			// play. See `scene/Visibility.hpp`.
-			Universe->Present(shown, frameSeconds, Universe->AlphaOf(shown));
+			// **A world that is not ticking is presented at one, not at its
+			// accumulator.** Alpha is where *between* two ticks to draw, and a
+			// suspended world has no next tick to draw towards — its accumulator
+			// stops wherever it stopped, which is usually zero, and zero means
+			// "draw the previous frame". `capture-previous` is a `PreSimulation`
+			// system and `Present` runs `PreRender` alone, so that previous frame
+			// is wherever each part was created: an edited world drew every part
+			// at its birthplace while the selection outline followed the real
+			// transform.
+			const bool ticking = Universe->StateOf(shown) == engine::world::WorldState::Active;
+			Universe->Present(shown, frameSeconds, ticking ? Universe->AlphaOf(shown) : 1.0f);
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
@@ -1206,6 +1324,21 @@ namespace studio {
 		const WorldId grid = AddWorld(Name(SKYGRID_WORLD));
 		const WorldId mirrors = AddWorld(Name(MIRROR_WORLD));
 
+		// **A third, and it is the one that shows what a `MeshPart` is.** The
+		// other two are made of `Part`s, so a new game contained no example of
+		// the class the mesh picker, the content pipeline and half of v0.9 exist
+		// to serve — somebody looking for "how do I use a mesh" found a menu
+		// item and no scene.
+		//
+		// **It costs nothing at start-up, which is the only reason it can be
+		// here.** `MeshGrid.luau` seeds from the six built-in ids, and a built-in
+		// is generated in-process and never fetched — `Editor::
+		// RequestContentAsset` refuses to ask a CDN for one. So this world names
+		// six meshes that are already registered and issues no request at all: a
+		// template that pulled content on open would put back the twenty-nine
+		// second start-up v0.10 spent a version removing.
+		const WorldId meshes = AddWorld(Name(MESHGRID_WORLD));
+
 		Active = grid;
 		SelectionWorld = Active;
 
@@ -1249,6 +1382,12 @@ namespace studio {
 			InstallExampleScript(store, "Mirrors-1-world.luau", "MirrorScene");
 		});
 
+		// The mesh grid lays its own plate and its own camera, so it needs the
+		// same nothing the other two do.
+		Universe->Enter(meshes, [this](Store &store) {
+			InstallExampleScript(store, "MeshGrid.luau", "MeshGridScene");
+		});
+
 		// **A viewport each, pinned rather than left following the active
 		// world.** An extra viewport with no world of its own draws whatever is
 		// being edited, so two panels would show one scene twice and the
@@ -1264,12 +1403,13 @@ namespace studio {
 		// unselected tab is a template nobody finds.
 		ExpandWorldTree(grid);
 		ExpandWorldTree(mirrors);
+		ExpandWorldTree(meshes);
 
 		// Enough frames to outlast a first-run layout rebuild. See
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: two worlds, skygrid and mirrors, ticking in parallel");
+		Say("new game: three worlds — skygrid, mirrors and meshes — ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
@@ -1645,11 +1785,23 @@ namespace studio {
 			OpenPathTo(world, created);
 			RevealSelection = true;
 			MarkModified();
+
+			// **Invalidated on a structural change and not on every edit.** A
+			// property write is what actually *names* an asset, and invalidating
+			// there would rescan every world on every frame of a dragged slider
+			// — which is the shape of the bug this flag was added to fix. An
+			// insert or a delete is rare and bounded; anything finer is what
+			// `Rescan` is for.
+			GalleryScanned = false;
 		}
 		return created;
 	}
 
 	void Editor::DeleteSelection() {
+		// The other structural change. See `InsertInstance` for why only these
+		// two.
+		GalleryScanned = false;
+
 		if (Selection.empty() || !SelectionWorld.IsValid()) {
 			return;
 		}

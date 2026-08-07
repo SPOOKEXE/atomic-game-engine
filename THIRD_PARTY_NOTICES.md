@@ -1,8 +1,9 @@
 # Third-party notices
 
 This engine is MPL-2.0. It builds against the projects below, each under its own
-licence. Every one of them lives in `mono.vendor/` as a git submodule, so the
-full licence text ships with the source in `mono.vendor/<name>/`.
+licence. Most live in `mono.vendor/` as git submodules. The standalone fonts and
+the compiled-in texture are tracked exceptions, with their licence or
+provenance beside the file.
 
 All of them are permissive and compatible with MPL-2.0. **Nothing here is
 copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
@@ -17,26 +18,25 @@ it is built in a tree of its own — `.gitmodules` carries the reasoning.
 |---|---|---|---|
 | [SDL3](https://github.com/libsdl-org/SDL) | Zlib | window, input, GPU abstraction | client only |
 | [glm](https://github.com/g-truc/glm) | MIT / Happy Bunny | the maths under `core/types` | yes |
-| [spdlog](https://github.com/gabime/spdlog) | MIT | logging behind `core::Log` | yes |
+| [spdlog](https://github.com/gabime/spdlog) | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
 | [Catch2](https://github.com/catchorg/Catch2) | BSL-1.0 | the test framework | no — tests only |
 | [shaderc](https://github.com/google/shaderc) | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | yes, once a caller exists — see below |
 | [Dear ImGui](https://github.com/ocornut/imgui) | MIT | editor and tooling UI | studio only |
 | [asio](https://github.com/chriskohlhoff/asio) | BSL-1.0 | networking, when `net` exists | yes, once linked |
-| [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | X25519, HKDF-SHA256, ChaCha20-Poly1305 and HMAC-SHA256 in `net`; Ed25519 and HMAC-SHA256 in `assets`; SHA-256 behind `core::Random`; the test runner's cache | yes |
+| [Crypto++](https://github.com/weidai11/cryptopp) | BSL-1.0 (files public domain) | X25519, HKDF-SHA256, ChaCha20-Poly1305 and HMAC-SHA256 in `net`; Ed25519 and HMAC-SHA256 in `assets`; PNG CRC/DEFLATE in `bake`; deterministic hashing and the test runner's cache | yes, where linked |
 | [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | BSD-3-Clause | the CMake build for Crypto++ | no — build system only |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` — chunk, asset, bundle and manifest addressing | yes, once linked |
 | [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
 | [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no — `just docs` only |
-| [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and its compiler, from v0.6; its analysis library behind `mono.tools/scriptcheck`, from v0.7 | yes, once linked — nothing links it today |
+| [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and compiler; its analysis library behind `mono.tools/scriptcheck` | yes, where the Luau runtime is linked |
 | [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no — never built by this build; `just luau-lsp` builds it separately |
-| [nlohmann/json](https://github.com/nlohmann/json) | MIT | JSON for the studio's control server, which speaks Model Context Protocol, from v0.8 | studio only |
-| [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM, from v0.6 | yes, once linked — nothing links it today |
-| [Dear ImGui](https://github.com/ocornut/imgui) | MIT | the editor's widget toolkit, behind `engine::ui`, from v0.7 | client only — `mono.studio` alone links it |
-| [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | the editor's interface typeface, from v0.7 | staged beside any program that links `engine::ui` |
+| [nlohmann/json](https://github.com/nlohmann/json) | MIT | Model Context Protocol control messages and glTF import | server/studio control and studio tooling |
+| [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM | yes, where the JavaScript runtime is linked |
+| [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | interface text in the editor and game UI | staged beside programs linking `engine::ui` or `engine::render` |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | the monospace typeface the script editor uses, from v0.7 | as above |
 | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display typeface, from v0.7 | as above |
-| [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | the coverage face merged into the others, from v0.7 | as above |
+| [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage for editor and game UI | as above; render loads it as a separate face |
 | [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only — nothing else links `audio` |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
@@ -88,15 +88,12 @@ contains the `yes` rows and not the others:
   carries the notice for one and not the other.
 
   **The reason given here used to be `core::Random`, and that is no longer the
-  cause.** Measured per program on the `release` preset: the client and the
-  server each carry 43 of Crypto++'s 173 members, and **every one of them is
-  first pulled in by `net`** — the cipher, the handshake and the admission
-  cookie. `core::Random` on its own pulls 36, and those 36 are a strict subset,
-  so relinking either program against a `core` that does not use Crypto++ at
-  all changes the member count not at all. `assets` is a second independent
-  cause, through `Grant`'s HMAC and Ed25519, and it is what will put Crypto++
-  into `mono.cdn` the day `Origin` is wired into its main — today that program
-  links the archive and pulls **zero** members, because its main is a stub.
+  cause.** The exact archive members are build- and call-graph-dependent. `net`
+  pulls the cipher, handshake and admission-cookie code; `assets` is a second
+  cause through `Grant`'s HMAC and Ed25519; and `bake` uses the CRC/DEFLATE
+  paths. The origin is now wired into `mono.cdn`, so the final membership must
+  be rechecked from the current release link rather than copied from an old
+  stub-state measurement.
 
   Worth stating because the wrong cause was load-bearing for a deferred item:
   `D00004` was filed to ask whether `core` should stop linking Crypto++, on the
@@ -158,6 +155,33 @@ therefore not engaged.
 They are used at their **default variable instance**, which for all four is the
 regular weight. Nothing here drives a weight axis, because stb_truetype — which
 is what Dear ImGui rasterises with — does not.
+
+## Art, and the one piece of it that is compiled in
+
+**`mono.engine/render/src/DefaultTexture.inl` is content, not code.** It is one
+channel of ambientCG's *Plastic 013 A* colour map, box-filtered from 1024 to 64
+and lifted so its brightest texel is white, as a C array. It is what every part
+with no material draws as — `render/DefaultTexture.hpp` says why it cannot be
+fetched like everything else — so it is in the binary rather than in a store.
+
+**CC0-1.0**, a public-domain dedication: no attribution is required and the row
+is here anyway, because "no attribution required" is a licence term and not a
+reason to leave the provenance of a shipped asset unrecorded.
+
+`scripts/fetch-materials.py` downloads from the same place and from two others,
+all three CC0:
+
+| Source | Licence | What comes from it |
+|---|---|---|
+| [ambientCG](https://ambientcg.com/) | CC0-1.0 | PBR material sets, and the compiled-in default above |
+| [Poly Haven](https://polyhaven.com/) | CC0-1.0 | PBR material sets |
+| [cgbookcase](https://www.cgbookcase.com/) | CC0-1.0 | PBR material sets |
+
+**None of that reaches the repository.** The script writes into `.cache/` and
+`assetc` bakes into a content store on the machine that ran it, which is where
+gigabytes of art belong — `mono.cdn/AGENTS.md` says a monorepo carrying them
+makes every clone slow forever. The one exception is the four-kilobyte tile
+above, and it is four kilobytes.
 
 ## If you add one
 

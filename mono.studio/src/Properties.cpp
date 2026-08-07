@@ -1,15 +1,21 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <imgui.h>
+#include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
 namespace studio {
+
+	// The one asset picker in this panel, opened for whichever property
+	// asked. One id because one modal can be up at a time.
+	static constexpr const char *ASSET_PICKER = "Choose content";
 
 	using engine::core::Name;
 	using engine::ecs::ClassId;
@@ -379,7 +385,7 @@ namespace studio {
 						case PropertyType::Enum: {
 							// **The registered set, not a text field.** That is
 							// the whole reason `PropertyType::Enum` exists: a
-							// typed `Material = "Plsatic"` is refused where it
+							// typed `AlphaMode = "Clipp"` is refused where it
 							// was written rather than landing in the component
 							// and surfacing as a part drawn with the default.
 							// A combo makes the typo impossible rather than
@@ -403,9 +409,54 @@ namespace studio {
 						case PropertyType::Name: {
 							std::string text =
 								changed.Name.IsValid() ? std::string(Label(changed.Name)) : std::string{};
+
+							// **A picker for the handful of properties that name
+							// content, and a plain field for every other `Name`.**
+							// `Mesh`, `TextureID`, `Texture`, `SoundId` and `Image`
+							// take a string a publisher wrote — rule 4 — and getting
+							// one wrong has no visible failure: an unknown mesh draws
+							// the missing-mesh marker, which is also what a mesh that
+							// has not streamed in yet looks like. Every other `Name`
+							// property is an ordinary label, and a modal over one
+							// would be a dialog in the way.
+							const engine::assets::AssetKind content =
+								ContentKindOfProperty(descriptor->Spelling);
+
+							if (content == engine::assets::AssetKind::Unknown) {
+								if (TextField("##v", text)) {
+									changed.Name = text.empty() ? Name{} : Name(text);
+									wrote = true;
+								}
+								break;
+							}
+
+							// **The field stays, narrowed.** Somebody who knows the
+							// name should still be able to paste it, and a property
+							// only settable through a modal would be one a script can
+							// write and a person cannot.
+							const float browse = engine::ui::Scaled(28.0f);
+							ImGui::SetNextItemWidth(-(browse + ImGui::GetStyle().ItemSpacing.x));
 							if (TextField("##v", text)) {
 								changed.Name = text.empty() ? Name{} : Name(text);
 								wrote = true;
+							}
+
+							ImGui::SameLine();
+							if (ImGui::Button("...", ImVec2(browse, 0.0f)) && !locked) {
+								// **Opened after the loop rather than here.** An
+								// `OpenPopup` inside the table is inside this
+								// property's `PushID`, so its id would not be the one
+								// `BeginPopupModal` computes at the window's root, and
+								// the popup would never appear. Recorded here and
+								// opened where the modal is drawn.
+								PickerWanted = true;
+								PickerKind = content;
+								PickerProperty = descriptor->Name;
+								PickerType = descriptor->Type;
+								PickerChoice = text;
+							}
+							if (ImGui::IsItemHovered()) {
+								ImGui::SetTooltip("choose from the content store");
 							}
 							break;
 						}
@@ -437,6 +488,54 @@ namespace studio {
 							break;
 						}
 
+						case PropertyType::NumberRange: {
+							float parts[2]{changed.NumberRange.Minimum, changed.NumberRange.Maximum};
+							if (ImGui::DragFloat2("##v", parts, StepFor(parts[1]))) {
+								// **Not clamped so the minimum stays below the
+								// maximum.** Dragging either handle past the other
+								// is how a person *inverts* a range, and a widget
+								// that silently pushed the other end along would
+								// make that impossible to express and impossible
+								// to notice. `game::ParseValue` refuses to reorder
+								// for the same reason.
+								changed.NumberRange = engine::core::NumberRange{parts[0], parts[1]};
+								wrote = true;
+							}
+							break;
+						}
+
+						// --- the two curves ---------------------------------
+						//
+						// **A text field, and a curve editor is deliberately not
+						// here.** `game::FormatValue` already writes a sequence as
+						// `0, 1, 0; 1, 0, 0` and `ParseValue` reads it back, so a
+						// text field is a complete, round-tripping editor for
+						// about six lines — and the alternative is a spline widget
+						// with keypoint dragging, which is a panel rather than a
+						// row and belongs beside the emitter preview rather than
+						// in the generic property list.
+						//
+						// What the text field is *not* is comfortable, and that is
+						// the honest trade rather than a claim it is fine. The
+						// curve editor is `mono.studio/AGENTS.md`'s deferred list.
+						//
+						// **Parsed on commit rather than per keystroke**, because
+						// half a typed gradient is a parse failure and writing one
+						// per character would fight the person typing it.
+						case PropertyType::NumberSequence:
+						case PropertyType::ColorSequence: {
+							std::string text = FormatValue(changed);
+							if (TextField("##v", text)) {
+								PropertyValue parsed;
+								std::string reason;
+								if (ParseValue(descriptor->Type, text, parsed, reason)) {
+									changed = parsed;
+									wrote = true;
+								}
+							}
+							break;
+						}
+
 						case PropertyType::Opaque:
 							ImGui::TextDisabled("(not readable as a value)");
 							break;
@@ -459,6 +558,30 @@ namespace studio {
 				ImGui::EndTable();
 			}
 		});
+
+		// **Drawn at the window's root, which is the only place its id
+		// matches the `OpenPopup` beside it.** See the `...` button for why
+		// the open is deferred rather than done where it is clicked.
+		if (PickerWanted) {
+			ImGui::OpenPopup(ASSET_PICKER);
+			PickerWanted = false;
+		}
+
+		if (DrawAssetPicker(ASSET_PICKER, PickerKind, PickerChoice) && PickerProperty.IsValid()) {
+			// The picker spans frames, so what it confirms feeds the same
+			// `edit` a widget would have — one path applies a property write
+			// and it stays one path, including undo.
+			edit.Property = PickerProperty;
+
+			// **`ChosenContentValue` and not four lines here**, because those
+			// four lines left `Type` at `Opaque` for a whole version and
+			// `game::WriteProperty` refused every one of them without a word.
+			// The function takes the type, so there is no longer a way to write
+			// this and forget it.
+			edit.Value = ChosenContentValue(PickerType, PickerChoice);
+			edit.Wanted = true;
+			PickerProperty = Name{};
+		}
 
 		ImGui::End();
 
@@ -510,6 +633,18 @@ namespace studio {
 				}
 			}
 		});
+
+		// **A mesh that is already loaded gets no arrival to hang the fit on.**
+		// `DrainContent` reshapes parts when geometry lands, which covers the
+		// ordinary case of naming a mesh nothing had fetched yet. Picking one a
+		// previous part already pulled in fires nothing at all, so the part would
+		// keep whatever box it had and stretch the new mesh into it.
+		if (edit.Property == Name("MeshId")) {
+			engine::core::Vector3 extent;
+			if (Renderer.MeshExtentOf(edit.Value.Name, extent)) {
+				FitPartsToMesh(edit.Value.Name, extent);
+			}
+		}
 
 		MarkModified();
 	}

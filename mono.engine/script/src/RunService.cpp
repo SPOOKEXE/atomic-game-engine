@@ -131,9 +131,8 @@ namespace engine::script {
 			// identifier for one world would be the two-sources-of-truth
 			// problem, and this one is already the key everything else uses.
 			if (field == "JobId") {
-				const auto &context = *static_cast<LuauContext *>(
-					lua_tolightuserdata(state, lua_upvalueindex(1))
-				);
+				const auto &context =
+					*static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(1)));
 				const std::string_view name = context.World->Name();
 				lua_pushlstring(state, name.data(), name.size());
 				return 1;

@@ -1,13 +1,17 @@
+#include <engine/assets/Material.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 
 #include <algorithm>
 #include <assetc/Bake.hpp>
 #include <fstream>
 #include <map>
 #include <set>
+#include <span>
+#include <string_view>
 
 namespace assetc {
 
@@ -19,6 +23,7 @@ namespace assetc {
 		// Extensions recognized by the runtime asset catalogue.
 		constexpr std::string_view MESH_EXTENSION = ".amesh";
 		constexpr std::string_view TEXTURE_EXTENSION = ".atex";
+		constexpr std::string_view MATERIAL_EXTENSION = ".amat";
 
 		std::string Lowered(std::string text) {
 			std::transform(text.begin(), text.end(), text.begin(), [](char value) {
@@ -53,8 +58,23 @@ namespace assetc {
 			return extension == ".glb" || extension == ".gltf" || extension == ".obj" || extension == ".pmx";
 		}
 
+		// **`.mat` is a source and `.amat` is what it bakes to**, the same split
+		// `.png` and `.atex` have. What is inside a `.mat` is three lines of text
+		// somebody or something wrote — see `ReadMaterialSource` — and a runtime
+		// parses no text.
+		bool IsMaterial(std::string_view extension) {
+			return extension == ".mat";
+		}
+
 		bool IsImage(std::string_view extension) {
-			return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp";
+			// **`.gif` is here and its output is a flipbook sheet**, which is the
+			// one entry whose baked result is not a picture of its input.
+			// `bake::ReadGif` lays the frames out as a square power-of-two grid,
+			// so a GIF becomes an ordinary texture and every path downstream —
+			// the chunker, the manifest, the renderer's table — handles it with no
+			// knowledge that it animates. `bake/src/Gif.cpp` carries the argument.
+			return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+				   extension == ".bmp" || extension == ".gif";
 		}
 
 		std::vector<std::byte> ReadFile(const fs::path &path) {
@@ -128,6 +148,56 @@ namespace assetc {
 			}
 			return !out.empty();
 		}
+
+		// One `key = value` line at a time, `#` to end of line is a comment.
+		//
+		// **A hand-written parser and not a format with a library**, which is the
+		// boring option `AGENTS.md` asks for: a material source has one key today
+		// and the whole of what it must do is survive being written by
+		// `scripts/fetch-materials.py` and read here. JSON would be a vendor
+		// dependency in a tool for six lines of text; a binary source would not be
+		// editable, which is the one thing a *source* has to be.
+		//
+		// **Unknown keys are ignored rather than refused.** The fetcher writes
+		// `color` and nothing else today, and `ROADMAP.md` v0.11 adds four more
+		// when there is a pass that reads them — a baker that refused an unknown
+		// key would make every material written for the newer engine unbakeable by
+		// the older one, which is the wrong direction for a content tree that
+		// outlives a build.
+		std::string MaterialColourOf(std::span<const std::byte> bytes) {
+			const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+
+			size_t start = 0;
+			while (start < text.size()) {
+				size_t end = std::min(text.find('\n', start), text.size());
+				std::string_view line = text.substr(start, end - start);
+				start = end + 1;
+
+				line = line.substr(0, std::min(line.find('#'), line.size()));
+
+				const size_t equals = line.find('=');
+				if (equals == std::string_view::npos) {
+					continue;
+				}
+
+				const auto trim = [](std::string_view value) {
+					while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
+						value.remove_prefix(1);
+					}
+					while (!value.empty() &&
+						   (value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
+						value.remove_suffix(1);
+					}
+					return value;
+				};
+
+				const std::string key = Lowered(std::string(trim(line.substr(0, equals))));
+				if (key == "color" || key == "colour") {
+					return std::string(trim(line.substr(equals + 1)));
+				}
+			}
+			return {};
+		}
 	}
 
 	std::string BakedName(std::string_view path) {
@@ -137,6 +207,9 @@ namespace assetc {
 		}
 		if (IsImage(extension)) {
 			return WithoutExtension(path) + std::string(TEXTURE_EXTENSION);
+		}
+		if (IsMaterial(extension)) {
+			return WithoutExtension(path) + std::string(MATERIAL_EXTENSION);
 		}
 		return std::string(path);
 	}
@@ -165,6 +238,18 @@ namespace assetc {
 		}
 		std::sort(sources.begin(), sources.end());
 
+		// **After the sort, so a filtered run and a whole one agree about what
+		// a source is.** Filtering the walk instead would work today and would
+		// stop the moment something in the loop depended on a neighbour.
+		if (!settings.Only.empty()) {
+			const std::string wanted = Slashed(settings.Only);
+			std::erase_if(sources, [&wanted](const std::string &source) { return source != wanted; });
+			if (sources.empty()) {
+				failure = "assetc: " + settings.Only + " is not in " + settings.Input.string();
+				return report;
+			}
+		}
+
 		for (const std::string &relative : sources) {
 			Baked baked;
 			baked.Source = relative;
@@ -182,6 +267,60 @@ namespace assetc {
 			const std::string extension = ExtensionOf(relative);
 			const bool model = IsModel(extension);
 			const bool image = IsImage(extension);
+
+			// **Handled before the graph, because a material has no pixels.**
+			// Everything below this decodes an image or a model; a material is a
+			// reference and the only work is resolving it, so running it through
+			// `bake::Graph` would need an import node for a format with nothing to
+			// import.
+			if (IsMaterial(extension)) {
+				const std::string colour = MaterialColourOf(bytes);
+
+				engine::assets::MaterialData material;
+				if (!colour.empty()) {
+					const size_t slash = relative.find_last_of('/');
+					const std::string directory =
+						slash == std::string::npos ? std::string() : relative.substr(0, slash);
+
+					// **Through the same `BakedName` a model's texture reference
+					// goes through**, which is the whole reason that function is
+					// exported. A material naming `Bricks_Color.png` and a baked
+					// tree holding `Bricks_Color.atex` have to line up, and two
+					// spellings of the rule is a material that resolves to nothing
+					// on a machine nobody tested.
+					std::string resolved;
+					if (Resolve(directory, colour, resolved)) {
+						material.ColourMap = BakedName(resolved);
+					} else {
+						// Refuse references outside the input tree, exactly as a
+						// model's are refused. An untextured material is a real
+						// state — `assets/Material.hpp` — so this is a material
+						// that draws the default rather than a failed row.
+						baked.Failure = "the colour map is outside the input tree";
+						report.Failures++;
+					}
+				}
+
+				engine::core::ByteWriter writer;
+				if (!engine::assets::Material::Write(writer, material)) {
+					baked.Failure = "the material is not one the format can hold";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+
+				baked.Output = BakedName(relative);
+				baked.Kind = AssetKind::Material;
+				baked.Bytes = writer.Size();
+				if (!WriteFile(settings.Output / baked.Output, writer.Bytes())) {
+					baked.Failure = "cannot write";
+					report.Failures++;
+				} else {
+					report.OutputBytes += writer.Size();
+				}
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
 
 			if (!model && !image) {
 				if (!settings.CopyUnknown) {
@@ -254,11 +393,42 @@ namespace assetc {
 						continue;
 					}
 					std::string resolved;
-					if (!Resolve(directory, submesh.Texture, resolved)) {
+
+					// **The resolver first, because it knows things the tree
+					// cannot.** A flattened store has no `tex/` folder beside the
+					// model — see `Settings::ResolveTexture` for what that broke
+					// and for how the import log puts it back.
+					const bool named = settings.ResolveTexture &&
+									   settings.ResolveTexture(relative, submesh.Texture, resolved);
+
+					if (!named && !Resolve(directory, submesh.Texture, resolved)) {
 						// Refuse references outside the input tree.
 						submesh.Texture.clear();
 						continue;
 					}
+
+					// **Checked against the tree, and not checking is what let
+					// this ship.** `Resolve` is purely lexical — it joins and
+					// normalises and never asks whether the file is there — so a
+					// reference to something that is not being baked became a
+					// perfectly well-formed name for an asset that would never
+					// exist. Nothing downstream can catch it: the publisher
+					// signs whatever it is given, and the client's miss looks
+					// exactly like a texture that has not streamed in yet.
+					std::error_code missing;
+					if (!std::filesystem::is_regular_file(settings.Input / resolved, missing)) {
+						ENGINE_WARN(
+							"bake: {}: texture '{}' resolves to '{}', which is not in the input tree — "
+							"the submesh will draw untextured",
+							relative,
+							submesh.Texture,
+							resolved
+						);
+						submesh.Texture.clear();
+						report.DanglingTextures++;
+						continue;
+					}
+
 					submesh.Texture = BakedName(resolved);
 				}
 
@@ -284,6 +454,17 @@ namespace assetc {
 				}
 				report.Assets.push_back(std::move(baked));
 				continue;
+			}
+
+			// **After the resize, because the resize carries the fields across
+			// and this one overwrites one of them.** The other order would work
+			// today and would break the first time a resize stopped preserving
+			// the rate — which is exactly the failure `ResizeImage`'s note is
+			// about.
+			if (image && settings.FlipbookFps > 0.0f) {
+				const engine::bake::NodeId retime = graph.AddRetime(settings.FlipbookFps);
+				graph.Connect(tail, retime);
+				tail = retime;
 			}
 
 			const engine::bake::NodeId write = graph.AddWrite(baked.Output);

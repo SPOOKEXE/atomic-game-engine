@@ -50,9 +50,8 @@ namespace {
 			RegisterGuiClasses();
 			InstallGuiServices(Data);
 
-			Container = Data.CreateInstance(
-				engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui"
-			);
+			Container =
+				Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui");
 
 			Request.Display.Width = 800.0f;
 			Request.Display.Height = 600.0f;

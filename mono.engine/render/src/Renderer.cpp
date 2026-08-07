@@ -41,31 +41,76 @@ namespace engine::render {
 
 		// A draw instance in the layout the opaque pipeline binds.
 		//
-		// Built-in meshes are unit shapes; scale is folded into the model matrix.
-		GpuInstance ToGpu(const scene::DrawInstance &instance) {
+		// **`Size` is a box the mesh is stretched into, not a multiplier.** The
+		// mesh's own bounding box is mapped exactly onto the part's, so
+		// `MeshPart.Size` means metres for every mesh in the world regardless of
+		// the scale it was authored at — Roblox's `MeshPart` semantic, and the
+		// thing that makes `scene::Bounds` describe the geometry rather than
+		// approximate it.
+		//
+		// **The culling depended on this and nothing enforced it.**
+		// `graph::CullAndBound` tests `HalfExtent` against the frustum. While
+		// `Size` merely multiplied mesh coordinates, a mesh authored twenty units
+		// tall drew ten times outside the box describing it and was culled with
+		// most of itself still on screen. Now the drawn geometry fills that box
+		// exactly, so the cull is right by construction rather than right when
+		// the content happened to be baked correctly.
+		//
+		// A built-in is a unit shape about its own origin, so its `Extent` is a
+		// half on every axis and this is `HalfExtent * 2` — byte for byte what
+		// this function did before.
+		//
+		// @param instance What to draw.
+		// @param mesh     Its geometry, as `MeshTable::Resolve` gave it. Never
+		//        null: an unknown name resolves to the fallback.
+		GpuInstance ToGpu(const scene::DrawInstance &instance, const MeshEntry &mesh) {
+			// How much to multiply one axis by so the mesh's own box becomes the
+			// part's.
+			//
+			// **A degenerate axis keeps the old rule rather than dividing.** The
+			// built-in plane is a quad with no thickness, so its Y extent is
+			// exactly zero — and a flat mesh is an ordinary thing to author. The
+			// fallback is `HalfExtent * 2`, which is what a zero-thickness mesh
+			// got before and does nothing to geometry that has no extent on that
+			// axis anyway.
+			const auto stretch = [](float half, float extent) {
+				return extent > 1e-6f ? half / extent : half * 2.0f;
+			};
+
+			const glm::vec3 scale{
+				stretch(instance.HalfExtent.X, mesh.Extent.X),
+				stretch(instance.HalfExtent.Y, mesh.Extent.Y),
+				stretch(instance.HalfExtent.Z, mesh.Extent.Z),
+			};
+
 			GpuInstance gpu;
 			gpu.Model = instance.Frame.ToMatrix();
 
-			// Built-in geometry is one unit across.
-			gpu.Model[0] *= instance.HalfExtent.X * 2.0f;
-			gpu.Model[1] *= instance.HalfExtent.Y * 2.0f;
-			gpu.Model[2] *= instance.HalfExtent.Z * 2.0f;
+			gpu.Model[0] *= scale.x;
+			gpu.Model[1] *= scale.y;
+			gpu.Model[2] *= scale.z;
+
+			// **Centred after scaling, in the part's own space.** A model
+			// authored off its origin would otherwise hang away from the part by
+			// however far its box is offset — and because the offset scales with
+			// the part, it would grow as somebody resized it. Written into the
+			// translation column rather than composed as a second matrix: this
+			// runs once per instance per frame over the whole draw list.
+			// The upper 3x3 already carries the rotation *and* the scale, so one
+			// multiply moves the mesh's centre onto the part's origin.
+			const glm::vec3 centre{mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z};
+			gpu.Model[3] -= glm::vec4(glm::mat3(gpu.Model) * centre, 0.0f);
 
 			// Convert author-facing transparency to shader alpha.
 			gpu.Colour =
 				glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency};
 
 			// Avoid infinities for zero-scale geometry.
-			const auto reciprocal = [](float extent) {
-				const float scale = extent * 2.0f;
-				return scale * scale > 1e-12f ? 1.0f / (scale * scale) : 1.0f;
+			const auto reciprocal = [](float axis) {
+				return axis * axis > 1e-12f ? 1.0f / (axis * axis) : 1.0f;
 			};
-			gpu.InverseScaleSquared = glm::vec4{
-				reciprocal(instance.HalfExtent.X),
-				reciprocal(instance.HalfExtent.Y),
-				reciprocal(instance.HalfExtent.Z),
-				0.0f,
-			};
+			gpu.InverseScaleSquared =
+				glm::vec4{reciprocal(scale.x), reciprocal(scale.y), reciprocal(scale.z), 0.0f};
 			return gpu;
 		}
 
@@ -78,6 +123,45 @@ namespace engine::render {
 			// Surface-camera projection, or identity for ordinary geometry.
 			glm::mat4 SurfaceViewProjection;
 		};
+
+		// The local light set, pushed once per pass rather than per draw.
+		//
+		// **Separate from `LightingUniforms` because the two change at different
+		// rates.** That one carries the submesh's base colour and the surface
+		// flags, so it is re-pushed on every draw call; this does not change
+		// within a frame. Folding them would re-upload 784 bytes of light data on
+		// every draw of a scene to say the same thing.
+		struct LightUniforms {
+			// xyz: position. w: range.
+			glm::vec4 Position[MAX_SCENE_LIGHTS]{};
+
+			// rgb: colour times brightness.
+			glm::vec4 Colour[MAX_SCENE_LIGHTS]{};
+
+			// xyz: spot direction. w: cone cosine, or -1 for a point light.
+			glm::vec4 Direction[MAX_SCENE_LIGHTS]{};
+
+			// x: how many are in use.
+			glm::vec4 Count{0.0f, 0.0f, 0.0f, 0.0f};
+		};
+
+		// Packs a caller's lights into the buffer the shader reads.
+		LightUniforms ToGpu(std::span<const SceneLight> lights) {
+			LightUniforms out;
+			const size_t count = std::min(lights.size(), MAX_SCENE_LIGHTS);
+
+			for (size_t index = 0; index < count; index++) {
+				const SceneLight &light = lights[index];
+				out.Position[index] =
+					glm::vec4{light.Position.X, light.Position.Y, light.Position.Z, light.Range};
+				out.Colour[index] = glm::vec4{light.Colour.R, light.Colour.G, light.Colour.B, 0.0f};
+				out.Direction[index] =
+					glm::vec4{light.Direction.X, light.Direction.Y, light.Direction.Z, light.ConeCosine};
+			}
+
+			out.Count = glm::vec4{static_cast<float>(count), 0.0f, 0.0f, 0.0f};
+			return out;
+		}
 
 		struct LightingUniforms {
 			glm::vec4 Direction;
@@ -94,6 +178,15 @@ namespace engine::render {
 			// x: whether `colourMap` holds this draw's texture. y: the alpha
 			// below which a fragment is discarded, or zero to discard none.
 			glm::vec4 Surface{0.0f, 0.0f, 0.0f, 0.0f};
+
+			// Where the current animation cell sits: x the scale, yz the offset.
+			//
+			// **A transform rather than a cell index**, so a still image is the
+			// identity and the shader needs no branch per fragment —
+			// `render::FlipbookCell` carries the argument. A GIF is an ordinary
+			// texture in every other respect, which is what makes one usable on
+			// a part at all.
+			glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
 		};
 
 		// Mix renderer-owned view data into the scene signature.
@@ -226,6 +319,14 @@ namespace engine::render {
 		MeshTable Meshes;
 		TextureTable Textures;
 
+		// How long animation has been running, as the caller measures it.
+		//
+		// **Given rather than read.** `render` holds no clock, which is the
+		// standing rule `assets::Grant` and `cdn::Service::Pump` keep for the
+		// same reason: a module with a notion of "now" of its own has one to
+		// drift, and a recorded run could not replay.
+		double AnimationSeconds = 0.0;
+
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
 		//
@@ -241,6 +342,129 @@ namespace engine::render {
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
+
+		// --- particles --------------------------------------------------------
+		//
+		// **Two pipelines and one buffer.** The two differ only in their blend
+		// state — one mixes into the target and one adds to it — and blend state
+		// is baked into a pipeline on every modern API, which is the same reason
+		// `TransparentPipeline` is a second object rather than a uniform on the
+		// first.
+		//
+		// **Additive is not a cosmetic variant.** Adding is commutative, so an
+		// additive emitter's particles need no back-to-front sort at all; at half a
+		// million particles that is the difference between sorting and not.
+		SDL_GPUGraphicsPipeline *ParticlePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AdditiveParticlePipeline = nullptr;
+
+		// One instance buffer for every particle in the frame.
+		//
+		// Separate from `InstanceBuffer` because the strides differ — 28 bytes
+		// against 96 — and a shared buffer would mean either padding a particle to
+		// a mesh instance's width or rebinding the vertex layout mid-pass.
+		SDL_GPUBuffer *ParticleBuffer = nullptr;
+		SDL_GPUTransferBuffer *ParticleTransfer = nullptr;
+		uint32_t ParticleCapacity = 0;
+
+		// One run of particles that share every uniform and every binding.
+		//
+		// **What makes the target count drawable at all.** One draw call per
+		// emitter is a hundred thousand of them at the roadmap's scale; grouping
+		// by state takes a grid of identical emitters to a single call.
+		struct ParticleGroup {
+			// Which batch's state this group draws with. Every batch folded into
+			// it compares equal under `SameParticleState`, so any of them would
+			// do and the first is the one kept.
+			uint32_t Batch = 0;
+
+			// Where this group's particles start in the shared buffer.
+			uint32_t First = 0;
+
+			// How many there are.
+			uint32_t Count = 0;
+		};
+
+		// --- ribbons ----------------------------------------------------------
+		//
+		// **The same two-pipeline shape the particles have**, and for the same
+		// reason: blend state is baked into a pipeline, and an additive ribbon is
+		// order-independent where a blended one is not.
+		//
+		// The primitive differs. A particle is a quad expanded from its vertex
+		// index; a ribbon is a real vertex stream, because its geometry is a
+		// function of where its endpoints are and that is resolved on the CPU
+		// where a test can reach it — `ribbon.vert` carries the argument.
+		SDL_GPUGraphicsPipeline *RibbonPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AdditiveRibbonPipeline = nullptr;
+
+		SDL_GPUBuffer *RibbonBuffer = nullptr;
+		SDL_GPUTransferBuffer *RibbonTransfer = nullptr;
+		uint32_t RibbonCapacity = 0;
+
+		// Grows the ribbon buffer, on `ReserveParticles`'s terms.
+		bool ReserveRibbons(uint32_t count);
+
+		// Uploads this frame's ribbon vertices, outside every render pass.
+		//
+		// @return How many vertices were packed.
+		uint32_t PrepareRibbons(std::span<const effects::RibbonVertex> vertices);
+
+		// Draws the runs `effects::BuildRibbons` produced.
+		//
+		// **One draw call per run and no grouping**, which is the opposite of the
+		// particle path and is right for the opposite reason: a run is already a
+		// whole beam or a whole trail, so a scene has tens of them where it has
+		// tens of thousands of emitters. Grouping would save a bind on a count
+		// that does not need saving, and it cannot merge two runs anyway — they
+		// are separate strips, and a strip drawn as one primitive would connect
+		// the end of one to the start of the next.
+		//
+		// @return How many draw calls were issued.
+		uint32_t DrawRibbons(
+			SDL_GPUCommandBuffer *command,
+			SDL_GPURenderPass *pass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &eye,
+			std::span<const effects::RibbonRun> runs
+		);
+
+		// This frame's groups, and the batch order they were built from.
+		//
+		// Members rather than locals, so the capacity survives the frame — the
+		// same argument `DrawOrder` makes one screen up.
+		std::vector<ParticleGroup> ParticleGroups;
+		std::vector<uint32_t> ParticleOrder;
+
+		// Grows the particle buffer to hold at least `count`, keeping what fits.
+		//
+		// **Grown and never shrunk**, exactly as the instance buffer is: an
+		// explosion is a spike in the particle count and a frame that reallocated
+		// on the way back down would pay for the spike twice.
+		bool ReserveParticles(uint32_t count);
+
+		// Groups the batches, packs them into the transfer buffer, and records
+		// where each group lands.
+		//
+		// **Outside every render pass, beside the instance upload**, because the
+		// copy that follows it is a copy pass and a copy pass cannot be started
+		// while a render pass is open. The first version of this did the memcpy
+		// inside the draw and never issued the copy at all, so the vertex buffer
+		// held whatever the previous frame left — which draws *something*, which
+		// is why it took a capture rather than a crash to find.
+		//
+		// @return How many particles were packed.
+		uint32_t PrepareParticles(std::span<const ParticleBatch> batches);
+
+		// Draws what `PrepareParticles` packed.
+		//
+		// @return How many draw calls were issued.
+		uint32_t DrawParticles(
+			SDL_GPUCommandBuffer *command,
+			SDL_GPURenderPass *pass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &eye,
+			std::span<const ParticleBatch> batches
+		);
 
 		// Chosen once so pipelines and depth textures use one supported format.
 		SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
@@ -274,7 +498,7 @@ namespace engine::render {
 			uint32_t DrawnWidth = 0;
 			uint32_t DrawnHeight = 0;
 
-		// Per-slot depth matches the block-rounded colour target dimensions.
+			// Per-slot depth matches the block-rounded colour target dimensions.
 			SDL_GPUTexture *Depth = nullptr;
 			uint32_t DepthWidth = 0;
 			uint32_t DepthHeight = 0;
@@ -753,7 +977,17 @@ namespace engine::render {
 		// part of the shader object rather than of the pipeline, so a mismatch
 		// with the `layout(set = 2, binding = n)` declarations is a bind that
 		// silently reads nothing rather than a validation error.
-		SDL_GPUShader *opaqueFragment = LoadShader("opaque.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
+		SDL_GPUShader *opaqueFragment = LoadShader(
+			// **Two uniform buffers now, not one.** The count is part of the
+			// shader object rather than of the pipeline, so a mismatch with the
+			// `layout(set = 3, binding = n)` declarations is a push that lands
+			// nowhere rather than a validation error — the same trap the sampler
+			// count above records.
+			"opaque.frag",
+			SDL_GPU_SHADERSTAGE_FRAGMENT,
+			3,
+			2
+		);
 
 		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
@@ -878,6 +1112,176 @@ namespace engine::render {
 			ENGINE_ERROR("transparent pipeline: {}", SDL_GetError());
 		}
 
+		// --- particles ------------------------------------------------------
+		//
+		// **No vertex buffer for the quad and no index buffer at all.** The
+		// billboard's four corners come out of `gl_VertexIndex` in the shader, and
+		// the primitive is a triangle strip — so one particle is one instance of
+		// four vertices with nothing fetched. At half a million particles that is
+		// half a million cache lines never read.
+		//
+		// Slot 0 is the per-instance particle, which is why the descriptions below
+		// name one buffer where the opaque pipeline names two.
+
+		SDL_GPUShader *particleVertex = LoadShader("particle.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		SDL_GPUShader *particleFragment = LoadShader("particle.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+
+		if (particleVertex != nullptr && particleFragment != nullptr) {
+			const SDL_GPUVertexBufferDescription particleBuffers[] = {
+				{0, sizeof(effects::ParticleInstance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
+			};
+
+			// **Three of the four are unsigned integers rather than floats**,
+			// because that is what they are: a packed size, a packed rotation and
+			// cell, and an RGBA8 colour. Declaring them as floats would make the
+			// driver convert bits that are not a float, which is not a slow path —
+			// it is a different number.
+			const SDL_GPUVertexAttribute particleAttributes[] = {
+				{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::ParticleInstance, Position)},
+				{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Size)},
+				{2,
+				 0,
+				 SDL_GPU_VERTEXELEMENTFORMAT_UINT,
+				 offsetof(effects::ParticleInstance, RotationAndCell)},
+				{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Colour)},
+				{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Slot)},
+			};
+
+			SDL_GPUColorTargetDescription particleTarget{};
+			particleTarget.format = swapchainFormat;
+			particleTarget.blend_state.enable_blend = true;
+			particleTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+			particleTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+			particleTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+			particleTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+			particleTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			particleTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+			SDL_GPUGraphicsPipelineCreateInfo particle{};
+			particle.vertex_shader = particleVertex;
+			particle.fragment_shader = particleFragment;
+			particle.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+			particle.vertex_input_state.vertex_buffer_descriptions = particleBuffers;
+			particle.vertex_input_state.num_vertex_buffers = 1;
+			particle.vertex_input_state.vertex_attributes = particleAttributes;
+			particle.vertex_input_state.num_vertex_attributes = 5;
+			particle.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+
+			// **Nothing is culled.** A billboard is a flat quad turned to face the
+			// eye, so which way it winds depends on where the camera is — and a
+			// cull mode would make half the particles in a scene vanish depending
+			// on which side of the emitter you stood.
+			particle.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+			// **Depth tested and not depth written**, which is the same pair the
+			// transparent pipeline has and for the same reason: a particle must be
+			// hidden by the wall in front of it, and must not hide the particle
+			// behind it.
+			particle.depth_stencil_state.enable_depth_test = true;
+			particle.depth_stencil_state.enable_depth_write = false;
+			particle.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+			particle.target_info.color_target_descriptions = &particleTarget;
+			particle.target_info.num_color_targets = 1;
+			particle.target_info.depth_stencil_format = DepthFormat;
+			particle.target_info.has_depth_stencil_target = true;
+
+			ParticlePipeline = SDL_CreateGPUGraphicsPipeline(Device, &particle);
+			if (ParticlePipeline == nullptr) {
+				ENGINE_ERROR("particle pipeline: {}", SDL_GetError());
+			}
+
+			// The additive twin. **One destination factor apart**, and that one
+			// factor is what makes the blend commutative and therefore
+			// order-independent — which is why an additive emitter needs no sort.
+			SDL_GPUColorTargetDescription additiveTarget = particleTarget;
+			additiveTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			additiveTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+
+			SDL_GPUGraphicsPipelineCreateInfo additive = particle;
+			additive.target_info.color_target_descriptions = &additiveTarget;
+
+			AdditiveParticlePipeline = SDL_CreateGPUGraphicsPipeline(Device, &additive);
+			if (AdditiveParticlePipeline == nullptr) {
+				ENGINE_ERROR("additive particle pipeline: {}", SDL_GetError());
+			}
+
+			SDL_ReleaseGPUShader(Device, particleVertex);
+			SDL_ReleaseGPUShader(Device, particleFragment);
+		}
+
+		// --- ribbons --------------------------------------------------------
+		//
+		// A triangle strip over a real vertex buffer, where the particle pass has
+		// no buffer at all. `ribbon.vert` says why the geometry is built on the
+		// CPU rather than expanded here.
+
+		SDL_GPUShader *ribbonVertex = LoadShader("ribbon.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		SDL_GPUShader *ribbonFragment = LoadShader("ribbon.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+
+		if (ribbonVertex != nullptr && ribbonFragment != nullptr) {
+			const SDL_GPUVertexBufferDescription ribbonBuffers[] = {
+				{0, sizeof(effects::RibbonVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0},
+			};
+
+			const SDL_GPUVertexAttribute ribbonAttributes[] = {
+				{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::RibbonVertex, Position)},
+				{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(effects::RibbonVertex, Coordinate)},
+				{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::RibbonVertex, Colour)},
+			};
+
+			SDL_GPUColorTargetDescription ribbonTarget{};
+			ribbonTarget.format = swapchainFormat;
+			ribbonTarget.blend_state.enable_blend = true;
+			ribbonTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+			ribbonTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+			ribbonTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+			ribbonTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+			ribbonTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			ribbonTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+			SDL_GPUGraphicsPipelineCreateInfo ribbon{};
+			ribbon.vertex_shader = ribbonVertex;
+			ribbon.fragment_shader = ribbonFragment;
+			ribbon.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+			ribbon.vertex_input_state.vertex_buffer_descriptions = ribbonBuffers;
+			ribbon.vertex_input_state.num_vertex_buffers = 1;
+			ribbon.vertex_input_state.vertex_attributes = ribbonAttributes;
+			ribbon.vertex_input_state.num_vertex_attributes = 3;
+			ribbon.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+
+			// **Nothing is culled**, for the billboard's reason: a camera-facing
+			// strip's winding depends on where the camera is, so a cull mode
+			// would make a beam vanish from one side.
+			ribbon.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			ribbon.depth_stencil_state.enable_depth_test = true;
+			ribbon.depth_stencil_state.enable_depth_write = false;
+			ribbon.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+			ribbon.target_info.color_target_descriptions = &ribbonTarget;
+			ribbon.target_info.num_color_targets = 1;
+			ribbon.target_info.depth_stencil_format = DepthFormat;
+			ribbon.target_info.has_depth_stencil_target = true;
+
+			RibbonPipeline = SDL_CreateGPUGraphicsPipeline(Device, &ribbon);
+			if (RibbonPipeline == nullptr) {
+				ENGINE_ERROR("ribbon pipeline: {}", SDL_GetError());
+			}
+
+			SDL_GPUColorTargetDescription additiveRibbon = ribbonTarget;
+			additiveRibbon.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			additiveRibbon.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+
+			SDL_GPUGraphicsPipelineCreateInfo additive = ribbon;
+			additive.target_info.color_target_descriptions = &additiveRibbon;
+
+			AdditiveRibbonPipeline = SDL_CreateGPUGraphicsPipeline(Device, &additive);
+			if (AdditiveRibbonPipeline == nullptr) {
+				ENGINE_ERROR("additive ribbon pipeline: {}", SDL_GetError());
+			}
+
+			SDL_ReleaseGPUShader(Device, ribbonVertex);
+			SDL_ReleaseGPUShader(Device, ribbonFragment);
+		}
+
 		// --- overlay --------------------------------------------------------
 
 		SDL_GPUColorTargetDescription overlayTarget{};
@@ -917,6 +1321,11 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, shadowVertex);
 		SDL_ReleaseGPUShader(Device, shadowFragment);
 
+		// **The particle pipelines are deliberately not in this conjunction.** A
+		// build whose particle shaders failed to compile still draws a world, and
+		// failing initialisation over an effect would take the whole client down
+		// for something a scene may not even use. `DrawParticles` checks for null
+		// and draws nothing, with the error already in the log above.
 		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && ShadowPipeline != nullptr &&
 			   OverlayPipeline != nullptr;
 	}
@@ -951,13 +1360,22 @@ namespace engine::render {
 			}
 
 			if (lighting != nullptr) {
-				SDL_GPUTexture *const sampled = Textures.Find(texture);
+				// **The default, not the fallback texel, and not "do not
+				// sample".** A drawable naming no texture is not a drawable with
+				// nothing to draw — it is one made of the engine's default
+				// material, which `DefaultTexture.hpp` says is a real sheet of
+				// white plastic. So the slot always has content and the shader
+				// always samples it; what used to be the "no texture" branch is
+				// now the case where `Material = None` means something.
+				SDL_GPUTexture *const found = Textures.Find(texture);
+				SDL_GPUTexture *const sampled = found != nullptr ? found : Textures.Default();
 
 				// **The fallback texel is bound rather than the binding being
-				// skipped**, because a sampler a pipeline declares must have
-				// something in it — an unbound one is undefined behaviour on
-				// some backends and a validation error on others. The uniform
-				// flag is what tells the shader to ignore it.
+				// skipped** for the other two, because a sampler a pipeline
+				// declares must have something in it — an unbound one is
+				// undefined behaviour on some backends and a validation error on
+				// others. Those two are genuinely absent features rather than
+				// defaulted ones, and their uniform flags still say so.
 				const SDL_GPUTextureSamplerBinding samplers[] = {
 					{shadow != nullptr ? shadow : FallbackTexture, shadowSampler},
 					{surface != nullptr ? surface : FallbackTexture, surfaceSampler},
@@ -968,6 +1386,15 @@ namespace engine::render {
 				LightingUniforms uniforms = *lighting;
 				uniforms.BaseColour = glm::vec4{colour[0], colour[1], colour[2], colour[3]};
 				uniforms.Surface = glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+
+				// **The cell is per draw, not per instance**, which is the whole
+				// simplification: a sheet plays on the clock rather than on
+				// anything an entity carries, so every part showing one GIF shows
+				// the same frame. A per-instance phase is a real feature and is a
+				// different one — `effects::FlipbookLayout` already has it for
+				// particles, where the cell is a function of a particle's age.
+				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
+				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 			}
 
@@ -1139,6 +1566,420 @@ namespace engine::render {
 
 		InstanceCapacity = capacity;
 		return true;
+	}
+
+	bool Renderer::Impl::ReserveParticles(uint32_t count) {
+		if (count <= ParticleCapacity) {
+			return true;
+		}
+
+		// Powers of two, for `EnsureInstanceCapacity`'s reason and with more
+		// force: an explosion is a spike in the particle count, and a buffer that
+		// grew by exactly what was asked would reallocate on every frame of the
+		// ramp.
+		//
+		// **Starting at 4096 rather than at 256**, because an emitter that is
+		// emitting at all has hundreds of particles — the smallest useful scene is
+		// already past the mesh path's starting size, so starting there would be
+		// four reallocations on the first frame anything is drawn.
+		uint32_t capacity = ParticleCapacity == 0 ? 4096 : ParticleCapacity;
+		while (capacity < count) {
+			capacity *= 2;
+		}
+
+		if (ParticleBuffer != nullptr) {
+			SDL_ReleaseGPUBuffer(Device, ParticleBuffer);
+		}
+		if (ParticleTransfer != nullptr) {
+			SDL_ReleaseGPUTransferBuffer(Device, ParticleTransfer);
+		}
+
+		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(effects::ParticleInstance));
+
+		SDL_GPUBufferCreateInfo bufferInfo{};
+		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+		bufferInfo.size = bytes;
+		ParticleBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
+		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		transferInfo.size = bytes;
+		ParticleTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+
+		if (ParticleBuffer == nullptr || ParticleTransfer == nullptr) {
+			ENGINE_ERROR("particle buffer of {} entries: {}", capacity, SDL_GetError());
+			ParticleCapacity = 0;
+			return false;
+		}
+
+		ParticleCapacity = capacity;
+		return true;
+	}
+
+	// The uniforms the particle shaders read. Private, like every other GPU
+	// layout in this file.
+	namespace {
+		struct ParticleUniforms {
+			glm::mat4 ViewProjection;
+			glm::vec4 CameraRight;
+			glm::vec4 CameraUp;
+			glm::vec4 CameraForward;
+
+			// x: flipbook side. y: Z offset. z: whether world up is kept.
+			// w: unused, named so the struct's size is stated rather than implied.
+			glm::vec4 Options;
+		};
+
+		struct ParticleMaterial {
+			// x: whether the sampler holds this group's texture. The rest is
+			// named for `ParticleUniforms::Options`'s reason.
+			glm::vec4 Flags;
+		};
+
+		// Whether two batches can be drawn as one call.
+		//
+		// **Everything that is a uniform or a binding, and nothing that is a
+		// vertex attribute.** Two emitters differing only in their particles are
+		// one draw; two differing in their texture are two, because a texture is
+		// a binding and a binding cannot change inside a draw.
+		//
+		// `ZOffset` and `FlipbookSide` are uniforms rather than bindings and could
+		// have been moved onto the instance instead — four more bytes a particle,
+		// which is two megabytes a frame at the target count against a handful of
+		// extra draw calls. The draw calls are cheaper.
+		bool SameParticleState(const render::ParticleBatch &left, const render::ParticleBatch &right) {
+			return left.Additive == right.Additive && left.WorldUp == right.WorldUp &&
+				   left.Texture == right.Texture && left.FlipbookSide == right.FlipbookSide &&
+				   left.ZOffset == right.ZOffset;
+		}
+	}
+
+	uint32_t Renderer::Impl::PrepareParticles(std::span<const render::ParticleBatch> batches) {
+		ParticleGroups.clear();
+		if (ParticlePipeline == nullptr || batches.empty()) {
+			return 0;
+		}
+
+		// **Grouped by state, and this is the difference between a scene that
+		// draws and one that does not.** The first version issued one draw call
+		// per emitter, which at the roadmap's hundred thousand emitters is a
+		// hundred thousand draw calls a frame — an order of magnitude past what
+		// any driver will do at sixty hertz. Measured at 1,600 emitters it was
+		// 1,608 draw calls; grouped, the same scene is **three**, because every
+		// emitter in the grid shares a texture and a blend mode.
+		//
+		// **A stable sort into an index list rather than sorting the batches**,
+		// because the caller owns them — the same reason `scene::OrderForDrawing`
+		// produces an order instead of reordering a draw list.
+		ParticleOrder.resize(batches.size());
+		for (size_t index = 0; index < batches.size(); index++) {
+			ParticleOrder[index] = static_cast<uint32_t>(index);
+		}
+
+		// Blended before additive, so the pipeline is bound twice rather than
+		// alternating. Within each half the key is arbitrary but must be *total*,
+		// or equal states would not end up adjacent.
+		std::stable_sort(
+			ParticleOrder.begin(), ParticleOrder.end(), [batches](uint32_t left, uint32_t right) {
+				const render::ParticleBatch &a = batches[left];
+				const render::ParticleBatch &b = batches[right];
+				if (a.Additive != b.Additive) {
+					return !a.Additive;
+				}
+				if (a.Texture.Id() != b.Texture.Id()) {
+					return a.Texture.Id() < b.Texture.Id();
+				}
+				if (a.FlipbookSide != b.FlipbookSide) {
+					return a.FlipbookSide < b.FlipbookSide;
+				}
+				if (a.ZOffset != b.ZOffset) {
+					return a.ZOffset < b.ZOffset;
+				}
+				return static_cast<int>(a.WorldUp) < static_cast<int>(b.WorldUp);
+			}
+		);
+
+		uint32_t total = 0;
+		for (const render::ParticleBatch &batch : batches) {
+			total += static_cast<uint32_t>(batch.Particles.size());
+		}
+		if (total == 0 || !ReserveParticles(total)) {
+			return 0;
+		}
+
+		auto *mapped = static_cast<effects::ParticleInstance *>(
+			SDL_MapGPUTransferBuffer(Device, ParticleTransfer, true)
+		);
+		if (mapped == nullptr) {
+			return 0;
+		}
+
+		// One walk that both packs the buffer and records where each group lands.
+		// After this the order is a buffer offset and the batch it came from is
+		// gone, which is the same arrangement `SlotMesh` has for the mesh path.
+		uint32_t written = 0;
+		for (const uint32_t index : ParticleOrder) {
+			const render::ParticleBatch &batch = batches[index];
+			if (batch.Particles.empty()) {
+				continue;
+			}
+
+			if (ParticleGroups.empty() || !SameParticleState(batches[ParticleGroups.back().Batch], batch)) {
+				ParticleGroups.push_back(ParticleGroup{index, written, 0});
+			}
+
+			const auto count = static_cast<uint32_t>(batch.Particles.size());
+			std::memcpy(mapped + written, batch.Particles.data(), count * sizeof(effects::ParticleInstance));
+			written += count;
+			ParticleGroups.back().Count += count;
+		}
+
+		SDL_UnmapGPUTransferBuffer(Device, ParticleTransfer);
+		return written;
+	}
+
+	uint32_t Renderer::Impl::DrawParticles(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPURenderPass *pass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &eye,
+		std::span<const render::ParticleBatch> batches
+	) {
+		if (ParticlePipeline == nullptr || ParticleGroups.empty()) {
+			return 0;
+		}
+
+		// The camera's axes, once for the frame rather than once per group: a
+		// billboard is turned by the same three vectors whatever emitter it came
+		// from.
+		const auto axis = [&eye](float x, float y, float z) {
+			const core::Vector3 world = eye.VectorToWorldSpace(core::Vector3{x, y, z});
+			return glm::vec4{world.X, world.Y, world.Z, 0.0f};
+		};
+
+		ParticleUniforms uniforms{};
+		uniforms.ViewProjection = viewProjection;
+		uniforms.CameraRight = axis(1.0f, 0.0f, 0.0f);
+		uniforms.CameraUp = axis(0.0f, 1.0f, 0.0f);
+
+		// **The forward the shader wants points from the eye into the scene**, and
+		// `CFrame`'s own forward is -Z — the engine's camera convention, which
+		// `scene::NormalOf` states. Taken here rather than negated in the shader,
+		// so the convention lives in one place.
+		uniforms.CameraForward = axis(0.0f, 0.0f, -1.0f);
+
+		SDL_GPUBufferBinding vertexBinding{};
+		vertexBinding.buffer = ParticleBuffer;
+		vertexBinding.offset = 0;
+		SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+
+		uint32_t draws = 0;
+		bool additiveBound = false;
+		bool blendedBound = false;
+
+		for (const ParticleGroup &group : ParticleGroups) {
+			const render::ParticleBatch &state = batches[group.Batch];
+
+			// **Bound once per pipeline rather than once per group**, which the
+			// sort is what makes possible: every blended group precedes every
+			// additive one, so each pipeline is bound the first time it is
+			// reached and never again.
+			if (state.Additive) {
+				if (AdditiveParticlePipeline == nullptr) {
+					continue;
+				}
+				if (!additiveBound) {
+					SDL_BindGPUGraphicsPipeline(pass, AdditiveParticlePipeline);
+					additiveBound = true;
+				}
+			} else if (!blendedBound) {
+				SDL_BindGPUGraphicsPipeline(pass, ParticlePipeline);
+				blendedBound = true;
+			}
+
+			uniforms.Options = glm::vec4{
+				state.FlipbookSide <= 0.0f ? 1.0f : state.FlipbookSide,
+				state.ZOffset,
+				state.WorldUp ? 1.0f : 0.0f,
+				0.0f,
+			};
+			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+
+			SDL_GPUTexture *const texture = Textures.Find(state.Texture);
+
+			ParticleMaterial material{};
+			material.Flags = glm::vec4{texture != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+			SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
+
+			// **The fallback is bound rather than the sampler left unbound**,
+			// which is the rule `DrawSlots` follows: a shader declares a sampler
+			// whether or not a draw has a texture for it, and leaving it unbound
+			// is a validation error on some drivers and a read of whatever was
+			// there on others. The uniform above decides whether it is used.
+			SDL_GPUTextureSamplerBinding binding{};
+			binding.texture = texture != nullptr ? texture : FallbackTexture;
+			binding.sampler = Textures.Sampler();
+			SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+
+			// Four vertices a particle, as a strip. `first_instance` selects this
+			// group's slice of the shared buffer.
+			SDL_DrawGPUPrimitives(pass, 4, group.Count, 0, group.First);
+			draws++;
+		}
+
+		return draws;
+	}
+
+	bool Renderer::Impl::ReserveRibbons(uint32_t count) {
+		if (count <= RibbonCapacity) {
+			return true;
+		}
+
+		// Powers of two from 1024, which is about sixty beams' worth. Smaller
+		// than the particle buffer's floor because a ribbon count is bounded by
+		// how many beams an author placed rather than by a rate.
+		uint32_t capacity = RibbonCapacity == 0 ? 1024 : RibbonCapacity;
+		while (capacity < count) {
+			capacity *= 2;
+		}
+
+		if (RibbonBuffer != nullptr) {
+			SDL_ReleaseGPUBuffer(Device, RibbonBuffer);
+		}
+		if (RibbonTransfer != nullptr) {
+			SDL_ReleaseGPUTransferBuffer(Device, RibbonTransfer);
+		}
+
+		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(effects::RibbonVertex));
+
+		SDL_GPUBufferCreateInfo bufferInfo{};
+		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+		bufferInfo.size = bytes;
+		RibbonBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
+		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		transferInfo.size = bytes;
+		RibbonTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+
+		if (RibbonBuffer == nullptr || RibbonTransfer == nullptr) {
+			ENGINE_ERROR("ribbon buffer of {} vertices: {}", capacity, SDL_GetError());
+			RibbonCapacity = 0;
+			return false;
+		}
+
+		RibbonCapacity = capacity;
+		return true;
+	}
+
+	uint32_t Renderer::Impl::PrepareRibbons(std::span<const effects::RibbonVertex> vertices) {
+		if (RibbonPipeline == nullptr || vertices.empty()) {
+			return 0;
+		}
+
+		const auto count = static_cast<uint32_t>(vertices.size());
+		if (!ReserveRibbons(count)) {
+			return 0;
+		}
+
+		// **Copied whole rather than run by run**, because `RibbonRun::First` is
+		// already an index into this stream — `BuildRibbons` packed the runs
+		// contiguously in the order it produced them, so the buffer and the runs
+		// agree with no repacking.
+		auto *mapped =
+			static_cast<effects::RibbonVertex *>(SDL_MapGPUTransferBuffer(Device, RibbonTransfer, true));
+		if (mapped == nullptr) {
+			return 0;
+		}
+		std::memcpy(mapped, vertices.data(), count * sizeof(effects::RibbonVertex));
+		SDL_UnmapGPUTransferBuffer(Device, RibbonTransfer);
+
+		return count;
+	}
+
+	namespace {
+		struct RibbonUniforms {
+			glm::mat4 ViewProjection;
+			glm::vec4 CameraForward;
+
+			// x: Z offset. The rest is named so the struct's size is stated.
+			glm::vec4 Options;
+		};
+	}
+
+	uint32_t Renderer::Impl::DrawRibbons(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPURenderPass *pass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &eye,
+		std::span<const effects::RibbonRun> runs
+	) {
+		if (RibbonPipeline == nullptr || runs.empty()) {
+			return 0;
+		}
+
+		const core::Vector3 forward = eye.VectorToWorldSpace(core::Vector3{0.0f, 0.0f, -1.0f});
+
+		RibbonUniforms uniforms{};
+		uniforms.ViewProjection = viewProjection;
+		uniforms.CameraForward = glm::vec4{forward.X, forward.Y, forward.Z, 0.0f};
+
+		SDL_GPUBufferBinding vertexBinding{};
+		vertexBinding.buffer = RibbonBuffer;
+		vertexBinding.offset = 0;
+		SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+
+		uint32_t draws = 0;
+		bool blendedBound = false;
+		bool additiveBound = false;
+
+		// **Two passes over the runs rather than one**, so each pipeline is bound
+		// once. `BuildRibbons` produces beams then trails in world order and does
+		// not group by blend mode — grouping there would be a shared module
+		// ordering work for a pipeline it cannot name.
+		for (int additive = 0; additive < 2; additive++) {
+			for (const effects::RibbonRun &run : runs) {
+				if (run.Additive != (additive == 1) || run.Count < 4) {
+					continue;
+				}
+
+				if (run.Additive) {
+					if (AdditiveRibbonPipeline == nullptr) {
+						continue;
+					}
+					if (!additiveBound) {
+						SDL_BindGPUGraphicsPipeline(pass, AdditiveRibbonPipeline);
+						additiveBound = true;
+					}
+				} else if (!blendedBound) {
+					SDL_BindGPUGraphicsPipeline(pass, RibbonPipeline);
+					blendedBound = true;
+				}
+
+				uniforms.Options = glm::vec4{run.ZOffset, 0.0f, 0.0f, 0.0f};
+				SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+
+				SDL_GPUTexture *const texture = Textures.Find(run.Texture);
+
+				ParticleMaterial material{};
+				material.Flags = glm::vec4{texture != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
+
+				// The fallback is bound rather than the sampler left unbound, for
+				// `DrawParticles`'s reason.
+				SDL_GPUTextureSamplerBinding binding{};
+				binding.texture = texture != nullptr ? texture : FallbackTexture;
+				binding.sampler = Textures.Sampler();
+				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+
+				// A strip, so the vertex count is the run's own and `first_vertex`
+				// selects its slice. No instancing: one run is one ribbon.
+				SDL_DrawGPUPrimitives(pass, run.Count, 1, run.First, 0);
+				draws++;
+			}
+		}
+
+		return draws;
 	}
 
 	bool Renderer::Impl::EnsureScene(uint32_t width, uint32_t height) {
@@ -1758,6 +2599,14 @@ namespace engine::render {
 		State = std::make_unique<Impl>();
 	}
 
+	bool Renderer::MeshExtentOf(const core::Name &name, core::Vector3 &out) const {
+		if (State == nullptr || !State->Meshes.Has(name)) {
+			return false;
+		}
+		out = State->Meshes.Resolve(name).Extent;
+		return true;
+	}
+
 	bool Renderer::AddMesh(const core::Name &name, const assets::MeshData &mesh) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
@@ -1776,6 +2625,40 @@ namespace engine::render {
 			return false;
 		}
 		return State->Textures.Add(name, image);
+	}
+
+	void Renderer::SetAnimationTime(double seconds) {
+		if (State != nullptr) {
+			State->AnimationSeconds = seconds;
+		}
+	}
+
+	FlipbookCell Renderer::TextureCell(const core::Name &name, double seconds) const {
+		if (State == nullptr) {
+			return {};
+		}
+		return State->Textures.CellOf(name, seconds);
+	}
+
+	void *Renderer::TextureHandle(const core::Name &name) const {
+		if (State == nullptr) {
+			return nullptr;
+		}
+		return State->Textures.Find(name);
+	}
+
+	bool Renderer::TextureSize(const core::Name &name, uint32_t &width, uint32_t &height) const {
+		if (State == nullptr) {
+			return false;
+		}
+		return State->Textures.SizeOf(name, width, height);
+	}
+
+	bool Renderer::DropTexture(const core::Name &name) {
+		if (State == nullptr) {
+			return false;
+		}
+		return State->Textures.Drop(name);
 	}
 
 	bool Renderer::HasMesh(const core::Name &name) const {
@@ -1891,7 +2774,11 @@ namespace engine::render {
 		std::span<const SurfaceView> surfaces,
 		FrameOverlayHook *interfaceHook,
 		const SceneTarget *sceneTarget,
-		size_t targetSlot
+		size_t targetSlot,
+		std::span<const ParticleBatch> particles,
+		std::span<const effects::RibbonVertex> ribbonVertices,
+		std::span<const effects::RibbonRun> ribbonRuns,
+		std::span<const SceneLight> lights
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
@@ -2401,16 +3288,21 @@ namespace engine::render {
 					State->SlotTexture.resize(uploadCount);
 					State->SlotTags.resize(uploadCount);
 
+					// **The mesh is resolved once and used twice.** `ToGpu` needs
+					// it to stretch the instance into its `Size` box and the draw
+					// loop needs it to find its runs, and resolving twice would
+					// be a second hash of the same name per instance per frame.
 					const auto record = [&](size_t slot, const scene::DrawInstance &instance) {
-						State->SlotMesh[slot] = &State->Meshes.Resolve(instance.Mesh);
+						const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
+						State->SlotMesh[slot] = &mesh;
 						State->SlotTexture[slot] = instance.Texture;
 						State->SlotTags[slot] = instance.TagMask;
+						return &mesh;
 					};
 
 					for (size_t index = 0; index < State->SceneOrder.size(); index++) {
 						const scene::DrawInstance &instance = State->SceneInstances[State->SceneOrder[index]];
-						out[index] = ToGpu(instance);
-						record(index, instance);
+						out[index] = ToGpu(instance, *record(index, instance));
 					}
 
 					const size_t cameraBase = State->SceneOrder.size();
@@ -2418,13 +3310,37 @@ namespace engine::render {
 					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
 						const scene::DrawInstance &instance =
 							State->VisibleInstances[State->DrawOrder[index]];
-						camera[index] = ToGpu(instance);
-						record(cameraBase + index, instance);
+						camera[index] = ToGpu(instance, *record(cameraBase + index, instance));
 					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 				haveInstances = true;
 			}
+		}
+
+		// The particles, packed and grouped before any render pass opens.
+		//
+		// **Here rather than inside the draw**, because what follows is a copy
+		// pass and a copy pass cannot be started while a render pass is open —
+		// the same constraint `FrameOverlayHook`'s `Prepare`/`Record` split
+		// exists for, stated in that header in the same words.
+		// The local lights, packed once for the frame.
+		//
+		// **Every pass gets the same set**, including a mirror's: a lamp lights
+		// what a reflection shows exactly as it lights the world, and giving the
+		// surface pass a different set would make a mirror disagree with the room
+		// it is in.
+		const LightUniforms lightUniforms = ToGpu(lights);
+
+		uint32_t particleCount = 0;
+		uint32_t ribbonCount = 0;
+		{
+			ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
+			particleCount = State->PrepareParticles(particles);
+			result.Particles = particleCount;
+
+			ribbonCount = State->PrepareRibbons(ribbonVertices);
+			result.RibbonVertices = ribbonCount;
 		}
 
 		// Only when something is actually waiting to go across. A panel redrawn
@@ -2433,10 +3349,33 @@ namespace engine::render {
 		const bool uploadOverlay =
 			haveOverlay && (State->OverlayUninitialised || overlay.UploadRegion().Width > 0);
 
-		if (haveInstances || uploadOverlay) {
+		if (haveInstances || uploadOverlay || particleCount > 0 || ribbonCount > 0) {
 			ENGINE_PROFILE_CAT("copy pass", core::ProfileCategory::Render);
 
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+
+			if (ribbonCount > 0) {
+				const SDL_GPUTransferBufferLocation source{State->RibbonTransfer, 0};
+				const SDL_GPUBufferRegion destination{
+					State->RibbonBuffer,
+					0,
+					ribbonCount * static_cast<uint32_t>(sizeof(effects::RibbonVertex)),
+				};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+			}
+
+			if (particleCount > 0) {
+				const SDL_GPUTransferBufferLocation source{State->ParticleTransfer, 0};
+				const SDL_GPUBufferRegion destination{
+					State->ParticleBuffer,
+					0,
+					particleCount * static_cast<uint32_t>(sizeof(effects::ParticleInstance)),
+				};
+				// Cycled, for the instance buffer's reason: a fresh allocation
+				// rather than a stall on the copy the previous frame may still be
+				// reading.
+				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+			}
 
 			if (haveInstances) {
 				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
@@ -2701,6 +3640,12 @@ namespace engine::render {
 				surfaceDepth.cycle = true;
 
 				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
+				// **The light set, pushed once for the whole pass.** Uniform state
+				// on a command buffer persists until it is replaced, so one push
+				// before the draws serves every one of them — which is the whole
+				// reason this is a second buffer rather than fields on the
+				// per-draw `LightingUniforms`.
+				SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
 
 				const SDL_GPUBufferBinding vertexBindings[] = {
@@ -2980,6 +3925,12 @@ namespace engine::render {
 			passes.Enter(Pass::Opaque);
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+			// **The light set, pushed once for the whole pass.** Uniform state
+			// on a command buffer persists until it is replaced, so one push
+			// before the draws serves every one of them — which is the whole
+			// reason this is a second buffer rather than fields on the
+			// per-draw `LightingUniforms`.
+			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 
 			// **The world's rectangle inside an attachment that is larger than
 			// it.** Without this the pass inherits a viewport covering the whole
@@ -3239,6 +4190,35 @@ namespace engine::render {
 					if (transparentSurfaces > 0) {
 						drawScreenMirrors(true);
 					}
+				}
+
+				// --- particles ---------------------------------------------
+				//
+				// **After every blended run and inside the same pass**, which is
+				// the arrangement the header states: a particle is depth-tested
+				// against the world and drawn over the glass. Sorting half a
+				// million particles into the geometry's own order would cost more
+				// than the artefact of not doing it.
+				//
+				// **Not their own `Pass` member**, deliberately. `render::Pass` is
+				// compared against `graph::StandardPipeline` by a test, and adding
+				// a stage to one and not the other is exactly the drift D00016
+				// records. Particles are part of what `Transparent` means until
+				// the pipeline is a graph rather than a function body.
+				if (particleCount > 0) {
+					passes.Enter(Pass::Transparent);
+					result.DrawCalls += State->DrawParticles(
+						command, pass, frameUniforms.ViewProjection, cameraFrame, particles
+					);
+				}
+
+				// The beams and trails, after the particles. See the header for
+				// why the order is fixed rather than sorted.
+				if (ribbonCount > 0) {
+					passes.Enter(Pass::Transparent);
+					result.DrawCalls += State->DrawRibbons(
+						command, pass, frameUniforms.ViewProjection, cameraFrame, ribbonRuns
+					);
 				}
 
 				// **Counted as it is drawn rather than derived from the instance

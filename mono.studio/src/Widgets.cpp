@@ -39,14 +39,15 @@ namespace studio {
 		}
 	}
 
-	bool TextField(const char *label, std::string &text, const char *hint) {
+	bool TextField(const char *label, std::string &text, const char *hint, bool secret) {
 		// The capacity is what imgui writes into, so a string with none is a
 		// field that cannot be typed in.
 		if (text.capacity() < 64) {
 			text.reserve(64);
 		}
 
-		const auto flags = ImGuiInputTextFlags_CallbackResize;
+		const auto flags = secret ? (ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_Password)
+								  : ImGuiInputTextFlags_CallbackResize;
 
 		if (hint != nullptr) {
 			return ImGui::InputTextWithHint(
@@ -332,6 +333,99 @@ namespace studio {
 
 		if (confirmed) {
 			path = chosen.string();
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+		return confirmed;
+	}
+
+	bool FolderPrompt(const char *title, std::string &path, const char *accept) {
+		bool confirmed = false;
+
+		const ImGuiViewport *main = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos(main->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+		ImGui::SetNextWindowSize(
+			ImVec2(engine::ui::Scaled(640.0f), engine::ui::Scaled(460.0f)), ImGuiCond_Appearing
+		);
+
+		if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+			return false;
+		}
+
+		// Where this dialog is looking, kept per title — `FilePrompt`'s reason
+		// and its pattern.
+		std::filesystem::path *const where = &PerCallSite<std::filesystem::path>(title);
+
+		if (ImGui::IsWindowAppearing()) {
+			*where = std::filesystem::path(path);
+		}
+
+		// **No extension filter, and the files are listed anyway.** A folder
+		// browser that showed only directories makes an empty folder and the
+		// wrong folder look identical, which is exactly the mistake somebody is
+		// about to make when they import a hundred files from the wrong place.
+		const Listing listing = BrowseDirectory(*where, {});
+		*where = listing.Directory;
+
+		ImGui::TextDisabled("%s", listing.Directory.string().c_str());
+		ImGui::Separator();
+
+		const float footer = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 2.0f;
+
+		if (ImGui::BeginChild("##rows", ImVec2(0.0f, -footer), ImGuiChildFlags_Borders)) {
+			if (!listing.Error.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::TextWrapped("%s", listing.Error.c_str());
+				ImGui::PopStyleColor();
+			}
+
+			if (!listing.Parent.empty()) {
+				if (ImGui::Selectable("..")) {
+					*where = listing.Parent;
+				}
+			}
+
+			size_t files = 0;
+			for (const BrowseEntry &entry : listing.Entries) {
+				ImGui::PushID(entry.Path.string().c_str());
+
+				if (entry.Directory) {
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+					if (ImGui::Selectable((entry.Name + "/").c_str())) {
+						*where = entry.Path;
+					}
+					ImGui::PopStyleColor();
+				} else {
+					// Shown and not selectable: this dialog returns the folder,
+					// and a row that highlighted but did nothing would be worse
+					// than one that plainly cannot be picked.
+					ImGui::TextDisabled("%s", entry.Name.c_str());
+					files++;
+				}
+
+				ImGui::PopID();
+			}
+
+			if (files == 0 && listing.Entries.empty()) {
+				ImGui::TextDisabled("(empty)");
+			}
+		}
+		ImGui::EndChild();
+
+		const ImVec2 button(engine::ui::Scaled(140.0f), 0.0f);
+
+		if (ImGui::Button(accept, button)) {
+			confirmed = true;
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", button) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+			ImGui::CloseCurrentPopup();
+		}
+
+		if (confirmed) {
+			path = listing.Directory.string();
 			ImGui::CloseCurrentPopup();
 		}
 

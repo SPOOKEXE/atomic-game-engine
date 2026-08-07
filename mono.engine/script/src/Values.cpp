@@ -474,6 +474,98 @@ namespace engine::script {
 		return *static_cast<core::Rect *>(value);
 	}
 
+	// --- the three a curve is authored in ------------------------------------
+	//
+	// **Accessors only, for the reason the four above give**: `LuauDatatypes.cpp`
+	// owns what a `NumberSequence` *is* to a script, and this file owns handing a
+	// property's bytes across. Two definitions of the metatable would be two
+	// answers to `typeof(value)`.
+	//
+	// **These three are the first values here that are not a handful of floats.**
+	// A `ColorSequence` is 408 bytes, so `lua_newuserdatatagged` allocates that
+	// much per push — which is why the property path reads into a stack buffer
+	// once and pushes once, rather than pushing a temporary per keypoint the way
+	// the `Keypoints` getter does. The getter is a script asking for the stops;
+	// this is a property read, and it happens on every `.Changed` fan-out.
+
+	core::NumberRange *PushNumberRange(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::NumberRange), TAG_NUMBER_RANGE);
+		auto *value = new (memory) core::NumberRange();
+		luaL_getmetatable(state, "NumberRange");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::NumberSequence *PushNumberSequence(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::NumberSequence), TAG_NUMBER_SEQUENCE);
+		auto *value = new (memory) core::NumberSequence();
+		luaL_getmetatable(state, "NumberSequence");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::ColorSequence *PushColorSequence(lua_State *state) {
+		void *memory = lua_newuserdatatagged(state, sizeof(core::ColorSequence), TAG_COLOR_SEQUENCE);
+		auto *value = new (memory) core::ColorSequence();
+		luaL_getmetatable(state, "ColorSequence");
+		lua_setmetatable(state, -2);
+		return value;
+	}
+
+	core::NumberRange &CheckNumberRange(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_NUMBER_RANGE);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "NumberRange");
+		}
+		return *static_cast<core::NumberRange *>(value);
+	}
+
+	core::NumberSequence &CheckNumberSequence(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_NUMBER_SEQUENCE);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "NumberSequence");
+		}
+		return *static_cast<core::NumberSequence *>(value);
+	}
+
+	core::ColorSequence &CheckColorSequence(lua_State *state, int index) {
+		void *value = lua_touserdatatagged(state, index, TAG_COLOR_SEQUENCE);
+		if (value == nullptr) {
+			luaL_typeerrorL(state, index, "ColorSequence");
+		}
+		return *static_cast<core::ColorSequence *>(value);
+	}
+
+	namespace {
+		// Puts a constant vector on a constructor table that `Install` has just
+		// set as a global.
+		//
+		// **A field on the global table rather than a case in `Vector3Index`**,
+		// and the difference is which side of the dot it is on. `Vector3Index`
+		// answers `someVector.X` — a member of a *value* — and Roblox's `zero` and
+		// `one` are members of the *library*, the same shelf `Vector3.new` sits on.
+		// Putting them in the index would make `part.Position.zero` answer, which
+		// is a member nobody wrote.
+		//
+		// Pushed as an ordinary userdata, so it carries the same metatable and the
+		// same tag as anything `Vector3.new` returns — a constant that failed
+		// `CheckVector3` would be a constant no property could be assigned from.
+		//
+		// **A fresh copy per read is not what this gives**, and that is worth
+		// stating because it looks like a hazard and is not: `Vector3` has no
+		// mutating member and no field a script can assign, so the one userdata
+		// behind `Vector3.zero` cannot be written through. `Install` seals the
+		// metatable for the same class of reason.
+		void SetVectorConstant(
+			lua_State *state, const char *global, const char *field, const core::Vector3 &value
+		) {
+			lua_getglobal(state, global);
+			*PushVector3(state) = value;
+			lua_setfield(state, -2, field);
+			lua_pop(state, 1);
+		}
+	}
+
 	void OpenValues(lua_State *state) {
 		static const luaL_Reg vectorConstructors[] = {{"new", Vector3New}, {nullptr, nullptr}};
 		static const luaL_Reg colorConstructors[] = {
@@ -497,5 +589,17 @@ namespace engine::script {
 		);
 		Install(state, "Color3", Color3Index, nullptr, colorConstructors, nullptr, Color3Equal);
 		Install(state, "CFrame", CFrameIndex, nullptr, frameConstructors, CFrameMultiply, CFrameEqual);
+
+		// **Lowercase, because Roblox's are.** Every other member of this
+		// vocabulary is capitalised and these two are not, which reads as a
+		// mistake until you try to run a script written elsewhere. The rule
+		// `scene/Part.cpp` states for the class tree is the rule here: a second
+		// spelling of one constant is the duplicate `AGENTS.md` calls the most
+		// expensive kind of debt, and `Vector3.Zero` would be exactly that.
+		//
+		// After both `Install` calls, because the global table they set is what
+		// these attach to.
+		SetVectorConstant(state, "Vector3", "zero", core::Vector3::Zero);
+		SetVectorConstant(state, "Vector3", "one", core::Vector3::One);
 	}
 }

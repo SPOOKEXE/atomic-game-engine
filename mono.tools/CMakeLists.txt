@@ -17,6 +17,9 @@ add_subdirectory(scriptcheck)
 # MCP stdio-to-control-port bridge.
 add_subdirectory(mcpbridge)
 
+# Brings files into the local content store.
+add_subdirectory(contentimport)
+
 # Line counter.
 add_subdirectory(linecount)
 
