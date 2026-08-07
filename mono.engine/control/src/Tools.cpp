@@ -18,6 +18,7 @@
 #include <engine/ecs/Instance.hpp>
 
 #include <algorithm>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -60,6 +61,22 @@ namespace engine::control {
 			return "unknown";
 		}
 
+		// How wide a property value can be, and therefore how big the buffers
+		// below are.
+		//
+		// **Sized by the widest property type rather than by `CFrame`**, which is
+		// what it was until a sequence became one. A `core::ColorSequence` is
+		// twenty keypoints and does not fit in twenty-eight bytes, so the guard on
+		// `property.Size` refused it — correctly, and silently, which is what
+		// would have made `emitter.Color` read back as `null` over the control
+		// surface with nothing in the log to say a property had been dropped.
+		//
+		// A `constexpr` rather than a `sizeof` spelled at each buffer, because
+		// there are two of them and the read one being narrower than the write one
+		// is a bug with no symptom on the write path.
+		constexpr size_t WIDEST_PROPERTY =
+			std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
+
 		// One property, converted for a reader rather than for a wire.
 		//
 		// A `Vector3` becomes three named numbers and not an array: the whole
@@ -79,7 +96,7 @@ namespace engine::control {
 				return text;
 			}
 
-			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 			if (property.Size > sizeof(bytes) ||
 				!store.GetProperty(instance, property, bytes, property.Size)) {
 				return nullptr;
@@ -141,6 +158,42 @@ namespace engine::control {
 					{"Min", json{{"X", value.Min.X}, {"Y", value.Min.Y}}},
 					{"Max", json{{"X", value.Max.X}, {"Y", value.Max.Y}}},
 				};
+			}
+			// A curve is an array of named stops, by the same rule again: an array
+			// of bare triples would need a schema to read and this does not.
+			//
+			// **Only `Count` stops, never the fixed array.** A sequence carries
+			// twenty keypoint slots and uses two of them; writing the tail would
+			// put eighteen zeroed stops at time zero in the reply, which reads as
+			// a gradient that steps to nothing rather than as unused capacity.
+			case PropertyType::NumberRange: {
+				const auto &value = *reinterpret_cast<const core::NumberRange *>(bytes);
+				return json{{"Min", value.Minimum}, {"Max", value.Maximum}};
+			}
+			case PropertyType::NumberSequence: {
+				const auto &value = *reinterpret_cast<const core::NumberSequence *>(bytes);
+				json stops = json::array();
+				for (uint32_t index = 0; index < value.Count; index++) {
+					const core::NumberKeypoint &stop = value.Keypoints[index];
+					stops.push_back(
+						json{{"Time", stop.Time}, {"Value", stop.Value}, {"Envelope", stop.Envelope}}
+					);
+				}
+				return json{{"Keypoints", stops}};
+			}
+			case PropertyType::ColorSequence: {
+				const auto &value = *reinterpret_cast<const core::ColorSequence *>(bytes);
+				json stops = json::array();
+				for (uint32_t index = 0; index < value.Count; index++) {
+					const core::ColorKeypoint &stop = value.Keypoints[index];
+					stops.push_back(
+						json{
+							{"Time", stop.Time},
+							{"Value", json{{"R", stop.Value.R}, {"G", stop.Value.G}, {"B", stop.Value.B}}},
+						}
+					);
+				}
+				return json{{"Keypoints", stops}};
 			}
 			case PropertyType::Reference:
 				return reinterpret_cast<const ecs::Entity *>(bytes)->Id;
@@ -267,7 +320,7 @@ namespace engine::control {
 
 			// Sized from the descriptor, exactly as the script bindings are, so
 			// this cannot be the place a size mismatch is introduced.
-			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 			if (property.Size > sizeof(bytes)) {
 				failure = "property too large to write";
 				return false;
@@ -367,6 +420,70 @@ namespace engine::control {
 					number(max.value("X", json(0.0)), 0.0f),
 					number(max.value("Y", json(0.0)), 0.0f),
 				};
+				break;
+			}
+			case PropertyType::NumberRange:
+				*reinterpret_cast<core::NumberRange *>(bytes) = core::NumberRange{
+					number(value.value("Min", json(0.0)), 0.0f),
+					number(value.value("Max", json(0.0)), 0.0f),
+				};
+				break;
+			case PropertyType::NumberSequence: {
+				// **Placement-new rather than a cast and an assign.** Every other
+				// case here writes over a buffer that is already a valid object of
+				// nothing at all, which is fine for four floats; a sequence is
+				// three hundred bytes with a `Count` that decides which of them
+				// mean anything, and assigning through a cast to storage that was
+				// never constructed reads the old `Count` on the way past. Zeroed
+				// storage makes that harmless today and would not the first time a
+				// buffer was reused.
+				auto *out = new (bytes) core::NumberSequence();
+				const json stops = value.value("Keypoints", value);
+				if (!stops.is_array()) {
+					failure = "a NumberSequence takes {\"Keypoints\": [...]}";
+					return false;
+				}
+				for (const json &stop : stops) {
+					// Refused rather than truncated, for the reason
+					// `NumberSequence.new` gives in the Luau binding: a gradient
+					// silently missing its last stop is subtly wrong everywhere
+					// and obviously wrong nowhere.
+					if (!out->Add(
+							core::NumberKeypoint{
+								number(stop.value("Time", json(0.0)), 0.0f),
+								number(stop.value("Value", json(0.0)), 0.0f),
+								number(stop.value("Envelope", json(0.0)), 0.0f),
+							}
+						)) {
+						failure = "a NumberSequence holds at most 20 keypoints";
+						return false;
+					}
+				}
+				break;
+			}
+			case PropertyType::ColorSequence: {
+				auto *out = new (bytes) core::ColorSequence();
+				const json stops = value.value("Keypoints", value);
+				if (!stops.is_array()) {
+					failure = "a ColorSequence takes {\"Keypoints\": [...]}";
+					return false;
+				}
+				for (const json &stop : stops) {
+					const json colour = stop.value("Value", json::object());
+					if (!out->Add(
+							core::ColorKeypoint{
+								number(stop.value("Time", json(0.0)), 0.0f),
+								core::Color3{
+									number(colour.value("R", json(0.0)), 0.0f),
+									number(colour.value("G", json(0.0)), 0.0f),
+									number(colour.value("B", json(0.0)), 0.0f),
+								},
+							}
+						)) {
+						failure = "a ColorSequence holds at most 20 keypoints";
+						return false;
+					}
+				}
 				break;
 			}
 			case PropertyType::Reference:

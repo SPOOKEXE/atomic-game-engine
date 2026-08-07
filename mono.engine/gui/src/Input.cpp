@@ -3,9 +3,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/Registration.hpp>
 
 #include <cmath>
-#include <engine/gui/Registration.hpp>
 
 namespace engine::gui {
 

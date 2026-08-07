@@ -1,5 +1,6 @@
 #include "StoreState.hpp"
 
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/ChangeChannel.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Time.hpp>
@@ -135,6 +136,32 @@ namespace engine::ecs {
 		return EntityId::Pack(index, state.Directory.Generation(index));
 	}
 
+	namespace {
+		// Drops one entity's attributes, reaching the resource through the state
+		// rather than through `Store`.
+		//
+		// **`ecs::Attributes.hpp`'s functions take a `Store` and this is below
+		// one**, so the table is reached the way every other resource is at this
+		// layer: by component id out of `ResourceTable`. The alternative was to
+		// hook two `Store` methods instead of one point, and the version that did
+		// that missed `DestroyInstance` — which is the bug this exists to have
+		// fixed rather than a hypothetical.
+		void DropAttributes(StoreState &state, Entity entity) {
+			Column *column = state.Resources.Find(Components::Of<AttributeTable>().Index);
+			if (column == nullptr || column->Size() == 0) {
+				// **The ordinary case, and it has to cost nothing.** A world with
+				// no attributes has no table, and this runs on every destroyed row
+				// of every world — so the miss is one sorted-vector lookup over a
+				// handful of entries and nothing else.
+				return;
+			}
+
+			if (auto *table = static_cast<AttributeTable *>(column->At(0))) {
+				table->Entities.erase(entity.Id);
+			}
+		}
+	}
+
 	void DestroyEntity(StoreState &state, Entity entity) {
 		const EntityId id = EntityId::Of(entity);
 		if (!state.Directory.Alive(id.Index, id.Generation)) {
@@ -145,6 +172,20 @@ namespace engine::ecs {
 			state.Commands.push_back(Command{Command::Kind::Destroy, entity, ComponentId{}, nullptr});
 			return;
 		}
+
+		// **Attributes go with the row, because entity ids are reused.** The
+		// table is keyed by id and a freed slot is handed straight to the next
+		// `Create`, so an entry left behind surfaces as somebody else's attribute
+		// on a freshly made part — at a distance of however many entities were
+		// created in between, which is the worst kind of bug to find.
+		//
+		// **Here rather than in `Store::Destroy`, because that is not the only
+		// door.** `DestroyInstance` walks a subtree and calls `DestroyEntity`
+		// directly, so a script's `:Destroy()` never passed through the first
+		// version of this and the attribute outlived the instance. This is the
+		// one point every row leaves by; `ecs/tests` and the script suite both
+		// pin it.
+		DropAttributes(state, entity);
 
 		Vacate(state, *state.Directory.Locate(id.Index));
 

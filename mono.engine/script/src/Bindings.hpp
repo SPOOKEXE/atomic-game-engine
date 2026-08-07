@@ -33,6 +33,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::script {
 
@@ -84,6 +85,68 @@ namespace engine::script {
 
 		// What a raycast is told to ignore.
 		TAG_RAYCAST_PARAMS = 20,
+
+		// One stop in a sequence.
+		//
+		// **Added at v0.10 because a particle emitter made the table form
+		// insufficient**, which is a reversal of the note above
+		// `ReadNumberKeypoint` and worth recording rather than quietly editing
+		// out. That note said two more userdata types for a value an author
+		// writes inline once was surface nobody asked for, and while a sequence
+		// was only ever constructed from a literal it was right.
+		//
+		// What changed is that a sequence is now a *property*: an emitter's
+		// `Transparency` is read back, and `emitter.Transparency.Keypoints[1]`
+		// handed back a bare `{time, value, envelope}` table — three anonymous
+		// numbers with no `typeof`, no way to tell one from a `ColorSequence`'s
+		// stop, and nothing to compare against. Reading a value back in a shape
+		// its own constructor accepts is the round trip a property surface owes,
+		// and the table form does not give it a name.
+		//
+		// The table form still works everywhere it did. Both constructors take
+		// either.
+		TAG_NUMBER_KEYPOINT = 21,
+		TAG_COLOR_KEYPOINT = 22,
+
+		// `UserInputService`, which is a userdata rather than a table.
+		//
+		// **Because a table cannot hold a property that changes.** `luaL_sandbox`
+		// freezes the globals and enables `safeenv`, and Luau then compiles
+		// `Service.Field` on a constant global table into a `GETIMPORT` resolved
+		// once per closure — so `UserInputService.MouseBehavior` would read
+		// whatever it was the first time a script asked, forever. A userdata's
+		// field access always goes through `__index`.
+		//
+		// It carries no payload. What the object is, is its metatable.
+		TAG_INPUT_SERVICE = 23,
+	};
+
+	// One action bound through `ContextActionService`.
+	//
+	// **Declared here rather than in `InputServices.cpp` because it lives on the
+	// context**, and it lives on the context because it holds a registry
+	// reference: a `thread_local` would be shared between two VMs on one thread,
+	// so a reference minted by one would be dereferenced against the other's
+	// state. That is not a leak — it is a `lua_getref` into a different VM, which
+	// is undefined and crashed a test that had nothing to do with input.
+	//
+	// @since v0.10
+	struct BoundAction {
+		// What the script called it. Unbinding is by this name.
+		std::string Name;
+
+		// The keys it claims, as `scene::KeyCode` ordinals.
+		//
+		// **Ordinals rather than the enum**, so this header does not have to name
+		// `scene` — `Bindings.hpp` is included by every binding file and widening
+		// it for one vector is the kind of edge that spreads.
+		std::vector<uint16_t> Keys;
+
+		// The registry reference to the handler.
+		int Callback = -1;
+
+		// Higher wins. Roblox's default is zero and so is this.
+		int Priority = 0;
 	};
 
 	// Everything one Luau runtime needs, hung off the state rather than a
@@ -110,6 +173,13 @@ namespace engine::script {
 
 		// Suspended threads and when they may run again.
 		TaskQueue Tasks;
+
+		// What `ContextActionService` has bound, highest priority first.
+		//
+		// **Sorted at bind time rather than searched at press time**, because
+		// binding is rare where pressing is not — and because the order has to be
+		// stable, which a sort on every press could not promise.
+		std::vector<BoundAction> Actions;
 
 		// The VM this context belongs to, so a `Connection` userdata can reach
 		// the table without a second upvalue on every method.
@@ -277,6 +347,21 @@ namespace engine::script {
 	core::UDim2 &CheckUDim2(lua_State *state, int index);
 	core::Rect &CheckRect(lua_State *state, int index);
 
+	// --- the three a curve is authored in -------------------------------------
+	//
+	// The same split again: the metatables are `LuauDatatypes.cpp`'s and these
+	// hand a property's bytes across. See `Values.cpp` for what makes these three
+	// different from the seven above — they are hundreds of bytes rather than a
+	// handful of floats.
+
+	core::NumberRange *PushNumberRange(lua_State *state);
+	core::NumberSequence *PushNumberSequence(lua_State *state);
+	core::ColorSequence *PushColorSequence(lua_State *state);
+
+	core::NumberRange &CheckNumberRange(lua_State *state, int index);
+	core::NumberSequence &CheckNumberSequence(lua_State *state, int index);
+	core::ColorSequence &CheckColorSequence(lua_State *state, int index);
+
 	// --- signals --------------------------------------------------------------
 
 	// Pushes a signal object onto the stack.
@@ -312,6 +397,23 @@ namespace engine::script {
 	// and whose `IsServer`/`IsClient`/`IsStudio` say where a script is standing.
 	void OpenRunService(lua_State *state);
 
+	// Installs `UserInputService` and `ContextActionService`.
+	//
+	// **Both read `scene::InputState` and neither reads `engine::input`**, which
+	// is the tier seam `Input.hpp` exists for: this module is `shared` and the SDL
+	// pump is `client`.
+	void OpenInputServices(lua_State *state);
+
+	// Turns this frame's key edges into bound actions and input signals.
+	//
+	// Called at a barrier beside `PumpChanges`, for the same reason: a handler
+	// that mutated the world would otherwise do it in the middle of a loop over
+	// it.
+	//
+	// @param state The VM.
+	// @return An error message when a handler raised, or empty.
+	std::string PumpInput(lua_State *state);
+
 	// Installs `game`, whose `GetService` is how a Roblox script reaches one.
 	void OpenGame(lua_State *state);
 
@@ -322,6 +424,17 @@ namespace engine::script {
 	// **yields** on one — which is legal under `docs/SCRIPT_CONCURRENCY.md` §1
 	// precisely because the barrier applies replies in a deterministic order.
 	void OpenServices(lua_State *state);
+
+	// Installs `ContentService`, which answers what content this world holds.
+	//
+	// **The other half of rule 4.** A script names an asset and had no way to
+	// ask what the names were, so every demo carried string literals for files
+	// that only existed if somebody had baked that exact tree. See
+	// `ContentService.cpp`.
+	//
+	// @param state The VM.
+	// @since v0.10
+	void OpenContentService(lua_State *state);
 
 	// Installs `require`, which is the only route to a `ModuleScript`.
 	//

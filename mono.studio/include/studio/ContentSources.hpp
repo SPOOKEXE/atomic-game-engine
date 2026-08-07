@@ -18,6 +18,22 @@
 // preferences page that forgot the address when it was disabled would make that
 // a retyping exercise.
 //
+// **Each row also says which direction it is used in** — `delivery::SourceRole`
+// — which is what lets one origin take every write and a different one serve
+// every read. The order is still the priority, and it is one order rather than
+// two: what somebody wants in both directions is nearest first, and two lists
+// that could drift apart would be two chances to configure a mirror wrong.
+//
+// **The ingest key is saved here and the signing seed is not, and that is not
+// an inconsistency.** A signing seed decides what a *client* will trust, so one
+// sitting in a preferences file is a key that signs anything anybody drops in
+// the content folder — `cdn::PublishLocal` and `DrawAssets` both refuse to keep
+// one. An ingest key only decides who may spend a write origin's disk: content
+// that reaches an inbox is still unsigned, and no client looks at it until a
+// publisher has signed a manifest naming it. Losing it costs disk, not trust,
+// and an upload target somebody has to retype every session is one they will
+// stop using. `cdn::IngestSettings` carries the argument in full.
+//
 // @tier client
 
 #include <engine/delivery/Source.hpp>

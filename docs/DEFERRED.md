@@ -12,6 +12,57 @@ Insert the NEWEST items to the front, so older are towards the back.
 If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
 
 ```
+### [_] D00032
+
+**Deleting a `Material` instance leaves the texture it last resolved on the part.**
+
+- `scene::ResolveMaterials` walks `MaterialRef` rows and writes the resolved texture into the parent's `SurfaceAppearance::ColourMap`. A part that no longer has a `Material` child has no row, so nothing visits it and the last resolved name stays — the part goes on drawing a texture nothing in the tree names any more.
+- **The three states that do work are the ones that matter day to day**, which is why this shipped rather than blocking: no material at all leaves an authored `BasePart.ColorMap` alone; a material naming an asset resolves to it; and a material set back to `None` *clears* the part, because the pass writes even when it resolves to nothing. Only the deletion is stale, and only until something writes the field again.
+- **The obvious fix is the wrong trade by two orders of magnitude.** Visiting every part every tick to ask whether it still has a material child is a child scan per drawable per tick, on the loop `client::CollectInstances` exists to keep flat, to correct an editor-time action.
+- **What would close it is a destruction hook**, which is the shape `ecs::Store::DestroyEntity` already carries for attributes — `ROADMAP.md` v0.10's attributes entry records the same bug in the same place, found the same way. A `MaterialRef` leaving a row is exactly the event this needs, and it is one hook rather than a pass.
+
+### [_] D00031
+
+**The editor does not know `Enum.Material`, because luau-lsp reads the definitions file and nothing registers the prefix for it.**
+
+- `just typecheck` accepts `local m: Enum.Material` — `scriptcheck` registers `importedTypeBindings["Enum"]` itself. luau-lsp loads the same definitions file and does not, so an author writing the dotted form sees a red squiggle on a line that builds and passes.
+- **The flat spelling still resolves everywhere**, so this is a cosmetic gap with a workaround rather than a broken surface: `Enum_Material` is what the declaration file declares and what the editor understands.
+- **Three ways to close it, and none is obviously right yet.** Teach luau-lsp the prefix, which means a patch to a vendored tool and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork. Switch `luau-lsp.platform.type` to `roblox`, which makes the editor typecheck against Roblox's class tree rather than this engine's — worse than the squiggle. Or generate an `Enum.luau` module and have scripts `require` it, which works in both and costs a line at the top of every file.
+- **Reopen trigger: somebody writing enum annotations often enough to be annoyed.** The engine's own scripts have three.
+
+### [_] D00030
+
+**A mutable property on a script *global* reads once and never again, because `luaL_sandbox` enables Luau's `safeenv`.**
+
+- `UserInputService.MouseBehavior` is the first property in the engine that lives on a global rather than on an instance, and it does not work when it is read that way. `local UIS = game:GetService("UserInputService")` works; `UserInputService.MouseBehavior` returns whatever it was the first time any closure asked.
+- **The mechanism, because it is not obvious and cost an hour.** `luaL_sandbox` freezes the global table and turns on `safeenv`, which lets the compiler emit `GETIMPORT` for a constant global followed by constant fields. `GETIMPORT` resolves the chain once per closure and caches the **value**. It does this whether the intermediate is a table or a userdata, so making the service a userdata does not fix it — that was tried, and the observation that settled it is that `__index` fires for the first read of a field and never for the second, with no raw key on the object to explain it.
+- **The userdata is still right and is kept.** It is what makes every read *through a local* go to `__index`; a plain table would have been cached there too.
+- **In practice it does not bite, which is why this is filed rather than fixed.** Every Roblox script begins `local UIS = game:GetService("UserInputService")`, and `game:GetService` is a method call that cannot be an import. The engine's own declaration files describe the property, the test uses the idiomatic form, and the comment in `InputServices.cpp` says so.
+- **What closing it would take.** Either not sandboxing — which is not on the table, `LuauRuntime` freezes the globals so one script cannot change the language the next one runs in — or making the service a *function call* rather than a global, which changes the surface away from Roblox's. Neither is worth it for a property nobody reaches the broken way.
+- **Reopen trigger: a second mutable global property.** One is an oddity with a workaround everybody already uses; two is a pattern, and at that point the surface should stop being globals.
+
+### [_] D00029
+
+**The light count is spelled in C++ and in GLSL and nothing checks that the two agree.**
+
+- `render::MAX_SCENE_LIGHTS` is 16 and `MAX_LIGHTS` in `shaders/opaque.frag` is 16, and the only thing keeping them equal is that somebody wrote both. `AGENTS.md` rule 6 is explicit that a constraint the build does not check is documentation, and this one is.
+- **A test that reads the shader back does not work, and it was tried.** What `Paths::Shaders` stages is SPIR-V — the constant is folded away by then — so a suite comparing the staged file against the C++ value has nothing to compare. Reading the repository's `shaders/` directory from a test binary would work and would make the test depend on the source tree being present beside it, which no other suite here does.
+- **What a mismatch costs, which is why this is filed rather than shrugged at.** It is not a validation error and not a crash: `LightUniforms` is sized by the C++ constant and the shader indexes by its own, so a shader with a smaller cap silently ignores the tail of the set and one with a larger cap reads past the buffer. Both look like "that lamp does not work".
+- **The fix is one line and it is in the build rather than in either file.** The shader compile step passes `-DMAX_LIGHTS=<n>` and `opaque.frag` declares `#ifndef MAX_LIGHTS` around its own value, so the number has one home and the shader still compiles standalone. What it needs is for the CMake shader rule to take a define list, which it does not today.
+- **Reopen trigger: the next time a shader needs a constant C++ also holds.** There is exactly one now; a second makes the build change worth doing rather than worth filing.
+
+### [CLOSED] D00028
+
+**`Enum.Material` is a type in Luau after all. This entry was wrong and is corrected rather than deleted.**
+
+- **What it claimed:** that Luau *cannot* express a dotted type name for a global, that a definitions file's inability to declare one was the language's inability, and that the only way out was a generated `Enum.luau` module and a require-path resolver.
+- **The first half was right and the conclusion did not follow.** A definitions file genuinely cannot declare one: `loadDefinitionFile` writes `exportedTypeBindings[name]` and nothing else, and there is no `declare` syntax for a dotted name. The probe that produced "Unknown type 'Enum.Material'" was real.
+- **What was missed is where the resolution happens.** Luau parses `Enum.Material` in a type position as a reference with a *prefix*, and resolves it through `Scope::lookupImportedType("Enum", "Material")` — the `importedTypeBindings` map. `require` populates that map (`ConstraintGenerator.cpp:1512`), and so may a **host**. Roblox is not using definition-file syntax; it is registering that map. So is luau-lsp's Roblox platform.
+- **Closed by doing the same thing.** `mono.tools/scriptcheck` walks the `Enum_*` extern types the generator emitted and aliases each under the `Enum` prefix, before `freeze`. 35 enums, and `local m: Enum.Material` typechecks. The examples that carried `Enum_Material` in an annotation now carry `Enum.Material`.
+- **The declaration file still uses the flat names, and that is ordering rather than compromise.** The aliases are built *from* the types the file created, so they cannot exist while it is being loaded — emitting the dotted form there made the file fail to load before a single script was checked. Both spellings name the same `TypeFun`.
+- **What is still open is the editor, and it is filed as D00031** rather than left inside a closed entry.
+- **The lesson worth keeping: "the file cannot say it" is not "the language cannot do it".** The first probe answered the question that was asked and the wrong question was asked.
+
 ### [_] D00027
 
 **The mirror flashes once per orbit, and it is a sign flip rather than a projection fault.**
@@ -23,14 +74,13 @@ If a deferred item no longer exists, say the related code was deleted, then mark
 - The test asserts the current value rather than the desired one, so closing this fails it and forces the bound to be tightened in the same change.
 - **Reopen trigger: filed against v0.8 and ready now.** Nothing blocks it; it wants a decision about `SurfaceView` and a person to look at the result.
 
-### [_] D00026
+### [CLOSED] D00026
 
-**`assets::Texture` is a format nothing writes and nothing uploads.**
-
-- v0.8 answered what an `AssetKind::Texture`'s bytes *are* — a header and the pixels a GPU wants — because the gap was never a missing decoder. What it did not do is either end of the pipe.
-- **The publishing end.** Nothing converts a PNG into one. That belongs in `mono.tools` and not in a game binary, which is the whole reason the runtime format is raw: a client that decoded PNGs would pay for a Huffman tree on the frame a texture streamed in.
-- **The upload end.** `render::InterfaceBatch` carries an unresolved `core::Name` and `InterfacePass::SetImageSource` is the hook; nothing supplies one, so an `ImageLabel` samples the atlas's white texel and draws a flat tinted rectangle. Visible on purpose, for the reason the missing-texture marker was: an image that drew nothing would look like the label was broken rather than like the image was missing.
-- **Reopen trigger: the interface pass verified on hardware.** The upload is the same device work the pass is, and doing it before the pass is known to draw would be debugging two things at once.
+**Closed in v0.10.** `bake` writes the runtime texture format from supported
+source images, while the client and studio resolve image names through their
+content tables and upload the resulting pixels. Missing or unresolved images
+still use the visible fallback marker. Runtime code does not decode PNG files;
+the parser remains in `bake`.
 
 ### [CLOSED] D00025
 
@@ -115,14 +165,15 @@ and for deleted marked items;
 
 ### [_] D00019
 
-**The engine's Luau is held one release behind upstream so that the editor and the type check agree, and what holds it there is luau-lsp rather than anything here.**
+**The engine's Luau is held at the revision the editor tool can consume so that
+the editor and the type check agree. The current engine revision is Luau 0.732.**
 
-- `mono.vendor/luau` and `mono.vendor/luau-lsp/luau` are pinned to the **same commit** — `f8ca77ac`, Luau **0.731**. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
-- **0.732 is the ceiling and it is luau-lsp's ceiling, not ours.** That release removed the `ConstraintSolver::reportError(TypeError)` and `reportError(TypeErrorData&&, const Location&)` overloads in favour of one that also takes a `ModuleName`. luau-lsp calls the old forms at **sixteen sites** in `src/platform/roblox/RobloxLuauExt.cpp`, so it does not compile against 0.732. The engine itself builds, tests, replays and stays byte-identical on 0.732 — it was there briefly, and moving back cost one release plus two commits, one of which was a `CODEOWNERS` file.
+- `mono.vendor/luau` is pinned to commit `f8ca77ac` (Luau **0.732**), and `mono.vendor/luau-lsp/luau` must be pinned to the same commit when that optional submodule is checked out. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
+- **The exact upstream ceiling belongs to luau-lsp.** Its nested Luau must remain buildable against the language-server sources. Do not bump the engine submodule alone: the sync check is the contract, and a failed `just luau-lsp` is preferable to silently giving authors diagnostics for another language revision.
 - **Checked, not written down.** `just luau-lsp` compares the two `HEAD`s and refuses to build when they differ, naming both. Verified by mutation: bumping `mono.vendor/luau` alone makes the recipe fail with the two SHAs printed. Without that, the drift is invisible — the engine keeps passing every check it has, and only an editor is wrong.
-- **What the choice actually costs, so a later reader can weigh it.** One Luau release on the *engine's* VM, to buy one language across both tools. The trade is only defensible while the gap is small; a year of releases behind would invert it, and the answer then is the fork below rather than a wider gap.
+- **What the choice actually costs, so a later reader can weigh it.** The engine follows the editor's compatible revision rather than independently following upstream. The trade is only defensible while the gap stays small; a long-lived gap would invert it, and the answer then is the fork below rather than a wider gap.
 - **The fork is the way out and was declined at v0.7 on purpose.** Pointing luau-lsp at `mono.vendor/luau` needs sixteen mechanical call-site changes, and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork whose remote is recorded in `.gitmodules` — never into a file in this tree. That is a fork to maintain against a moving target, for a developer tool.
-- **Reopen trigger: luau-lsp syncs past 0.732.** Its `main` already reads "Sync to upstream Luau 0.731", so this is a matter of weeks rather than a standing condition. Bump both submodules together, run `just luau-lsp` — which will refuse if only one moved — then `just check`.
+- **Reopen trigger: luau-lsp syncs to a later Luau revision.** Bump both submodules together, run `just luau-lsp` — which refuses if only one moved — then run `just check`.
 
 ### [_] D00018
 
@@ -200,7 +251,7 @@ and for deleted marked items;
 ### [_] D00014
 
 - **QUIC underneath `net::Transport`, replacing the hand-rolled reliability, handshake and framing.** Raised as a direction rather than a complaint: what is built works and is tested, and the argument for QUIC is not that ours is wrong but that a great deal of it is a worse version of something standardised.
-- **What it would buy, in the order the arguments actually weigh.** Congestion control, which **this engine has none of** — `LinkSettings` has `BytesPerTick` and `PacketsPerTick`, and a *fixed cap is not congestion control*: it does not back off when the path is congested and it does not open up when it is not, so on a real internet path it is either wasting the link or contributing to a collapse it cannot detect. Then per-stream loss recovery without head-of-line blocking across streams, which is exactly the shape this module arrived at by hand — structure reliable, values not. Then TLS 1.3, which subsumes `D00006`'s X25519/HKDF/ChaCha20-Poly1305 and, unlike ours, **binds the exchange to a server identity**, which is the half of `D00006` still open. Then connection migration and 0-RTT resumption, neither of which we would build.
+- **What it would buy, in the order the arguments actually weigh.** Congestion control, which **this engine has none of** — `LinkSettings` has `BytesPerTick` and `PacketsPerTick`, and a *fixed cap is not congestion control*: it does not back off when the path is congested and it does not open up when it is not, so on a real internet path it is either wasting the link or contributing to a collapse it cannot detect. Then per-stream loss recovery without head-of-line blocking across streams, which is exactly the shape this module arrived at by hand — structure reliable, values not. Then TLS 1.3, which subsumes the engine's X25519/HKDF/ChaCha20-Poly1305 and server-identity binding, now closed in D00006. Then connection migration and 0-RTT resumption, neither of which we would build.
 - **It passes this repository's second-consumer test, which is the standard that justifies work here.** The game link is one. `ROADMAP.md`'s cdn wire streaming is the other: it is blocked on `net` growing an `http/` sub-area, because a content origin serves bulk bytes over request/response rather than over a game datagram channel with a per-tick budget. **HTTP/3 is QUIC.** One dependency answers both, and the alternative is hand-rolling a second protocol beside the first.
 - **The seam already exists and was built for exactly this.** `net::Transport` is the interface a caller cannot see through, `Endpoint` is this engine's own value type precisely so that no public header names a socket or an `error_code`, and `replication` at L12 names entities and components and hands bytes down. So QUIC is **a `Transport` implementation plus the deletion of the reliability layer**, not a rewrite of `replication`. That is the cheap part and it is worth saying, because it makes the expensive parts legible.
 - **The blocking obstacle is the clock, and it is this module's central invariant rather than a detail.** `net/AGENTS.md`: *"Every call that could care about now takes it as an argument. There is no `Clock` member and there must not be."* Every QUIC stack runs loss detection, pacing and congestion control off timers of its own. Some can be driven entirely from a caller-supplied time — `picoquic` and `ngtcp2` take an explicit timestamp on every entry point — and others cannot without fighting them. **That choice is the whole feasibility question**, and it has to be settled before a library is picked, not after: get it wrong and `just determinism` and `just replay-check` stop meaning what they say, which is the one thing this repository checks rather than claims.
@@ -288,18 +339,14 @@ and for deleted marked items;
 
 - **Lag compensation** — rewinding the server to what a client saw when it fired. It needs a server-side history buffer of past ticks that `replication` deliberately does not keep, and a policy for how far back it will honour, which is a game-design decision about fairness rather than an engine one. **Reopen trigger: the first hitscan weapon**, which cannot be built without it and which nothing before v0.4's physics can express.
 
-### [_] D00006
+### [CLOSED] D00006
 
-**Mostly closed at v0.4. What remains is narrower than what this entry was opened for, and is restated here rather than left implied by a struck-through paragraph.**
-
-- ~~`replication::Listener` admits a client on its first datagram.~~ **Closed.** The three things this entry said were missing — a key exchange before a slot is reserved, a challenge answered before any state is allocated, and an answer to who may connect — are all in. `net::Handshake` is wired in on its own channel, so `Listener::Poll` routes by channel *before* by sender and a datagram from an unknown address on any other channel is dropped and counted. The challenge is **stateless**: an HMAC cookie over the peer's address and its key-exchange message, keyed by a rotating secret, so an unanswered challenge costs zero bytes and stays zero however many are outstanding — the failure this entry was really about was never the slot, it was that a stranger could make the server *remember* something. Proved by two hundred endpoints saying hello, nothing being allocated, and the first of them still answering afterwards. Admission is an injectable policy; the default admits anybody who completes the handshake and the header says so in those words, because a handshake proves a peer can receive where it says it can and do arithmetic, not that it is welcome.
-- ~~An entity with no replicated components appears in the snapshot as a bare row.~~ **Closed.** The visible set is now built from entities carrying at least one replicated component.
-- ~~The stream is in the clear.~~ **Closed.** Every payload above the handshake channel is ChaCha20-Poly1305 with the **whole packet header as associated data**, under the keys the exchange already derived — `Session` holds the `Sealer`/`Opener` pair for the life of the connection instead of destroying it after the confirmation. Wire cost: a 64-bit counter in the header plus the 16-byte tag, so `HEADER_BYTES` 17→25, `MAXIMUM_PAYLOAD_BYTES` 1183→1175, and a new `MAXIMUM_MESSAGE_BYTES` of 1159 which is what every budget above `net` is now sized against. **This entry predicted sixteen bytes; it is twenty-four**, because the counter went on the wire rather than being derived.
-- **The counter is carried whole rather than derived from the packet sequence**, and that is the decision most likely to have gone wrong quietly. The sequence is 16-bit and `Packet::IsNewer` exists precisely because it wraps every eighteen minutes at sixty packets a second — **a nonce from a wrapping counter is a nonce that repeats**, and repeating one under ChaCha20-Poly1305 leaks the XOR of two plaintexts and can expose the Poly1305 key. A resend is sealed again under a fresh counter rather than replayed verbatim: both are safe against a repeat, so the choice came from how they fail — a verbatim replay would have to freeze the acknowledgement the resend carries, on the one packet a stalled stream most needs current, or stop covering the mutable header with the tag.
-- **Uniqueness is checked rather than sampled, which is the part worth copying.** The test harness taps every datagram *beneath* the lossy wrapper — it must see what was sent, not what survived — and asserts the counter strictly increases per direction. One direction is one key and one `Sealer`, so that assertion *is* "no nonce repeats under this key", and it runs over every datagram `EndToEnd.cpp`, `Loss.cpp` and `Encryption.cpp` produce, resends and duplicates and reorders included. The suite then asserts the witness had something to witness, because a witness nothing goes past passes for the wrong reason.
-- There is **no downgrade to refuse, because there is no field to ask with.** A session with no keys sends nothing and accepts nothing, failing closed in one place. The tag is checked *before* `Link::OnPacket`, so a forged packet cannot move the sequence window, retire a reliable payload or reset the idle timeout. Verified under seeded loss, duplication and reordering: not one genuine packet failed to open, which is the assertion that says the `Opener` holds no replay window — a duplicate presents the same counter twice and a reorder a lower one after a higher, and dedup stays where it already was in `ReliableReceiver`.
-- **Still open: nothing binds the exchange to a server identity, and encryption does not close it.** `net::Handshake` carries its own `TODO(v0.4)`. The traffic is now confidential against somebody watching and is **still unauthenticated against a relay** — a peer on the path can hold one exchange with each side and read all of it. A static server key and a signature over the transcript is the shape; where the key comes from and who trusts it is a deployment question, which is why it is here rather than built. **This is the bullet that must not be read as covered by the ones above it**, and both module `AGENTS.md` files now say encryption is protection against a listener and not against a relay, so the line that used to warn people has been replaced rather than removed.
-- **Reopen trigger, unchanged and still unmet: the first time this listens on anything but loopback.** The bound (`MaximumClients`, 64, counted in `Statistics::Turned`) is still in front of the handshake and is still what makes this a gap rather than a hole.
+**Closed in v0.9.** The stateless challenge prevents an unknown peer from
+consuming a client slot, payloads use ChaCha20-Poly1305 with a monotone wire
+counter, and the handshake is bound to a server identity with an Ed25519
+signature. v0.10 added client identification and the server-side admission
+policy. The default remains the weaker unauthenticated mode for compatibility;
+`--identity-key` and `--server-key` opt into identity pinning.
 
 ### [_] D00005
 

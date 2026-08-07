@@ -471,11 +471,7 @@ namespace engine::gui {
 		//        the padding already taken out.
 		// @return The extent inside the padding. The caller adds it back.
 		Vector2 ContentExtent(
-			const Store &store,
-			const Scan &scan,
-			const Vector2 &basis,
-			int depth,
-			std::vector<Entity> &arena
+			const Store &store, const Scan &scan, const Vector2 &basis, int depth, std::vector<Entity> &arena
 		) {
 			// **Marked here, after this node's own child run was appended.**
 			// Measuring a child appends that child's children, and none of those
@@ -508,18 +504,20 @@ namespace engine::gui {
 				}
 
 				const int32_t perLine = CellsPerLine(
-					*modifiers.Grid, horizontal ? basis.X : basis.Y, horizontal ? cell.X : cell.Y,
+					*modifiers.Grid,
+					horizontal ? basis.X : basis.Y,
+					horizontal ? cell.X : cell.Y,
 					horizontal ? gap.X : gap.Y
 				);
 				const int32_t onLine = std::min(counted, perLine);
 				const int32_t lines = (counted + perLine - 1) / perLine;
 
-				const float along =
-					static_cast<float>(onLine) * ((horizontal ? cell.X : cell.Y) + (horizontal ? gap.X : gap.Y)) -
-					(horizontal ? gap.X : gap.Y);
-				const float across =
-					static_cast<float>(lines) * ((horizontal ? cell.Y : cell.X) + (horizontal ? gap.Y : gap.X)) -
-					(horizontal ? gap.Y : gap.X);
+				const float along = static_cast<float>(onLine) *
+										((horizontal ? cell.X : cell.Y) + (horizontal ? gap.X : gap.Y)) -
+									(horizontal ? gap.X : gap.Y);
+				const float across = static_cast<float>(lines) *
+										 ((horizontal ? cell.Y : cell.X) + (horizontal ? gap.Y : gap.X)) -
+									 (horizontal ? gap.Y : gap.X);
 
 				return horizontal ? Vector2{along, across} : Vector2{across, along};
 			}
@@ -679,9 +677,7 @@ namespace engine::gui {
 		// `thread_local` because a `Store` binds its owning thread, so two
 		// worlds laying out at once are two threads and must not share this.
 		std::vector<Item> &ScratchAt(int depth) {
-			static thread_local std::vector<std::vector<Item>> pool(
-				static_cast<size_t>(MAXIMUM_DEPTH) + 2
-			);
+			static thread_local std::vector<std::vector<Item>> pool(static_cast<size_t>(MAXIMUM_DEPTH) + 2);
 			return pool[static_cast<size_t>(std::clamp(depth, 0, MAXIMUM_DEPTH + 1))];
 		}
 
@@ -816,9 +812,8 @@ namespace engine::gui {
 				const Vector2 corner = horizontal ? Vector2{area.Min.X + along, area.Min.Y + across}
 												  : Vector2{area.Min.X + across, area.Min.Y + along};
 
-				placed += Place(
-					store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation, item.Found
-				);
+				placed +=
+					Place(store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation, item.Found);
 				along += (horizontal ? item.Size.X : item.Size.Y) + gap;
 			}
 
@@ -848,9 +843,8 @@ namespace engine::gui {
 			const float track = horizontal ? span.X : span.Y;
 			const float step = (horizontal ? cell.X : cell.Y) + (horizontal ? gap.X : gap.Y);
 
-			const int32_t perLine = CellsPerLine(
-				layout, track, horizontal ? cell.X : cell.Y, horizontal ? gap.X : gap.Y
-			);
+			const int32_t perLine =
+				CellsPerLine(layout, track, horizontal ? cell.X : cell.Y, horizontal ? gap.X : gap.Y);
 
 			const bool fromRight =
 				layout.Corner == StartCorner::TopRight || layout.Corner == StartCorner::BottomRight;
@@ -908,7 +902,12 @@ namespace engine::gui {
 										   : Vector2{area.Min.X + acrossOffset, area.Min.Y + alongOffset};
 
 				placed += Place(
-					store, items[index].Node, FromCorner(corner, cell), clip, depth, rotation,
+					store,
+					items[index].Node,
+					FromCorner(corner, cell),
+					clip,
+					depth,
+					rotation,
 					items[index].Found
 				);
 			}
@@ -1043,9 +1042,7 @@ namespace engine::gui {
 
 			if (const Surface *surface = store.Get<Surface>(collector);
 				surface != nullptr && store.IsA(collector, ids.SurfaceGui)) {
-				out = Rect{
-					Vector2::Zero, resolved != nullptr ? resolved->Size : surface->CanvasSize
-				};
+				out = Rect{Vector2::Zero, resolved != nullptr ? resolved->Size : surface->CanvasSize};
 				return true;
 			}
 
@@ -1056,9 +1053,8 @@ namespace engine::gui {
 				// camera there is no number to multiply it by.
 				out = Rect{
 					Vector2::Zero,
-					resolved != nullptr
-						? resolved->Size
-						: Vector2{billboard->Size.X.Offset, billboard->Size.Y.Offset},
+					resolved != nullptr ? resolved->Size
+										: Vector2{billboard->Size.X.Offset, billboard->Size.Y.Offset},
 				};
 				return true;
 			}
@@ -1124,8 +1120,7 @@ namespace engine::gui {
 			const bool spatial =
 				store.IsA(collector, ids.SurfaceGui) || store.IsA(collector, ids.BillboardGui);
 
-			const bool drawn = layer != nullptr && layer->Enabled &&
-							   Contained(store, collector, spatial) &&
+			const bool drawn = layer != nullptr && layer->Enabled && Contained(store, collector, spatial) &&
 							   CanvasFor(store, collector, screen, canvas);
 
 			if (!drawn) {

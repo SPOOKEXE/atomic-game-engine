@@ -157,9 +157,8 @@ TEST_CASE("an adornee with no transform produces nothing", "[render][adornmentge
 	// selection rather than an adornee that has no position.
 	World world("adornment_geometry.notransform");
 
-	const Entity folder = world.Data.CreateInstance(
-		engine::ecs::Classes::Find(engine::core::Name("Instance")), "Group"
-	);
+	const Entity folder =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "Group");
 	world.Data.SetParent(folder, world.Workspace);
 	world.Adorn("SelectionBox", folder);
 

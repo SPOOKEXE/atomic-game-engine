@@ -153,12 +153,114 @@ TEST_CASE("a header name that is not a token is refused", "[http]") {
 	CHECK(Parse("GET / HTTP/1.1\r\n: a\r\n\r\n", request) == ParseResult::Malformed);
 }
 
-TEST_CASE("a request that declares a body is refused", "[http]") {
-	// Skipping a body means trusting a length field to find the next message.
+TEST_CASE("a request that declares a body is refused unless it is a PUT", "[http]") {
+	// Skipping a body means trusting a length field to find the next message,
+	// and a body on a verb intermediaries frame differently is the smuggling
+	// primitive itself.
 	Request request;
 	CHECK(Parse("GET / HTTP/1.1\r\ncontent-length: 5\r\n\r\nhello", request) == ParseResult::Malformed);
+	CHECK(Parse("HEAD / HTTP/1.1\r\ncontent-length: 5\r\n\r\nhello", request) == ParseResult::Malformed);
+
 	// Zero is fine: it declares no body.
 	CHECK(Parse("GET / HTTP/1.1\r\ncontent-length: 0\r\n\r\n", request) == ParseResult::Ok);
+
+	// **A verb this subset does not implement is held to the same rule**, so a
+	// well-formed `POST` still reaches the 501 it is owed rather than dropping
+	// a connection that did nothing wrong.
+	CHECK(Parse("POST / HTTP/1.1\r\ncontent-length: 5\r\n\r\nhello", request) == ParseResult::Malformed);
+}
+
+// --- PUT, the one verb that carries a body ---------------------------------
+
+TEST_CASE("a PUT carries its body", "[http]") {
+	Request request;
+	REQUIRE(
+		Parse("PUT /ingest/ab12 HTTP/1.1\r\nhost: origin\r\ncontent-length: 5\r\n\r\nhello", request) ==
+		ParseResult::Ok
+	);
+	CHECK(request.Verb == Method::Put);
+	CHECK(request.Target == "/ingest/ab12");
+	CHECK(Text(request.Body) == "hello");
+}
+
+TEST_CASE("a PUT is incomplete until its whole body has arrived", "[http]") {
+	// The ordinary state of a large upload halfway across a socket, and not an
+	// error — the server keeps reading rather than closing.
+	Request request;
+	CHECK(
+		Parse("PUT /ingest/ab12 HTTP/1.1\r\ncontent-length: 5\r\n\r\nhel", request) == ParseResult::Incomplete
+	);
+	CHECK(request.Verb == Method::Unknown); // Nothing handed back half-parsed.
+}
+
+TEST_CASE("a PUT with no content-length is refused", "[http]") {
+	// `transfer-encoding` is refused outright, so a PUT without a length has no
+	// framing at all — and guessing "empty" would silently store nothing.
+	Request request;
+	CHECK(Parse("PUT /ingest/ab12 HTTP/1.1\r\nhost: origin\r\n\r\n", request) == ParseResult::Malformed);
+}
+
+TEST_CASE("a PUT body is bounded before it is buffered", "[http]") {
+	MessageLimits limits;
+	limits.BodyBytes = 8;
+
+	// **`TooLarge` and not `Malformed`**, because the two produce different
+	// answers: 413 tells an uploader to split the file, 400 tells it nothing.
+	Request request;
+	CHECK(
+		Parse("PUT /ingest/ab12 HTTP/1.1\r\ncontent-length: 9\r\n\r\n", request, limits) ==
+		ParseResult::TooLarge
+	);
+	CHECK(
+		Parse("PUT /ingest/ab12 HTTP/1.1\r\ncontent-length: 8\r\n\r\n12345678", request, limits) ==
+		ParseResult::Ok
+	);
+}
+
+TEST_CASE("consumed covers a PUT's body as well as its headers", "[http]") {
+	// The framing that lets a connection be reused: the next message starts
+	// exactly where this one ended, body included.
+	const std::vector<std::byte> bytes =
+		Raw("PUT /ingest/a HTTP/1.1\r\ncontent-length: 2\r\n\r\nhi"
+			"GET /health HTTP/1.1\r\n\r\n");
+
+	Request first;
+	size_t consumed = 0;
+	REQUIRE(ParseRequest(bytes, {}, first, consumed) == ParseResult::Ok);
+	CHECK(Text(first.Body) == "hi");
+
+	Request second;
+	size_t again = 0;
+	REQUIRE(ParseRequest(std::span(bytes).subspan(consumed), {}, second, again) == ParseResult::Ok);
+	CHECK(second.Verb == Method::Get);
+	CHECK(second.Target == "/health");
+}
+
+TEST_CASE("a written PUT parses back with its body", "[http]") {
+	Request request;
+	request.Verb = Method::Put;
+	request.Target = "/ingest/abcd";
+	request.Headers.push_back(Header{.Name = "x-atomic-ingest", .Value = "secret"});
+	request.Body = Raw("some bytes");
+
+	std::vector<std::byte> wire;
+	WriteRequest(request, "origin:9080", wire);
+
+	Request read;
+	size_t consumed = 0;
+	REQUIRE(ParseRequest(wire, {}, read, consumed) == ParseResult::Ok);
+	CHECK(read.Verb == Method::Put);
+	CHECK(Text(read.Body) == "some bytes");
+	CHECK(consumed == wire.size());
+
+	// **A `Get` is written without a `content-length` at all**, rather than
+	// with a zero: `ParseRequest` refuses a non-PUT that declares one.
+	Request fetch;
+	fetch.Verb = Method::Get;
+	fetch.Target = "/health";
+	std::vector<std::byte> plain;
+	WriteRequest(fetch, "origin:9080", plain);
+	CHECK(Text(plain).find("content-length") == std::string::npos);
 }
 
 TEST_CASE("a content-length that is not digits is refused", "[http]") {

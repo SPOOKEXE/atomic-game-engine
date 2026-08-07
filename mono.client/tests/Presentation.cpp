@@ -17,6 +17,7 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -437,5 +438,86 @@ TEST_CASE("a world that only presents still aims its mirrors", "[client][present
 		);
 		REQUIRE(marker != list->Instances.end());
 		CHECK_FALSE(marker->CastShadow);
+	});
+}
+
+// --- authoring a transform without a tick ------------------------------------
+
+TEST_CASE("a part moved without a tick is drawn where it was moved to", "[client][presentation]") {
+	// **The editor's whole case, and it was drawing every part in the wrong
+	// place.** `World::Present` runs `PreRender` alone; `capture-previous` is a
+	// `PreSimulation` system, so a *suspended* world — which is what the studio
+	// shows while you author — never updates `PreviousTransform`. The draw list
+	// interpolates from that stale value toward the current one, and a suspended
+	// world's alpha does not advance either, so a part dragged in the properties
+	// panel stayed exactly where it started while its selection outline — which
+	// reads `Transform` directly — moved away from it.
+	//
+	// Two parts of the frame disagreeing about where something is reads as a
+	// renderer fault, which is the most expensive kind of wrong place to look.
+	Universe universe;
+	const WorldId world = AddWorld(universe, "presentation.authored");
+	AddPart(universe, world, "Dragged");
+
+	// A first frame, so the entity has been presented at least once.
+	universe.Present(world, 1.0f / 60.0f, 1.0f);
+
+	universe.Enter(world, [](Store &store) {
+		const Entity part = InScene(store, "Dragged");
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+		const Vector3 moved{12.0f, 3.0f, -5.0f};
+		REQUIRE(store.SetProperty(part, Name("Position"), &moved, sizeof(moved)));
+	});
+
+	// **Alpha one, which is what a world that is not simulating has to be
+	// presented at.** There is nothing to interpolate *towards* when no tick is
+	// coming; the current transform is the whole truth. `Editor::Present` passes
+	// this for a suspended world.
+	universe.Present(world, 1.0f / 60.0f, 1.0f);
+
+	universe.Enter(world, [](Store &store) {
+		const auto *list = store.Resource<client::DrawList>();
+		REQUIRE(list != nullptr);
+		REQUIRE(list->Instances.size() == 1);
+		CHECK(list->Instances[0].Frame.Position.X == Catch::Approx(12.0f));
+		CHECK(list->Instances[0].Frame.Position.Y == Catch::Approx(3.0f));
+		CHECK(list->Instances[0].Frame.Position.Z == Catch::Approx(-5.0f));
+	});
+}
+
+TEST_CASE("a scripted move still interpolates across a tick", "[client][presentation]") {
+	// **The case that refuted the obvious fix.** Making an authored write clear
+	// `PreviousTransform` — "a teleport, not a simulation step" — reads well and
+	// breaks every scripted animation in the engine: `examples/Rings.luau` sets
+	// `CFrame` once a tick and relies on the draw list interpolating between
+	// ticks, which is what buys smooth motion at 300 frames a second over a
+	// 60 Hz simulation. Clearing it turns all of that into stepped motion at the
+	// tick rate.
+	//
+	// So a property write moves `Transform` and nothing else, and the editor's
+	// problem — a suspended world whose previous frame is never captured — is
+	// fixed by presenting such a world at alpha one instead. `PlaceInstance`
+	// carries both halves.
+	Universe universe;
+	const WorldId world = AddWorld(universe, "presentation.interpolated");
+	AddPart(universe, world, "Animated");
+
+	universe.Present(world, 1.0f / 60.0f, 1.0f);
+
+	universe.Enter(world, [](Store &store) {
+		const Entity part = InScene(store, "Animated");
+		const Vector3 moved{40.0f, 0.0f, 0.0f};
+		REQUIRE(store.SetProperty(part, Name("Position"), &moved, sizeof(moved)));
+	});
+
+	// Halfway between the frame it was at and the frame it was put at.
+	universe.Present(world, 1.0f / 60.0f, 0.5f);
+
+	universe.Enter(world, [](Store &store) {
+		const auto *list = store.Resource<client::DrawList>();
+		REQUIRE(list != nullptr);
+		REQUIRE(list->Instances.size() == 1);
+		CHECK(list->Instances[0].Frame.Position.X == Catch::Approx(20.0f));
 	});
 }

@@ -36,7 +36,9 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/NumberRange.hpp>
 #include <engine/core/types/Rect.hpp>
+#include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/TweenInfo.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
@@ -143,6 +145,15 @@ namespace engine::script {
 	core::UDim *AsUDim(JSContext *context, JSValueConst value);
 	core::UDim2 *AsUDim2(JSContext *context, JSValueConst value);
 	core::Rect *AsRect(JSContext *context, JSValueConst value);
+
+	// The three `effects` is authored in, added at v0.10 with the property types.
+	JSValue MakeNumberRange(JSContext *context, const core::NumberRange &value);
+	JSValue MakeNumberSequence(JSContext *context, const core::NumberSequence &value);
+	JSValue MakeColorSequence(JSContext *context, const core::ColorSequence &value);
+
+	core::NumberRange *AsNumberRange(JSContext *context, JSValueConst value);
+	core::NumberSequence *AsNumberSequence(JSContext *context, JSValueConst value);
+	core::ColorSequence *AsColorSequence(JSContext *context, JSValueConst value);
 
 	// One instance object for an entity, prototype and all.
 	JSValue MakeJsInstance(JSContext *context, ecs::Entity instance);

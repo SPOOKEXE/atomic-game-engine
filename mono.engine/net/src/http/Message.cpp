@@ -242,6 +242,8 @@ namespace engine::net::http {
 			return "GET";
 		case Method::Head:
 			return "HEAD";
+		case Method::Put:
+			return "PUT";
 		case Method::Unknown:
 			break;
 		}
@@ -389,8 +391,13 @@ namespace engine::net::http {
 		// An unrecognised verb parses rather than refusing, so the caller can
 		// answer 501 on a well-formed request instead of dropping a connection
 		// that did nothing wrong.
-		parsed.Verb = verb == "GET" ? Method::Get : (verb == "HEAD" ? Method::Head : Method::Unknown);
-		if (parsed.Verb == Method::Unknown && !IsToken(verb)) {
+		if (verb == "GET") {
+			parsed.Verb = Method::Get;
+		} else if (verb == "HEAD") {
+			parsed.Verb = Method::Head;
+		} else if (verb == "PUT") {
+			parsed.Verb = Method::Put;
+		} else if (!IsToken(verb)) {
 			return ParseResult::Malformed;
 		}
 		parsed.Target = std::string(target);
@@ -413,12 +420,41 @@ namespace engine::net::http {
 			return fields;
 		}
 
-		// A request in this subset carries no body. One that declares a
-		// non-zero length is refused rather than skipped over, because skipping
-		// it means trusting a length to find the next message.
-		if (headers.HasLength && headers.BodyBytes != 0) {
+		// **A body is `Put`'s and no other verb's.** A `GET` or a `HEAD` that
+		// declares a non-zero length is refused rather than skipped over,
+		// because skipping it means trusting a length to find the next message
+		// — and a body on a verb whose framing intermediaries disagree about is
+		// the request-smuggling primitive itself, not merely adjacent to it.
+		//
+		// `Unknown` is held to the same rule so that a well-formed
+		// `DELETE`/`POST` still reaches the `501` the caller owes it, rather
+		// than dropping a connection that did nothing wrong.
+		if (parsed.Verb != Method::Put) {
+			if (headers.HasLength && headers.BodyBytes != 0) {
+				return ParseResult::Malformed;
+			}
+		} else if (!headers.HasLength) {
+			// **A `Put` states its length or it is not a `Put`.** The other
+			// framing — `transfer-encoding` — is refused outright above, so
+			// without a length there is no way to know where this message ends
+			// and guessing "empty" would silently store nothing.
 			return ParseResult::Malformed;
 		}
+
+		// The whole body has to be here before this parses, which is why an
+		// origin that accepts uploads sizes `ConnectionBufferBytes` to hold
+		// one. Waiting is `Incomplete` and not an error: it is the ordinary
+		// state of a large upload halfway across a socket.
+		const size_t bodyStart = headerEnd + HEADER_END.size();
+		const uint64_t arriving = parsed.Verb == Method::Put ? headers.BodyBytes : 0;
+		if (text.size() - bodyStart < arriving) {
+			return ParseResult::Incomplete;
+		}
+
+		parsed.Body.assign(
+			buffer.begin() + static_cast<ptrdiff_t>(bodyStart),
+			buffer.begin() + static_cast<ptrdiff_t>(bodyStart + arriving)
+		);
 
 		parsed.Headers = std::move(headers.Fields);
 		if (const std::optional<std::string_view> range = parsed.Find("range")) {
@@ -430,7 +466,7 @@ namespace engine::net::http {
 			}
 		}
 
-		consumed = headerEnd + HEADER_END.size();
+		consumed = bodyStart + arriving;
 		request = std::move(parsed);
 		return ParseResult::Ok;
 	}
@@ -606,7 +642,27 @@ namespace engine::net::http {
 			Append(out, field.Value);
 			Append(out, CRLF);
 		}
+
+		// **Written only for the verb that may carry one, and written from the
+		// body rather than from the header list** — `WriteResponse`'s rule,
+		// and for its reason: two sources for one number is one number that
+		// will eventually be wrong, and the symptom is a connection that
+		// desynchronises a message later.
+		//
+		// A `Get` gets no `content-length` at all rather than a zero, because
+		// `ParseRequest` refuses a non-`Put` that declares one and a zero would
+		// be one more field on every fetch this engine makes.
+		if (request.Verb == Method::Put) {
+			Append(out, "content-length: ");
+			Append(out, std::to_string(request.Body.size()));
+			Append(out, CRLF);
+		}
+
 		Append(out, CRLF);
+
+		if (request.Verb == Method::Put) {
+			out.insert(out.end(), request.Body.begin(), request.Body.end());
+		}
 	}
 
 	void WriteResponse(const Response &response, bool bodyOmitted, std::vector<std::byte> &out) {

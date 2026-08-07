@@ -62,7 +62,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `Enum.Material.Plastic` — the second lookup.
+		// `Enum.AlphaMode.Clip` — the second lookup.
 		//
 		// A metatable rather than a prebuilt table of members, so an enum
 		// extended after the VM opened is still reachable. A game registering
@@ -84,7 +84,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `Enum.Material:GetEnumItems()`
+		// `Enum.AlphaMode:GetEnumItems()`
 		int EnumSetGetItems(lua_State *state) {
 			lua_getfield(state, 1, "__enum");
 			const Name enumName(luaL_checkstring(state, -1));
@@ -99,7 +99,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `Enum.Material` — the first lookup.
+		// `Enum.AlphaMode` — the first lookup.
 		int EnumIndex(lua_State *state) {
 			const char *name = luaL_checkstring(state, 2);
 			const Name enumName(name);
@@ -146,7 +146,7 @@ namespace engine::script {
 		// An `EnumItem` of the *right* enum. A member of the wrong one is the
 		// error a bare string could never have caught, so it is refused here
 		// rather than left to `Store::SetProperty`'s registry check — which
-		// would accept `Enum.Shape.Box` for a `Material` if both happened to
+		// would accept `Enum.Shape.Box` for an `AlphaMode` if both happened to
 		// register a member of that name.
 		if (void *value = lua_touserdatatagged(state, index, TAG_ENUM_ITEM); value != nullptr) {
 			const auto *item = static_cast<const EnumItem *>(value);
@@ -157,7 +157,7 @@ namespace engine::script {
 			return true;
 		}
 
-		// A bare string, because `part.Material = "Plastic"` is what Roblox
+		// A bare string, because `part.AlphaMode = "Clip"` is what Roblox
 		// accepts and what a migrating script already contains. Whether the
 		// member exists is `Store::SetProperty`'s check, so there is one answer
 		// rather than two.

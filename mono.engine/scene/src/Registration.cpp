@@ -3,12 +3,17 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
@@ -16,22 +21,6 @@
 #include <cstdint>
 
 namespace engine::scene {
-
-	const core::Name &DefaultMaterial() {
-		// **`Plastic` spelled here and registered as an enum member in
-		// `Part.cpp`, which is two places holding one string.** They are not
-		// collapsible in the direction that would help: the enum list is
-		// registered when the class tree is built, and a `Visual` can be default
-		// constructed before that has happened — a replica's column grows from a
-		// wire delta, and nothing on that path builds a class tree. Reading the
-		// enum's first member instead would therefore return an invalid name on
-		// exactly the path this default exists to serve.
-		//
-		// `scene/tests/Components.cpp` asserts the two agree, which is the check
-		// that makes the duplication safe rather than merely stated.
-		static const core::Name name("Plastic");
-		return name;
-	}
 
 	namespace {
 		// `Surface`, `Visual` and `SurfaceTable` all hold a `core::Name`, and a
@@ -63,8 +52,14 @@ namespace engine::scene {
 				writer.WriteFloat(visual.Tint.G);
 				writer.WriteFloat(visual.Tint.B);
 				writer.WriteName(visual.Mesh);
-				writer.WriteName(visual.Material);
 				writer.WriteBool(visual.Visible);
+
+				// **Written, and forgetting to would be this function's own
+				// documented failure mode repeating.** See the paragraph below:
+				// two fields added to `Visual` crossed for free everywhere except
+				// here and silently reset on every load. A part whose `Fitted`
+				// reset would be reshaped the next time its mesh arrived.
+				writer.WriteName(visual.Fitted);
 
 				// **Added at v0.7, and the reason it was missing is the reason
 				// a custom serialiser is dangerous.** A field added to a type
@@ -95,8 +90,8 @@ namespace engine::scene {
 				visual.Tint.G = reader.ReadFloat();
 				visual.Tint.B = reader.ReadFloat();
 				visual.Mesh = reader.ReadName();
-				visual.Material = reader.ReadName();
 				visual.Visible = reader.ReadBool();
+				visual.Fitted = reader.ReadName();
 				visual.Transparency = reader.ReadFloat();
 				visual.Surface = reader.ReadInt8();
 				visual.CastShadow = reader.ReadBool();
@@ -134,6 +129,60 @@ namespace engine::scene {
 			auto *catalogues = static_cast<MeshCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].Triangles.clear();
+			}
+		}
+
+		// Derived resource, the same as the mesh one above and for the same
+		// reason: the frame counts came from whatever registered the textures
+		// this run, and a save file carrying last run's would be numbers that
+		// agree with nothing on disk.
+		void WriteTextureCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadTextureCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<TextureCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].Flipbooks.clear();
+			}
+		}
+
+		// Derived resource, the same as the ones above. **And the most obviously
+		// so of the four**: this list came from a manifest a publisher signed and
+		// a client verified *this run*, so a save file carrying last run's would
+		// offer a scene names that nothing in the store answers to.
+		void WritePublishedCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadPublishedCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<PublishedCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].Meshes.clear();
+			}
+		}
+
+		// Derived resource, the same as the two above and for the same reason:
+		// the texture names came from whatever registered the materials this run,
+		// and a save file carrying last run's would be names that resolve to
+		// nothing on a machine with different content.
+		void WriteMaterialCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadMaterialCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<MaterialCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].ColourMaps.clear();
+			}
+		}
+
+		// A name, so a hand-written pair. The rule this file opens with.
+		void WriteMaterialRefs(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *refs = static_cast<const MaterialRef *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(refs[index].Asset);
+			}
+		}
+
+		void ReadMaterialRefs(core::ByteReader &reader, void *destination, size_t count) {
+			auto *refs = static_cast<MaterialRef *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				refs[index].Asset = reader.ReadName();
 			}
 		}
 
@@ -349,6 +398,38 @@ namespace engine::scene {
 
 		// A name again, so a hand-written pair again. See `WriteSounds`.
 		ecs::Components::Register<Sound>("scene.Sound", WriteSounds, ReadSounds);
+
+		// **Both generated, because neither holds a `core::Name`.** The rule this
+		// file opens with is about names and only about names: a name's id is a
+		// counter this process assigned, so it is written as text. An
+		// `Attachment` is two `CFrame`s and a `Light` is a colour, four floats and
+		// three bytes of enum and flags — all of which mean the same thing in
+		// every process, so the object representation is the format and the
+		// generated pair is correct.
+		//
+		// **The derived half of an `Attachment` crosses too**, and that is worth a
+		// sentence rather than a shrug: `WorldFrame` is a cache with one writer,
+		// and writing a cache into a snapshot is normally the thing rule 2
+		// refuses. It goes in because the alternative is a restored world whose
+		// beams draw at the origin for one frame — `ResolveAttachments` runs in
+		// `PreRender`, so a load that cleared it would present before it was
+		// filled. One frame of a beam in the wrong place is more visible than
+		// thirty-two bytes an entity.
+		// **Generated, because a `Pivot` is one `CFrame`** — no name, so the
+		// object representation is the format. Registered beside `Attachment`
+		// for the same reason it is: both are placements relative to something
+		// else.
+		ecs::Components::Register<Pivot>("scene.Pivot");
+
+		ecs::Components::Register<Attachment>("scene.Attachment");
+		ecs::Components::Register<Light>("scene.Light");
+
+		// **Generated, because a `Humanoid` is nine floats and four flags.** No
+		// name, so the object representation is the format and there is nothing
+		// to hand-write — which is the desirable case and the one most components
+		// here are in.
+		ecs::Components::Register<Humanoid>("scene.Humanoid");
+
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
 
 		// The service fixtures, added at the end because that is the rule this
@@ -369,6 +450,12 @@ namespace engine::scene {
 		// unusable the moment a world crosses a process.
 		ecs::Components::Register<LocalPlayer>("scene.LocalPlayer");
 
+		// **What a `Material` instance holds, added at the end** for the reason
+		// this list opens with: registration order decides component ids, and ids
+		// decide the order archetypes iterate their columns. A hand-written pair
+		// because it is a name.
+		ecs::Components::Register<MaterialRef>("scene.MaterialRef", WriteMaterialRefs, ReadMaterialRefs);
+
 		// The render gate, at the end for the reason this list opens with.
 		//
 		// **No wire form, and it is not an oversight.** This is a conclusion
@@ -387,9 +474,31 @@ namespace engine::scene {
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
 		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
+
+		// **`InputState` crosses and `CameraController` crosses**, which is worth
+		// a sentence because one of them looks like it should not. Input is
+		// per-frame state and writing it into a save file sounds like storing an
+		// answer that is recomputed — and it is, except that a *recording* is the
+		// case that matters: `just replay-check` replays a world from a snapshot
+		// and its input stream, and a snapshot whose input state was cleared would
+		// replay a character that never moved.
+		//
+		// The camera controller is authored state — a mode, a zoom, a sensitivity
+		// — and crosses for the ordinary reason.
+		ecs::Components::Register<InputState>("scene.InputState");
+		ecs::Components::Register<CameraController>("scene.CameraController");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
 		ecs::Components::Register<MeshCatalogue>(
 			"scene.MeshCatalogue", WriteMeshCatalogues, ReadMeshCatalogues
+		);
+		ecs::Components::Register<TextureCatalogue>(
+			"scene.TextureCatalogue", WriteTextureCatalogues, ReadTextureCatalogues
+		);
+		ecs::Components::Register<MaterialCatalogue>(
+			"scene.MaterialCatalogue", WriteMaterialCatalogues, ReadMaterialCatalogues
+		);
+		ecs::Components::Register<PublishedCatalogue>(
+			"scene.PublishedCatalogue", WritePublishedCatalogues, ReadPublishedCatalogues
 		);
 
 		// What `SyncRendered` compares this frame's tree against, at the end of

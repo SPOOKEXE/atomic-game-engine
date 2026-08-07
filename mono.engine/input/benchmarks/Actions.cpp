@@ -81,9 +81,9 @@ namespace actions_bench {
 			std::vector<SDL_Scancode> found;
 			for (size_t index = 0; index < static_cast<size_t>(Action::Count); index++) {
 				const std::string_view binding = engine::input::GetActionBinding(static_cast<Action>(index));
-				const SDL_Scancode scancode =
-					binding.empty() ? SDL_SCANCODE_UNKNOWN
-									: SDL_GetScancodeFromName(std::string(binding).c_str());
+				const SDL_Scancode scancode = binding.empty()
+												  ? SDL_SCANCODE_UNKNOWN
+												  : SDL_GetScancodeFromName(std::string(binding).c_str());
 				if (scancode != SDL_SCANCODE_UNKNOWN) {
 					found.push_back(scancode);
 				}
@@ -214,7 +214,8 @@ BENCH("frame · BeginFrame then 64 mixed events", 1000) {
 		for (size_t event = 0; event < 64; event++) {
 			if ((event % 16) == 0) {
 				consumed +=
-					actions.HandleEvent(KeyEvent(keys[event % keys.size()], (frame & 1u) == 0u, false)) ? 1u : 0u;
+					actions.HandleEvent(KeyEvent(keys[event % keys.size()], (frame & 1u) == 0u, false)) ? 1u
+																										: 0u;
 			} else {
 				consumed += actions.HandleEvent(motion) ? 1u : 0u;
 			}

@@ -440,8 +440,7 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 		// A constant distance from the origin, which is what the pane is
 		// centred on — the motion the flash was reported under.
 		mirror.World.Set<Transform>(
-			mirror.Eye,
-			Transform{CFrame(Vector3{std::sin(angle) * RADIUS, 0.0f, std::cos(angle) * RADIUS})}
+			mirror.Eye, Transform{CFrame(Vector3{std::sin(angle) * RADIUS, 0.0f, std::cos(angle) * RADIUS})}
 		);
 
 		AimSurfaceCameras(mirror.World);

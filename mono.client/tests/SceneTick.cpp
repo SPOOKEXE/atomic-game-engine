@@ -411,11 +411,34 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// beside it and places every surface camera parented to a part — see
 	// `scene/SurfaceCameras.hpp`.
 	//
+	// **Nine more at v0.10**, from two installers. `InstallEffects` adds
+	// resolve-attachments and refresh-emitters in `PreSimulation`, step-particles
+	// and record-trails in `Simulation`, and build-ribbons in `PreRender`.
+	// `InstallControls` adds character-control and ground-characters in
+	// `PreSimulation`, step-characters in `Simulation`, and camera-control in
+	// `PreRender`.
+	//
+	// Only two of the nine are presentation; the rest are simulation and are here
+	// because this count is over every phase rather than over one.
+	//
+	// The question this assertion exists to force was asked and answered:
+	// **a world that only presents still does the right thing.** The studio's
+	// suspended scene runs `PreRender` and not `Simulation`, so it builds ribbons
+	// from whatever the trails last recorded and steps no particles — a frozen
+	// effect rather than a missing one, which is what a suspended world should
+	// look like.
+	//
 	// **A count rather than a list, and it is worth keeping as one.** It fails
 	// whenever a system is added to the presentation phase, which is exactly
 	// when somebody should be asked whether a world that only presents — the
 	// studio's suspended scene — still does the right thing.
-	REQUIRE(timings.size() == 6);
+	//
+	// **Sixteen since v0.10's `resolve-materials`, and the question it forces was
+	// answered.** It runs in `PreSimulation`, so a suspended scene does not run
+	// it — which is right: a `Material` instance's texture is already on the part
+	// from the last tick that did, so a frozen world keeps the material it was
+	// frozen with rather than losing it.
+	REQUIRE(timings.size() == 16);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

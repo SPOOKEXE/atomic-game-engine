@@ -47,11 +47,35 @@ namespace engine::ui {
 	//
 	// @since v0.8
 	struct ImageSource {
-		// The texture for a content name, or a null id when there is none.
+		// What a name resolved to.
 		//
-		// `size` is filled in with the image's pixel dimensions, which the
-		// nine-slice and tile paths need and the stretch path does not.
-		std::function<ImTextureID(const core::Name &name, ImVec2 &size)> Resolve;
+		// **A struct rather than out-parameters**, because there are four
+		// answers now and a signature with three `&`s is one a caller fills in
+		// the wrong order exactly once.
+		//
+		// @since v0.10
+		struct Resolved {
+			// The texture, or a null id when there is none.
+			ImTextureID Texture{};
+
+			// The image's pixel dimensions, which the nine-slice and tile paths
+			// need and the stretch path does not.
+			ImVec2 Size{0.0f, 0.0f};
+
+			// The sub-rectangle the current animation cell occupies, in texture
+			// coordinates.
+			//
+			// **The whole image for anything that is not a sheet**, so a caller
+			// applies it unconditionally. A `.gif` bakes to an ordinary texture
+			// carrying a grid of frames — `render::FlipbookCell` — and only the
+			// thing that uploaded it knows the grid is there, which is why this
+			// comes back with the handle rather than being asked for separately.
+			ImVec2 CellMin{0.0f, 0.0f};
+			ImVec2 CellMax{1.0f, 1.0f};
+		};
+
+		// The texture for a content name.
+		std::function<Resolved(const core::Name &name)> Resolve;
 	};
 
 	// How a compiled list is placed on screen.

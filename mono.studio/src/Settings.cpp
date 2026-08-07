@@ -342,13 +342,24 @@ namespace studio {
 
 		ImGui::TextDisabled("the first source that answers wins; one that fails is passed over");
 
+		// **One order, and each row says which directions it is in.** That is
+		// the whole of "one server takes the writes, another serves the reads":
+		// a read walks this list skipping the write-only rows and stops at the
+		// first that answers, and an upload walks it skipping the read-only
+		// rows and sends to *every* one. Two lists would be two orderings that
+		// drift, and what somebody wants in both directions is the same thing —
+		// nearest first.
+		ImGui::TextDisabled("a write origin is never fetched from, and a read origin is never uploaded to");
+
 		bool changed = false;
 
-		if (ImGui::BeginTable("##sources", 6, ImGuiTableFlags_SizingStretchProp)) {
+		if (ImGui::BeginTable("##sources", 8, ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("##on", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(24.0f));
-			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.25f);
-			ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(96.0f));
-			ImGui::TableSetupColumn("Location", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+			ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(90.0f));
+			ImGui::TableSetupColumn("Use", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
+			ImGui::TableSetupColumn("Location", ImGuiTableColumnFlags_WidthStretch, 0.4f);
+			ImGui::TableSetupColumn("Ingest key", ImGuiTableColumnFlags_WidthStretch, 0.25f);
 			ImGui::TableSetupColumn("##order", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(52.0f));
 			ImGui::TableSetupColumn("##drop", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(24.0f));
 			ImGui::TableHeadersRow();
@@ -385,6 +396,22 @@ namespace studio {
 
 				ImGui::TableNextColumn();
 				ImGui::SetNextItemWidth(-FLT_MIN);
+				int role = static_cast<int>(source.Role);
+				if (ImGui::Combo("##role", &role, "both\0read\0write\0")) {
+					source.Role = static_cast<engine::delivery::SourceRole>(role);
+					changed = true;
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"both: fetched from and uploaded to\n"
+						"read: fetched from only\n"
+						"write: uploaded to only — never consulted for a fetch, because it\n"
+						"holds content no signed manifest describes yet"
+					);
+				}
+
+				ImGui::TableNextColumn();
+				ImGui::SetNextItemWidth(-FLT_MIN);
 				changed |= TextField(
 					"##location",
 					source.Location,
@@ -396,6 +423,31 @@ namespace studio {
 							? "an address and a port, as 127.0.0.1:9080 — a host name has to be resolved first"
 							: "a directory holding a published content store"
 					);
+				}
+
+				ImGui::TableNextColumn();
+
+				// **Only a write row needs one, and a directory never does.**
+				// Writing to a directory is writing to a filesystem this process
+				// already has; the key exists to admit a request to somebody
+				// else's origin, and there is no request here to admit.
+				const bool needsKey = source.Role != engine::delivery::SourceRole::Read &&
+									  source.Kind == engine::delivery::SourceKind::Http;
+				if (needsKey) {
+					ImGui::SetNextItemWidth(-FLT_MIN);
+
+					// **Masked, but saved** — unlike the signing seed on the
+					// Assets panel, which is asked for every time and never
+					// kept. `ContentSources.hpp` carries why those two differ:
+					// an ingest key buys disk, a signing seed buys trust.
+					changed |= TextField("##ingest", source.IngestKey, "shared secret", true);
+					if (source.IngestKey.empty() && ImGui::IsItemHovered()) {
+						ImGui::SetTooltip(
+							"without this the origin refuses every upload, so this row is not a write target"
+						);
+					}
+				} else {
+					ImGui::TextDisabled("—");
 				}
 
 				ImGui::TableNextColumn();
@@ -485,6 +537,19 @@ namespace studio {
 			// list is a half-finished list either way — and an editor that lost
 			// a typed address on exit is worse than one that saved it.
 			Content.Save(ContentSourcesPath);
+
+			// **And the clients are rebuilt with it**, which is what makes this
+			// page a settings page rather than a form. Before there was
+			// anything downstream of it, a wrong key and a working one looked
+			// identical here and stayed that way until somebody restarted.
+			//
+			// Rebuilt on every keystroke, which sounds wasteful and is not:
+			// building a client resolves addresses and opens a cache, and both
+			// are cheap next to the fetch nothing has asked for yet. The
+			// alternative — rebuilding when the field loses focus — makes the
+			// Network panel disagree with this one for as long as a cursor sits
+			// in a field.
+			RebuildContentClients();
 		}
 	}
 

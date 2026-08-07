@@ -31,6 +31,18 @@ namespace engine::bake {
 	// @return `false` on anything malformed or unsupported.
 	bool ReadJpeg(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure);
 
+	// Decodes a GIF into one flipbook sheet.
+	//
+	// **A grid, not a list of frames**, because a flipbook is the thing this
+	// engine can already draw animated — `effects::FlipbookLayout`. `Gif.cpp`
+	// carries the whole argument and what it costs.
+	//
+	// @param bytes   The file, `GIF8` included.
+	// @param out     Filled on success, left alone on failure.
+	// @param failure Set to why on failure.
+	// @return `false` on anything malformed or unsupported.
+	bool ReadGif(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure);
+
 	// Decodes a Windows BMP into RGBA8.
 	//
 	// @param bytes   The file, `BM` included.

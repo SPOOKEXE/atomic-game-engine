@@ -54,6 +54,32 @@ namespace engine::scene {
 		core::CFrame Frame;
 	};
 
+	// Where a thing is grasped, relative to its own placement.
+	//
+	// **Roblox's `PivotOffset`, and the reason a pivot needs storage at all is
+	// that a placement has no natural handle.** A `Transform` says where the
+	// *centre* of something is, which is what a solver and a broad phase want
+	// and almost never what an author wants: a door turns on its hinge, a lid on
+	// its rim, a character stands on the ground under its feet. `PivotTo` is
+	// "put this thing's handle here", and without an offset it can only ever
+	// mean "put its centre here".
+	//
+	// **A column on every `PVInstance` rather than an optional component**, and
+	// the trade is `SurfaceAppearance`'s exactly: an optional one means a
+	// draw-time or query-time join, and `GetPivot` is asked per selection per
+	// frame by the editor's gizmo. Twenty-eight bytes an entity and no branches.
+	//
+	// **Identity is the default and means "the centre".** So a part nobody has
+	// given a pivot behaves precisely as it did before this existed, which is
+	// what makes the field safe to add to every placed thing.
+	//
+	// @since v0.10
+	struct Pivot {
+		// The handle, in the instance's own frame. Composed as
+		// `Transform::Frame * Offset` to get a world pivot.
+		core::CFrame Offset;
+	};
+
 	// Where it was when the current tick began.
 	//
 	// Rendering runs faster than the simulation ticks, so drawing at tick
@@ -202,26 +228,6 @@ namespace engine::scene {
 		core::Name Material;
 	};
 
-	// The material a part is drawn with when nobody says otherwise.
-	//
-	// **A function rather than a constant, because a `core::Name` is interned
-	// and interning needs the registry to exist.** A namespace-scope `const
-	// core::Name` would be constructed during static initialisation, in an order
-	// nothing specifies, and the registry it needs is itself a function-local
-	// static somewhere else. A function-local static is initialised on first
-	// call and therefore after whatever it depends on, which is the same
-	// arrangement `NormalIdEnum` in `Part.cpp` uses for the same reason.
-	//
-	// Interned once per process and returned by reference. `Name.hpp` states the
-	// rule — constructing from a literal takes the registry mutex and hashes a
-	// string — and this is read once per default-constructed `Visual`, which is
-	// once per row a column grows by.
-	//
-	// @return `Plastic`, a member of the `Material` enum `scene::Part.cpp`
-	//         registers.
-	// @since v0.8
-	const core::Name &DefaultMaterial();
-
 	// What a thing looks like.
 	//
 	// Names rather than handles, because a mesh reference has to survive a save
@@ -238,22 +244,34 @@ namespace engine::scene {
 		// a unit cube, today.
 		core::Name Mesh;
 
-		// The material to draw it with. Distinct from `Surface::Material`,
-		// which is what it *feels* like: a mirror-finish floor and a rubber
-		// floor may share a surface and never a material.
+		// Which mesh `Bounds::HalfExtent` was last shaped to fit.
 		//
-		// **`Plastic` rather than invalid**, so a part that nobody has authored
-		// a material for reads back a member of the enum instead of a blank. An
-		// invalid name here meant the properties panel showed an empty combo on
-		// every fresh part — a control whose current value is not one of the
-		// values it offers — and a script reading `part.Material` got something
-		// it could not compare against `Enum.Material.Plastic` even though that
-		// is exactly what the part was drawn as.
+		// **`Size` is a box the mesh is stretched into**, so a part whose box is
+		// the wrong shape distorts whatever is put in it — and only the geometry
+		// knows the right shape. An editor therefore reshapes the box when a mesh
+		// is chosen. The question this field answers is *when it may stop*.
 		//
-		// `Mesh` above is deliberately *not* given the same treatment: an
-		// invalid mesh means "the consumer's own default", which is a real and
-		// useful state, and there is no name for the unit cube to give it.
-		core::Name Material = DefaultMaterial();
+		// **A name rather than a "fitted" flag, because the flag has no good
+		// value to be reset by.** What must happen is: fit when the mesh changes,
+		// and never again. A bool needs somebody to clear it on every write to
+		// `Mesh`, in every path that writes one — a property panel, a script, a
+		// game file, a replication delta — and the one that forgets produces a
+		// part that silently stops fitting. Recording *which* mesh the box was
+		// shaped for makes the comparison the condition: `Fitted != Mesh` is
+		// exactly "the mesh changed since the box was shaped", with nothing to
+		// keep in step.
+		//
+		// **Saved, which is what makes reopening a place leave sizes alone.** A
+		// part somebody deliberately squashed would otherwise be reshaped the
+		// first time its mesh arrived in a new session — a scene that quietly
+		// rearranges itself on load, which is the worst kind of surprise because
+		// nothing did it.
+		//
+		// Invalid on a part nothing has fitted, which is every part that has
+		// never named a mesh.
+		//
+		// @since v0.10
+		core::Name Fitted;
 
 		// How much of what is behind shows through, 0 to 1.
 		//
@@ -367,6 +385,32 @@ namespace engine::scene {
 
 		// Explicit padding, for the reason every other `Reserved` gives.
 		uint8_t Reserved[3] = {};
+	};
+
+	// Which material an instance names.
+	//
+	// **The whole of a `Material` instance's storage**, and it is one field on
+	// purpose: `ROADMAP.md` v0.10 asks for the simplified model — one texture —
+	// with the multi-map form deferred to the pipeline that can read one. A
+	// second field here would be a reference nothing resolves.
+	//
+	// **On the `Material` instance and not on the part**, which is what makes
+	// this an object an author adds rather than a property every drawable
+	// carries. `Materials.hpp` carries the argument in full, including why
+	// `SurfaceAppearance` is still the field the draw path reads.
+	//
+	// @since v0.10
+	struct MaterialRef {
+		// The material asset's name — what a publisher called the `.amat`.
+		//
+		// A name, for `Visual::Mesh`'s reason: the reference has to survive a
+		// save file and a wire. **An invalid one is `Material = None`**: an
+		// instance somebody added and has not chosen a material for, which
+		// resolves to no texture and draws `render::DefaultTexture`. That is the
+		// default a fresh `Material` starts at, deliberately — the enum this
+		// replaces defaulted to `Plastic`, a value the renderer could not act on,
+		// and a default that means "nothing yet" is the honest one.
+		core::Name Asset;
 	};
 
 	// Which tags an entity carries, as a bitmask.
@@ -569,6 +613,136 @@ namespace engine::scene {
 
 		// Explicit padding, for the reason every other `Reserved` gives.
 		uint8_t Reserved[2] = {};
+	};
+
+	// A point on a part, carried with it.
+	//
+	// **The one exception to "every transform here is world space and nothing
+	// propagates it", and it is narrower than it looks.** An `Attachment` is not
+	// a `PVInstance` and carries no `Transform`: it holds *its own* pair of
+	// frames, one authored relative to a parent part and one derived from it by
+	// a single flat pass. So there is still no transform hierarchy, no dirty
+	// cascade and no per-entity parent walk in the simulation — there is one
+	// loop over one component type, and everything else in this file is
+	// untouched.
+	//
+	// **The derived frame is a field rather than a getter, and the reason is a
+	// beam.** A beam reads both of its attachments' world frames every frame,
+	// and a getter that resolved by walking to the parent would be two hierarchy
+	// lookups and two `CFrame` products per beam per frame — for a value that is
+	// the same for every reader within one frame. `ecs/AGENTS.md`'s rule against
+	// two copies of a fact bends here for the reason `CameraMatrices` bends it:
+	// the second copy is a *cache with one writer*, and `ResolveAttachments` is
+	// that writer.
+	//
+	// **An attachment on nothing keeps its local frame as its world frame.**
+	// Roblox's rule — an `Attachment` parented to a `Model` or to the tree root
+	// has no part to be relative to — and it is what makes an attachment usable
+	// as a bare point in space, which is what a beam between two world positions
+	// needs.
+	//
+	// @since v0.10
+	struct Attachment {
+		// Where this point sits, relative to the parent part's own frame.
+		//
+		// A `CFrame` and not a `Vector3`, because an attachment carries a
+		// direction as well as a position: a beam leaves along the attachment's
+		// axis and a particle emitter's cone opens around it. A point with no
+		// orientation would make both of those a second field.
+		core::CFrame Frame;
+
+		// The same point in world space, as of the last `ResolveAttachments`.
+		//
+		// **Derived, never authored.** A script writing this is writing a value
+		// that is overwritten before anything reads it, which is why the property
+		// surface exposes `WorldCFrame` as read-only and `CFrame` as writable —
+		// the same split `GuiObject`'s absolutes have.
+		core::CFrame WorldFrame;
+	};
+
+	// What kind of light an entity emits.
+	//
+	// **Three classes and one component**, which is the trade `Collider::Extent`
+	// already makes across three shapes: the three differ by two fields, and
+	// three components would be three columns, three queries and three upload
+	// paths for something the renderer packs into one array either way.
+	//
+	// @since v0.10
+	enum class LightKind : uint8_t {
+		// Radiates in every direction from a point. Ignores `Angle` and `Face`.
+		Point = 0,
+
+		// A cone about the parent's `Face`, `Angle` degrees wide.
+		Spot = 1,
+
+		// A cone about the parent's `Face`, emitted from the whole face rather
+		// than from a point.
+		Surface = 2,
+	};
+
+	// Something that gives off light.
+	//
+	// **Where it shines from is its parent's business**, exactly as `Sound`'s is
+	// — a `PointLight` inside a part lights the world from that part, and one
+	// parented to an `Attachment` lights from the attachment. So there is no
+	// position here and there must not be one, for `Sound`'s reason: a second
+	// opinion about where a thing is, is rule 2 with a bulb attached.
+	//
+	// **Nothing in this module lights anything.** `scene` is `shared` and a
+	// server has no renderer; the client walks these rows and fills its lighting
+	// uniforms, which is the same split `Visual::Mesh` has against the renderer
+	// and `Sound` has against the mixer.
+	//
+	// Widest-first with the flags last, so the object representation a snapshot
+	// writes holds no uninitialised bytes between fields.
+	//
+	// @since v0.10
+	struct Light {
+		// What colour the light is.
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+
+		// How strong it is, with 1 being Roblox's default.
+		float Brightness = 1.0f;
+
+		// How far it reaches, in metres.
+		//
+		// **A hard cutoff rather than a physical falloff**, which is Roblox's
+		// `Range` and is also what a forward renderer needs: a light with no end
+		// is a light every fragment in the world has to be tested against, and
+		// the range is what lets a tile or cluster pass reject it.
+		float Range = 8.0f;
+
+		// How wide a spot or surface light's cone is, in degrees.
+		//
+		// Ignored entirely for a `Point`, which is why it is one field rather
+		// than a separate component: a column of unused floats on the point
+		// lights is four bytes, and a second archetype is a second query.
+		float Angle = 90.0f;
+
+		// Which face of the parent part a spot or surface light points out of.
+		//
+		// Stored as the enum so the component stays trivially copyable, and its
+		// ordinals are the format — `scene/Enums.hpp` says why `NormalId` is the
+		// one enum here whose numbers may never be reordered.
+		NormalId Face = NormalId::Front;
+
+		// Which of the three this is.
+		LightKind Kind = LightKind::Point;
+
+		// Whether it casts a shadow.
+		//
+		// **Authored and not yet read**, which is stated rather than hidden: the
+		// renderer has one shadow-casting directional light and no shadow map per
+		// point light. Declared anyway because it is the field that decides
+		// whether a light is cheap, and a game authored without it would have to
+		// be re-authored the day the pass exists. `SurfaceAppearance`'s rule
+		// about `MetalnessMap` cuts the other way here and deliberately: that was
+		// a field a physically based pipeline would *interpret*, and this is one
+		// an author *decides*.
+		bool Shadows = false;
+
+		// Whether it is on.
+		bool Enabled = true;
 	};
 
 	// A content hash of what a consumer last saw, for consumers that cannot

@@ -6,6 +6,7 @@
 #include <engine/render/DebugPanels.hpp>
 
 #include <cctype>
+#include <cdn/LocalStore.hpp>
 #include <client/Client.hpp>
 #include <cstdio>
 #include <string>
@@ -147,6 +148,26 @@ int main(int argc, char **argv) {
 	for (const std::string_view source : arguments.GetAll("cdn")) {
 		options.ContentSources.emplace_back(source);
 	}
+
+	// **The local store, when nobody named an origin.** `ROADMAP.md` v0.10 asks
+	// for the cdn to be hooked up by default, and this is what that means in
+	// practice: content published into `~/Documents/atomic-game-engine/cdn`
+	// resolves with no flag at all, where before it took `assetc`, `cdn
+	// --publish` and a `--cdn dir:...` on every run.
+	//
+	// **Appended rather than prepended, and only when the list is empty.** A
+	// caller who named an origin meant it, and quietly adding a second one behind
+	// theirs would make "which store did that texture come from" a question with
+	// no answer in the command line.
+	//
+	// The folder is created rather than merely looked for, so a first run leaves
+	// somewhere to drag files into instead of a path that does not exist.
+	if (options.ContentSources.empty()) {
+		const cdn::LocalPaths local = cdn::DefaultLocalPaths();
+		if (cdn::EnsureLocalStore(local)) {
+			options.ContentSources.push_back("dir:" + local.Processed.string());
+		}
+	}
 	if (auto cache = arguments.Get("content-cache")) {
 		options.ContentCache = std::filesystem::path(*cache);
 	}
@@ -158,6 +179,23 @@ int main(int argc, char **argv) {
 	}
 	if (auto key = arguments.Get("publisher-key")) {
 		options.ContentPublisherKey = std::string(*key);
+	} else if (options.ContentSources.size() == 1 &&
+			   options.ContentSources.front() == "dir:" + cdn::DefaultLocalPaths().Processed.string()) {
+		// **The development key, and only for the store on this machine.** A
+		// client with no `--publisher-key` refused to start at all, which is
+		// right for an origin across a network and was pure friction for the
+		// well-known local folder: the same sixty-four characters had to be
+		// typed for `--publish` and again here, and getting one wrong produced a
+		// client that refused every asset with no hint which half was wrong.
+		//
+		// **The condition is the whole safety of it.** This fires only when
+		// nobody named a source *and* the only source is the default local
+		// store's own directory. Naming any origin — `--cdn`, a remote, even
+		// another directory — leaves the key required, because a key that
+		// everybody knows is not a trust boundary and must never become one for
+		// content somebody else served. `cdn::DevelopmentSigningKey` carries the
+		// same argument from the publishing end.
+		options.ContentPublisherKey = cdn::DevelopmentPublisher().ToHex();
 	}
 
 	if (auto tab = arguments.Get("profiler-tab")) {

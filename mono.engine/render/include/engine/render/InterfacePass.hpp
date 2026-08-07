@@ -25,6 +25,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/gui/DrawList.hpp>
+#include <engine/render/Flipbook.hpp>
 #include <engine/render/GlyphAtlas.hpp>
 #include <engine/render/InterfaceMesh.hpp>
 #include <engine/render/Renderer.hpp>
@@ -98,9 +99,15 @@ namespace engine::render {
 		// visible flat rectangle rather than nothing, so a missing image reads
 		// as missing.
 		//
-		// @param resolve Called with a content name; returns an
-		//        `SDL_GPUTexture *` or null.
-		void SetImageSource(std::function<void *(const core::Name &)> resolve) {
+		// **The cell comes back with the handle**, because a `.gif` bakes to an
+		// ordinary texture and only the thing that uploaded it knows the sheet
+		// is a sheet. Returning the handle alone is what made an animated
+		// `ImageLabel` a still of its first frame.
+		//
+		// @param resolve Called with a content name and a cell to fill; returns
+		//        an `SDL_GPUTexture *` or null. The cell is left at the identity
+		//        for anything that is not a sheet.
+		void SetImageSource(std::function<void *(const core::Name &, FlipbookCell &)> resolve) {
 			Images = std::move(resolve);
 		}
 
@@ -134,7 +141,7 @@ namespace engine::render {
 		gui::DrawList Pending;
 		core::Vector2 Canvas;
 
-		std::function<void *(const core::Name &)> Images;
+		std::function<void *(const core::Name &, FlipbookCell &)> Images;
 
 		bool AtlasUploaded = false;
 		size_t Recorded = 0;

@@ -26,13 +26,13 @@ namespace engine::render {
 		}
 
 		bool SameClip(const Rect &left, const Rect &right) {
-			return left.Min.X == right.Min.X && left.Min.Y == right.Min.Y &&
-				   left.Max.X == right.Max.X && left.Max.Y == right.Max.Y;
+			return left.Min.X == right.Min.X && left.Min.Y == right.Min.Y && left.Max.X == right.Max.X &&
+				   left.Max.Y == right.Max.Y;
 		}
 	}
 
 	InterfaceMesh::Rotation InterfaceMesh::TurnOf(const gui::DrawCommand &command) {
-	Rotation turn;
+		Rotation turn;
 		turn.Pivot = core::Vector2{
 			(command.Bounds.Min.X + command.Bounds.Max.X) * 0.5f,
 			(command.Bounds.Min.Y + command.Bounds.Max.Y) * 0.5f,
@@ -57,9 +57,7 @@ namespace engine::render {
 		return atlas.WhiteTexel();
 	}
 
-	void InterfaceMesh::Push(
-		const Rect &bounds, const Rect &uv, uint32_t colour, const Rotation &turn
-	) {
+	void InterfaceMesh::Push(const Rect &bounds, const Rect &uv, uint32_t colour, const Rotation &turn) {
 		// **Sixteen-bit indices, so a quad past 65 532 vertices is dropped
 		// rather than wrapped.** Wrapping would draw a triangle between three
 		// unrelated corners of the interface — a stripe across the screen that
@@ -182,16 +180,18 @@ namespace engine::render {
 						Vector2{box.Min.X + thickness, box.Max.Y - thickness}
 					},
 					solid,
-					colour
-				, turn);
+					colour,
+					turn
+				);
 				Push(
 					Rect{
 						Vector2{box.Max.X - thickness, box.Min.Y + thickness},
 						Vector2{box.Max.X, box.Max.Y - thickness}
 					},
 					solid,
-					colour
-				, turn);
+					colour,
+					turn
+				);
 				break;
 			}
 
@@ -258,8 +258,9 @@ namespace engine::render {
 									static_cast<float>(glyph->Y + glyph->Height) / height
 								}
 							},
-							colour
-						, turn);
+							colour,
+							turn
+						);
 					}
 
 					penX += glyph->Advance;

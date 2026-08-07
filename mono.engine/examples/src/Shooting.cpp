@@ -50,7 +50,7 @@ namespace engine::examples {
 			return false;
 		}
 
-			// Do not normalize an invalid client direction.
+		// Do not normalize an invalid client direction.
 		const float length = std::sqrt(
 			shot.Aim.Direction.X * shot.Aim.Direction.X + shot.Aim.Direction.Y * shot.Aim.Direction.Y +
 			shot.Aim.Direction.Z * shot.Aim.Direction.Z

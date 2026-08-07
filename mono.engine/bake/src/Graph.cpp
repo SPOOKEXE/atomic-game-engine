@@ -82,6 +82,13 @@ namespace engine::bake {
 		return Append(std::move(node));
 	}
 
+	NodeId Graph::AddRetime(float fps) {
+		Node node;
+		node.Kind = NodeKind::Retime;
+		node.Size = fps;
+		return Append(std::move(node));
+	}
+
 	NodeId Graph::AddWrite(std::string_view name) {
 		Node node;
 		node.Kind = NodeKind::Write;
@@ -258,6 +265,18 @@ namespace engine::bake {
 				for (size_t pixel = 3; pixel < result.Texture.Pixels.size(); pixel += 4) {
 					result.Texture.Pixels[pixel] = std::byte{255};
 				}
+			}
+			break;
+		case NodeKind::Retime:
+			if (input.Kind != PayloadKind::Texture) {
+				return wrongKind("a texture");
+			}
+			// **Only a flipbook is retimed.** A frame rate on a still image is
+			// a number nothing would read, and stamping one would make
+			// `TextureData::IsFlipbook` — which asks about the grid, not the
+			// rate — the only thing keeping them apart.
+			if (node.Size > 0.0f && result.Texture.IsFlipbook()) {
+				result.Texture.FlipbookFrameRate = node.Size;
 			}
 			break;
 		case NodeKind::Write: {

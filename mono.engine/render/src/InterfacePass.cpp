@@ -275,8 +275,7 @@ namespace engine::render {
 			SDL_UnmapGPUTransferBuffer(gpu, staging);
 		}
 
-		SDL_GPUCopyPass *copy =
-			SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
 
 		SDL_GPUTextureTransferInfo source{};
 		source.transfer_buffer = staging;
@@ -382,8 +381,7 @@ namespace engine::render {
 			return false;
 		}
 
-		SDL_GPUCopyPass *copy =
-			SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
 
 		SDL_GPUTransferBufferLocation from{};
 		from.transfer_buffer = staging;
@@ -439,9 +437,21 @@ namespace engine::render {
 
 		for (const InterfaceBatch &batch : Mesh.Batches()) {
 			SDL_GPUTexture *texture = atlas;
+
+			// The identity, so a rectangle and a glyph — which sample the atlas
+			// and are most of a frame — pay one uniform push and no arithmetic.
+			FlipbookCell cell;
+
 			if (batch.Image.IsValid() && Images) {
-				if (auto *resolved = static_cast<SDL_GPUTexture *>(Images(batch.Image))) {
+				if (auto *resolved = static_cast<SDL_GPUTexture *>(Images(batch.Image, cell))) {
 					texture = resolved;
+				} else {
+					// **The cell goes back to the identity with the handle.** A
+					// resolver may have filled it before deciding it had no
+					// texture, and sampling the atlas's white texel through a
+					// quarter-scale transform is a rectangle drawn at the wrong
+					// size for a reason nothing on screen explains.
+					cell = FlipbookCell{};
 				}
 				// **An unresolved name falls back to the atlas**, which draws
 				// the image's bounds as a flat tinted rectangle. Visible on
@@ -460,6 +470,14 @@ namespace engine::render {
 				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 				bound = texture;
 			}
+
+			// **Pushed per batch rather than per pass**, because the sheet is a
+			// property of the texture and a frame holds several. It is sixteen
+			// bytes against a bind that already happened.
+			const float flipbook[4] = {cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
+			SDL_PushGPUFragmentUniformData(
+				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, flipbook, sizeof(flipbook)
+			);
 
 			// The scissor, in pixels, clamped to the target — a negative origin
 			// or a width past the edge is a validation error on some backends
