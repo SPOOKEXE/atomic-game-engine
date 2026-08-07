@@ -834,6 +834,7 @@ The rendering and camera work this version already carried, unchanged:
 
 - [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
 - [_] convert the entire rendering pipeline to the node system with a studio editor? then during play, it'll compile and work. Add a node editor like blender's system as well for both the mesh pipeline and the rendering pipeline, as separate widgets called Render Pipeline and Assets Pipeline. I plan to have all assets be managed in Assets Pipeline using many node trees in one editor (and same for render but as different subpipelines).
+- [_] improved physics pipeline with spatial optimisations
 
 ### v0.12
 
