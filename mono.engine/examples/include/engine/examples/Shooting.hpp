@@ -39,6 +39,7 @@ namespace engine::examples {
 
 	// One shot target at the rewound position.
 	struct Target {
+		// What was hit.
 		ecs::Entity Entity;
 
 		// Position at the shooter's simulation time.

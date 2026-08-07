@@ -24,12 +24,21 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ListenerSettings {
+		// The link's own settings — framing, timeouts and per-tick budgets.
 		SessionSettings Session;
 
+		// How the world is streamed once a client is in.
 		AuthoritySettings Authority;
 
+		// The hard cap on connected clients.
+		//
+		// **In front of the handshake rather than behind it**, and that ordering
+		// is what makes the stateless challenge a gap rather than a hole: the
+		// worst an unadmitted flood can do is fill this number of slots, which
+		// is a full server rather than an exhausted one.
 		size_t MaximumClients = 64;
 
+		// How the admission cookie is keyed and rotated.
 		net::CookieSettings Cookie;
 	};
 
@@ -113,8 +122,14 @@ namespace engine::replication {
 		//
 		// @since v0.3
 		struct Submission {
+			// Who sent them.
 			ClientId Client;
 
+			// What they sent, in the order they sent it.
+			//
+			// **A span into the listener's own storage and not a copy**, so it
+			// is valid until the next pump — a caller that kept it across one
+			// would be reading inputs that have since been retired.
 			std::span<const Input> Inputs;
 		};
 
@@ -144,16 +159,33 @@ namespace engine::replication {
 		//
 		// @since v0.3
 		struct Statistics {
+			// Clients that completed the handshake and were let in.
 			uint64_t Admitted = 0;
 
+			// Clients that were in and are not any more.
 			uint64_t Dropped = 0;
 
+			// Clients turned away because the server was full.
 			uint64_t Turned = 0;
 
+			// Challenges issued to peers that had not answered one yet.
+			//
+			// **This is the number that stays cheap under a flood.** A challenge
+			// costs no state at all, so a rising count here beside a flat
+			// `Admitted` is somebody knocking rather than a server in trouble.
 			uint64_t Challenged = 0;
 
+			// Datagrams refused before they became anything — a wrong magic, an
+			// unknown version, a channel outside the enum.
 			uint64_t Refused = 0;
 
+			// Peers that completed the handshake and were declined by the
+			// admission policy.
+			//
+			// **Apart from `Turned` on purpose**: full is the engine's answer
+			// and rejected is the game's, and a server that is turning people
+			// away wants a different fix from one whose policy is declining
+			// them.
 			uint64_t Rejected = 0;
 		};
 

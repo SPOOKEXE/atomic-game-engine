@@ -54,8 +54,10 @@ namespace engine::render {
 
 		// What each run samples and what colour it is multiplied by, parallel
 		// to `Runs`.
+		//@{
 		std::vector<core::Name> Textures;
 		std::vector<std::array<float, 4>> Colours;
+		//@}
 
 		// The middle of the mesh's own bounding box, in mesh space.
 		//
@@ -151,12 +153,14 @@ namespace engine::render {
 		}
 
 		// The shared buffers, for binding.
+		//@{
 		SDL_GPUBuffer *Vertices() const {
 			return VertexBuffer;
 		}
 		SDL_GPUBuffer *Indices() const {
 			return IndexBuffer;
 		}
+		//@}
 
 	  private:
 		bool Upload();

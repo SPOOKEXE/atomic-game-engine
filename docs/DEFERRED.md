@@ -35,57 +35,54 @@ and for deleted marked items;
 
 ## Deferred Items
 
-### [_] D00036
+### [CLOSED] D00036
 
-**307 public entities carry no comment, and nothing had ever been able to say so.**
+**307 public entities carried no comment, and nothing had ever been able to say so.**
 
 - `just docs-check` runs two Doxygen passes. The first is the site, and it fails
   the recipe on malformed comments and dangling links; the second is the
   **coverage** pass, `EXTRACT_ALL = NO`, whose whole job is to report a public
-  entity nobody documented. **The second had never completed**, because the
-  first has been red for at least two versions and the recipe stops at it.
-- **Found by fixing the thing in front of it**, which is the entire point of
-  `D00035` and is why that entry is worth reading beside this one. The moment
-  `warnings.txt` reached zero, `gaps.txt` reported **307**.
-- **This is the third time this repository has recorded exactly this cascade**,
-  and it should probably stop being a surprise: `ROADMAP.md` v0.2 has it for
-  `just docs-check` itself, `D00005` has it for `just preset=ci check`, and this
-  is the same shape one level in — a check behind a failing check is a check
-  nobody has ever seen the output of.
-- **All 307 are *public* members**, checked rather than assumed: the coverage
-  pass leaves `EXTRACT_PRIVATE` at its default of off, so none of these is a
-  private detail that slipped in. They are real gaps against this repository's
-  stated rule.
-- **They are concentrated rather than spread**, which makes the work more
-  tractable than the number suggests: `mono.studio/include/studio/Editor.hpp`
-  holds **136** of them, `replication/` about **72** across four headers, and
-  `gui/Enums.hpp` **18**. Ten files carry roughly eighty per cent.
-- **A large share are structural rather than unwritten, and that is the finding
-  worth acting on.** `gui/Enums.hpp` declares nineteen `Describe` overloads under
-  one paragraph that is explicitly about all nineteen — and Doxygen attaches a
-  comment to the declaration beneath it, so eighteen count as undocumented. The
-  prose exists and is good. Nothing is missing except an attachment.
-- **Doxygen's own answer for that does not work here, and all three forms were
-  tried**: `//@{` member groups, `@name`, and `DISTRIBUTE_GROUP_DOC = YES`. None
-  clears the warning for namespace-level overloads — `@name` made it *worse*, 18
-  to 19, by detaching the paragraph from the first declaration as well.
-  `docgen::Promote` also promotes `//@{` to `///@{`, which merges the marker into
-  the prose block so it forms no group at all; that was fixed, retested, and
-  reverted when the grouping turned out not to help even when the marker
-  survived. Recorded so the next person does not spend the afternoon again.
-- **So the remaining choice is per-declaration comments**, one line each saying
-  which enum, which is repetitive in exactly the way this repository dislikes —
-  or accepting that an overload family cannot satisfy this check and saying so
-  where the check is configured. **That decision is the work here**, and it
-  should be made once for all the families rather than per file.
-- **Do not make the recipe pass by lowering the bar**, which is the obvious and
-  wrong first move. The pass exists because `EXTRACT_ALL = YES` silently
-  disables `WARN_IF_UNDOCUMENTED` — `docgen/AGENTS.md` says so in as many words
-  — and a coverage check tuned until it is quiet is the documentation this file
-  keeps warning about.
-- **Reopen trigger: it is failing now**, and unlike `D00035` this one cannot be
-  closed in an afternoon. It wants a decision about scope first and then a
-  sustained pass.
+  entity nobody documented. **The second had never completed**, because the first
+  had been red for at least two versions and the recipe stops at it.
+- **Found by fixing the thing in front of it**, which is `D00035`. The moment
+  `warnings.txt` reached zero, `gaps.txt` reported **307** — and this is the
+  third time this repository has recorded that cascade: `ROADMAP.md` v0.2 for
+  `docs-check` itself, `D00005` for `just preset=ci check`, and now one level in.
+- **All 307 were genuinely public**, checked rather than assumed: the coverage
+  pass leaves `EXTRACT_PRIVATE` off, so none was a private detail that slipped
+  in.
+- **About a third were unattached rather than unwritten**, and one setting closed
+  them. `ecs::AttributeValue` has fifteen payload fields that are one idea —
+  a per-field comment could only ever have said "the `float` case" — and
+  `engine::gui` declares nineteen `Describe` overloads under one paragraph
+  explicitly about all nineteen. Doxygen attaches a comment to the declaration
+  beneath it, so the other fourteen and eighteen counted as gaps.
+  `DISTRIBUTE_GROUP_DOC = YES` plus `//@{` markers documents each family once.
+  **Not a lowered bar**: the author still writes the comment and still marks the
+  group by hand. What it stops is documentation written to satisfy a check.
+- **The rest was writing, and the useful ones were where a name hides a trap** —
+  `Delta::Baseline` and why a lost datagram is survivable, `Structure`'s three
+  lists and why `Forgotten` is never merged with `Destroyed`,
+  `Statistics::Refused` against `Deferred` (the link saying no against this
+  module saying later, which this file already records people confusing twice),
+  and `Answer::PublicKey` being repeated rather than remembered, which is what
+  makes the challenge stateless.
+- **Two wrong turns, both recorded rather than tidied away.** A filter rule was
+  added so `//@{` was *not* promoted to `///@{`, on the reasoning that a
+  delimiter is not prose — wrong for this pipeline, since the promoted form is
+  the one Doxygen groups on. Worse, while that rule was in place it produced the
+  measurement behind a confident claim in this entry that namespace-level
+  overloads **cannot** be grouped. They can. **A tool change made mid-
+  investigation invalidated the measurement being taken through it**, because the
+  filter was both the instrument and the subject. The rule was reverted and left
+  out, having no user.
+- **It also turned up three more orphaned doc blocks** of the kind `D00035`
+  found two of — a new member's comment inserted *inside* an existing one, so
+  `RequestShownContent` and `PublishManifestNames` were undocumented while their
+  prose sat on `FitPartsToMesh`. All three were added by the v0.10 mesh work.
+- **`just docs-check` exits 0 and says "every public entity is documented".**
+  It is now a check that can fail for a real reason, which it has not been able
+  to do for two versions.
 
 ### [CLOSED] D00035
 

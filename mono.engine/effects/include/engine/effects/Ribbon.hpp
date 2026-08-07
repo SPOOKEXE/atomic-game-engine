@@ -320,8 +320,10 @@ namespace engine::effects {
 
 	// Serialisation for the two components, exported so `Registration.cpp` can
 	// name them without this file's internals.
+	//@{
 	void WriteBeams(core::ByteWriter &writer, const void *source, size_t count);
 	void ReadBeams(core::ByteReader &reader, void *destination, size_t count);
 	void WriteTrails(core::ByteWriter &writer, const void *source, size_t count);
 	void ReadTrails(core::ByteReader &reader, void *destination, size_t count);
+	//@}
 }

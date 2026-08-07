@@ -109,8 +109,10 @@ namespace studio {
 		// safe to *cache* because the signature folds in the name and the class
 		// — a rename changes the stamp, which rebuilds the row, which resolves
 		// the text again.
+		//@{
 		const char *Text = "";
 		const char *ClassText = "";
+		//@}
 
 		// How far to indent. A root is 0.
 		uint16_t Depth = 0;

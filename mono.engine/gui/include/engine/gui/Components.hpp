@@ -481,10 +481,17 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Padding {
+		// One edge each, resolved against the parent's own size.
+		//
+		// **A `UDim` rather than a number**, so padding can be a fraction of the
+		// parent — which is what lets one element look right at two sizes
+		// without a script recomputing it.
+		//@{
 		core::UDim Top;
 		core::UDim Bottom;
 		core::UDim Left;
 		core::UDim Right;
+		//@}
 	};
 
 	// Stacks the parent's children along one axis.
@@ -556,6 +563,7 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct SizeLimits {
+		// The smallest the parent may resolve to. Zero means unconstrained.
 		core::Vector2 Min{0.0f, 0.0f};
 
 		// The default is the largest a UI could sensibly be rather than
@@ -568,8 +576,15 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct TextSizeLimits {
+		// The range a scaled label may pick its size from.
+		//
+		// **One is the floor rather than zero**, because text at zero pixels is
+		// an element that silently draws nothing rather than one that is
+		// obviously too small.
+		//@{
 		int32_t Min = 1;
 		int32_t Max = 100;
+		//@}
 	};
 
 	// Rounds the parent's corners.
@@ -585,15 +600,26 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Stroke {
+		// What the outline looks like.
+		//
+		// **Its own transparency rather than the parent's**, so an outline can
+		// stay solid on a fading element — which is what a focus ring wants and
+		// what inheriting would make impossible.
+		//@{
 		core::Color3 Color{0.0f, 0.0f, 0.0f};
 		float Thickness = 1.0f;
 		float Transparency = 0.0f;
+		//@}
 	};
 
 	// Multiplies the parent's resolved size and text size.
 	//
 	// @since v0.8
 	struct Scale {
+		// What the parent's resolved size and text size are multiplied by.
+		//
+		// Applied after layout rather than during it, so scaling a container
+		// does not re-flow what is inside it.
 		float Factor = 1.0f;
 	};
 

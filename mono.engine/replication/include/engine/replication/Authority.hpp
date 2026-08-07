@@ -20,10 +20,18 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ClientId {
+		// The index no client ever has, so a default handle is not client zero.
 		static constexpr uint32_t INVALID = 0xFFFFFFFFu;
 
+		// Which slot this client occupies.
 		uint32_t Index = INVALID;
 
+		// How many clients have occupied that slot before it.
+		//
+		// **The half that makes a stale handle safe.** Slots are reused the
+		// moment a client leaves, so an index alone would let a message meant
+		// for somebody who disconnected be delivered to whoever arrived next —
+		// `ecs::Entity` carries a generation for the same reason.
 		uint32_t Generation = 0;
 
 		// @return `true` when it came from `Admit`.
@@ -42,16 +50,42 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct AuthoritySettings {
+		// How much of a join snapshot goes into one message.
+		//
+		// Under the datagram limit on purpose: a chunk that cannot fit is
+		// refused by the link every tick, and a refusal is indistinguishable
+		// from ordinary backpressure.
 		size_t ChunkBytes = 1024;
 
+		// How many of those go out per tick, which is what spreads a join across
+		// ticks instead of stalling one.
 		size_t ChunksPerTick = 8;
 
+		// How far behind a client may fall before it is re-snapshotted instead
+		// of repaired.
+		//
+		// **Measured against how far behind the client is, not against the tick
+		// number** — the version that compared tick numbers re-snapshotted a
+		// client in perfect agreement with a quiet world every 120 ticks for
+		// ever.
 		uint64_t ResnapshotAfterTicks = 120;
 
+		// The per-client message budget for one tick.
 		size_t MessagesPerTick = 32;
 
+		// The per-client byte budget for one tick.
+		//
+		// **Per client rather than per server, and the difference is not
+		// pedantry**: the budget belongs to a link and there is one link per
+		// connection, so a server-wide cap would have to be divided before it
+		// could be enforced — and that division *is* a per-client cap.
 		size_t BytesPerTick = 32 * 1024;
 
+		// How long a value may wait before it outranks every score.
+		//
+		// What stops the priority ordering starving anything: the bound on how
+		// late a value can be is `StarvationTicks + ceil(n/k)`, which is
+		// asserted by a test rather than argued for.
 		uint64_t StarvationTicks = 30;
 	};
 
@@ -183,12 +217,20 @@ namespace engine::replication {
 		//
 		// @since v0.3
 		struct ClientStatus {
+			// Whether the join snapshot is still going out.
 			bool Streaming = false;
 
+			// How many bytes of it are left to send.
 			size_t SnapshotRemaining = 0;
 
+			// The last tick this client acknowledged applying in full.
 			uint64_t Applied = 0;
 
+			// How many entities this client is believed to hold.
+			//
+			// The set every `Created`, `Destroyed` and `Forgotten` is a
+			// difference against — which is why losing sight of an entity is a
+			// forget rather than a destroy.
 			size_t Known = 0;
 		};
 
@@ -202,18 +244,35 @@ namespace engine::replication {
 		//
 		// @since v0.3
 		struct Statistics {
+			// Messages built by the last `Publish`.
 			size_t Messages = 0;
 
+			// Their total size.
 			size_t Bytes = 0;
 
+			// How many entities passed interest across every client.
 			size_t Visible = 0;
 
+			// Clients re-snapshotted rather than repaired.
 			size_t Resnapshots = 0;
 
+			// Messages the transport would not take.
+			//
+			// **Distinct from `Deferred`, and conflating the two is a mistake
+			// people make twice.** This one means the *link* refused: the send
+			// window was full or the datagram budget was spent. `Deferred` means
+			// this module chose not to send yet. One is the network saying no
+			// and the other is the priority ordering saying later.
 			size_t Refused = 0;
 
+			// Values this module held back because the budget was already spent.
 			size_t Deferred = 0;
 
+			// How many ticks the longest-waiting deferred value has waited.
+			//
+			// The number to read when something is not replicating: a rising
+			// `Stalest` is a budget too small for the world, where a flat one
+			// with a high `Refused` is a link problem.
 			uint64_t Stalest = 0;
 		};
 

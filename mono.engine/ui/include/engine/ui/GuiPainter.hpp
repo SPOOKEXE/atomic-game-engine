@@ -70,8 +70,10 @@ namespace engine::ui {
 			// carrying a grid of frames — `render::FlipbookCell` — and only the
 			// thing that uploaded it knows the grid is there, which is why this
 			// comes back with the handle rather than being asked for separately.
+			//@{
 			ImVec2 CellMin{0.0f, 0.0f};
 			ImVec2 CellMax{1.0f, 1.0f};
+			//@}
 		};
 
 		// The texture for a content name.

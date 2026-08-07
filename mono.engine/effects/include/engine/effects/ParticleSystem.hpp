@@ -279,8 +279,10 @@ namespace engine::effects {
 		//
 		// Copied off the emitter rather than read through it, for `Frame`'s
 		// reason. Four bytes here against a fifteen-hundred-byte load there.
+		//@{
 		FlipbookLayout Flipbook = FlipbookLayout::None;
 		FlipbookMode FlipbookPlayback = FlipbookMode::OneShot;
+		//@}
 
 		// How many cells hold a frame, resolved from the emitter — never zero.
 		//

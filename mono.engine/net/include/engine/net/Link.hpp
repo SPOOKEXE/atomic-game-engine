@@ -117,6 +117,13 @@ namespace engine::net {
 			}
 		}
 
+		// What this link has carried and what it has refused.
+		//
+		// **Read this before concluding a component is not replicating.**
+		// `SendsOverBudget` off zero means the link turned messages away, which
+		// looks from the outside exactly like a sender that never sent them.
+		//
+		// @return The running totals, valid until the next pump.
 		const ConnectionStats &Stats() const {
 			return Totals;
 		}
