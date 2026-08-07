@@ -62,14 +62,15 @@ namespace studio {
 		// alias is a row here too, because a person picks whichever name their
 		// class shows them.
 		static constexpr Row ROWS[] = {
-			// `Visual::Mesh`, under both its names.
-			{"Mesh", AssetKind::Mesh},
+			// **`MeshPart.MeshId` and `MeshPart.TextureID`, and no aliases.**
+			// These were declared on `BasePart` as `Mesh` and `ColorMap` too,
+			// and the pair of spellings is what made this table's own warning
+			// come true: the first version had one of each, so selecting a
+			// `MeshPart` showed a plain text field on the two names it displays.
+			// v0.10 removed the aliases — geometry from a file is not something
+			// a plain `Part` has — so there is one name for each and no way for
+			// the halves to drift.
 			{"MeshId", AssetKind::Mesh},
-
-			// `SurfaceAppearance::ColourMap`, under both of its names. The
-			// American spelling is what `BasePart` shows; `TextureID` is what
-			// `MeshPart` shows, and it is Roblox's.
-			{"ColorMap", AssetKind::Texture},
 			{"TextureID", AssetKind::Texture},
 
 			// `ParticleEmitter`, `Beam` and `Trail` all spell it this way, and
@@ -242,8 +243,29 @@ namespace studio {
 			const float side = engine::ui::Scaled(48.0f);
 			const float spacing = ImGui::GetStyle().ItemSpacing.x;
 
-			for (const Candidate &candidate : shown) {
-				const cdn::PublishedEntry &entry = *candidate.Entry;
+			// **Clipped, and the absence of this was three separate bugs.** The
+			// list is every texture in the store — 1,637 of them here — and
+			// without a clipper every one submitted a `Selectable` and asked for
+			// a thumbnail on every frame the modal was open. That is a visible
+			// stall on a list nobody can read all of, and it is why the previews
+			// looked broken: `ThumbnailFor` queues what it is asked for, the
+			// cache holds 256, and asking for 1,637 a frame evicts each one long
+			// before its turn to be built came round. The pictures were not
+			// failing, they were being thrown away.
+			//
+			// `DrawPublishedList` in the assets panel has had one since it was
+			// written; the picker was small when it was written and stopped
+			// being small when the store filled up.
+			//
+			// **Uniform row height is what makes it exact** — every row is
+			// `side` tall by construction, so the clipper needs no measuring
+			// pass and scrolling lands where the scrollbar says.
+			ImGuiListClipper clipper;
+			clipper.Begin(static_cast<int>(shown.size()), side + ImGui::GetStyle().ItemSpacing.y);
+
+			while (clipper.Step()) {
+			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+				const cdn::PublishedEntry &entry = *shown[static_cast<size_t>(row)].Entry;
 				ImGui::PushID(entry.Name.c_str());
 
 				const RowAction action = DrawAssetRow(
@@ -277,6 +299,7 @@ namespace studio {
 				HoverPreview(entry.Name, entry.Kind);
 
 				ImGui::PopID();
+			}
 			}
 		}
 		ImGui::EndChild();
@@ -334,21 +357,32 @@ namespace studio {
 		);
 		ImGui::PopStyleColor();
 
-		size_t shown = 0;
+		// **Filtered into a list first, so the clipper below has a count.** The
+		// raw half of this store is 1,974 files; drawing all of them to find out
+		// how many matched is the stall the clipper exists to prevent.
+		//
+		// **Classified by the label and not by the file on disk**, because
+		// `ImportFile` renames to `<hash><extension>` and the extension is the
+		// half that survives. `RawEntry::Original` is the name somebody gave it,
+		// which is also what a person is scanning the list for.
+		std::vector<const cdn::RawEntry *> shown;
+		shown.reserve(PickerRaw.size());
 		for (const cdn::RawEntry &entry : PickerRaw) {
-			// **Classified by the label and not by the file on disk**, because
-			// `ImportFile` renames to `<hash><extension>` and the extension is
-			// the half that survives. `RawEntry::Original` is the name somebody
-			// gave it, which is also what a person is scanning the list for.
 			if (engine::assets::KindOfName(entry.Original) != kind) {
 				continue;
 			}
-
 			int score = 0;
-			if (!FuzzyMatch(PickerFilter, entry.Original, score)) {
-				continue;
+			if (FuzzyMatch(PickerFilter, entry.Original, score)) {
+				shown.push_back(&entry);
 			}
-			shown++;
+		}
+
+		ImGuiListClipper clipper;
+		clipper.Begin(static_cast<int>(shown.size()), side + ImGui::GetStyle().ItemSpacing.y);
+
+		while (clipper.Step()) {
+		for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+			const cdn::RawEntry &entry = *shown[static_cast<size_t>(row)];
 
 			const std::string relative = RawRelativePath(entry);
 			ImGui::PushID(relative.c_str());
@@ -378,8 +412,9 @@ namespace studio {
 			HoverPreview(relative, kind);
 			ImGui::PopID();
 		}
+		}
 
-		if (shown == 0) {
+		if (shown.empty()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::TextWrapped("nothing of that kind in raw/");
 			ImGui::PopStyleColor();

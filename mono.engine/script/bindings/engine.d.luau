@@ -747,6 +747,8 @@ declare extern type Instance with
 	function FindFirstChild(self, name: string): Instance?
 	function IsDescendantOf(self, ancestor: Instance): boolean
 	function ClearAllChildren(self): ()
+	function GetPivot(self): CFrame
+	function PivotTo(self, target: CFrame): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
@@ -763,6 +765,7 @@ end
 declare extern type PVInstance extends Instance with
 	CFrame: CFrame
 	Orientation: Vector3
+	PivotOffset: CFrame
 	Position: Vector3
 end
 
@@ -774,8 +777,6 @@ declare extern type BasePart extends PVInstance with
 	CastShadow: boolean
 	CollisionGroup: string
 	Color: Color3
-	ColorMap: string
-	Mesh: string
 	Size: Vector3
 	Transparency: number
 	Visible: boolean

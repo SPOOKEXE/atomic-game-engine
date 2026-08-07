@@ -1149,6 +1149,17 @@ declare task: {
 				out << "\tfunction FindFirstChild(self, name: string): Instance?\n";
 				out << "\tfunction IsDescendantOf(self, ancestor: Instance): boolean\n";
 				out << "\tfunction ClearAllChildren(self): ()\n";
+
+				// **The pivot pair, declared on `Instance` rather than on
+				// `PVInstance`.** Roblox puts them on the latter and the binding
+				// puts every method here for one reason: the method table is one
+				// table, shared by every instance userdata, so a declaration on a
+				// subclass would type-check something the run time does not
+				// enforce. `scene::PivotOf` answers the identity for anything
+				// with no placement, which is what makes that honest rather than
+				// merely convenient.
+				out << "\tfunction GetPivot(self): CFrame\n";
+				out << "\tfunction PivotTo(self, target: CFrame): ()\n";
 				out << "\tfunction GetPropertyChangedSignal(self, property: string): "
 					   "PropertyChangedSignal\n";
 
@@ -1898,6 +1909,11 @@ declare const task: {
 				out << "\tFindFirstChild(name: string): Instance | null;\n";
 				out << "\tIsDescendantOf(ancestor: Instance): boolean;\n";
 				out << "\tClearAllChildren(): void;\n";
+
+				// The pivot pair, matching the Luau half and declared in the
+				// same place for the same reason.
+				out << "\tGetPivot(): CFrame;\n";
+				out << "\tPivotTo(target: CFrame): void;\n";
 				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
 
 				// Attributes, matching the Luau half. The union is the same

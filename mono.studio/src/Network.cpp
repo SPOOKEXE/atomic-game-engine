@@ -22,6 +22,13 @@
 // it — which is the same decision `Dashboard`'s minute buckets make, at the
 // resolution an interactive panel is read at.
 
+#include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/Materials.hpp>
+#include <engine/core/Bytes.hpp>
+#include <engine/assets/Texture.hpp>
+#include <engine/assets/Mesh.hpp>
+#include <engine/assets/Material.hpp>
+#include <client/ContentDemand.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
@@ -156,6 +163,7 @@ namespace studio {
 
 		if (ContentClient) {
 			ContentClient->Pump();
+			DrainContent();
 		}
 
 		if (ContentUploads) {
@@ -192,6 +200,142 @@ namespace studio {
 		}
 		const uint64_t up = ContentUploads ? ContentUploads->Counters().SentBytes : 0;
 		ContentSamples.Observe(ContentSeconds, down, up);
+	}
+
+	void Editor::EachOpenWorld(const std::function<void(engine::ecs::Store &)> &body) {
+		// **Every world, not only the one on screen.** An editor has several
+		// open — a server's beside a client's during Play — and a mesh
+		// registered into the renderer is registered for all of them, so a
+		// catalogue filled for one would leave `TrianglesCount` answering zero
+		// in the others for no reason anybody could see.
+		for (const engine::world::WorldId world : Universe->Worlds()) {
+			Universe->Enter(world, [&body](engine::ecs::Store &store) { body(store); });
+		}
+	}
+
+	void Editor::DrainContent() {
+		// **The editor fetches content, which it did not before at all.** Its
+		// delivery client existed and nothing ever asked it for anything, so a
+		// `MeshPart` in a viewport drew the fallback cube however good its
+		// `MeshId` was — the renderer had never been handed a mesh. This is
+		// `Client::PumpContent`'s policy, one program over.
+		if (!ContentRequested && ContentClient->Ready()) {
+			ContentRequested = true;
+
+			// Meshes and materials by kind, textures on demand. Not an
+			// optimisation: a 1K sheet is four uncompressed megabytes and
+			// `render::TextureTable` holds 512, so asking for every texture in a
+			// large store spends the ceiling in manifest order and refuses the
+			// rest — `client/ContentDemand.hpp` carries how that looked.
+			for (const engine::assets::AssetKind kind :
+				 {engine::assets::AssetKind::Mesh, engine::assets::AssetKind::Material}) {
+				const std::vector<engine::delivery::RequestId> issued = ContentClient->RequestKind(kind);
+				ContentPending.insert(ContentPending.end(), issued.begin(), issued.end());
+			}
+			ENGINE_INFO("assets: asked for {} mesh and material asset(s)", ContentPending.size());
+		}
+
+		if (ContentRequested) {
+			RequestShownTextures();
+		}
+
+		size_t kept = 0;
+		for (const engine::delivery::RequestId id : ContentPending) {
+			if (ContentClient->StateOf(id) == engine::delivery::RequestState::Pending) {
+				ContentPending[kept++] = id;
+				continue;
+			}
+
+			std::optional<engine::delivery::Asset> asset = ContentClient->Take(id);
+			if (!asset) {
+				continue;
+			}
+
+			const engine::core::Name name(asset->Name);
+			engine::core::ByteReader reader(asset->Bytes);
+
+			if (asset->Kind == engine::assets::AssetKind::Mesh) {
+				engine::assets::MeshData mesh;
+				if (!engine::assets::Mesh::Read(reader, mesh)) {
+					continue;
+				}
+
+				// A mesh's own sheets, at the one point their names are
+				// readable — they live inside the mesh file, so the demand pass
+				// cannot see them.
+				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
+					if (!submesh.Texture.empty()) {
+						RequestContentTexture(engine::core::Name(submesh.Texture));
+					}
+				}
+
+				if (Renderer.AddMesh(name, mesh)) {
+					ContentMeshes++;
+					// **Triangle counts are world data**, so `MeshPart.
+					// TrianglesCount` answers in an edited world too — which is
+					// how somebody checks a mesh actually arrived.
+					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
+					EachOpenWorld([&name, triangles](engine::ecs::Store &store) {
+						engine::scene::RecordMesh(store, name, triangles);
+					});
+				}
+			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
+				engine::assets::TextureData image;
+				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
+					ContentTextures++;
+				}
+			} else if (asset->Kind == engine::assets::AssetKind::Material) {
+				engine::assets::MaterialData material;
+				if (!engine::assets::Material::Read(reader, material)) {
+					continue;
+				}
+				const engine::core::Name colour(material.ColourMap);
+				EachOpenWorld([&name, &colour](engine::ecs::Store &store) {
+					engine::scene::RecordMaterial(store, name, colour);
+				});
+				ContentMaterials++;
+			}
+		}
+		ContentPending.resize(kept);
+
+		// Appended after the walk, never during it — a mesh names its own
+		// sheets while this vector is being drained, and pushing to a container
+		// being iterated is what cost the client a whole debugging round.
+		ContentPending.insert(ContentPending.end(), ContentIssued.begin(), ContentIssued.end());
+		ContentIssued.clear();
+
+		// **Said once, when the queue first empties.** The editor fetched
+		// nothing at all before this existed and nothing said so — a `MeshPart`
+		// simply drew the fallback cube — so the one line that distinguishes
+		// "no content configured" from "content arrived" is worth a log.
+		if (ContentPending.empty() && !ContentReported) {
+			ContentReported = true;
+			ENGINE_INFO(
+				"assets: {} mesh(es), {} texture(s) and {} material(s) registered",
+				ContentMeshes,
+				ContentTextures,
+				ContentMaterials
+			);
+		}
+	}
+
+	void Editor::RequestShownTextures() {
+		std::vector<engine::core::Name> wanted;
+		EachOpenWorld([&wanted](engine::ecs::Store &store) {
+			client::CollectWantedTextures(store, wanted);
+		});
+		for (const engine::core::Name &name : wanted) {
+			RequestContentTexture(name);
+		}
+	}
+
+	void Editor::RequestContentTexture(const engine::core::Name &texture) {
+		// Asked once, whatever happened to it — a misspelled name must not
+		// issue a request per frame for the life of the session.
+		if (!ContentClient || !texture.IsValid() || !ContentAsked.insert(texture.Id()).second) {
+			return;
+		}
+		ContentIssued.push_back(ContentClient->Request(texture.Text()));
 	}
 
 	void Editor::UploadStore() {

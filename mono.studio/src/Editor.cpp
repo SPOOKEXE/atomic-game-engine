@@ -1059,7 +1059,17 @@ namespace studio {
 			// never ticks, so a gate maintained by the simulation would leave a
 			// part dragged into `Workspace` invisible until somebody pressed
 			// play. See `scene/Visibility.hpp`.
-			Universe->Present(shown, frameSeconds, Universe->AlphaOf(shown));
+			// **A world that is not ticking is presented at one, not at its
+			// accumulator.** Alpha is where *between* two ticks to draw, and a
+			// suspended world has no next tick to draw towards — its accumulator
+			// stops wherever it stopped, which is usually zero, and zero means
+			// "draw the previous frame". `capture-previous` is a `PreSimulation`
+			// system and `Present` runs `PreRender` alone, so that previous frame
+			// is wherever each part was created: an edited world drew every part
+			// at its birthplace while the selection outline followed the real
+			// transform.
+			const bool ticking = Universe->StateOf(shown) == engine::world::WorldState::Active;
+			Universe->Present(shown, frameSeconds, ticking ? Universe->AlphaOf(shown) : 1.0f);
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
@@ -1702,11 +1712,23 @@ namespace studio {
 			OpenPathTo(world, created);
 			RevealSelection = true;
 			MarkModified();
+
+			// **Invalidated on a structural change and not on every edit.** A
+			// property write is what actually *names* an asset, and invalidating
+			// there would rescan every world on every frame of a dragged slider
+			// — which is the shape of the bug this flag was added to fix. An
+			// insert or a delete is rare and bounded; anything finer is what
+			// `Rescan` is for.
+			GalleryScanned = false;
 		}
 		return created;
 	}
 
 	void Editor::DeleteSelection() {
+		// The other structural change. See `InsertInstance` for why only these
+		// two.
+		GalleryScanned = false;
+
 		if (Selection.empty() || !SelectionWorld.IsValid()) {
 			return;
 		}

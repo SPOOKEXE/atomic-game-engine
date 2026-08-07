@@ -3869,3 +3869,51 @@ TEST_CASE("Vector3 has the Magnitude and Unit the declarations promise", "[scrip
 	CHECK_FALSE(runtime->Run("return Vector3.new(0, 0, 0).Unit"));
 	CHECK(runtime->LastError().find("zero vector") != std::string::npos);
 }
+
+// --- pivots -------------------------------------------------------------------
+
+TEST_CASE("a script pivots a part by its handle", "[scripting]") {
+	// **The pair is the point.** A `Transform` says where a part's centre is,
+	// and almost nothing is placed by its centre — `PivotOffset` is where the
+	// handle is, `GetPivot` reads it in world space and `PivotTo` puts it
+	// somewhere. Setting `CFrame` to the target instead is the bug this exists
+	// to make unnecessary.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local door = Instance.new('Part')
+		door.Parent = workspace
+
+		-- With no offset the handle is the placement itself.
+		door.Position = Vector3.new(1, 2, 3)
+		assert((door:GetPivot().Position - Vector3.new(1, 2, 3)).Magnitude < 1e-4, 'default pivot')
+
+		-- A hinge two studs to the left.
+		door.PivotOffset = CFrame.new(Vector3.new(-2, 0, 0))
+		assert((door:GetPivot().Position - Vector3.new(-1, 2, 3)).Magnitude < 1e-4, 'offset pivot')
+
+		-- Sending the *handle* somewhere moves the part to put it there.
+		door:PivotTo(CFrame.new(Vector3.new(10, 0, 0)))
+		assert((door:GetPivot().Position - Vector3.new(10, 0, 0)).Magnitude < 1e-4, 'pivot landed')
+		assert((door.Position - Vector3.new(12, 0, 0)).Magnitude < 1e-4, 'part followed')
+	)");
+}
+
+TEST_CASE("an instance with no placement answers a pivot anyway", "[scripting]") {
+	// **Rather than raising**, which is `IsA`'s rule for a class nobody
+	// registered: a script asking any instance for its pivot is asking a
+	// question with a correct answer, and it is the identity.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local folder = Instance.new('Instance')
+		assert(folder:GetPivot().Position.Magnitude < 1e-4, 'identity pivot')
+
+		-- And moving it does nothing rather than erroring mid-frame.
+		folder:PivotTo(CFrame.new(Vector3.new(5, 0, 0)))
+	)");
+}

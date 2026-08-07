@@ -54,6 +54,32 @@ namespace engine::scene {
 		core::CFrame Frame;
 	};
 
+	// Where a thing is grasped, relative to its own placement.
+	//
+	// **Roblox's `PivotOffset`, and the reason a pivot needs storage at all is
+	// that a placement has no natural handle.** A `Transform` says where the
+	// *centre* of something is, which is what a solver and a broad phase want
+	// and almost never what an author wants: a door turns on its hinge, a lid on
+	// its rim, a character stands on the ground under its feet. `PivotTo` is
+	// "put this thing's handle here", and without an offset it can only ever
+	// mean "put its centre here".
+	//
+	// **A column on every `PVInstance` rather than an optional component**, and
+	// the trade is `SurfaceAppearance`'s exactly: an optional one means a
+	// draw-time or query-time join, and `GetPivot` is asked per selection per
+	// frame by the editor's gizmo. Twenty-eight bytes an entity and no branches.
+	//
+	// **Identity is the default and means "the centre".** So a part nobody has
+	// given a pivot behaves precisely as it did before this existed, which is
+	// what makes the field safe to add to every placed thing.
+	//
+	// @since v0.10
+	struct Pivot {
+		// The handle, in the instance's own frame. Composed as
+		// `Transform::Frame * Offset` to get a world pivot.
+		core::CFrame Offset;
+	};
+
 	// Where it was when the current tick began.
 	//
 	// Rendering runs faster than the simulation ticks, so drawing at tick

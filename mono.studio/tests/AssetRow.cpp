@@ -467,3 +467,45 @@ TEST_CASE("a tile that rewinds inside a group is closed by the group", "[studio]
 
 	CHECK_FALSE(dangling);
 }
+
+TEST_CASE("a long list only submits the rows on screen", "[studio][assetrow]") {
+	// **Three bugs came from one missing clipper**, and this is the check that
+	// would have caught all of them. The asset picker listed every texture in
+	// the store — 1,637 of them — and submitted a `Selectable` and asked for a
+	// thumbnail for each, every frame the modal was open. That is a visible
+	// stall; worse, `Editor::ThumbnailFor` queues what it is asked for against a
+	// 256-entry cache, so asking for 1,637 a frame evicted each picture long
+	// before its turn to be built came round. The previews were not failing,
+	// they were being thrown away, and the list looked permanently broken.
+	//
+	// The picker was small when it was written and stopped being small when the
+	// store filled up. What this pins is that the cost is bounded by the *view*
+	// rather than by the store.
+	Context context;
+
+	constexpr int ROWS = 2000;
+	int submitted = 0;
+
+	Frame(Mouse{}, [&] {
+		if (ImGui::BeginChild("##rows", ImVec2(0.0f, 200.0f), ImGuiChildFlags_Borders)) {
+			ImGuiListClipper clipper;
+			clipper.Begin(ROWS, SIDE + ImGui::GetStyle().ItemSpacing.y);
+
+			while (clipper.Step()) {
+				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+					ImGui::PushID(row);
+					DrawAssetRow(false, SIDE, [&](ImVec2) { submitted++; });
+					ImGui::PopID();
+				}
+			}
+		}
+		ImGui::EndChild();
+	});
+
+	// A 200-pixel child at 48-pixel rows holds four or five, and imgui draws a
+	// row or two either side of them. Two thousand rows must not cost two
+	// thousand anything.
+	INFO("submitted " << submitted << " of " << ROWS);
+	CHECK(submitted > 0);
+	CHECK(submitted < 40);
+}

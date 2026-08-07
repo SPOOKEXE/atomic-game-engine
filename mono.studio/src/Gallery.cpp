@@ -57,6 +57,7 @@ namespace studio {
 
 	void Editor::RebuildGallery() {
 		Gallery.clear();
+		GalleryScanned = true;
 
 		if (!Universe) {
 			return;
@@ -167,7 +168,20 @@ namespace studio {
 		// every entity of every world reading every `Name` property is a real
 		// cost — it is the one thing in this panel that scales with the scene
 		// rather than with the store.
-		if (ImGui::IsWindowAppearing() || Gallery.empty()) {
+		//
+		// **The gate is "have I scanned", not "is the result empty", and the
+		// difference was seconds of frozen editor.** An empty result is a
+		// *result*: a fresh place names no assets at all, so `Gallery.empty()`
+		// stayed true, so the full walk ran again on the next frame, and the
+		// next — for as long as the panel was open. Inserting anything made it
+		// worse by adding an entity to a scan that was already running every
+		// frame, which is why it showed up as "the studio greys out when I
+		// insert something".
+		//
+		// A flag rather than a timestamp: what makes the scan stale is somebody
+		// changing a world, and `Rescan` is the honest answer until there is a
+		// change signal worth hanging it on.
+		if (ImGui::IsWindowAppearing() || !GalleryScanned) {
 			RebuildGallery();
 		}
 

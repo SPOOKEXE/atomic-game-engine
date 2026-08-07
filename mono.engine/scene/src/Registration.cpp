@@ -393,6 +393,12 @@ namespace engine::scene {
 		// `PreRender`, so a load that cleared it would present before it was
 		// filled. One frame of a beam in the wrong place is more visible than
 		// thirty-two bytes an entity.
+		// **Generated, because a `Pivot` is one `CFrame`** — no name, so the
+		// object representation is the format. Registered beside `Attachment`
+		// for the same reason it is: both are placements relative to something
+		// else.
+		ecs::Components::Register<Pivot>("scene.Pivot");
+
 		ecs::Components::Register<Attachment>("scene.Attachment");
 		ecs::Components::Register<Light>("scene.Light");
 

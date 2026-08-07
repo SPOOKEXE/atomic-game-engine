@@ -304,6 +304,42 @@ namespace engine::script {
 			return 1;
 		}
 
+		// `pvInstance:GetPivot()` and `pvInstance:PivotTo(cframe)`
+		//
+		// **Roblox's pivot pair, and the whole reason it is a pair.** A
+		// `Transform` says where the *centre* of something is; almost nothing an
+		// author places is placed by its centre — a door turns on its hinge, a
+		// lid sits on its rim, a character stands on the ground under its feet.
+		// `PivotOffset` is where the handle is and these two are how it is used.
+		//
+		// **Methods rather than a `Pivot` property**, which is Roblox's shape and
+		// is right for a reason of its own: `GetPivot` is *derived* from two
+		// fields and `PivotTo` writes a third thing entirely, so a read-write
+		// property would look like storage and behave like a computation.
+		//
+		// **Not refused for a non-`PVInstance`**, matching every other method
+		// here: `scene::PivotOf` answers the identity for something with no
+		// placement, which is what a script asking a `Folder` for its pivot
+		// should get rather than an error mid-frame.
+		int InstanceGetPivot(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			*PushCFrame(state) = scene::PivotOf(store, instance);
+			return 1;
+		}
+
+		int InstancePivotTo(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			const core::CFrame &target = CheckCFrame(state, 2);
+
+			// The return is dropped on purpose: Roblox's `PivotTo` returns
+			// nothing, and an instance with no placement to move is the same
+			// "did nothing" a `Folder` would be.
+			(void)scene::PivotTo(store, instance, target);
+			return 0;
+		}
+
 		// `instance:AddTag(name)`, `instance:RemoveTag(name)`, `instance:HasTag(name)`
 		//
 		// **Roblox puts these on `CollectionService` and they are methods here**,
@@ -1107,6 +1143,8 @@ namespace engine::script {
 			lua_CFunction Function;
 		} METHODS[] = {
 			{"IsA", InstanceIsA},
+			{"GetPivot", InstanceGetPivot},
+			{"PivotTo", InstancePivotTo},
 			{"AddTag", InstanceAddTag},
 			{"RemoveTag", InstanceRemoveTag},
 			{"HasTag", InstanceHasTag},

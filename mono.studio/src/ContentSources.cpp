@@ -1,4 +1,6 @@
 #include <engine/assets/Signature.hpp>
+
+#include <cdn/LocalStore.hpp>
 #include <engine/core/Log.hpp>
 
 #include <fstream>
@@ -25,9 +27,46 @@ namespace studio {
 	}
 
 	ContentSources ContentSources::Default() {
+		// **The store on this machine, and a key that can verify it.** The
+		// default was `127.0.0.1:9080` with no publisher key, which is a
+		// perfectly reasonable default for a *deployment* and meant that a fresh
+		// editor could fetch nothing at all: `DeliverySettings::IsValid` refuses
+		// without a key, so `MakeAssetClient` was never called and no mesh, no
+		// texture and no material ever reached the renderer. A `MeshPart` drew
+		// the fallback cube, a `ColorMap` drew nothing, and the assets panel
+		// listed a store full of content none of which the viewport could show.
+		//
+		// The client already defaults to the same folder — `client/app/main.cpp`
+		// — and to `cdn::DevelopmentPublisher` for it, which is what makes the
+		// key here safe to fill in: it verifies only the store this editor
+		// publishes to, and pointing a row anywhere else means supplying the
+		// real one. `cdn::DevelopmentSigningKey` carries what that identity is
+		// and is not for.
+		const cdn::LocalPaths local = cdn::DefaultLocalPaths();
+
 		ContentSources sources;
+		sources.PublisherKey = cdn::DevelopmentPublisher().ToHex();
+		sources.Sources.push_back(
+			engine::delivery::Source{
+				.Name = "local store",
+				.Kind = engine::delivery::SourceKind::Directory,
+				.Location = local.Processed.string(),
+				.Enabled = true,
+				.Role = engine::delivery::SourceRole::Read,
+				.IngestKey = {},
+			}
+		);
+
+		// **The origin next door is kept and turned off**, rather than dropped.
+		// A row that is off is one somebody can switch on — `ContentSources.hpp`
+		// says why a disabled row is kept — and this is the address a deployment
+		// uses, so deleting it would make the common remote case something to
+		// retype rather than something to enable.
 		const engine::delivery::DeliverySettings defaults = engine::delivery::DeliverySettings::Default();
-		sources.Sources = defaults.Sources;
+		for (engine::delivery::Source source : defaults.Sources) {
+			source.Enabled = false;
+			sources.Sources.push_back(std::move(source));
+		}
 		return sources;
 	}
 

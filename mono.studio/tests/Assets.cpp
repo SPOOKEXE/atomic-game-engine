@@ -31,11 +31,15 @@ TEST_CASE("the properties that name content are the ones that get a picker", "[s
 	// exists — showed a plain text field on the two names it actually
 	// displays. An alias is a row, because a person picks whichever name their
 	// class shows them.
-	CHECK(ContentKindOfProperty("Mesh") == AssetKind::Mesh);
 	CHECK(ContentKindOfProperty("MeshId") == AssetKind::Mesh);
-
-	CHECK(ContentKindOfProperty("ColorMap") == AssetKind::Texture);
 	CHECK(ContentKindOfProperty("TextureID") == AssetKind::Texture);
+
+	// **The aliases are gone with the properties they named.** `BasePart.Mesh`
+	// and `BasePart.ColorMap` were removed at v0.10 — geometry from a file is
+	// not something a plain `Part` has — so a row for either would be a picker
+	// offered on a property no class declares.
+	CHECK(ContentKindOfProperty("Mesh") == AssetKind::Unknown);
+	CHECK(ContentKindOfProperty("ColorMap") == AssetKind::Unknown);
 
 	// **One row covers `ParticleEmitter`, `Beam` and `Trail`**, which is the
 	// point of keying on the property rather than the class: three classes,

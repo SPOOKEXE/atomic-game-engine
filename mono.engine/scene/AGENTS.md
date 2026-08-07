@@ -241,8 +241,27 @@ presentation module is the change to refuse.
 ## The property surface is declared, and a property is a conversion
 
 `Part.cpp` declares what a script can name: `CFrame`, `Position`, `Orientation`,
-`Size`, `Color`, `Visible`, `Mesh`, `CanCollide`, `Anchored`, and `Name`/`Parent`
-on `Instance`.
+`PivotOffset`, `Size`, `Color`, `Visible`, `CanCollide`, `Anchored`, and
+`Name`/`Parent` on `Instance`. `MeshId` and `TextureID` are `MeshPart`'s.
+
+**A class declares what its *kind* of thing has, and v0.10 corrected `BasePart`
+against that.** `BasePart` is what `Part`, `MeshPart` and a future
+`UnionOperation` share; geometry loaded from a file is not shared by any of them,
+so `Mesh` and `ColorMap` moved to `MeshPart` under the names that class shows.
+Offering a mesh reference on a `Part` was worse than not having it — an author
+sets it, the six-sided box does not change, and nothing says the class was wrong.
+
+**The storage did not move and must not.** `Visual` and `SurfaceAppearance` stay
+on `BasePart`, because `client::CollectInstances` is a batched parallel walk over
+a fixed signature and an optional column is what that shape cannot express. A
+dense column of mostly-invalid names is sixteen bytes an entity and no branches;
+a per-class component is a join per row per frame. What moved is the vocabulary.
+
+**A pivot is storage and `GetPivot` is not.** `Pivot::Offset` is a column on
+every `PVInstance` — a placement says where a thing's *centre* is and almost
+nothing is placed by its centre. `PivotOf` and `PivotTo` are free functions over
+it, and `PivotTo` is `target * Offset⁻¹` rather than a plain move; getting that
+inverse the wrong way round is what "PivotTo ignores the offset" bugs are.
 
 **`Material` was on that list until v0.10 and is not a property at all now.** It
 was an `Enum` over seventeen names that no renderer sampled differently — a

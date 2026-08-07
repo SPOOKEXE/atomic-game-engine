@@ -673,6 +673,8 @@ declare interface Instance {
 	FindFirstChild(name: string): Instance | null;
 	IsDescendantOf(ancestor: Instance): boolean;
 	ClearAllChildren(): void;
+	GetPivot(): CFrame;
+	PivotTo(target: CFrame): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
@@ -689,6 +691,7 @@ declare interface Instance {
 declare interface PVInstance extends Instance {
 	CFrame: CFrame;
 	Orientation: Vector3;
+	PivotOffset: CFrame;
 	Position: Vector3;
 }
 
@@ -700,8 +703,6 @@ declare interface BasePart extends PVInstance {
 	CastShadow: boolean;
 	CollisionGroup: string;
 	Color: Color3;
-	ColorMap: string;
-	Mesh: string;
 	Size: Vector3;
 	Transparency: number;
 	Visible: boolean;

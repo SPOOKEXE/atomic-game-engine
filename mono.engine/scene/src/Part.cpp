@@ -51,6 +51,70 @@ namespace engine::scene {
 		// would write twelve bytes over the front of a `CFrame` and leave a
 		// quaternion that no longer matches — which is exactly what a member
 		// pointer cannot express and why this is a conversion.
+		// Writes a placement.
+		//
+		// **`PreviousTransform` is deliberately *not* written here, and that is
+		// a decision this function exists to record.** The obvious reading is
+		// that an authored write is a teleport and should move the frame it is
+		// interpolated from — and it was written that way first. It is wrong:
+		// `examples/Rings.luau` and every scripted animation in this engine set
+		// `CFrame` once per tick and rely on the draw list interpolating between
+		// ticks, which is what buys smooth motion at 300 frames a second over a
+		// 60 Hz simulation. Clearing the previous frame on every write turns all
+		// of it into stepped motion at the tick rate.
+		//
+		// `client.scene.tick`'s "rendering interpolates between the last two
+		// ticks" is the case that caught it, and it is the case that matters.
+		//
+		// **The editor's problem was a different one and is fixed where it
+		// belongs.** A suspended world never runs `capture-previous` — that is a
+		// `PreSimulation` system and `World::Present` runs `PreRender` alone —
+		// so its `PreviousTransform` is wherever each part was created. The fix
+		// is to present a world that is not ticking at alpha *one*, because
+		// there is no next tick to draw towards; `Editor::Present` does that.
+		//
+		// @param store    The world.
+		// @param instance The entity.
+		// @param frame    Where it now is.
+		void PlaceInstance(ecs::Store &store, ecs::Entity instance, const core::CFrame &frame) {
+			if (Transform *transform = store.GetMutable<Transform>(instance)) {
+				transform->Frame = frame;
+			}
+		}
+
+		// CFrame: the placement itself.
+		//
+		// A `Computed` over a field a member pointer could reach, which is the
+		// one case in this file where that is not a smell — see `PlaceInstance`.
+		PropertyDescriptor CFrameProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CFrame");
+			property.Type = PropertyType::CFrame;
+			property.Size = sizeof(core::CFrame);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Transform>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Transform *transform = store.Get<Transform>(instance);
+				if (transform == nullptr) {
+					return false;
+				}
+				*static_cast<core::CFrame *>(out) = transform->Frame;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				if (store.Get<Transform>(instance) == nullptr) {
+					return false;
+				}
+				PlaceInstance(store, instance, *static_cast<const core::CFrame *>(value));
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor PositionProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Position");
@@ -70,11 +134,13 @@ namespace engine::scene {
 			};
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				Transform *transform = store.GetMutable<Transform>(instance);
+				const Transform *transform = store.Get<Transform>(instance);
 				if (transform == nullptr) {
 					return false;
 				}
-				transform->Frame.Position = *static_cast<const core::Vector3 *>(value);
+				core::CFrame frame = transform->Frame;
+				frame.Position = *static_cast<const core::Vector3 *>(value);
+				PlaceInstance(store, instance, frame);
 				return true;
 			};
 
@@ -110,20 +176,19 @@ namespace engine::scene {
 
 			// Position kept, for the same reason Position keeps the rotation.
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				Transform *transform = store.GetMutable<Transform>(instance);
+				const Transform *transform = store.Get<Transform>(instance);
 				if (transform == nullptr) {
 					return false;
 				}
 				const core::Vector3 degrees = *static_cast<const core::Vector3 *>(value);
-				const core::CFrame rotation = core::CFrame::Angles(
+				core::CFrame frame = core::CFrame::Angles(
 					degrees.X * RADIANS_PER_DEGREE,
 					degrees.Y * RADIANS_PER_DEGREE,
 					degrees.Z * RADIANS_PER_DEGREE
 				);
 
-				const core::Vector3 kept = transform->Frame.Position;
-				transform->Frame = rotation;
-				transform->Frame.Position = kept;
+				frame.Position = transform->Frame.Position;
+				PlaceInstance(store, instance, frame);
 				return true;
 			};
 
@@ -909,7 +974,7 @@ namespace engine::scene {
 			// split, kept because v0.6 binds `Instance.new` to this same table
 			// and a tree that differs from the one scripts expect is a
 			// migration nobody asked for.
-			const std::array pv{ecs::Components::Of<Transform>()};
+			const std::array pv{ecs::Components::Of<Transform>(), ecs::Components::Of<Pivot>()};
 			const ecs::ClassId pvInstance = ecs::Classes::Register("PVInstance", instance, pv);
 
 			const std::array base{
@@ -1134,9 +1199,21 @@ namespace engine::scene {
 			// sets `.Name`, so it has to be writable rather than readable.
 			// `Name` and `Parent` are declared by `RegisterInstanceRoot` above.
 
-			ecs::Classes::Property<&Transform::Frame>(pvInstance, "CFrame");
+			// **Computed rather than a member projection**, which it was: a
+			// projection writes `Transform::Frame` and nothing else, and an
+			// authored placement has to move `PreviousTransform` with it or the
+			// part is drawn between where it was and where it was put.
+			// `PlaceInstance` carries the whole argument.
+			ecs::Classes::Computed(pvInstance, CFrameProperty());
 			ecs::Classes::Computed(pvInstance, PositionProperty());
 			ecs::Classes::Computed(pvInstance, OrientationProperty());
+
+			// **Roblox's `PivotOffset`, on `PVInstance` rather than on
+			// `BasePart`.** Roblox declares it on the latter; here the component
+			// is on the former, and a `Model` — when there is one — wants the
+			// same field for the same reason. Declaring it where the storage is
+			// keeps one answer to "what has a pivot".
+			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
 
 			ecs::Classes::Computed(basePart, SizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
@@ -1150,11 +1227,35 @@ namespace engine::scene {
 			// share a surface and never a material.
 			ecs::Classes::Property<&Visual::Tint>(basePart, "Color");
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
-			ecs::Classes::Property<&Visual::Mesh>(basePart, "Mesh");
 
-			// The surface a part is drawn with. On `BasePart` because the
-			// component is, so a plain `Part` may carry a texture too.
-			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(basePart, "ColorMap");
+			// **`Mesh` and `ColorMap` are not here, and that is v0.10's
+			// correction.** `BasePart` is what `Part`, `MeshPart` and a future
+			// `UnionOperation` *share*, and geometry loaded from a file is not
+			// shared by any of them: a `Part` is one of six built-in shapes and
+			// naming a mesh on it is a property that does nothing. Offering it
+			// is worse than not having it — an author sets it, the part does not
+			// change, and nothing says the class was the wrong one. Both are
+			// declared on `MeshPart` below, under the names that class actually
+			// shows.
+			//
+			// **The storage is unchanged and stays on `BasePart`.**
+			// `SurfaceAppearance`'s own comment carries why: `client::
+			// CollectInstances` is a batched parallel walk over a fixed
+			// signature, and an optional column is precisely what that shape
+			// cannot express. A dense column of mostly-invalid names is sixteen
+			// bytes an entity and no branches — where a per-class component
+			// would be a join per row per frame. What moved is the *vocabulary*,
+			// which is what a properties panel and a script see.
+			//
+			// A `Part` is textured by a `Material` instance under it, which is
+			// what `scene/Materials.hpp` is for.
+
+			// **The alpha pair stays on `BasePart`, and the asymmetry is
+			// deliberate.** These say how the alpha of whatever is being sampled
+			// is treated, and a plain `Part` samples something the moment it has
+			// a `Material` child — a cut-out material on a `Part` needs `Clip`
+			// exactly as one on a `MeshPart` does. They are not *content*, which
+			// is the line the two above fall on the far side of.
 			ecs::Classes::ClampedProperty<&SurfaceAppearance::AlphaCutoff, 0.0f, 1.0f>(
 				basePart, "AlphaCutoff"
 			);
@@ -1199,10 +1300,16 @@ namespace engine::scene {
 			// Roblox's is and because `Orientation` already reproduces that same
 			// split — the component stores radians and the conversion is where
 			// the unit changes, which is the whole shape of a property here.
-			// Roblox's names for the same two fields, on the class a script
-			// asks for by name. Aliases rather than a second storage: both
-			// project the components `BasePart` already holds, so setting
-			// `.MeshId` and reading `.Mesh` cannot disagree.
+			// **Roblox's names, and since v0.10 the only names.** These were
+			// aliases of `BasePart.Mesh` and `BasePart.ColorMap`; those are gone
+			// — see the note where they used to be declared — so a mesh
+			// reference and its sheet are named on the one class that has
+			// either. One spelling rather than two also ends the trap
+			// `studio/Assets.hpp` warned about, where an alias missing from the
+			// picker's table gave a plain text field on the name people use.
+			//
+			// They still project the components `BasePart` holds, which is a
+			// storage decision and not a vocabulary one.
 			ecs::Classes::Property<&Visual::Mesh>(meshPart, "MeshId");
 			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(meshPart, "TextureID");
 
@@ -1318,6 +1425,34 @@ namespace engine::scene {
 			// other ambiguous.
 			return part;
 		}
+	}
+
+	core::CFrame PivotOf(const ecs::Store &store, ecs::Entity instance) {
+		const Transform *transform = store.Get<Transform>(instance);
+		if (transform == nullptr) {
+			return {};
+		}
+
+		// **A missing `Pivot` is the identity rather than a refusal.** Every
+		// `PVInstance` has the column, but a replica's row grows from a wire
+		// delta and a headless world may hold an instance built by hand — and
+		// "no offset" is a complete answer, not an error.
+		const Pivot *pivot = store.Get<Pivot>(instance);
+		return pivot == nullptr ? transform->Frame : transform->Frame * pivot->Offset;
+	}
+
+	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target) {
+		if (store.Get<Transform>(instance) == nullptr) {
+			return false;
+		}
+
+		const Pivot *pivot = store.Get<Pivot>(instance);
+		const core::CFrame placement = pivot == nullptr ? target : target * pivot->Offset.Inverse();
+
+		// Through the same helper a property write uses, so a script pivoting a
+		// part and an author dragging one leave the world in the same state.
+		PlaceInstance(store, instance, placement);
+		return true;
 	}
 
 	ecs::ClassId PartClass() {

@@ -62,7 +62,9 @@
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
+#include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct SDL_Window;
@@ -1234,6 +1236,14 @@ namespace studio {
 		// store.
 		void RebuildGallery();
 
+		// Whether the gallery has been walked since it was last invalidated.
+		//
+		// **Separate from `Gallery.empty()`, which is what it used to be gated
+		// on.** A world that names no assets produces an empty gallery, and
+		// reading that as "not scanned yet" walked every entity of every world
+		// on every frame the panel was open.
+		bool GalleryScanned = false;
+
 		// Selects every instance using one asset.
 		//
 		// The gesture the gallery exists for — "where is this texture actually
@@ -1296,6 +1306,41 @@ namespace studio {
 		//
 		// @param frameSeconds How long the last frame took.
 		void PumpContent(double frameSeconds);
+
+		// Takes what the delivery client has finished and registers it.
+		//
+		// **The editor fetches content, which it did not before at all.** Its
+		// delivery client existed and nothing ever asked it for anything, so a
+		// `MeshPart` drew the fallback cube however good its `MeshId` was.
+		void DrainContent();
+
+		// Asks for the textures the open worlds name and has not asked for.
+		void RequestShownTextures();
+
+		// Asks for one texture, once.
+		void RequestContentTexture(const engine::core::Name &texture);
+
+		// Runs `body` inside every open world.
+		void EachOpenWorld(const std::function<void(engine::ecs::Store &)> &body);
+
+		// Whether the by-kind requests have been issued. Once, not per frame.
+		bool ContentRequested = false;
+
+		// Whether the one-line summary has been logged.
+		bool ContentReported = false;
+
+		size_t ContentMeshes = 0;
+		size_t ContentTextures = 0;
+		size_t ContentMaterials = 0;
+
+		// Fetches still in flight.
+		std::vector<engine::delivery::RequestId> ContentPending;
+
+		// Requests made while `ContentPending` was being walked.
+		std::vector<engine::delivery::RequestId> ContentIssued;
+
+		// Which texture names have been asked for, by `core::Name::Id`.
+		std::unordered_set<uint32_t> ContentAsked;
 
 		// Queues every file in the local store's `raw/` for every write source.
 		void UploadStore();

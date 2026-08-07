@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <cdn/LocalStore.hpp>
 #include <studio/ContentSources.hpp>
 
 TEST_SUITE_ID("studio.contentsources")
@@ -42,18 +43,25 @@ namespace {
 	}
 }
 
-TEST_CASE("a fresh install starts with one local origin", "[studio][contentsources]") {
+TEST_CASE("a fresh install starts with the store on this machine", "[studio][contentsources]") {
 	const ContentSources sources = ContentSources::Default();
 
-	// One, not none: an editor that came up with an empty list would report
-	// "no sources" for a machine that has an origin running next to it, which
-	// is the ordinary development arrangement.
-	REQUIRE(sources.Sources.size() == 1);
+	// **Two rows, and the first is the local folder.** This used to be one HTTP
+	// origin and no publisher key, and "no key" is what `DeliverySettings::
+	// IsValid` refuses — so a fresh editor built no delivery client and fetched
+	// nothing at all. A `MeshPart` drew the fallback cube however good its
+	// `MeshId` was.
+	REQUIRE(sources.Sources.size() == 2);
 	CHECK(sources.Sources.front().Enabled);
+	CHECK(sources.Sources.front().Kind == engine::delivery::SourceKind::Directory);
 
-	// And no trust by default. The publisher key is the thing a person has to
-	// supply, and defaulting one would be defaulting who this editor believes.
-	CHECK(sources.PublisherKey.empty());
+	// **A key by default, which the comment here used to forbid.** "Defaulting
+	// one would be defaulting who this editor believes" is still true and is
+	// exactly why this one is `cdn::DevelopmentSigningKey`'s public half: it
+	// believes the store this machine publishes to, which is the folder on the
+	// row above it. Pointing a row anywhere else means supplying the real key —
+	// see `cdn/LocalStore.hpp` for where that stops.
+	CHECK_FALSE(sources.PublisherKey.empty());
 }
 
 TEST_CASE("a saved list comes back in the same order", "[studio][contentsources]") {
@@ -273,6 +281,72 @@ TEST_CASE("an unrecognised role reads as both rather than dropping the row", "[s
 	// The permissive answer is the one that keeps a list working — a row
 	// dropped over a word nobody recognises is an origin that vanished.
 	CHECK(sources.Sources.front().Role == SourceRole::Both);
+
+	std::filesystem::remove(path);
+}
+
+// --- what a fresh editor can reach -------------------------------------------
+
+TEST_CASE("a fresh editor can fetch from the store on this machine", "[studio][content]") {
+	// **The default was an address nobody is listening on and no publisher
+	// key**, which `DeliverySettings::IsValid` refuses — so `MakeAssetClient`
+	// was never called and the editor fetched *nothing at all*. A `MeshPart`
+	// drew the fallback cube however good its `MeshId` was, a `ColorMap` drew
+	// nothing, and the assets panel happily listed a store full of content none
+	// of which the viewport could show. Nothing said why: an unconfigured
+	// delivery client and one whose fetches fail look identical from a viewport.
+	const studio::ContentSources sources = studio::ContentSources::Default();
+	const engine::delivery::DeliverySettings settings = sources.ToSettings();
+
+	CHECK(settings.IsValid());
+	REQUIRE_FALSE(settings.Usable().empty());
+
+	// The store this machine's client publishes to and reads from, first.
+	CHECK(settings.Usable().front().Kind == engine::delivery::SourceKind::Directory);
+	CHECK(
+		settings.Usable().front().Location == cdn::DefaultLocalPaths().Processed.string()
+	);
+
+	// **The key that can verify it.** Trusting the development identity is what
+	// makes the local folder usable with nothing typed; it verifies only what
+	// this editor publishes, and any other origin needs the real one.
+	CHECK(sources.PublisherKey == cdn::DevelopmentPublisher().ToHex());
+}
+
+TEST_CASE("the remote row is kept and turned off", "[studio][content]") {
+	// **Kept rather than dropped**, which is `ContentSources.hpp`'s own rule one
+	// row over: a disabled source is one somebody can switch on, and deleting
+	// the address a deployment uses would make the common remote case something
+	// to retype.
+	const studio::ContentSources sources = studio::ContentSources::Default();
+	REQUIRE(sources.Sources.size() >= 2);
+
+	bool sawDisabledHttp = false;
+	for (const engine::delivery::Source &source : sources.Sources) {
+		if (source.Kind == engine::delivery::SourceKind::Http) {
+			CHECK_FALSE(source.Enabled);
+			sawDisabledHttp = true;
+		}
+	}
+	CHECK(sawDisabledHttp);
+}
+
+TEST_CASE("the default survives a save and a load", "[studio][content]") {
+	// The key is written and read back, which the round trip did not cover
+	// before because the default had none.
+	const std::filesystem::path path =
+		std::filesystem::temp_directory_path() / "atomic-studio-content-default.ini";
+	std::filesystem::remove(path);
+
+	const studio::ContentSources written = studio::ContentSources::Default();
+	REQUIRE(written.Save(path));
+
+	studio::ContentSources read;
+	REQUIRE(read.Load(path));
+	CHECK(read.PublisherKey == written.PublisherKey);
+	REQUIRE(read.Sources.size() == written.Sources.size());
+	CHECK(read.Sources[0].Location == written.Sources[0].Location);
+	CHECK(read.Sources[0].Enabled);
 
 	std::filesystem::remove(path);
 }

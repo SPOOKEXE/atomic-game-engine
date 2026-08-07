@@ -80,16 +80,12 @@ TEST_CASE("a mesh part's content rows all get a picker", "[studio][properties]")
 	const Entity part = store.CreateInstance(Classes::Find(Name("MeshPart")), "Imported");
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 
-	// `MeshId` and `TextureID` are Roblox's names and the ones a `MeshPart`
-	// actually shows; `Mesh` and `ColorMap` are the same two components under
-	// `BasePart`'s spellings. An alias missing from the table is a plain text
-	// field on the name somebody is looking at, which `Assets.hpp` calls the
-	// exact cost of keying on the property.
+	// `MeshId` and `TextureID` are Roblox's names and, since v0.10, the only
+	// ones — the `BasePart` aliases `Mesh` and `ColorMap` are gone, because
+	// geometry loaded from a file is not something a plain `Part` has.
 	for (const auto &[property, kind] : {
 			 std::pair<std::string_view, AssetKind>{"MeshId", AssetKind::Mesh},
 			 std::pair<std::string_view, AssetKind>{"TextureID", AssetKind::Texture},
-			 std::pair<std::string_view, AssetKind>{"Mesh", AssetKind::Mesh},
-			 std::pair<std::string_view, AssetKind>{"ColorMap", AssetKind::Texture},
 		 }) {
 		INFO(property);
 		const Row row = Inspect(store, part, property);
@@ -109,11 +105,11 @@ TEST_CASE("a mesh part's content rows all get a picker", "[studio][properties]")
 	}
 }
 
-TEST_CASE("a plain part's content rows do too", "[studio][properties]") {
-	// **The same check one class down**, because `MeshPart` adds no component —
-	// it is the vocabulary, and `Visual::Mesh` and `SurfaceAppearance::ColourMap`
-	// sit on `BasePart`. A `Part` that could not pick a texture would mean the
-	// two spellings had drifted apart rather than the alias being wrong.
+TEST_CASE("a plain part offers neither row", "[studio][properties]") {
+	// **The point of the split, from the panel's side.** A mesh reference on a
+	// `Part` was a picker that did nothing: you chose a mesh, the six-sided box
+	// did not change, and nothing said the class was the wrong one. A `Part` is
+	// textured by a `Material` instance under it instead.
 	engine::scene::RegisterSceneComponents();
 	engine::scene::RegisterSceneClasses();
 
@@ -121,17 +117,10 @@ TEST_CASE("a plain part's content rows do too", "[studio][properties]") {
 	const Entity part = store.CreateInstance(Classes::Find(Name("Part")), "Plain");
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 
-	const Row mesh = Inspect(store, part, "Mesh");
-	CHECK(mesh.Found);
-	CHECK(mesh.Readable);
-	CHECK(mesh.Writable);
-	CHECK(mesh.Kind == AssetKind::Mesh);
-
-	const Row colour = Inspect(store, part, "ColorMap");
-	CHECK(colour.Found);
-	CHECK(colour.Readable);
-	CHECK(colour.Writable);
-	CHECK(colour.Kind == AssetKind::Texture);
+	CHECK_FALSE(Inspect(store, part, "Mesh").Found);
+	CHECK_FALSE(Inspect(store, part, "MeshId").Found);
+	CHECK_FALSE(Inspect(store, part, "ColorMap").Found);
+	CHECK_FALSE(Inspect(store, part, "TextureID").Found);
 }
 
 TEST_CASE("a material instance's one row gets a picker", "[studio][properties]") {

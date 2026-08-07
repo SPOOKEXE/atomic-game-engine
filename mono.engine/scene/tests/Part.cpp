@@ -453,11 +453,13 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	const ClassId meshPart = engine::ecs::Classes::Find(Name("MeshPart"));
 	REQUIRE(meshPart.IsValid());
 
-	// **It adds no component**, and that is the whole shape of the class:
-	// `Visual::Mesh` and `SurfaceAppearance::ColourMap` already sit on
-	// `BasePart`, because a plain `Part` may name a built-in and a texture just
-	// as legitimately. What `MeshPart` is *for* is the vocabulary a ported
-	// script uses.
+	// **It adds no component and it is the only class with the vocabulary.**
+	// `Visual::Mesh` and `SurfaceAppearance::ColourMap` sit on `BasePart` as
+	// *storage*, because the draw-list pass is a batched walk over a fixed
+	// signature and an optional column is what that shape cannot express. What
+	// v0.10 moved is the naming: `BasePart` is what `Part`, `MeshPart` and a
+	// future `UnionOperation` share, and geometry loaded from a file is not
+	// shared by any of them.
 	CHECK(engine::ecs::Classes::IsA(meshPart, engine::ecs::Classes::Find(Name("BasePart"))));
 
 	const Entity part = store.CreateInstance(meshPart, "Fox");
@@ -471,15 +473,46 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	REQUIRE(Write(store, part, "MeshId", Name("props/fox.amesh")));
 	CHECK(Read<Name>(store, part, "MeshId") == Name("props/fox.amesh"));
 
-	// **The alias and the component agree because there is one component.**
-	// `MeshId` and `Mesh` project the same field, so a script setting one and a
-	// loader reading the other cannot disagree — which is the whole reason the
-	// class carries no storage of its own.
-	CHECK(Read<Name>(store, part, "Mesh") == Name("props/fox.amesh"));
-
 	REQUIRE(Write(store, part, "TextureID", Name("props/fox.atex")));
 	CHECK(Read<Name>(store, part, "TextureID") == Name("props/fox.atex"));
-	CHECK(Read<Name>(store, part, "ColorMap") == Name("props/fox.atex"));
+
+	// **One spelling and not two.** `Mesh` and `ColorMap` were aliases of these
+	// on `BasePart` and are gone: two names for one field is the duplication
+	// `AGENTS.md` calls the most expensive kind, and it had already cost the
+	// asset picker a bug — an alias missing from its table gave a plain text
+	// field on the name people actually use.
+	Name unused;
+	CHECK_FALSE(store.GetProperty(part, Name("Mesh"), &unused, sizeof(unused)));
+	CHECK_FALSE(store.GetProperty(part, Name("ColorMap"), &unused, sizeof(unused)));
+}
+
+TEST_CASE("a plain Part names no mesh and no texture", "[scene][part]") {
+	// **The point of the split.** A `Part` is one of six built-in shapes, and a
+	// mesh reference on it is a property that does nothing — an author sets it,
+	// the part does not change, and nothing says the class was the wrong one.
+	// Offering it is worse than not having it.
+	//
+	// A `Part` is textured by a `Material` instance under it, which is what
+	// `scene/Materials.hpp` is for.
+	Store store("plain_part_vocabulary");
+	RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Plain");
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	Name unused;
+	CHECK_FALSE(store.GetProperty(part, Name("Mesh"), &unused, sizeof(unused)));
+	CHECK_FALSE(store.GetProperty(part, Name("MeshId"), &unused, sizeof(unused)));
+	CHECK_FALSE(store.GetProperty(part, Name("ColorMap"), &unused, sizeof(unused)));
+	CHECK_FALSE(store.GetProperty(part, Name("TextureID"), &unused, sizeof(unused)));
+
+	// **The storage is still there and is still dense**, which is the half that
+	// did not move: the renderer reads these as columns over every drawable.
+	CHECK(store.Get<engine::scene::SurfaceAppearance>(part) != nullptr);
+
+	// And the alpha pair stays, because a `Material` on a `Part` samples a
+	// texture whose alpha has to be interpreted.
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Opaque"));
 }
 
 TEST_CASE("AlphaMode is an enum, so a misspelling is refused", "[scene][part]") {
@@ -505,4 +538,92 @@ TEST_CASE("AlphaMode is an enum, so a misspelling is refused", "[scene][part]") 
 	// surface that is entirely there or entirely gone.
 	REQUIRE(Write(store, part, "AlphaCutoff", 4.0f));
 	CHECK(Read<float>(store, part, "AlphaCutoff") == 1.0f);
+}
+
+// --- pivots -------------------------------------------------------------------
+
+TEST_CASE("a pivot defaults to the placement itself", "[scene][part]") {
+	// **Identity means "the centre"**, which is what makes the field safe to put
+	// on every placed thing: a part nobody has given a pivot behaves exactly as
+	// it did before pivots existed.
+	Store store("pivot_default");
+	RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Plain");
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	const Vector3 placed{3.0f, 4.0f, 5.0f};
+	REQUIRE(Write(store, part, "Position", placed));
+
+	CHECK(engine::scene::PivotOf(store, part).Position == placed);
+}
+
+TEST_CASE("a pivot offset moves the handle and not the part", "[scene][part]") {
+	// A door's hinge: the part stays where it is and what `GetPivot` answers
+	// moves to the edge.
+	Store store("pivot_offset");
+	RegisterSceneClasses();
+
+	const Entity door = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Door");
+
+	const engine::core::CFrame hinge(Vector3(-2.0f, 0.0f, 0.0f));
+	REQUIRE(Write(store, door, "PivotOffset", hinge));
+
+	CHECK(engine::scene::PivotOf(store, door).Position.X == Catch::Approx(-2.0f));
+
+	// The placement itself is untouched — a pivot describes a handle, not a
+	// move.
+	CHECK(Read<Vector3>(store, door, "Position").X == Catch::Approx(0.0f));
+}
+
+TEST_CASE("PivotTo puts the handle where it was asked for", "[scene][part]") {
+	// **The inverse, and it is the whole of `PivotTo`.** Setting the transform
+	// to the target and hoping is what "PivotTo ignores the offset" bugs are:
+	// the placement that puts the *pivot* at the target is `target * Offset` —
+	// inverted.
+	Store store("pivot_to");
+	RegisterSceneClasses();
+
+	const Entity door = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Door");
+	const engine::core::CFrame hinge(Vector3(-2.0f, 0.0f, 0.0f));
+	REQUIRE(Write(store, door, "PivotOffset", hinge));
+
+	const engine::core::CFrame target(Vector3(10.0f, 1.0f, 0.0f));
+	REQUIRE(engine::scene::PivotTo(store, door, target));
+
+	// The handle landed exactly where it was sent.
+	const engine::core::CFrame pivot = engine::scene::PivotOf(store, door);
+	CHECK(pivot.Position.X == Catch::Approx(10.0f));
+	CHECK(pivot.Position.Y == Catch::Approx(1.0f));
+
+	// And the part moved to put it there, rather than onto the target itself.
+	CHECK(Read<Vector3>(store, door, "Position").X == Catch::Approx(12.0f));
+}
+
+TEST_CASE("PivotTo with no offset is a plain move", "[scene][part]") {
+	// The common case has to stay the obvious one, or `PivotTo` becomes a thing
+	// people avoid.
+	Store store("pivot_plain");
+	RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Plain");
+	const engine::core::CFrame target(Vector3(7.0f, 0.0f, -3.0f));
+
+	REQUIRE(engine::scene::PivotTo(store, part, target));
+	CHECK(Read<Vector3>(store, part, "Position").X == Catch::Approx(7.0f));
+	CHECK(Read<Vector3>(store, part, "Position").Z == Catch::Approx(-3.0f));
+}
+
+TEST_CASE("something with no placement has no pivot to move", "[scene][part]") {
+	// A `Folder` is not a `PVInstance`. Answering the identity rather than
+	// raising is what lets a script ask any instance without a class check
+	// first — the same rule `IsA` follows for a class nobody registered.
+	Store store("pivot_absent");
+	RegisterSceneClasses();
+
+	const Entity folder = store.CreateInstance(engine::ecs::Classes::Find(Name("Instance")), "Folder");
+	REQUIRE(folder != engine::ecs::NULL_ENTITY);
+
+	CHECK(engine::scene::PivotOf(store, folder).Position == Vector3(0.0f, 0.0f, 0.0f));
+	CHECK_FALSE(engine::scene::PivotTo(store, folder, engine::core::CFrame(Vector3(5.0f, 0.0f, 0.0f))));
 }
