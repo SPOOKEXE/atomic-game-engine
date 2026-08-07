@@ -41,9 +41,12 @@ namespace engine::render {
 	//
 	// @since v0.8
 	struct AdornmentLine {
+		// The two ends and what colour to draw between them.
+		//@{
 		core::Vector3 From;
 		core::Vector3 To;
 		core::Color3 Colour;
+		//@}
 
 		// 0 is opaque, Roblox's sense — kept because every other transparency
 		// in this engine keeps it and one that flipped would be found by

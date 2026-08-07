@@ -255,7 +255,7 @@ namespace engine::script {
 
 		// Which thread is suspended on which `world::Ticket`.
 		//
-		// **The first of `docs/SCRIPT_CONCURRENCY.md` §1's three legal resume
+		// **The first of `docs/retired/SCRIPT_CONCURRENCY.md` §1's three legal resume
 		// sources**, made concrete. A `GetAsync` returns a ticket, the reply
 		// lands at a later barrier applied in sorted order, and this is what
 		// joins the reply back to the script waiting for it. Keyed on the
@@ -267,7 +267,7 @@ namespace engine::script {
 	//
 	// What tells a legal yield from an illegal one: a thread that suspended
 	// through `task` is waiting for a tick boundary, which
-	// `docs/SCRIPT_CONCURRENCY.md` §1 permits. One that suspended any other way
+	// `docs/retired/SCRIPT_CONCURRENCY.md` §1 permits. One that suspended any other way
 	// found a route out of the sandbox and is refused.
 	//
 	// @param context The VM's context.
@@ -421,7 +421,7 @@ namespace engine::script {
 	//
 	// `MessagingService`, `MemoryStoreService` and `DataStoreService`. The last
 	// two want a reply, and a reply arrives at a later barrier, so a script
-	// **yields** on one — which is legal under `docs/SCRIPT_CONCURRENCY.md` §1
+	// **yields** on one — which is legal under `docs/retired/SCRIPT_CONCURRENCY.md` §1
 	// precisely because the barrier applies replies in a deterministic order.
 	void OpenServices(lua_State *state);
 

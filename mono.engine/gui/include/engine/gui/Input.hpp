@@ -98,6 +98,7 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct GuiEvent {
+		// What happened.
 		EventKind Kind = EventKind::MouseMoved;
 
 		// The element it happened to.

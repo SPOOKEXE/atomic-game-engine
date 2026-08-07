@@ -112,9 +112,11 @@ namespace engine::gui {
 	// drawing.
 	//
 	// @since v0.8
+	//@{
 	inline constexpr std::string_view WORKSPACE = "Workspace";
 	inline constexpr std::string_view STARTER_GUI = "StarterGui";
 	inline constexpr std::string_view PLAYER_GUI = "PlayerGui";
+	//@}
 
 	// Resolves every `LayerCollector` in the store and everything under it.
 	//

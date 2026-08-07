@@ -88,8 +88,11 @@ namespace studio {
 	//
 	// @since v0.10
 	struct NetworkRates {
+		// The measured rates, in bytes a second.
+		//@{
 		double DownPerSecond = 0.0;
 		double UpPerSecond = 0.0;
+		//@}
 
 		// How long the window actually was. Zero means there is not one yet,
 		// which the panel says rather than drawing a zero that looks like idle.
@@ -119,11 +122,19 @@ namespace studio {
 
 		// One reading of the running totals.
 		struct Sample {
+			// When it was taken, and the running totals at that moment.
+			//
+			// **Totals rather than deltas**, so a rate is a subtraction between
+			// any two samples — which is what lets the window be resized without
+			// the history meaning something different.
+			//@{
 			double Seconds = 0.0;
 			uint64_t Down = 0;
 			uint64_t Up = 0;
+			//@}
 		};
 
+		// The ring of readings, oldest to newest by way of `At`.
 		std::array<Sample, CAPACITY> Points{};
 
 		// Where the newest sample is.
@@ -182,8 +193,15 @@ namespace studio {
 	//
 	// @since v0.10
 	struct PendingDownload {
+		// What was asked for, and the handle to ask about it.
+		//
+		// **The name is kept even though the id is the handle**, because a panel
+		// showing what is in flight has to name the asset and a `RequestId` is a
+		// number nobody can read.
+		//@{
 		std::string Name;
 		engine::delivery::RequestId Id;
+		//@}
 	};
 
 	// What the editor is doing to the game right now.
@@ -1127,8 +1145,33 @@ namespace studio {
 		// Frames, for the eviction order. Not a clock — nothing here needs one.
 		uint64_t ThumbnailClock = 0;
 
+		// Keeps what the preview slot just drew, so a row can show it later.
+		//
+		// **This is what makes a rendered preview outlive the cursor.** Without
+		// it a mesh or a material has a picture only while it is hovered, which
+		// is `DEFERRED.md` D00033. Cheap and idempotent: an asset already
+		// holding a handle is left alone, so the turntable does not recreate a
+		// texture every frame.
+		//
+		// @param name The asset whose preview is in the slot.
+		void CachePreviewThumbnail(const std::string &name);
+
 		// Decodes, uploads and measures one mesh.
 		PreviewState BuildPreviewMesh(const std::string &name);
+
+		// Reads a material and uploads its colour map for the preview sphere.
+		//
+		// **Ready with an invalid `texture` is a real outcome, not a failure**: a
+		// material that names no colour map previews as a bare sphere, which is
+		// what that material actually puts on a part. A material that names one
+		// this machine does not have is `Unavailable` instead, because a grey
+		// ball would be a picture of something the material is not.
+		//
+		// @param name    The `.amat`'s published name.
+		// @param texture Filled with the name the sheet was registered under, and
+		//                left alone when there is nothing to sample.
+		// @return Whether a preview can be drawn.
+		PreviewState BuildPreviewMaterial(const std::string &name, engine::core::Name &texture);
 
 		// What a preview mesh is registered under, prefixed so it can never be
 		// drawn as content.
@@ -1138,6 +1181,16 @@ namespace studio {
 		struct PreviewBounds {
 			engine::core::Vector3 Centre;
 			float Radius = 1.0f;
+
+			// The texture the preview samples, or an invalid name for none.
+			//
+			// **Set for a material and left empty for a mesh**, which is the
+			// whole of the difference between the two previews: a material is
+			// the engine's sphere wearing its colour map, and a mesh is its own
+			// geometry wearing nothing. Both are one instance in one slot, so
+			// carrying the texture on the record rather than branching in
+			// `RenderPreviewSlot` keeps that function about the camera.
+			engine::core::Name Texture;
 		};
 
 		// Which meshes have been tried, and how each went.
@@ -1341,13 +1394,6 @@ namespace studio {
 		// `MeshPart` drew the fallback cube however good its `MeshId` was.
 		void DrainContent();
 
-		// Asks for what the open worlds name and has not been asked for, a
-		// bounded number of them per pump.
-		// Hands every open world the list of mesh names the store published.
-		//
-		// **Names, not content.** It is what makes
-		// `ContentService:GetPublishedMeshes()` answerable, and naming one of them
-		// is still what fetches it — see `scene/PublishedCatalogue.hpp`.
 		// Reshapes every part naming this mesh to the mesh's own proportions,
 		// keeping the size each part already has along its longest axis.
 		//
@@ -1355,8 +1401,16 @@ namespace studio {
 		// box is the wrong shape distorts whatever is put in it, and only the
 		// geometry knows the right shape. Idempotent, so it is safe to run
 		// whenever a mesh arrives.
+		//
+		// @param mesh   The mesh that arrived.
+		// @param extent Its own half-extent, from the renderer's table.
 		void FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent);
 
+		// Rebuilds `PublishedMeshNames` from the signed manifest.
+		//
+		// **Names, not content.** It is what makes
+		// `ContentService:GetPublishedMeshes()` answerable, and naming one of them
+		// is still what fetches it — see `scene/PublishedCatalogue.hpp`.
 		void PublishManifestNames();
 
 		// Makes sure every open world holds `PublishedMeshNames`.
@@ -1369,6 +1423,13 @@ namespace studio {
 		// The mesh names the store published, filtered to what a runtime reads.
 		std::vector<engine::core::Name> PublishedMeshNames;
 
+		// Asks for what the open worlds name and has not been asked for, a
+		// bounded number of them per pump.
+		//
+		// **Bounded because the unit that travels is a bundle**, and asking for
+		// everything at once resolves, verifies and decompresses all of it on
+		// this thread — which is what made the editor freeze for half a minute
+		// on start-up before anything was demand-driven.
 		void RequestShownContent();
 
 		// Asks for one asset, once.
@@ -1396,9 +1457,16 @@ namespace studio {
 		// every asset chosen from a picker loaded without a word.
 		size_t ContentReportedTotal = 0;
 
+		// How much of each kind has been registered into the renderer.
+		//
+		// Reported together, because "7 meshes, 16 textures" is what says a
+		// scene arrived and a bare total is not — a store that delivered every
+		// texture and no mesh reads as working until somebody looks at it.
+		//@{
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
 		size_t ContentMaterials = 0;
+		//@}
 
 		// Fetches still in flight.
 		std::vector<engine::delivery::RequestId> ContentPending;
@@ -1475,13 +1543,41 @@ namespace studio {
 
 		// Reapplies the last undone edit. See `UndoEdit` for the selection.
 		void RedoEdit();
+
+		// Whether an instance is in the current selection.
+		//
+		// @param instance The instance to test.
+		// @return `true` when it is selected.
 		bool IsSelected(Entity instance) const;
 
 		// --- actions ----------------------------------------------------------
 
+		// Replaces everything with an empty game.
+		//
+		// **Refused while anything is running**, for the reason the Worlds panel
+		// states: the snapshot Stop restores was taken before the run began.
 		void NewGame();
+
+		// Loads a game file, adopting its path.
+		//
+		// @param path The `.agame` to read.
+		// @return `false` when it could not be read or is not one.
 		bool OpenGame(const std::filesystem::path &path);
+
+		// Writes the whole game, adopting the path.
+		//
+		// **Adopting is what separates this from `ExportActiveWorld`**: the
+		// title changes, the modified marker clears, and Ctrl+S writes here from
+		// then on.
+		//
+		// @param path Where to write.
+		// @return `false` when it could not be written.
 		bool SaveGame(const std::filesystem::path &path);
+
+		// Writes the active world alone, without adopting the path.
+		//
+		// @param path Where to write.
+		// @return `false` when it could not be written.
 		bool ExportActiveWorld(const std::filesystem::path &path);
 
 		// Writes the universe and every world in it, without adopting the path.
@@ -1495,6 +1591,13 @@ namespace studio {
 		// @param path Where to write.
 		// @return `false` when the file would not be written.
 		bool ExportUniverse(const std::filesystem::path &path);
+		// Adds one world file to this universe, keeping what is here.
+		//
+		// A world whose name is taken arrives under a suffixed one rather than
+		// being refused — an import should never silently replace a scene.
+		//
+		// @param path The world file to read.
+		// @return `false` when nothing could be imported.
 		bool ImportWorldFile(const std::filesystem::path &path);
 
 		// Adds another game's worlds to this universe, keeping what is here.
@@ -1532,15 +1635,56 @@ namespace studio {
 		// @param world The world whose instances to open.
 		void ExpandWorldTree(WorldId world);
 
+		// Adds an empty world to the universe.
+		//
+		// @param name What to call it.
+		// @return The new world, or an invalid id when the name is taken.
 		WorldId AddWorld(engine::core::Name name);
+
+		// Removes a world and everything in it.
+		//
+		// **Never the last one**, for `UpdateWorldLifecycle`'s reason: a
+		// universe with nothing in it is a game that has stopped without saying
+		// so.
+		//
+		// @param world The world to remove.
 		void RemoveWorld(WorldId world);
 
+		// Creates one instance and selects it.
+		//
+		// @param world  Which world.
+		// @param klass  What to create.
+		// @param parent Where to put it, or a null entity for the root.
+		// @return The new instance, or a null entity when the class is unknown.
 		Entity InsertInstance(WorldId world, engine::ecs::ClassId klass, Entity parent);
+
+		// Destroys everything selected, as one undoable edit.
+		//
+		// **One edit and not one per instance**, so undoing a multi-selection
+		// delete brings all of it back rather than the last one.
 		void DeleteSelection();
+
+		// Clones everything selected and selects the copies.
 		void DuplicateSelection();
 
+		// Opens a script in a tab, or focuses the tab it is already in.
+		//
+		// @param world    Which world it lives in.
+		// @param instance The `Script` to open.
 		void OpenScriptTab(WorldId world, Entity instance);
+
+		// Writes a tab's text back into its instance.
+		//
+		// **Into the instance rather than to disk**, because a script *is* the
+		// game file's content — saving the game is what puts it on disk.
+		//
+		// @param tab The tab to save.
 		void SaveScriptTab(OpenScript &tab);
+
+		// Closes a tab, discarding nothing — the text is already in the
+		// instance if it was saved, and a tab is a view rather than a document.
+		//
+		// @param index Which tab.
 		void CloseScriptTab(size_t index);
 
 		// --- running -----------------------------------------------------------
@@ -1588,7 +1732,17 @@ namespace studio {
 		// --- state ------------------------------------------------------------
 
 		void Say(std::string text, engine::core::LogLevel level = engine::core::LogLevel::Info);
+		// Records that the game differs from what is on disk.
+		//
+		// **Every path that edits the world calls this**, which is why it is a
+		// method rather than a flag somebody sets: a missed call is a game that
+		// closes without offering to save.
 		void MarkModified();
+
+		// The window title: the game's name, its path, and a marker when it is
+		// modified.
+		//
+		// @return The title to set.
 		std::string TitleText() const;
 
 		// --- control -----------------------------------------------------------
@@ -1621,6 +1775,7 @@ namespace studio {
 		// over a socket.
 		bool ControlWantsProfile = false;
 
+		// What this editor was started with.
 		Options Settings;
 
 		// Where this editor fetches content from, in priority order.
@@ -1633,6 +1788,8 @@ namespace studio {
 		// The listener and the table. Held by value and started only when asked;
 		// a server that was never started costs a thread that was never spawned.
 		engine::control::Server ControlServer;
+		// What the control server exposes, and how it describes itself to
+		// whatever connected.
 		engine::control::Surface ControlSurface{
 			"atomic-studio",
 			"The editor of the atomic game engine, live. `engine_info` and `world_list` are the two "
@@ -1642,11 +1799,18 @@ namespace studio {
 			"the snapshot taken when it started."
 		};
 
+		// The window and the things that draw into it.
+		//
+		// **Held by value and in this order**, because destruction runs
+		// backwards: the clock and the interface go before the renderer, and the
+		// renderer before the window it borrowed its device from.
+		//@{
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
 		engine::render::OverlayImage Overlay;
 		engine::ui::Interface Interface;
 		engine::core::FrameClock Clock;
+		//@}
 
 		// Held by pointer because a universe binds its driver thread on
 		// construction, and that thread is decided in `Initialise` rather than
@@ -1672,6 +1836,8 @@ namespace studio {
 		// that came back open on start-up would be a modal in front of the
 		// window before anybody had asked for one.
 		bool ShowPalette = false;
+
+		// What has been typed into it.
 		std::string PaletteQuery;
 
 		// Which row the arrow keys have moved to. Reset whenever the query
@@ -1682,9 +1848,11 @@ namespace studio {
 		// The game's name and where it came from. An empty path is a game that
 		// has never been saved, which is what makes Save fall through to Save
 		// As rather than writing somewhere arbitrary.
+		//@{
 		engine::core::Name GameName;
 		std::filesystem::path GamePath;
 		bool Modified = false;
+		//@}
 
 		// The world the viewport draws and the properties panel edits.
 		WorldId Active;
@@ -1692,8 +1860,10 @@ namespace studio {
 		// What is selected, and which world it is in. Cleared whenever `Active`
 		// changes, because a selection in a world nobody is looking at is a
 		// delete somebody does not see.
+		//@{
 		WorldId SelectionWorld;
 		std::vector<Entity> Selection;
+		//@}
 
 		// One record per world the explorer has drawn. See `WorldTree`.
 		std::vector<WorldTree> Trees;
@@ -1713,8 +1883,10 @@ namespace studio {
 		// reason every panel here reads the store every frame: a half-typed
 		// name is not world state, and writing each keystroke through would put
 		// one undo entry on the stack per character.
+		//@{
 		Entity Renaming;
 		std::string RenameBuffer;
+		//@}
 
 		// Whether the rename field still has to be given the keyboard.
 		//
@@ -1854,8 +2026,10 @@ namespace studio {
 		//
 		// @param world The scene to ask about.
 		// @return The record, or null.
+		//@{
 		WorldRun *RunOf(WorldId world);
 		const WorldRun *RunOf(WorldId world) const;
+		//@}
 
 		// What a world is doing right now.
 		//
@@ -1912,8 +2086,15 @@ namespace studio {
 		// @return `true` when at least one world is running.
 		bool AnyRunning() const;
 
+		// The open script tabs, and which one is in front.
+		//
+		// **An index rather than a pointer**, because closing a tab moves the
+		// rest — a pointer would outlive the element it named by exactly one
+		// erase. -1 is no tab open.
+		//@{
 		std::vector<OpenScript> Scripts;
 		int ActiveScript = -1;
+		//@}
 
 		// How much bigger the code is drawn than the interface around it.
 		//
@@ -1923,6 +2104,10 @@ namespace studio {
 		// they switch file.
 		float ScriptZoom = 1.0f;
 
+		// The output panel's lines, oldest first.
+		//
+		// A deque because it is trimmed from the front at `OUTPUT_LIMIT` and
+		// appended at the back, which is the one shape a vector is bad at.
 		std::deque<Message> Output;
 
 		// The engine log, teed into that panel. See `PanelSink` in `Editor.cpp`:
@@ -1933,11 +2118,8 @@ namespace studio {
 
 		// --- the viewport ------------------------------------------------------
 
-		// Where the eye is. Not an entity in any world: a camera that lived in
-		// the scene would be saved into the game file, replicated, and reset by
-		// Stop — three things an editor camera must not do.
-		// Makes this viewer's own camera in a world, and keeps it where the eye
-		// is.
+		// Puts this panel's own camera in the world it is showing, and names it
+		// the world's live one.
 		//
 		// **The camera is the viewer's, not the game's.** The editor makes one
 		// to show its point of view, a client makes one for its player, and when
@@ -1946,12 +2128,6 @@ namespace studio {
 		// Everything else about it is ordinary: it is in `Workspace`, the
 		// explorer shows it, the properties panel edits it, and a script sees it
 		// where it expects the current camera to be.
-		//
-		// @param world The world being viewed.
-		// @param eye   Where this viewport is looking from.
-		// @param lens  Its field of view and clip planes.
-		// Puts this panel's own camera in the world it is showing, and names it
-		// the world's live one.
 		//
 		// **One per panel, not one per world, and that is the whole point.** A
 		// single shared `Camera` instance was written by whichever panel drew
@@ -2009,10 +2185,18 @@ namespace studio {
 		// without finding a menu.
 		Entity FollowCamera;
 
+		// The main viewport's eye.
+		//
+		// **Yaw and pitch are kept beside the frame rather than derived from
+		// it.** Recovering them from a rotation is ambiguous at the poles, and
+		// the pitch clamp needs an angle it can compare — which is why the
+		// camera never rolls.
+		//@{
 		engine::core::CFrame CameraFrame;
 		float CameraYaw = 0.0f;
 		float CameraPitch = 0.0f;
 		float CameraSpeed = 24.0f;
+		//@}
 
 		// How big a texture the world is drawn into, from the viewport panel's
 		// content rectangle. See `render::SceneTarget`.
@@ -2033,17 +2217,29 @@ namespace studio {
 			// Which world it draws, or invalid to follow the active one.
 			WorldId World;
 
+			// The texture this panel's world is drawn into.
 			engine::render::SceneTarget Target;
 
+			// This panel's own eye, for the main viewport's reason.
+			//@{
 			engine::core::CFrame Frame;
 			float Yaw = 0.0f;
 			float Pitch = 0.0f;
 			float Speed = 24.0f;
+			//@}
 
+			// What the pointer is doing to this panel.
+			//
+			// A drag holds `Active` or `Panning` until the button is released
+			// even when the pointer leaves — a look that stopped at the edge
+			// would be unusable exactly when somebody is turning quickly.
+			//@{
 			bool Hovered = false;
 			bool Active = false;
 			bool Panning = false;
+			//@}
 
+			// Whether the panel exists at all.
 			bool Open = false;
 
 			// A `Camera` instance this view looks through, or null for the free
@@ -2082,16 +2278,22 @@ namespace studio {
 
 			// The panel-space rectangle the world image occupies, in screen
 			// coordinates because that is what a draw list takes.
+			//@{
 			float X = 0.0f;
 			float Y = 0.0f;
 			float Width = 0.0f;
 			float Height = 0.0f;
+			//@}
 
 			// Whether this panel drew at all this frame. A closed panel returns
 			// early and leaves this false.
 			bool Drawn = false;
 		};
 
+		// How many viewport panels there are beyond the main one.
+		//
+		// A fixed number rather than a growable list, because each costs a scene
+		// target — device memory that exists whether the panel is open or not.
 		static constexpr size_t EXTRA_VIEWPORTS = 3;
 
 		// **The slot the asset preview owns, past every viewport panel.**
@@ -2100,6 +2302,7 @@ namespace studio {
 		// precisely so two things of different sizes do not reallocate one
 		// target twice a frame.
 		static constexpr size_t PREVIEW_SLOT = 1 + EXTRA_VIEWPORTS;
+		// The extra panels, whether or not they are open.
 		std::array<ViewportState, EXTRA_VIEWPORTS> Extras;
 
 		// A panel's own camera instance, and the world it was minted in.
@@ -2110,8 +2313,11 @@ namespace studio {
 		// there — `Universe::Enter` needs the id to do it, and by then the panel
 		// is already showing something else.
 		struct ViewerCamera {
+			// The camera and the world it was minted in.
+			//@{
 			WorldId World;
 			Entity Instance;
+			//@}
 		};
 
 		// Indexed the way `DrawingViewport` is: 0 is the main panel, 1.. are the
@@ -2147,13 +2353,25 @@ namespace studio {
 		//
 		// @since v0.7
 		struct PendingPickAction {
+			// Which panel the click was in, and where in it.
+			//@{
 			size_t Viewport = 0;
 			float X = 0.0f;
 			float Y = 0.0f;
+			//@}
+
+			// Whether to add to the selection rather than replace it.
 			bool Add = false;
+
+			// Whether there is a click waiting at all.
+			//
+			// **Separate from the coordinates, because (0, 0) is a real
+			// place.** A sentinel position would make the top-left corner
+			// unclickable.
 			bool Wanted = false;
 		};
 
+		// The click waiting to become a selection, if any.
 		PendingPickAction PendingPick;
 
 		// Which manipulator the viewport is offering.
@@ -2179,6 +2397,7 @@ namespace studio {
 			Scale,
 		};
 
+		// Which manipulator is offered right now.
 		ToolMode CurrentTool = ToolMode::Select;
 
 		// Snap steps, and whether they are on.
@@ -2186,9 +2405,11 @@ namespace studio {
 		// **Off by default.** Snapping is a constraint somebody turns on for a
 		// job, and an editor that quietly rounded every drag would be an editor
 		// that cannot place anything where it was asked to.
+		//@{
 		bool SnapEnabled = false;
 		float SnapDistance = 1.0f;
 		float SnapDegrees = 15.0f;
+		//@}
 
 		// A translate gizmo, mid-drag.
 		//
@@ -2214,8 +2435,10 @@ namespace studio {
 
 			// Where the selection was before any of this, for the undo entry
 			// and for applying an absolute rather than accumulated delta.
+			//@{
 			std::vector<engine::core::CFrame> Before;
 			std::vector<Entity> Instances;
+			//@}
 
 			// The half-extents before the drag, for a scale. Parallel to
 			// `Instances`; an entry is zero for anything with no `Bounds`.
@@ -2231,9 +2454,12 @@ namespace studio {
 
 			// Whether anything actually moved. A click on a handle that never
 			// dragged is not an edit and must not reach the log.
+			// Whether the drag actually moved anything, so a click that grabbed
+			// a handle and released without moving records no command.
 			bool Moved = false;
 		};
 
+		// The drag in flight, if any.
 		GizmoDrag Dragging;
 
 		// Draws the translate gizmo and runs a drag. Called from the overlay.
@@ -2287,18 +2513,22 @@ namespace studio {
 		// name is hunting it across the scripts they have open, and a find box
 		// that emptied itself every time they switched tab would be a find box
 		// they retype.
+		//@{
 		bool ShowFind = false;
 		std::string FindText;
 		std::string ReplaceText;
+		//@}
 
 		// What the output panel is showing, and what it is searching for.
 		//
 		// **Three flags rather than a minimum level**, because "just the
 		// warnings" is a question a threshold cannot answer. See `DrawOutput`.
+		//@{
 		bool ShowInfo = true;
 		bool ShowWarnings = true;
 		bool ShowErrors = true;
 		std::string OutputFilter;
+		//@}
 
 		// How far a pick ray reaches, in metres.
 		//
@@ -2398,24 +2628,38 @@ namespace studio {
 		// functions. A static would be shared between two editors in one
 		// process, which is a thing a test does.
 
+		//@{
 		bool AskingSaveAs = false;
 		bool AskingOpen = false;
+		//@}
 
 		// Whether the Rojo project picker is up. See `SyncRojo`.
 		bool AskingRojo = false;
+		// Which of the file modals is up. At most one at a time.
+		//@{
 		bool AskingExport = false;
 		bool AskingExportUniverse = false;
 		bool AskingImport = false;
 		bool AskingImportUniverse = false;
 		bool AskingNewWorld = false;
+		//@}
+		// What the modal's two text fields hold.
+		//
+		// **Shared across the dialogs rather than one pair each**, because only
+		// one is ever open — and a field per dialog is a field somebody forgets
+		// to clear, so the New World box opens holding the last export path.
+		//@{
 		std::string PathBuffer;
 		std::string NameBuffer;
+		//@}
 
 		// What the explorer's, the properties panel's and the keybind page's
 		// filter boxes hold.
+		//@{
 		std::string ExplorerFilter;
 		std::string PropertyFilter;
 		std::string KeybindFilter;
+		//@}
 
 		// Which action is waiting for a key, as a `studio::Action` cast to int,
 		// or -1 for none.
@@ -2430,20 +2674,29 @@ namespace studio {
 		// asked for while it was inside `Universe::Enter` and could not do
 		// there.
 
+		// An insert the explorer asked for, applied outside `Universe::Enter`.
 		struct PendingInsertAction {
+			// Where it goes, what it is, and what it hangs off.
+			//@{
 			WorldId World;
 			engine::ecs::ClassId Class;
 			Entity Parent;
+			//@}
 		};
 
 		// A rename the tree asked for, applied outside `Universe::Enter`.
 		struct PendingRenameInstanceAction {
+			// Which instance, and what to call it.
+			//@{
 			WorldId World;
 			Entity Instance;
 			std::string To;
+			//@}
 		};
 
+		// A move within one world, applied outside `Universe::Enter`.
 		struct PendingReparentAction {
+			// Which world it happens in.
 			WorldId World;
 
 			// Everything to move, which is one row for a menu action and the
@@ -2455,6 +2708,7 @@ namespace studio {
 			// later that most of it did not.
 			std::vector<Entity> Instances;
 
+			// What to parent them to, or null for a root.
 			Entity Parent;
 		};
 
@@ -2469,17 +2723,24 @@ namespace studio {
 		// told — and a single struct covering both would make that
 		// "sometimes".
 		struct PendingMoveAction {
+			// Where it comes from and where it goes.
+			//@{
 			WorldId Source;
 			WorldId Target;
 			Entity Instance;
+			//@}
 
 			// What to parent it to in `Target`, or null for a root there.
 			Entity Parent;
 		};
 
+		// A script the explorer asked to open, applied outside `Universe::Enter`.
 		struct PendingScriptAction {
+			// Which script, and where it lives.
+			//@{
 			WorldId World;
 			Entity Instance;
+			//@}
 		};
 
 		// Whether the pointer is over the viewport panel, and whether a drag
@@ -2488,6 +2749,8 @@ namespace studio {
 		// that stopped at the edge would be unusable exactly when somebody is
 		// turning quickly.
 		bool ViewportHovered = false;
+
+		// Whether a look-drag is in flight.
 		bool ViewportActive = false;
 
 		// Whether a middle-drag pan is in flight.
@@ -2500,12 +2763,14 @@ namespace studio {
 		// Which panels are open. Not saved here — imgui's ini remembers it, and
 		// a second copy would be the drift rule 2 is about. These are the
 		// current frame's answer, passed to `ImGui::Begin` and read back.
+		//@{
 		bool ShowViewport = true;
 		bool ShowExplorer = true;
 		bool ShowWorlds = true;
 		bool ShowProperties = true;
 		bool ShowScripts = true;
 		bool ShowOutput = true;
+		//@}
 
 		// Closed by default: it is a panel somebody opens to change one thing.
 		bool ShowSettings = false;
@@ -2693,8 +2958,10 @@ namespace studio {
 		bool ShowDebugger = false;
 
 		// What the debugger's add-breakpoint row holds.
+		//@{
 		std::string BreakSource;
 		int BreakLine = 1;
+		//@}
 
 		// Whether a new breakpoint ends the script or lets it carry on.
 		bool BreakStops = false;
@@ -2742,8 +3009,10 @@ namespace studio {
 		// with their own button. The client's F3/F5 could not be reused here —
 		// F5 is Play — and inventing a second set of function keys for the
 		// editor was a decision worth not making twice.
+		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+		//@}
 
 		// Frame times, sampled every frame so the panel has history the moment
 		// it is opened rather than starting empty.
@@ -2755,18 +3024,27 @@ namespace studio {
 		// being walked.
 		bool ResetLayout = false;
 
+		// What the panels asked for this frame, applied by
+		// `ApplyPendingActions` once every `Universe::Enter` has been left.
+		//
+		// **A slot each rather than a queue**, because two of the same action in
+		// one frame is a double click rather than two intentions — and the last
+		// one is the one somebody meant.
+		//@{
 		PendingInsertAction PendingInsert;
 		PendingReparentAction PendingReparent;
 		PendingRenameInstanceAction PendingRenameInstance;
 		PendingMoveAction PendingMove;
 		PendingScriptAction PendingOpenScript;
 		WorldId PendingRemoveWorld;
+		//@}
 		// Where the keybind table is read from and written back to.
 		//
 		// Beside the binary with the layout ini, so a launcher's working
 		// directory cannot move somebody's keys. See `Keybinds::Load`.
 		std::filesystem::path KeybindPath;
 
+		// A world the Worlds panel asked to make active, applied after it draws.
 		WorldId PendingActivate;
 
 		// A run change asked for from the Worlds panel, applied after it draws.
@@ -2774,31 +3052,51 @@ namespace studio {
 		// **Queued because `SetRunMode` rebuilds the world.** Starting or stopping
 		// a scene from inside the popup drawn for its own row would destroy the
 		// world while the loop listing it still held its handle.
+		//@{
 		WorldId PendingRunWorld;
 		RunMode PendingRunMode = RunMode::Edit;
 		WorldId PendingDuplicateWorld;
 		WorldId PendingTeleport;
+		//@}
 
 		// A world whose state a menu asked to change, and what to. Both, so
 		// that Open and Close are one queued action rather than two flags that
 		// can disagree.
+		//@{
 		WorldId PendingWorldState;
 		engine::world::WorldState PendingWorldStateTo = engine::world::WorldState::Active;
+		//@}
+
+		// A world a menu asked to rename, and what to.
+		//@{
 		WorldId PendingRenameWorld;
 		std::string PendingRenameTo;
+		//@}
 		// A camera to look through, and whether the menu asked at all — the two
 		// are separate because "look through nothing" is a real request.
+		//@{
 		Entity PendingLookThrough;
 		bool PendingLookThroughSet = false;
+		//@}
 
+		// Whether the selection is to be duplicated or destroyed after the
+		// panels finish drawing.
+		//
+		// Flags rather than actions because the subject is already known — it is
+		// whatever is selected, and reading it here would be reading it a frame
+		// early.
+		//@{
 		bool PendingDuplicate = false;
 		bool PendingDelete = false;
+		//@}
 
 		// The scene the rename prompt is for, and whether it is open. Held
 		// apart from `PendingRenameWorld` because the prompt spans frames and
 		// the action is applied on exactly one.
+		//@{
 		WorldId RenamingWorld;
 		bool AskingRenameWorld = false;
+		//@}
 
 		// The explorer's recursion buffer, shared by every level of one walk.
 		//
@@ -2814,12 +3112,15 @@ namespace studio {
 			double Taken = 0.0;
 		};
 
+		// One row per world, refreshed on a timer rather than every frame — a
+		// count is a walk, and nobody reads it sixty times a second.
 		std::vector<InstanceCount> InstanceCounts;
 
 		// --- the world lifecycle ----------------------------------------------
 
 		// When a world last had a reason to be running.
 		struct WorldLife {
+			// Which world this is about.
 			WorldId World;
 
 			// Frame-clock time of the last activity: an arrival, an occupant,
@@ -2827,6 +3128,7 @@ namespace studio {
 			double LastActivity = 0.0;
 		};
 
+		// One record per world the lifecycle is watching.
 		std::vector<WorldLife> Lives;
 
 		// Whether worlds close themselves when nobody is in them.
@@ -2835,6 +3137,10 @@ namespace studio {
 		// which is the thing `WorldState::Suspended` exists to prevent — but it
 		// is a policy, and an author debugging a world that keeps closing under
 		// them needs a way to stop it.
+		// Whether the idle policy may suspend and resume worlds at all.
+		//
+		// Off is what an author wants while debugging one scene: a world that
+		// closed under them mid-investigation would look like the bug.
 		bool AutoManageWorlds = true;
 
 		// How long a world with nobody in it keeps ticking before it closes.
@@ -2855,8 +3161,12 @@ namespace studio {
 		// destination's inbox.
 		WorldId PlayerWorld;
 
+		// Whether the editor's own loop is still going, and what the last frame
+		// through it did.
+		//@{
 		bool Running = false;
 		int64_t FramesDrawn = 0;
 		engine::render::FrameResult LastFrame;
+		//@}
 	};
 }

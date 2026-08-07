@@ -42,19 +42,25 @@ namespace engine::render {
 	struct InterfaceVertex {
 		// Position in canvas pixels. The pass turns these into clip space with
 		// one multiply, so nothing here has to know the target's size.
+		//@{
 		float X = 0.0f;
 		float Y = 0.0f;
+		//@}
 
 		// Where to sample. For an untextured quad this is the atlas's white
 		// texel, so a filled rectangle and a glyph go through one pipeline.
+		//@{
 		float U = 0.0f;
 		float V = 0.0f;
+		//@}
 
 		// RGBA, non-premultiplied, in that byte order.
+		//@{
 		uint8_t R = 255;
 		uint8_t G = 255;
 		uint8_t B = 255;
 		uint8_t A = 255;
+		//@}
 	};
 
 	// A run of indices sharing one texture and one scissor.
@@ -67,8 +73,10 @@ namespace engine::render {
 	// @since v0.8
 	struct InterfaceBatch {
 		// Where this run starts in the index buffer, and how long it is.
+		//@{
 		uint32_t FirstIndex = 0;
 		uint32_t IndexCount = 0;
+		//@}
 
 		// The scissor, in canvas pixels.
 		core::Rect Clip;

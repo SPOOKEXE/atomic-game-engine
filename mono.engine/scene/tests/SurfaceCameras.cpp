@@ -248,17 +248,37 @@ TEST_CASE("the frustum covers the whole pane, however close the viewer stands", 
 	CHECK(mirror.World.Get<Camera>(mirror.Reflection)->FieldOfViewRadians < 0.2f);
 }
 
-TEST_CASE(
-	"a pane in the plane of the viewer does not produce an infinite frustum", "[scene][surfacecameras]"
-) {
-	// The 180 degree case, arriving. The viewer walks into the glass, the
-	// reflected camera arrives with it, and the angle the pane subtends goes to
-	// half a turn — which no projection covers and which `tan` answers with
-	// infinity. Clamped, so the frame is a reflection that stops covering the far
-	// corners rather than a matrix full of infinities spreading into every
-	// culled bound.
+TEST_CASE("a pane in the plane of the viewer draws nothing", "[scene][surfacecameras]") {
+	// **D00027's closure, and it replaces what this case used to assert.** It
+	// used to put the viewer exactly in the glass and require a *clamped* frustum
+	// — a reflection covering half a turn, which no projection covers and which
+	// `tan` answers with infinity. Clamping produced a finite matrix for a view
+	// nobody can see: a pane edge-on subtends no pixels.
+	//
+	// So the answer is now that there is no reflection to draw, which is what
+	// removes the flash rather than bounding it — see `EDGE_ON_MARGIN`.
 	Mirror mirror;
 	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, -0.2f});
+
+	CHECK(AimSurfaceCameras(mirror.World) == 0);
+
+	// **The pane has to be told, not merely the camera.** A surface left holding
+	// its slot goes on sampling whatever was last rendered into it, which is a
+	// frozen reflection rather than a blank one — worse than the bug, because it
+	// is a picture of somewhere the viewer is no longer standing.
+	const Visual *pane = mirror.World.Get<Visual>(mirror.Pane);
+	REQUIRE(pane != nullptr);
+	CHECK(pane->Surface == -1);
+}
+
+TEST_CASE("a pane just clear of the plane still fits a finite frustum", "[scene][surfacecameras]") {
+	// The other side of `EDGE_ON_MARGIN`, so the clamp that case used to test is
+	// still covered where it still applies. Just outside the band the viewer is
+	// nearly level with the pane, the subtended angle is enormous, and the fit
+	// has to stay finite rather than spreading infinities into every bound
+	// derived from it.
+	Mirror mirror;
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{0.0f, 0.0f, -0.55f});
 
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
 
@@ -288,13 +308,23 @@ TEST_CASE("a rotated pane reflects along the way it actually faces", "[scene][su
 	// than the part's own would put the camera behind where the pane used to be.
 	Mirror mirror(NormalId::Front, CFrame(Vector3::Zero, CFrame::Angles(0.0f, 1.5707963f, 0.0f).Rotation()));
 
+	// **The eye is moved in front of the turned pane, which the original of this
+	// case did not do.** It left the viewer at +Z, and the rotated normal is -X —
+	// so the eye was exactly *level* with the plane, the mirrored position was
+	// the eye itself, and the assertion "Z did not move" passed for a reflection
+	// that was never computed. Since `EDGE_ON_MARGIN` that arrangement draws
+	// nothing, which is what turned this into a failure and showed up the
+	// fixture.
+	mirror.World.GetMutable<Transform>(mirror.Eye)->Frame = CFrame(Vector3{-20.0f, 0.0f, 0.0f});
+
 	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
 
-	// The face normal is now -X, the eye is at +Z — so it is level with the
-	// plane rather than in front of it, and the mirrored position is the eye
-	// itself. What matters is that nothing moved along Z, which a world-axis
-	// reflection would have done.
-	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(20.0f, TOLERANCE));
+	// The face is at x = -0.2 and the eye 19.8 in front of it, so the reflection
+	// lands the same distance behind: -20 + 2 × 19.8. **The real assertion is
+	// still that nothing moved along Z** — a version reflecting through the world
+	// axis rather than the part's own would have swung the camera along it.
+	CHECK_THAT(mirror.Placed().X, Catch::Matchers::WithinAbs(19.6f, TOLERANCE));
+	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(0.0f, TOLERANCE));
 }
 
 TEST_CASE("the face marker lies on the face the camera projects off", "[scene][surfacecameras]") {
@@ -434,6 +464,11 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 	float worstTurn = 0.0f;
 	float worstTurnAt = 0.0f;
 
+	// Whether the previous sample drew anything, so a blank frame breaks the
+	// chain instead of being compared across.
+	bool hasPrevious = false;
+	int blank = 0;
+
 	for (int step = 0; step <= SAMPLES; step++) {
 		const float angle = static_cast<float>(step) * (6.2831853f / static_cast<float>(SAMPLES));
 
@@ -443,7 +478,17 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 			mirror.Eye, Transform{CFrame(Vector3{std::sin(angle) * RADIUS, 0.0f, std::cos(angle) * RADIUS})}
 		);
 
-		AimSurfaceCameras(mirror.World);
+		// **Continuity is only asked of frames that draw**, which is the whole of
+		// D00027's fix expressed as a measurement. Crossing the plane, the pane
+		// goes blank for a few samples and comes back aimed the other way — the
+		// two orientations are never in consecutive *visible* frames, so there is
+		// no flash. Comparing across the gap would be asserting continuity of a
+		// picture nobody was shown.
+		if (AimSurfaceCameras(mirror.World) == 0) {
+			blank++;
+			hasPrevious = false;
+			continue;
+		}
 
 		const Camera *camera = mirror.World.Get<Camera>(mirror.Reflection);
 		REQUIRE(camera != nullptr);
@@ -459,7 +504,7 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 		// origin crosses it twice a lap — so the reflected camera whips 180° and
 		// the frame after it is unrelated to the frame before.
 		const Vector3 look = mirror.World.Get<Transform>(mirror.Reflection)->Frame.LookVector();
-		if (step > 0) {
+		if (hasPrevious) {
 			const float change = std::abs(fov - previous);
 			if (change > worst) {
 				worst = change;
@@ -474,6 +519,7 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 		}
 		previous = fov;
 		previousLook = look;
+		hasPrevious = true;
 	}
 
 	INFO("worst single-step change " << worst << " radians of FOV, at " << worstAt << " radians");
@@ -483,25 +529,29 @@ TEST_CASE("orbiting the eye does not step the fitted field of view", "[scene][su
 	// maximum, in one sample. A smooth sweep stays far below a tenth of that.
 	CHECK(worst < 0.25f);
 
-	// **And here is the flash, measured but not yet fixed.**
+	// **And here is the flash, fixed rather than measured.** This bound used to
+	// be `<= 2.001` — asserting the bug, because a look vector changing by
+	// exactly 2.0 is a 180 degree turn in one frame, once a lap, where `facing`
+	// flips sign as the viewer crosses the pane's plane.
 	//
-	// A degree of orbit turns the reflected camera by about a degree — except
-	// once a lap, where it turns by 180. `facing` flips sign when the viewer
-	// crosses the pane's plane, and orbiting a pane centred on the origin
-	// crosses it twice: the camera whips round and the frame after is unrelated
-	// to the frame before.
+	// It is now *zero* across every visible frame, and that falls out of the fix
+	// rather than being tuned to: within one side of the plane `facing` is
+	// constant, so the reflected camera's orientation does not change at all as
+	// the viewer orbits — only its position does. The band where the sign would
+	// have flipped draws nothing.
 	//
-	// **Skipping the crossing does not fix it and was tried.** Leaving the
-	// camera at its last transform for the frames inside the band just moves the
-	// flip a frame later; the discontinuity is inherent to the sign, not to when
-	// it is evaluated. Facing -Z on one side and +Z on the other are both
-	// correct, and there is no continuous path between them.
-	//
-	// What would fix it is deciding a pane seen edge-on renders *nothing* —
-	// disabling the surface rather than re-aiming it — which is a change to what
-	// `SurfaceView` means to the renderer and not to the arithmetic here. Filed
-	// rather than guessed at, because a half-fix that moved the flash by a frame
-	// is worse than a measurement that says where it is.
+	// **Skipping the crossing without blanking it does not work and was tried.**
+	// Holding the camera's last transform through the band moves the flip a frame
+	// later; the discontinuity belongs to the sign, not to when it is evaluated.
+	// What removes it is that no frame in between is shown.
 	INFO("worst single-step turn " << worstTurn << " at " << worstTurnAt << " radians");
-	CHECK(worstTurn <= 2.001f);
+	CHECK(worstTurn < 0.01f);
+
+	// **The band was actually entered, which the bound above cannot say.** With
+	// no blank samples this test would pass by having quietly stopped crossing
+	// the plane at all — so the fix has to be shown doing something, not merely
+	// failing to do the wrong thing. Twice a lap, a handful of samples each.
+	INFO("blank samples " << blank << " of " << SAMPLES);
+	CHECK(blank > 0);
+	CHECK(blank < SAMPLES / 4);
 }

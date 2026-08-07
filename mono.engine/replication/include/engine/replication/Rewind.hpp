@@ -17,6 +17,13 @@ namespace engine::replication {
 	//
 	// @since v0.9
 	struct RewindSettings {
+		// How many past ticks of position are kept.
+		//
+		// **A bound on memory and on fairness at once.** Deeper history honours
+		// a laggier client's view of where things were, and how far back a
+		// server is willing to go is a game-design decision about fairness
+		// rather than an engine one — half a second at sixty hertz is the
+		// default because it covers an ordinary connection and not an excuse.
 		size_t HistoryTicks = 32;
 	};
 

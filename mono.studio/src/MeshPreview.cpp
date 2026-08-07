@@ -37,7 +37,11 @@
 // regret it.
 
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/AssetKind.hpp>
+#include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
+#include <engine/assets/Texture.hpp>
+#include <engine/bake/Image.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
@@ -111,8 +115,95 @@ namespace studio {
 		return state;
 	}
 
+	PreviewState Editor::BuildPreviewMaterial(const std::string &name, engine::core::Name &texture) {
+		const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
+
+		std::error_code failure;
+		if (!std::filesystem::is_regular_file(source, failure)) {
+			return PreviewState::Unavailable;
+		}
+
+		const std::optional<std::vector<std::byte>> bytes = ReadWholeFile(source);
+		if (!bytes) {
+			return PreviewState::TooLarge;
+		}
+
+		engine::assets::MaterialData material;
+		engine::core::ByteReader reader(*bytes);
+		if (!engine::assets::Material::Read(reader, material)) {
+			return PreviewState::Unavailable;
+		}
+
+		// **A material that names no texture previews as a bare sphere, and that
+		// is the honest answer rather than a failure.** `assets::Material`'s own
+		// rule is that an untextured material and an unknown one read alike to a
+		// consumer — but here they are genuinely different: this one was read,
+		// and what it says is that there is nothing to sample. A sphere in the
+		// default grey is exactly what such a material puts on a part.
+		if (material.ColourMap.empty()) {
+			return PreviewState::Ready;
+		}
+
+		// **Past this point a missing sheet is `Unavailable`, not a bare
+		// sphere.** The material names a texture, so a grey ball would be a
+		// picture of something the material is not — the failure mode `Preview.hpp`
+		// calls a preview that lies rather than one that is absent. A store
+		// published from another machine has the `.amat` and not its pixels,
+		// which is precisely this case.
+		const std::filesystem::path sheet =
+			cdn::FindInStore(cdn::DefaultLocalPaths(), material.ColourMap);
+		if (!std::filesystem::is_regular_file(sheet, failure)) {
+			return PreviewState::Unavailable;
+		}
+
+		const std::optional<std::vector<std::byte>> sheetBytes = ReadWholeFile(sheet);
+		if (!sheetBytes) {
+			return PreviewState::TooLarge;
+		}
+
+		// **`assets::Texture` and not the importer.** A `.amat`'s colour map is
+		// always a baked name — `assetc` rewrites it through `BakedName` for
+		// exactly this reason — so reaching for `bake::ReadImage` here would be
+		// covering for a material that should never have been published.
+		engine::assets::TextureData decoded;
+		engine::core::ByteReader sheetReader(*sheetBytes);
+		if (!engine::assets::Texture::Read(sheetReader, decoded)) {
+			return PreviewState::Unavailable;
+		}
+
+		// Resampled to a bound, because nothing evicts a preview — see
+		// `PREVIEW_MATERIAL_SIDE`. Aspect is kept rather than squared off: a
+		// sheet that is not square is unusual and stretching it would put the
+		// distortion on the sphere.
+		engine::assets::TextureData fitted;
+		const uint32_t longest = std::max(decoded.Width, decoded.Height);
+		if (longest > PREVIEW_MATERIAL_SIDE) {
+			const double scale = static_cast<double>(PREVIEW_MATERIAL_SIDE) / longest;
+			const auto width = static_cast<uint32_t>(std::max(1.0, decoded.Width * scale));
+			const auto height = static_cast<uint32_t>(std::max(1.0, decoded.Height * scale));
+			if (!engine::bake::ResizeImage(decoded, width, height, fitted)) {
+				return PreviewState::Unavailable;
+			}
+		} else {
+			fitted = decoded;
+		}
+
+		// Prefixed for `PreviewMeshName`'s reason, and it matters more here: a
+		// colour map registered under its real name would replace the content
+		// one, so every part in the scene wearing that material would quietly
+		// drop to a 256-pixel copy of it.
+		const engine::core::Name key(PreviewMeshName(material.ColourMap));
+		if (!Renderer.AddTexture(key, fitted)) {
+			return PreviewState::Unavailable;
+		}
+
+		texture = key;
+		return PreviewState::Ready;
+	}
+
 	PreviewState Editor::BuildPreviewMesh(const std::string &name) {
 		engine::assets::MeshData mesh;
+		engine::core::Name texture;
 
 		// **A built-in is generated, not read**, and asking the store for one
 		// would have been a file that is deliberately not there. `engine.Cube`
@@ -120,7 +211,26 @@ namespace studio {
 		// which is the whole reason the picker offers them — so a preview that
 		// only knew how to open files would show the six meshes that are always
 		// available as the six that can never be previewed.
-		if (engine::assets::BuiltinMesh builtin; engine::assets::BuiltinFromName(name, builtin)) {
+		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Material) {
+			// **A material is the engine's own sphere wearing it.** There is no
+			// geometry to show — a `.amat` is a texture reference — so the
+			// preview has to supply a shape, and a sphere is the one that shows a
+			// map at every angle at once: the top faces the light, the limb goes
+			// to grazing, and the silhouette is the same for every material so
+			// two of them can be told apart by their surface rather than by their
+			// outline. That is the same reason every material browser ever
+			// written uses one.
+			//
+			// `MakeSphere` duplicates its seam column, so the map wraps without
+			// running backwards across one column of triangles — which is what
+			// makes this legible rather than merely round.
+			const PreviewState state = BuildPreviewMaterial(name, texture);
+			if (state != PreviewState::Ready) {
+				return state;
+			}
+			mesh = engine::assets::MakeBuiltin(engine::assets::BuiltinMesh::Sphere);
+		} else if (engine::assets::BuiltinMesh builtin;
+				   engine::assets::BuiltinFromName(name, builtin)) {
 			mesh = engine::assets::MakeBuiltin(builtin);
 		} else {
 			// **`cdn::FindInStore` and not a folder spelled here.** This read
@@ -172,6 +282,8 @@ namespace studio {
 		bounds.Radius = std::max(
 			0.05f, std::sqrt(extent.X * extent.X + extent.Y * extent.Y + extent.Z * extent.Z)
 		);
+
+		bounds.Texture = texture;
 
 		const engine::core::Name key(PreviewMeshName(name));
 		if (!Renderer.AddMesh(key, mesh)) {
@@ -225,7 +337,15 @@ namespace studio {
 		instance.HalfExtent = engine::core::Vector3{
 			bounds->second.Radius, bounds->second.Radius, bounds->second.Radius
 		};
-		instance.Tint = engine::core::Color3{0.92f, 0.92f, 0.94f};
+		// **White under a texture and a light grey without one.** The grey exists
+		// so an untextured mesh is not a black silhouette; multiplying a
+		// material's own colour map by it would darken every material preview by
+		// eight per cent against the part the same material draws on, which is
+		// the one thing a material preview must not do — it is being looked at to
+		// judge a colour.
+		instance.Texture = bounds->second.Texture;
+		instance.Tint = instance.Texture.IsValid() ? engine::core::Color3{1.0f, 1.0f, 1.0f}
+												   : engine::core::Color3{0.92f, 0.92f, 0.94f};
 		instance.Mesh = engine::core::Name(PreviewMeshName(PreviewWanted));
 
 		const engine::scene::DrawInstance one[]{instance};
@@ -299,6 +419,43 @@ namespace studio {
 		// painted the slot's texture without checking whose it was would show the
 		// hovered mesh's picture in every mesh row on screen.
 		PreviewShowing = PreviewWanted;
+
+		// **And kept, so every other row can show it too.** The slot itself is
+		// scratch — a handful of them, drawn into on rotation — which is why
+		// this preview could only ever be the row under the cursor. A capture is
+		// an ordinary texture-table entry, so it lands in the same thumbnail
+		// cache as a decoded picture and is evicted by the same rule.
+		CachePreviewThumbnail(PreviewWanted);
 		return true;
+	}
+
+	void Editor::CachePreviewThumbnail(const std::string &name) {
+		if (name.empty()) {
+			return;
+		}
+
+		// **Once per asset, not once per frame.** The preview turns, so this
+		// would otherwise release and recreate a texture every frame the cursor
+		// sat still — and the frozen angle a thumbnail wants is any of them.
+		const auto found = Thumbnails.find(name);
+		if (found != Thumbnails.end() && found->second.Handle != nullptr) {
+			return;
+		}
+
+		const engine::core::Name key(ThumbnailTextureName(name));
+		if (!Renderer.CaptureSceneTexture(PREVIEW_SLOT, key)) {
+			return;
+		}
+
+		// **Written into `Thumbnails` rather than kept beside it**, which is
+		// what makes eviction work without knowing this exists: `PumpThumbnails`
+		// drops the least recently drawn by calling `DropTexture` on exactly
+		// this name. A second cache would have been a second thing to evict, and
+		// the one nobody wrote a policy for.
+		Entry entry;
+		entry.Handle = Renderer.TextureHandle(key);
+		entry.State = entry.Handle != nullptr ? PreviewState::Ready : PreviewState::Unavailable;
+		entry.LastSeen = ThumbnailClock;
+		Thumbnails[name] = entry;
 	}
 }

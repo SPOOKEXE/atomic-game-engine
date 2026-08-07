@@ -223,10 +223,17 @@ namespace cdn {
 	// defers — or a suffix, which is a worse hash. The log is where "this came
 	// from `~/art/fox/diffuse.png`" lives.
 	//
+	// **An empty file is refused, by name.** It can never bake and never
+	// publish, so accepting one puts a file in `raw/` that nothing downstream
+	// will ever account for — and since both halves report counts rather than
+	// names, the only trace is that two totals differ by one. See the refusal in
+	// the source for the hunt that cost.
+	//
 	// @param paths  The store.
 	// @param source The file to bring in.
 	// @param seconds The time to log it at.
-	// @return What happened, or nothing when the file could not be read.
+	// @return What happened, or nothing when the file could not be read or was
+	//         empty.
 	std::optional<ImportReport>
 	ImportFile(const LocalPaths &paths, const std::filesystem::path &source, uint64_t seconds);
 

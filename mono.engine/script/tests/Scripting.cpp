@@ -2063,7 +2063,7 @@ TEST_CASE("two scripts each see themselves and not each other", "[scripting][ins
 // **The calls a script genuinely suspends on**, and the reason `task` had to
 // come first. A `Get` returns a `Ticket`; the reply lands in the inbox at a
 // later tick, applied sorted at the barrier — which is
-// `docs/SCRIPT_CONCURRENCY.md` §1's *first* legal resume source, and the only
+// `docs/retired/SCRIPT_CONCURRENCY.md` §1's *first* legal resume source, and the only
 // one that needs a bus behind it rather than a bare `Store`.
 //
 // So these tests build a real `Universe`. Asserting on the Luau code alone

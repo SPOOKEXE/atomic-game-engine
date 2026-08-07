@@ -33,8 +33,10 @@ namespace engine::replication {
 		// @since v0.9
 		const assets::SigningKey *ClientIdentity = nullptr;
 
+		// The link's own settings — framing, timeouts and per-tick budgets.
 		SessionSettings Session;
 
+		// How much unacknowledged input this client keeps for replay.
 		PredictionSettings Prediction;
 
 		// How often to say the same thing again while the exchange is unfinished.
@@ -133,8 +135,15 @@ namespace engine::replication {
 		//
 		// @since v0.3
 		struct Statistics {
+			// Inbound datagrams this connection would not parse.
+			//
+			// **Every field of an inbound message is hostile**, so a refusal here
+			// is the ordinary outcome of a hostile or corrupt packet rather than
+			// a fault to investigate — it is the count *rising steadily* that
+			// says something.
 			uint64_t Refused = 0;
 
+			// Ticks applied to the replica in full.
 			uint64_t Applied = 0;
 		};
 

@@ -2736,6 +2736,87 @@ namespace engine::render {
 		return slot < State->SceneSlots.size() ? State->SceneSlots[slot].Texture : nullptr;
 	}
 
+	bool Renderer::CaptureSceneTexture(size_t slot, const core::Name &name) {
+		if (State == nullptr || State->Device == nullptr || !name.IsValid()) {
+			return false;
+		}
+		if (slot >= State->SceneSlots.size()) {
+			return false;
+		}
+
+		const Impl::SceneSlot &source = State->SceneSlots[slot];
+		if (source.Texture == nullptr || source.DrawnWidth == 0 || source.DrawnHeight == 0) {
+			return false;
+		}
+
+		// **The drawn rectangle and not the whole target.** A scene target is
+		// allocated in 64-pixel blocks with hysteresis, so most of it is border
+		// the pass never wrote — `SceneTextureExtent` exists because of exactly
+		// that. Copying the allocation would keep a picture with an unwritten
+		// margin down two edges, and every consumer would then need the extent
+		// as well as the handle, which is the coupling this call is meant to end.
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+
+		// The source's format, for `EnsureSceneTarget`'s reason one level up: a
+		// blit between mismatched formats is a validation error on the backends
+		// that check and a corrupt image on the ones that do not.
+		info.format = State->ColourFormat();
+
+		// Sampled, and a colour target because `SDL_BlitGPUTexture` renders into
+		// its destination rather than copying into it.
+		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+		info.width = source.DrawnWidth;
+		info.height = source.DrawnHeight;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+
+		SDL_GPUTexture *copy = SDL_CreateGPUTexture(State->Device, &info);
+		if (copy == nullptr) {
+			ENGINE_ERROR("SDL_CreateGPUTexture (scene capture): {}", SDL_GetError());
+			return false;
+		}
+
+		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(State->Device);
+		if (command == nullptr) {
+			ENGINE_ERROR("SDL_AcquireGPUCommandBuffer (scene capture): {}", SDL_GetError());
+			SDL_ReleaseGPUTexture(State->Device, copy);
+			return false;
+		}
+
+		// **A blit rather than a copy pass, because the source region is a
+		// sub-rectangle.** `SDL_CopyGPUTextureToTexture` would work only if the
+		// two agreed on size, which they deliberately do not.
+		SDL_GPUBlitInfo blit{};
+		blit.source.texture = source.Texture;
+		blit.source.w = source.DrawnWidth;
+		blit.source.h = source.DrawnHeight;
+		blit.destination.texture = copy;
+		blit.destination.w = source.DrawnWidth;
+		blit.destination.h = source.DrawnHeight;
+
+		// Nothing is preserved, because every texel of the destination is
+		// written — saying so lets a tiler skip loading it.
+		blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+		blit.filter = SDL_GPU_FILTER_NEAREST;
+
+		SDL_BlitGPUTexture(command, &blit);
+		SDL_SubmitGPUCommandBuffer(command);
+
+		// **Four bytes a texel, which is the honest figure for every format this
+		// swapchain uses.** Guessing low here would let the table's ceiling be
+		// walked past by whoever captures the most.
+		const size_t bytes = static_cast<size_t>(source.DrawnWidth) * source.DrawnHeight * 4;
+
+		if (!State->Textures.Adopt(name, copy, source.DrawnWidth, source.DrawnHeight, bytes)) {
+			// Refused, so the texture is still ours to release — `Adopt` says so.
+			SDL_ReleaseGPUTexture(State->Device, copy);
+			return false;
+		}
+
+		return true;
+	}
+
 	SceneExtent Renderer::SceneTextureExtent(size_t slot) const {
 		if (slot >= State->SceneSlots.size()) {
 			return {};

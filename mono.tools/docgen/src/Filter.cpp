@@ -195,6 +195,120 @@ namespace docgen {
 			return result;
 		}
 
+		// Where the `**` emphasis markers are in one comment body.
+		//
+		// **Skipping the ones inside a code span is the whole reason this is a
+		// scan rather than a `find`.** `` `a ** b` `` is code, and turning it
+		// into a tag would rewrite the thing the backticks exist to quote.
+		// Backtick state is per line: a code span in this repository's prose
+		// never crosses one, and assuming otherwise would let a single stray
+		// backtick swallow the rest of a block.
+		std::vector<size_t> BoldMarkers(std::string_view body) {
+			std::vector<size_t> found;
+			bool code = false;
+			size_t i = 0;
+			while (i < body.size()) {
+				if (body[i] == '`') {
+					code = !code;
+					i++;
+					continue;
+				}
+				if (!code && body[i] == '*' && i + 1 < body.size() && body[i + 1] == '*') {
+					found.push_back(i);
+					i += 2;
+					continue;
+				}
+				i++;
+			}
+			return found;
+		}
+
+		bool IsSentenceStop(char c) {
+			return c == '.' || c == '?' || c == '!';
+		}
+
+		// Moves a sentence's full stop out of the emphasis that ends with it.
+		//
+		// `**Sentence.**` becomes `**Sentence**.`, and that one character is the
+		// whole of it.
+		//
+		// **`JAVADOC_AUTOBRIEF` splits the brief at the first sentence-ending
+		// stop, and it does not care that the stop is inside emphasis.** This
+		// repository's house style is a bold *sentence* — `**Twenty-eight and
+		// not thirty-two.**` — so the split lands between the `**` and its
+		// partner: the brief ends holding an unclosed emphasis and the detailed
+		// description starts with a stranded closing one. Doxygen reports `end of
+		// comment block while expecting </strong>` **against the following
+		// comment block**, which is why the warning never points at the comment
+		// that caused it.
+		//
+		// **Emphasis spanning a line break is fine and was the wrong suspect.**
+		// A whole afternoon went on it: the first minimal reproduction happened
+		// to keep the stop inside the bold while dashes, quotes and wrapping were
+		// varied around it, so every variant failed and the wrapping took the
+		// blame. Moving the stop out fixes a bold spanning three lines; keeping
+		// it in breaks one that fits on half of one.
+		//
+		// **A character moved rather than lines joined**, because the line count
+		// is this filter's load-bearing invariant — Doxygen numbers the source
+		// listing from the filtered text and the browser links from the original.
+		// This edits within a line and changes no line's existence.
+		//
+		// **An odd marker leaves the block alone.** A comment with an unpaired
+		// `**` — prose about a pointer-to-pointer, a literal asterisk pair —
+		// would otherwise have its punctuation shuffled on a boundary that is not
+		// emphasis at all.
+		void MoveSentenceStops(std::vector<std::string> &bodies, size_t first, size_t last) {
+			size_t total = 0;
+			for (size_t i = first; i <= last; ++i) {
+				total += BoldMarkers(bodies[i]).size();
+			}
+			if (total == 0 || total % 2 != 0) {
+				return;
+			}
+
+			size_t seen = 0;
+			for (size_t i = first; i <= last; ++i) {
+				const std::vector<size_t> markers = BoldMarkers(bodies[i]);
+				if (markers.empty()) {
+					seen += markers.size();
+					continue;
+				}
+
+				std::string &body = bodies[i];
+
+				// Right to left, so an edit cannot move a marker this loop has
+				// not reached yet.
+				for (size_t index = markers.size(); index-- > 0;) {
+					// Whether this marker closes depends on how many came before
+					// it in the *block*, which is what makes the pairing a block
+					// question rather than a line one.
+					size_t before = seen;
+					for (size_t earlier = 0; earlier < index; ++earlier) {
+						before++;
+					}
+					if (before % 2 == 0) {
+						continue;
+					}
+
+					const size_t marker = markers[index];
+					size_t stop = marker;
+					while (stop > 0 && IsSentenceStop(body[stop - 1])) {
+						stop--;
+					}
+					if (stop == marker) {
+						continue;
+					}
+
+					const std::string moved = body.substr(stop, marker - stop);
+					body.erase(stop, marker - stop);
+					body.insert(stop + 2, moved);
+				}
+
+				seen += markers.size();
+			}
+		}
+
 		// The line to overwrite with `/// @file`, or NONE.
 		//
 		// Overwriting a blank line that is already there is what keeps the line
@@ -242,30 +356,72 @@ namespace docgen {
 		const std::vector<Line> lines = Split(source);
 		const size_t fileCommand = FileCommandLine(lines);
 
+		// **Where every comment starts, worked out first and once.** `Scanner`
+		// carries state across lines — a block comment and a raw string both
+		// outlive one — so it must see every line exactly once and in order.
+		// That is also why the emphasis rewrite below cannot simply ask again.
+		std::vector<size_t> comments(lines.size(), NONE);
+		{
+			Scanner scanner;
+			for (size_t i = 0; i < lines.size(); ++i) {
+				comments[i] = scanner.CommentAt(lines[i].Text);
+			}
+		}
+
+		// Whether each line is a comment this filter promotes, and what its body
+		// becomes. Escaping happens here so that `MoveSentenceStops` measures
+		// offsets in the text that is actually emitted: `EscapePlaceholders`
+		// lengthens `<word>` to `&lt;word>`, so a marker position taken before it
+		// ran would name the wrong character afterwards.
+		std::vector<std::string> bodies(lines.size());
+		std::vector<bool> owned(lines.size(), false);
+		std::vector<bool> promoted(lines.size(), false);
+
+		for (size_t i = 0; i < lines.size(); ++i) {
+			const std::string_view text = lines[i].Text;
+			if (i == fileCommand || comments[i] == NONE || IsAlreadyMarked(text.substr(comments[i]))) {
+				continue;
+			}
+			promoted[i] = true;
+			owned[i] = IsBlank(text.substr(0, comments[i]));
+			bodies[i] = EscapePlaceholders(text.substr(comments[i] + 2));
+		}
+
+		// **Emphasis is a property of a block, not of a line**, so the runs are
+		// found before anything is rewritten. Only own-the-line comments group:
+		// a trailing `///<` documents the thing to its left and is a comment of
+		// one line, so pairing across two of them would join two members' prose.
+		for (size_t i = 0; i < lines.size();) {
+			if (!promoted[i] || !owned[i]) {
+				i++;
+				continue;
+			}
+			size_t last = i;
+			while (last + 1 < lines.size() && promoted[last + 1] && owned[last + 1]) {
+				last++;
+			}
+			MoveSentenceStops(bodies, i, last);
+			i = last + 1;
+		}
+
 		std::string result;
 		result.reserve(source.size() + source.size() / 8);
 
-		Scanner scanner;
 		for (size_t i = 0; i < lines.size(); ++i) {
 			const std::string_view text = lines[i].Text;
 
-			// Still scanned, so that a blank line inside a raw string is not
-			// mistaken for the one beside a comment block.
-			const size_t comment = scanner.CommentAt(text);
-
 			if (i == fileCommand) {
 				result += "/// @file";
-			} else if (comment == NONE || IsAlreadyMarked(text.substr(comment))) {
+			} else if (!promoted[i]) {
 				result += text;
 			} else {
-				const bool ownsTheLine = IsBlank(text.substr(0, comment));
-				result += text.substr(0, comment);
+				result += text.substr(0, comments[i]);
 				// `///<` is Doxygen for "documents the thing to my left". A
 				// trailing comment promoted to plain `///` would attach to the
 				// *next* member instead, which documents the wrong field and
 				// looks right while doing it.
-				result += ownsTheLine ? "///" : "///<";
-				result += EscapePlaceholders(text.substr(comment + 2));
+				result += owned[i] ? "///" : "///<";
+				result += bodies[i];
 			}
 
 			result += lines[i].Ending;

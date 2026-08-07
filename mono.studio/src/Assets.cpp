@@ -288,7 +288,7 @@ namespace studio {
 		//
 		// So exactly one mesh row is alive at a time and it is the one being
 		// pointed at, which is the row somebody wants to see.
-		if (kind == engine::assets::AssetKind::Mesh && !name.empty() && name == PreviewShowing) {
+		if (PreviewIsRendered(kind) && !name.empty() && name == PreviewShowing) {
 			if (void *const slot = Renderer.SceneTexture(PREVIEW_SLOT); slot != nullptr) {
 				const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PREVIEW_SLOT);
 

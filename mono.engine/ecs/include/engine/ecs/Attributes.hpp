@@ -73,11 +73,19 @@ namespace engine::ecs {
 		// `GetAttribute` says "there is no such thing" without a second return.
 		PropertyType Type = PropertyType::Opaque;
 
+		// The plain scalar cases, one per width `PropertyType` names.
+		//
+		// **Read only when `Type` says so**, which is the whole discipline of a
+		// struct-with-every-field: nothing here is cleared when another case is
+		// written, so a reader that trusts `Float` without checking `Type` gets
+		// whatever the last `Float` attribute on this entity happened to be.
+		//@{
 		bool Bool = false;
 		int32_t Int32 = 0;
 		int64_t Int64 = 0;
 		float Float = 0.0f;
 		double Double = 0.0;
+		//@}
 
 		// Used for both `Name` and `Enum`, exactly as `game::PropertyValue` does.
 		core::Name Name;
@@ -87,6 +95,17 @@ namespace engine::ecs {
 		// *computes* must be able to go away, where a `core::Name` never does.
 		std::string String;
 
+		// The datatype cases — every `core/types` value a script can author.
+		//
+		// **The two sequences are 656 bytes between them and are carried
+		// anyway**, which is the trade this struct's header opens with: an
+		// attribute lives in a hash map rather than in a column, so width costs
+		// the entities that have one instead of every entity in the world.
+		//
+		// Each is named for its type so a reader never has to look up which
+		// field a `PropertyType` selects — the enum member and the field spell
+		// the same word.
+		//@{
 		core::Vector3 Vector3;
 		core::CFrame CFrame;
 		core::Color3 Color3;
@@ -97,6 +116,7 @@ namespace engine::ecs {
 		core::NumberRange NumberRange;
 		core::NumberSequence NumberSequence;
 		core::ColorSequence ColorSequence;
+		//@}
 	};
 
 	// Reports whether a type may be stored as an attribute.

@@ -858,8 +858,8 @@ complete because a world is deterministic given its state and its inbox.
 
 The third form is what `just replay-check` runs: `again.rec` has to come back
 byte-identical to `run.rec`, which says the snapshot, the frame times and every
-envelope all reproduced — not merely that the replay survived. `just
-determinism` makes the weaker but broader claim, that two live runs of one scene
+envelope all reproduced — not merely that the replay survived.
+`just determinism` makes the weaker but broader claim, that two live runs of one scene
 produce identical files. Both are same-binary, same-machine; cross-machine
 agreement is deliberately not promised, because floating point differs between
 compilers and chips.
@@ -1431,8 +1431,8 @@ an editor reporting a language the engine does not run is worse than an editor
 reporting nothing. That pin currently holds the engine one release behind
 upstream; `docs/DEFERRED.md` D00019 is why, and what it would take to stop.
 
-**This is the half of the bindings contract that faces the scripts.** `just
-bindings-check` asks whether the declarations still match the class table; this
+**This is the half of the bindings contract that faces the scripts.**
+`just bindings-check` asks whether the declarations still match the class table; this
 asks whether the scripts still match the declarations, and the two can disagree
 on their own. A property removed from the class table regenerates cleanly and
 leaves every script that named it broken, with nothing reporting it until the

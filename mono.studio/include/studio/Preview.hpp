@@ -84,4 +84,38 @@ namespace studio {
 	// models this repository's own seed content contains, which is deliberate:
 	// the budget should refuse something, or it is not a budget.
 	constexpr uint32_t PREVIEW_MAXIMUM_TRIANGLES = 250000;
+
+	// The longest side a material preview's colour map is resampled to.
+	//
+	// **A material preview is the one that would otherwise grow without a
+	// bound.** A mesh preview is capped by its triangle count and a thumbnail is
+	// resampled to `THUMBNAIL_SIDE`, but a material's sheet is whatever the
+	// publisher baked — this repository's own seed content is 1K and 2K — and
+	// nothing evicts a preview once it is uploaded. Hovering thirty 2K sheets at
+	// full size is half a gigabyte of device memory for pictures of spheres.
+	//
+	// 256 rather than `THUMBNAIL_SIDE`, because this one is *sampled* rather than
+	// blitted: it wraps a sphere at the hover panel's size, so the texels that
+	// survive are the ones under a curved surface at a glancing angle, and a
+	// 64-pixel sheet reads as a smear where a thumbnail at 64 reads as a picture.
+	constexpr uint32_t PREVIEW_MATERIAL_SIDE = 256;
+
+	// Whether a kind's preview is a render rather than a bitmap.
+	//
+	// **One answer, because the question is asked in two places.** The hover
+	// panel decides whether to drive the preview slot, and a list row decides
+	// whether to paint what that slot holds — and the two have to agree exactly,
+	// or a row draws a dash beside a hover panel showing the thing. That is the
+	// duplicate-policy failure this repository keeps recording, so the condition
+	// lives here rather than being spelled in `HoverPreview.cpp` and `Assets.cpp`.
+	//
+	// **A mesh and a material, and nothing else.** Both are references with no
+	// picture of their own: a mesh is geometry that has to be drawn, and a
+	// material is a texture reference whose picture is the engine's sphere
+	// wearing it. Everything else in a store — a texture, a GIF, audio, a script
+	// — either has pixels already or has none to have.
+	constexpr bool PreviewIsRendered(engine::assets::AssetKind kind) {
+		return kind == engine::assets::AssetKind::Mesh ||
+			   kind == engine::assets::AssetKind::Material;
+	}
 }

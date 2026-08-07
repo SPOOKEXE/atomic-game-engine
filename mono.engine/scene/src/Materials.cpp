@@ -3,6 +3,10 @@
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 namespace engine::scene {
 
 	core::Name MaterialCatalogue::Find(const core::Name &material) const {
@@ -45,6 +49,11 @@ namespace engine::scene {
 	size_t ResolveMaterials(ecs::Store &store) {
 		size_t resolved = 0;
 
+		// The parents written this pass, so the next one can tell what stopped
+		// having a material. Gathered while writing rather than in a second
+		// walk — the entity is already in hand.
+		std::vector<ecs::Entity> written;
+
 		// **`Each` and not `EachBatchParallel`, and the difference is the parent
 		// lookup** — `ResolveAttachments` states the argument and this pass has
 		// exactly the same shape. A batched walk is handed columns and no entity,
@@ -56,7 +65,7 @@ namespace engine::scene {
 		// resolved name denormalised by whatever writes it; a world with one per
 		// distinct-looking part does not. Stated rather than measured, which is
 		// the honest label.
-		store.Each<MaterialRef>([&store, &resolved](ecs::Entity entity, MaterialRef &material) {
+		store.Each<MaterialRef>([&store, &resolved, &written](ecs::Entity entity, MaterialRef &material) {
 			const ecs::Entity parent = store.ParentOf(entity);
 			if (parent == ecs::NULL_ENTITY) {
 				return;
@@ -77,9 +86,52 @@ namespace engine::scene {
 			// honest default, and a pass that skipped it would make "None" mean
 			// "keep the previous one".
 			appearance->ColourMap = ColourMapOf(store, material.Asset);
+			written.push_back(parent);
 			resolved++;
 		});
 
+		std::sort(written.begin(), written.end(), [](ecs::Entity left, ecs::Entity right) {
+			return left.Id < right.Id;
+		});
+
+		// **A world that has never had a material does not acquire a catalogue
+		// here.** `ColourMapOf` is deliberately the non-creating reader so this
+		// pass leaves an untouched world untouched, and creating the resource to
+		// store an empty list would undo that for every world in the universe.
+		MaterialCatalogue *catalogue = store.ResourceMutable<MaterialCatalogue>();
+		if (catalogue == nullptr) {
+			if (written.empty()) {
+				return resolved;
+			}
+			catalogue = &MaterialsOf(store);
+		}
+
+		// Clear the parents that had a material last pass and do not now.
+		//
+		// **Written back even though it resolves to nothing**, which is the same
+		// rule as the `None` case above one level out: the field is derived, so
+		// the pass owns it, and leaving the last value would make "no material"
+		// mean "keep whatever the deleted one said".
+		for (const ecs::Entity previous : catalogue->Resolved) {
+			const bool still = std::binary_search(
+				written.begin(), written.end(), previous, [](ecs::Entity left, ecs::Entity right) {
+					return left.Id < right.Id;
+				}
+			);
+			if (still) {
+				continue;
+			}
+
+			// Null for an entity destroyed since the last pass, for one whose
+			// index has been recycled into a different entity, and for a parent
+			// that no longer draws. All three are misses rather than special
+			// cases.
+			if (SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(previous)) {
+				appearance->ColourMap = core::Name{};
+			}
+		}
+
+		catalogue->Resolved = std::move(written);
 		return resolved;
 	}
 

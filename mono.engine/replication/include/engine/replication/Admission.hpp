@@ -41,6 +41,11 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Hello {
+		// The client's ephemeral key-exchange message.
+		//
+		// **Ephemeral, and freshly generated per connection.** It comes from the
+		// OS source rather than `core::Random`, whose determinism is the whole
+		// reason it must never produce a key.
 		std::array<std::byte, net::Handshake::MESSAGE_BYTES> PublicKey{};
 	};
 
@@ -48,6 +53,12 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Challenge {
+		// The cookie the server issued.
+		//
+		// **An HMAC over the peer's address and its hello, keyed by a rotating
+		// secret** — which is what makes the challenge cost no state: the server
+		// remembers nothing about who it has challenged, and an answer carrying
+		// a cookie it did not mint verifies against nothing.
 		std::array<std::byte, net::Cookie::COOKIE_BYTES> Cookie{};
 	};
 
@@ -55,6 +66,13 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Answer {
+		// The same key the `Hello` carried, sent back with the cookie.
+		//
+		// **Repeated rather than remembered, which is what makes the challenge
+		// stateless.** The server keeps nothing between the two: the cookie is
+		// an HMAC over this address *and* this key, so an answer that changed
+		// either verifies against nothing. That is why an unanswered challenge
+		// costs zero bytes however many are outstanding.
 		std::array<std::byte, net::Handshake::MESSAGE_BYTES> PublicKey{};
 
 		// The cookie the server issued.
@@ -65,10 +83,21 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Welcome {
+		// The server's half of the exchange.
 		std::array<std::byte, net::Handshake::MESSAGE_BYTES> PublicKey{};
 
+		// Where the server's send counter starts.
+		//
+		// Sent rather than assumed zero so the two ends agree on the nonce
+		// sequence from the first sealed packet — a counter that disagreed would
+		// decrypt as garbage rather than as an error.
 		uint64_t Counter = 0;
 
+		// Proof the server derived the same keys.
+		//
+		// **Without this a mismatch shows up as the first real message failing
+		// to open**, which is indistinguishable from a corrupt datagram and
+		// happens a tick later than the thing that caused it.
 		std::array<std::byte, net::Cipher::TAG_BYTES> Confirmation{};
 
 		// @since v0.9
@@ -79,15 +108,21 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Admission {
+		// Which of the payloads below was filled in.
 		AdmissionKind Kind = AdmissionKind::Hello;
 
+		// The payloads, one per kind.
+		//
+		// **Only the one `Kind` names has been written**; the rest are left at
+		// their defaults, so reading any other is reading a value no peer sent.
+		// `replication::Message` carries the argument for every field rather
+		// than a union.
+		//@{
 		replication::Hello Hello;
-
 		replication::Challenge Challenge;
-
 		replication::Answer Answer;
-
 		replication::Welcome Welcome;
+		//@}
 	};
 
 	// Writes a hello.
@@ -152,10 +187,22 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Applicant {
+		// Where it answered from.
+		//
+		// **Proven rather than claimed**, which is the one thing completing the
+		// handshake establishes: the peer can receive at the address it named.
+		// It says nothing about whether the peer is welcome, which is what a
+		// policy is for.
 		net::Endpoint From;
 
+		// How many clients are already connected, so a policy can weigh this one
+		// against the room left rather than against a cap it would have to know.
 		size_t Connected = 0;
 
+		// The caller's clock, in seconds.
+		//
+		// Passed in for `net`'s standing rule: nothing in this subsystem reads a
+		// wall clock, so a rate limit is testable in a microsecond.
 		double NowSeconds = 0.0;
 	};
 

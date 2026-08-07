@@ -168,6 +168,14 @@ namespace engine::scene {
 			auto *catalogues = static_cast<MaterialCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].ColourMaps.clear();
+
+				// **The resolved set has to go with it, and this one is not
+				// merely tidy.** It holds entity handles, and a load replaces
+				// the whole directory — so a handle kept across it names
+				// whatever now sits at that index, and the next pass would
+				// clear the colour map of an unrelated part exactly once,
+				// immediately after loading.
+				catalogues[index].Resolved.clear();
 			}
 		}
 

@@ -57,6 +57,33 @@ namespace engine::render {
 		//         upload.
 		bool Add(const core::Name &name, const assets::TextureData &image);
 
+		// Takes ownership of a texture somebody else created.
+		//
+		// **The one way into this table that does not start from pixels on the
+		// host**, and it exists for a picture the GPU already drew: a rendered
+		// thumbnail is a scene target, and reading it back to the CPU only to
+		// upload it again would be a round trip across the bus for bytes that
+		// never needed to leave the device.
+		//
+		// **Ownership transfers, which is the whole contract.** The table
+		// releases it on `Drop`, on replacement and on `Shutdown`, exactly as it
+		// does for one it uploaded — so a caller that also released it would be
+		// a double free, and one that kept using the handle after a `Drop` would
+		// be reading freed device memory. Hand it over and forget it.
+		//
+		// @param name    The name to publish it under.
+		// @param texture The texture. Null is refused.
+		// @param width   Its width in pixels, for `SizeOf`.
+		// @param height  Its height.
+		// @param bytes   What it cost in device memory, counted against
+		//                `MAXIMUM_BYTES` like any upload. A caller that guessed
+		//                low would let the ceiling be walked past.
+		// @return `false` for an invalid name, a null texture or a full table —
+		//         and on `false` the caller still owns it.
+		// @since v0.10
+		bool
+		Adopt(const core::Name &name, SDL_GPUTexture *texture, uint32_t width, uint32_t height, size_t bytes);
+
 		// The texture for a name, or null when it is not registered.
 		//
 		// **Stays honest about absence**, which is what makes it usable for the

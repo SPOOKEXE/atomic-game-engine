@@ -65,9 +65,16 @@ namespace engine::assets {
 	//
 	// @since v0.8
 	struct TextureData {
+		// The image's shape and how its bytes are laid out.
+		//
+		// **The format is carried rather than assumed** because `R8` exists: a
+		// mask uploaded as RGBA would be four times the device memory, and one
+		// sampled as RGBA without being widened would draw red.
+		//@{
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		TextureFormat Format = TextureFormat::RGBA8;
+		//@}
 
 		// Row-major, top row first, `Width * BytesPerPixel` per row and no
 		// padding between them.
