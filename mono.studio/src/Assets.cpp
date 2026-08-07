@@ -275,12 +275,41 @@ namespace studio {
 	void Editor::PaintPreview(
 		float cornerX, float cornerY, float side, const std::string &name, engine::assets::AssetKind kind
 	) {
-		PreviewState state = PreviewState::Pending;
-		void *const handle = ThumbnailFor(name, state);
-
 		ImDrawList *const draw = ImGui::GetWindowDrawList();
 		const ImVec2 corner(cornerX, cornerY);
 		const ImVec2 far(cornerX + side, cornerY + side);
+
+		// **A mesh has no bitmap and gets the live slot instead.** A picture of a
+		// mesh is a render — `Thumbnails.cpp` opens with why there is no cached
+		// one — so a mesh row resolves to `Unavailable` and would draw an `M`
+		// forever. The hovered row is the one the preview slot is already
+		// rendering for the panel beside the cursor, and drawing that same
+		// texture here costs nothing: it is one image, already made, this frame.
+		//
+		// So exactly one mesh row is alive at a time and it is the one being
+		// pointed at, which is the row somebody wants to see.
+		if (kind == engine::assets::AssetKind::Mesh && !name.empty() && name == PreviewShowing) {
+			if (void *const slot = Renderer.SceneTexture(PREVIEW_SLOT); slot != nullptr) {
+				const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(PREVIEW_SLOT);
+
+				// **Sampled to its extent rather than whole.** The target is
+				// rounded up to a block and the render fills the corner, so
+				// drawing all of it would show the unwritten border down two
+				// edges — the same correction the viewport panel and the hover
+				// panel both make.
+				draw->AddImage(
+					reinterpret_cast<ImTextureID>(slot),
+					corner,
+					far,
+					ImVec2(0.0f, 0.0f),
+					ImVec2(extent.U, extent.V)
+				);
+				return;
+			}
+		}
+
+		PreviewState state = PreviewState::Pending;
+		void *const handle = ThumbnailFor(name, state);
 
 		if (handle != nullptr) {
 			draw->AddImage(reinterpret_cast<ImTextureID>(handle), corner, far);

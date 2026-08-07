@@ -1131,6 +1131,15 @@ namespace studio {
 		// What the preview slot should draw on its next turn, or empty.
 		std::string PreviewWanted;
 
+		// Whose picture is in the preview slot right now.
+		//
+		// **One slot, so one row.** `PaintPreview` draws this texture in place of
+		// the kind glyph for the row it belongs to, which is what makes a hovered
+		// mesh turn in its own 48-pixel square instead of staying an `M`. A row
+		// that drew the slot without comparing names would show the hovered
+		// mesh's picture in every mesh row on screen.
+		std::string PreviewShowing;
+
 		// The row the cursor is over this frame, before the delay.
 		std::string HoverCandidate;
 

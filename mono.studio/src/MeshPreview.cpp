@@ -63,6 +63,15 @@ namespace studio {
 		// one direction that shows depth on almost anything.
 		const engine::core::Vector3 CAMERA_DIRECTION{1.0f, 0.65f, 1.0f};
 
+		// How fast the turntable goes round.
+		//
+		// **Slow enough to read, which is slower than it feels like it should
+		// be.** A full turn every eight seconds lets somebody take in one side
+		// before the next arrives; at a turn a second the silhouette is a blur
+		// and the preview is worse than a still. `MeshGrid.luau`'s pedestals run
+		// at about the same rate for the same reason.
+		constexpr double TURNTABLE_RADIANS_PER_SECOND = 0.785;
+
 		std::optional<std::vector<std::byte>> ReadWholeFile(const std::filesystem::path &path) {
 			std::error_code failure;
 			const auto size = std::filesystem::file_size(path, failure);
@@ -233,23 +242,63 @@ namespace studio {
 		const float distance =
 			(bounds->second.Radius / std::tan(lens.FieldOfViewRadians * 0.5f)) * CAMERA_PADDING;
 
-		const engine::core::CFrame eye =
-			engine::core::CFrame::LookAt(CAMERA_DIRECTION.Unit() * distance, engine::core::Vector3{});
+		// **It turns, and a still frame is what made a preview hard to read.**
+		// A mesh seen from one fixed angle hides the half facing away, and at
+		// forty-eight pixels the near half of most things is a blob — which is
+		// exactly the case a picker is for. A turntable shows the silhouette
+		// changing, and a silhouette is what somebody recognises an asset by.
+		//
+		// **The camera orbits rather than the mesh spinning**, which matters for
+		// one reason: the light is fixed in world space, so a rotating *model*
+		// would carry its shading round with it and read as a flat cut-out. An
+		// orbiting eye moves the highlight across the surface, which is the half
+		// of a turntable that says the thing has depth.
+		//
+		// `AnimationSeconds` is the editor's own clock — the same one driving
+		// flipbooks — so the preview turns at the frame rate rather than at the
+		// rate the rotation happens to hand it slots.
+		const auto angle = static_cast<float>(AnimationSeconds * TURNTABLE_RADIANS_PER_SECOND);
+		const engine::core::Vector3 direction{
+			CAMERA_DIRECTION.X * std::cos(angle) - CAMERA_DIRECTION.Z * std::sin(angle),
+			CAMERA_DIRECTION.Y,
+			CAMERA_DIRECTION.X * std::sin(angle) + CAMERA_DIRECTION.Z * std::cos(angle),
+		};
 
-		// **No interface hook and no surfaces.** This slot draws one mesh into a
-		// small square; passing the editor's chrome would draw the whole editor
-		// into a 132-pixel texture, and a mirror pass would render a scene that
-		// is not there.
+		const engine::core::CFrame eye =
+			engine::core::CFrame::LookAt(direction.Unit() * distance, engine::core::Vector3{});
+
+		// **The interface is passed, and leaving it out turned the window
+		// black.** The claim that used to be here was that "passing the editor's
+		// chrome would draw the whole editor into a 132-pixel texture". It does
+		// not: the *world* goes to the offscreen slot named by `targetSlot`, and
+		// the interface pass writes the **swapchain**. They are different
+		// attachments in one call.
+		//
+		// What passing `nullptr` did instead was leave nothing at all touching
+		// the swapchain — and `Renderer::Render` then clears it and presents,
+		// deliberately, because presenting a texture the driver handed back
+		// unwritten shows uninitialised memory. So every frame spent on a preview
+		// presented a cleared window. Hovering a mesh row blanked the entire
+		// editor and moving the cursor away brought it back.
+		//
+		// **No surfaces, though**, and that part was right: a mirror pass here
+		// would render a scene that is not there.
 		Renderer.Render(
 			eye,
 			lens,
 			std::span<const engine::scene::DrawInstance>(one),
 			Overlay,
 			{},
-			nullptr,
+			&Interface,
 			&target,
 			PREVIEW_SLOT
 		);
+
+		// **What the slot now holds, so a row can draw it.** There is one slot,
+		// so exactly one mesh in the list can be live at a time — and a row that
+		// painted the slot's texture without checking whose it was would show the
+		// hovered mesh's picture in every mesh row on screen.
+		PreviewShowing = PreviewWanted;
 		return true;
 	}
 }

@@ -892,18 +892,7 @@ namespace studio {
 		//
 		// Skipping the closed ones matters: rotating through four slots with
 		// one panel open would redraw it every fourth frame for no reason.
-		// **The asset preview takes its turn before the panels do.** It is
-		// rendered when something is hovering it and skipped entirely when
-		// nothing is, so the cost is a hovered row's worth of frames rather
-		// than a permanent share of the rotation — and `RenderPreviewSlot`
-		// owns the whole `Render` call for that frame, exactly as a viewport
-		// does, because `Render` owns the swapchain and the present.
-		if (RenderPreviewSlot()) {
-			PreviewWanted.clear();
-			return;
-		}
-
-		size_t candidates[1 + EXTRA_VIEWPORTS];
+		size_t candidates[2 + EXTRA_VIEWPORTS];
 		size_t candidateCount = 0;
 
 		if (ShowViewport) {
@@ -913,6 +902,29 @@ namespace studio {
 			if (Extras[index].Open) {
 				candidates[candidateCount++] = index + 1;
 			}
+		}
+
+		// **The asset preview is one more slot in the rotation, and it took
+		// every frame instead.** It used to be tested before the loop and
+		// `return` on success — and because a hovered row re-asks for its
+		// preview on every frame it is hovered, that early return fired on
+		// *every* frame too. `Renderer::Render` owns the swapchain and the
+		// present, so the editor's own chrome was never drawn for as long as the
+		// cursor rested on a mesh: the whole window went black and came back the
+		// moment the pointer moved away.
+		//
+		// The comment that used to sit here said the cost was "a hovered row's
+		// worth of frames rather than a permanent share of the rotation". That
+		// was the intent and the code did the opposite — it took the whole
+		// rotation and left nothing for the panels.
+		//
+		// As a candidate it gets one turn in N like everything else, so a
+		// hovered preview refreshes at a share of the frame rate and the editor
+		// keeps drawing. A preview refreshing at a third of 120 fps is forty
+		// updates a second on a thing being looked at, which is not something an
+		// eye can see; a window that stops being drawn is.
+		if (!PreviewWanted.empty()) {
+			candidates[candidateCount++] = PREVIEW_SLOT;
 		}
 
 		// **A closed panel gives its camera back, every frame rather than on an
@@ -941,6 +953,23 @@ namespace studio {
 		} else {
 			RoundRobin = (RoundRobin + 1) % candidateCount;
 			DrawingViewport = candidates[RoundRobin];
+		}
+
+		// **This frame belongs to the preview**, and it is spent the same way a
+		// viewport spends one: `Render` owns the swapchain, so whichever slot the
+		// rotation picked gets the whole call. The difference from what this used
+		// to do is only that it had to be *picked*.
+		if (DrawingViewport == PREVIEW_SLOT) {
+			if (RenderPreviewSlot()) {
+				PreviewWanted.clear();
+				return;
+			}
+
+			// It asked and could not be drawn — an unloaded mesh, or a bounds
+			// entry that has gone. Fall through to the first viewport rather than
+			// spending the frame on nothing.
+			PreviewWanted.clear();
+			DrawingViewport = candidateCount > 1 ? candidates[0] : 0;
 		}
 
 		ViewportState *extra = ExtraAt(DrawingViewport);
