@@ -7,6 +7,8 @@
 #include <cdn/LocalStore.hpp>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
+#include <memory>
 #include <sstream>
 #include <system_error>
 #include <unordered_map>
@@ -302,6 +304,56 @@ namespace cdn {
 
 	engine::assets::PublicKey DevelopmentPublisher() {
 		return DevelopmentSigningKey().Public();
+	}
+
+	std::function<bool(std::string_view model, std::string_view reference, std::string &out)>
+	StoreTextureResolver(const LocalPaths &paths) {
+		// Both directions of the log, taken once. **A snapshot rather than a live
+		// read**, because this is called per submesh of every model in a bake and
+		// re-reading a file with several thousand lines each time would be
+		// quadratic in the store.
+		auto originals = std::make_shared<std::unordered_map<std::string, std::string>>();
+		auto hashes = std::make_shared<std::unordered_map<std::string, std::string>>();
+
+		for (const LogEntry &entry : ReadLog(paths)) {
+			if (entry.Hash.empty() || entry.Subject.empty()) {
+				continue;
+			}
+			// Last writer wins in both maps, matching `RawContents`: a file
+			// re-imported from a new place is most usefully known by the new one.
+			(*originals)[entry.Hash] = entry.Subject;
+			(*hashes)[entry.Subject] = entry.Hash;
+		}
+
+		// The extension a store file carries, so the answer names a real file.
+		// `raw/` holds `<hash><extension>` and the log records neither half
+		// separately, so the extension comes off the original path.
+		return [originals, hashes](std::string_view model, std::string_view reference, std::string &out) {
+			// The model's own original path, from its hash. A model that is not
+			// in the log — dropped into `raw/` by hand — cannot be placed, and
+			// that is a `false` rather than a guess.
+			const std::filesystem::path modelPath(model);
+			const auto origin = originals->find(modelPath.stem().string());
+			if (origin == originals->end()) {
+				return false;
+			}
+
+			// Where the reference points, in the tree the model was authored in.
+			// **`lexically_normal`, so `../shared/skin.png` is a path the log can
+			// match** — a model referring up out of its own folder is ordinary,
+			// and a literal join would produce a string no import ever wrote.
+			const std::filesystem::path wanted =
+				(std::filesystem::path(origin->second).parent_path() / std::filesystem::path(reference))
+					.lexically_normal();
+
+			const auto found = hashes->find(wanted.generic_string());
+			if (found == hashes->end()) {
+				return false;
+			}
+
+			out = found->second + wanted.extension().string();
+			return true;
+		};
 	}
 
 	std::vector<RawEntry> RawContents(const LocalPaths &paths) {

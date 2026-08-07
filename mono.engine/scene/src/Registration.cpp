@@ -8,6 +8,7 @@
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceTable.hpp>
@@ -133,6 +134,19 @@ namespace engine::scene {
 			auto *catalogues = static_cast<TextureCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].Flipbooks.clear();
+			}
+		}
+
+		// Derived resource, the same as the ones above. **And the most obviously
+		// so of the four**: this list came from a manifest a publisher signed and
+		// a client verified *this run*, so a save file carrying last run's would
+		// offer a scene names that nothing in the store answers to.
+		void WritePublishedCatalogues(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadPublishedCatalogues(core::ByteReader &, void *destination, size_t count) {
+			auto *catalogues = static_cast<PublishedCatalogue *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				catalogues[index].Meshes.clear();
 			}
 		}
 
@@ -474,6 +488,9 @@ namespace engine::scene {
 		);
 		ecs::Components::Register<MaterialCatalogue>(
 			"scene.MaterialCatalogue", WriteMaterialCatalogues, ReadMaterialCatalogues
+		);
+		ecs::Components::Register<PublishedCatalogue>(
+			"scene.PublishedCatalogue", WritePublishedCatalogues, ReadPublishedCatalogues
 		);
 
 		// What `SyncRendered` compares this frame's tree against, at the end of

@@ -3,6 +3,7 @@
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 
 #include <algorithm>
 #include <assetc/Bake.hpp>
@@ -392,11 +393,42 @@ namespace assetc {
 						continue;
 					}
 					std::string resolved;
-					if (!Resolve(directory, submesh.Texture, resolved)) {
+
+					// **The resolver first, because it knows things the tree
+					// cannot.** A flattened store has no `tex/` folder beside the
+					// model — see `Settings::ResolveTexture` for what that broke
+					// and for how the import log puts it back.
+					const bool named = settings.ResolveTexture &&
+									   settings.ResolveTexture(relative, submesh.Texture, resolved);
+
+					if (!named && !Resolve(directory, submesh.Texture, resolved)) {
 						// Refuse references outside the input tree.
 						submesh.Texture.clear();
 						continue;
 					}
+
+					// **Checked against the tree, and not checking is what let
+					// this ship.** `Resolve` is purely lexical — it joins and
+					// normalises and never asks whether the file is there — so a
+					// reference to something that is not being baked became a
+					// perfectly well-formed name for an asset that would never
+					// exist. Nothing downstream can catch it: the publisher
+					// signs whatever it is given, and the client's miss looks
+					// exactly like a texture that has not streamed in yet.
+					std::error_code missing;
+					if (!std::filesystem::is_regular_file(settings.Input / resolved, missing)) {
+						ENGINE_WARN(
+							"bake: {}: texture '{}' resolves to '{}', which is not in the input tree — "
+							"the submesh will draw untextured",
+							relative,
+							submesh.Texture,
+							resolved
+						);
+						submesh.Texture.clear();
+						report.DanglingTextures++;
+						continue;
+					}
+
 					submesh.Texture = BakedName(resolved);
 				}
 

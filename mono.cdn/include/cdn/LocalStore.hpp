@@ -72,6 +72,7 @@
 #include <cdn/Publisher.hpp>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -339,6 +340,39 @@ namespace cdn {
 	// @return The files. Empty when there is no store or nothing in it.
 	// @since v0.10
 	std::vector<RawEntry> RawContents(const LocalPaths &paths);
+
+	// Resolves a model's texture references against the import log.
+	//
+	// **Because importing flattens, and flattening breaks models.** A `.pmx`
+	// names its sheets as `tex/体.png`, relative to the folder it was authored
+	// in. `ImportFile` renames every file to `<hash><extension>` in one flat
+	// directory, so once a model and its sheets are in `raw/` nothing on disk
+	// records that they belong together — and a bake over that folder joins the
+	// reference lexically into `tex/体.atex`, a name no manifest carries. The
+	// model publishes, arrives, draws, and has no textures.
+	//
+	// **The log is the only thing that still knows.** It records the path every
+	// file had before it was imported, so the sheet's original path and the
+	// model's original path share a directory exactly as the model expects. Walk
+	// from one to the other and the hash falls out.
+	//
+	//     raw/<model hash>.pmx    ← was /art/char/model.pmx
+	//     reference "tex/体.png"  → /art/char/tex/体.png
+	//                             → raw/<sheet hash>.png
+	//
+	// **It is a labelling use of the log, which is the only kind this header
+	// permits** — see `RawEntry::Original`. The folder is still the index: a
+	// reference the log cannot place simply is not resolved, and the bake says so
+	// rather than emitting a name that resolves to nothing.
+	//
+	// @param paths The store.
+	// @return A resolver shaped for `assetc::Settings::ResolveTexture`, which
+	//         answers with a name relative to `raw/`. It captures a snapshot of
+	//         the log taken now — a store being written to while it bakes is not
+	//         a case this tries to be live for.
+	// @since v0.10
+	std::function<bool(std::string_view model, std::string_view reference, std::string &out)>
+	StoreTextureResolver(const LocalPaths &paths);
 
 	// One asset the last publish put in `processed/`.
 	//

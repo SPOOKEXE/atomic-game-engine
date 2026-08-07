@@ -23,6 +23,8 @@
 // resolution an interactive panel is read at.
 
 #include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/PublishedCatalogue.hpp>
+#include <engine/assets/Manifest.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/assets/Texture.hpp>
@@ -234,9 +236,21 @@ namespace studio {
 		if (!ContentRequested && ContentClient->Ready()) {
 			ContentRequested = true;
 			ENGINE_INFO("assets: catalogue ready — content is fetched as the worlds name it");
+
+			// **The list of what there is, handed to the worlds once.** Not the
+			// content — the *names*. A scene has no other way to find out what a
+			// store published: since v0.10 nothing is fetched by kind, so
+			// `ContentService:GetMeshes()` reports only what something already
+			// asked for, and a scene reading it can never be the thing that asks.
+			//
+			// Cheap, and worth saying how cheap: a few hundred strings, once,
+			// against the 6.9 GB that asking by kind used to pull through
+			// `Pump`. Naming one of these is still what fetches it.
+			PublishManifestNames();
 		}
 
 		if (ContentRequested) {
+			OfferPublishedNames();
 			RequestShownContent();
 		}
 
@@ -331,6 +345,55 @@ namespace studio {
 				ContentMaterials
 			);
 		}
+	}
+
+	void Editor::PublishManifestNames() {
+		const engine::assets::Manifest *catalogue = ContentClient ? ContentClient->Catalogue() : nullptr;
+		if (catalogue == nullptr) {
+			return;
+		}
+
+		// **Runtime-readable only.** A `.pmx` and a `.amesh` are both
+		// `AssetKind::Mesh` and only the second is something the runtime decodes,
+		// so offering both would put names in a scene's list that can be named,
+		// fetched and then refused — a cell drawing the fallback cube with a
+		// perfectly good string behind it. `assets::IsRuntimeReadable` is the same
+		// filter the asset picker applies, and a second opinion here would be a
+		// script disagreeing with the editor about what works.
+		PublishedMeshNames.clear();
+		for (const engine::assets::AssetEntry *entry : catalogue->OfKind(engine::assets::AssetKind::Mesh)) {
+			if (entry != nullptr && engine::assets::IsRuntimeReadable(entry->Name)) {
+				PublishedMeshNames.emplace_back(entry->Name);
+			}
+		}
+
+		ENGINE_INFO("assets: {} published mesh(es) offered to the worlds", PublishedMeshNames.size());
+		OfferPublishedNames();
+	}
+
+	void Editor::OfferPublishedNames() {
+		if (PublishedMeshNames.empty()) {
+			return;
+		}
+
+		// **Every pump, not once when the catalogue opened.** Worlds appear after
+		// that moment and routinely: pressing Play mints a server world and a
+		// client replica, and both run scripts. Offering once left those two with
+		// an empty list, so the mesh grid placed its six built-ins during editing
+		// and stayed at six through the whole play session — which reads exactly
+		// like a store with nothing in it.
+		//
+		// **Guarded on the count, so the common case is a comparison.** The list
+		// only ever changes on a republish, and copying a few hundred names into
+		// every world every pump would be work proportional to the store on a
+		// path that runs at the frame rate.
+		EachOpenWorld([this](engine::ecs::Store &store) {
+			const auto *held = store.Resource<engine::scene::PublishedCatalogue>();
+			if (held != nullptr && held->Meshes.size() == PublishedMeshNames.size()) {
+				return;
+			}
+			(void)engine::scene::RecordPublishedMeshes(store, PublishedMeshNames);
+		});
 	}
 
 	void Editor::RequestShownContent() {

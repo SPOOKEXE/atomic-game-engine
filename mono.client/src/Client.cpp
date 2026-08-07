@@ -1,3 +1,4 @@
+#include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/audio/Wav.hpp>
 #include <engine/core/Log.hpp>
@@ -15,6 +16,7 @@
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -301,11 +303,9 @@ namespace client {
 			return;
 		}
 
-		// Request each kind once, after the verified catalogue arrives.
 		if (!ContentRequested && Content->Ready()) {
 			ContentRequested = true;
 
-			// Request by kind because the catalogue owns the asset list.
 			// **Nothing is requested by kind, which is what v0.10 ended.** The
 			// unit that travels is a *bundle*, so asking for every mesh and
 			// every material asks for essentially every bundle in the store —
@@ -316,6 +316,14 @@ namespace client {
 			//
 			// `client/ContentDemand.hpp` carries both failures this replaces.
 			ENGINE_INFO("content: catalogue ready — assets are fetched as the world names them");
+
+			// **The manifest's mesh names, handed to the world once.** Names, not
+			// content — a few hundred strings against the 6.9 GB above. It is the
+			// only way a scene can find out what there is to name, because the
+			// catalogue it can otherwise read holds what has already been asked
+			// for. `scene/PublishedCatalogue.hpp` carries the whole argument, and
+			// naming one of these is still what fetches it.
+			OfferPublishedContent();
 		}
 
 		// **Every pump, and it is a diff rather than a walk of the catalogue.**
@@ -505,6 +513,42 @@ namespace client {
 				ContentSounds
 			);
 		}
+	}
+
+	void Client::OfferPublishedContent() {
+		const engine::assets::Manifest *catalogue = Content ? Content->Catalogue() : nullptr;
+		if (catalogue == nullptr) {
+			return;
+		}
+
+		// **Runtime-readable only.** A `.pmx` and a `.amesh` are both
+		// `AssetKind::Mesh` and only the second is one this process decodes, so
+		// offering both would hand a scene names it can set, fetch and then fail
+		// to draw — a part on the fallback cube with a perfectly good string
+		// behind it.
+		std::vector<engine::core::Name> meshes;
+		for (const engine::assets::AssetEntry *entry : catalogue->OfKind(engine::assets::AssetKind::Mesh)) {
+			if (entry != nullptr && engine::assets::IsRuntimeReadable(entry->Name)) {
+				meshes.emplace_back(entry->Name);
+			}
+		}
+
+		// Every simulated world, and the replica when there is one — a scene is a
+		// scene wherever it came from, and a list offered to only some of them
+		// would be a service that answers differently depending on which world a
+		// script happens to be in.
+		for (const engine::world::WorldId id : Simulated) {
+			Universe_->Enter(id, [&meshes](engine::ecs::Store &store) {
+				(void)engine::scene::RecordPublishedMeshes(store, meshes);
+			});
+		}
+		if (ReportedJoin) {
+			Universe_->Enter(Replicated, [&meshes](engine::ecs::Store &store) {
+				(void)engine::scene::RecordPublishedMeshes(store, meshes);
+			});
+		}
+
+		ENGINE_INFO("content: {} published mesh(es) offered to the world", meshes.size());
 	}
 
 	void Client::RequestWantedContent() {

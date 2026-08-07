@@ -12,12 +12,21 @@
 // So this is the other half of the pair: the catalogues the client already fills
 // as content arrives, readable from Luau.
 //
-// **It reports what this world has, not what a store holds.** `MeshCatalogue`
-// and `TextureCatalogue` are written by whatever registered the content this
-// run — the client's content pump — so an empty list means "nothing has arrived
-// here", which on a headless server is the permanent and correct answer. A
-// service that read a manifest instead would tell a script about assets the
-// renderer cannot draw and the process may never fetch.
+// **Most of it reports what this world has, not what a store holds.**
+// `MeshCatalogue` and `TextureCatalogue` are written by whatever registered the
+// content this run — the client's content pump — so an empty list means "nothing
+// has arrived here", which on a headless server is the permanent and correct
+// answer.
+//
+// **`GetPublishedMeshes` is the one exception, and v0.10 made it necessary.**
+// While content was fetched by kind, everything published arrived whether a
+// scene wanted it or not, so "what has arrived" and "what exists" were the same
+// list and only the first needed asking. Nothing is fetched by kind any more —
+// `client/ContentDemand.hpp` carries the 6.9 GB that ended it — so a scene
+// reading only the first can never discover anything, and every demo was back to
+// string literals. It reads the manifest a client already verified, which is a
+// few hundred strings rather than a store, and naming one of them is what
+// fetches it.
 //
 // **Names, in sorted order, and nothing else.** Not handles, not a table of
 // metadata that would then be a second place facts about a mesh live —
@@ -30,6 +39,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 
 #include <algorithm>
@@ -85,6 +95,34 @@ namespace engine::script {
 						names.emplace_back(name.Text());
 					}
 				}
+			}
+			return PushNames(state, std::move(names));
+		}
+
+		// ContentService:GetPublishedMeshes()
+		//
+		// **What there is to name, where `GetMeshes` says what has been named.**
+		// The two used to be one question because content was fetched by kind, so
+		// everything published arrived whether or not a scene wanted it. Since
+		// v0.10 nothing is fetched by kind — `client/ContentDemand.hpp` has the
+		// 6.9 GB that made that necessary — and the consequence landed here: a
+		// scene reading `GetMeshes` sees only what it or another scene already
+		// asked for, so it can never discover anything.
+		//
+		// Reading this and setting a `MeshId` *is* the ask. The name goes into
+		// the world, `CollectWantedContent` finds it on the next pump, and that
+		// one asset is fetched. A scene decides how many to take;
+		// `MeshGrid.luau` takes twelve.
+		int GetPublishedMeshes(lua_State *state) {
+			const ecs::Store &store = StoreOfUpvalue(state);
+
+			std::vector<core::Name> published;
+			(void)scene::PublishedMeshes(store, published);
+
+			std::vector<std::string> names;
+			names.reserve(published.size());
+			for (const core::Name &mesh : published) {
+				names.emplace_back(mesh.Text());
 			}
 			return PushNames(state, std::move(names));
 		}
@@ -153,6 +191,7 @@ namespace engine::script {
 
 		static const luaL_Reg methods[] = {
 			{"GetMeshes", GetMeshes},
+			{"GetPublishedMeshes", GetPublishedMeshes},
 			{"GetTextures", GetTextures},
 			{"GetFlipbook", GetFlipbook},
 			{"GetTriangleCount", GetTriangleCount},

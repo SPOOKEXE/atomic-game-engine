@@ -2,32 +2,38 @@
 -- Every imported mesh at once, on turntables, in a grid.
 --
 -- `Meshes.luau` proves one glTF and one PMX arrive and draw. This is the wider
--- check: nine models from three importers, laid out so a single frame says
--- which of them made it. **A grid is the point** — a mesh that failed to
--- resolve draws as `MeshTable`'s fallback cube, so a cube standing in a cell
--- where a dragon should be is a name that did not match, and it is obvious at a
--- glance rather than after a log hunt.
+-- check: every mesh the store published *and* every mesh the engine ships, laid
+-- out so a single frame says which of them made it. **A grid is the point** — a
+-- mesh that failed to resolve draws as `MeshTable`'s fallback cube, so a cube
+-- standing in a cell where a character should be is a name that did not match,
+-- and it is obvious at a glance rather than after a log hunt.
 --
 -- Each model turns on its own pedestal, because a still frame hides the half of
 -- a mesh facing away — and a reversed winding is exactly the bug that looks
 -- fine from the front.
 --
--- ## What is in it and where it came from
+-- ## What it is checking
 --
--- Three importers, and the mix is deliberate rather than decorative:
+-- The plate mixes two sources on purpose, and the mix is what makes one frame
+-- diagnostic rather than decorative:
 --
---   * **`props/fox.amesh`** — glTF, authored elsewhere and untextured, so it
---     draws in its materials' base colours. Ten of them.
---   * **`props/dragon.amesh`, `characters/wizard.amesh`** — glTF exported from
---     Blender. Their materials are *procedural shader graphs*, which glTF has
---     no way to carry, so these arrive with base colours and no sheets. That is
---     the exporter's limit and not the pipeline's, and it is worth seeing next
---     to the PMX characters, which do carry sheets.
---   * **the five PMX models** — MikuMikuDance characters with real texture
---     sheets, non-ASCII file names, and per-submesh materials. If these draw
---     textured, then `bake::ReadPmx`, the UTF-16 path decoding, the texture
---     rewriting in `assetc`, the manifest, the signature and `TextureTable`
---     are all working at once.
+--   * **The engine's own six** — `engine.Cube` and its siblings, generated in
+--     process by `assets::MakeBuiltin`. They cannot fail to resolve, so a cell
+--     of theirs drawing wrong is a renderer fault and never a content one. They
+--     are the control.
+--   * **Whatever the store published**, which on this repository is a glTF fox
+--     and six MikuMikuDance characters — PMX, with real texture sheets,
+--     non-ASCII file names and per-submesh materials. If those draw textured
+--     then `bake::ReadPmx`, the UTF-16 path decoding, the texture rewriting in
+--     `assetc`, the manifest, the signature, the bundle fetch and `TextureTable`
+--     are all working at once. That is a lot of pipeline riding on one glance.
+--
+-- **The mirror across the back is doing the same job from the other side.** It
+-- shows every model's far face at the same time as the camera shows the near
+-- one, so a winding fault is visible without waiting for a turntable to come
+-- round — and it puts the whole grid through `SurfaceCamera`'s path, so a frame
+-- where the grid is right and the reflection is wrong says the fault is in
+-- surface rendering rather than in content.
 --
 -- ## Run it
 --
@@ -72,23 +78,23 @@
 --     `MeshTable::Initialise` registers them before the first frame. Naming them
 --     is safe *because* they cannot be missing, which is exactly what the nine
 --     literals were not.
---   * everything else comes from `ContentService:GetMeshes()`, which reports what
---     this world actually holds. On this repository's own store those ids are
---     64 hex characters and an extension — the content hash — and a cell drawn
---     from one is proof the whole pipeline ran.
+--   * everything else comes from `ContentService:GetPublishedMeshes()`, which
+--     reports what the *store* published — the signed manifest, verified before
+--     anything could be fetched. On this repository's own store those ids are 64
+--     hex characters and an extension — the content hash — and a cell drawn from
+--     one is proof the whole pipeline ran.
 --
--- **The second half needs something else to have named the mesh first, and
--- since v0.10 that is a real limit rather than a detail.** Content is fetched
--- because a world names it — `client/ContentDemand.hpp` carries why asking by
--- kind had to stop — so the catalogue holds what has been asked for, and a scene
--- that only reads the catalogue can never be the thing that asks. With a store
--- and no other scene naming anything, this plate is six built-ins.
+-- **Naming one is what fetches it, and that is the point rather than a side
+-- effect.** Content arrives because a world names it — `client/ContentDemand.hpp`
+-- carries why asking by kind had to stop, and the 6.9 GB it used to pull through
+-- one synchronous function. So this reads a few hundred *strings*, picks at most
+-- `CELLS` of them, and sets a `MeshId`; the next content pump fetches exactly
+-- those. The plate is the demand.
 --
--- That is a gap in the *service*, not in this file: a scene has no way to ask
--- what a store published, only what this world already loaded. Listing the
--- manifest is `ROADMAP.md`'s content-browser work. Until then, a grid of imports
--- is what `--game` with an authored place gives you, and the six below are what
--- a fresh install gives you.
+-- It used to read `GetMeshes()` instead, which reports what this world has
+-- already loaded — and since nothing else in a fresh place names an import, that
+-- list was the six built-ins forever. A scene that only reads what arrived can
+-- never be the thing that asks.
 --
 -- A cell on screen is still proof and a missing cell is still content that is
 -- not here. What changed is that six cells are always proof of *something*, so
@@ -131,9 +137,10 @@ local PEDESTAL_HEIGHT = 0.6
 
 -- **How many cells the plate and the mirror are built for, rather than how many
 -- there are.** The grid grows as content arrives, and a floor that resized every
--- time a mesh landed would be a scene that visibly rebuilds itself. Twelve is
--- three full rows, which is more than this repository's seed content has.
-local CELLS = 12
+-- time a mesh landed would be a scene that visibly rebuilds itself. Fifteen is
+-- five full rows: the six built-ins plus room for nine imports, which covers
+-- this repository's own seed content with two cells spare.
+local CELLS = 15
 local ROWS = math.ceil(CELLS / COLUMNS)
 
 local PLATE_X = COLUMNS * SPACING + SPACING
@@ -329,6 +336,11 @@ workspace.CurrentCamera = view
 --
 -- Cheap when nothing changes: `GetMeshes` builds a sorted list of what this
 -- world holds, and the common case is that its length has not moved.
+-- How many of the ids on the plate came from the store rather than the engine.
+-- Read by the sign, so "six primitives" and "six primitives and seven
+-- characters" are different sentences.
+local imported = 0
+
 local known = -1
 
 -- Every id to place, built-ins first and content after.
@@ -338,16 +350,33 @@ local known = -1
 -- the same on every run — but the six that are always there should be the six
 -- leftmost cells whatever a store happens to hold, or adding one asset would
 -- reshuffle the part of the plate that never changes.
+-- **Imports first, built-ins after, and the order decides what gets dropped.**
+-- The plate holds `CELLS`; anything past that is reported and left off. Putting
+-- the built-ins last means a full store spends its cells on the models somebody
+-- imported and a bare one still shows six primitives — where built-ins-first
+-- filled half the plate with cubes and cylinders and pushed the characters off
+-- the end, which is a demo of the wrong thing.
+--
+-- Both halves are deterministic: `GetPublishedMeshes` sorts, and `BUILTIN` is a
+-- literal. So the layout is a function of what the store holds and is the same
+-- on every run.
 local function everyMesh(): { string }
-	local ids = table.clone(BUILTIN)
+	local ids: { string } = {}
 
-	for _, mesh in ipairs(ContentService:GetMeshes()) do
-		-- **Skipped rather than placed twice.** `GetMeshes` reports what the
-		-- world holds and the built-ins are registered into every world, so all
-		-- six come back from it as well.
+	for _, mesh in ipairs(ContentService:GetPublishedMeshes()) do
+		-- **Skipped rather than placed twice.** A built-in is not published and
+		-- should not come back from this, but a store is free to hold a file
+		-- called anything — and a cell built twice is a mesh that turns in two
+		-- places and a plate one short.
 		if not table.find(BUILTIN, mesh) then
 			table.insert(ids, mesh)
 		end
+	end
+
+	imported = #ids
+
+	for _, mesh in ipairs(BUILTIN) do
+		table.insert(ids, mesh)
 	end
 
 	return ids
@@ -383,8 +412,8 @@ RunService.Heartbeat:Connect(function()
 	-- would leave a plate of primitives looking like a plate of failed imports.
 	text.Text = if placedCount == 0
 		then "no meshes in this world — run with --cdn"
-		elseif placedCount <= #BUILTIN then `{placedCount} built-in mesh(es) — publish content for more`
-		else `{placedCount} mesh(es), {placedCount - #BUILTIN} imported`
+		elseif imported == 0 then `{placedCount} built-in mesh(es) — publish content for more`
+		else `{placedCount} mesh(es), {imported} imported`
 
 	print(`mesh grid: {placedCount} mesh(es) placed`)
 end)

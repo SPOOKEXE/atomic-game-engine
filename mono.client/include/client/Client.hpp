@@ -290,6 +290,13 @@ namespace client {
 		// **Demand rather than by kind**, which is what makes a large store
 		// usable at all — `client/ContentDemand.hpp` carries the two failures
 		// that forced it.
+		// Hands every world the mesh names the store published.
+		//
+		// **Names, not content**, and the only way a scene can discover what
+		// there is to name — see `scene/PublishedCatalogue.hpp`. Naming one is
+		// still what fetches it.
+		void OfferPublishedContent();
+
 		void RequestWantedContent();
 
 		// Asks for one asset, once.

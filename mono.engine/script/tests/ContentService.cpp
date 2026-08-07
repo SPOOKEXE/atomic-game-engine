@@ -15,6 +15,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/Runtime.hpp>
@@ -24,6 +25,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.script.contentservice")
 TEST_DEPENDS("engine.scene.texturecatalogue")
@@ -159,4 +161,75 @@ TEST_CASE("a mesh registered after the runtime started is still seen", "[scripti
 		assert(#meshes == 1, "the one that arrived")
 		assert(meshes[1] == "props/late.amesh")
 	)");
+}
+
+TEST_CASE("a script can ask what the store published", "[scripting][content]") {
+	// **The two lists answer different questions and the difference is the
+	// whole reason this one exists.** `GetMeshes` is what arrived; this is what
+	// there is. They were the same set until v0.10, because content was fetched
+	// by kind — so a scene reading the first saw the store whether it had asked
+	// for any of it or not. Nothing is fetched by kind now, and the consequence
+	// is that a scene reading only the first can never discover anything: it
+	// sees what it has already named, which on a fresh place is nothing.
+	Store store = Fresh("content_published");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	REQUIRE(runtime != nullptr);
+
+	// A world nobody has told answers empty rather than failing, which is what a
+	// headless server and a client with no `--cdn` both are.
+	MustRun(*runtime, R"(
+		assert(#ContentService:GetPublishedMeshes() == 0, "nothing offered yet")
+	)");
+
+	REQUIRE(
+		engine::scene::RecordPublishedMeshes(
+			store, {Name("characters/xiao.amesh"), Name("characters/barbara.amesh")}
+		) == 2
+	);
+
+	MustRun(*runtime, R"(
+		local published = ContentService:GetPublishedMeshes()
+		assert(#published == 2, "both offered")
+
+		-- Sorted, like every list this service returns, so a scene laying content
+		-- out arranges itself the same way on every run.
+		assert(published[1] == "characters/barbara.amesh", published[1])
+		assert(published[2] == "characters/xiao.amesh", published[2])
+
+		-- And still nothing has *arrived*. This is the distinction: naming one of
+		-- these is what fetches it, so before a scene does, the loaded catalogue
+		-- is empty.
+		assert(#ContentService:GetMeshes() == 0, "published is not loaded")
+	)");
+}
+
+TEST_CASE("a republish replaces the offered list", "[scripting][content]") {
+	// **Replaces rather than appends.** A manifest is a whole answer, and a name
+	// left behind from a previous one is a mesh a scene would set, fetch and
+	// never resolve — which draws the fallback cube with nothing to say why.
+	Store store = Fresh("content_republish");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	REQUIRE(runtime != nullptr);
+
+	REQUIRE(engine::scene::RecordPublishedMeshes(store, {Name("gone.amesh")}) == 1);
+	REQUIRE(engine::scene::RecordPublishedMeshes(store, {Name("kept.amesh")}) == 1);
+
+	MustRun(*runtime, R"(
+		local published = ContentService:GetPublishedMeshes()
+		assert(#published == 1, "one, not two")
+		assert(published[1] == "kept.amesh", published[1])
+	)");
+}
+
+TEST_CASE("an invalid published name is dropped", "[scripting][content]") {
+	// A name a scene cannot use is a row it would try to fetch and never
+	// resolve, so it is refused where the list is recorded rather than surfacing
+	// as an empty string in a table somebody iterates.
+	Store store = Fresh("content_invalid");
+	CHECK(engine::scene::RecordPublishedMeshes(store, {Name(), Name("real.amesh"), Name()}) == 1);
+
+	std::vector<Name> read;
+	CHECK(engine::scene::PublishedMeshes(store, read) == 1);
+	REQUIRE(read.size() == 1);
+	CHECK(read.front() == Name("real.amesh"));
 }

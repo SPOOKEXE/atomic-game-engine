@@ -417,3 +417,78 @@ TEST_CASE("the published listing gives the names and kinds a scene writes", "[cd
 		CHECK_FALSE(entry.Root.IsZero());
 	}
 }
+
+TEST_CASE("a model's texture is followed through the import log", "[cdn]") {
+	// **The link importing destroys, put back.** A `.pmx` names its sheets
+	// relative to the folder it was authored in — `tex/skin.png` — and
+	// `ImportFile` renames every file to `<hash><extension>` in one flat
+	// directory. After that the folder cannot say that a particular `<hash>.png`
+	// is the model's `tex/skin.png`, so a bake joins the reference lexically,
+	// writes `tex/skin.atex` into the mesh, and publishes a model that arrives,
+	// draws, and is untextured with nothing anywhere saying why.
+	//
+	// The log still records where each file came from, and the two original
+	// paths share a directory exactly as the model expects.
+	const Scratch scratch("resolver");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+	REQUIRE(cdn::EnsureLocalStore(paths));
+
+	// An art folder as somebody would have it: the model, and its sheets in a
+	// `tex/` folder beside it.
+	const std::filesystem::path art = scratch.Path / "art" / "character";
+	const std::filesystem::path model = WriteFile(art / "hero.pmx", "model bytes");
+	const std::filesystem::path skin = WriteFile(art / "tex" / "skin.png", "skin pixels");
+	const std::filesystem::path hair = WriteFile(art / "tex" / "hair.png", "hair pixels");
+
+	const auto modelReport = cdn::ImportFile(paths, model, 1000);
+	const auto skinReport = cdn::ImportFile(paths, skin, 1001);
+	const auto hairReport = cdn::ImportFile(paths, hair, 1002);
+	REQUIRE(modelReport.has_value());
+	REQUIRE(skinReport.has_value());
+	REQUIRE(hairReport.has_value());
+
+	const auto resolve = cdn::StoreTextureResolver(paths);
+	const std::string stored = modelReport->Stored.filename().string();
+
+	// **The extension comes from the original**, so the answer names a file that
+	// is actually in `raw/` — `BakedName` is applied by the caller and turns this
+	// into the `.atex` the manifest carries.
+	std::string out;
+	REQUIRE(resolve(stored, "tex/skin.png", out));
+	CHECK(out == skinReport->Hash + ".png");
+	CHECK(std::filesystem::is_regular_file(paths.Raw / out));
+
+	REQUIRE(resolve(stored, "tex/hair.png", out));
+	CHECK(out == hairReport->Hash + ".png");
+
+	// **A reference up and out of the model's own folder is ordinary** — shared
+	// sheets live one level up all the time — so the join is normalised rather
+	// than taken literally. `character/tex/../tex/skin.png` is `tex/skin.png`.
+	REQUIRE(resolve(stored, "tex/../tex/skin.png", out));
+	CHECK(out == skinReport->Hash + ".png");
+}
+
+TEST_CASE("an unresolvable texture is refused rather than guessed", "[cdn]") {
+	// **Every `false` here becomes a cleared reference and a warning in the
+	// bake**, which is the whole correction: the old path emitted a well-formed
+	// name for an asset that would never exist, and nothing downstream could tell
+	// that apart from content still streaming in.
+	const Scratch scratch("resolver_miss");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+	REQUIRE(cdn::EnsureLocalStore(paths));
+
+	const std::filesystem::path art = scratch.Path / "art";
+	const auto imported = cdn::ImportFile(paths, WriteFile(art / "hero.pmx", "model bytes"), 1000);
+	REQUIRE(imported.has_value());
+
+	const auto resolve = cdn::StoreTextureResolver(paths);
+	std::string out;
+
+	// The sheet was never imported, so nothing can place it.
+	CHECK_FALSE(resolve(imported->Stored.filename().string(), "tex/skin.png", out));
+
+	// And a model that is not in the log at all — dropped into `raw/` by hand —
+	// cannot be placed either. That is a `false` rather than a guess: the folder
+	// is the index, and the log only ever labels.
+	CHECK_FALSE(resolve("deadbeef.pmx", "tex/skin.png", out));
+}

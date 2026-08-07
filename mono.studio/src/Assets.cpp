@@ -363,6 +363,12 @@ namespace studio {
 		// somebody has already placed would move their world.
 		settings.ModelSize = 0.0f;
 
+		// **The log, for the same reason `contentimport` passes it**: `raw/` is
+		// flat, so a model's `tex/skin.png` cannot be followed through the folder
+		// and only the import record still knows where the two came from. A bake
+		// without this produces a mesh whose sheets nothing can fetch.
+		settings.ResolveTexture = cdn::StoreTextureResolver(paths);
+
 		std::string failure;
 		const assetc::Report report = assetc::Bake(settings, failure);
 		if (!failure.empty() || report.Assets.empty()) {

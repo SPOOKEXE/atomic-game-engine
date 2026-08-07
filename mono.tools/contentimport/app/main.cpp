@@ -185,6 +185,14 @@ int main(int argc, char **argv) {
 	// placed would move their world.
 	baking.ModelSize = 0.0f;
 
+	// **The log, because `raw/` is flat and a model's sheets are not beside it.**
+	// A `.pmx` names `tex/体.png`; import renamed both the model and the sheet to
+	// hashes in one directory, so the reference cannot be followed through the
+	// folder any more. `cdn::StoreTextureResolver` follows it through the import
+	// log instead. Without this every PMX character baked with dangling sheet
+	// names and published a model that arrives, draws, and is untextured.
+	baking.ResolveTexture = cdn::StoreTextureResolver(paths);
+
 	std::string bakeFailure;
 	const assetc::Report baked = assetc::Bake(baking, bakeFailure);
 	if (!bakeFailure.empty()) {
@@ -194,6 +202,19 @@ int main(int argc, char **argv) {
 	ENGINE_INFO(
 		"baked {} asset(s), {} failed — {} bytes out", baked.Assets.size(), baked.Failures, baked.OutputBytes
 	);
+
+	// **Said separately, because it is a different kind of wrong.** A failed
+	// asset did not bake and its row says so; a dangling texture reference bakes
+	// perfectly and produces a model that draws untextured with nothing to
+	// explain it. A store where this is non-zero has models whose sheets nothing
+	// will ever fetch.
+	if (baked.DanglingTextures > 0) {
+		ENGINE_WARN(
+			"{} model texture reference(s) named a file not in the store — those submeshes will draw "
+			"untextured",
+			baked.DanglingTextures
+		);
+	}
 
 	// **The development identity when nobody says otherwise.** A store on this
 	// machine, serving this machine's editor, had a key only so that the same

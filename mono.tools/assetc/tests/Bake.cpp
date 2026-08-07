@@ -378,3 +378,130 @@ TEST_CASE("a source that is not there is a run failure", "[assetc][bake]") {
 	CHECK_FALSE(failure.empty());
 	CHECK(report.Assets.empty());
 }
+
+namespace {
+	// A PMX naming one sheet as `tex\\skin.png`, taken byte for byte from
+	// `bake/tests/Model.cpp`.
+	//
+	// **A PMX and not the `.obj` the tests above use, because an `.obj` cannot
+	// express this bug.** `bake::ReadObj` reads `usemtl` into `Submesh::Material`
+	// and never sets `Submesh::Texture` — it does not open a `.mtl` at all — so a
+	// model built from one has no texture reference to dangle. That is also why
+	// the existing "texture references become baked asset names" case only
+	// asserts that the bitmap baked: there was never a reference in the mesh for
+	// it to check.
+	std::string PmxWithSheet() {
+		static constexpr std::array<uint8_t, 347> BYTES{
+			{0x50, 0x4D, 0x58, 0x20, 0x00, 0x00, 0x00, 0x40, 0x08, 0x00, 0x00, 0x02, 0x01, 0x01, 0x01, 0x01,
+			 0x01, 0x0A, 0x00, 0x00, 0x00, 0x6D, 0x00, 0x6F, 0x00, 0x64, 0x00, 0x65, 0x00, 0x6C, 0x00, 0x0A,
+			 0x00, 0x00, 0x00, 0x6D, 0x00, 0x6F, 0x00, 0x64, 0x00, 0x65, 0x00, 0x6C, 0x00, 0x0E, 0x00, 0x00,
+			 0x00, 0x63, 0x00, 0x6F, 0x00, 0x6D, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00, 0x0E,
+			 0x00, 0x00, 0x00, 0x63, 0x00, 0x6F, 0x00, 0x6D, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74,
+			 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80,
+			 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80,
+			 0x3F, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02,
+			 0x00, 0x01, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x74, 0x00, 0x65, 0x00, 0x78, 0x00, 0x5C,
+			 0x00, 0x73, 0x00, 0x6B, 0x00, 0x69, 0x00, 0x6E, 0x00, 0x2E, 0x00, 0x70, 0x00, 0x6E, 0x00, 0x67,
+			 0x00, 0x01, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x62, 0x00, 0x6F, 0x00, 0x64, 0x00, 0x79,
+			 0x00, 0x08, 0x00, 0x00, 0x00, 0x62, 0x00, 0x6F, 0x00, 0x64, 0x00, 0x79, 0x00, 0xCD, 0xCC, 0x4C,
+			 0x3F, 0x9A, 0x99, 0x19, 0x3F, 0xCD, 0xCC, 0xCC, 0x3E, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x40, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F, 0x00, 0xFF,
+			 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}
+		};
+
+		return std::string(reinterpret_cast<const char *>(BYTES.data()), BYTES.size());
+	}
+}
+
+TEST_CASE("a texture reference to nothing is refused rather than written", "[assetc][bake]") {
+	// **The bug this replaces produced a name and no warning.** `Resolve` is
+	// lexical: it joins and normalises and never asks whether the file is there,
+	// so a model naming `tex/skin.png` in a tree with no such file baked
+	// `tex/skin.atex` into the mesh, the publisher signed it, and the client's
+	// miss was indistinguishable from a texture still streaming in. The model
+	// arrived, drew, and had no textures — which is what every PMX character in
+	// this repository's own store did.
+	const Scratch scratch("dangling");
+	scratch.Write("characters/doll.pmx", PmxWithSheet());
+	// **And deliberately no `characters/tex/skin.png`**, which is the whole case.
+
+	const Report report = Baked(scratch, Settings{});
+
+	// The model still bakes — geometry is not what failed, and a run that
+	// refused the mesh would lose the half that works.
+	CHECK(report.Failures == 0);
+	CHECK(fs::exists(scratch.Out() / "characters/doll.amesh"));
+
+	// But the reference is gone and counted, so a caller can say so.
+	CHECK(report.DanglingTextures == 1);
+
+	// Cleared, so the submesh draws untextured rather than carrying a name
+	// nothing answers to.
+	const engine::assets::MeshData mesh = ReadMesh(scratch.Out() / "characters/doll.amesh");
+	REQUIRE_FALSE(mesh.Submeshes.empty());
+	CHECK(mesh.Submeshes.front().Texture.empty());
+}
+
+TEST_CASE("a texture reference beside the model still resolves", "[assetc][bake]") {
+	// The ordinary art-tree case, which must keep working: the sheet is where
+	// the model says it is, so no resolver is needed and nothing dangles.
+	const Scratch scratch("beside");
+	scratch.Write("characters/doll.pmx", PmxWithSheet());
+	// **BMP bytes under a `.png` name, deliberately.** `bake::ReadImage` picks
+	// its decoder from the bytes rather than from the extension, and what the
+	// name has to match is what the model asked for.
+	scratch.Write("characters/tex/skin.png", BMP);
+
+	const Report report = Baked(scratch, Settings{});
+	CHECK(report.Failures == 0);
+	CHECK(report.DanglingTextures == 0);
+	CHECK(fs::exists(scratch.Out() / "characters/tex/skin.atex"));
+
+	// **The mesh's own reference, which is the thing that was wrong.** Checking
+	// only that the sheet baked is what the older case did, and it would have
+	// passed on every day this was broken.
+	const engine::assets::MeshData mesh = ReadMesh(scratch.Out() / "characters/doll.amesh");
+	REQUIRE_FALSE(mesh.Submeshes.empty());
+	CHECK(mesh.Submeshes.front().Texture == "characters/tex/skin.atex");
+}
+
+TEST_CASE("a resolver places a texture the tree cannot", "[assetc][bake]") {
+	// **The flattened-store case, which is what a `cdn` import produces.** The
+	// model and its sheet are both `<hash><extension>` in one directory, so
+	// `tex/skin.png` names nothing — and only the import log knows the two belong
+	// together. `cdn::StoreTextureResolver` is the real one; this stands in for
+	// it so the wiring is checked without a store.
+	const Scratch scratch("resolved");
+	scratch.Write("deadbeef.pmx", PmxWithSheet());
+	scratch.Write("cafebabe.png", BMP);
+
+	std::string asked;
+	Settings settings;
+	settings.ResolveTexture = [&asked](std::string_view model, std::string_view reference, std::string &out) {
+		CHECK(model == "deadbeef.pmx");
+		asked = reference;
+		out = "cafebabe.png";
+		return true;
+	};
+
+	const Report report = Baked(scratch, settings);
+	CHECK(report.Failures == 0);
+
+	// **Nothing dangles**, which is the assertion: the resolver's answer is
+	// checked against the tree exactly as a lexical one is, so a resolver that
+	// lied would be caught here rather than shipped.
+	CHECK(report.DanglingTextures == 0);
+	CHECK_FALSE(asked.empty());
+	CHECK(fs::exists(scratch.Out() / "cafebabe.atex"));
+
+	const engine::assets::MeshData mesh = ReadMesh(scratch.Out() / "deadbeef.amesh");
+	REQUIRE_FALSE(mesh.Submeshes.empty());
+	CHECK(mesh.Submeshes.front().Texture == "cafebabe.atex");
+}

@@ -1325,6 +1325,23 @@ namespace studio {
 
 		// Asks for what the open worlds name and has not been asked for, a
 		// bounded number of them per pump.
+		// Hands every open world the list of mesh names the store published.
+		//
+		// **Names, not content.** It is what makes
+		// `ContentService:GetPublishedMeshes()` answerable, and naming one of them
+		// is still what fetches it — see `scene/PublishedCatalogue.hpp`.
+		void PublishManifestNames();
+
+		// Makes sure every open world holds `PublishedMeshNames`.
+		//
+		// **Every pump, because worlds appear after the catalogue does** — Play
+		// mints a server world and a client replica, and both run scripts.
+		// Guarded on the count, so the steady case is a comparison.
+		void OfferPublishedNames();
+
+		// The mesh names the store published, filtered to what a runtime reads.
+		std::vector<engine::core::Name> PublishedMeshNames;
+
 		void RequestShownContent();
 
 		// Asks for one asset, once.

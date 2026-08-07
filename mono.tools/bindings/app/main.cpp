@@ -956,6 +956,20 @@ declare extern type ContentService with
 	-- and before content has arrived, which are the same honest answer.
 	function GetMeshes(self): { string }
 
+	-- Every mesh the *store* published, sorted — the signed manifest, which a
+	-- client verifies before it can fetch anything.
+	--
+	-- **This is what there is to name; `GetMeshes` is what has been named.** The
+	-- two were one question until v0.10, because content was fetched by kind and
+	-- so everything published arrived whether a scene wanted it or not. Nothing
+	-- is fetched by kind now, which means a scene reading only `GetMeshes` sees
+	-- what it has already asked for and can never discover anything.
+	--
+	-- Setting a `MeshId` from this list *is* the ask: the name enters the world
+	-- and the next content pump fetches that one asset. Empty on a process with
+	-- no content source, which is the honest answer.
+	function GetPublishedMeshes(self): { string }
+
 	-- Every texture registered in this world, sorted.
 	function GetTextures(self): { string }
 
