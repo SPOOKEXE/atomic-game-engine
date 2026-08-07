@@ -140,6 +140,37 @@ namespace engine::render {
 		return texture;
 	}
 
+	TextureTable::Entry
+	TextureTable::Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image) {
+		// **One description, because there are two call sites.** `Add` replaces
+		// an entry or inserts one, and two aggregate initialisers is two places
+		// to forget a field — which is exactly how the sheet layout would go
+		// missing on a *replaced* texture only, so an animation would play until
+		// a publisher re-published it and then stop.
+		return Entry{
+			.Texture = texture,
+			.Bytes = bytes,
+			.Width = image.Width,
+			.Height = image.Height,
+			.FlipbookSide = image.FlipbookSide,
+			.FlipbookFrames = image.FlipbookFrames,
+			.FlipbookFrameRate = image.FlipbookFrameRate,
+		};
+	}
+
+	FlipbookCell TextureTable::CellOf(const core::Name &name, double seconds) const {
+		if (!name.IsValid()) {
+			return {};
+		}
+		const auto found = Textures.find(name.Id());
+		if (found == Textures.end()) {
+			return {};
+		}
+		return FlipbookCellAt(
+			found->second.FlipbookSide, found->second.FlipbookFrames, found->second.FlipbookFrameRate, seconds
+		);
+	}
+
 	bool TextureTable::Add(const core::Name &name, const assets::TextureData &image) {
 		if (Device == nullptr || !name.IsValid() || !image.IsValid()) {
 			return false;
@@ -167,13 +198,9 @@ namespace engine::render {
 			// replaced textures drifted up until the ceiling refused an upload
 			// that would have fit.
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
-			existing->second =
-				Entry{.Texture = texture, .Bytes = uploadBytes, .Width = image.Width, .Height = image.Height};
+			existing->second = Describe(texture, uploadBytes, image);
 		} else {
-			Textures.emplace(
-				name.Id(),
-				Entry{.Texture = texture, .Bytes = uploadBytes, .Width = image.Width, .Height = image.Height}
-			);
+			Textures.emplace(name.Id(), Describe(texture, uploadBytes, image));
 		}
 
 		UploadedBytes += uploadBytes;

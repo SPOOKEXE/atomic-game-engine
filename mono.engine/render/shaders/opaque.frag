@@ -32,6 +32,12 @@ layout(set = 3, binding = 0) uniform Lighting {
 	//    stand-in.
 	// y: the alpha below which a fragment is discarded, or 0 to discard none.
 	vec4 Surface;
+
+	// Where the current animation cell sits in its sheet: x the scale, yz the
+	// offset. The identity (1, 0, 0) for a texture that is not a sheet, so this
+	// is applied unconditionally rather than behind a branch — a divergent
+	// branch per fragment to avoid a multiply and an add is the wrong trade.
+	vec4 Flipbook;
 } lighting;
 
 // How many local lights one draw may be affected by.
@@ -181,7 +187,14 @@ void main() {
 	// instance tint is what the scene says this copy of it is. A pipeline that
 	// let any of them replace the others would lose a different thing in each
 	// of the three cases.
-	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, inTexCoord) : vec4(1.0);
+	// **`fract` before the cell transform, so a tiled coordinate stays inside its
+	// cell.** An imported mesh's UVs routinely run past one and the sampler
+	// repeats them, which is right for a whole sheet and catastrophic for a cell:
+	// without this a coordinate of 1.2 would land two cells further along and a
+	// GIF on a tiled surface would show several frames at once.
+	const vec2 cellUv = fract(inTexCoord) * lighting.Flipbook.x + lighting.Flipbook.yz;
+
+	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, cellUv) : vec4(1.0);
 
 	// Cut-out before anything else is computed. A hair card is authored as a
 	// plane with a mask, and discarding is what keeps it opaque and out of the

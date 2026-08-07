@@ -7,6 +7,7 @@
 
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/render/Flipbook.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -97,6 +98,19 @@ namespace engine::render {
 		// @since v0.10
 		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height) const;
 
+		// Where this texture's current cell sits, for a sheet that animates.
+		//
+		// **The identity for anything that is not a sheet**, so a caller applies
+		// the transform unconditionally — `render::FlipbookCell` carries why
+		// that shape rather than a cell index.
+		//
+		// @param name    The texture.
+		// @param seconds How long animation has been running. The caller's
+		//                clock; this module holds none.
+		// @return The transform, or the identity for a still or an absent name.
+		// @since v0.10
+		FlipbookCell CellOf(const core::Name &name, double seconds) const;
+
 		// The shared sampler.
 		SDL_GPUSampler *Sampler() const {
 			return SharedSampler;
@@ -145,6 +159,15 @@ namespace engine::render {
 			// draws every slice at the wrong scale.
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+
+			// **The sheet layout, kept because the pass that plays it has only a
+			// name.** A GIF bakes to an ordinary texture carrying its grid,
+			// frame count and rate — `assets::TextureData` — and every one of
+			// those was thrown away on upload, so nothing downstream could tell
+			// an animation from a tile atlas. They are three bytes an entry.
+			uint8_t FlipbookSide = 0;
+			uint8_t FlipbookFrames = 0;
+			float FlipbookFrameRate = 0.0f;
 		};
 
 		// Creates one device texture and fills it, widening `R8` on the way.
@@ -158,6 +181,9 @@ namespace engine::render {
 		// @param bytes  Set to what the upload cost in device memory.
 		// @return The texture, or null.
 		SDL_GPUTexture *Upload(const assets::TextureData &image, std::string_view label, size_t &bytes);
+
+		// One entry from an upload and the image it came from. See the body.
+		static Entry Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image);
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUSampler *SharedSampler = nullptr;

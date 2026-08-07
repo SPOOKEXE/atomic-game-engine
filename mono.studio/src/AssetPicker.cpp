@@ -29,6 +29,7 @@
 #include <imgui.h>
 #include <string>
 #include <string_view>
+#include <filesystem>
 #include <studio/AssetRow.hpp>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
@@ -179,7 +180,32 @@ namespace studio {
 
 		const float footer = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
 
+		// **Two tabs, because the store has two halves and only one of them is
+		// selectable as it stands.** `baked/` is what a publisher published and
+		// what a runtime reads; `raw/` is what somebody dragged in five seconds
+		// ago and has not been through a baker. Before this the second was simply
+		// invisible, so a file you had just imported could not be chosen until
+		// the whole store had been republished — which on this repository's own
+		// store is four minutes.
+		if (ImGui::BeginTabBar("##halves")) {
+			if (ImGui::BeginTabItem("Published")) {
+				PickerShowRaw = false;
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Raw")) {
+				PickerShowRaw = true;
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
+		}
+
 		if (ImGui::BeginChild("##rows", ImVec2(0.0f, -footer), ImGuiChildFlags_Borders)) {
+			if (PickerShowRaw) {
+				DrawRawPickerRows(kind, chosen, confirmed);
+				ImGui::EndChild();
+				return FinishAssetPicker(chosen, confirmed);
+			}
+
 			if (PickerContents.empty()) {
 				// **The two empty cases are different and are said
 				// differently.** Nothing published at all is a pipeline that has
@@ -254,7 +280,13 @@ namespace studio {
 			}
 		}
 		ImGui::EndChild();
+		return FinishAssetPicker(chosen, confirmed);
+	}
 
+	bool Editor::FinishAssetPicker(std::string &chosen, bool confirmed) {
+		// **The footer, shared by both tabs.** Two copies of Use/Cancel/Clear is
+		// two places for "Clear" to stop clearing, and the bug would only show on
+		// whichever tab somebody used less.
 		const ImVec2 button(engine::ui::Scaled(110.0f), 0.0f);
 
 		ImGui::BeginDisabled(chosen.empty());
@@ -279,6 +311,11 @@ namespace studio {
 			confirmed = true;
 		}
 
+		if (!AssetStatus.empty()) {
+			ImGui::SameLine();
+			ImGui::TextDisabled("%s", AssetStatus.c_str());
+		}
+
 		if (confirmed) {
 			ImGui::CloseCurrentPopup();
 		}
@@ -287,7 +324,78 @@ namespace studio {
 		return confirmed;
 	}
 
+	void Editor::DrawRawPickerRows(AssetKind kind, std::string &chosen, bool &confirmed) {
+		const float side = engine::ui::Scaled(48.0f);
+		const float spacing = ImGui::GetStyle().ItemSpacing.x;
+
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextWrapped(
+			"unbaked sources — choosing one bakes it now. Publish before a client can fetch it."
+		);
+		ImGui::PopStyleColor();
+
+		size_t shown = 0;
+		for (const cdn::RawEntry &entry : PickerRaw) {
+			// **Classified by the label and not by the file on disk**, because
+			// `ImportFile` renames to `<hash><extension>` and the extension is
+			// the half that survives. `RawEntry::Original` is the name somebody
+			// gave it, which is also what a person is scanning the list for.
+			if (engine::assets::KindOfName(entry.Original) != kind) {
+				continue;
+			}
+
+			int score = 0;
+			if (!FuzzyMatch(PickerFilter, entry.Original, score)) {
+				continue;
+			}
+			shown++;
+
+			const std::string relative = RawRelativePath(entry);
+			ImGui::PushID(relative.c_str());
+
+			const RowAction action = DrawAssetRow(false, side, [&](ImVec2 corner) {
+				PaintPreview(corner.x, corner.y, side, relative, kind);
+
+				const float baseline = corner.y + (side - ImGui::GetTextLineHeight()) * 0.5f;
+				ImGui::GetWindowDrawList()->AddText(
+					ImVec2(corner.x + side + spacing, baseline),
+					ImGui::GetColorU32(ImGuiCol_Text),
+					entry.Original.c_str()
+				);
+			});
+
+			if (action != RowAction::None) {
+				// **Baked here and not on confirm**, so the name written into
+				// the property is one that exists — a picker that handed back a
+				// raw name would put a `.png` on a `ColorMap`, which is the
+				// exact thing this store spent four versions doing.
+				if (std::string baked; BakeRawAsset(relative, baked)) {
+					chosen = baked;
+					confirmed = action == RowAction::Confirmed;
+				}
+			}
+
+			HoverPreview(relative, kind);
+			ImGui::PopID();
+		}
+
+		if (shown == 0) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped("nothing of that kind in raw/");
+			ImGui::PopStyleColor();
+		}
+	}
+
+	std::string Editor::RawRelativePath(const cdn::RawEntry &entry) {
+		std::error_code failure;
+		const std::filesystem::path relative =
+			std::filesystem::relative(entry.Path, cdn::DefaultLocalPaths().Raw, failure);
+		return failure ? entry.Path.filename().generic_string() : relative.generic_string();
+	}
+
 	void Editor::RefreshPickerContents() {
-		PickerContents = cdn::PublishedContents(cdn::DefaultLocalPaths());
+		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		PickerContents = cdn::PublishedContents(paths);
+		PickerRaw = cdn::RawContents(paths);
 	}
 }

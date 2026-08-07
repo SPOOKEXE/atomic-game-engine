@@ -984,6 +984,14 @@ namespace studio {
 		// The published manifest, as a table somebody can filter and copy from.
 		void DrawPublishedList();
 
+		// How long this editor has been drawing, in seconds.
+		//
+		// **What animation is played against**, accumulated from the frame delta
+		// rather than read from a wall clock — see `Renderer::SetAnimationTime`.
+		// A world paused in the editor still animates its interface, which is
+		// why this advances with the *frame* and not with a world's tick.
+		double AnimationSeconds = 0.0;
+
 		// What is sitting in `raw/`, waiting to be published.
 		void DrawRawList();
 
@@ -1237,6 +1245,37 @@ namespace studio {
 		// **Called when a picker opens and by its Refresh button, never per
 		// frame.** Reading a manifest is opening and parsing a file.
 		void RefreshPickerContents();
+
+		// Whether the picker is showing `raw/` rather than the manifest.
+		bool PickerShowRaw = false;
+
+		// Draws the raw half of the picker: unbaked sources, baked when picked.
+		void DrawRawPickerRows(engine::assets::AssetKind kind, std::string &chosen, bool &confirmed);
+
+		// The Use/Cancel/Clear row and the popup's close. Shared by both tabs.
+		bool FinishAssetPicker(std::string &chosen, bool confirmed);
+
+		// A raw entry's path relative to `raw/`, which is what a baker takes.
+		static std::string RawRelativePath(const cdn::RawEntry &entry);
+
+		// Bakes one source out of `raw/` into `baked/`, now.
+		//
+		// **On demand, because a whole-store bake is minutes.** A picker that
+		// republished to make one file selectable would be one nobody waits for
+		// — `assetc::Settings::Only` carries why it is a filter on the real walk
+		// rather than a second baker.
+		//
+		// @param relative The source's path under `raw/`.
+		// @param baked    Set to the baked name, which is what a scene writes.
+		// @return `false` when it could not be baked. `AssetStatus` says why.
+		bool BakeRawAsset(const std::string &relative, std::string &baked);
+
+		// Hands a freshly baked file to this editor's renderer.
+		//
+		// **So a picked asset appears in the viewport before any publish**,
+		// which is the whole point of baking on demand. Textures and meshes
+		// only; everything else reaches a runtime through a publish.
+		void RegisterBakedAsset(const std::filesystem::path &path, const std::string &name);
 
 		// What is moving between this editor and its origins.
 		//

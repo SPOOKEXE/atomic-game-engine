@@ -57,6 +57,25 @@ namespace assetc {
 		//
 		// The output tree is also the publisher's input.
 		bool CopyUnknown = true;
+
+		// Bake only this one source, as a path relative to `Input`.
+		//
+		// **For the editor, which bakes what somebody just picked.** A studio
+		// showing the raw folder has to turn one file into something a runtime
+		// reads *now* — re-walking a store of six thousand assets to do it would
+		// take minutes, and a picker that hung for minutes is one nobody uses.
+		//
+		// **A filter on the existing walk rather than a second entry point**,
+		// because everything that makes a bake correct is in that walk: a
+		// material's colour map is rewritten through `BakedName`, a model's
+		// textures likewise, and a second path would be a second chance to
+		// spell that rule differently. What it costs is a directory scan to find
+		// one file, which is microseconds against decoding it.
+		//
+		// Empty bakes the whole tree, which is what every other caller wants.
+		//
+		// @since v0.10
+		std::string Only;
 	};
 
 	// What one source file became.

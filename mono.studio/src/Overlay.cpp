@@ -998,18 +998,28 @@ namespace studio {
 		// **The size travels with the handle** because a nine-sliced or tiled
 		// image is laid out in source pixels — `Renderer::TextureSize` says why.
 		engine::ui::ImageSource images;
-		images.Resolve = [this](const engine::core::Name &name, ImVec2 &size) -> ImTextureID {
+		images.Resolve = [this](const engine::core::Name &name) -> engine::ui::ImageSource::Resolved {
+			engine::ui::ImageSource::Resolved resolved;
+
 			void *const handle = Renderer.TextureHandle(name);
 			if (handle == nullptr) {
-				return 0;
+				return resolved;
 			}
+			resolved.Texture = reinterpret_cast<ImTextureID>(handle);
 
 			uint32_t width = 0;
 			uint32_t height = 0;
 			if (Renderer.TextureSize(name, width, height)) {
-				size = ImVec2(static_cast<float>(width), static_cast<float>(height));
+				resolved.Size = ImVec2(static_cast<float>(width), static_cast<float>(height));
 			}
-			return reinterpret_cast<ImTextureID>(handle);
+
+			// **The editor's own clock, not the world's.** A world paused in the
+			// editor is still a world somebody is looking at, and its interface
+			// should go on animating — the same reason a paused game's menus do.
+			const engine::render::FlipbookCell cell = Renderer.TextureCell(name, AnimationSeconds);
+			resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
+			resolved.CellMax = ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);
+			return resolved;
 		};
 
 		engine::ui::PaintGui(GuiLists[index].Commands(), slot.List, target, images);

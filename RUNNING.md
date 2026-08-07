@@ -1670,6 +1670,48 @@ inside the mesh file. A material's sheet is *not* — it reaches a part through
 The fetcher is resumable: anything already on disk is skipped, so an interrupted
 run or a raised `--count` costs only what is new.
 
+## Animated textures — `.gif`
+
+A `.gif` bakes to one ordinary `.atex` carrying a square grid of its frames, how
+many of the cells hold one, and the rate the source was authored at. Nothing
+downstream knows it animates until it is drawn, at which point the cell is picked
+from a clock:
+
+```lua
+local screen = Instance.new("Part")
+screen.ColorMap = "fox_dance.atex"   -- baked from fox_dance.gif
+```
+
+The same name on an `ImageLabel` animates too. **Every part showing one GIF shows
+the same frame**, because the cell is a function of the clock rather than of
+anything an entity carries — a per-instance phase is a real feature and a
+different one. A particle emitter's flipbook is already that: `effects` picks the
+cell from a particle's own age, so `OneShot` stretches a sheet over a lifetime.
+
+**The grid is square and a power of two**, so a 12-frame GIF wastes four cells of
+a 4x4 and anything past 64 frames is truncated. `bake/Gif.cpp` carries why that
+trade rather than an animated-texture type.
+
+**A paused editor holds its frame.** The clock is whatever the client or the
+studio has accumulated from its own frame deltas — no module here reads a wall
+clock — so a stopped run stops animating and two runs of one recording show the
+same frames.
+
+## Picking an asset that has not been published
+
+The content picker has two tabs. **Published** is the manifest: baked forms only,
+because a `.pmx` and a `.amesh` are both `AssetKind::Mesh` and only the second is
+something a runtime reads. **Raw** is the other half of the store — what somebody
+dragged in and has not baked.
+
+Choosing a raw row **bakes that one source now**, hands the bytes to the editor's
+own renderer so it appears in the viewport immediately, and writes the *baked*
+name into the property. A publish is still what a client needs; the tab says so.
+
+Baking one file is a filter on the same walk `assetc` does, so a material picked
+this way still has its colour map rewritten by the same rule — there is no second
+baker with its own opinion about names.
+
 ## Using a material
 
 `Enum.Material` does not exist. A material is content, and a part names one

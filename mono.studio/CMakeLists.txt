@@ -55,6 +55,14 @@ mono_add_library(studio
 		# `cdn/LocalStore.hpp` directly.
 		Mono::cdn
 
+		# The baker, so the asset picker can turn a raw file into something a
+		# runtime reads without republishing a store. **The same composition
+		# `contentimport` makes**, and for the same reason: baking cannot live in
+		# `Mono::cdn` — its short link row is the point of that member and a
+		# baker is exactly the interpretation an origin must not do — so it
+		# happens in the programs that can link both.
+		Tool::assetc
+
 		# L9, `shared`. Image decoding, for the asset previews.
 		#
 		# **A decoder in an editor is not the thing `assets::Texture` argues

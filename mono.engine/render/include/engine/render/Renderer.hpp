@@ -10,6 +10,7 @@
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -530,7 +531,31 @@ namespace engine::render {
 		// @return The handle, or nullptr for a name this renderer has not been
 		//         given.
 		// @since v0.10
+		// How long animation has been running, for anything played on a clock.
+		//
+		// **The caller's clock, because this module holds none** — the rule the
+		// whole engine keeps. A client passes its own accumulated seconds and so
+		// does the studio; a paused editor simply stops advancing it, which is
+		// what makes a paused world's GIFs hold their frame with no second
+		// mechanism for it.
+		//
+		// @param seconds Seconds since the session began.
+		// @since v0.10
+		void SetAnimationTime(double seconds);
+
 		void *TextureHandle(const core::Name &name) const;
+
+		// Where a texture's current animation cell sits.
+		//
+		// **For an interface painter, which has a name and no table.** The
+		// opaque pass reads the same thing from the table directly; this is the
+		// same answer for the two callers outside this module.
+		//
+		// @param name    The texture.
+		// @param seconds How long animation has been running.
+		// @return The transform, or the identity for a still or an absent name.
+		// @since v0.10
+		FlipbookCell TextureCell(const core::Name &name, double seconds) const;
 
 		// How big a registered texture is, in source pixels.
 		//

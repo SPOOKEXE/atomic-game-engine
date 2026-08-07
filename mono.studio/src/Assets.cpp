@@ -29,14 +29,21 @@
 // this editor already use. Keeping a text field beside a browser would be two
 // places to say the same thing.
 
+#include <assetc/Bake.hpp>
 #include <cdn/LocalStore.hpp>
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/Mesh.hpp>
+#include <engine/assets/Texture.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
+#include <iterator>
+#include <vector>
 #include <filesystem>
 #include <imgui.h>
 #include <studio/Assets.hpp>
@@ -305,6 +312,93 @@ namespace studio {
 				ImGui::GetColorU32(ImGuiCol_TextDisabled),
 				mark
 			);
+		}
+	}
+
+	bool Editor::BakeRawAsset(const std::string &relative, std::string &baked) {
+		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+
+		// **One source, through the whole baker.** `assetc::Settings::Only`
+		// filters the walk rather than skipping it, so a material picked here
+		// gets its colour map rewritten through `BakedName` exactly as a
+		// whole-tree bake would — two spellings of that rule is a material that
+		// resolves to nothing on a machine nobody tested.
+		assetc::Settings settings;
+		settings.Input = paths.Raw;
+		settings.Output = paths.Baked;
+		settings.Only = relative;
+
+		// **Models keep the scale they were authored at**, which `contentimport`
+		// also does and for the same reason: this is a store being baked rather
+		// than an art folder being imported, and silently rescaling a model
+		// somebody has already placed would move their world.
+		settings.ModelSize = 0.0f;
+
+		std::string failure;
+		const assetc::Report report = assetc::Bake(settings, failure);
+		if (!failure.empty() || report.Assets.empty()) {
+			AssetStatus = failure.empty() ? "nothing to bake" : failure;
+			ENGINE_WARN("assets: bake {}: {}", relative, AssetStatus);
+			return false;
+		}
+
+		const assetc::Baked &one = report.Assets.front();
+		if (!one.Failure.empty()) {
+			AssetStatus = one.Failure;
+			ENGINE_WARN("assets: bake {}: {}", relative, one.Failure);
+			return false;
+		}
+
+		baked = one.Output;
+
+		// **Registered into this editor's own renderer immediately.** The point
+		// of baking on demand is that the thing appears now; waiting for a
+		// publish would make the picker's whole reason for existing a four-minute
+		// round trip. What a publish is still needed for is a *client* — nothing
+		// outside this process can fetch an asset no manifest names, and the tab
+		// says so.
+		RegisterBakedAsset(paths.Baked / baked, baked);
+
+		AssetStatus = "baked " + baked + " — publish to share it";
+		ENGINE_INFO("assets: {}", AssetStatus);
+
+		// The picker lists the manifest, and this file is not in one yet. Its
+		// row appears under Published after the next publish.
+		return true;
+	}
+
+	void Editor::RegisterBakedAsset(const std::filesystem::path &path, const std::string &name) {
+		std::ifstream file(path, std::ios::binary);
+		if (!file) {
+			return;
+		}
+		const std::vector<char> raw((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+		if (raw.empty()) {
+			return;
+		}
+
+		engine::core::ByteReader reader(
+			{reinterpret_cast<const std::byte *>(raw.data()), raw.size()}
+		);
+		const engine::core::Name interned(name);
+
+		// **Only the two kinds this editor can show.** A sound or a script baked
+		// on demand is a real thing to have done and there is nothing here to
+		// hand it to — the publish is what delivers those, and pretending
+		// otherwise would be a status line that lied.
+		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Texture) {
+			engine::assets::TextureData image;
+			if (engine::assets::Texture::Read(reader, image)) {
+				Renderer.AddTexture(interned, image);
+			}
+			return;
+		}
+
+		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Mesh) {
+			engine::assets::MeshData mesh;
+			if (engine::assets::Mesh::Read(reader, mesh)) {
+				Renderer.AddMesh(interned, mesh);
+			}
 		}
 	}
 

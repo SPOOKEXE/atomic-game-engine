@@ -360,6 +360,14 @@ namespace client {
 		// once; see the call site for why it is not done at start-up.
 		bool InterfaceImagesReady = false;
 
+		// How long this session has been drawing, in seconds.
+		//
+		// **What animation is played against**, and it is accumulated from the
+		// frame delta rather than read from a wall clock: a run paused or ended
+		// holds its animations where they were, and two runs of one recording
+		// show the same frames.
+		double AnimationSeconds = 0.0;
+
 		// The compiled list the pass draws, kept across frames so its signature
 		// can be compared. Holding one per frame would compute a signature, find
 		// nothing to compare it against and rebuild every time — every cost of

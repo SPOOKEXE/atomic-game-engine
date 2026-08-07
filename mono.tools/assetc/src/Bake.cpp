@@ -237,6 +237,18 @@ namespace assetc {
 		}
 		std::sort(sources.begin(), sources.end());
 
+		// **After the sort, so a filtered run and a whole one agree about what
+		// a source is.** Filtering the walk instead would work today and would
+		// stop the moment something in the loop depended on a neighbour.
+		if (!settings.Only.empty()) {
+			const std::string wanted = Slashed(settings.Only);
+			std::erase_if(sources, [&wanted](const std::string &source) { return source != wanted; });
+			if (sources.empty()) {
+				failure = "assetc: " + settings.Only + " is not in " + settings.Input.string();
+				return report;
+			}
+		}
+
 		for (const std::string &relative : sources) {
 			Baked baked;
 			baked.Source = relative;

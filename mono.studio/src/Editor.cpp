@@ -852,6 +852,12 @@ namespace studio {
 		// stuttered.
 		Statistics.Record(Clock.Now(), frameSeconds);
 
+		// **Accumulated from the frame delta, and handed to the renderer that
+		// draws against it.** `Renderer::SetAnimationTime` carries why the clock
+		// is the caller's: a module holding one has a notion of "now" to drift.
+		AnimationSeconds += frameSeconds;
+		Renderer.SetAnimationTime(AnimationSeconds);
+
 		// **The frame graph is only collected while it is being read.**
 		// Recording every span of every frame costs real time, and the whole
 		// reason to look at that panel is that time is scarce. The client's

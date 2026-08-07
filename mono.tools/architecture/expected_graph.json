@@ -284,6 +284,7 @@
 		"studio": {
 			"tier": "client",
 			"links": [
+				"assetc",
 				"assets",
 				"audio",
 				"bake",
@@ -439,6 +440,7 @@
 		"studio": {
 			"tier": "client",
 			"links": [
+				"assetc",
 				"assets",
 				"audio",
 				"bake",

@@ -133,6 +133,15 @@ namespace engine::render {
 			// x: whether `colourMap` holds this draw's texture. y: the alpha
 			// below which a fragment is discarded, or zero to discard none.
 			glm::vec4 Surface{0.0f, 0.0f, 0.0f, 0.0f};
+
+			// Where the current animation cell sits: x the scale, yz the offset.
+			//
+			// **A transform rather than a cell index**, so a still image is the
+			// identity and the shader needs no branch per fragment —
+			// `render::FlipbookCell` carries the argument. A GIF is an ordinary
+			// texture in every other respect, which is what makes one usable on
+			// a part at all.
+			glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
 		};
 
 		// Mix renderer-owned view data into the scene signature.
@@ -264,6 +273,14 @@ namespace engine::render {
 		// Every mesh and texture available to the renderer.
 		MeshTable Meshes;
 		TextureTable Textures;
+
+		// How long animation has been running, as the caller measures it.
+		//
+		// **Given rather than read.** `render` holds no clock, which is the
+		// standing rule `assets::Grant` and `cdn::Service::Pump` keep for the
+		// same reason: a module with a notion of "now" of its own has one to
+		// drift, and a recorded run could not replay.
+		double AnimationSeconds = 0.0;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
@@ -1324,6 +1341,15 @@ namespace engine::render {
 				LightingUniforms uniforms = *lighting;
 				uniforms.BaseColour = glm::vec4{colour[0], colour[1], colour[2], colour[3]};
 				uniforms.Surface = glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+
+				// **The cell is per draw, not per instance**, which is the whole
+				// simplification: a sheet plays on the clock rather than on
+				// anything an entity carries, so every part showing one GIF shows
+				// the same frame. A per-instance phase is a real feature and is a
+				// different one — `effects::FlipbookLayout` already has it for
+				// particles, where the cell is a function of a particle's age.
+				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
+				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 			}
 
@@ -2546,6 +2572,19 @@ namespace engine::render {
 			return false;
 		}
 		return State->Textures.Add(name, image);
+	}
+
+	void Renderer::SetAnimationTime(double seconds) {
+		if (State != nullptr) {
+			State->AnimationSeconds = seconds;
+		}
+	}
+
+	FlipbookCell Renderer::TextureCell(const core::Name &name, double seconds) const {
+		if (State == nullptr) {
+			return {};
+		}
+		return State->Textures.CellOf(name, seconds);
 	}
 
 	void *Renderer::TextureHandle(const core::Name &name) const {

@@ -317,3 +317,64 @@ TEST_CASE("an unknown key in a material is ignored rather than refused", "[asset
 	CHECK(report.Failures == 0);
 	CHECK(ReadMaterial(scratch.Out() / "materials/oak.amat").ColourMap == "materials/oak_Color.atex");
 }
+
+// --- baking one source ------------------------------------------------------
+
+TEST_CASE("only the named source is baked", "[assetc][bake]") {
+	// **What the studio's picker needs.** Making one raw file selectable by
+	// re-walking a store of six thousand assets takes minutes, and a picker that
+	// hung for minutes is one nobody uses.
+	const Scratch scratch("only");
+	scratch.Write("a.bmp", BMP);
+	scratch.Write("b.bmp", BMP);
+	scratch.Write("props/floor.obj", OBJ);
+
+	Settings settings;
+	settings.Only = "b.bmp";
+
+	const Report report = Baked(scratch, settings);
+	REQUIRE(report.Failures == 0);
+	REQUIRE(report.Assets.size() == 1);
+	CHECK(report.Assets[0].Output == "b.atex");
+
+	CHECK(fs::exists(scratch.Out() / "b.atex"));
+	CHECK_FALSE(fs::exists(scratch.Out() / "a.atex"));
+	CHECK_FALSE(fs::exists(scratch.Out() / "props/floor.amesh"));
+}
+
+TEST_CASE("one source goes through the whole baker", "[assetc][bake]") {
+	// **A filter on the walk and not a second entry point**, which is what makes
+	// this hold: a material picked on its own still has its colour map rewritten
+	// through `BakedName`. A shortcut path would be a second spelling of that
+	// rule, and the failure would be a material resolving to a name no manifest
+	// carries — on the editor's path only, which is the half nobody tests.
+	const Scratch scratch("only-material");
+	scratch.Write("materials/oak_Color.bmp", BMP);
+	scratch.Write("materials/oak.mat", std::string_view("color = oak_Color.bmp\n"));
+
+	Settings settings;
+	settings.Only = "materials/oak.mat";
+
+	const Report report = Baked(scratch, settings);
+	REQUIRE(report.Failures == 0);
+	CHECK(ReadMaterial(scratch.Out() / "materials/oak.amat").ColourMap == "materials/oak_Color.atex");
+}
+
+TEST_CASE("a source that is not there is a run failure", "[assetc][bake]") {
+	// **A run failure and not an empty report**, because the caller asked for one
+	// specific thing: a report with no rows reads as "nothing to do" and this is
+	// "the file you named is gone", which for a picker means a row somebody
+	// clicked after the file was deleted underneath them.
+	const Scratch scratch("only-missing");
+	scratch.Write("a.bmp", BMP);
+
+	Settings settings;
+	settings.Input = scratch.In();
+	settings.Output = scratch.Out();
+	settings.Only = "nothing.bmp";
+
+	std::string failure;
+	const Report report = assetc::Bake(settings, failure);
+	CHECK_FALSE(failure.empty());
+	CHECK(report.Assets.empty());
+}

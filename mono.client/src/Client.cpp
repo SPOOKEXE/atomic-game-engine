@@ -1242,6 +1242,12 @@ namespace client {
 
 		Statistics.Record(Clock.Now(), delta);
 
+		// **Advanced with the frame it will be drawn against.** Accumulated from
+		// the frame delta rather than read from a wall clock, so a run that
+		// stalls does not skip an animation forward and two runs of one
+		// recording show the same frames — `Renderer::SetAnimationTime`.
+		AnimationSeconds += delta;
+
 		// Ticks actually achieved, over a one-second window. It matches the
 		// configured rate until the machine cannot keep up, and the gap is the
 		// number worth seeing.
@@ -1403,9 +1409,15 @@ namespace client {
 		// answers, and a lambda capturing `this` outlives the frame it is set in.
 		if (!InterfaceImagesReady) {
 			InterfaceImagesReady = true;
-			Interface.SetImageSource([this](const engine::core::Name &name) -> void * {
-				return Renderer.TextureHandle(name);
-			});
+			Interface.SetImageSource(
+				[this](const engine::core::Name &name, engine::render::FlipbookCell &cell) -> void * {
+					void *const handle = Renderer.TextureHandle(name);
+					if (handle != nullptr) {
+						cell = Renderer.TextureCell(name, AnimationSeconds);
+					}
+					return handle;
+				}
+			);
 		}
 
 		engine::render::InterfacePass *hook = nullptr;
@@ -1457,6 +1469,12 @@ namespace client {
 			target.Height = static_cast<uint32_t>(Settings.Height);
 			sceneTarget = &target;
 		}
+
+		// **Accumulated from the frame's own delta rather than read from a
+		// clock**, so a paused editor or a stopped run holds its animations
+		// where they were and a recorded session replays them identically —
+		// `Renderer::SetAnimationTime` carries the rule.
+		Renderer.SetAnimationTime(AnimationSeconds);
 
 		LastFrame = Renderer.Render(
 			Views.CameraFrame(),
