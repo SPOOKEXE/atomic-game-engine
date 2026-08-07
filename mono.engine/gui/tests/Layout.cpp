@@ -38,9 +38,8 @@ namespace {
 			// the containment test reads is the *name*, so an instance carrying
 			// that name is exactly as contained as the real service would be.
 			// That is the same duplication `NormalId` already makes here.
-			Container = Data.CreateInstance(
-				engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui"
-			);
+			Container =
+				Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui");
 			Display.Width = 800.0f;
 			Display.Height = 600.0f;
 		}
@@ -579,9 +578,8 @@ TEST_CASE("a screen gui nested inside a container still draws", "[gui][layout]")
 	// authors nest: a folder of screens under `StarterGui` is ordinary.
 	World world("gui_layout.nested");
 
-	const Entity folder = world.Data.CreateInstance(
-		engine::ecs::Classes::Find(engine::core::Name("Instance")), "Screens"
-	);
+	const Entity folder =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "Screens");
 	world.Data.SetParent(folder, world.Container);
 
 	const Entity screen = world.Make("ScreenGui", folder);

@@ -27,6 +27,12 @@ mono_add_library(client
 		# components, and the two had to be kept in step by hand.
 		Engine::scene
 
+		# L8, `shared`. The particle pool and the ribbon builder. A client
+		# installs the three systems that run them and turns the pool into
+		# `render::ParticleBatch`es — see `client/Scene.hpp`, which explains why
+		# that conversion is here rather than in `effects`.
+		Engine::effects
+
 		# `--connect` makes one of this client's worlds somebody else's
 		# authority. Both are `shared` tier, so neither widens what a client is
 		# allowed to link — the tier rule already permits `shared` here.
@@ -67,6 +73,17 @@ mono_add_program(client
 		Mono::client
 		Engine::core
 		Engine::render
+
+		# **The program and not the library**, because only `main.cpp` names it:
+		# the client defaults its content origin to the local store at
+		# `~/Documents/atomic-game-engine/cdn` when nobody passed `--cdn`, which
+		# is `ROADMAP.md` v0.10's "hook up all cdn behavior to this by default".
+		#
+		# Keeping it out of `Mono::client` matters: a host that embeds the client
+		# library — the studio, the unified harness — chooses its own content
+		# sources, and inheriting a default from a library it links would be a
+		# decision made somewhere it cannot see.
+		Mono::cdn
 
 	# Single-player will link the server library into this process, and that is
 	# the one edge the tier rule has to allow by name rather than by rule:

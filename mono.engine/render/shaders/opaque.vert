@@ -32,6 +32,11 @@ layout(location = 2) out vec4 outLightPosition;
 layout(location = 3) out vec4 outSurfacePosition;
 layout(location = 4) out vec2 outTexCoord;
 
+// Where this fragment is, for the point and spot lights' falloff. **The world
+// position and not the view one**, because a light's range is in metres and a
+// view-space distance would make it depend on where the camera is.
+layout(location = 5) out vec3 outWorldPosition;
+
 void main() {
 	mat4 model = mat4(inModel0, inModel1, inModel2, inModel3);
 
@@ -41,6 +46,7 @@ void main() {
 	outTexCoord = inTexCoord;
 
 	vec4 world = model * vec4(inPosition, 1.0);
+	outWorldPosition = world.xyz;
 
 	// Divide in the fragment to preserve perspective-correct interpolation.
 	outLightPosition = frame.LightViewProjection * world;

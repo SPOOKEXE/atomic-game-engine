@@ -79,11 +79,59 @@ namespace engine::assets {
 		// pads on upload, where it knows the number.
 		std::vector<std::byte> Pixels;
 
+		// The flipbook grid's side, or zero for a still image.
+		//
+		// **A sheet of animation frames is still one texture, and that is the
+		// whole reason this is three fields rather than a new asset kind.** A
+		// GIF decodes to a square power-of-two grid of cells — `bake/Gif.cpp`
+		// carries that argument — so what a sampler needs is unchanged and what
+		// is *lost* without these three is how to play it: a 4x4 sheet and a
+		// 4x4 tile atlas are the same pixels.
+		//
+		// @since v0.10
+		uint8_t FlipbookSide = 0;
+
+		// How many of the grid's cells hold a frame.
+		//
+		// **Not `Side * Side`, because a real animation rarely fills a square.**
+		// A 24-frame GIF lands in an 8x8 with forty cells empty, and a player
+		// that walked all sixty-four would spend five eighths of every loop
+		// showing nothing. Mirrors `effects::ParticleEmitter::FlipbookFrames`,
+		// which is where the same number ends up.
+		//
+		// @since v0.10
+		uint8_t FlipbookFrames = 0;
+
+		// Frames a second the source was authored at, or zero when unknown.
+		//
+		// **Read from the source rather than assumed.** A GIF states a delay
+		// per frame and this is what those delays average to; a sheet drawn by
+		// hand states nothing, which is what zero means. A consumer that gets
+		// zero picks its own rate — for a particle that is "one loop over the
+		// lifetime", which is what the engine did before there was anything to
+		// ask.
+		//
+		// **One rate for the sheet, and a GIF may not have one.** Per-frame
+		// delays are a thing GIF permits and encoders occasionally use; a
+		// flipbook has a single rate by construction, so a varying one is
+		// averaged and that is a real approximation rather than a lossless
+		// conversion.
+		//
+		// @since v0.10
+		float FlipbookFrameRate = 0.0f;
+
 		// Whether this describes an image at all.
 		//
 		// @return `true` when the dimensions are non-zero and the pixel count
 		//         matches them exactly.
 		bool IsValid() const;
+
+		// Whether this image is a sheet of animation frames.
+		//
+		// @return `true` when the grid has a side and at least one frame in it.
+		bool IsFlipbook() const {
+			return FlipbookSide > 0 && FlipbookFrames > 0;
+		}
 	};
 
 	// Reading and writing the texture format.
@@ -100,7 +148,14 @@ namespace engine::assets {
 		static constexpr uint32_t MAGIC = 0x31585441;
 
 		// The version. Bumped when the layout changes, never reused.
-		static constexpr uint16_t VERSION = 1;
+		//
+		// **2 adds the three flipbook fields, and 1 is still read.** Not for
+		// compatibility's sake — this is pre-release and the standing rule is
+		// that a format break is acceptable — but because the absent case has
+		// an obviously right answer: a v1 file is a still image, which is what
+		// zeroes already mean. Refusing one would make every baked texture in
+		// every store on disk unreadable to buy nothing.
+		static constexpr uint16_t VERSION = 2;
 
 		// The largest image this will read.
 		//

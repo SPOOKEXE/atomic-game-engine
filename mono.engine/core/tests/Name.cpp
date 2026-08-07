@@ -244,8 +244,7 @@ TEST_CASE("a racing first sighting still yields one id and one entry", "[name]")
 		});
 	}
 
-	while (ready.load() < THREADS) {
-	}
+	while (ready.load() < THREADS) {}
 	go.store(true, std::memory_order_release);
 
 	for (std::thread &thread : threads) {

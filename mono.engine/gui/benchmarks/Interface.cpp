@@ -68,8 +68,8 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/gui/Components.hpp>
 #include <engine/gui/Compile.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
@@ -145,7 +145,8 @@ namespace interface_bench {
 		EnsureRegistered();
 
 		Interface made;
-		made.Data = std::make_unique<Store>("gui_bench_" + std::to_string(count) + "_" + std::to_string(depth));
+		made.Data =
+			std::make_unique<Store>("gui_bench_" + std::to_string(count) + "_" + std::to_string(depth));
 		Store &store = *made.Data;
 
 		made.Root = store.CreateInstance(GuiClass("ScreenGui"), "ScreenGui");

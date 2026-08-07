@@ -211,16 +211,29 @@ namespace engine::ui {
 			const ImVec2 max = space.Point(command.Bounds.Max);
 			const ImU32 tint = Colour(command.Tint, command.Transparency);
 
-			ImVec2 imageSize{0.0f, 0.0f};
-			const ImTextureID texture =
-				images.Resolve ? images.Resolve(command.Image, imageSize) : ImTextureID{};
+			const ImageSource::Resolved resolved =
+				images.Resolve ? images.Resolve(command.Image) : ImageSource::Resolved{};
+			const ImTextureID texture = resolved.Texture;
 
 			if (texture == ImTextureID{}) {
 				return PaintMissingImage(into, min, max, tint);
 			}
 
-			ImVec2 uvMin{0.0f, 0.0f};
-			ImVec2 uvMax{1.0f, 1.0f};
+			// **The animation cell is where the coordinates start**, so
+			// everything below composes inside the frame that is showing rather
+			// than across the whole sheet. A still image resolves to the whole
+			// image and the arithmetic is the identity.
+			ImVec2 uvMin = resolved.CellMin;
+			ImVec2 uvMax = resolved.CellMax;
+
+			const ImVec2 span{uvMax.x - uvMin.x, uvMax.y - uvMin.y};
+
+			// **The *cell's* pixel size, not the sheet's.** A nine-slice inset
+			// and a tile size are authored against the picture somebody can see,
+			// and on an 8x8 sheet the sheet is eight times that in each
+			// direction — so measuring against it would put every slice border
+			// an eighth of the way in.
+			ImVec2 imageSize{resolved.Size.x * span.x, resolved.Size.y * span.y};
 
 			// A non-empty `Sample` narrows the whole thing to a sub-rectangle
 			// of the image before anything else happens — Roblox's
@@ -228,8 +241,14 @@ namespace engine::ui {
 			// `ScaleType` rather than replacing one.
 			if (imageSize.x > 0.0f && imageSize.y > 0.0f && command.Sample.Width() > 0.0f &&
 				command.Sample.Height() > 0.0f) {
-				uvMin = ImVec2{command.Sample.Min.X / imageSize.x, command.Sample.Min.Y / imageSize.y};
-				uvMax = ImVec2{command.Sample.Max.X / imageSize.x, command.Sample.Max.Y / imageSize.y};
+				uvMin = ImVec2{
+					resolved.CellMin.x + command.Sample.Min.X / imageSize.x * span.x,
+					resolved.CellMin.y + command.Sample.Min.Y / imageSize.y * span.y
+				};
+				uvMax = ImVec2{
+					resolved.CellMin.x + command.Sample.Max.X / imageSize.x * span.x,
+					resolved.CellMin.y + command.Sample.Max.Y / imageSize.y * span.y
+				};
 				imageSize = ImVec2{command.Sample.Width(), command.Sample.Height()};
 			}
 

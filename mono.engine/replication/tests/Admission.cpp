@@ -273,7 +273,6 @@ namespace admission_test {
 
 using namespace admission_test;
 
-
 TEST_CASE("every admission message survives the round trip", "[replication][admission]") {
 	Admission read;
 
@@ -374,7 +373,6 @@ TEST_CASE("a malformed admission message is refused whole", "[replication][admis
 	}
 }
 
-
 TEST_CASE("a stranger's first datagram admits nothing", "[replication][admission]") {
 	Port port(1);
 
@@ -456,7 +454,6 @@ TEST_CASE("a peer that never answers is never admitted", "[replication][admissio
 	CHECK(port.Server->Authority().Count() == 0);
 	CHECK(port.Server->Stats().Admitted == 0);
 }
-
 
 TEST_CASE("a forged cookie is refused", "[replication][admission]") {
 	Port port(1);
@@ -583,7 +580,6 @@ TEST_CASE("a server-to-client message from a client is refused", "[replication][
 	CHECK(port.Server->Stats().Refused == 2);
 }
 
-
 TEST_CASE("a connector that gets its welcome is admitted", "[replication][admission]") {
 	Dialogue dialogue;
 	CHECK_FALSE(dialogue.Client->Admitted());
@@ -673,7 +669,6 @@ TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][adm
 	CHECK(transports[0]->Receive(scratch).Status != TransportStatus::Ok);
 	CHECK(client.Rejected());
 }
-
 
 TEST_CASE("the bound still turns away the peer past it", "[replication][admission]") {
 	ListenerSettings settings;
@@ -771,7 +766,6 @@ TEST_CASE("a rejected peer costs no slot", "[replication][admission]") {
 	CHECK(port.Server->Stats().Refused == 0);
 }
 
-
 TEST_CASE("a welcome that was lost is sent again", "[replication][admission]") {
 	Port port(1);
 	Stranger stranger = port.Peer(0, 16);
@@ -853,7 +847,6 @@ TEST_CASE("a session refuses a handshake packet outright", "[replication][admiss
 	CHECK(session.Stats().Refused == 1);
 	CHECK(session.Link().Stats().PacketsReceived == 0);
 }
-
 
 TEST_CASE("a signed welcome from the pinned server is accepted", "[replication][admission]") {
 	const engine::assets::SigningKey server = Identity(0x40);
@@ -967,7 +960,6 @@ TEST_CASE("a signature is over the transcript, so it does not move", "[replicati
 	CHECK_FALSE(second.Client->Admitted());
 	CHECK(second.Client->Rejected());
 }
-
 
 TEST_CASE("a client's claim verifies against the transcript", "[replication][admission]") {
 	const engine::assets::SigningKey client = Identity(0x60);

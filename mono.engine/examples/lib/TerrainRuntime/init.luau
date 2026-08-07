@@ -4,18 +4,19 @@
 --
 -- `TerrainCore` computes and never touches an instance, which is what let its
 -- whole test suite run with no world at all. This is the other side of that
--- line, and it is the only file in the pair that names `Part`, `Color3` or
--- `Enum.Material`.
+-- line, and it is the only file in the pair that names `Part` or
+-- `Color3`.
 --
 -- ## What differs from the Roblox original
 --
 -- Two things, and neither is in the core:
 --
 --   * **Materials.** `TerrainCore` names a material as a string because it has
---     to run outside any engine. Four of the names it uses -- `Snow`, `Ground`,
---     `LeafyGrass` and `Basalt` -- are Roblox materials this engine does not
---     have, so they are remapped below. The colour is the core's either way, and
---     colour is what actually reads at terrain scale.
+--     to run outside any engine. Nothing here reads that name any more: v0.10
+--     removed `Enum.Material`, and the replacement names a published asset,
+--     which a demo cannot assume is on the machine running it. The colour is
+--     the core's either way, and colour is what actually reads at terrain
+--     scale.
 --   * **No `Folder`.** A bare `Instance` is the container, which is all a
 --     `Folder` ever was.
 
@@ -38,21 +39,11 @@ TerrainRuntime.__index = TerrainRuntime
 -- would otherwise leave the pool holding the difference forever.
 local POOL_LIMIT = 2048
 
--- The material each `TerrainCore` surface draws as here.
---
--- Written out per surface rather than as a name-to-name table, so a surface
--- added to the core fails loudly at load with a nil index rather than silently
--- drawing plastic.
-local MATERIALS: { Enum_Material } = {
-	Enum.Material.Slate, -- rock
-	Enum.Material.Grass, -- grass
-	Enum.Material.Sand, -- sand
-	Enum.Material.SmoothPlastic, -- snow: no Snow material, and the colour carries it
-	Enum.Material.Concrete, -- tundra: no Ground
-	Enum.Material.Grass, -- scrub: no LeafyGrass
-	Enum.Material.Glass, -- water
-	Enum.Material.Slate, -- scorch: no Basalt
-}
+-- **No material is set, and `Enum.Material` no longer exists.** v0.10 removed
+-- it: seventeen names nothing sampled, replaced by a `Material` instance that
+-- names a published asset. A demo that shipped one would only draw right on a
+-- machine whose content store happened to hold that material, so the colour
+-- carries the look here exactly as it always actually did.
 
 local WATER = HeightField.SurfaceWater
 local WATER_TRANSPARENCY = 0.35
@@ -75,7 +66,6 @@ export type Builder = typeof(setmetatable(
 local COLOURS: { Color3 } = {}
 for index, surface in HeightField.Surfaces do
 	COLOURS[index] = Color3.new(surface.color.r, surface.color.g, surface.color.b)
-	assert(MATERIALS[index] ~= nil, `no material for terrain surface '{surface.id}'`)
 end
 
 function TerrainRuntime.new(field: any, size: number, container: Instance?): Builder
@@ -153,7 +143,6 @@ function TerrainRuntime.build(self: Builder, cx: number, cz: number)
 		part.Size = Vector3.new(width, height, depth)
 		part.Position = Vector3.new(x, y, z)
 		part.Color = COLOURS[box.surface]
-		part.Material = MATERIALS[box.surface]
 
 		local isWater = box.surface == WATER
 		part.Transparency = if isWater then WATER_TRANSPARENCY else 0
@@ -250,7 +239,6 @@ function TerrainRuntime.stats(self: Builder): { [string]: number }
 end
 
 TerrainRuntime.PoolLimit = POOL_LIMIT
-TerrainRuntime.Materials = MATERIALS
 TerrainRuntime.Colours = COLOURS
 TerrainRuntime.New = TerrainRuntime.new
 

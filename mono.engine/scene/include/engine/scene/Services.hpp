@@ -28,11 +28,10 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
-
-#include <string_view>
 #include <engine/scene/Enums.hpp>
 
 #include <cstdint>
+#include <string_view>
 
 namespace engine::ecs {
 	class Store;

@@ -27,6 +27,7 @@ using engine::scene::BodyKind;
 using engine::scene::Bounds;
 using engine::scene::Camera;
 using engine::scene::Collider;
+using engine::scene::MaterialRef;
 using engine::scene::Motion;
 using engine::scene::NormalId;
 using engine::scene::PreviousTransform;
@@ -107,6 +108,18 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// wider. `Surface` is an `int8_t` and `CastShadow` is a `bool`, so each took
 	// one of those bytes and cost nothing — which is what named padding is
 	// *for*, and what this check is here to keep honest. One byte is left.
+	//
+	// **Two `Name`s, and both of the changes that got it there are v0.10's.**
+	// `Material` came off — a material is content named by a `Material`
+	// instance, not a word on every drawable, `scene/Materials.hpp` — and
+	// `Fitted` went on, which records the mesh `Bounds` was last shaped to fit.
+	//
+	// **The second one is paid for on every part in the world**, including every
+	// plain `Part` that will never name a mesh, and that is the honest cost of
+	// keeping `client::CollectInstances` a batched walk over fixed columns: the
+	// same trade `SurfaceAppearance` makes one component over. Four bytes an
+	// entity buys a fit rule with nothing to keep in step — see `Visual::Fitted`
+	// for why a bool would have been cheaper and wrong.
 	CHECK(
 		sizeof(Visual) ==
 		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + sizeof(bool) + 1
@@ -182,40 +195,28 @@ TEST_CASE("a default visual is a visible untinted default mesh", "[scene][compon
 	// decides.
 	CHECK_FALSE(visual.Mesh.IsValid());
 
-	// **Material is the opposite case, and the asymmetry is the point.** There
-	// is no name for "the consumer's own default material" the way there is for
-	// its default mesh — a part is drawn as *something* — so leaving this
-	// invalid meant a properties panel showing an empty combo whose current
-	// value was not among the values it offered, and a script comparing
-	// `part.Material` against `Enum.Material.Plastic` and getting false on a
-	// part that was drawn as plastic.
-	CHECK(visual.Material == engine::scene::DefaultMaterial());
-	CHECK(visual.Material == Name("Plastic"));
+	// **A `Visual` no longer carries a material at all**, which is the change
+	// v0.10 made and this is where it is pinned. It used to default to
+	// `Plastic` so a properties panel had something to show and a script had
+	// something to compare against — both real problems with a seventeen-name
+	// enum nothing sampled. A material is content now: a `Material` instance
+	// under the part names one, and a part with none draws
+	// `render::DefaultTexture`. See `scene/Materials.hpp`.
+	//
+	// **Nothing asserts the absence, and there is no way to.** A `requires`
+	// expression naming a member of a concrete type is a hard error rather than
+	// a substitution failure, so the check that "`Visual` has no `Material`" is
+	// the compiler refusing every call site — which it does, loudly, and which is
+	// what the rest of this change is. The test below is the positive half.
 }
 
-TEST_CASE("the default material is a member of the material enum", "[scene][components]") {
-	// **The check that makes one string in two files safe.** `DefaultMaterial`
-	// interns "Plastic" and `scene::Part.cpp` registers the enum's members from
-	// a separate list, and they cannot be collapsed in the direction that would
-	// help: a `Visual` can be default constructed before any class tree exists —
-	// a replica's column grows straight from a wire delta — so reading the
-	// enum's first member as the default would hand back an invalid name on
-	// exactly the path the default is for.
-	//
-	// So they are two declarations of one fact, and this is what stops them
-	// drifting. Renaming the enum member without renaming the default would
-	// otherwise leave every part carrying a material name the enum does not
-	// contain, and the only symptom would be a combo with no selection.
-	// Building the class tree is what registers the enum, so this is the call
-	// that makes the lookup below meaningful rather than merely absent.
-	(void)engine::scene::PartClass();
-
-	size_t ordinal = 0;
-	REQUIRE(engine::ecs::EnumTable::OrdinalOf(Name("Material"), engine::scene::DefaultMaterial(), ordinal));
-
-	// First, because `Part.cpp` lists it first and a fresh part reading back the
-	// enum's leading member is what an author expects to see.
-	CHECK(ordinal == 0);
+TEST_CASE("a material reference starts at none", "[scene][components]") {
+	// **`None` and not `Plastic`, which is the whole shape of the change.** The
+	// enum defaulted to a value the renderer could not act on; this defaults to
+	// "nothing chosen yet", which is a state the renderer draws — the engine's
+	// own white plastic — and a state an author can read as unfinished.
+	const MaterialRef material;
+	CHECK_FALSE(material.Asset.IsValid());
 }
 
 TEST_CASE("a default surface names nothing", "[scene][components]") {

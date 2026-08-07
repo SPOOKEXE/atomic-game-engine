@@ -182,9 +182,8 @@ TEST_CASE("a surface gui on something with no bounds resolves nothing", "[render
 	// mean inventing an extent, and the honest answer is the authored pixels.
 	World world("render_canvas.unbounded");
 
-	const Entity folder = world.Data.CreateInstance(
-		engine::ecs::Classes::Find(engine::core::Name("Folder")), "Signs"
-	);
+	const Entity folder =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Folder")), "Signs");
 	world.Data.SetParent(folder, world.Workspace);
 
 	const Entity surface = world.Collector("SurfaceGui", folder);
@@ -215,8 +214,7 @@ TEST_CASE("a resolved canvas is dropped when it stops being resolvable", "[rende
 	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
 	REQUIRE(world.Resolved(surface) != nullptr);
 
-	world.Data.GetMutable<engine::gui::Surface>(surface)->Sizing =
-		engine::gui::SurfaceSizingMode::FixedSize;
+	world.Data.GetMutable<engine::gui::Surface>(surface)->Sizing = engine::gui::SurfaceSizingMode::FixedSize;
 
 	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 0);
 	CHECK(world.Resolved(surface) == nullptr);

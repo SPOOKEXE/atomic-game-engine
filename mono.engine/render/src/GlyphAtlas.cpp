@@ -74,8 +74,8 @@ namespace engine::render {
 			return nullptr;
 		}
 
-		const size_t index = 1 + static_cast<size_t>(face) * PER_FACE +
-							 static_cast<size_t>(codepoint - FIRST_CODEPOINT);
+		const size_t index =
+			1 + static_cast<size_t>(face) * PER_FACE + static_cast<size_t>(codepoint - FIRST_CODEPOINT);
 		const Glyph &glyph = Glyphs[index];
 
 		// A glyph with no advance was never baked — the face was missing, or
@@ -255,7 +255,10 @@ namespace engine::render {
 			std::vector<stbrp_node> nodes(side);
 			stbrp_context context{};
 			stbrp_init_target(
-				&context, static_cast<int>(side), static_cast<int>(side), nodes.data(),
+				&context,
+				static_cast<int>(side),
+				static_cast<int>(side),
+				nodes.data(),
 				static_cast<int>(nodes.size())
 			);
 
@@ -280,7 +283,6 @@ namespace engine::render {
 		SheetWidth = side;
 		SheetHeight = side;
 		Pixels.assign(static_cast<size_t>(side) * static_cast<size_t>(side), 0);
-
 
 		for (const stbrp_rect &rect : rects) {
 			const Baked &entry = baked[static_cast<size_t>(rect.id)];

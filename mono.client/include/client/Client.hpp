@@ -10,6 +10,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/input/Actions.hpp>
+#include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
@@ -18,6 +19,7 @@
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -28,8 +30,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct SDL_Window;
@@ -281,6 +285,26 @@ namespace client {
 		// pass — the two constraints that decide where this can go at all.
 		void PumpContent();
 
+		// Asks for everything the simulated worlds name and has not asked for.
+		//
+		// **Demand rather than by kind**, which is what makes a large store
+		// usable at all — `client/ContentDemand.hpp` carries the two failures
+		// that forced it.
+		// Hands every world the mesh names the store published.
+		//
+		// **Names, not content**, and the only way a scene can discover what
+		// there is to name — see `scene/PublishedCatalogue.hpp`. Naming one is
+		// still what fetches it.
+		void OfferPublishedContent();
+
+		void RequestWantedContent();
+
+		// Asks for one asset, once.
+		//
+		// @param texture The name. An invalid one, or one already asked for, is
+		//        ignored.
+		void RequestAsset(const engine::core::Name &texture);
+
 		// Brings the mixer into line with every simulated world's `Sound` rows.
 		//
 		// After the tick and before presentation, so what a script set this
@@ -339,6 +363,18 @@ namespace client {
 		// overlays.
 		engine::render::InterfacePass Interface;
 
+		// Whether the interface pass has been given its image resolver. Set
+		// once; see the call site for why it is not done at start-up.
+		bool InterfaceImagesReady = false;
+
+		// How long this session has been drawing, in seconds.
+		//
+		// **What animation is played against**, and it is accumulated from the
+		// frame delta rather than read from a wall clock: a run paused or ended
+		// holds its animations where they were, and two runs of one recording
+		// show the same frames.
+		double AnimationSeconds = 0.0;
+
 		// The compiled list the pass draws, kept across frames so its signature
 		// can be compared. Holding one per frame would compute a signature, find
 		// nothing to compare it against and rebuild every time — every cost of
@@ -351,6 +387,24 @@ namespace client {
 		engine::render::FrameStatistics Statistics;
 
 		engine::input::Actions Actions;
+
+		// This frame's raw input, before any world has been told about it.
+		//
+		// **Beside `Actions` rather than inside it**, because the two answer
+		// different questions about one keyboard: `Actions` is "did the player ask
+		// for the frame graph", and this is "is W held". `input/Translate.hpp`
+		// carries the split.
+		engine::input::Translator Input;
+
+		// What a script last asked the pointer to do, and what the window was last
+		// told.
+		//
+		// **Two fields rather than one, so the window call is made on the frame it
+		// changes and no other.** `SDL_SetWindowRelativeMouseMode` is a
+		// window-manager round trip on some platforms, and a client that made it
+		// every frame would pay for it every frame to say what it already said.
+		engine::scene::MouseBehavior PointerMode = engine::scene::MouseBehavior::Default;
+		engine::scene::MouseBehavior AppliedPointerMode = engine::scene::MouseBehavior::Default;
 		engine::core::FrameClock Clock;
 
 		// The world, and the only place simulation state lives. Everything
@@ -399,8 +453,19 @@ namespace client {
 		bool ContentRequested = false;
 		bool ContentReported = false;
 
+		// Requests made while `ContentPending` was being walked, moved into it
+		// afterwards. See `Client::RequestTexture`.
+		std::vector<engine::delivery::RequestId> ContentIssued;
+
+		// Which texture names have been asked for, by `core::Name::Id`.
+		//
+		// **Asked once, whatever happened**, so a misspelled name costs one
+		// failed request rather than one per pump forever.
+		std::unordered_set<uint32_t> ContentAsked;
+
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
+		size_t ContentMaterials = 0;
 		size_t ContentSounds = 0;
 
 		// The decoded audio this client has, by the name the manifest published
@@ -472,6 +537,39 @@ namespace client {
 		// was deleted stops being drawn — a list assembled from what is in the
 		// world cannot outlive what is in the world.
 		std::vector<engine::render::SurfaceView> Surfaces;
+
+		// This frame's particle batches, one per emitter with something alive.
+		//
+		// **A member rather than a local, for `Surfaces`' reason**: the vector's
+		// capacity survives from frame to frame, so a steady scene stops
+		// allocating after the first one. At a hundred thousand emitters that is
+		// the difference between one allocation and one a frame.
+		//
+		// **Only the rendered world fills it.** A batch is a span into that
+		// world's pool, and a second world's pool is a different allocation — so
+		// mixing two worlds' batches in one list would hand the renderer spans
+		// with nothing in common but a type.
+		std::vector<engine::render::ParticleBatch> Particles;
+
+		// This frame's beams and trails, as spans into the drawn world's buffer.
+		//
+		// **Spans and not vectors, unlike `Particles`.** A particle batch has to
+		// be assembled — the shared half comes off the emitter and the particles
+		// come out of the pool — so there is a list to own. A ribbon buffer is
+		// already exactly what the renderer takes, so copying it would be moving
+		// the vertices twice to gain nothing.
+		//
+		// Valid for the frame and only for the frame: `BuildRibbons` clears and
+		// refills the buffer in the next `PreRender`, which runs after `Render`.
+		std::span<const engine::effects::RibbonVertex> RibbonVertices;
+		std::span<const engine::effects::RibbonRun> RibbonRuns;
+
+		// The point and spot lights nearest this frame's eye.
+		//
+		// A vector rather than a span, unlike the ribbons: the set is *chosen*
+		// from the world rather than taken whole, so there is a list to own. Its
+		// capacity survives the frame for `Surfaces`' reason.
+		std::vector<engine::render::SceneLight> Lights;
 
 		engine::core::CFrame ComposedFrame;
 		engine::scene::Camera ComposedCamera;

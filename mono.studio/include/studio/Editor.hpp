@@ -37,6 +37,9 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/assets/AssetKind.hpp>
+#include <engine/delivery/Client.hpp>
+#include <engine/delivery/Uploader.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/Components.hpp>
@@ -51,20 +54,137 @@
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
+#include <cdn/LocalStore.hpp>
 #include <studio/Commands.hpp>
+#include <studio/Preview.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
+#include <functional>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct SDL_Window;
+
+// **Forward-declared rather than including imgui here.** `Editor.hpp` is
+// included by every panel and by the tests, and dragging imgui in to name one
+// parameter type would make a headless suite compile a UI library.
+struct ImGuiTableSortSpecs;
+
+// **Forward-declared rather than including imgui here.**  is
+// included by every panel and by the tests, and dragging imgui into all of them
+// to name one parameter type would make a headless suite compile a UI library.
+struct ImGuiTableSortSpecs;
 
 namespace studio {
 
 	using engine::ecs::Entity;
 	using engine::world::WorldId;
+
+	// Bytes a second in each direction, over a measured window.
+	//
+	// @since v0.10
+	struct NetworkRates {
+		double DownPerSecond = 0.0;
+		double UpPerSecond = 0.0;
+
+		// How long the window actually was. Zero means there is not one yet,
+		// which the panel says rather than drawing a zero that looks like idle.
+		double WindowSeconds = 0.0;
+	};
+
+	// What crossed the wire over the last few seconds, and when.
+	//
+	// **A short ring, because a total cannot say whether a transfer is
+	// moving.** Bytes-since-start divided by editor-uptime is a number that
+	// only falls, and it is useless at the moment somebody actually asks — "is
+	// this download progressing". `cdn::Dashboard` makes the same decision at a
+	// minute's resolution for a terminal; this is the same arithmetic at the
+	// resolution a panel is read at.
+	//
+	// **Holds no clock.** Every sample is stamped with a time the caller passes
+	// in, which is `net`'s and `assets::Grant`'s standing rule and is what lets
+	// a suite state ten seconds of traffic rather than wait them out.
+	//
+	// @since v0.10
+	struct NetworkSamples {
+		// How many seconds of history the ring holds, at one sample a second.
+		static constexpr size_t CAPACITY = 8;
+
+		// The shortest gap between two samples.
+		static constexpr double INTERVAL = 1.0;
+
+		// One reading of the running totals.
+		struct Sample {
+			double Seconds = 0.0;
+			uint64_t Down = 0;
+			uint64_t Up = 0;
+		};
+
+		std::array<Sample, CAPACITY> Points{};
+
+		// Where the newest sample is.
+		size_t At = 0;
+
+		// How many of the ring's entries hold a reading.
+		size_t Filled = 0;
+
+		// Records the running totals, if enough time has passed.
+		//
+		// @param nowSeconds Seconds since the editor started.
+		// @param down Bytes fetched over this client's life.
+		// @param up Bytes uploaded over this uploader's life.
+		void Observe(double nowSeconds, uint64_t down, uint64_t up);
+
+		// What crossed per second across the whole window.
+		//
+		// The oldest sample against the newest rather than the last two: a pair
+		// one interval apart is one frame's noise, and what the panel is being
+		// read for is whether a transfer is moving.
+		//
+		// @return The rates, with a zero window when there are fewer than two
+		//         samples.
+		NetworkRates Rates() const;
+	};
+
+	// One asset the worlds actually use, and what uses it.
+	//
+	// **One entry per asset rather than per instance**, which is the whole shape
+	// of the gallery: a texture on forty parts is one tile with `x40` on it.
+	//
+	// @since v0.10
+	struct GalleryEntry {
+		// The name the property holds.
+		engine::core::Name Asset;
+
+		// What kind of content that name is, from the property that named it.
+		engine::assets::AssetKind Kind = engine::assets::AssetKind::Unknown;
+
+		// **Which property is using it — the caption that carries the
+		// information.** Four tiles reading "SurfaceAppearance" say nothing;
+		// "ColorMap" and "NormalMap" say everything.
+		std::string Property;
+
+		// Where the first user lives, so a click can select in that world.
+		engine::world::WorldId World;
+
+		// The first instance found using it.
+		Entity First;
+
+		// How many instances use it.
+		size_t Uses = 0;
+	};
+
+	// An asset asked for and not yet arrived.
+	//
+	// @since v0.10
+	struct PendingDownload {
+		std::string Name;
+		engine::delivery::RequestId Id;
+	};
 
 	// What the editor is doing to the game right now.
 	//
@@ -155,6 +275,16 @@ namespace studio {
 		// The frame graph, which is the second of the two panels above.
 		bool ShowFrameGraph = false;
 
+		// The assets manager, open at startup.
+		//
+		// **The same reason the two above take flags**, said in their own
+		// comment: it makes the panel reachable without a keyboard, which is
+		// what lets a capture prove it draws. A panel that had only ever been
+		// compiled is what the roadmap's own `[~]` on this one was about.
+		//
+		// @since v0.10
+		bool ShowAssetsPanel = false;
+
 		// The loopback port the control server listens on, or -1 for off.
 		//
 		// **Off by default, and that is the security boundary.** This surface
@@ -230,6 +360,24 @@ namespace studio {
 		// taken once, a few frames in — early enough to be useful and late
 		// enough that the layout and the first scene have settled.
 		std::filesystem::path Capture;
+
+		// Which world the capture should be of, or empty for whichever the
+		// active viewport is showing.
+		//
+		// **Because a count is not a picture, and every check this editor could
+		// run headlessly was a count.** A change to how geometry is scaled,
+		// centred or culled produces an identical "13 placed, 7 meshes, 16
+		// textures, 0 unresolved" whether the models are right, squashed,
+		// inside-out or invisible. Naming the world lets a smoke test shoot the
+		// one scene built to show content.
+		//
+		// A name that no world answers to leaves the capture on the active
+		// viewport rather than failing: a capture is a diagnostic, and one that
+		// aborted a run because a scene was renamed would be worse than one that
+		// photographs the wrong thing.
+		//
+		// @since v0.10
+		std::string CaptureWorld;
 	};
 
 	// One open script tab.
@@ -829,6 +977,448 @@ namespace studio {
 		// menu names the next one; this names all of them, and clicking an entry
 		// walks to that point rather than making somebody press Ctrl+Z and count.
 		void DrawHistory();
+
+		// What is in the local content store, and how to put things in it.
+		//
+		// **A view over `cdn::LocalStore` and nothing of its own.** The folder is
+		// the index, so this reads the log and calls `ImportFile` — it keeps no
+		// list and caches nothing it cannot rebuild. `Assets.cpp` says why the
+		// upload is a typed path rather than a file dialog.
+		void DrawAssets();
+
+		// Brings one file, or every file under one folder, into the store.
+		//
+		// @param given What the person chose or dropped.
+		void ImportAssetPath(const std::string &given);
+
+		// What a dropped path does.
+		//
+		// **Opens the panel as well as importing.** A drop onto a closed one
+		// would otherwise be silent: the file lands, the status line updates,
+		// and nothing the person can see says so.
+		//
+		// @param path One dropped file or folder. SDL delivers one event per
+		//        path, so a multi-file drop is several calls.
+		void DropAssetPath(const std::string &path);
+
+		// The published manifest, as a table somebody can filter and copy from.
+		void DrawPublishedList();
+
+		// How long this editor has been drawing, in seconds.
+		//
+		// **What animation is played against**, accumulated from the frame delta
+		// rather than read from a wall clock — see `Renderer::SetAnimationTime`.
+		// A world paused in the editor still animates its interface, which is
+		// why this advances with the *frame* and not with a world's tick.
+		double AnimationSeconds = 0.0;
+
+		// What is sitting in `raw/`, waiting to be published.
+		void DrawRawList();
+
+		// One asset's picture, or a box of the same size when there is none.
+		//
+		// **The same size either way**, so a row does not change height when its
+		// picture arrives — a list that reflows while it loads is one nobody can
+		// click in.
+		//
+		// @param name The asset's name, which is its path under `raw/`.
+		// @param side How wide to draw it.
+		// @param kind What it is, so an empty box can say something useful.
+		void DrawPreview(const std::string &name, float side, engine::assets::AssetKind kind);
+
+		// The same picture, painted at a screen position and reserving nothing.
+		//
+		// **For a caller that has already reserved the space**, which a content
+		// list's row has: the row is one `Selectable` and everything over it is
+		// painted, so a preview submitted as an item there would be a second hit
+		// target and a second copy of the row's geometry.
+		// `studio/AssetRow.hpp` carries the whole rule.
+		//
+		// **Two floats rather than an `ImVec2`**, for the reason this header
+		// forward-declares `ImGuiTableSortSpecs` instead of including imgui: it
+		// is included by every panel and by the tests, and dragging a UI library
+		// in to name one parameter type is a cost every one of them pays. A
+		// forward declaration will not do here — the type is passed by value.
+		//
+		// @param cornerX Left edge, in screen space.
+		// @param cornerY Top edge, in screen space.
+		// @param side    How wide and tall to paint it.
+		// @param name    The asset's name, which is its path under `raw/`.
+		// @param kind    What it is, for the glyph when there is no picture.
+		void PaintPreview(
+			float cornerX, float cornerY, float side, const std::string &name,
+			engine::assets::AssetKind kind
+		);
+
+		// Orders the published view by whatever headers were clicked.
+		//
+		// **The view and never `PickerContents`.** That is what the manifest
+		// says, in the order it says it, and every picker reads it — a header
+		// click must not reorder what another panel is looking at.
+		void SortPublished(
+			std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs
+		);
+
+		// The same for the raw view.
+		void SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
+
+		// Re-reads both halves of the store.
+		//
+		// **Called when the panel opens and after anything changes it**, never
+		// per frame: listing `raw/` stats every file and reading the manifest
+		// parses one.
+		void RefreshStoreContents();
+
+		// A small picture of an asset, for a row in a list.
+		//
+		// **Asked for while drawing and built between frames.** Returning null
+		// is the ordinary answer the first time a row appears — the caller draws
+		// its placeholder and the picture arrives a frame or two later. See
+		// `Thumbnails.cpp` for why it is not built here.
+		//
+		// @param name The asset's name, which is also its path under `raw/`.
+		// @return The backend handle to draw, or nullptr when there is none.
+		void *ThumbnailFor(const std::string &name);
+
+		// The same, and why there is no picture when there is not.
+		//
+		// **Three outcomes rather than two**, which is the correction
+		// `Preview.hpp` opens with: a file refused for its size and a file that
+		// would not decode are different situations and a person can act on
+		// only one of them.
+		//
+		// @param name  The asset's name.
+		// @param state Filled in with what happened.
+		// @return The handle, or nullptr.
+		void *ThumbnailFor(const std::string &name, PreviewState &state);
+
+		// Builds a bounded number of queued thumbnails and evicts old ones.
+		void PumpThumbnails();
+
+		// What one asset's preview is registered under in the texture table.
+		//
+		// **Prefixed, so a preview can never be sampled as content**: the
+		// renderer resolves a part's texture out of the same table by name, and
+		// a 64-pixel thumbnail under the real name would replace the real one.
+		static std::string ThumbnailTextureName(const std::string &name);
+
+	  private:
+		// Decodes, scales and uploads one. Null when there is nothing to show.
+		void *BuildThumbnail(const std::string &name, PreviewState &state);
+
+		// One asset's preview, and when its row was last drawn.
+		struct Entry {
+			// Null for an asset with no preview — a mesh, an archive, a file
+			// from another machine. **Cached as null rather than retried**, or
+			// its row would queue a decode on every frame it is visible.
+			void *Handle = nullptr;
+
+			// Why, when there is no handle.
+			PreviewState State = PreviewState::Pending;
+
+			uint64_t LastSeen = 0;
+		};
+
+		std::unordered_map<std::string, Entry> Thumbnails;
+
+		// Asked for while drawing, built by `PumpThumbnails`.
+		std::vector<std::string> ThumbnailQueue;
+
+		// Frames, for the eviction order. Not a clock — nothing here needs one.
+		uint64_t ThumbnailClock = 0;
+
+		// Decodes, uploads and measures one mesh.
+		PreviewState BuildPreviewMesh(const std::string &name);
+
+		// What a preview mesh is registered under, prefixed so it can never be
+		// drawn as content.
+		static std::string PreviewMeshName(const std::string &name);
+
+		// A mesh's true extent, for framing the camera on it.
+		struct PreviewBounds {
+			engine::core::Vector3 Centre;
+			float Radius = 1.0f;
+		};
+
+		// Which meshes have been tried, and how each went.
+		std::unordered_map<std::string, PreviewState> PreviewMeshes;
+
+		// The bounds of the ones that loaded.
+		std::unordered_map<std::string, PreviewBounds> PreviewMeshBounds;
+
+		// What the preview slot should draw on its next turn, or empty.
+		std::string PreviewWanted;
+
+		// Whose picture is in the preview slot right now.
+		//
+		// **One slot, so one row.** `PaintPreview` draws this texture in place of
+		// the kind glyph for the row it belongs to, which is what makes a hovered
+		// mesh turn in its own 48-pixel square instead of staying an `M`. A row
+		// that drew the slot without comparing names would show the hovered
+		// mesh's picture in every mesh row on screen.
+		std::string PreviewShowing;
+
+		// The row the cursor is over this frame, before the delay.
+		std::string HoverCandidate;
+
+		// What kind that row's asset is.
+		engine::assets::AssetKind HoverKind = engine::assets::AssetKind::Unknown;
+
+		// Whether any row claimed the cursor this frame.
+		bool HoverSeen = false;
+
+		// The row the delay is counting for. **The token from the reference, as
+		// state rather than a deferred callback** — a different row resets it,
+		// so a superseded hover cannot land a quarter second after the cursor
+		// left.
+		std::string HoverPending;
+
+		// How long it has been counted for.
+		double HoverElapsed = 0.0;
+
+		// What is actually on screen, or empty.
+		std::string HoverShowing;
+
+		// How wide that target should be.
+		uint32_t PreviewSide = 132;
+
+
+	  public:
+
+		// Publishes `raw/` into `processed/`.
+		//
+		// @param hexSeed 64 hex characters of Ed25519 seed. Not stored.
+		void PublishAssets(const std::string &hexSeed);
+
+		// A modal listing the store's published assets of one kind.
+		//
+		// **What replaces typing a mesh name and finding out later.** An unknown
+		// name is a part drawn with the missing-mesh marker, which is also what
+		// a mesh that has not streamed in yet looks like — so the old text field
+		// had no failure a person could see. See `AssetPicker.cpp`.
+		//
+		// @param title  The popup id, which `OpenPopup` was given.
+		// @param kind   Which assets to list.
+		// @param chosen The selection, in and out. Emptied by Clear.
+		// @return `true` on the frame it is confirmed.
+		bool DrawAssetPicker(const char *title, engine::assets::AssetKind kind, std::string &chosen);
+
+		// Loads a mesh into the renderer so a preview can draw it.
+		//
+		// **Read from `raw/<name>` and decoded as `assets::Mesh`**, the same
+		// path a thumbnail takes and for the same reason — no delivery client,
+		// no chunk reassembly. A source format that has not been baked is
+		// `Unavailable`, and the caption says to run `assetc`.
+		//
+		// @param name The asset's name.
+		// @return Whether it can be previewed, and why not when it cannot.
+		PreviewState LoadPreviewMesh(const std::string &name);
+
+		// Asks the render rotation to draw this mesh into the preview slot.
+		//
+		// @param name The mesh, already through `LoadPreviewMesh`.
+		// @param side How wide the target should be.
+		// @return Whether the mesh is known well enough to draw.
+		bool DrawPreviewViewport(const std::string &name, float side);
+
+		// Draws whatever `DrawPreviewViewport` last asked for.
+		//
+		// **Called from `PresentWorld`'s rotation and never twice a frame**:
+		// `Renderer::Render` owns the swapchain and the present, so a second
+		// call a frame would be a second present. See `MeshPreview.cpp`.
+		//
+		// @return Whether it drew, so the rotation knows it spent its turn.
+		bool RenderPreviewSlot();
+
+		// Offers the item just drawn as the hover preview's subject.
+		//
+		// **Called right after the row's widget**, because it reads
+		// `IsItemHovered`. A quarter-second delay and a token keep dragging the
+		// cursor down a list from opening three hundred previews — see
+		// `HoverPreview.cpp`, which takes both from `explorer-plus`.
+		//
+		// @param name The asset the row is about.
+		// @param kind What it is, which decides whether the preview is a picture
+		//        or a render.
+		void HoverPreview(const std::string &name, engine::assets::AssetKind kind);
+
+		// Settles the hover state once a list has finished drawing.
+		//
+		// **After the loop and never inside it**: every row calling this would
+		// have each one cancelling the next.
+		//
+		// @param frameSeconds How long the last frame took, for the delay.
+		void EndHoverPreview(double frameSeconds);
+
+		// Draws the preview panel, if the delay has elapsed.
+		void DrawHoverPreview();
+
+		// Every asset the worlds name, one tile each. See `Gallery.cpp`.
+		void DrawGallery();
+
+		// Walks every world for every content-naming property.
+		//
+		// **Rebuilt on demand and never per frame**: this is the one thing in
+		// the assets panel that scales with the scene rather than with the
+		// store.
+		void RebuildGallery();
+
+		// Whether the gallery has been walked since it was last invalidated.
+		//
+		// **Separate from `Gallery.empty()`, which is what it used to be gated
+		// on.** A world that names no assets produces an empty gallery, and
+		// reading that as "not scanned yet" walked every entity of every world
+		// on every frame the panel was open.
+		bool GalleryScanned = false;
+
+		// Selects every instance using one asset.
+		//
+		// The gesture the gallery exists for — "where is this texture actually
+		// used" is the question somebody has before they change one.
+		void SelectGalleryUsers(const GalleryEntry &entry);
+
+		// Re-reads the store's manifest into `PickerContents`.
+		//
+		// **Called when a picker opens and by its Refresh button, never per
+		// frame.** Reading a manifest is opening and parsing a file.
+		void RefreshPickerContents();
+
+		// Whether the picker is showing `raw/` rather than the manifest.
+		bool PickerShowRaw = false;
+
+		// Draws the raw half of the picker: unbaked sources, baked when picked.
+		void DrawRawPickerRows(engine::assets::AssetKind kind, std::string &chosen, bool &confirmed);
+
+		// The Use/Cancel/Clear row and the popup's close. Shared by both tabs.
+		bool FinishAssetPicker(std::string &chosen, bool confirmed);
+
+		// A raw entry's path relative to `raw/`, which is what a baker takes.
+		static std::string RawRelativePath(const cdn::RawEntry &entry);
+
+		// Bakes one source out of `raw/` into `baked/`, now.
+		//
+		// **On demand, because a whole-store bake is minutes.** A picker that
+		// republished to make one file selectable would be one nobody waits for
+		// — `assetc::Settings::Only` carries why it is a filter on the real walk
+		// rather than a second baker.
+		//
+		// @param relative The source's path under `raw/`.
+		// @param baked    Set to the baked name, which is what a scene writes.
+		// @return `false` when it could not be baked. `AssetStatus` says why.
+		bool BakeRawAsset(const std::string &relative, std::string &baked);
+
+		// Hands a freshly baked file to this editor's renderer.
+		//
+		// **So a picked asset appears in the viewport before any publish**,
+		// which is the whole point of baking on demand. Textures and meshes
+		// only; everything else reaches a runtime through a publish.
+		void RegisterBakedAsset(const std::filesystem::path &path, const std::string &name);
+
+		// What is moving between this editor and its origins.
+		//
+		// **The panel that makes `ContentSources` observable.** The settings
+		// were saved and loaded since v0.9 and nothing ever built a client from
+		// them, so a wrong key and a working one looked identical. See
+		// `Network.cpp`.
+		void DrawNetwork();
+
+		// Builds the delivery client and the uploader from the current sources.
+		//
+		// Called at start-up and whenever the Content page is edited, because a
+		// role or an address changed there decides which of the two a row
+		// belongs to.
+		void RebuildContentClients();
+
+		// Drives both, and samples what they have moved.
+		//
+		// @param frameSeconds How long the last frame took.
+		void PumpContent(double frameSeconds);
+
+		// Takes what the delivery client has finished and registers it.
+		//
+		// **The editor fetches content, which it did not before at all.** Its
+		// delivery client existed and nothing ever asked it for anything, so a
+		// `MeshPart` drew the fallback cube however good its `MeshId` was.
+		void DrainContent();
+
+		// Asks for what the open worlds name and has not been asked for, a
+		// bounded number of them per pump.
+		// Hands every open world the list of mesh names the store published.
+		//
+		// **Names, not content.** It is what makes
+		// `ContentService:GetPublishedMeshes()` answerable, and naming one of them
+		// is still what fetches it — see `scene/PublishedCatalogue.hpp`.
+		// Reshapes every part naming this mesh to the mesh's own proportions,
+		// keeping the size each part already has along its longest axis.
+		//
+		// **Because `Size` is a box the mesh is stretched into.** A part whose
+		// box is the wrong shape distorts whatever is put in it, and only the
+		// geometry knows the right shape. Idempotent, so it is safe to run
+		// whenever a mesh arrives.
+		void FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent);
+
+		void PublishManifestNames();
+
+		// Makes sure every open world holds `PublishedMeshNames`.
+		//
+		// **Every pump, because worlds appear after the catalogue does** — Play
+		// mints a server world and a client replica, and both run scripts.
+		// Guarded on the count, so the steady case is a comparison.
+		void OfferPublishedNames();
+
+		// The mesh names the store published, filtered to what a runtime reads.
+		std::vector<engine::core::Name> PublishedMeshNames;
+
+		void RequestShownContent();
+
+		// Asks for one asset, once.
+		//
+		// @return Whether this call issued a request, so the caller can bound
+		//         how many it starts in one pump.
+		bool RequestContentAsset(const engine::core::Name &asset);
+
+		// Runs `body` inside every open world.
+		void EachOpenWorld(const std::function<void(engine::ecs::Store &)> &body);
+
+		// Whether the catalogue has been seen to open.
+		//
+		// **Not "whether the requests have been issued", which is what this used
+		// to mean.** Nothing is requested up front any more — a world names an
+		// asset or it is not fetched — so this only gates `RequestShownContent`
+		// on there being a catalogue to ask.
+		bool ContentRequested = false;
+
+		// The total the summary last reported, so the next one is logged only
+		// when something has actually arrived since.
+		//
+		// **A total rather than a flag**, because an editor keeps naming content
+		// after start-up — see `DrainContent`, where a once-only report meant
+		// every asset chosen from a picker loaded without a word.
+		size_t ContentReportedTotal = 0;
+
+		size_t ContentMeshes = 0;
+		size_t ContentTextures = 0;
+		size_t ContentMaterials = 0;
+
+		// Fetches still in flight.
+		std::vector<engine::delivery::RequestId> ContentPending;
+
+		// Requests made while `ContentPending` was being walked.
+		std::vector<engine::delivery::RequestId> ContentIssued;
+
+		// Which texture names have been asked for, by `core::Name::Id`.
+		std::unordered_set<uint32_t> ContentAsked;
+
+		// Queues every file in the local store's `raw/` for every write source.
+		void UploadStore();
+
+		// Asks the delivery client for one asset by name.
+		//
+		// @param name The content name, as the signed manifest spells it.
+		void DownloadAsset(const std::string &name);
+
+		// Files what has arrived into the local store.
+		void CollectDownloads();
 
 		// What crosses between worlds, which is the one thing they share.
 		//
@@ -1503,6 +2093,13 @@ namespace studio {
 		};
 
 		static constexpr size_t EXTRA_VIEWPORTS = 3;
+
+		// **The slot the asset preview owns, past every viewport panel.**
+		// Sharing one with a viewport would make the preview and that panel
+		// overwrite each other's texture — `PresentWorld` keeps a slot per panel
+		// precisely so two things of different sizes do not reallocate one
+		// target twice a frame.
+		static constexpr size_t PREVIEW_SLOT = 1 + EXTRA_VIEWPORTS;
 		std::array<ViewportState, EXTRA_VIEWPORTS> Extras;
 
 		// A panel's own camera instance, and the world it was minted in.
@@ -1921,6 +2518,136 @@ namespace studio {
 
 		// The undo stack as a list. See `DrawHistory`.
 		bool ShowHistory = false;
+
+		// The local content store. See `DrawAssets`.
+		bool ShowAssets = false;
+
+		// Where the add-file and add-folder dialogs are looking.
+		//
+		// **A `std::string` and no longer a fixed buffer**, because it is no
+		// longer typed into: `FilePrompt` and `FolderPrompt` own the text field
+		// and hand back what was browsed to.
+		std::string AssetBrowsePath;
+
+		// What the person typed into the store list's filter.
+		std::string AssetFilter;
+
+		// One entry per asset the worlds use. Rebuilt on demand.
+		std::vector<GalleryEntry> Gallery;
+
+		// The signing seed, for a publish.
+		//
+		// **Never saved, and the buffer is cleared with the editor.** A key kept
+		// in the preferences file is a key that signs anything anybody drops in
+		// the content folder — `cdn::PublishLocal` carries the argument.
+		char AssetSigningKey[128] = {};
+
+		// What the last import or publish said.
+		std::string AssetStatus;
+
+		// What the store has published, as of the last refresh.
+		//
+		// Held rather than re-read, for `RefreshPickerContents`' reason. Shared
+		// by every picker and by the Assets panel, because they are looking at
+		// one store and two copies would disagree the moment one refreshed.
+		std::vector<cdn::PublishedEntry> PickerContents;
+
+		// What is sitting in `raw/`, as of the last refresh.
+		std::vector<cdn::RawEntry> PickerRaw;
+
+		// What the person typed into a picker's filter.
+		std::string PickerFilter;
+
+		// Whether a `...` button was pressed this frame.
+		//
+		// **The open is deferred because of imgui's id stack.** A property's
+		// widget is inside a `PushID`, so an `OpenPopup` there computes a
+		// different id than the `BeginPopupModal` at the window's root — and the
+		// modal would silently never appear.
+		bool PickerWanted = false;
+
+		// Which kind the open picker is listing.
+		engine::assets::AssetKind PickerKind = engine::assets::AssetKind::Unknown;
+
+		// Which property it was opened for, so the frame it is confirmed knows
+		// what to write.
+		//
+		// **A name rather than a descriptor pointer.** A modal spans frames and
+		// the class table is rebuilt by registration — rule 3, and the reason
+		// every handle in this editor is a value.
+		engine::core::Name PickerProperty;
+
+		// What that property's type is, carried across the frames the modal is
+		// open.
+		//
+		// **Because `game::WriteProperty` refuses a value whose `Type` does not
+		// match the descriptor's, and a default-constructed `PropertyValue` is
+		// `Opaque`.** The confirm path used to build one from nothing and set
+		// only `Name` on it, so every choice made in this picker — mesh,
+		// texture, material, sound, image — was refused by the one line at the
+		// top of `WriteProperty` and nothing anywhere said so. The property
+		// stayed blank, the part kept the fallback cube, and typing the same
+		// string into the field beside it worked, because that path starts from
+		// the value it read and keeps its type.
+		//
+		// Carried rather than assumed to be `Name`: `ContentKindOfProperty` only
+		// happens to match `Name` properties today, and an assumption that holds
+		// by coincidence is how this broke in the first place.
+		engine::ecs::PropertyType PickerType = engine::ecs::PropertyType::Opaque;
+
+		// The engine's own meshes, offered beside the store's.
+		//
+		// **Separate from `PickerContents` because it means something else.**
+		// That one is the published manifest and its emptiness is a message
+		// somebody acts on; these six exist in every process whether or not
+		// anything has ever been published, so folding them in would make
+		// "nothing published" unsayable.
+		std::vector<cdn::PublishedEntry> PickerBuiltins;
+
+		// The name a picker is currently offering.
+		std::string PickerChoice;
+
+		// What is moving to and from the origins. See `DrawNetwork`.
+		bool ShowNetwork = false;
+
+		// The editor's own delivery client, built from `Content`.
+		//
+		// **Absent when the settings are not valid**, which is an ordinary
+		// state and not an error: an editor with no publisher key configured
+		// has a source list and no trust, and nothing should be fetched through
+		// it — `MakeAssetClient` is the one that refuses.
+		std::unique_ptr<engine::delivery::AssetClient> ContentClient;
+
+		// The other direction. Absent when no source has the write role.
+		//
+		// **Built even when `ContentClient` is not.** An uploader verifies nothing,
+		// so it needs no publisher key — and seeding an origin is exactly the
+		// case where no manifest has been signed yet.
+		std::unique_ptr<engine::delivery::Uploader> ContentUploads;
+
+		// Seconds since the editor started, for the sample ring's timestamps.
+		//
+		// Accumulated from frame times rather than read from a clock, which is
+		// `NetworkSamples`' rule and is what lets a suite state a window.
+		double ContentSeconds = 0.0;
+
+		// The last few seconds of transfer, for the rate rows.
+		NetworkSamples ContentSamples;
+
+		// What the last upload, download or rebuild said.
+		std::string ContentStatus;
+
+		// Assets asked for and not yet arrived.
+		std::vector<PendingDownload> Downloads;
+
+		// What the person typed into the fetch field.
+		char DownloadName[256] = {};
+
+		// How many files the last upload queued, for the progress line.
+		size_t UploadQueued = 0;
+
+		// How many of them did not arrive.
+		size_t UploadFailures = 0;
 
 		// What crosses between worlds. See `DrawBus`.
 		bool ShowBus = false;

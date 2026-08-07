@@ -267,10 +267,6 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 		mesh.Mesh = Name("registration_test.Mesh");
 		cases.push_back({"Mesh", mesh});
 
-		Visual material = base;
-		material.Material = Name("registration_test.Material");
-		cases.push_back({"Material", material});
-
 		Visual transparency = base;
 		transparency.Transparency = 0.5f;
 		cases.push_back({"Transparency", transparency});
@@ -299,7 +295,6 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 	Visual authored;
 	authored.Tint = engine::core::Color3{0.1f, 0.2f, 0.3f};
 	authored.Mesh = Name("registration_test.Mesh");
-	authored.Material = Name("registration_test.Material");
 	authored.Transparency = 0.5f;
 	authored.Visible = false;
 	authored.Surface = 3;
@@ -315,7 +310,6 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 	CHECK(restored.Tint.G == authored.Tint.G);
 	CHECK(restored.Tint.B == authored.Tint.B);
 	CHECK(restored.Mesh == authored.Mesh);
-	CHECK(restored.Material == authored.Material);
 	CHECK(restored.Transparency == authored.Transparency);
 	CHECK(restored.Visible == authored.Visible);
 	CHECK(restored.Surface == authored.Surface);

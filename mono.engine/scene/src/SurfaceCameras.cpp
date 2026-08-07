@@ -102,7 +102,6 @@ namespace engine::scene {
 		// not already saturated.
 		constexpr float MINIMUM_DEPTH = 1e-3f;
 
-
 		// And the narrowest, so a distant pane still has a frustum with a shape.
 		constexpr float FIT_MINIMUM = 0.02f;
 

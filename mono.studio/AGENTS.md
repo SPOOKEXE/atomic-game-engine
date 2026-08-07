@@ -271,3 +271,22 @@ them needs a window, a device and an imgui frame.
 `tests/Operators.cpp` records what it costs to get this wrong: the suite there
 cannot reach `Editor::RegisterOperators`, so the join it claims to check is not
 actually checked. Put the logic where a test can call it.
+
+**"An imgui frame" was on that list and does not belong on it.** A window and a
+device genuinely cannot be had in a suite; an imgui *context* can — `CreateContext`
+allocates a style table and a font atlas description and touches no driver, which
+`engine.ui.theme` has said in one line since v0.7. A frame can be submitted, a
+mouse can be moved and clicked, and everything that is not a rasteriser answers.
+
+That was not free to learn. The asset picker's row rewound the cursor with
+`SetCursorPos` and submitted nothing after it, which is an `IM_ASSERT_USER_ERROR`
+inside `EndChild` — so the editor did not misdraw, it called `abort()` on the
+frame the picker opened, and choosing a material was impossible. Nothing could
+have caught it, because nothing here had ever run a frame.
+
+`studio/AssetRow.hpp` is the shape that cannot do it — one item per row,
+everything else painted — and `tests/AssetRow.cpp` is the suite, including a case
+that provokes the fault on purpose with imgui's assert switched off, so the
+detector is known to work rather than merely known to pass. **Reach for that
+harness before extracting a free function**: a panel's imgui behaviour is now
+testable, and moving logic out to avoid testing it is no longer the only option.

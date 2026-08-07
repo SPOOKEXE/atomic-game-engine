@@ -285,7 +285,8 @@ BENCH("Open · 10k frames under the wrong counter", FRAMES) {
 	const std::vector<std::byte> &header = AssociatedData();
 	uint32_t accepted = 0;
 	for (size_t index = 0; index < FRAMES; index++) {
-		accepted += ends.Responder.Receiving.Open(frame.Counter + 1, frame.Bytes, header).has_value() ? 1u : 0u;
+		accepted +=
+			ends.Responder.Receiving.Open(frame.Counter + 1, frame.Bytes, header).has_value() ? 1u : 0u;
 	}
 	Consume(accepted);
 }
@@ -332,8 +333,7 @@ BENCH("Handshake::BeginFromSecret · 500", 500) {
 	static std::array<std::byte, Handshake::SECRET_BYTES> secret{};
 	secret.fill(static_cast<std::byte>(0x33));
 	for (size_t index = 0; index < 500; index++) {
-		std::optional<Handshake> responder =
-			Handshake::BeginFromSecret(HandshakeRole::Responder, secret);
+		std::optional<Handshake> responder = Handshake::BeginFromSecret(HandshakeRole::Responder, secret);
 		Consume(responder->Message().size());
 	}
 }

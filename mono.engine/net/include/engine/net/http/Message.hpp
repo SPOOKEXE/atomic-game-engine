@@ -46,8 +46,8 @@ namespace engine::net::http {
 
 	// What a request asks for.
 	//
-	// Two verbs, because an origin serves and does not accept. Anything else
-	// parses as `Unknown` and is answered `501` rather than being guessed at.
+	// Anything outside this list parses as `Unknown` and is answered `501`
+	// rather than being guessed at.
 	//
 	// @since v0.9
 	enum class Method : uint8_t {
@@ -60,6 +60,24 @@ namespace engine::net::http {
 		// Fetch the target's headers and no body. What a client uses to learn
 		// a bundle's size before deciding to spend the bandwidth.
 		Head,
+
+		// Store the body at the target.
+		//
+		// **The one verb here that carries a body, and the only one that ever
+		// will.** A `GET` or a `HEAD` with a `content-length` is refused rather
+		// than read — see `ParseRequest` — because a body on a verb whose
+		// framing nobody agrees about is precisely the request-smuggling shape:
+		// two hops that disagree about where the message ended see two
+		// different next requests. `PUT` is unambiguous, so `PUT` is where a
+		// body is allowed and no other verb is.
+		//
+		// **Idempotent by the target being a content address.** `cdn::Service`
+		// ingests at `/ingest/<hash>` and hashes what arrives, so the same file
+		// sent twice is the same file, and a retry after a dropped socket is
+		// free rather than a duplicate.
+		//
+		// @since v0.10
+		Put,
 	};
 
 	// Returns a stable, human-readable name for a method.
@@ -190,13 +208,19 @@ namespace engine::net::http {
 		// The most header fields.
 		size_t HeaderCount = 64;
 
-		// The largest body this will accept.
+		// The largest body this will accept, in either direction.
 		//
-		// A request in this subset has no body at all; this bounds a
-		// *response*, which is a compressed group and is genuinely large. The
-		// delivery client also checks the length against the signed manifest
-		// before it believes it — CDN.md §5's decompression-bomb rule — so this
-		// is the transport's backstop rather than the real check.
+		// Mostly this bounds a *response*, which is a compressed group and is
+		// genuinely large. The delivery client also checks the length against
+		// the signed manifest before it believes it — CDN.md §5's
+		// decompression-bomb rule — so this is the transport's backstop rather
+		// than the real check.
+		//
+		// Since v0.10 it also bounds a `Put` request's body. **That is not the
+		// binding limit on an upload** and should not be mistaken for one:
+		// `ServerSettings::ConnectionBufferBytes` is far smaller and is what an
+		// upload actually has to fit inside, because a request is buffered
+		// whole before it parses.
 		uint64_t BodyBytes = 512ull * 1024u * 1024u;
 	};
 
@@ -219,6 +243,19 @@ namespace engine::net::http {
 
 		// The `Range` header, if one parsed.
 		std::optional<ByteRange> Range;
+
+		// The body, empty for every verb but `Put`.
+		//
+		// **Bounded by `MessageLimits::BodyBytes` before a byte is kept**, the
+		// same as a response's, and by `ServerSettings::ConnectionBufferBytes`
+		// while it is still arriving. The second is the one that bites: a whole
+		// request is buffered before it parses, so an origin that accepts
+		// uploads has to be told it may hold one — `cdn::IngestSettings` sizes
+		// it, and a file past that is `413` rather than a connection that fills
+		// memory.
+		//
+		// @since v0.10
+		std::vector<std::byte> Body;
 
 		// The value of a header, or nothing.
 		//

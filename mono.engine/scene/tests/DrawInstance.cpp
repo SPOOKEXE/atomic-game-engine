@@ -59,7 +59,11 @@ TEST_CASE("a default draw instance is a white unit cube at the origin", "[scene]
 	// A handle would be a number that only means something inside one process,
 	// which is the rule this whole payload is shaped by.
 	CHECK_FALSE(instance.Mesh.IsValid());
-	CHECK_FALSE(instance.Material.IsValid());
+
+	// **The texture, where a material name used to sit beside it.** A material
+	// is content that resolves to a texture before a draw list is built, so
+	// there is nothing left for a draw instance to carry a second name for.
+	CHECK_FALSE(instance.Texture.IsValid());
 }
 
 TEST_CASE("a draw instance is built from scene components without conversion", "[scene][drawinstance]") {
@@ -74,7 +78,6 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 
 	Visual visual;
 	visual.Mesh = Name("drawinstance_test.Wedge");
-	visual.Material = Name("drawinstance_test.Oak");
 	visual.Tint = engine::core::Color3(0.25f, 0.5f, 0.75f);
 
 	// **Every field named, because `-Werror=missing-field-initializers` is on
@@ -87,13 +90,11 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 	instance.HalfExtent = bounds.HalfExtent;
 	instance.Tint = visual.Tint;
 	instance.Mesh = visual.Mesh;
-	instance.Material = visual.Material;
 
 	CHECK(instance.Frame.Position == transform.Frame.Position);
 	CHECK(instance.HalfExtent == bounds.HalfExtent);
 	CHECK(instance.Tint.G == 0.5f);
 	CHECK(instance.Mesh == visual.Mesh);
-	CHECK(instance.Material == visual.Material);
 }
 
 // --- ordering for the transparent pass --------------------------------------
@@ -505,8 +506,12 @@ TEST_CASE("a signature ignores the bytes that carry no meaning", "[scene][drawin
 
 	const uint64_t before = engine::scene::SignatureOf(std::span(&instance, 1));
 
+	// **One byte, because `Reserved` is one byte.** This wrote two until v0.10,
+	// which was out of bounds the whole time and landed in whatever followed the
+	// object — harmless by luck until removing `Material` moved the field and the
+	// stack canary caught it. The array's own comment says why there is one:
+	// `Alpha` took the second.
 	instance.Reserved[0] = 0xAB;
-	instance.Reserved[1] = 0xCD;
 	CHECK(engine::scene::SignatureOf(std::span(&instance, 1)) == before);
 
 	// **The type is packed today, and that is why this is an assert rather than
@@ -546,7 +551,7 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.Tint = engine::core::Color3{1.0f, 1.0f, 0.0f}; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Transparency = 0.5f; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Mesh = Name("drawinstance_test.Other"); }) != unchanged);
-	CHECK(moved([](DrawInstance &i) { i.Material = Name("drawinstance_test.Steel"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.Texture = Name("drawinstance_test.Steel"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Surface = 0; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 

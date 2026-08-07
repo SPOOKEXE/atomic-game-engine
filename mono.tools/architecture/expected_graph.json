@@ -59,6 +59,7 @@
 				"core",
 				"delivery",
 				"ecs",
+				"effects",
 				"examples",
 				"game",
 				"graph",
@@ -110,6 +111,16 @@
 				"parallel"
 			]
 		},
+		"effects": {
+			"tier": "shared",
+			"links": [
+				"core",
+				"ecs",
+				"parallel",
+				"scene",
+				"spatial"
+			]
+		},
 		"examples": {
 			"tier": "shared",
 			"links": [
@@ -159,7 +170,11 @@
 		"input": {
 			"tier": "client",
 			"links": [
-				"core"
+				"core",
+				"ecs",
+				"parallel",
+				"scene",
+				"spatial"
 			],
 			"requires": "MONO_BUILD_CLIENT"
 		},
@@ -197,6 +212,7 @@
 				"assets",
 				"core",
 				"ecs",
+				"effects",
 				"graph",
 				"gui",
 				"parallel",
@@ -268,14 +284,17 @@
 		"studio": {
 			"tier": "client",
 			"links": [
+				"assetc",
 				"assets",
 				"audio",
+				"bake",
 				"cdn",
 				"client",
 				"control",
 				"core",
 				"delivery",
 				"ecs",
+				"effects",
 				"examples",
 				"game",
 				"graph",
@@ -307,6 +326,7 @@
 				"assets",
 				"core",
 				"ecs",
+				"effects",
 				"graph",
 				"gui",
 				"parallel",
@@ -326,6 +346,7 @@
 				"core",
 				"delivery",
 				"ecs",
+				"effects",
 				"examples",
 				"game",
 				"graph",
@@ -370,9 +391,12 @@
 			"links": [
 				"assets",
 				"audio",
+
+				"cdn",
 				"core",
 				"delivery",
 				"ecs",
+				"effects",
 				"examples",
 				"game",
 				"graph",
@@ -416,14 +440,17 @@
 		"studio": {
 			"tier": "client",
 			"links": [
+				"assetc",
 				"assets",
 				"audio",
+				"bake",
 				"cdn",
 				"client",
 				"control",
 				"core",
 				"delivery",
 				"ecs",
+				"effects",
 				"examples",
 				"game",
 				"graph",
@@ -454,6 +481,7 @@
 				"core",
 				"delivery",
 				"ecs",
+				"effects",
 				"examples",
 				"game",
 				"graph",

@@ -414,6 +414,12 @@ namespace engine::ecs {
 			return "UDim2";
 		case PropertyType::Rect:
 			return "Rect";
+		case PropertyType::NumberRange:
+			return "NumberRange";
+		case PropertyType::NumberSequence:
+			return "NumberSequence";
+		case PropertyType::ColorSequence:
+			return "ColorSequence";
 		}
 		return "?";
 	}

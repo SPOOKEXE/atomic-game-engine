@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
 	arguments.Flag("stats", "Open the statistics panel (F7)");
 	arguments.Flag("graph", "Open the frame graph (F8)");
+	arguments.Flag("assets", "Open the assets manager");
 	arguments.Flag("viewport2", "Open the second viewport");
 
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
@@ -37,6 +38,7 @@ int main(int argc, char **argv) {
 	arguments.Value("tick-rate", "HZ", "Simulation ticks per second while running (default 60)");
 	arguments.Value("frames", "N", "Exit after N presented frames");
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
+	arguments.Value("capture-world", "NAME", "Point --capture at this scene rather than the active one");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
@@ -87,6 +89,7 @@ int main(int argc, char **argv) {
 	options.Uncapped = arguments.Has("uncapped");
 	options.ShowStatistics = arguments.Has("stats");
 	options.ShowFrameGraph = arguments.Has("graph");
+	options.ShowAssetsPanel = arguments.Has("assets");
 	options.ShowSecondViewport = arguments.Has("viewport2");
 
 	// A headless run has no window to close, so without a budget it would never
@@ -114,6 +117,9 @@ int main(int argc, char **argv) {
 			);
 			return 2;
 		}
+	}
+	if (auto world = arguments.Get("capture-world")) {
+		options.CaptureWorld = *world;
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);

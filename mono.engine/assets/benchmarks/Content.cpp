@@ -33,8 +33,8 @@
 
 TEST_SUITE_ID("engine.assets.bench.content")
 
-using engine::assets::ChunkLimits;
 using engine::assets::Chunker;
+using engine::assets::ChunkLimits;
 using engine::assets::ChunkSpan;
 using engine::assets::ContentHash;
 using engine::assets::Hasher;

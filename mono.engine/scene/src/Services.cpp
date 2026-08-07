@@ -3,6 +3,8 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 
@@ -161,6 +163,88 @@ namespace engine::scene {
 			{"Players", ServiceScope::Shared, {}},
 		}};
 
+		// `workspace.CurrentCamera`: a reference over the `ActiveCamera` resource.
+		//
+		// **The resource is the storage and this is the only way to reach it from
+		// a script**, which is the whole design. `ActiveCamera` has named the live
+		// camera since v0.4 and there was no property projecting it, so a script
+		// could create a `Camera` and had no way to say "look through this one" —
+		// it had to be handed one by whatever built the world.
+		//
+		// **A read resolves the resource and a write moves it.** Not a component
+		// on `Workspace`: that would be a second place the live camera is
+		// recorded, and the two would disagree the first time anything set the
+		// resource directly — which `client::InstallDefaultCamera` does.
+		//
+		// **`PropertyKind::Computed` and not `Structural`**, even though it writes
+		// a resource rather than a component: structural means the write moves the
+		// row to another archetype, and this moves nothing. What it does touch is
+		// outside the entity entirely, which is a case `PropertyKind` has no
+		// member for — recorded here rather than by inventing one for a single
+		// property.
+		PropertyDescriptor CurrentCameraProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CurrentCamera");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(ecs::Entity);
+			property.Kind = PropertyKind::Computed;
+
+			// **Names the `Camera` component rather than nothing**, which is the
+			// nearest honest answer: what this projects is a resource, and
+			// `Reads`/`Writes` can only name components. A `.Changed` listener on
+			// this property therefore fires when a camera row is written rather
+			// than when the live one changes — over-reporting, which is the
+			// direction `ecs::ChangeChannel` says to err in.
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Camera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				const ActiveCamera *active = store.Resource<ActiveCamera>();
+
+				// A world with no live camera answers nil rather than failing.
+				// `Instance.new("Camera")` before anything has been made live is
+				// an ordinary state, and a getter that returned false would make
+				// `workspace.CurrentCamera` an error rather than a nil.
+				*static_cast<ecs::Entity *>(out) = active == nullptr ? ecs::NULL_ENTITY : active->Entity;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				const auto camera = *static_cast<const ecs::Entity *>(value);
+
+				// **Refused for anything that is not a camera.** Assigning a part
+				// here would leave `ResolveActiveCamera` looking for a `Camera`
+				// component it will not find, so the matrices would silently stay
+				// as they were — a frame drawn from where the camera used to be,
+				// which reads as a renderer fault. `ActiveCamera.hpp` describes
+				// that exact failure and this is what keeps a script from causing
+				// it.
+				//
+				// Clearing is allowed: `workspace.CurrentCamera = nil` is how a
+				// script says "nothing is looking", and the resource keeps its
+				// last matrices for the reason `ResolveActiveCamera` gives.
+				if (camera != ecs::NULL_ENTITY && store.Get<Camera>(camera) == nullptr) {
+					return false;
+				}
+
+				ActiveCamera live;
+				if (const ActiveCamera *existing = store.Resource<ActiveCamera>()) {
+					// **Read-modify-write, so the aspect ratio and the matrices
+					// survive.** A fresh `ActiveCamera` would reset `AspectRatio`
+					// to 1, and the consumer that owns that number — a window, a
+					// mirror's texture — writes it once rather than every frame.
+					// A script changing camera would have squashed the view until
+					// the next resize.
+					live = *existing;
+				}
+				live.Entity = camera;
+				store.SetResource(live);
+				return true;
+			};
+
+			return property;
+		}
+
 		ClassId RegisterServiceTree() {
 			// The root of everything, and the components these classes are sets
 			// of, both through `PartClass`. A service derives from `Instance`,
@@ -205,6 +289,9 @@ namespace engine::scene {
 			Classes::Register("Player", instance, {});
 
 			Classes::Computed(service, ScopeProperty());
+
+			const ClassId workspace = Classes::Find(core::Name("Workspace"));
+			Classes::Computed(workspace, CurrentCameraProperty());
 
 			const ClassId players = Classes::Find(core::Name("Players"));
 			Classes::Computed(players, LocalPlayerProperty());
@@ -274,9 +361,8 @@ namespace engine::scene {
 		// side of it — and what the containment test reads is the *name*. So the
 		// spelling is what matters, and `examples/tests/Scene.cpp` pins it
 		// against `gui::PLAYER_GUI` from the one place both are linked.
-		const Entity playerGui = store.CreateInstance(
-			Classes::Find(core::Name("Instance")), std::string(PLAYER_GUI_NAME)
-		);
+		const Entity playerGui =
+			store.CreateInstance(Classes::Find(core::Name("Instance")), std::string(PLAYER_GUI_NAME));
 		if (playerGui != NULL_ENTITY) {
 			store.SetParent(playerGui, player);
 		}

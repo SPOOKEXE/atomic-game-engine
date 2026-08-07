@@ -1,5 +1,7 @@
 #include <engine/assets/Texture.hpp>
 
+#include <algorithm>
+
 namespace engine::assets {
 
 	bool TextureData::IsValid() const {
@@ -29,6 +31,14 @@ namespace engine::assets {
 		writer.WriteUInt32(data.Width);
 		writer.WriteUInt32(data.Height);
 
+		// **Before the pixels, because the pixels have no length of their own.**
+		// Everything after them would be unreachable: the reader takes the rest
+		// of the payload as the image, which is exactly what stops a second
+		// count from disagreeing with the first.
+		writer.WriteUInt8(data.FlipbookSide);
+		writer.WriteUInt8(data.FlipbookFrames);
+		writer.WriteFloat(data.FlipbookFrameRate);
+
 		// Raw, with no length of its own: the dimensions and the format say how
 		// many bytes follow, and a second count would be a second answer that a
 		// corrupt file could make disagree with the first.
@@ -40,7 +50,11 @@ namespace engine::assets {
 		if (reader.ReadUInt32() != MAGIC) {
 			return false;
 		}
-		if (reader.ReadUInt16() != VERSION) {
+		// **1 and 2 are both read**, and the difference is only the three
+		// flipbook fields. A v1 file is a still image, which is what their
+		// zeroes already mean — see `VERSION`.
+		const uint16_t version = reader.ReadUInt16();
+		if (version == 0 || version > VERSION) {
 			return false;
 		}
 
@@ -55,6 +69,15 @@ namespace engine::assets {
 
 		const uint32_t width = reader.ReadUInt32();
 		const uint32_t height = reader.ReadUInt32();
+
+		uint8_t side = 0;
+		uint8_t frames = 0;
+		float frameRate = 0.0f;
+		if (version >= 2) {
+			side = reader.ReadUInt8();
+			frames = reader.ReadUInt8();
+			frameRate = reader.ReadFloat();
+		}
 
 		if (reader.Failed()) {
 			return false;
@@ -85,6 +108,24 @@ namespace engine::assets {
 		out.Width = width;
 		out.Height = height;
 		out.Format = static_cast<TextureFormat>(format);
+
+		// **A frame count past the grid is clamped rather than refused**, which
+		// is the opposite of how every other field here is treated and is right
+		// for the same reason the rest are not: the others decide how many bytes
+		// to allocate, and this one decides which cell to sample. A wrong count
+		// is a shorter animation; a wrong dimension is a buffer overrun.
+		out.FlipbookSide = side;
+		out.FlipbookFrames = side == 0 ? 0
+									   : static_cast<uint8_t>(std::min<uint32_t>(
+											 frames == 0 ? static_cast<uint32_t>(side) * side : frames,
+											 static_cast<uint32_t>(side) * side
+										 ));
+
+		// A negative or non-finite rate reads as "unknown" rather than being
+		// refused, for the reason above — and because a consumer already has to
+		// handle zero.
+		out.FlipbookFrameRate = frameRate > 0.0f && frameRate < 1000.0f ? frameRate : 0.0f;
+
 		out.Pixels.assign(pixels.begin(), pixels.end());
 		return true;
 	}

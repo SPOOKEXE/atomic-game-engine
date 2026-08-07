@@ -79,6 +79,14 @@ namespace engine::script {
 		}
 	}
 
+	void ChangeQueue::Record(Entity instance, core::Name name) {
+		// The same dedup `Fan` uses, so an attribute written three times in one
+		// tick signals once with the value it ended at.
+		if (Queued.insert(KeyOf(instance, name)).second) {
+			Pending.push_back(Change{instance, name});
+		}
+	}
+
 	void ChangeQueue::Drain(const std::function<void(Entity, core::Name)> &body) {
 		if (Pending.empty()) {
 			return;

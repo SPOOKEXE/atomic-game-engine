@@ -321,19 +321,48 @@ namespace engine::script {
 
 		// --- sequences -------------------------------------------------------
 
-		// A keypoint arrives as a table rather than as its own userdata.
+		// A keypoint arrives as its own userdata, or as a table.
 		//
-		// Roblox has `NumberSequenceKeypoint`, and two more userdata types for
-		// something an author writes inline once is surface nobody asked for.
-		// The table form is what the constructor already has to accept.
+		// **Both forms, and the table one is not deprecated.** Roblox has
+		// `NumberSequenceKeypoint`, and until v0.10 this engine deliberately did
+		// not — the note here said two more userdata types for a value an author
+		// writes inline once is surface nobody asked for, and while a sequence was
+		// only ever built from a literal that was true.
+		//
+		// What made it false is that a sequence became a *property*. An emitter's
+		// `Transparency` is read back, and a getter handing out
+		// `{time, value, envelope}` gives three anonymous numbers with no
+		// `typeof` — so `emitter.Transparency.Keypoints[1].Value` did not work and
+		// nothing said why. `TAG_NUMBER_KEYPOINT` carries the rest of the
+		// reasoning.
+		//
+		// The table stays because a literal is still how a gradient is written,
+		// and `{{0, 1}, {1, 0}}` is much better to read than two constructor
+		// calls. What changed is that it is no longer the *only* form.
 		bool ReadNumberKeypoint(lua_State *state, int index, NumberKeypoint &out) {
+			if (void *tagged = lua_touserdatatagged(state, index, TAG_NUMBER_KEYPOINT)) {
+				out = *static_cast<const NumberKeypoint *>(tagged);
+				return true;
+			}
 			if (!lua_istable(state, index)) {
 				return false;
 			}
 
-			lua_rawgeti(state, index, 1);
-			lua_rawgeti(state, index, 2);
-			lua_rawgeti(state, index, 3);
+			// **Made absolute before anything is pushed, and this was a real bug
+			// rather than a tidy-up.** A negative index is relative to the top *at
+			// the moment of the call*, so after the first `lua_rawgeti` grows the
+			// stack, `index` of -1 names the value that was just pushed instead of
+			// the table it came from — and the second read then indexes a number.
+			//
+			// It survived because nothing exercised it: every sequence in the
+			// suite was built from the two-argument form, and the table form is
+			// the one that goes through here. The v0.10 keypoint tests are what
+			// found it, by crashing.
+			const int table = lua_absindex(state, index);
+
+			lua_rawgeti(state, table, 1);
+			lua_rawgeti(state, table, 2);
+			lua_rawgeti(state, table, 3);
 
 			out.Time = static_cast<float>(lua_tonumber(state, -3));
 			out.Value = static_cast<float>(lua_tonumber(state, -2));
@@ -341,6 +370,110 @@ namespace engine::script {
 
 			lua_pop(state, 3);
 			return true;
+		}
+
+		// The colour twin, and it is a separate function rather than a template
+		// because the table layouts differ: a number keypoint's second element is
+		// a number and a colour keypoint's is a `Color3` userdata, so the two
+		// bodies share no line worth factoring.
+		bool ReadColorKeypoint(lua_State *state, int index, ColorKeypoint &out) {
+			if (void *tagged = lua_touserdatatagged(state, index, TAG_COLOR_KEYPOINT)) {
+				out = *static_cast<const ColorKeypoint *>(tagged);
+				return true;
+			}
+			if (!lua_istable(state, index)) {
+				return false;
+			}
+
+			// Absolute, for `ReadNumberKeypoint`'s reason one function up.
+			const int table = lua_absindex(state, index);
+
+			lua_rawgeti(state, table, 1);
+			lua_rawgeti(state, table, 2);
+
+			// Read before the pop, and `CheckColor3` may longjmp out of here —
+			// which is fine and is why nothing between these two lines allocates.
+			out.Time = static_cast<float>(lua_tonumber(state, -2));
+			out.Value = CheckColor3(state, -1);
+
+			lua_pop(state, 2);
+			return true;
+		}
+
+		// `NumberSequenceKeypoint.new(time, value, envelope)`.
+		//
+		// The envelope defaults to zero, which is Roblox's default and is also the
+		// only value that means "no band" — `Sequence.hpp` declines to sample the
+		// band itself because picking a number inside it needs a generator, and
+		// `effects::ParticleSystem` is the caller that has one.
+		int NumberKeypointNew(lua_State *state) {
+			const NumberKeypoint built{Number(state, 1), Number(state, 2), Number(state, 3)};
+			*Push<NumberKeypoint, TAG_NUMBER_KEYPOINT>(state, "NumberSequenceKeypoint") = built;
+			return 1;
+		}
+
+		int NumberKeypointIndex(lua_State *state) {
+			const NumberKeypoint &value =
+				Check<NumberKeypoint, TAG_NUMBER_KEYPOINT>(state, 1, "NumberSequenceKeypoint");
+			const std::string_view field = luaL_checkstring(state, 2);
+
+			if (field == "Time") {
+				lua_pushnumber(state, value.Time);
+				return 1;
+			}
+			if (field == "Value") {
+				lua_pushnumber(state, value.Value);
+				return 1;
+			}
+			if (field == "Envelope") {
+				lua_pushnumber(state, value.Envelope);
+				return 1;
+			}
+
+			luaL_errorL(state, "NumberSequenceKeypoint has no member '%s'", std::string(field).c_str());
+		}
+
+		int NumberKeypointEqual(lua_State *state) {
+			lua_pushboolean(
+				state,
+				Check<NumberKeypoint, TAG_NUMBER_KEYPOINT>(state, 1, "NumberSequenceKeypoint") ==
+					Check<NumberKeypoint, TAG_NUMBER_KEYPOINT>(state, 2, "NumberSequenceKeypoint")
+			);
+			return 1;
+		}
+
+		// `ColorSequenceKeypoint.new(time, colour)`. No envelope: Roblox's colour
+		// keypoint has none, and `core::ColorKeypoint` has no field for one.
+		int ColorKeypointNew(lua_State *state) {
+			const ColorKeypoint built{Number(state, 1), CheckColor3(state, 2)};
+			*Push<ColorKeypoint, TAG_COLOR_KEYPOINT>(state, "ColorSequenceKeypoint") = built;
+			return 1;
+		}
+
+		int ColorKeypointIndex(lua_State *state) {
+			const ColorKeypoint &value =
+				Check<ColorKeypoint, TAG_COLOR_KEYPOINT>(state, 1, "ColorSequenceKeypoint");
+			const std::string_view field = luaL_checkstring(state, 2);
+
+			if (field == "Time") {
+				lua_pushnumber(state, value.Time);
+				return 1;
+			}
+			if (field == "Value") {
+				*PushColor3(state) = value.Value;
+				return 1;
+			}
+
+			luaL_errorL(state, "ColorSequenceKeypoint has no member '%s'", std::string(field).c_str());
+		}
+
+		int ColorKeypointEqual(lua_State *state) {
+			lua_pushboolean(
+				state,
+				Check<ColorKeypoint, TAG_COLOR_KEYPOINT>(state, 1, "ColorSequenceKeypoint") ==
+					Check<ColorKeypoint, TAG_COLOR_KEYPOINT>(state, 2, "ColorSequenceKeypoint")
+			);
+			return 1;
 		}
 
 		int NumberSequenceNew(lua_State *state) {
@@ -385,15 +518,17 @@ namespace engine::script {
 			const std::string_view field = luaL_checkstring(state, 2);
 
 			if (field == "Keypoints") {
+				// **Userdata rather than the `{time, value, envelope}` tables this
+				// used to hand back.** A read that does not come back in a shape
+				// the constructor accepts is not a round trip, and three anonymous
+				// numbers were not one: nothing said which was the time, `typeof`
+				// answered "table", and a stop from a colour ramp was
+				// indistinguishable from a stop from a number ramp. See
+				// `TAG_NUMBER_KEYPOINT`.
 				lua_newtable(state);
 				for (uint32_t index = 0; index < value.Count; index++) {
-					lua_newtable(state);
-					lua_pushnumber(state, value.Keypoints[index].Time);
-					lua_rawseti(state, -2, 1);
-					lua_pushnumber(state, value.Keypoints[index].Value);
-					lua_rawseti(state, -2, 2);
-					lua_pushnumber(state, value.Keypoints[index].Envelope);
-					lua_rawseti(state, -2, 3);
+					*Push<NumberKeypoint, TAG_NUMBER_KEYPOINT>(state, "NumberSequenceKeypoint") =
+						value.Keypoints[index];
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
 				return 1;
@@ -419,19 +554,17 @@ namespace engine::script {
 				const int count = lua_objlen(state, 1);
 				for (int index = 1; index <= count; index++) {
 					lua_rawgeti(state, 1, index);
-					if (!lua_istable(state, -1)) {
+
+					ColorKeypoint keypoint;
+					if (!ReadColorKeypoint(state, -1, keypoint)) {
 						luaL_errorL(
-							state, "ColorSequence.new: keypoint %d is not a {time, Color3} table", index
+							state,
+							"ColorSequence.new: keypoint %d is not a ColorSequenceKeypoint or a "
+							"{time, Color3} table",
+							index
 						);
 					}
-
-					lua_rawgeti(state, -1, 1);
-					lua_rawgeti(state, -2, 2);
-
-					const ColorKeypoint keypoint{
-						static_cast<float>(lua_tonumber(state, -2)), CheckColor3(state, -1)
-					};
-					lua_pop(state, 3);
+					lua_pop(state, 1);
 
 					if (!built.Add(keypoint)) {
 						luaL_errorL(
@@ -466,13 +599,11 @@ namespace engine::script {
 				const ColorSequence &value =
 					Check<ColorSequence, TAG_COLOR_SEQUENCE>(state, 1, "ColorSequence");
 
+				// Userdata, for `NumberSequenceIndex`'s reason.
 				lua_newtable(state);
 				for (uint32_t index = 0; index < value.Count; index++) {
-					lua_newtable(state);
-					lua_pushnumber(state, value.Keypoints[index].Time);
-					lua_rawseti(state, -2, 1);
-					*PushColor3(state) = value.Keypoints[index].Value;
-					lua_rawseti(state, -2, 2);
+					*Push<ColorKeypoint, TAG_COLOR_KEYPOINT>(state, "ColorSequenceKeypoint") =
+						value.Keypoints[index];
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
 				return 1;
@@ -838,6 +969,8 @@ namespace engine::script {
 		static const luaL_Reg numberRange[] = {{"new", NumberRangeNew}, {nullptr, nullptr}};
 		static const luaL_Reg numberSequence[] = {{"new", NumberSequenceNew}, {nullptr, nullptr}};
 		static const luaL_Reg colorSequence[] = {{"new", ColorSequenceNew}, {nullptr, nullptr}};
+		static const luaL_Reg numberKeypoint[] = {{"new", NumberKeypointNew}, {nullptr, nullptr}};
+		static const luaL_Reg colorKeypoint[] = {{"new", ColorKeypointNew}, {nullptr, nullptr}};
 		static const luaL_Reg tweenInfo[] = {{"new", TweenInfoNew}, {nullptr, nullptr}};
 		static const luaL_Reg ray[] = {{"new", RayNew}, {nullptr, nullptr}};
 		static const luaL_Reg random[] = {{"new", RandomNew}, {nullptr, nullptr}};
@@ -872,6 +1005,27 @@ namespace engine::script {
 			 nullptr,
 			 nullptr,
 			 colorSequence},
+			// **Registered after the sequences they belong to, which is only
+			// legibility — `Install` is order-independent.** Equality is bound on
+			// both because comparing two stops is what a test of a gradient does,
+			// and without it `==` compares userdata addresses and is false for two
+			// keypoints holding identical numbers.
+			{"NumberSequenceKeypoint",
+			 NumberKeypointIndex,
+			 nullptr,
+			 NumberKeypointEqual,
+			 nullptr,
+			 nullptr,
+			 nullptr,
+			 numberKeypoint},
+			{"ColorSequenceKeypoint",
+			 ColorKeypointIndex,
+			 nullptr,
+			 ColorKeypointEqual,
+			 nullptr,
+			 nullptr,
+			 nullptr,
+			 colorKeypoint},
 			{"TweenInfo", TweenInfoIndex, nullptr, nullptr, nullptr, nullptr, nullptr, tweenInfo},
 			{"Ray", RayIndex, nullptr, nullptr, nullptr, nullptr, nullptr, ray},
 			{"Random", RandomIndex, nullptr, nullptr, nullptr, nullptr, nullptr, random},

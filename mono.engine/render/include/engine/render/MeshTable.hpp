@@ -56,6 +56,28 @@ namespace engine::render {
 		// to `Runs`.
 		std::vector<core::Name> Textures;
 		std::vector<std::array<float, 4>> Colours;
+
+		// The middle of the mesh's own bounding box, in mesh space.
+		//
+		// **Subtracted before scaling, so a model authored off-centre sits where
+		// the part is** rather than at an offset nobody can see the cause of.
+		core::Vector3 Centre;
+
+		// Half the mesh's own bounding box, in mesh space.
+		//
+		// **This is what makes `MeshPart.Size` a box rather than a multiplier.**
+		// The renderer scales by `HalfExtent / Extent`, so the mesh's own box is
+		// mapped exactly onto the part's — which is Roblox's `MeshPart` semantic
+		// and, more usefully here, the thing that makes `scene::Bounds` true.
+		// `graph::CullAndBound` tests that box against the frustum, and before
+		// this the drawn geometry could be any size at all relative to it: a
+		// character baked at authored scale extended ten times further than the
+		// box describing it and was culled while still on screen.
+		//
+		// Half of one on every axis for a built-in, whose geometry is a unit
+		// shape about its own origin — so `HalfExtent / 0.5` is `HalfExtent * 2`
+		// and every built-in draws exactly as it did before this field existed.
+		core::Vector3 Extent{0.5f, 0.5f, 0.5f};
 	};
 
 	// The meshes a renderer can draw.
@@ -83,7 +105,7 @@ namespace engine::render {
 
 		// Takes the device and registers the engine's built-in meshes.
 		//
-			// Registers the fallback mesh used for unknown names.
+		// Registers the fallback mesh used for unknown names.
 		//
 		// @param device The GPU device. Kept, not owned.
 		// @return `false` when the built-ins could not be uploaded.

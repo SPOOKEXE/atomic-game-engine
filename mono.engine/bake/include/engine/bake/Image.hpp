@@ -29,6 +29,20 @@ namespace engine::bake {
 		//
 		// Baseline JPEG only.
 		Jpeg,
+
+		// GIF87a or GIF89a, decoded into **one flipbook sheet** rather than a
+		// list of frames.
+		//
+		// **The one format here whose output is not a picture of its input**, and
+		// that is deliberate: a GIF is a short looping animation and the thing
+		// this engine draws animated is a flipbook, so the frames are laid out as
+		// a square power-of-two grid and become an ordinary texture that every
+		// existing path handles. `bake/src/Gif.cpp` carries the argument and
+		// states what it costs — a 12-frame GIF wastes four cells of a 4x4, and
+		// anything past 64 frames is truncated.
+		//
+		// @since v0.10
+		Gif,
 	};
 
 	// Identifies a format from the leading bytes.

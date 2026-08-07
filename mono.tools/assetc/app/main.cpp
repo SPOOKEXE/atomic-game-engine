@@ -26,6 +26,11 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"max-texture", "PIXELS", "Shrink any texture wider or taller than this (default: 2048, 0 for none)"
 	);
+	arguments.Value(
+		"flipbook-fps",
+		"FPS",
+		"Override the frame rate of every imported flipbook (default: 0, keep what the GIF said)"
+	);
 	arguments.Flag("no-copy", "Skip files this cannot bake instead of copying them across");
 	arguments.Flag("quiet", "Print the summary only, not a row per asset");
 
@@ -56,6 +61,7 @@ int main(int argc, char **argv) {
 	settings.ModelSize = static_cast<float>(arguments.GetNumber("model-size", settings.ModelSize));
 	settings.MaximumTexture =
 		static_cast<uint32_t>(arguments.GetInteger("max-texture", settings.MaximumTexture));
+	settings.FlipbookFps = static_cast<float>(arguments.GetNumber("flipbook-fps", settings.FlipbookFps));
 
 	std::string failure;
 	const assetc::Report report = assetc::Bake(settings, failure);

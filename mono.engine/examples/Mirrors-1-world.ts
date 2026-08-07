@@ -78,7 +78,7 @@ const WALLS: {
 	name: string;
 	position: Vector3;
 	size: Vector3;
-	face: Enum_NormalId;
+	face: Enum.NormalId;
 }[] = [
 	{
 		name: "MirrorNorth",

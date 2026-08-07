@@ -78,3 +78,37 @@ TEST_CASE("unknown is zero so an unwritten field makes no claim", "[assets]") {
 	CHECK(static_cast<uint8_t>(AssetKind::Texture) == 2);
 	CHECK(static_cast<uint8_t>(AssetKind::Audio) == 3);
 }
+
+TEST_CASE("a source form is not something a runtime reads", "[assets]") {
+	// **The distinction the extension table cannot make.** Both halves of every
+	// format classify the same way on purpose — a publisher pointed at a source
+	// tree and one pointed at a baked tree must agree — and that is exactly why
+	// "will this load" needs a second question.
+	using engine::assets::IsRuntimeReadable;
+
+	CHECK_FALSE(IsRuntimeReadable("characters/miku.pmx"));
+	CHECK_FALSE(IsRuntimeReadable("props/crate.glb"));
+	CHECK_FALSE(IsRuntimeReadable("tex/skin.png"));
+	CHECK_FALSE(IsRuntimeReadable("tex/sheet.gif"));
+	CHECK_FALSE(IsRuntimeReadable("materials/oak.mat"));
+
+	CHECK(IsRuntimeReadable("characters/miku.amesh"));
+	CHECK(IsRuntimeReadable("tex/skin.atex"));
+	CHECK(IsRuntimeReadable("materials/oak.amat"));
+
+	// **Formats with no baked form are readable as they are**, which is why
+	// this is not a list of three extensions: a baker copies these across
+	// unchanged and a runtime decodes them itself.
+	CHECK(IsRuntimeReadable("audio/step.wav"));
+	CHECK(IsRuntimeReadable("audio/theme.mp3"));
+	CHECK(IsRuntimeReadable("scripts/Rings.luau"));
+	CHECK(IsRuntimeReadable("fonts/JetBrainsMono.ttf"));
+	CHECK(IsRuntimeReadable("levels/start.agame"));
+
+	// Case-insensitively, for `KindOfName`'s reason: artists' tools emit `.PNG`.
+	CHECK_FALSE(IsRuntimeReadable("tex/SKIN.PNG"));
+
+	// A name with no extension is whatever it is rather than a source.
+	CHECK(IsRuntimeReadable("readme"));
+	CHECK(IsRuntimeReadable("trailing."));
+}

@@ -988,6 +988,40 @@ namespace studio {
 		engine::ui::PaintTarget target;
 		target.Origin = ImVec2(slot.X, slot.Y);
 
-		engine::ui::PaintGui(GuiLists[index].Commands(), slot.List, target);
+		// **The hook `ui::ImageSource` exists for, connected.** `engine::ui` is
+		// the editor's toolkit and has no business resolving a game's content
+		// names — so it takes this, and until v0.10 nothing supplied one and
+		// every `ImageLabel` in a viewport panel drew the missing-image marker
+		// whatever had loaded. The seam was right and one end of it was never
+		// connected; `client::Client` had the same gap on its own pass.
+		//
+		// **The size travels with the handle** because a nine-sliced or tiled
+		// image is laid out in source pixels — `Renderer::TextureSize` says why.
+		engine::ui::ImageSource images;
+		images.Resolve = [this](const engine::core::Name &name) -> engine::ui::ImageSource::Resolved {
+			engine::ui::ImageSource::Resolved resolved;
+
+			void *const handle = Renderer.TextureHandle(name);
+			if (handle == nullptr) {
+				return resolved;
+			}
+			resolved.Texture = reinterpret_cast<ImTextureID>(handle);
+
+			uint32_t width = 0;
+			uint32_t height = 0;
+			if (Renderer.TextureSize(name, width, height)) {
+				resolved.Size = ImVec2(static_cast<float>(width), static_cast<float>(height));
+			}
+
+			// **The editor's own clock, not the world's.** A world paused in the
+			// editor is still a world somebody is looking at, and its interface
+			// should go on animating — the same reason a paused game's menus do.
+			const engine::render::FlipbookCell cell = Renderer.TextureCell(name, AnimationSeconds);
+			resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
+			resolved.CellMax = ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);
+			return resolved;
+		};
+
+		engine::ui::PaintGui(GuiLists[index].Commands(), slot.List, target, images);
 	}
 }

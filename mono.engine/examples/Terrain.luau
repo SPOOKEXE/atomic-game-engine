@@ -290,14 +290,19 @@ local SURFACE_TUNDRA = 5
 local SURFACE_SCRUB = 6
 local SURFACE_WATER = 7
 
+-- **No material is set, and `Enum.Material` no longer exists.** v0.10 removed
+-- it: seventeen names nothing sampled, replaced by a `Material` instance that
+-- names a published asset. A demo that shipped one would only draw right on a
+-- machine whose content store happened to hold that material, so the colour
+-- carries the look here exactly as it always actually did.
 local SURFACES = {
-	{ Colour = Color3.fromRGB(112, 110, 106), Material = Enum.Material.Slate },
-	{ Colour = Color3.fromRGB(86, 134, 66), Material = Enum.Material.Grass },
-	{ Colour = Color3.fromRGB(214, 200, 148), Material = Enum.Material.Sand },
-	{ Colour = Color3.fromRGB(238, 242, 247), Material = Enum.Material.Concrete },
-	{ Colour = Color3.fromRGB(150, 162, 148), Material = Enum.Material.Concrete },
-	{ Colour = Color3.fromRGB(146, 142, 92), Material = Enum.Material.Grass },
-	{ Colour = Color3.fromRGB(52, 104, 152), Material = Enum.Material.Ice },
+	{ Colour = Color3.fromRGB(112, 110, 106) },
+	{ Colour = Color3.fromRGB(86, 134, 66) },
+	{ Colour = Color3.fromRGB(214, 200, 148) },
+	{ Colour = Color3.fromRGB(238, 242, 247) },
+	{ Colour = Color3.fromRGB(150, 162, 148) },
+	{ Colour = Color3.fromRGB(146, 142, 92) },
+	{ Colour = Color3.fromRGB(52, 104, 152) },
 }
 
 -- The transparency water is drawn at. Solid ground uses zero and never sets the
@@ -710,7 +715,6 @@ local function PlaceBox(
 
 	local entry = SURFACES[surface]
 	part.Color = entry.Colour
-	part.Material = entry.Material
 	part.Transparency = if surface == SURFACE_WATER then WATER_TRANSPARENCY else 0
 
 	-- Water casts no shadow. A translucent shadow caster is the expensive kind

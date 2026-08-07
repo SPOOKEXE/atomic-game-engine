@@ -7,11 +7,19 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Property.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/effects/Registration.hpp>
+#include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Query.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -311,7 +319,6 @@ namespace client {
 								bounds[row].HalfExtent,
 								visuals[row].Tint,
 								visuals[row].Mesh,
-								visuals[row].Material,
 								appearances[row].ColourMap,
 								tags[row].Mask,
 
@@ -493,12 +500,310 @@ namespace client {
 		return views.size();
 	}
 
+	size_t CollectParticleBatches(Store &store, std::vector<engine::render::ParticleBatch> &batches) {
+		batches.clear();
+
+		const auto *system = store.Resource<engine::effects::ParticleSystem>();
+		if (system == nullptr || system->Blocks.empty()) {
+			return 0;
+		}
+
+		// **Walked from the emitter column rather than from the block list**, and
+		// the direction matters: a block knows how many particles it has and
+		// nothing about what they look like, and the shared half — texture, blend
+		// mode, flipbook — is on the emitter. Walking blocks would mean a lookup
+		// from `EmitterBlock::Owner` back to a row per block, which is a random
+		// access per emitter to avoid a sequential one.
+		//
+		// The order is therefore the emitter column's, which is stable within a
+		// tick — so the batch list is the same every frame and the draw order does
+		// not shuffle.
+		store.Each<const engine::effects::ParticleEmitter, const engine::effects::EmitterSlot>(
+			[&](engine::ecs::Entity,
+				const engine::effects::ParticleEmitter &emitter,
+				const engine::effects::EmitterSlot &slot) {
+				if (slot.Index == engine::effects::NO_SLOT || slot.Index >= system->Blocks.size()) {
+					return;
+				}
+
+				const engine::effects::EmitterBlock &block = system->Blocks[slot.Index];
+				if (block.Live == 0) {
+					// **Skipped rather than emitted as an empty batch.** An empty
+					// batch is a uniform push and a pipeline bind for zero
+					// vertices, and in a scene of a hundred thousand emitters most
+					// of them are empty at any moment.
+					return;
+				}
+
+				engine::render::ParticleBatch batch;
+				batch.Particles = {system->Instances.data() + block.First, block.Live};
+				batch.Texture = emitter.Texture;
+				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
+				batch.ZOffset = emitter.ZOffset;
+				batch.Additive = emitter.Additive;
+				batch.WorldUp =
+					emitter.Orientation == engine::effects::ParticleOrientation::FacingCameraWorldUp;
+				batches.push_back(batch);
+			}
+		);
+
+		return batches.size();
+	}
+
+	size_t CollectLights(Store &store, const Vector3 &eye, std::vector<engine::render::SceneLight> &lights) {
+		lights.clear();
+
+		// Gathered whole, then ordered, then cut. **Not cut during the walk**,
+		// because "the sixteen nearest" cannot be decided until the far ones have
+		// been seen — a partial sort over the whole set is the only form that is
+		// correct, and a scene has tens of lights rather than thousands.
+		store.Each<const engine::scene::Light>([&](engine::ecs::Entity entity,
+												   const engine::scene::Light &bulb) {
+			if (!bulb.Enabled || bulb.Brightness <= 0.0f || bulb.Range <= 0.0f) {
+				return;
+			}
+
+			const engine::ecs::Entity parent = store.ParentOf(entity);
+			if (parent == engine::ecs::NULL_ENTITY) {
+				return;
+			}
+
+			engine::core::CFrame frame;
+			if (const auto *point = store.Get<engine::scene::Attachment>(parent)) {
+				frame = point->WorldFrame;
+			} else if (const auto *placement = store.Get<Transform>(parent)) {
+				frame = placement->Frame;
+			} else {
+				// No place to shine from. Skipped rather than placed at the
+				// origin — see the header.
+				return;
+			}
+
+			engine::render::SceneLight light;
+			light.Position = frame.Position;
+			light.Range = bulb.Range;
+
+			// Brightness folded into the colour here, once per light per
+			// frame, rather than in the shader once per light per fragment.
+			light.Colour = engine::core::Color3{
+				bulb.Colour.R * bulb.Brightness,
+				bulb.Colour.G * bulb.Brightness,
+				bulb.Colour.B * bulb.Brightness,
+			};
+
+			if (bulb.Kind == engine::scene::LightKind::Point) {
+				// -1 is the value the shader reads as "never clip", which is
+				// what a point light is, and it needs no branch of its own
+				// there.
+				light.ConeCosine = -1.0f;
+			} else {
+				// The face's normal, turned into world space by whatever the
+				// light hangs off. A spot on an attachment points along the
+				// attachment, which is what an attachment carries an
+				// orientation for.
+				light.Direction = frame.VectorToWorldSpace(engine::scene::NormalOf(bulb.Face));
+
+				// Half the authored angle, as a cosine. Roblox's `Angle` is
+				// the full cone width, and the dot product test is against the
+				// half — halving in the shader would be doing it per fragment.
+				light.ConeCosine = std::cos(
+					std::clamp(bulb.Angle, 0.0f, 180.0f) * 0.5f * std::numbers::pi_v<float> / 180.0f
+				);
+			}
+
+			lights.push_back(light);
+		});
+
+		if (lights.size() > engine::render::MAX_SCENE_LIGHTS) {
+			std::partial_sort(
+				lights.begin(),
+				lights.begin() + engine::render::MAX_SCENE_LIGHTS,
+				lights.end(),
+				[&eye](const engine::render::SceneLight &left, const engine::render::SceneLight &right) {
+					// Squared, because the square root is monotonic and cannot
+					// change an ordering — `scene::OrderForDrawing`'s reason.
+					const Vector3 a = left.Position - eye;
+					const Vector3 b = right.Position - eye;
+					return a.Dot(a) < b.Dot(b);
+				}
+			);
+			lights.resize(engine::render::MAX_SCENE_LIGHTS);
+		}
+
+		return lights.size();
+	}
+
+	namespace {
+		// Writes `Humanoid::Grounded` from a downward ray.
+		//
+		// **Here rather than in `scene`, because `scene` may not link
+		// `physics`.** `scene::StepCharacters` reads the flag and never computes
+		// it, which is the same shape `replication::DistancePriority` has: the
+		// arithmetic in the shared module, the query in whatever can run one.
+		void GroundCharacters(Store &store) {
+			store.Each<engine::scene::Humanoid, const Transform>([&store](
+																	 engine::ecs::Entity entity,
+																	 engine::scene::Humanoid &humanoid,
+																	 const Transform &placement
+																 ) {
+				if (!humanoid.Enabled) {
+					return;
+				}
+
+				// From just inside the feet to just below them. **Starting
+				// inside rather than at the surface**, because a ray that
+				// begins exactly on a face is a coin flip about whether it hits
+				// it — and the coin lands differently on two machines, which is
+				// a desync arriving through a character controller.
+				const Vector3 feet = placement.Frame.Position - Vector3{0.0f, humanoid.Height * 0.5f, 0.0f};
+
+				const engine::core::Ray ray{feet + Vector3{0.0f, 0.1f, 0.0f}, Vector3{0.0f, -1.0f, 0.0f}};
+
+				const auto hit = engine::physics::Raycast(store, ray, 0.1f + humanoid.GroundTolerance);
+
+				// **The character's own collider is rejected here rather than
+				// excluded from the query**, because `physics::Raycast` filters
+				// by layer and not by entity. One compare against the nearest
+				// hit is cheaper than a layer per character, and it is right
+				// for the case that matters: a humanoid standing on itself.
+				//
+				// What it does not handle is a *multi-part* character standing
+				// on its own leg. That wants an ignore list on the query, which
+				// is `physics`' to add and not this function's to work around.
+				humanoid.Grounded = hit.has_value() && hit->Owner != entity;
+			});
+		}
+
+		// The three effects systems, installed together because they are one
+		// dependency chain and installing two of the three is a scene where
+		// nothing emits.
+		//
+		// **`ResolveAttachments` first and in `PreSimulation`**, because an
+		// emitter parented to an attachment reads that attachment's world frame
+		// when it spawns — and spawning happens in the same phase. Resolving after
+		// would emit from where the attachment was last frame, which on a fast
+		// projectile is a visible lag between the rocket and its exhaust.
+		//
+		// **`RecordTrails` in the simulation and not here**, which is the one that
+		// does not follow the pattern: a trail is a record of where something has
+		// been, so sampling it at frame rate would make its length depend on the
+		// machine drawing it. `Ribbon.hpp` carries the argument.
+		void InstallEffects(Store &store, Scheduler &scheduler, uint32_t poolCapacity) {
+			engine::effects::RegisterEffectClasses();
+
+			if (!store.HasResource<engine::effects::ParticleSystem>()) {
+				engine::effects::InstallParticles(store, poolCapacity);
+			}
+			if (!store.HasResource<engine::effects::RibbonBuffer>()) {
+				store.SetResource(engine::effects::RibbonBuffer{});
+			}
+
+			scheduler.Add("resolve-attachments", Phase::PreSimulation, [](Store &world) {
+				(void)engine::scene::ResolveAttachments(world);
+			});
+			scheduler.Add("refresh-emitters", Phase::PreSimulation, [](Store &world) {
+				(void)engine::effects::RefreshEmitters(world);
+			});
+			scheduler.Add("step-particles", Phase::Simulation, [](Store &world) {
+				(void)engine::effects::StepParticles(world, static_cast<float>(world.Time().Delta));
+			});
+			scheduler.Add("record-trails", Phase::Simulation, [](Store &world) {
+				(void)engine::effects::RecordTrails(world, static_cast<float>(world.Time().Delta));
+			});
+			scheduler.Add("build-ribbons", Phase::PreRender, [](Store &world) {
+				const auto *active = world.Resource<ActiveCamera>();
+				const engine::scene::Transform *eye =
+					active == nullptr ? nullptr : world.Get<engine::scene::Transform>(active->Entity);
+				(void)engine::effects::BuildRibbons(
+					world,
+					eye == nullptr ? Vector3::Zero : eye->Frame.Position,
+					static_cast<float>(world.Time().Elapsed)
+				);
+			});
+		}
+
+		// The camera and character systems, installed together.
+		//
+		// **`InputState` is created here and never by a script**, because a world
+		// with no resource is one where every input query answers "nothing
+		// pressed" — which is exactly right for a server and exactly wrong for a
+		// client that forgot to install it. Creating it at install time makes the
+		// presence of the resource mean "somebody is looking at this world".
+		//
+		// **The ground check is the client's rather than `scene`'s**, and that is
+		// the tier doing its job: `scene` may not link `physics`, so
+		// `StepCharacters` reads `Humanoid::Grounded` and this is what writes it.
+		// The same split `replication::DistancePriority::Blocked` already has —
+		// the arithmetic there, the query here.
+		void InstallControls(Store &store, Scheduler &scheduler) {
+			if (!store.HasResource<engine::scene::InputState>()) {
+				store.SetResource(engine::scene::InputState{});
+			}
+			if (!store.HasResource<engine::scene::CameraController>()) {
+				store.SetResource(engine::scene::CameraController{});
+			}
+
+			// **Camera control in `PreRender` and character control in
+			// `Simulation`**, which is not an inconsistency. A camera is
+			// presentation — it should turn at frame rate, because a mouse moves
+			// at frame rate and a camera locked to the tick judders. A character
+			// moves a body the physics step integrates, so it has to be on the
+			// tick or two players at different frame rates would move at different
+			// speeds.
+			scheduler.Add("camera-control", Phase::PreRender, [](Store &world) {
+				(void)engine::scene::UpdateCameraControl(world);
+				(void)engine::scene::PlaceCamera(world);
+			});
+
+			scheduler.Add("character-control", Phase::PreSimulation, [](Store &world) {
+				(void)engine::scene::UpdateCharacterControl(world);
+			});
+
+			scheduler.Add("ground-characters", Phase::PreSimulation, GroundCharacters);
+
+			scheduler.Add("step-characters", Phase::Simulation, [](Store &world) {
+				(void)engine::scene::StepCharacters(world, static_cast<float>(world.Time().Delta));
+			});
+		}
+
+		// How many particles a world's pool holds when nobody has said.
+		//
+		// **Half a million, because that is the number `ROADMAP.md` v0.10 asks
+		// for by name** — a hundred thousand emitters at five particles each — and
+		// a default below it makes the engine's stated target something every
+		// scene has to opt into.
+		//
+		// **The cost is paid whether or not a world has an effect in it**, which
+		// is what makes this a real decision rather than a generous one: the pool
+		// is allocated up front and never grows (`ParticleSystem::Capacity` gives
+		// the reason), so this is 524,288 slots times 68 bytes across the instance
+		// and state arrays — **about 36 MB a world**, resident from the moment
+		// presentation is installed.
+		//
+		// That is affordable for one world and is not for twenty. A host that
+		// opens several at once — the studio with more than one place loaded —
+		// should pass its own figure rather than take this one, and
+		// `InstallParticles` takes the capacity for exactly that reason.
+		//
+		// **Measured before it was raised**: at 250,000 the stress scene's grid
+		// starved after about 41,000 of its 102,400 emitters, and the symptom was
+		// an effect that simply was not there rather than an error —
+		// `ParticleStatistics::EmittersRefused` is the number that says so.
+		constexpr uint32_t DEFAULT_PARTICLE_POOL = 524288;
+	}
+
 	bool BuildScriptedWorld(Store &store, Scheduler &scheduler, const std::string &path, uint32_t reserve) {
 		// Before anything mints an automatic id for `DrawList`. See
 		// `RegisterClientComponents`: `Components::Of<T>` caches its answer per
 		// type per process, so an explicit registration that arrives second
 		// aborts rather than quietly leaving two names for one thing.
 		RegisterClientComponents();
+
+		// **Before the script runs, not after.** `InstallEffects` below registers
+		// the same classes and is too late: the script is what calls
+		// `Instance.new("ParticleEmitter")`, and a class table that gains the name
+		// afterwards is a scene whose emitters all failed to resolve.
+		engine::effects::RegisterEffectClasses();
 
 		// Register built-in metadata before the script can query it.
 		RecordBuiltinMeshes(store);
@@ -534,9 +839,14 @@ namespace client {
 			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		}
 
+		scheduler.Add("resolve-materials", Phase::PreSimulation, [](Store &world) {
+			(void)engine::scene::ResolveMaterials(world);
+		});
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
+		InstallControls(store, scheduler);
 		return true;
 	}
 
@@ -610,6 +920,16 @@ namespace client {
 		// two copies of a system that writes `PreviousTransform` can both be
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+
+		// **`PreSimulation`, ahead of everything that reads a
+		// `SurfaceAppearance`** — `ResolveAttachments`' phase and its reason. A
+		// `Material` instance names an asset and the part it hangs off is what
+		// the draw-list pass reads, so resolving after collection would draw last
+		// tick's texture for a frame every time somebody changed one.
+		scheduler.Add("resolve-materials", Phase::PreSimulation, [](Store &world) {
+			(void)engine::scene::ResolveMaterials(world);
+		});
+
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
 
 		// **And the mirrors, which only `BuildScriptedWorld` was installing.**
@@ -631,5 +951,13 @@ namespace client {
 		// so a mirror aimed after collection would publish last frame's answer.
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
 		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+
+		// **The same three systems `BuildScriptedWorld` installs, from the same
+		// place.** This is the argument `aim-surface-cameras` already makes one
+		// line up, arriving again: the studio, `--game` and an imported world all
+		// come through here, and a world with emitters and no step is a world
+		// whose effects are authored, saved, loaded and then motionless.
+		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
+		InstallControls(store, scheduler);
 	}
 }
