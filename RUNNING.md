@@ -98,13 +98,30 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.engine/core` | `engine_core` | `Engine::core` | `test_core` | shared |
 | `mono.engine/parallel` | `engine_parallel` | `Engine::parallel` | `test_parallel` | shared |
 | `mono.engine/ecs` | `engine_ecs` | `Engine::ecs` | `test_ecs` | shared |
+| `mono.engine/world` | `engine_world` | `Engine::world` | `test_world` | shared |
+| `mono.engine/spatial` | `engine_spatial` | `Engine::spatial` | `test_spatial` | shared |
+| `mono.engine/scene` | `engine_scene` | `Engine::scene` | `test_scene` | shared |
+| `mono.engine/gui` | `engine_gui` | `Engine::gui` | `test_gui` | shared |
 | `mono.engine/assets` | `engine_assets` | `Engine::assets` | `test_assets` | shared |
+| `mono.engine/physics` | `engine_physics` | `Engine::physics` | `test_physics` | shared |
+| `mono.engine/effects` | `engine_effects` | `Engine::effects` | `test_effects` | shared |
+| `mono.engine/script` | `engine_script` | `Engine::script` | `test_script` | shared |
+| `mono.engine/bake` | `engine_bake` | `Engine::bake` | `test_bake` | shared |
+| `mono.engine/graph` | `engine_graph` | `Engine::graph` | `test_graph` | shared |
+| `mono.engine/game` | `engine_game` | `Engine::game` | `test_game` | shared |
+| `mono.engine/examples` | `engine_examples` | `Engine::examples` | `test_examples` | shared |
 | `mono.engine/net` | `engine_net` | `Engine::net` | `test_net` | shared |
+| `mono.engine/delivery` | `engine_delivery` | `Engine::delivery` | `test_delivery` | shared |
+| `mono.engine/replication` | `engine_replication` | `Engine::replication` | `test_replication` | shared |
+| `mono.engine/control` | `engine_control` | `Engine::control` | — | shared |
+| `mono.engine/audio` | `engine_audio` | `Engine::audio` | `test_audio` | client |
 | `mono.engine/input` | `engine_input` | `Engine::input` | `test_input` | client |
 | `mono.engine/render` | `engine_render` | `Engine::render` | `test_render` | client |
+| `mono.engine/ui` | `engine_ui` | `Engine::ui` | `test_ui` | client |
 | `mono.client` | `client_lib` | `Mono::client` | `test_client` | client |
 | `mono.server` | `server_lib` | `Mono::server` | `test_server` | server |
 | `mono.unified_server_client` | `unified_server_client_lib` | `Mono::unified_server_client` | `test_unified_server_client` | client |
+| `mono.studio` | `studio_lib` | `Mono::studio` | `test_studio` | client |
 | `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
 | `mono.tools/linecount` | `linecount_lib` | `Tool::linecount` | `test_linecount` | shared |
@@ -113,6 +130,11 @@ The names are derived, not chosen per module: `mono_add_library` makes
 `engine_<name>` for an `Engine::` module and `<name>_lib` for a product's own
 library, and `mono_add_tests` makes `test_<name>`. See
 `mono.build/MonoLibrary.cmake`.
+
+The remaining tools are also built from `mono.tools/`: `bindings`, `docgen`,
+`scriptcheck`, `mcpbridge`, `contentimport` and `assetc`. They are command-line
+tools rather than engine modules; `testrunner`, `benchrunner` and `linecount`
+are the other tool entry points.
 
 **`engine_input` and `engine_render` do not exist under the `server` preset.**
 `mono.engine/CMakeLists.txt` only adds them when `MONO_BUILD_CLIENT` is on, so a
@@ -299,6 +321,8 @@ floor by the time you looked away.
 
 | Option | Default | What it does |
 |---|---|---|
+| `--verbose` | off | log at trace level |
+| `--force-serial-compute` | off | run parallel dispatches on one thread |
 | `--game PATH` | — | open a game file at startup |
 | `--width`, `--height` | 1600×900 | window size |
 | `--scale FACTOR` | 1.0 | multiplies every font and padding |
@@ -308,6 +332,12 @@ floor by the time you looked away.
 | `--headless` | off | run with no window at all; needs `--frames` |
 | `--run MODE` | `edit` | start in `edit`, `server` or `play` |
 | `--uncapped` | off | draw with no frame rate ceiling |
+| `--stats`, `--graph` | off | open the statistics or frame-graph panel |
+| `--assets` | off | open the assets manager |
+| `--viewport2` | off | open the second viewport |
+| `--profile-snapshot PATH` | — | write a frame-graph snapshot on exit |
+| `--idle-close SECONDS` | 300 | close an empty world after this long |
+| `--mcp-port PORT` | off | open the loopback control surface |
 | `--override-assets-directory DIR` | — | read staged data from here |
 
 **The editor is not paced by the display.** It starts with vertical sync off and
@@ -381,25 +411,26 @@ version, and that is what it is for.
 
 # Running a script file *(v0.6)*
 
-The engine runs `.luau` and `.ts` files directly. A game is a script, not a
-compiled artefact, and all three programs take a path to one:
+The client and server can load a scene script, and the unified harness can load
+one for its authority. A game is a script, not a compiled artefact; the studio
+opens an authored game file:
 
 ```sh
-atomic game.luau                    # the engine, and nothing else
-client game.luau --stats            # with a window, a renderer and input
-server game.ts --tick-rate 60       # headless, hosting
+just run --script .cache/build/dev/assets/examples/Rings.luau
+server --game My.agame --tick-rate 60
 ```
 
-A bare path is the documented form. The explicit spellings are synonyms, kept
-because they are what the programs declare today:
+The client and server use explicit options because neither program treats a
+bare positional path as a script:
 
 ```sh
-client --script game.luau           # identical to `client game.luau`
-server --game world.ts              # identical to `server world.ts`
+just run --script path/to/game.luau
+server --game path/to/game.agame
 ```
 
-Both extensions load the same way. `.ts` is TypeScript/JavaScript and `.luau` is
-Luau; which one a file is comes from its extension, and a game may mix them.
+`.ts` is TypeScript/JavaScript and `.luau` is Luau; which one a file is comes
+from its extension, and a game may mix them. TypeScript is transpiled to staged
+JavaScript during the build when the pinned compiler is available.
 `mono.engine/examples/` holds the demo scenes, each written twice — once in each
 language, doing the same thing — so that the binding surface is exercised from
 both.
@@ -427,9 +458,9 @@ own tests here. `MagicRuntime` and `TerrainRuntime` are this engine's, because
 that is the only layer that names an instance.
 
 ```sh
-just run --script assets/examples/Magic.luau      # spells cratering terrain
-just run --script assets/examples/Libraries.luau  # the libraries, loaded and exercised
-just run --script assets/examples/MagicTests.luau # their 183 tests, in this VM
+just run --script .cache/build/dev/assets/examples/Magic.luau      # spells cratering terrain
+just run --script .cache/build/dev/assets/examples/Libraries.luau  # libraries, loaded and exercised
+just run --script .cache/build/dev/assets/examples/MagicTests.luau # their tests, in this VM
 ```
 
 **`MagicRuntime` draws a body and nothing else.** The Roblox original builds a
@@ -488,22 +519,16 @@ one has.
 
 ### What happens today
 
-**Nothing executes yet.** In v0.1:
+The Luau runtime, QuickJS runtime, bindings and game-file reader are active.
+`--script` loads a scene script, and `--game` loads an authored `.agame` file.
+The file extension selects Luau or JavaScript for script files; TypeScript
+sources are transpiled to staged `.js` files when the pinned TypeScript compiler
+is available. `atomic` is still not a target or a recipe.
 
-- `--script` and `--game` are parsed and *warn*. `client` says the scripting
-  layer has not landed; `server` says the game file format has not landed and
-  names the placeholder world it is hosting instead.
-- A bare positional path is collected by the parser (`core::Arguments` keeps
-  positionals) and then ignored by both mains, with no message. Prefer the
-  explicit spelling until the runtime lands, because it at least tells you it
-  did nothing.
-- `atomic` is not a target. It arrives with the runtime.
-- The files in `mono.engine/examples/` are placeholders.
-
-The VM, the bindings and the standalone runtime are v0.5–v0.6 on
-[ROADMAP.md](ROADMAP.md). A flag that is silently ignored is worse than one that
-says so, which is why the warnings are there rather than removed —
-[docs/DEFERRED.md](docs/DEFERRED.md).
+The example sources are real scenes, not placeholders. The default client scene
+is `Rings.luau`; staged examples live under
+`.cache/build/<preset>/assets/examples/` after a build. A missing TypeScript
+compiler skips JavaScript twins and leaves Luau scenes available.
 
 ---
 
@@ -527,7 +552,7 @@ example, so seeing one is a command rather than a path to look up:
 
 | Script | Scene |
 |---|---|
-| `run-demo` | the built-in C++ demo — `mono.client/src/Demo.cpp` |
+| `run-demo` | the default scripted scene — `mono.engine/examples/Rings.luau` |
 | `run-rings` | orbiting, spinning parts — the loading path |
 | `run-skygrid` | a lattice of blocks in empty sky |
 | `run-terrain` | 16384² voxel terrain, streamed around a camera |
@@ -572,18 +597,29 @@ it.
 
 ```
 --stats                          Open the F3 statistics panel at startup
+--net                            Open the F4 network panel (needs --connect)
 --graph                          Open the F5 frame graph at startup
 --uncapped                       Present without waiting for vblank
+--max-fps N                      Hold this frame rate; needs --uncapped
 --verbose                        Log at trace level
+--force-serial-compute           Run parallel dispatches on one thread
 --worlds N                       Worlds to simulate and composite (default 1)
 --view-spacing UNITS             World units between composited views (default 40)
 --entities N                     Cubes in the demo scene, per world (default 2048)
+--tick-rate HZ                   Simulation ticks per second (default 60)
 --frames N                       Exit after N presented frames
 --width PX                       Window width (default 1280)
 --height PX                      Window height (default 720)
 --profiler-tab NAME              frame, categories, systems or counters
---script PATH                    Luau or TypeScript script to run at startup (v0.6)
---game PATH                      Game file to play single-player (.agame) (v0.7)
+--script PATH                    Luau or JavaScript scene to run at startup
+--game PATH                      Game file to play single-player (.agame)
+--connect HOST:PORT               Replicate a world from this server
+--server-key HEX                 Pin the server identity
+--cdn SOURCE                     Content source; repeatable, `dir:PATH` allowed
+--content-cache DIR              Keep verified content between runs
+--publisher-key HEX              Pin the content publisher
+--sound PATH                     Loop a .wav or .mp3
+--capture PATH                   Write a BMP near the end; needs --frames
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
 --override-assets-directory DIR  Read shaders and data from here
@@ -756,7 +792,7 @@ that it is written by the next and the run still ends when it was told to.
 
 ```sh
 just run --frames 60 --entities 2048 \
-  --script assets/examples/Meshes.luau \
+  --script .cache/build/dev/assets/examples/Meshes.luau \
   --cdn dir:store --publisher-key PUBLIC --capture meshes.bmp
 ```
 
@@ -784,6 +820,8 @@ just host --ticks 300 --entities 20000
 --unpaced                        Tick back to back instead of pacing to the tick rate
 --graph                          Collect the frame graph (for a Tracy capture)
 --verbose                        Log at trace level
+--force-serial-compute           Run parallel dispatches on one thread
+--mcp-port PORT                  Open the loopback control surface (default 8734)
 --tick-rate HZ                   Ticks per second (default 30)
 --entities N                     Entities in the placeholder world (default 4096)
 --ticks N                        Exit after N ticks
@@ -799,6 +837,11 @@ just host --ticks 300 --entities 20000
 --worlds-per-host N              Shared worlds per host process (default 8)
 --host-program PATH              The program a host runs (default: this one)
 --processes N                    How many processes share this machine
+--listen PORT                    Serve a world to clients over UDP
+--identity-key HEX               Ed25519 seed for the server identity
+--content-store DIR              Serve a local content store
+--content-port PORT              Port for the attached content origin
+--content-grant-key HEX          Secret used for content grants
 --help                           Show this text
 ```
 
@@ -959,7 +1002,7 @@ of it is a no-op.
 ### Serve one
 
 ```sh
-just serve                                  # the staged directory, beside the binary
+just serve --store ./store                   # serve a prepared content store
 ./.cache/build/dev/cdn/cdn --store ./store --grant-key HEX --port 9080
 ```
 
@@ -1058,7 +1101,7 @@ CDN.md §6's three deployments are flag combinations rather than three programs:
 A server can run one in-process, which is the self-hosted case:
 
 ```sh
-just server --content-store ./store --content-grant-key HEX --content-port 9080
+just host --content-store ./store --content-grant-key HEX --content-port 9080
 ```
 
 The grant is then issued and verified across a function call, and **both halves
@@ -1069,8 +1112,8 @@ somebody ships the other one.
 ### Fetching it
 
 ```sh
-just client --cdn 127.0.0.1:9080 --publisher-key HEX --content-cache ./cache
-just client --cdn dir:./store --publisher-key HEX     # a local store, no wire
+just run --cdn 127.0.0.1:9080 --publisher-key HEX --content-cache ./cache
+just run --cdn dir:./store --publisher-key HEX        # a local store, no wire
 ```
 
 `--cdn` is repeatable and **the order is the priority**: the first source that
@@ -1087,8 +1130,8 @@ that accepted an unsigned manifest would have no trust boundary at all.
 # Audio
 
 ```sh
-just client --sound ./assets/tone.wav      # plays it on a loop
-just client --sound ./assets/track.mp3     # the same, and the decoder is picked
+just run --sound ./assets/tone.wav         # plays it on a loop
+just run --sound ./assets/track.mp3        # the same, and the decoder is picked
                                            # from the bytes rather than the name
 ```
 
@@ -1133,7 +1176,7 @@ There is a working one in `mono.engine/examples/Terrain.luau`:
 
 ```sh
 cdn --publish ./content --store ./store --signing-key HEX   # content/audio/*.mp3
-just run --script assets/examples/Terrain.luau \
+just run --script .cache/build/dev/assets/examples/Terrain.luau \
     --cdn dir:./store --publisher-key PUBLIC
 ```
 
@@ -1363,8 +1406,10 @@ shows up as a diff somebody reviews.
 just typecheck
 ```
 
-Every `.luau` and `.ts` under `mono.engine/examples/`, against the declarations
-in `mono.engine/script/bindings/`. Directly:
+Top-level `.luau` examples are checked by the repository's Luau checker. The
+TypeScript check covers `.ts` files under `mono.engine/examples/` and
+`mono.studio/panels/`. Nested Luau libraries are exercised by their own scene
+tests but are not included by the current `just typecheck` glob. Directly:
 
 ```sh
 ./.cache/build/dev/tools/scriptcheck mono.engine/examples/*.luau
@@ -1416,10 +1461,11 @@ only be a format for bun and npm to disagree about.
 
 ## Driving the engine from outside — `--mcp-port`
 
-Every long-running program can open a socket that answers **Model Context
-Protocol**, so a language model or a script can watch it and steer it: list the
-scenes, read and write properties, start and stop a world, read the log, read
-the frame profile.
+The `server` and `studio` programs can open a socket that answers **Model
+Context Protocol**, so a language model or a script can watch them and steer
+them: list scenes, read and write properties, start and stop a world, read the
+log, and read the frame profile. The client, unified harness and content origin
+do not currently register `--mcp-port`.
 
 **It is off unless you ask.** Read
 [SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
@@ -1431,15 +1477,12 @@ just mcp                                  # the editor, port 8738
 server --mcp-port 8734 --game My.agame    # a dedicated server
 ```
 
-The port is yours to choose; the defaults exist so five programs on one machine
-do not collide:
+The port is yours to choose; the defaults exist so the two supported programs on
+one machine do not collide:
 
 | Program | Port | What it exposes |
 |---|---|---|
 | `server` | 8734 | its worlds, read and write |
-| `client` | 8735 | *not wired yet* |
-| `unified_server_client` | 8736 | *not wired yet* |
-| `cdn` | 8737 | *not wired yet* — it has no run loop |
 | `studio` | 8738 | worlds, plus selection, Play and the output panel |
 
 ### Connecting a client to it

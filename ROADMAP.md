@@ -3,7 +3,11 @@
 
 ## Editing
 
-Do NOT place `deferred` items in this file. Place them in `docs/DEFERRED.md`. If a TODO item is not FULLY completed, split the TODO item, keeping the concise short dash point list with block infront and split it as another item under the same version.
+Do NOT add new deferred work as a roadmap item. Place it in
+`docs/DEFERRED.md`. The existing `Deferred:` blocks below are version history
+and pointers to that register. If a TODO item is not FULLY completed, split the
+TODO item, keeping the concise short dash point list with block infront and
+split it as another item under the same version.
 
 For example, if we complete A and B but not C and D:
 ```
@@ -31,14 +35,17 @@ or defer to another version.
 
 `CDN.md`, `RENDER_PIPELINE.md`, `repo_layout.md`, `GARG_ECS_Layout.md` and
 `DATATYPES_LIBRARIES.md` are cited by section number throughout this file and by
-several module `AGENTS.md` files. None of them has ever been committed —
-`git rev-list --all --objects` finds no such path. They are design notes held
-outside the tree, so a section reference here is a pointer somebody has to be
-handed rather than one they can follow. Said once, at the top, rather than
-qualified at every citation. `v02v03v04.md` carries the same note for the three
-it depends on.
+several module `AGENTS.md` files. None of those design notes is committed —
+`git rev-list --all --objects` finds no such path. They are held outside the
+tree, so a section reference here is a pointer somebody has to be handed rather
+than one they can follow. Said once, at the top, rather than qualified at every
+citation. The former `v02v03v04.md` plan is different: its committed retirement
+copy is [`docs/retired/v02v03v04.md`](docs/retired/v02v03v04.md).
 
 ## VERSIONS
+
+The milestone headings below are development labels. They are not synchronized
+with CMake package metadata, which currently reports project version `0.4.0`.
 
 ### v0.0
 
@@ -232,7 +239,7 @@ The engine has been full ECS since v0.2 and userland instancing is a façade ove
 - [x] **the bindings manifest** — `mono.tools/bindings` emits `mono.engine/script/bindings/manifest.json` from the class table: five classes, their trees, their component sets, and every property's type, kind, byte width, writability and the components each side reads and writes. **No offsets anywhere in it**, which is not restraint — a property is a conversion, so there is no byte offset to leak, and rule 4 is satisfied by construction rather than by a disclaimer about which fields survive a recompile. Versioned from the first commit. Component names are sorted rather than left in registration order, because registration order depends on which translation unit ran its static initialiser first and a manifest that changed when a link line moved would fail its own check for a reason nobody could act on
 - [x] **`just bindings-check`, inside `just check`** — regenerate, diff, fail on drift, and **proved to fail rather than assumed to**: renaming one property in the checked-in file makes it exit non-zero with the name and the recipe to fix it. Rule 6 is what makes it mandatory, and this repository has twice watched a check rot into a false claim
 - [x] **the `.d.ts` and Luau declarations**, generated from the same manifest so the two surfaces cannot drift into two APIs. The TypeScript one is a type root, which is the shape a toolchain consumes in place of `@rbxts/types`; the derived interfaces carry only what each class declares itself, because repeating an inherited property would be a second declaration of one fact that TypeScript would silently accept a narrowing of
-- [x] **the concurrency document** — [docs/SCRIPT_CONCURRENCY.md](docs/SCRIPT_CONCURRENCY.md), and it builds nothing: `Universe`, `ExecutionMode`, `Postbox` over four buses, `Ticket` and the barrier all exist. It settles the rule everything follows — **a script may only resume from something the barrier delivers in a deterministic order**, which is narrower than "no yielding" and stricter than "yield freely" — and then what falls out of it: `wait` in ticks with a recommendation to rename rather than redefine, a value-to-bytes codec that must sort keys and produce **identical bytes from both VMs** (one shared test, not two), a cross-world lock that is `MemoryStore::Update`'s versioned compare-and-swap because rule 3 leaves no shared memory to guard, and budgets and replica refusals as part of the contract rather than as implementation detail
+- [x] **the concurrency document** — [docs/retired/SCRIPT_CONCURRENCY.md](docs/retired/SCRIPT_CONCURRENCY.md), and it builds nothing: `Universe`, `ExecutionMode`, `Postbox` over four buses, `Ticket` and the barrier all exist. It settles the rule everything follows — **a script may only resume from something the barrier delivers in a deterministic order**, which is narrower than "no yielding" and stricter than "yield freely" — and then what falls out of it: `wait` in ticks with a recommendation to rename rather than redefine, a value-to-bytes codec that must sort keys and produce **identical bytes from both VMs** (one shared test, not two), a cross-world lock that is `MemoryStore::Update`'s versioned compare-and-swap because rule 3 leaves no shared memory to guard, and budgets and replica refusals as part of the contract rather than as implementation detail
 - [x] **QuickJS is linked, and JavaScript runs beside Luau.** `Runtime` is an interface; `LuauRuntime` and `JavaScriptRuntime` are two files in one module and adding the second changed no caller — which is what the module's `VENDOR`-not-`VENDOR_PUBLIC` row was for. The extension picks the VM, so `Rings.luau` and `Rings.js` build **the same world** through the same bindings and every program loads either. **Three things the tests caught rather than the design:** `JS_NewContext` adds `Date`, so the context is built from `JS_NewContextRaw` and an explicit intrinsic list; `JS_AddIntrinsicEval` turned out to be required by `JS_Eval` itself, so excluding it produced "eval is not supported" for every script rather than a sandbox, and the global `eval` is deleted afterwards instead; and `JS_AddIntrinsicBigInt` over a raw context leaves an object alive so `JS_FreeRuntime` asserts, reproduced against upstream in isolation. Instances are sealed and scripts run in strict mode, because in sloppy mode assigning to a non-extensible object **silently does nothing** — `part.Transparency = 0.5` would have looked like it worked
 - [x] **`Instance.new`, properties and the hierarchy bind to the class table — the same one C++ calls.** A calling convention rather than a second mechanism: `Instance.new` goes through `Store::CreateInstance`, `part.Size = v` through `Store::SetProperty`, and `part.Parent = workspace` through `Store::SetParent`. The marshalling switches on `PropertyType` and **never on a property's name**, so a property `scene` declares tomorrow is reachable from both languages today. **What is not bound yet is named in v0.6 rather than implied**: `.Changed`, `:IsA`, `:Destroy`, `:Clone` and `:GetChildren` all exist in C++ and none of them has a script spelling
 - [x] **`--script PATH` stops warning and starts loading**, which closes the oldest bullet in `D00001` — it had been accepted and ignored since v0.1. `--script` on the client, `--game` on the server (ignored since v0.3), `--scene` on the unified harness, and the extension picks the VM
@@ -245,7 +252,7 @@ The engine has been full ECS since v0.2 and userland instancing is a façade ove
 
 Where a world *contains* its scripts rather than being handed one, and where the renderer catches up with what a script can already say. v0.5 made the façade real; what is left is the half a Roblox author reaches for next — signals, the instance methods, the datatype vocabulary — and the rendering those scripts describe.
 
-**The rule everything script-side lands under is already written**: [docs/SCRIPT_CONCURRENCY.md](docs/SCRIPT_CONCURRENCY.md) §1 — a script may only resume from something the barrier delivers in a deterministic order. Every item below that yields answers to it.
+**The rule everything script-side lands under is already written**: [docs/retired/SCRIPT_CONCURRENCY.md](docs/retired/SCRIPT_CONCURRENCY.md) §1 — a script may only resume from something the barrier delivers in a deterministic order. Every item below that yields answers to it.
 
 **Where this version stands.** The script half is built and measured; the render half is not started. That split is not arbitrary — everything below the line needs `mono.engine/graph/` at L9, and everything above it needed only the class table `scene` already declared. The items are marked individually rather than the version being called done.
 
@@ -559,32 +566,12 @@ refuses everywhere else. In order:
   tessellated here — a radius belongs in a shader, and nine-slice needs the
   image's pixel size, which is precisely what a content name says this layer
   must not know
-- [~] **Texture resolution for `ImageLabel` and `ImageButton` — the format,
-  not yet the upload.** `ui::ImageSource` is the hook and nothing supplies one,
-  so an image draws the missing-texture marker — visible on purpose, because an
-  `ImageLabel` that drew nothing would look like the label was broken rather
-  than like the image was missing.
-  **The gap was never a missing decoder, and it was diagnosed as one twice.**
-  `AssetKind::Texture` named a kind and nothing said what those bytes *are*, so
-  there was nothing for a backend to sample even once they had arrived.
-  Vendoring a PNG reader would have answered how to read somebody else's format
-  when what was needed was to have one. `assets::Texture` is that format, and it
-  is deliberately the dullest possible: a header and the pixels a GPU wants, in
-  the order it wants them.
-  **A runtime does not decode.** Turning a PNG into this is a publishing step —
-  the division `Chunker` and `Manifest` already draw, where the origin does the
-  work once and every client does none. That is why a decoder belongs in
-  `mono.tools` rather than in a game binary: a client that decoded PNGs would
-  pay for a Huffman tree on the frame a texture streamed in, and a shipped game
-  would carry a decompressor for a format it never has to read. Uncompressed on
-  disk and compressed in transit, because `delivery::GroupCodec` already runs
-  zstd over whatever a group holds.
-  Every header field is checked against the bytes actually present before one is
-  allocated — the decompression-bomb check `Packet` and `GroupCodec` both carry —
-  and the format byte is range-checked before the cast for `ReadMessage`'s
-  reason. **What is left is the upload**, which is the same device half the
-  render pass is waiting on: `InterfaceBatch` already carries the content name
-  unresolved, so the seam is open at both ends
+- [x] **Texture resolution for `ImageLabel` and `ImageButton`.** The runtime
+  format was added in v0.8 and the upload hook was connected in v0.10. The
+  client and studio resolve `ui::ImageSource` through the content tables, while
+  unresolved content keeps the visible fallback marker. Runtime code reads the
+  baked texture format; PNG decoding remains in `bake` and is not carried by a
+  shipped game.
 - [x] **Connecting `gui::GuiEvent` to `script::Signals`.** The routing produced
   events and nothing turned them into a `.Activated`. **The join is in `script`
   itself, which is "above both" read correctly**: `gui` is L7 and `script` is
@@ -854,5 +841,3 @@ The rendering and camera work this version already carried, unchanged:
 - [_] ...
 
 ---
-
-
