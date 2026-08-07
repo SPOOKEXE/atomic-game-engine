@@ -798,6 +798,33 @@ namespace engine::render {
 		//         that slot.
 		void *SceneTexture(size_t slot = 0) const;
 
+		// Keeps a copy of what a scene slot currently holds, under a name.
+		//
+		// **A slot is scratch and this is how a picture outlives it.** There are
+		// a handful of slots and they are drawn into on rotation, so whatever is
+		// in one is gone within a few frames — which is why the studio's mesh
+		// preview could only ever show the row under the cursor. A captured copy
+		// is an ordinary entry in the texture table: `TextureHandle` returns it,
+		// `DropTexture` releases it, and a list can draw a hundred of them.
+		//
+		// **The drawn rectangle, not the allocation.** A target is rounded up to
+		// a block, so the copy is `SceneTextureExtent`'s rectangle and samples
+		// whole — a consumer needs the handle and nothing else, which is the
+		// coupling this exists to end.
+		//
+		// **Costs device memory that nothing reclaims on its own.** Each capture
+		// is four bytes a texel against `TextureTable::MAXIMUM_BYTES`, so a
+		// caller building them per row owes an eviction policy; the studio's
+		// thumbnail cache is one.
+		//
+		// @param slot The slot to copy. Must have been drawn into.
+		// @param name The name to publish the copy under. Replaces one already
+		//             there, releasing it.
+		// @return `false` for a slot never drawn into, an invalid name, or a
+		//         texture table with no room.
+		// @since v0.10
+		bool CaptureSceneTexture(size_t slot, const core::Name &name);
+
 		// Which corner of that slot's texture the world is in.
 		//
 		// **It describes the texture `SceneTexture` returns right now**, which

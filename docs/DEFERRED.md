@@ -179,26 +179,46 @@ and for deleted marked items;
 - Pinned by a case that imports an empty file, requires the refusal, and then
   requires `raw/` and the log to be empty. Demonstrated by mutation.
 
-### [_] D00033
+### [CLOSED] D00033
 
-**A mesh has no cached thumbnail, so a picker row shows a glyph until it is hovered.**
+**A mesh had no cached thumbnail, so a picker row showed a glyph until it was hovered.**
 
-- `PaintPreview` renders the *hovered* row into the studio's one preview slot —
-  built-ins included — and every other row shows a letter. The rendering works;
-  what is missing is retention.
-- **The blocker is in `render` rather than in `mono.studio`, which is why this is
-  not a studio item.** A cached thumbnail means copying a scene target into a
-  texture that outlives the frame, and the renderer exposes no such copy. The
-  studio can ask for a slot to be drawn and cannot ask for the result to be kept.
-- **One slot is a deliberate floor and not an accident** — the alternative
-  reached for first is a slot per visible row, which is the mistake `D00028`'s
-  neighbour in the picker already made once: the thumbnail cache is 256 entries
-  and asking for 1,637 a frame evicted each picture before its turn came round.
-  A retained texture per *mesh* has the same shape and wants the same clipping.
-- **Reopen trigger: the renderer growing a target read-back for any reason.**
-  It has one plausible second caller already — v0.10's open material-preview line
-  wants a sphere rendered with a material and kept, which is the identical
-  mechanism pointed at a different asset kind.
+- `PaintPreview` rendered the *hovered* row into the studio's one preview slot —
+  built-ins included — and every other row showed a letter. The rendering worked;
+  what was missing was retention.
+- **The blocker was in `render` rather than in `mono.studio`, and that reading
+  held.** A cached thumbnail means keeping a scene target past the frame, and the
+  renderer exposed no copy: the studio could ask for a slot to be drawn and could
+  not ask for the result to be kept.
+- **Closed at v0.10 by `Renderer::CaptureSceneTexture`**, a device-to-device blit
+  from a slot into a new texture, published into `render::TextureTable` through a
+  new `Adopt`. Nothing goes through the host: reading a picture back to the CPU
+  only to upload it again would be a round trip across the bus for bytes that
+  never needed to leave the device.
+- **`Adopt` transfers ownership, and that is the whole contract.** The table
+  releases the texture on `Drop`, on replacement and on `Shutdown` exactly as it
+  does for one it uploaded — so every refusal in `CaptureSceneTexture` has to
+  leave the caller still owning it, and a full table returns `false` *before*
+  releasing whatever was under the name rather than after.
+- **The drawn rectangle is copied, not the allocation.** A scene target is
+  rounded up to 64-pixel blocks with hysteresis, so most of it is border the pass
+  never wrote — copying it whole would keep a picture with an unwritten margin
+  down two edges and force every consumer to carry `SceneTextureExtent` beside
+  the handle, which is the coupling this ends.
+- **It lands in the existing thumbnail cache rather than beside it**, which is
+  what makes eviction work without knowing captures exist: `PumpThumbnails` drops
+  the least recently drawn by calling `DropTexture` on exactly the name a capture
+  publishes under. A second cache would have been a second thing to evict, and
+  the one nobody wrote a policy for. Captured once per asset, not once per frame
+  — the preview turns, and the frozen angle a thumbnail wants is any of them.
+- **What is tested is every refusal and none of the success.** A capture needs a
+  device; standing a fake in front of that would test the fake. Three cases pin
+  the paths that decide whether a caller has just been handed a texture it now
+  owns — no device, an invalid name, a slot never drawn into. The drawn path is
+  verified by running the editor.
+- The prediction in this entry's old reopen trigger was half right: the material
+  preview did arrive and did want the same mechanism, but it shipped *before*
+  this using the live slot, so the trigger never fired on its own.
 
 ### [CLOSED] D00032
 

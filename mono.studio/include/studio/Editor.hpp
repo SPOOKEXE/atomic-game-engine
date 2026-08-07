@@ -1127,6 +1127,17 @@ namespace studio {
 		// Frames, for the eviction order. Not a clock — nothing here needs one.
 		uint64_t ThumbnailClock = 0;
 
+		// Keeps what the preview slot just drew, so a row can show it later.
+		//
+		// **This is what makes a rendered preview outlive the cursor.** Without
+		// it a mesh or a material has a picture only while it is hovered, which
+		// is `DEFERRED.md` D00033. Cheap and idempotent: an asset already
+		// holding a handle is left alone, so the turntable does not recreate a
+		// texture every frame.
+		//
+		// @param name The asset whose preview is in the slot.
+		void CachePreviewThumbnail(const std::string &name);
+
 		// Decodes, uploads and measures one mesh.
 		PreviewState BuildPreviewMesh(const std::string &name);
 

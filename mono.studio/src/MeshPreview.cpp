@@ -419,6 +419,43 @@ namespace studio {
 		// painted the slot's texture without checking whose it was would show the
 		// hovered mesh's picture in every mesh row on screen.
 		PreviewShowing = PreviewWanted;
+
+		// **And kept, so every other row can show it too.** The slot itself is
+		// scratch — a handful of them, drawn into on rotation — which is why
+		// this preview could only ever be the row under the cursor. A capture is
+		// an ordinary texture-table entry, so it lands in the same thumbnail
+		// cache as a decoded picture and is evicted by the same rule.
+		CachePreviewThumbnail(PreviewWanted);
 		return true;
+	}
+
+	void Editor::CachePreviewThumbnail(const std::string &name) {
+		if (name.empty()) {
+			return;
+		}
+
+		// **Once per asset, not once per frame.** The preview turns, so this
+		// would otherwise release and recreate a texture every frame the cursor
+		// sat still — and the frozen angle a thumbnail wants is any of them.
+		const auto found = Thumbnails.find(name);
+		if (found != Thumbnails.end() && found->second.Handle != nullptr) {
+			return;
+		}
+
+		const engine::core::Name key(ThumbnailTextureName(name));
+		if (!Renderer.CaptureSceneTexture(PREVIEW_SLOT, key)) {
+			return;
+		}
+
+		// **Written into `Thumbnails` rather than kept beside it**, which is
+		// what makes eviction work without knowing this exists: `PumpThumbnails`
+		// drops the least recently drawn by calling `DropTexture` on exactly
+		// this name. A second cache would have been a second thing to evict, and
+		// the one nobody wrote a policy for.
+		Entry entry;
+		entry.Handle = Renderer.TextureHandle(key);
+		entry.State = entry.Handle != nullptr ? PreviewState::Ready : PreviewState::Unavailable;
+		entry.LastSeen = ThumbnailClock;
+		Thumbnails[name] = entry;
 	}
 }
