@@ -5,10 +5,12 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <assetc/Bake.hpp>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -504,4 +506,44 @@ TEST_CASE("a resolver places a texture the tree cannot", "[assetc][bake]") {
 	const engine::assets::MeshData mesh = ReadMesh(scratch.Out() / "deadbeef.amesh");
 	REQUIRE_FALSE(mesh.Submeshes.empty());
 	CHECK(mesh.Submeshes.front().Texture == "cafebabe.atex");
+}
+
+TEST_CASE("a unit bake keeps a model inside the box its bounds describe", "[assetc][bake]") {
+	// **The invariant the whole size convention rests on, and breaking it made
+	// the culling delete things.**
+	//
+	// `MeshPart.Size` multiplies a mesh's own coordinates rather than fitting the
+	// mesh into a box, while `scene::Bounds::HalfExtent` — which is what
+	// `graph::CullAndBound` tests against the frustum — is `Size / 2`. Those two
+	// agree only when the mesh's own coordinates fit inside ±0.5. A store baked
+	// at authored scale held PMX characters about twenty units tall, so every one
+	// of them was culled against a box a tenth of its size: the model vanished
+	// while most of it was still on screen, and nothing about the cull was wrong.
+	//
+	// So this is not a test that a number was passed through. It is the test that
+	// a baked mesh is something the renderer's bounding box can describe.
+	const Scratch scratch("unit_bounds");
+	scratch.Write("huge.pmx", PmxWithSheet());
+
+	Settings settings;
+	settings.ModelSize = 1.0f;
+	const Report report = Baked(scratch, settings);
+	REQUIRE(report.Failures == 0);
+
+	const engine::assets::MeshData mesh = ReadMesh(scratch.Out() / "huge.amesh");
+
+	// Every vertex, not just the derived box — the box is computed from the
+	// vertices and would agree with itself either way.
+	for (const engine::assets::MeshVertex &vertex : mesh.Vertices) {
+		REQUIRE(std::abs(vertex.Position[0]) <= 0.5f + 1e-4f);
+		REQUIRE(std::abs(vertex.Position[1]) <= 0.5f + 1e-4f);
+		REQUIRE(std::abs(vertex.Position[2]) <= 0.5f + 1e-4f);
+	}
+
+	// And the longest axis actually reaches the box, so "fits" is not "shrunk to
+	// nothing" — a model scaled to a speck would also pass the check above.
+	const float longest = std::max(
+		{mesh.Maximum.X - mesh.Minimum.X, mesh.Maximum.Y - mesh.Minimum.Y, mesh.Maximum.Z - mesh.Minimum.Z}
+	);
+	CHECK(longest == Catch::Approx(1.0f).margin(1e-3f));
 }

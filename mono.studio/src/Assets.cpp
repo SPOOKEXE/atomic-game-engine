@@ -357,11 +357,12 @@ namespace studio {
 		settings.Output = paths.Baked;
 		settings.Only = relative;
 
-		// **Models keep the scale they were authored at**, which `contentimport`
-		// also does and for the same reason: this is a store being baked rather
-		// than an art folder being imported, and silently rescaling a model
-		// somebody has already placed would move their world.
-		settings.ModelSize = 0.0f;
+		// **A unit box, matching `contentimport` exactly.** The two bake into the
+		// same store and a mesh has to behave the same whichever produced it —
+		// one baked at authored scale would draw at a different size and, worse,
+		// be culled against a `Bounds` ten times too small. `contentimport`
+		// carries the whole argument.
+		settings.ModelSize = 1.0f;
 
 		// **The log, for the same reason `contentimport` passes it**: `raw/` is
 		// flat, so a model's `tex/skin.png` cannot be followed through the folder

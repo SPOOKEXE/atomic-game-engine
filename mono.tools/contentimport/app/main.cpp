@@ -178,12 +178,39 @@ int main(int argc, char **argv) {
 	baking.Input = paths.Raw;
 	baking.Output = paths.Baked;
 
-	// **Models are left at the scale they were authored**, unlike `assetc`'s own
-	// default of four metres. That default exists for a person pointing the
-	// baker at an art folder and wanting a scene to be usable; this is a store
-	// being re-baked, where silently rescaling everything somebody already
-	// placed would move their world.
-	baking.ModelSize = 0.0f;
+	// **Every imported model is fitted into a unit box, and leaving it at the
+	// authored scale was wrong in a way that took two versions to see.**
+	//
+	// A `MeshPart`'s `Size` *multiplies* the mesh's own coordinates rather than
+	// fitting the mesh into a box — `examples/MeshGrid.luau` opens by calling
+	// that load-bearing — so a mesh only behaves like the built-ins if its own
+	// coordinates fit inside ±0.5. Then `Size` means metres for every part in
+	// the scene rather than metres for some and a multiplier for others.
+	//
+	// This baked at authored scale, and a PMX character is authored around
+	// twenty units tall. Two things followed, and only the first is obvious:
+	//
+	//   * the model drew about twenty times too big and overlapped every
+	//     neighbour on the plate;
+	//   * **the culling deleted it.** `scene::Bounds::HalfExtent` is `Size / 2`
+	//     — two metres for a part sized four — and that is the box
+	//     `graph::CullAndBound` tests against the frustum. The geometry extended
+	//     ten times further than the box describing it, so the instance was
+	//     culled while most of it was still on screen. Nothing is wrong with the
+	//     cull; it was told a bounding box that was not one.
+	//
+	// The comment that used to be here argued that "silently rescaling
+	// everything somebody already placed would move their world". That is a real
+	// cost and it is the smaller one: nothing placed against these meshes could
+	// have looked right, because the engine's whole size convention assumed the
+	// unit box they did not have.
+	//
+	// **Not `assetc`'s default of four**, which fits a model to four metres and
+	// is aimed at somebody pointing the baker at an art folder and wanting a
+	// scene to be usable immediately. A store is a library, and a library entry
+	// should carry no opinion about how big it is — one is the only scale that
+	// means "whatever `Size` says".
+	baking.ModelSize = 1.0f;
 
 	// **The log, because `raw/` is flat and a model's sheets are not beside it.**
 	// A `.pmx` names `tex/体.png`; import renamed both the model and the sheet to
