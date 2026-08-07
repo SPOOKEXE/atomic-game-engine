@@ -2,7 +2,7 @@
 
 // How a viewport panel maps between the world, the texture, and the panel.
 //
-// **This is the piece `docs/v07v08.md` §4.2 names as most likely to be got
+// **This is the piece `docs/retired/v07v08.md` §4.2 names as most likely to be got
 // wrong, and it has two traps in it rather than one.**
 //
 // ## The texture is last frame's

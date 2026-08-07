@@ -46,8 +46,10 @@ namespace engine::render {
 		float Scale = 1.0f;
 
 		// Added after the scale.
+		//@{
 		float OffsetU = 0.0f;
 		float OffsetV = 0.0f;
+		//@}
 	};
 
 	// Which frame is showing at `seconds`.

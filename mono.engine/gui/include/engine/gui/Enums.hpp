@@ -250,6 +250,7 @@ namespace engine::gui {
 	// walking the range and calling these, so a name here is the name a script
 	// spells and a game file carries. That is what makes the list one
 	// declaration instead of two that agree until they do not.
+	//@{
 	const char *Describe(SizeConstraint value);
 	const char *Describe(AutomaticSize value);
 	const char *Describe(BorderMode value);
@@ -269,4 +270,5 @@ namespace engine::gui {
 	const char *Describe(ZIndexBehavior value);
 	const char *Describe(SurfaceSizingMode value);
 	const char *Describe(Face value);
+	//@}
 }

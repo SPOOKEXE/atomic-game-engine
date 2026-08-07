@@ -63,7 +63,43 @@ namespace engine::scene {
 			// Handed out after the walk, by entity id. -1 is a camera past the
 			// renderer's cap, whose pane is left as an ordinary part.
 			int8_t Surface = -1;
+
+			// Whether there is a reflection to draw at all this frame.
+			//
+			// False for a pane the viewer is in the plane of — see
+			// `EDGE_ON_MARGIN`. Such an aim still travels through the rest of
+			// this pass, because the *pane* has to be told to stop sampling; an
+			// aim simply dropped on the floor would leave it showing the last
+			// frame that was rendered into its slot.
+			bool Renders = true;
 		};
+
+		// How close to a pane's own plane the viewer may be before its surface
+		// stops drawing.
+		//
+		// **A pane seen edge-on subtends no pixels, and its reflection is
+		// degenerate before it gets there.** This is the fix for D00027 and it is
+		// a decision about what a surface view *means* rather than a correction
+		// to the arithmetic: at the crossing there is no continuous answer to aim
+		// for. `facing` is +1 on one side of the plane and -1 on the other, both
+		// are right, and no path connects them — so the reflected camera turns
+		// 180 degrees between two frames, which is the flash.
+		//
+		// **Skipping the crossing and holding the last transform was tried and
+		// does not work**: it moves the flip one frame later rather than removing
+		// it. What removes it is that nothing is drawn across the band, so the
+		// two orientations either side are never seen in consecutive frames.
+		//
+		// The same 0.3 as the near-plane margin below, and deliberately the same
+		// number: inside it the reflected camera is nearer its own glass than the
+		// margin that exists to stop the near plane z-fighting the pane, so every
+		// part of this construction is already degenerate there.
+		//
+		// **What it does not cover, stated rather than discovered later:** a
+		// viewer crossing the plane fast enough to step over the whole band
+		// between two frames still sees the flip. The band is a distance and the
+		// step is a speed, so no width closes that for every speed.
+		constexpr float EDGE_ON_MARGIN = 0.3f;
 
 		std::vector<Aim> &Pending() {
 			static thread_local std::vector<Aim> pending;
@@ -390,6 +426,21 @@ namespace engine::scene {
 				// whole of planar reflection and is why the image lines up with
 				// the pane instead of sliding across it as the viewer moves.
 				const float distance = (eye - centre).Dot(unit);
+
+				// **Edge-on renders nothing.** See `EDGE_ON_MARGIN`: this is the
+				// one band where there is no continuous orientation to aim for,
+				// and a pane the viewer is level with covers no pixels anyway.
+				// Carried through as a non-rendering aim rather than returned
+				// from, so the pane is told to stop sampling its slot.
+				if (std::abs(distance) < EDGE_ON_MARGIN) {
+					Aim blank;
+					blank.Camera = entity;
+					blank.Part = face.Part;
+					blank.Renders = false;
+					pending.push_back(blank);
+					return;
+				}
+
 				const Vector3 reflected = eye - unit * (2.0f * distance);
 
 				// **Aimed, not merely placed.** An identity rotation looks down
@@ -493,7 +544,15 @@ namespace engine::scene {
 			// overflow at an existing slot would be worse than nothing — two
 			// panes showing one camera's reflection, which reads as a projection
 			// bug rather than as a budget.
-			pending[index].Surface = index < MAX_SURFACES ? static_cast<int8_t>(index) : int8_t{-1};
+			//
+			// **A pane that is not drawing this frame still holds its place in
+			// the numbering**, rather than being packed out of it. Compacting
+			// would hand its slot to the next mirror along and take it back a
+			// frame later, so every other reflection in the scene would swap
+			// textures each time one viewer walked past the plane of one pane —
+			// a much louder artefact than the one being fixed.
+			const bool renders = pending[index].Renders && index < MAX_SURFACES;
+			pending[index].Surface = renders ? static_cast<int8_t>(index) : int8_t{-1};
 		}
 
 		// **Every write is guarded on the value actually differing, and that is
@@ -516,9 +575,16 @@ namespace engine::scene {
 			// bits, so an exact compare answers exactly that. A tolerance would
 			// be answering a different question and would let a slow drift
 			// accumulate unreported.
-			const Transform *placed = store.Get<Transform>(aim.Camera);
-			if (placed == nullptr || std::memcmp(&placed->Frame, &aim.Frame, sizeof(CFrame)) != 0) {
-				store.Set(aim.Camera, Transform{aim.Frame});
+			// **A non-rendering aim leaves the camera exactly where it was.**
+			// There is nothing to point it at, and writing the identity or the
+			// eye's own frame would be a dirty mark per mirror per frame for a
+			// value nothing reads — the same argument the guarded writes below
+			// are here for. The slot is what stops it drawing, not its placement.
+			if (aim.Renders) {
+				const Transform *placed = store.Get<Transform>(aim.Camera);
+				if (placed == nullptr || std::memcmp(&placed->Frame, &aim.Frame, sizeof(CFrame)) != 0) {
+					store.Set(aim.Camera, Transform{aim.Frame});
+				}
 			}
 
 			// **Both clip and field of view, and both are the engine's now.** A
@@ -527,7 +593,7 @@ namespace engine::scene {
 			// author's to choose than the placement is. A `FieldOfView` set by a
 			// script is honoured on a camera parented to the world, which is the
 			// same line `Transform` is already drawn on.
-			if (const Camera *lens = store.Get<Camera>(aim.Camera); lens != nullptr) {
+			if (const Camera *lens = store.Get<Camera>(aim.Camera); aim.Renders && lens != nullptr) {
 				if (lens->NearPlane != aim.NearPlane) {
 					store.GetMutable<Camera>(aim.Camera)->NearPlane = aim.NearPlane;
 				}
@@ -558,7 +624,13 @@ namespace engine::scene {
 			}
 		}
 
-		return pending.size();
+		// **What rendered, not what was walked.** A pane the viewer is level with
+		// has been visited and told to stop sampling, which is work — but the
+		// caller asks this to find out whether there is a reflection in the
+		// scene, and counting a blank one would answer yes.
+		return static_cast<size_t>(std::count_if(pending.begin(), pending.end(), [](const Aim &aim) {
+			return aim.Renders;
+		}));
 	}
 
 	size_t AppendSurfaceFaceMarkers(Store &store, std::vector<DrawInstance> &out) {

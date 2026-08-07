@@ -283,7 +283,7 @@ namespace engine::script {
 		//
 		// The callback fires when the barrier delivers, which is a
 		// deterministic point in a deterministic order — so this needs no
-		// yielding and is legal under `docs/SCRIPT_CONCURRENCY.md` §1.
+		// yielding and is legal under `docs/retired/SCRIPT_CONCURRENCY.md` §1.
 		int SubscribeAsync(lua_State *state) {
 			Postbox box(StoreOfUpvalue(state));
 
@@ -388,7 +388,7 @@ namespace engine::script {
 			const std::vector<std::byte> payload = EncodeArgument(state, 4);
 
 			// **The compare-and-swap, which is the cross-world lock.**
-			// `docs/SCRIPT_CONCURRENCY.md` §4: a lock in the shape an author
+			// `docs/retired/SCRIPT_CONCURRENCY.md` §4: a lock in the shape an author
 			// expects cannot exist here, because rule 3 leaves no shared memory
 			// to guard. What they actually want is this — the version the caller
 			// read goes in, and `Conflict` comes back when it has moved on.

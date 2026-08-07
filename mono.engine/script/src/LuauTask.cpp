@@ -51,7 +51,7 @@ namespace engine::script {
 
 		// `task.wait(seconds)` — resumes at a tick boundary.
 		//
-		// **Seconds in, ticks underneath**, which `docs/SCRIPT_CONCURRENCY.md`
+		// **Seconds in, ticks underneath**, which `docs/retired/SCRIPT_CONCURRENCY.md`
 		// §2 settled. Seconds because that is what an author means and what
 		// Roblox takes; ticks because a wall-clock sleep resumes after a
 		// different amount of *simulation* on a busy machine than on an idle
@@ -188,7 +188,7 @@ namespace engine::script {
 		// `wait(n)`, which does not exist.
 		//
 		// **A refusal that names its replacement**, which is
-		// `docs/SCRIPT_CONCURRENCY.md` §2's recommendation and the reason it is
+		// `docs/retired/SCRIPT_CONCURRENCY.md` §2's recommendation and the reason it is
 		// worth a bound function rather than an absence. A missing global reads
 		// as "this engine forgot `wait`"; this reads as "this engine renamed it,
 		// and here is why". A familiar name with different semantics would cost

@@ -139,7 +139,12 @@ namespace studio {
 
 		PreviewState state = PreviewState::Pending;
 
-		if (HoverKind == engine::assets::AssetKind::Mesh) {
+		// **A material joins the mesh path rather than the thumbnail one**, and
+		// for the same reason: a `.amat` is a reference and has no picture of its
+		// own, so a thumbnail of one resolves to `Unavailable` and draws a dash
+		// for ever. What it wants is the engine's sphere wearing it, which is a
+		// render — the same slot, the same rotation, the same turntable.
+		if (PreviewIsRendered(HoverKind)) {
 			// **A mesh is a render and not a bitmap** — `MeshPreview.cpp`
 			// carries why. Loading is idempotent and cached, so calling it every
 			// frame the preview is open costs a hash lookup.

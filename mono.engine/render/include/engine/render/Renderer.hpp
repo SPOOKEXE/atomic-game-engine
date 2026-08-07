@@ -122,19 +122,25 @@ namespace engine::render {
 
 	// How many local lights one frame may carry.
 	//
-	// Sixteen, matching `MAX_LIGHTS` in `opaque.frag`.
+	// **This is the one home of the number, and `opaque.frag` is told it.**
+	// `mono.engine/render/CMakeLists.txt` reads the value out of this
+	// declaration and passes `-DMAX_LIGHTS` to glslc, so the shader's loop bound
+	// and the uniform buffer this sizes cannot disagree — there is no second
+	// literal left to drift. Changing it here changes both.
 	//
-	// **The two are spelled twice and nothing checks it**, which is a real gap
-	// rather than an accepted convention: one is a GLSL constant and the other is
-	// C++, there is no header a shader can include, and what gets staged is
-	// SPIR-V — so a test cannot read the source back and compare. `AGENTS.md`
-	// rule 6 names this exact shape, and the honest label is that this is
-	// documentation. `DEFERRED.md` D00029 carries the fix, which is to inject the
-	// count as a preprocessor define at shader compile time so the number has one
-	// home.
+	// It was spelled twice until v0.10 and nothing checked it, which `AGENTS.md`
+	// rule 6 calls documentation rather than a constraint. The reason it is
+	// arranged so a mismatch is impossible, rather than tested for, is that it
+	// could not be tested for: what gets staged is SPIR-V, and the constant is
+	// folded away by then.
 	//
-	// A mismatch is not a validation error. It is a light set that silently reads
-	// past its own count or stops short of it.
+	// A mismatch was never a validation error. It is a light set that silently
+	// reads past its own count or stops short of it — which looks like one lamp
+	// not working.
+	//
+	// **Keep this a plain integer literal on one line.** The configure step
+	// matches it with a regex and fails loudly if it cannot, so an expression
+	// here is a configure error rather than a silent revert to a stale value.
 	//
 	// @since v0.10
 	inline constexpr size_t MAX_SCENE_LIGHTS = 16;
@@ -527,6 +533,18 @@ namespace engine::render {
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image);
 
+		// How long animation has been running, for anything played on a clock.
+		//
+		// **The caller's clock, because this module holds none** — the rule the
+		// whole engine keeps. A client passes its own accumulated seconds and so
+		// does the studio; a paused editor simply stops advancing it, which is
+		// what makes a paused world's GIFs hold their frame with no second
+		// mechanism for it.
+		//
+		// @param seconds Seconds since the session began.
+		// @since v0.10
+		void SetAnimationTime(double seconds);
+
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.
 		//
@@ -545,18 +563,6 @@ namespace engine::render {
 		// @return The handle, or nullptr for a name this renderer has not been
 		//         given.
 		// @since v0.10
-		// How long animation has been running, for anything played on a clock.
-		//
-		// **The caller's clock, because this module holds none** — the rule the
-		// whole engine keeps. A client passes its own accumulated seconds and so
-		// does the studio; a paused editor simply stops advancing it, which is
-		// what makes a paused world's GIFs hold their frame with no second
-		// mechanism for it.
-		//
-		// @param seconds Seconds since the session began.
-		// @since v0.10
-		void SetAnimationTime(double seconds);
-
 		void *TextureHandle(const core::Name &name) const;
 
 		// Where a texture's current animation cell sits.
@@ -791,6 +797,33 @@ namespace engine::render {
 		// @return The texture, or `nullptr` when nothing has been drawn into
 		//         that slot.
 		void *SceneTexture(size_t slot = 0) const;
+
+		// Keeps a copy of what a scene slot currently holds, under a name.
+		//
+		// **A slot is scratch and this is how a picture outlives it.** There are
+		// a handful of slots and they are drawn into on rotation, so whatever is
+		// in one is gone within a few frames — which is why the studio's mesh
+		// preview could only ever show the row under the cursor. A captured copy
+		// is an ordinary entry in the texture table: `TextureHandle` returns it,
+		// `DropTexture` releases it, and a list can draw a hundred of them.
+		//
+		// **The drawn rectangle, not the allocation.** A target is rounded up to
+		// a block, so the copy is `SceneTextureExtent`'s rectangle and samples
+		// whole — a consumer needs the handle and nothing else, which is the
+		// coupling this exists to end.
+		//
+		// **Costs device memory that nothing reclaims on its own.** Each capture
+		// is four bytes a texel against `TextureTable::MAXIMUM_BYTES`, so a
+		// caller building them per row owes an eviction policy; the studio's
+		// thumbnail cache is one.
+		//
+		// @param slot The slot to copy. Must have been drawn into.
+		// @param name The name to publish the copy under. Replaces one already
+		//             there, releasing it.
+		// @return `false` for a slot never drawn into, an invalid name, or a
+		//         texture table with no room.
+		// @since v0.10
+		bool CaptureSceneTexture(size_t slot, const core::Name &name);
 
 		// Which corner of that slot's texture the world is in.
 		//

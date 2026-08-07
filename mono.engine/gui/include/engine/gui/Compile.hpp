@@ -118,6 +118,12 @@ namespace engine::gui {
 			return Built;
 		}
 
+		// How many times the compiled list was asked for.
+		//
+		// Read beside `Rebuilds`: the two being equal means the cache never hit,
+		// which is the shape of a tree whose hash moves every frame.
+		//
+		// @return The count since construction.
 		size_t Requests() const {
 			return Asked;
 		}

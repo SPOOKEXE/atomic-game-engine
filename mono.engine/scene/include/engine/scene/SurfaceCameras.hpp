@@ -133,9 +133,22 @@ namespace engine::scene {
 	// immediately before each. Nothing here can enforce that: this pass has no
 	// idea how many places its answer is about to be drawn from.
 	//
+	// **A pane the viewer is level with draws nothing at all**, which is a
+	// statement about what a surface view means rather than about arithmetic.
+	// Which way along its normal a reflected camera looks depends on which side
+	// of the plane the viewer is, both answers are right, and no continuous path
+	// joins them — so crossing the plane turned the camera 180 degrees between
+	// two frames, once per orbit, which is what a mirror flashing is. A pane seen
+	// edge-on covers no pixels, so the honest answer is that there is nothing to
+	// show; its camera is left where it was and its pane is taken off its slot.
+	// `EDGE_ON_MARGIN` in the source carries the width and its limits.
+	//
 	// @param store The world.
-	// @return How many surface cameras were placed. Zero is the ordinary case in
-	//         a scene with no mirror in it, and is not a failure.
+	// @return How many surface cameras produced a reflection. Zero is the
+	//         ordinary case in a scene with no mirror in it, and is not a
+	//         failure. A pane that was visited and blanked for being edge-on is
+	//         not counted, because the caller is asking whether there is a
+	//         reflection rather than whether there is a mirror.
 	size_t AimSurfaceCameras(ecs::Store &store);
 
 	// Appends a thin translucent bar lying on each face a surface camera

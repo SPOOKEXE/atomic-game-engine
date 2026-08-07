@@ -68,16 +68,20 @@ namespace engine::render {
 	// @since v0.8
 	struct Glyph {
 		// Where the glyph sits in the atlas, in texels.
+		//@{
 		uint16_t X = 0;
 		uint16_t Y = 0;
 		uint16_t Width = 0;
 		uint16_t Height = 0;
+		//@}
 
 		// Where to put it relative to the pen, in pixels. Y grows downward, so
 		// a glyph's top is usually negative — which is the one sign everybody
 		// gets backwards once.
+		//@{
 		float OffsetX = 0.0f;
 		float OffsetY = 0.0f;
+		//@}
 
 		// How far the pen moves after drawing it.
 		float Advance = 0.0f;
@@ -101,8 +105,10 @@ namespace engine::render {
 		// works — filed rather than pretended at. A codepoint outside this range
 		// resolves to nothing and a caller draws the missing-glyph box, which is
 		// visible on purpose for `ImageSource`'s reason.
+		//@{
 		static constexpr char32_t FIRST_CODEPOINT = 32;
 		static constexpr char32_t LAST_CODEPOINT = 255;
+		//@}
 
 		// Builds the atlas by rasterising the vendored faces.
 		//
@@ -128,12 +134,14 @@ namespace engine::render {
 		}
 
 		// How wide and tall the sheet is, in texels.
+		//@{
 		uint32_t Width() const {
 			return SheetWidth;
 		}
 		uint32_t Height() const {
 			return SheetHeight;
 		}
+		//@}
 
 		// The em size this was baked at.
 		float PixelSize() const {

@@ -430,7 +430,7 @@ namespace engine::script {
 
 		// **A yield is legal now, and only from `task`.**
 		//
-		// `docs/SCRIPT_CONCURRENCY.md` §1 permits a resume from a tick boundary,
+		// `docs/retired/SCRIPT_CONCURRENCY.md` §1 permits a resume from a tick boundary,
 		// a barrier delivery or a `Ticket` reply, and forbids everything else. A
 		// thread that suspended through `task.wait` is registered for one of
 		// those and something will come back for it. A thread that suspended any

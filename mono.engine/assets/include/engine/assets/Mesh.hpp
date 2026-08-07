@@ -75,8 +75,10 @@ namespace engine::assets {
 		// claiming a bound of a kilometre is drawn from everywhere. Both are
 		// invisible failures that look like renderer bugs. `Read` computes
 		// them, so there is one answer and it is the true one.
+		//@{
 		core::Vector3 Minimum;
 		core::Vector3 Maximum;
+		//@}
 
 		// Whether this describes a mesh at all.
 		//

@@ -142,14 +142,19 @@ namespace assetc {
 	//
 	// @since v0.9
 	struct Report {
+		// One row per asset the run produced, failures included — a row carries
+		// its own failure so a caller can name what did not bake rather than
+		// subtract two counts.
 		std::vector<Baked> Assets;
 
 		// How many rows carry a failure.
 		size_t Failures = 0;
 
 		// Source and output totals for completed rows.
+		//@{
 		uint64_t SourceBytes = 0;
 		uint64_t OutputBytes = 0;
+		//@}
 
 		// How many model texture references named something that is not in the
 		// input tree.

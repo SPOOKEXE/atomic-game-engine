@@ -18,7 +18,7 @@
 // **A suspended script is a `Promise`, not a coroutine.** Luau has coroutines
 // and JavaScript does not; what JavaScript has is `await`, and a promise
 // resolved by the host at a barrier is exactly the same contract —
-// `docs/SCRIPT_CONCURRENCY.md` §1's "a script may only resume from something
+// `docs/retired/SCRIPT_CONCURRENCY.md` §1's "a script may only resume from something
 // the barrier delivers in a deterministic order". `JS_ExecutePendingJob` is what
 // makes that true rather than aspirational: the host drives the microtask
 // queue, so a reaction runs at a point the engine picked. A JS engine without

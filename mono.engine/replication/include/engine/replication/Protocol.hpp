@@ -41,8 +41,15 @@ namespace engine::replication {
 	//
 	// @since v0.9
 	struct Identify {
+		// The public half of the identity being claimed.
 		assets::PublicKey Key;
 
+		// The claim itself, signed by the private half.
+		//
+		// **A key alone proves nothing**, which is the whole reason this is two
+		// fields: anybody can copy a public key off the wire and send it. What
+		// the signature covers is the handshake this message belongs to, so a
+		// replay from another session verifies against the wrong transcript.
 		assets::SignatureBytes Signature;
 	};
 
@@ -55,12 +62,24 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct SnapshotChunk {
+		// The tick the whole snapshot was taken at.
+		//
+		// Carried on every chunk rather than only the first, so a receiver can
+		// tell a late chunk of a superseded snapshot from one it still wants.
 		uint64_t Tick = 0;
 
+		// How long the assembled snapshot is, so a receiver can size its buffer
+		// once and refuse a total it will not accept before any of it arrives.
 		uint32_t TotalBytes = 0;
 
+		// Where this chunk starts within that total.
+		//
+		// **Explicit rather than implied by arrival order**, because chunks
+		// travel on a channel that may reorder them — an appending receiver
+		// would assemble a snapshot out of order and never know.
 		uint32_t Offset = 0;
 
+		// This chunk's bytes.
 		std::vector<std::byte> Bytes;
 	};
 
@@ -68,10 +87,21 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ComponentDelta {
+		// Which component this is, by name.
+		//
+		// **A name and not an id**, which is `AGENTS.md` rule 4 on the wire: two
+		// processes register components in whatever order their code ran, so an
+		// index means different things at each end.
 		core::Name Component;
 
+		// The rows that changed, in the order their values are packed.
 		std::vector<ecs::Entity> Entities;
 
+		// Those rows' values, back to back at the component's wire stride.
+		//
+		// **Parallel to `Entities` rather than interleaved with it**, so the
+		// values are one memcpy per run of adjacent rows — which is what
+		// `EachChangedBatch` yields and the reason it yields runs at all.
 		std::vector<std::byte> Values;
 	};
 
@@ -79,8 +109,16 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Delta {
+		// The tick this describes.
 		uint64_t Tick = 0;
 
+		// The tick this is a difference against.
+		//
+		// **What makes a lost datagram survivable.** A delta built from one
+		// tick's dirty bits describes only that tick, so an entity that moved on
+		// a tick nobody received and then went still would be wrong on that
+		// client for ever. The baseline says what the sender believes the
+		// receiver already has, and anything unconfirmed since is resent.
 		uint64_t Baseline = 0;
 
 		// @since v0.5
@@ -89,6 +127,7 @@ namespace engine::replication {
 		// @since v0.5
 		bool Final = true;
 
+		// One entry per component that moved.
 		std::vector<ComponentDelta> Components;
 	};
 
@@ -96,12 +135,24 @@ namespace engine::replication {
 	//
 	// @since v0.5
 	struct Structure {
+		// The tick these changes belong to.
 		uint64_t Tick = 0;
 
+		// Entities the client should now hold.
+		//
+		// Carried at the sender's exact index *and* generation, because a handle
+		// stored inside a component has to mean the same entity at both ends.
 		std::vector<ecs::Entity> Created;
 
+		// Entities that no longer exist anywhere.
 		std::vector<ecs::Entity> Destroyed;
 
+		// Entities that still exist and this client can no longer see.
+		//
+		// **Never merged with `Destroyed`, and that is the point of having
+		// three.** A client told to destroy something it merely lost sight of
+		// would delete a thing that is still there and then be wrong about it
+		// the moment it came back into view.
 		std::vector<ecs::Entity> Forgotten;
 	};
 
@@ -109,8 +160,15 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Input {
+		// The tick the player made it on, which is what lets the server retire
+		// exactly the inputs it consumed and leave the rest to be replayed.
 		uint64_t Tick = 0;
 
+		// The input itself, opaque here.
+		//
+		// **This module does not know what a game's input is**, and reading it
+		// would be `replication` knowing what a component means — the same line
+		// `ComponentDelta::Values` is on.
 		std::vector<std::byte> Bytes;
 	};
 
@@ -118,6 +176,11 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Applied {
+		// The last tick the client applied in full.
+		//
+		// **In full is the load-bearing part.** A tick's delta may be several
+		// messages, and acknowledging a partly-applied one would retire a
+		// baseline the client does not actually hold.
 		uint64_t Tick = 0;
 	};
 
@@ -167,19 +230,29 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct Message {
+		// Which of the payloads below was filled in.
 		MessageKind Kind = MessageKind::Applied;
 
+		// The payloads, one per kind.
+		//
+		// **Every field rather than a union, and it costs what it costs.** A
+		// message is parsed once per datagram and then acted on, so the saving a
+		// union would buy is a few hundred bytes on one stack frame — against a
+		// visitor at every site that handles a message, in a module where every
+		// inbound field is hostile and the parsing is the part that has to stay
+		// readable.
+		//
+		// **Only the one `Kind` names has been written.** `ReadMessage` leaves
+		// the rest at their defaults, so a reader that switches on something
+		// other than `Kind` is reading a value no sender sent.
+		//@{
 		SnapshotChunk Chunk;
-
 		replication::Delta Delta;
-
 		replication::Structure Structure;
-
 		replication::Input Input;
-
 		replication::Applied Applied;
-
 		replication::Identify Identify;
+		//@}
 	};
 
 	// Reads a message, refusing anything that is not one.

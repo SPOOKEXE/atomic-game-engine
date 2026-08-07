@@ -228,6 +228,45 @@ namespace engine::render {
 		return true;
 	}
 
+	bool TextureTable::Adopt(
+		const core::Name &name, SDL_GPUTexture *texture, uint32_t width, uint32_t height, size_t bytes
+	) {
+		if (Device == nullptr || !name.IsValid() || texture == nullptr) {
+			return false;
+		}
+
+		// **Refused before the swap, so a full table leaves the caller its
+		// texture.** The alternative — release the old entry and then discover
+		// there is no room — would drop a working picture to make space for one
+		// that is not going in.
+		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
+			ENGINE_WARN("texture table: full, refusing {}", name.Text());
+			return false;
+		}
+
+		Entry entry;
+		entry.Texture = texture;
+		entry.Bytes = bytes;
+		entry.Width = width;
+		entry.Height = height;
+
+		// No flipbook fields: a rendered picture is one frame by construction,
+		// and claiming a grid would make `FlipbookCell` walk cells that are not
+		// there.
+
+		const auto existing = Textures.find(name.Id());
+		if (existing != Textures.end()) {
+			SDL_ReleaseGPUTexture(Device, existing->second.Texture);
+			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
+			existing->second = entry;
+		} else {
+			Textures.emplace(name.Id(), entry);
+		}
+
+		UploadedBytes += bytes;
+		return true;
+	}
+
 	bool TextureTable::Drop(const core::Name &name) {
 		if (Device == nullptr || !name.IsValid()) {
 			return false;

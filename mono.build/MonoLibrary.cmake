@@ -74,7 +74,19 @@ endfunction()
 # A module owning GLSL compiles it into a directory named after the module, so
 # two modules cannot collide on fullscreen.vert. Programs copy those directories
 # in wholesale, which is why the module name is part of the path.
-function(_mono_add_shaders name target)
+# A constant a shader shares with C++ is passed in rather than typed twice.
+#
+# `defines` is a list of `NAME=VALUE`, each becoming a `-D` on the glslc command
+# line. It exists because a number spelled in a header *and* in GLSL is a
+# constraint the build does not check, which AGENTS.md rule 6 calls
+# documentation — and the failure it hides is quiet in both directions: a shader
+# capped lower silently ignores the tail of a uniform array, and one capped
+# higher reads past the buffer. Both look like "that light does not work".
+#
+# The value is read out of the header that declares it, so C++ stays the one
+# home and the shader carries no literal of its own to disagree with. A shader
+# still compiles standalone, because each `#ifndef`s its own fallback.
+function(_mono_add_shaders name target defines)
 	set(source_dir "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 	if(NOT IS_DIRECTORY "${source_dir}")
 		return()
@@ -96,13 +108,18 @@ function(_mono_add_shaders name target)
 	set(stage "${MONO_SHADER_STAGE}/${name}")
 	file(MAKE_DIRECTORY "${stage}")
 
+	set(define_flags "")
+	foreach(define IN LISTS defines)
+		list(APPEND define_flags "-D${define}")
+	endforeach()
+
 	set(outputs "")
 	foreach(shader IN LISTS sources)
 		get_filename_component(shader_name "${shader}" NAME)
 		set(spv "${stage}/${shader_name}.spv")
 		add_custom_command(
 			OUTPUT "${spv}"
-			COMMAND ${MONO_GLSLC} "${shader}" -o "${spv}"
+			COMMAND ${MONO_GLSLC} ${define_flags} "${shader}" -o "${spv}"
 			# The compiler is a dependency, not just a command. Without it a
 			# shaderc bump leaves every .spv on disk stale, and the mismatch
 			# surfaces as a pipeline that fails to create.
@@ -193,7 +210,7 @@ function(mono_add_library name)
 	cmake_parse_arguments(ARG
 		""
 		"TIER;NAMESPACE"
-		"DEPS;VENDOR;VENDOR_PUBLIC;VENDOR_INCLUDES;DEFINES;ALLOW_TIER_ESCAPE"
+		"DEPS;VENDOR;VENDOR_PUBLIC;VENDOR_INCLUDES;DEFINES;SHADER_DEFINES;ALLOW_TIER_ESCAPE"
 		${ARGN})
 
 	if(NOT ARG_TIER)
@@ -270,7 +287,7 @@ function(mono_add_library name)
 		endif()
 	endif()
 
-	_mono_add_shaders(${name} ${target})
+	_mono_add_shaders(${name} ${target} "${ARG_SHADER_DEFINES}")
 
 	if(MONO_BUILD_TESTS AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 		mono_add_tests(${name} DEPS ${ARG_NAMESPACE}::${name})

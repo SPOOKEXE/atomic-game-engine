@@ -102,6 +102,13 @@ namespace engine::scene {
 	// @since v0.10
 	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target);
 
+	// The `Part` class id, registering the whole tree on first call.
+	//
+	// **Every other class accessor here goes through this one**, so a caller
+	// asking for `Material` or `Attachment` first still gets a fully registered
+	// tree — one registration whichever door it is entered by.
+	//
+	// @return The class id.
 	ecs::ClassId PartClass();
 
 	// The `Camera` class id, registering the tree on first call.

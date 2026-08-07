@@ -38,12 +38,22 @@
 // with both is authored twice and the material wins, because it is the more
 // specific statement.
 //
-// **What that costs is a real gap and is stated rather than hidden**: deleting a
-// `Material` child leaves the colour map it last resolved on the parent, because
-// nothing visits a part that no longer has one. `docs/DEFERRED.md` D00032 is the
-// entry. The alternative — a pass over every part every tick, checking whether
-// it has a material child — is a child scan per drawable per tick to fix an
-// editor-time action, which is the wrong trade by two orders of magnitude.
+// **A part that stops having a material is cleared, and the pass costs nothing
+// extra to do it.** Deleting a `Material` child used to leave the colour map it
+// last resolved sitting on the parent for ever, because nothing visits a part
+// that no longer has one — `docs/DEFERRED.md` D00032. The fix is not the pass
+// over every part that entry rejected, which would be a child scan per drawable
+// per tick to correct an editor-time action. It is a **difference between two
+// passes**: the resolve records which parents it wrote, and the next one clears
+// any parent in that record it did not write again. The work is proportional to
+// the number of *materials*, which is what the pass already walks.
+//
+// **That covers more than deletion, which is why it is this and not a
+// destruction hook.** A hook on the row leaving would miss a `Material`
+// *reparented* to another part, a `MaterialRef` removed from a still-living
+// instance, and a part whose material was moved under something with no
+// `SurfaceAppearance` — all of which leave the same stale texture and none of
+// which is a destruction.
 //
 // ## Nothing here reads a material file
 //
@@ -56,9 +66,11 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Entity.hpp>
 
 #include <cstddef>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -83,6 +95,24 @@ namespace engine::scene {
 		// would take, and the value has to be a `Name` because it is what gets
 		// written onto a component.
 		std::unordered_map<uint32_t, core::Name> ColourMaps;
+
+		// The parents `ResolveMaterials` wrote on its last pass, sorted.
+		//
+		// **This is what lets a part be cleared when its material goes away**
+		// without visiting every part in the world: the next pass writes its own
+		// list and clears whatever is in this one and not in that one.
+		//
+		// **Handles rather than indices, and the generation is load-bearing.**
+		// An entity destroyed between two passes hands its index straight to the
+		// next `Create`, so an index alone would clear the colour map of an
+		// unrelated part that happened to be built in its place. `Store::Get`
+		// checks the generation and answers null for a handle that has been
+		// recycled, which turns that into a miss rather than a wrong write.
+		//
+		// Sorted so the difference is a binary search per entry rather than a
+		// scan, and because two `Material` children on one part would otherwise
+		// have to be de-duplicated by the reader.
+		std::vector<ecs::Entity> Resolved;
 
 		// The colour map a material names, or an invalid name.
 		//

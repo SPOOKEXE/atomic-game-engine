@@ -111,6 +111,19 @@ SOURCE_BROWSER         = YES
 JAVADOC_AUTOBRIEF      = YES
 MARKDOWN_SUPPORT       = YES
 
+# One comment covers a `//@{` group, rather than the first member of it.
+#
+# **This is not a way of requiring less.** The author still writes the comment
+# and still marks the group by hand; what it changes is that a family of fields
+# which are one idea — `ecs::AttributeValue`'s fifteen payload cases, where a
+# per-field comment could only ever say "the `float` case" — is documented once
+# instead of fifteen times. Documentation written to satisfy a check is the thing
+# `docs/CODE_DOCUMENTING.md` is against.
+#
+# It applies to members. Namespace-level overloads are not covered by it and
+# were tried; see DEFERRED.md D00036.
+DISTRIBUTE_GROUP_DOC   = YES
+
 # The public surface is listed whether or not somebody documented it. A gap
 # should be visible on the page rather than absent from it — an undocumented
 # method that simply does not appear reads as a method that does not exist.
@@ -181,3 +194,14 @@ DOT_IMAGE_FORMAT       = svg
 INTERACTIVE_SVG        = YES
 INCLUDE_GRAPH          = NO
 INCLUDED_BY_GRAPH      = NO
+
+# Above the largest class in this repository rather than at Doxygen's default of
+# 50, which `studio::Editor` passes with 55 collaborators — and passing it draws
+# *no graph at all* and emits a warning, so the default turns the one class whose
+# relationships are hardest to hold in a head into the one class with no picture.
+#
+# It is a bound on how long `dot` may be asked to think, not on correctness, so
+# the honest setting is one above what is actually here. A class that reaches
+# this is a class to split, and the warning coming back is a reasonable way to
+# hear about it.
+DOT_GRAPH_MAX_NODES    = 64

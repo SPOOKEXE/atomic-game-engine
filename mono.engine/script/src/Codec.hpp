@@ -3,7 +3,7 @@
 // What a script sends across a bus, as bytes.
 //
 // **The one piece of this surface with no prior art anywhere in the tree**, and
-// `docs/SCRIPT_CONCURRENCY.md` §3 states its three requirements in priority
+// `docs/retired/SCRIPT_CONCURRENCY.md` §3 states its three requirements in priority
 // order. Each of them decided something about the format rather than about the
 // implementation, which is the point — a property of the *format* is one both
 // bindings get for free, and a property of an implementation is one each would

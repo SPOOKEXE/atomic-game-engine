@@ -183,7 +183,7 @@ stable — the instance, not the text.
   is a file this repository does not have and a licence somebody has to choose.
 - **No two-way sync.** A Rojo project is read, never written back. Conflict
   semantics for everything the editor can touch is a real piece of work rather
-  than a flag, and `docs/v07v08.md` files it under v0.10.
+  than a flag, and `docs/retired/v07v08.md` files it under v0.10.
 
 ## A file's shape decides its class, and its class decides its context
 

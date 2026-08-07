@@ -38,6 +38,7 @@
 
 #include <string>
 #include <string_view>
+#include <studio/Preview.hpp>
 #include <studio/Assets.hpp>
 #include <vector>
 
@@ -223,4 +224,20 @@ TEST_CASE("an unknown id is not silently a cube", "[studio][mesh]") {
 	// And once the world does hold it, the same id reports what arrived.
 	REQUIRE(engine::scene::RecordMesh(store, Name("nobody/published/this.amesh"), 3706));
 	CHECK(engine::scene::TrianglesOf(store, Name("nobody/published/this.amesh")) == 3706);
+}
+
+TEST_CASE("a material previews as a render, not a bitmap", "[studio][meshresolution]") {
+	using engine::assets::AssetKind;
+
+	// **The two kinds that have no picture of their own.** A mesh is geometry
+	// and a material is a texture *reference* — neither is bytes anybody can
+	// blit, so both go to the preview slot and get drawn.
+	CHECK(studio::PreviewIsRendered(AssetKind::Mesh));
+	CHECK(studio::PreviewIsRendered(AssetKind::Material));
+
+	// **A texture already is its own picture**, so sending it to the slot would
+	// be a camera, a pass and a target to show pixels that were in hand.
+	CHECK_FALSE(studio::PreviewIsRendered(AssetKind::Texture));
+	CHECK_FALSE(studio::PreviewIsRendered(AssetKind::Audio));
+	CHECK_FALSE(studio::PreviewIsRendered(AssetKind::Unknown));
 }

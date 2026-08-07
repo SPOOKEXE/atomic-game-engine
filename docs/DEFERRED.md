@@ -7,19 +7,229 @@ Each section has the header `[_] D00000`.
 
 The numerical is a counter that increments every item.
 
-Insert the NEWEST items to the front, so older are towards the back.
+Insert the NEWEST items at the front **of `## Deferred Items`**, so older ones
+are towards the back. The section is named because "the front" on its own is the
+front of this *format example*, which is where D00025 through D00032 spent v0.9
+and v0.10 — eight real entries, the newest of them, rendering as a code sample.
+Nothing checks this: a fenced block is valid Markdown whatever is inside it.
 
 If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
 
 ```
-### [_] D00032
+### [_] D00101
 
-**Deleting a `Material` instance leaves the texture it last resolved on the part.**
+- item 1
+- item 2
+- item 3
+```
+
+and for deleted marked items;
+
+```
+### [DELETED] D00001
+
+- item 1
+- item 2
+- item 3
+```
+
+## Deferred Items
+
+### [CLOSED] D00036
+
+**307 public entities carried no comment, and nothing had ever been able to say so.**
+
+- `just docs-check` runs two Doxygen passes. The first is the site, and it fails
+  the recipe on malformed comments and dangling links; the second is the
+  **coverage** pass, `EXTRACT_ALL = NO`, whose whole job is to report a public
+  entity nobody documented. **The second had never completed**, because the first
+  had been red for at least two versions and the recipe stops at it.
+- **Found by fixing the thing in front of it**, which is `D00035`. The moment
+  `warnings.txt` reached zero, `gaps.txt` reported **307** — and this is the
+  third time this repository has recorded that cascade: `ROADMAP.md` v0.2 for
+  `docs-check` itself, `D00005` for `just preset=ci check`, and now one level in.
+- **All 307 were genuinely public**, checked rather than assumed: the coverage
+  pass leaves `EXTRACT_PRIVATE` off, so none was a private detail that slipped
+  in.
+- **About a third were unattached rather than unwritten**, and one setting closed
+  them. `ecs::AttributeValue` has fifteen payload fields that are one idea —
+  a per-field comment could only ever have said "the `float` case" — and
+  `engine::gui` declares nineteen `Describe` overloads under one paragraph
+  explicitly about all nineteen. Doxygen attaches a comment to the declaration
+  beneath it, so the other fourteen and eighteen counted as gaps.
+  `DISTRIBUTE_GROUP_DOC = YES` plus `//@{` markers documents each family once.
+  **Not a lowered bar**: the author still writes the comment and still marks the
+  group by hand. What it stops is documentation written to satisfy a check.
+- **The rest was writing, and the useful ones were where a name hides a trap** —
+  `Delta::Baseline` and why a lost datagram is survivable, `Structure`'s three
+  lists and why `Forgotten` is never merged with `Destroyed`,
+  `Statistics::Refused` against `Deferred` (the link saying no against this
+  module saying later, which this file already records people confusing twice),
+  and `Answer::PublicKey` being repeated rather than remembered, which is what
+  makes the challenge stateless.
+- **Two wrong turns, both recorded rather than tidied away.** A filter rule was
+  added so `//@{` was *not* promoted to `///@{`, on the reasoning that a
+  delimiter is not prose — wrong for this pipeline, since the promoted form is
+  the one Doxygen groups on. Worse, while that rule was in place it produced the
+  measurement behind a confident claim in this entry that namespace-level
+  overloads **cannot** be grouped. They can. **A tool change made mid-
+  investigation invalidated the measurement being taken through it**, because the
+  filter was both the instrument and the subject. The rule was reverted and left
+  out, having no user.
+- **It also turned up three more orphaned doc blocks** of the kind `D00035`
+  found two of — a new member's comment inserted *inside* an existing one, so
+  `RequestShownContent` and `PublishManifestNames` were undocumented while their
+  prose sat on `FitPartsToMesh`. All three were added by the v0.10 mesh work.
+- **`just docs-check` exits 0 and says "every public entity is documented".**
+  It is now a check that can fail for a real reason, which it has not been able
+  to do for two versions.
+
+### [CLOSED] D00035
+
+**`just docs-check` was red, and the thing it was red about was not the thing worth finding.**
+
+- Found by running it rather than by reading it: the recipe fails when
+  `warnings.txt` is non-empty, and it held **19 lines**. One was a genuinely
+  broken link — `README.md` pointing at `docs/CPP_LINKER.md` after that file
+  moved to `docs/retired/` — and the other eighteen were Doxygen's Markdown
+  disagreeing with prose it was handed.
+- **The link half was larger than the one warning showed.** The same move left
+  **26 stale `docs/<name>.md` references across 20 files**, almost all in source
+  comments where nothing checks them — `docs-check` only resolves links
+  reachable from the documented surface. Two more dangling links were found by
+  sweeping every local Markdown link directly, including one *inside*
+  `docs/retired/v07v08.md` that broke by being moved beside the siblings it
+  names.
+- **The count moved the wrong way first, and that was the tell.** 19 to start;
+  fixing the mainpage link took it to **26**, because the site pass had been
+  stopping at that link and the seven it then reported had been invisible behind
+  it — including two live source defects, where a new member's doc block had
+  been inserted *inside* an existing one, leaving `bake::Graph::AddWrite` and
+  `render::Renderer::TextureHandle` undocumented while their prose sat on the
+  wrong function.
+- **The eighteen had one cause, and it was not the one this entry first named.**
+  `JAVADOC_AUTOBRIEF` ends the brief at the first sentence-ending stop and does
+  not care that the stop is inside emphasis. This repository's house style is a
+  bold *sentence* — `**Twenty-eight and not thirty-two.**` — so the split lands
+  between the `**` and its partner: the brief ends holding an unclosed emphasis
+  and the detail starts with a stranded closer. Doxygen reports it **against the
+  following comment block**, which is why the warning never points at the
+  comment that caused it.
+- **The wrong answer was held for an afternoon and is recorded rather than
+  quietly dropped.** The first minimal reproduction kept the stop inside the
+  bold while dashes, quotes and line wrapping were varied around it — so every
+  variant failed and *wrapping* took the blame. That conclusion was written into
+  this entry as confirmed, with a measurement beside it (355 multi-line bolds
+  across 145 headers) that made it look substantiated. **Emphasis spanning a
+  line break is completely fine.** Moving the stop out fixes a bold spanning
+  three lines; leaving it in breaks one that fits on half of one. The lesson is
+  the old one: varying everything except the cause proves the cause is
+  everything else.
+- **Fixed in the filter, in one character.** `docgen::Promote` moves a trailing
+  stop from inside the emphasis to outside it — `**Sentence.**` becomes
+  `**Sentence**.` — which preserves the line count that every source link on the
+  generated page depends on, keeps `JAVADOC_AUTOBRIEF`, and leaves the house
+  style alone. An unpaired `**` leaves its block untouched, and markers inside a
+  code span are code. Seven cases in `docgen/tests/Filter.cpp`.
+- **The last one was in Markdown rather than in a comment, and pages are not
+  filtered.** A code span containing apostrophes —
+  `` `Unknown type 'Enum.Material'` `` — left an unmatched `</tt>`, reported
+  against a line four bullets further down. It resisted isolation because the
+  line, the pair and the section all rendered clean on their own; what found it
+  was neutralising each of that line's sixteen code spans in turn.
+- **`DOT_GRAPH_MAX_NODES` is 64 now**, up from Doxygen's default of 50, which
+  `studio::Editor` passes with 55 collaborators — and passing it draws no graph
+  at all and warns, so the default gave the one class whose relationships are
+  hardest to hold in a head the one page with no picture.
+- **Closed with `warnings.txt` at zero, and what that revealed is `D00036`.**
+  The coverage pass behind it had never run to completion and reports 307
+  documentation gaps. That is a separate entry because it is separate work.
+
+### [CLOSED] D00034
+
+**One asset baked and did not publish, and nothing in the pipeline would say which.**
+
+- v0.10's store re-baked to **1974 raw, 1973 baked**. The gap was real, was never
+  identified, and was only visible by *subtracting two numbers printed by two
+  different tools* — which is why it survived a whole version.
+- **Found, and it is not where this entry looked.** The entry assumed a baker
+  refusing something and throwing the reason away. It was neither the baker nor
+  the publisher: `cdn::ImportFile` accepted a **zero-byte file**. Found by
+  diffing the two folders by hash, which left exactly one — `af1349b9…`, BLAKE3's
+  empty-input digest — and then reading the content log, which named
+  `blender-dragon/.venv/.lock`: a Python virtualenv lock file swept along by the
+  folder import of a model.
+- **The diagnosis this entry made was right and the location was wrong, which is
+  worth keeping.** "The reporting is the actual defect, not the missing asset"
+  held exactly — but the missing report was three stages upstream of where it
+  was looked for. `cdn::Publish` *already* names what it skips, including an
+  empty file; the trouble is that by the time it says so the file has been in
+  `raw/` for good, and `raw/` is the folder the counts are taken from.
+- **Closed by refusing it where refusing is free.** `ImportFile` now rejects an
+  empty file and names it: it can never bake and never publish, so accepting one
+  is guaranteed to produce a store whose totals disagree. Nothing is written and
+  nothing is logged, because a refusal that still left the file behind would
+  move the silence rather than remove it.
+- **Not deleted from this repository's own store**, which still holds the
+  zero-byte file: that is somebody's content directory and not this change's to
+  edit. The counts there stay 1974/1973 until it is removed by hand.
+- Pinned by a case that imports an empty file, requires the refusal, and then
+  requires `raw/` and the log to be empty. Demonstrated by mutation.
+
+### [CLOSED] D00033
+
+**A mesh had no cached thumbnail, so a picker row showed a glyph until it was hovered.**
+
+- `PaintPreview` rendered the *hovered* row into the studio's one preview slot —
+  built-ins included — and every other row showed a letter. The rendering worked;
+  what was missing was retention.
+- **The blocker was in `render` rather than in `mono.studio`, and that reading
+  held.** A cached thumbnail means keeping a scene target past the frame, and the
+  renderer exposed no copy: the studio could ask for a slot to be drawn and could
+  not ask for the result to be kept.
+- **Closed at v0.10 by `Renderer::CaptureSceneTexture`**, a device-to-device blit
+  from a slot into a new texture, published into `render::TextureTable` through a
+  new `Adopt`. Nothing goes through the host: reading a picture back to the CPU
+  only to upload it again would be a round trip across the bus for bytes that
+  never needed to leave the device.
+- **`Adopt` transfers ownership, and that is the whole contract.** The table
+  releases the texture on `Drop`, on replacement and on `Shutdown` exactly as it
+  does for one it uploaded — so every refusal in `CaptureSceneTexture` has to
+  leave the caller still owning it, and a full table returns `false` *before*
+  releasing whatever was under the name rather than after.
+- **The drawn rectangle is copied, not the allocation.** A scene target is
+  rounded up to 64-pixel blocks with hysteresis, so most of it is border the pass
+  never wrote — copying it whole would keep a picture with an unwritten margin
+  down two edges and force every consumer to carry `SceneTextureExtent` beside
+  the handle, which is the coupling this ends.
+- **It lands in the existing thumbnail cache rather than beside it**, which is
+  what makes eviction work without knowing captures exist: `PumpThumbnails` drops
+  the least recently drawn by calling `DropTexture` on exactly the name a capture
+  publishes under. A second cache would have been a second thing to evict, and
+  the one nobody wrote a policy for. Captured once per asset, not once per frame
+  — the preview turns, and the frozen angle a thumbnail wants is any of them.
+- **What is tested is every refusal and none of the success.** A capture needs a
+  device; standing a fake in front of that would test the fake. Three cases pin
+  the paths that decide whether a caller has just been handed a texture it now
+  owns — no device, an invalid name, a slot never drawn into. The drawn path is
+  verified by running the editor.
+- The prediction in this entry's old reopen trigger was half right: the material
+  preview did arrive and did want the same mechanism, but it shipped *before*
+  this using the live slot, so the trigger never fired on its own.
+
+### [CLOSED] D00032
+
+**Deleting a `Material` instance left the texture it last resolved on the part.**
 
 - `scene::ResolveMaterials` walks `MaterialRef` rows and writes the resolved texture into the parent's `SurfaceAppearance::ColourMap`. A part that no longer has a `Material` child has no row, so nothing visits it and the last resolved name stays — the part goes on drawing a texture nothing in the tree names any more.
 - **The three states that do work are the ones that matter day to day**, which is why this shipped rather than blocking: no material at all leaves an authored `BasePart.ColorMap` alone; a material naming an asset resolves to it; and a material set back to `None` *clears* the part, because the pass writes even when it resolves to nothing. Only the deletion is stale, and only until something writes the field again.
 - **The obvious fix is the wrong trade by two orders of magnitude.** Visiting every part every tick to ask whether it still has a material child is a child scan per drawable per tick, on the loop `client::CollectInstances` exists to keep flat, to correct an editor-time action.
-- **What would close it is a destruction hook**, which is the shape `ecs::Store::DestroyEntity` already carries for attributes — `ROADMAP.md` v0.10's attributes entry records the same bug in the same place, found the same way. A `MaterialRef` leaving a row is exactly the event this needs, and it is one hook rather than a pass.
+- ~~**What would close it is a destruction hook**, which is the shape `ecs::Store::DestroyEntity` already carries for attributes.~~ **Closed at v0.10, and not that way — the hook would have been both harder and weaker.**
+- **Harder, because the shape this entry pointed at is not a hook.** `DropAttributes` is a *hard-coded call* inside `DestroyEntity`, not a registration anything can add to, and `scene` sits above `ecs` — so closing this as described meant first inventing a general destruction hook in the storage layer, for one caller.
+- **Weaker, because destruction is only one of the ways this goes wrong.** A `Material` **reparented** to a different part destroys nothing, and leaves the part it left holding the old texture for ever; so does a `MaterialRef` removed from a living instance, and a material moved under something with no `SurfaceAppearance`. A hook on the row leaving catches none of those three. This entry named the symptom it had seen and then wrote the fix for exactly that symptom, which is the failure worth keeping: **the trigger was "deleted", the defect was "stopped being written".**
+- **What shipped is a difference between two passes.** `ResolveMaterials` records the parents it wrote in `MaterialCatalogue::Resolved`, and the next pass clears any parent in that record it did not write again. It is O(materials), not O(parts) — so the trade this entry rejected is not paid: nothing walks the drawables, and the pass already had every entity it needs in hand.
+- **Three things had to be right and each is pinned.** The set holds **handles rather than indices**, because a destroyed entity's index is reused immediately and an index alone would clear an unrelated part built in its place — `Store::Get` checks the generation and answers null. `ReadMaterialCatalogues` clears the set on load, or a handle kept across a directory replacement names whatever now sits at that index. And a world that has never had a material still acquires **no resource at all**, which is what `ColourMapOf` being the non-creating reader exists to protect.
+- **Demonstrated by mutation.** With the clear removed, the deletion case and the reparent case both fail; the third case — no catalogue on an untouched world — passes either way, because it pins a guarantee rather than catching this bug.
 
 ### [_] D00031
 
@@ -41,15 +251,18 @@ If a deferred item no longer exists, say the related code was deleted, then mark
 - **What closing it would take.** Either not sandboxing — which is not on the table, `LuauRuntime` freezes the globals so one script cannot change the language the next one runs in — or making the service a *function call* rather than a global, which changes the surface away from Roblox's. Neither is worth it for a property nobody reaches the broken way.
 - **Reopen trigger: a second mutable global property.** One is an oddity with a workaround everybody already uses; two is a pattern, and at that point the surface should stop being globals.
 
-### [_] D00029
+### [CLOSED] D00029
 
-**The light count is spelled in C++ and in GLSL and nothing checks that the two agree.**
+**The light count was spelled in C++ and in GLSL and nothing checked that the two agreed.**
 
 - `render::MAX_SCENE_LIGHTS` is 16 and `MAX_LIGHTS` in `shaders/opaque.frag` is 16, and the only thing keeping them equal is that somebody wrote both. `AGENTS.md` rule 6 is explicit that a constraint the build does not check is documentation, and this one is.
 - **A test that reads the shader back does not work, and it was tried.** What `Paths::Shaders` stages is SPIR-V — the constant is folded away by then — so a suite comparing the staged file against the C++ value has nothing to compare. Reading the repository's `shaders/` directory from a test binary would work and would make the test depend on the source tree being present beside it, which no other suite here does.
 - **What a mismatch costs, which is why this is filed rather than shrugged at.** It is not a validation error and not a crash: `LightUniforms` is sized by the C++ constant and the shader indexes by its own, so a shader with a smaller cap silently ignores the tail of the set and one with a larger cap reads past the buffer. Both look like "that lamp does not work".
-- **The fix is one line and it is in the build rather than in either file.** The shader compile step passes `-DMAX_LIGHTS=<n>` and `opaque.frag` declares `#ifndef MAX_LIGHTS` around its own value, so the number has one home and the shader still compiles standalone. What it needs is for the CMake shader rule to take a define list, which it does not today.
-- **Reopen trigger: the next time a shader needs a constant C++ also holds.** There is exactly one now; a second makes the build change worth doing rather than worth filing.
+- ~~**The fix is one line and it is in the build rather than in either file.**~~ **Closed at v0.10, and the entry's own prescription was right except for where the number lives.** `mono_add_library` takes `SHADER_DEFINES`, `_mono_add_shaders` turns each into a `-D` on the glslc command, and `opaque.frag` guards its value with `#ifndef MAX_LIGHTS` so it still compiles by hand.
+- **The number stayed in C++ rather than moving into the build, which is the one place this entry's plan was changed.** Putting it in CMake and defining it into both languages was the obvious reading of "one home in the build", and it fails on a detail: `Renderer.hpp` is included by things that do not link `render` — `mono.tools/linecount/tests/Report.cpp` is one — so a compile definition would either break them or need a fallback default, which is the second spelling again. Instead the configure **reads** `MAX_SCENE_LIGHTS` out of the header with a regex and feeds glslc. C++ stays where a reader expects the constant, and the shader keeps no literal of its own.
+- **Demonstrated by mutation rather than asserted.** The header set to 8, reconfigured: the command line becomes `-DMAX_LIGHTS=8` and the staged SPIR-V changes hash. Reverted, and it changes back. **There is no test, deliberately** — the disagreement is now unrepresentable rather than detectable, and a suite could not have read the number anyway, which is what the first attempt at this discovered.
+- **Two sharp edges, both handled where they bite.** The regex is matched at configure time, so `CMAKE_CONFIGURE_DEPENDS` names the header — without it, editing the constant recompiles the C++ and leaves the shaders on the value read at the last configure, which is this bug arriving by a different door. And a failed match is a `FATAL_ERROR` naming the file, not a silent skip, because a quiet fallback would restore exactly the drift being deleted.
+- **Reopen trigger: the next time a shader needs a constant C++ also holds.** The mechanism now exists, so that is a one-line `SHADER_DEFINES` entry rather than a build change.
 
 ### [CLOSED] D00028
 
@@ -58,21 +271,23 @@ If a deferred item no longer exists, say the related code was deleted, then mark
 - **What it claimed:** that Luau *cannot* express a dotted type name for a global, that a definitions file's inability to declare one was the language's inability, and that the only way out was a generated `Enum.luau` module and a require-path resolver.
 - **The first half was right and the conclusion did not follow.** A definitions file genuinely cannot declare one: `loadDefinitionFile` writes `exportedTypeBindings[name]` and nothing else, and there is no `declare` syntax for a dotted name. The probe that produced "Unknown type 'Enum.Material'" was real.
 - **What was missed is where the resolution happens.** Luau parses `Enum.Material` in a type position as a reference with a *prefix*, and resolves it through `Scope::lookupImportedType("Enum", "Material")` — the `importedTypeBindings` map. `require` populates that map (`ConstraintGenerator.cpp:1512`), and so may a **host**. Roblox is not using definition-file syntax; it is registering that map. So is luau-lsp's Roblox platform.
-- **Closed by doing the same thing.** `mono.tools/scriptcheck` walks the `Enum_*` extern types the generator emitted and aliases each under the `Enum` prefix, before `freeze`. 35 enums, and `local m: Enum.Material` typechecks. The examples that carried `Enum_Material` in an annotation now carry `Enum.Material`.
+- **Closed by doing the same thing.** `mono.tools/scriptcheck` walks the extern types the generator emitted under the `Enum_` prefix and aliases each under the `Enum` prefix, before `freeze`. 35 enums, and `local m: Enum.Material` typechecks. The examples that carried `Enum_Material` in an annotation now carry `Enum.Material`.
 - **The declaration file still uses the flat names, and that is ordering rather than compromise.** The aliases are built *from* the types the file created, so they cannot exist while it is being loaded — emitting the dotted form there made the file fail to load before a single script was checked. Both spellings name the same `TypeFun`.
 - **What is still open is the editor, and it is filed as D00031** rather than left inside a closed entry.
 - **The lesson worth keeping: "the file cannot say it" is not "the language cannot do it".** The first probe answered the question that was asked and the wrong question was asked.
 
-### [_] D00027
+### [CLOSED] D00027
 
-**The mirror flashes once per orbit, and it is a sign flip rather than a projection fault.**
+**The mirror flashed once per orbit, and it was a sign flip rather than a projection fault.**
 
 - `scene::AimSurfaceCameras` sets `facing = distance >= 0 ? 1 : -1` and points the reflected camera along `unit * facing`. That is correct on either side of a pane — a face can be looked at from behind and the reflection belongs on that side — and it is discontinuous *at* the plane.
 - **Measured, not inferred.** `scene/tests/SurfaceCameras.cpp` orbits the eye a full lap at 360 samples and records the worst single-step change. The field of view moves by 0.027 radians at worst; the camera's look vector moves by **exactly 2.0** at 1.588 radians, which is a 180° turn in one frame at precisely the plane crossing. Orbiting a pane centred on the origin crosses twice a lap.
 - **Skipping the crossing was tried and does not work.** Returning early leaves the camera at its previous transform, so the flip lands a frame later instead of not happening; the discontinuity belongs to the sign, not to when it is evaluated. There is no continuous path between facing -Z and facing +Z.
-- **What would fix it.** A pane seen edge-on subtends zero pixels, so the honest answer is that its surface renders *nothing* — disabling the `SurfaceView` rather than re-aiming its camera. That is a change to what a surface view means to the renderer, not to the arithmetic in `AimSurfaceCameras`.
-- The test asserts the current value rather than the desired one, so closing this fails it and forces the bound to be tightened in the same change.
-- **Reopen trigger: filed against v0.8 and ready now.** Nothing blocks it; it wants a decision about `SurfaceView` and a person to look at the result.
+- ~~**What would fix it.**~~ **Closed at v0.10, exactly as this entry predicted and for the reason it gave.** A pane seen edge-on subtends zero pixels, so its surface renders *nothing*: inside `EDGE_ON_MARGIN` of the plane the camera is left where it was and the pane is taken off its slot. The two orientations either side of the crossing are therefore never in consecutive **visible** frames, which is what removes the flash — the sign still flips, and nothing is shown while it does.
+- **The measurement inverted.** Worst single-step turn over a 360-sample lap went from **exactly 2.0** — a 180 degree whip — to **exactly 0**, and the zero is not a tuned bound: within one side of the plane `facing` is constant, so the reflected camera's orientation does not change at all as the viewer orbits. Only its position does. Six samples of 360 come out blank, twice a lap.
+- **The entry's note about the test was right and was worth writing down.** The bound asserted the bug (`<= 2.001`), so closing this failed it and forced the assertion to be rewritten in the same change — and rewriting it surfaced the real question, which is *what to measure*. Continuity is only asked of frames that draw; comparing across the blank band would be asserting continuity of a picture nobody was shown. A second assertion requires the band to actually be entered, because otherwise the test would pass by quietly no longer crossing the plane.
+- **Two existing cases were pinning the degenerate arrangement without saying so, and only failing revealed it.** One put the viewer exactly in the glass and required a *clamped* frustum — a finite matrix for a view covering half a turn, which nobody can see. The other, "a rotated pane reflects along the way it actually faces", left the eye at +Z while the rotated normal was -X: the eye was level with the plane, the mirrored position was the eye itself, and its assertion passed for a reflection that was never computed. **A test that passes because nothing happened is the failure mode this closure actually found.**
+- **What it does not cover, stated rather than left to be discovered.** The band is a distance and a viewer's motion is a speed, so somebody crossing the plane fast enough to step over the whole band between two frames still sees the flip. No width closes that for every speed.
 
 ### [CLOSED] D00026
 
@@ -92,25 +307,6 @@ the parser remains in `bake`.
 - **Closed at v0.8, in the same change as `D00023`** — rotating the geometry without rotating the test would have made the mismatch visible rather than merely present.
 - **The point is turned into the element's space, not the rectangle into the screen's.** A rotated rectangle is not a rectangle and testing one needs a polygon; rotating the *point* back by the same angle makes the test the axis-aligned one it already was, exactly.
 - **The clip is deliberately still not rotated.** A scissor is axis-aligned on every backend there is, so an element rotated inside a clipped container is cut by an upright rectangle — which is what the painter does and what the hit test therefore has to agree with.
-
-### [_] D00101
-
-- item 1
-- item 2
-- item 3
-```
-
-and for deleted marked items;
-
-```
-### [DELETED] D00001
-
-- item 1
-- item 2
-- item 3
-```
-
-## Deferred Items
 
 ### [CLOSED] D00023
 
@@ -185,7 +381,7 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **The real answer is the one `mono.server` already wrote down and then did not get**: *"These four are the placeholder scene; a game file names its own at v0.5."* A `<Replicated>` section in the game document is a per-game declaration read by whoever loads it, which deletes all three copies rather than moving them — and it is the only version of this that also lets a game replicate a component `scene` does not own.
 - **Reopen trigger: a fourth copy, or the first component whose detector differs between two of the three.** The second is the one that bites without warning — the copies are in three programs, so nothing in the build compares them, and the symptom is a value that crosses in the studio and not on a server.
 
-### [_] D00017
+### [PARTIAL] D00017
 
 **The hosting half of L12 — orchestration — has been a `TODO(v0.2+)` in `mono.engine/CMakeLists.txt` since v0.0 and is not scheduled by any version.** Converted from a marker to an entry at v0.6, because a `TODO` naming a version that shipped three releases ago is the exact failure `docs/retired/v05.md` already records once.
 
@@ -195,8 +391,12 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **v0.7 changed what this entry is about, and it is no longer "nobody asks the questions".** The prediction above was right in the letter and wrong in the consequence: the studio does host its worlds in its own process, which is indeed the case orchestration is least needed for — and then it **answered two of the questions anyway**. `Editor::UpdateWorldLifecycle` decides when a world stops (idle at `IdleCloseSeconds`, 300 s by default), when it starts again (something is sitting in its inbox, which is reliable precisely because a suspended world is the one world whose inbox nothing drains), and three exceptions that are not obvious and were each arrived at by being wrong first: never the last world, never a world outside a scoped run, and being *looked at* counts as occupancy.
 - **`mono.server` has none of it.** `--game FILE.agame` loads every world in the file and ticks all of them forever; there is no `SetState` and no `Suspended` anywhere under `mono.server/src`. So the lifecycle policy exists exactly once in this repository, and it is in the editor.
 - **That makes the risk a second copy rather than a missing module, which is a different and cheaper thing to act on.** This repository's most expensive recurring bug is one policy written twice — `CapturePreviousTransforms` was five lines in `examples` that the studio needed too, `ReadSource` exists so a source cache cannot be consulted from one entry point and not another, and there is deliberately **one** bus router so a world's behaviour does not change by being hosted elsewhere. A server that grows its own idle policy makes a world that closes on one host and not the other, with nothing reporting it.
-- **So the narrow action is available before the module is**: hoist the occupancy and idle policy out of `mono.studio` to somewhere `mono.server` can reach it, and let placement — which genuinely has no caller — wait for a deployment. Building the whole module now would still be the guess this entry warns about; leaving the policy where it is would not.
-- **Reopen trigger, split in two because the halves are no longer due together.** *Lifetime* — when a world starts and stops — is due now and has one implementation to hoist rather than none to invent. *Placement* — which host a world runs on, and what happens when it dies — is unchanged: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
+- ~~**So the narrow action is available before the module is**~~ **— done at v0.10, and only that half.** `engine::world::DecideLifecycle` is the policy, in `mono.engine/world` at L4 `server`, which both programs already link. `mono.studio` calls it; placement, which genuinely has no caller, is untouched and still waits for a deployment.
+- **The split that made it hoistable is decision versus gathering.** Whether somebody is *looking* at a world is a question only an editor can answer, and whether a world is inside a scoped run is a `WorldRun` concept meaning nothing to a server — so those stay in `mono.studio` and arrive as facts in `LifecycleInputs`. What moved is the part that must not differ between hosts: the thresholds, the order the tests are applied in, and the three refusals.
+- **The dividend that arrived first was not the one this entry argues for.** The case against a second copy is right, and `mono.server` still has no caller — so nothing has been de-duplicated yet. What changed immediately is that the policy became **testable**: every branch of it was previously reachable only by opening the studio and waiting five minutes, and there are now eight cases, including the two that were pure comment before — a `Faulted` world belongs to the supervisor, and occupancy cannot wake a suspended world because nothing can occupy a world that is not running.
+- **One real ordering bug came out of the move.** Routing the studio through the shared decision put the idle-clock lookup ahead of the suspended-world case, so a suspended world with a teleport waiting would have been delayed a frame while an entry it has no use for was created for it. The clock is now looked up only for an `Active` world, which is also the honest statement of what an idle clock is for.
+- **`mono.server` is deliberately not wired up.** It loads every world in a game file and ticks all of them forever, and giving it suspension is a behaviour change to a program whose output `just determinism` and `just replay-check` compare byte for byte. The policy being reachable is what this entry asked for; using it is a decision with its own consequences.
+- **Reopen trigger, split in two because the halves are no longer due together.** *Lifetime* — when a world starts and stops — **is hoisted and this half is closed**; what is left of it is a caller in `mono.server`, which is a decision about server behaviour rather than about where the code lives. *Placement* — which host a world runs on, and what happens when it dies — is unchanged: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
 
 ### [_] D00016
 

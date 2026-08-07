@@ -43,9 +43,17 @@ namespace engine::bake {
 		// Source name, carried down the chain for import dispatch.
 		std::string Source;
 
+		// The payload itself, in whichever form the last node left it.
+		//
+		// **Every form rather than a variant**, so a node reads the one it
+		// understands and passes the rest through untouched — which is what lets
+		// a chain mix a decoder, a resize and a writer without each knowing what
+		// the others produce.
+		//@{
 		std::vector<std::byte> Bytes;
 		assets::MeshData Mesh;
 		assets::TextureData Texture;
+		//@}
 	};
 
 	// Closed list of node operations.
@@ -93,11 +101,19 @@ namespace engine::bake {
 		// The value meaning "no node". Zero is never issued.
 		static constexpr uint32_t NONE = 0;
 
+		// The handle itself, an index into the graph's node list.
 		uint32_t Value = NONE;
 
+		// Whether this names a node.
+		//
+		// @return `false` for a default handle, which is what `AddX` returns
+		//         when it refuses.
 		constexpr bool IsValid() const {
 			return Value != NONE;
 		}
+
+		// @param other The handle to compare.
+		// @return `true` when both name the same node.
 		constexpr bool operator==(const NodeId &other) const = default;
 	};
 
@@ -174,10 +190,6 @@ namespace engine::bake {
 		// @return The node, or an invalid id.
 		NodeId AddResize(uint32_t width, uint32_t height);
 
-		// Adds a `Write` node.
-		//
-		// @param name The name the asset is published under.
-		// @return The node, or an invalid id.
 		// Restates an imported flipbook's frame rate.
 		//
 		// **A node rather than a mutation on the way past**, because everything
@@ -194,6 +206,10 @@ namespace engine::bake {
 		// @since v0.10
 		NodeId AddRetime(float fps);
 
+		// Adds a `Write` node.
+		//
+		// @param name The name the asset is published under.
+		// @return The node, or an invalid id.
 		NodeId AddWrite(std::string_view name);
 
 		// Wires one node's output into another's input.
