@@ -35,102 +35,149 @@ and for deleted marked items;
 
 ## Deferred Items
 
-### [_] D00035
+### [_] D00036
+
+**307 public entities carry no comment, and nothing had ever been able to say so.**
+
+- `just docs-check` runs two Doxygen passes. The first is the site, and it fails
+  the recipe on malformed comments and dangling links; the second is the
+  **coverage** pass, `EXTRACT_ALL = NO`, whose whole job is to report a public
+  entity nobody documented. **The second had never completed**, because the
+  first has been red for at least two versions and the recipe stops at it.
+- **Found by fixing the thing in front of it**, which is the entire point of
+  `D00035` and is why that entry is worth reading beside this one. The moment
+  `warnings.txt` reached zero, `gaps.txt` reported **307**.
+- **This is the third time this repository has recorded exactly this cascade**,
+  and it should probably stop being a surprise: `ROADMAP.md` v0.2 has it for
+  `just docs-check` itself, `D00005` has it for `just preset=ci check`, and this
+  is the same shape one level in — a check behind a failing check is a check
+  nobody has ever seen the output of.
+- **All 307 are *public* members**, checked rather than assumed: the coverage
+  pass leaves `EXTRACT_PRIVATE` at its default of off, so none of these is a
+  private detail that slipped in. They are real gaps against this repository's
+  stated rule.
+- **They are concentrated rather than spread**, which makes the work more
+  tractable than the number suggests: `mono.studio/include/studio/Editor.hpp`
+  holds **136** of them, `replication/` about **72** across four headers, and
+  `gui/Enums.hpp` **18**. Ten files carry roughly eighty per cent.
+- **A large share are structural rather than unwritten, and that is the finding
+  worth acting on.** `gui/Enums.hpp` declares nineteen `Describe` overloads under
+  one paragraph that is explicitly about all nineteen — and Doxygen attaches a
+  comment to the declaration beneath it, so eighteen count as undocumented. The
+  prose exists and is good. Nothing is missing except an attachment.
+- **Doxygen's own answer for that does not work here, and all three forms were
+  tried**: `//@{` member groups, `@name`, and `DISTRIBUTE_GROUP_DOC = YES`. None
+  clears the warning for namespace-level overloads — `@name` made it *worse*, 18
+  to 19, by detaching the paragraph from the first declaration as well.
+  `docgen::Promote` also promotes `//@{` to `///@{`, which merges the marker into
+  the prose block so it forms no group at all; that was fixed, retested, and
+  reverted when the grouping turned out not to help even when the marker
+  survived. Recorded so the next person does not spend the afternoon again.
+- **So the remaining choice is per-declaration comments**, one line each saying
+  which enum, which is repetitive in exactly the way this repository dislikes —
+  or accepting that an overload family cannot satisfy this check and saying so
+  where the check is configured. **That decision is the work here**, and it
+  should be made once for all the families rather than per file.
+- **Do not make the recipe pass by lowering the bar**, which is the obvious and
+  wrong first move. The pass exists because `EXTRACT_ALL = YES` silently
+  disables `WARN_IF_UNDOCUMENTED` — `docgen/AGENTS.md` says so in as many words
+  — and a coverage check tuned until it is quiet is the documentation this file
+  keeps warning about.
+- **Reopen trigger: it is failing now**, and unlike `D00035` this one cannot be
+  closed in an afternoon. It wants a decision about scope first and then a
+  sustained pass.
+
+### [CLOSED] D00035
 
 **`just docs-check` was red, and the thing it was red about was not the thing worth finding.**
 
-- Found by running it rather than by reading it, which is the whole point: the
-  recipe fails when `warnings.txt` is non-empty, and it held **19 lines**. One
-  was a genuinely broken link — `README.md` pointing at `docs/CPP_LINKER.md`
-  after that file moved to `docs/retired/` — and **the other eighteen are
-  Doxygen's markdown parser disagreeing with prose it is being handed.**
-- **The link half is closed and was larger than the one warning showed.** The
-  same move left **26 stale `docs/<name>.md` references across 20 files**,
-  almost all in source comments, where nothing checks them at all — `docs-check`
-  only resolves links reachable from the documented surface, so the one it
-  caught was the one in the mainpage. Two more dangling links were found by
+- Found by running it rather than by reading it: the recipe fails when
+  `warnings.txt` is non-empty, and it held **19 lines**. One was a genuinely
+  broken link — `README.md` pointing at `docs/CPP_LINKER.md` after that file
+  moved to `docs/retired/` — and the other eighteen were Doxygen's Markdown
+  disagreeing with prose it was handed.
+- **The link half was larger than the one warning showed.** The same move left
+  **26 stale `docs/<name>.md` references across 20 files**, almost all in source
+  comments where nothing checks them — `docs-check` only resolves links
+  reachable from the documented surface. Two more dangling links were found by
   sweeping every local Markdown link directly, including one *inside*
   `docs/retired/v07v08.md` that broke by being moved beside the siblings it
-  names. That sweep is not a recipe and should probably become one.
-- **The rest are `end of comment block while expecting </strong>`, and one cause
-  of them is confirmed: Doxygen's Markdown will not match `**bold**` across a
-  line break.** Reduced to a minimal file and isolated by varying one thing at a
-  time — em-dash, quotes and hyphen make no difference, and the identical
-  sentence rewrapped so the bold opens and closes on **one** line produces no
-  warning at all. The warning is reported against the last line of the comment
-  block, which is why it lands on lines holding no `**` of their own.
-- **That does not explain all of them, and the residue is written down rather
-  than assumed away.** Three surviving sites — `Particles.hpp:473`,
-  `Editor.hpp:2088` and `Editor.hpp:2369` — have bolds that open and close on a
-  single line, so the confirmed cause does not apply. What the three share is
-  that each comment sits on something Doxygen does not emit at
-  `EXTRACT_ALL = NO`: a `static_assert`, a private `static constexpr`, and a
-  comment following an inline function body. **The working hypothesis is that a
-  comment on a skipped entity is carried forward and merged with the next
-  block**, and a merge splits a leading bold across the brief/detail boundary
-  that `JAVADOC_AUTOBRIEF` inserts. Untested — it is a hypothesis with an
-  obvious experiment, not a finding.
-- **This is a house-style collision rather than a typo, which is why it is not
-  simply fixed in place.** The prose here is bold-heavy by convention and
-  wrapped by `.clang-format` at `ColumnLimit: 110` with `ReflowComments` at its
-  default of on — so a bold phrase long enough to be reflowed is *reformatted
-  into* the broken form by `just format`. `Editor.hpp` alone has **27** bolds
-  spanning a line break; only the three on Doxygen-extracted members warn,
-  because `Doxyfile.check` runs `EXTRACT_ALL = NO`. Rewrapping the three fixes
-  today's log and leaves the other twenty-four to surface the moment their
-  members become documented.
-- **So the fix is a decision, not an edit, and there are three candidates.**
-  Keep every bold phrase under one line and let `docs-check` enforce it, which
-  costs nothing but constrains how a long emphasis may be phrased. Teach
-  `docgen::Promote` to join a bold that spans lines — attractive, and it
-  collides head-on with that filter's stated invariant that **line count is
-  preserved exactly**, since Doxygen numbers the source listing from the
-  filtered text. Or stop using `**` in extracted comments, which is the one
-  nobody wants.
-- **Why it is filed rather than pushed through.** The engine is unaffected:
-  these are warnings about generated documentation, `docs-check` is not part of
-  `just check`, and the eighteen predate this session. What is *not* acceptable
-  is leaving the recipe red, because this repository has already recorded that
-  failure twice — v0.2's `docs-check` cascade, where a pass nobody could get
-  green hid the coverage pass behind it entirely, and `D00005`'s correction,
-  where a sentence claiming a check passed aged into a false one.
-- **The count moved the wrong way first, and that is the v0.2 cascade repeating
-  in miniature.** 19 lines to start; fixing the mainpage link took it to **26**,
-  because the site pass had been stopping at that link and the seven it then
-  reported had been invisible behind it — including two live source defects,
-  where a new member's doc block had been inserted *inside* an existing one, so
-  `bake::Graph::AddWrite` and `render::Renderer::TextureHandle` were undocumented
-  while their prose was attached to the wrong function. It is now back to 19,
-  with every link and every `@param` defect gone and only the Markdown left.
-- **Reopen trigger: it is red now, at 19 lines that are all Doxygen Markdown.**
-  Either settle the bold question above, or make the recipe distinguish a broken
-  *link* from a malformed *comment* — that is the distinction that matters, one
-  non-empty log flattens it, and flattening it is what let a dangling link hide
-  two real defects for a version.
+  names.
+- **The count moved the wrong way first, and that was the tell.** 19 to start;
+  fixing the mainpage link took it to **26**, because the site pass had been
+  stopping at that link and the seven it then reported had been invisible behind
+  it — including two live source defects, where a new member's doc block had
+  been inserted *inside* an existing one, leaving `bake::Graph::AddWrite` and
+  `render::Renderer::TextureHandle` undocumented while their prose sat on the
+  wrong function.
+- **The eighteen had one cause, and it was not the one this entry first named.**
+  `JAVADOC_AUTOBRIEF` ends the brief at the first sentence-ending stop and does
+  not care that the stop is inside emphasis. This repository's house style is a
+  bold *sentence* — `**Twenty-eight and not thirty-two.**` — so the split lands
+  between the `**` and its partner: the brief ends holding an unclosed emphasis
+  and the detail starts with a stranded closer. Doxygen reports it **against the
+  following comment block**, which is why the warning never points at the
+  comment that caused it.
+- **The wrong answer was held for an afternoon and is recorded rather than
+  quietly dropped.** The first minimal reproduction kept the stop inside the
+  bold while dashes, quotes and line wrapping were varied around it — so every
+  variant failed and *wrapping* took the blame. That conclusion was written into
+  this entry as confirmed, with a measurement beside it (355 multi-line bolds
+  across 145 headers) that made it look substantiated. **Emphasis spanning a
+  line break is completely fine.** Moving the stop out fixes a bold spanning
+  three lines; leaving it in breaks one that fits on half of one. The lesson is
+  the old one: varying everything except the cause proves the cause is
+  everything else.
+- **Fixed in the filter, in one character.** `docgen::Promote` moves a trailing
+  stop from inside the emphasis to outside it — `**Sentence.**` becomes
+  `**Sentence**.` — which preserves the line count that every source link on the
+  generated page depends on, keeps `JAVADOC_AUTOBRIEF`, and leaves the house
+  style alone. An unpaired `**` leaves its block untouched, and markers inside a
+  code span are code. Seven cases in `docgen/tests/Filter.cpp`.
+- **The last one was in Markdown rather than in a comment, and pages are not
+  filtered.** A code span containing apostrophes —
+  `` `Unknown type 'Enum.Material'` `` — left an unmatched `</tt>`, reported
+  against a line four bullets further down. It resisted isolation because the
+  line, the pair and the section all rendered clean on their own; what found it
+  was neutralising each of that line's sixteen code spans in turn.
+- **`DOT_GRAPH_MAX_NODES` is 64 now**, up from Doxygen's default of 50, which
+  `studio::Editor` passes with 55 collaborators — and passing it draws no graph
+  at all and warns, so the default gave the one class whose relationships are
+  hardest to hold in a head the one page with no picture.
+- **Closed with `warnings.txt` at zero, and what that revealed is `D00036`.**
+  The coverage pass behind it had never run to completion and reports 307
+  documentation gaps. That is a separate entry because it is separate work.
 
-### [_] D00034
+### [CLOSED] D00034
 
-**One asset bakes and does not publish, and nothing in the pipeline will say which.**
+**One asset baked and did not publish, and nothing in the pipeline would say which.**
 
-- v0.10's store re-bakes to **1974 baked, 0 dangling, 1973 published**. The
-  one-asset gap is real and has never been identified — and it is only visible
-  by *subtracting two numbers printed by two different tools*, which is why it
-  survived a whole version. Five Poly Haven materials were separately skipped at
-  import for having no diffuse map; that one is understood and this one is not.
-- **The reporting is the actual defect, not the missing asset.** `assetc` and
-  `cdn::Publish` both report a count of what they handled, and a count cannot be
-  subtracted from another count to get a *name*. Every stage that drops
-  something drops it for a stated reason it already knows, and then throws the
-  reason away — so the cheap fix is not an investigation, it is making a refusal
-  name its subject at the point of refusal, the way `Report::DanglingTextures`
-  now names a texture rather than counting one.
-- **Why this is filed rather than chased.** One asset in 1974 is invisible in a
-  viewport and the store is otherwise correct, so the cost of the bug is bounded
-  by whatever that asset is. The cost of the *silence* is not bounded, and it is
-  the thing that will still be here when the store is ten times the size.
-- **Reopen trigger: whichever comes first of somebody missing a specific asset,
-  or the next change to either tool's reporting** — the second is when naming
-  the subject is nearly free, and doing it then costs a line rather than a pass.
+- v0.10's store re-baked to **1974 raw, 1973 baked**. The gap was real, was never
+  identified, and was only visible by *subtracting two numbers printed by two
+  different tools* — which is why it survived a whole version.
+- **Found, and it is not where this entry looked.** The entry assumed a baker
+  refusing something and throwing the reason away. It was neither the baker nor
+  the publisher: `cdn::ImportFile` accepted a **zero-byte file**. Found by
+  diffing the two folders by hash, which left exactly one — `af1349b9…`, BLAKE3's
+  empty-input digest — and then reading the content log, which named
+  `blender-dragon/.venv/.lock`: a Python virtualenv lock file swept along by the
+  folder import of a model.
+- **The diagnosis this entry made was right and the location was wrong, which is
+  worth keeping.** "The reporting is the actual defect, not the missing asset"
+  held exactly — but the missing report was three stages upstream of where it
+  was looked for. `cdn::Publish` *already* names what it skips, including an
+  empty file; the trouble is that by the time it says so the file has been in
+  `raw/` for good, and `raw/` is the folder the counts are taken from.
+- **Closed by refusing it where refusing is free.** `ImportFile` now rejects an
+  empty file and names it: it can never bake and never publish, so accepting one
+  is guaranteed to produce a store whose totals disagree. Nothing is written and
+  nothing is logged, because a refusal that still left the file behind would
+  move the silence rather than remove it.
+- **Not deleted from this repository's own store**, which still holds the
+  zero-byte file: that is somebody's content directory and not this change's to
+  edit. The counts there stay 1974/1973 until it is removed by hand.
+- Pinned by a case that imports an empty file, requires the refusal, and then
+  requires `raw/` and the log to be empty. Demonstrated by mutation.
 
 ### [_] D00033
 
@@ -207,7 +254,7 @@ and for deleted marked items;
 - **What it claimed:** that Luau *cannot* express a dotted type name for a global, that a definitions file's inability to declare one was the language's inability, and that the only way out was a generated `Enum.luau` module and a require-path resolver.
 - **The first half was right and the conclusion did not follow.** A definitions file genuinely cannot declare one: `loadDefinitionFile` writes `exportedTypeBindings[name]` and nothing else, and there is no `declare` syntax for a dotted name. The probe that produced "Unknown type 'Enum.Material'" was real.
 - **What was missed is where the resolution happens.** Luau parses `Enum.Material` in a type position as a reference with a *prefix*, and resolves it through `Scope::lookupImportedType("Enum", "Material")` — the `importedTypeBindings` map. `require` populates that map (`ConstraintGenerator.cpp:1512`), and so may a **host**. Roblox is not using definition-file syntax; it is registering that map. So is luau-lsp's Roblox platform.
-- **Closed by doing the same thing.** `mono.tools/scriptcheck` walks the `Enum_*` extern types the generator emitted and aliases each under the `Enum` prefix, before `freeze`. 35 enums, and `local m: Enum.Material` typechecks. The examples that carried `Enum_Material` in an annotation now carry `Enum.Material`.
+- **Closed by doing the same thing.** `mono.tools/scriptcheck` walks the extern types the generator emitted under the `Enum_` prefix and aliases each under the `Enum` prefix, before `freeze`. 35 enums, and `local m: Enum.Material` typechecks. The examples that carried `Enum_Material` in an annotation now carry `Enum.Material`.
 - **The declaration file still uses the flat names, and that is ordering rather than compromise.** The aliases are built *from* the types the file created, so they cannot exist while it is being loaded — emitting the dotted form there made the file fail to load before a single script was checked. Both spellings name the same `TypeFun`.
 - **What is still open is the editor, and it is filed as D00031** rather than left inside a closed entry.
 - **The lesson worth keeping: "the file cannot say it" is not "the language cannot do it".** The first probe answered the question that was asked and the wrong question was asked.

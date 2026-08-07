@@ -158,8 +158,8 @@ Anything else without a suite is a gap, not a convention. Prefer to separate by 
 but flat is OK.
 
 **Comment the decision, not the mechanics.** `// increment the counter` above
-`counter++` is noise. `// Cycling hands back a fresh allocation rather than
-stalling on the copy the previous frame may still be reading` is the reason
+`counter++` is noise.
+`// Cycling hands back a fresh allocation rather than stalling on the copy the previous frame may still be reading` is the reason
 somebody will need in six months. If a line looks wrong but is right, that is
 exactly the line that needs a comment. Be aggressive in keeping comments short
 where possible, no reason for five lines of code when it can be described in two.

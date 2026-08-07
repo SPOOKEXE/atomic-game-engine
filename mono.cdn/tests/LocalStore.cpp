@@ -492,3 +492,34 @@ TEST_CASE("an unresolvable texture is refused rather than guessed", "[cdn]") {
 	// is the index, and the log only ever labels.
 	CHECK_FALSE(resolve("deadbeef.pmx", "tex/skin.png", out));
 }
+
+TEST_CASE("an empty file is refused rather than stored", "[cdn]") {
+	const Scratch scratch("empty");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+
+	const std::filesystem::path source = WriteFile(scratch.Path / "incoming" / ".lock", "");
+
+	// **The whole of D00034 in one case.** An empty file hashes to BLAKE3's
+	// empty-input digest, writes a zero-byte `raw/` entry, and bakes to nothing
+	// — so the store's raw and baked counts differ by one for ever with no line
+	// anywhere naming it. This repository's own store carried exactly that for a
+	// version: a `.lock` from inside a Python virtualenv, swept along by a
+	// folder import of a model.
+	CHECK_FALSE(cdn::ImportFile(paths, source, 1000).has_value());
+
+	// **Nothing is left behind**, which is the half that matters. A refusal that
+	// still wrote the file would move the silence rather than remove it.
+	size_t stored = 0;
+	std::error_code failure;
+	for (const auto &entry : std::filesystem::directory_iterator(paths.Raw, failure)) {
+		if (entry.is_regular_file()) {
+			stored++;
+		}
+	}
+	CHECK(stored == 0);
+
+	// And it is not in the log either, so "where did this come from" cannot
+	// answer for a file that was never taken in.
+	const std::vector<cdn::LogEntry> log = cdn::ReadLog(paths);
+	CHECK(log.empty());
+}

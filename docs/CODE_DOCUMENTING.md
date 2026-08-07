@@ -297,8 +297,8 @@ into its own index page, so "what is client-only?" is a page rather than a grep.
 // @tier L12 · client
 ```
 
-This replaces the three spellings currently in the tree — `L3 ·`, `L12
-[client] ·`, `L1.` — with one that is also a link. The tier itself is enforced
+This replaces the three spellings currently in the tree — `L3 ·`,
+`L12 [client] ·`, `L1.` — with one that is also a link. The tier itself is enforced
 by `mono_check_all_tiers`; the tag is how it reaches the page.
 
 `@client` and `@server` carry their own sentence already, so they take no

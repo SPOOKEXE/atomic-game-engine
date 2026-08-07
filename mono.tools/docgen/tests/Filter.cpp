@@ -209,3 +209,68 @@ TEST_CASE("an empty file filters to an empty file", "[docgen]") {
 	REQUIRE(Promote("").empty());
 	REQUIRE(Promote("\n") == "\n");
 }
+
+TEST_CASE("a bold sentence's full stop moves outside the emphasis", "[docgen]") {
+	// **The whole bug, in one character.** `JAVADOC_AUTOBRIEF` ends the brief at
+	// the first sentence stop and does not care that the stop is inside
+	// emphasis — so `**Sentence.**` leaves the brief holding an unclosed `**`
+	// and the detail holding its stranded partner.
+	const std::string filtered = Promote("// **A failure here is a decision.** And then some.\n");
+	CHECK(Contains(filtered, "**A failure here is a decision**."));
+	CHECK_FALSE(Contains(filtered, "decision.**"));
+}
+
+TEST_CASE("emphasis spanning a line break is left spanning it", "[docgen]") {
+	// **This was the wrong suspect and the test says so.** Bold across a
+	// newline is fine; what broke was the stop inside it. Joining the lines
+	// would have been the obvious fix and would have broken the line count,
+	// which every source link on the generated page depends on.
+	const std::string source = "// **Twenty-eight and not thirty-two, which is worth pinning rather\n"
+							   "// than leaving to the compiler.** The arithmetic settles it.\n"
+							   "int Thing;\n";
+
+	const std::string filtered = Promote(source);
+	CHECK(Contains(filtered, "**Twenty-eight"));
+	CHECK(Contains(filtered, "than leaving to the compiler**."));
+	CHECK(LineCount(filtered) == LineCount(source));
+}
+
+TEST_CASE("a stop that is already outside is left alone", "[docgen]") {
+	const std::string filtered = Promote("// **Already correct**. And then some.\n");
+	CHECK(Contains(filtered, "**Already correct**. And then some."));
+}
+
+TEST_CASE("an unpaired marker leaves the block untouched", "[docgen]") {
+	// Shuffling punctuation across a boundary that is not emphasis at all would
+	// be a rewrite of prose nobody wrote.
+	const std::string filtered = Promote("// A **dangling marker with a stop.\n");
+	CHECK(Contains(filtered, "**dangling marker with a stop."));
+}
+
+TEST_CASE("markers inside a code span are code", "[docgen]") {
+	// `` `a ** b` `` is a quoted expression, and pairing across it would make
+	// the next real marker a closer.
+	const std::string filtered = Promote("// Consider `a ** b` and `c ** d` in prose.\n");
+	CHECK(Contains(filtered, "`a ** b`"));
+	CHECK(Contains(filtered, "`c ** d`"));
+}
+
+TEST_CASE("emphasis does not pair across two comment blocks", "[docgen]") {
+	// Two blocks are two comments, and a marker in one closing a marker in the
+	// other would be the same bleed the original bug had.
+	const std::string source = "// A **first thing.\n"
+							   "int One;\n"
+							   "\n"
+							   "// A **second thing.\n"
+							   "int Two;\n";
+
+	const std::string filtered = Promote(source);
+	CHECK(Contains(filtered, "**first thing."));
+	CHECK(Contains(filtered, "**second thing."));
+	CHECK(LineCount(filtered) == LineCount(source));
+}
+
+TEST_CASE("an ellipsis moves whole rather than one stop at a time", "[docgen]") {
+	const std::string filtered = Promote("// **A trailing thought...** And more.\n");
+	CHECK(Contains(filtered, "**A trailing thought**... And more."));
+}

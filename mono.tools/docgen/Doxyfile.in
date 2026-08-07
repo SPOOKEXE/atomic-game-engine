@@ -181,3 +181,14 @@ DOT_IMAGE_FORMAT       = svg
 INTERACTIVE_SVG        = YES
 INCLUDE_GRAPH          = NO
 INCLUDED_BY_GRAPH      = NO
+
+# Above the largest class in this repository rather than at Doxygen's default of
+# 50, which `studio::Editor` passes with 55 collaborators — and passing it draws
+# *no graph at all* and emits a warning, so the default turns the one class whose
+# relationships are hardest to hold in a head into the one class with no picture.
+#
+# It is a bound on how long `dot` may be asked to think, not on correctness, so
+# the honest setting is one above what is actually here. A class that reaches
+# this is a class to split, and the warning coming back is a reasonable way to
+# hear about it.
+DOT_GRAPH_MAX_NODES    = 64

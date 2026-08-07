@@ -180,6 +180,28 @@ namespace cdn {
 		// which is about sixty. That is a buffer, not a problem.
 		const std::vector<char> bytes{std::istreambuf_iterator<char>(file), {}};
 
+		// **An empty file is refused here rather than three stages later.**
+		// `Publish` already skips one — "cdn: skipped {} — empty" — but by then
+		// it is in `raw/` for good, hash-named `af1349b9…` after BLAKE3's
+		// empty-input digest, and it bakes to nothing. The result is a store
+		// whose raw and baked counts differ by one for ever, with no line
+		// anywhere naming the file: the only way to find it is to subtract two
+		// numbers printed by two different tools and then diff the two folders
+		// by hash. `DEFERRED.md` D00034 is that hunt written down.
+		//
+		// **Named, because a count cannot be subtracted from a count to get a
+		// name.** A folder import sweeps whatever is in the folder — the one
+		// this was found by was a `.lock` inside a Python virtualenv that came
+		// along with a model — so the message has to say which file, or it is
+		// the same silence one stage earlier.
+		if (bytes.empty()) {
+			ENGINE_WARN(
+				"content store: refused {} — empty, and an empty file can never bake or publish",
+				source.string()
+			);
+			return std::nullopt;
+		}
+
 		ImportReport report;
 		report.Bytes = bytes.size();
 		report.Hash = engine::assets::Hasher::Of(
