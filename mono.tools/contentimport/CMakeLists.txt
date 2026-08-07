@@ -8,8 +8,16 @@
 # tracks `mono_add_library` modules and `mono_add_program` programs, and a bare
 # `add_executable` is neither. So this link row is reviewed here and nowhere
 # else, which is an argument for keeping it short.
+#
+# **`Tool::assetc` is the row v0.10 added, and it is the composition rather than
+# a widening.** `--publish` bakes `raw/` into `baked/` and then publishes that,
+# because a raw tree published straight through hands a client bytes no runtime
+# reads. The baking cannot move into `Mono::cdn` — its short link row is the
+# whole point of that member and a baker is exactly the interpretation an origin
+# must not do — so it lives in the programs that can link both. This is one of
+# the two; `mono.studio` is the other.
 add_executable(contentimport app/main.cpp)
-target_link_libraries(contentimport PRIVATE Engine::core Mono::cdn)
+target_link_libraries(contentimport PRIVATE Engine::core Mono::cdn Tool::assetc)
 target_compile_options(contentimport PRIVATE ${MONO_COMPILE_OPTIONS})
 
 set_target_properties(contentimport PROPERTIES

@@ -152,6 +152,20 @@ namespace studio {
 			if (entry.Kind != kind) {
 				continue;
 			}
+
+			// **Source forms are not offered, because choosing one does
+			// nothing.** A `.pmx` and a `.amesh` are both `AssetKind::Mesh`, and
+			// only the second is something a runtime reads — so a picker
+			// listing both offered a choice that silently left the part looking
+			// exactly as it did. Until v0.10 the local store published `raw/`
+			// straight through, so *most* of this list was that.
+			//
+			// `assets::IsRuntimeReadable` is the one place the two halves of the
+			// extension table are told apart; a second opinion here would be a
+			// picker that disagreed with the loader about what works.
+			if (!engine::assets::IsRuntimeReadable(entry.Name)) {
+				continue;
+			}
 			int score = 0;
 			if (!FuzzyMatch(PickerFilter, entry.Name, score)) {
 				continue;

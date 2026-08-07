@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <chrono>
 #include <client/Client.hpp>
+#include <client/ContentDemand.hpp>
 #include <client/Replicated.hpp>
 #include <fstream>
 #include <thread>
@@ -305,14 +306,19 @@ namespace client {
 			ContentRequested = true;
 
 			// Request by kind because the catalogue owns the asset list.
-			// **`Material` is in the list and it is small.** A `.amat` is a magic,
-			// a version and one name — a few dozen bytes — so asking for every
-			// one costs nothing beside the sheets they reference, and a material
-			// that arrived after the part naming it would leave that part drawing
-			// the default until something else changed.
+			// **Textures are not in this list, and that is the whole of what
+			// v0.10 changed here.** Asking for every texture in the catalogue
+			// spent `render::TextureTable::MAXIMUM_BYTES` in manifest order and
+			// refused the rest, so on a store of 1,637 sheets the ones a scene
+			// actually named were usually among the refused —
+			// `client/ContentDemand.hpp` carries how that looked and why.
+			//
+			// **`Material` is in it and it is small.** A `.amat` is a magic, a
+			// version and one name, and a material has to arrive before anything
+			// can know which texture it names — a demand pass waiting for
+			// materials to be demanded would wait on itself.
 			for (const engine::assets::AssetKind kind :
 				 {engine::assets::AssetKind::Mesh,
-				  engine::assets::AssetKind::Texture,
 				  engine::assets::AssetKind::Material,
 				  engine::assets::AssetKind::Audio}) {
 				const std::vector<engine::delivery::RequestId> issued = Content->RequestKind(kind);
@@ -320,8 +326,18 @@ namespace client {
 			}
 
 			ENGINE_INFO(
-				"content: asked for {} mesh, texture, material and audio asset(s)", ContentPending.size()
+				"content: asked for {} mesh, material and audio asset(s); textures on demand",
+				ContentPending.size()
 			);
+		}
+
+		// **Every pump, and it is a diff rather than a walk of the catalogue.**
+		// A world's texture names change when a scene is authored, loaded or
+		// replicated, none of which this can observe cheaply — so the names are
+		// collected and everything already asked for is dropped. What survives is
+		// almost always nothing.
+		if (ContentRequested) {
+			RequestWantedTextures();
 		}
 
 		// Apply completions between frames, outside render passes.
@@ -355,6 +371,17 @@ namespace client {
 					ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
 					continue;
 				}
+				// **A mesh's own sheets, asked for at the one point their names
+				// are readable.** `Submesh::Texture` lives in the mesh file, so
+				// `CollectWantedTextures` cannot see it — an imported model's
+				// twenty sheets would otherwise never be fetched at all now that
+				// textures are demand-driven.
+				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
+					if (!submesh.Texture.empty()) {
+						RequestTexture(engine::core::Name(submesh.Texture));
+					}
+				}
+
 				if (Renderer.AddMesh(name, mesh)) {
 					ContentMeshes++;
 
@@ -421,6 +448,19 @@ namespace client {
 				// part, in `shared`, so a headless server resolves the same
 				// materials the client does.
 				const engine::core::Name colour(material.ColourMap);
+
+				// **Deliberately not asked for here**, unlike a mesh's sheets, and
+				// the asymmetry is the point. Every material in the catalogue
+				// arrives whether anything uses it or not — 295 of them on this
+				// store — so fetching each one's sheet on arrival is requesting
+				// every texture by kind again, one indirection later, and it
+				// refuses 160 of them exactly as before.
+				//
+				// A material reaches a *part* through `ResolveMaterials`, which
+				// writes this name into that part's `SurfaceAppearance::ColourMap`
+				// — and that is a field `CollectWantedTextures` already reads. So
+				// the demand path needs no special case: the next pump asks for
+				// the sheets of the materials something is actually made of.
 				for (const engine::world::WorldId id : Simulated) {
 					Universe_->Enter(id, [&name, &colour](engine::ecs::Store &store) {
 						engine::scene::RecordMaterial(store, name, colour);
@@ -464,6 +504,10 @@ namespace client {
 		}
 		ContentPending.resize(kept);
 
+		// Appended after the walk, never during it. See `RequestTexture`.
+		ContentPending.insert(ContentPending.end(), ContentIssued.begin(), ContentIssued.end());
+		ContentIssued.clear();
+
 		if (ContentRequested && ContentPending.empty() && !ContentReported) {
 			ContentReported = true;
 			ENGINE_INFO(
@@ -474,6 +518,42 @@ namespace client {
 				ContentSounds
 			);
 		}
+	}
+
+	void Client::RequestWantedTextures() {
+		std::vector<engine::core::Name> wanted;
+		for (const engine::world::WorldId id : Simulated) {
+			Universe_->Enter(id, [&wanted](engine::ecs::Store &store) {
+				CollectWantedTextures(store, wanted);
+			});
+		}
+		if (ReportedJoin) {
+			Universe_->Enter(Replicated, [&wanted](engine::ecs::Store &store) {
+				CollectWantedTextures(store, wanted);
+			});
+		}
+
+		for (const engine::core::Name &name : wanted) {
+			RequestTexture(name);
+		}
+	}
+
+	void Client::RequestTexture(const engine::core::Name &texture) {
+		// **Asked once and never again, whatever happened to it.** A name that
+		// failed — not in the manifest, refused by the table — must not be
+		// retried, or a scene naming one misspelled texture issues a request per
+		// pump for the life of the process.
+		if (!Content || !texture.IsValid() || !ContentAsked.insert(texture.Id()).second) {
+			return;
+		}
+
+		// **Queued rather than appended, because this is called from inside the
+		// walk over `ContentPending`.** A mesh names its own sheets and a
+		// material names its colour map, and both are read while draining that
+		// vector — pushing to it there is a range-for over a container being
+		// grown, which is what it looks like: the walk lost its place and one
+		// texture out of the several hundred asked for arrived.
+		ContentIssued.push_back(Content->Request(texture.Text()));
 	}
 
 	void Client::PumpSounds() {
@@ -1311,6 +1391,23 @@ namespace client {
 		// the `ScreenGui` this walks is the same storage a system iterates —
 		// there is no second tree to keep in step, which is what makes one
 		// `Layout` pass over the store the whole of it.
+		// **The image resolver, set once and never unset.** `InterfacePass` takes
+		// a hook rather than a texture table because `render` has no business
+		// resolving a game's content names — `gui::DrawCommand::Image` is a name
+		// precisely so that whoever owns the textures decides. Nothing supplied
+		// one, so every `ImageLabel` in the engine drew the atlas's white texel
+		// and read as a missing image whatever had loaded. The seam was right and
+		// one end of it was never connected.
+		//
+		// Set here rather than at start-up because the renderer's table is what
+		// answers, and a lambda capturing `this` outlives the frame it is set in.
+		if (!InterfaceImagesReady) {
+			InterfaceImagesReady = true;
+			Interface.SetImageSource([this](const engine::core::Name &name) -> void * {
+				return Renderer.TextureHandle(name);
+			});
+		}
+
 		engine::render::InterfacePass *hook = nullptr;
 		if (Rendered.IsValid()) {
 			engine::gui::CompileRequest request;

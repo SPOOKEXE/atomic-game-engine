@@ -179,6 +179,23 @@ int main(int argc, char **argv) {
 	}
 	if (auto key = arguments.Get("publisher-key")) {
 		options.ContentPublisherKey = std::string(*key);
+	} else if (options.ContentSources.size() == 1 &&
+			   options.ContentSources.front() == "dir:" + cdn::DefaultLocalPaths().Processed.string()) {
+		// **The development key, and only for the store on this machine.** A
+		// client with no `--publisher-key` refused to start at all, which is
+		// right for an origin across a network and was pure friction for the
+		// well-known local folder: the same sixty-four characters had to be
+		// typed for `--publish` and again here, and getting one wrong produced a
+		// client that refused every asset with no hint which half was wrong.
+		//
+		// **The condition is the whole safety of it.** This fires only when
+		// nobody named a source *and* the only source is the default local
+		// store's own directory. Naming any origin — `--cdn`, a remote, even
+		// another directory — leaves the key required, because a key that
+		// everybody knows is not a trust boundary and must never become one for
+		// content somebody else served. `cdn::DevelopmentSigningKey` carries the
+		// same argument from the publishing end.
+		options.ContentPublisherKey = cdn::DevelopmentPublisher().ToHex();
 	}
 
 	if (auto tab = arguments.Get("profiler-tab")) {

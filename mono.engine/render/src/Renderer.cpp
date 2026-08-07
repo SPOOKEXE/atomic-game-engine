@@ -2555,6 +2555,13 @@ namespace engine::render {
 		return State->Textures.Find(name);
 	}
 
+	bool Renderer::TextureSize(const core::Name &name, uint32_t &width, uint32_t &height) const {
+		if (State == nullptr) {
+			return false;
+		}
+		return State->Textures.SizeOf(name, width, height);
+	}
+
 	bool Renderer::DropTexture(const core::Name &name) {
 		if (State == nullptr) {
 			return false;

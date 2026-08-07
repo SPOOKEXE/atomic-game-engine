@@ -532,6 +532,21 @@ namespace engine::render {
 		// @since v0.10
 		void *TextureHandle(const core::Name &name) const;
 
+		// How big a registered texture is, in source pixels.
+		//
+		// **Handed out with the handle, because an interface painter needs
+		// both.** A nine-sliced or tiled `ImageLabel` is laid out in source
+		// pixels — its slice insets are in them — so a resolver returning a
+		// handle alone makes every slice the wrong size, which reads as a
+		// corrupt image rather than as a missing measurement.
+		//
+		// @param name   The name.
+		// @param width  Set to the width, or left alone when the name is absent.
+		// @param height Set to the height, likewise.
+		// @return `false` for a texture this renderer does not hold.
+		// @since v0.10
+		bool TextureSize(const core::Name &name, uint32_t &width, uint32_t &height) const;
+
 		// Forgets a registered texture and frees it.
 		//
 		// **Because a thumbnail cache has to have a ceiling.** Every other

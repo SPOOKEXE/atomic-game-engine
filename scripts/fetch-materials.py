@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """Downloads public-domain PBR materials into a tree `assetc` can bake.
 
-**A script rather than a tool, and it stops at the staging tree.** What this
-produces is *source art* — PNGs and a `.mat` beside them — which is exactly what
-`assetc --input` takes. It does not write into the content store, does not bake
-and does not publish, because each of those already has one implementation and a
-downloader that grew a second would be the format-dialect mistake `AGENTS.md`
-names. The three steps in order:
+**A script rather than a tool, and it stops at the source art.** What this
+produces is PNGs and a `.mat` beside them, written into the content store's
+`raw/` — which is what `raw/` is for, and what `contentimport --publish` bakes.
+It does not bake and does not publish, because each of those already has one
+implementation and a downloader that grew a second would be the format-dialect
+mistake `AGENTS.md` names. Two steps:
 
-    scripts/fetch-materials.py --out .cache/materials
-    assetc --input .cache/materials --output ~/Documents/atomic-game-engine/cdn/raw
-    contentimport --publish --key HEX          # or the studio's Publish button
+    scripts/fetch-materials.py --out ~/Documents/atomic-game-engine/cdn/raw
+    contentimport --publish
 
-`just materials` is those first two with the paths filled in.
+`just materials` is both, with the paths filled in.
 
 ## The three sources
 
@@ -359,7 +358,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         default=".cache/materials",
-        help="Staging tree to write. This is assetc's --input, not the content store.",
+        help="Where the source art goes. The content store's raw/ is the useful answer.",
     )
     parser.add_argument("--count", type=int, default=100, help="How many materials per source")
     parser.add_argument("--resolution", default="1K", choices=["1K", "2K", "4K"])
@@ -397,7 +396,7 @@ def main() -> int:
         f"\n{total_done} material(s) written, {total_skipped} already present, "
         f"{total_bytes / 1_000_000_000:.2f} GB into {root}"
     )
-    log("next: assetc --input " + str(root) + " --output ~/Documents/atomic-game-engine/cdn/raw")
+    log("next: contentimport --publish")
     return 0
 
 

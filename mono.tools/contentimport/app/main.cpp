@@ -19,6 +19,7 @@
 #include <engine/core/Log.hpp>
 
 #include <array>
+#include <assetc/Bake.hpp>
 #include <cdn/LocalStore.hpp>
 #include <chrono>
 #include <cstdio>
@@ -112,7 +113,7 @@ int main(int argc, char **argv) {
 
 	arguments.Value("root", "PATH", "The store. Defaults to ~/Documents/atomic-game-engine/cdn");
 	arguments.Flag("publish", "Publish raw/ into processed/ once the imports are done");
-	arguments.Value("key", "HEX", "64 hex characters of Ed25519 seed. Needed by --publish");
+	arguments.Value("key", "HEX", "64 hex characters of Ed25519 seed. Defaults to the development key");
 
 	const engine::core::Arguments::Result parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -167,19 +168,48 @@ int main(int argc, char **argv) {
 		return failures == 0 ? 0 : 1;
 	}
 
-	// **The key is asked for rather than invented.** A publish signs a manifest,
-	// and a tool that generated its own key would produce a store no client
-	// trusts and no message saying why.
-	const auto hex = arguments.Get("key");
-	if (!hex.has_value()) {
-		ENGINE_ERROR("--publish needs --key: a manifest nobody signed is one no client will take");
-		return 2;
-	}
+	// **Baked before published, which is the step that was missing.** `raw/`
+	// holds what somebody dragged in and a runtime decodes none of it —
+	// `cdn/LocalStore.hpp` carries how long that went unnoticed and what it
+	// looked like. `assetc::Bake` is the one baker; this supplies it the two
+	// paths and nothing else, so a tree baked here and a tree baked by
+	// `assetc --input` are the same tree.
+	assetc::Settings baking;
+	baking.Input = paths.Raw;
+	baking.Output = paths.Baked;
 
-	const auto signing = SeedFromHex(*hex);
-	if (!signing.has_value()) {
-		ENGINE_ERROR("--key must be 64 lowercase hex characters");
-		return 2;
+	// **Models are left at the scale they were authored**, unlike `assetc`'s own
+	// default of four metres. That default exists for a person pointing the
+	// baker at an art folder and wanting a scene to be usable; this is a store
+	// being re-baked, where silently rescaling everything somebody already
+	// placed would move their world.
+	baking.ModelSize = 0.0f;
+
+	std::string bakeFailure;
+	const assetc::Report baked = assetc::Bake(baking, bakeFailure);
+	if (!bakeFailure.empty()) {
+		ENGINE_ERROR("bake: {}", bakeFailure);
+		return 1;
+	}
+	ENGINE_INFO(
+		"baked {} asset(s), {} failed — {} bytes out", baked.Assets.size(), baked.Failures, baked.OutputBytes
+	);
+
+	// **The development identity when nobody says otherwise.** A store on this
+	// machine, serving this machine's editor, had a key only so that the same
+	// sixty-four characters could be mistyped in three places —
+	// `cdn::DevelopmentSigningKey` carries what that costs and where it stops.
+	// `--key` still overrides it, and `cdn --publish` still requires one.
+	std::optional<engine::assets::SigningKey> signing;
+	if (const auto hex = arguments.Get("key")) {
+		signing = SeedFromHex(*hex);
+		if (!signing.has_value()) {
+			ENGINE_ERROR("--key must be 64 lowercase hex characters");
+			return 2;
+		}
+	} else {
+		signing = cdn::DevelopmentSigningKey();
+		ENGINE_INFO("publishing with the development key — pass --key for an identity of your own");
 	}
 
 	const auto published = cdn::PublishLocal(paths, *signing, now);

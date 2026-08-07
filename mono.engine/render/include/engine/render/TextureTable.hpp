@@ -88,6 +88,15 @@ namespace engine::render {
 			return DefaultHandle;
 		}
 
+		// How big a registered texture is, in source pixels.
+		//
+		// @param name   The name.
+		// @param width  Set to the width, or left alone when the name is absent.
+		// @param height Set to the height, likewise.
+		// @return `false` for a name this table does not hold.
+		// @since v0.10
+		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height) const;
+
 		// The shared sampler.
 		SDL_GPUSampler *Sampler() const {
 			return SharedSampler;
@@ -128,6 +137,14 @@ namespace engine::render {
 		struct Entry {
 			SDL_GPUTexture *Texture = nullptr;
 			size_t Bytes = 0;
+
+			// **What was uploaded, because a caller cannot ask the device.** A
+			// nine-sliced or tiled `ImageLabel` is laid out in *source* pixels —
+			// `gui::DrawCommand`'s slice insets are in them — so a painter
+			// resolving a name to a handle needs the dimensions with it or it
+			// draws every slice at the wrong scale.
+			uint32_t Width = 0;
+			uint32_t Height = 0;
 		};
 
 		// Creates one device texture and fills it, widening `R8` on the way.

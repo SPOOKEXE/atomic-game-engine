@@ -64,6 +64,30 @@ namespace engine::assets {
 	// @return The kind, or `Unknown` for anything else.
 	AssetKind KindFromName(std::string_view text);
 
+	// Whether a runtime can read this name's bytes as they are.
+	//
+	// **The extension table holds both sides of every format and this is the
+	// question it cannot answer.** `.pmx` and `.amesh` are both `Mesh`; `.png`
+	// and `.atex` are both `Texture` — which is right for *routing*, because a
+	// publisher pointed at a source tree and one pointed at a baked tree must
+	// classify the same way. It is wrong for anything asking "will this load",
+	// and until v0.10 nothing asked: the local store published `raw/` directly,
+	// so every content picker in the editor offered PNGs and PMX files that
+	// could never draw, and choosing one produced a part that silently kept its
+	// old appearance.
+	//
+	// **A source is not "unreadable", it is unbaked**, and the two look the same
+	// from here. What this answers is whether `assetc` has already been over it.
+	//
+	// Formats with no baked form of their own — audio, scripts, fonts, data —
+	// are readable as they are, which is why this is not simply a list of three
+	// extensions.
+	//
+	// @param name The content name, as the manifest holds it.
+	// @return `false` for a source form a baker still has to convert.
+	// @since v0.10
+	bool IsRuntimeReadable(std::string_view name);
+
 	// Derives a kind from a name's extension at publish time.
 	//
 	// @param name The content name, as the manifest holds it.

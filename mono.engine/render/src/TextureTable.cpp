@@ -167,9 +167,13 @@ namespace engine::render {
 			// replaced textures drifted up until the ceiling refused an upload
 			// that would have fit.
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
-			existing->second = Entry{.Texture = texture, .Bytes = uploadBytes};
+			existing->second =
+				Entry{.Texture = texture, .Bytes = uploadBytes, .Width = image.Width, .Height = image.Height};
 		} else {
-			Textures.emplace(name.Id(), Entry{.Texture = texture, .Bytes = uploadBytes});
+			Textures.emplace(
+				name.Id(),
+				Entry{.Texture = texture, .Bytes = uploadBytes, .Width = image.Width, .Height = image.Height}
+			);
 		}
 
 		UploadedBytes += uploadBytes;
@@ -182,6 +186,19 @@ namespace engine::render {
 		}
 		const auto found = Textures.find(name.Id());
 		return found == Textures.end() ? nullptr : found->second.Texture;
+	}
+
+	bool TextureTable::SizeOf(const core::Name &name, uint32_t &width, uint32_t &height) const {
+		if (!name.IsValid()) {
+			return false;
+		}
+		const auto found = Textures.find(name.Id());
+		if (found == Textures.end()) {
+			return false;
+		}
+		width = found->second.Width;
+		height = found->second.Height;
+		return true;
 	}
 
 	bool TextureTable::Drop(const core::Name &name) {

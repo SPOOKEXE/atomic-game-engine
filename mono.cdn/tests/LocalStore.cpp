@@ -176,12 +176,21 @@ TEST_CASE("a truncated log line is skipped rather than refusing the file", "[cdn
 	REQUIRE(entries[1].Subject == "/art/fox.png");
 }
 
-TEST_CASE("publishing the raw folder fills the processed one", "[cdn]") {
+TEST_CASE("publishing the baked folder fills the processed one", "[cdn]") {
 	const Scratch scratch("publish");
 	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
 
 	REQUIRE(cdn::ImportFile(paths, WriteFile(scratch.Path / "in" / "a.txt", "alpha"), 1).has_value());
 	REQUIRE(cdn::ImportFile(paths, WriteFile(scratch.Path / "in" / "b.txt", "beta"), 2).has_value());
+
+	// **`baked/` is what gets published, and nothing here fills it.** A baker is
+	// `Engine::bake`'s decoders and this module must not link one — `AGENTS.md`
+	// — so the suite plays the part `contentimport` and the studio play, which
+	// is to put the runtime forms there. Copying is enough: what is *in* them is
+	// the baker's problem and not this module's.
+	REQUIRE(cdn::EnsureLocalStore(paths));
+	WriteFile(paths.Baked / "a.txt", "alpha");
+	WriteFile(paths.Baked / "b.txt", "beta");
 
 	// **The key is the caller's**, because a store on disk has no business
 	// holding one — a key beside the content it signs is a key that signs
@@ -284,6 +293,41 @@ TEST_CASE("a tree under raw is listed and labelled by its path", "[cdn]") {
 	CHECK(names[1] == "materials/ambientcg/Bricks075A_Color.atex");
 }
 
+TEST_CASE("publishing an unbaked store is refused rather than emptied", "[cdn]") {
+	// **The state every existing store is in the first time this runs**, and the
+	// one that must not silently succeed: `baked/` is empty, `raw/` is full, and
+	// writing an empty manifest over a working one reads as a store somebody
+	// deleted rather than as a step nobody ran.
+	const Scratch scratch("unbaked");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+	REQUIRE(cdn::ImportFile(paths, WriteFile(scratch.Path / "in" / "a.png", "pixels"), 1).has_value());
+
+	CHECK_FALSE(cdn::PublishLocal(paths, cdn::DevelopmentSigningKey(), 2).has_value());
+
+	// **A wholly empty store is refused too, and by something else.** The guard
+	// above only fires when `raw/` has content; a store with neither is stopped
+	// one layer down by `cdn::Publish`, which refuses a publication with nothing
+	// in it — `AGENTS.md`: "a null publish is refused", because an origin with
+	// nothing to serve should refuse requests rather than serve nothing. Checked
+	// here so the two refusals are not confused for one.
+	const Scratch fresh("unbaked-empty");
+	const cdn::LocalPaths empty = cdn::LocalPathsUnder(fresh.Path);
+	REQUIRE(cdn::EnsureLocalStore(empty));
+	CHECK_FALSE(cdn::PublishLocal(empty, cdn::DevelopmentSigningKey(), 3).has_value());
+}
+
+TEST_CASE("the development identity is one constant everything agrees on", "[cdn]") {
+	// **Stable across calls and across processes**, which is the whole of what it
+	// buys: `contentimport --publish` signs with it and a client with no
+	// `--publisher-key` trusts it, and neither has to be told the other's half.
+	CHECK(cdn::DevelopmentSigningKey().Public().ToHex() == cdn::DevelopmentPublisher().ToHex());
+	CHECK(cdn::DevelopmentPublisher().ToHex() == cdn::DevelopmentPublisher().ToHex());
+
+	// Not zero, which is what a key that failed to build would read as.
+	CHECK(cdn::DevelopmentPublisher().ToHex().size() == 64);
+	CHECK(cdn::DevelopmentPublisher().ToHex() != std::string(64, '0'));
+}
+
 TEST_CASE("a store with nothing in it lists nothing rather than failing", "[cdn]") {
 	const Scratch scratch("rawempty");
 	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
@@ -302,11 +346,11 @@ TEST_CASE("the published listing gives the names and kinds a scene writes", "[cd
 	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
 	REQUIRE(cdn::EnsureLocalStore(paths));
 
-	// Written straight into `raw/` under names a publisher can classify, which
-	// is what `ImportFile` produces once `assetc` has baked a tree.
-	WriteFile(paths.Raw / "rock.mesh", "vertices");
-	WriteFile(paths.Raw / "grass.atex", "texels");
-	WriteFile(paths.Raw / "step.wav", "samples");
+	// Written into `baked/` under names a publisher can classify, which is what
+	// `assetc` leaves there.
+	WriteFile(paths.Baked / "rock.mesh", "vertices");
+	WriteFile(paths.Baked / "grass.atex", "texels");
+	WriteFile(paths.Baked / "step.wav", "samples");
 
 	std::array<std::byte, 32> seed{};
 	seed.fill(std::byte{9});

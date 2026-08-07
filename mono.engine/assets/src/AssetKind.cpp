@@ -73,6 +73,55 @@ namespace engine::assets {
 		return "unknown";
 	}
 
+	bool IsRuntimeReadable(std::string_view name) {
+		// **The source forms, listed rather than the baked ones.** There are
+		// three baked extensions today and fourteen sources, but the list that
+		// must not go stale is this one: a format added to the extension table
+		// without a row here would be offered as loadable and would not load,
+		// which is the failure this function exists to end. A baked form added
+		// without a row here is simply offered, which is correct.
+		static constexpr std::string_view SOURCES[] = {
+			// Models, all of which bake to `.amesh`.
+			"glb",
+			"gltf",
+			"obj",
+			"fbx",
+			"pmx",
+
+			// Images, all of which bake to `.atex`. `.gif` is here and its
+			// baked form is an ordinary flipbook sheet — `bake/Gif.cpp`.
+			"png",
+			"jpg",
+			"jpeg",
+			"bmp",
+			"gif",
+			"tga",
+
+			// Material descriptions, which bake to `.amat`.
+			"mat",
+			"surface",
+		};
+
+		const size_t dot = name.find_last_of('.');
+		if (dot == std::string_view::npos || dot + 1 >= name.size()) {
+			// No extension at all. Not a source this baker knows, so it is
+			// whatever it is — the same answer `KindOfName` gives it.
+			return true;
+		}
+
+		std::string extension(name.substr(dot + 1));
+		std::transform(extension.begin(), extension.end(), extension.begin(), [](char value) {
+			return (value >= 'A' && value <= 'Z') ? static_cast<char>(value - 'A' + 'a') : value;
+		});
+
+		for (const std::string_view source : SOURCES) {
+			if (extension == source) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	AssetKind KindFromName(std::string_view text) {
 		for (uint8_t value = 1; value <= static_cast<uint8_t>(AssetKind::Data); ++value) {
 			const auto kind = static_cast<AssetKind>(value);

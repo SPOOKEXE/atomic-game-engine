@@ -324,19 +324,18 @@ host *args: (build "server")
 
 # Public-domain PBR materials, downloaded and baked into the local content store.
 #
-# Two steps, because each already has one implementation: the script fetches into
-# a staging tree and `assetc` bakes that tree into `raw/`. Publishing is the third
-# and is deliberately not here — it needs a signing key, and a recipe that held
-# one would put it in the repository. Publish from the studio's assets panel, or:
-#
-#   contentimport --publish --key HEX
+# Two steps: the script writes source art into the store's `raw/`, and
+# `contentimport --publish` bakes `raw/` into `baked/` and publishes that. It
+# signs with `cdn::DevelopmentSigningKey` unless `--key` says otherwise, which is
+# why no key appears here — see `cdn/LocalStore.hpp` for what that identity is
+# and is not for.
 #
 # `just materials count=25` for a smaller pull. Re-running is cheap: the fetcher
-# skips what is already on disk and `assetc` is deterministic.
-materials count="100": (build "assetc")
-    python3 scripts/fetch-materials.py --out .cache/materials --count {{count}}
-    ./{{build}}/tools/assetc --input .cache/materials \
-        --output ~/Documents/atomic-game-engine/cdn/raw --model-size 0 --quiet
+# skips what is already on disk and the baker is deterministic.
+materials count="100": (build "contentimport")
+    python3 scripts/fetch-materials.py \
+        --out ~/Documents/atomic-game-engine/cdn/raw --count {{count}}
+    ./{{build}}/tools/contentimport --publish
 
 # Run the content origin. `just serve --root ./content` passes flags through.
 serve *args: (build "cdn")

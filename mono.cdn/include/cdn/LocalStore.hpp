@@ -13,8 +13,27 @@
 //
 // - **`raw/`** — what a person put in. A `.png`, a `.gltf`, a `.wav`, under its
 //   own name. This is the half a human reads and drags files into.
+// - **`baked/`** — the same content in the formats a runtime reads: `.atex`,
+//   `.amesh`, `.amat`. What a publisher publishes.
 // - **`processed/`** — what the engine reads: chunks, groups, a manifest.
 //   Content-addressed, so a name here is a hash and nothing else.
+//
+// **`baked/` arrived at v0.10 and its absence was a four-version bug, not a
+// simplification.** `PublishLocal` published `raw/` directly, so every PNG
+// somebody imported through the assets panel reached a client as a PNG — and
+// `assets::Texture::Read` refuses one, because `Texture.hpp`'s whole argument is
+// that a runtime does not decode. The symptom was that nothing worked and
+// nothing said why: an `ImageLabel` drew its missing-image marker, a part's
+// `ColorMap` did nothing at all, and a `MeshPart` drew the fallback cube. This
+// store held 231 PNGs, 12 BMPs, 6 PMX models and a GLB, and the engine could
+// read none of them.
+//
+// **Nothing here bakes, and that is deliberate.** `mono.cdn`'s link row is the
+// point of this member — `AGENTS.md` — and a baker is `Engine::bake`'s image and
+// model decoders, which is exactly the interpretation an origin must not do. So
+// this module owns the *path* and publishes whatever is in it; filling it is the
+// job of something that already links a baker, which today is `contentimport`
+// and the studio. Two callers, and both go through `assetc::Bake`.
 //
 // **The split is not tidiness, it is that the two have different identities.** A
 // raw file is identified by what somebody called it and changes when they edit
@@ -48,6 +67,7 @@
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/Signature.hpp>
 
 #include <cdn/Publisher.hpp>
 #include <cstdint>
@@ -68,6 +88,11 @@ namespace cdn {
 
 		// What a person put in.
 		std::filesystem::path Raw;
+
+		// The same content in the formats a runtime reads. What gets published.
+		//
+		// @since v0.10
+		std::filesystem::path Baked;
 
 		// What the engine reads.
 		std::filesystem::path Processed;
@@ -204,7 +229,17 @@ namespace cdn {
 	std::optional<ImportReport>
 	ImportFile(const LocalPaths &paths, const std::filesystem::path &source, uint64_t seconds);
 
-	// Publishes everything in `raw/` into `processed/`.
+	// Publishes everything in `baked/` into `processed/`.
+	//
+	// **`baked/` and not `raw/`, which is the correction v0.10 made.** A raw
+	// tree published straight through hands a client bytes no runtime reads —
+	// see the header. Whatever filled `baked/` decides what is in it; this
+	// publishes a directory it did not create.
+	//
+	// **An empty `baked/` beside a full `raw/` is refused rather than published
+	// as nothing.** That is the exact state a store is in the first time this
+	// runs after the upgrade, and publishing an empty manifest over a working
+	// one would look like the store had been emptied.
 	//
 	// A thin wrapper over `cdn::Publish` that supplies the two paths and writes
 	// the log line. **The signing key is the caller's**, because a store on disk
@@ -244,6 +279,33 @@ namespace cdn {
 		// What it weighs.
 		uint64_t Bytes = 0;
 	};
+
+	// The signing identity a local store uses when nobody supplies one.
+	//
+	// **A constant, in the source, and it is not a secret — that is the point.**
+	// A signature answers "did the publisher I trust produce this", and for a
+	// store on somebody's own disk, serving their own editor, the answer is
+	// always yes and the key was pure friction: `assetc`, `cdn --publish` and
+	// `client --publisher-key` all wanted the same sixty-four characters typed
+	// again, and getting one wrong produced a client that refused every asset.
+	//
+	// **What it costs is real and is bounded by where it is used.** Anything
+	// signed with this is trusted by anything that trusts this, so it is a
+	// development identity for the well-known local store and nothing else. A
+	// deployment supplies its own with `--signing-key` and `--publisher-key`,
+	// which still work exactly as they did, and `cdn --publish` still *requires*
+	// one — an origin serving other machines must not have a default identity
+	// that everybody knows.
+	//
+	// @return The seed. Its public half is `DevelopmentPublisher()`.
+	// @since v0.10
+	engine::assets::SigningKey DevelopmentSigningKey();
+
+	// The public half of `DevelopmentSigningKey`, for a client to trust.
+	//
+	// @return The key.
+	// @since v0.10
+	engine::assets::PublicKey DevelopmentPublisher();
 
 	// What is actually in `raw/`, newest first.
 	//

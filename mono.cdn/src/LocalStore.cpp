@@ -41,6 +41,26 @@ namespace cdn {
 		constexpr char FIELD = '\t';
 	}
 
+	namespace {
+		// Whether a directory holds no regular file, at any depth.
+		//
+		// **Missing counts as empty**, because the caller's question is "is there
+		// anything to publish" and a store that has never been baked has no
+		// folder rather than an empty one.
+		bool IsEmptyDirectory(const std::filesystem::path &path) {
+			std::error_code failure;
+			for (const auto &entry : std::filesystem::recursive_directory_iterator(path, failure)) {
+				if (failure) {
+					break;
+				}
+				if (entry.is_regular_file(failure)) {
+					return false;
+				}
+			}
+			return true;
+		}
+	}
+
 	LocalPaths DefaultLocalPaths() {
 		return LocalPathsUnder(HomeDirectory() / "Documents" / "atomic-game-engine" / "cdn");
 	}
@@ -49,6 +69,7 @@ namespace cdn {
 		LocalPaths paths;
 		paths.Root = root;
 		paths.Raw = root / "raw";
+		paths.Baked = root / "baked";
 		paths.Processed = root / "processed";
 		paths.Log = root / "content.log";
 		return paths;
@@ -63,6 +84,12 @@ namespace cdn {
 		std::filesystem::create_directories(paths.Raw, failure);
 		if (failure) {
 			ENGINE_ERROR("content store: could not create {}: {}", paths.Raw.string(), failure.message());
+			return false;
+		}
+
+		std::filesystem::create_directories(paths.Baked, failure);
+		if (failure) {
+			ENGINE_ERROR("content store: could not create {}: {}", paths.Baked.string(), failure.message());
 			return false;
 		}
 
@@ -207,7 +234,19 @@ namespace cdn {
 			return std::nullopt;
 		}
 
-		const std::optional<PublishReport> report = Publish(paths.Raw, paths.Processed, signing, settings);
+		// **Refused rather than published as nothing.** This is exactly the
+		// state a store is in the first time it is published after `baked/`
+		// existed, and an empty manifest written over a working one reads as a
+		// store somebody emptied. Whatever fills `baked/` has not run.
+		if (IsEmptyDirectory(paths.Baked) && !IsEmptyDirectory(paths.Raw)) {
+			ENGINE_ERROR(
+				"content store: {} is empty and {} is not", paths.Baked.string(), paths.Raw.string()
+			);
+			ENGINE_ERROR("bake before publishing — `contentimport --publish` and the studio both do");
+			return std::nullopt;
+		}
+
+		const std::optional<PublishReport> report = Publish(paths.Baked, paths.Processed, signing, settings);
 		if (!report.has_value()) {
 			return std::nullopt;
 		}
@@ -221,6 +260,33 @@ namespace cdn {
 		(void)AppendLog(paths, entry);
 
 		return report;
+	}
+
+	engine::assets::SigningKey DevelopmentSigningKey() {
+		// **Spelled out rather than derived, so it is greppable and stable.**
+		// A seed computed from a string would be a second thing to reimplement
+		// the day another tool needs the same identity, and this is a constant
+		// whose whole value is that everything agrees on it. `LocalStore.hpp`
+		// carries what it is and is not for.
+		constexpr std::array<uint8_t, engine::assets::SigningKey::SEED_BYTES> SEED{
+			0xa7, 0x0e, 0x1c, 0x9d, 0x54, 0x33, 0x8b, 0x62, 0xf1, 0x40, 0x2a, 0xd6, 0x77, 0x18, 0xbc, 0x05,
+			0x93, 0xee, 0x6f, 0x21, 0x4c, 0xb8, 0x0d, 0x7a, 0x35, 0xc2, 0x99, 0x86, 0x50, 0xfb, 0x13, 0x48,
+		};
+
+		std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+		for (size_t index = 0; index < seed.size(); index++) {
+			seed[index] = static_cast<std::byte>(SEED[index]);
+		}
+
+		std::optional<engine::assets::SigningKey> key = engine::assets::SigningKey::FromSeed(seed);
+
+		// `FromSeed` refuses only a wrong length, and the length is a
+		// `static_assert` away from being a compile error.
+		return std::move(*key);
+	}
+
+	engine::assets::PublicKey DevelopmentPublisher() {
+		return DevelopmentSigningKey().Public();
 	}
 
 	std::vector<RawEntry> RawContents(const LocalPaths &paths) {

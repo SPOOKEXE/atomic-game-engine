@@ -33,6 +33,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct SDL_Window;
@@ -284,6 +285,19 @@ namespace client {
 		// pass — the two constraints that decide where this can go at all.
 		void PumpContent();
 
+		// Asks for every texture the simulated worlds name and has not asked for.
+		//
+		// **Demand rather than by kind**, which is what makes a large store
+		// usable at all — `client/ContentDemand.hpp` carries the failure that
+		// forced it.
+		void RequestWantedTextures();
+
+		// Asks for one texture, once.
+		//
+		// @param texture The name. An invalid one, or one already asked for, is
+		//        ignored.
+		void RequestTexture(const engine::core::Name &texture);
+
 		// Brings the mixer into line with every simulated world's `Sound` rows.
 		//
 		// After the tick and before presentation, so what a script set this
@@ -341,6 +355,10 @@ namespace client {
 		// the viewer, and `--worlds N` places four *views* rather than four
 		// overlays.
 		engine::render::InterfacePass Interface;
+
+		// Whether the interface pass has been given its image resolver. Set
+		// once; see the call site for why it is not done at start-up.
+		bool InterfaceImagesReady = false;
 
 		// The compiled list the pass draws, kept across frames so its signature
 		// can be compared. Holding one per frame would compute a signature, find
@@ -419,6 +437,16 @@ namespace client {
 		// Once, not per frame — see `PumpContent`.
 		bool ContentRequested = false;
 		bool ContentReported = false;
+
+		// Requests made while `ContentPending` was being walked, moved into it
+		// afterwards. See `Client::RequestTexture`.
+		std::vector<engine::delivery::RequestId> ContentIssued;
+
+		// Which texture names have been asked for, by `core::Name::Id`.
+		//
+		// **Asked once, whatever happened**, so a misspelled name costs one
+		// failed request rather than one per pump forever.
+		std::unordered_set<uint32_t> ContentAsked;
 
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;

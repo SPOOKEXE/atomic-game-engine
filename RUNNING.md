@@ -1592,19 +1592,21 @@ just materials count=25     # a smaller pull
 ```
 
 Downloads public-domain PBR material sets from **ambientCG**, **Poly Haven** and
-**cgbookcase** — all three CC0 — and bakes them into
-`~/Documents/atomic-game-engine/cdn/raw`. Two steps, and the recipe is the two:
+**cgbookcase** — all three CC0 — into the content store's `raw/`, then bakes and
+publishes. Two steps, and the recipe is the two:
 
 ```sh
-python3 scripts/fetch-materials.py --out .cache/materials --count 100
-assetc --input .cache/materials --output ~/Documents/atomic-game-engine/cdn/raw --model-size 0
+python3 scripts/fetch-materials.py --out ~/Documents/atomic-game-engine/cdn/raw --count 100
+contentimport --publish
 ```
 
-**Publishing is not one of them**, and that is deliberate: publishing needs a
-signing key, and a recipe carrying one would put a key in the repository. Publish
-from the studio's assets panel, or with `contentimport --publish --key HEX`.
+**No key is typed**, because a local store signs with `cdn::DevelopmentSigningKey`
+— a constant in the source, deliberately not a secret. `--key HEX` still supplies
+your own, and `cdn --publish` still requires one; see "The store's three folders"
+below for what that identity is and is not for.
 
-Each material lands as a `.amat` and its five maps beside it:
+Each material lands in `raw/` as a `.mat` and five PNGs, and in `baked/` as a
+`.amat` and five `.atex`:
 
 ```
 materials/ambientcg/Bricks075A.amat
@@ -1621,9 +1623,49 @@ get a pass, and the `.mat` gains four keys with it.
 
 **A tree under `raw/`, not the flat hash-named import `contentimport` does.** A
 material has to *name* its texture, and a hash rename gives it no name to write.
-`cdn::Publish` has always walked `raw/` recursively and named assets by their
-path relative to it, so this needed nothing new — only the studio's raw listing,
+`cdn::Publish` has always walked recursively and named assets by their path
+relative to the root, so this needed nothing new — only the studio's raw listing,
 which was not recursive and showed the whole tree as empty.
+
+## The store's three folders
+
+```
+~/Documents/atomic-game-engine/cdn/
+    raw/          what you put in — .png, .glb, .mat, .wav
+    baked/        what a runtime reads — .atex, .amesh, .amat
+    processed/    chunks, groups and a signed manifest
+```
+
+**`baked/` arrived at v0.10 and its absence was a four-version bug.**
+`PublishLocal` published `raw/` directly, so a PNG imported through the assets
+panel reached a client *as a PNG* — and `assets::Texture::Read` refuses one,
+because a runtime does not decode. Nothing said why: an `ImageLabel` drew its
+missing-image marker, a part's `ColorMap` did nothing, and a `MeshPart` drew the
+fallback cube. Baking is `contentimport --publish` and the studio's Publish
+button; publishing an unbaked store is refused rather than writing an empty
+manifest over a working one.
+
+**A local store signs with a constant.** `cdn::DevelopmentSigningKey` is in the
+source and is not a secret — a signature answers "did the publisher I trust
+produce this", and for a folder on your own disk serving your own editor the
+answer is always yes. A client with no `--publisher-key` trusts it **only** when
+it is using the default local store and nobody named an origin; name any source
+and the key is required again, because a key everybody knows is not a trust
+boundary.
+
+## Content is fetched because something names it
+
+A client asks for every **mesh**, **material** and **sound** in the catalogue and
+for **no textures at all** until a world names one. That is not an optimisation:
+`render::TextureTable` holds 512 MB, an uncompressed 1K sheet is four megabytes,
+and a store of 1,637 textures spends the ceiling after about a hundred and forty
+of them — in *manifest* order, which has nothing to do with what the scene needs.
+The rest were refused, so the texture you asked for usually was not there.
+
+Every place a texture can be named is in `client::CollectWantedTextures`. A
+mesh's own sheets are asked for when the mesh arrives, because the names live
+inside the mesh file. A material's sheet is *not* — it reaches a part through
+`ResolveMaterials`, which writes it into a field the collector already reads.
 
 The fetcher is resumable: anything already on disk is skipped, so an interrupted
 run or a raised `--count` costs only what is new.
