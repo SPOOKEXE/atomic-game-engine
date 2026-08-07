@@ -22,10 +22,15 @@
 // ## What is previewable
 //
 // Images. `bake::ReadImage` reads PNG, BMP, JPEG and GIF, and `assets::Texture`
-// reads a baked `.atex`. **A mesh gets no thumbnail**, and that is a real gap
-// rather than an oversight: a picture of a mesh is a render, which needs a
-// camera, a pass and a target — the studio has all three and pointing them at a
-// list of two hundred rows is a different feature. Meshes show their kind.
+// reads a baked `.atex`.
+//
+// **A mesh gets no *thumbnail*, and that is still true — it gets a live view
+// instead.** A picture of a mesh is a render: a camera, a pass and a target, one
+// per row, for a list of hundreds. `explorer-plus` reaches the same conclusion
+// and lands in the same place — its table rows carry class icons, and the 3D
+// preview is a `ViewportFrame` that exists only for the *hovered* row. So a mesh
+// resolves here to `Unavailable` for the inline case, and `MeshPreview.cpp`
+// renders the hovered one into a viewport slot.
 //
 // ## Why it is bounded, and how
 //
@@ -43,6 +48,7 @@
 // The three together mean scrolling a large store costs a steady trickle rather
 // than a cliff, and stopping costs nothing.
 
+#include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/core/Log.hpp>
@@ -51,6 +57,7 @@
 #include <cdn/LocalStore.hpp>
 #include <fstream>
 #include <studio/Editor.hpp>
+#include <studio/Preview.hpp>
 #include <vector>
 
 namespace studio {
@@ -78,33 +85,31 @@ namespace studio {
 		// screenful in well under a second and never drops a frame.
 		constexpr size_t THUMBNAILS_PER_FRAME = 1;
 
-		// The largest file this will try to decode for a preview.
-		//
-		// **A preview is not worth an arbitrary allocation.** The pixel ceiling
-		// in `bake` already bounds what a decoder will produce; this bounds what
-		// is read off disk to feed it, so a hundred-megabyte TIFF somebody
-		// dropped in does not become a hundred-megabyte read on the frame its
-		// row scrolled past.
-		constexpr uint64_t MAXIMUM_SOURCE_BYTES = 64ull * 1024u * 1024u;
+		// Why a read did not produce bytes. The two are answered differently —
+		// `Preview.hpp` carries the argument.
+		enum class ReadOutcome : uint8_t { Ok, TooLarge, Unreadable };
 
-		std::optional<std::vector<std::byte>> ReadWholeFile(const std::filesystem::path &path) {
+		ReadOutcome ReadWholeFile(const std::filesystem::path &path, std::vector<std::byte> &out) {
 			std::error_code failure;
 			const auto size = std::filesystem::file_size(path, failure);
-			if (failure || size == 0 || size > MAXIMUM_SOURCE_BYTES) {
-				return std::nullopt;
+			if (failure || size == 0) {
+				return ReadOutcome::Unreadable;
+			}
+			if (size > PREVIEW_MAXIMUM_SOURCE_BYTES) {
+				return ReadOutcome::TooLarge;
 			}
 
 			std::ifstream file(path, std::ios::binary);
 			if (!file) {
-				return std::nullopt;
+				return ReadOutcome::Unreadable;
 			}
 
-			std::vector<std::byte> bytes(static_cast<size_t>(size));
-			file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size));
+			out.resize(static_cast<size_t>(size));
+			file.read(reinterpret_cast<char *>(out.data()), static_cast<std::streamsize>(size));
 			if (!file) {
-				return std::nullopt;
+				return ReadOutcome::Unreadable;
 			}
-			return bytes;
+			return ReadOutcome::Ok;
 		}
 
 		// Fits an image inside a square without stretching it.
@@ -166,7 +171,14 @@ namespace studio {
 	}
 
 	void *Editor::ThumbnailFor(const std::string &name) {
+		PreviewState ignored = PreviewState::Pending;
+		return ThumbnailFor(name, ignored);
+	}
+
+	void *Editor::ThumbnailFor(const std::string &name, PreviewState &state) {
+		state = PreviewState::Pending;
 		if (name.empty()) {
+			state = PreviewState::Unavailable;
 			return nullptr;
 		}
 
@@ -175,6 +187,7 @@ namespace studio {
 			// Touched so the eviction below knows this one is still being
 			// looked at.
 			found->second.LastSeen = ThumbnailClock;
+			state = found->second.State;
 			return found->second.Handle;
 		}
 
@@ -201,13 +214,14 @@ namespace studio {
 				continue;
 			}
 
-			// **Recorded whether or not it worked.** A file that cannot be
-			// decoded — a `.pmx`, a `.zip`, a texture from another machine —
-			// must be remembered as having no preview, or its row would queue a
-			// decode on every frame it is drawn.
+			// **Recorded whether or not it worked, and *why* it did not.** A
+			// file that cannot be decoded must be remembered, or its row would
+			// queue a decode on every frame it is drawn — and remembering the
+			// reason is what lets the empty box say something useful instead of
+			// being one blank square for four different situations.
 			Entry entry;
 			entry.LastSeen = ThumbnailClock;
-			entry.Handle = BuildThumbnail(name);
+			entry.Handle = BuildThumbnail(name, entry.State);
 			Thumbnails.emplace(name, entry);
 
 			built++;
@@ -250,7 +264,7 @@ namespace studio {
 		return "studio.thumbnail/" + name;
 	}
 
-	void *Editor::BuildThumbnail(const std::string &name) {
+	void *Editor::BuildThumbnail(const std::string &name, PreviewState &state) {
 		// `raw/<name>`, which is the same file the publisher read — see the
 		// header on why that identity holds.
 		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
@@ -258,12 +272,23 @@ namespace studio {
 
 		std::error_code failure;
 		if (!std::filesystem::is_regular_file(source, failure)) {
+			// Published from another machine, so there are no local pixels.
+			state = PreviewState::Unavailable;
 			return nullptr;
 		}
 
-		const std::optional<std::vector<std::byte>> bytes = ReadWholeFile(source);
-		if (!bytes) {
+		std::vector<std::byte> bytes;
+		switch (ReadWholeFile(source, bytes)) {
+		case ReadOutcome::TooLarge:
+			// **The one refusal a person can act on.** Named rather than folded
+			// into "unavailable" — `Preview.hpp` carries why.
+			state = PreviewState::TooLarge;
 			return nullptr;
+		case ReadOutcome::Unreadable:
+			state = PreviewState::Unavailable;
+			return nullptr;
+		case ReadOutcome::Ok:
+			break;
 		}
 
 		engine::assets::TextureData decoded;
@@ -271,26 +296,31 @@ namespace studio {
 		// A baked texture reads through its own format; everything else goes to
 		// the importer, which picks its decoder from the bytes rather than from
 		// the extension — so a `.png` that is really a JPEG still previews.
-		engine::core::ByteReader reader(*bytes);
+		engine::core::ByteReader reader(bytes);
 		if (!engine::assets::Texture::Read(reader, decoded)) {
 			std::string ignored;
-			if (!engine::bake::ReadImage(*bytes, decoded, ignored)) {
-				// Not an image, or not one this reads. **Silent**: a store holds
-				// meshes, archives and text, and warning about each one every
-				// time its row is drawn would bury the log.
+			if (!engine::bake::ReadImage(bytes, decoded, ignored)) {
+				// Not an image, or not one this reads — a mesh, an archive, a
+				// script. **Silent**: a store holds all three, and warning about
+				// each one every time its row is drawn would bury the log.
+				state = PreviewState::Unavailable;
 				return nullptr;
 			}
 		}
 
 		engine::assets::TextureData thumbnail;
 		if (!Letterbox(decoded, thumbnail)) {
+			state = PreviewState::Unavailable;
 			return nullptr;
 		}
 
 		const engine::core::Name key(ThumbnailTextureName(name));
 		if (!Renderer.AddTexture(key, thumbnail)) {
+			state = PreviewState::Unavailable;
 			return nullptr;
 		}
+
+		state = PreviewState::Ready;
 		return Renderer.TextureHandle(key);
 	}
 }

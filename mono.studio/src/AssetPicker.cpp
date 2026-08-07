@@ -223,13 +223,13 @@ namespace studio {
 					}
 				}
 
-				// The content address, for somebody comparing two stores.
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("%s\n%s", entry.Name.c_str(), entry.Root.ToHex().substr(0, 16).c_str());
-				}
+				// **The big preview, on the row rather than as a tooltip.** A
+				// picker is exactly where somebody needs to see the thing before
+				// choosing it, and 48 pixels is not enough to recognise art.
+				HoverPreview(entry.Name, entry.Kind);
 
 				ImGui::SetCursorPos(start);
-				DrawPreview(entry.Name, side);
+				DrawPreview(entry.Name, side, entry.Kind);
 
 				ImGui::SameLine();
 

@@ -271,6 +271,13 @@ namespace studio {
 			DrawDebugger();
 		}
 
+		// **After every panel, because any of them may be the one under the
+		// cursor.** `EndHoverPreview` settles the delay for the whole frame and
+		// `DrawHoverPreview` puts the panel on top of everything — which is why
+		// neither belongs inside a list's own loop.
+		EndHoverPreview(static_cast<double>(ImGui::GetIO().DeltaTime));
+		DrawHoverPreview();
+
 		{
 			ENGINE_PROFILE_CAT("dialogs", engine::core::ProfileCategory::Render);
 			DrawDialogs();

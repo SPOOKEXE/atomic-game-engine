@@ -885,6 +885,17 @@ namespace studio {
 		//
 		// Skipping the closed ones matters: rotating through four slots with
 		// one panel open would redraw it every fourth frame for no reason.
+		// **The asset preview takes its turn before the panels do.** It is
+		// rendered when something is hovering it and skipped entirely when
+		// nothing is, so the cost is a hovered row's worth of frames rather
+		// than a permanent share of the rotation — and `RenderPreviewSlot`
+		// owns the whole `Render` call for that frame, exactly as a viewport
+		// does, because `Render` owns the swapchain and the present.
+		if (RenderPreviewSlot()) {
+			PreviewWanted.clear();
+			return;
+		}
+
 		size_t candidates[1 + EXTRA_VIEWPORTS];
 		size_t candidateCount = 0;
 

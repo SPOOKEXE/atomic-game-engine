@@ -56,6 +56,7 @@
 #include <string>
 #include <cdn/LocalStore.hpp>
 #include <studio/Commands.hpp>
+#include <studio/Preview.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
@@ -145,6 +146,34 @@ namespace studio {
 		// @return The rates, with a zero window when there are fewer than two
 		//         samples.
 		NetworkRates Rates() const;
+	};
+
+	// One asset the worlds actually use, and what uses it.
+	//
+	// **One entry per asset rather than per instance**, which is the whole shape
+	// of the gallery: a texture on forty parts is one tile with `x40` on it.
+	//
+	// @since v0.10
+	struct GalleryEntry {
+		// The name the property holds.
+		engine::core::Name Asset;
+
+		// What kind of content that name is, from the property that named it.
+		engine::assets::AssetKind Kind = engine::assets::AssetKind::Unknown;
+
+		// **Which property is using it — the caption that carries the
+		// information.** Four tiles reading "SurfaceAppearance" say nothing;
+		// "ColorMap" and "NormalMap" say everything.
+		std::string Property;
+
+		// Where the first user lives, so a click can select in that world.
+		engine::world::WorldId World;
+
+		// The first instance found using it.
+		Entity First;
+
+		// How many instances use it.
+		size_t Uses = 0;
 	};
 
 	// An asset asked for and not yet arrived.
@@ -966,7 +995,8 @@ namespace studio {
 		//
 		// @param name The asset's name, which is its path under `raw/`.
 		// @param side How wide to draw it.
-		void DrawPreview(const std::string &name, float side);
+		// @param kind What it is, so an empty box can say something useful.
+		void DrawPreview(const std::string &name, float side, engine::assets::AssetKind kind);
 
 		// Orders the published view by whatever headers were clicked.
 		//
@@ -995,10 +1025,20 @@ namespace studio {
 		// `Thumbnails.cpp` for why it is not built here.
 		//
 		// @param name The asset's name, which is also its path under `raw/`.
-		// @return The backend handle to draw, or nullptr when there is no
-		//         preview — not yet, or not ever, and a caller cannot tell the
-		//         two apart because it does not need to.
+		// @return The backend handle to draw, or nullptr when there is none.
 		void *ThumbnailFor(const std::string &name);
+
+		// The same, and why there is no picture when there is not.
+		//
+		// **Three outcomes rather than two**, which is the correction
+		// `Preview.hpp` opens with: a file refused for its size and a file that
+		// would not decode are different situations and a person can act on
+		// only one of them.
+		//
+		// @param name  The asset's name.
+		// @param state Filled in with what happened.
+		// @return The handle, or nullptr.
+		void *ThumbnailFor(const std::string &name, PreviewState &state);
 
 		// Builds a bounded number of queued thumbnails and evicts old ones.
 		void PumpThumbnails();
@@ -1012,7 +1052,7 @@ namespace studio {
 
 	  private:
 		// Decodes, scales and uploads one. Null when there is nothing to show.
-		void *BuildThumbnail(const std::string &name);
+		void *BuildThumbnail(const std::string &name, PreviewState &state);
 
 		// One asset's preview, and when its row was last drawn.
 		struct Entry {
@@ -1020,6 +1060,9 @@ namespace studio {
 			// from another machine. **Cached as null rather than retried**, or
 			// its row would queue a decode on every frame it is visible.
 			void *Handle = nullptr;
+
+			// Why, when there is no handle.
+			PreviewState State = PreviewState::Pending;
 
 			uint64_t LastSeen = 0;
 		};
@@ -1031,6 +1074,53 @@ namespace studio {
 
 		// Frames, for the eviction order. Not a clock — nothing here needs one.
 		uint64_t ThumbnailClock = 0;
+
+		// Decodes, uploads and measures one mesh.
+		PreviewState BuildPreviewMesh(const std::string &name);
+
+		// What a preview mesh is registered under, prefixed so it can never be
+		// drawn as content.
+		static std::string PreviewMeshName(const std::string &name);
+
+		// A mesh's true extent, for framing the camera on it.
+		struct PreviewBounds {
+			engine::core::Vector3 Centre;
+			float Radius = 1.0f;
+		};
+
+		// Which meshes have been tried, and how each went.
+		std::unordered_map<std::string, PreviewState> PreviewMeshes;
+
+		// The bounds of the ones that loaded.
+		std::unordered_map<std::string, PreviewBounds> PreviewMeshBounds;
+
+		// What the preview slot should draw on its next turn, or empty.
+		std::string PreviewWanted;
+
+		// The row the cursor is over this frame, before the delay.
+		std::string HoverCandidate;
+
+		// What kind that row's asset is.
+		engine::assets::AssetKind HoverKind = engine::assets::AssetKind::Unknown;
+
+		// Whether any row claimed the cursor this frame.
+		bool HoverSeen = false;
+
+		// The row the delay is counting for. **The token from the reference, as
+		// state rather than a deferred callback** — a different row resets it,
+		// so a superseded hover cannot land a quarter second after the cursor
+		// left.
+		std::string HoverPending;
+
+		// How long it has been counted for.
+		double HoverElapsed = 0.0;
+
+		// What is actually on screen, or empty.
+		std::string HoverShowing;
+
+		// How wide that target should be.
+		uint32_t PreviewSide = 132;
+
 
 	  public:
 
@@ -1051,6 +1141,72 @@ namespace studio {
 		// @param chosen The selection, in and out. Emptied by Clear.
 		// @return `true` on the frame it is confirmed.
 		bool DrawAssetPicker(const char *title, engine::assets::AssetKind kind, std::string &chosen);
+
+		// Loads a mesh into the renderer so a preview can draw it.
+		//
+		// **Read from `raw/<name>` and decoded as `assets::Mesh`**, the same
+		// path a thumbnail takes and for the same reason — no delivery client,
+		// no chunk reassembly. A source format that has not been baked is
+		// `Unavailable`, and the caption says to run `assetc`.
+		//
+		// @param name The asset's name.
+		// @return Whether it can be previewed, and why not when it cannot.
+		PreviewState LoadPreviewMesh(const std::string &name);
+
+		// Asks the render rotation to draw this mesh into the preview slot.
+		//
+		// @param name The mesh, already through `LoadPreviewMesh`.
+		// @param side How wide the target should be.
+		// @return Whether the mesh is known well enough to draw.
+		bool DrawPreviewViewport(const std::string &name, float side);
+
+		// Draws whatever `DrawPreviewViewport` last asked for.
+		//
+		// **Called from `PresentWorld`'s rotation and never twice a frame**:
+		// `Renderer::Render` owns the swapchain and the present, so a second
+		// call a frame would be a second present. See `MeshPreview.cpp`.
+		//
+		// @return Whether it drew, so the rotation knows it spent its turn.
+		bool RenderPreviewSlot();
+
+		// Offers the item just drawn as the hover preview's subject.
+		//
+		// **Called right after the row's widget**, because it reads
+		// `IsItemHovered`. A quarter-second delay and a token keep dragging the
+		// cursor down a list from opening three hundred previews — see
+		// `HoverPreview.cpp`, which takes both from `explorer-plus`.
+		//
+		// @param name The asset the row is about.
+		// @param kind What it is, which decides whether the preview is a picture
+		//        or a render.
+		void HoverPreview(const std::string &name, engine::assets::AssetKind kind);
+
+		// Settles the hover state once a list has finished drawing.
+		//
+		// **After the loop and never inside it**: every row calling this would
+		// have each one cancelling the next.
+		//
+		// @param frameSeconds How long the last frame took, for the delay.
+		void EndHoverPreview(double frameSeconds);
+
+		// Draws the preview panel, if the delay has elapsed.
+		void DrawHoverPreview();
+
+		// Every asset the worlds name, one tile each. See `Gallery.cpp`.
+		void DrawGallery();
+
+		// Walks every world for every content-naming property.
+		//
+		// **Rebuilt on demand and never per frame**: this is the one thing in
+		// the assets panel that scales with the scene rather than with the
+		// store.
+		void RebuildGallery();
+
+		// Selects every instance using one asset.
+		//
+		// The gesture the gallery exists for — "where is this texture actually
+		// used" is the question somebody has before they change one.
+		void SelectGalleryUsers(const GalleryEntry &entry);
 
 		// Re-reads the store's manifest into `PickerContents`.
 		//
@@ -1762,6 +1918,13 @@ namespace studio {
 		};
 
 		static constexpr size_t EXTRA_VIEWPORTS = 3;
+
+		// **The slot the asset preview owns, past every viewport panel.**
+		// Sharing one with a viewport would make the preview and that panel
+		// overwrite each other's texture — `PresentWorld` keeps a slot per panel
+		// precisely so two things of different sizes do not reallocate one
+		// target twice a frame.
+		static constexpr size_t PREVIEW_SLOT = 1 + EXTRA_VIEWPORTS;
 		std::array<ViewportState, EXTRA_VIEWPORTS> Extras;
 
 		// A panel's own camera instance, and the world it was minted in.
@@ -2193,6 +2356,9 @@ namespace studio {
 
 		// What the person typed into the store list's filter.
 		std::string AssetFilter;
+
+		// One entry per asset the worlds use. Rebuilt on demand.
+		std::vector<GalleryEntry> Gallery;
 
 		// The signing seed, for a publish.
 		//

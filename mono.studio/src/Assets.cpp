@@ -30,6 +30,7 @@
 // places to say the same thing.
 
 #include <cdn/LocalStore.hpp>
+#include <engine/assets/AssetKind.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
@@ -40,6 +41,7 @@
 #include <imgui.h>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
+#include <studio/Preview.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -236,16 +238,26 @@ namespace studio {
 				DrawRawList();
 				ImGui::EndTabItem();
 			}
+
+			// **A third question, and the only panel that can answer it.** The
+			// other two tabs say what the *store* holds; this says what the
+			// worlds actually use, which is what somebody needs before changing
+			// or deleting an asset.
+			if (ImGui::BeginTabItem("Used")) {
+				DrawGallery();
+				ImGui::EndTabItem();
+			}
 			ImGui::EndTabBar();
 		}
 
 		ImGui::End();
 	}
 
-	void Editor::DrawPreview(const std::string &name, float side) {
+	void Editor::DrawPreview(const std::string &name, float side, engine::assets::AssetKind kind) {
 		const ImVec2 box(side, side);
 
-		if (void *handle = ThumbnailFor(name); handle != nullptr) {
+		PreviewState state = PreviewState::Pending;
+		if (void *handle = ThumbnailFor(name, state); handle != nullptr) {
 			ImGui::Image(reinterpret_cast<ImTextureID>(handle), box);
 			return;
 		}
@@ -253,18 +265,33 @@ namespace studio {
 		// **A box of the same size rather than nothing**, so a row does not
 		// change height when its picture arrives — a list that reflows while it
 		// loads is one nobody can click in.
-		//
-		// Whether this is "not yet" or "never" is deliberately not
-		// distinguished: `Thumbnails.cpp` caches a failure as null, so asking
-		// again is free, and a spinner on a mesh that will never have a preview
-		// would be a promise the editor cannot keep.
 		const ImVec2 corner = ImGui::GetCursorScreenPos();
 		ImGui::Dummy(box);
-		ImGui::GetWindowDrawList()->AddRect(
-			corner,
-			ImVec2(corner.x + side, corner.y + side),
-			ImGui::GetColorU32(ImGuiCol_Border)
-		);
+
+		ImDrawList *const draw = ImGui::GetWindowDrawList();
+		draw->AddRect(corner, ImVec2(corner.x + side, corner.y + side), ImGui::GetColorU32(ImGuiCol_Border));
+
+		// **A mark rather than a sentence, at this size.** Thirty-two pixels
+		// holds no words; the hover preview is where the reason is spelled out —
+		// which is the split `explorer-plus` makes too, its rows carrying icons
+		// and its hover panel carrying "Preview unavailable".
+		//
+		// A cross for refused, a dash for nothing to show, and nothing at all
+		// while it is still pending: a mark that appeared and was replaced two
+		// frames later reads as a flicker.
+		const char *mark = state == PreviewState::TooLarge	  ? "!"
+						   : state == PreviewState::Pending	  ? nullptr
+						   : kind == engine::assets::AssetKind::Mesh ? "M"
+						   : kind == engine::assets::AssetKind::Audio ? "S"
+																	  : "-";
+		if (mark != nullptr) {
+			const ImVec2 text = ImGui::CalcTextSize(mark);
+			draw->AddText(
+				ImVec2(corner.x + (side - text.x) * 0.5f, corner.y + (side - text.y) * 0.5f),
+				ImGui::GetColorU32(ImGuiCol_TextDisabled),
+				mark
+			);
+		}
 	}
 
 	void Editor::DrawPublishedList() {
@@ -331,7 +358,8 @@ namespace studio {
 				// **Only the rows the clipper drew ask for a picture**, which is
 				// the bound that makes previews affordable over a store of
 				// hundreds — Thumbnails.cpp.
-				DrawPreview(entry.Name, engine::ui::Scaled(32.0f));
+				DrawPreview(entry.Name, engine::ui::Scaled(32.0f), entry.Kind);
+				HoverPreview(entry.Name, entry.Kind);
 
 				ImGui::TableNextColumn();
 
@@ -339,9 +367,7 @@ namespace studio {
 				// copying — one click rather than reading it off and retyping.
 				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(entry.Name.c_str());
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("%s\nclick to copy", entry.Name.c_str());
-				}
+				HoverPreview(entry.Name, entry.Kind);
 				if (ImGui::IsItemClicked()) {
 					ImGui::SetClipboardText(entry.Name.c_str());
 				}
@@ -477,11 +503,16 @@ namespace studio {
 				// this file is called under `raw/` — which is the path
 				// `ThumbnailFor` resolves. The two differ: `Original` is what it
 				// was called before it came in.
-				DrawPreview(entry.Path.filename().string(), engine::ui::Scaled(32.0f));
+				const std::string stored = entry.Path.filename().string();
+				const engine::assets::AssetKind kind = engine::assets::KindOfName(stored);
+
+				DrawPreview(stored, engine::ui::Scaled(32.0f), kind);
+				HoverPreview(stored, kind);
 
 				ImGui::TableNextColumn();
 				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(entry.Original.c_str());
+				HoverPreview(stored, kind);
 
 				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(Readable(entry.Bytes).c_str());
@@ -490,7 +521,6 @@ namespace studio {
 
 				// The hash-named file this actually is, which is what somebody
 				// looking in the folder with a terminal will see.
-				const std::string stored = entry.Path.filename().string();
 				ImGui::TextUnformatted(stored.substr(0, 8).c_str());
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("%s", entry.Path.string().c_str());
