@@ -262,6 +262,21 @@ namespace cdn {
 		return report;
 	}
 
+	std::filesystem::path FindInStore(const LocalPaths &paths, std::string_view name) {
+		if (name.empty()) {
+			return {};
+		}
+
+		std::error_code failure;
+		for (const std::filesystem::path &folder : {paths.Baked, paths.Raw}) {
+			const std::filesystem::path candidate = folder / name;
+			if (std::filesystem::is_regular_file(candidate, failure)) {
+				return candidate;
+			}
+		}
+		return {};
+	}
+
 	engine::assets::SigningKey DevelopmentSigningKey() {
 		// **Spelled out rather than derived, so it is greppable and stable.**
 		// A seed computed from a string would be a second thing to reimplement

@@ -316,6 +316,45 @@ TEST_CASE("publishing an unbaked store is refused rather than emptied", "[cdn]")
 	CHECK_FALSE(cdn::PublishLocal(empty, cdn::DevelopmentSigningKey(), 3).has_value());
 }
 
+TEST_CASE("an asset is found in baked before raw", "[cdn]") {
+	// **The regression this exists for was silent and looked like missing
+	// content.** Every preview in the editor read `raw/<name>`, with a comment
+	// saying that held because the publisher walked `raw/`. The day it walked
+	// `baked/`, every published name resolved to a file that was not there and
+	// each one quietly became "no local pixels" — a store full of assets showing
+	// a grid of empty boxes, with nothing logged and nothing to grep for.
+	const Scratch scratch("find");
+	const cdn::LocalPaths paths = cdn::LocalPathsUnder(scratch.Path);
+	REQUIRE(cdn::EnsureLocalStore(paths));
+
+	WriteFile(paths.Raw / "sheet.png", "source");
+	WriteFile(paths.Baked / "sheet.atex", "baked");
+
+	// A published name is a path under `baked/`, which is what the publisher
+	// walked.
+	CHECK(cdn::FindInStore(paths, "sheet.atex") == paths.Baked / "sheet.atex");
+
+	// A raw listing's name is a path under `raw/`, and both reach the same
+	// caller — a picker showing either half.
+	CHECK(cdn::FindInStore(paths, "sheet.png") == paths.Raw / "sheet.png");
+
+	// **`baked/` wins when both have the name**, because that is the one a
+	// manifest can be naming: a stale source beside a fresh bake would otherwise
+	// preview the thing nobody publishes.
+	WriteFile(paths.Raw / "both.atex", "stale");
+	WriteFile(paths.Baked / "both.atex", "fresh");
+	CHECK(cdn::FindInStore(paths, "both.atex") == paths.Baked / "both.atex");
+
+	// Nothing anywhere is an empty path rather than a plausible one — the honest
+	// answer for an asset published from another machine.
+	CHECK(cdn::FindInStore(paths, "absent.atex").empty());
+	CHECK(cdn::FindInStore(paths, "").empty());
+
+	// A tree, because the material import writes one and a picker shows it.
+	WriteFile(paths.Baked / "materials" / "oak.amat", "material");
+	CHECK(cdn::FindInStore(paths, "materials/oak.amat") == paths.Baked / "materials" / "oak.amat");
+}
+
 TEST_CASE("the development identity is one constant everything agrees on", "[cdn]") {
 	// **Stable across calls and across processes**, which is the whole of what it
 	// buys: `contentimport --publish` signs with it and a client with no

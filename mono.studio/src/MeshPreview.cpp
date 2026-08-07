@@ -102,8 +102,11 @@ namespace studio {
 	}
 
 	PreviewState Editor::BuildPreviewMesh(const std::string &name) {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-		const std::filesystem::path source = paths.Raw / name;
+		// **`cdn::FindInStore` and not a folder spelled here.** This read
+		// `raw/<name>` and was right for as long as the publisher walked `raw/`;
+		// the day it walked `baked/`, every preview in the editor resolved to a
+		// missing file and turned into "no local pixels" with nothing said.
+		const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
 
 		std::error_code failure;
 		if (!std::filesystem::is_regular_file(source, failure)) {

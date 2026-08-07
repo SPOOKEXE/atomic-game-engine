@@ -280,6 +280,29 @@ namespace cdn {
 		uint64_t Bytes = 0;
 	};
 
+	// Where a named asset's bytes are on this machine.
+	//
+	// **`baked/` first, then `raw/`, and the order is the whole of it.** A
+	// *published* name is a path under `baked/` — that is what `PublishLocal`
+	// walks — and a name a raw listing produced is a path under `raw/`. Both
+	// reach an editor wanting to show somebody a picture of an asset, and both
+	// are just names by then.
+	//
+	// **This function is why previews broke when `baked/` arrived.** Everything
+	// showing an asset read `raw/<name>` and said so in a comment that had been
+	// true for exactly as long as the publisher walked `raw/`: the moment it
+	// walked `baked/`, every name in every picker resolved to a file that was
+	// not there, and each one silently became "no local pixels". One place that
+	// knows the layout is the fix; two callers spelling it themselves is how it
+	// went wrong.
+	//
+	// @param paths The store.
+	// @param name  The asset's name, as a manifest or a raw listing gives it.
+	// @return The file, or an empty path when neither folder has it — which is
+	//         the honest answer for something published from another machine.
+	// @since v0.10
+	std::filesystem::path FindInStore(const LocalPaths &paths, std::string_view name);
+
 	// The signing identity a local store uses when nobody supplies one.
 	//
 	// **A constant, in the source, and it is not a secret — that is the point.**
