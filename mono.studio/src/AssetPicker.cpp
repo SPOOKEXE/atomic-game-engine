@@ -29,6 +29,7 @@
 #include <imgui.h>
 #include <string>
 #include <string_view>
+#include <studio/AssetRow.hpp>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
@@ -194,6 +195,10 @@ namespace studio {
 			// `diffuse.png` gets `<64 hex>.png` — so a list of names alone is a
 			// list of identifiers nobody can choose between. The thumbnail is
 			// what makes this a picker rather than a lookup table.
+			//
+			// **One item per row and everything else painted**, which is
+			// `studio/AssetRow.hpp`'s rule and the reason this loop no longer
+			// aborts the editor on the frame it opens.
 			const float side = engine::ui::Scaled(48.0f);
 			const float spacing = ImGui::GetStyle().ItemSpacing.x;
 
@@ -201,46 +206,35 @@ namespace studio {
 				const cdn::PublishedEntry &entry = *candidate.Entry;
 				ImGui::PushID(entry.Name.c_str());
 
-				const bool selected = entry.Name == chosen;
+				const RowAction action = DrawAssetRow(
+					entry.Name == chosen,
+					side,
+					[&](ImVec2 corner) {
+						PaintPreview(corner.x, corner.y, side, entry.Name, entry.Kind);
 
-				// **The whole row is the hit target, drawn before the contents
-				// and then rewound over.** A `Selectable` beside an `Image` is
-				// two things to aim at, and clicking the picture — which is what
-				// a person does — would miss.
-				const ImVec2 start = ImGui::GetCursorPos();
-				if (ImGui::Selectable(
-						"##row",
-						selected,
-						ImGuiSelectableFlags_AllowDoubleClick,
-						ImVec2(0.0f, side)
-					)) {
-					chosen = entry.Name;
-
-					// Double-click confirms, which is what a person tries first
-					// — `FilePrompt` does the same and for the same reason.
-					if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-						confirmed = true;
+						// Centred against the picture rather than sitting on its
+						// top edge, which is what makes a tall row read as one
+						// row.
+						const float baseline = corner.y + (side - ImGui::GetTextLineHeight()) * 0.5f;
+						ImGui::GetWindowDrawList()->AddText(
+							ImVec2(corner.x + side + spacing, baseline),
+							ImGui::GetColorU32(ImGuiCol_Text),
+							entry.Name.c_str()
+						);
 					}
+				);
+
+				if (action != RowAction::None) {
+					chosen = entry.Name;
+					confirmed = action == RowAction::Confirmed;
 				}
 
 				// **The big preview, on the row rather than as a tooltip.** A
 				// picker is exactly where somebody needs to see the thing before
 				// choosing it, and 48 pixels is not enough to recognise art.
+				// Reads `IsItemHovered()`, which is still the row's — see
+				// `DrawAssetRow`.
 				HoverPreview(entry.Name, entry.Kind);
-
-				ImGui::SetCursorPos(start);
-				DrawPreview(entry.Name, side, entry.Kind);
-
-				ImGui::SameLine();
-
-				// Centred against the picture rather than sitting on its top
-				// edge, which is what makes a tall row read as one row.
-				ImGui::SetCursorPos(
-					ImVec2(start.x + side + spacing, start.y + (side - ImGui::GetTextLineHeight()) * 0.5f)
-				);
-				ImGui::TextUnformatted(entry.Name.c_str());
-
-				ImGui::SetCursorPos(ImVec2(start.x, start.y + side + ImGui::GetStyle().ItemSpacing.y));
 
 				ImGui::PopID();
 			}

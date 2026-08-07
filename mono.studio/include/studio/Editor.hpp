@@ -998,6 +998,30 @@ namespace studio {
 		// @param kind What it is, so an empty box can say something useful.
 		void DrawPreview(const std::string &name, float side, engine::assets::AssetKind kind);
 
+		// The same picture, painted at a screen position and reserving nothing.
+		//
+		// **For a caller that has already reserved the space**, which a content
+		// list's row has: the row is one `Selectable` and everything over it is
+		// painted, so a preview submitted as an item there would be a second hit
+		// target and a second copy of the row's geometry.
+		// `studio/AssetRow.hpp` carries the whole rule.
+		//
+		// **Two floats rather than an `ImVec2`**, for the reason this header
+		// forward-declares `ImGuiTableSortSpecs` instead of including imgui: it
+		// is included by every panel and by the tests, and dragging a UI library
+		// in to name one parameter type is a cost every one of them pays. A
+		// forward declaration will not do here — the type is passed by value.
+		//
+		// @param cornerX Left edge, in screen space.
+		// @param cornerY Top edge, in screen space.
+		// @param side    How wide and tall to paint it.
+		// @param name    The asset's name, which is its path under `raw/`.
+		// @param kind    What it is, for the glyph when there is no picture.
+		void PaintPreview(
+			float cornerX, float cornerY, float side, const std::string &name,
+			engine::assets::AssetKind kind
+		);
+
 		// Orders the published view by whatever headers were clicked.
 		//
 		// **The view and never `PickerContents`.** That is what the manifest

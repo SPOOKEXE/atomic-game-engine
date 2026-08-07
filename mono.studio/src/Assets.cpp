@@ -254,22 +254,36 @@ namespace studio {
 	}
 
 	void Editor::DrawPreview(const std::string &name, float side, engine::assets::AssetKind kind) {
-		const ImVec2 box(side, side);
+		// **The space is reserved with an item and the picture is painted into
+		// it**, which is the split `PaintPreview` exists for: a list row paints
+		// over a selectable it must not add a second hit target to, and a panel
+		// that draws a preview on its own still needs the layout to know it is
+		// there. One painter, two ways in — `studio/AssetRow.hpp` carries why
+		// the row cannot use this one.
+		const ImVec2 corner = ImGui::GetCursorScreenPos();
+		ImGui::Dummy(ImVec2(side, side));
+		PaintPreview(corner.x, corner.y, side, name, kind);
+	}
 
+	void Editor::PaintPreview(
+		float cornerX, float cornerY, float side, const std::string &name, engine::assets::AssetKind kind
+	) {
 		PreviewState state = PreviewState::Pending;
-		if (void *handle = ThumbnailFor(name, state); handle != nullptr) {
-			ImGui::Image(reinterpret_cast<ImTextureID>(handle), box);
+		void *const handle = ThumbnailFor(name, state);
+
+		ImDrawList *const draw = ImGui::GetWindowDrawList();
+		const ImVec2 corner(cornerX, cornerY);
+		const ImVec2 far(cornerX + side, cornerY + side);
+
+		if (handle != nullptr) {
+			draw->AddImage(reinterpret_cast<ImTextureID>(handle), corner, far);
 			return;
 		}
 
 		// **A box of the same size rather than nothing**, so a row does not
 		// change height when its picture arrives — a list that reflows while it
 		// loads is one nobody can click in.
-		const ImVec2 corner = ImGui::GetCursorScreenPos();
-		ImGui::Dummy(box);
-
-		ImDrawList *const draw = ImGui::GetWindowDrawList();
-		draw->AddRect(corner, ImVec2(corner.x + side, corner.y + side), ImGui::GetColorU32(ImGuiCol_Border));
+		draw->AddRect(corner, far, ImGui::GetColorU32(ImGuiCol_Border));
 
 		// **A mark rather than a sentence, at this size.** Thirty-two pixels
 		// holds no words; the hover preview is where the reason is spelled out —
