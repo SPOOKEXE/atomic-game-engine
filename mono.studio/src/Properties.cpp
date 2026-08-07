@@ -634,6 +634,18 @@ namespace studio {
 			}
 		});
 
+		// **A mesh that is already loaded gets no arrival to hang the fit on.**
+		// `DrainContent` reshapes parts when geometry lands, which covers the
+		// ordinary case of naming a mesh nothing had fetched yet. Picking one a
+		// previous part already pulled in fires nothing at all, so the part would
+		// keep whatever box it had and stretch the new mesh into it.
+		if (edit.Property == Name("MeshId")) {
+			engine::core::Vector3 extent;
+			if (Renderer.MeshExtentOf(edit.Value.Name, extent)) {
+				FitPartsToMesh(edit.Value.Name, extent);
+			}
+		}
+
 		MarkModified();
 	}
 }

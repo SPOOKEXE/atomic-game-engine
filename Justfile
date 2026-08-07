@@ -298,11 +298,24 @@ edit *args: (build "studio")
 #
 # Not part of `just check`: it needs a GPU, and a build container that has none
 # would fail a check about the editor for a reason that is not about the editor.
-studio-smoke game="" out=".cache/studio-smoke.bmp": (build "studio")
-    @rm -f {{out}}
+# **And a second shot, of the scene built to show content.** Every headless check
+# this editor could run was a count, and a count says the same thing whether the
+# models are right, squashed, inside-out, untextured or culled away — all five of
+# which have happened. The mesh grid is the one scene whose whole job is to make
+# content visible, so photographing it turns "13 placed, 7 meshes, 16 textures"
+# into something somebody can actually disagree with.
+#
+# **Longer than twelve frames, because content arrives over several.** Naming a
+# mesh is what fetches it, the fetch spans frames, and the grid grows on
+# `Heartbeat` as bundles land — so a capture at frame ten is a picture of an empty
+# plate and says nothing.
+studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.bmp": (build "studio")
+    @rm -f {{out}} {{meshes}}
     ./{{build}}/studio/studio --headless --frames 12 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
     @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
-    @echo "studio ok — loaded, played and rendered with no display, into {{out}}"
+    ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world Meshes --capture {{meshes}} --width 1280 --height 900
+    @test -s {{meshes}} || (echo "FAIL: the headless editor wrote no mesh capture" && exit 1)
+    @echo "studio ok — loaded, played and rendered with no display, into {{out}} and {{meshes}}"
 
 # Drag the editor's window and check it is still alive afterwards.
 #

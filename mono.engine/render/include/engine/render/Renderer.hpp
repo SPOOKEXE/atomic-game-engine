@@ -504,6 +504,20 @@ namespace engine::render {
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh);
 
+		// A registered mesh's own half-extent, in mesh space.
+		//
+		// **So an editor can make `Size` mean the mesh's proportions.** Since
+		// `Size` is a box the mesh is stretched into, a part whose box has the
+		// wrong shape distorts whatever is put in it — and the only thing that
+		// knows the right shape is the geometry. `render::MeshEntry::Extent`
+		// carries the whole argument.
+		//
+		// @param name The mesh.
+		// @param out  Set only when the mesh is registered.
+		// @return `false` for a name this table does not hold, so a caller can
+		//         tell "not loaded yet" from "flat on one axis".
+		bool MeshExtentOf(const core::Name &name, core::Vector3 &out) const;
+
 		// Registers a texture under the name a `SurfaceAppearance` or a submesh
 		// will ask for.
 		//

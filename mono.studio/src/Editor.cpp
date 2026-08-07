@@ -292,6 +292,27 @@ namespace studio {
 			NewGame();
 		}
 
+		// **The scene a capture was asked for, made the active one.** The
+		// capture photographs whichever world the drawing viewport shows, so
+		// naming one has to move the viewport rather than reach past it — there
+		// is one scene target per panel and only the panel that drew this frame
+		// has anything in it.
+		//
+		// Done here, before the first frame, so every frame of the run is of the
+		// scene under test rather than only the captured one. A name nothing
+		// answers to is ignored: a capture is a diagnostic, and one that aborted
+		// a run because a scene had been renamed would be worse than one that
+		// photographs the default.
+		if (!Settings.CaptureWorld.empty()) {
+			const WorldId wanted = Universe->Find(Name(Settings.CaptureWorld));
+			if (wanted.IsValid()) {
+				Active = wanted;
+				SelectionWorld = Active;
+			} else {
+				ENGINE_WARN("capture: no world called '{}' — capturing the active one", Settings.CaptureWorld);
+			}
+		}
+
 		// Back and up, looking at the origin — where a new scene's first part
 		// is. A camera at the origin looking down the axis starts inside
 		// whatever gets made first, which reads as a black viewport.

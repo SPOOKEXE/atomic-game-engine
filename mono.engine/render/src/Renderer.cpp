@@ -41,31 +41,76 @@ namespace engine::render {
 
 		// A draw instance in the layout the opaque pipeline binds.
 		//
-		// Built-in meshes are unit shapes; scale is folded into the model matrix.
-		GpuInstance ToGpu(const scene::DrawInstance &instance) {
+		// **`Size` is a box the mesh is stretched into, not a multiplier.** The
+		// mesh's own bounding box is mapped exactly onto the part's, so
+		// `MeshPart.Size` means metres for every mesh in the world regardless of
+		// the scale it was authored at — Roblox's `MeshPart` semantic, and the
+		// thing that makes `scene::Bounds` describe the geometry rather than
+		// approximate it.
+		//
+		// **The culling depended on this and nothing enforced it.**
+		// `graph::CullAndBound` tests `HalfExtent` against the frustum. While
+		// `Size` merely multiplied mesh coordinates, a mesh authored twenty units
+		// tall drew ten times outside the box describing it and was culled with
+		// most of itself still on screen. Now the drawn geometry fills that box
+		// exactly, so the cull is right by construction rather than right when
+		// the content happened to be baked correctly.
+		//
+		// A built-in is a unit shape about its own origin, so its `Extent` is a
+		// half on every axis and this is `HalfExtent * 2` — byte for byte what
+		// this function did before.
+		//
+		// @param instance What to draw.
+		// @param mesh     Its geometry, as `MeshTable::Resolve` gave it. Never
+		//        null: an unknown name resolves to the fallback.
+		GpuInstance ToGpu(const scene::DrawInstance &instance, const MeshEntry &mesh) {
+			// How much to multiply one axis by so the mesh's own box becomes the
+			// part's.
+			//
+			// **A degenerate axis keeps the old rule rather than dividing.** The
+			// built-in plane is a quad with no thickness, so its Y extent is
+			// exactly zero — and a flat mesh is an ordinary thing to author. The
+			// fallback is `HalfExtent * 2`, which is what a zero-thickness mesh
+			// got before and does nothing to geometry that has no extent on that
+			// axis anyway.
+			const auto stretch = [](float half, float extent) {
+				return extent > 1e-6f ? half / extent : half * 2.0f;
+			};
+
+			const glm::vec3 scale{
+				stretch(instance.HalfExtent.X, mesh.Extent.X),
+				stretch(instance.HalfExtent.Y, mesh.Extent.Y),
+				stretch(instance.HalfExtent.Z, mesh.Extent.Z),
+			};
+
 			GpuInstance gpu;
 			gpu.Model = instance.Frame.ToMatrix();
 
-			// Built-in geometry is one unit across.
-			gpu.Model[0] *= instance.HalfExtent.X * 2.0f;
-			gpu.Model[1] *= instance.HalfExtent.Y * 2.0f;
-			gpu.Model[2] *= instance.HalfExtent.Z * 2.0f;
+			gpu.Model[0] *= scale.x;
+			gpu.Model[1] *= scale.y;
+			gpu.Model[2] *= scale.z;
+
+			// **Centred after scaling, in the part's own space.** A model
+			// authored off its origin would otherwise hang away from the part by
+			// however far its box is offset — and because the offset scales with
+			// the part, it would grow as somebody resized it. Written into the
+			// translation column rather than composed as a second matrix: this
+			// runs once per instance per frame over the whole draw list.
+			// The upper 3x3 already carries the rotation *and* the scale, so one
+			// multiply moves the mesh's centre onto the part's origin.
+			const glm::vec3 centre{mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z};
+			gpu.Model[3] -= glm::vec4(glm::mat3(gpu.Model) * centre, 0.0f);
 
 			// Convert author-facing transparency to shader alpha.
 			gpu.Colour =
 				glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency};
 
 			// Avoid infinities for zero-scale geometry.
-			const auto reciprocal = [](float extent) {
-				const float scale = extent * 2.0f;
-				return scale * scale > 1e-12f ? 1.0f / (scale * scale) : 1.0f;
+			const auto reciprocal = [](float axis) {
+				return axis * axis > 1e-12f ? 1.0f / (axis * axis) : 1.0f;
 			};
-			gpu.InverseScaleSquared = glm::vec4{
-				reciprocal(instance.HalfExtent.X),
-				reciprocal(instance.HalfExtent.Y),
-				reciprocal(instance.HalfExtent.Z),
-				0.0f,
-			};
+			gpu.InverseScaleSquared =
+				glm::vec4{reciprocal(scale.x), reciprocal(scale.y), reciprocal(scale.z), 0.0f};
 			return gpu;
 		}
 
@@ -2554,6 +2599,14 @@ namespace engine::render {
 		State = std::make_unique<Impl>();
 	}
 
+	bool Renderer::MeshExtentOf(const core::Name &name, core::Vector3 &out) const {
+		if (State == nullptr || !State->Meshes.Has(name)) {
+			return false;
+		}
+		out = State->Meshes.Resolve(name).Extent;
+		return true;
+	}
+
 	bool Renderer::AddMesh(const core::Name &name, const assets::MeshData &mesh) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
@@ -3235,16 +3288,21 @@ namespace engine::render {
 					State->SlotTexture.resize(uploadCount);
 					State->SlotTags.resize(uploadCount);
 
+					// **The mesh is resolved once and used twice.** `ToGpu` needs
+					// it to stretch the instance into its `Size` box and the draw
+					// loop needs it to find its runs, and resolving twice would
+					// be a second hash of the same name per instance per frame.
 					const auto record = [&](size_t slot, const scene::DrawInstance &instance) {
-						State->SlotMesh[slot] = &State->Meshes.Resolve(instance.Mesh);
+						const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
+						State->SlotMesh[slot] = &mesh;
 						State->SlotTexture[slot] = instance.Texture;
 						State->SlotTags[slot] = instance.TagMask;
+						return &mesh;
 					};
 
 					for (size_t index = 0; index < State->SceneOrder.size(); index++) {
 						const scene::DrawInstance &instance = State->SceneInstances[State->SceneOrder[index]];
-						out[index] = ToGpu(instance);
-						record(index, instance);
+						out[index] = ToGpu(instance, *record(index, instance));
 					}
 
 					const size_t cameraBase = State->SceneOrder.size();
@@ -3252,8 +3310,7 @@ namespace engine::render {
 					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
 						const scene::DrawInstance &instance =
 							State->VisibleInstances[State->DrawOrder[index]];
-						camera[index] = ToGpu(instance);
-						record(cameraBase + index, instance);
+						camera[index] = ToGpu(instance, *record(cameraBase + index, instance));
 					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);

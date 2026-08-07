@@ -286,6 +286,14 @@ namespace studio {
 
 				if (Renderer.AddMesh(name, mesh)) {
 					ContentMeshes++;
+
+					// **Every part naming it, now that its shape is known.** A
+					// `MeshId` can be set long before the geometry arrives — that
+					// is the ordinary case, since naming it is what fetches it —
+					// so the fit cannot happen at assignment alone.
+					FitPartsToMesh(
+						name, engine::core::Vector3{(mesh.Maximum - mesh.Minimum) * 0.5f}
+					);
 					// **Triangle counts are world data**, so `MeshPart.
 					// TrianglesCount` answers in an edited world too — which is
 					// how somebody checks a mesh actually arrived.
@@ -345,6 +353,63 @@ namespace studio {
 				ContentMaterials
 			);
 		}
+	}
+
+	void Editor::FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent) {
+		// The mesh's proportions, normalised so the longest axis is one.
+		const float longest = std::max({extent.X, extent.Y, extent.Z});
+		if (!mesh.IsValid() || longest <= 1e-6f) {
+			return;
+		}
+
+		EachOpenWorld([&mesh, &extent, longest](engine::ecs::Store &store) {
+			store.Each<engine::scene::Visual, engine::scene::Bounds>(
+				[&](engine::ecs::Entity, engine::scene::Visual &visual, engine::scene::Bounds &bounds) {
+					// **Only when the mesh changed, which is what `Visual::Fitted`
+					// records.** This runs whenever geometry arrives — a republish,
+					// a reopened place, another part pulling the same mesh in — and
+					// without the guard every one of those would reshape a box
+					// somebody had deliberately squashed. A scene that rearranges
+					// itself on load is the worst kind of surprise, because nothing
+					// visibly did it.
+					if (visual.Mesh != mesh || visual.Fitted == mesh) {
+						return;
+					}
+
+					// **The part keeps the size it has along its longest axis and
+					// gets the mesh's shape on the other two.** That is the whole
+					// rule, and both halves are load-bearing:
+					//
+					//   * the shape has to come from the mesh, because `Size` is a
+					//     box the mesh is *stretched* into — a character in a cubic
+					//     box is a character squashed into a cube;
+					//   * the scale has to come from the part, because somebody
+					//     swapping a bad mesh for a fixed one wants the thing to
+					//     stay the size they made it. Taking the mesh's own metres
+					//     would resize their scene every time they corrected an
+					//     asset.
+					//
+					// **Idempotent**, which is what lets this run whenever a mesh
+					// arrives rather than only on assignment: a part whose
+					// proportions already match is written the value it has.
+					const float span =
+						std::max({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
+					if (span <= 1e-6f) {
+						return;
+					}
+
+					const float unit = span / longest;
+					bounds.HalfExtent = engine::core::Vector3{
+						extent.X * unit,
+						extent.Y * unit,
+						extent.Z * unit,
+					};
+
+					// Claimed, so nothing fits this part to this mesh again.
+					visual.Fitted = mesh;
+				}
+			);
+		});
 	}
 
 	void Editor::PublishManifestNames() {

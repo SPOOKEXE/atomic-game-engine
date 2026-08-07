@@ -109,13 +109,20 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// one of those bytes and cost nothing — which is what named padding is
 	// *for*, and what this check is here to keep honest. One byte is left.
 	//
-	// **One `Name` now and not two.** v0.10 took `Material` off this component:
-	// a material is content named by a `Material` instance, not a word on every
-	// drawable — `scene/Materials.hpp`. Four bytes off the widest column in the
-	// engine, which is the part of that change nothing else reports.
+	// **Two `Name`s, and both of the changes that got it there are v0.10's.**
+	// `Material` came off — a material is content named by a `Material`
+	// instance, not a word on every drawable, `scene/Materials.hpp` — and
+	// `Fitted` went on, which records the mesh `Bounds` was last shaped to fit.
+	//
+	// **The second one is paid for on every part in the world**, including every
+	// plain `Part` that will never name a mesh, and that is the honest cost of
+	// keeping `client::CollectInstances` a batched walk over fixed columns: the
+	// same trade `SurfaceAppearance` makes one component over. Four bytes an
+	// entity buys a fit rule with nothing to keep in step — see `Visual::Fitted`
+	// for why a bool would have been cheaper and wrong.
 	CHECK(
 		sizeof(Visual) ==
-		sizeof(Color3) + sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + sizeof(bool) + 1
+		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + sizeof(bool) + 1
 	);
 
 	CHECK(sizeof(Rendered) == sizeof(uint8_t) + 3);

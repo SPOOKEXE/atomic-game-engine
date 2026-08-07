@@ -244,6 +244,35 @@ namespace engine::scene {
 		// a unit cube, today.
 		core::Name Mesh;
 
+		// Which mesh `Bounds::HalfExtent` was last shaped to fit.
+		//
+		// **`Size` is a box the mesh is stretched into**, so a part whose box is
+		// the wrong shape distorts whatever is put in it — and only the geometry
+		// knows the right shape. An editor therefore reshapes the box when a mesh
+		// is chosen. The question this field answers is *when it may stop*.
+		//
+		// **A name rather than a "fitted" flag, because the flag has no good
+		// value to be reset by.** What must happen is: fit when the mesh changes,
+		// and never again. A bool needs somebody to clear it on every write to
+		// `Mesh`, in every path that writes one — a property panel, a script, a
+		// game file, a replication delta — and the one that forgets produces a
+		// part that silently stops fitting. Recording *which* mesh the box was
+		// shaped for makes the comparison the condition: `Fitted != Mesh` is
+		// exactly "the mesh changed since the box was shaped", with nothing to
+		// keep in step.
+		//
+		// **Saved, which is what makes reopening a place leave sizes alone.** A
+		// part somebody deliberately squashed would otherwise be reshaped the
+		// first time its mesh arrived in a new session — a scene that quietly
+		// rearranges itself on load, which is the worst kind of surprise because
+		// nothing did it.
+		//
+		// Invalid on a part nothing has fitted, which is every part that has
+		// never named a mesh.
+		//
+		// @since v0.10
+		core::Name Fitted;
+
 		// How much of what is behind shows through, 0 to 1.
 		//
 		// **The field is cheap and the ordering is not**, which is why this

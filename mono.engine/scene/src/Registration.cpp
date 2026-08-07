@@ -54,6 +54,13 @@ namespace engine::scene {
 				writer.WriteName(visual.Mesh);
 				writer.WriteBool(visual.Visible);
 
+				// **Written, and forgetting to would be this function's own
+				// documented failure mode repeating.** See the paragraph below:
+				// two fields added to `Visual` crossed for free everywhere except
+				// here and silently reset on every load. A part whose `Fitted`
+				// reset would be reshaped the next time its mesh arrived.
+				writer.WriteName(visual.Fitted);
+
 				// **Added at v0.7, and the reason it was missing is the reason
 				// a custom serialiser is dangerous.** A field added to a type
 				// with a generated serialiser crosses for free; a field added to
@@ -84,6 +91,7 @@ namespace engine::scene {
 				visual.Tint.B = reader.ReadFloat();
 				visual.Mesh = reader.ReadName();
 				visual.Visible = reader.ReadBool();
+				visual.Fitted = reader.ReadName();
 				visual.Transparency = reader.ReadFloat();
 				visual.Surface = reader.ReadInt8();
 				visual.CastShadow = reader.ReadBool();

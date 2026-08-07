@@ -360,6 +360,24 @@ namespace studio {
 		// taken once, a few frames in — early enough to be useful and late
 		// enough that the layout and the first scene have settled.
 		std::filesystem::path Capture;
+
+		// Which world the capture should be of, or empty for whichever the
+		// active viewport is showing.
+		//
+		// **Because a count is not a picture, and every check this editor could
+		// run headlessly was a count.** A change to how geometry is scaled,
+		// centred or culled produces an identical "13 placed, 7 meshes, 16
+		// textures, 0 unresolved" whether the models are right, squashed,
+		// inside-out or invisible. Naming the world lets a smoke test shoot the
+		// one scene built to show content.
+		//
+		// A name that no world answers to leaves the capture on the active
+		// viewport rather than failing: a capture is a diagnostic, and one that
+		// aborted a run because a scene was renamed would be worse than one that
+		// photographs the wrong thing.
+		//
+		// @since v0.10
+		std::string CaptureWorld;
 	};
 
 	// One open script tab.
@@ -1330,6 +1348,15 @@ namespace studio {
 		// **Names, not content.** It is what makes
 		// `ContentService:GetPublishedMeshes()` answerable, and naming one of them
 		// is still what fetches it — see `scene/PublishedCatalogue.hpp`.
+		// Reshapes every part naming this mesh to the mesh's own proportions,
+		// keeping the size each part already has along its longest axis.
+		//
+		// **Because `Size` is a box the mesh is stretched into.** A part whose
+		// box is the wrong shape distorts whatever is put in it, and only the
+		// geometry knows the right shape. Idempotent, so it is safe to run
+		// whenever a mesh arrives.
+		void FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent);
+
 		void PublishManifestNames();
 
 		// Makes sure every open world holds `PublishedMeshNames`.
