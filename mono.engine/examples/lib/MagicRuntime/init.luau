@@ -44,7 +44,7 @@ local MagicRuntime = {}
 -- exactly these four, and this engine has all of them -- so unlike terrain there
 -- is no remap here and none should be added: widening it would let a spell
 -- author a material the Roblox side would refuse.
-local MATERIALS: { [string]: Enum_Material } = {
+local MATERIALS: { [string]: Enum.Material } = {
 	Neon = Enum.Material.Neon,
 	SmoothPlastic = Enum.Material.SmoothPlastic,
 	ForceField = Enum.Material.ForceField,

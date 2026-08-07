@@ -83,7 +83,7 @@ namespace engine::render {
 
 		// Takes the device and registers the engine's built-in meshes.
 		//
-			// Registers the fallback mesh used for unknown names.
+		// Registers the fallback mesh used for unknown names.
 		//
 		// @param device The GPU device. Kept, not owned.
 		// @return `false` when the built-ins could not be uploaded.

@@ -32,7 +32,9 @@
 // than anything about a scene. Nothing here reads a field of one.
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/NumberRange.hpp>
 #include <engine/core/types/Rect.hpp>
+#include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -140,6 +142,35 @@ namespace engine::ecs {
 		UDim,
 		UDim2,
 		Rect,
+
+		// The three a curve is authored in, added at v0.10 for `effects`.
+		//
+		// **Here for the reason the four above are: a value that cannot be a
+		// property is a value nothing can author.** `core::NumberSequence` and
+		// `core::ColorSequence` have existed since v0.6 and neither was a
+		// `PropertyType`, which was fine while the only thing holding one was a
+		// local in a script. A particle emitter holds eight of them, and an
+		// emitter whose `Size` could not be saved, could not appear in a
+		// properties panel and could not be set from a script would be an emitter
+		// nobody can author — the same gap `UDim2` had at v0.8, in the same words.
+		//
+		// **They are big, and that is the one thing about them worth checking
+		// against the closed-list rule.** A `NumberSequence` is 328 bytes and a
+		// `ColorSequence` is 328; every other member of this enum is 32 or fewer.
+		// `PropertyDescriptor::Size` already carries the width and every path
+		// checks a caller's buffer against it, so nothing here assumes a property
+		// value fits in a register — but a marshaller that copied by value into a
+		// stack temporary per read is a marshaller that just grew its frame by a
+		// third of a kilobyte. `control/src/Tools.cpp` reads through a shared
+		// buffer for exactly this reason and is where the size is felt.
+		//
+		// `NumberRange` joins them because an emitter's `Lifetime` and `Speed` are
+		// ranges rather than curves, and a range spelled as two float properties
+		// is two writes with a frame between them where the minimum exceeds the
+		// maximum.
+		NumberRange,
+		NumberSequence,
+		ColorSequence,
 	};
 
 	// How a property reaches the components underneath it.
@@ -503,6 +534,12 @@ namespace engine::ecs {
 				return PropertyType::UDim2;
 			} else if constexpr (std::is_same_v<Bare, core::Rect>) {
 				return PropertyType::Rect;
+			} else if constexpr (std::is_same_v<Bare, core::NumberRange>) {
+				return PropertyType::NumberRange;
+			} else if constexpr (std::is_same_v<Bare, core::NumberSequence>) {
+				return PropertyType::NumberSequence;
+			} else if constexpr (std::is_same_v<Bare, core::ColorSequence>) {
+				return PropertyType::ColorSequence;
 			} else if constexpr (std::is_same_v<Bare, bool>) {
 				return PropertyType::Bool;
 			} else if constexpr (std::is_same_v<Bare, int32_t> || std::is_same_v<Bare, uint32_t>) {

@@ -437,6 +437,54 @@ namespace studio {
 							break;
 						}
 
+						case PropertyType::NumberRange: {
+							float parts[2]{changed.NumberRange.Minimum, changed.NumberRange.Maximum};
+							if (ImGui::DragFloat2("##v", parts, StepFor(parts[1]))) {
+								// **Not clamped so the minimum stays below the
+								// maximum.** Dragging either handle past the other
+								// is how a person *inverts* a range, and a widget
+								// that silently pushed the other end along would
+								// make that impossible to express and impossible
+								// to notice. `game::ParseValue` refuses to reorder
+								// for the same reason.
+								changed.NumberRange = engine::core::NumberRange{parts[0], parts[1]};
+								wrote = true;
+							}
+							break;
+						}
+
+						// --- the two curves ---------------------------------
+						//
+						// **A text field, and a curve editor is deliberately not
+						// here.** `game::FormatValue` already writes a sequence as
+						// `0, 1, 0; 1, 0, 0` and `ParseValue` reads it back, so a
+						// text field is a complete, round-tripping editor for
+						// about six lines — and the alternative is a spline widget
+						// with keypoint dragging, which is a panel rather than a
+						// row and belongs beside the emitter preview rather than
+						// in the generic property list.
+						//
+						// What the text field is *not* is comfortable, and that is
+						// the honest trade rather than a claim it is fine. The
+						// curve editor is `mono.studio/AGENTS.md`'s deferred list.
+						//
+						// **Parsed on commit rather than per keystroke**, because
+						// half a typed gradient is a parse failure and writing one
+						// per character would fight the person typing it.
+						case PropertyType::NumberSequence:
+						case PropertyType::ColorSequence: {
+							std::string text = FormatValue(changed);
+							if (TextField("##v", text)) {
+								PropertyValue parsed;
+								std::string reason;
+								if (ParseValue(descriptor->Type, text, parsed, reason)) {
+									changed = parsed;
+									wrote = true;
+								}
+							}
+							break;
+						}
+
 						case PropertyType::Opaque:
 							ImGui::TextDisabled("(not readable as a value)");
 							break;

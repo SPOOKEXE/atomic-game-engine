@@ -36,9 +36,8 @@ namespace {
 			// the containment test reads is the *name*, so an instance carrying
 			// that name is exactly as contained as the real service would be.
 			// That is the same duplication `NormalId` already makes here.
-			Container = Data.CreateInstance(
-				engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui"
-			);
+			Container =
+				Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui");
 			Request.Display.Width = 800.0f;
 			Request.Display.Height = 600.0f;
 		}
@@ -330,8 +329,8 @@ TEST_CASE("a rotated element is clickable where it is drawn", "[gui][input]") {
 
 	// The unrotated box spans x 100..300, y 190..210 — centred at (200, 200).
 	// Turned, it spans x 190..210, y 100..300.
-	const Vector2 alongTurned{200.0f, 120.0f};   // inside turned, outside flat
-	const Vector2 alongFlat{280.0f, 200.0f};     // inside flat, outside turned
+	const Vector2 alongTurned{200.0f, 120.0f}; // inside turned, outside flat
+	const Vector2 alongFlat{280.0f, 200.0f};   // inside flat, outside turned
 
 	CHECK(Pick(world.Data, world.List.Commands(), alongTurned) == button);
 	CHECK(Pick(world.Data, world.List.Commands(), alongFlat) == NULL_ENTITY);

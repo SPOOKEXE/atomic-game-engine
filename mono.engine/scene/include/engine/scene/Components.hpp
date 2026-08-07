@@ -571,6 +571,136 @@ namespace engine::scene {
 		uint8_t Reserved[2] = {};
 	};
 
+	// A point on a part, carried with it.
+	//
+	// **The one exception to "every transform here is world space and nothing
+	// propagates it", and it is narrower than it looks.** An `Attachment` is not
+	// a `PVInstance` and carries no `Transform`: it holds *its own* pair of
+	// frames, one authored relative to a parent part and one derived from it by
+	// a single flat pass. So there is still no transform hierarchy, no dirty
+	// cascade and no per-entity parent walk in the simulation — there is one
+	// loop over one component type, and everything else in this file is
+	// untouched.
+	//
+	// **The derived frame is a field rather than a getter, and the reason is a
+	// beam.** A beam reads both of its attachments' world frames every frame,
+	// and a getter that resolved by walking to the parent would be two hierarchy
+	// lookups and two `CFrame` products per beam per frame — for a value that is
+	// the same for every reader within one frame. `ecs/AGENTS.md`'s rule against
+	// two copies of a fact bends here for the reason `CameraMatrices` bends it:
+	// the second copy is a *cache with one writer*, and `ResolveAttachments` is
+	// that writer.
+	//
+	// **An attachment on nothing keeps its local frame as its world frame.**
+	// Roblox's rule — an `Attachment` parented to a `Model` or to the tree root
+	// has no part to be relative to — and it is what makes an attachment usable
+	// as a bare point in space, which is what a beam between two world positions
+	// needs.
+	//
+	// @since v0.10
+	struct Attachment {
+		// Where this point sits, relative to the parent part's own frame.
+		//
+		// A `CFrame` and not a `Vector3`, because an attachment carries a
+		// direction as well as a position: a beam leaves along the attachment's
+		// axis and a particle emitter's cone opens around it. A point with no
+		// orientation would make both of those a second field.
+		core::CFrame Frame;
+
+		// The same point in world space, as of the last `ResolveAttachments`.
+		//
+		// **Derived, never authored.** A script writing this is writing a value
+		// that is overwritten before anything reads it, which is why the property
+		// surface exposes `WorldCFrame` as read-only and `CFrame` as writable —
+		// the same split `GuiObject`'s absolutes have.
+		core::CFrame WorldFrame;
+	};
+
+	// What kind of light an entity emits.
+	//
+	// **Three classes and one component**, which is the trade `Collider::Extent`
+	// already makes across three shapes: the three differ by two fields, and
+	// three components would be three columns, three queries and three upload
+	// paths for something the renderer packs into one array either way.
+	//
+	// @since v0.10
+	enum class LightKind : uint8_t {
+		// Radiates in every direction from a point. Ignores `Angle` and `Face`.
+		Point = 0,
+
+		// A cone about the parent's `Face`, `Angle` degrees wide.
+		Spot = 1,
+
+		// A cone about the parent's `Face`, emitted from the whole face rather
+		// than from a point.
+		Surface = 2,
+	};
+
+	// Something that gives off light.
+	//
+	// **Where it shines from is its parent's business**, exactly as `Sound`'s is
+	// — a `PointLight` inside a part lights the world from that part, and one
+	// parented to an `Attachment` lights from the attachment. So there is no
+	// position here and there must not be one, for `Sound`'s reason: a second
+	// opinion about where a thing is, is rule 2 with a bulb attached.
+	//
+	// **Nothing in this module lights anything.** `scene` is `shared` and a
+	// server has no renderer; the client walks these rows and fills its lighting
+	// uniforms, which is the same split `Visual::Mesh` has against the renderer
+	// and `Sound` has against the mixer.
+	//
+	// Widest-first with the flags last, so the object representation a snapshot
+	// writes holds no uninitialised bytes between fields.
+	//
+	// @since v0.10
+	struct Light {
+		// What colour the light is.
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+
+		// How strong it is, with 1 being Roblox's default.
+		float Brightness = 1.0f;
+
+		// How far it reaches, in metres.
+		//
+		// **A hard cutoff rather than a physical falloff**, which is Roblox's
+		// `Range` and is also what a forward renderer needs: a light with no end
+		// is a light every fragment in the world has to be tested against, and
+		// the range is what lets a tile or cluster pass reject it.
+		float Range = 8.0f;
+
+		// How wide a spot or surface light's cone is, in degrees.
+		//
+		// Ignored entirely for a `Point`, which is why it is one field rather
+		// than a separate component: a column of unused floats on the point
+		// lights is four bytes, and a second archetype is a second query.
+		float Angle = 90.0f;
+
+		// Which face of the parent part a spot or surface light points out of.
+		//
+		// Stored as the enum so the component stays trivially copyable, and its
+		// ordinals are the format — `scene/Enums.hpp` says why `NormalId` is the
+		// one enum here whose numbers may never be reordered.
+		NormalId Face = NormalId::Front;
+
+		// Which of the three this is.
+		LightKind Kind = LightKind::Point;
+
+		// Whether it casts a shadow.
+		//
+		// **Authored and not yet read**, which is stated rather than hidden: the
+		// renderer has one shadow-casting directional light and no shadow map per
+		// point light. Declared anyway because it is the field that decides
+		// whether a light is cheap, and a game authored without it would have to
+		// be re-authored the day the pass exists. `SurfaceAppearance`'s rule
+		// about `MetalnessMap` cuts the other way here and deliberately: that was
+		// a field a physically based pipeline would *interpret*, and this is one
+		// an author *decides*.
+		bool Shadows = false;
+
+		// Whether it is on.
+		bool Enabled = true;
+	};
+
 	// A content hash of what a consumer last saw, for consumers that cannot
 	// observe a column version.
 	//

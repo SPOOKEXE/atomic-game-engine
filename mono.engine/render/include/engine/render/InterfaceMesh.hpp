@@ -144,9 +144,7 @@ namespace engine::render {
 		// The rotation one command asks for, resolved once.
 		static Rotation TurnOf(const gui::DrawCommand &command);
 
-		void Push(
-			const core::Rect &bounds, const core::Rect &uv, uint32_t colour, const Rotation &turn
-		);
+		void Push(const core::Rect &bounds, const core::Rect &uv, uint32_t colour, const Rotation &turn);
 
 		std::vector<InterfaceVertex> VertexData;
 		std::vector<uint16_t> IndexData;

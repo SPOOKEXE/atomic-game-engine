@@ -43,7 +43,7 @@ local POOL_LIMIT = 2048
 -- Written out per surface rather than as a name-to-name table, so a surface
 -- added to the core fails loudly at load with a nil index rather than silently
 -- drawing plastic.
-local MATERIALS: { Enum_Material } = {
+local MATERIALS: { Enum.Material } = {
 	Enum.Material.Slate, -- rock
 	Enum.Material.Grass, -- grass
 	Enum.Material.Sand, -- sand

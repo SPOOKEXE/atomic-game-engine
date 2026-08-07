@@ -830,6 +830,24 @@ namespace studio {
 		// walks to that point rather than making somebody press Ctrl+Z and count.
 		void DrawHistory();
 
+		// What is in the local content store, and how to put things in it.
+		//
+		// **A view over `cdn::LocalStore` and nothing of its own.** The folder is
+		// the index, so this reads the log and calls `ImportFile` — it keeps no
+		// list and caches nothing it cannot rebuild. `Assets.cpp` says why the
+		// upload is a typed path rather than a file dialog.
+		void DrawAssets();
+
+		// Brings one file, or every file under one folder, into the store.
+		//
+		// @param given What the person typed or dropped.
+		void ImportAssetPath(const std::string &given);
+
+		// Publishes `raw/` into `processed/`.
+		//
+		// @param hexSeed 64 hex characters of Ed25519 seed. Not stored.
+		void PublishAssets(const std::string &hexSeed);
+
 		// What crosses between worlds, which is the one thing they share.
 		//
 		// **The rule that nothing crossing a world boundary is a pointer is what
@@ -1921,6 +1939,26 @@ namespace studio {
 
 		// The undo stack as a list. See `DrawHistory`.
 		bool ShowHistory = false;
+
+		// The local content store. See `DrawAssets`.
+		bool ShowAssets = false;
+
+		// What the person last typed into the import field.
+		//
+		// **A fixed buffer, because that is what `ImGui::InputText` takes.** A
+		// `std::string` needs the resize callback, which is worth having for the
+		// script editor and is not for a path somebody pastes once.
+		char AssetImportPath[512] = {};
+
+		// The signing seed, for a publish.
+		//
+		// **Never saved, and the buffer is cleared with the editor.** A key kept
+		// in the preferences file is a key that signs anything anybody drops in
+		// the content folder — `cdn::PublishLocal` carries the argument.
+		char AssetSigningKey[128] = {};
+
+		// What the last import or publish said.
+		std::string AssetStatus;
 
 		// What crosses between worlds. See `DrawBus`.
 		bool ShowBus = false;

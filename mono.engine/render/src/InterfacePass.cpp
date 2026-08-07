@@ -275,8 +275,7 @@ namespace engine::render {
 			SDL_UnmapGPUTransferBuffer(gpu, staging);
 		}
 
-		SDL_GPUCopyPass *copy =
-			SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
 
 		SDL_GPUTextureTransferInfo source{};
 		source.transfer_buffer = staging;
@@ -382,8 +381,7 @@ namespace engine::render {
 			return false;
 		}
 
-		SDL_GPUCopyPass *copy =
-			SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
 
 		SDL_GPUTransferBufferLocation from{};
 		from.transfer_buffer = staging;

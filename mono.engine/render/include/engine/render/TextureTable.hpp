@@ -26,7 +26,7 @@ namespace engine::render {
 	  public:
 		// How much device memory the table will hold, in bytes.
 		//
-			// Bounds device memory reachable from content.
+		// Bounds device memory reachable from content.
 		static constexpr size_t MAXIMUM_BYTES = 512u * 1024u * 1024u;
 
 		TextureTable() = default;
@@ -46,7 +46,7 @@ namespace engine::render {
 
 		// Uploads a texture under a name, replacing one already there.
 		//
-			// Uploads immediately because textures are independent resources.
+		// Uploads immediately because textures are independent resources.
 		//
 		// @param name  The name a `SurfaceAppearance` or a submesh will ask
 		//              for.
@@ -57,7 +57,7 @@ namespace engine::render {
 
 		// The texture for a name, or null when it is not registered.
 		//
-			// Missing textures return null; the material supplies the base colour.
+		// Missing textures return null; the material supplies the base colour.
 		//
 		// @param name The name.
 		// @return The texture, or null.

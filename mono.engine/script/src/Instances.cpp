@@ -2,11 +2,13 @@
 #include "Subtree.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
 
+#include <algorithm>
 #include <lualib.h>
 #include <string_view>
 #include <vector>
@@ -68,6 +70,22 @@ namespace engine::script {
 		// tomorrow is readable and writable from Luau today, because this code
 		// only ever learned the shapes a value can have.
 
+		// How wide a property value can be, and therefore how big the shared
+		// buffers below are.
+		//
+		// **This was `sizeof(core::CFrame)` until v0.10 added the sequences.** A
+		// `core::ColorSequence` is twenty keypoints and does not fit in
+		// twenty-eight bytes, and the guard is `property.Size > sizeof(bytes)` —
+		// so an emitter's `Color` would have failed the read with "could not
+		// read 'Color'", naming a property that is declared and readable and
+		// whose only problem was a buffer one file away.
+		//
+		// A named constant rather than a `sizeof` at each buffer, because there
+		// are two and the getter's being narrower than the setter's is a bug with
+		// no symptom on the setter.
+		constexpr size_t WIDEST_PROPERTY =
+			std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
+
 		// Pushes a property's value, having read it into a buffer of its size.
 		bool PushValue(lua_State *state, const PropertyDescriptor &property, const void *bytes) {
 			switch (property.Type) {
@@ -128,6 +146,15 @@ namespace engine::script {
 				return true;
 			case PropertyType::Rect:
 				*PushRect(state) = *static_cast<const core::Rect *>(bytes);
+				return true;
+			case PropertyType::NumberRange:
+				*PushNumberRange(state) = *static_cast<const core::NumberRange *>(bytes);
+				return true;
+			case PropertyType::NumberSequence:
+				*PushNumberSequence(state) = *static_cast<const core::NumberSequence *>(bytes);
+				return true;
+			case PropertyType::ColorSequence:
+				*PushColorSequence(state) = *static_cast<const core::ColorSequence *>(bytes);
 				return true;
 			case PropertyType::Reference: {
 				// **Nil, and this is where "an orphan is not in the world"
@@ -205,6 +232,23 @@ namespace engine::script {
 				return true;
 			case PropertyType::Rect:
 				*static_cast<core::Rect *>(out) = CheckRect(state, index);
+				return true;
+			case PropertyType::NumberRange:
+				*static_cast<core::NumberRange *>(out) = CheckNumberRange(state, index);
+				return true;
+
+			// **Placement-new, where every case above assigns.** `out` is
+			// uninitialised stack bytes, and assigning a 328-byte value over it is
+			// harmless only because these types are trivially copyable — which
+			// they are, and which the caller's zeroed buffer already relies on.
+			// Written as a plain assignment for the same reason as the rest: one
+			// shape, so a future non-trivial member is caught by the compiler here
+			// rather than by a corrupt gradient.
+			case PropertyType::NumberSequence:
+				*static_cast<core::NumberSequence *>(out) = CheckNumberSequence(state, index);
+				return true;
+			case PropertyType::ColorSequence:
+				*static_cast<core::ColorSequence *>(out) = CheckColorSequence(state, index);
 				return true;
 			case PropertyType::Reference:
 				// `part.Parent = nil` detaches. `part.Parent = workspace` is now
@@ -624,7 +668,7 @@ namespace engine::script {
 				// `Classes::Describe` and scan the class's property list a
 				// second time, for a descriptor that is in scope — which is
 				// half the class-table traffic of a scripted frame.
-				alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
+				alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 				if (property->Size > sizeof(bytes) ||
 					!store.GetProperty(instance, *property, bytes, property->Size)) {
 					luaL_errorL(state, "could not read '%s'", field);
@@ -724,7 +768,7 @@ namespace engine::script {
 				return 0;
 			}
 
-			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 			if (property->Size > sizeof(bytes) || !ReadValue(state, 3, *property, bytes)) {
 				luaL_errorL(state, "'%s' cannot take that value", field);
 			}
@@ -806,6 +850,249 @@ namespace engine::script {
 		}
 	}
 
+	// --- attributes -----------------------------------------------------------
+	//
+	// **The same marshalling as a property and deliberately so.** An attribute
+	// and a property are one question — what can userland hold — asked at run time
+	// and at declaration time, so `PushValue` and `ReadValue` above serve both.
+	// Two marshallers would be two places to add a type to and two to forget.
+	//
+	// What differs is that an attribute has no descriptor, so the *type* has to
+	// come from the Luau value itself on the way in and from the stored value on
+	// the way out.
+
+	namespace {
+		// Turns a Luau value into an attribute, by what it is rather than by what
+		// a descriptor said it should be.
+		//
+		// **Userdata is checked by tag, in the order the vocabulary was added.**
+		// A tag check is exact — `Vector2` and `UDim` are both two floats and only
+		// the tag tells them apart — so the order here is legibility and not
+		// correctness.
+		//
+		// Returns `Opaque` for anything with no attribute form, which is what the
+		// caller turns into a refusal. `nil` is the one exception and is handled
+		// by the caller before this: it means *remove*.
+		ecs::AttributeValue ReadAttribute(lua_State *state, int index) {
+			ecs::AttributeValue value;
+
+			if (lua_isboolean(state, index)) {
+				value.Type = ecs::PropertyType::Bool;
+				value.Bool = lua_toboolean(state, index) != 0;
+				return value;
+			}
+			if (lua_isnumber(state, index)) {
+				// **A double and not an int, even for a whole number.** Luau has
+				// one number type; guessing at an integer here would make
+				// `SetAttribute("n", 1)` read back as an `Int32` and
+				// `SetAttribute("n", 1.5)` as a `Double`, so a script that
+				// incremented an attribute would change its own type halfway.
+				value.Type = ecs::PropertyType::Double;
+				value.Double = lua_tonumber(state, index);
+				return value;
+			}
+			if (lua_isstring(state, index)) {
+				// **`String` and never `Name`.** An attribute's value is something
+				// a game computes — a title, a state, a message — and `core::Name`
+				// is a registry that never releases. `ecs::PropertyType::String`
+				// carries the whole argument, and this is the surface it was added
+				// for.
+				size_t length = 0;
+				const char *text = lua_tolstring(state, index, &length);
+				value.Type = ecs::PropertyType::String;
+				value.String.assign(text, length);
+				return value;
+			}
+
+			if (lua_touserdatatagged(state, index, TAG_VECTOR3) != nullptr) {
+				value.Type = ecs::PropertyType::Vector3;
+				value.Vector3 = CheckVector3(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_COLOR3) != nullptr) {
+				value.Type = ecs::PropertyType::Color3;
+				value.Color3 = CheckColor3(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_CFRAME) != nullptr) {
+				value.Type = ecs::PropertyType::CFrame;
+				value.CFrame = CheckCFrame(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_VECTOR2) != nullptr) {
+				value.Type = ecs::PropertyType::Vector2;
+				value.Vector2 = CheckVector2Value(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_UDIM) != nullptr) {
+				value.Type = ecs::PropertyType::UDim;
+				value.UDim = CheckUDim(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_UDIM2) != nullptr) {
+				value.Type = ecs::PropertyType::UDim2;
+				value.UDim2 = CheckUDim2(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_RECT) != nullptr) {
+				value.Type = ecs::PropertyType::Rect;
+				value.Rect = CheckRect(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_NUMBER_RANGE) != nullptr) {
+				value.Type = ecs::PropertyType::NumberRange;
+				value.NumberRange = CheckNumberRange(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_NUMBER_SEQUENCE) != nullptr) {
+				value.Type = ecs::PropertyType::NumberSequence;
+				value.NumberSequence = CheckNumberSequence(state, index);
+			} else if (lua_touserdatatagged(state, index, TAG_COLOR_SEQUENCE) != nullptr) {
+				value.Type = ecs::PropertyType::ColorSequence;
+				value.ColorSequence = CheckColorSequence(state, index);
+			}
+
+			return value;
+		}
+
+		// Pushes a stored attribute.
+		//
+		// Returns `false` for a type with no Luau form, which cannot happen for a
+		// value this binding stored and can for one a future build wrote — so it
+		// is a refusal rather than an assert.
+		bool PushAttribute(lua_State *state, const ecs::AttributeValue &value) {
+			switch (value.Type) {
+			case ecs::PropertyType::Bool:
+				lua_pushboolean(state, value.Bool);
+				return true;
+			case ecs::PropertyType::Int32:
+				lua_pushinteger(state, value.Int32);
+				return true;
+			case ecs::PropertyType::Int64:
+				lua_pushnumber(state, static_cast<double>(value.Int64));
+				return true;
+			case ecs::PropertyType::Float:
+				lua_pushnumber(state, value.Float);
+				return true;
+			case ecs::PropertyType::Double:
+				lua_pushnumber(state, value.Double);
+				return true;
+			case ecs::PropertyType::Name:
+			case ecs::PropertyType::Enum:
+				lua_pushstring(state, value.Name.Text().data());
+				return true;
+			case ecs::PropertyType::String:
+				lua_pushlstring(state, value.String.data(), value.String.size());
+				return true;
+			case ecs::PropertyType::Vector3:
+				*PushVector3(state) = value.Vector3;
+				return true;
+			case ecs::PropertyType::Color3:
+				*PushColor3(state) = value.Color3;
+				return true;
+			case ecs::PropertyType::CFrame:
+				*PushCFrame(state) = value.CFrame;
+				return true;
+			case ecs::PropertyType::Vector2:
+				*PushVector2(state) = value.Vector2;
+				return true;
+			case ecs::PropertyType::UDim:
+				*PushUDim(state) = value.UDim;
+				return true;
+			case ecs::PropertyType::UDim2:
+				*PushUDim2(state) = value.UDim2;
+				return true;
+			case ecs::PropertyType::Rect:
+				*PushRect(state) = value.Rect;
+				return true;
+			case ecs::PropertyType::NumberRange:
+				*PushNumberRange(state) = value.NumberRange;
+				return true;
+			case ecs::PropertyType::NumberSequence:
+				*PushNumberSequence(state) = value.NumberSequence;
+				return true;
+			case ecs::PropertyType::ColorSequence:
+				*PushColorSequence(state) = value.ColorSequence;
+				return true;
+			case ecs::PropertyType::Reference:
+			case ecs::PropertyType::Opaque:
+				break;
+			}
+			return false;
+		}
+
+		int InstanceGetAttribute(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			const Name name(luaL_checkstring(state, 2));
+
+			ecs::AttributeValue value;
+			if (!ecs::GetAttribute(store, instance, name, value) || !PushAttribute(state, value)) {
+				// **Nil for an attribute nobody set**, which is Roblox's answer
+				// and is the only one a script can act on: an error would make
+				// `if part:GetAttribute("Health") then` a crash rather than a
+				// test.
+				lua_pushnil(state);
+			}
+			return 1;
+		}
+
+		int InstanceSetAttribute(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+			const Name name(luaL_checkstring(state, 2));
+
+			ecs::AttributeValue value;
+			if (!lua_isnoneornil(state, 3)) {
+				value = ReadAttribute(state, 3);
+				if (value.Type == ecs::PropertyType::Opaque) {
+					luaL_errorL(
+						state, "SetAttribute: '%s' cannot hold that type", std::string(name.Text()).c_str()
+					);
+				}
+			}
+
+			// An `Opaque` value removes, which is what `nil` fell through to
+			// above. `ecs::SetAttribute` carries the argument for why removal is
+			// not a method of its own.
+			if (!ecs::SetAttribute(store, instance, name, value)) {
+				luaL_errorL(state, "could not set attribute '%s'", std::string(name.Text()).c_str());
+			}
+
+			// **Queued rather than fired**, so an attribute signals on the same
+			// barrier a property does and with the same dedup —
+			// `ChangeQueue::Record` carries the argument. `PumpChanges` is what
+			// turns this into `.Changed` and into whatever
+			// `GetAttributeChangedSignal` connected.
+			UpvalueContext(state).Changes.Record(instance, name);
+			return 0;
+		}
+
+		// `instance:GetAttributes()` — every attribute, as a table.
+		//
+		// Roblox's name and Roblox's shape: a map from name to value rather than
+		// an array, because that is what a caller iterates with `pairs`.
+		int InstanceGetAttributes(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			lua_newtable(state);
+			for (const Name &name : ecs::AttributeNames(store, instance)) {
+				ecs::AttributeValue value;
+				if (!ecs::GetAttribute(store, instance, name, value)) {
+					continue;
+				}
+				if (!PushAttribute(state, value)) {
+					continue;
+				}
+				lua_setfield(state, -2, name.Text().data());
+			}
+			return 1;
+		}
+
+		// `instance:GetAttributeChangedSignal(name)`.
+		int InstanceGetAttributeChangedSignal(lua_State *state) {
+			const Entity instance = CheckInstance(state, 1);
+			const Name name(luaL_checkstring(state, 2));
+
+			// **The property-changed signal, keyed by the attribute's name.**
+			// `SignalKind::PropertyChanged` already filters by a `core::Name`, and
+			// an attribute name and a property name live in the same registry — so
+			// a second signal kind would be a second table to fan out from for a
+			// filter that already exists.
+			//
+			// The cost is that an attribute sharing a name with a property fires
+			// both listeners. That is a collision an author can see and avoid, and
+			// the alternative is a parallel signal path for a case nobody has hit.
+			PushSignal(state, SignalKind::PropertyChanged, instance, name);
+			return 1;
+		}
+	}
+
 	void PushInstanceValue(lua_State *state, ecs::Entity instance) {
 		PushInstance(state, instance);
 	}
@@ -837,6 +1124,10 @@ namespace engine::script {
 			{"IsDescendantOf", InstanceIsDescendantOf},
 			{"ClearAllChildren", InstanceClearAllChildren},
 			{"GetPropertyChangedSignal", InstanceGetPropertyChangedSignal},
+			{"GetAttribute", InstanceGetAttribute},
+			{"SetAttribute", InstanceSetAttribute},
+			{"GetAttributes", InstanceGetAttributes},
+			{"GetAttributeChangedSignal", InstanceGetAttributeChangedSignal},
 		};
 
 		lua_newtable(state);

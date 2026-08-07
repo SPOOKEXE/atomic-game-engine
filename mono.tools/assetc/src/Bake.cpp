@@ -54,7 +54,14 @@ namespace assetc {
 		}
 
 		bool IsImage(std::string_view extension) {
-			return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp";
+			// **`.gif` is here and its output is a flipbook sheet**, which is the
+			// one entry whose baked result is not a picture of its input.
+			// `bake::ReadGif` lays the frames out as a square power-of-two grid,
+			// so a GIF becomes an ordinary texture and every path downstream —
+			// the chunker, the manifest, the renderer's table — handles it with no
+			// knowledge that it animates. `bake/src/Gif.cpp` carries the argument.
+			return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+				   extension == ".bmp" || extension == ".gif";
 		}
 
 		std::vector<std::byte> ReadFile(const fs::path &path) {

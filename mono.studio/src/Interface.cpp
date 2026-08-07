@@ -262,6 +262,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			DrawHistory();
+			DrawAssets();
 			DrawBus();
 			DrawFindInstances();
 			DrawScriptProfile();
@@ -886,6 +887,7 @@ namespace studio {
 		// somebody works in all day, because these are opened to answer a
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
+		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);

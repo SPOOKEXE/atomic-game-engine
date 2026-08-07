@@ -47,9 +47,8 @@ namespace {
 			// the containment test reads is the *name*, so an instance carrying
 			// that name is exactly as contained as the real service would be.
 			// That is the same duplication `NormalId` already makes here.
-			Container = Data.CreateInstance(
-				engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui"
-			);
+			Container =
+				Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "StarterGui");
 			Request.Display.Width = 800.0f;
 			Request.Display.Height = 600.0f;
 		}

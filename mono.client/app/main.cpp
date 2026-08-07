@@ -6,6 +6,7 @@
 #include <engine/render/DebugPanels.hpp>
 
 #include <cctype>
+#include <cdn/LocalStore.hpp>
 #include <client/Client.hpp>
 #include <cstdio>
 #include <string>
@@ -146,6 +147,26 @@ int main(int argc, char **argv) {
 
 	for (const std::string_view source : arguments.GetAll("cdn")) {
 		options.ContentSources.emplace_back(source);
+	}
+
+	// **The local store, when nobody named an origin.** `ROADMAP.md` v0.10 asks
+	// for the cdn to be hooked up by default, and this is what that means in
+	// practice: content published into `~/Documents/atomic-game-engine/cdn`
+	// resolves with no flag at all, where before it took `assetc`, `cdn
+	// --publish` and a `--cdn dir:...` on every run.
+	//
+	// **Appended rather than prepended, and only when the list is empty.** A
+	// caller who named an origin meant it, and quietly adding a second one behind
+	// theirs would make "which store did that texture come from" a question with
+	// no answer in the command line.
+	//
+	// The folder is created rather than merely looked for, so a first run leaves
+	// somewhere to drag files into instead of a path that does not exist.
+	if (options.ContentSources.empty()) {
+		const cdn::LocalPaths local = cdn::DefaultLocalPaths();
+		if (cdn::EnsureLocalStore(local)) {
+			options.ContentSources.push_back("dir:" + local.Processed.string());
+		}
 	}
 	if (auto cache = arguments.Get("content-cache")) {
 		options.ContentCache = std::filesystem::path(*cache);

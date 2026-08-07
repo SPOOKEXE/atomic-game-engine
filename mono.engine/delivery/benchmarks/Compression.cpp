@@ -75,9 +75,22 @@ namespace compression_bench {
 	// descriptions looks like to a compressor.
 	std::vector<std::byte> ContentOf(size_t bytes, uint32_t seed) {
 		static const std::vector<std::string> vocabulary = {
-			"<Part name=\"", "\" class=\"BasePart\">", "<Vector3 x=\"", "\" y=\"", "\" z=\"", "\"/>",
-			"</Part>",		 "<Material>Plastic</",	   "<CFrame>",		"1.000000",	 "0.000000", "-1.000000",
-			"<Transparency>", "<Color3 r=\"",		   "<Children>",	"</Children>",
+			"<Part name=\"",
+			"\" class=\"BasePart\">",
+			"<Vector3 x=\"",
+			"\" y=\"",
+			"\" z=\"",
+			"\"/>",
+			"</Part>",
+			"<Material>Plastic</",
+			"<CFrame>",
+			"1.000000",
+			"0.000000",
+			"-1.000000",
+			"<Transparency>",
+			"<Color3 r=\"",
+			"<Children>",
+			"</Children>",
 		};
 
 		std::vector<std::byte> made;
@@ -190,12 +203,17 @@ namespace compression_bench {
 	// asks whether level 9 is the right default.
 	void ReportRatios() {
 		static const bool once = [] {
-			std::fprintf(stderr, "\n  group compression, %zu KiB of scene-shaped content\n", GROUP_BYTES / 1024);
+			std::fprintf(
+				stderr, "\n  group compression, %zu KiB of scene-shaped content\n", GROUP_BYTES / 1024
+			);
 			std::fprintf(stderr, "  %-28s %12s %8s\n", "variant", "bytes", "ratio");
 
 			const auto line = [](const char *label, size_t bytes) {
 				std::fprintf(
-					stderr, "  %-28s %12zu %7.2fx\n", label, bytes,
+					stderr,
+					"  %-28s %12zu %7.2fx\n",
+					label,
+					bytes,
 					bytes == 0 ? 0.0 : static_cast<double>(GROUP_BYTES) / static_cast<double>(bytes)
 				);
 			};
@@ -229,12 +247,18 @@ namespace compression_bench {
 
 			std::fprintf(stderr, "\n  200 small groups of 4 KiB each (%d KiB total)\n", 200 * 4);
 			std::fprintf(
-				stderr, "  %-28s %12zu %7.2fx\n", "level 9", plain,
+				stderr,
+				"  %-28s %12zu %7.2fx\n",
+				"level 9",
+				plain,
 				plain == 0 ? 0.0 : static_cast<double>(200 * 4 * 1024) / static_cast<double>(plain)
 			);
 			if (Trained()) {
 				std::fprintf(
-					stderr, "  %-28s %12zu %7.2fx\n", "level 9 + dictionary", withDictionary,
+					stderr,
+					"  %-28s %12zu %7.2fx\n",
+					"level 9 + dictionary",
+					withDictionary,
 					withDictionary == 0
 						? 0.0
 						: static_cast<double>(200 * 4 * 1024) / static_cast<double>(withDictionary)
@@ -281,7 +305,8 @@ BENCH("Compress · 4 MiB at level 3 (zstd default)", GROUP_BYTES / 1024) {
 
 BENCH("Compress · 4 MiB at level 9 (engine default)", GROUP_BYTES / 1024) {
 	// **`DEFAULT_LEVEL`, and the row the header's open question is about.**
-	const std::optional<std::vector<std::byte>> frame = GroupCodec::Compress(Group(), GroupCodec::DEFAULT_LEVEL);
+	const std::optional<std::vector<std::byte>> frame =
+		GroupCodec::Compress(Group(), GroupCodec::DEFAULT_LEVEL);
 	Consume(frame ? frame->size() : 0);
 }
 

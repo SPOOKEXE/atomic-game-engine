@@ -337,8 +337,7 @@ BENCH("CommandQueue::Post · 100k against a full ring", 100'000) {
 	command.Target = NodeId{engine::audio::AudioGraph::OUTPUT_ID};
 
 	// Fill it once; nothing drains it afterwards.
-	while (queue.Post(command)) {
-	}
+	while (queue.Post(command)) {}
 
 	size_t refused = 0;
 	for (size_t index = 0; index < 100'000; index++) {

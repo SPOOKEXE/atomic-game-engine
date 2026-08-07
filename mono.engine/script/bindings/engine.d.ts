@@ -42,6 +42,10 @@ declare interface CFrame {
 
 declare const Vector3: {
 	new: (x?: number, y?: number, z?: number) => Vector3;
+
+	// Lowercase, because Roblox's are. The Luau half carries the argument.
+	readonly zero: Vector3;
+	readonly one: Vector3;
 };
 
 declare const Color3: {
@@ -79,6 +83,71 @@ declare interface ChangedSignal {
 	Once(handler: (property: string) => void): RBXScriptConnection;
 	Equals(other: ChangedSignal): boolean;
 }
+
+// What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
+//
+// **Named at file scope rather than nested**, because TypeScript has no
+// interface-scoped type alias the way the Luau half does — so the name is
+// prefixed to say where it belongs rather than risking a collision with a game's
+// own `Attribute`.
+// --- input ------------------------------------------------------------------
+//
+// Hand-written for the Luau half's reason: these are globals, not classes.
+declare interface UserInputServiceType {
+	MouseBehavior: Enum.MouseBehavior;
+	MouseDeltaSensitivity: number;
+	readonly KeyboardEnabled: boolean;
+	readonly MouseEnabled: boolean;
+
+	readonly InputBegan: PropertyChangedSignal;
+	readonly InputEnded: PropertyChangedSignal;
+	readonly InputChanged: PropertyChangedSignal;
+
+	IsKeyDown(key: Enum.KeyCode): boolean;
+	IsMouseButtonPressed(button: Enum.UserInputType): boolean;
+	GetMouseLocation(): Vector2;
+	GetMouseDelta(): Vector2;
+	GetKeysPressed(): Enum.KeyCode[];
+}
+
+declare const UserInputService: UserInputServiceType;
+
+declare interface ContextActionServiceType {
+	BindAction(
+		name: string,
+		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
+		createTouchButton: boolean,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	BindActionAtPriority(
+		name: string,
+		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
+		createTouchButton: boolean,
+		priority: number,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	UnbindAction(name: string): void;
+	UnbindAllActions(): void;
+}
+
+declare const ContextActionService: ContextActionServiceType;
+
+declare type EngineAttribute =
+	| boolean
+	| number
+	| string
+	| Vector3
+	| Color3
+	| CFrame
+	| Vector2
+	| UDim
+	| UDim2
+	| Rect
+	| NumberRange
+	| NumberSequence
+	| ColorSequence;
 
 declare interface PropertyChangedSignal {
 	Connect(handler: () => void): RBXScriptConnection;
@@ -118,179 +187,311 @@ declare interface RaycastResult {
 	readonly Position: Vector3;
 	readonly Normal: Vector3;
 	readonly Distance: number;
-	readonly Material: Enum_Material;
+	readonly Material: Enum.Material;
 }
 
 declare interface EnumItem { readonly Name: string; readonly EnumType: string; Equals(other: EnumItem): boolean; }
-declare interface Enum_AlphaMode extends EnumItem { readonly __enum: "AlphaMode"; }
-declare interface Enum_AspectType extends EnumItem { readonly __enum: "AspectType"; }
-declare interface Enum_AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
-declare interface Enum_BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
-declare interface Enum_DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
-declare interface Enum_EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
-declare interface Enum_EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
-declare interface Enum_FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
-declare interface Enum_Font extends EnumItem { readonly __enum: "Font"; }
-declare interface Enum_HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
-declare interface Enum_Material extends EnumItem { readonly __enum: "Material"; }
-declare interface Enum_NormalId extends EnumItem { readonly __enum: "NormalId"; }
-declare interface Enum_ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
-declare interface Enum_ScrollingDirection extends EnumItem { readonly __enum: "ScrollingDirection"; }
-declare interface Enum_ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
-declare interface Enum_SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
-declare interface Enum_SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
-declare interface Enum_StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
-declare interface Enum_SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
-declare interface Enum_TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
-declare interface Enum_TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
-declare interface Enum_TextYAlignment extends EnumItem { readonly __enum: "TextYAlignment"; }
-declare interface Enum_VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
-declare interface Enum_ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 declare namespace Enum {
+	interface AlphaMode extends EnumItem { readonly __enum: "AlphaMode"; }
+	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
+	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
+	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
+	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
+	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
+	interface EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
+	interface EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
+	interface FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
+	interface Font extends EnumItem { readonly __enum: "Font"; }
+	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
+	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
+	interface Material extends EnumItem { readonly __enum: "Material"; }
+	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
+	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
+	interface ParticleEmitterShape extends EnumItem { readonly __enum: "ParticleEmitterShape"; }
+	interface ParticleEmitterShapeInOut extends EnumItem { readonly __enum: "ParticleEmitterShapeInOut"; }
+	interface ParticleEmitterShapeStyle extends EnumItem { readonly __enum: "ParticleEmitterShapeStyle"; }
+	interface ParticleFlipbookLayout extends EnumItem { readonly __enum: "ParticleFlipbookLayout"; }
+	interface ParticleFlipbookMode extends EnumItem { readonly __enum: "ParticleFlipbookMode"; }
+	interface ParticleOrientation extends EnumItem { readonly __enum: "ParticleOrientation"; }
+	interface ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
+	interface ScrollingDirection extends EnumItem { readonly __enum: "ScrollingDirection"; }
+	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
+	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
+	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
+	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
+	interface SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
+	interface TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
+	interface TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
+	interface TextYAlignment extends EnumItem { readonly __enum: "TextYAlignment"; }
+	interface UserInputState extends EnumItem { readonly __enum: "UserInputState"; }
+	interface UserInputType extends EnumItem { readonly __enum: "UserInputType"; }
+	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
+	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
+
 	const AlphaMode: {
-		readonly Opaque: Enum_AlphaMode;
-		readonly Clip: Enum_AlphaMode;
-		readonly Blend: Enum_AlphaMode;
+		readonly Opaque: AlphaMode;
+		readonly Clip: AlphaMode;
+		readonly Blend: AlphaMode;
 	};
 	const AspectType: {
-		readonly FitWithinMaxSize: Enum_AspectType;
-		readonly ScaleWithParentSize: Enum_AspectType;
+		readonly FitWithinMaxSize: AspectType;
+		readonly ScaleWithParentSize: AspectType;
 	};
 	const AutomaticSize: {
-		readonly None: Enum_AutomaticSize;
-		readonly X: Enum_AutomaticSize;
-		readonly Y: Enum_AutomaticSize;
-		readonly XY: Enum_AutomaticSize;
+		readonly None: AutomaticSize;
+		readonly X: AutomaticSize;
+		readonly Y: AutomaticSize;
+		readonly XY: AutomaticSize;
 	};
 	const BorderMode: {
-		readonly Outline: Enum_BorderMode;
-		readonly Middle: Enum_BorderMode;
-		readonly Inset: Enum_BorderMode;
+		readonly Outline: BorderMode;
+		readonly Middle: BorderMode;
+		readonly Inset: BorderMode;
+	};
+	const CameraType: {
+		readonly Classic: CameraType;
+		readonly LockFirstPerson: CameraType;
+		readonly ShiftLock: CameraType;
+		readonly Scriptable: CameraType;
 	};
 	const DominantAxis: {
-		readonly Width: Enum_DominantAxis;
-		readonly Height: Enum_DominantAxis;
+		readonly Width: DominantAxis;
+		readonly Height: DominantAxis;
 	};
 	const EasingDirection: {
-		readonly In: Enum_EasingDirection;
-		readonly Out: Enum_EasingDirection;
-		readonly InOut: Enum_EasingDirection;
+		readonly In: EasingDirection;
+		readonly Out: EasingDirection;
+		readonly InOut: EasingDirection;
 	};
 	const EasingStyle: {
-		readonly Linear: Enum_EasingStyle;
-		readonly Quad: Enum_EasingStyle;
-		readonly Cubic: Enum_EasingStyle;
-		readonly Quart: Enum_EasingStyle;
-		readonly Quint: Enum_EasingStyle;
-		readonly Sine: Enum_EasingStyle;
-		readonly Exponential: Enum_EasingStyle;
-		readonly Circular: Enum_EasingStyle;
-		readonly Back: Enum_EasingStyle;
-		readonly Elastic: Enum_EasingStyle;
-		readonly Bounce: Enum_EasingStyle;
+		readonly Linear: EasingStyle;
+		readonly Quad: EasingStyle;
+		readonly Cubic: EasingStyle;
+		readonly Quart: EasingStyle;
+		readonly Quint: EasingStyle;
+		readonly Sine: EasingStyle;
+		readonly Exponential: EasingStyle;
+		readonly Circular: EasingStyle;
+		readonly Back: EasingStyle;
+		readonly Elastic: EasingStyle;
+		readonly Bounce: EasingStyle;
 	};
 	const FillDirection: {
-		readonly Horizontal: Enum_FillDirection;
-		readonly Vertical: Enum_FillDirection;
+		readonly Horizontal: FillDirection;
+		readonly Vertical: FillDirection;
 	};
 	const Font: {
-		readonly Regular: Enum_Font;
-		readonly Bold: Enum_Font;
-		readonly Italic: Enum_Font;
-		readonly Code: Enum_Font;
+		readonly Regular: Font;
+		readonly Bold: Font;
+		readonly Italic: Font;
+		readonly Code: Font;
 	};
 	const HorizontalAlignment: {
-		readonly Left: Enum_HorizontalAlignment;
-		readonly Center: Enum_HorizontalAlignment;
-		readonly Right: Enum_HorizontalAlignment;
+		readonly Left: HorizontalAlignment;
+		readonly Center: HorizontalAlignment;
+		readonly Right: HorizontalAlignment;
+	};
+	const KeyCode: {
+		readonly Unknown: KeyCode;
+		readonly A: KeyCode;
+		readonly B: KeyCode;
+		readonly C: KeyCode;
+		readonly D: KeyCode;
+		readonly E: KeyCode;
+		readonly F: KeyCode;
+		readonly G: KeyCode;
+		readonly H: KeyCode;
+		readonly I: KeyCode;
+		readonly J: KeyCode;
+		readonly K: KeyCode;
+		readonly L: KeyCode;
+		readonly M: KeyCode;
+		readonly N: KeyCode;
+		readonly O: KeyCode;
+		readonly P: KeyCode;
+		readonly Q: KeyCode;
+		readonly R: KeyCode;
+		readonly S: KeyCode;
+		readonly T: KeyCode;
+		readonly U: KeyCode;
+		readonly V: KeyCode;
+		readonly W: KeyCode;
+		readonly X: KeyCode;
+		readonly Y: KeyCode;
+		readonly Z: KeyCode;
+		readonly Zero: KeyCode;
+		readonly One: KeyCode;
+		readonly Two: KeyCode;
+		readonly Three: KeyCode;
+		readonly Four: KeyCode;
+		readonly Five: KeyCode;
+		readonly Six: KeyCode;
+		readonly Seven: KeyCode;
+		readonly Eight: KeyCode;
+		readonly Nine: KeyCode;
+		readonly Space: KeyCode;
+		readonly Return: KeyCode;
+		readonly Escape: KeyCode;
+		readonly Backspace: KeyCode;
+		readonly Tab: KeyCode;
+		readonly LeftShift: KeyCode;
+		readonly RightShift: KeyCode;
+		readonly LeftControl: KeyCode;
+		readonly RightControl: KeyCode;
+		readonly LeftAlt: KeyCode;
+		readonly RightAlt: KeyCode;
+		readonly Up: KeyCode;
+		readonly Down: KeyCode;
+		readonly Left: KeyCode;
+		readonly Right: KeyCode;
+		readonly F1: KeyCode;
+		readonly F2: KeyCode;
+		readonly F3: KeyCode;
+		readonly F4: KeyCode;
+		readonly F5: KeyCode;
+		readonly F6: KeyCode;
+		readonly F7: KeyCode;
+		readonly F8: KeyCode;
+		readonly F9: KeyCode;
+		readonly F10: KeyCode;
+		readonly F11: KeyCode;
+		readonly F12: KeyCode;
 	};
 	const Material: {
-		readonly Plastic: Enum_Material;
-		readonly SmoothPlastic: Enum_Material;
-		readonly Wood: Enum_Material;
-		readonly WoodPlanks: Enum_Material;
-		readonly Metal: Enum_Material;
-		readonly CorrodedMetal: Enum_Material;
-		readonly DiamondPlate: Enum_Material;
-		readonly Concrete: Enum_Material;
-		readonly Brick: Enum_Material;
-		readonly Cobblestone: Enum_Material;
-		readonly Grass: Enum_Material;
-		readonly Sand: Enum_Material;
-		readonly Slate: Enum_Material;
-		readonly Ice: Enum_Material;
-		readonly Glass: Enum_Material;
-		readonly Neon: Enum_Material;
-		readonly ForceField: Enum_Material;
+		readonly Plastic: Material;
+		readonly SmoothPlastic: Material;
+		readonly Wood: Material;
+		readonly WoodPlanks: Material;
+		readonly Metal: Material;
+		readonly CorrodedMetal: Material;
+		readonly DiamondPlate: Material;
+		readonly Concrete: Material;
+		readonly Brick: Material;
+		readonly Cobblestone: Material;
+		readonly Grass: Material;
+		readonly Sand: Material;
+		readonly Slate: Material;
+		readonly Ice: Material;
+		readonly Glass: Material;
+		readonly Neon: Material;
+		readonly ForceField: Material;
+	};
+	const MouseBehavior: {
+		readonly Default: MouseBehavior;
+		readonly LockCenter: MouseBehavior;
+		readonly LockCurrentPosition: MouseBehavior;
 	};
 	const NormalId: {
-		readonly Right: Enum_NormalId;
-		readonly Top: Enum_NormalId;
-		readonly Back: Enum_NormalId;
-		readonly Left: Enum_NormalId;
-		readonly Bottom: Enum_NormalId;
-		readonly Front: Enum_NormalId;
+		readonly Right: NormalId;
+		readonly Top: NormalId;
+		readonly Back: NormalId;
+		readonly Left: NormalId;
+		readonly Bottom: NormalId;
+		readonly Front: NormalId;
+	};
+	const ParticleEmitterShape: {
+		readonly Box: ParticleEmitterShape;
+		readonly Sphere: ParticleEmitterShape;
+		readonly Cylinder: ParticleEmitterShape;
+		readonly Disc: ParticleEmitterShape;
+	};
+	const ParticleEmitterShapeInOut: {
+		readonly Outward: ParticleEmitterShapeInOut;
+		readonly Inward: ParticleEmitterShapeInOut;
+		readonly InAndOut: ParticleEmitterShapeInOut;
+	};
+	const ParticleEmitterShapeStyle: {
+		readonly Volume: ParticleEmitterShapeStyle;
+		readonly Surface: ParticleEmitterShapeStyle;
+	};
+	const ParticleFlipbookLayout: {
+		readonly None: ParticleFlipbookLayout;
+		readonly Grid2x2: ParticleFlipbookLayout;
+		readonly Grid4x4: ParticleFlipbookLayout;
+		readonly Grid8x8: ParticleFlipbookLayout;
+	};
+	const ParticleFlipbookMode: {
+		readonly Loop: ParticleFlipbookMode;
+		readonly OneShot: ParticleFlipbookMode;
+		readonly PingPong: ParticleFlipbookMode;
+		readonly Random: ParticleFlipbookMode;
+	};
+	const ParticleOrientation: {
+		readonly FacingCamera: ParticleOrientation;
+		readonly FacingCameraWorldUp: ParticleOrientation;
+		readonly VelocityParallel: ParticleOrientation;
+		readonly VelocityPerpendicular: ParticleOrientation;
 	};
 	const ScaleType: {
-		readonly Stretch: Enum_ScaleType;
-		readonly Slice: Enum_ScaleType;
-		readonly Tile: Enum_ScaleType;
-		readonly Fit: Enum_ScaleType;
-		readonly Crop: Enum_ScaleType;
+		readonly Stretch: ScaleType;
+		readonly Slice: ScaleType;
+		readonly Tile: ScaleType;
+		readonly Fit: ScaleType;
+		readonly Crop: ScaleType;
 	};
 	const ScrollingDirection: {
-		readonly X: Enum_ScrollingDirection;
-		readonly Y: Enum_ScrollingDirection;
-		readonly XY: Enum_ScrollingDirection;
+		readonly X: ScrollingDirection;
+		readonly Y: ScrollingDirection;
+		readonly XY: ScrollingDirection;
 	};
 	const ServiceScope: {
-		readonly Shared: Enum_ServiceScope;
-		readonly Server: Enum_ServiceScope;
-		readonly Client: Enum_ServiceScope;
+		readonly Shared: ServiceScope;
+		readonly Server: ServiceScope;
+		readonly Client: ServiceScope;
 	};
 	const SizeConstraint: {
-		readonly RelativeXY: Enum_SizeConstraint;
-		readonly RelativeXX: Enum_SizeConstraint;
-		readonly RelativeYY: Enum_SizeConstraint;
+		readonly RelativeXY: SizeConstraint;
+		readonly RelativeXX: SizeConstraint;
+		readonly RelativeYY: SizeConstraint;
 	};
 	const SortOrder: {
-		readonly Name: Enum_SortOrder;
-		readonly Custom: Enum_SortOrder;
-		readonly LayoutOrder: Enum_SortOrder;
+		readonly Name: SortOrder;
+		readonly Custom: SortOrder;
+		readonly LayoutOrder: SortOrder;
 	};
 	const StartCorner: {
-		readonly TopLeft: Enum_StartCorner;
-		readonly TopRight: Enum_StartCorner;
-		readonly BottomLeft: Enum_StartCorner;
-		readonly BottomRight: Enum_StartCorner;
+		readonly TopLeft: StartCorner;
+		readonly TopRight: StartCorner;
+		readonly BottomLeft: StartCorner;
+		readonly BottomRight: StartCorner;
 	};
 	const SurfaceSizingMode: {
-		readonly FixedSize: Enum_SurfaceSizingMode;
-		readonly PixelsPerStud: Enum_SurfaceSizingMode;
+		readonly FixedSize: SurfaceSizingMode;
+		readonly PixelsPerStud: SurfaceSizingMode;
 	};
 	const TextTruncate: {
-		readonly None: Enum_TextTruncate;
-		readonly AtEnd: Enum_TextTruncate;
+		readonly None: TextTruncate;
+		readonly AtEnd: TextTruncate;
 	};
 	const TextXAlignment: {
-		readonly Left: Enum_TextXAlignment;
-		readonly Center: Enum_TextXAlignment;
-		readonly Right: Enum_TextXAlignment;
+		readonly Left: TextXAlignment;
+		readonly Center: TextXAlignment;
+		readonly Right: TextXAlignment;
 	};
 	const TextYAlignment: {
-		readonly Top: Enum_TextYAlignment;
-		readonly Center: Enum_TextYAlignment;
-		readonly Bottom: Enum_TextYAlignment;
+		readonly Top: TextYAlignment;
+		readonly Center: TextYAlignment;
+		readonly Bottom: TextYAlignment;
+	};
+	const UserInputState: {
+		readonly Begin: UserInputState;
+		readonly Change: UserInputState;
+		readonly End: UserInputState;
+	};
+	const UserInputType: {
+		readonly MouseButton1: UserInputType;
+		readonly MouseButton2: UserInputType;
+		readonly MouseButton3: UserInputType;
 	};
 	const VerticalAlignment: {
-		readonly Top: Enum_VerticalAlignment;
-		readonly Center: Enum_VerticalAlignment;
-		readonly Bottom: Enum_VerticalAlignment;
+		readonly Top: VerticalAlignment;
+		readonly Center: VerticalAlignment;
+		readonly Bottom: VerticalAlignment;
 	};
 	const ZIndexBehavior: {
-		readonly Global: Enum_ZIndexBehavior;
-		readonly Sibling: Enum_ZIndexBehavior;
+		readonly Global: ZIndexBehavior;
+		readonly Sibling: ZIndexBehavior;
 	};
 }
 
@@ -365,7 +566,28 @@ declare const NumberRange: {
 	new: (min: number, max?: number) => NumberRange;
 };
 
+// The stops. See the Luau half for why these arrived at v0.10.
+declare interface NumberSequenceKeypoint {
+	readonly Time: number;
+	readonly Value: number;
+	readonly Envelope: number;
+}
+
+declare const NumberSequenceKeypoint: {
+	new: (time: number, value: number, envelope?: number) => NumberSequenceKeypoint;
+};
+
+declare interface ColorSequenceKeypoint {
+	readonly Time: number;
+	readonly Value: Color3;
+}
+
+declare const ColorSequenceKeypoint: {
+	new: (time: number, value: Color3) => ColorSequenceKeypoint;
+};
+
 declare interface NumberSequence {
+	readonly Keypoints: readonly NumberSequenceKeypoint[];
 	Evaluate(time: number): number;
 }
 
@@ -373,13 +595,15 @@ declare const NumberSequence: {
 	new: {
 		(value: number): NumberSequence;
 		(from: number, to: number): NumberSequence;
-		// `[time, value]`. The Luau half reads an envelope as a third element;
-		// this one does not.
-		(keypoints: [number, number][]): NumberSequence;
+		// Either form. `[time, value, envelope]` is the table one; the Luau half
+		// says the same thing in its own syntax.
+		(keypoints: (NumberSequenceKeypoint | [number, number] | [number, number, number])[]):
+			NumberSequence;
 	};
 };
 
 declare interface ColorSequence {
+	readonly Keypoints: readonly ColorSequenceKeypoint[];
 	Evaluate(time: number): Color3;
 }
 
@@ -387,6 +611,7 @@ declare const ColorSequence: {
 	new: {
 		(value: Color3): ColorSequence;
 		(from: Color3, to: Color3): ColorSequence;
+		(keypoints: (ColorSequenceKeypoint | [number, Color3])[]): ColorSequence;
 	};
 };
 
@@ -401,8 +626,8 @@ declare interface TweenInfo {
 declare const TweenInfo: {
 	new: (
 		time?: number,
-		style?: Enum_EasingStyle,
-		direction?: Enum_EasingDirection,
+		style?: Enum.EasingStyle,
+		direction?: Enum.EasingDirection,
 		repeatCount?: number,
 		reverses?: boolean,
 		delayTime?: number
@@ -466,6 +691,10 @@ declare interface Instance {
 	IsDescendantOf(ancestor: Instance): boolean;
 	ClearAllChildren(): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
+	GetAttribute(name: string): EngineAttribute | null;
+	SetAttribute(name: string, value: EngineAttribute | null): void;
+	GetAttributes(): { [name: string]: EngineAttribute };
+	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
 	readonly Activated: GuiSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
@@ -482,14 +711,14 @@ declare interface PVInstance extends Instance {
 
 declare interface BasePart extends PVInstance {
 	AlphaCutoff: number;
-	AlphaMode: Enum_AlphaMode;
+	AlphaMode: Enum.AlphaMode;
 	Anchored: boolean;
 	CanCollide: boolean;
 	CastShadow: boolean;
 	CollisionGroup: string;
 	Color: Color3;
 	ColorMap: string;
-	Material: Enum_Material;
+	Material: Enum.Material;
 	Mesh: string;
 	Size: Vector3;
 	Transparency: number;
@@ -513,7 +742,7 @@ declare interface Camera extends PVInstance {
 }
 
 declare interface SurfaceCamera extends Camera {
-	Face: Enum_NormalId;
+	Face: Enum.NormalId;
 	ImageTransparency: number;
 	TagFilter: string;
 }
@@ -525,6 +754,41 @@ declare interface Sound extends Instance {
 	RollOffMinDistance: number;
 	SoundId: string;
 	Volume: number;
+}
+
+declare interface Attachment extends Instance {
+	CFrame: CFrame;
+	Position: Vector3;
+	readonly WorldCFrame: CFrame;
+	readonly WorldPosition: Vector3;
+}
+
+declare interface Humanoid extends Instance {
+	Enabled: boolean;
+	readonly Grounded: boolean;
+	HipHeight: number;
+	JumpPower: number;
+	MoveDirection: Vector3;
+	WalkSpeed: number;
+}
+
+declare interface Light extends Instance {
+	Angle: number;
+	Brightness: number;
+	Color: Color3;
+	Enabled: boolean;
+	Face: Enum.NormalId;
+	Range: number;
+	Shadows: boolean;
+}
+
+declare interface PointLight extends Light {
+}
+
+declare interface SpotLight extends Light {
+}
+
+declare interface SurfaceLight extends Light {
 }
 
 declare interface LuaSourceContainer extends Instance {
@@ -539,6 +803,73 @@ declare interface LocalScript extends LuaSourceContainer {
 }
 
 declare interface ModuleScript extends LuaSourceContainer {
+}
+
+declare interface ParticleEmitter extends Instance {
+	Acceleration: Vector3;
+	Additive: boolean;
+	Brightness: number;
+	Color: ColorSequence;
+	Drag: number;
+	EmissionDirection: Enum.NormalId;
+	Enabled: boolean;
+	FlipbookFramerate: NumberRange;
+	FlipbookFrames: number;
+	FlipbookLayout: Enum.ParticleFlipbookLayout;
+	FlipbookMode: Enum.ParticleFlipbookMode;
+	FlipbookStartRandom: boolean;
+	Lifetime: NumberRange;
+	LightEmission: number;
+	LightInfluence: number;
+	LockedToPart: boolean;
+	Orientation: Enum.ParticleOrientation;
+	Rate: number;
+	RotSpeed: NumberRange;
+	Rotation: NumberRange;
+	Shape: Enum.ParticleEmitterShape;
+	ShapeInOut: Enum.ParticleEmitterShapeInOut;
+	ShapePartial: number;
+	ShapeStyle: Enum.ParticleEmitterShapeStyle;
+	Size: NumberSequence;
+	Speed: NumberRange;
+	SpreadAngle: Vector2;
+	Squash: NumberSequence;
+	Texture: string;
+	TimeScale: number;
+	Transparency: NumberSequence;
+	VelocityInheritance: number;
+	ZOffset: number;
+}
+
+declare interface Beam extends Instance {
+	Additive: boolean;
+	Attachment0: Instance;
+	Attachment1: Instance;
+	Color: ColorSequence;
+	CurveSize0: number;
+	CurveSize1: number;
+	Enabled: boolean;
+	FaceCamera: boolean;
+	Texture: string;
+	TextureLength: number;
+	TextureSpeed: number;
+	Transparency: NumberSequence;
+	Width0: number;
+	Width1: number;
+	ZOffset: number;
+}
+
+declare interface Trail extends Instance {
+	Additive: boolean;
+	Attachment0: Instance;
+	Attachment1: Instance;
+	Color: ColorSequence;
+	Enabled: boolean;
+	Lifetime: number;
+	MinLength: number;
+	Texture: string;
+	TextureLength: number;
+	Transparency: NumberSequence;
 }
 
 declare interface GuiBase extends Instance {
@@ -603,11 +934,11 @@ declare interface GuiBase2d extends GuiBase {
 declare interface GuiObject extends GuiBase2d {
 	Active: boolean;
 	AnchorPoint: Vector2;
-	AutomaticSize: Enum_AutomaticSize;
+	AutomaticSize: Enum.AutomaticSize;
 	BackgroundColor3: Color3;
 	BackgroundTransparency: number;
 	BorderColor3: Color3;
-	BorderMode: Enum_BorderMode;
+	BorderMode: Enum.BorderMode;
 	BorderSizePixel: number;
 	ClipsDescendants: boolean;
 	LayoutOrder: number;
@@ -615,7 +946,7 @@ declare interface GuiObject extends GuiBase2d {
 	Rotation: number;
 	Selectable: boolean;
 	Size: UDim2;
-	SizeConstraint: Enum_SizeConstraint;
+	SizeConstraint: Enum.SizeConstraint;
 	Visible: boolean;
 	ZIndex: number;
 }
@@ -629,13 +960,13 @@ declare interface CanvasGroup extends Frame {
 }
 
 declare interface ScrollingFrame extends Frame {
-	AutomaticCanvasSize: Enum_AutomaticSize;
+	AutomaticCanvasSize: Enum.AutomaticSize;
 	CanvasPosition: Vector2;
 	CanvasSize: UDim2;
 	ScrollBarImageColor3: Color3;
 	ScrollBarImageTransparency: number;
 	ScrollBarThickness: number;
-	ScrollingDirection: Enum_ScrollingDirection;
+	ScrollingDirection: Enum.ScrollingDirection;
 	ScrollingEnabled: boolean;
 }
 
@@ -646,7 +977,7 @@ declare interface GuiButton extends GuiObject {
 }
 
 declare interface TextButton extends GuiButton {
-	Font: Enum_Font;
+	Font: Enum.Font;
 	LineHeight: number;
 	Text: string;
 	TextColor3: Color3;
@@ -655,10 +986,10 @@ declare interface TextButton extends GuiButton {
 	TextStrokeColor3: Color3;
 	TextStrokeTransparency: number;
 	TextTransparency: number;
-	TextTruncate: Enum_TextTruncate;
+	TextTruncate: Enum.TextTruncate;
 	TextWrapped: boolean;
-	TextXAlignment: Enum_TextXAlignment;
-	TextYAlignment: Enum_TextYAlignment;
+	TextXAlignment: Enum.TextXAlignment;
+	TextYAlignment: Enum.TextYAlignment;
 }
 
 declare interface ImageButton extends GuiButton {
@@ -667,7 +998,7 @@ declare interface ImageButton extends GuiButton {
 	ImageRectOffset: Vector2;
 	ImageRectSize: Vector2;
 	ImageTransparency: number;
-	ScaleType: Enum_ScaleType;
+	ScaleType: Enum.ScaleType;
 	SliceCenter: Rect;
 	SliceScale: number;
 	TileSize: UDim2;
@@ -677,7 +1008,7 @@ declare interface GuiLabel extends GuiObject {
 }
 
 declare interface TextLabel extends GuiLabel {
-	Font: Enum_Font;
+	Font: Enum.Font;
 	LineHeight: number;
 	Text: string;
 	TextColor3: Color3;
@@ -686,10 +1017,10 @@ declare interface TextLabel extends GuiLabel {
 	TextStrokeColor3: Color3;
 	TextStrokeTransparency: number;
 	TextTransparency: number;
-	TextTruncate: Enum_TextTruncate;
+	TextTruncate: Enum.TextTruncate;
 	TextWrapped: boolean;
-	TextXAlignment: Enum_TextXAlignment;
-	TextYAlignment: Enum_TextYAlignment;
+	TextXAlignment: Enum.TextXAlignment;
+	TextYAlignment: Enum.TextYAlignment;
 }
 
 declare interface ImageLabel extends GuiLabel {
@@ -698,7 +1029,7 @@ declare interface ImageLabel extends GuiLabel {
 	ImageRectOffset: Vector2;
 	ImageRectSize: Vector2;
 	ImageTransparency: number;
-	ScaleType: Enum_ScaleType;
+	ScaleType: Enum.ScaleType;
 	SliceCenter: Rect;
 	SliceScale: number;
 	TileSize: UDim2;
@@ -707,7 +1038,7 @@ declare interface ImageLabel extends GuiLabel {
 declare interface TextBox extends GuiObject {
 	ClearTextOnFocus: boolean;
 	CursorPosition: number;
-	Font: Enum_Font;
+	Font: Enum.Font;
 	LineHeight: number;
 	MultiLine: boolean;
 	PlaceholderColor3: Color3;
@@ -721,10 +1052,10 @@ declare interface TextBox extends GuiObject {
 	TextStrokeColor3: Color3;
 	TextStrokeTransparency: number;
 	TextTransparency: number;
-	TextTruncate: Enum_TextTruncate;
+	TextTruncate: Enum.TextTruncate;
 	TextWrapped: boolean;
-	TextXAlignment: Enum_TextXAlignment;
-	TextYAlignment: Enum_TextYAlignment;
+	TextXAlignment: Enum.TextXAlignment;
+	TextYAlignment: Enum.TextYAlignment;
 }
 
 declare interface ViewportFrame extends GuiObject {
@@ -740,7 +1071,7 @@ declare interface LayerCollector extends GuiBase2d {
 	DisplayOrder: number;
 	Enabled: boolean;
 	ResetOnSpawn: boolean;
-	ZIndexBehavior: Enum_ZIndexBehavior;
+	ZIndexBehavior: Enum.ZIndexBehavior;
 }
 
 declare interface ScreenGui extends LayerCollector {
@@ -752,10 +1083,10 @@ declare interface SurfaceGui extends LayerCollector {
 	AlwaysOnTop: boolean;
 	Brightness: number;
 	CanvasSize: Vector2;
-	Face: Enum_NormalId;
+	Face: Enum.NormalId;
 	LightInfluence: number;
 	PixelsPerStud: number;
-	SizingMode: Enum_SurfaceSizingMode;
+	SizingMode: Enum.SurfaceSizingMode;
 }
 
 declare interface BillboardGui extends LayerCollector {
@@ -785,22 +1116,22 @@ declare interface UILayout extends UIComponent {
 }
 
 declare interface UIListLayout extends UILayout {
-	FillDirection: Enum_FillDirection;
-	HorizontalAlignment: Enum_HorizontalAlignment;
+	FillDirection: Enum.FillDirection;
+	HorizontalAlignment: Enum.HorizontalAlignment;
 	Padding: UDim;
-	SortOrder: Enum_SortOrder;
-	VerticalAlignment: Enum_VerticalAlignment;
+	SortOrder: Enum.SortOrder;
+	VerticalAlignment: Enum.VerticalAlignment;
 }
 
 declare interface UIGridLayout extends UILayout {
 	CellPadding: UDim2;
 	CellSize: UDim2;
-	FillDirection: Enum_FillDirection;
+	FillDirection: Enum.FillDirection;
 	FillDirectionMaxCells: number;
-	HorizontalAlignment: Enum_HorizontalAlignment;
-	SortOrder: Enum_SortOrder;
-	StartCorner: Enum_StartCorner;
-	VerticalAlignment: Enum_VerticalAlignment;
+	HorizontalAlignment: Enum.HorizontalAlignment;
+	SortOrder: Enum.SortOrder;
+	StartCorner: Enum.StartCorner;
+	VerticalAlignment: Enum.VerticalAlignment;
 }
 
 declare interface UIConstraint extends UIComponent {
@@ -808,8 +1139,8 @@ declare interface UIConstraint extends UIComponent {
 
 declare interface UIAspectRatioConstraint extends UIConstraint {
 	AspectRatio: number;
-	AspectType: Enum_AspectType;
-	DominantAxis: Enum_DominantAxis;
+	AspectType: Enum.AspectType;
+	DominantAxis: Enum.DominantAxis;
 }
 
 declare interface UISizeConstraint extends UIConstraint {
@@ -845,11 +1176,11 @@ declare interface UIScale extends UIComponent {
 
 declare interface Service extends Instance {
 	Fixture: boolean;
-	Scope: Enum_ServiceScope;
+	Scope: Enum.ServiceScope;
 }
 
 declare interface Workspace extends Service {
-	CurrentCamera: Camera | null;
+	CurrentCamera: Instance;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 }
 
@@ -990,10 +1321,19 @@ declare const Instance: {
 		(className: "Camera", parent?: Instance): Camera;
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
 		(className: "Sound", parent?: Instance): Sound;
+		(className: "Attachment", parent?: Instance): Attachment;
+		(className: "Humanoid", parent?: Instance): Humanoid;
+		(className: "Light", parent?: Instance): Light;
+		(className: "PointLight", parent?: Instance): PointLight;
+		(className: "SpotLight", parent?: Instance): SpotLight;
+		(className: "SurfaceLight", parent?: Instance): SurfaceLight;
 		(className: "LuaSourceContainer", parent?: Instance): LuaSourceContainer;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;
 		(className: "ModuleScript", parent?: Instance): ModuleScript;
+		(className: "ParticleEmitter", parent?: Instance): ParticleEmitter;
+		(className: "Beam", parent?: Instance): Beam;
+		(className: "Trail", parent?: Instance): Trail;
 		(className: "GuiBase", parent?: Instance): GuiBase;
 		(className: "GuiService", parent?: Instance): GuiService;
 		(className: "GuiBase3d", parent?: Instance): GuiBase3d;

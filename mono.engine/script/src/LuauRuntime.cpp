@@ -287,6 +287,7 @@ namespace engine::script {
 		OpenSignals(State);
 		OpenInstances(State);
 		OpenRunService(State);
+		OpenInputServices(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
 		OpenServices(State);
@@ -687,6 +688,18 @@ namespace engine::script {
 			}
 		};
 
+		{
+			// **Input first, and that ordering is the useful one.** A bound
+			// action's handler writes properties, and those writes should reach
+			// their listeners on *this* barrier rather than the next — so the pump
+			// that produces writes runs before the pump that delivers them.
+			//
+			// The reverse order works and puts every scripted response a frame
+			// late, which is the kind of latency nobody can find by reading a
+			// handler.
+			ENGINE_PROFILE_CAT("script input", core::ProfileCategory::Script);
+			note(PumpInput(State));
+		}
 		{
 			ENGINE_PROFILE_CAT("script changes", core::ProfileCategory::Script);
 			note(PumpChanges(State));

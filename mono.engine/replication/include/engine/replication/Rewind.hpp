@@ -39,7 +39,6 @@ namespace engine::replication {
 		uint64_t Latest = 0;
 		bool Open = false;
 
-
 	  public:
 		// Builds a history.
 		//

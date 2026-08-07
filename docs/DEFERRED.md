@@ -12,6 +12,48 @@ Insert the NEWEST items to the front, so older are towards the back.
 If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
 
 ```
+### [_] D00030
+
+**A mutable property on a script *global* reads once and never again, because `luaL_sandbox` enables Luau's `safeenv`.**
+
+- `UserInputService.MouseBehavior` is the first property in the engine that lives on a global rather than on an instance, and it does not work when it is read that way. `local UIS = game:GetService("UserInputService")` works; `UserInputService.MouseBehavior` returns whatever it was the first time any closure asked.
+- **The mechanism, because it is not obvious and cost an hour.** `luaL_sandbox` freezes the global table and turns on `safeenv`, which lets the compiler emit `GETIMPORT` for a constant global followed by constant fields. `GETIMPORT` resolves the chain once per closure and caches the **value**. It does this whether the intermediate is a table or a userdata, so making the service a userdata does not fix it — that was tried, and the observation that settled it is that `__index` fires for the first read of a field and never for the second, with no raw key on the object to explain it.
+- **The userdata is still right and is kept.** It is what makes every read *through a local* go to `__index`; a plain table would have been cached there too.
+- **In practice it does not bite, which is why this is filed rather than fixed.** Every Roblox script begins `local UIS = game:GetService("UserInputService")`, and `game:GetService` is a method call that cannot be an import. The engine's own declaration files describe the property, the test uses the idiomatic form, and the comment in `InputServices.cpp` says so.
+- **What closing it would take.** Either not sandboxing — which is not on the table, `LuauRuntime` freezes the globals so one script cannot change the language the next one runs in — or making the service a *function call* rather than a global, which changes the surface away from Roblox's. Neither is worth it for a property nobody reaches the broken way.
+- **Reopen trigger: a second mutable global property.** One is an oddity with a workaround everybody already uses; two is a pattern, and at that point the surface should stop being globals.
+
+### [_] D00029
+
+**The light count is spelled in C++ and in GLSL and nothing checks that the two agree.**
+
+- `render::MAX_SCENE_LIGHTS` is 16 and `MAX_LIGHTS` in `shaders/opaque.frag` is 16, and the only thing keeping them equal is that somebody wrote both. `AGENTS.md` rule 6 is explicit that a constraint the build does not check is documentation, and this one is.
+- **A test that reads the shader back does not work, and it was tried.** What `Paths::Shaders` stages is SPIR-V — the constant is folded away by then — so a suite comparing the staged file against the C++ value has nothing to compare. Reading the repository's `shaders/` directory from a test binary would work and would make the test depend on the source tree being present beside it, which no other suite here does.
+- **What a mismatch costs, which is why this is filed rather than shrugged at.** It is not a validation error and not a crash: `LightUniforms` is sized by the C++ constant and the shader indexes by its own, so a shader with a smaller cap silently ignores the tail of the set and one with a larger cap reads past the buffer. Both look like "that lamp does not work".
+- **The fix is one line and it is in the build rather than in either file.** The shader compile step passes `-DMAX_LIGHTS=<n>` and `opaque.frag` declares `#ifndef MAX_LIGHTS` around its own value, so the number has one home and the shader still compiles standalone. What it needs is for the CMake shader rule to take a define list, which it does not today.
+- **Reopen trigger: the next time a shader needs a constant C++ also holds.** There is exactly one now; a second makes the build change worth doing rather than worth filing.
+
+### [CLOSED] D00028
+
+**`Enum.Material` is a type in Luau after all. This entry was wrong and is corrected rather than deleted.**
+
+- **What it claimed:** that Luau *cannot* express a dotted type name for a global, that a definitions file's inability to declare one was the language's inability, and that the only way out was a generated `Enum.luau` module and a require-path resolver.
+- **The first half was right and the conclusion did not follow.** A definitions file genuinely cannot declare one: `loadDefinitionFile` writes `exportedTypeBindings[name]` and nothing else, and there is no `declare` syntax for a dotted name. The probe that produced "Unknown type 'Enum.Material'" was real.
+- **What was missed is where the resolution happens.** Luau parses `Enum.Material` in a type position as a reference with a *prefix*, and resolves it through `Scope::lookupImportedType("Enum", "Material")` — the `importedTypeBindings` map. `require` populates that map (`ConstraintGenerator.cpp:1512`), and so may a **host**. Roblox is not using definition-file syntax; it is registering that map. So is luau-lsp's Roblox platform.
+- **Closed by doing the same thing.** `mono.tools/scriptcheck` walks the `Enum_*` extern types the generator emitted and aliases each under the `Enum` prefix, before `freeze`. 35 enums, and `local m: Enum.Material` typechecks. The examples that carried `Enum_Material` in an annotation now carry `Enum.Material`.
+- **The declaration file still uses the flat names, and that is ordering rather than compromise.** The aliases are built *from* the types the file created, so they cannot exist while it is being loaded — emitting the dotted form there made the file fail to load before a single script was checked. Both spellings name the same `TypeFun`.
+- **What is still open is the editor, and it is filed as D00031** rather than left inside a closed entry.
+- **The lesson worth keeping: "the file cannot say it" is not "the language cannot do it".** The first probe answered the question that was asked and the wrong question was asked.
+
+### [_] D00031
+
+**The editor does not know `Enum.Material`, because luau-lsp reads the definitions file and nothing registers the prefix for it.**
+
+- `just typecheck` accepts `local m: Enum.Material` — `scriptcheck` registers `importedTypeBindings["Enum"]` itself. luau-lsp loads the same definitions file and does not, so an author writing the dotted form sees a red squiggle on a line that builds and passes.
+- **The flat spelling still resolves everywhere**, so this is a cosmetic gap with a workaround rather than a broken surface: `Enum_Material` is what the declaration file declares and what the editor understands.
+- **Three ways to close it, and none is obviously right yet.** Teach luau-lsp the prefix, which means a patch to a vendored tool and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork. Switch `luau-lsp.platform.type` to `roblox`, which makes the editor typecheck against Roblox's class tree rather than this engine's — worse than the squiggle. Or generate an `Enum.luau` module and have scripts `require` it, which works in both and costs a line at the top of every file.
+- **Reopen trigger: somebody writing enum annotations often enough to be annoyed.** The engine's own scripts have three.
+
 ### [_] D00027
 
 **The mirror flashes once per orbit, and it is a sign flip rather than a projection fault.**

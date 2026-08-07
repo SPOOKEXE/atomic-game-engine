@@ -160,6 +160,44 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	// --- `Enum.Material` as a *type* ------------------------------------------
+	//
+	// **A definitions file cannot declare a dotted type and the host can register
+	// one**, which is the whole of why this exists here rather than in
+	// `mono.tools/bindings`.
+	//
+	// Luau parses `Enum.Material` in a type position as a reference with a
+	// *prefix*, and resolves it through `Scope::lookupImportedType("Enum",
+	// "Material")` — that is, `importedTypeBindings["Enum"]["Material"]`. That map
+	// is populated by `require` (`ConstraintGenerator.cpp:1512` assigns a required
+	// module's exported bindings into it) and by nothing a `declare` statement can
+	// say. `loadDefinitionFile` only ever writes `exportedTypeBindings[name]`, a
+	// flat name.
+	//
+	// **So Roblox is not doing anything a definitions file can do — it is doing
+	// this.** luau-lsp's Roblox platform registers the same map from an API dump.
+	// The generator emits `Enum_Material` as a flat extern type, and this aliases
+	// every one of them under the `Enum` prefix, so a script may write either.
+	//
+	// **Before `freeze`**, because freezing the arena is what stops anything
+	// adding to the vocabulary afterwards.
+	{
+		auto &bindings = frontend.globals.globalScope->importedTypeBindings["Enum"];
+		size_t aliased = 0;
+
+		for (const auto &[name, binding] : frontend.globals.globalScope->exportedTypeBindings) {
+			// Every `Enum_X` the generator emitted, under the name `X`.
+			constexpr std::string_view PREFIX = "Enum_";
+			if (name.size() <= PREFIX.size() || name.compare(0, PREFIX.size(), PREFIX) != 0) {
+				continue;
+			}
+			bindings[name.substr(PREFIX.size())] = binding;
+			aliased++;
+		}
+
+		ENGINE_INFO("scriptcheck: {} enum(s) reachable as Enum.<Name> in a type position", aliased);
+	}
+
 	// Frozen so a script cannot add to the vocabulary it is being checked
 	// against, which is also what the sandbox does at run time.
 	Luau::freeze(frontend.globals.globalTypes);

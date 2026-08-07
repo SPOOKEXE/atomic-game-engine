@@ -39,6 +39,13 @@ namespace engine::bake {
 			static_cast<uint8_t>(bytes[1]) == 0xD8 && static_cast<uint8_t>(bytes[2]) == 0xFF) {
 			return ImageFormat::Jpeg;
 		}
+
+		// `GIF87a` or `GIF89a`. Four bytes rather than six, because the version
+		// changes nothing this decoder does — see `Gif.cpp`.
+		if (bytes.size() >= 4 && static_cast<char>(bytes[0]) == 'G' && static_cast<char>(bytes[1]) == 'I' &&
+			static_cast<char>(bytes[2]) == 'F' && static_cast<char>(bytes[3]) == '8') {
+			return ImageFormat::Gif;
+		}
 		return ImageFormat::Unknown;
 	}
 
@@ -50,6 +57,8 @@ namespace engine::bake {
 			return "bmp";
 		case ImageFormat::Jpeg:
 			return "jpeg";
+		case ImageFormat::Gif:
+			return "gif";
 		case ImageFormat::Unknown:
 			break;
 		}
@@ -64,6 +73,8 @@ namespace engine::bake {
 			return ReadBmp(bytes, out, failure);
 		case ImageFormat::Jpeg:
 			return ReadJpeg(bytes, out, failure);
+		case ImageFormat::Gif:
+			return ReadGif(bytes, out, failure);
 		case ImageFormat::Unknown:
 			break;
 		}

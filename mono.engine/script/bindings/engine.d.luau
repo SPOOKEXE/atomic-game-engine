@@ -31,6 +31,12 @@ end
 
 declare Vector3: {
 	new: (x: number?, y: number?, z: number?) -> Vector3,
+
+	-- **Lowercase, because Roblox's are.** Every other member of this vocabulary
+	-- is capitalised and these two are not, which reads as a mistake until you
+	-- try to run a script written elsewhere.
+	zero: Vector3,
+	one: Vector3,
 }
 
 declare extern type Color3 with
@@ -78,6 +84,59 @@ declare extern type ChangedSignal with
 	function Connect(self, handler: (property: string) -> ()): RBXScriptConnection
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
 end
+
+-- --- input ------------------------------------------------------------------
+--
+-- **Hand-written, because these two are script globals rather than classes.**
+-- `RunService` and `MessagingService` are declared the same way for the same
+-- reason: nothing about them is in the class table, so the generator has no way
+-- to derive them and writing them out is the honest form.
+
+declare extern type UserInputServiceType with
+	MouseBehavior: Enum_MouseBehavior
+	MouseDeltaSensitivity: number
+	read KeyboardEnabled: boolean
+	read MouseEnabled: boolean
+
+	read InputBegan: PropertyChangedSignal
+	read InputEnded: PropertyChangedSignal
+	read InputChanged: PropertyChangedSignal
+
+	function IsKeyDown(self, key: Enum_KeyCode): boolean
+	function IsMouseButtonPressed(self, button: Enum_UserInputType): boolean
+	function GetMouseLocation(self): Vector2
+	function GetMouseDelta(self): Vector2
+	function GetKeysPressed(self): { Enum_KeyCode }
+end
+
+declare UserInputService: UserInputServiceType
+
+declare extern type ContextActionServiceType with
+	-- The touch-button argument is accepted and ignored: there is no touch
+	-- surface, and refusing it would make a Roblox script fail on a line that
+	-- describes something this engine simply does not have.
+	function BindAction(
+		self,
+		name: string,
+		handler: (string, Enum_UserInputState, Enum_KeyCode) -> (),
+		createTouchButton: boolean,
+		...: Enum_KeyCode
+	): ()
+
+	function BindActionAtPriority(
+		self,
+		name: string,
+		handler: (string, Enum_UserInputState, Enum_KeyCode) -> (),
+		createTouchButton: boolean,
+		priority: number,
+		...: Enum_KeyCode
+	): ()
+
+	function UnbindAction(self, name: string): ()
+	function UnbindAllActions(self): ()
+end
+
+declare ContextActionService: ContextActionServiceType
 
 declare extern type PropertyChangedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
@@ -132,6 +191,9 @@ end
 declare extern type Enum_BorderMode extends EnumItem with
 end
 
+declare extern type Enum_CameraType extends EnumItem with
+end
+
 declare extern type Enum_DominantAxis extends EnumItem with
 end
 
@@ -150,10 +212,34 @@ end
 declare extern type Enum_HorizontalAlignment extends EnumItem with
 end
 
+declare extern type Enum_KeyCode extends EnumItem with
+end
+
 declare extern type Enum_Material extends EnumItem with
 end
 
+declare extern type Enum_MouseBehavior extends EnumItem with
+end
+
 declare extern type Enum_NormalId extends EnumItem with
+end
+
+declare extern type Enum_ParticleEmitterShape extends EnumItem with
+end
+
+declare extern type Enum_ParticleEmitterShapeInOut extends EnumItem with
+end
+
+declare extern type Enum_ParticleEmitterShapeStyle extends EnumItem with
+end
+
+declare extern type Enum_ParticleFlipbookLayout extends EnumItem with
+end
+
+declare extern type Enum_ParticleFlipbookMode extends EnumItem with
+end
+
+declare extern type Enum_ParticleOrientation extends EnumItem with
 end
 
 declare extern type Enum_ScaleType extends EnumItem with
@@ -186,6 +272,12 @@ end
 declare extern type Enum_TextYAlignment extends EnumItem with
 end
 
+declare extern type Enum_UserInputState extends EnumItem with
+end
+
+declare extern type Enum_UserInputType extends EnumItem with
+end
+
 declare extern type Enum_VerticalAlignment extends EnumItem with
 end
 
@@ -212,6 +304,12 @@ declare Enum: {
 		Outline: Enum_BorderMode,
 		Middle: Enum_BorderMode,
 		Inset: Enum_BorderMode,
+	},
+	CameraType: {
+		Classic: Enum_CameraType,
+		LockFirstPerson: Enum_CameraType,
+		ShiftLock: Enum_CameraType,
+		Scriptable: Enum_CameraType,
 	},
 	DominantAxis: {
 		Width: Enum_DominantAxis,
@@ -250,6 +348,72 @@ declare Enum: {
 		Center: Enum_HorizontalAlignment,
 		Right: Enum_HorizontalAlignment,
 	},
+	KeyCode: {
+		Unknown: Enum_KeyCode,
+		A: Enum_KeyCode,
+		B: Enum_KeyCode,
+		C: Enum_KeyCode,
+		D: Enum_KeyCode,
+		E: Enum_KeyCode,
+		F: Enum_KeyCode,
+		G: Enum_KeyCode,
+		H: Enum_KeyCode,
+		I: Enum_KeyCode,
+		J: Enum_KeyCode,
+		K: Enum_KeyCode,
+		L: Enum_KeyCode,
+		M: Enum_KeyCode,
+		N: Enum_KeyCode,
+		O: Enum_KeyCode,
+		P: Enum_KeyCode,
+		Q: Enum_KeyCode,
+		R: Enum_KeyCode,
+		S: Enum_KeyCode,
+		T: Enum_KeyCode,
+		U: Enum_KeyCode,
+		V: Enum_KeyCode,
+		W: Enum_KeyCode,
+		X: Enum_KeyCode,
+		Y: Enum_KeyCode,
+		Z: Enum_KeyCode,
+		Zero: Enum_KeyCode,
+		One: Enum_KeyCode,
+		Two: Enum_KeyCode,
+		Three: Enum_KeyCode,
+		Four: Enum_KeyCode,
+		Five: Enum_KeyCode,
+		Six: Enum_KeyCode,
+		Seven: Enum_KeyCode,
+		Eight: Enum_KeyCode,
+		Nine: Enum_KeyCode,
+		Space: Enum_KeyCode,
+		Return: Enum_KeyCode,
+		Escape: Enum_KeyCode,
+		Backspace: Enum_KeyCode,
+		Tab: Enum_KeyCode,
+		LeftShift: Enum_KeyCode,
+		RightShift: Enum_KeyCode,
+		LeftControl: Enum_KeyCode,
+		RightControl: Enum_KeyCode,
+		LeftAlt: Enum_KeyCode,
+		RightAlt: Enum_KeyCode,
+		Up: Enum_KeyCode,
+		Down: Enum_KeyCode,
+		Left: Enum_KeyCode,
+		Right: Enum_KeyCode,
+		F1: Enum_KeyCode,
+		F2: Enum_KeyCode,
+		F3: Enum_KeyCode,
+		F4: Enum_KeyCode,
+		F5: Enum_KeyCode,
+		F6: Enum_KeyCode,
+		F7: Enum_KeyCode,
+		F8: Enum_KeyCode,
+		F9: Enum_KeyCode,
+		F10: Enum_KeyCode,
+		F11: Enum_KeyCode,
+		F12: Enum_KeyCode,
+	},
 	Material: {
 		Plastic: Enum_Material,
 		SmoothPlastic: Enum_Material,
@@ -269,6 +433,11 @@ declare Enum: {
 		Neon: Enum_Material,
 		ForceField: Enum_Material,
 	},
+	MouseBehavior: {
+		Default: Enum_MouseBehavior,
+		LockCenter: Enum_MouseBehavior,
+		LockCurrentPosition: Enum_MouseBehavior,
+	},
 	NormalId: {
 		Right: Enum_NormalId,
 		Top: Enum_NormalId,
@@ -276,6 +445,39 @@ declare Enum: {
 		Left: Enum_NormalId,
 		Bottom: Enum_NormalId,
 		Front: Enum_NormalId,
+	},
+	ParticleEmitterShape: {
+		Box: Enum_ParticleEmitterShape,
+		Sphere: Enum_ParticleEmitterShape,
+		Cylinder: Enum_ParticleEmitterShape,
+		Disc: Enum_ParticleEmitterShape,
+	},
+	ParticleEmitterShapeInOut: {
+		Outward: Enum_ParticleEmitterShapeInOut,
+		Inward: Enum_ParticleEmitterShapeInOut,
+		InAndOut: Enum_ParticleEmitterShapeInOut,
+	},
+	ParticleEmitterShapeStyle: {
+		Volume: Enum_ParticleEmitterShapeStyle,
+		Surface: Enum_ParticleEmitterShapeStyle,
+	},
+	ParticleFlipbookLayout: {
+		None: Enum_ParticleFlipbookLayout,
+		Grid2x2: Enum_ParticleFlipbookLayout,
+		Grid4x4: Enum_ParticleFlipbookLayout,
+		Grid8x8: Enum_ParticleFlipbookLayout,
+	},
+	ParticleFlipbookMode: {
+		Loop: Enum_ParticleFlipbookMode,
+		OneShot: Enum_ParticleFlipbookMode,
+		PingPong: Enum_ParticleFlipbookMode,
+		Random: Enum_ParticleFlipbookMode,
+	},
+	ParticleOrientation: {
+		FacingCamera: Enum_ParticleOrientation,
+		FacingCameraWorldUp: Enum_ParticleOrientation,
+		VelocityParallel: Enum_ParticleOrientation,
+		VelocityPerpendicular: Enum_ParticleOrientation,
 	},
 	ScaleType: {
 		Stretch: Enum_ScaleType,
@@ -327,6 +529,16 @@ declare Enum: {
 		Top: Enum_TextYAlignment,
 		Center: Enum_TextYAlignment,
 		Bottom: Enum_TextYAlignment,
+	},
+	UserInputState: {
+		Begin: Enum_UserInputState,
+		Change: Enum_UserInputState,
+		End: Enum_UserInputState,
+	},
+	UserInputType: {
+		MouseButton1: Enum_UserInputType,
+		MouseButton2: Enum_UserInputType,
+		MouseButton3: Enum_UserInputType,
 	},
 	VerticalAlignment: {
 		Top: Enum_VerticalAlignment,
@@ -413,25 +625,66 @@ declare NumberRange: {
 	new: (min: number, max: number?) -> NumberRange,
 }
 
+-- The stops, added at v0.10 because a sequence became a *property* and a value
+-- read back has to come back in a shape its own constructor accepts. Until then
+-- `Keypoints` handed out `{time, value, envelope}` tables, and those are still
+-- accepted by both constructors — the table form is how a gradient is written
+-- inline and is not deprecated.
+-- What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
+--
+-- At file scope because a `declare extern type ... with` block takes members and
+-- not aliases, and because the TypeScript half needs the same for its own reason.
+export type EngineAttribute =
+	boolean | number | string | Vector3 | Color3 | CFrame
+	| Vector2 | UDim | UDim2 | Rect | NumberRange | NumberSequence | ColorSequence
+
+declare extern type NumberSequenceKeypoint with
+	read Time: number
+	read Value: number
+	read Envelope: number
+end
+
+declare NumberSequenceKeypoint: {
+	new: (time: number, value: number, envelope: number?) -> NumberSequenceKeypoint,
+}
+
+declare extern type ColorSequenceKeypoint with
+	read Time: number
+	read Value: Color3
+end
+
+declare ColorSequenceKeypoint: {
+	-- No envelope: Roblox's colour keypoint has none and `core::ColorKeypoint`
+	-- has no field for one.
+	new: (time: number, value: Color3) -> ColorSequenceKeypoint,
+}
+
 declare extern type NumberSequence with
-	Keypoints: { { number } }
+	read Keypoints: { NumberSequenceKeypoint }
 	function Evaluate(self, time: number): number
 end
 
 declare NumberSequence: {
 	new: ((value: number) -> NumberSequence)
 		& ((from: number, to: number) -> NumberSequence)
+		-- **Two overloads rather than one over a union**, which is a Luau
+		-- inference limit rather than a design: `{ A | B }` does not unify
+		-- against a table literal whose elements are all `A`, so the union form
+		-- rejects the ordinary case to accept the mixed one. Both are listed and
+		-- the run time takes either, element by element.
+		& ((keypoints: { NumberSequenceKeypoint }) -> NumberSequence)
 		& ((keypoints: { { number } }) -> NumberSequence),
 }
 
 declare extern type ColorSequence with
-	Keypoints: { { number | Color3 } }
+	read Keypoints: { ColorSequenceKeypoint }
 	function Evaluate(self, time: number): Color3
 end
 
 declare ColorSequence: {
 	new: ((value: Color3) -> ColorSequence)
 		& ((from: Color3, to: Color3) -> ColorSequence)
+		& ((keypoints: { ColorSequenceKeypoint }) -> ColorSequence)
 		& ((keypoints: { { number | Color3 } }) -> ColorSequence),
 }
 
@@ -517,6 +770,10 @@ declare extern type Instance with
 	function IsDescendantOf(self, ancestor: Instance): boolean
 	function ClearAllChildren(self): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
+	function GetAttribute(self, name: string): EngineAttribute?
+	function SetAttribute(self, name: string, value: EngineAttribute?): ()
+	function GetAttributes(self): { [string]: EngineAttribute }
+	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
 	Activated: GuiSignal
 	InputBegan: GuiSignal
 	InputEnded: GuiSignal
@@ -578,6 +835,41 @@ declare extern type Sound extends Instance with
 	Volume: number
 end
 
+declare extern type Attachment extends Instance with
+	CFrame: CFrame
+	Position: Vector3
+	read WorldCFrame: CFrame
+	read WorldPosition: Vector3
+end
+
+declare extern type Humanoid extends Instance with
+	Enabled: boolean
+	read Grounded: boolean
+	HipHeight: number
+	JumpPower: number
+	MoveDirection: Vector3
+	WalkSpeed: number
+end
+
+declare extern type Light extends Instance with
+	Angle: number
+	Brightness: number
+	Color: Color3
+	Enabled: boolean
+	Face: Enum_NormalId
+	Range: number
+	Shadows: boolean
+end
+
+declare extern type PointLight extends Light with
+end
+
+declare extern type SpotLight extends Light with
+end
+
+declare extern type SurfaceLight extends Light with
+end
+
 declare extern type LuaSourceContainer extends Instance with
 	Disabled: boolean
 	Source: string
@@ -590,6 +882,73 @@ declare extern type LocalScript extends LuaSourceContainer with
 end
 
 declare extern type ModuleScript extends LuaSourceContainer with
+end
+
+declare extern type ParticleEmitter extends Instance with
+	Acceleration: Vector3
+	Additive: boolean
+	Brightness: number
+	Color: ColorSequence
+	Drag: number
+	EmissionDirection: Enum_NormalId
+	Enabled: boolean
+	FlipbookFramerate: NumberRange
+	FlipbookFrames: number
+	FlipbookLayout: Enum_ParticleFlipbookLayout
+	FlipbookMode: Enum_ParticleFlipbookMode
+	FlipbookStartRandom: boolean
+	Lifetime: NumberRange
+	LightEmission: number
+	LightInfluence: number
+	LockedToPart: boolean
+	Orientation: Enum_ParticleOrientation
+	Rate: number
+	RotSpeed: NumberRange
+	Rotation: NumberRange
+	Shape: Enum_ParticleEmitterShape
+	ShapeInOut: Enum_ParticleEmitterShapeInOut
+	ShapePartial: number
+	ShapeStyle: Enum_ParticleEmitterShapeStyle
+	Size: NumberSequence
+	Speed: NumberRange
+	SpreadAngle: Vector2
+	Squash: NumberSequence
+	Texture: string
+	TimeScale: number
+	Transparency: NumberSequence
+	VelocityInheritance: number
+	ZOffset: number
+end
+
+declare extern type Beam extends Instance with
+	Additive: boolean
+	Attachment0: Instance
+	Attachment1: Instance
+	Color: ColorSequence
+	CurveSize0: number
+	CurveSize1: number
+	Enabled: boolean
+	FaceCamera: boolean
+	Texture: string
+	TextureLength: number
+	TextureSpeed: number
+	Transparency: NumberSequence
+	Width0: number
+	Width1: number
+	ZOffset: number
+end
+
+declare extern type Trail extends Instance with
+	Additive: boolean
+	Attachment0: Instance
+	Attachment1: Instance
+	Color: ColorSequence
+	Enabled: boolean
+	Lifetime: number
+	MinLength: number
+	Texture: string
+	TextureLength: number
+	Transparency: NumberSequence
 end
 
 declare extern type GuiBase extends Instance with
@@ -900,7 +1259,7 @@ declare extern type Service extends Instance with
 end
 
 declare extern type Workspace extends Service with
-	CurrentCamera: Camera?
+	CurrentCamera: Instance
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
 		Position: Vector3,
@@ -1055,10 +1414,19 @@ type CreatableInstances = {
 	Camera: Camera,
 	SurfaceCamera: SurfaceCamera,
 	Sound: Sound,
+	Attachment: Attachment,
+	Humanoid: Humanoid,
+	Light: Light,
+	PointLight: PointLight,
+	SpotLight: SpotLight,
+	SurfaceLight: SurfaceLight,
 	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,
 	ModuleScript: ModuleScript,
+	ParticleEmitter: ParticleEmitter,
+	Beam: Beam,
+	Trail: Trail,
 	GuiBase: GuiBase,
 	GuiService: GuiService,
 	GuiBase3d: GuiBase3d,

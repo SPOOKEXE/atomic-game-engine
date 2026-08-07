@@ -3,11 +3,15 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/effects/Ribbon.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/input/Translate.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -704,6 +708,13 @@ namespace client {
 		// frame's events has to survive until something reads it.
 		Actions.BeginFrame();
 
+		// **The raw state beside the action layer, not instead of it.** `Actions`
+		// maps a key to an *intent* the client acts on — F5 toggles the frame
+		// graph — and this records what is *held*, which is what a game's own
+		// scripts read. Two questions about one keyboard, and both want every
+		// event.
+		Input.BeginFrame();
+
 		{
 			// **The pump on its own.** `pump events` covered the poll and every
 			// key it then acted on, and the poll is the half that can block on
@@ -716,7 +727,35 @@ namespace client {
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
 				Actions.HandleEvent(event);
+
+				// **Both, unconditionally, and neither consumes for the other.**
+				// `Actions::HandleEvent` reports whether it took an event and that
+				// answer is about the *client's* bindings — a script watching F5
+				// should still see F5. Gating this on that return would make the
+				// engine's own keybindings invisible to the game, which is a rule
+				// nobody asked for.
+				Input.HandleEvent(event);
 			}
+		}
+
+		// **The pointer mode a script asked for, applied once it changes.**
+		// `SDL_SetWindowRelativeMouseMode` is a system call and a window-manager
+		// round trip on some platforms, so setting it every frame is a per-frame
+		// cost to say what it already says. The compare is what makes it free.
+		if (Window != nullptr && PointerMode != AppliedPointerMode) {
+			const bool relative = PointerMode == engine::scene::MouseBehavior::LockCenter;
+			SDL_SetWindowRelativeMouseMode(Window, relative);
+
+			// `LockCurrentPosition` hides the pointer without warping it, which is
+			// what a drag-to-rotate wants: the pointer is back where it started
+			// when the drag ends. Relative mode would warp it to the centre.
+			if (PointerMode == engine::scene::MouseBehavior::LockCurrentPosition) {
+				SDL_HideCursor();
+			} else if (!relative) {
+				SDL_ShowCursor();
+			}
+
+			AppliedPointerMode = PointerMode;
 		}
 
 		if (Actions.Fired(Action::Quit)) {
@@ -917,7 +956,43 @@ namespace client {
 			// go on rendering a camera that is no longer in the scene.
 			Surfaces.clear();
 
+			// **Cleared with the surfaces and for a sharper version of the same
+			// reason.** A stale `SurfaceView` renders a camera that has gone; a
+			// stale `ParticleBatch` is a span into a pool that has been stepped
+			// since, so its `Live` prefix may now be shorter than the span says.
+			// That is a read past the live particles rather than a wrong picture.
+			Particles.clear();
+			Lights.clear();
+			RibbonVertices = {};
+			RibbonRuns = {};
+
 			for (const engine::world::WorldId id : Simulated) {
+				// **Written before `Present`, so this frame's `PreRender` sees
+				// this frame's input.** A camera controller reads the state and
+				// places the camera in the same pass; writing afterwards would
+				// aim every camera at where the mouse was one frame ago, which is
+				// the lag nobody can find by reading the controller.
+				//
+				// **Every simulated world, not only the drawn one.** A world the
+				// player is not looking at still ticks its scripts, and a script
+				// polling `UserInputService` there should get the same answer —
+				// the alternative is input that works in one world and silently
+				// does not in another.
+				Universe_->Enter(id, [this](engine::ecs::Store &store) {
+					if (auto *state = store.ResourceMutable<engine::scene::InputState>()) {
+						// **The behaviour is read back, not overwritten.** A
+						// script sets `UserInputService.MouseBehavior` and the
+						// client applies it to the window; copying the whole
+						// translator over the resource would throw that away every
+						// frame. `scene::InputState` is the seam in both
+						// directions.
+						const engine::scene::MouseBehavior wanted = state->Behaviour;
+						*state = Input.State();
+						state->Behaviour = wanted;
+						PointerMode = wanted;
+					}
+				});
+
 				Universe_->Present(id, delta, Universe_->AlphaOf(id));
 
 				// Published from inside the world, straight after its PreRender
@@ -952,6 +1027,26 @@ namespace client {
 						// mirrored walls gets a working mirror per wall rather
 						// than one wall's image projected across all four.
 						(void)CollectSurfaceViews(store, Surfaces);
+
+						// **The particles, from the world being drawn and only
+						// that one.** A batch is a span into this world's pool;
+						// see `Client.hpp` for why a second world's cannot be
+						// appended to the same list.
+						(void)CollectParticleBatches(store, Particles);
+
+						// **The ribbons are taken as spans rather than copied**,
+						// which is safe for the frame and only for the frame:
+						// `BuildRibbons` clears and refills the buffer in the next
+						// `PreRender`, and `Render` is called before that.
+						RibbonVertices = engine::effects::RibbonStream(store);
+						RibbonRuns = engine::effects::RibbonRuns(store);
+
+						// **Ordered from the eye, which is why this needs the
+						// camera and the two above do not.** The renderer takes
+						// sixteen lights and a world may hold any number; which
+						// sixteen is a scene question and distance is the answer
+						// that is right more often than it is wrong.
+						(void)CollectLights(store, placement->Frame.Position, Lights);
 					}
 
 					Views.Publish(
@@ -1203,7 +1298,18 @@ namespace client {
 		}
 
 		LastFrame = Renderer.Render(
-			Views.CameraFrame(), Views.Camera(), Views.Instances(), Overlay, Surfaces, hook, sceneTarget
+			Views.CameraFrame(),
+			Views.Camera(),
+			Views.Instances(),
+			Overlay,
+			Surfaces,
+			hook,
+			sceneTarget,
+			0,
+			Particles,
+			RibbonVertices,
+			RibbonRuns,
+			Lights
 		);
 
 		// **After the frame rather than before it**, so the capture is of a

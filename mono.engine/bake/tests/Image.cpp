@@ -276,13 +276,92 @@ namespace {
 	}
 }
 
+namespace {
+	// The smallest GIF that decodes to something checkable.
+	//
+	// Two pixels wide, one tall, two colours, one frame. Written byte by byte
+	// because that *is* the format — a helper that assembled it would be a second
+	// encoder to trust.
+	std::vector<std::byte> TinyGif() {
+		const std::vector<uint8_t> bytes{
+			// Header, then a 2x1 canvas with a 2-entry global table.
+			'G',
+			'I',
+			'F',
+			'8',
+			'9',
+			'a',
+			0x02,
+			0x00,
+			0x01,
+			0x00,
+			0x80,
+			0x00,
+			0x00,
+
+			// The table: red, then blue.
+			0xFF,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0xFF,
+
+			// Image descriptor at 0,0, 2x1, no local table.
+			0x2C,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0x02,
+			0x00,
+			0x01,
+			0x00,
+			0x00,
+
+			// LZW: minimum code width 2, one block of two bytes, then the block
+			// terminator.
+			//
+			// **The bytes are the codes clear(4), 0, 1, end(5) packed LSB-first at
+			// three bits each**, which comes out as 0x44 0x0A — and getting that
+			// wrong by one byte is exactly the mistake this test exists to catch,
+			// because a decoder that reads a shifted stream produces plausible
+			// garbage rather than an error.
+			0x02,
+			0x02,
+			0x44,
+			0x0A,
+			0x00,
+
+			// Trailer.
+			0x3B,
+		};
+
+		std::vector<std::byte> out;
+		out.reserve(bytes.size());
+		for (const uint8_t byte : bytes) {
+			out.push_back(static_cast<std::byte>(byte));
+		}
+		return out;
+	}
+}
+
 TEST_CASE("the format is sniffed from the bytes", "[bake][image]") {
 	CHECK(ImageFormatOfBytes(Bytes(PNG_RGB)) == ImageFormat::Png);
 	CHECK(ImageFormatOfBytes(Bytes(BMP_TOP_DOWN)) == ImageFormat::Bmp);
 
+	CHECK(ImageFormatOfBytes(TinyGif()) == ImageFormat::Gif);
+
 	// A file called `.png` that is a BMP is an ordinary art-pipeline accident,
 	// and the signature is what makes it a non-event.
-	constexpr std::array<uint8_t, 4> notAnImage{'G', 'I', 'F', '8'};
+	//
+	// **This example used to be `GIF8`**, back when a GIF was something this did
+	// not read. v0.10 added one, so the stand-in for "not an image" moved to a
+	// format that is still genuinely unsupported — WebP's `RIFF....WEBP`. That is
+	// the ordinary way this assertion ages: every format added takes one candidate
+	// off the list, and the test says so rather than being quietly weakened to
+	// checking nothing.
+	constexpr std::array<uint8_t, 4> notAnImage{'R', 'I', 'F', 'F'};
 	CHECK(ImageFormatOfBytes(Bytes(notAnImage)) == ImageFormat::Unknown);
 	CHECK(ImageFormatOfBytes({}) == ImageFormat::Unknown);
 }
@@ -543,6 +622,69 @@ TEST_CASE("a truncated jpeg is refused or whole, never half", "[bake][image]") {
 		} else {
 			CHECK(image.Pixels.empty());
 			CHECK_FALSE(failure.empty());
+		}
+	}
+}
+
+// --- GIF, added at v0.10 ------------------------------------------------------
+//
+// **A GIF built in the test rather than read from disk**, which is the rule every
+// other case in this file follows: a suite that needed a file beside it is a
+// suite that fails on a fresh clone.
+
+TEST_CASE("a GIF is recognised by its signature", "[bake]") {
+	const std::vector<std::byte> gif = TinyGif();
+	REQUIRE(engine::bake::ImageFormatOfBytes(gif) == engine::bake::ImageFormat::Gif);
+	REQUIRE(engine::bake::Describe(engine::bake::ImageFormat::Gif) == "gif");
+
+	// GIF87a too — the version changes nothing this decoder does.
+	std::vector<std::byte> older = gif;
+	older[4] = static_cast<std::byte>('7');
+	REQUIRE(engine::bake::ImageFormatOfBytes(older) == engine::bake::ImageFormat::Gif);
+}
+
+TEST_CASE("a single-frame GIF decodes to a one-cell sheet", "[bake]") {
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	REQUIRE(engine::bake::ReadImage(TinyGif(), texture, failure));
+	REQUIRE(failure.empty());
+
+	// **One frame is a 1x1 grid, so the sheet is the canvas.** A decoder that
+	// always rounded up to 2x2 would double every still image's memory to hold
+	// three empty cells.
+	REQUIRE(texture.Width == 2);
+	REQUIRE(texture.Height == 1);
+	REQUIRE(texture.Pixels.size() == 2 * 1 * 4);
+
+	// Red then blue, opaque.
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[0]) == 255);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[1]) == 0);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[3]) == 255);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[6]) == 255);
+	REQUIRE(static_cast<uint8_t>(texture.Pixels[7]) == 255);
+}
+
+TEST_CASE("a truncated GIF is refused rather than clamped", "[bake]") {
+	const std::vector<std::byte> whole = TinyGif();
+
+	// **Every prefix**, because a length running past the end is the failure mode
+	// a length-prefixed format read off disk actually has — `assets::Wav`'s rule,
+	// and the reason it is a refusal and never a clamp: a clamp turns a truncated
+	// file into a shorter animation that plays.
+	for (size_t length = 1; length < whole.size(); length++) {
+		engine::assets::TextureData texture;
+		std::string failure;
+
+		const std::span<const std::byte> prefix(whole.data(), length);
+		if (engine::bake::ReadImage(prefix, texture, failure)) {
+			// A prefix that happens to be a complete GIF minus its trailer is
+			// legitimately decodable — an encoder that omitted the end code is
+			// common. What must never happen is a *silent* wrong size.
+			REQUIRE(texture.Width == 2);
+			REQUIRE(texture.Height == 1);
+		} else {
+			REQUIRE_FALSE(failure.empty());
 		}
 	}
 }

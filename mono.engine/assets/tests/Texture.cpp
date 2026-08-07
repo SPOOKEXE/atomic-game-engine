@@ -34,9 +34,7 @@ namespace {
 		data.Width = width;
 		data.Height = height;
 		data.Format = format;
-		data.Pixels.resize(
-			static_cast<size_t>(width) * static_cast<size_t>(height) * BytesPerPixel(format)
-		);
+		data.Pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * BytesPerPixel(format));
 		for (size_t index = 0; index < data.Pixels.size(); index++) {
 			data.Pixels[index] = static_cast<std::byte>(index * 7u);
 		}

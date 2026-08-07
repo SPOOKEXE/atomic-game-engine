@@ -3,6 +3,8 @@
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -349,6 +351,32 @@ namespace engine::scene {
 
 		// A name again, so a hand-written pair again. See `WriteSounds`.
 		ecs::Components::Register<Sound>("scene.Sound", WriteSounds, ReadSounds);
+
+		// **Both generated, because neither holds a `core::Name`.** The rule this
+		// file opens with is about names and only about names: a name's id is a
+		// counter this process assigned, so it is written as text. An
+		// `Attachment` is two `CFrame`s and a `Light` is a colour, four floats and
+		// three bytes of enum and flags — all of which mean the same thing in
+		// every process, so the object representation is the format and the
+		// generated pair is correct.
+		//
+		// **The derived half of an `Attachment` crosses too**, and that is worth a
+		// sentence rather than a shrug: `WorldFrame` is a cache with one writer,
+		// and writing a cache into a snapshot is normally the thing rule 2
+		// refuses. It goes in because the alternative is a restored world whose
+		// beams draw at the origin for one frame — `ResolveAttachments` runs in
+		// `PreRender`, so a load that cleared it would present before it was
+		// filled. One frame of a beam in the wrong place is more visible than
+		// thirty-two bytes an entity.
+		ecs::Components::Register<Attachment>("scene.Attachment");
+		ecs::Components::Register<Light>("scene.Light");
+
+		// **Generated, because a `Humanoid` is nine floats and four flags.** No
+		// name, so the object representation is the format and there is nothing
+		// to hand-write — which is the desirable case and the one most components
+		// here are in.
+		ecs::Components::Register<Humanoid>("scene.Humanoid");
+
 		ecs::Components::Register<QuickHash>("scene.QuickHash");
 
 		// The service fixtures, added at the end because that is the rule this
@@ -387,6 +415,19 @@ namespace engine::scene {
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
 		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
+
+		// **`InputState` crosses and `CameraController` crosses**, which is worth
+		// a sentence because one of them looks like it should not. Input is
+		// per-frame state and writing it into a save file sounds like storing an
+		// answer that is recomputed — and it is, except that a *recording* is the
+		// case that matters: `just replay-check` replays a world from a snapshot
+		// and its input stream, and a snapshot whose input state was cleared would
+		// replay a character that never moved.
+		//
+		// The camera controller is authored state — a mode, a zoom, a sensitivity
+		// — and crosses for the ordinary reason.
+		ecs::Components::Register<InputState>("scene.InputState");
+		ecs::Components::Register<CameraController>("scene.CameraController");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
 		ecs::Components::Register<MeshCatalogue>(
 			"scene.MeshCatalogue", WriteMeshCatalogues, ReadMeshCatalogues

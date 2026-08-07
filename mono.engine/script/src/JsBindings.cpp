@@ -10,6 +10,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/world/Postbox.hpp>
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -124,6 +125,40 @@ namespace engine::script {
 		return ValueOf<core::Rect>(context, value, JsOf(context).RectClass);
 	}
 
+	// The three `effects` is authored in, and the same gap again: `JsDatatypes.cpp`
+	// has installed the constructors and the class ids since v0.6, and what was
+	// missing was the pair that carries a property's bytes — which is why a
+	// `NumberSequence` could be built in a script and assigned to nothing.
+	//
+	// **`MakeValue` allocates and copies, and here that is a 408-byte copy** where
+	// every other type on this page is sixteen. Acceptable for the same reason the
+	// Luau side's is: this is the path a caller reached through a *name*, once per
+	// property access, and never the path a draw list walks.
+
+	JSValue MakeNumberRange(JSContext *context, const core::NumberRange &value) {
+		return MakeValue(context, JsOf(context).NumberRangeClass, value);
+	}
+
+	JSValue MakeNumberSequence(JSContext *context, const core::NumberSequence &value) {
+		return MakeValue(context, JsOf(context).NumberSequenceClass, value);
+	}
+
+	JSValue MakeColorSequence(JSContext *context, const core::ColorSequence &value) {
+		return MakeValue(context, JsOf(context).ColorSequenceClass, value);
+	}
+
+	core::NumberRange *AsNumberRange(JSContext *context, JSValueConst value) {
+		return ValueOf<core::NumberRange>(context, value, JsOf(context).NumberRangeClass);
+	}
+
+	core::NumberSequence *AsNumberSequence(JSContext *context, JSValueConst value) {
+		return ValueOf<core::NumberSequence>(context, value, JsOf(context).NumberSequenceClass);
+	}
+
+	core::ColorSequence *AsColorSequence(JSContext *context, JSValueConst value) {
+		return ValueOf<core::ColorSequence>(context, value, JsOf(context).ColorSequenceClass);
+	}
+
 	namespace {
 		JSValue MakeEnumItem(JSContext *context, const Name &enumName, const Name &member);
 		bool ReadEnumValueImpl(JSContext *context, JSValueConst value, const Name &enumName, Name &out);
@@ -133,6 +168,13 @@ namespace engine::script {
 		// **A switch over `PropertyType` and nothing else**, exactly as the Luau
 		// side is. No property is named in either file, which is what makes one
 		// property declaration reach both languages.
+
+		// How wide a property value can be. See `Instances.cpp`, which carries
+		// the whole argument — this is the same constant on the other language's
+		// side, and the two being spelled from the same two `sizeof`s is what
+		// stops a property that reads in Luau failing in JavaScript.
+		constexpr size_t WIDEST_PROPERTY =
+			std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
 
 		JSValue ToJs(JSContext *context, const PropertyDescriptor &property, const void *bytes) {
 			switch (property.Type) {
@@ -177,6 +219,12 @@ namespace engine::script {
 				return MakeUDim2(context, *static_cast<const core::UDim2 *>(bytes));
 			case PropertyType::Rect:
 				return MakeRect(context, *static_cast<const core::Rect *>(bytes));
+			case PropertyType::NumberRange:
+				return MakeNumberRange(context, *static_cast<const core::NumberRange *>(bytes));
+			case PropertyType::NumberSequence:
+				return MakeNumberSequence(context, *static_cast<const core::NumberSequence *>(bytes));
+			case PropertyType::ColorSequence:
+				return MakeColorSequence(context, *static_cast<const core::ColorSequence *>(bytes));
 			case PropertyType::Reference: {
 				// **Null, and it means nil rather than "a root".** This handed
 				// back `workspace` before v0.7, because `workspace` *was* the
@@ -311,6 +359,30 @@ namespace engine::script {
 				*static_cast<core::Rect *>(out) = *rect;
 				return true;
 			}
+			case PropertyType::NumberRange: {
+				const core::NumberRange *range = AsNumberRange(context, value);
+				if (range == nullptr) {
+					return false;
+				}
+				*static_cast<core::NumberRange *>(out) = *range;
+				return true;
+			}
+			case PropertyType::NumberSequence: {
+				const core::NumberSequence *curve = AsNumberSequence(context, value);
+				if (curve == nullptr) {
+					return false;
+				}
+				*static_cast<core::NumberSequence *>(out) = *curve;
+				return true;
+			}
+			case PropertyType::ColorSequence: {
+				const core::ColorSequence *gradient = AsColorSequence(context, value);
+				if (gradient == nullptr) {
+					return false;
+				}
+				*static_cast<core::ColorSequence *>(out) = *gradient;
+				return true;
+			}
 			case PropertyType::Reference: {
 				// An instance arrives as its object; `null` detaches, which is
 				// what Roblox's `Parent = nil` means. `workspace` needs no case
@@ -384,7 +456,7 @@ namespace engine::script {
 				return JS_NewStringLen(context, text.data(), text.size());
 			}
 
-			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 			if (property->Size > sizeof(bytes) ||
 				!bound.World->GetProperty(instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
@@ -431,7 +503,7 @@ namespace engine::script {
 				return JS_UNDEFINED;
 			}
 
-			alignas(16) unsigned char bytes[sizeof(core::CFrame)] = {};
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 			if (property->Size > sizeof(bytes) || !FromJs(context, argv[0], *property, bytes)) {
 				return JS_ThrowTypeError(
 					context, "'%s' cannot take that value", property->Name.Text().data()
@@ -1332,6 +1404,17 @@ namespace engine::script {
 
 			JSValue table = JS_NewObject(context);
 			JS_SetPropertyStr(context, table, "new", JS_NewCFunction(context, Vector3New, "new", 3));
+
+			// **The same two constants the Luau surface carries, spelled the same
+			// way.** Two bindings over one engine is exactly the drift a declared
+			// property prevents for components, and there is no such mechanism for
+			// a library constant — so the only thing keeping `Vector3.zero`
+			// meaning the same in both languages is that both are written here and
+			// in `Values.cpp` from `core::Vector3`'s own members.
+			//
+			// Lowercase, because Roblox's are. `Values.cpp` carries the argument.
+			JS_SetPropertyStr(context, table, "zero", MakeVector3(context, core::Vector3::Zero));
+			JS_SetPropertyStr(context, table, "one", MakeVector3(context, core::Vector3::One));
 			JS_SetPropertyStr(context, global, "Vector3", table);
 		}
 

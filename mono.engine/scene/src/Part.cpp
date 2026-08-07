@@ -3,9 +3,12 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -634,6 +637,175 @@ namespace engine::scene {
 			return property;
 		}
 
+		// --- the attachment's four ------------------------------------------
+		//
+		// **Two writable and two read-only, and the split is the design.**
+		// `CFrame` and `Position` are the local offset an author writes;
+		// `WorldCFrame` and `WorldPosition` are what `ResolveAttachments`
+		// computed from it. A writable world frame would be a second way to place
+		// an attachment, and the two would disagree the moment the parent moved —
+		// which is exactly the state `GuiObject`'s absolutes are read-only to
+		// prevent.
+		//
+		// **A getter that walked to the parent was tried and is what the derived
+		// field replaced.** It is one `CFrame` product per read, and a beam reads
+		// four of them per frame — but the cost is not the argument. The argument
+		// is that a read on the frame an attachment is created, before the pass
+		// has run, would answer a stale identity through the field and the right
+		// value through the walk, and a property that answers differently
+		// depending on when in the frame it is asked is a property nobody can
+		// reason about. So the getter resolves on the spot and the *draw path*
+		// reads the field: one authoritative answer for a script, one cheap one
+		// for a loop.
+		PropertyDescriptor AttachmentPositionProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Position");
+			property.Type = PropertyType::Vector3;
+			property.Size = sizeof(core::Vector3);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Attachment *point = store.Get<Attachment>(instance);
+				if (point == nullptr) {
+					return false;
+				}
+				*static_cast<core::Vector3 *>(out) = point->Frame.Position;
+				return true;
+			};
+
+			// The rotation is kept, for `PositionProperty`'s reason one file up:
+			// an attachment carries a direction as well as a place, and a setter
+			// that wrote twelve bytes over the front of a `CFrame` would leave a
+			// quaternion that no longer matches.
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Attachment *point = store.GetMutable<Attachment>(instance);
+				if (point == nullptr) {
+					return false;
+				}
+				point->Frame.Position = *static_cast<const core::Vector3 *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
+		PropertyDescriptor WorldCFrameProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("WorldCFrame");
+			property.Type = PropertyType::CFrame;
+			property.Size = sizeof(core::CFrame);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<Attachment>(instance) == nullptr) {
+					return false;
+				}
+				*static_cast<core::CFrame *>(out) = ResolveAttachment(store, instance);
+				return true;
+			};
+
+			return property;
+		}
+
+		PropertyDescriptor WorldPositionProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("WorldPosition");
+			property.Type = PropertyType::Vector3;
+			property.Size = sizeof(core::Vector3);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<Attachment>(instance) == nullptr) {
+					return false;
+				}
+				*static_cast<core::Vector3 *>(out) = ResolveAttachment(store, instance).Position;
+				return true;
+			};
+
+			return property;
+		}
+
+		// Which face a spot or surface light points out of.
+		//
+		// The same shape as `FaceProperty` above and deliberately not shared with
+		// it: that one reads a `SurfaceCamera` and this reads a `Light`, and a
+		// descriptor is a pair of function pointers over a specific component. A
+		// template over the component would save nine lines and cost the reader
+		// the ability to see what a property touches, which is what `Reads` and
+		// `Writes` exist to state.
+		PropertyDescriptor LightFaceProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Face");
+			property.Type = PropertyType::Enum;
+			property.EnumName = NormalIdEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Light>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Light *bulb = store.Get<Light>(instance);
+				if (bulb == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(NormalIdEnum(), static_cast<size_t>(bulb->Face));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Light *bulb = store.GetMutable<Light>(instance);
+				if (bulb == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						NormalIdEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				bulb->Face = static_cast<NormalId>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
+		// Whether the world found something under the character's feet.
+		//
+		// Read-only, for the reason the declaration site gives.
+		PropertyDescriptor GroundedProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Grounded");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Humanoid>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Humanoid *humanoid = store.Get<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				*static_cast<bool *>(out) = humanoid->Grounded;
+				return true;
+			};
+
+			return property;
+		}
+
 		// Read-only mesh metadata; zero means the catalogue has no entry.
 		PropertyDescriptor TrianglesCountProperty() {
 			PropertyDescriptor property;
@@ -897,6 +1069,91 @@ namespace engine::scene {
 			const std::array emitter{ecs::Components::Of<Sound>()};
 			const ecs::ClassId soundClass = ecs::Classes::Register("Sound", instance, emitter);
 
+			// **An `Attachment` is an `Instance` and not a `PVInstance`**, which
+			// is `Sound`'s omission for a related reason. A `PVInstance` carries a
+			// `Transform` — a world-space placement — and an attachment already
+			// holds a `CFrame` relative to its parent. Two of those on one row is
+			// two opinions about where a point is, and `SetParent` would silently
+			// decide which one won.
+			//
+			// The whole reason this class exists before anything that uses it is
+			// that beams, trails and particle emitters are all parented to one.
+			// Building any of those first means building them twice.
+			const std::array point{ecs::Components::Of<Attachment>()};
+			const ecs::ClassId attachmentClass = ecs::Classes::Register("Attachment", instance, point);
+
+			// **One component, three classes**, which is `Collider`'s trade across
+			// three shapes. The three lights differ by two fields; three
+			// components would be three columns, three queries and three upload
+			// paths for something a renderer packs into one array either way.
+			//
+			// Each class sets its own `Kind` as a *prototype default*, so
+			// `Instance.new("SpotLight")` is a spot light without a script saying
+			// so — which is the whole point of the prototype row. A `Kind`
+			// property is deliberately not declared: the class is the answer, and
+			// a second way to say it is the duplicate `AGENTS.md` warns about.
+			// **A `Humanoid` is an `Instance` under a character model**, which is
+			// Roblox's arrangement exactly: the humanoid is a sibling of the parts
+			// it drives rather than a component on one of them. That is what lets
+			// a character be a model of several parts with one thing steering it,
+			// and it is why `StepCharacters` walks `<Humanoid, Motion>` rather
+			// than looking for a humanoid on a part.
+			const std::array body{ecs::Components::Of<Humanoid>()};
+			const ecs::ClassId humanoidClass = ecs::Classes::Register("Humanoid", instance, body);
+
+			// The key names, so a script can say `Enum.KeyCode.Space` and be told
+			// when it is wrong. **Generated from `Describe` rather than typed out
+			// beside the enum**, which is the rule `NormalId` already follows here
+			// — one declaration, and adding a key means adding it in one place.
+			std::array<std::string_view, static_cast<size_t>(KeyCode::Count)> keys{};
+			for (size_t index = 0; index < keys.size(); index++) {
+				keys[index] = Describe(static_cast<KeyCode>(index));
+			}
+			ecs::EnumTable::Register("KeyCode", keys);
+
+			std::array<std::string_view, static_cast<size_t>(MouseButton::Count)> buttons{};
+			for (size_t index = 0; index < buttons.size(); index++) {
+				buttons[index] = Describe(static_cast<MouseButton>(index));
+			}
+			ecs::EnumTable::Register("UserInputType", buttons);
+
+			// **The states a bound action's handler is told about.** Registered
+			// here beside the other input enums rather than in
+			// `script::OpenInputServices`, because the bindings generator does not
+			// open a VM — an enum registered at VM-open time is one the manifest
+			// never sees, and `Enum_UserInputState` came out of the declaration
+			// file as an unknown type.
+			ecs::EnumTable::Register(
+				"UserInputState", std::array<std::string_view, 3>{"Begin", "Change", "End"}
+			);
+
+			ecs::EnumTable::Register(
+				"MouseBehavior",
+				std::array<std::string_view, 3>{"Default", "LockCenter", "LockCurrentPosition"}
+			);
+			ecs::EnumTable::Register(
+				"CameraType",
+				std::array<std::string_view, 4>{"Classic", "LockFirstPerson", "ShiftLock", "Scriptable"}
+			);
+
+			const std::array bulb{ecs::Components::Of<Light>()};
+			const ecs::ClassId lightClass = ecs::Classes::Register("Light", instance, bulb);
+			// **Registered and not kept**, because a point light declares no property of
+			// its own: everything it has is on `Light`, and the class exists so that
+			// `Instance.new("PointLight")` resolves and so that `:IsA("PointLight")`
+			// answers. The two below are kept only to hang a prototype default off.
+			(void)ecs::Classes::Register("PointLight", lightClass, {});
+			const ecs::ClassId spotLightClass = ecs::Classes::Register("SpotLight", lightClass, {});
+			const ecs::ClassId surfaceLightClass = ecs::Classes::Register("SurfaceLight", lightClass, {});
+
+			Light spot;
+			spot.Kind = LightKind::Spot;
+			ecs::Classes::Default(spotLightClass, spot);
+
+			Light surfaceLight;
+			surfaceLight.Kind = LightKind::Surface;
+			ecs::Classes::Default(surfaceLightClass, surfaceLight);
+
 			// --- properties, declared where the component arrives ------------
 			//
 			// Each on the class that first holds what it projects, so a derived
@@ -1028,6 +1285,62 @@ namespace engine::scene {
 			ecs::Classes::Property<&Sound::Playing>(soundClass, "Playing");
 			ecs::Classes::Property<&Sound::RollOffMinDistance>(soundClass, "RollOffMinDistance");
 			ecs::Classes::Property<&Sound::RollOffMaxDistance>(soundClass, "RollOffMaxDistance");
+
+			// The attachment's four. `CFrame` is the authored local offset and
+			// carries the same name a `PVInstance`'s does — which is correct
+			// rather than a collision: on both classes it means "where this thing
+			// is, in the terms that thing is placed in", and an attachment is
+			// placed relative to its parent.
+			ecs::Classes::Property<&Attachment::Frame>(attachmentClass, "CFrame");
+			ecs::Classes::Computed(attachmentClass, AttachmentPositionProperty());
+			ecs::Classes::Computed(attachmentClass, WorldCFrameProperty());
+			ecs::Classes::Computed(attachmentClass, WorldPositionProperty());
+
+			// The light's, declared on the base so all three inherit them.
+			//
+			// **`Angle` and `Face` are on `Light` rather than on the two classes
+			// that read them**, which is the shape the single component forces and
+			// is honest about it: a `PointLight` has an `Angle` property that does
+			// nothing. The alternative is declaring the same two descriptors on
+			// two classes, which is two declarations of one projection — and the
+			// component is shared either way, so the storage does not change. A
+			// point light's angle reads back what it was set to and is ignored,
+			// which is the same contract `SurfaceCamera::Face` has on a camera
+			// parented to the world.
+			ecs::Classes::Property<&Light::Colour>(lightClass, "Color");
+			ecs::Classes::Property<&Light::Enabled>(lightClass, "Enabled");
+			ecs::Classes::Property<&Light::Shadows>(lightClass, "Shadows");
+
+			// Clamped, because all three are quantities with an obvious nearest
+			// meaning outside their range — `ClampedProperty`'s own argument. The
+			// brightness ceiling is Roblox's; the range ceiling is the one past
+			// which a forward renderer's light culling stops rejecting anything.
+			ecs::Classes::ClampedProperty<&Light::Brightness, 0.0f, 10000.0f>(lightClass, "Brightness");
+			ecs::Classes::ClampedProperty<&Light::Range, 0.0f, 60.0f>(lightClass, "Range");
+			ecs::Classes::ClampedProperty<&Light::Angle, 0.0f, 180.0f>(lightClass, "Angle");
+			ecs::Classes::Computed(lightClass, LightFaceProperty());
+
+			// The humanoid's. All plain fields — nothing here is a doubled
+			// half-extent or an angle in the wrong unit, so there is no conversion
+			// to write and no place for one to be wrong in one direction.
+			//
+			// **`MoveDirection` is writable, which is what makes a scripted
+			// character possible.** A game driving an NPC writes it directly and
+			// never installs `UpdateCharacterControl`; a player's character has
+			// that system writing it every frame instead. One field, two writers,
+			// and only one of them installed per character — which is the same
+			// shape `MoveCamera` and a scripted camera already have.
+			ecs::Classes::Property<&Humanoid::MoveDirection>(humanoidClass, "MoveDirection");
+			ecs::Classes::ClampedProperty<&Humanoid::WalkSpeed, 0.0f, 1000.0f>(humanoidClass, "WalkSpeed");
+			ecs::Classes::ClampedProperty<&Humanoid::JumpSpeed, 0.0f, 1000.0f>(humanoidClass, "JumpPower");
+			ecs::Classes::ClampedProperty<&Humanoid::Height, 0.1f, 100.0f>(humanoidClass, "HipHeight");
+			ecs::Classes::Property<&Humanoid::Enabled>(humanoidClass, "Enabled");
+
+			// **Read-only, because it is what the world found rather than what an
+			// author wants.** A script setting `Grounded` would be telling the
+			// controller a lie it acts on immediately — the jump would fire in
+			// mid-air, which is the exploit this flag exists to gate.
+			ecs::Classes::Computed(humanoidClass, GroundedProperty());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like.

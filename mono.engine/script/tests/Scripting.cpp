@@ -15,6 +15,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
@@ -887,6 +888,255 @@ TEST_CASE("an unregistered enum is an error rather than an empty table", "[scrip
 	)");
 }
 
+// --- attributes -------------------------------------------------------------
+
+TEST_CASE("attributes hold what a script puts in them", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new("Part")
+
+		-- **Nil for one nobody set**, which is the answer a script can act on:
+		-- an error would make `if part:GetAttribute("x") then` a crash.
+		assert(part:GetAttribute("Health") == nil, 'an unset attribute is not nil')
+
+		part:SetAttribute("Health", 75)
+		assert(part:GetAttribute("Health") == 75, 'a number did not round-trip')
+
+		part:SetAttribute("Faction", "red")
+		assert(part:GetAttribute("Faction") == 'red', 'a string did not round-trip')
+
+		part:SetAttribute("Alive", true)
+		assert(part:GetAttribute("Alive") == true, 'a boolean did not round-trip')
+
+		-- The datatypes, which is the half a plain key-value store would not have.
+		part:SetAttribute("Home", Vector3.new(1, 2, 3))
+		assert(part:GetAttribute("Home") == Vector3.new(1, 2, 3), 'a Vector3 did not round-trip')
+
+		part:SetAttribute("Tint", Color3.new(1, 0, 0))
+		assert(part:GetAttribute("Tint") == Color3.new(1, 0, 0), 'a Color3 did not round-trip')
+
+		part:SetAttribute("Band", NumberRange.new(2, 8))
+		assert(part:GetAttribute("Band").Max == 8, 'a NumberRange did not round-trip')
+
+		part:SetAttribute("Fade", NumberSequence.new(1, 0))
+		assert(math.abs(part:GetAttribute("Fade"):Evaluate(0.5) - 0.5) < 1e-5, 'a curve did not round-trip')
+
+		-- **Nil removes**, which is Roblox's spelling and the only one that lets
+		-- a script take an attribute back.
+		part:SetAttribute("Health", nil)
+		assert(part:GetAttribute("Health") == nil, 'nil did not remove')
+
+		-- Everything at once, by name.
+		local all = part:GetAttributes()
+		assert(all.Faction == 'red', 'GetAttributes lost a value')
+		assert(all.Health == nil, 'GetAttributes returned a removed attribute')
+
+		local count = 0
+		for _ in pairs(all) do
+			count += 1
+		end
+		assert(count == 6, 'GetAttributes returned ' .. count .. ' rather than 6')
+
+		-- **An instance is refused**, because a handle means nothing outside the
+		-- world holding it and an attribute crosses a save file.
+		local ok = pcall(function()
+			part:SetAttribute("Other", Instance.new("Part"))
+		end)
+		assert(not ok, 'an instance was accepted as an attribute')
+	)");
+}
+
+TEST_CASE("attributes are dropped with the instance that held them", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// **Entity ids are reused, which is the whole reason this test exists.** A
+	// table keyed by id with an entry left behind surfaces as somebody else's
+	// attribute on a freshly created part — at a distance of however many
+	// entities were made in between, which is the worst kind of bug to find.
+	MustRun(*runtime, R"(
+		local first = Instance.new("Part")
+		first:SetAttribute("Secret", "gone")
+		first:Destroy()
+
+		local second = Instance.new("Part")
+		assert(second:GetAttribute("Secret") == nil, 'an attribute outlived its instance')
+	)");
+}
+
+TEST_CASE("an attribute change reaches a listener", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new("Part")
+		part.Parent = workspace
+
+		local seen = 0
+		part:GetAttributeChangedSignal("Score"):Connect(function()
+			seen += 1
+		end)
+
+		part:SetAttribute("Score", 1)
+
+		-- **Written three times and signalled once**, which is the dedup the
+		-- change queue already gives every property: a script seeing three calls
+		-- with two values nobody will observe is worse than one call with the
+		-- value it ended at.
+		part:SetAttribute("Score", 2)
+		part:SetAttribute("Score", 3)
+
+		task.wait()
+		assert(seen == 1, 'the attribute listener ran ' .. seen .. ' time(s) rather than once')
+		assert(part:GetAttribute("Score") == 3, 'the listener saw a stale value')
+	)");
+}
+
+// --- input ------------------------------------------------------------------
+
+TEST_CASE("UserInputService answers from the world's input state", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+
+	// **The resource is what makes input exist.** A world without one is a
+	// server, and every query answers "nothing pressed" rather than raising —
+	// which is what lets one script poll input on both halves of a game.
+	engine::scene::InputState state;
+	state.Down.Set(engine::scene::KeyCode::W, true);
+	state.MousePosition = engine::core::Vector2{120.0f, 45.0f};
+	store.SetResource(state);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		assert(UserInputService:IsKeyDown(Enum.KeyCode.W), 'W should be down')
+		assert(not UserInputService:IsKeyDown(Enum.KeyCode.A), 'A should not be down')
+
+		local where = UserInputService:GetMouseLocation()
+		assert(where.X == 120 and where.Y == 45, 'the mouse is somewhere else')
+
+		local held = UserInputService:GetKeysPressed()
+		assert(#held == 1, 'expected exactly one key held')
+		assert(held[1] == Enum.KeyCode.W, 'GetKeysPressed returned the wrong key')
+
+		-- **The one field that travels towards the client.** A script sets it and
+		-- the client applies it to the window on the next frame.
+		-- **Through a local, which is how a Roblox script is written anyway** —
+		-- `local UIS = game:GetService("UserInputService")`. It is also the only
+		-- form that works: `luaL_sandbox` enables Luau's `safeenv`, so a bare
+		-- `Global.Field` compiles to a `GETIMPORT` that resolves once and caches
+		-- the *value*, and a property read that way never changes again.
+		-- `DEFERRED.md` D00030 carries it.
+		local uis = game:GetService('UserInputService')
+		uis.MouseBehavior = Enum.MouseBehavior.LockCenter
+		assert(
+			uis.MouseBehavior == Enum.MouseBehavior.LockCenter,
+			'MouseBehavior did not round-trip'
+		)
+	)");
+
+	// The write reached the resource rather than a copy.
+	REQUIRE(
+		store.Resource<engine::scene::InputState>()->Behaviour == engine::scene::MouseBehavior::LockCenter
+	);
+}
+
+TEST_CASE("a world with no input state answers rather than raising", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// **A server is this case, and it is the ordinary one.** A script that
+	// guarded every input query would be a script that could not be shared
+	// between the two halves of a game.
+	MustRun(*runtime, R"(
+		assert(not UserInputService:IsKeyDown(Enum.KeyCode.W), 'a headless world reported a key')
+		assert(#UserInputService:GetKeysPressed() == 0, 'a headless world reported keys')
+		assert(not UserInputService.KeyboardEnabled, 'a headless world claimed a keyboard')
+	)");
+}
+
+TEST_CASE("a bound action fires on the edge and the priority decides", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	store.SetResource(engine::scene::InputState{});
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		-- **A part's attribute rather than a global**, because `luaL_sandbox`
+		-- freezes the global table: `_G.log = {}` is "attempt to modify a
+		-- readonly table". An attribute is the engine's own answer to "somewhere
+		-- a handler can write that a later chunk can read".
+		local board = Instance.new('Part')
+		board.Name = 'Board'
+		board.Parent = workspace
+		board:SetAttribute('Log', '')
+
+		local function note(text: string)
+			board:SetAttribute('Log', board:GetAttribute('Log') .. text .. ';')
+		end
+
+		ContextActionService:BindActionAtPriority('low', function(name, state)
+			note('low:' .. tostring(state.Name))
+		end, false, 1, Enum.KeyCode.E)
+
+		ContextActionService:BindActionAtPriority('high', function(name, state)
+			note('high:' .. tostring(state.Name))
+		end, false, 10, Enum.KeyCode.E)
+	)");
+
+	// Press E. **The edge is the difference between the two bitsets**, which is
+	// what a client's translator produces every frame — so a test drives it the
+	// same way rather than through a second path.
+	auto *input = store.ResourceMutable<engine::scene::InputState>();
+	input->Previous = input->Down;
+	input->Down.Set(engine::scene::KeyCode::E, true);
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	MustRun(*runtime, R"(
+		-- **The highest priority claims the key and the rest never see it**,
+		-- which is the whole reason ContextActionService exists beside polling.
+		local board = workspace:FindFirstChild('Board')
+		assert(board:GetAttribute('Log') == 'high:Begin;', 'got ' .. board:GetAttribute('Log'))
+	)");
+
+	// Release it.
+	input = store.ResourceMutable<engine::scene::InputState>();
+	input->Previous = input->Down;
+	input->Down.Set(engine::scene::KeyCode::E, false);
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(board:GetAttribute('Log') == 'high:Begin;high:End;', 'got ' .. board:GetAttribute('Log'))
+	)");
+
+	// Unbinding the winner hands the key to the next claim down.
+	MustRun(*runtime, R"(
+		ContextActionService:UnbindAction('high')
+		workspace:FindFirstChild('Board'):SetAttribute('Log', '')
+	)");
+
+	input = store.ResourceMutable<engine::scene::InputState>();
+	input->Previous = input->Down;
+	input->Down.Set(engine::scene::KeyCode::E, true);
+
+	REQUIRE(runtime->Heartbeat(0.016f));
+
+	MustRun(*runtime, R"(
+		local board = workspace:FindFirstChild('Board')
+		assert(board:GetAttribute('Log') == 'low:Begin;', 'unbinding did not hand the key down')
+	)");
+}
+
 // --- the datatype vocabulary ------------------------------------------------
 
 TEST_CASE("the datatypes arithmetic and read back", "[scripting]") {
@@ -929,6 +1179,86 @@ TEST_CASE("the datatypes arithmetic and read back", "[scripting]") {
 		assert(info.Time == 2, 'TweenInfo time')
 		assert(info.EasingStyle == Enum.EasingStyle.Quad, 'TweenInfo style did not round-trip')
 		assert(math.abs(info:Evaluate(0.5) - 0.75) < 1e-5, 'Quad/Out at a half is three quarters')
+	)");
+}
+
+// --- the two constants and the two keypoints, added at v0.10 -----------------
+
+TEST_CASE("Vector3 carries the constants a script spells lowercase", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		assert(Vector3.zero == Vector3.new(0, 0, 0), 'Vector3.zero')
+		assert(Vector3.one == Vector3.new(1, 1, 1), 'Vector3.one')
+
+		-- **The constants are ordinary values of the type**, which is what makes
+		-- them usable rather than decorative: a constant that failed the userdata
+		-- check would be a constant no property could be assigned from and no
+		-- operator could take.
+		assert(typeof(Vector3.zero) == 'Vector3', 'the constant is not a Vector3')
+		assert((Vector3.one * 3) == Vector3.new(3, 3, 3), 'a constant does not multiply')
+		assert((Vector3.zero + Vector3.one) == Vector3.one, 'a constant does not add')
+
+		-- Lowercase and not capitalised, because Roblox's are. A script written
+		-- elsewhere says `Vector3.zero`, and a second spelling would be the
+		-- duplicate AGENTS.md calls the most expensive kind of debt.
+		assert(rawget(Vector3, 'Zero') == nil, 'a second spelling of zero exists')
+	)");
+}
+
+TEST_CASE("the sequence keypoints are values rather than tables", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local stop = NumberSequenceKeypoint.new(0.25, 4, 0.5)
+		assert(stop.Time == 0.25 and stop.Value == 4 and stop.Envelope == 0.5, 'keypoint fields')
+		assert(typeof(stop) == 'NumberSequenceKeypoint', 'keypoint typeof')
+
+		-- Equality compares the numbers rather than the userdata's address,
+		-- which is what a test of a gradient actually asks.
+		assert(stop == NumberSequenceKeypoint.new(0.25, 4, 0.5), 'keypoint equality')
+		assert(stop ~= NumberSequenceKeypoint.new(0.25, 4), 'the envelope is part of the value')
+
+		local tint = ColorSequenceKeypoint.new(1, Color3.new(0, 1, 0))
+		assert(tint.Time == 1 and tint.Value == Color3.new(0, 1, 0), 'colour keypoint fields')
+		assert(typeof(tint) == 'ColorSequenceKeypoint', 'colour keypoint typeof')
+
+		-- **A constructor takes either form.** The table literal is still how a
+		-- gradient is written inline and is not deprecated; what v0.10 added is
+		-- that it is no longer the only form.
+		--
+		-- This line is also what found a real bug rather than only covering one:
+		-- the table branch read its fields through a *relative* stack index that
+		-- shifted as the stack grew, so the second field came out of the first
+		-- one's value. Nothing had exercised it, because every sequence in this
+		-- suite was built from the two-argument form.
+		local mixed = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			{1, 0, 0.25},
+		})
+		assert(#mixed.Keypoints == 2, 'mixed keypoint forms')
+		assert(mixed.Keypoints[1].Value == 1, 'the userdata form lost its value')
+		assert(mixed.Keypoints[2].Time == 1, 'the table form lost its time')
+		assert(mixed.Keypoints[2].Envelope == 0.25, 'the table form lost its envelope')
+
+		-- **The round trip is the whole reason these types exist.** Reading a
+		-- sequence back hands out keypoints its own constructor accepts, where it
+		-- used to hand out three anonymous numbers in a table.
+		local again = NumberSequence.new(mixed.Keypoints)
+		assert(again.Keypoints[1] == mixed.Keypoints[1], 'a sequence did not round-trip')
+		assert(math.abs(again:Evaluate(0.5) - 0.5) < 1e-5, 'the round-tripped ramp is not the ramp')
+
+		local ramp = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.new(1, 0, 0)),
+			ColorSequenceKeypoint.new(1, Color3.new(0, 0, 1)),
+		})
+		assert(#ramp.Keypoints == 2, 'colour keypoints')
+		assert(ramp.Keypoints[1].Value == Color3.new(1, 0, 0), 'colour keypoint round trip')
+		assert(math.abs(ramp:Evaluate(0.5).B - 0.5) < 1e-5, 'colour ramp midpoint')
 	)");
 }
 

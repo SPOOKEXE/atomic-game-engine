@@ -393,8 +393,7 @@ namespace engine::gui {
 
 			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, {});
 			const ClassId sphereHandle = Classes::Register("SphereHandleAdornment", handleAdornment, {});
-			const ClassId cylinderHandle =
-				Classes::Register("CylinderHandleAdornment", handleAdornment, {});
+			const ClassId cylinderHandle = Classes::Register("CylinderHandleAdornment", handleAdornment, {});
 			const ClassId lineHandle = Classes::Register("LineHandleAdornment", handleAdornment, {});
 
 			// `Handles` and `ArcHandles` are the draggable ones — the editor's
@@ -682,9 +681,7 @@ namespace engine::gui {
 
 			Classes::Property<&SelectionOutline::LineThickness>(selectionBox, "LineThickness");
 			Classes::Property<&SelectionOutline::SurfaceColor>(selectionBox, "SurfaceColor3");
-			Classes::Property<&SelectionOutline::SurfaceTransparency>(
-				selectionBox, "SurfaceTransparency"
-			);
+			Classes::Property<&SelectionOutline::SurfaceTransparency>(selectionBox, "SurfaceTransparency");
 
 			Classes::Property<&HandleShape::Offset>(handleAdornment, "CFrame");
 			Classes::Property<&HandleShape::Size>(handleAdornment, "Size");

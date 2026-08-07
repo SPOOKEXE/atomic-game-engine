@@ -24,7 +24,9 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/NumberRange.hpp>
 #include <engine/core/types/Rect.hpp>
+#include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -105,6 +107,24 @@ namespace engine::game {
 
 		// A `PropertyType::Rect` value.
 		core::Rect Rect;
+
+		// A `PropertyType::NumberRange` value.
+		core::NumberRange NumberRange;
+
+		// A `PropertyType::NumberSequence` value.
+		//
+		// **These two are what make the "around a hundred bytes" above wrong**,
+		// and the note is kept rather than corrected because the reasoning it
+		// carries still holds and the number no longer does. A sequence is 328
+		// bytes each, so a `PropertyValue` is now the better part of a kilobyte —
+		// which is fine for the same reason a hundred bytes was fine, and only for
+		// that reason: this crosses between a store, a text field and a document
+		// once per interaction, and is never stored in bulk. A `PropertyValue` in
+		// a vector sized by the world would be a different type.
+		core::NumberSequence NumberSequence;
+
+		// A `PropertyType::ColorSequence` value.
+		core::ColorSequence ColorSequence;
 	};
 
 	// Reads one property off an instance.

@@ -10,6 +10,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/input/Actions.hpp>
+#include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
@@ -18,6 +19,7 @@
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -28,6 +30,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -351,6 +354,24 @@ namespace client {
 		engine::render::FrameStatistics Statistics;
 
 		engine::input::Actions Actions;
+
+		// This frame's raw input, before any world has been told about it.
+		//
+		// **Beside `Actions` rather than inside it**, because the two answer
+		// different questions about one keyboard: `Actions` is "did the player ask
+		// for the frame graph", and this is "is W held". `input/Translate.hpp`
+		// carries the split.
+		engine::input::Translator Input;
+
+		// What a script last asked the pointer to do, and what the window was last
+		// told.
+		//
+		// **Two fields rather than one, so the window call is made on the frame it
+		// changes and no other.** `SDL_SetWindowRelativeMouseMode` is a
+		// window-manager round trip on some platforms, and a client that made it
+		// every frame would pay for it every frame to say what it already said.
+		engine::scene::MouseBehavior PointerMode = engine::scene::MouseBehavior::Default;
+		engine::scene::MouseBehavior AppliedPointerMode = engine::scene::MouseBehavior::Default;
 		engine::core::FrameClock Clock;
 
 		// The world, and the only place simulation state lives. Everything
@@ -472,6 +493,39 @@ namespace client {
 		// was deleted stops being drawn — a list assembled from what is in the
 		// world cannot outlive what is in the world.
 		std::vector<engine::render::SurfaceView> Surfaces;
+
+		// This frame's particle batches, one per emitter with something alive.
+		//
+		// **A member rather than a local, for `Surfaces`' reason**: the vector's
+		// capacity survives from frame to frame, so a steady scene stops
+		// allocating after the first one. At a hundred thousand emitters that is
+		// the difference between one allocation and one a frame.
+		//
+		// **Only the rendered world fills it.** A batch is a span into that
+		// world's pool, and a second world's pool is a different allocation — so
+		// mixing two worlds' batches in one list would hand the renderer spans
+		// with nothing in common but a type.
+		std::vector<engine::render::ParticleBatch> Particles;
+
+		// This frame's beams and trails, as spans into the drawn world's buffer.
+		//
+		// **Spans and not vectors, unlike `Particles`.** A particle batch has to
+		// be assembled — the shared half comes off the emitter and the particles
+		// come out of the pool — so there is a list to own. A ribbon buffer is
+		// already exactly what the renderer takes, so copying it would be moving
+		// the vertices twice to gain nothing.
+		//
+		// Valid for the frame and only for the frame: `BuildRibbons` clears and
+		// refills the buffer in the next `PreRender`, which runs after `Render`.
+		std::span<const engine::effects::RibbonVertex> RibbonVertices;
+		std::span<const engine::effects::RibbonRun> RibbonRuns;
+
+		// The point and spot lights nearest this frame's eye.
+		//
+		// A vector rather than a span, unlike the ribbons: the set is *chosen*
+		// from the world rather than taken whole, so there is a list to own. Its
+		// capacity survives the frame for `Surfaces`' reason.
+		std::vector<engine::render::SceneLight> Lights;
 
 		engine::core::CFrame ComposedFrame;
 		engine::scene::Camera ComposedCamera;
