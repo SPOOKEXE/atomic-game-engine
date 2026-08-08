@@ -698,6 +698,28 @@ namespace client {
 				store.SetResource(engine::effects::RibbonBuffer{});
 			}
 
+			// **Registered in both phases, and that is not a duplicate system.**
+			// `ResolveAttachments` is a pure recompute of a cache — one multiply
+			// per attachment, from state it does not own — so running it twice
+			// gives the same answer twice, which is what makes this safe where
+			// two *different* systems writing one field would not be.
+			//
+			// It has a consumer in each phase and they need different things:
+			//
+			//   - `refresh-emitters`, below, reads `Attachment::WorldFrame` to
+			//     place a spawn, and it runs in `PreSimulation`. Resolving only
+			//     at `PreRender` would hand it the previous tick's frame, so a
+			//     rocket's exhaust would trail its nozzle by a tick.
+			//   - `client::CollectLights` reads it to place a lamp, and it runs
+			//     at present time. A world that is being *authored* never ticks
+			//     at all — `World::Present` runs `PreRender` alone — so
+			//     resolving only at `PreSimulation` left every attachment at the
+			//     identity and every lamp in the studio lighting the origin.
+			//
+			// `Attachments.hpp` says this pass runs in `PreRender`; it was
+			// registered in `PreSimulation` alone, and the header was the half
+			// that was right about the draw path. Both are true and both are
+			// declared.
 			scheduler.Add("resolve-attachments", Phase::PreSimulation, [](Store &world) {
 				(void)engine::scene::ResolveAttachments(world);
 			});
@@ -709,6 +731,13 @@ namespace client {
 			});
 			scheduler.Add("record-trails", Phase::Simulation, [](Store &world) {
 				(void)engine::effects::RecordTrails(world, static_cast<float>(world.Time().Delta));
+			});
+			// The `PreRender` half of the pair above. First in this phase, so
+			// `build-ribbons` and everything the host reads after `Present` —
+			// `client::CollectLights`, `CollectParticleBatches` — see a frame
+			// resolved against the transforms this frame is being drawn with.
+			scheduler.Add("resolve-attachments", Phase::PreRender, [](Store &world) {
+				(void)engine::scene::ResolveAttachments(world);
 			});
 			scheduler.Add("build-ribbons", Phase::PreRender, [](Store &world) {
 				const auto *active = world.Resource<ActiveCamera>();
@@ -839,7 +868,9 @@ namespace client {
 			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		}
 
-		scheduler.Add("resolve-materials", Phase::PreSimulation, [](Store &world) {
+		// `PreRender`, ahead of the pass that reads it — `InstallPresentation`
+		// carries the argument, and this is the same three lines.
+		scheduler.Add("resolve-materials", Phase::PreRender, [](Store &world) {
 			(void)engine::scene::ResolveMaterials(world);
 		});
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
@@ -921,12 +952,24 @@ namespace client {
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
 
-		// **`PreSimulation`, ahead of everything that reads a
-		// `SurfaceAppearance`** — `ResolveAttachments`' phase and its reason. A
-		// `Material` instance names an asset and the part it hangs off is what
+		// **`PreRender`, ahead of everything that reads a `SurfaceAppearance`.**
+		// A `Material` instance names an asset and the part it hangs off is what
 		// the draw-list pass reads, so resolving after collection would draw last
-		// tick's texture for a frame every time somebody changed one.
-		scheduler.Add("resolve-materials", Phase::PreSimulation, [](Store &world) {
+		// frame's texture for a frame every time somebody changed one.
+		//
+		// **It was `PreSimulation`, and that made it do nothing at all in an
+		// edited world.** `World::Present` runs `PreRender` alone and the studio
+		// never ticks while somebody is authoring, so a `Material` dropped onto
+		// a part changed the part's appearance only after Play was pressed —
+		// which reads as the material not being loaded rather than as a pass
+		// that did not run. The same mistake put every part at the origin
+		// through `PreviousTransform`; `studio::PresentationAlpha` is that one.
+		//
+		// Nothing in the tick reads a `SurfaceAppearance`, so the phase this
+		// belongs in is the one its only consumer runs in. It now costs once per
+		// *frame* rather than once per tick, which is a walk of the material
+		// instances — a handful in a scene, against a draw list of thousands.
+		scheduler.Add("resolve-materials", Phase::PreRender, [](Store &world) {
 			(void)engine::scene::ResolveMaterials(world);
 		});
 

@@ -111,7 +111,7 @@
 				{"name": "Size", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Bounds"], "writes": ["scene.Bounds", "scene.Collider"]},
 				{"name": "TextureID", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
-				{"name": "TrianglesCount", "type": "int32", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "TrianglesCount", "type": "int32", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.Visual"], "writes": []},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]}
 			]
 		},
@@ -180,8 +180,8 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Attachment"], "writes": ["scene.Attachment"]},
-				{"name": "WorldCFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": false, "reads": ["scene.Attachment"], "writes": ["scene.Attachment"]},
-				{"name": "WorldPosition", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": false, "reads": ["scene.Attachment"], "writes": ["scene.Attachment"]}
+				{"name": "WorldCFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": false, "reads": ["scene.Attachment"], "writes": []},
+				{"name": "WorldPosition", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": false, "reads": ["scene.Attachment"], "writes": []}
 			]
 		},
 		{
@@ -202,7 +202,7 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Humanoid"],
 			"properties": [
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
-				{"name": "Grounded", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
+				{"name": "Grounded", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Humanoid"], "writes": []},
 				{"name": "HipHeight", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "JumpPower", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "MoveDirection", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},

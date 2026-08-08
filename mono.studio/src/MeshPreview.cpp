@@ -403,16 +403,15 @@ namespace studio {
 		//
 		// **No surfaces, though**, and that part was right: a mirror pass here
 		// would render a scene that is not there.
-		Renderer.Render(
-			eye,
-			lens,
-			std::span<const engine::scene::DrawInstance>(one),
-			Overlay,
-			{},
-			&Interface,
-			&target,
-			PREVIEW_SLOT
-		);
+		const engine::render::View view{
+			.CameraFrame = eye,
+			.Camera = lens,
+			.Instances = std::span<const engine::scene::DrawInstance>(one),
+			.Target = &target,
+			.Slot = PREVIEW_SLOT,
+		};
+
+		Renderer.Render({&view, 1}, Overlay, &Interface);
 
 		// **What the slot now holds, so a row can draw it.** There is one slot,
 		// so exactly one mesh in the list can be live at a time — and a row that

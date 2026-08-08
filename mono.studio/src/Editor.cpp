@@ -28,6 +28,7 @@
 #include <imgui.h>
 #include <mutex>
 #include <studio/Editor.hpp>
+#include <studio/Presentation.hpp>
 #include <studio/RojoSync.hpp>
 
 #include <fstream>
@@ -509,6 +510,12 @@ namespace studio {
 	}
 
 	void Editor::Simulate(float frameSeconds) {
+		// **Cleared first and set once, at the tick.** Every early return below
+		// is a frame the universe does not advance, and `Present` has to know
+		// which — see `studio::PresentationAlpha` for what reading it wrong
+		// did.
+		Advancing = false;
+
 		if (!AnyRunning()) {
 			// **A world being edited does not tick, and that is deliberate.**
 			// A universe that simulated while somebody was authoring would
@@ -589,6 +596,7 @@ namespace studio {
 			}
 		}
 
+		Advancing = true;
 		Universe->Tick(frameSeconds);
 	}
 
@@ -1110,17 +1118,28 @@ namespace studio {
 			// never ticks, so a gate maintained by the simulation would leave a
 			// part dragged into `Workspace` invisible until somebody pressed
 			// play. See `scene/Visibility.hpp`.
-			// **A world that is not ticking is presented at one, not at its
-			// accumulator.** Alpha is where *between* two ticks to draw, and a
-			// suspended world has no next tick to draw towards — its accumulator
-			// stops wherever it stopped, which is usually zero, and zero means
-			// "draw the previous frame". `capture-previous` is a `PreSimulation`
-			// system and `Present` runs `PreRender` alone, so that previous frame
-			// is wherever each part was created: an edited world drew every part
-			// at its birthplace while the selection outline followed the real
-			// transform.
-			const bool ticking = Universe->StateOf(shown) == engine::world::WorldState::Active;
-			Universe->Present(shown, frameSeconds, ticking ? Universe->AlphaOf(shown) : 1.0f);
+			// **A world that is not being ticked is presented at one, not at
+			// its accumulator.** Alpha is where *between* two ticks to draw,
+			// and a world nothing advances has no next tick to draw towards —
+			// its accumulator stops wherever it stopped, which is usually zero,
+			// and zero means "draw the previous frame". `capture-previous` is a
+			// `PreSimulation` system and `Present` runs `PreRender` alone, so
+			// that previous frame is wherever each part was created: an edited
+			// world drew every part at its birthplace while the selection
+			// outline followed the real transform.
+			//
+			// **This asked `StateOf` alone and that was wrong for Edit mode**,
+			// which is where an author spends most of their time.
+			// `SyncWorldStates` leaves every world `Active` when nothing is
+			// running, so the state said "ticking" while `Simulate` was
+			// returning before the tick. `studio::PresentationAlpha` carries
+			// the whole argument and is where it is now decided, because
+			// nothing in this class is reachable from a test.
+			Universe->Present(
+				shown,
+				frameSeconds,
+				PresentationAlpha(Advancing, Universe->StateOf(shown), Universe->AlphaOf(shown))
+			);
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
@@ -1178,17 +1197,21 @@ namespace studio {
 		// another panel's current one. They shared one set until v0.75, and
 		// flying either camera moved the mirrors in both windows.
 
-		LastFrame = Renderer.Render(
-			eye,
-			lens,
-			instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
-								 : std::span<const engine::scene::DrawInstance>{},
-			Overlay,
-			Surfaces,
-			&Interface,
-			target.IsValid() ? &target : nullptr,
-			DrawingViewport
-		);
+		// **Assigned rather than brace-initialised**, for the reason
+		// `Client.cpp`'s single view gives: a `View` carries particles, ribbons
+		// and lights that an editor viewport has nothing to say about, and a
+		// designated initialiser that skips a field is a warning per field.
+		engine::render::View view;
+		view.CameraFrame = eye;
+		view.Camera = lens;
+		if (instances != nullptr) {
+			view.Instances = *instances;
+		}
+		view.Surfaces = Surfaces;
+		view.Target = target.IsValid() ? &target : nullptr;
+		view.Slot = DrawingViewport;
+
+		LastFrame = Renderer.Render({&view, 1}, Overlay, &Interface);
 
 		// **Presented, or simply drawn when there is nowhere to present.**
 		// A headless renderer never presents by design, so counting presents

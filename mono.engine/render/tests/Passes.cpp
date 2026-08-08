@@ -15,7 +15,7 @@
 // anywhere. That is the whole reason the enum exists as a separate thing from
 // the function body: the body needs a GPU, the description does not.
 
-#include <engine/graph/Pipeline.hpp>
+#include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -38,53 +38,56 @@ TEST_SUITE_ID("engine.render.passes")
 // closure, so an edit there moves `engine.graph.pipeline`, and this line is
 // what carries that up to here. Without it the check would stay green through
 // exactly the change it was written to catch.
-TEST_DEPENDS("engine.graph.pipeline")
+TEST_DEPENDS("engine.graph.rendergraph")
 
 using engine::core::Name;
-using engine::graph::Pipeline;
-using engine::graph::PipelineStatus;
-using engine::graph::Stage;
-using engine::graph::StandardPipeline;
+using engine::graph::GraphStatus;
+using engine::graph::Node;
+using engine::graph::NodeId;
+using engine::graph::RenderGraph;
+using engine::graph::StandardGraph;
 using engine::render::FrameResult;
 using engine::render::Pass;
 using engine::render::PassOrder;
 
 namespace {
-	// The stage names, in declaration order.
-	//
-	// Bound to a named `Pipeline` rather than taken from the temporary:
-	// `Stages()` is deleted on an rvalue for exactly this reason, and writing
-	// the mistake here once was how that overload came to exist.
-	std::vector<Name> StageNames(const Pipeline &pipeline) {
+	// The node names, in declaration order.
+	std::vector<Name> NodeNames(const RenderGraph &graph) {
 		std::vector<Name> names;
-		for (const Stage &stage : pipeline.Stages()) {
-			names.push_back(stage.Name);
+		for (size_t index = 0; index < graph.Count(); index++) {
+			names.push_back(graph.Find(NodeId{static_cast<uint32_t>(index + 1)})->Name);
 		}
 		return names;
 	}
 }
 
-TEST_CASE("the renderer's passes are the standard pipeline's stages", "[render][graph]") {
-	const Pipeline pipeline = StandardPipeline();
-	const std::vector<Name> stages = StageNames(pipeline);
+TEST_CASE("the renderer's passes are the standard graph's nodes", "[render][graph]") {
+	// **This no longer compares two descriptions — it checks that the one
+	// description arrived intact.** `render::PassOrder` used to be a second
+	// hand-written list of these names and this case existed to catch the two
+	// drifting apart; `DEFERRED.md` D00016 is that entry. It reads the names out
+	// of `StandardGraph` now, so drift is not possible and what is left worth
+	// asserting is that the derivation lines up with the `Pass` enum.
+	//
+	// Kept rather than deleted because the enum is still written by hand: a node
+	// added to the graph without a matching enumerator, or added in the wrong
+	// place, is a real mistake and this is where it surfaces.
+	const RenderGraph standard = StandardGraph();
+	const std::vector<Name> nodes = NodeNames(standard);
 	const auto order = PassOrder();
 
-	// **Count first, and the message matters more than the assertion.** This is
-	// the failure the entry predicted: a sixth pass added to one description and
-	// not the other. Whichever side was edited, the fix is to edit both.
 	INFO(
-		"Renderer submits " << order.size() << " passes and StandardPipeline declares " << stages.size()
-							<< " stages. A pass added to one must be added to the other — see D00016."
+		"Renderer submits " << order.size() << " passes and StandardGraph declares " << nodes.size()
+							<< " nodes. A node added to the graph needs an enumerator beside it."
 	);
-	REQUIRE(order.size() == stages.size());
+	REQUIRE(order.size() == nodes.size());
 
-	// **In order, not as a set.** A pipeline holding the right five stages in
-	// the wrong order describes a frame where the colour pass samples a shadow
-	// map nothing has rendered, which is not a crash on a GPU — it is a frame
-	// lit by whatever was in that memory.
-	for (size_t index = 0; index < stages.size(); index++) {
+	// **In order, not as a set.** A frame holding the right six passes in the
+	// wrong order samples a shadow map nothing has rendered, which is not a
+	// crash on a GPU — it is a frame lit by whatever was in that memory.
+	for (size_t index = 0; index < nodes.size(); index++) {
 		INFO("position " << index);
-		CHECK(order[index].Text() == stages[index].Text());
+		CHECK(order[index].Text() == nodes[index].Text());
 	}
 }
 
@@ -110,15 +113,16 @@ TEST_CASE("the pass enum indexes its own names", "[render]") {
 	CHECK(order[static_cast<size_t>(Pass::Interface)].Text() == "interface");
 }
 
-TEST_CASE("the standard pipeline the renderer follows is runnable", "[render][graph]") {
-	// The other half of the pairing. `PassOrder` says the renderer agrees with
-	// the pipeline; this says the pipeline is worth agreeing with — no stage
-	// reads a target that no earlier stage wrote.
-	const Pipeline pipeline = StandardPipeline();
+TEST_CASE("the standard graph the renderer follows is runnable", "[render][graph]") {
+	// The other half of the pairing. The case above says the renderer's passes
+	// are the graph's nodes; this says the graph is worth following — no node
+	// reads a resource that no earlier node wrote, and no shared node fights a
+	// per-view one over the same write.
+	const RenderGraph standard = StandardGraph();
 
 	Name offender;
-	INFO("offending stage: " << std::string(offender.Text()));
-	CHECK(pipeline.Validate(offender) == PipelineStatus::Ok);
+	INFO("offending node: " << std::string(offender.Text()));
+	CHECK(standard.Validate(offender) == GraphStatus::Ok);
 }
 
 TEST_CASE("a frame result reports which passes ran", "[render]") {

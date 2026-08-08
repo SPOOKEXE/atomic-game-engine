@@ -1,5 +1,6 @@
 // Covers the replica presentation seam without a GPU.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -351,4 +352,22 @@ TEST_CASE("a replicated world registers its own types before it uses them", "[cl
 
 	// The explicit name, not the compiler's. A recording carries this string.
 	CHECK(engine::ecs::Components::Describe(id).Name.Text() == "client.DrawList");
+}
+
+// --- what a snapshot of a replica world can carry -----------------------------
+
+// **Rule 4, and `client::DrawList` learned it the expensive way.** A resource is
+// keyed by a component id, and `Store::SetResource` mints one under whatever the
+// compiler spells the type as unless somebody registered a name. Nothing notices
+// until a world holding it is saved — which is exactly what the studio's Play
+// does, and what its Stop restores from.
+//
+// `DrawList` had no registration at all before v0.7 and `Store::Save` refused
+// the world for it. `SnapshotBuffer` is set as a resource on every replica the
+// studio holds, and it is the second type in the same position.
+TEST_CASE("a replica world can be snapshotted", "[client][replicated]") {
+	Replica replica;
+
+	engine::core::ByteWriter writer;
+	CHECK(replica.World.Save(writer));
 }

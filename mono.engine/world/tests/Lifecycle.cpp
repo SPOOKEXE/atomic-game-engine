@@ -7,6 +7,7 @@
 // comments.
 
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Enums.hpp>
 #include <engine/world/Lifecycle.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -108,4 +109,28 @@ TEST_CASE("an idle-rate world is not suspended out from under itself", "[world][
 	// `Suspended` is a policy no host has needed yet, and answering it here
 	// would put a second opinion beside `SetState`.
 	CHECK(DecideLifecycle(inputs) == LifecycleAction::Leave);
+}
+
+// --- what a state says about ticking -----------------------------------------
+
+// **`Ticks` exists because callers were spelling it `state == Active` and two
+// states tick.** The one that got caught was in the editor: an interpolation
+// alpha derived from a state test drew an `Idle` world at the tick rate while
+// it was simulating perfectly well, and — with the other half of the same
+// question missing — drew every part of an *edited* world at the origin. See
+// `studio/Presentation.hpp`.
+//
+// Enumerated rather than tested in two groups, so adding a state to `WorldState`
+// and forgetting it here is a compile error in the switch and a missing line
+// in this list.
+TEST_CASE("two world states tick and three do not", "[world][lifecycle]") {
+	CHECK(engine::world::Ticks(WorldState::Active));
+	CHECK(engine::world::Ticks(WorldState::Idle));
+
+	CHECK_FALSE(engine::world::Ticks(WorldState::Suspended));
+	CHECK_FALSE(engine::world::Ticks(WorldState::Faulted));
+
+	// **`Remote` is a record of a world this process does not hold**, so it is
+	// not merely not ticking here — there is no storage to tick.
+	CHECK_FALSE(engine::world::Ticks(WorldState::Remote));
 }

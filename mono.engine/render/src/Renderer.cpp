@@ -2,6 +2,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
+#include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/MeshTable.hpp>
 #include <engine/render/Renderer.hpp>
@@ -243,9 +244,29 @@ namespace engine::render {
 		//
 		// Runtime guard for pass order; optional passes may be skipped.
 		struct PassRecorder {
+			// Which passes ran, over the whole frame. The union across views,
+			// because `FrameResult::Passes` answers "what did this frame draw"
+			// and a viewport that skipped its shadow pass did not stop the frame
+			// from having one.
 			uint8_t Ran = 0;
+
+			// How far through `PassOrder()` *this view* has got.
 			uint8_t Furthest = 0;
 			bool Complained = false;
+
+			// Starts a view's sequence.
+			//
+			// **The ordering rule is per view, and a frame of several views is
+			// not one walk of `PassOrder()`.** Four viewports submit shadow,
+			// surface, opaque four times over, so a recorder that kept climbing
+			// across the whole frame would report the second view's shadow pass
+			// as arriving after the first view's opaque one — which is true, and
+			// correct, and not what this is checking for.
+			//
+			// `Ran` deliberately survives the reset; only the position does not.
+			void BeginView() {
+				Furthest = 0;
+			}
 
 			void Enter(Pass pass) {
 				const auto index = static_cast<uint8_t>(pass);
@@ -269,17 +290,38 @@ namespace engine::render {
 	}
 
 	std::span<const core::Name> PassOrder() {
+		// **Read out of `graph::StandardGraph`, not typed again here.** This was
+		// a hand-written list of the same six names, and `DEFERRED.md` D00016 is
+		// the entry about what that costs: the frame was described twice and a
+		// test kept the copies in step. A test that compares two descriptions
+		// tells you they disagree; it cannot tell you which one is right, and it
+		// only ever runs after somebody has already changed one of them.
+		//
+		// So there is one description now and this is a view of it. The v0.11
+		// graph would otherwise have made it *three*, which is precisely what
+		// D00016 says the mitigation buys if the runtime lands separately.
+		//
+		// **Declaration order rather than compiled order.** `Compile` partitions
+		// into shared and per-view blocks, so the order it produces is the order
+		// a *frame* runs in; this is the order the passes were *declared* in,
+		// which is what the `Pass` enum indexes and what `PassRecorder` walks.
+		//
 		// Function-local rather than a namespace-scope array, because a
 		// `core::Name` interns on construction and interning before `main` is
-		// how a static initialisation order bug is written.
-		static const std::array<core::Name, static_cast<size_t>(Pass::Count)> order{
-			core::Name("shadow"),
-			core::Name("surface"),
-			core::Name("opaque"),
-			core::Name("transparent"),
-			core::Name("overlay"),
-			core::Name("interface"),
-		};
+		// how a static initialisation order bug is written — which is doubly
+		// true now that building it runs another module's code.
+		static const std::vector<core::Name> order = [] {
+			const graph::RenderGraph standard = graph::StandardGraph();
+
+			std::vector<core::Name> names;
+			names.reserve(standard.Count());
+			for (size_t index = 0; index < standard.Count(); index++) {
+				const graph::Node *node = standard.Find(graph::NodeId{static_cast<uint32_t>(index + 1)});
+				names.push_back(node->Name);
+			}
+			return names;
+		}();
+
 		return order;
 	}
 
@@ -2847,20 +2889,8 @@ namespace engine::render {
 		return handles;
 	}
 
-	FrameResult Renderer::Render(
-		const core::CFrame &cameraFrame,
-		const scene::Camera &camera,
-		std::span<const scene::DrawInstance> instances,
-		OverlayImage &overlay,
-		std::span<const SurfaceView> surfaces,
-		FrameOverlayHook *interfaceHook,
-		const SceneTarget *sceneTarget,
-		size_t targetSlot,
-		std::span<const ParticleBatch> particles,
-		std::span<const effects::RibbonVertex> ribbonVertices,
-		std::span<const effects::RibbonRun> ribbonRuns,
-		std::span<const SceneLight> lights
-	) {
+	FrameResult
+	Renderer::Render(std::span<const View> views, OverlayImage &overlay, FrameOverlayHook *interfaceHook) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
 		// **The single-threaded recording contract, checked rather than
@@ -2868,12 +2898,6 @@ namespace engine::render {
 		// recording from another thread is the failure this refuses. See
 		// `IsOnOwningThread` for why that is the design and not a limitation.
 		RequireOwningThread("Render");
-
-		// **Which target this frame draws into, read by `EnsureScene`.** Passed
-		// through a member rather than an argument because `EnsureScene` is
-		// called from two places and threading a slot through both would put
-		// the same value in two signatures that must agree.
-		State->ActiveSlot = targetSlot;
 
 		FrameResult result;
 		if (!State->Device) {
@@ -2890,844 +2914,772 @@ namespace engine::render {
 
 		SDL_GPUCommandBuffer *command = nullptr;
 		SDL_GPUTexture *swapchain = nullptr;
-		uint32_t width = 0;
-		uint32_t height = 0;
-		State->TakeFrame(command, swapchain, width, height);
+		uint32_t frameWidth = 0;
+		uint32_t frameHeight = 0;
+		State->TakeFrame(command, swapchain, frameWidth, frameHeight);
 
-		// **Headless has no swapchain, so its size comes from the target** —
-		// nothing else has an opinion about it.
-		if (State->Headless()) {
-			if (sceneTarget == nullptr || !sceneTarget->IsValid()) {
-				// A headless renderer with nowhere to draw is a caller mistake
-				// rather than a state to tolerate: every pass would run and its
-				// result would be discarded.
-				SDL_SubmitGPUCommandBuffer(command);
-				return result;
-			}
-
-			width = sceneTarget->Width;
-			height = sceneTarget->Height;
-		}
-
-		// --- where the world goes -------------------------------------------
+		// --- what belongs to the frame rather than to a view ------------------
 		//
-		// Resolved once, here, and everything downstream reads `sceneWidth` and
-		// `sceneHeight` rather than the swapchain's. That is the whole reason
-		// this is a few lines in one place instead of a conditional at each use:
-		// the cull frustum, the projection and the depth buffer all have to
-		// agree about how big the image is, and they are decided hundreds of
-		// lines apart.
+		// Everything below outlives one viewport, which is what makes it frame
+		// state rather than another local inside the loop.
+
+		// The passes submitted, recorded as they go. See `PassRecorder`, whose
+		// `BeginView` exists because the ordering rule is per view.
+		PassRecorder passes;
+
+		// What the overlay and the interface draw onto.
 		//
-		// A target that cannot be allocated falls back to the window rather than
-		// dropping the frame. A caller asking for a texture and getting a frame
-		// it did not expect can see that something is wrong; one that gets no
-		// frame at all sees a frozen editor.
-		const bool offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
-							   State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+		// **Asking to clear until some view says otherwise.** Until a pass
+		// touches the swapchain it holds last frame's image or uninitialised
+		// memory, so the first thing to reach it must clear; a view that drew
+		// straight onto the window has already done that and flips this to
+		// `LOAD`. With several such views, only the first clears — which is the
+		// bug this arrangement exists to make impossible.
+		SDL_GPUColorTargetInfo windowTarget{};
+		windowTarget.texture = swapchain;
+		windowTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+		windowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+		windowTarget.store_op = SDL_GPU_STOREOP_STORE;
 
-		if (State->Headless() && !offscreen) {
-			// The target could not be allocated. Headless has no window to fall
-			// back to, so the frame ends here rather than drawing into nothing.
-			SDL_SubmitGPUCommandBuffer(command);
-			return result;
-		}
-
-		if (!offscreen && State->SlotAt(targetSlot).Texture != nullptr) {
-			// Nothing asked for a texture this frame, so last frame's is
-			// released rather than kept against a caller who might come back. A
-			// viewport panel that was closed should not go on costing its
-			// pixels.
-			State->EnsureScene(0, 0);
-		}
-
-		const uint32_t sceneWidth = offscreen ? sceneTarget->Width : width;
-		const uint32_t sceneHeight = offscreen ? sceneTarget->Height : height;
-
-		// **What the pass is drawing *onto*, which is not what it draws.** An
-		// offscreen target is allocated in blocks, so the attachment is at least
-		// as big as the world's rectangle and usually bigger; the world fills
-		// the corner and the viewport below is what confines it there. See
-		// `SCENE_TARGET_BLOCK`.
-		const uint32_t targetWidth = offscreen ? State->SlotAt(targetSlot).Width : width;
-		const uint32_t targetHeight = offscreen ? State->SlotAt(targetSlot).Height : height;
-
-		{
-			// Nothing at all on a steady window, and a texture allocation on the
-			// frame after a resize. Worth telling apart from the pass that uses
-			// it, because one is every frame and the other is one frame.
-			//
-			// **Sized to the attachment rather than to the world.** SDL wants a
-			// depth target whose dimensions match the colour target it is bound
-			// beside, and the colour target is the block-rounded allocation —
-			// not the rectangle the world is drawn into. Sizing this to the
-			// world instead is a validation failure on the frames where the two
-			// differ, which is nearly all of them.
-			//
-			// **The slot's own depth when drawing offscreen.** Two viewports of
-			// different sizes sharing one depth texture made every frame
-			// reallocate it twice — see `SceneSlot::Depth`.
-			ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
-
-			bool depthReady = false;
-			if (offscreen) {
-				Impl::SceneSlot &slot = State->SlotAt(targetSlot);
-				depthReady = State->EnsureDepthIn(
-					slot.Depth, slot.DepthWidth, slot.DepthHeight, targetWidth, targetHeight
-				);
-			} else {
-				depthReady = State->EnsureDepth(targetWidth, targetHeight);
-			}
-
-			if (!depthReady) {
-				SDL_SubmitGPUCommandBuffer(command);
-				return result;
-			}
-		}
-
-		// --- uploads --------------------------------------------------------
-
-		const auto totalCount = static_cast<uint32_t>(instances.size());
-		bool haveInstances = false;
+		// Whether the overlay texture is worth drawing. One CPU image for the
+		// window, so this is the frame's answer and not a view's.
 		bool haveOverlay = false;
 
-		// **Culled, then ordered, then uploaded** — and the sequence is the
-		// point. Culling first means the sort runs over what survives rather
-		// than over the world, and the upload carries only what is drawn.
+		// Which view the capture should read, filled in by whichever one asked.
+		size_t captureSlot = 0;
+		uint32_t captureWidth = 0;
+		uint32_t captureHeight = 0;
+		bool captureReady = false;
+
+		// **Refused rather than drawn, because the second would overwrite the
+		// first.** A slot owns a scene texture and a surface bank; two views
+		// sharing one would have the later silently replace the earlier's image,
+		// and the frame would present one viewport twice with no sign anything
+		// went wrong.
+		uint64_t claimedSlots = 0;
+
+		// --- the overlay, which is the window's and not a view's ---------------
 		//
-		// The frustum comes from the same `ResolveCamera` the draw does, so it
-		// cannot disagree with what was actually projected. A frustum built from
-		// a field of view and an aspect ratio kept separately is the bug that
-		// pops geometry at the screen edge on one machine and not another.
-
-		// **Every surface camera's view, resolved before any pass runs.** Each
-		// is used twice: to render into its own texture now, and — one frame
-		// later, as `PreviousViewProjection` — to project that texture back onto
-		// whatever samples it, including another mirror.
+		// **Hoisted out of the loop, and an empty frame is why.** This was a
+		// per-view step while there was only ever one view, and it survived that
+		// way it would have meant a frame drawing no world drew no panels either
+		// — which is exactly the frame an editor with every viewport closed
+		// presents. It also stopped `EnsureOverlay` being asked the same question
+		// once per viewport.
 		//
-		// The accepted views are gathered here rather than filtered at each use,
-		// so the two passes that draw mirrors iterate the same list and cannot
-		// disagree about which indices are live. A duplicate index is the one
-		// case worth refusing outright: two views writing one texture would race
-		// for the pair and neither would be the frame the screen then samples.
-		struct AcceptedView {
-			uint8_t Index = 0;
-			const SurfaceView *View = nullptr;
-
-			// **Held here rather than written straight to the slot**, because
-			// whether it may be written is not known yet. A slot's
-			// `ViewProjection` has to keep describing the camera that rendered
-			// the texture the slot holds — so a surface that turns out to be
-			// unchanged, and therefore does not re-render, must not take this
-			// frame's matrix. See the refresh decision below.
-			glm::mat4 ViewProjection{1.0f};
-
-			float ImageOpacity = 1.0f;
-
-			// Whether this surface renders this frame. False when its signature
-			// matches the one its texture was drawn with.
-			bool Refresh = true;
-		};
-		AcceptedView accepted[scene::MAX_SURFACES];
-		size_t acceptedCount = 0;
-		bool claimed[scene::MAX_SURFACES] = {};
-
-		// **This viewport's surfaces, and not the renderer's.** A reflection is
-		// of the viewer, so a world drawn from two panels wants two images per
-		// pane. Resolved once here and read everywhere below, so no pass can
-		// reach the wrong bank. See `Impl::SurfaceBanks`.
-		Impl::SurfaceBank &bank = State->SurfacesAt(targetSlot);
-
-		for (const SurfaceView &view : surfaces) {
-			if (view.Index < 0 || static_cast<uint8_t>(view.Index) >= scene::MAX_SURFACES) {
-				ENGINE_WARN(
-					"surface camera index {} is outside 0..{}, so it renders nothing",
-					view.Index,
-					scene::MAX_SURFACES - 1
-				);
-				continue;
-			}
-
-			const auto index = static_cast<uint8_t>(view.Index);
-			if (claimed[index]) {
-				ENGINE_WARN("two surface cameras claim index {}; the second is ignored", view.Index);
-				continue;
-			}
-
-			claimed[index] = true;
-
-			const float aspect =
-				static_cast<float>(view.Width) / static_cast<float>(std::max(view.Height, 1u));
-
-			AcceptedView entry;
-			entry.Index = index;
-			entry.View = &view;
-			entry.ViewProjection = scene::ResolveCamera(view.Frame, view.Lens, aspect).ViewProjection;
-			entry.ImageOpacity = std::clamp(view.ImageOpacity, 0.0f, 1.0f);
-
-			accepted[acceptedCount++] = entry;
-		}
-
-		size_t visibleCount = 0;
-
-		// **What the light has to see, out of the walk the culler was making
-		// anyway.** Deriving an instance's world box is three quaternion
-		// rotations and nine abs-mul-adds, and this frame used to pay for it
-		// twice over the same span — once to fit the light and once to test the
-		// frustum. `graph::CullAndBound` is those two passes fused; the union is
-		// six comparisons on a box that already exists. See its comment for why
-		// this is not a cache.
-		core::AABB sceneBounds;
+		// HasContent, not IsDirty. The texture keeps the last thing uploaded to
+		// it, so a frame that redraws nothing still has a panel to show — which
+		// is the whole point of the image living on the GPU rather than being
+		// pushed there again every frame.
+		//
+		// **Headless first, because nothing headless can show it.** The overlay
+		// pass is the window's, so a headless frame allocated a texture, copied
+		// the panels into it and drew none of them — and `MarkUploaded` then told
+		// the image the GPU matched it, which was a claim about a texture nothing
+		// would ever sample.
 		{
-			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
-
-			const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-			const graph::Frustum frustum = graph::Frustum::FromViewProjection(
-				scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
-			);
-			visibleCount = graph::CullAndBound(instances, frustum, State->Visible, sceneBounds);
-		}
-
-		// **Fitted to the whole draw list, not to what survived culling.** A
-		// caster outside the camera's frustum still shadows into it, so the
-		// light has to see everything — and fitting to the culled set is the
-		// classic version of this bug: shadows that vanish as their casters
-		// leave the screen. That is why `sceneBounds` is the union over
-		// `instances` and not over `State->Visible`.
-		//
-		// Built here rather than before the cull only because the cull is now
-		// what produces the bound. Nothing between the two reads it, and its
-		// first use is the shadow pass.
-		const glm::mat4 lightViewProjection = graph::FitDirectionalLight(
-			sceneBounds, core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
-		);
-
-		// Ordered over the survivors, so the two passes are two ranges of one
-		// buffer. Opaque first in whatever order the world produced, then the
-		// transparent tail back to front from where the camera is.
-		State->VisibleInstances.resize(visibleCount);
-		for (size_t index = 0; index < visibleCount; index++) {
-			State->VisibleInstances[index] = instances[State->Visible[index]];
-		}
-
-		size_t opaqueCount = 0;
-		{
-			ENGINE_PROFILE_CAT("order instances", core::ProfileCategory::Render);
-			opaqueCount =
-				scene::OrderForDrawing(State->VisibleInstances, cameraFrame.Position, State->DrawOrder);
-		}
-		const auto transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
-
-		// **Surface instances moved to the back of the opaque head**, so the
-		// camera range is three contiguous runs — plain opaque, then mirrors,
-		// then transparent — and each is one draw with one `first_instance`.
-		// Whether an instance samples the surface is per instance and the
-		// uniform that says so is per draw, so the alternative is a branch on
-		// data the fragment shader does not have.
-		//
-		// Stable, for the reason the ordering itself is: an opaque scene with no
-		// mirrors must come out of this exactly as it went in.
-		uint32_t surfaceInCamera = 0;
-		if (opaqueCount > 0) {
-			ENGINE_PROFILE_CAT("partition surfaces", core::ProfileCategory::Render);
-
-			// **`scene::PartitionSurfaces`, not a fourth copy of it.** The
-			// comment forty lines down insists the mirror partition lives in
-			// `scene` "where a headless suite can get at them" — and this file
-			// had two hand-rolled copies of it, which is what that sentence
-			// exists to prevent. They are one function now, and it is the tested
-			// one.
-			surfaceInCamera = static_cast<uint32_t>(scene::PartitionSurfaces(
-				State->VisibleInstances, std::span<uint32_t>(State->DrawOrder.data(), opaqueCount)
-			));
-		}
-		const auto plainOpaque = static_cast<uint32_t>(opaqueCount) - surfaceInCamera;
-
-		// **Grouped by index within that run, because each index owns a
-		// texture.** The screen pass binds a sampler and pushes a projection per
-		// surface, so what used to be one draw over "the mirrors" is one draw
-		// per surface — and each has to be contiguous for that to be an offset
-		// and a count rather than a per-instance branch.
-		//
-		// `scene::GroupSurfaces`, not a second copy of it: the scene range is
-		// grouped by `OrderScene` using the same function, and two groupings
-		// that disagreed would put a pane's reflection on another pane's pass.
-		scene::SurfaceRun cameraRuns[scene::MAX_SURFACES];
-		if (surfaceInCamera > 0) {
-			scene::GroupSurfaces(
-				State->VisibleInstances,
-				std::span<uint32_t>(State->DrawOrder.data() + plainOpaque, surfaceInCamera),
-				plainOpaque,
-				true,
-				cameraRuns
-			);
-		}
-
-		// **And the same split at the end of the blended tail, which is what
-		// makes a faded mirror still a mirror.** A part leaves the opaque head
-		// the moment its `Transparency` goes above zero — and the head is where
-		// the mirror flag was set, so the reflection did not dim, it vanished.
-		// That reads as the surface camera having stopped rather than as an
-		// ordering rule, and it is the bug this run exists to fix.
-		//
-		// They go *last* of everything, so they draw over the blended geometry
-		// as well as the opaque. Stable, so the back-to-front sort survives
-		// inside each run — see `scene::ScenePlan::TransparentSurfaces` for what
-		// is given up across the two.
-		uint32_t transparentSurfaces = 0;
-		if (transparentCount > 0) {
-			ENGINE_PROFILE_CAT("partition blended surfaces", core::ProfileCategory::Render);
-
-			transparentSurfaces = static_cast<uint32_t>(scene::PartitionSurfaces(
-				State->VisibleInstances,
-				std::span<uint32_t>(State->DrawOrder.data() + opaqueCount, transparentCount)
-			));
-		}
-		const uint32_t plainTransparent = transparentCount - transparentSurfaces;
-
-		if (transparentSurfaces > 0) {
-			scene::GroupSurfaces(
-				State->VisibleInstances,
-				std::span<uint32_t>(
-					State->DrawOrder.data() + opaqueCount + plainTransparent, transparentSurfaces
-				),
-				static_cast<uint32_t>(opaqueCount) + plainTransparent,
-				false,
-				cameraRuns
-			);
-		}
-
-		// The flip from transparency to opacity happened where each view was
-		// accepted, once per surface, rather than in a shader nobody can put a
-		// breakpoint in. `Impl::SurfaceSlotState::ImageOpacity` holds it.
-
-		// **A second range holding everything, for the two passes that are not
-		// the camera's.** A caster outside the camera's frustum still shadows
-		// into it, and a mirror shows what is behind the viewer — so culling to
-		// the eye would give shadows that vanish as their casters leave the
-		// screen and a mirror that reflects only what is already on screen.
-		// Both are the classic version of this mistake.
-		//
-		// Ordered from the surface camera when there is one, because the surface
-		// pass is the only consumer that needs an order at all — a depth-only
-		// pass does not care.
-		// **Allocated for every accepted view before anything is ordered**, so
-		// a view whose texture cannot be made drops out of the frame here rather
-		// than half way through the pass loop.
-		size_t liveCount = 0;
-		for (size_t index = 0; index < acceptedCount; index++) {
-			const AcceptedView &view = accepted[index];
-			if (State->EnsureSurface(targetSlot, view.Index, view.View->Width, view.View->Height)) {
-				accepted[liveCount++] = view;
-			}
-		}
-		acceptedCount = liveCount;
-
-		// **Ordered from the first surface camera when there is one.** The
-		// blended sort is per view and there is only one scene range, so several
-		// surfaces cannot each have the tail sorted for them — the first is the
-		// one that gets it, and every other surface draws that order. Blended
-		// geometry inside a reflection of a reflection is therefore sorted for
-		// the wrong eye, which is a compositing error confined to the second
-		// bounce and cheaper than an ordering pass per surface.
-		const bool wantSurface = acceptedCount > 0;
-		const core::Vector3 sceneEye = wantSurface ? accepted[0].View->Frame.Position : cameraFrame.Position;
-
-		// **One signature shared by every surface, and that is not a shortcut.**
-		// Each camera's matrix is in it because a surface pass draws the *other*
-		// mirrors, projecting each one's texture with the camera that rendered
-		// it — so a camera that moves changes how it appears inside every other
-		// one. Every input to any surface is therefore an input to all of them,
-		// and computing several separately would only be several chances for
-		// them to disagree.
-		//
-		// It is still stored per slot rather than once, because slots do not
-		// refresh together: one that has never rendered has nothing to compare
-		// against, and one that appeared this frame has to draw once before it
-		// can be skipped.
-		uint64_t surfaceSignature = 0;
-		size_t refreshCount = 0;
-		if (wantSurface) {
-			ENGINE_PROFILE_CAT("surface signature", core::ProfileCategory::Render);
-
-			surfaceSignature = scene::SignatureOf(instances);
-
-			for (size_t index = 0; index < acceptedCount; index++) {
-				surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].Index);
-				surfaceSignature = MixMatrix(surfaceSignature, accepted[index].ViewProjection);
-				surfaceSignature = MixFloat(surfaceSignature, accepted[index].ImageOpacity);
-			}
-
-			for (size_t index = 0; index < acceptedCount; index++) {
-				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
-
-				// **Written whether or not the surface renders.** The opacity is
-				// what the *screen* pass composites the pane with and it changes
-				// no texel of the texture, so a mirror faded by a script fades
-				// this frame rather than on whichever later frame something else
-				// happens to move.
-				state.ImageOpacity = accepted[index].ImageOpacity;
-
-				accepted[index].Refresh = !state.Ready || state.Signature != surfaceSignature;
-				refreshCount += accepted[index].Refresh ? 1u : 0u;
-			}
-		}
-
-		State->SceneInstances.assign(instances.begin(), instances.end());
-
-		// **Every range the three scene passes submit, from one call.** The
-		// ordering, the mirror partition and the caster partition are arithmetic
-		// over a `shared` type and they live in `scene::OrderScene` — where a
-		// headless suite can get at them. A renderer is the one module a test
-		// cannot exercise, so the counts it hands to a draw call are the last
-		// place they should be computed. See `scene::ScenePlan` for the runs.
-		scene::ScenePlan plan;
-		{
-			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
-			plan = scene::OrderScene(State->SceneInstances, sceneEye, State->SceneOrder);
-		}
-
-		const auto sceneCount = static_cast<uint32_t>(State->SceneInstances.size());
-		const auto sceneOpaque = static_cast<size_t>(plan.Opaque);
-		const uint32_t sceneTransparent = plan.Transparent;
-		const uint32_t sceneReflected = plan.Reflected;
-		const uint32_t reflectedCasters = plan.ReflectedCasters;
-		const uint32_t surfaceCasters = plan.SurfaceCasters;
-
-		{
-			// Allocation, on the frame an overlay first appears or changes size.
-			// Zero on every other frame, which is what makes a reading here
-			// worth looking at rather than background noise.
-			// HasContent, not IsDirty. The texture keeps the last thing uploaded
-			// to it, so a frame that redraws nothing still has a panel to show —
-			// which is the whole point of the image living on the GPU rather
-			// than being pushed there again every frame.
-			// **Headless first, because nothing headless can show it.** The
-			// overlay pass is the window's, so a headless frame allocated a
-			// texture, copied the panels into it and drew none of them — and
-			// `MarkUploaded` then told the image the GPU matched it, which was
-			// a claim about a texture nothing would ever sample. Now the whole
-			// overlay is one question answered once.
-			//
-			// Safe to skip only because the screen pass no longer borrows this
-			// texture when the shadow map is missing; see `FallbackTexture`.
 			ENGINE_PROFILE_CAT("ensure overlay", core::ProfileCategory::Render);
 			haveOverlay = !State->Headless() && overlay.HasContent() && !overlay.IsEmpty() &&
 						  State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
 		}
 
-		const auto instanceCount = static_cast<uint32_t>(visibleCount);
-		result.Culled = totalCount - instanceCount;
-
-		// **One buffer, two ranges.** The scene range first so its offset is
-		// zero and the camera range starts where it ends — which is what makes
-		// each pass one `first_instance` rather than a second buffer and a
-		// second bind.
-		const uint32_t uploadCount = sceneCount + instanceCount;
-
-		if (uploadCount > 0) {
-			bool capacity = false;
-			{
-				// Grows the device buffer when the scene does. Separate from the
-				// copy below because one is a GPU allocation and the other is a
-				// memcpy, and a spike in either means something different.
-				ENGINE_PROFILE_CAT("ensure instance capacity", core::ProfileCategory::Render);
-				capacity = State->EnsureInstanceCapacity(uploadCount);
-			}
-
-			if (capacity) {
-				ENGINE_PROFILE_CAT("upload instances", core::ProfileCategory::Render);
-
-				void *mapped = nullptr;
-				{
-					// Mapping can stall: the driver hands back memory the GPU may
-					// still be reading unless it cycles, and this asks it to.
-					ENGINE_PROFILE_CAT("map instances", core::ProfileCategory::Render);
-					mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
-				}
-				{
-					// Converted straight into the mapped buffer rather than
-					// into a vector that is then memcpy'd. Eighty bytes an
-					// entity go into write-combined memory either way, and the
-					// staging copy would be that traffic paid a third time —
-					// once by the world filling its draw list, once here, and
-					// once again on the way out.
-					//
-					// This is where a `CFrame` and a `Color3` become a `mat4`
-					// and an RGBA, and it is the only place in the engine that
-					// happens. A world produces scene data; a device layout is
-					// this module's business.
-					ENGINE_PROFILE_CAT("convert instances", core::ProfileCategory::Render);
-
-					auto *out = static_cast<GpuInstance *>(mapped);
-
-					// **What is in each slot, recorded in the same pass that
-					// fills it.** The draw loop needs the mesh and the texture
-					// of every slot to find its runs, and the only place that
-					// mapping exists is here — after this loop the order is a
-					// buffer offset and the instance it came from is gone.
-					State->SlotMesh.resize(uploadCount);
-					State->SlotTexture.resize(uploadCount);
-					State->SlotTags.resize(uploadCount);
-
-					// **The mesh is resolved once and used twice.** `ToGpu` needs
-					// it to stretch the instance into its `Size` box and the draw
-					// loop needs it to find its runs, and resolving twice would
-					// be a second hash of the same name per instance per frame.
-					const auto record = [&](size_t slot, const scene::DrawInstance &instance) {
-						const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
-						State->SlotMesh[slot] = &mesh;
-						State->SlotTexture[slot] = instance.Texture;
-						State->SlotTags[slot] = instance.TagMask;
-						return &mesh;
-					};
-
-					for (size_t index = 0; index < State->SceneOrder.size(); index++) {
-						const scene::DrawInstance &instance = State->SceneInstances[State->SceneOrder[index]];
-						out[index] = ToGpu(instance, *record(index, instance));
-					}
-
-					const size_t cameraBase = State->SceneOrder.size();
-					auto *camera = out + cameraBase;
-					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
-						const scene::DrawInstance &instance =
-							State->VisibleInstances[State->DrawOrder[index]];
-						camera[index] = ToGpu(instance, *record(cameraBase + index, instance));
-					}
-				}
-				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
-				haveInstances = true;
-			}
-		}
-
-		// The particles, packed and grouped before any render pass opens.
-		//
-		// **Here rather than inside the draw**, because what follows is a copy
-		// pass and a copy pass cannot be started while a render pass is open —
-		// the same constraint `FrameOverlayHook`'s `Prepare`/`Record` split
-		// exists for, stated in that header in the same words.
-		// The local lights, packed once for the frame.
-		//
-		// **Every pass gets the same set**, including a mirror's: a lamp lights
-		// what a reflection shows exactly as it lights the world, and giving the
-		// surface pass a different set would make a mirror disagree with the room
-		// it is in.
-		const LightUniforms lightUniforms = ToGpu(lights);
-
-		uint32_t particleCount = 0;
-		uint32_t ribbonCount = 0;
-		{
-			ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
-			particleCount = State->PrepareParticles(particles);
-			result.Particles = particleCount;
-
-			ribbonCount = State->PrepareRibbons(ribbonVertices);
-			result.RibbonVertices = ribbonCount;
-		}
-
 		// Only when something is actually waiting to go across. A panel redrawn
-		// ten times a second and presented a thousand times has nothing to
-		// upload on nine hundred and ninety of those frames.
-		const bool uploadOverlay =
-			haveOverlay && (State->OverlayUninitialised || overlay.UploadRegion().Width > 0);
-
-		if (haveInstances || uploadOverlay || particleCount > 0 || ribbonCount > 0) {
-			ENGINE_PROFILE_CAT("copy pass", core::ProfileCategory::Render);
-
+		// ten times a second and presented a thousand times has nothing to upload
+		// on nine hundred and ninety of those frames.
+		//
+		// **Its own copy pass rather than the views' shared one.** There may be
+		// no views at all, and a copy pass is cheap next to a texture upload that
+		// would otherwise never happen.
+		if (haveOverlay && (State->OverlayUninitialised || overlay.UploadRegion().Width > 0)) {
+			ENGINE_PROFILE_CAT("overlay upload pass", core::ProfileCategory::Render);
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+			// Only the part of the overlay that anything has drawn on.
+			//
+			// The image is the size of the window and the panels are a
+			// corner of it, so sending all of it meant megabytes of
+			// transparent pixels per frame that had not changed since the
+			// program started — measured as the largest single cost in the
+			// frame. The region covers what was drawn this frame and what
+			// was drawn last frame, the second being how the pixels a
+			// shrinking panel vacates get told they are transparent now.
+			ENGINE_PROFILE_CAT("upload overlay", core::ProfileCategory::Render);
 
-			if (ribbonCount > 0) {
-				const SDL_GPUTransferBufferLocation source{State->RibbonTransfer, 0};
-				const SDL_GPUBufferRegion destination{
-					State->RibbonBuffer,
-					0,
-					ribbonCount * static_cast<uint32_t>(sizeof(effects::RibbonVertex)),
-				};
-				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+			// The whole image on the frame the texture was created, so that
+			// the parts no panel ever covers are transparent rather than
+			// whatever the driver handed back.
+			const auto region = State->OverlayUninitialised
+									? OverlayImage::Region{0, 0, overlay.GetWidth(), overlay.GetHeight()}
+									: overlay.UploadRegion();
+			State->OverlayUninitialised = false;
+
+			const auto rowBytes = static_cast<size_t>(region.Width) * OverlayImage::BYTES_PER_PIXEL;
+
+			void *mapped = nullptr;
+			{
+				ENGINE_PROFILE_CAT("map overlay", core::ProfileCategory::Render);
+				mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
 			}
 
-			if (particleCount > 0) {
-				const SDL_GPUTransferBufferLocation source{State->ParticleTransfer, 0};
-				const SDL_GPUBufferRegion destination{
-					State->ParticleBuffer,
-					0,
-					particleCount * static_cast<uint32_t>(sizeof(effects::ParticleInstance)),
-				};
-				// Cycled, for the instance buffer's reason: a fresh allocation
-				// rather than a stall on the copy the previous frame may still be
-				// reading.
-				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
-			}
+			{
+				// Row by row, because the region is narrower than the image
+				// and its rows are not adjacent in it. Packed tightly on the
+				// way out, which is what pixels_per_row below promises.
+				ENGINE_PROFILE_CAT("copy overlay", core::ProfileCategory::Render);
 
-			if (haveInstances) {
-				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
-				const SDL_GPUBufferRegion destination{
-					State->InstanceBuffer,
-					0,
-					uploadCount * static_cast<uint32_t>(sizeof(GpuInstance)),
-				};
-				// Cycling hands back a fresh allocation rather than stalling on
-				// the copy the previous frame may still be reading.
-				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
-			}
+				auto *destination = static_cast<uint8_t *>(mapped);
+				const uint8_t *pixels = overlay.GetPixels();
+				const auto stride = static_cast<size_t>(overlay.GetWidth()) * OverlayImage::BYTES_PER_PIXEL;
 
-			if (uploadOverlay) {
-				// Only the part of the overlay that anything has drawn on.
-				//
-				// The image is the size of the window and the panels are a
-				// corner of it, so sending all of it meant megabytes of
-				// transparent pixels per frame that had not changed since the
-				// program started — measured as the largest single cost in the
-				// frame. The region covers what was drawn this frame and what
-				// was drawn last frame, the second being how the pixels a
-				// shrinking panel vacates get told they are transparent now.
-				ENGINE_PROFILE_CAT("upload overlay", core::ProfileCategory::Render);
-
-				// The whole image on the frame the texture was created, so that
-				// the parts no panel ever covers are transparent rather than
-				// whatever the driver handed back.
-				const auto region = State->OverlayUninitialised
-										? OverlayImage::Region{0, 0, overlay.GetWidth(), overlay.GetHeight()}
-										: overlay.UploadRegion();
-				State->OverlayUninitialised = false;
-
-				const auto rowBytes = static_cast<size_t>(region.Width) * OverlayImage::BYTES_PER_PIXEL;
-
-				void *mapped = nullptr;
-				{
-					ENGINE_PROFILE_CAT("map overlay", core::ProfileCategory::Render);
-					mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
+				for (int row = 0; row < region.Height; row++) {
+					const size_t offset = static_cast<size_t>(region.Y + row) * stride +
+										  static_cast<size_t>(region.X) * OverlayImage::BYTES_PER_PIXEL;
+					std::memcpy(destination + static_cast<size_t>(row) * rowBytes, pixels + offset, rowBytes);
 				}
-
-				{
-					// Row by row, because the region is narrower than the image
-					// and its rows are not adjacent in it. Packed tightly on the
-					// way out, which is what pixels_per_row below promises.
-					ENGINE_PROFILE_CAT("copy overlay", core::ProfileCategory::Render);
-
-					auto *destination = static_cast<uint8_t *>(mapped);
-					const uint8_t *pixels = overlay.GetPixels();
-					const auto stride =
-						static_cast<size_t>(overlay.GetWidth()) * OverlayImage::BYTES_PER_PIXEL;
-
-					for (int row = 0; row < region.Height; row++) {
-						const size_t offset = static_cast<size_t>(region.Y + row) * stride +
-											  static_cast<size_t>(region.X) * OverlayImage::BYTES_PER_PIXEL;
-						std::memcpy(
-							destination + static_cast<size_t>(row) * rowBytes, pixels + offset, rowBytes
-						);
-					}
-				}
-
-				SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
-
-				SDL_GPUTextureTransferInfo source{};
-				source.transfer_buffer = State->OverlayTransfer;
-				source.pixels_per_row = static_cast<uint32_t>(region.Width);
-				source.rows_per_layer = static_cast<uint32_t>(region.Height);
-
-				SDL_GPUTextureRegion destination{};
-				destination.texture = State->OverlayTexture;
-				destination.x = static_cast<uint32_t>(region.X);
-				destination.y = static_cast<uint32_t>(region.Y);
-				destination.w = static_cast<uint32_t>(region.Width);
-				destination.h = static_cast<uint32_t>(region.Height);
-				destination.d = 1;
-
-				// False, not true. Cycling hands back a *fresh* texture, and a
-				// fresh texture is uninitialised everywhere this upload does not
-				// reach — which is now everywhere outside the panels.
-				SDL_UploadToGPUTexture(copy, &source, &destination, false);
-
-				// The GPU matches the image now, so nothing is pending until
-				// something draws again.
-				overlay.MarkUploaded();
 			}
 
+			SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
+
+			SDL_GPUTextureTransferInfo source{};
+			source.transfer_buffer = State->OverlayTransfer;
+			source.pixels_per_row = static_cast<uint32_t>(region.Width);
+			source.rows_per_layer = static_cast<uint32_t>(region.Height);
+
+			SDL_GPUTextureRegion destination{};
+			destination.texture = State->OverlayTexture;
+			destination.x = static_cast<uint32_t>(region.X);
+			destination.y = static_cast<uint32_t>(region.Y);
+			destination.w = static_cast<uint32_t>(region.Width);
+			destination.h = static_cast<uint32_t>(region.Height);
+			destination.d = 1;
+
+			// False, not true. Cycling hands back a *fresh* texture, and a
+			// fresh texture is uninitialised everywhere this upload does not
+			// reach — which is now everywhere outside the panels.
+			SDL_UploadToGPUTexture(copy, &source, &destination, false);
+
+			// The GPU matches the image now, so nothing is pending until
+			// something draws again.
+			overlay.MarkUploaded();
 			SDL_EndGPUCopyPass(copy);
 		}
 
-		// The passes below, recorded as they are submitted. See `PassRecorder`.
-		PassRecorder passes;
+		for (const View &view : views) {
+			if (view.Slot < 64) {
+				const uint64_t bit = uint64_t{1} << view.Slot;
+				if ((claimedSlots & bit) != 0) {
+					ENGINE_WARN("two views claim slot {}; the second is ignored", view.Slot);
+					continue;
+				}
+				claimedSlots |= bit;
+			}
 
-		// --- shadow pass ----------------------------------------------------
-		//
-		// **The scene range, not the camera's**, and no colour target at all.
-		// Every caster casts, whether or not the eye can see it.
-		//
-		// A scene whose opaque geometry all opted out of casting skips the pass
-		// rather than clearing a depth target nothing writes to — and the
-		// colour pass then samples a shadow map that was never rendered, which
-		// is what `FrameResult::Ran` exists to make visible.
-		const bool haveShadow = haveInstances && sceneCount > 0 &&
-								(reflectedCasters > 0 || surfaceCasters > 0) && State->EnsureShadow();
+			const core::CFrame &cameraFrame = view.CameraFrame;
+			const scene::Camera &camera = view.Camera;
+			const std::span<const scene::DrawInstance> instances = view.Instances;
+			const std::span<const SurfaceView> surfaces = view.Surfaces;
+			const SceneTarget *sceneTarget = view.Target;
+			const size_t targetSlot = view.Slot;
+			const std::span<const ParticleBatch> particles = view.Particles;
+			const std::span<const effects::RibbonVertex> ribbonVertices = view.RibbonVertices;
+			const std::span<const effects::RibbonRun> ribbonRuns = view.RibbonRuns;
+			const std::span<const SceneLight> lights = view.Lights;
 
-		if (haveShadow) {
-			ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
-			passes.Enter(Pass::Shadow);
+			// **Which target this view draws into, read by `EnsureScene`.**
+			// Passed through a member rather than an argument because
+			// `EnsureScene` is called from two places and threading a slot
+			// through both would put the same value in two signatures that must
+			// agree.
+			State->ActiveSlot = targetSlot;
 
-			SDL_GPUDepthStencilTargetInfo shadowTarget{};
-			shadowTarget.texture = State->ShadowTexture;
-			shadowTarget.clear_depth = 1.0f;
-			shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			uint32_t width = frameWidth;
+			uint32_t height = frameHeight;
 
-			// **Stored, unlike the colour pass's depth.** This one is read by
-			// the next pass, which is the entire point of rendering it.
-			shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
-			shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-			shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-			shadowTarget.cycle = true;
+			// **Headless has no swapchain, so its size comes from the target** —
+			// nothing else has an opinion about it.
+			if (State->Headless()) {
+				if (sceneTarget == nullptr || !sceneTarget->IsValid()) {
+					// A headless renderer with nowhere to draw is a caller mistake
+					// rather than a state to tolerate: every pass would run and its
+					// result would be discarded.
+					SDL_SubmitGPUCommandBuffer(command);
+					return result;
+				}
 
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
-			SDL_BindGPUGraphicsPipeline(pass, State->ShadowPipeline);
+				width = sceneTarget->Width;
+				height = sceneTarget->Height;
+			}
 
-			const SDL_GPUBufferBinding vertexBindings[] = {
-				{State->Meshes.Vertices(), 0},
-				{State->InstanceBuffer, 0},
+			// --- where the world goes -------------------------------------------
+			//
+			// Resolved once, here, and everything downstream reads `sceneWidth` and
+			// `sceneHeight` rather than the swapchain's. That is the whole reason
+			// this is a few lines in one place instead of a conditional at each use:
+			// the cull frustum, the projection and the depth buffer all have to
+			// agree about how big the image is, and they are decided hundreds of
+			// lines apart.
+			//
+			// A target that cannot be allocated falls back to the window rather than
+			// dropping the frame. A caller asking for a texture and getting a frame
+			// it did not expect can see that something is wrong; one that gets no
+			// frame at all sees a frozen editor.
+			const bool offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
+								   State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+
+			if (State->Headless() && !offscreen) {
+				// The target could not be allocated. Headless has no window to fall
+				// back to, so the frame ends here rather than drawing into nothing.
+				SDL_SubmitGPUCommandBuffer(command);
+				return result;
+			}
+
+			if (!offscreen && State->SlotAt(targetSlot).Texture != nullptr) {
+				// Nothing asked for a texture this frame, so last frame's is
+				// released rather than kept against a caller who might come back. A
+				// viewport panel that was closed should not go on costing its
+				// pixels.
+				State->EnsureScene(0, 0);
+			}
+
+			const uint32_t sceneWidth = offscreen ? sceneTarget->Width : width;
+			const uint32_t sceneHeight = offscreen ? sceneTarget->Height : height;
+
+			// **What the pass is drawing *onto*, which is not what it draws.** An
+			// offscreen target is allocated in blocks, so the attachment is at least
+			// as big as the world's rectangle and usually bigger; the world fills
+			// the corner and the viewport below is what confines it there. See
+			// `SCENE_TARGET_BLOCK`.
+			const uint32_t targetWidth = offscreen ? State->SlotAt(targetSlot).Width : width;
+			const uint32_t targetHeight = offscreen ? State->SlotAt(targetSlot).Height : height;
+
+			{
+				// Nothing at all on a steady window, and a texture allocation on the
+				// frame after a resize. Worth telling apart from the pass that uses
+				// it, because one is every frame and the other is one frame.
+				//
+				// **Sized to the attachment rather than to the world.** SDL wants a
+				// depth target whose dimensions match the colour target it is bound
+				// beside, and the colour target is the block-rounded allocation —
+				// not the rectangle the world is drawn into. Sizing this to the
+				// world instead is a validation failure on the frames where the two
+				// differ, which is nearly all of them.
+				//
+				// **The slot's own depth when drawing offscreen.** Two viewports of
+				// different sizes sharing one depth texture made every frame
+				// reallocate it twice — see `SceneSlot::Depth`.
+				ENGINE_PROFILE_CAT("ensure depth", core::ProfileCategory::Render);
+
+				bool depthReady = false;
+				if (offscreen) {
+					Impl::SceneSlot &slot = State->SlotAt(targetSlot);
+					depthReady = State->EnsureDepthIn(
+						slot.Depth, slot.DepthWidth, slot.DepthHeight, targetWidth, targetHeight
+					);
+				} else {
+					depthReady = State->EnsureDepth(targetWidth, targetHeight);
+				}
+
+				if (!depthReady) {
+					SDL_SubmitGPUCommandBuffer(command);
+					return result;
+				}
+			}
+
+			// --- uploads --------------------------------------------------------
+
+			const auto totalCount = static_cast<uint32_t>(instances.size());
+			bool haveInstances = false;
+
+			// **Culled, then ordered, then uploaded** — and the sequence is the
+			// point. Culling first means the sort runs over what survives rather
+			// than over the world, and the upload carries only what is drawn.
+			//
+			// The frustum comes from the same `ResolveCamera` the draw does, so it
+			// cannot disagree with what was actually projected. A frustum built from
+			// a field of view and an aspect ratio kept separately is the bug that
+			// pops geometry at the screen edge on one machine and not another.
+
+			// **Every surface camera's view, resolved before any pass runs.** Each
+			// is used twice: to render into its own texture now, and — one frame
+			// later, as `PreviousViewProjection` — to project that texture back onto
+			// whatever samples it, including another mirror.
+			//
+			// The accepted views are gathered here rather than filtered at each use,
+			// so the two passes that draw mirrors iterate the same list and cannot
+			// disagree about which indices are live. A duplicate index is the one
+			// case worth refusing outright: two views writing one texture would race
+			// for the pair and neither would be the frame the screen then samples.
+			struct AcceptedView {
+				uint8_t Index = 0;
+				const SurfaceView *View = nullptr;
+
+				// **Held here rather than written straight to the slot**, because
+				// whether it may be written is not known yet. A slot's
+				// `ViewProjection` has to keep describing the camera that rendered
+				// the texture the slot holds — so a surface that turns out to be
+				// unchanged, and therefore does not re-render, must not take this
+				// frame's matrix. See the refresh decision below.
+				glm::mat4 ViewProjection{1.0f};
+
+				float ImageOpacity = 1.0f;
+
+				// Whether this surface renders this frame. False when its signature
+				// matches the one its texture was drawn with.
+				bool Refresh = true;
 			};
-			SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+			AcceptedView accepted[scene::MAX_SURFACES];
+			size_t acceptedCount = 0;
+			bool claimed[scene::MAX_SURFACES] = {};
 
-			const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-			SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+			// **This viewport's surfaces, and not the renderer's.** A reflection is
+			// of the viewer, so a world drawn from two panels wants two images per
+			// pane. Resolved once here and read everywhere below, so no pass can
+			// reach the wrong bank. See `Impl::SurfaceBanks`.
+			Impl::SurfaceBank &bank = State->SurfacesAt(targetSlot);
 
-			SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
-
-			// **Only the opaque part of the scene casts**, and of that only what
-			// `Visual::CastShadow` left switched on. A transparent pane writing
-			// full depth into the shadow map would cast a solid shadow, which is
-			// the most obviously wrong thing glass can do; an opaque thing that
-			// should not occlude is the case the author decides, and it arrives
-			// here as the caster runs `partition casters` produced.
-			//
-			// Two draws because the two runs are not adjacent — the surface
-			// partition sits between them. The second is empty in every scene
-			// with no mirror in it, which is almost all of them.
-			// Depth only, so no samplers and no fragment uniforms — the null
-			// lighting pointer is what says so.
-			uint64_t shadowTriangles = 0;
-			if (reflectedCasters > 0) {
-				result.DrawCalls += State->DrawSlots(
-					command,
-					pass,
-					0,
-					reflectedCasters,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					0,
-					shadowTriangles
-				);
-			}
-			if (surfaceCasters > 0) {
-				result.DrawCalls += State->DrawSlots(
-					command,
-					pass,
-					sceneReflected,
-					surfaceCasters,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					0,
-					shadowTriangles
-				);
-			}
-
-			SDL_EndGPURenderPass(pass);
-		}
-
-		// --- surface pass ----------------------------------------------------
-		//
-		// The same scene range, from each surface camera, into that surface's
-		// own texture. What a mirror shows next frame — the one-frame staleness
-		// `ViewChannel` already assumed, and what breaks the dependency cycle
-		// between a mirror and what it reflects.
-		//
-		// **One pass per surface, and each one draws the other surfaces.** A
-		// mirror still may not appear in its own reflection: it sits between its
-		// camera and the world and would fill the texture with itself. Every
-		// *other* mirror is drawn, from the half of its pair this frame is not
-		// writing — so what you see in a mirror of a mirror is one frame old per
-		// bounce. There is no order that would avoid that, because each surface
-		// is being rendered for the others.
-		//
-		// **Only the surfaces whose signature moved.** A pass that would redraw
-		// the texture its slot already holds is not run: its pair keeps the
-		// frame it has, its matrices keep describing the camera that drew that
-		// frame, and the screen pass samples it exactly as if it had just been
-		// rendered. See `SignatureOf` for what counts as a change and, more to
-		// the point, what deliberately does not.
-		if (wantSurface && haveInstances && sceneCount > 0 && refreshCount > 0) {
-			ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
-			passes.Enter(Pass::Surface);
-
-			// **Flipped for every refreshing surface before the first pass runs,
-			// not inside the loop.** A surface pass samples the other surfaces'
-			// read slots, so every slot has to have finished flipping before any
-			// of them is read — flipping inside the loop would have the second
-			// pass sample the first surface's *new* texture, which is this
-			// frame's half-drawn image and the exact self-reference the pair
-			// exists to make impossible.
-			//
-			// **A skipped surface does not flip, and its matrices do not move.**
-			// Both halves of that are one fact: the slot still holds the frame it
-			// held, so `ViewProjection` must still be the camera that drew it and
-			// `PreviousViewProjection` the one before. Advancing either for a
-			// surface that did not render would project a texture with a camera
-			// that never took it — a reflection sliding across a pane that
-			// nothing in the scene is moving, which is the hardest possible
-			// version of this bug to attribute.
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
+			for (const SurfaceView &view : surfaces) {
+				if (view.Index < 0 || static_cast<uint8_t>(view.Index) >= scene::MAX_SURFACES) {
+					ENGINE_WARN(
+						"surface camera index {} is outside 0..{}, so it renders nothing",
+						view.Index,
+						scene::MAX_SURFACES - 1
+					);
 					continue;
 				}
 
-				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
-				state.PreviousViewProjection = state.ViewProjection;
-				state.ViewProjection = accepted[index].ViewProjection;
-				state.Slot ^= 1u;
-			}
-
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
+				const auto index = static_cast<uint8_t>(view.Index);
+				if (claimed[index]) {
+					ENGINE_WARN("two surface cameras claim index {}; the second is ignored", view.Index);
 					continue;
 				}
 
-				const uint8_t self = accepted[index].Index;
+				claimed[index] = true;
 
-				// **Taken here rather than at each draw**, because `drawMirrors`
-				// below shadows `index` with its own loop over surfaces — so
-				// `accepted[index]` inside it would name a different view
-				// entirely, and the filter would silently be another surface's.
-				const uint32_t surfaceFilter = accepted[index].View->TagFilter;
-				Impl::SurfaceSlotState &state = bank.Surfaces[self];
+				const float aspect =
+					static_cast<float>(view.Width) / static_cast<float>(std::max(view.Height, 1u));
 
-				SDL_GPUColorTargetInfo surfaceColour{};
-				surfaceColour.texture = state.Texture[state.Slot];
-				surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
-				surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
-				surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
-				surfaceColour.cycle = true;
+				AcceptedView entry;
+				entry.Index = index;
+				entry.View = &view;
+				entry.ViewProjection = scene::ResolveCamera(view.Frame, view.Lens, aspect).ViewProjection;
+				entry.ImageOpacity = std::clamp(view.ImageOpacity, 0.0f, 1.0f);
 
-				SDL_GPUDepthStencilTargetInfo surfaceDepth{};
-				surfaceDepth.texture = state.Depth;
-				surfaceDepth.clear_depth = 1.0f;
-				surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
-				surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
-				surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-				surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-				surfaceDepth.cycle = true;
+				accepted[acceptedCount++] = entry;
+			}
 
-				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
-				// **The light set, pushed once for the whole pass.** Uniform state
-				// on a command buffer persists until it is replaced, so one push
-				// before the draws serves every one of them — which is the whole
-				// reason this is a second buffer rather than fields on the
-				// per-draw `LightingUniforms`.
-				SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
-				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+			size_t visibleCount = 0;
+
+			// **What the light has to see, out of the walk the culler was making
+			// anyway.** Deriving an instance's world box is three quaternion
+			// rotations and nine abs-mul-adds, and this frame used to pay for it
+			// twice over the same span — once to fit the light and once to test the
+			// frustum. `graph::CullAndBound` is those two passes fused; the union is
+			// six comparisons on a box that already exists. See its comment for why
+			// this is not a cache.
+			core::AABB sceneBounds;
+			{
+				ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
+
+				const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
+				const graph::Frustum frustum = graph::Frustum::FromViewProjection(
+					scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection
+				);
+				visibleCount = graph::CullAndBound(instances, frustum, State->Visible, sceneBounds);
+			}
+
+			// **Fitted to the whole draw list, not to what survived culling.** A
+			// caster outside the camera's frustum still shadows into it, so the
+			// light has to see everything — and fitting to the culled set is the
+			// classic version of this bug: shadows that vanish as their casters
+			// leave the screen. That is why `sceneBounds` is the union over
+			// `instances` and not over `State->Visible`.
+			//
+			// Built here rather than before the cull only because the cull is now
+			// what produces the bound. Nothing between the two reads it, and its
+			// first use is the shadow pass.
+			const glm::mat4 lightViewProjection = graph::FitDirectionalLight(
+				sceneBounds, core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
+			);
+
+			// Ordered over the survivors, so the two passes are two ranges of one
+			// buffer. Opaque first in whatever order the world produced, then the
+			// transparent tail back to front from where the camera is.
+			State->VisibleInstances.resize(visibleCount);
+			for (size_t index = 0; index < visibleCount; index++) {
+				State->VisibleInstances[index] = instances[State->Visible[index]];
+			}
+
+			size_t opaqueCount = 0;
+			{
+				ENGINE_PROFILE_CAT("order instances", core::ProfileCategory::Render);
+				opaqueCount =
+					scene::OrderForDrawing(State->VisibleInstances, cameraFrame.Position, State->DrawOrder);
+			}
+			const auto transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
+
+			// **Surface instances moved to the back of the opaque head**, so the
+			// camera range is three contiguous runs — plain opaque, then mirrors,
+			// then transparent — and each is one draw with one `first_instance`.
+			// Whether an instance samples the surface is per instance and the
+			// uniform that says so is per draw, so the alternative is a branch on
+			// data the fragment shader does not have.
+			//
+			// Stable, for the reason the ordering itself is: an opaque scene with no
+			// mirrors must come out of this exactly as it went in.
+			uint32_t surfaceInCamera = 0;
+			if (opaqueCount > 0) {
+				ENGINE_PROFILE_CAT("partition surfaces", core::ProfileCategory::Render);
+
+				// **`scene::PartitionSurfaces`, not a fourth copy of it.** The
+				// comment forty lines down insists the mirror partition lives in
+				// `scene` "where a headless suite can get at them" — and this file
+				// had two hand-rolled copies of it, which is what that sentence
+				// exists to prevent. They are one function now, and it is the tested
+				// one.
+				surfaceInCamera = static_cast<uint32_t>(scene::PartitionSurfaces(
+					State->VisibleInstances, std::span<uint32_t>(State->DrawOrder.data(), opaqueCount)
+				));
+			}
+			const auto plainOpaque = static_cast<uint32_t>(opaqueCount) - surfaceInCamera;
+
+			// **Grouped by index within that run, because each index owns a
+			// texture.** The screen pass binds a sampler and pushes a projection per
+			// surface, so what used to be one draw over "the mirrors" is one draw
+			// per surface — and each has to be contiguous for that to be an offset
+			// and a count rather than a per-instance branch.
+			//
+			// `scene::GroupSurfaces`, not a second copy of it: the scene range is
+			// grouped by `OrderScene` using the same function, and two groupings
+			// that disagreed would put a pane's reflection on another pane's pass.
+			scene::SurfaceRun cameraRuns[scene::MAX_SURFACES];
+			if (surfaceInCamera > 0) {
+				scene::GroupSurfaces(
+					State->VisibleInstances,
+					std::span<uint32_t>(State->DrawOrder.data() + plainOpaque, surfaceInCamera),
+					plainOpaque,
+					true,
+					cameraRuns
+				);
+			}
+
+			// **And the same split at the end of the blended tail, which is what
+			// makes a faded mirror still a mirror.** A part leaves the opaque head
+			// the moment its `Transparency` goes above zero — and the head is where
+			// the mirror flag was set, so the reflection did not dim, it vanished.
+			// That reads as the surface camera having stopped rather than as an
+			// ordering rule, and it is the bug this run exists to fix.
+			//
+			// They go *last* of everything, so they draw over the blended geometry
+			// as well as the opaque. Stable, so the back-to-front sort survives
+			// inside each run — see `scene::ScenePlan::TransparentSurfaces` for what
+			// is given up across the two.
+			uint32_t transparentSurfaces = 0;
+			if (transparentCount > 0) {
+				ENGINE_PROFILE_CAT("partition blended surfaces", core::ProfileCategory::Render);
+
+				transparentSurfaces = static_cast<uint32_t>(scene::PartitionSurfaces(
+					State->VisibleInstances,
+					std::span<uint32_t>(State->DrawOrder.data() + opaqueCount, transparentCount)
+				));
+			}
+			const uint32_t plainTransparent = transparentCount - transparentSurfaces;
+
+			if (transparentSurfaces > 0) {
+				scene::GroupSurfaces(
+					State->VisibleInstances,
+					std::span<uint32_t>(
+						State->DrawOrder.data() + opaqueCount + plainTransparent, transparentSurfaces
+					),
+					static_cast<uint32_t>(opaqueCount) + plainTransparent,
+					false,
+					cameraRuns
+				);
+			}
+
+			// The flip from transparency to opacity happened where each view was
+			// accepted, once per surface, rather than in a shader nobody can put a
+			// breakpoint in. `Impl::SurfaceSlotState::ImageOpacity` holds it.
+
+			// **A second range holding everything, for the two passes that are not
+			// the camera's.** A caster outside the camera's frustum still shadows
+			// into it, and a mirror shows what is behind the viewer — so culling to
+			// the eye would give shadows that vanish as their casters leave the
+			// screen and a mirror that reflects only what is already on screen.
+			// Both are the classic version of this mistake.
+			//
+			// Ordered from the surface camera when there is one, because the surface
+			// pass is the only consumer that needs an order at all — a depth-only
+			// pass does not care.
+			// **Allocated for every accepted view before anything is ordered**, so
+			// a view whose texture cannot be made drops out of the frame here rather
+			// than half way through the pass loop.
+			size_t liveCount = 0;
+			for (size_t index = 0; index < acceptedCount; index++) {
+				const AcceptedView &view = accepted[index];
+				if (State->EnsureSurface(targetSlot, view.Index, view.View->Width, view.View->Height)) {
+					accepted[liveCount++] = view;
+				}
+			}
+			acceptedCount = liveCount;
+
+			// **Ordered from the first surface camera when there is one.** The
+			// blended sort is per view and there is only one scene range, so several
+			// surfaces cannot each have the tail sorted for them — the first is the
+			// one that gets it, and every other surface draws that order. Blended
+			// geometry inside a reflection of a reflection is therefore sorted for
+			// the wrong eye, which is a compositing error confined to the second
+			// bounce and cheaper than an ordering pass per surface.
+			const bool wantSurface = acceptedCount > 0;
+			const core::Vector3 sceneEye =
+				wantSurface ? accepted[0].View->Frame.Position : cameraFrame.Position;
+
+			// **One signature shared by every surface, and that is not a shortcut.**
+			// Each camera's matrix is in it because a surface pass draws the *other*
+			// mirrors, projecting each one's texture with the camera that rendered
+			// it — so a camera that moves changes how it appears inside every other
+			// one. Every input to any surface is therefore an input to all of them,
+			// and computing several separately would only be several chances for
+			// them to disagree.
+			//
+			// It is still stored per slot rather than once, because slots do not
+			// refresh together: one that has never rendered has nothing to compare
+			// against, and one that appeared this frame has to draw once before it
+			// can be skipped.
+			uint64_t surfaceSignature = 0;
+			size_t refreshCount = 0;
+			if (wantSurface) {
+				ENGINE_PROFILE_CAT("surface signature", core::ProfileCategory::Render);
+
+				surfaceSignature = scene::SignatureOf(instances);
+
+				for (size_t index = 0; index < acceptedCount; index++) {
+					surfaceSignature = scene::MixSignature(surfaceSignature, accepted[index].Index);
+					surfaceSignature = MixMatrix(surfaceSignature, accepted[index].ViewProjection);
+					surfaceSignature = MixFloat(surfaceSignature, accepted[index].ImageOpacity);
+				}
+
+				for (size_t index = 0; index < acceptedCount; index++) {
+					Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
+
+					// **Written whether or not the surface renders.** The opacity is
+					// what the *screen* pass composites the pane with and it changes
+					// no texel of the texture, so a mirror faded by a script fades
+					// this frame rather than on whichever later frame something else
+					// happens to move.
+					state.ImageOpacity = accepted[index].ImageOpacity;
+
+					accepted[index].Refresh = !state.Ready || state.Signature != surfaceSignature;
+					refreshCount += accepted[index].Refresh ? 1u : 0u;
+				}
+			}
+
+			State->SceneInstances.assign(instances.begin(), instances.end());
+
+			// **Every range the three scene passes submit, from one call.** The
+			// ordering, the mirror partition and the caster partition are arithmetic
+			// over a `shared` type and they live in `scene::OrderScene` — where a
+			// headless suite can get at them. A renderer is the one module a test
+			// cannot exercise, so the counts it hands to a draw call are the last
+			// place they should be computed. See `scene::ScenePlan` for the runs.
+			scene::ScenePlan plan;
+			{
+				ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
+				plan = scene::OrderScene(State->SceneInstances, sceneEye, State->SceneOrder);
+			}
+
+			const auto sceneCount = static_cast<uint32_t>(State->SceneInstances.size());
+			const auto sceneOpaque = static_cast<size_t>(plan.Opaque);
+			const uint32_t sceneTransparent = plan.Transparent;
+			const uint32_t sceneReflected = plan.Reflected;
+			const uint32_t reflectedCasters = plan.ReflectedCasters;
+			const uint32_t surfaceCasters = plan.SurfaceCasters;
+
+			const auto instanceCount = static_cast<uint32_t>(visibleCount);
+			result.Culled += totalCount - instanceCount;
+
+			// **One buffer, two ranges.** The scene range first so its offset is
+			// zero and the camera range starts where it ends — which is what makes
+			// each pass one `first_instance` rather than a second buffer and a
+			// second bind.
+			const uint32_t uploadCount = sceneCount + instanceCount;
+
+			if (uploadCount > 0) {
+				bool capacity = false;
+				{
+					// Grows the device buffer when the scene does. Separate from the
+					// copy below because one is a GPU allocation and the other is a
+					// memcpy, and a spike in either means something different.
+					ENGINE_PROFILE_CAT("ensure instance capacity", core::ProfileCategory::Render);
+					capacity = State->EnsureInstanceCapacity(uploadCount);
+				}
+
+				if (capacity) {
+					ENGINE_PROFILE_CAT("upload instances", core::ProfileCategory::Render);
+
+					void *mapped = nullptr;
+					{
+						// Mapping can stall: the driver hands back memory the GPU may
+						// still be reading unless it cycles, and this asks it to.
+						ENGINE_PROFILE_CAT("map instances", core::ProfileCategory::Render);
+						mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
+					}
+					{
+						// Converted straight into the mapped buffer rather than
+						// into a vector that is then memcpy'd. Eighty bytes an
+						// entity go into write-combined memory either way, and the
+						// staging copy would be that traffic paid a third time —
+						// once by the world filling its draw list, once here, and
+						// once again on the way out.
+						//
+						// This is where a `CFrame` and a `Color3` become a `mat4`
+						// and an RGBA, and it is the only place in the engine that
+						// happens. A world produces scene data; a device layout is
+						// this module's business.
+						ENGINE_PROFILE_CAT("convert instances", core::ProfileCategory::Render);
+
+						auto *out = static_cast<GpuInstance *>(mapped);
+
+						// **What is in each slot, recorded in the same pass that
+						// fills it.** The draw loop needs the mesh and the texture
+						// of every slot to find its runs, and the only place that
+						// mapping exists is here — after this loop the order is a
+						// buffer offset and the instance it came from is gone.
+						State->SlotMesh.resize(uploadCount);
+						State->SlotTexture.resize(uploadCount);
+						State->SlotTags.resize(uploadCount);
+
+						// **The mesh is resolved once and used twice.** `ToGpu` needs
+						// it to stretch the instance into its `Size` box and the draw
+						// loop needs it to find its runs, and resolving twice would
+						// be a second hash of the same name per instance per frame.
+						const auto record = [&](size_t slot, const scene::DrawInstance &instance) {
+							const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
+							State->SlotMesh[slot] = &mesh;
+							State->SlotTexture[slot] = instance.Texture;
+							State->SlotTags[slot] = instance.TagMask;
+							return &mesh;
+						};
+
+						for (size_t index = 0; index < State->SceneOrder.size(); index++) {
+							const scene::DrawInstance &instance =
+								State->SceneInstances[State->SceneOrder[index]];
+							out[index] = ToGpu(instance, *record(index, instance));
+						}
+
+						const size_t cameraBase = State->SceneOrder.size();
+						auto *camera = out + cameraBase;
+						for (size_t index = 0; index < State->DrawOrder.size(); index++) {
+							const scene::DrawInstance &instance =
+								State->VisibleInstances[State->DrawOrder[index]];
+							camera[index] = ToGpu(instance, *record(cameraBase + index, instance));
+						}
+					}
+					SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
+					haveInstances = true;
+				}
+			}
+
+			// The particles, packed and grouped before any render pass opens.
+			//
+			// **Here rather than inside the draw**, because what follows is a copy
+			// pass and a copy pass cannot be started while a render pass is open —
+			// the same constraint `FrameOverlayHook`'s `Prepare`/`Record` split
+			// exists for, stated in that header in the same words.
+			// The local lights, packed once for the frame.
+			//
+			// **Every pass gets the same set**, including a mirror's: a lamp lights
+			// what a reflection shows exactly as it lights the world, and giving the
+			// surface pass a different set would make a mirror disagree with the room
+			// it is in.
+			const LightUniforms lightUniforms = ToGpu(lights);
+
+			uint32_t particleCount = 0;
+			uint32_t ribbonCount = 0;
+			{
+				ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
+				particleCount = State->PrepareParticles(particles);
+				result.Particles += particleCount;
+
+				ribbonCount = State->PrepareRibbons(ribbonVertices);
+				result.RibbonVertices += ribbonCount;
+			}
+
+			if (haveInstances || particleCount > 0 || ribbonCount > 0) {
+				ENGINE_PROFILE_CAT("copy pass", core::ProfileCategory::Render);
+
+				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+
+				if (ribbonCount > 0) {
+					const SDL_GPUTransferBufferLocation source{State->RibbonTransfer, 0};
+					const SDL_GPUBufferRegion destination{
+						State->RibbonBuffer,
+						0,
+						ribbonCount * static_cast<uint32_t>(sizeof(effects::RibbonVertex)),
+					};
+					SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				}
+
+				if (particleCount > 0) {
+					const SDL_GPUTransferBufferLocation source{State->ParticleTransfer, 0};
+					const SDL_GPUBufferRegion destination{
+						State->ParticleBuffer,
+						0,
+						particleCount * static_cast<uint32_t>(sizeof(effects::ParticleInstance)),
+					};
+					// Cycled, for the instance buffer's reason: a fresh allocation
+					// rather than a stall on the copy the previous frame may still be
+					// reading.
+					SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				}
+
+				if (haveInstances) {
+					const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
+					const SDL_GPUBufferRegion destination{
+						State->InstanceBuffer,
+						0,
+						uploadCount * static_cast<uint32_t>(sizeof(GpuInstance)),
+					};
+					// Cycling hands back a fresh allocation rather than stalling on
+					// the copy the previous frame may still be reading.
+					SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				}
+
+				SDL_EndGPUCopyPass(copy);
+			}
+
+			// This view's walk of `PassOrder()`. The recorder is the frame's — `Ran`
+			// is the union over every view — and only the position resets here.
+			passes.BeginView();
+
+			// --- shadow pass ----------------------------------------------------
+			//
+			// **The scene range, not the camera's**, and no colour target at all.
+			// Every caster casts, whether or not the eye can see it.
+			//
+			// A scene whose opaque geometry all opted out of casting skips the pass
+			// rather than clearing a depth target nothing writes to — and the
+			// colour pass then samples a shadow map that was never rendered, which
+			// is what `FrameResult::Ran` exists to make visible.
+			const bool haveShadow = haveInstances && sceneCount > 0 &&
+									(reflectedCasters > 0 || surfaceCasters > 0) && State->EnsureShadow();
+
+			if (haveShadow) {
+				ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
+				passes.Enter(Pass::Shadow);
+
+				SDL_GPUDepthStencilTargetInfo shadowTarget{};
+				shadowTarget.texture = State->ShadowTexture;
+				shadowTarget.clear_depth = 1.0f;
+				shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+
+				// **Stored, unlike the colour pass's depth.** This one is read by
+				// the next pass, which is the entire point of rendering it.
+				shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
+				shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+				shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+				shadowTarget.cycle = true;
+
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
+				SDL_BindGPUGraphicsPipeline(pass, State->ShadowPipeline);
 
 				const SDL_GPUBufferBinding vertexBindings[] = {
 					{State->Meshes.Vertices(), 0},
@@ -3738,144 +3690,212 @@ namespace engine::render {
 				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-				// **Shadowed, and pointedly not surfaced.** The mirror's own view
-				// gets the shadow map, so what it reflects is lit the way the
-				// screen lights it.
+				SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
+
+				// **Only the opaque part of the scene casts**, and of that only what
+				// `Visual::CastShadow` left switched on. A transparent pane writing
+				// full depth into the shadow map would cast a solid shadow, which is
+				// the most obviously wrong thing glass can do; an opaque thing that
+				// should not occlude is the case the author decides, and it arrives
+				// here as the caster runs `partition casters` produced.
 				//
-				// **`Flags.z` is zero for the world, and it has to be.** It means
-				// "this draw samples a surface texture instead of its own tint",
-				// and it is set below for exactly the mirror runs. Setting it for
-				// the whole pass is what made the floor sample the previous
-				// frame's reflection and come out as the clear colour wherever
-				// that projection landed on untouched texels — a black wedge in
-				// the mirror that survived deleting every caster, the frame and
-				// the near-plane hack, and moved when the camera was re-aimed but
-				// not when the floor was.
-				const LightingUniforms surfaceLighting{
-					glm::vec4{SUN_DIRECTION, 0.0f},
-					SUN_AMBIENT,
-					glm::vec4{
-						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
-					},
-				};
-
-				SDL_GPUTexture *const fallback =
-					State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
-				SDL_GPUSampler *const shadowSampler =
-					State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
-
-				// **The samplers are bound per draw now rather than per run**,
-				// because the third one — the colour map — changes with the
-				// mesh being drawn and the other two do not. `DrawSlots` binds
-				// all three together; what is left here is remembering which
-				// surface texture the next draws should sample.
-				SDL_GPUTexture *surfaceTexture = nullptr;
-				const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
-
-				const FrameUniforms worldFrame{
-					state.ViewProjection,
-					lightViewProjection,
-					glm::mat4{1.0f},
-				};
-
-				const auto plainly = [&]() {
-					SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
-					bindSurface(nullptr);
-				};
-
-				plainly();
-
-				// The world, minus every mirror. `plan.Reflected` is the
-				// non-mirror opaque run.
-				if (sceneReflected > 0) {
+				// Two draws because the two runs are not adjacent — the surface
+				// partition sits between them. The second is empty in every scene
+				// with no mirror in it, which is almost all of them.
+				// Depth only, so no samplers and no fragment uniforms — the null
+				// lighting pointer is what says so.
+				uint64_t shadowTriangles = 0;
+				if (reflectedCasters > 0) {
 					result.DrawCalls += State->DrawSlots(
 						command,
 						pass,
 						0,
+						reflectedCasters,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						0,
+						shadowTriangles
+					);
+				}
+				if (surfaceCasters > 0) {
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
 						sceneReflected,
-						&surfaceLighting,
-						fallback,
-						shadowSampler,
-						surfaceTexture,
-						State->SurfaceSampler,
-						surfaceFilter,
-						result.Triangles
+						surfaceCasters,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						nullptr,
+						0,
+						shadowTriangles
 					);
 				}
 
-				// **Every mirror except this one, one draw each.** `self` is
-				// skipped because nothing sees itself in its own reflection —
-				// drawing it would fill this texture with the pane it belongs
-				// to, and the mirror would show itself rather than the room.
+				SDL_EndGPURenderPass(pass);
+			}
+
+			// --- surface pass ----------------------------------------------------
+			//
+			// The same scene range, from each surface camera, into that surface's
+			// own texture. What a mirror shows next frame — the one-frame staleness
+			// `ViewChannel` already assumed, and what breaks the dependency cycle
+			// between a mirror and what it reflects.
+			//
+			// **One pass per surface, and each one draws the other surfaces.** A
+			// mirror still may not appear in its own reflection: it sits between its
+			// camera and the world and would fill the texture with itself. Every
+			// *other* mirror is drawn, from the half of its pair this frame is not
+			// writing — so what you see in a mirror of a mirror is one frame old per
+			// bounce. There is no order that would avoid that, because each surface
+			// is being rendered for the others.
+			//
+			// **Only the surfaces whose signature moved.** A pass that would redraw
+			// the texture its slot already holds is not run: its pair keeps the
+			// frame it has, its matrices keep describing the camera that drew that
+			// frame, and the screen pass samples it exactly as if it had just been
+			// rendered. See `SignatureOf` for what counts as a change and, more to
+			// the point, what deliberately does not.
+			if (wantSurface && haveInstances && sceneCount > 0 && refreshCount > 0) {
+				ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
+				passes.Enter(Pass::Surface);
+
+				// **Flipped for every refreshing surface before the first pass runs,
+				// not inside the loop.** A surface pass samples the other surfaces'
+				// read slots, so every slot has to have finished flipping before any
+				// of them is read — flipping inside the loop would have the second
+				// pass sample the first surface's *new* texture, which is this
+				// frame's half-drawn image and the exact self-reference the pair
+				// exists to make impossible.
 				//
-				// A surface that has no frame yet, or that no camera is
-				// rendering this frame, is drawn **plainly** rather than skipped.
-				// A pane that vanishes until its mirror warms up is worse than
-				// one that is briefly its own colour, and a pane naming an index
-				// nothing renders is a scene mistake that should be visible as a
-				// flat pane rather than as a hole in the geometry.
-				//
-				// Sampled draws project with the matrix that *rendered* the
-				// texture being read — `PreviousViewProjection`, not the one
-				// just resolved — because the image is a frame old and
-				// projecting it with a fresh camera slides it across the pane.
-				const auto drawMirrors = [&](bool blended) {
-					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
-						if (index == self) {
-							continue;
-						}
+				// **A skipped surface does not flip, and its matrices do not move.**
+				// Both halves of that are one fact: the slot still holds the frame it
+				// held, so `ViewProjection` must still be the camera that drew it and
+				// `PreviousViewProjection` the one before. Advancing either for a
+				// surface that did not render would project a texture with a camera
+				// that never took it — a reflection sliding across a pane that
+				// nothing in the scene is moving, which is the hardest possible
+				// version of this bug to attribute.
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
 
-						const scene::SurfaceRun &run = plan.Runs[index];
-						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
-						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
-						if (count == 0) {
-							continue;
-						}
+					Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
+					state.PreviousViewProjection = state.ViewProjection;
+					state.ViewProjection = accepted[index].ViewProjection;
+					state.Slot ^= 1u;
+				}
 
-						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
-						if (!shown.Ready || !claimed[index]) {
-							plainly();
-							result.DrawCalls += State->DrawSlots(
-								command,
-								pass,
-								first,
-								count,
-								&surfaceLighting,
-								fallback,
-								shadowSampler,
-								surfaceTexture,
-								State->SurfaceSampler,
-								surfaceFilter,
-								result.Triangles
-							);
-							continue;
-						}
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
 
-						const FrameUniforms mirrorFrame{
-							state.ViewProjection,
-							lightViewProjection,
-							shown.PreviousViewProjection,
-						};
-						const LightingUniforms mirrorLighting{
-							glm::vec4{SUN_DIRECTION, 0.0f},
-							SUN_AMBIENT,
-							glm::vec4{
-								haveShadow ? 1.0f : 0.0f,
-								1.0f / static_cast<float>(SHADOW_RESOLUTION),
-								1.0f,
-								shown.ImageOpacity
-							},
-						};
+					const uint8_t self = accepted[index].Index;
 
-						SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-						bindSurface(shown.Texture[shown.Slot ^ 1u]);
+					// **Taken here rather than at each draw**, because `drawMirrors`
+					// below shadows `index` with its own loop over surfaces — so
+					// `accepted[index]` inside it would name a different view
+					// entirely, and the filter would silently be another surface's.
+					const uint32_t surfaceFilter = accepted[index].View->TagFilter;
+					Impl::SurfaceSlotState &state = bank.Surfaces[self];
 
+					SDL_GPUColorTargetInfo surfaceColour{};
+					surfaceColour.texture = state.Texture[state.Slot];
+					surfaceColour.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+					surfaceColour.load_op = SDL_GPU_LOADOP_CLEAR;
+					surfaceColour.store_op = SDL_GPU_STOREOP_STORE;
+					surfaceColour.cycle = true;
+
+					SDL_GPUDepthStencilTargetInfo surfaceDepth{};
+					surfaceDepth.texture = state.Depth;
+					surfaceDepth.clear_depth = 1.0f;
+					surfaceDepth.load_op = SDL_GPU_LOADOP_CLEAR;
+					surfaceDepth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+					surfaceDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					surfaceDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					surfaceDepth.cycle = true;
+
+					SDL_GPURenderPass *pass =
+						SDL_BeginGPURenderPass(command, &surfaceColour, 1, &surfaceDepth);
+					// **The light set, pushed once for the whole pass.** Uniform state
+					// on a command buffer persists until it is replaced, so one push
+					// before the draws serves every one of them — which is the whole
+					// reason this is a second buffer rather than fields on the
+					// per-draw `LightingUniforms`.
+					SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+
+					const SDL_GPUBufferBinding vertexBindings[] = {
+						{State->Meshes.Vertices(), 0},
+						{State->InstanceBuffer, 0},
+					};
+					SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+					// **Shadowed, and pointedly not surfaced.** The mirror's own view
+					// gets the shadow map, so what it reflects is lit the way the
+					// screen lights it.
+					//
+					// **`Flags.z` is zero for the world, and it has to be.** It means
+					// "this draw samples a surface texture instead of its own tint",
+					// and it is set below for exactly the mirror runs. Setting it for
+					// the whole pass is what made the floor sample the previous
+					// frame's reflection and come out as the clear colour wherever
+					// that projection landed on untouched texels — a black wedge in
+					// the mirror that survived deleting every caster, the frame and
+					// the near-plane hack, and moved when the camera was re-aimed but
+					// not when the floor was.
+					const LightingUniforms surfaceLighting{
+						glm::vec4{SUN_DIRECTION, 0.0f},
+						SUN_AMBIENT,
+						glm::vec4{
+							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
+						},
+					};
+
+					SDL_GPUTexture *const fallback =
+						State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
+					SDL_GPUSampler *const shadowSampler =
+						State->ShadowSampler != nullptr ? State->ShadowSampler : State->SurfaceSampler;
+
+					// **The samplers are bound per draw now rather than per run**,
+					// because the third one — the colour map — changes with the
+					// mesh being drawn and the other two do not. `DrawSlots` binds
+					// all three together; what is left here is remembering which
+					// surface texture the next draws should sample.
+					SDL_GPUTexture *surfaceTexture = nullptr;
+					const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
+
+					const FrameUniforms worldFrame{
+						state.ViewProjection,
+						lightViewProjection,
+						glm::mat4{1.0f},
+					};
+
+					const auto plainly = [&]() {
+						SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
+						bindSurface(nullptr);
+					};
+
+					plainly();
+
+					// The world, minus every mirror. `plan.Reflected` is the
+					// non-mirror opaque run.
+					if (sceneReflected > 0) {
 						result.DrawCalls += State->DrawSlots(
 							command,
 							pass,
-							first,
-							count,
-							&mirrorLighting,
+							0,
+							sceneReflected,
+							&surfaceLighting,
 							fallback,
 							shadowSampler,
 							surfaceTexture,
@@ -3884,308 +3904,61 @@ namespace engine::render {
 							result.Triangles
 						);
 					}
-				};
 
-				drawMirrors(false);
+					// **Every mirror except this one, one draw each.** `self` is
+					// skipped because nothing sees itself in its own reflection —
+					// drawing it would fill this texture with the pane it belongs
+					// to, and the mirror would show itself rather than the room.
+					//
+					// A surface that has no frame yet, or that no camera is
+					// rendering this frame, is drawn **plainly** rather than skipped.
+					// A pane that vanishes until its mirror warms up is worse than
+					// one that is briefly its own colour, and a pane naming an index
+					// nothing renders is a scene mistake that should be visible as a
+					// flat pane rather than as a hole in the geometry.
+					//
+					// Sampled draws project with the matrix that *rendered* the
+					// texture being read — `PreviousViewProjection`, not the one
+					// just resolved — because the image is a frame old and
+					// projecting it with a fresh camera slides it across the pane.
+					const auto drawMirrors = [&](bool blended) {
+						for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+							if (index == self) {
+								continue;
+							}
 
-				// **The blended tail *minus* the mirrors in it.** The opaque head
-				// already excludes them for the reason above; a pane that went
-				// transparent moved from the head to the tail and stopped being
-				// excluded, so a faded mirror reflected itself.
-				const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
-				if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
-					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
-				}
+							const scene::SurfaceRun &run = plan.Runs[index];
+							const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
+							const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
+							if (count == 0) {
+								continue;
+							}
 
-				if (blendedPlain > 0) {
-					plainly();
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						static_cast<uint32_t>(sceneOpaque),
-						blendedPlain,
-						&surfaceLighting,
-						fallback,
-						shadowSampler,
-						surfaceTexture,
-						State->SurfaceSampler,
-						surfaceFilter,
-						result.Triangles
-					);
-				}
+							const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+							if (!shown.Ready || !claimed[index]) {
+								plainly();
+								result.DrawCalls += State->DrawSlots(
+									command,
+									pass,
+									first,
+									count,
+									&surfaceLighting,
+									fallback,
+									shadowSampler,
+									surfaceTexture,
+									State->SurfaceSampler,
+									surfaceFilter,
+									result.Triangles
+								);
+								continue;
+							}
 
-				// And the blended mirrors that are not this one, last of
-				// everything drawn into this texture.
-				if (plan.TransparentSurfaces > 0) {
-					drawMirrors(true);
-				}
-
-				SDL_EndGPURenderPass(pass);
-			}
-
-			// **Marked ready only after every pass has run**, so a surface that
-			// was written this frame cannot be sampled as another surface's
-			// "previous" within the same frame. From here the screen pass may
-			// sample what was just written and the next frame's surface passes
-			// may sample it as their previous.
-			//
-			// **The signature is recorded here and not where it was computed**,
-			// which is what makes a surface that failed to render try again. A
-			// slot only claims to be drawn with this signature once a pass has
-			// actually drawn it; storing it up front would mark a skipped or
-			// abandoned surface as current and leave it holding the wrong image
-			// until something else in the scene moved.
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
-					continue;
-				}
-
-				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
-				state.Ready = true;
-				state.Signature = surfaceSignature;
-				result.SurfacePasses++;
-			}
-		}
-
-		// --- the interface's uploads ----------------------------------------
-		//
-		// **Here, and not beside the pass that draws them.** Dear ImGui's
-		// backend copies its vertex and index buffers through a copy pass, and
-		// SDL refuses to open one while a render pass is in flight — so an
-		// upload issued from `Record` works right up until the first frame with
-		// enough widgets to grow a buffer, which is a bug that arrives months
-		// after the code that caused it. The split is `FrameOverlayHook`'s
-		// contract for exactly that reason.
-		const bool drawInterface =
-			!State->Headless() && interfaceHook != nullptr && interfaceHook->Prepare(command);
-
-		// --- opaque pass ----------------------------------------------------
-
-		// **The world's target, which is the offscreen texture or the window.**
-		// Everything after this pass draws onto the *window* regardless — the
-		// debug overlay is in window pixels and the editor's chrome is the
-		// window — so this is the one target that moves.
-		SDL_GPUColorTargetInfo colourTarget{};
-		colourTarget.texture = offscreen ? State->SlotAt(targetSlot).Texture : swapchain;
-		colourTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
-		colourTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-		colourTarget.store_op = SDL_GPU_STOREOP_STORE;
-
-		// What the overlay and the interface draw onto. When the world went
-		// offscreen the window has never been touched this frame, so the first
-		// pass to reach it clears — otherwise it is whatever the driver handed
-		// back, which is last frame's image or uninitialised memory.
-		SDL_GPUColorTargetInfo windowTarget{};
-		windowTarget.texture = swapchain;
-		windowTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
-		windowTarget.load_op = offscreen ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
-		windowTarget.store_op = SDL_GPU_STOREOP_STORE;
-
-		SDL_GPUDepthStencilTargetInfo depthTarget{};
-		// The one `EnsureDepth` above filled: this slot's when the world is going
-		// into a texture, the shared window one when it is going to the
-		// swapchain. See `SceneSlot::Depth`.
-		depthTarget.texture = offscreen ? State->SlotAt(targetSlot).Depth : State->DepthTexture;
-		depthTarget.clear_depth = 1.0f;
-		depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-		// Nothing reads depth after the pass, so there is no reason to write it
-		// back out to memory.
-		depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
-		depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-		depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-		depthTarget.cycle = true;
-
-		{
-			ENGINE_PROFILE_CAT("opaque pass", core::ProfileCategory::Render);
-
-			// Entered unconditionally, and that is the honest reading rather
-			// than a convenience: the stage clears colour and depth, so a frame
-			// with nothing in it still ran this pass — the background is what it
-			// drew. `Validate` sees the same thing, because the stage's writes
-			// are marked `Clear`.
-			passes.Enter(Pass::Opaque);
-
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
-			// **The light set, pushed once for the whole pass.** Uniform state
-			// on a command buffer persists until it is replaced, so one push
-			// before the draws serves every one of them — which is the whole
-			// reason this is a second buffer rather than fields on the
-			// per-draw `LightingUniforms`.
-			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
-
-			// **The world's rectangle inside an attachment that is larger than
-			// it.** Without this the pass inherits a viewport covering the whole
-			// texture, and a block-rounded target would draw the world into
-			// 1600x960 while the panel shows the 1600x900 corner — the image
-			// squashed by the rounding. Set once here and inherited by the
-			// transparent draws in the same pass. See `SCENE_TARGET_BLOCK`.
-			//
-			// Correct on the window path too, where the two sizes are equal and
-			// this restates the default rather than changing it.
-			const SDL_GPUViewport view{
-				0.0f, 0.0f, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight), 0.0f, 1.0f
-			};
-			SDL_SetGPUViewport(pass, &view);
-
-			// The scissor goes with it. A viewport shrinks what is drawn but
-			// does not clip what a pipeline with no depth test could still
-			// scribble outside it, and the border is memory nothing owns.
-			const SDL_Rect scissor{0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)};
-			SDL_SetGPUScissor(pass, &scissor);
-
-			if (haveInstances) {
-				SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
-
-				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->Meshes.Vertices(), 0},
-					{State->InstanceBuffer, 0},
-				};
-				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
-
-				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-				const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-
-				// `scene::ResolveCamera`, not a projection built here. It is the
-				// one place the engine decides what a camera's matrices are, and
-				// a second copy is a second chance to disagree about handedness,
-				// clip depth or the order of the product — a disagreement that
-				// reads as z-fighting rather than as a matrix mistake.
-				//
-				// The Y convention that used to need a comment here lives there
-				// too: no flip, because SDL's Vulkan backend already submits a
-				// negative-height viewport "for consistency with other
-				// backends".
-				//
-				// The aspect ratio is the rectangle the world is drawn into
-				// rather than anything a caller computed, so a frame taken
-				// mid-resize is projected for the image it actually lands in.
-				// Without a `Viewport` that rectangle is the swapchain, which is
-				// what every non-editor caller gets and what this used to say.
-				// **Identity for the surface projection, because this draw is
-				// not a mirror's.** Every draw that samples a surface pushes its
-				// own matrix below, one per index; leaving a live one here would
-				// give the plain geometry a projection it must never use, which
-				// is the shape of the black-wedge bug the surface pass records.
-				const glm::mat4 viewProjection =
-					scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection;
-
-				const FrameUniforms frameUniforms{
-					viewProjection,
-					lightViewProjection,
-					glm::mat4{1.0f},
-				};
-				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
-
-				// **The surface flag is off for the opaque range and on for a
-				// second draw over the instances that carry one.** Whether an
-				// instance samples the surface is per instance and the uniform
-				// is per draw, so the split is a third draw rather than a
-				// per-fragment branch on data the shader does not have.
-				const LightingUniforms lighting{
-					glm::vec4{SUN_DIRECTION, 0.0f},
-					SUN_AMBIENT,
-					glm::vec4{
-						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f
-					},
-				};
-				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
-
-				// The same, for the runs that sample the surface texture.
-				//
-				// **Declared beside the ordinary one because two runs push it
-				// now**, not one: the opaque mirrors and, since a faded mirror
-				// stopped vanishing, the blended ones at the very end of the
-				// tail. `Flags.w` is the image's own opacity and was unused
-				// until a mirror had to be legible on a pane that is itself
-				// transparent — see `SurfaceView::ImageOpacity`.
-				// Both samplers, every draw. A shadow map that was not rendered
-				// binds another texture in its place rather than nothing: the
-				// flag above is what stops it being read, and an unbound sampler
-				// is undefined behaviour on several backends where a wrongly
-				// bound one is merely ignored.
-				//
-				// **`FallbackTexture` rather than `OverlayTexture`**, which only
-				// exists while a debug panel has something in it. A scene of
-				// nothing but transparent geometry casts nothing, so the shadow
-				// map is absent too — and with the panels closed both were null
-				// and the guard below skipped the bind and drew anyway. See
-				// `Impl::FallbackTexture`.
-				SDL_GPUTexture *const shadow =
-					State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
-				SDL_GPUSampler *const shadowSampler =
-					State->ShadowSampler != nullptr ? State->ShadowSampler : State->OverlaySampler;
-				SDL_GPUSampler *const surfaceSampler =
-					State->SurfaceSampler != nullptr ? State->SurfaceSampler : shadowSampler;
-
-				// Remembered rather than bound, for the surface pass's reason:
-				// `DrawSlots` binds all three samplers together because the
-				// third changes per mesh.
-				SDL_GPUTexture *screenSurface = nullptr;
-				const auto bindScreen = [&](SDL_GPUTexture *texture) { screenSurface = texture; };
-
-				bindScreen(nullptr);
-
-				// **Two draws over one buffer, split at the boundary the
-				// ordering produced.** `first_instance` is what makes that
-				// possible without a second upload: the instance attributes are
-				// per-instance vertex data, so the offset picks up where the
-				// opaque range left off.
-				if (plainOpaque > 0) {
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						sceneCount,
-						plainOpaque,
-						&lighting,
-						shadow,
-						shadowSampler,
-						screenSurface,
-						surfaceSampler,
-						0,
-						result.Triangles
-					);
-				}
-
-				// **The surface draws, one per index rather than one for "the
-				// mirrors".** Each index owns a texture and a projection, so
-				// what used to be a single run is a run each — grouped by
-				// `scene::GroupSurfaces` into `cameraRuns` so every one of them
-				// is still an offset and a count rather than a per-instance
-				// branch.
-				//
-				// **This frame's texture, not the previous one.** The surface
-				// passes have already run, so the screen shows a reflection that
-				// is current. Only what a mirror sees *of another mirror* is a
-				// frame behind, and that is the staleness the pair exists for.
-				LightingUniforms mirroredUniforms{};
-				const auto drawScreenMirrors = [&](bool blended) {
-					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
-						const scene::SurfaceRun &run = cameraRuns[index];
-						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
-						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
-						if (count == 0) {
-							continue;
-						}
-
-						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
-
-						// Its own tint until the surface has a frame, and for a
-						// pane naming an index nothing renders. Skipping it
-						// instead would leave a hole in the geometry, which reads
-						// as a culling bug rather than as a mirror that has not
-						// warmed up.
-						const LightingUniforms *uniforms = &lighting;
-						if (!shown.Ready) {
-							bindScreen(nullptr);
-						} else {
 							const FrameUniforms mirrorFrame{
-								viewProjection,
+								state.ViewProjection,
 								lightViewProjection,
-								shown.ViewProjection,
+								shown.PreviousViewProjection,
 							};
-							const LightingUniforms mirrored{
+							const LightingUniforms mirrorLighting{
 								glm::vec4{SUN_DIRECTION, 0.0f},
 								SUN_AMBIENT,
 								glm::vec4{
@@ -4197,62 +3970,254 @@ namespace engine::render {
 							};
 
 							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-							bindScreen(shown.Texture[shown.Slot]);
+							bindSurface(shown.Texture[shown.Slot ^ 1u]);
 
-							// Held rather than pushed: `DrawSlots` pushes the
-							// fragment uniforms itself, because it has to write
-							// the submesh's colour into them.
-							mirroredUniforms = mirrored;
-							uniforms = &mirroredUniforms;
-
-							result.SurfaceInstances += count;
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								first,
+								count,
+								&mirrorLighting,
+								fallback,
+								shadowSampler,
+								surfaceTexture,
+								State->SurfaceSampler,
+								surfaceFilter,
+								result.Triangles
+							);
 						}
+					};
 
+					drawMirrors(false);
+
+					// **The blended tail *minus* the mirrors in it.** The opaque head
+					// already excludes them for the reason above; a pane that went
+					// transparent moved from the head to the tail and stopped being
+					// excluded, so a faded mirror reflected itself.
+					const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
+					if (blendedPlain > 0 || plan.TransparentSurfaces > 0) {
+						SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+					}
+
+					if (blendedPlain > 0) {
+						plainly();
 						result.DrawCalls += State->DrawSlots(
 							command,
 							pass,
-							sceneCount + first,
-							count,
-							uniforms,
-							shadow,
+							static_cast<uint32_t>(sceneOpaque),
+							blendedPlain,
+							&surfaceLighting,
+							fallback,
 							shadowSampler,
-							screenSurface,
-							surfaceSampler,
-							0,
+							surfaceTexture,
+							State->SurfaceSampler,
+							surfaceFilter,
 							result.Triangles
 						);
-
-						// Back to the ordinary uniforms, so the next draw does
-						// not inherit this mirror's projection.
-						SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
 					}
-				};
 
-				if (surfaceInCamera > 0) {
-					drawScreenMirrors(false);
-					bindScreen(nullptr);
+					// And the blended mirrors that are not this one, last of
+					// everything drawn into this texture.
+					if (plan.TransparentSurfaces > 0) {
+						drawMirrors(true);
+					}
+
+					SDL_EndGPURenderPass(pass);
 				}
 
-				if (transparentCount > 0) {
-					// Same pass, same depth attachment, different pipeline —
-					// blending on and depth writes off. A separate render pass
-					// would have to reload the depth buffer, and the whole point
-					// is that these fragments are tested against what the opaque
-					// pass already wrote.
+				// **Marked ready only after every pass has run**, so a surface that
+				// was written this frame cannot be sampled as another surface's
+				// "previous" within the same frame. From here the screen pass may
+				// sample what was just written and the next frame's surface passes
+				// may sample it as their previous.
+				//
+				// **The signature is recorded here and not where it was computed**,
+				// which is what makes a surface that failed to render try again. A
+				// slot only claims to be drawn with this signature once a pass has
+				// actually drawn it; storing it up front would mark a skipped or
+				// abandoned surface as current and leave it holding the wrong image
+				// until something else in the scene moved.
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
+
+					Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
+					state.Ready = true;
+					state.Signature = surfaceSignature;
+					result.SurfacePasses++;
+				}
+			}
+
+			// --- opaque pass ----------------------------------------------------
+
+			// **The world's target, which is the offscreen texture or the window.**
+			// Everything after this pass draws onto the *window* regardless — the
+			// debug overlay is in window pixels and the editor's chrome is the
+			// window — so this is the one target that moves.
+			SDL_GPUColorTargetInfo colourTarget{};
+			colourTarget.texture = offscreen ? State->SlotAt(targetSlot).Texture : swapchain;
+			colourTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+			colourTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
+
+			SDL_GPUDepthStencilTargetInfo depthTarget{};
+			// The one `EnsureDepth` above filled: this slot's when the world is going
+			// into a texture, the shared window one when it is going to the
+			// swapchain. See `SceneSlot::Depth`.
+			depthTarget.texture = offscreen ? State->SlotAt(targetSlot).Depth : State->DepthTexture;
+			depthTarget.clear_depth = 1.0f;
+			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			// Nothing reads depth after the pass, so there is no reason to write it
+			// back out to memory.
+			depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+			depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+			depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+			depthTarget.cycle = true;
+
+			{
+				ENGINE_PROFILE_CAT("opaque pass", core::ProfileCategory::Render);
+
+				// Entered unconditionally, and that is the honest reading rather
+				// than a convenience: the stage clears colour and depth, so a frame
+				// with nothing in it still ran this pass — the background is what it
+				// drew. `Validate` sees the same thing, because the stage's writes
+				// are marked `Clear`.
+				passes.Enter(Pass::Opaque);
+
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+				// **The light set, pushed once for the whole pass.** Uniform state
+				// on a command buffer persists until it is replaced, so one push
+				// before the draws serves every one of them — which is the whole
+				// reason this is a second buffer rather than fields on the
+				// per-draw `LightingUniforms`.
+				SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+
+				// **The world's rectangle inside an attachment that is larger than
+				// it.** Without this the pass inherits a viewport covering the whole
+				// texture, and a block-rounded target would draw the world into
+				// 1600x960 while the panel shows the 1600x900 corner — the image
+				// squashed by the rounding. Set once here and inherited by the
+				// transparent draws in the same pass. See `SCENE_TARGET_BLOCK`.
+				//
+				// Correct on the window path too, where the two sizes are equal and
+				// this restates the default rather than changing it.
+				const SDL_GPUViewport view{
+					0.0f, 0.0f, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight), 0.0f, 1.0f
+				};
+				SDL_SetGPUViewport(pass, &view);
+
+				// The scissor goes with it. A viewport shrinks what is drawn but
+				// does not clip what a pipeline with no depth test could still
+				// scribble outside it, and the border is memory nothing owns.
+				const SDL_Rect scissor{0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)};
+				SDL_SetGPUScissor(pass, &scissor);
+
+				if (haveInstances) {
+					SDL_BindGPUGraphicsPipeline(pass, State->OpaquePipeline);
+
+					const SDL_GPUBufferBinding vertexBindings[] = {
+						{State->Meshes.Vertices(), 0},
+						{State->InstanceBuffer, 0},
+					};
+					SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+					const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
+
+					// `scene::ResolveCamera`, not a projection built here. It is the
+					// one place the engine decides what a camera's matrices are, and
+					// a second copy is a second chance to disagree about handedness,
+					// clip depth or the order of the product — a disagreement that
+					// reads as z-fighting rather than as a matrix mistake.
 					//
-					// Still its own stage, sharing a render pass. What the list
-					// describes is what is drawn and in what order, not how many
-					// times a target is bound.
-					passes.Enter(Pass::Transparent);
+					// The Y convention that used to need a comment here lives there
+					// too: no flip, because SDL's Vulkan backend already submits a
+					// negative-height viewport "for consistency with other
+					// backends".
+					//
+					// The aspect ratio is the rectangle the world is drawn into
+					// rather than anything a caller computed, so a frame taken
+					// mid-resize is projected for the image it actually lands in.
+					// Without a `Viewport` that rectangle is the swapchain, which is
+					// what every non-editor caller gets and what this used to say.
+					// **Identity for the surface projection, because this draw is
+					// not a mirror's.** Every draw that samples a surface pushes its
+					// own matrix below, one per index; leaving a live one here would
+					// give the plain geometry a projection it must never use, which
+					// is the shape of the black-wedge bug the surface pass records.
+					const glm::mat4 viewProjection =
+						scene::ResolveCamera(cameraFrame, camera, aspect).ViewProjection;
 
-					SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+					const FrameUniforms frameUniforms{
+						viewProjection,
+						lightViewProjection,
+						glm::mat4{1.0f},
+					};
+					SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
 
-					if (plainTransparent > 0) {
+					// **The surface flag is off for the opaque range and on for a
+					// second draw over the instances that carry one.** Whether an
+					// instance samples the surface is per instance and the uniform
+					// is per draw, so the split is a third draw rather than a
+					// per-fragment branch on data the shader does not have.
+					const LightingUniforms lighting{
+						glm::vec4{SUN_DIRECTION, 0.0f},
+						SUN_AMBIENT,
+						glm::vec4{
+							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f
+						},
+					};
+					SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
+
+					// The same, for the runs that sample the surface texture.
+					//
+					// **Declared beside the ordinary one because two runs push it
+					// now**, not one: the opaque mirrors and, since a faded mirror
+					// stopped vanishing, the blended ones at the very end of the
+					// tail. `Flags.w` is the image's own opacity and was unused
+					// until a mirror had to be legible on a pane that is itself
+					// transparent — see `SurfaceView::ImageOpacity`.
+					// Both samplers, every draw. A shadow map that was not rendered
+					// binds another texture in its place rather than nothing: the
+					// flag above is what stops it being read, and an unbound sampler
+					// is undefined behaviour on several backends where a wrongly
+					// bound one is merely ignored.
+					//
+					// **`FallbackTexture` rather than `OverlayTexture`**, which only
+					// exists while a debug panel has something in it. A scene of
+					// nothing but transparent geometry casts nothing, so the shadow
+					// map is absent too — and with the panels closed both were null
+					// and the guard below skipped the bind and drew anyway. See
+					// `Impl::FallbackTexture`.
+					SDL_GPUTexture *const shadow =
+						State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture;
+					SDL_GPUSampler *const shadowSampler =
+						State->ShadowSampler != nullptr ? State->ShadowSampler : State->OverlaySampler;
+					SDL_GPUSampler *const surfaceSampler =
+						State->SurfaceSampler != nullptr ? State->SurfaceSampler : shadowSampler;
+
+					// Remembered rather than bound, for the surface pass's reason:
+					// `DrawSlots` binds all three samplers together because the
+					// third changes per mesh.
+					SDL_GPUTexture *screenSurface = nullptr;
+					const auto bindScreen = [&](SDL_GPUTexture *texture) { screenSurface = texture; };
+
+					bindScreen(nullptr);
+
+					// **Two draws over one buffer, split at the boundary the
+					// ordering produced.** `first_instance` is what makes that
+					// possible without a second upload: the instance attributes are
+					// per-instance vertex data, so the offset picks up where the
+					// opaque range left off.
+					if (plainOpaque > 0) {
 						result.DrawCalls += State->DrawSlots(
 							command,
 							pass,
-							sceneCount + static_cast<uint32_t>(opaqueCount),
-							plainTransparent,
+							sceneCount,
+							plainOpaque,
 							&lighting,
 							shadow,
 							shadowSampler,
@@ -4263,56 +4228,207 @@ namespace engine::render {
 						);
 					}
 
-					// **The blended mirrors, last of everything.** Same pipeline
-					// and same sort, different uniforms: these runs are the ones
-					// that sample a surface texture, so a pane at any
-					// transparency still shows its reflection at the image's own
-					// opacity.
-					if (transparentSurfaces > 0) {
-						drawScreenMirrors(true);
+					// **The surface draws, one per index rather than one for "the
+					// mirrors".** Each index owns a texture and a projection, so
+					// what used to be a single run is a run each — grouped by
+					// `scene::GroupSurfaces` into `cameraRuns` so every one of them
+					// is still an offset and a count rather than a per-instance
+					// branch.
+					//
+					// **This frame's texture, not the previous one.** The surface
+					// passes have already run, so the screen shows a reflection that
+					// is current. Only what a mirror sees *of another mirror* is a
+					// frame behind, and that is the staleness the pair exists for.
+					LightingUniforms mirroredUniforms{};
+					const auto drawScreenMirrors = [&](bool blended) {
+						for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+							const scene::SurfaceRun &run = cameraRuns[index];
+							const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
+							const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
+							if (count == 0) {
+								continue;
+							}
+
+							const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+
+							// Its own tint until the surface has a frame, and for a
+							// pane naming an index nothing renders. Skipping it
+							// instead would leave a hole in the geometry, which reads
+							// as a culling bug rather than as a mirror that has not
+							// warmed up.
+							const LightingUniforms *uniforms = &lighting;
+							if (!shown.Ready) {
+								bindScreen(nullptr);
+							} else {
+								const FrameUniforms mirrorFrame{
+									viewProjection,
+									lightViewProjection,
+									shown.ViewProjection,
+								};
+								const LightingUniforms mirrored{
+									glm::vec4{SUN_DIRECTION, 0.0f},
+									SUN_AMBIENT,
+									glm::vec4{
+										haveShadow ? 1.0f : 0.0f,
+										1.0f / static_cast<float>(SHADOW_RESOLUTION),
+										1.0f,
+										shown.ImageOpacity
+									},
+								};
+
+								SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
+								bindScreen(shown.Texture[shown.Slot]);
+
+								// Held rather than pushed: `DrawSlots` pushes the
+								// fragment uniforms itself, because it has to write
+								// the submesh's colour into them.
+								mirroredUniforms = mirrored;
+								uniforms = &mirroredUniforms;
+
+								result.SurfaceInstances += count;
+							}
+
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								sceneCount + first,
+								count,
+								uniforms,
+								shadow,
+								shadowSampler,
+								screenSurface,
+								surfaceSampler,
+								0,
+								result.Triangles
+							);
+
+							// Back to the ordinary uniforms, so the next draw does
+							// not inherit this mirror's projection.
+							SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+						}
+					};
+
+					if (surfaceInCamera > 0) {
+						drawScreenMirrors(false);
+						bindScreen(nullptr);
 					}
+
+					if (transparentCount > 0) {
+						// Same pass, same depth attachment, different pipeline —
+						// blending on and depth writes off. A separate render pass
+						// would have to reload the depth buffer, and the whole point
+						// is that these fragments are tested against what the opaque
+						// pass already wrote.
+						//
+						// Still its own stage, sharing a render pass. What the list
+						// describes is what is drawn and in what order, not how many
+						// times a target is bound.
+						passes.Enter(Pass::Transparent);
+
+						SDL_BindGPUGraphicsPipeline(pass, State->TransparentPipeline);
+
+						if (plainTransparent > 0) {
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								sceneCount + static_cast<uint32_t>(opaqueCount),
+								plainTransparent,
+								&lighting,
+								shadow,
+								shadowSampler,
+								screenSurface,
+								surfaceSampler,
+								0,
+								result.Triangles
+							);
+						}
+
+						// **The blended mirrors, last of everything.** Same pipeline
+						// and same sort, different uniforms: these runs are the ones
+						// that sample a surface texture, so a pane at any
+						// transparency still shows its reflection at the image's own
+						// opacity.
+						if (transparentSurfaces > 0) {
+							drawScreenMirrors(true);
+						}
+					}
+
+					// --- particles ---------------------------------------------
+					//
+					// **After every blended run and inside the same pass**, which is
+					// the arrangement the header states: a particle is depth-tested
+					// against the world and drawn over the glass. Sorting half a
+					// million particles into the geometry's own order would cost more
+					// than the artefact of not doing it.
+					//
+					// **Not their own `Pass` member**, deliberately. `render::Pass` is
+					// derived from `graph::StandardGraph`, and adding
+					// a stage to one and not the other is exactly the drift D00016
+					// records. Particles are part of what `Transparent` means until
+					// the pipeline is a graph rather than a function body.
+					if (particleCount > 0) {
+						passes.Enter(Pass::Transparent);
+						result.DrawCalls += State->DrawParticles(
+							command, pass, frameUniforms.ViewProjection, cameraFrame, particles
+						);
+					}
+
+					// The beams and trails, after the particles. See the header for
+					// why the order is fixed rather than sorted.
+					if (ribbonCount > 0) {
+						passes.Enter(Pass::Transparent);
+						result.DrawCalls += State->DrawRibbons(
+							command, pass, frameUniforms.ViewProjection, cameraFrame, ribbonRuns
+						);
+					}
+
+					// **Counted as it is drawn rather than derived from the instance
+					// count.** While everything was a cube, triangles were thirty-six
+					// indices times however many instances; with a mesh per instance
+					// there is no such multiplier, and the honest number is the one
+					// `DrawSlots` accumulated. `instanceCount` is still what the
+					// instance counter reports.
+					(void)instanceCount;
 				}
 
-				// --- particles ---------------------------------------------
-				//
-				// **After every blended run and inside the same pass**, which is
-				// the arrangement the header states: a particle is depth-tested
-				// against the world and drawn over the glass. Sorting half a
-				// million particles into the geometry's own order would cost more
-				// than the artefact of not doing it.
-				//
-				// **Not their own `Pass` member**, deliberately. `render::Pass` is
-				// compared against `graph::StandardPipeline` by a test, and adding
-				// a stage to one and not the other is exactly the drift D00016
-				// records. Particles are part of what `Transparent` means until
-				// the pipeline is a graph rather than a function body.
-				if (particleCount > 0) {
-					passes.Enter(Pass::Transparent);
-					result.DrawCalls += State->DrawParticles(
-						command, pass, frameUniforms.ViewProjection, cameraFrame, particles
-					);
-				}
-
-				// The beams and trails, after the particles. See the header for
-				// why the order is fixed rather than sorted.
-				if (ribbonCount > 0) {
-					passes.Enter(Pass::Transparent);
-					result.DrawCalls += State->DrawRibbons(
-						command, pass, frameUniforms.ViewProjection, cameraFrame, ribbonRuns
-					);
-				}
-
-				// **Counted as it is drawn rather than derived from the instance
-				// count.** While everything was a cube, triangles were thirty-six
-				// indices times however many instances; with a mesh per instance
-				// there is no such multiplier, and the honest number is the one
-				// `DrawSlots` accumulated. `instanceCount` is still what the
-				// instance counter reports.
-				(void)instanceCount;
+				SDL_EndGPURenderPass(pass);
 			}
 
-			SDL_EndGPURenderPass(pass);
+			// **This view drew straight onto the window, so nothing after it may
+			// clear.** `windowTarget` starts the frame asking to clear, because
+			// until some pass touches the swapchain it holds last frame's image or
+			// uninitialised memory. A view that went offscreen leaves it asking; one
+			// that did not has just cleared and filled it here.
+			//
+			// Frame-level rather than per view, and it has to be: with four
+			// viewports drawing to the window, the second must not erase the first.
+			if (!offscreen) {
+				windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			}
+
+			// **The capture is this view's, and the last one asking wins.** It reads
+			// a slot's texture and its drawn size, both of which are per view, so
+			// the epilogue cannot recover them once the loop has moved on.
+			if (offscreen && !State->CapturePath.empty()) {
+				captureSlot = targetSlot;
+				captureWidth = sceneWidth;
+				captureHeight = sceneHeight;
+				captureReady = true;
+			}
 		}
+
+		// --- the interface's uploads ----------------------------------------
+		//
+		// **Once for the frame, after every view.** Dear ImGui's backend copies
+		// its vertex and index buffers through a copy pass, and SDL refuses to
+		// open one while a render pass is in flight — so this cannot move inside
+		// the loop above, where a view's render passes are in flight, and it
+		// cannot be per view, because the hook has one buffer and preparing it
+		// four times would upload the same widgets four times.
+		//
+		// The split is `FrameOverlayHook`'s contract for exactly that reason.
+		const bool drawInterface =
+			!State->Headless() && interfaceHook != nullptr && interfaceHook->Prepare(command);
 
 		// --- overlay pass ---------------------------------------------------
 
@@ -4372,25 +4488,25 @@ namespace engine::render {
 		// editor's panels over it. A copy pass, so it cannot be inside one of
 		// the render passes above.
 		SDL_GPUTransferBuffer *capture = nullptr;
-		if (offscreen && !State->CapturePath.empty()) {
+		if (captureReady) {
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
-			info.size = sceneWidth * sceneHeight * 4;
+			info.size = captureWidth * captureHeight * 4;
 
 			capture = SDL_CreateGPUTransferBuffer(State->Device, &info);
 			if (capture != nullptr) {
 				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
 				SDL_GPUTextureRegion source{};
-				source.texture = State->SlotAt(targetSlot).Texture;
-				source.w = sceneWidth;
-				source.h = sceneHeight;
+				source.texture = State->SlotAt(captureSlot).Texture;
+				source.w = captureWidth;
+				source.h = captureHeight;
 				source.d = 1;
 
 				SDL_GPUTextureTransferInfo destination{};
 				destination.transfer_buffer = capture;
-				destination.pixels_per_row = sceneWidth;
-				destination.rows_per_layer = sceneHeight;
+				destination.pixels_per_row = captureWidth;
+				destination.rows_per_layer = captureHeight;
 
 				SDL_DownloadFromGPUTexture(copy, &source, &destination);
 				SDL_EndGPUCopyPass(copy);
@@ -4435,9 +4551,9 @@ namespace engine::render {
 				SDL_WaitForGPUFences(State->Device, true, &fence, 1);
 				SDL_ReleaseGPUFence(State->Device, fence);
 
-				if (State->WriteCapture(capture, sceneWidth, sceneHeight)) {
+				if (State->WriteCapture(capture, captureWidth, captureHeight)) {
 					ENGINE_INFO(
-						"captured {} x {} to {}", sceneWidth, sceneHeight, State->CapturePath.string()
+						"captured {} x {} to {}", captureWidth, captureHeight, State->CapturePath.string()
 					);
 				}
 

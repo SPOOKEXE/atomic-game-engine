@@ -28,7 +28,8 @@ namespace engine::render {
 
 	// The stages `Render` submits, in submission order.
 	//
-	// Tests compare this order with graph::StandardPipeline.
+	// `PassOrder` reads these names out of `graph::StandardGraph`; this enum is
+	// the hand-written half, and a test checks the two line up.
 	//
 	// @since v0.6
 	enum class Pass : uint8_t {
@@ -360,6 +361,117 @@ namespace engine::render {
 		virtual void Record(void *commandBuffer, void *renderPass) = 0;
 	};
 
+	// One view of one world, and everything that is that view's alone.
+	//
+	// **The twelve parameters `Render` used to take, minus the two that were
+	// never the view's.** Four of those twelve arrived after v0.9, each by the
+	// same route — a feature needed one more span, and the shortest change was
+	// one more trailing default argument. `DEFERRED.md` D00002 recorded where
+	// that ends: *"handle multiple worlds in parallel is the first roadmap line
+	// that cannot be met by making the function longer."*
+	//
+	// **What makes this a view rather than a rectangle**, which is the mistake
+	// v0.7 made and deleted inside one version. `render::Viewport` described
+	// *where a view lands*; every field here is about *what is seen* — the eye,
+	// the lens, the world, the lights near it. The test the deleted type failed
+	// is whether `graph::Node::PerView` can be read against it, and it can: a
+	// shadow map is a function of the world and the sun, so it is shared across
+	// these, and a colour pass is a function of `CameraFrame` and is not.
+	//
+	// The overlay and the interface hook are deliberately *not* here. Both are
+	// the window's rather than a view's — one CPU image and one editor's chrome,
+	// drawn once over whatever the views produced — so they stay parameters of
+	// the frame. See `Renderer::Render`.
+	//
+	// Nothing here is retained past the call: the spans are read during it and
+	// the values are copied.
+	//
+	// @since v0.11
+	// @client
+	struct View {
+		// World-space placement of the camera.
+		core::CFrame CameraFrame;
+
+		// Field of view and clipping distances.
+		//
+		// No aspect ratio, because it is the target's rather than the author's —
+		// `scene::ResolveCamera` takes one so a frame caught during a resize is
+		// projected for the image it is actually drawn into.
+		scene::Camera Camera;
+
+		// What to draw, as the world described it.
+		//
+		// **Per view rather than per frame, which is what "multiple worlds"
+		// means.** Two views of one world pass the same span; a studio showing a
+		// server's world beside a client's passes two different ones, and
+		// nothing in the renderer needs to know which case it is in.
+		std::span<const scene::DrawInstance> Instances;
+
+		// The offscreen views to render first, one per surface index. Empty for
+		// a scene with no mirror in it.
+		std::span<const SurfaceView> Surfaces;
+
+		// Draw the world into an offscreen texture of this size instead of into
+		// the window, or null for the window. Decides the aspect ratio and the
+		// cull frustum as well as the target — see `SceneTarget`.
+		const SceneTarget *Target = nullptr;
+
+		// Which viewport this is, selecting both the scene texture and the
+		// surface texture bank. A program with one view uses 0 and never sets
+		// this. See `Renderer::SceneTexture`.
+		size_t Slot = 0;
+
+		// Which world this view is of.
+		//
+		// **An opaque number, and deliberately not a `world::WorldId`.** `render`
+		// is L12 `client` and a world's identifier is L4's; what this needs is
+		// only whether two views are of the same world, so it takes whatever the
+		// caller already uses to tell them apart and never learns what a world
+		// is. `world::WorldId::Value` is the obvious thing to pass.
+		//
+		// **What it decides is how much shared work a frame does.** A shadow map
+		// is per world per light, so views sharing a world share one and views of
+		// different worlds need one each — see `graph::RenderGraph::Execute`.
+		// Leaving it at zero puts every view in one world, which is what a game
+		// and a single-panel editor both are.
+		uint64_t World = 0;
+
+		// One batch per emitter with live particles, drawn after the blended
+		// geometry and before the overlay.
+		//
+		// **After the blended pass and never sorted against it**, which is the
+		// same trade `scene::ScenePlan::TransparentSurfaces` makes for mirrors:
+		// a particle in front of a pane of glass is drawn after it whatever the
+		// depths say. One sorted run per pipeline is what lets the blend mode be
+		// a pipeline binding instead of a per-fragment branch, and interleaving
+		// half a million particles into the geometry sort would cost more than
+		// the artefact does.
+		std::span<const ParticleBatch> Particles;
+
+		// Every beam and trail vertex this world produced, as
+		// `effects::BuildRibbons` packed them. The whole stream rather than one
+		// run, because the runs index into it.
+		std::span<const effects::RibbonVertex> RibbonVertices;
+
+		// Where each ribbon sits in that stream.
+		//
+		// **Drawn after the particles**, which is one more fixed ordering in a
+		// pass that has several. A beam is usually the thing an author wants on
+		// top of its own sparks, so the order is the useful one rather than an
+		// accident.
+		std::span<const effects::RibbonRun> RibbonRuns;
+
+		// The point and spot lights near this view, at most `MAX_SCENE_LIGHTS`.
+		//
+		// **Added to the directional term rather than replacing it**, so a scene
+		// with no lamps looks exactly as it did before v0.10.
+		//
+		// Anything past the cap is dropped, and the caller is the one that
+		// should be choosing which: the renderer has no idea which lamp matters.
+		// `client::CollectLights` picks the nearest to the eye.
+		std::span<const SceneLight> Lights;
+	};
+
 	// What one `Render` call submitted, and whether it reached the display.
 	//
 	// A default result means no frame was presented, including while the window
@@ -681,10 +793,27 @@ namespace engine::render {
 		// @return True when the requested mode was supported and taken.
 		bool SetVerticalSync(bool enabled);
 
-		// Draws one frame and presents it. Returns false in Presented when the
-		// swapchain had no texture — minimised, or resizing — which is not an
-		// error and not a reason to stop ticking. It is also false if SDL rejects
-		// command submission.
+		// Draws one frame from any number of views and presents it.
+		//
+		// **One frame, many views, and that is the whole of this signature.** Every
+		// view in `views` is recorded into one command buffer, which is acquired
+		// once and submitted once. Passing four views draws four viewports in a
+		// frame; passing one is what a game does and costs exactly what it did.
+		//
+		// **What used to be twelve parameters is now `View` and two things that
+		// were never a view's.** The overlay is one CPU image for the window and
+		// the interface hook is the editor's chrome drawn over everything, so both
+		// belong to the frame however many worlds it shows. See `View` for why the
+		// rest moved and for `DEFERRED.md` D00002, which is the entry this closes.
+		//
+		// **An empty `views` is legal and draws no world.** It is what a frame that
+		// is only an interface looks like — the window is still cleared, the
+		// overlay and the hook still draw, and the frame still presents. A caller
+		// with nothing to show should not have to invent a camera to say so.
+		//
+		// Returns `Presented = false` when the swapchain had no texture — minimised,
+		// or resizing — which is not an error and not a reason to stop ticking. It
+		// is also false if SDL rejects command submission.
 		//
 		// `overlay` is uploaded only when it has something pending, and drawn
 		// whenever it has content — the texture holds the last thing sent to it,
@@ -693,87 +822,25 @@ namespace engine::render {
 		// which is the only reason it is not a const reference; nothing else
 		// about it is retained past the call.
 		//
-		// The camera and instances are copied during the call and not retained.
-		//
 		// The aspect ratio comes from the swapchain texture this call acquired
 		// rather than from a caller, so a frame taken during a resize is
 		// projected for the image it is actually drawn into. `scene::Camera`
 		// therefore holds no aspect ratio and `scene::ResolveCamera` takes one.
 		//
-		// @param cameraFrame World-space placement of the camera.
-		// @param camera      Field of view and clipping distances.
-		// @param instances   What to draw, as the world described it. Each is
-		//                    turned into a model matrix and a colour here.
-		// @param overlay     CPU premultiplied RGBA8 overlay. Uploaded only when
-		//                    it has a pending region, drawn whenever it has
-		//                    content, and marked uploaded on the way out.
-		// @param surfaces    The offscreen views to render first, one per surface
-		//                    index. Empty for a scene with no mirror in it.
-		// @param interfaceHook An editor's chrome, drawn last, or null. See
-		//                    `FrameOverlayHook` for why this is not imgui.
-		// @param sceneTarget Draw the world into an offscreen texture of this
-		//                    size instead of into the window, or null for the
-		//                    window. Decides the aspect ratio and the cull
-		//                    frustum as well as the target — see `SceneTarget`.
-		// @param targetSlot  Which viewport this call is drawing. A game draws
-		//                    one view and never passes this; a studio keeps a
-		//                    slot per viewport so two panels of different sizes
-		//                    do not reallocate one shared texture twice a frame.
-		//                    See `SceneTexture`.
-		//
-		//                    Selects the surface texture bank for this viewport.
-		// @param particles  One batch per emitter with live particles, drawn after
-		//                    the blended geometry and before the overlay. Empty
-		//                    for a scene with no effects in it, which is every
-		//                    scene that has not installed a particle pool.
-		//
-		//                    **After the blended pass and never sorted against
-		//                    it**, which is the same trade `ScenePlan::
-		//                    TransparentSurfaces` makes for mirrors: a particle in
-		//                    front of a pane of glass is drawn after it whatever
-		//                    the depths say. One sorted run per pipeline is what
-		//                    lets the blend mode be a pipeline binding instead of
-		//                    a per-fragment branch, and interleaving half a million
-		//                    particles into the geometry sort would cost more than
-		//                    the artefact does.
-		// @param ribbonVertices Every beam and trail vertex this world produced,
-		//                    as `effects::BuildRibbons` packed them. Passed as the
-		//                    whole stream rather than per run, because the runs
-		//                    index into it.
-		// @param ribbonRuns  Where each ribbon sits in that stream.
-		//
-		//                    **Drawn after the particles**, which is one more
-		//                    fixed ordering in a pass that has several — see the
-		//                    `particles` note above. A beam is usually the thing
-		//                    an author wants on top of its own sparks, so the
-		//                    order is the useful one rather than an accident, and
-		//                    it is fixed rather than sorted for the same reason
-		//                    every other run here is.
-		// @param lights     The point and spot lights near this view, at most
-		//                    `MAX_SCENE_LIGHTS`. **Added to the directional term
-		//                    rather than replacing it**, so a scene with no lamps
-		//                    looks exactly as it did before v0.10 — which is what
-		//                    makes this safe to switch on for every existing world.
-		//
-		//                    Anything past the cap is dropped, and the caller is
-		//                    the one that should be choosing which: the renderer
-		//                    has no idea which lamp matters. `client::CollectLights`
-		//                    picks the nearest to the eye.
-		// @return Submitted draw counts and whether the frame was presented.
-		FrameResult Render(
-			const core::CFrame &cameraFrame,
-			const scene::Camera &camera,
-			std::span<const scene::DrawInstance> instances,
-			OverlayImage &overlay,
-			std::span<const SurfaceView> surfaces = {},
-			FrameOverlayHook *interfaceHook = nullptr,
-			const SceneTarget *sceneTarget = nullptr,
-			size_t targetSlot = 0,
-			std::span<const ParticleBatch> particles = {},
-			std::span<const effects::RibbonVertex> ribbonVertices = {},
-			std::span<const effects::RibbonRun> ribbonRuns = {},
-			std::span<const SceneLight> lights = {}
-		);
+		// @param views    What to draw, one entry per viewport. Read during the
+		//                 call and not retained. Two views naming the same `Slot`
+		//                 is refused with a warning rather than drawn, because the
+		//                 second would overwrite the first\'s texture and the frame
+		//                 would silently show only one of them.
+		// @param overlay  CPU premultiplied RGBA8 overlay. Uploaded only when it
+		//                 has a pending region, drawn whenever it has content, and
+		//                 marked uploaded on the way out.
+		// @param interfaceHook An editor\'s chrome, drawn last, or null. See
+		//                 `FrameOverlayHook` for why this is not imgui.
+		// @return Submitted draw counts, summed over every view, and whether the
+		//         frame was presented.
+		FrameResult
+		Render(std::span<const View> views, OverlayImage &overlay, FrameOverlayHook *interfaceHook = nullptr);
 
 		// The texture the most recent `Render` drew that slot's world into.
 		//

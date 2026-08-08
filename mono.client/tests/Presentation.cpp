@@ -10,7 +10,9 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -520,4 +522,94 @@ TEST_CASE("a scripted move still interpolates across a tick", "[client][presenta
 		REQUIRE(list->Instances.size() == 1);
 		CHECK(list->Instances[0].Frame.Position.X == Catch::Approx(20.0f));
 	});
+}
+
+// --- derived state a world that never ticks still needs -----------------------
+//
+// **Three passes had the same bug and one of them shipped as a visible fault.**
+// A studio in Edit mode never ticks: `Editor::Simulate` returns before
+// `Universe::Tick`, and `World::Present` runs `PreRender` alone. So a pass
+// registered in `PreSimulation` does not run at all while somebody is
+// authoring — and everything downstream of it reads whatever the component was
+// last left holding, which for something the editor just made is the type's
+// default.
+//
+// `PreviousTransform` was the one that got noticed, because "the part draws at
+// the origin" is impossible to miss. These two are the same shape and were
+// quieter: a material that does nothing until you press Play, and a lamp that
+// lights the origin instead of the part it hangs off.
+//
+// The tests present without ever ticking, which is exactly what the studio does.
+
+TEST_CASE("a material assigned without a tick reaches the draw list", "[client][presentation]") {
+	Universe universe;
+	const WorldId world = AddWorld(universe, "presentation.material");
+	AddPart(universe, world, "Crate");
+
+	const Name asset("materials/oak.amat");
+	const Name colour("materials/oak_Color.atex");
+
+	universe.Enter(world, [&asset, &colour](Store &store) {
+		REQUIRE(engine::scene::RecordMaterial(store, asset, colour));
+
+		const Entity crate = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Crate");
+		const Entity material = store.CreateInstance(engine::scene::MaterialClass(), "Oak");
+		REQUIRE(store.SetParent(material, crate));
+
+		auto *ref = store.GetMutable<engine::scene::MaterialRef>(material);
+		REQUIRE(ref != nullptr);
+		ref->Asset = asset;
+	});
+
+	REQUIRE(Drawn(universe, world) == 1);
+
+	universe.Enter(world, [&colour](Store &store) {
+		// The component the resolve pass writes...
+		const Entity crate = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Crate");
+		CHECK(store.Get<engine::scene::SurfaceAppearance>(crate)->ColourMap == colour);
+
+		// ...and the copy of it the renderer actually samples, which is the half
+		// that decides whether anything looks different on screen.
+		const auto *list = store.Resource<client::DrawList>();
+		REQUIRE(list != nullptr);
+		REQUIRE(list->Instances.size() == 1);
+		CHECK(list->Instances[0].Texture == colour);
+	});
+}
+
+TEST_CASE("a light on an attachment is placed without a tick", "[client][presentation]") {
+	// `Attachment::WorldFrame` is a cache with one writer, and `CollectLights`
+	// reads it rather than walking the hierarchy per lamp. Unresolved, it is the
+	// identity — so every lamp in an edited world lit the origin, whatever it
+	// was actually parented to.
+	Universe universe;
+	const WorldId world = AddWorld(universe, "presentation.lamp");
+	AddPart(universe, world, "Post");
+
+	const Vector3 stood{10.0f, 0.0f, -4.0f};
+	const Vector3 raised{0.0f, 6.0f, 0.0f};
+
+	universe.Enter(world, [&stood, &raised](Store &store) {
+		const Entity post = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Post");
+		REQUIRE(store.SetProperty(post, Name("Position"), &stood, sizeof(stood)));
+
+		const Entity point = store.CreateInstance(engine::ecs::Classes::Find(Name("Attachment")), "Top");
+		REQUIRE(store.SetParent(point, post));
+		store.GetMutable<engine::scene::Attachment>(point)->Frame = engine::core::CFrame(raised);
+
+		const Entity bulb = store.CreateInstance(engine::ecs::Classes::Find(Name("PointLight")), "Bulb");
+		REQUIRE(store.SetParent(bulb, point));
+	});
+
+	universe.Present(world, 1.0f / 60.0f, 1.0f);
+
+	std::vector<engine::render::SceneLight> lights;
+	universe.Enter(world, [&lights](Store &store) {
+		CHECK(client::CollectLights(store, Vector3{}, lights) == 1);
+	});
+
+	REQUIRE(lights.size() == 1);
+	CHECK(lights[0].Position.X == Catch::Approx(stood.X + raised.X));
+	CHECK(lights[0].Position.Y == Catch::Approx(stood.Y + raised.Y));
+	CHECK(lights[0].Position.Z == Catch::Approx(stood.Z + raised.Z));
 }

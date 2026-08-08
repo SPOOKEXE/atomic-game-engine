@@ -134,19 +134,19 @@ using namespace ordering_bench;
 // One iteration is one instance, so every row divides into a per-instance cost
 // and the ladder says directly whether ordering is linear in the draw list.
 
-BENCH("OrderScene · 1k instances, opaque", 1000) {
+BENCH_PER_ITEM("OrderScene · 1k instances, opaque", 1000) {
 	const std::vector<DrawInstance> &instances = SceneOf(1000, 0, 0);
 	const ScenePlan plan = OrderScene(instances, EYE, Order());
 	Consume(plan.Opaque);
 }
 
-BENCH("OrderScene · 10k instances, opaque", 10'000) {
+BENCH_PER_ITEM("OrderScene · 10k instances, opaque", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 0, 0);
 	const ScenePlan plan = OrderScene(instances, EYE, Order());
 	Consume(plan.Opaque);
 }
 
-BENCH("OrderScene · 50k instances, opaque", 50'000) {
+BENCH_PER_ITEM("OrderScene · 50k instances, opaque", 50'000) {
 	// A large scene, and the one that says whether the per-instance cost is
 	// really flat. Fifty thousand draw instances is more than a renderer should
 	// be submitting, which is exactly why it belongs here: the number that says
@@ -163,25 +163,25 @@ BENCH("OrderScene · 50k instances, opaque", 50'000) {
 // climb across these four rows is the whole cost of the second pass's ordering,
 // and it is superlinear in a way none of the rows above can show.
 
-BENCH("OrderScene · 10k instances, 0% transparent", 10'000) {
+BENCH_PER_ITEM("OrderScene · 10k instances, 0% transparent", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 0, 0);
 	const ScenePlan plan = OrderScene(instances, EYE, Order());
 	Consume(plan.Transparent);
 }
 
-BENCH("OrderScene · 10k instances, 5% transparent", 10'000) {
+BENCH_PER_ITEM("OrderScene · 10k instances, 5% transparent", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 5, 0);
 	const ScenePlan plan = OrderScene(instances, EYE, Order());
 	Consume(plan.Transparent);
 }
 
-BENCH("OrderScene · 10k instances, 25% transparent", 10'000) {
+BENCH_PER_ITEM("OrderScene · 10k instances, 25% transparent", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 25, 0);
 	const ScenePlan plan = OrderScene(instances, EYE, Order());
 	Consume(plan.Transparent);
 }
 
-BENCH("OrderScene · 10k instances, 100% transparent", 10'000) {
+BENCH_PER_ITEM("OrderScene · 10k instances, 100% transparent", 10'000) {
 	// **The worst case, and it is a real scene**: a wall of glass, a particle
 	// field, a UI layer drawn in world space. Everything sorts, nothing
 	// partitions, and this is what that frame costs before a single triangle is
@@ -193,7 +193,7 @@ BENCH("OrderScene · 10k instances, 100% transparent", 10'000) {
 
 // --- mirrors -------------------------------------------------------------------
 
-BENCH("OrderScene · 10k instances, 10% showing a surface", 10'000) {
+BENCH_PER_ITEM("OrderScene · 10k instances, 10% showing a surface", 10'000) {
 	// `PartitionSurfaces` returns without touching the order when nothing shows
 	// a surface — every scene with no mirror in it — because `stable_partition`
 	// allocates a temporary. So the gap between this row and the 0% one is the
@@ -204,7 +204,7 @@ BENCH("OrderScene · 10k instances, 10% showing a surface", 10'000) {
 	Consume(plan.Surfaces);
 }
 
-BENCH("OrderScene · 10k instances, 10% surfaces and 10% transparent", 10'000) {
+BENCH_PER_ITEM("OrderScene · 10k instances, 10% surfaces and 10% transparent", 10'000) {
 	// Both passes doing work at once, which is what a hall of mirrors with
 	// windows actually is. Read against the two single-cause rows: if it is
 	// dearer than their sum, the two orderings are interfering.
@@ -213,7 +213,7 @@ BENCH("OrderScene · 10k instances, 10% surfaces and 10% transparent", 10'000) {
 	Consume(plan.Surfaces + plan.Transparent);
 }
 
-BENCH("GroupSurfaces · 10k instances, 10% across 16 indices", 10'000) {
+BENCH_PER_ITEM("GroupSurfaces · 10k instances, 10% across 16 indices", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 0, 10);
 	std::vector<uint32_t> &order = Order();
 	const ScenePlan plan = OrderScene(instances, EYE, order);
@@ -229,12 +229,12 @@ BENCH("GroupSurfaces · 10k instances, 10% across 16 indices", 10'000) {
 // Measured separately so a regression in the whole can be attributed rather
 // than merely noticed.
 
-BENCH("OrderForDrawing · 10k instances, 25% transparent", 10'000) {
+BENCH_PER_ITEM("OrderForDrawing · 10k instances, 25% transparent", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 25, 0);
 	Consume(OrderForDrawing(instances, EYE, Order()));
 }
 
-BENCH("PartitionCasters · 10k opaque instances", 10'000) {
+BENCH_PER_ITEM("PartitionCasters · 10k opaque instances", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 0, 0);
 	std::vector<uint32_t> &order = Order();
 	order.resize(instances.size());
@@ -244,7 +244,7 @@ BENCH("PartitionCasters · 10k opaque instances", 10'000) {
 	Consume(PartitionCasters(instances, order));
 }
 
-BENCH("PartitionSurfaces · 10k instances with no mirror", 10'000) {
+BENCH_PER_ITEM("PartitionSurfaces · 10k instances with no mirror", 10'000) {
 	// **The early-out row.** No instance shows a surface, so this must return
 	// without touching the order and without allocating. It should be a linear
 	// scan and nothing else — if it costs anything like the row below, the scan
@@ -258,7 +258,7 @@ BENCH("PartitionSurfaces · 10k instances with no mirror", 10'000) {
 	Consume(PartitionSurfaces(instances, order));
 }
 
-BENCH("PartitionSurfaces · 10k instances, 10% showing a mirror", 10'000) {
+BENCH_PER_ITEM("PartitionSurfaces · 10k instances, 10% showing a mirror", 10'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 0, 10);
 	std::vector<uint32_t> &order = Order();
 	order.resize(instances.size());
@@ -268,7 +268,7 @@ BENCH("PartitionSurfaces · 10k instances, 10% showing a mirror", 10'000) {
 	Consume(PartitionSurfaces(instances, order));
 }
 
-BENCH("IsTransparent · 100k calls", 100'000) {
+BENCH_PER_ITEM("IsTransparent · 100k calls", 100'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(10'000, 25, 0);
 	uint32_t blended = 0;
 	for (size_t index = 0; index < 100'000; index++) {
@@ -279,7 +279,7 @@ BENCH("IsTransparent · 100k calls", 100'000) {
 
 // --- the redraw check ----------------------------------------------------------
 
-BENCH("SignatureOf · 10k instances", 10'000) {
+BENCH_PER_ITEM("SignatureOf · 10k instances", 10'000) {
 	// **Runs every frame per live surface**, over the whole list, to decide
 	// whether that surface needs redrawing. Sixteen surfaces is sixteen full
 	// scans of the draw list before anything is drawn — so this row times
@@ -289,14 +289,14 @@ BENCH("SignatureOf · 10k instances", 10'000) {
 	Consume(SignatureOf(instances));
 }
 
-BENCH("SignatureOf · 50k instances", 50'000) {
+BENCH_PER_ITEM("SignatureOf · 50k instances", 50'000) {
 	const std::vector<DrawInstance> &instances = SceneOf(50'000, 10, 10);
 	Consume(SignatureOf(instances));
 }
 
 // --- a frame -------------------------------------------------------------------
 
-BENCH("frame · 10k instances ordered for 6 views", 6) {
+BENCH_PER_ITEM("frame · 10k instances ordered for 6 views", 6) {
 	// **The real bill: a camera, a sun and four mirrors.** One iteration is one
 	// view, so the figure is the per-view cost and the row total is what a frame
 	// spends ordering before the renderer has issued a command. At 60 Hz a frame

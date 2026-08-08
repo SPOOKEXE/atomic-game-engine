@@ -40,4 +40,11 @@ mono_add_library(game
 		# it is the field `script/Instances.hpp` predicted this version would
 		# need.
 		Engine::script
+
+		# L9. A world carries its render pipelines the way it carries its scripts:
+		# `graph::PipelineSet` is authored content, and a world that exported its
+		# parts but forgot how it was drawn would lose an editor's work on exit.
+		# The set already serialises to text, so this format embeds it rather than
+		# inventing a second one.
+		Engine::graph
 )

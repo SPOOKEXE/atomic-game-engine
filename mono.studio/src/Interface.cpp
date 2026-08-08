@@ -263,6 +263,8 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			DrawHistory();
 			DrawAssets();
+			DrawRenderPipeline();
+			DrawAssetsPipeline();
 			DrawNetwork();
 			DrawBus();
 			DrawFindInstances();
@@ -896,6 +898,8 @@ namespace studio {
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
+		ImGui::MenuItem("Assets Pipeline", nullptr, &ShowAssetsPipeline);
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);

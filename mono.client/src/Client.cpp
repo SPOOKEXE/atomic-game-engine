@@ -1507,20 +1507,27 @@ namespace client {
 		// `Renderer::SetAnimationTime` carries the rule.
 		Renderer.SetAnimationTime(AnimationSeconds);
 
-		LastFrame = Renderer.Render(
-			Views.CameraFrame(),
-			Views.Camera(),
-			Views.Instances(),
-			Overlay,
-			Surfaces,
-			hook,
-			sceneTarget,
-			0,
-			Particles,
-			RibbonVertices,
-			RibbonRuns,
-			Lights
-		);
+		// One view, which is what a game is. The span is of a single local
+		// rather than a member: nothing is retained past the call, so there is
+		// nothing for the client to own.
+		//
+		// **Assigned rather than brace-initialised**, because a `View` has
+		// fields this caller has nothing to say about and a designated
+		// initialiser list that skips one is a warning per skipped field. The
+		// defaults are the answer for those, and saying so by leaving them
+		// alone is clearer than repeating them.
+		engine::render::View view;
+		view.CameraFrame = Views.CameraFrame();
+		view.Camera = Views.Camera();
+		view.Instances = Views.Instances();
+		view.Surfaces = Surfaces;
+		view.Target = sceneTarget;
+		view.Particles = Particles;
+		view.RibbonVertices = RibbonVertices;
+		view.RibbonRuns = RibbonRuns;
+		view.Lights = Lights;
+
+		LastFrame = Renderer.Render({&view, 1}, Overlay, hook);
 
 		// **After the frame rather than before it**, so the capture is of a
 		// frame whose scene texture exists — the studio's own capture states

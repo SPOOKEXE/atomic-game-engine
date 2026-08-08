@@ -106,6 +106,25 @@ namespace engine::world {
 		WrongThread,
 	};
 
+	// Whether a world in this state is advanced by `Universe::Tick`.
+	//
+	// **Two states tick and three do not, and the count is the reason this is a
+	// function.** Callers wrote `state == WorldState::Active` because that is
+	// the state they had in mind, and an `Idle` world — which ticks, slowly —
+	// then answered "no". A caller deriving how far between two ticks to draw
+	// got the wrong answer for a world that was simulating perfectly well.
+	//
+	// **It says nothing about whether the universe is being ticked at all.** A
+	// host that has stopped calling `Universe::Tick` leaves every world in
+	// whatever state it was in, and no state can express that; the caller knows
+	// and this cannot. `studio::PresentationAlpha` is the caller that needs
+	// both halves and takes them separately.
+	//
+	// @param state The state to ask about.
+	// @return Whether the driver advances a world in this state.
+	// @since v0.11
+	bool Ticks(WorldState state);
+
 	// Returns a stable, human-readable name for a world state.
 	//
 	// @param state The state to name.

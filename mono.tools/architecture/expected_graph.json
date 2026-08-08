@@ -135,11 +135,26 @@
 				"world"
 			]
 		},
+		"nodeview": {
+			"tier": "shared",
+			"links": [
+				"assets",
+				"bake",
+				"core",
+				"ecs",
+				"graph",
+				"gui",
+				"parallel",
+				"scene",
+				"spatial"
+			]
+		},
 		"game": {
 			"tier": "shared",
 			"links": [
 				"core",
 				"ecs",
+				"graph",
 				"gui",
 				"parallel",
 				"physics",
@@ -263,6 +278,7 @@
 				"ecs",
 				"examples",
 				"game",
+				"graph",
 				"gui",
 				"net",
 				"parallel",
@@ -301,6 +317,7 @@
 				"gui",
 				"input",
 				"net",
+				"nodeview",
 				"parallel",
 				"physics",
 				"render",
@@ -425,6 +442,7 @@
 				"ecs",
 				"examples",
 				"game",
+				"graph",
 				"gui",
 				"net",
 				"parallel",
@@ -457,6 +475,7 @@
 				"gui",
 				"input",
 				"net",
+				"nodeview",
 				"parallel",
 				"physics",
 				"render",

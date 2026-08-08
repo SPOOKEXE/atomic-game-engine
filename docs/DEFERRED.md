@@ -35,6 +35,299 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [CLOSED] D00044
+
+**`PropertyDescriptor::Writes` has no consumer. It is a declared constraint the
+build does not check and nothing reads.**
+
+**Filed on a false premise and closed with the real one.** `Writes` *is*
+consumed: `mono.tools/bindings` emits it as the `writes` array of every property
+row in `manifest.json`, a checked-in file both declaration files are generated
+beside. The search that filed this covered `mono.engine`, `mono.client`,
+`mono.server` and `mono.studio` and did not cover `mono.tools`.
+
+So the field is not dead — it is *published*, which makes a wrong one worse
+than the entry claimed rather than harmless. What was actually wrong:
+
+- **Four read-only properties declared a write set.**
+  `Attachment.WorldCFrame` and `WorldPosition`, `Humanoid.Grounded` and
+  `MeshPart.TrianglesCount` each wrote `Writes = property.Reads` beside
+  `Writable = false`. The manifest said so too, in the file, for two versions —
+  telling every script author that setting them moves storage they cannot even
+  be given a value for. `gui::ResolvedField` had the right shape the whole
+  time; `scene` was the outlier.
+- **Fixed** by declaring the empty set, and the manifest regenerated: four rows,
+  no other drift.
+- **And made unrepeatable.** `bindings` now walks the whole class table before
+  it writes or compares, and refuses two contradictions: a read-only property
+  that declares writes, and a writable one that declares none. It runs under
+  `just check`, so a descriptor that drifts fails the build. That check is in
+  the bindings tool rather than a suite because it is the only binary that
+  registers `scene`, `script`, `effects`, `gui` and the services together.
+- **An empty `reads` set is deliberately not a fault.** `Players.LocalPlayer`
+  has one and is right to: it projects a world resource, not a component on the
+  row. The consequence — such a property can never fire `.Changed` — is a
+  limitation its own comment states, not a contradiction.
+
+### [CLOSED] D00043
+
+**A derived property whose getter walks to another entity cannot signal
+`.Changed` when that entity moves.**
+
+Closed by making the resolve pass report its own write, which is a smaller fix
+than the entry expected and does not need a cross-entity dependency at all.
+
+- **The real cause was one layer down and worse than filed.**
+  `ResolveAttachments` wrote `WorldFrame` through the reference `Store::Each`
+  hands out — a direct memory write, which the store does not report. So
+  `Attachment.WorldCFrame` and `WorldPosition` could not fire `.Changed` for
+  *any* reason, including the attachment's own `CFrame` being set. The entry
+  read it as a limitation of per-entity delivery; delivery was never reached.
+- **The fix**: the pass gathers what actually moved, then writes those rows
+  through `Store::GetMutable` — the call that reports a write. `ChangeQueue`
+  already subscribes to `Attachment` through `Reads`, so the signal now arrives
+  on the attachment's own row, which is where the per-entity filter wants it.
+- **Only the rows that moved**, which is the half that makes it safe to run
+  every frame in two phases: reporting unconditionally would advance the world's
+  change counter for ever and falsify `physics`'s static broadphase gate and
+  `gui`'s compile gate. `engine.scene.attachments` asserts both directions —
+  the parent moving signals, and a second pass over a still world signals
+  nothing and leaves `ChangeVersion` where it was.
+
+### [CLOSED] D00042
+
+**`Scheduler` says registration order within a phase means nothing. Four systems
+in `PreRender` depend on it.**
+
+Closed by declaring the contract the scheduler already keeps, rather than
+building a dependency sort for something insertion order expresses exactly.
+
+- `Scheduler::RunPhases` walks its vector in insertion order, and every host in
+  the repository relies on it: a pass that derives something is registered ahead
+  of the pass that reads it, and `client::InstallPresentation` says so in its
+  own comments. A rule the code breaks everywhere is not a rule, it is a trap —
+  it tells a reader the ordering they can see is accidental.
+- **The alternative was a declared dependency between systems**, which would be
+  a second mechanism saying what registration already says, and would have to be
+  written out at every one of those call sites to mean the same thing.
+- The header now states both halves, and `ecs.scheduler` holds them: systems in
+  one phase run in the order they were added, over two ticks so a scheduler that
+  rebuilt its list could not pass; and a phase boundary still outranks
+  registration, so the new sentence cannot be read as "registration order is
+  *the* contract".
+
+### [_] D00041
+
+**The node canvas is a `gui` tree and the studio's panels are Dear ImGui. They
+do not compose, and the mounting work has to answer this first.**
+
+Found while scoping the studio half of the Render Pipeline and Assets Pipeline
+widgets, with every piece they consume already built and tested.
+
+- **v0.11 §6 decided the canvas is built on the engine's own `gui` tree**, not a
+  vendored node-editor library, and that decision is sound — it made the whole
+  of `nodeview` headless-testable, which is where this session's layout, edge,
+  hit-test and selection bugs were caught.
+- **But a `gui` tree is drawn by `render`**, as instances compiled to a draw
+  list. The studio's panels are `ImGui::Begin` blocks in `mono.studio`, drawn by
+  `mono.engine/ui`. An `ImGui` window cannot contain a `gui` subtree; they are
+  two renderers with two draw lists.
+- **The engine already has the pattern for this and it is the viewport.** A
+  world is rendered into an offscreen `SceneTarget` and the panel shows that
+  texture — `Renderer::SceneTexture` hands back an `SDL_GPUTexture *`, which is
+  an `ImTextureID` unchanged. A node canvas can go the same way: give it a slot,
+  render its `gui` tree into it, show the texture.
+- **Which makes the canvas a second consumer of the multi-view seam**, and an
+  argument for it. Two open node editors plus a viewport is three views in one
+  frame — exactly what `Render(std::span<const View>)` was built for and what
+  `D00038` says nothing yet exercises.
+- **The alternative is drawing the layout with ImGui directly** — `PipelineView`
+  hands back columns, rows and edges, and an ImGui draw list can render boxes
+  and lines from that without any `gui` instances at all. That is less code and
+  throws away §6's decision along with the tested tree.
+- **Not decided here.** The first costs a render target per open editor and
+  makes the canvas a real `gui` consumer; the second is cheaper and leaves
+  `nodeview::Build` with no caller. Whichever is chosen, `graph::PipelineView`
+  and `nodeview::CanvasState` are used either way — the layout, the hit-test and
+  the selection are the same arithmetic behind both.
+
+### [CLOSED] D00040
+
+**`Node::PerView = false` is shared *per world*, and the graph has no idea what
+a world is.**
+
+**Closed at v0.11.** `Execute` takes one world identifier per view and runs the
+shared block once per *distinct* world, with that world's views immediately
+after it. `render::View::World` carries the number — an opaque `uint64_t` and
+deliberately not a `world::WorldId`, since `render` is L12 and a world's
+identifier is L4's; what the partition needs is only whether two views are of
+the same world. The view-count overload is kept and means "every view in one
+world", which is what a game and a single-panel editor both are.
+
+Two views of one world run one shadow pass; two views of two worlds run two.
+Views of one world need not be adjacent, because a studio's panels are in panel
+order rather than world order. The grouping — a world's shared work, then that
+world's views — is the load-bearing half: every world's shared block first would
+have the second world's shadow pass overwrite the first's before the first's
+views had sampled it.
+
+Found while wiring `Renderer::Render` onto `graph::RenderGraph` — the §4.3
+executor — and it is the thing that has to be settled before that work is worth
+starting.
+
+- **The shadow node is shared because every view of one world samples one map.**
+  That is the claim v0.11 is built on and it is true, with the qualifier the
+  graph does not carry: *of one world*. `Compile` partitions into shared and
+  per-view and nothing in it names a world, so "shared" currently means "once
+  per frame".
+- **A frame may hold views of different worlds.** That is the roadmap line this
+  version exists for, and the studio's second panel already *defaults* to a
+  different world. Two such views need two shadow maps, fitted to two sets of
+  bounds. Running one shared shadow pass for the frame would light one world's
+  geometry with the other's sun fit.
+- **It is not a bug today because nothing passes more than one view** (`D00038`),
+  and a single-view frame has exactly one world in it. It becomes one on the
+  first frame that does.
+- **The renderer's shape says the same thing from the other side.** Everything
+  the shadow pass needs — the union bound, the light matrix, the scene order —
+  is derived inside the per-view setup from *that view's* draw list. Hoisting
+  the pass without hoisting its inputs is not possible, and its inputs are only
+  hoistable across views that share a draw list.
+- **The likely answer is that a `View` names its world** — an opaque id the
+  caller sets, not a pointer and not a `world::WorldId`, since `render` is L12
+  and may not reach for one — and `Execute` runs the shared block once per
+  distinct id rather than once per frame. That makes the partition mean what its
+  comment already claims. The alternative is one compiled graph per world, which
+  is cheaper to reason about and pays a compile per world rather than a
+  partition per frame.
+- **Promoted to a roadmap line at v0.11**, "the render pipeline is per world,
+  not per process", because it is a change to what a pipeline *is* rather than a
+  defect in one — `StandardGraph()` is a free function returning one frame for
+  the whole process, and a universe holds several worlds.
+- Until then `render/benchmarks/Frame.cpp` is the honest measure of what the
+  partition is worth, and it says the shareable thing is the shadow *pass*
+  rather than the shadow *fit*.
+
+### [_] D00039
+
+**No world this engine ships runs a physics tick. The module is complete,
+tested, benchmarked, and connected to nothing.**
+
+Found while starting v0.11 §4.6, which was scoped as "pre-emptive — nothing has
+been reported slow, so begin with benchmarks and touch nothing a number has not
+pointed at". The benchmarks were the right first move and they pointed
+somewhere else.
+
+- **`RegisterPhysicsSystems` is called from `physics/tests/` and nowhere else.**
+  Checked across the whole repository, not inferred: no client, server, studio,
+  `world` or `game` translation unit calls it.
+- **`PreparePhysicsWorld` is the same story.** Every call outside the module's
+  own tests and benchmarks is one of those tests. Without it a store has no
+  `PhysicsWorld` resource, and `WorldResource.cpp` is explicit about what that
+  means: *"a world with no `PhysicsWorld` produces no pairs, no contacts and no
+  query answers at all"*.
+- **Only `Engine::script` lists `Engine::physics`** in a `CMakeLists.txt`. The
+  client and server reach it transitively.
+- **Four production call sites use `physics::Raycast`** — the client's humanoid
+  ground check, one server path, and the Luau and JS `Raycast` bindings. None
+  of them is reached in the default scenes: a headless `studio --run play` and a
+  60-tick server run each log **zero** occurrences of the every-call error that
+  an unprepared world produces. So the queries are not silently returning
+  nothing today; they are simply not being asked.
+- **What this costs is that the whole simulation half is unexercised outside its
+  own suites.** Integrate, broad phase, narrow phase and solver have tests and
+  benchmarks and no consumer, so nothing about them is checked end to end and
+  the numbers below describe a module rather than a frame.
+- **What it means for optimisation work: do not.** The solver is by far the
+  largest figure in the suite — 13.7 ms for 800 stacks of four, which would be
+  82% of a 60 Hz frame — and the broad phase is 2.6 ms at sixteen thousand
+  colliders. Both are honest measurements of code no world runs, so a
+  percentage taken off either buys nothing until this entry is closed.
+- **The order is wiring first, then measuring the real thing.** Whichever world
+  gains a physics tick will have its own collider count, density and
+  static/dynamic split, and every constant here — cell size included — should be
+  re-measured against it rather than tuned now against a synthetic slab.
+
+### [_] D00038
+
+**`Renderer::Render` takes many views and nothing passes more than one.**
+
+- v0.11 replaced the twelve-parameter `Render` with `std::span<const View>`, so a
+  frame of four viewports is one command buffer, one swapchain acquisition and
+  one present. `D00002` is closed by that. **The seam exists and is unexercised**
+  — all three callers pass a span of one.
+- **The studio is the caller that wants it and cannot have it yet.** It
+  round-robins one panel per frame, so with two open each updates at half the
+  rate. Converting the loop is not the hard part; the hard part is above it.
+- **`Universe->Present` runs `PreRender`, and `aim-surface-cameras` lives
+  there.** A panel's surface cameras are aimed from *that panel's* eye, into
+  world state, immediately before its draw list is collected. Drawing two panels
+  in one frame means aiming twice before rendering once, and the second aim
+  overwrites the first — which `Editor.cpp` already records as the bug that made
+  a mirror in one panel track the camera being flown in the other.
+- **Two panels on two worlds is fine and is the interesting case.** `Present` is
+  per world, the aim is per world, and the second panel already defaults to a
+  *different* world — which is the roadmap's "handle multiple worlds in
+  parallel" exactly. **Two panels on one world is the one that breaks**: it
+  would present the same world twice in a frame and run its `PreRender` systems
+  twice against one `frameSeconds`.
+- So the conversion needs the same-world case answered first — present once per
+  distinct world per frame, then aim and collect per panel — rather than a loop
+  around what is there now.
+- Until then the round-robin stays, and `render/benchmarks/Frame.cpp` says what
+  it is buying: about 150 us of CPU record per viewport, 18% of a 300 fps frame
+  at four panels.
+
+### [CLOSED] D00037
+
+**`BENCH`'s iteration count means two different things in two files, and a row
+does not say which.**
+
+**Closed at v0.11.** The report carries the unit. `BenchCase` grew a
+`BenchUnit` — `Call` when the body loops `Iterations` times, `Item` when it runs
+once over `Iterations` things — and the line is now
+`bench<TAB>suite<TAB>ns<TAB>spread<TAB>samples<TAB>iterations<TAB>unit<TAB>name`.
+`graph`'s rows read `call` and `scene`'s read `item`, so two figures four orders
+of magnitude apart are no longer silently comparable.
+
+- **A second macro rather than a parameter.** `BENCH_PER_ITEM` declares the
+  normalising form; `BENCH` keeps its signature and its meaning, so no existing
+  benchmark changed except `scene/benchmarks/Ordering.cpp`, which was already
+  using the divisor that way and now says so.
+- **The unit goes before the name, not after it.** The name is free text
+  flattened onto one line, so anything past it cannot be found by counting tabs.
+- **The baseline migration this entry warned about cost nothing**, because
+  `.cache/bench-baseline.tsv` is git-ignored — there was no committed baseline
+  to migrate. Checked rather than assumed; the runner re-measured all 401 rows
+  against the new format.
+
+- `BenchMain::Sample` calls the body **once** and divides the elapsed time by the
+  declared `Iterations`. So the count is a divisor the author promises the body
+  honours, and `Bench.hpp` states that contract: *"Runs the body `Iterations`
+  times."*
+- **`graph/benchmarks/Cull.cpp` keeps the promise** — it writes
+  `for (pass = 0; pass < 200000; pass++)` inside the body — and its rows are
+  nanoseconds per call.
+- **`scene/benchmarks/Ordering.cpp` does not, deliberately.** Its bodies run once
+  and pass the *instance count* as the divisor, so its rows are nanoseconds per
+  **instance**: *"One iteration is one instance, so every row divides into a
+  per-instance cost."* That is a reasonable thing to want and the header says so.
+- **Nothing in the report distinguishes them.** Both emit the same six tab-
+  separated columns, so `OrderScene · 10k instances = 1` and `Cull 1000, all
+  visible = 17207` sit in one output looking comparable and are off by four
+  orders of magnitude from each other's unit.
+- Found while writing `render/benchmarks/Frame.cpp`, which made the third
+  mistake available: a body that runs once while declaring 200, reporting a
+  frame at 739 ns. It was caught only because `graph`'s table gave a number to
+  contradict it — 5000 instances cannot record in less time than one of them
+  culls.
+- **Not fixed here because the fix is a decision, not a patch.** Either
+  `BenchCase` grows a unit field the report carries, or the per-instance
+  normalisation is spelled differently — a `PER_ITEM` variant of the macro — so
+  the divisor always means the same thing. `bench-accept` compares rows against a
+  stored baseline, so whichever is chosen has to migrate the baseline in the same
+  commit.
+
 ### [CLOSED] D00036
 
 **307 public entities carried no comment, and nothing had ever been able to say so.**
@@ -398,9 +691,16 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **`mono.server` is deliberately not wired up.** It loads every world in a game file and ticks all of them forever, and giving it suspension is a behaviour change to a program whose output `just determinism` and `just replay-check` compare byte for byte. The policy being reachable is what this entry asked for; using it is a decision with its own consequences.
 - **Reopen trigger, split in two because the halves are no longer due together.** *Lifetime* — when a world starts and stops — **is hoisted and this half is closed**; what is left of it is a caller in `mono.server`, which is a decision about server behaviour rather than about where the code lives. *Placement* — which host a world runs on, and what happens when it dies — is unchanged: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
 
-### [_] D00016
+### [CLOSED] D00016
 
 **A frame is described in two places as of v0.6 and nothing checks that the two agree.** Filed the moment the second description appeared, rather than after they disagreed.
+
+**Closed at v0.11 by deleting the second description rather than checking it**, which is what the reopen trigger below said to wait for — and it went exactly the way that note warned it could not go otherwise.
+
+- `render::PassOrder()` **reads its names out of `graph::StandardGraph()`**. It was a hand-written array of the same six; it is now a view of the one description. Drift is not possible rather than detectable, which is `AGENTS.md` rule 6 applied to the thing rule 6 was quoted about.
+- **`graph::Pipeline` and `StandardPipeline` are deleted, along with their tests.** `RenderGraph` supersedes them entirely — the same declaration-ordered stages with the same read-before-write check, plus resources, the shared/per-view partition and an executor. Keeping the flat list beside it would have been the third description this entry explicitly forbids. "Delete the thing you replaced."
+- **The comparison test is kept and repurposed.** It can no longer catch two lists disagreeing, because there is one; what it now checks is that the derivation lines up with the `Pass` enum, which is still written by hand. Mutation-verified: swapping `overlay` and `interface` in `StandardGraph` fails `tests/Passes.cpp` at both the count and the position.
+- **The hole that remains is the one this entry always named.** A pass added by writing `SDL_BeginGPURenderPass` inline rather than entering through `PassRecorder` is still invisible to all of this. Closing *that* is the executor — `D00002`'s remainder — not another list.
 
 - `Renderer::Render` submits a shadow pass, a surface pass, an opaque pass, a transparent pass and an overlay pass, in that order, from a function that knows all five by name. `graph::StandardPipeline` is the same five as data, and `Pipeline::Validate` checks the one property that goes wrong at this size — a stage reading a target no earlier stage wrote. **Neither knows the other exists.** `render` links `graph` for `Cull`, `Frustum` and `FitDirectionalLight`; it never reads a `Pipeline`.
 - **This is D00002's "`render` must not grow a hand-rolled pass list" being overrun, and the overrun is not the interesting part.** The passes had nowhere else to live — the graph runtime describes and does not execute. What is worth filing is that the mitigation is a sentence: `mono.engine/render/AGENTS.md` now says *"if you add a pass here, add its stage there in the same change"*, which is **rule 6 out loud** — a rule the build does not check is documentation.

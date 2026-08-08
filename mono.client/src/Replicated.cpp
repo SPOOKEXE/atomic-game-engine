@@ -101,6 +101,14 @@ namespace client {
 		// Register client resources before their component ids are minted.
 		RegisterClientComponents();
 
+		// **And the replication module's own, which nothing was doing.** A
+		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,
+		// and one minted from the compiler's spelling is a world `Store::Save`
+		// refuses — so a replica could not be snapshotted, which is what the
+		// studio does every time Play is pressed. `client::DrawList` two lines
+		// down is the same fix for the same reason, one version earlier.
+		engine::replication::RegisterReplicationComponents();
+
 		store.SetResource(DrawList{});
 
 		// Per-world state belongs in the store.

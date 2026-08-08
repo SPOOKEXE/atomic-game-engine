@@ -34,6 +34,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/nodeview/State.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
@@ -1003,6 +1004,20 @@ namespace studio {
 		// list and caches nothing it cannot rebuild. `Assets.cpp` says why the
 		// upload is a typed path rather than a file dialog.
 		void DrawAssets();
+
+		// The Render Pipeline and Assets Pipeline node editors.
+		//
+		// **Drawn with an ImGui draw list rather than as a `gui` tree**, which is
+		// `DEFERRED.md` D00041's decision: the canvas machinery — layout, edges,
+		// hit-testing, selection — is `graph::PipelineView` and
+		// `nodeview::CanvasState` and is shared either way, but a `gui` subtree
+		// cannot live inside an `ImGui::Begin` block. The engine's own tree would
+		// need a render target per open editor; boxes and lines on a draw list need
+		// none, and this panel is the editor's chrome rather than a game's UI.
+		//@{
+		void DrawRenderPipeline();
+		void DrawAssetsPipeline();
+		//@}
 
 		// Brings one file, or every file under one folder, into the store.
 		//
@@ -2787,6 +2802,21 @@ namespace studio {
 		// The local content store. See `DrawAssets`.
 		bool ShowAssets = false;
 
+		// Whether each node editor is open. Closed by default: they are for
+		// somebody editing a pipeline, and every other session should not pay a
+		// panel for it.
+		//@{
+		bool ShowRenderPipeline = false;
+		bool ShowAssetsPipeline = false;
+		//@}
+
+		// What each canvas has selected and how far it is scrolled. **Outside the
+		// canvas because it outlives a rebuild** — see `nodeview::CanvasState`.
+		//@{
+		engine::nodeview::CanvasState RenderPipelineState;
+		engine::nodeview::CanvasState AssetsPipelineState;
+		//@}
+
 		// Where the add-file and add-folder dialogs are looking.
 		//
 		// **A `std::string` and no longer a fixed buffer**, because it is no
@@ -3160,6 +3190,16 @@ namespace studio {
 		// A script's own teleports are picked up separately, through the
 		// destination's inbox.
 		WorldId PlayerWorld;
+
+		// Whether the last `Simulate` reached `Universe::Tick`.
+		//
+		// **The universe cannot be asked this and no world's state carries
+		// it.** `SyncWorldStates` leaves every world `Active` when nothing is
+		// running — deliberately, so an author back in Edit does not find their
+		// scenes marked stopped — while `Simulate` returns before the tick.
+		// `Present` needs to tell those apart to pick an interpolation alpha,
+		// and `studio::PresentationAlpha` is where that is decided.
+		bool Advancing = false;
 
 		// Whether the editor's own loop is still going, and what the last frame
 		// through it did.

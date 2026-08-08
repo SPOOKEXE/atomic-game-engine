@@ -2,6 +2,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -483,6 +484,51 @@ namespace engine::game {
 			}
 		}
 
+		// A world's render pipelines, as one block of text.
+		//
+		// **Embedded rather than re-encoded as elements.** `graph::PipelineSet`
+		// already has a line-oriented format that round trips and refuses a
+		// malformed line, and restating it as XML would be a second grammar for
+		// one thing — with the interesting failure that the two could disagree
+		// about what a pipeline is while both parsing.
+		//
+		// CDATA for `WriteSources`'s reason: this is meant to be read in the
+		// file, and a document full of `&quot;` is not.
+		void WritePipelines(XmlWriter &writer, const Store &store) {
+			const auto *set = store.Resource<graph::PipelineSet>();
+			if (set == nullptr || set->Count() == 0) {
+				return;
+			}
+
+			writer.Open("Pipelines");
+			writer.Verbatim(graph::Write(*set));
+			writer.Close();
+		}
+
+		// **A malformed block is dropped with a line in the log rather than
+		// failing the world.** A world whose parts all loaded and whose pipeline
+		// did not is recoverable — it draws with the standard frame and somebody
+		// fixes the pipeline. Refusing the whole document would lose the parts
+		// too, which is a worse answer to the same file.
+		void ReadPipelines(const XmlElement &element, Store &store) {
+			graph::PipelineSet set;
+			core::Name offender;
+
+			const graph::PipelineDocumentStatus status = graph::Read(element.Text, set, offender);
+			if (status != graph::PipelineDocumentStatus::Ok) {
+				ENGINE_WARN(
+					"world pipelines: {} at '{}' — the world loads and draws with the standard frame",
+					graph::Describe(status),
+					offender.IsValid() ? offender.Text() : ""
+				);
+				return;
+			}
+
+			if (set.Count() > 0) {
+				store.SetResource(std::move(set));
+			}
+		}
+
 		void ReadSources(const XmlDocument &document, const XmlElement &element, Store &store) {
 			script::SourceCache cache;
 
@@ -667,12 +713,22 @@ namespace engine::game {
 		gui::RegisterGuiClasses();
 
 		script::ScriptClass();
+
+		// **The render pipelines a world carries.** Registered here rather than
+		// left to a caller for the reason every other line in this function
+		// exists: a resource is keyed by a component id, and one first minted by
+		// `SetResource` takes the compiler's spelling of the type — a world that
+		// saves, loads, and quietly has no pipelines because the two spellings
+		// never met. Naming it beside the classes is what makes the order
+		// impossible to get wrong from outside.
+		graph::RegisterPipelineComponents();
 	}
 
 	void WriteWorldBody(XmlWriter &writer, Store &store) {
 		RegisterGameClasses();
 
 		WriteSources(writer, store);
+		WritePipelines(writer, store);
 
 		Numbering numbering;
 		store.EachRoot([&](Entity root) { numbering.Walk(store, root); });
@@ -696,6 +752,11 @@ namespace engine::game {
 
 			if (child->Name == "Sources") {
 				ReadSources(document, *child, store);
+				continue;
+			}
+
+			if (child->Name == "Pipelines") {
+				ReadPipelines(*child, store);
 				continue;
 			}
 

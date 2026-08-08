@@ -45,6 +45,55 @@ TEST_CASE("phases run in order regardless of registration order", "[scheduler]")
 	REQUIRE(order == std::vector<std::string>{"a", "b", "c", "d"});
 }
 
+// **The half the header used to deny, and every host in the repository relies
+// on it.** `client::InstallPresentation` puts `resolve-materials` ahead of
+// `collect-instances` in one phase because the second reads what the first
+// writes, and `sync-rendered` ahead of `aim-surface-cameras` for the same
+// reason. That was true and undeclared, which made it a trap: a reader was told
+// the order they could see meant nothing.
+//
+// Registered in a deliberately unhelpful order — reverse alphabetical, so a
+// scheduler that sorted by name would come out the other way round and a
+// scheduler that grouped by phase alone could come out either.
+TEST_CASE("systems in one phase run in the order they were added", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	std::vector<std::string> order;
+
+	scheduler.Add("derive", Phase::PreRender, [&](Store &) { order.emplace_back("derive"); });
+	scheduler.Add("consume", Phase::PreRender, [&](Store &) { order.emplace_back("consume"); });
+	scheduler.Add("also-consume", Phase::PreRender, [&](Store &) { order.emplace_back("also-consume"); });
+
+	scheduler.Tick(store, 0.016f);
+
+	REQUIRE(order == std::vector<std::string>{"derive", "consume", "also-consume"});
+
+	// And it survives a second run, because a scheduler that rebuilt its list
+	// per tick would be free to reorder it and nothing else here would notice.
+	order.clear();
+	scheduler.Tick(store, 0.016f);
+	REQUIRE(order == std::vector<std::string>{"derive", "consume", "also-consume"});
+}
+
+// **Phase order still wins**, which is the half that was always declared: a
+// system added first but placed later runs later. The two rules meet here, and
+// this is what stops "registration order is a contract" being read as
+// "registration order is *the* contract".
+TEST_CASE("a phase boundary outranks registration order", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	std::vector<std::string> order;
+
+	scheduler.Add("drawn-first", Phase::PreRender, [&](Store &) { order.emplace_back("drawn-first"); });
+	scheduler.Add("simulated-second", Phase::Simulation, [&](Store &) {
+		order.emplace_back("simulated-second");
+	});
+
+	scheduler.Tick(store, 0.016f);
+
+	REQUIRE(order == std::vector<std::string>{"simulated-second", "drawn-first"});
+}
+
 TEST_CASE("the delta reaches every system through the world's clock", "[scheduler]") {
 	Store store("test");
 	Scheduler scheduler;
