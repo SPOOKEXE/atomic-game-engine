@@ -16,7 +16,7 @@ should leave the in-progress item marked with what compiles and what does not.
 |---|---|---|
 | 1 | Type system — formats, usage kinds, divisor, external resources | **done** |
 | 2 | Catalogue — 45 node kinds, typed and formatted slots | **done** |
-| 3 | Executor — `Renderer::Render` runs the graph | **step 1 done, step 2 two passes of six** — `shadow` and `surface` are handlers; `opaque` is next and has a decision in it |
+| 3 | Executor — `Renderer::Render` runs the graph | **step 1 done, step 2 all six blocks moved** — five kinds registered; `transparent` is drawn inside `opaque`'s render pass and is the one still to split out. Then the swap |
 | 4 | Static checks — nine fault kinds | **done** |
 | 5 | Authored order, and scopes | **done** |
 | 6 | Access grid / profiler visualiser | **done** |
@@ -120,6 +120,63 @@ counter probe that does cover it.
             `bank` did not move — the handler derives it from `ActiveSlot`,
             which is already the answer to "which panel".
 
+      - [x] **2d — `opaque` moved**, and with it the blended stage, the
+            particles and the ribbons, because **they are one
+            `SDL_BeginGPURenderPass`**. `ViewPass` grew the camera's half: the
+            camera and its frame, the scene rectangle, `Offscreen`, the six run
+            counts, `CameraRuns`, and the effects' spans. `FramePass` grew
+            `Swapchain`, which is the frame's and not a view's.
+
+            **`transparent` is deliberately not registered.** `PassTable::Missing`
+            names it, which is true — the table cannot submit this frame on its
+            own yet — and that is better than an entry claiming to draw
+            something `SubmitOpaque` already drew. Step 2e is what adds it.
+
+      - [x] **2e — `overlay` and `interface` moved.** The frame's last two, and
+            the only ones that are `NodeScope::Frame`. `FramePass` grew the
+            three things they share: a **pointer** to `Render`'s
+            `windowTarget`, because the load op flips from clear to load as the
+            frame goes on and every writer must see the same one;
+            `HaveOverlay`; and `Interface`, which is the hook or null.
+
+            **`Interface` is filled after the view loop, not by `FrameScope`.**
+            Dear ImGui copies its buffers through a copy pass and SDL refuses to
+            open one while a render pass is in flight, so the hook cannot be
+            asked to prepare until every view has finished with the command
+            buffer. That is `FrameOverlayHook`'s whole contract.
+
+      - [ ] **2f — split `transparent` out of `SubmitOpaque`.** Two handlers,
+            one render pass: `FramePass` holds the open `SDL_GPURenderPass`,
+            `SubmitOpaque` opens it and `SubmitTransparent` ends it.
+
+            **What the blended tail uses from the opaque half — read off, not
+            guessed.** Everything else it touches is already a `ViewPass` field:
+
+            | name | what to do with it |
+            |---|---|
+            | `pass` | onto `FramePass`. The one that actually needs to move |
+            | `lighting` | a `ViewPass` field, or rebuilt — it is four floats off `HaveShadow` |
+            | `shadow`, `shadowSampler`, `surfaceSampler` | rebuilt. Each is one `?:` over an `Impl` member, and duplicating the *fallback rule* is the risk to watch: a second copy that forgot `FallbackTexture` is the null-sampler bug the comment there records |
+            | `screenSurface` | dies with the split — it is `bindScreen`'s scratch and belongs inside whatever `drawScreenMirrors` becomes |
+            | `frameUniforms` | a `ViewPass` field. `SubmitTransparent` reads only `.ViewProjection`, for the particles and ribbons |
+            | `drawScreenMirrors` | a member. **This is the actual work of 2f** — it is called by both halves, closes over eight things, and re-pushes `frameUniforms` on the way out so the next draw does not inherit a mirror's projection |
+
+            So the shape is: promote `drawScreenMirrors` to
+            `Impl::DrawScreenMirrors(SDL_GPURenderPass *, bool blended)` reading
+            `CurrentView` and `CurrentFrame`, verify **that alone** is
+            hash-identical, and only then cut the function in two. Two verified
+            steps again, for 2a's reason.
+
+            **Not two render passes.** The blended draws are depth-tested
+            against what the opaque draws wrote, and that depth is
+            `STOREOP_DONT_CARE` — a second pass would have to store and reload
+            it, paying a full depth round trip for a split the frame does not
+            need. `PassRecorder` already takes this reading: it enters
+            `Pass::Transparent` from inside the opaque render pass, and the
+            comment there is the settled answer — *what the list describes is
+            what is drawn and in what order, not how many times a target is
+            bound.*
+
       ### The golden image does not gate every pass
 
       **Found by mutation, and it changes how the rest of this stage is
@@ -145,6 +202,30 @@ counter probe that does cover it.
       It is worth keeping this as the routine for anything in `render` that
       claims to be behaviour-neutral: it costs two builds and it covers the
       passes the one deterministic capture cannot see.
+
+      **Three runners, because one does not reach every pass.** The headless
+      capture never draws the window, so `overlay` and `interface` are invisible
+      to it — and `overlay` needs a debug panel that the studio does not open.
+      The full set, and what each is for:
+
+      | run | covers |
+      |---|---|
+      | `studio --headless --frames 40 --run play` | `shadow`, `surface`, `opaque`, `transparent`. **Deterministic** — diff the 27 `PROBE` lines directly |
+      | `studio --frames 30 --run play --stats` | `interface`. Counts drift with timing, so compare the **set of `ran=` values** — `{36, 37, 47}` |
+      | `client --stats` (20s, `timeout`) | `overlay`. `ran=21` is `shadow \| opaque \| overlay`; the studio uses ImGui for its panels and never sets bit 4 |
+
+      `ran` is `FrameResult::Passes`, so a missing pass shows up as a missing
+      bit whether or not it changed a pixel. Redirect to a file and grep the
+      file — `timeout … | grep` loses the output when the timeout fires.
+
+      **And check that the build actually built.** 2d passed the golden image
+      while `SubmitOpaque` was written but never registered — `cmake --build`
+      had printed nothing and rebuilt nothing, so the hash was taken from a
+      stale binary. The probe caught it in one run: no `PROBE` lines at all, and
+      `no handler registered for render pass 'opaque'` forty times over. Grep
+      the build output for `Building CXX`, not only for `error:`; a hash from a
+      binary that does not contain the change is worse than no hash, because it
+      looks like evidence.
 
       **The closure set, corrected by moving it.** The eleven names below were
       measured by reading; four of them are the *frame's* and one is not
@@ -255,6 +336,24 @@ counter probe that does cover it.
       `PassRecorder`'s ordering guard all go — `Execute` is the ordering, so
       keeping a second one would be the third description of the frame that
       D00016 is about.
+
+      **Blocked on 2f**, and the blocker is `PassTable::Missing` telling the
+      truth: `transparent` has no handler, so `Execute` would refuse the frame
+      and name it. That is the seam working as designed rather than a problem to
+      route around.
+
+      **The one behaviour change to expect, and it is intended.** The shadow
+      node is `NodeScope::World`, so `Execute` runs it **once per world**; today
+      it runs once per *view*. Four viewports of one world render the shadow map
+      four times now and once afterwards. The matrix is fitted to the whole
+      scene bound rather than the eye's frustum, so all four are the same map —
+      which is exactly the claim `graph::StandardGraph` makes and
+      `engine.render.graphrunner` already asserts. Expect the golden image to
+      hold and the *cost* to drop; if the image moves, the scope is wrong rather
+      than the swap.
+
+      `SubmitPass` and the six call sites in `Render` are what `Execute`
+      replaces, so the swap is small — the six steps above are what made it so.
 
 ### Stage 7's other half — per-pass GPU timestamps (D00046)
 
