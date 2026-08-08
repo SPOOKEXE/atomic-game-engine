@@ -193,7 +193,8 @@ namespace engine::parallel {
 
 			if (handover != nullptr) {
 				const std::wstring entry =
-					prefix + std::to_wstring(static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(handover)));
+					prefix +
+					std::to_wstring(static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(handover)));
 				block.insert(block.end(), entry.c_str(), entry.c_str() + entry.size() + 1);
 			}
 

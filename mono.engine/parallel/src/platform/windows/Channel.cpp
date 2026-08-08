@@ -228,9 +228,8 @@ namespace engine::parallel {
 		}
 
 		DWORD written = 0;
-		const BOOL sent = WriteFile(
-			static_cast<HANDLE>(parentEnd), &description, sizeof(description), &written, nullptr
-		);
+		const BOOL sent =
+			WriteFile(static_cast<HANDLE>(parentEnd), &description, sizeof(description), &written, nullptr);
 		if (sent == 0 || written != sizeof(description)) {
 			ENGINE_ERROR("could not hand a channel to the child: {}", GetLastError());
 			return false;
@@ -302,8 +301,7 @@ namespace engine::parallel {
 		// and the read then fails rather than waiting forever.
 		WSAPROTOCOL_INFOW description{};
 		DWORD read = 0;
-		const BOOL got =
-			ReadFile(pipe, &description, sizeof(description), &read, nullptr);
+		const BOOL got = ReadFile(pipe, &description, sizeof(description), &read, nullptr);
 
 		// Once, whatever happens. The pipe has carried the one thing it was for,
 		// and leaving it open would leave a handle nothing will ever read again.
