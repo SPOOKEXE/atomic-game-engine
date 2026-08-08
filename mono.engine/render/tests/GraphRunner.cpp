@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -227,4 +228,143 @@ TEST_CASE("the table refuses a handler it could not call", "[render][graphrunner
 
 	table.Clear();
 	CHECK_FALSE(table.Has(Name("opaque")));
+}
+
+TEST_CASE("a viewer node is handed the resource it is wired to", "[render][graph]") {
+	// **The whole of what a `viewer` node does.** It draws nothing and produces
+	// nothing; its entire job is to name a resource so that somebody downloads
+	// it. `Renderer`'s handler turns `RunContext::Reads` into a texture and asks
+	// for a copy — so what is worth asserting without a device is that the
+	// runner hands the node the resource the graph wired to it, and that a
+	// pipeline with one in it still compiles and runs.
+	//
+	// **`viewer` is not in `StandardGraph`, and should not be.** A frame that
+	// always paid for a readback nobody was looking at would be the wrong
+	// default. So this builds the smallest pipeline that has one, which is also
+	// the first test of `Renderer::SetPipeline`'s shape: a graph the caller
+	// authored rather than the standard one.
+	RenderGraph graph = StandardGraph();
+
+	engine::graph::ResourceId colour;
+	for (size_t index = 0; index < graph.ResourceCount(); index++) {
+		const engine::graph::ResourceId id{static_cast<uint32_t>(index + 1)};
+		const engine::graph::ResourceDesc *desc = graph.FindResource(id);
+		if (desc != nullptr && desc->Name == Name("colour")) {
+			colour = id;
+		}
+	}
+	REQUIRE(colour.IsValid());
+
+	engine::graph::Node viewer;
+	viewer.Name = Name("viewer");
+	viewer.Kind = Name("viewer");
+	viewer.Reads = {colour};
+	viewer.Scope = engine::graph::NodeScope::Frame;
+	REQUIRE(graph.AddNode(viewer).IsValid());
+
+	CompiledGraph compiled;
+	Name offender;
+	INFO("offending node: " << std::string(offender.Text()));
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	std::vector<std::string> ran;
+	std::vector<std::string> wired;
+
+	PassTable table;
+	Record(table, graph, ran);
+	table.Set(Name("viewer"), [&](const RunContext &context) {
+		for (const engine::graph::ResourceId read : context.Reads) {
+			const engine::graph::ResourceDesc *desc = graph.FindResource(read);
+			if (desc != nullptr) {
+				wired.emplace_back(desc->Name.Text());
+			}
+		}
+		ran.emplace_back("viewer");
+		return true;
+	});
+
+	GraphRunner runner{table};
+	REQUIRE(runner.Run(RunContext{}) == false);
+
+	GraphRunner live{table};
+	REQUIRE(graph.Execute(compiled, live, size_t{1}));
+
+	// The resource it was wired to, and only that one.
+	REQUIRE(wired.size() == 1);
+	CHECK(wired[0] == "colour");
+
+	// **And it runs after what it is looking at.** A viewer scheduled before the
+	// pass that writes its source would download the previous frame's image
+	// while claiming to show this one — which is the staleness `PendingReadback`
+	// reports honestly and this would hide.
+	const auto viewerAt = std::find(ran.begin(), ran.end(), "viewer");
+	const auto opaqueAt = std::find(ran.begin(), ran.end(), "opaque@0");
+	REQUIRE(viewerAt != ran.end());
+	REQUIRE(opaqueAt != ran.end());
+	CHECK(opaqueAt < viewerAt);
+}
+
+TEST_CASE("an overdraw pipeline runs the counter and a viewer of it", "[render][graph]") {
+	// **The two stage-8 nodes, wired the way somebody inspecting a frame would
+	// wire them.** `overdraw` counts into its own target and `viewer` asks for
+	// that target to be downloaded — which is the whole loop from "I want to see
+	// overdraw" to a picture, minus the device.
+	//
+	// Neither is in `StandardGraph`, and neither should be: one pays for a
+	// second pass over every instance and the other pays for a readback, every
+	// frame, for a number nobody asked for. They exist to be added to a pipeline
+	// somebody authored.
+	//
+	// **Built in order rather than appended to the standard frame**, which is
+	// the thing worth knowing about authoring one. Appending a `View` node to
+	// `StandardGraph` is refused with `SharedBetweenViews`: its `Frame`-scoped
+	// tail — `overlay`, `interface` — is already declared, and a per-view node
+	// after them would mean "every view, then the panels, then every view
+	// again". Declaration order is the order, so an authored pipeline is
+	// declared in it.
+	RenderGraph graph;
+
+	const engine::graph::ResourceId counts =
+		graph.AddResource({.Name = Name("overdraw"), .Kind = engine::graph::ResourceKind::Colour});
+	REQUIRE(counts.IsValid());
+
+	engine::graph::Node counter;
+	counter.Name = Name("overdraw");
+	counter.Kind = Name("overdraw");
+	counter.Writes = {counts};
+	counter.Scope = engine::graph::NodeScope::View;
+	REQUIRE(graph.AddNode(counter).IsValid());
+
+	engine::graph::Node viewer;
+	viewer.Name = Name("viewer");
+	viewer.Kind = Name("viewer");
+	viewer.Reads = {counts};
+	viewer.Scope = engine::graph::NodeScope::Frame;
+	REQUIRE(graph.AddNode(viewer).IsValid());
+
+	CompiledGraph compiled;
+	Name offender;
+	INFO("offending node: " << std::string(offender.Text()));
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	std::vector<std::string> ran;
+	PassTable table;
+	Record(table, graph, ran);
+
+	GraphRunner runner{table};
+	REQUIRE(graph.Execute(compiled, runner, size_t{2}));
+
+	// **The counter is per view and the viewer is not.** Two views count twice;
+	// the download happens once, at the end, because there is one panel.
+	CHECK(std::count(ran.begin(), ran.end(), "overdraw@0") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "overdraw@1") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "viewer") == 1);
+
+	// **And the viewer runs after the thing it is looking at**, which is what
+	// makes the picture this frame's rather than the last one's.
+	const auto viewerAt = std::find(ran.begin(), ran.end(), "viewer");
+	const auto lastCount = std::find(ran.begin(), ran.end(), "overdraw@1");
+	REQUIRE(viewerAt != ran.end());
+	REQUIRE(lastCount != ran.end());
+	CHECK(lastCount < viewerAt);
 }

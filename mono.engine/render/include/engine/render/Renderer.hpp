@@ -10,8 +10,10 @@
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/Readback.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
@@ -946,6 +948,65 @@ namespace engine::render {
 		// The device and swapchain format a `FrameOverlayHook` builds against.
 		//
 		// @return The handles, both empty before Initialise.
+		// Runs this pipeline instead of the standard frame.
+		//
+		// **The thing the whole node editor was for.** Until this existed,
+		// editing a pipeline changed a document and not a frame — which is the
+		// state `docs/PIPELINE_NODES.md` stage 3 called the one most likely to
+		// be misread as the editor being broken. `graph::Execute` already
+		// submits the frame; this is what decides *which* frame it submits.
+		//
+		// **Refused rather than half-applied.** A graph that does not compile,
+		// or that names a node kind nothing can draw, leaves the previous
+		// pipeline running and says why. A renderer that accepted it would
+		// present a dark window and the scene would get the blame.
+		//
+		// @param pipeline What to run. Copied, because a caller editing a
+		//                 document should not be editing the frame in flight.
+		// @return Whether it was taken. On `false` the previous pipeline is
+		//         still running and the reason is logged.
+		bool SetPipeline(const graph::RenderGraph &pipeline);
+
+		// Goes back to `graph::StandardGraph`.
+		void ResetPipeline();
+
+		// The debug download's most recent picture, and how old it is.
+		//
+		// **A frame late, and it says so.** A readback that waited would be a
+		// stall in a panel; one that does not is a picture behind. The second is
+		// fine and the staleness is reported rather than hidden — see
+		// `render::PendingReadback`.
+		//
+		// Empty until a `viewer` node has run in a pipeline this renderer was
+		// given, which the standard frame has none of.
+		//
+		// @since v0.11
+		struct ReadbackImage {
+			// Which resource it is of, and how big.
+			//@{
+			core::Name Source;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			//@}
+
+			// The pixels, as the transfer buffer held them, and what they reduce
+			// to.
+			//@{
+			std::span<const uint32_t> Pixels;
+			ImageHistogram Histogram;
+			//@}
+
+			// How many frames ago this was asked for. Zero for no picture.
+			uint64_t Age = 0;
+
+			bool IsValid() const {
+				return Width > 0 && Height > 0 && !Pixels.empty();
+			}
+		};
+
+		// What the last `viewer` node produced.
+		ReadbackImage Readback() const;
+
 		BackendHandles Backend() const;
 
 	  private:

@@ -15,13 +15,13 @@ should leave the in-progress item marked with what compiles and what does not.
 | stage | what | state |
 |---|---|---|
 | 1 | Type system — formats, usage kinds, divisor, external resources | **done** |
-| 2 | Catalogue — 45 node kinds, typed and formatted slots | **done** |
+| 2 | Catalogue — 48 node kinds, typed and formatted slots | **done** |
 | 3 | Executor — `Renderer::Render` runs the graph | **done.** `graph::Execute` is what submits the frame; `PassOrder()` is a view of the graph and the `Pass` enum is gone |
 | 4 | Static checks — nine fault kinds | **done** |
 | 5 | Authored order, and scopes | **done** |
 | 6 | Access grid / profiler visualiser | **done** |
 | 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
-| 8 | Readbacks — viewer image, histograms, overdraw | **half.** The arithmetic is built and tested — `engine.render.readback`, histograms and the download policy. The device half, the `viewer` node and overdraw are not |
+| 8 | Readbacks — viewer image, histograms, overdraw | **done.** Histograms, the download policy, the non-stalling device path, the `viewer` node, the `overdraw` counter, and `Renderer::SetPipeline` so a pipeline with either in it can run |
 
 ---
 
@@ -495,25 +495,82 @@ should be. `engine.render.readback` is eight cases with no GPU in them.
       (3 cases), `/255` instead of `/256` in the bucket (2 cases), ageing from
       the fence (1 case), and dropping the in-flight guard in `Poll` (1 case).
 
-- [ ] **The device half.** `Renderer` owns the transfer buffer and the fence and
-      has to drive `PendingReadback` with them. The pieces are already there:
-      `--capture` does exactly this download **with** a stall
-      (`SDL_SubmitGPUCommandBufferAndAcquireFence` then `SDL_WaitForGPUFences`),
-      and the non-stalling version is the same copy pass plus
-      `SDL_QueryGPUFence` polled on a later frame. What it needs that `--capture`
-      does not is a transfer buffer that outlives the frame.
+- [x] **The device half.** `Impl::ReadbackSlot` holds a transfer buffer and a
+      fence that outlive the frame — the only two things the renderer
+      deliberately keeps across one, which is why they are also the only two
+      `Shutdown` would otherwise miss. `PollReadback` asks
+      `SDL_QueryGPUFence` at the top of a frame and never waits; the submit
+      keeps the fence instead of waiting on it.
 
-- [ ] **The `viewer` node**, which is in the catalogue and does nothing. A
-      handler registered under `viewer` that copies whatever it reads into the
-      readback slot. It is one blit and it is the bridge between the editor and
-      the inspector — §4.6 calls it the highest-value single addition and that
-      still looks right.
+      **One exception, and it is not a stall.** When `--capture` is also active
+      it has already waited, so the download in the same command buffer is
+      finished too and is collected there rather than left for next frame. The
+      readback did not become a stall by sharing the ride.
 
-- [ ] **An overdraw view — fault 9.** The one item here that is not a readback
-      of an existing target: it needs a pass that *counts* rather than shades,
-      which is a pipeline with additive blend into an `R8`/`R16` and no depth
-      write. A node kind, a pipeline and a shader — more than the other three
-      put together.
+- [x] **The `viewer` node.** A handler that turns `RunContext::Reads` into a
+      texture and asks for a download of it. It draws nothing and never refuses
+      a frame — nothing downstream reads what a viewer produces, so a download
+      that could not start is a stale panel and not a hole in the frame.
+
+      **`Impl::TextureFor` is what makes it possible**, and it is the first
+      place the graph's resource *names* mean anything: until now `Reads` and
+      `Writes` were checked against each other and against nothing else. It
+      answers for the standard frame's five plus `overdraw`; anything else gets
+      an invalid answer rather than a guess.
+
+      `surface` answers with index zero's readable half, which is a choice
+      rather than a fact — there are `scene::MAX_SURFACES` of them and the name
+      does not say which. A per-index viewer needs a word the catalogue does not
+      have.
+
+- [x] **An overdraw view — fault 9.** `overdraw` is a catalogue kind now, a
+      pipeline, a fragment shader and a handler. Three things make it a counter
+      rather than a render:
+
+      - an `R8_UNORM` target with **additive** blending, so each fragment adds
+        one step of 1/255 and the readback multiplies back up;
+      - **depth test and write both off** — the point is to count the fragments
+        the depth test would have discarded, and leaving the test on would count
+        one per pixel and measure nothing;
+      - **no culling**, because a back face still costs a fragment on the way to
+        being rejected on some hardware and a count that pretends otherwise
+        flatters the scene.
+
+      **The vertex stage is `opaque.vert` unchanged**, so what is counted is
+      what that pass would actually shade — same instancing, same clip. A second
+      vertex shader would be a second description of where the geometry is, and
+      the whole point is to measure the first one.
+
+- [x] **`Renderer::SetPipeline`**, without which all three of the above are dead
+      code: `viewer` and `overdraw` are deliberately **not** in `StandardGraph`,
+      because a frame that always paid for a second pass over every instance and
+      a readback nobody was looking at would be the wrong default. So the
+      renderer had to be able to run a graph somebody authored, which is the
+      thing `PIPELINE_NODES.md` stage 3 said the whole node editor was for.
+
+      Refused rather than half-applied: a graph that does not compile, or that
+      names a kind nothing can draw, leaves the previous pipeline running and
+      says why.
+
+**Two contradictions the building turned up**, both found by trying to run what
+the catalogue described rather than by reading it:
+
+- **`Validate` refused every sink.** It fired on any node with no writes, and
+  `viewer` and `capture` both write nothing by definition — so two catalogue
+  kinds could never be placed in a graph that compiled, and nothing noticed
+  until something tried. What a sink produces is a panel or a file, outside the
+  graph, which is exactly why the graph cannot see it. The rule is now "neither
+  reads nor writes", which still catches the pointless node the original case
+  was written for. Mutation-checked: putting the old rule back fails both the
+  new sink case and the viewer pipeline.
+
+- **A per-view node cannot be appended to the standard frame.** `Compile`
+  refuses it with `SharedBetweenViews`, because the frame's `Frame`-scoped tail
+  — `overlay`, `interface` — is already declared and a per-view node after them
+  would mean "every view, then the panels, then every view again". Declaration
+  order is the order, so an authored pipeline has to be *declared* in it rather
+  than assembled by appending. Worth knowing before anybody writes the editor
+  action that adds a node.
 
 ---
 

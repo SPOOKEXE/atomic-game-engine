@@ -160,7 +160,7 @@ namespace engine::graph {
 		case GraphStatus::DuplicateNode:
 			return "two nodes share a name";
 		case GraphStatus::WritesNothing:
-			return "a node writes nothing";
+			return "a node neither reads nor writes";
 		case GraphStatus::UnknownResource:
 			return "a node names a resource this graph does not hold";
 		case GraphStatus::ReadsBeforeWrite:
@@ -237,7 +237,16 @@ namespace engine::graph {
 			// part of the graph an author is editing, and reporting its faults
 			// only once it is switched back on is a diagnostic arriving at the
 			// least convenient moment.
-			if (node.Writes.empty()) {
+			// **A sink is not a pointless node.** `viewer` and `capture` write
+			// nothing by definition — their whole purpose is to consume, and
+			// what they produce is a panel or a file, which is outside the
+			// graph. Refusing every node with no writes made both of them
+			// catalogue entries that could never be placed, which nothing
+			// noticed until one was.
+			//
+			// What is still a fault is a node that neither reads nor writes:
+			// that one cannot affect the frame and cannot be observed either.
+			if (node.Writes.empty() && node.Reads.empty()) {
 				offender = node.Name;
 				return GraphStatus::WritesNothing;
 			}

@@ -35,7 +35,7 @@ and for deleted marked items;
 
 ## Deferred Items
 
-### [_] D00047
+### [CLOSED] D00047
 
 **Readbacks: the viewer node's image, channel histograms, and an overdraw view.**
 
@@ -98,11 +98,20 @@ rather than as free.
   count every copy into GPU memory, measured at the region rather than derived
   from a count, and the profile panel shows them.
 
-### [_] D00045
+### [CLOSED] D00045
 
-**`Node::PerView` wants to be a scope, and the change is 85 references wide.**
+**Closed at v0.11: `NodeScope` shipped with three values.** The open question the
+last bullet leaves — three scopes or four — was answered as it predicted.
+`Frame`, `World` and `View` exist; `Surface` does not, because nothing schedules
+a per-surface block and a fourth value would have been a word in the type with no
+block to run in. `RenderGraph::Execute` runs the `World` band once per distinct
+world and `Renderer::FrameRunner` prepares that world's first view before it,
+which is what gave `World` something real to attach to.
 
-`PIPELINE_NODES.md` stage 5's remaining half.
+**`Node::PerView` is gone**, not widened: the field is `Scope` and `Compile`'s
+partition turns on a predicate rather than a boolean.
+
+**`PIPELINE_NODES.md` stage 5's remaining half, as it was written:**
 
 - A boolean says per-view or not. What a frame needs is **once per frame, once
   per world, once per view, once per surface** — and the multi-view seam already
@@ -970,9 +979,25 @@ policy. The default remains the weaker unauthenticated mode for compatibility;
 - Likely moot at v0.2, when `Column`/`ComponentSet` replace flecs as the storage and the query object stops being flecs's to build.
 - Resources are per-world with no ordering guarantee against each other, which is fine while they are written by one system each. When two systems write one resource, that ordering is a phase question, not a resource question.
 
-### [_] D00002
+### [CLOSED] D00002
 
-**Three of these four bullets were false by the end of v0.6 and are corrected here rather than left to be read.** The entry stays open; what it is open *for* is much narrower than what it was written for.
+**Closed at v0.11 by the executor landing.** `Renderer::Render` runs
+`graph::Execute` over a compiled `graph::RenderGraph`; the six pass bodies are
+handlers a `PassTable` finds by kind. `render::PassOrder` reads its names out of
+the graph and the hand-written `Pass` enum beside it is deleted, so the frame is
+described once. `Renderer::SetPipeline` takes an authored graph, which is the
+line this entry's last bullet was really about — editing a pipeline changes a
+frame now and not only a document.
+
+**What did *not* close with it, recorded so nobody looks for it here:** the graph
+still describes what runs and does not yet *allocate* what it runs over —
+`Impl::TextureFor` maps the standard frame's resource names onto textures the
+renderer owns, and a name it does not know gets an invalid answer rather than a
+new target. Transient allocation, aliasing and pass culling — RDG's derived half,
+`PIPELINE_NODES.md` §1.1 — are all still absent. That is the next entry somebody
+should file rather than a bullet here.
+
+**Three of the four bullets below were already false by the end of v0.6 and were corrected in place rather than left to be read.**
 
 - The graph renderer of `RENDER_PIPELINE.md`. ~~The current `render` module is stage 0 of its twelve — one instanced opaque pass and one overlay pass, standing in for stage 1's skeleton.~~ **Five passes as of v0.6** — shadow, surface, opaque, transparent, overlay — over a frustum-culled draw list. Still stage 1's skeleton rather than the graph, and the thing that makes it a skeleton is unchanged: **the order is a function body**. More passes is not more architecture.
 - ~~Its stage 2 needs `ecs::ChangeChannel` for per-node cache invalidation, and its §4.2 needs `ecs::Column`/`ComponentSet` to store nodes as rows. Both wait for v0.2, which is D00001.~~ **Both closed** — the storage rewrite at v0.2, chunking at v0.4. **Nothing in `ecs` blocks the graph any more**, which means this entry has been waiting on nobody but itself since v0.4.

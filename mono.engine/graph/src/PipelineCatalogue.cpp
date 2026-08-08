@@ -662,6 +662,18 @@ namespace engine::graph {
 			 {{"window", K::Colour, LDR, true, "The swapchain."}},
 			 "Puts a finished image on the window."},
 
+			{"overdraw",
+			 "Overdraw",
+			 C::Draw,
+			 S::View,
+			 {},
+			 {{"overdraw", K::Colour, F::R8, true, "Fragments per pixel, one step of 1/255 each."}},
+			 "Counts how many times each pixel would be shaded, by drawing the "
+			 "camera's whole list with the depth test off. Fault 9 of the eleven, "
+			 "and the only one no reading of the graph can answer — overdraw is a "
+			 "property of what the geometry happens to overlap.",
+			 true},
+
 			{"viewer",
 			 "Viewer",
 			 C::Output,

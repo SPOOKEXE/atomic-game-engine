@@ -1,7 +1,7 @@
 # Render pipeline nodes — research, taxonomy and design
 
-**Status: stages 1 to 6 are built and tested. 7 and 8 are half built, and in
-each case the missing half is named rather than pending.**
+**Status: stages 1 to 6 and 8 are built and tested. 7 is half built, and the
+missing half is named rather than pending — `SDL_GPU` has no timestamp query.**
 
 `docs/PIPELINE_TODO.md` is the working state — this table says which stages
 exist, that one says how far each got and what is next.
@@ -15,7 +15,7 @@ exist, that one says how far each got and what is next.
 | 5 | Authored order and scopes | **built.** The order check is `OutOfOrder` in `engine.graph.pipelinediagnostics`; scopes are `NodeScope` — `Frame`, `World`, `View`, and not `Surface`, for the reason in the TODO. |
 | 6 | The access grid | **built**, `engine.graph.pipelineprofile`, drawn by the Pipeline Profile panel |
 | 7 | GPU timestamps and upload counters | **half built, and the other half is not ours to build.** CPU→GPU traffic is counted at every copy and shown on the panel; debug groups name every node for a graphics debugger. Per-pass *timestamps* need an API `SDL_GPU` does not have — it exposes fences and nothing finer. D00046. |
-| 8 | Readbacks — the viewer's image, channel histograms, overdraw | **half built.** The reduction and the download policy are `engine.render.readback`, with no device in them; faults 3 and 4 are answered arithmetic. The download itself, the `viewer` node and overdraw (fault 9) are not. D00047. |
+| 8 | Readbacks — the viewer's image, channel histograms, overdraw | **built.** `engine.render.readback` is the reduction and the fence policy, with no device in them; the renderer holds a transfer buffer and a fence across frames and never waits. `viewer` and `overdraw` are handlers, and `Renderer::SetPipeline` is what lets a pipeline containing either actually run. Faults 3, 4 and 9 are all answerable. |
 
 Two findings came out of building it, both from the checker reporting our own
 frame and both recorded in place: `window` and `colour` are **external**
@@ -564,6 +564,20 @@ they belong: they need a path off the GPU that does not exist yet.
 **Stage 8 — readbacks.** The `viewer` node's image, channel histograms (which
 answer "is this alpha empty"), and an overdraw view. Last, because it is the most
 expensive and the least load-bearing — but it is what closes faults 3, 4 and 9.
+
+Built, and the shape of it is worth stating: the *reduction* and the *fence
+policy* have no device in them and live in `engine.render.readback` where a suite
+can reach them, and the renderer owns only the transfer buffer and the fence.
+That is the same split `PassTable`/`GraphRunner` took at stage 3, and for the
+same reason — the renderer is the one module a suite cannot exercise, so
+everything that can be moved out of it should be.
+
+**And the reason `viewer` and `overdraw` are not in the standard frame** is that
+a frame which always paid for a readback nobody was looking at, and a second pass
+over every instance, would be the wrong default. They are what an *authored*
+pipeline adds — which is what made `Renderer::SetPipeline` a prerequisite rather
+than a nicety, and what finally makes editing a pipeline change a frame rather
+than a document.
 
 ---
 

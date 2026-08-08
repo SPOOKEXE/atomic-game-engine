@@ -407,7 +407,13 @@ namespace engine::graph {
 		// Two nodes share a name, so a profiler cannot tell them apart.
 		DuplicateNode,
 
-		// A node writes nothing, which is a node that cannot be observed.
+		// A node neither reads nor writes, so it cannot affect the frame and
+		// cannot be observed either.
+		//
+		// **Writing nothing is not enough to be this.** `viewer` and `capture`
+		// are sinks: they consume a resource and produce a panel or a file,
+		// which is outside the graph. Refusing them made two catalogue kinds
+		// that could never be placed.
 		WritesNothing,
 
 		// A node names a resource this graph does not hold.

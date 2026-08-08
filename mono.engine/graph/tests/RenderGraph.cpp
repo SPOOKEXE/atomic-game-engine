@@ -335,13 +335,32 @@ TEST_CASE("two nodes may not share a name", "[graph]") {
 	CHECK(graph.Validate(offender) == GraphStatus::DuplicateNode);
 }
 
-TEST_CASE("a node that writes nothing cannot be observed", "[graph]") {
+TEST_CASE("a node that neither reads nor writes cannot be observed", "[graph]") {
 	RenderGraph graph;
 	graph.AddNode({.Name = Name("pointless"), .Reads = {}, .Writes = {}});
 
 	Name offender;
 	CHECK(graph.Validate(offender) == GraphStatus::WritesNothing);
 	CHECK(offender == Name("pointless"));
+}
+
+TEST_CASE("a sink writes nothing and is not pointless", "[graph]") {
+	// **`viewer` and `capture` are both sinks**, and the rule above used to
+	// refuse them: it fired on any node with no writes, which made two catalogue
+	// kinds that could never be placed in a graph that compiled. Nothing noticed
+	// until something tried to run one.
+	//
+	// What a sink produces is a panel or a file — outside the graph, which is
+	// exactly why the graph cannot see it. Reading something is what makes it
+	// observable enough to be worth running.
+	RenderGraph graph;
+	const ResourceId colour = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+	graph.AddNode({.Name = Name("opaque"), .Writes = {colour}});
+	graph.AddNode({.Name = Name("viewer"), .Reads = {colour}, .Writes = {}});
+
+	Name offender;
+	INFO("offending node: " << std::string(offender.Text()));
+	CHECK(graph.Validate(offender) == GraphStatus::Ok);
 }
 
 TEST_CASE("a resource nothing declared is refused", "[graph]") {

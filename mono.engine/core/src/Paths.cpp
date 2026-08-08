@@ -41,4 +41,8 @@ namespace engine::core {
 	std::filesystem::path Paths::Fonts() {
 		return Assets() / "fonts";
 	}
+
+	std::filesystem::path Paths::Program(std::string_view name) {
+		return std::filesystem::path(std::string(name) + std::string(platform::ProgramSuffix()));
+	}
 }

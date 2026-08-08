@@ -41,11 +41,7 @@ namespace host_mode_test {
 	// The server program, which sits beside the test binary's directory rather
 	// than in it: tests stage into `tests/` and programs into their own.
 	std::filesystem::path ServerProgram() {
-#if defined(_WIN32)
-		return engine::core::Paths::Base().parent_path() / "server" / "server.exe";
-#else
-		return engine::core::Paths::Base().parent_path() / "server" / "server";
-#endif
+		return engine::core::Paths::Base().parent_path() / "server" / engine::core::Paths::Program("server");
 	}
 
 	bool ServerAvailable() {

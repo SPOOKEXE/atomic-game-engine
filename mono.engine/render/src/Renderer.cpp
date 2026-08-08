@@ -6,6 +6,7 @@
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/render/MeshTable.hpp>
+#include <engine/render/Readback.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -216,6 +217,13 @@ namespace engine::render {
 
 		// Measured shadow-map resolution for the current scene scale.
 		constexpr uint32_t SHADOW_RESOLUTION = 2048;
+
+		// What the overdraw counter is drawn into.
+		//
+		// **One channel and eight bits**, additively blended: each fragment adds
+		// 1/255 and 255 layers saturate, which is a long way past the point
+		// where the number stops being interesting. See `overdraw.frag`.
+		constexpr SDL_GPUTextureFormat OVERDRAW_FORMAT = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
 
 		// Measured resize threshold; keeps targets stable during viewport drags.
 		constexpr uint32_t SCENE_TARGET_BLOCK = 64;
@@ -1065,6 +1073,113 @@ namespace engine::render {
 		// @return Whether it drew. A `true` claims the slot.
 		bool ClaimSlot(const View &view);
 
+		// The debug download: one image off the GPU, a frame late.
+		//
+		// **The opposite discipline to `--capture`.** That one waits on a fence
+		// because a file written a frame late is a file written wrong; this one
+		// must never wait, because a panel that hitched to fetch its picture is
+		// worse than a panel showing last frame's. So the copy goes in, the
+		// fence is kept, and the pixels are collected whenever the GPU gets
+		// round to it. `PendingReadback` is the policy and has its own suite;
+		// this is the device half of it.
+		//
+		// @since v0.11
+		struct ReadbackSlot {
+			// Lives across frames, which is the whole difference from the
+			// capture path — that one creates a transfer buffer, waits, reads
+			// and frees it inside one frame.
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			uint32_t Capacity = 0;
+
+			// The fence for the submit the copy went in with. Held, not waited
+			// on. Null when nothing is in flight.
+			SDL_GPUFence *Fence = nullptr;
+
+			// What was asked for, so the panel can say what it is looking at.
+			//@{
+			core::Name Source;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			//@}
+
+			// The picture, once it arrives, and what it reduces to.
+			//@{
+			std::vector<uint32_t> Pixels;
+			ImageHistogram Histogram;
+			//@}
+
+			PendingReadback Pending;
+		};
+
+		ReadbackSlot Readback;
+
+		// Frames since the renderer started, for `PendingReadback::Age`.
+		//
+		// **The renderer's own count and not a caller's**, because the age this
+		// reports is in frames this renderer drew — a host that skipped a
+		// present still drew, and a host that drew twice in a tick still
+		// counted twice.
+		uint64_t FrameCounter = 0;
+
+		// Whether a download went into this frame's command buffer.
+		bool ReadbackSubmitted = false;
+
+		// Maps the transfer buffer and reduces what is in it.
+		//
+		// Called once per arrival, by whichever of the two paths noticed — the
+		// poll at the top of a frame, or the capture's wait when a download
+		// happened to share its command buffer.
+		void CollectReadback();
+
+		// Collects the picture if the GPU has finished with it.
+		//
+		// **Non-blocking, and called at the top of a frame.** By then the fence
+		// from a previous frame has usually signalled and the copy costs
+		// nothing; when it has not, nothing waits and the panel keeps showing
+		// what it had.
+		void PollReadback();
+
+		// Puts a download of one named resource into this frame.
+		//
+		// @param resource Which resource, as the graph names it.
+		// @return Whether a copy was recorded. False when one is already in
+		//         flight, when the name is not one this renderer allocates, or
+		//         when the transfer buffer could not be grown.
+		bool RequestReadback(core::Name resource);
+
+		// A texture the graph names, and how big it is.
+		//
+		// @since v0.11
+		struct NamedTexture {
+			SDL_GPUTexture *Texture = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+
+			bool IsValid() const {
+				return Texture != nullptr && Width > 0 && Height > 0;
+			}
+		};
+
+		// Which of this renderer's textures a graph resource is.
+		//
+		// **The first place the graph's resource names mean anything.** Until
+		// now a node's `Reads` and `Writes` were checked against each other and
+		// nothing else — the names were a description of the frame and not a
+		// handle on it. A `viewer` node has to turn one into a texture, so this
+		// is where that starts.
+		//
+		// **Only the standard frame's five.** An authored pipeline naming a
+		// resource this renderer does not allocate gets an invalid answer rather
+		// than a guess, and the caller says so. Allocating from the graph is a
+		// stage of its own and a long way from here.
+		//
+		// @param resource The name, as `graph::ResourceDesc::Name` holds it.
+		// @return The texture, or an invalid one. `surface` answers with index
+		//         zero's readable half, which is a choice rather than a fact —
+		//         there are `scene::MAX_SURFACES` of them and the name does not
+		//         say which.
+		NamedTexture TextureFor(core::Name resource);
+
 		// What `PrepareView` decided about a view.
 		//
 		// @since v0.11
@@ -1093,6 +1208,23 @@ namespace engine::render {
 		// @param view What to draw.
 		// @return Whether its passes may run. See `ViewReady`.
 		ViewReady PrepareView(const View &view);
+
+		// Makes the overdraw target, at the size the world is drawn at.
+		//
+		// @param width  The world's rectangle.
+		// @param height The same.
+		// @return Whether it exists at that size afterwards.
+		bool EnsureOverdraw(uint32_t width, uint32_t height);
+
+		// Counts how many times each pixel would be shaded.
+		//
+		// **The one fault of the eleven that no reading of the graph answers.**
+		// It runs the camera's whole draw list with the depth test off, so what
+		// lands in the target is fragments-per-pixel rather than the frame.
+		//
+		// @return `false` to abandon the frame. A view with nothing to draw
+		//         counts nothing and returns `true`.
+		bool SubmitOverdraw();
 
 		// The blended tail of the eye's pass, and the effects after it.
 		//
@@ -1347,6 +1479,19 @@ namespace engine::render {
 		// buffer** the colour pass binds, which is what makes a shadow map one
 		// more draw over data that is already on the device.
 		SDL_GPUGraphicsPipeline *ShadowPipeline = nullptr;
+
+		// Counts shading instead of doing it. See `overdraw.frag`, and
+		// `docs/PIPELINE_NODES.md` §1.5 fault 9 for why it is a pipeline rather
+		// than a graph property.
+		SDL_GPUGraphicsPipeline *OverdrawPipeline = nullptr;
+
+		// What it draws into, and how big. Allocated on demand, because a frame
+		// nobody is inspecting should not pay for it.
+		//@{
+		SDL_GPUTexture *OverdrawTexture = nullptr;
+		uint32_t OverdrawWidth = 0;
+		uint32_t OverdrawHeight = 0;
+		//@}
 		SDL_GPUTexture *ShadowTexture = nullptr;
 		SDL_GPUSampler *ShadowSampler = nullptr;
 
@@ -1594,6 +1739,11 @@ namespace engine::render {
 	bool Renderer::Impl::CreatePipelines() {
 		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 
+		// **The overdraw pass shares `opaque.vert`**, so what it counts is what
+		// that pass would actually shade — same instancing, same clip. No
+		// samplers and no fragment uniforms: it writes a constant.
+		SDL_GPUShader *overdrawFragment = LoadShader("overdraw.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+
 		// **Two samplers now: the shadow map and the surface.** The count is
 		// part of the shader object rather than of the pipeline, so a mismatch
 		// with the `layout(set = 2, binding = n)` declarations is a bind that
@@ -1615,8 +1765,8 @@ namespace engine::render {
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
-		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
-			!overlayFragment) {
+		if (!opaqueVertex || !opaqueFragment || !overdrawFragment || !shadowVertex || !shadowFragment ||
+			!overlayVertex || !overlayFragment) {
 			return false;
 		}
 
@@ -1671,6 +1821,48 @@ namespace engine::render {
 		OpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
 		if (!OpaquePipeline) {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
+		}
+
+		// --- overdraw --------------------------------------------------------
+		//
+		// The opaque pipeline that counts instead of shading. Fault 9, which is
+		// the one of the eleven that no amount of reading the graph can answer:
+		// how many times a pixel was shaded is a property of what the geometry
+		// happens to overlap.
+		//
+		// Three changes, and each is the whole reason it is a second pipeline:
+		//
+		// - **An `R8_UNORM` target with additive blending**, so each fragment
+		//   adds one step of 1/255 and the readback multiplies back up.
+		// - **Depth test and write both off.** The point is to count the
+		//   fragments the depth test would have *discarded* — leaving the test
+		//   on would count one per pixel and measure nothing.
+		// - **No culling**, for the same reason: a back face that the opaque
+		//   pass rejects still costs a fragment on the way to being rejected on
+		//   some hardware, and a count that pretends otherwise flatters the
+		//   scene.
+		SDL_GPUColorTargetDescription countTarget{};
+		countTarget.format = OVERDRAW_FORMAT;
+		countTarget.blend_state.enable_blend = true;
+		countTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+		countTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		countTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		countTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		countTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		countTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+
+		SDL_GPUGraphicsPipelineCreateInfo overdraw = opaque;
+		overdraw.fragment_shader = overdrawFragment;
+		overdraw.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		overdraw.depth_stencil_state.enable_depth_test = false;
+		overdraw.depth_stencil_state.enable_depth_write = false;
+		overdraw.target_info.color_target_descriptions = &countTarget;
+		overdraw.target_info.num_color_targets = 1;
+		overdraw.target_info.has_depth_stencil_target = false;
+
+		OverdrawPipeline = SDL_CreateGPUGraphicsPipeline(Device, &overdraw);
+		if (!OverdrawPipeline) {
+			ENGINE_ERROR("overdraw pipeline: {}", SDL_GetError());
 		}
 
 		// --- shadow ---------------------------------------------------------
@@ -1936,6 +2128,7 @@ namespace engine::render {
 		// outlive their creation.
 		SDL_ReleaseGPUShader(Device, opaqueVertex);
 		SDL_ReleaseGPUShader(Device, opaqueFragment);
+		SDL_ReleaseGPUShader(Device, overdrawFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
 
@@ -3217,6 +3410,20 @@ namespace engine::render {
 		if (State->OverlayTransfer) {
 			SDL_ReleaseGPUTransferBuffer(device, State->OverlayTransfer);
 		}
+
+		// **The debug download's, which outlive a frame and so can outlive the
+		// device.** Everything else here is freed because a frame owns it for a
+		// frame; these two are the only things the renderer deliberately keeps
+		// across one, which makes them the only two nothing else would catch.
+		if (State->Readback.Fence) {
+			SDL_ReleaseGPUFence(device, State->Readback.Fence);
+		}
+		if (State->Readback.Transfer) {
+			SDL_ReleaseGPUTransferBuffer(device, State->Readback.Transfer);
+		}
+		if (State->OverdrawTexture) {
+			SDL_ReleaseGPUTexture(device, State->OverdrawTexture);
+		}
 		if (State->OverlaySampler) {
 			SDL_ReleaseGPUSampler(device, State->OverlaySampler);
 		}
@@ -3473,6 +3680,56 @@ namespace engine::render {
 		};
 	}
 
+	bool Renderer::SetPipeline(const graph::RenderGraph &pipeline) {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+
+		// **Compiled and checked before anything is replaced.** A half-applied
+		// pipeline is a frame nobody authored.
+		graph::CompiledGraph compiled;
+		core::Name offender;
+		const graph::GraphStatus status = pipeline.Compile(compiled, offender);
+		if (status != graph::GraphStatus::Ok) {
+			ENGINE_ERROR("pipeline refused: {} at '{}'", graph::Describe(status), offender.Text());
+			return false;
+		}
+
+		const std::vector<core::Name> missing = State->Passes.Missing(pipeline);
+		if (!missing.empty()) {
+			for (const core::Name &kind : missing) {
+				ENGINE_ERROR("pipeline refused: nothing can submit a '{}' node", kind.Text());
+			}
+			return false;
+		}
+
+		State->Graph = pipeline;
+		State->Compiled = std::move(compiled);
+		return true;
+	}
+
+	void Renderer::ResetPipeline() {
+		if (State == nullptr || State->Device == nullptr) {
+			return;
+		}
+		State->BuildFrameGraph();
+	}
+
+	Renderer::ReadbackImage Renderer::Readback() const {
+		ReadbackImage out;
+		if (State == nullptr || !State->Readback.Pending.HasImage()) {
+			return out;
+		}
+
+		out.Source = State->Readback.Source;
+		out.Width = State->Readback.Width;
+		out.Height = State->Readback.Height;
+		out.Pixels = State->Readback.Pixels;
+		out.Histogram = State->Readback.Histogram;
+		out.Age = State->Readback.Pending.Age(State->FrameCounter);
+		return out;
+	}
+
 	BackendHandles Renderer::Backend() const {
 		BackendHandles handles;
 		if (State->Device != nullptr) {
@@ -3501,6 +3758,37 @@ namespace engine::render {
 		});
 		Passes.Set(core::Name("overlay"), [this](const graph::RunContext &) { return SubmitOverlay(); });
 		Passes.Set(core::Name("interface"), [this](const graph::RunContext &) { return SubmitInterface(); });
+
+		// **The viewer, which is Blender's idea and the cheapest thing here.**
+		// It draws nothing: it asks for a download of whatever is wired into it,
+		// and the panel shows what comes back a frame later. `§4.6` calls it the
+		// highest-value single addition and that still looks right — it is the
+		// bridge between the editor and the inspector, and it costs one copy.
+		//
+		// **Not in `graph::StandardGraph`**, so it runs only in an authored
+		// pipeline handed to `Renderer::SetPipeline`. A frame that always paid
+		// for a readback nobody was looking at would be the wrong default.
+		// **The overdraw counter**, which is fault 9 and the only one of the
+		// eleven that needs a pipeline of its own. Not in `StandardGraph`
+		// either: a frame that always counted its own overdraw would pay for
+		// a second pass over every instance, every frame, for a number nobody
+		// asked for.
+		Passes.Set(core::Name("overdraw"), [this](const graph::RunContext &) { return SubmitOverdraw(); });
+
+		Passes.Set(core::Name("viewer"), [this](const graph::RunContext &context) {
+			for (const graph::ResourceId read : context.Reads) {
+				const graph::ResourceDesc *desc = Graph.FindResource(read);
+				if (desc != nullptr && RequestReadback(desc->Name)) {
+					break;
+				}
+			}
+
+			// **Never refuses the frame.** Nothing downstream reads what a
+			// viewer produces — it has no outputs at all — so a download that
+			// could not be started is a panel with a stale picture and not a
+			// frame with a hole in it.
+			return true;
+		});
 
 		// **`transparent` shares `opaque`'s render pass and still gets its own
 		// entry**, because the graph has two nodes and the table answers for
@@ -3599,6 +3887,174 @@ namespace engine::render {
 		}
 
 		return ran;
+	}
+
+	void Renderer::Impl::PollReadback() {
+		if (Readback.Fence == nullptr) {
+			return;
+		}
+
+		// **Asked, not waited on.** `SDL_WaitForGPUFences` is what the capture
+		// path does and what this one must not.
+		if (!SDL_QueryGPUFence(Device, Readback.Fence)) {
+			return;
+		}
+
+		SDL_ReleaseGPUFence(Device, Readback.Fence);
+		Readback.Fence = nullptr;
+
+		if (!Readback.Pending.Poll(true)) {
+			return;
+		}
+
+		CollectReadback();
+	}
+
+	void Renderer::Impl::CollectReadback() {
+		void *mapped = SDL_MapGPUTransferBuffer(Device, Readback.Transfer, false);
+		if (mapped == nullptr) {
+			ENGINE_ERROR("readback: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+			return;
+		}
+
+		const size_t count = static_cast<size_t>(Readback.Width) * Readback.Height;
+		Readback.Pixels.assign(
+			static_cast<const uint32_t *>(mapped), static_cast<const uint32_t *>(mapped) + count
+		);
+		SDL_UnmapGPUTransferBuffer(Device, Readback.Transfer);
+
+		// **Reduced once, here, rather than every time a panel draws.** The
+		// histogram is the answer; the pixels are what it was computed from and
+		// are kept only because a viewer wants to show them.
+		Readback.Histogram = Histogram(Readback.Pixels);
+	}
+
+	bool Renderer::Impl::RequestReadback(core::Name resource) {
+		if (!Readback.Pending.CanRequest()) {
+			return false;
+		}
+
+		const NamedTexture found = TextureFor(resource);
+		if (!found.IsValid()) {
+			return false;
+		}
+
+		const uint32_t bytes = found.Width * found.Height * 4;
+		if (Readback.Capacity < bytes) {
+			if (Readback.Transfer != nullptr) {
+				SDL_ReleaseGPUTransferBuffer(Device, Readback.Transfer);
+				Readback.Transfer = nullptr;
+			}
+
+			SDL_GPUTransferBufferCreateInfo info{};
+			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+			info.size = bytes;
+
+			Readback.Transfer = SDL_CreateGPUTransferBuffer(Device, &info);
+			if (Readback.Transfer == nullptr) {
+				ENGINE_ERROR("readback: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
+				Readback.Capacity = 0;
+				return false;
+			}
+			Readback.Capacity = bytes;
+		}
+
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(CurrentFrame.Command);
+
+		SDL_GPUTextureRegion source{};
+		source.texture = found.Texture;
+		source.w = found.Width;
+		source.h = found.Height;
+		source.d = 1;
+
+		SDL_GPUTextureTransferInfo destination{};
+		destination.transfer_buffer = Readback.Transfer;
+		destination.pixels_per_row = found.Width;
+		destination.rows_per_layer = found.Height;
+
+		SDL_DownloadFromGPUTexture(copy, &source, &destination);
+		SDL_EndGPUCopyPass(copy);
+
+		Readback.Source = resource;
+		Readback.Width = found.Width;
+		Readback.Height = found.Height;
+		Readback.Pending.Submitted(FrameCounter);
+		ReadbackSubmitted = true;
+		return true;
+	}
+
+	Renderer::Impl::NamedTexture Renderer::Impl::TextureFor(core::Name resource) {
+		NamedTexture out;
+		const std::string_view name = resource.Text();
+
+		if (name == "colour") {
+			// **What the world was drawn into**, which is the offscreen target
+			// when there is one and the swapchain otherwise. The same choice the
+			// opaque pass makes, and it has to be the same one.
+			if (CurrentView.Offscreen) {
+				const SceneSlot &slot = SlotAt(ActiveSlot);
+				out.Texture = slot.Texture;
+				out.Width = CurrentView.SceneWidth;
+				out.Height = CurrentView.SceneHeight;
+			} else {
+				out.Texture = CurrentFrame.Swapchain;
+				out.Width = CurrentFrame.Width;
+				out.Height = CurrentFrame.Height;
+			}
+			return out;
+		}
+
+		if (name == "depth") {
+			if (CurrentView.Offscreen) {
+				const SceneSlot &slot = SlotAt(ActiveSlot);
+				out.Texture = slot.Depth;
+				out.Width = slot.DepthWidth;
+				out.Height = slot.DepthHeight;
+			} else {
+				out.Texture = DepthTexture;
+				out.Width = DepthWidth;
+				out.Height = DepthHeight;
+			}
+			return out;
+		}
+
+		if (name == "shadow") {
+			out.Texture = ShadowTexture;
+			out.Width = SHADOW_RESOLUTION;
+			out.Height = SHADOW_RESOLUTION;
+			return out;
+		}
+
+		if (name == "surface") {
+			// **Index zero, and the half that is readable.** A pane's pair is
+			// ping-ponged and the slot being written this frame is half drawn;
+			// `Slot ^ 1u` is the one the screen samples. Which *index* is not
+			// answerable from the name at all — that is what a per-index viewer
+			// node would need, and the catalogue has no word for it yet.
+			const SurfaceSlotState &state = SurfacesAt(ActiveSlot).Surfaces[0];
+			if (state.Ready) {
+				out.Texture = state.Texture[state.Slot];
+				out.Width = state.Width;
+				out.Height = state.Height;
+			}
+			return out;
+		}
+
+		if (name == "overdraw") {
+			out.Texture = OverdrawTexture;
+			out.Width = OverdrawWidth;
+			out.Height = OverdrawHeight;
+			return out;
+		}
+
+		if (name == "window") {
+			out.Texture = CurrentFrame.Swapchain;
+			out.Width = CurrentFrame.Width;
+			out.Height = CurrentFrame.Height;
+			return out;
+		}
+
+		return out;
 	}
 
 	bool Renderer::Impl::ClaimSlot(const View &view) {
@@ -4956,6 +5412,106 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::Impl::EnsureOverdraw(uint32_t width, uint32_t height) {
+		if (width == 0 || height == 0) {
+			return false;
+		}
+		if (OverdrawTexture != nullptr && OverdrawWidth == width && OverdrawHeight == height) {
+			return true;
+		}
+
+		if (OverdrawTexture != nullptr) {
+			SDL_ReleaseGPUTexture(Device, OverdrawTexture);
+			OverdrawTexture = nullptr;
+		}
+
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+		info.format = OVERDRAW_FORMAT;
+
+		// **Sampler usage as well as colour target**, because the whole point is
+		// that something reads it back afterwards.
+		info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		info.width = width;
+		info.height = height;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+
+		OverdrawTexture = SDL_CreateGPUTexture(Device, &info);
+		if (OverdrawTexture == nullptr) {
+			ENGINE_ERROR("overdraw target: {}", SDL_GetError());
+			OverdrawWidth = 0;
+			OverdrawHeight = 0;
+			return false;
+		}
+
+		OverdrawWidth = width;
+		OverdrawHeight = height;
+		return true;
+	}
+
+	bool Renderer::Impl::SubmitOverdraw() {
+		if (!CurrentView.HaveInstances || OverdrawPipeline == nullptr) {
+			return true;
+		}
+		if (!EnsureOverdraw(CurrentView.SceneWidth, CurrentView.SceneHeight)) {
+			return true;
+		}
+
+		ENGINE_PROFILE_CAT("overdraw pass", core::ProfileCategory::Render);
+		CurrentFrame.Recorder->Enter(core::Name("overdraw"));
+
+		SDL_GPUCommandBuffer *command = CurrentFrame.Command;
+
+		SDL_GPUColorTargetInfo target{};
+		target.texture = OverdrawTexture;
+		target.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
+		target.load_op = SDL_GPU_LOADOP_CLEAR;
+		target.store_op = SDL_GPU_STOREOP_STORE;
+		target.cycle = true;
+
+		// **No depth attachment at all**, which is what makes this a count. The
+		// opaque pass tests against depth and discards what is behind it; this
+		// one is measuring exactly what that discards.
+		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &target, 1, nullptr);
+		SDL_BindGPUGraphicsPipeline(pass, OverdrawPipeline);
+
+		const SDL_GPUBufferBinding vertexBindings[] = {
+			{Meshes.Vertices(), 0},
+			{InstanceBuffer, 0},
+		};
+		SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+
+		const SDL_GPUBufferBinding indexBinding{Meshes.Indices(), 0};
+		SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+		// The camera's matrices, which the shared vertex stage reads.
+		SDL_PushGPUVertexUniformData(command, 0, &CurrentView.Frame, sizeof(CurrentView.Frame));
+
+		// **The whole camera range in one draw**, opaque and blended together.
+		// Splitting it the way the colour passes do would describe the runs
+		// twice for a pass that treats them identically — every fragment counts
+		// the same whatever pipeline would have shaded it.
+		if (CurrentView.InstanceCount > 0) {
+			CurrentFrame.Result->DrawCalls += DrawSlots(
+				command,
+				pass,
+				CurrentView.SceneCount,
+				CurrentView.InstanceCount,
+				nullptr,
+				nullptr,
+				nullptr,
+				nullptr,
+				nullptr,
+				0,
+				CurrentFrame.Result->Triangles
+			);
+		}
+
+		SDL_EndGPURenderPass(pass);
+		return true;
+	}
+
 	bool Renderer::Impl::SubmitTransparent() {
 		// The blended tail of the eye's pass, and the effects after it.
 		//
@@ -5161,6 +5717,14 @@ namespace engine::render {
 		State->TakeFrame(command, swapchain, frameWidth, frameHeight);
 		State->CurrentFrame.Width = frameWidth;
 		State->CurrentFrame.Height = frameHeight;
+
+		// **Collected before anything is recorded, and never waited for.** By
+		// now the fence from a previous frame has usually signalled; when it has
+		// not, nothing stalls and the panel keeps the picture it had. See
+		// `Impl::ReadbackSlot`.
+		State->FrameCounter++;
+		State->ReadbackSubmitted = false;
+		State->PollReadback();
 
 		// --- what belongs to the frame rather than to a view ------------------
 		//
@@ -5436,6 +6000,15 @@ namespace engine::render {
 				SDL_WaitForGPUFences(State->Device, true, &fence, 1);
 				SDL_ReleaseGPUFence(State->Device, fence);
 
+				// **A debug download in the same buffer is finished too**, so it
+				// is collected here rather than left for next frame. The wait
+				// already happened and it was the capture that asked for it —
+				// the readback did not become a stall by sharing the ride.
+				if (State->ReadbackSubmitted) {
+					State->Readback.Pending.Poll(true);
+					State->CollectReadback();
+				}
+
 				if (State->WriteCapture(
 						capture, State->CurrentFrame.CaptureWidth, State->CurrentFrame.CaptureHeight
 					)) {
@@ -5452,6 +6025,23 @@ namespace engine::render {
 				// Once. A request that repeated would write a file every frame
 				// and stall every one of them.
 				State->CapturePath.clear();
+			} else if (State->ReadbackSubmitted) {
+				// **A fence kept rather than waited on.** This is the whole
+				// difference between a debug view and a capture: the copy is in
+				// the buffer, the GPU will get to it, and `PollReadback` picks
+				// the pixels up at the top of some later frame.
+				State->Readback.Fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+				if (State->Readback.Fence == nullptr) {
+					ENGINE_ERROR("readback: SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError());
+
+					// The copy went in with the buffer either way, so the
+					// request is over — leaving it in flight would block every
+					// later one behind a fence that does not exist.
+					State->Readback.Pending.Poll(true);
+					State->Readback.Pixels.clear();
+					State->Readback.Histogram = ImageHistogram{};
+					return result;
+				}
 			} else if (!SDL_SubmitGPUCommandBuffer(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				return result;
