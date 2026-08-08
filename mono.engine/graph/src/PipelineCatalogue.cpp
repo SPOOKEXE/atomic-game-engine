@@ -220,7 +220,7 @@ namespace engine::graph {
 			 "Depth pre-pass",
 			 C::Draw,
 			 S::View,
-			 {},
+			 {{"entities", K::Entities, F::R8, false, "What to lay depth for."}},
 			 {{"depth", K::Depth, D24, true, "Scene depth, before any shading."}},
 			 "Depth only, so the base pass shades each pixel once. Worth about 7% "
 			 "on a frame that lacks it.",
@@ -235,7 +235,11 @@ namespace engine::graph {
 			 // the shared block once per distinct world — the vocabulary is
 			 // only now catching up with it.
 			 S::World,
-			 {},
+			 {{"entities",
+			   K::Entities,
+			   F::R8,
+			   false,
+			   "The casters. Deliberately not frustum culled — one off screen still shadows in."}},
 			 {{"shadow", K::Depth, D32, true, "The light's depth atlas."}},
 			 "Draws the casters from the light, into a depth map every view samples.",
 			 true},
@@ -244,7 +248,8 @@ namespace engine::graph {
 			 "Surface",
 			 C::Draw,
 			 S::View,
-			 {{"shadow", K::Texture, D32, false, "Shadows, if any."}},
+			 {{"shadow", K::Texture, D32, false, "Shadows, if any."},
+			  {"entities", K::Entities, F::R8, false, "What each mirror draws."}},
 			 {{"surface", K::Colour, RGBA8, true, "One image per surface index."}},
 			 "Renders each mirror's own view into the texture its pane samples."},
 
@@ -253,7 +258,12 @@ namespace engine::graph {
 			 C::Draw,
 			 S::View,
 			 {{"shadow", K::Texture, D32, false, "Shadows, if any."},
-			  {"surface", K::Texture, RGBA8, false, "Mirror images."}},
+			  {"surface", K::Texture, RGBA8, false, "Mirror images."},
+			  {"entities",
+			   K::Entities,
+			   F::R8,
+			   false,
+			   "What to draw. Unwired, the pass draws what the view prepared."}},
 			 {{"colour", K::Colour, RGBA16, true, "The lit frame."},
 			  {"depth", K::Depth, D24, true, "What it wrote."}},
 			 "The solid geometry, front to back against the depth buffer."},
@@ -262,7 +272,8 @@ namespace engine::graph {
 			 "G-buffer",
 			 C::Draw,
 			 S::View,
-			 {{"shadow", K::Texture, D32, false, "Shadows, if any."}},
+			 {{"shadow", K::Texture, D32, false, "Shadows, if any."},
+			  {"entities", K::Entities, F::R8, false, "What to fill the buffers from."}},
 			 {{"albedo", K::Colour, RGBA8, true, "Base colour. Alpha is opacity."},
 			  {"normal", K::Colour, LDR, true, "World normals. Ten bits an axis is enough."},
 			  {"material", K::Colour, RGBA8, true, "Roughness, metalness, and material tags."},
@@ -283,7 +294,8 @@ namespace engine::graph {
 			 C::Draw,
 			 S::View,
 			 {{"colour", K::Colour, RGBA16, true, "What to blend over."},
-			  {"depth", K::Depth, D24, true, "The opaque depth."}},
+			  {"depth", K::Depth, D24, true, "The opaque depth."},
+			  {"entities", K::Entities, F::R8, false, "The blended tail, already ordered back to front."}},
 			 {{"colour", K::Colour, RGBA16, true, "The blended frame."}},
 			 "The blended tail, back to front, tested against the opaque depth."},
 
@@ -661,6 +673,113 @@ namespace engine::graph {
 			 {{"colour", K::Texture, LDR, true, "The frame to show."}},
 			 {{"window", K::Colour, LDR, true, "The swapchain."}},
 			 "Puts a finished image on the window."},
+
+			// --- the entity flow ---------------------------------------------
+			//
+			// **What a pass draws, as wires.** Everything above describes what is
+			// drawn *into*; these describe what goes in. They carry
+			// `ResourceKind::Entities` — a list of indices into the view's draw
+			// list — and every one of them is list-in, list-out, so they compose
+			// in any order somebody wires them.
+			{"camera",
+			 "Camera",
+			 C::Draw,
+			 S::View,
+			 {},
+			 {{"camera", K::Camera, F::R8, true, "Where this view looks from."}},
+			 "The view's own eye, as a value. What a filter culls against and "
+			 "what a colour pass projects with, when nothing says otherwise.",
+			 true},
+
+			{"light-camera",
+			 "Light camera",
+			 C::Draw,
+			 S::World,
+			 {{"entities", K::Entities, F::R8, false, "What the light must cover."}},
+			 {{"camera", K::Camera, F::R8, true, "The light's fitted viewpoint."}},
+			 "The sun, fitted to the bound of what it is given. **This is what "
+			 "makes 'do not frustum cull the shadow pass' sayable as something "
+			 "better** — cull against the light's box instead, which drops what "
+			 "casts into nothing rather than keeping everything.",
+			 true},
+
+			{"entities",
+			 "Entities",
+			 C::Draw,
+			 S::View,
+			 {},
+			 {{"entities", K::Entities, F::R8, true, "Every instance this view was given."}},
+			 "The source: the whole draw list, before anything has filtered it. "
+			 "Everything that draws geometry ultimately reads from one of these.",
+			 true},
+
+			{"cull-frustum",
+			 "Frustum cull",
+			 C::Draw,
+			 S::View,
+			 {{"entities", K::Entities, F::R8, true, "What to consider."},
+			  {"camera", K::Camera, F::R8, false, "Whose frustum. Unwired, the view's own eye."}},
+			 {{"entities", K::Entities, F::R8, true, "What the camera can see."}},
+			 "Drops what the view frustum does not contain. The single most "
+			 "valuable filter, and the one a shadow pass must not have — a caster "
+			 "off screen still shadows into it."},
+
+			{"cull-distance",
+			 "Distance cull",
+			 C::Draw,
+			 S::View,
+			 {{"entities", K::Entities, F::R8, true, "What to consider."},
+			  {"camera", K::Camera, F::R8, false, "Where to measure from. Unwired, the view's own eye."}},
+			 {{"entities", K::Entities, F::R8, true, "What is near enough."}},
+			 "Drops what is further than a radius. Unconfigured it keeps "
+			 "everything, because a node somebody has not set up should be a "
+			 "no-op rather than an empty frame."},
+
+			{"filter-tag",
+			 "Tag filter",
+			 C::Draw,
+			 S::View,
+			 {{"entities", K::Entities, F::R8, true, "What to consider."}},
+			 {{"entities", K::Entities, F::R8, true, "What carries the tag."}},
+			 "Keeps what matches a tag mask. How a pass draws one layer of a "
+			 "scene — the casters, the mirrors, the terrain — without the scene "
+			 "having to be split up to say so."},
+
+			{"order-draw",
+			 "Order for drawing",
+			 C::Draw,
+			 S::View,
+			 {{"entities", K::Entities, F::R8, true, "What to order."},
+			  {"camera",
+			   K::Camera,
+			   F::R8,
+			   false,
+			   "Who the back-to-front sort is for. Unwired, the view's own eye."}},
+			 {{"entities", K::Entities, F::R8, true, "Opaque first, then blended back to front."}},
+			 "Sorts a list the way a colour pass needs it. A depth-only pass does "
+			 "not need this and should not pay for it."},
+
+			{"upload-instances",
+			 "Upload instances",
+			 C::Draw,
+			 S::View,
+			 {{"entities", K::Entities, F::R8, true, "What to put in the buffer."}},
+			 {{"instances", K::Buffer, F::R8, true, "The per-instance attributes, on the GPU."}},
+			 "Puts a list's instances where the GPU can read them. **The join "
+			 "between what a pipeline decided and what it draws** — a filter "
+			 "upstream of one of these changes the frame; a filter with none "
+			 "downstream changes a list nobody reads."},
+
+			{"output",
+			 "Output",
+			 C::Output,
+			 S::Frame,
+			 {{"colour", K::Texture, LDR, true, "The image this pipeline produced."}},
+			 {},
+			 "The end of the pipeline: the image it produced, handed back. A "
+			 "graph with no output node draws into targets nobody collects, which "
+			 "is a pipeline that runs and produces nothing.",
+			 false},
 
 			{"overdraw",
 			 "Overdraw",

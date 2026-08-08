@@ -401,9 +401,42 @@ the single clearest illustration of why resolution has to be part of the type.
 - **`present`** — to the swapchain.
 - `capture` — to a file or a texture, which is what `--capture` already does
   outside the graph.
+- `output` — **the end of the pipeline**: the image it produced, handed back.
+  Distinct from `present`, which puts one on a swapchain. A graph with no output
+  node draws into targets nobody collects, which is a pipeline that runs and
+  produces nothing.
 - `viewer` — **Blender's viewer node**, and the highest-value single addition:
   attach it to any wire and the panel shows that image. It is the bridge between
   the editor and the inspector, and it costs one blit.
+
+### 4.6b The entity flow — what a pass draws
+
+**Added at v0.11, and it is the half §4 did not have.** Every kind above says
+what a pass draws *into*. None of them says what it draws. That was a fixed
+sequence inside the renderer — cull, order, partition, upload — so the one thing
+a pipeline could not express was which geometry any pass took.
+
+These carry `ResourceKind::Entities`: a list of indices into the view's draw
+list. Every one is list-in, list-out, so they compose in whatever order somebody
+wires them.
+
+- `entities` — the source. The whole draw list, before anything filtered it.
+- `cull-frustum` — what the camera can see. **The one a shadow pass must not
+  have**: a caster off screen still shadows into the frame, which is the classic
+  version of this bug.
+- `cull-distance` — what is near enough.
+- `filter-tag` — what carries a tag. How a pass draws one layer of a scene
+  without the scene having to be split up to say so.
+- `order-draw` — opaque first, then blended back to front. A depth-only pass does
+  not need this and should not pay for it.
+
+The geometry kinds take an **optional** entity input each, so a pipeline that
+wires none of this behaves as it always did.
+
+**Why indices and not pointers.** A list is offsets into the view's own draw
+list: it stays valid exactly as long as the caller's span does, costs four bytes
+an entry, and two lists of the same geometry share nothing that can go stale.
+"Pointers" is the right idea and the wrong representation.
 
 ### 4.7 Input
 - `scene-colour`, `scene-depth` — what the previous stage left.

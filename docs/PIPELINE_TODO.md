@@ -15,13 +15,14 @@ should leave the in-progress item marked with what compiles and what does not.
 | stage | what | state |
 |---|---|---|
 | 1 | Type system — formats, usage kinds, divisor, external resources | **done** |
-| 2 | Catalogue — 48 node kinds, typed and formatted slots | **done** |
+| 2 | Catalogue — 54 node kinds, typed and formatted slots | **done** |
 | 3 | Executor — `Renderer::Render` runs the graph | **done.** `graph::Execute` is what submits the frame; `PassOrder()` is a view of the graph and the `Pass` enum is gone |
 | 4 | Static checks — nine fault kinds | **done** |
 | 5 | Authored order, and scopes | **done** |
 | 6 | Access grid / profiler visualiser | **done** |
 | 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
 | 8 | Readbacks — viewer image, histograms, overdraw | **done.** Histograms, the download policy, the non-stalling device path, the `viewer` node, the `overdraw` counter, and `Renderer::SetPipeline` so a pipeline with either in it can run |
+| 9 | Entity flow — what a pass draws, as a wire | **working.** `ResourceKind::Entities`, `graph::EntityFlow`, eight node kinds, and a filter changes what the frame draws. Two colour passes cannot yet take two different lists |
 
 ---
 
@@ -451,6 +452,110 @@ blocked: no amount of work here moves it.
       `ID3D12GraphicsCommandList::EndQuery`. That second one is a real option and
       a real cost: it is per-backend code in a module whose whole point is not
       being per-backend.
+
+### Stage 9 — the entity flow: what a pass draws, as a wire
+
+**The half of a frame that was never in the graph.** Stages 1–8 made the frame
+authorable in every respect but one: a pipeline could add a pass, reorder passes
+and retarget them, and could not say **which geometry any of them took**. Culling,
+tag filtering and ordering were a fixed sequence in the middle of
+`Renderer::Render` and every pass read its result. A pipeline that can only
+reorder the frame somebody else wrote is not an editable pipeline.
+
+So a list of instances is a resource and the operations on it are nodes:
+
+```
+entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque ─▶ output
+                 │
+            filter-tag ─▶ shadow
+```
+
+- [x] **`ResourceKind::Entities`** — indices into the view's draw list.
+      *Indices, not pointers*: they stay valid as long as the caller's span
+      does, cost four bytes, and two lists of the same geometry share nothing
+      that can go stale. "Pointers" is the right idea and the wrong
+      representation.
+
+- [x] **`graph::EntityFlow`** — the store the lists travel in, plus
+      `AllEntities`, `FilterByFrustum`, `FilterByTag`, `FilterByDistance` and
+      `OrderEntities`. All arithmetic over spans, all in L9 with no device, all
+      exercised by `engine.graph.entityflow`.
+
+      **`scene::OrderSubset` rather than a second sort.** `OrderForDrawing` had a
+      reverse-then-stable-sort that a test caught once — "equal distances keep
+      world order" is only true because of it. Generalising it to a subset and
+      making the old entry point call it is what keeps that one description.
+
+- [x] **Seven node kinds**: `entities`, `cull-frustum`, `cull-distance`,
+      `filter-tag`, `order-draw`, and `output` — the terminal the pipeline hands
+      its image back through. The geometry kinds gained an **optional** entity
+      input each.
+
+- [x] **`Impl::SubmitFlow`** — one handler for the five, because they differ only
+      in the predicate. Each reads the first entity resource it is given, writes
+      the first it produces, and never looks at the world.
+
+**Three faults the building turned up, each caught by an existing check:**
+
+- **Catalogue inputs are positional, and prepending shifts every wire.**
+  `PipelineDiagnostics` maps `Node::Reads[n]` onto `NodeKindSpec::Inputs[n]`, so
+  putting the new entity slot at the *front* of `opaque` silently re-pointed
+  every existing wire at the wrong slot — which surfaced as every colour target
+  in the frame reporting `format-overspend`. **Append to `Inputs`, never
+  prepend**, until slots are matched by name.
+
+- **An entity list has no pixel format.** Its slot declares one only because
+  every slot does; the format checks read that as "eight bits a pixel" and
+  reported every HDR target as overspent. `PipelineDiagnostics` now skips
+  `Entities` resources rather than being given a sentinel format — a format
+  meaning "not an image" would have to be understood everywhere a format is.
+
+- **`Source` meant "reads nothing" and had to mean "reads no image".** `shadow`
+  and `depth-prepass` are sources — they need no picture from anywhere and can
+  start a chain — and they now take an optional entity list. The rule is
+  narrowed rather than holed: a source's inputs must all be `Entities` **and all
+  be optional**, because a source with a required input cannot start a chain
+  whatever it carries.
+
+- [x] **The last link — a filter now changes the frame.** `PrepareView` builds
+      the camera range from whatever entity list the pipeline wired into
+      `opaque`, and falls back to its own cull and sort when there is none. So
+      the standard frame is byte-identical and a pipeline with filters in it
+      draws what the filters left.
+
+      **The entity nodes run at prepare time, and that is forced rather than
+      chosen.** The camera range is uploaded once for the whole view, before any
+      pass; nodes that decide its contents therefore cannot wait for
+      `graph::Execute` to reach them. `RunEntityFlow` walks
+      `CompiledGraph::PerView` and runs exactly the nodes whose *output* is an
+      entity resource — still the graph's nodes, still in the order `Compile`
+      produced — and `SubmitFlow` finds the work done when `Execute` arrives.
+
+      **`DrawOrder` is the identity on the wired path.** The list already came
+      out of `order-draw`, so re-sorting it would be doing the sort twice; the
+      opaque count is taken by walking to the first blended instance, which is
+      only correct *because* `order-draw` puts the opaque head first. A pipeline
+      that omits `order-draw` gets its blended geometry in world order — the
+      author's decision, and visibly so.
+
+      `upload-instances` is in the catalogue as the honest name for that join,
+      and is not yet a node the renderer runs: the upload is still one operation
+      covering the scene range and the camera range together, and splitting it
+      is what would let two colour passes take two different lists.
+
+- [ ] **Two colour passes, two lists.** `CameraEntityList` reads whatever
+      `opaque` is wired to, because the camera range is one range. A pipeline
+      wiring different lists into different colour passes needs a range each,
+      which is `upload-instances` becoming a real node — and that in turn needs
+      the scene range and the camera range uploaded separately, which is the
+      knot `shadow` being `NodeScope::World` ties: it runs before the view's
+      nodes and draws from the scene half.
+
+- [ ] **Node parameters.** `cull-distance` has no radius and `filter-tag` no
+      mask, because the document format has no word for a node parameter yet.
+      Both read their unset value as *keep everything*, so an unconfigured node
+      is a no-op rather than a black frame — which is the right default and not
+      a substitute for the feature.
 
 ### Stage 8 — readbacks (D00047)
 

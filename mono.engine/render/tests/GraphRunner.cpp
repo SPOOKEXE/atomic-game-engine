@@ -368,3 +368,100 @@ TEST_CASE("an overdraw pipeline runs the counter and a viewer of it", "[render][
 	REQUIRE(lastCount != ran.end());
 	CHECK(lastCount < viewerAt);
 }
+
+TEST_CASE("a pipeline filters entities and hands back an image", "[render][graph]") {
+	// **The whole flow, end to end, with nothing hard-coded between the ends.**
+	//
+	//     entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque ─▶ output
+	//
+	// What this is defending is that *what a pass draws* is now a wire. Before
+	// this, a pipeline could add a pass, reorder passes and retarget them, and
+	// could not say which geometry any of them took — culling and ordering were
+	// a fixed sequence in the middle of `Renderer::Render` and every pass read
+	// its result. A pipeline that can only reorder the frame somebody else wrote
+	// is not an editable pipeline.
+	//
+	// Built in declaration order, which is the order: see the overdraw case for
+	// why appending to `StandardGraph` is refused.
+	RenderGraph graph;
+
+	const auto entities = [&](const char *name) {
+		return graph.AddResource({.Name = Name(name), .Kind = engine::graph::ResourceKind::Entities});
+	};
+
+	const engine::graph::ResourceId all = entities("all");
+	const engine::graph::ResourceId visible = entities("visible");
+	const engine::graph::ResourceId tagged = entities("tagged");
+	const engine::graph::ResourceId ordered = entities("ordered");
+	const engine::graph::ResourceId colour =
+		graph.AddResource({.Name = Name("colour"), .Kind = engine::graph::ResourceKind::Colour});
+
+	const auto add = [&](const char *name,
+						 const char *kind,
+						 std::vector<engine::graph::ResourceId> reads,
+						 std::vector<engine::graph::ResourceId> writes,
+						 engine::graph::NodeScope scope) {
+		engine::graph::Node node;
+		node.Name = Name(name);
+		node.Kind = Name(kind);
+		node.Reads = std::move(reads);
+		node.Writes = std::move(writes);
+		node.Scope = scope;
+		REQUIRE(graph.AddNode(node).IsValid());
+	};
+
+	const auto view = engine::graph::NodeScope::View;
+	add("entities", "entities", {}, {all}, view);
+	add("cull-frustum", "cull-frustum", {all}, {visible}, view);
+	add("filter-tag", "filter-tag", {visible}, {tagged}, view);
+	add("order-draw", "order-draw", {tagged}, {ordered}, view);
+	add("opaque", "opaque", {ordered}, {colour}, view);
+	add("output", "output", {colour}, {}, engine::graph::NodeScope::Frame);
+
+	CompiledGraph compiled;
+	Name offender;
+	INFO("offending node: " << std::string(offender.Text()));
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	std::vector<std::string> ran;
+	PassTable table;
+	Record(table, graph, ran);
+
+	GraphRunner runner{table};
+	REQUIRE(graph.Execute(compiled, runner, size_t{1}));
+
+	// **In order, and the order is the wiring rather than a list somebody
+	// typed.** `Compile` refuses a pass that reads what nothing has written, so
+	// this sequence is what the resource dependencies say it must be.
+	const std::vector<std::string> expected{
+		"entities@0", "cull-frustum@0", "filter-tag@0", "order-draw@0", "opaque@0", "output"
+	};
+	CHECK(ran == expected);
+}
+
+TEST_CASE("a pass reading a list nothing produced is refused at compile", "[render][graph]") {
+	// **The mis-wiring worth catching early.** A geometry pass whose entity
+	// input comes from nowhere would draw nothing, and a black frame is a poor
+	// way to learn that a wire is missing. `Compile` already refuses a pass that
+	// reads what nothing wrote — this checks that an entity list is no exception,
+	// which is the whole reason it is a resource rather than a side channel.
+	RenderGraph graph;
+
+	const engine::graph::ResourceId ordered =
+		graph.AddResource({.Name = Name("ordered"), .Kind = engine::graph::ResourceKind::Entities});
+	const engine::graph::ResourceId colour =
+		graph.AddResource({.Name = Name("colour"), .Kind = engine::graph::ResourceKind::Colour});
+
+	engine::graph::Node opaque;
+	opaque.Name = Name("opaque");
+	opaque.Kind = Name("opaque");
+	opaque.Reads = {ordered};
+	opaque.Writes = {colour};
+	opaque.Scope = engine::graph::NodeScope::View;
+	REQUIRE(graph.AddNode(opaque).IsValid());
+
+	CompiledGraph compiled;
+	Name offender;
+	CHECK(graph.Compile(compiled, offender) == GraphStatus::ReadsBeforeWrite);
+	CHECK(offender == Name("opaque"));
+}

@@ -31,6 +31,10 @@ namespace engine::graph {
 				return "storage";
 			case ResourceKind::Buffer:
 				return "buffer";
+			case ResourceKind::Entities:
+				return "entities";
+			case ResourceKind::Camera:
+				return "camera";
 			}
 			return "";
 		}
@@ -54,6 +58,14 @@ namespace engine::graph {
 			}
 			if (text == "buffer") {
 				kind = ResourceKind::Buffer;
+				return true;
+			}
+			if (text == "entities") {
+				kind = ResourceKind::Entities;
+				return true;
+			}
+			if (text == "camera") {
+				kind = ResourceKind::Camera;
 				return true;
 			}
 			return false;

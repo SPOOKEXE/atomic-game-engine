@@ -178,6 +178,29 @@ namespace engine::scene {
 		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
 	);
 
+	// The same, over a subset a caller already chose.
+	//
+	// **What `OrderForDrawing` became when culling moved into the graph.** A
+	// pass is handed a list of instances now rather than the whole world — see
+	// `graph::EntityFlow` — so the sort has to run over a list. This is that
+	// function; `OrderForDrawing` is it applied to everything.
+	//
+	// An index past the end of `instances` is kept and sorted last rather than
+	// dereferenced: a list is whatever a chain of filter nodes produced, and a
+	// mis-wired one should lose an object rather than read off the end.
+	//
+	// @param instances The whole draw list, which the indices are into.
+	// @param from      Which of them to order.
+	// @param eye       Where the view is, in world space.
+	// @param order     Filled with a permutation of `from`. Cleared first.
+	// @return How many at the front of `order` name opaque instances.
+	size_t OrderSubset(
+		std::span<const DrawInstance> instances,
+		std::span<const uint32_t> from,
+		const core::Vector3 &eye,
+		std::vector<uint32_t> &order
+	);
+
 	// Whether an instance needs the blended pass.
 	//
 	// **Not `> 0`, and the epsilon is the point.** A `Transparency` of a

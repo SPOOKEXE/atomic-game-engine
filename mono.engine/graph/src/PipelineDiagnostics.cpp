@@ -394,6 +394,19 @@ namespace engine::graph {
 			for (size_t slot = 0; slot < row.Body->Writes.size(); slot++) {
 				const ResourceId resource = row.Body->Writes[slot];
 
+				// **A list of instances has no pixels, so it has no bit depth to
+				// overspend.** `ResourceKind::Entities` carries indices into the
+				// view's draw list; its slots declare a format only because
+				// every slot does, and reading that as "eight bits a pixel"
+				// made every colour target in a pipeline with a filter wired
+				// into it report as overspent. Skipped rather than given a
+				// sentinel format, because a format that means "not an image"
+				// would have to be understood everywhere a format is.
+				const ResourceDesc *described = graph.FindResource(resource);
+				if (described != nullptr && described->Kind == ResourceKind::Entities) {
+					continue;
+				}
+
 				ResourceFormat produced{};
 				if (!SlotFormat(*row.Body, slot, false, produced)) {
 					continue;
@@ -415,6 +428,9 @@ namespace engine::graph {
 							}
 							ResourceFormat wanted{};
 							if (!SlotFormat(reader, in, true, wanted)) {
+								continue;
+							}
+							if (described != nullptr && described->Kind == ResourceKind::Entities) {
 								continue;
 							}
 							anyReader = true;

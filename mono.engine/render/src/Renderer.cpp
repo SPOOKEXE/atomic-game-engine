@@ -2,6 +2,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
+#include <engine/graph/EntityFlow.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/GraphRunner.hpp>
@@ -1112,6 +1113,88 @@ namespace engine::render {
 		};
 
 		ReadbackSlot Readback;
+
+		// Which instances each entity wire is carrying, this view.
+		//
+		// **The half of a frame that used to be a fixed sequence in `Render`.**
+		// Culling, tag filtering and ordering are nodes now; this is what they
+		// pass to each other and what a geometry pass reads. Cleared per view,
+		// because an index means nothing without the draw list it indexes. See
+		// `graph::EntityFlow`.
+		graph::EntityFlow Flow;
+
+		// Which viewpoint each camera wire is carrying, this view.
+		//
+		// **What "the camera" used to be.** Every filter and every sort read
+		// whichever camera the view happened to have, so a pipeline could not
+		// say *cull against the light*. See `graph::Viewpoints`.
+		graph::Viewpoints Cameras;
+
+		// The viewpoint a node is wired to, or this view's own.
+		//
+		// **Falling back rather than failing** is what makes the whole of this
+		// additive: a node with no camera input, or one whose wire leads
+		// nowhere, behaves exactly as it did before cameras were values.
+		//
+		// @param ids What the node reads.
+		// @return The viewpoint to use.
+		graph::Viewpoint ViewpointFor(std::span<const graph::ResourceId> ids) const;
+
+		// The name of the first camera resource among some ids.
+		core::Name FirstCamera(std::span<const graph::ResourceId> ids) const;
+
+		// What the view's nodes are filtering.
+		//
+		// **A span into the caller's own array**, valid only while a view's
+		// nodes run — which is the same lifetime `ViewPass` has and the reason
+		// this sits beside it rather than being copied.
+		std::span<const scene::DrawInstance> FlowInstances;
+
+		// Runs this view's entity nodes, in the graph's compiled order.
+		//
+		// **Before the passes, and that is forced rather than chosen.** What the
+		// filters decide has to be in the instance buffer before anything draws
+		// from it, and the upload happens once for the whole view — so the
+		// nodes that feed it cannot wait for `graph::Execute` to reach them.
+		// They are still the graph's nodes, still in the order `Compile`
+		// produced, and `SubmitFlow` is a no-op when `Execute` arrives.
+		//
+		// **A pipeline with no entity nodes is untouched.** `Ran` stays false,
+		// nothing is written, and `PrepareView` culls and orders exactly as it
+		// always did — which is what keeps the standard frame byte-identical.
+		void RunEntityFlow();
+
+		// Which list the geometry passes are wired to, or an invalid name.
+		//
+		// **Whatever `opaque` reads**, because that is the pass whose range the
+		// instance buffer's camera half is. A pipeline that wires different
+		// lists into different colour passes needs a range each, which is an
+		// upload node rather than this.
+		core::Name CameraEntityList() const;
+
+		// Whether this view's entity nodes have already run.
+		bool FlowRan = false;
+
+		// Runs one of the list-in, list-out nodes.
+		//
+		// **One handler for all of them, switching on the kind**, because they
+		// differ only in the predicate: each reads the first entity resource it
+		// is given, writes the first it produces, and never looks at the world.
+		// A handler apiece would be five copies of the same plumbing around five
+		// one-line differences.
+		//
+		// @param context The node, with its reads and writes.
+		// @return `false` only for a node that names no output to write.
+		bool SubmitFlow(const graph::RunContext &context);
+
+		// The name of the first entity resource among some ids.
+		//
+		// @param ids   What a node reads or writes.
+		// @return The name, or an invalid one when none of them is an entity
+		//         list. **Invalid rather than the first resource**: a geometry
+		//         pass reads a texture and an entity list, and picking whichever
+		//         came first would make the wiring order matter.
+		core::Name FirstEntityList(std::span<const graph::ResourceId> ids) const;
 
 		// Frames since the renderer started, for `PendingReadback::Age`.
 		//
@@ -3773,6 +3856,32 @@ namespace engine::render {
 		// either: a frame that always counted its own overdraw would pay for
 		// a second pass over every instance, every frame, for a number nobody
 		// asked for.
+		// --- the entity flow -------------------------------------------------
+		//
+		// **What a pass draws, wired rather than assumed.** One handler for the
+		// five, because they differ only in the predicate. See `SubmitFlow`.
+		for (const char *kind :
+			 {"entities",
+			  "camera",
+			  "light-camera",
+			  "cull-frustum",
+			  "cull-distance",
+			  "filter-tag",
+			  "order-draw"}) {
+			Passes.Set(core::Name(kind), [this](const graph::RunContext &context) {
+				return SubmitFlow(context);
+			});
+		}
+
+		// **The terminal.** It draws nothing: reaching it is what says the
+		// pipeline produced the image it was asked for, and the image is
+		// whatever the renderer's target already holds. A graph with no output
+		// node draws into targets nobody collects.
+		Passes.Set(core::Name("output"), [this](const graph::RunContext &) {
+			CurrentFrame.Recorder->Enter(core::Name("output"));
+			return true;
+		});
+
 		Passes.Set(core::Name("overdraw"), [this](const graph::RunContext &) { return SubmitOverdraw(); });
 
 		Passes.Set(core::Name("viewer"), [this](const graph::RunContext &context) {
@@ -4075,6 +4184,14 @@ namespace engine::render {
 	Renderer::Impl::ViewReady Renderer::Impl::PrepareView(const View &view) {
 		SDL_GPUCommandBuffer *command = CurrentFrame.Command;
 
+		// **The view's geometry, as the entity nodes will see it.** Cleared per
+		// view because an index means nothing without the draw list it indexes,
+		// and pointed at the caller's own array rather than copied — the span is
+		// valid for exactly as long as `ViewPass` is. See `graph::EntityFlow`.
+		FlowInstances = view.Instances;
+		Flow.Clear();
+		Cameras.Clear();
+
 		// **Cleared, not carried.** Four viewports run this loop four times
 		// and the second must not inherit the first's caster counts or its
 		// light matrix — a view of an empty world after a view of a full one
@@ -4298,19 +4415,55 @@ namespace engine::render {
 			sceneBounds, core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
 		);
 
+		// **The entity nodes, if the pipeline has any.** They decide which
+		// instances the camera range holds, and the camera range is uploaded
+		// below — so they run here rather than waiting for `graph::Execute`.
+		// See `RunEntityFlow`.
+		RunEntityFlow();
+
+		const core::Name wired = CameraEntityList();
+		const std::span<const uint32_t> chosen = Flow.Get(wired);
+		const bool filtered = FlowRan && wired.IsValid() && Flow.Has(wired);
+
 		// Ordered over the survivors, so the two passes are two ranges of one
 		// buffer. Opaque first in whatever order the world produced, then the
 		// transparent tail back to front from where the camera is.
-		VisibleInstances.resize(visibleCount);
-		for (size_t index = 0; index < visibleCount; index++) {
-			VisibleInstances[index] = instances[Visible[index]];
+		//
+		// **Or over whatever the pipeline's filters left**, when it has any. The
+		// list is already in the order an `order-draw` node put it in, so
+		// `DrawOrder` is the identity and the sort is not run twice — a pipeline
+		// that omits `order-draw` gets its blended geometry in world order,
+		// which is the author's decision and visibly so.
+		if (filtered) {
+			VisibleInstances.resize(chosen.size());
+			DrawOrder.resize(chosen.size());
+			for (size_t index = 0; index < chosen.size(); index++) {
+				VisibleInstances[index] =
+					chosen[index] < instances.size() ? instances[chosen[index]] : scene::DrawInstance{};
+				DrawOrder[index] = static_cast<uint32_t>(index);
+			}
+
+			visibleCount = chosen.size();
+			CurrentView.OpaqueCount = 0;
+			for (const scene::DrawInstance &instance : VisibleInstances) {
+				if (scene::IsTransparent(instance)) {
+					break;
+				}
+				CurrentView.OpaqueCount++;
+			}
+		} else {
+			VisibleInstances.resize(visibleCount);
+			for (size_t index = 0; index < visibleCount; index++) {
+				VisibleInstances[index] = instances[Visible[index]];
+			}
+
+			{
+				ENGINE_PROFILE_CAT("order instances", core::ProfileCategory::Render);
+				CurrentView.OpaqueCount =
+					scene::OrderForDrawing(VisibleInstances, cameraFrame.Position, DrawOrder);
+			}
 		}
 
-		{
-			ENGINE_PROFILE_CAT("order instances", core::ProfileCategory::Render);
-			CurrentView.OpaqueCount =
-				scene::OrderForDrawing(VisibleInstances, cameraFrame.Position, DrawOrder);
-		}
 		CurrentView.TransparentCount = static_cast<uint32_t>(visibleCount - CurrentView.OpaqueCount);
 
 		// **Surface instances moved to the back of the opaque head**, so the
@@ -5448,6 +5601,193 @@ namespace engine::render {
 		OverdrawWidth = width;
 		OverdrawHeight = height;
 		return true;
+	}
+
+	core::Name Renderer::Impl::FirstEntityList(std::span<const graph::ResourceId> ids) const {
+		for (const graph::ResourceId id : ids) {
+			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			if (desc != nullptr && desc->Kind == graph::ResourceKind::Entities) {
+				return desc->Name;
+			}
+		}
+		return {};
+	}
+
+	core::Name Renderer::Impl::CameraEntityList() const {
+		for (const graph::NodeId id : Compiled.PerView) {
+			const graph::Node *node = Graph.Find(id);
+			if (node == nullptr || !node->Enabled || node->Kind != core::Name("opaque")) {
+				continue;
+			}
+			return FirstEntityList(node->Reads);
+		}
+		return {};
+	}
+
+	void Renderer::Impl::RunEntityFlow() {
+		FlowRan = false;
+
+		for (const graph::NodeId id : Compiled.PerView) {
+			const graph::Node *node = Graph.Find(id);
+			if (node == nullptr || !node->Enabled) {
+				continue;
+			}
+			const bool produces =
+				FirstEntityList(node->Writes).IsValid() || FirstCamera(node->Writes).IsValid();
+			if (!Passes.Has(node->Kind) || !produces) {
+				continue;
+			}
+
+			// **Only the kinds that produce a list.** A geometry pass writes a
+			// colour target and reads a list; this is looking for the nodes that
+			// are the list's producers, which is exactly the ones whose *output*
+			// is an entity resource.
+			graph::RunContext context;
+			context.Node = id;
+			context.Name = node->Name;
+			context.Kind = node->Kind;
+			context.Reads = node->Reads;
+			context.Writes = node->Writes;
+
+			if (SubmitFlow(context)) {
+				FlowRan = true;
+			}
+		}
+	}
+
+	core::Name Renderer::Impl::FirstCamera(std::span<const graph::ResourceId> ids) const {
+		for (const graph::ResourceId id : ids) {
+			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			if (desc != nullptr && desc->Kind == graph::ResourceKind::Camera) {
+				return desc->Name;
+			}
+		}
+		return {};
+	}
+
+	graph::Viewpoint Renderer::Impl::ViewpointFor(std::span<const graph::ResourceId> ids) const {
+		graph::Viewpoint out;
+		const core::Name wired = FirstCamera(ids);
+		if (wired.IsValid() && Cameras.Get(wired, out)) {
+			return out;
+		}
+
+		out.Frame = CurrentView.CameraFrame;
+		out.Lens = CurrentView.Camera;
+		return out;
+	}
+
+	bool Renderer::Impl::SubmitFlow(const graph::RunContext &context) {
+		const bool viewpoint =
+			context.Kind == core::Name("camera") || context.Kind == core::Name("light-camera");
+		const core::Name out = viewpoint ? FirstCamera(context.Writes) : FirstEntityList(context.Writes);
+		if (!out.IsValid()) {
+			// Every one of these produces a list; a node that names none is a
+			// wiring mistake the author should be told about rather than a node
+			// that quietly does nothing.
+			ENGINE_ERROR("'{}' produces no entity list, so nothing can read it", context.Name.Text());
+			return false;
+		}
+
+		// **Already done, when `Execute` reaches it.** The lists were produced at
+		// prepare time because the upload they feed comes before every pass; the
+		// node is still walked, and this is where that walk finds the work
+		// finished. See `RunEntityFlow`.
+		graph::Viewpoint already;
+		if (FlowRan && (viewpoint ? Cameras.Get(out, already) : Flow.Has(out))) {
+			return true;
+		}
+
+		const std::string_view kind = context.Kind.Text();
+
+		// **The camera nodes produce no list**, so they must not open one — an
+		// empty entity list named after a camera would be a wire a geometry pass
+		// could read and draw nothing from.
+		std::vector<uint32_t> unused;
+		std::vector<uint32_t> &into = viewpoint ? unused : Flow.Open(out);
+
+		if (kind == "entities") {
+			graph::AllEntities(FlowInstances.size(), into);
+			return true;
+		}
+
+		// **The input is read before `Open` invalidated nothing.** `Open` clears
+		// the output's storage, and a node wired input-to-itself would then be
+		// filtering an empty list — so the read is copied out first when the two
+		// names are the same.
+		const core::Name from = FirstEntityList(context.Reads);
+		const std::span<const uint32_t> source = Flow.Get(from);
+		std::vector<uint32_t> input{source.begin(), source.end()};
+
+		const graph::Viewpoint eye = ViewpointFor(context.Reads);
+
+		if (kind == "camera") {
+			// The view's own, as a value. `ViewpointFor` already produced it —
+			// this node exists so a pipeline can wire it somewhere.
+			Cameras.Set(out, eye);
+			return true;
+		}
+
+		if (kind == "light-camera") {
+			// **The sun, fitted to what it was given.** `FitDirectionalLight`
+			// takes a bound and produces a projection with no lens behind it,
+			// which is what `Viewpoint::Fitted` is for.
+			core::AABB bounds;
+			bool any = false;
+			for (const uint32_t index : input) {
+				if (index >= FlowInstances.size()) {
+					continue;
+				}
+				const core::AABB box = graph::BoundsOf(FlowInstances[index]);
+				bounds = any ? bounds.Union(box) : box;
+				any = true;
+			}
+			if (!any) {
+				bounds = graph::BoundsOfAll(FlowInstances);
+			}
+
+			graph::Viewpoint light;
+			light.Frame = CurrentView.CameraFrame;
+			light.Projection = graph::FitDirectionalLight(
+				bounds, core::Vector3{SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z}
+			);
+			light.Fitted = true;
+			Cameras.Set(out, light);
+			return true;
+		}
+
+		if (kind == "cull-frustum") {
+			const float aspect = CurrentView.SceneHeight > 0 ? static_cast<float>(CurrentView.SceneWidth) /
+																   static_cast<float>(CurrentView.SceneHeight)
+															 : 1.0f;
+			const graph::Frustum frustum =
+				graph::Frustum::FromViewProjection(graph::ViewProjectionOf(eye, aspect));
+			graph::FilterByFrustum(FlowInstances, input, frustum, into);
+			return true;
+		}
+
+		if (kind == "cull-distance") {
+			// **Unconfigured, for now, and it keeps everything.** A radius is a
+			// node *parameter* and the document format has no word for one yet;
+			// zero is what `FilterByDistance` reads as "not set up", which is a
+			// no-op rather than an empty frame.
+			graph::FilterByDistance(FlowInstances, input, eye.Frame.Position, 0.0f, into);
+			return true;
+		}
+
+		if (kind == "filter-tag") {
+			// Same: no parameter yet, so no mask, so everything matches.
+			graph::FilterByTag(FlowInstances, input, 0, into);
+			return true;
+		}
+
+		if (kind == "order-draw") {
+			graph::OrderEntities(FlowInstances, input, eye.Frame.Position, into);
+			return true;
+		}
+
+		ENGINE_ERROR("'{}' is not an entity-flow kind", context.Kind.Text());
+		return false;
 	}
 
 	bool Renderer::Impl::SubmitOverdraw() {

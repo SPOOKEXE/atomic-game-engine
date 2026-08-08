@@ -99,9 +99,17 @@ TEST_CASE("every pass that is not a source takes an input", "[graph][catalogue]"
 }
 
 // And the converse, so `Source` cannot be used to wave a mistake through: a kind
-// that declares itself a source and then declares inputs is confused about which
-// it is.
-TEST_CASE("a source reads nothing", "[graph][catalogue]") {
+// that declares itself a source and then declares an *image* input is confused
+// about which it is.
+//
+// **`Entities` is exempt, and that is a narrowing rather than a hole.** A source
+// is a kind that can start a chain — it needs no picture from anywhere. When
+// what a pass draws became a wire, `shadow` and `depth-prepass` gained an
+// optional entity input: they still need no image, and they still start a chain,
+// but they will now take a list if one is offered. Reading the rule as "reads
+// nothing at all" would have forced them to stop being sources, which is the
+// opposite of true.
+TEST_CASE("a source reads no image", "[graph][catalogue]") {
 	Kinds();
 
 	for (const NodeKindSpec &spec : NodeCatalogue::All()) {
@@ -109,7 +117,15 @@ TEST_CASE("a source reads nothing", "[graph][catalogue]") {
 			continue;
 		}
 		INFO("kind: " << spec.Kind.Text());
-		CHECK(spec.Inputs.empty());
+
+		for (const PortSpec &input : spec.Inputs) {
+			INFO("input: " << input.Name.Text());
+			CHECK(input.Kind == engine::graph::ResourceKind::Entities);
+
+			// **And it has to be optional.** A source with a required input is
+			// a kind that cannot start a chain, whatever it carries.
+			CHECK_FALSE(input.Required);
+		}
 	}
 }
 

@@ -101,6 +101,15 @@ namespace studio {
 				return Colour(0.72f, 0.58f, 0.95f);
 			case ResourceKind::Buffer:
 				return Colour(0.85f, 0.80f, 0.55f);
+			case ResourceKind::Camera:
+				// Cyan, and neither an image nor a list. A viewpoint is the one
+				// wire that says *where from* rather than *what*.
+				return Colour(0.40f, 0.85f, 0.90f);
+			case ResourceKind::Entities:
+				// **Red, and the only wire that is not an image.** It carries
+				// which instances a pass draws rather than any pixels, so it
+				// should not read as a slightly different sort of texture.
+				return Colour(0.95f, 0.45f, 0.45f);
 			}
 			return Colour(0.7f, 0.7f, 0.7f);
 		}

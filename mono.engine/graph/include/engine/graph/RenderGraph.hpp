@@ -89,6 +89,42 @@ namespace engine::graph {
 		// A structured buffer rather than an image: a light list, a draw list,
 		// a reduction's output.
 		Buffer,
+
+		// A viewpoint: where something looks from, and through what lens.
+		//
+		// **Not a GPU resource either**, and a kind of its own for
+		// `Entities`' reason — it is a value a node reads, not a thing a pass
+		// draws into.
+		//
+		// **What it is for is that "the camera" was ambient.** Frustum culling,
+		// the back-to-front sort and every projection matrix in the frame read
+		// whichever camera the view happened to have, so a pipeline could not
+		// say *cull against the light* or *order for this mirror*. The eye is
+		// one viewpoint among several and the graph had no word for any of them.
+		//
+		// A node that takes one and is given none uses the view's own, which is
+		// what makes this additive: a pipeline that wires no cameras behaves
+		// exactly as it did before there were any.
+		Camera,
+
+		// A list of which instances a pass should draw.
+		//
+		// **Not an image and not a GPU resource at all**, which is why it is a
+		// kind of its own rather than a `Buffer`. It is indices into the view's
+		// draw list — pointers, in the sense that matters — and it lives on the
+		// CPU until something uploads it.
+		//
+		// **What it is for is putting the culling in the graph.** Frustum
+		// culling, tag filtering and back-to-front ordering are all
+		// list-in-list-out, they all happen before any pass draws, and they were
+		// all a fixed sequence inside `Renderer::Render` — so the one thing a
+		// pipeline could never say was *which* geometry a pass draws. This is
+		// the wire that says it.
+		//
+		// A pass that reads one draws what is in it. A pass that reads none
+		// draws nothing, which is what makes an empty filter a black frame
+		// rather than a full one.
+		Entities,
 	};
 
 	// What is in each pixel.
