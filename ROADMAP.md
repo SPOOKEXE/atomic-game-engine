@@ -883,6 +883,6 @@ The rendering and camera work this version already carried, unchanged:
 - [_] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, or assume per-viewport state for rojo-like sync system with main.default.json being in each subfolder)
 - [_] world => rojo sync, universe => multi-rojo sync (i reckon keep them separately syncing so even if one has bad formatting, the rest still sync)
 - [_] update built-in MCP integrations, add a studio ui button to enable/disable and information panel
-
+- [_] create a unified networking system for LAN, Peer2Peer and remote connections. Put in mono.network, then, build by import for the engine, studio and the cdn. I plan the engine to support direct connections between users (the host runs a server + client, then other clients connect to the local server) like LAN and Peer2Peer, then the studio supports it as well for team create with many users, then the cdn supports it to support different distribution streams like LAN, Peer2Peer, private (key accessed) networks and public distribution.
 
 ---
