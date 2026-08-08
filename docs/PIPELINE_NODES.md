@@ -1,14 +1,16 @@
 # Render pipeline nodes — research, taxonomy and design
 
-**Status: stages 1, 2, 4 and 6 are built and tested. 3, 5, 7 and 8 are not.**
+**Status: stages 1, 2, 4, 5 and 6 are built and tested. 3 is under way; 7 and 8
+are not.** `docs/PIPELINE_TODO.md` is the working state — this table says which
+stages exist, that one says how far each got and what is next.
 
 | stage | what | state |
 |---|---|---|
 | 1 | The type system — formats, usage kinds, resolution as a divisor, external resources | **built**, `engine.graph.rendergraph` + `engine.graph.pipelinecatalogue` |
 | 2 | The catalogue — 45 node kinds with typed, formatted slots | **built**, `engine.graph.pipelinecatalogue` |
-| 3 | The executor — `Renderer::Render` runs the graph | **not built**. D00002, and stage 7's other half is downstream of it. Until it lands, editing a pipeline changes a document and not a frame. |
+| 3 | The executor — `Renderer::Render` runs the graph | **under way**. D00002, and stage 7's other half is downstream of it. The seam is built and tested headlessly (`engine.render.graphrunner`); `shadow` and `surface` are handlers a `PassTable` finds; four passes and the swap itself are left. Until the swap lands, editing a pipeline changes a document and not a frame. |
 | 4 | The static checks — nine of the faults in §1.5 | **built**, `engine.graph.pipelinediagnostics`, and marked on the canvas |
-| 5 | Authored order and scopes | **half built.** The order check is `OutOfOrder` in `engine.graph.pipelinediagnostics`. Scopes are D00045 — 85 references wide, deferred for size rather than doubt. |
+| 5 | Authored order and scopes | **built.** The order check is `OutOfOrder` in `engine.graph.pipelinediagnostics`; scopes are `NodeScope` — `Frame`, `World`, `View`, and not `Surface`, for the reason in the TODO. |
 | 6 | The access grid | **built**, `engine.graph.pipelineprofile`, drawn by the Pipeline Profile panel |
 | 7 | GPU timestamps and upload counters | **half built.** CPU→GPU traffic is counted at every copy — `FrameResult::UploadedBytes` and `Uploads` — and shown on the profile panel. Per-pass timestamps are D00046, blocked on stage 3. |
 | 8 | Readbacks — the viewer's image, channel histograms, overdraw | **not built**. D00047. Faults 3, 4 and 9 stay out of reach without it. |
@@ -509,6 +511,23 @@ runs the graph through a `NodeRunner` instead of submitting six passes by name.
 Until this lands, editing the pipeline changes a document and not a frame — which
 is the thing most likely to be misread as the editor being broken. **This is the
 highest-value item in the whole list and it is already open.**
+
+Being done in three steps, each keeping the headless capture byte-identical: the
+seam (a `PassTable` and a `GraphRunner`, no device in either), then the six pass
+bodies moved out of `Render` one at a time, then the swap — after which
+`PassOrder()`, the `Pass` enum and `PassRecorder`'s ordering guard are all
+deleted, because `Execute` is the ordering and a second one would be the third
+description of the frame that D00016 is about.
+
+One thing the extraction turned up that belongs here rather than in the working
+notes: **`opaque` and `transparent` are one `SDL_BeginGPURenderPass` and two
+nodes.** The graph says they are separable and the renderer has them sharing an
+attachment set, a viewport and a light push. That is not a bug in either — it is
+Unity's pass merging (§1.2) arrived at by hand, and it is the first place this
+project has to say out loud whether the graph describes *nodes* or *render
+passes*. It describes nodes; the merge is a property of the frame, and the thing
+Unity's viewer prints beside a merge bar is the reason two passes could **not**
+be merged.
 
 **Stage 4 — the static checks** (§1.5). Six of the eleven faults found in the
 captured frame are properties of the authored graph and need no GPU at all: dead
