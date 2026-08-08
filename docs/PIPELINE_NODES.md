@@ -126,35 +126,115 @@ Three things Blender does that we do not:
 - **Sockets are typed and colour-coded** — yellow colour, grey value, purple
   vector, blue shader. We have this, with three types; it wants many more.
 
-### 1.4 What the screenshots add
+### 1.4 The captured frame
 
-The three captures are a RenderDoc-family tool over a deferred renderer, and
-they are the clearest statement of the ask.
+The three screenshots are stills from a full pass-by-pass walkthrough of one
+frame of a CryEngine demo, captured in a RenderDoc-family tool. The transcript
+gives the whole sequence, and it is worth writing down because **it is the most
+detailed description of a real modern frame available to this project**, and
+because the commentary running alongside it is a list of the exact faults a good
+editor should be able to find on its own.
 
-**Capture 1 — the G-buffer.** Four targets at 1920×1080:
-`R8G8B8A8_UNORM` ×2, `R16G16B16A16_FLOAT`, `D24_UNORM_S8_UINT`. Annotated:
-*"all 4 8-bit contain deferred/PBR data"*, *"empty 8-bit alpha"*, and the 16-bit
-target's alpha channel shown carrying real data. Beside it a **pipeline
-statistics** panel: CS/DS/GS/HS/PS/VS invocations, pixels rendered, post-clip
-primitives, primitive count, vertex count, GPU time elapsed.
+The frame, in order:
 
-The annotation is the point: **a wasted channel is invisible unless the tool
-shows you the channels.** An editor that only draws boxes cannot tell you an
-8-bit alpha is empty.
+1. Two quads clear parts of a **4096² D32 shadow atlas**; hardware clears for
+   scene depth, volumetric fog resources and the motion-vector buffer.
+2. **Base pass into deferred G-buffers.** Albedo `RGBA8` (alpha blank), a second
+   `RGBA8` of PBR data, normals packed into `RGBA16` with **material tags in the
+   alpha** — glass and window materials share one value, concrete a third —
+   and `D24_UNORM_S8_UINT` depth.
+3. Animated objects last in the base pass, writing motion vectors to `RG16`.
+4. A pixel shader copies the 24-bit hardware depth into an `R32_FLOAT` — a
+   full-screen triangle, so **~2.7 million pixel-shader invocations at 1080p**
+   just to change precision.
+5. That `R32` produces a half-resolution (540p) `D24` and a depth-downscaled
+   `RGBA16` whose channels hold min/max of each 2×2 and depth-discontinuity
+   information; that in turn produces a **135p** `RGBA16` and `D24` for light
+   culling.
+6. Hi-Z from the hardware depth, then a decal pass, then box-projection decals
+   using the `R32` depth and a *copy* of the normal buffer.
+7. A rain-projection pass over copies of normals, albedo and PBR.
+8. **Software ray tracing in a compute shader** over low-roughness pixels, using
+   depth, normals, PBR and an uncompressed PBR texture pool. Four `RGBA16`
+   outputs at **760p — about 30 % below native, roughly checkerboard density**.
+   Glass is traced *interlaced*: even lines take the exterior reflection, odd
+   lines the interior, resolved temporally.
+9. A small compute shader prepares tiled lighting parameters; a full-screen
+   triangle does tiled deferred shading of the RT resources.
+10. Temporal reconstruction against native-resolution G-buffers and accumulation
+    buffers; two buffers are kept for next frame; the result is upscaled to a
+    native `RGBA16`.
+11. SSDO, blurred depth-aware into a spare normal-buffer copy; a 50 µs downsample
+    of *albedo* for colour bleeding.
+12. Light culling by rasterising light-bound geometry against the downscaled
+    `D24` — noted as **faster than the compute-based light culling in other
+    pipelines**, and worth investigating.
+13. Shadows: a light's range volume is rasterised into the **stencil channel**,
+    and the stencil then restricts where the expensive shadow-projection pixel
+    shader runs on an `R8` shadow mask.
+14. A single large shader does direct lighting and composites SSDO bleed,
+    indirect light and the RT reflections into a native `RGBA16`, plus an
+    `R11G11B10` for screen-space subsurface scattering.
+15. Volumetric fog, transparents, sprites, rain — the rain masked by the previous
+    frame's bloom so drops only appear in lit areas.
+16. Depth of field at half resolution, near and far, composited.
+17. The post-DOF frame blurred to **270p**, then to the **64×64 `RG16` HDR
+    luminance target**, then reduced **all the way to 1×1** — this is capture 3.
+18. The 270p is recycled and blurred repeatedly until it overwrites the previous
+    frame's bloom `R11G11B10`.
+19. A LUT built in two draws, then **tone mapping with bloom composited**.
+20. **SMAA**: an edge mask into `RG8_UINT`, the stencil recording which pixels the
+    first pass touched so the blending pass can skip the rest, a blend mask into
+    `RGBA16`, then SMAA 2TX with history in the alpha.
+21. Final transfer to `RGBA8` with composite effects and film grain, then UI.
 
-**Capture 2 — one draw's resource set.** The `In / Exe / Out` column is the
-whole idea: eleven inputs (G-buffer targets at 1920×1080, plus `BC5_SNORM` and
-`BC1_UNORM_SRGB` material textures at 256² and 512², an `A8_UNORM` at 512²) and
-three outputs. Every row has a **thumbnail**, a **format**, and a **resolution**.
+Total: **13.80 ms** in the debugger, against an in-demo median about 30 % faster
+— the analyst attributes the gap to debugger overhead on the software RT.
 
-**Capture 3 — the downsample chain.** Inputs at 1920×1080 and 480×270; output
-at **64×64**, `R16G16_FLOAT`. 31 µs, 4096 pixels rendered, 3 vertices. This is
-"sampling smaller" made visible — and it is only legible because the tool prints
-the resolution of every bound resource next to its preview.
+### 1.5 The eleven faults, and the checks that would find them
 
-**What this means for us:** the unit of inspection is not the pass. It is the
-**(pass × resource) pair**, with direction, format, resolution and a preview.
-That is Unity's access grid with thumbnails, and it is the target for §7.
+This is the part that matters most for what we build. Each of these was found by
+a human reading a capture for half an hour. **Most of them are derivable from the
+graph.**
+
+| # | The fault, as observed | What the tool could check |
+|---|---|---|
+| 1 | An `R8` target is cleared and never used at all | **Dead resource**: written, never read. Cullable — RDG already does this. |
+| 2 | `RGBA8` and `RGBA16` are cleared, then wholly overwritten by a copy | **Wasted clear**: a clear whose every pixel is overwritten before any read. |
+| 3 | The albedo target's alpha channel is blank | **Empty channel**: needs the `separate` node, or a readback histogram. |
+| 4 | A half-resolution `RGB10A2` output is "a completely blank image" | Same check, whole-target. |
+| 5 | The subsurface `R11G11B10` is empty because the scene has no skin | **Conditionally dead**: a pass whose output is uniform. Argues for `Optional`, which we already have. |
+| 6 | Normals are in `RGBA16` where `RGB10A2` would do | **Format overspend**: a target whose declared bit depth exceeds what any reader samples. Needs the format type from §3. |
+| 7 | The scene is copied into an `R11G11B10` that is **never used again** | Dead resource, as (1). |
+| 8 | A group of draws whose resources "have nothing to do with previous or following draws" | **Disconnected subgraph** — trivially visible on a canvas, which is an argument for the canvas. |
+| 9 | No depth pre-pass, so **21 % of the most expensive material area is overdrawn**; adding a partial pre-pass gained **7 %, nearly a full millisecond** | **Overdraw**, which needs an overdraw view mode — a readback, not a graph property. |
+| 10 | A precision copy done as a full-screen triangle: 2.7 M pixel-shader invocations to move 24-bit depth into 32-bit | **Raster where copy or compute would do.** This is exactly why `Copy`/`Blit`/`Compute` must be distinct node kinds (§3) — the cost is invisible if everything is "a pass". |
+| 11 | Pre-pass objects rendered in the *middle* of the base pass rather than last | **Order**, and the reason §5 exists. |
+
+Six of the eleven — 1, 2, 5, 6, 7, 8 — are **static properties of the authored
+graph**. They need no capture, no timing and no GPU. A pipeline editor that ran
+those six checks continuously and marked the offending node would have caught
+most of what took a specialist a careful afternoon.
+
+Three more — 3, 4, 9 — need a **readback and a reduction**: is this channel
+constant, is this target uniform, how many times was this pixel shaded. That is
+the `viewer` node plus a histogram, not a whole profiler.
+
+Only 10 and 11 are judgement calls, and both are visible on the canvas the
+moment node kinds distinguish raster from copy and the order is authored rather
+than derived.
+
+**This reframes the whole feature.** The ask was "see what happens". The more
+valuable half is *the engine telling you what is wrong with what happens* — and
+most of that is arithmetic over a graph we already have.
+
+### 1.6 What the frame says about the catalogue
+
+The named passes above are the ground truth for §4, and several are things our
+catalogue has no word for at all: a shadow **atlas** with sub-rectangles reserved
+per light; **stencil-restricted** shading; a **downsample chain** whose output is
+a pyramid rather than an image; **reduction to 1×1**; **history buffers** that
+survive between frames; and copies as first-class work.
 
 ---
 
@@ -219,6 +299,12 @@ are the eight that exist today.
 - `gbuffer` — the deferred split of `opaque`: N colour targets plus depth.
 - `velocity` — per-pixel motion vectors, for TAA and motion blur.
 - `hzb` — hierarchical depth pyramid, for occlusion and SSR.
+- `depth-linearise` — hardware depth to a linear `R32F`. Its own kind because it
+  is one of the most commonly misimplemented passes in the industry (§1.5,
+  fault 10).
+- `depth-discontinuity` — min/max and edge information per 2×2, packed into one
+  target. The captured frame builds two of these and feeds light culling from
+  the smaller.
 - `decals` — projected surface modifications after the G-buffer.
 - `sky` / `atmosphere` — the background, before or after opaque.
 - `particles` / `ribbons` — the existing effects passes, promoted to nodes.
@@ -226,7 +312,14 @@ are the eight that exist today.
 ### 4.2 Lighting
 - `light-cull` — assign lights to a screen grid or clusters.
 - `deferred-lighting` — shade from the G-buffer.
-- `shadow-project` — resolve shadow maps into a screen-space mask.
+- `shadow-project` — resolve shadow maps into a screen-space mask. The captured
+  frame restricts this with the **stencil**, rasterising each light's range
+  volume first so the expensive projection shader runs only where the light
+  reaches — a technique our node model cannot currently express at all, because
+  it has no notion of a stencil-restricted pass.
+- `light-bounds` — rasterise light volumes against a downscaled depth target to
+  build the light list. Noted in the capture as materially faster than the
+  compute-based light culling in comparable pipelines, and worth measuring.
 - `ssao` — screen-space ambient occlusion.
 - `ssr` — screen-space reflections.
 - `ssgi` — screen-space global illumination.
@@ -242,7 +335,14 @@ This is where Blender's vocabulary transplants almost unchanged, and where the
 - `blur` — gaussian, box, directional, bokeh.
 - `dof` — depth of field, near and far.
 - `motion-blur` — from the velocity buffer.
-- `taa` / `fsr` / `upscale` — temporal resolve and spatial upscale.
+- `taa` / `smaa` / `upscale` — temporal resolve, edge anti-aliasing and spatial
+  upscale. The captured frame runs SMAA as three nodes — edge mask, blend mask,
+  resolve — with the stencil carrying which pixels the first touched so the
+  second can skip the rest. Three nodes rather than one is the honest shape.
+- `temporal-reconstruct` — accumulate a sub-resolution buffer against history and
+  motion vectors. Needs **history resources**: targets that survive between
+  frames, which the graph has no word for and which change resource lifetime
+  analysis entirely.
 - `sharpen`, `chromatic-aberration`, `vignette`, `grain`, `lut`.
 - `mix` — two images and a blend mode, which is Blender's `Mix` and the single
   most-used node in any compositor.
@@ -252,6 +352,11 @@ This is where Blender's vocabulary transplants almost unchanged, and where the
   only in a capture.
 
 ### 4.4 Resample — the "up/down scaling, sampling smaller" ask
+
+The captured frame contains six distinct resolutions — 1080p, 760p, 540p, 270p,
+135p, 64², 1×1 — reached by seven separate reduction steps. Every one of them is
+a node, and the chain from the post-DOF frame down to a 1×1 average luminance is
+the single clearest illustration of why resolution has to be part of the type.
 - `scale` — to a fraction or an absolute size, with a named filter (point,
   bilinear, catmull-rom, lanczos).
 - `downsample-chain` — build a mip pyramid; outputs an array, not one image.
@@ -259,7 +364,14 @@ This is where Blender's vocabulary transplants almost unchanged, and where the
 - `crop` / `pad` — a sub-rectangle, for split-screen and for jittered renders.
 - `resolve` — MSAA down to one sample.
 - `blit` — a straight copy, which is `Copy` work rather than `Raster` and is
-  worth its own kind so the cost shows up honestly.
+  worth its own kind so the cost shows up honestly. **Fault 10 in §1.5 is
+  exactly this**: a precision change done as a full-screen triangle, paying 2.7
+  million pixel-shader invocations for what a copy or a compute dispatch does
+  for nothing. If `blit` and `dispatch` are different node kinds from `raster`,
+  the mistake is visible in the shape of the graph.
+- `reduce-chain` — repeated halving to a fixed size, which is the 270p → 64² →
+  1×1 luminance chain. One node, not seven, because the intermediate steps are
+  not something anybody wires by hand.
 
 ### 4.5 Compute
 - `dispatch` — a named compute shader, N groups, declared storage bindings.
@@ -385,18 +497,29 @@ Until this lands, editing the pipeline changes a document and not a frame — wh
 is the thing most likely to be misread as the editor being broken. **This is the
 highest-value item in the whole list and it is already open.**
 
-**Stage 4 — ordering and scopes** (§5).
+**Stage 4 — the static checks** (§1.5). Six of the eleven faults found in the
+captured frame are properties of the authored graph and need no GPU at all: dead
+resources, wasted clears, format overspend, disconnected subgraphs, and passes
+whose output is never read. Each becomes a function over `CompiledGraph`
+returning a diagnostic naming the node — which means each is a headless test,
+and the panel's job is only to draw a warning triangle on the offending box.
 
-**Stage 5 — the access grid** (§7), read-only over the compiled graph: no
-timings, just who reads and writes what and when each resource lives. This is
-pure derivation from data we already have, and it is most of the value.
+**This is the best value in the whole document.** It is a few hundred lines of
+arithmetic, it is entirely testable, and it catches most of what took a
+specialist an afternoon of reading a capture.
 
-**Stage 6 — instrumentation.** GPU timestamps per pass, upload and readback byte
+**Stage 5 — ordering and scopes** (§5).
+
+**Stage 6 — the access grid** (§7), read-only over the compiled graph: no
+timings, just who reads and writes what and when each resource lives. Pure
+derivation from data we already have.
+
+**Stage 7 — instrumentation.** GPU timestamps per pass, upload and readback byte
 counts, pipeline statistics where SDL_GPU exposes them. The grid gains numbers.
 
-**Stage 7 — resource previews.** Thumbnails in the grid, which needs a readback
-path and a place to put it. Last, because it is the most expensive and the least
-load-bearing.
+**Stage 8 — readbacks.** The `viewer` node's image, channel histograms (which
+answer "is this alpha empty"), and an overdraw view. Last, because it is the most
+expensive and the least load-bearing — but it is what closes faults 3, 4 and 9.
 
 ---
 
@@ -410,5 +533,6 @@ load-bearing.
 - [Compositing — Blender Manual](https://docs.blender.org/manual/en/latest/compositing/index.html)
 - [Filter Nodes — Blender Manual](https://docs.blender.org/manual/en/latest/compositing/types/filter/index.html)
 - [Render Graphs — Riccardo Loggini](https://logins.github.io/graphics/2021/05/31/RenderGraphs.html)
-- [This Vendor Agnostic Ray Tracing Runs 120FPS](https://www.youtube.com/watch?v=yxSrDAOB2xc) — screenshots only; the
-  transcript could not be retrieved (every extraction service returned 403/405).
+- [This Vendor Agnostic Ray Tracing Runs 120FPS](https://www.youtube.com/watch?v=yxSrDAOB2xc) — Threat Interactive.
+  §1.4 and §1.5 are drawn from the transcript, supplied separately; the frame
+  walkthrough runs from about 03:08 to 21:10.
