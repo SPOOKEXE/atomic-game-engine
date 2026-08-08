@@ -36,11 +36,28 @@ or defer to another version.
 `CDN.md`, `RENDER_PIPELINE.md`, `repo_layout.md`, `GARG_ECS_Layout.md` and
 `DATATYPES_LIBRARIES.md` are cited by section number throughout this file and by
 several module `AGENTS.md` files. None of those design notes is committed —
-`git rev-list --all --objects` finds no such path. They are held outside the
-tree, so a section reference here is a pointer somebody has to be handed rather
-than one they can follow. Said once, at the top, rather than qualified at every
-citation. The former `v02v03v04.md` plan is different: its committed retirement
-copy is [`docs/retired/v02v03v04.md`](docs/retired/v02v03v04.md).
+`git rev-list --all --objects` finds no such path. Said once, at the top, rather
+than qualified at every citation. The former `v02v03v04.md` plan is different:
+its committed retirement copy is
+[`docs/retired/v02v03v04.md`](docs/retired/v02v03v04.md).
+
+**Four of the five are in a sibling repository, `../atomic-game-engine-hidden-docs`**,
+which is where a section reference can actually be followed — along with
+`core-features.md`, `MCP.md`, `SHADERC_VENDORING.md` and the Roblox, Unity and
+Unreal notes. Recorded because "held outside the tree" left every citation a
+pointer somebody had to be handed, and the path is not a secret even where the
+contents are.
+
+**`GARG_ECS_Layout.md` is not there either**, so that one citation is still
+unfollowable and is the only one of the five that is. Worth knowing before
+somebody goes looking for it twice.
+
+**A document outside the tree can describe another engine, and one of them
+does.** `RENDER_PIPELINE.md` is a design and staging plan for a graph renderer
+built beside an existing one — `--renderer=v1`, box3d, `Camera.Shaders`,
+`ChainCache` — and none of that machinery is here. Its stage numbers therefore
+do not index work in this repository, which v0.11's own line assumed they did.
+See `v11.md` §1, at the repository root.
 
 ## VERSIONS
 
@@ -852,13 +869,21 @@ The rendering and camera work this version already carried, unchanged:
 
 ### v0.11
 
-- [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — `RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with
+- [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic) — ~~`RENDER_PIPELINE.md` stages 8 to 12, including the HDR and G-buffer prerequisite its §17 opens with~~ **corrected: those stage numbers do not index this repository.** That document's §16 stages a graph renderer built *beside* an existing one — stage 8 is "switch the default, keep `--renderer=v1`" and 8b is "strip v1" — and it records stages 1, 3 and 5 as done *there*. Here, `NodeDesc`, `ExecContext`, `ChainCache`, `SceneParts`, `GeometryNode`, `SwapchainPresent`, `CapabilitiesOf` and `ClearPolicy` appear in **zero** files, `graph` is four headers of description with no executor, and there is no second renderer to switch a default away from. The work this line actually names is that document's stages **1, 3 and 5** adapted — skeleton and interpreted executor, capabilities, port the passes — then 10, then 11 and 12. **Two of its stated blockers are already retired here**: §17 calls runtime shader compilation unverifiable until shaderc is vendored, and this engine has linked it since v0.1; §14's physics-tick split, which §16 says to do early because it changes what every frame measurement means, shipped at v0.1. Planned in `v11.md` at the repository root
 - [_] convert the entire rendering pipeline to the node system with a studio editor? then during play, it'll compile and work. Add a node editor like blender's system as well for both the mesh pipeline and the rendering pipeline, as separate widgets called Render Pipeline and Assets Pipeline. I plan to have all assets be managed in Assets Pipeline using many node trees in one editor (and same for render but as different subpipelines).
 - [_] improved physics pipeline with spatial optimisations
+- [_] surfaceapperance actually integrated with new pipeline
 
 ### v0.12
 
 - [_] deferred items
-- [_] ...
+- [_] studio editing tools; select, move, rotate, 3d scene interactable gimbals, grid step amount input, rotation amount input, anchor toggle, "lock" toggle, pivot editor mode, reset pivot button. Reference "~/Pictures/Screenshot from 2026-08-08 15-59-40.png" and "~/Pictures/Screenshot from 2026-08-08 16-00-19.png".
+- [_] studio tooling tabs
+- [_] plugin system
+- [_] expose ECS underlying to luau and typescript (locked down but can query engine for entities using direct and returns instances)
+- [_] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, or assume per-viewport state for rojo-like sync system with main.default.json being in each subfolder)
+- [_] world => rojo sync, universe => multi-rojo sync (i reckon keep them separately syncing so even if one has bad formatting, the rest still sync)
+- [_] update built-in MCP integrations, add a studio ui button to enable/disable and information panel
+- [_] create a unified networking system for LAN, Peer2Peer and remote connections. Put in mono.network, then, build by import for the engine, studio and the cdn. I plan the engine to support direct connections between users (the host runs a server + client, then other clients connect to the local server) like LAN and Peer2Peer, then the studio supports it as well for team create with many users, then the cdn supports it to support different distribution streams like LAN, Peer2Peer, private (key accessed) networks and public distribution.
 
 ---
