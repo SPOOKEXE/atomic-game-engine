@@ -24,7 +24,6 @@
 
 #include <engine/bake/GraphDocument.hpp>
 #include <engine/ecs/Entity.hpp>
-#include <engine/nodeview/Canvas.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -88,18 +87,9 @@ namespace engine::nodeview {
 	// @return The layout.
 	AssetLayout LayoutAssets(const bake::Document &document);
 
-	// Builds an Assets Pipeline canvas under `parent`.
-	//
-	// Destroys whatever it built there before, exactly as `nodeview::Build`
-	// does, and for the same reason.
-	//
-	// @param store  The world the instances live in.
-	// @param parent What to hang the canvas under. An invalid handle builds
-	//               nothing.
-	// @param layout Where the nodes go.
-	// @param style  Spacing.
-	// @return What was built.
-	Canvas BuildAssets(
-		ecs::Store &store, ecs::Entity parent, const AssetLayout &layout, const CanvasStyle &style = {}
-	);
+	// **`BuildAssets` was here and went with `nodeview::Canvas`.** It turned
+	// this layout into `gui` instances, which `DEFERRED.md` D00041 settled
+	// against: the studio's panels are Dear ImGui and a `gui` subtree cannot
+	// live inside one. The layout is the part both renderings need and the part
+	// with tests, so it is what survived.
 }

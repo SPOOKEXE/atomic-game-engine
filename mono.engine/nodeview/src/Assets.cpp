@@ -1,5 +1,3 @@
-#include "Widgets.hpp"
-
 #include <engine/nodeview/Assets.hpp>
 
 #include <algorithm>
@@ -9,8 +7,6 @@
 namespace engine::nodeview {
 
 	namespace {
-		constexpr std::string_view ROOT_NAME = "AssetsCanvas";
-
 		// Whether an operation adds a node, which is what positions count.
 		bool AddsNode(bake::OperationKind kind) {
 			return kind != bake::OperationKind::Connect;
@@ -63,78 +59,5 @@ namespace engine::nodeview {
 		}
 
 		return layout;
-	}
-
-	Canvas
-	BuildAssets(ecs::Store &store, ecs::Entity parent, const AssetLayout &layout, const CanvasStyle &style) {
-		Canvas canvas;
-
-		if (parent == ecs::NULL_ENTITY || !store.Alive(parent)) {
-			return canvas;
-		}
-
-		gui::RegisterGuiClasses();
-
-		// Collected before any of it is destroyed, for `Canvas.cpp`'s reason:
-		// `EachChild` walks the sibling links `Destroy` rewrites.
-		std::vector<ecs::Entity> stale;
-		store.EachChild(parent, [&store, &stale](ecs::Entity child) {
-			if (store.InstanceNameOf(child) == core::Name(ROOT_NAME)) {
-				stale.push_back(child);
-			}
-		});
-		for (const ecs::Entity child : stale) {
-			store.Destroy(child);
-		}
-
-		canvas.Root = MakeFrame(
-			store,
-			parent,
-			ROOT_NAME,
-			core::UDim2{0.0f, 0.0f, 0.0f, 0.0f},
-			core::UDim2{1.0f, 0.0f, 1.0f, 0.0f},
-			core::Color3{0.09f, 0.10f, 0.12f}
-		);
-
-		// **No bands.** A render frame has three because a frame does; a bake
-		// chain has none, and inventing one to hold everything would be a box
-		// that means nothing.
-		for (const PlacedAsset &placed : layout.Nodes) {
-			const float left =
-				style.Margin + static_cast<float>(placed.Column) * (style.NodeWidth + style.ColumnGap);
-			const float down =
-				style.Margin + static_cast<float>(placed.Row) * (style.NodeHeight + style.RowGap);
-
-			// Named by position rather than by kind, because a chain may hold
-			// four `import` nodes and an instance name is how a panel finds the
-			// one somebody clicked.
-			const std::string name = std::to_string(placed.Position);
-
-			const ecs::Entity box = MakeFrame(
-				store,
-				canvas.Root,
-				name,
-				core::UDim2{0.0f, left, 0.0f, down},
-				core::UDim2{0.0f, style.NodeWidth, 0.0f, style.NodeHeight},
-				core::Color3{0.24f, 0.20f, 0.28f}
-			);
-
-			// The kind, and the name under it when there is one — a `source`
-			// box that did not say which file it read would be six identical
-			// boxes in a directory bake.
-			std::string text{placed.Kind};
-			if (!placed.Text.empty()) {
-				text += "\n";
-				text += placed.Text;
-			}
-
-			CanvasNode made;
-			made.Name = core::Name(name);
-			made.Box = box;
-			made.Label = MakeLabel(store, box, "Name", std::move(text), core::Color3{0.88f, 0.86f, 0.92f});
-			canvas.Nodes.push_back(made);
-		}
-
-		return canvas;
 	}
 }

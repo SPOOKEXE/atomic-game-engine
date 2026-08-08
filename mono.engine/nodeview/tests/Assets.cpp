@@ -6,9 +6,6 @@
 // canvas that lies about which way the data goes.
 
 #include <engine/bake/GraphDocument.hpp>
-#include <engine/ecs/Store.hpp>
-#include <engine/gui/Components.hpp>
-#include <engine/gui/Registration.hpp>
 #include <engine/nodeview/Assets.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -23,11 +20,7 @@ using engine::bake::Document;
 using engine::bake::Operation;
 using engine::bake::OperationKind;
 using engine::core::Name;
-using engine::ecs::Entity;
-using engine::ecs::Store;
 using engine::nodeview::AssetLayout;
-using engine::nodeview::BuildAssets;
-using engine::nodeview::Canvas;
 using engine::nodeview::LayoutAssets;
 
 namespace {
@@ -71,10 +64,6 @@ namespace {
 		return document;
 	}
 
-	Entity HostIn(Store &store) {
-		engine::gui::RegisterGuiClasses();
-		return store.CreateInstance(engine::gui::GuiClass("Frame"), "Panel");
-	}
 }
 
 TEST_CASE("a chain lays out left to right", "[nodeview]") {
@@ -139,74 +128,4 @@ TEST_CASE("a wire naming a node the document does not hold is ignored", "[nodevi
 	const AssetLayout layout = LayoutAssets(document);
 	CHECK(layout.Nodes.size() == 1);
 	CHECK(layout.Nodes[0].Column == 0);
-}
-
-TEST_CASE("the canvas draws one box per node", "[nodeview]") {
-	Store store("nodeview.assets.build");
-	const Entity host = HostIn(store);
-
-	const Canvas canvas = BuildAssets(store, host, LayoutAssets(Chain()));
-
-	REQUIRE(store.Alive(canvas.Root));
-	REQUIRE(canvas.Nodes.size() == 3);
-	for (const auto &node : canvas.Nodes) {
-		CHECK(store.Alive(node.Box));
-	}
-
-	// **No bands.** A bake chain has no shared/per-view split to draw.
-	CHECK(canvas.Bands.empty());
-}
-
-TEST_CASE("a box says what kind it is and what it names", "[nodeview]") {
-	Store store("nodeview.assets.labels");
-	const Entity host = HostIn(store);
-
-	const Canvas canvas = BuildAssets(store, host, LayoutAssets(Chain()));
-
-	const auto *first = store.Get<engine::gui::Label>(canvas.Nodes[0].Label);
-	REQUIRE(first != nullptr);
-	CHECK(first->Text.find("builtin") != std::string::npos);
-	CHECK(first->Text.find("engine.Cube") != std::string::npos);
-
-	// A `fit` carries no name, so it says only what it is.
-	const auto *second = store.Get<engine::gui::Label>(canvas.Nodes[1].Label);
-	REQUIRE(second != nullptr);
-	CHECK(second->Text == "fit");
-}
-
-TEST_CASE("boxes are named by position so a panel can find one", "[nodeview]") {
-	// A chain may hold four `import` nodes; the position is what tells them
-	// apart, and it is the numbering `Operation::From` already uses.
-	Store store("nodeview.assets.names");
-	const Entity host = HostIn(store);
-
-	const Canvas canvas = BuildAssets(store, host, LayoutAssets(Chain()));
-	CHECK(canvas.Nodes[0].Name == Name("1"));
-	CHECK(canvas.Nodes[2].Name == Name("3"));
-}
-
-TEST_CASE("rebuilding replaces the canvas", "[nodeview]") {
-	Store store("nodeview.assets.rebuild");
-	const Entity host = HostIn(store);
-
-	BuildAssets(store, host, LayoutAssets(Chain()));
-	const Canvas second = BuildAssets(store, host, LayoutAssets(Chain()));
-
-	size_t children = 0;
-	Entity only;
-	store.EachChild(host, [&](Entity child) {
-		children++;
-		only = child;
-	});
-	CHECK(children == 1);
-	CHECK(only == second.Root);
-}
-
-TEST_CASE("an empty document builds a canvas and no boxes", "[nodeview]") {
-	Store store("nodeview.assets.empty");
-	const Entity host = HostIn(store);
-
-	const Canvas canvas = BuildAssets(store, host, LayoutAssets(Document{}));
-	CHECK(store.Alive(canvas.Root));
-	CHECK(canvas.Nodes.empty());
 }

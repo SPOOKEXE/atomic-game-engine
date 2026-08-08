@@ -39,6 +39,8 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace engine::graph {
@@ -61,6 +63,21 @@ namespace engine::graph {
 
 		// Turns a node on or off.
 		Enable,
+
+		// Places a node on an editor's canvas.
+		//
+		// **Editor metadata, and `Build` ignores it.** Where a box sits changes
+		// how a pipeline reads and never what it computes, so moving one must
+		// not be able to produce a different frame — the same exclusion
+		// `rl-pipeline`'s `GraphSpec.content_hash` makes, and for the same
+		// reason: a cosmetic drag that invalidated a compile would make the
+		// editor unusable for the thing it is for.
+		//
+		// **An edit rather than a field on `AddNode`**, because a node is placed
+		// far more often than it is added and a document is a list of what
+		// somebody did. `PositionsOf` replays them; the last one for a name
+		// wins.
+		Move,
 	};
 
 	// A stable, human-readable name for an edit kind.
@@ -114,6 +131,18 @@ namespace engine::graph {
 
 		// `Enable`'s new state.
 		bool Enabled = true;
+
+		// `Move`'s destination, in canvas pixels.
+		//
+		// **Pixels and not columns.** `PipelineView` places a node by which
+		// band and column it runs in, which is the right answer for a diagram
+		// that draws itself; an editor is one somebody drags boxes around, and
+		// the two coexist — `LayoutPipeline` is what an "arrange" button calls
+		// to produce these.
+		//@{
+		float X = 0.0f;
+		float Y = 0.0f;
+		//@}
 	};
 
 	// Why a document would not build or parse.
@@ -315,6 +344,22 @@ namespace engine::graph {
 	// another module's is exactly the mistake `scene::RegisterSceneComponents`
 	// exists to stop `physics` making.
 	void RegisterPipelineComponents();
+
+	// Where a document's nodes have been dragged to.
+	//
+	// **Replayed rather than stored**, because a document is the record and a
+	// position is one more thing somebody did to it. The last `Move` for a name
+	// wins, so undoing a drag is `PipelineDocument::Undo` with no special case.
+	//
+	// A node that has never been moved is absent rather than at the origin: a
+	// caller that stacked every unplaced node on top of itself would be worse
+	// than one that arranged them, and only the caller knows which it wants.
+	//
+	// @param document The edits.
+	// @return Name to position, for every node a `Move` names — including names
+	//         the document never declared, which is what makes a position
+	//         survive deleting and re-adding a node under the same name.
+	std::unordered_map<uint32_t, std::pair<float, float>> PositionsOf(const PipelineDocument &document);
 
 	// The frame this engine draws today, as a document.
 	//

@@ -34,6 +34,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/nodeview/Editor.hpp>
 #include <engine/nodeview/State.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
@@ -2815,6 +2816,50 @@ namespace studio {
 		//@{
 		engine::nodeview::CanvasState RenderPipelineState;
 		engine::nodeview::CanvasState AssetsPipelineState;
+		//@}
+
+		// --- the Render Pipeline editor --------------------------------------
+		//
+		// **The pipeline being edited, held here rather than rebuilt per frame.**
+		// A panel that re-derived its graph from the world every frame would
+		// throw away a half-finished wire on the frame it was dragged, and would
+		// have nowhere to put a node somebody moved. `nodeview::EditorGraph` is
+		// the model; the world's `graph::PipelineSet` is where Save puts it.
+
+		// The graph on the canvas, and which world it was loaded from.
+		//
+		// **The world id is the reload trigger.** Switching worlds has to reload
+		// or the panel would be editing one scene's pipeline while showing
+		// another's name, and saving would write it to the wrong place.
+		//@{
+		engine::nodeview::EditorGraph RenderPipelineGraph;
+		engine::world::WorldId RenderPipelineLoaded;
+		bool RenderPipelineDirty = false;
+		//@}
+
+		// How far the canvas is scrolled and zoomed.
+		engine::nodeview::CanvasView RenderPipelineCanvas;
+
+		// Which node is selected, or an invalid name.
+		engine::core::Name RenderPipelineSelected;
+
+		// The node being dragged, and where inside it the pointer grabbed.
+		//
+		// **The offset is what stops the box snapping its corner to the cursor**
+		// on the first frame of every drag.
+		//@{
+		engine::core::Name RenderPipelineDragging;
+		engine::nodeview::Point RenderPipelineGrab;
+		//@}
+
+		// The wire in flight, if one is. Invalid means no drag.
+		engine::graph::PortRef RenderPipelineWire;
+
+		// Where the add-node menu was opened, in canvas pixels, and what has
+		// been typed into it.
+		//@{
+		engine::nodeview::Point RenderPipelineAddAt;
+		std::string RenderPipelineSearch;
 		//@}
 
 		// Where the add-file and add-folder dialogs are looking.

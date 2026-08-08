@@ -116,40 +116,34 @@ building a dependency sort for something insertion order expresses exactly.
   registration, so the new sentence cannot be read as "registration order is
   *the* contract".
 
-### [_] D00041
+### [CLOSED] D00041
 
 **The node canvas is a `gui` tree and the studio's panels are Dear ImGui. They
 do not compose, and the mounting work has to answer this first.**
 
-Found while scoping the studio half of the Render Pipeline and Assets Pipeline
-widgets, with every piece they consume already built and tested.
+Closed by taking the second of the two options this entry laid out: the canvas
+is drawn with an ImGui draw list, and `nodeview`'s `gui`-tree half is deleted.
 
-- **v0.11 §6 decided the canvas is built on the engine's own `gui` tree**, not a
-  vendored node-editor library, and that decision is sound — it made the whole
-  of `nodeview` headless-testable, which is where this session's layout, edge,
-  hit-test and selection bugs were caught.
-- **But a `gui` tree is drawn by `render`**, as instances compiled to a draw
-  list. The studio's panels are `ImGui::Begin` blocks in `mono.studio`, drawn by
-  `mono.engine/ui`. An `ImGui` window cannot contain a `gui` subtree; they are
-  two renderers with two draw lists.
-- **The engine already has the pattern for this and it is the viewport.** A
-  world is rendered into an offscreen `SceneTarget` and the panel shows that
-  texture — `Renderer::SceneTexture` hands back an `SDL_GPUTexture *`, which is
-  an `ImTextureID` unchanged. A node canvas can go the same way: give it a slot,
-  render its `gui` tree into it, show the texture.
-- **Which makes the canvas a second consumer of the multi-view seam**, and an
-  argument for it. Two open node editors plus a viewport is three views in one
-  frame — exactly what `Render(std::span<const View>)` was built for and what
-  `D00038` says nothing yet exercises.
-- **The alternative is drawing the layout with ImGui directly** — `PipelineView`
-  hands back columns, rows and edges, and an ImGui draw list can render boxes
-  and lines from that without any `gui` instances at all. That is less code and
-  throws away §6's decision along with the tested tree.
-- **Not decided here.** The first costs a render target per open editor and
-  makes the canvas a real `gui` consumer; the second is cheaper and leaves
-  `nodeview::Build` with no caller. Whichever is chosen, `graph::PipelineView`
-  and `nodeview::CanvasState` are used either way — the layout, the hit-test and
-  the selection are the same arithmetic behind both.
+- **The decision was forced by what "a full editor" needs, not by taste.** A
+  read-only diagram could have gone either way. Adding a node, dragging a wire
+  and refusing an incompatible drop all need per-frame input against per-frame
+  geometry, and routing that through a retained tree rendered into an offscreen
+  target — one per open editor — buys a widget set the panel does not otherwise
+  use and costs a texture, a pass and a coordinate hop on every click.
+- **What replaced it is testable in the same places.** `nodeview::Editor` holds
+  the hit-test, the drop rule, the zoom-about-a-point arithmetic and the menu's
+  search; `engine.nodeview.editor` asserts all of it. Only the drawing is in
+  `mono.studio/src/Pipelines.cpp`, which is the part no test could have reached
+  under either option.
+- **Deleted rather than left dead**: `nodeview::Canvas`, `nodeview::Build`,
+  `BuildAssets`, `CanvasStyle`, `Pick`, `PickAt` and `Click`, with their tests
+  and the internal `Widgets.hpp`. Keeping a second, unused way to draw a node
+  canvas is exactly the two-ways-to-do-one-job that `AGENTS.md` names as the
+  most expensive debt in a monorepo, and it would have been the copy nobody
+  noticed had rotted.
+- **`CanvasState`'s pan survives** because the Assets Pipeline canvas is still a
+  read-only diagram and still scrolls. It moves onto the same seam when that
+  panel becomes an editor.
 
 ### [CLOSED] D00040
 

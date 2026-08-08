@@ -19,7 +19,6 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/graph/PipelineView.hpp>
-#include <engine/nodeview/Canvas.hpp>
 
 namespace engine::nodeview {
 
@@ -43,25 +42,12 @@ namespace engine::nodeview {
 		//@}
 	};
 
-	// Handles a click at a point on the *widget*, in widget coordinates.
-	//
-	// **Widget coordinates and not canvas ones**, which is the distinction the
-	// pan exists to make: a caller has a pointer position relative to the panel
-	// and should not have to undo the scroll itself.
-	//
-	// Clicking empty space clears the selection rather than keeping it. An
-	// editor that kept it would leave somebody unable to deselect, and "click
-	// away to dismiss" is what every canvas in every tool does.
-	//
-	// @param state  Updated in place.
-	// @param layout Where the nodes are.
-	// @param style  The spacing they were built with.
-	// @param x      Pointer offset from the widget's left edge.
-	// @param y      Pointer offset from its top edge.
-	// @return `true` when the selection changed.
-	bool Click(
-		CanvasState &state, const graph::PipelineLayout &layout, const CanvasStyle &style, float x, float y
-	);
+	// **`Click` was here and went with the `gui` canvas it picked against.**
+	// `DEFERRED.md` D00041 settled the Render Pipeline widget onto ImGui draw
+	// lists, and `nodeview::HitTest` is what a pointer now asks — it takes a
+	// free-placed `EditorGraph` rather than a `PipelineLayout` of bands and
+	// columns, so there was nothing to keep. What is left here is the pan, which
+	// the Assets canvas still uses while it is still a diagram.
 
 	// Drags the view.
 	//

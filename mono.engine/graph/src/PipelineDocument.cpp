@@ -2,6 +2,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 
 #include <charconv>
+#include <cmath>
 #include <unordered_map>
 
 namespace engine::graph {
@@ -150,6 +151,34 @@ namespace engine::graph {
 			return result.ec == std::errc{} && result.ptr == last;
 		}
 
+		// A canvas coordinate.
+		//
+		// **Read as an integer and written as one**, which is the whole reason
+		// this is not `std::from_chars` over a float: a position is a pixel, a
+		// document has to round-trip byte for byte, and a decimal expansion is
+		// where that stops being true. Rounding a drag to the pixel it landed on
+		// costs nothing anybody can see.
+		bool TakeCoordinate(std::string_view &line, float &out) {
+			const std::string_view word = TakeWord(line);
+			if (word.empty()) {
+				return false;
+			}
+			const char *first = word.data();
+			const char *last = first + word.size();
+
+			int32_t whole = 0;
+			const auto result = std::from_chars(first, last, whole);
+			if (result.ec != std::errc{} || result.ptr != last) {
+				return false;
+			}
+			out = static_cast<float>(whole);
+			return true;
+		}
+
+		std::string Rounded(float value) {
+			return std::to_string(static_cast<int32_t>(std::lround(value)));
+		}
+
 		bool TakeFlag(std::string_view &line, bool &out) {
 			const std::string_view word = TakeWord(line);
 			if (word == "yes") {
@@ -183,6 +212,8 @@ namespace engine::graph {
 			return "writes";
 		case EditKind::Enable:
 			return "enable";
+		case EditKind::Move:
+			return "move";
 		}
 		return "unknown";
 	}
@@ -279,6 +310,17 @@ namespace engine::graph {
 					offender = edit.Target;
 					return PipelineDocumentStatus::UnknownName;
 				}
+
+				// **An unnamed target is an empty slot, not a mistake.** An
+				// editor's node has a fixed row of ports and some of them are
+				// unwired; writing one line per row — empty ones included — is
+				// what lets a reader put each binding back in the row it came
+				// from, because a document has no slot index and position in
+				// the list is the index. The runtime has no such notion, so
+				// this is where the two part company.
+				if (!edit.Target.IsValid()) {
+					break;
+				}
 				const auto found = resources.find(edit.Target.Id());
 				if (found == resources.end()) {
 					offender = edit.Target;
@@ -287,6 +329,11 @@ namespace engine::graph {
 				(edit.Kind == EditKind::Reads ? pending.Reads : pending.Writes).push_back(found->second);
 				break;
 			}
+			case EditKind::Move:
+				// **Ignored, and that is the whole point of it.** See `EditKind::Move`:
+				// where a box sits must not be able to change what a frame computes.
+				break;
+
 			case EditKind::Enable: {
 				const auto found = nodes.find(edit.Name.Id());
 				if (found == nodes.end()) {
@@ -313,6 +360,21 @@ namespace engine::graph {
 		}
 
 		return PipelineDocumentStatus::Ok;
+	}
+
+	std::unordered_map<uint32_t, std::pair<float, float>> PositionsOf(const PipelineDocument &document) {
+		std::unordered_map<uint32_t, std::pair<float, float>> placed;
+
+		// **Forwards, so the last `Move` wins.** A document is a record of what
+		// somebody did and a drag is a sequence of them; replaying backwards to
+		// stop early would be an optimisation that inverted the meaning.
+		for (const Edit &edit : document.Edits()) {
+			if (edit.Kind == EditKind::Move && edit.Name.IsValid()) {
+				placed[edit.Name.Id()] = {edit.X, edit.Y};
+			}
+		}
+
+		return placed;
 	}
 
 	std::string Write(const PipelineDocument &document) {
@@ -347,6 +409,11 @@ namespace engine::graph {
 				out.push_back(' ');
 				AppendQuoted(out, edit.Name.Text());
 				out += ' ' + std::string(FlagText(edit.Enabled));
+				break;
+			case EditKind::Move:
+				out.push_back(' ');
+				AppendQuoted(out, edit.Name.Text());
+				out += ' ' + Rounded(edit.X) + ' ' + Rounded(edit.Y);
 				break;
 			}
 
@@ -406,6 +473,11 @@ namespace engine::graph {
 				edit.Kind = word == "reads" ? EditKind::Reads : EditKind::Writes;
 				parsed = TakeQuoted(line, name);
 				edit.Target = core::Name(name);
+			} else if (word == "move") {
+				edit.Kind = EditKind::Move;
+				parsed =
+					TakeQuoted(line, name) && TakeCoordinate(line, edit.X) && TakeCoordinate(line, edit.Y);
+				edit.Name = core::Name(name);
 			} else if (word == "enable") {
 				edit.Kind = EditKind::Enable;
 				parsed = TakeQuoted(line, name) && TakeFlag(line, edit.Enabled);
