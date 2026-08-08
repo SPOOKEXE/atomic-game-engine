@@ -10,10 +10,15 @@
 // this file exists to prevent, one level up. The assertions compare the two
 // descriptions against each other and neither against a number.
 //
+// **The second description is gone, and so is most of what this file used to
+// check.** `render::Pass` was a hand-written enum saying the same six things in
+// the same order; `Renderer::Render` walks `graph::Execute` now and the enum has
+// been deleted. What is left is worth keeping: that `PassOrder` really is the
+// graph's order, that the graph is runnable, and that a caller can ask which
+// stages ran by name.
+//
 // **No device is created here and none is needed.** `PassOrder` is a list of
-// names and `StandardPipeline` is arithmetic over names, so the comparison runs
-// anywhere. That is the whole reason the enum exists as a separate thing from
-// the function body: the body needs a GPU, the description does not.
+// names and the graph is arithmetic over names, so all of this runs anywhere.
 
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Renderer.hpp>
@@ -47,7 +52,6 @@ using engine::graph::NodeId;
 using engine::graph::RenderGraph;
 using engine::graph::StandardGraph;
 using engine::render::FrameResult;
-using engine::render::Pass;
 using engine::render::PassOrder;
 
 namespace {
@@ -66,12 +70,12 @@ TEST_CASE("the renderer's passes are the standard graph's nodes", "[render][grap
 	// description arrived intact.** `render::PassOrder` used to be a second
 	// hand-written list of these names and this case existed to catch the two
 	// drifting apart; `DEFERRED.md` D00016 is that entry. It reads the names out
-	// of `StandardGraph` now, so drift is not possible and what is left worth
-	// asserting is that the derivation lines up with the `Pass` enum.
+	// of `StandardGraph` now, so drift is not possible.
 	//
-	// Kept rather than deleted because the enum is still written by hand: a node
-	// added to the graph without a matching enumerator, or added in the wrong
-	// place, is a real mistake and this is where it surfaces.
+	// Kept rather than deleted because `FrameResult::Passes` is a bitmask over
+	// these positions: a node inserted in the middle of the graph moves every
+	// bit after it, and a caller reading `Ran("overlay")` would get the answer
+	// for a different pass. This is where that surfaces.
 	const RenderGraph standard = StandardGraph();
 	const std::vector<Name> nodes = NodeNames(standard);
 	const auto order = PassOrder();
@@ -91,26 +95,24 @@ TEST_CASE("the renderer's passes are the standard graph's nodes", "[render][grap
 	}
 }
 
-TEST_CASE("the pass enum indexes its own names", "[render]") {
-	// `PassRecorder` shifts by the enum value and `PassOrder` is indexed by it,
-	// so a member inserted in the middle without moving the name beside it
-	// silently renames every pass after it. Cheap to assert and impossible to
-	// notice otherwise.
+TEST_CASE("pass order names the six stages the standard frame has", "[render][graph]") {
+	// **The names, not the count.** The count is asserted against the graph
+	// above; naming them here is what catches a *rename* — a node called
+	// `transparent` becoming `blended` would keep every count right and quietly
+	// change what `FrameResult::Ran` answers for.
+	//
+	// This was the case that used to check the hand-written enum indexed its own
+	// names. The enum is gone; the index space it defined is now the graph's, so
+	// what is worth pinning is which name sits at which position.
 	const auto order = PassOrder();
 
-	REQUIRE(order.size() == static_cast<size_t>(Pass::Count));
-	CHECK(order[static_cast<size_t>(Pass::Shadow)].Text() == "shadow");
-	CHECK(order[static_cast<size_t>(Pass::Surface)].Text() == "surface");
-	CHECK(order[static_cast<size_t>(Pass::Opaque)].Text() == "opaque");
-	CHECK(order[static_cast<size_t>(Pass::Transparent)].Text() == "transparent");
-	CHECK(order[static_cast<size_t>(Pass::Overlay)].Text() == "overlay");
-
-	// **Added when the sixth pass arrived, which is the case D00016 was filed
-	// against.** The count assertion above caught the pairing; this list did not
-	// grow with it, so `interface` was the one pass whose *name* nothing
-	// checked. Cheap, and exactly the kind of half-updated check this module has
-	// already watched rot once.
-	CHECK(order[static_cast<size_t>(Pass::Interface)].Text() == "interface");
+	REQUIRE(order.size() == 6);
+	CHECK(order[0].Text() == "shadow");
+	CHECK(order[1].Text() == "surface");
+	CHECK(order[2].Text() == "opaque");
+	CHECK(order[3].Text() == "transparent");
+	CHECK(order[4].Text() == "overlay");
+	CHECK(order[5].Text() == "interface");
 }
 
 TEST_CASE("the standard graph the renderer follows is runnable", "[render][graph]") {
@@ -131,22 +133,26 @@ TEST_CASE("a frame result reports which passes ran", "[render]") {
 	// pass are one draw each and are indistinguishable from there.
 	FrameResult result;
 
-	for (uint8_t index = 0; index < static_cast<uint8_t>(Pass::Count); index++) {
-		CHECK_FALSE(result.Ran(static_cast<Pass>(index)));
+	for (const Name &kind : PassOrder()) {
+		CHECK_FALSE(result.Ran(kind));
 	}
 
-	result.Passes = static_cast<uint8_t>(
-		(1u << static_cast<uint8_t>(Pass::Opaque)) | (1u << static_cast<uint8_t>(Pass::Overlay))
-	);
+	result.Passes = static_cast<uint8_t>((1u << 2) | (1u << 4));
 
-	CHECK(result.Ran(Pass::Opaque));
-	CHECK(result.Ran(Pass::Overlay));
+	CHECK(result.Ran(Name("opaque")));
+	CHECK(result.Ran(Name("overlay")));
 
 	// The interesting one: a frame that drew but cast no shadows, which is what
 	// a scene with no casters looks like and is not a bug.
-	CHECK_FALSE(result.Ran(Pass::Shadow));
-	CHECK_FALSE(result.Ran(Pass::Surface));
-	CHECK_FALSE(result.Ran(Pass::Transparent));
+	CHECK_FALSE(result.Ran(Name("shadow")));
+	CHECK_FALSE(result.Ran(Name("surface")));
+	CHECK_FALSE(result.Ran(Name("transparent")));
+
+	// **A name the frame does not have is false, not an error.** Asking whether
+	// a pass this renderer has never had ran is a fair question, and the honest
+	// answer is no rather than a crash or a bit belonging to something else.
+	CHECK_FALSE(result.Ran(Name("depth-prepass")));
+	CHECK_FALSE(result.Ran(Name{}));
 }
 
 // The other half of D00016's neighbourhood: a decision that was recorded and

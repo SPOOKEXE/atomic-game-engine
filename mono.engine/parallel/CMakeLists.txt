@@ -8,3 +8,11 @@ mono_add_library(parallel
 
 find_package(Threads REQUIRED)
 target_link_libraries(engine_parallel PUBLIC Threads::Threads)
+
+# Winsock, for the cross-process channel. Windows has no `socketpair`, so the
+# pair is built out of listen/connect/accept on loopback — see
+# src/platform/windows/Channel.cpp — and all of that needs the library linked
+# and started before the first call.
+if(WIN32)
+	target_link_libraries(engine_parallel PRIVATE ws2_32)
+endif()

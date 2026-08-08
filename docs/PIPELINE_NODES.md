@@ -1,19 +1,21 @@
 # Render pipeline nodes — research, taxonomy and design
 
-**Status: stages 1, 2, 4, 5 and 6 are built and tested. 3 is under way; 7 and 8
-are not.** `docs/PIPELINE_TODO.md` is the working state — this table says which
-stages exist, that one says how far each got and what is next.
+**Status: stages 1 to 6 are built and tested. 7 and 8 are half built, and in
+each case the missing half is named rather than pending.**
+
+`docs/PIPELINE_TODO.md` is the working state — this table says which stages
+exist, that one says how far each got and what is next.
 
 | stage | what | state |
 |---|---|---|
 | 1 | The type system — formats, usage kinds, resolution as a divisor, external resources | **built**, `engine.graph.rendergraph` + `engine.graph.pipelinecatalogue` |
 | 2 | The catalogue — 45 node kinds with typed, formatted slots | **built**, `engine.graph.pipelinecatalogue` |
-| 3 | The executor — `Renderer::Render` runs the graph | **under way**. D00002, and stage 7's other half is downstream of it. The seam is built and tested headlessly (`engine.render.graphrunner`); `shadow` and `surface` are handlers a `PassTable` finds; four passes and the swap itself are left. Until the swap lands, editing a pipeline changes a document and not a frame. |
+| 3 | The executor — `Renderer::Render` runs the graph | **built.** `graph::Execute` submits the frame; the six pass bodies are handlers a `PassTable` finds by kind, and `Renderer::Render` went from 1333 lines to 389. The `Pass` enum is gone — the graph is the description. |
 | 4 | The static checks — nine of the faults in §1.5 | **built**, `engine.graph.pipelinediagnostics`, and marked on the canvas |
 | 5 | Authored order and scopes | **built.** The order check is `OutOfOrder` in `engine.graph.pipelinediagnostics`; scopes are `NodeScope` — `Frame`, `World`, `View`, and not `Surface`, for the reason in the TODO. |
 | 6 | The access grid | **built**, `engine.graph.pipelineprofile`, drawn by the Pipeline Profile panel |
-| 7 | GPU timestamps and upload counters | **half built.** CPU→GPU traffic is counted at every copy — `FrameResult::UploadedBytes` and `Uploads` — and shown on the profile panel. Per-pass timestamps are D00046, blocked on stage 3. |
-| 8 | Readbacks — the viewer's image, channel histograms, overdraw | **not built**. D00047. Faults 3, 4 and 9 stay out of reach without it. |
+| 7 | GPU timestamps and upload counters | **half built, and the other half is not ours to build.** CPU→GPU traffic is counted at every copy and shown on the panel; debug groups name every node for a graphics debugger. Per-pass *timestamps* need an API `SDL_GPU` does not have — it exposes fences and nothing finer. D00046. |
+| 8 | Readbacks — the viewer's image, channel histograms, overdraw | **half built.** The reduction and the download policy are `engine.render.readback`, with no device in them; faults 3 and 4 are answered arithmetic. The download itself, the `viewer` node and overdraw (fault 9) are not. D00047. |
 
 Two findings came out of building it, both from the checker reporting our own
 frame and both recorded in place: `window` and `colour` are **external**

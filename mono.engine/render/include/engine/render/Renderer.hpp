@@ -28,39 +28,17 @@ namespace engine::render {
 
 	// The stages `Render` submits, in submission order.
 	//
-	// `PassOrder` reads these names out of `graph::StandardGraph`; this enum is
-	// the hand-written half, and a test checks the two line up.
+	// **Read out of `graph::StandardGraph` rather than written here**, which is
+	// the whole point: the frame is described once, as a graph, and this is a
+	// view of it. There used to be a `Pass` enum beside it saying the same six
+	// things in the same order with a test to keep the two in step — a test that
+	// can tell you two descriptions disagree but not which one is right, and
+	// that only ever runs after somebody has already changed one. `DEFERRED.md`
+	// D00016 is the entry about what that costs.
 	//
-	// @since v0.6
-	enum class Pass : uint8_t {
-		// Depth from the light, over the whole scene rather than the culled set.
-		Shadow,
-
-		// The surface camera's view, into a texture a mirror samples.
-		Surface,
-
-		// The screen, with depth written.
-		Opaque,
-
-		// Blended, depth-tested, and not depth-written; shares Opaque's pass.
-		Transparent,
-
-		// The overlay texture, loaded over the frame rather than clearing it.
-		Overlay,
-
-		// Whatever a `FrameOverlayHook` records — the editor's chrome, and
-		// nothing a game ships with.
-		//
-		// Last, so interface content stays above the world.
-		//
-		// @since v0.7
-		Interface,
-
-		// Not a pass. The count, for the bitmask below.
-		Count,
-	};
-
-	// The names of those stages, in the same order.
+	// What it is still for is the bit positions in `FrameResult::Passes`: a
+	// caller asking whether the shadow pass ran needs an index space, and this
+	// is the one the graph itself defines.
 	//
 	// @return The six names, valid for the life of the program.
 	std::span<const core::Name> PassOrder();
@@ -575,12 +553,25 @@ namespace engine::render {
 		// @since v0.6
 		uint8_t Passes = 0;
 
-		// Whether one pass submitted work this frame.
+		// Whether one stage submitted work this frame.
 		//
-		// @param pass Which one.
+		// **Named rather than indexed**, because the stages are a graph's nodes
+		// now and not an enumerator a caller can count on staying at the same
+		// number. A kind the standard frame does not name is `false` rather than
+		// an error: a caller asking about a pass this renderer has never had is
+		// asking a fair question with a plain answer.
+		//
+		// @param kind Which stage — `shadow`, `surface`, `opaque`,
+		//             `transparent`, `overlay` or `interface`.
 		// @return True when it ran.
-		bool Ran(Pass pass) const {
-			return (Passes & static_cast<uint8_t>(1u << static_cast<uint8_t>(pass))) != 0;
+		bool Ran(core::Name kind) const {
+			const std::span<const core::Name> order = PassOrder();
+			for (size_t index = 0; index < order.size() && index < 8; index++) {
+				if (order[index] == kind) {
+					return (Passes & static_cast<uint8_t>(1u << index)) != 0;
+				}
+			}
+			return false;
 		}
 	};
 

@@ -53,24 +53,50 @@ a path off the GPU.
 - SDL_GPU has the download path; what is missing is the fence discipline, because
   a readback that waits is a stall and a readback that does not is a frame late.
   A frame late is fine for a debug view and is worth saying out loud.
+- **The arithmetic half is built** — `engine.render.readback`, with no device in
+  it. `render::Histogram` answers faults 3 and 4 (`Constant`, `Blank`,
+  `ImageHistogram::Uniform`), and `render::PendingReadback` is the fence policy:
+  one download in flight, never stall, and report the age *from the request*
+  rather than from the fence. Eight cases, four mutations checked red.
+- What is left is the device half — a transfer buffer that outlives the frame and
+  `SDL_QueryGPUFence` polled on a later one; the `viewer` node, which is one blit
+  and the cheapest first user of all this; and overdraw, which is the odd one out
+  because it needs a pass that *counts* rather than shades — additive blend into
+  an `R8`, no depth write, its own pipeline and shader.
 
 ### [_] D00046
 
-**Per-pass GPU timestamps, which are blocked on the executor rather than on
-effort.**
+**Per-pass GPU timestamps, which `SDL_GPU` cannot express.**
 
 `PIPELINE_NODES.md` stage 7's remaining half. `ProfilePass::Elapsed` is the field
 they land in; it reads zero and the profile panel shows that as *not measured*
 rather than as free.
 
-- **There is nothing to put a timestamp around.** `Renderer::Render` submits six
-  passes by name; the graph's nodes are not what executes. Instrumenting the six
-  would be instrumenting exactly what D00002 deletes.
-- So this is downstream of the executor, not parallel to it — which was not
-  obvious when the plan was written and is why that document now says so.
-- The CPU half **is** built: `FrameResult::UploadedBytes` and `Uploads` count
-  every copy into GPU memory, measured at the region rather than derived from a
-  count, and the profile panel shows them.
+- **This entry used to say it was blocked on the executor.** It is not, any more:
+  D00002 landed and `graph::Execute` submits the frame, so there is now a node to
+  put a timestamp around. There is still no way to write one.
+- **`SDL_GPU` has no timestamp query API.** Checked by reading
+  `SDL_gpu.h` at the vendored 3.2.31 rather than by remembering: there are fences
+  — `SDL_SubmitGPUCommandBufferAndAcquireFence`, `SDL_QueryGPUFence` — and those
+  are whole-command-buffer granularity, which is one number for the frame. No
+  query pool, no timestamp write, nothing per pass.
+- So this is blocked on SDL rather than on us, which is a different kind of
+  blocked: no amount of work here moves it. Either a release adds the API, or it
+  needs a per-backend path behind `Renderer::Backend()` — Vulkan has
+  `vkCmdWriteTimestamp`, D3D12 has `EndQuery` — which is real per-backend code in
+  a module whose whole point is not being per-backend.
+- **Do not fill `Elapsed` with CPU time in the meantime.** A submit-side number
+  in a field labelled as the pass's cost is worse than a blank: somebody reads
+  "0.4 ms" for the shadow pass, believes the GPU said it, and optimises the wrong
+  thing.
+- **The half that could be built, was.** `FrameRunner::Run` pushes an
+  `SDL_PushGPUDebugGroup` named for each node, so RenderDoc, Nsight and Xcode
+  attribute every draw to a node. One group spans `opaque` and `transparent`
+  because they share a render pass. That is the readable-capture half of §7; the
+  numbers half is what is stuck.
+- The upload counters **are** built: `FrameResult::UploadedBytes` and `Uploads`
+  count every copy into GPU memory, measured at the region rather than derived
+  from a count, and the profile panel shows them.
 
 ### [_] D00045
 

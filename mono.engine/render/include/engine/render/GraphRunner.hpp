@@ -2,12 +2,13 @@
 
 // The seam between a render graph and the code that submits passes.
 //
-// **Step one of D00002, and deliberately the half with no device in it.**
-// `Renderer::Render` walks `PassOrder()` and submits six passes by name; the
-// graph says what the frame is and nothing runs it. Closing that gap is a
-// rewrite of the largest function in the engine, so it is being done in
-// increments that each keep `just studio-smoke` byte-identical — and this is
-// the increment that can be tested without a GPU at all.
+// **D00002's seam, and deliberately the half with no device in it.**
+// `Renderer::Render` used to walk a hand-written list and submit six passes by
+// name while the graph only described them. It runs `graph::Execute` now, and
+// this is what `Execute` calls: a table from a node's kind to something that
+// submits it. Getting there was a rewrite of the largest function in the engine,
+// done in increments that each kept `just studio-smoke` byte-identical — and
+// this is the part that can be tested without a GPU at all.
 //
 // ## What it is
 //

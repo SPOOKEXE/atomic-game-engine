@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -3681,8 +3682,13 @@ namespace {
 		std::filesystem::path Root;
 
 		explicit MountedLibrary(const char *name) {
+			// The point of the suffix is that two runs of this suite at once do
+			// not share a directory. A process id would say that too, but
+			// `getpid` is POSIX and Windows spells it `_getpid` behind
+			// <process.h> — a portable unique name is cheaper than a platform
+			// split inside a test fixture.
 			Root = std::filesystem::temp_directory_path() /
-				   ("mono_mount_" + std::string(name) + "_" + std::to_string(::getpid()));
+				   ("mono_mount_" + std::string(name) + "_" + std::to_string(std::random_device{}()));
 			std::filesystem::remove_all(Root);
 			std::filesystem::create_directories(Root);
 		}

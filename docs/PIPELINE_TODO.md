@@ -16,12 +16,12 @@ should leave the in-progress item marked with what compiles and what does not.
 |---|---|---|
 | 1 | Type system — formats, usage kinds, divisor, external resources | **done** |
 | 2 | Catalogue — 45 node kinds, typed and formatted slots | **done** |
-| 3 | Executor — `Renderer::Render` runs the graph | **step 1 done, step 2 all six blocks moved** — five kinds registered; `transparent` is drawn inside `opaque`'s render pass and is the one still to split out. Then the swap |
+| 3 | Executor — `Renderer::Render` runs the graph | **done.** `graph::Execute` is what submits the frame; `PassOrder()` is a view of the graph and the `Pass` enum is gone |
 | 4 | Static checks — nine fault kinds | **done** |
 | 5 | Authored order, and scopes | **done** |
 | 6 | Access grid / profiler visualiser | **done** |
-| 7 | Instrumentation | uploads **done**; GPU timestamps blocked on 3 |
-| 8 | Readbacks — viewer image, histograms, overdraw | **not started** |
+| 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
+| 8 | Readbacks — viewer image, histograms, overdraw | **half.** The arithmetic is built and tested — `engine.render.readback`, histograms and the download policy. The device half, the `viewer` node and overdraw are not |
 
 ---
 
@@ -83,7 +83,7 @@ counter probe that does cover it.
       A kind with no handler **refuses the frame and names itself** rather than
       skipping. A skipped pass renders dark and the scene gets the blame.
 
-- [ ] **Step 2 — the extraction.** Each of the six pass blocks inside
+- [x] **Step 2 — the extraction.** Each of the six pass blocks inside
       `Renderer::Render`'s per-view loop becomes a handler registered into a
       `PassTable` on `RenderState`. The bodies move unchanged; only what calls
       them changes. Golden image after each pass is moved, not after all six.
@@ -127,10 +127,9 @@ counter probe that does cover it.
             counts, `CameraRuns`, and the effects' spans. `FramePass` grew
             `Swapchain`, which is the frame's and not a view's.
 
-            **`transparent` is deliberately not registered.** `PassTable::Missing`
-            names it, which is true — the table cannot submit this frame on its
-            own yet — and that is better than an entry claiming to draw
-            something `SubmitOpaque` already drew. Step 2e is what adds it.
+            `transparent` was deliberately left unregistered at this point, so
+            `PassTable::Missing` named it rather than an entry claiming to draw
+            what `SubmitOpaque` already drew. 2f is what added it.
 
       - [x] **2e — `overlay` and `interface` moved.** The frame's last two, and
             the only ones that are `NodeScope::Frame`. `FramePass` grew the
@@ -145,37 +144,44 @@ counter probe that does cover it.
             asked to prepare until every view has finished with the command
             buffer. That is `FrameOverlayHook`'s whole contract.
 
-      - [ ] **2f — split `transparent` out of `SubmitOpaque`.** Two handlers,
-            one render pass: `FramePass` holds the open `SDL_GPURenderPass`,
-            `SubmitOpaque` opens it and `SubmitTransparent` ends it.
-
-            **What the blended tail uses from the opaque half — read off, not
-            guessed.** Everything else it touches is already a `ViewPass` field:
-
-            | name | what to do with it |
-            |---|---|
-            | `pass` | onto `FramePass`. The one that actually needs to move |
-            | `lighting` | a `ViewPass` field, or rebuilt — it is four floats off `HaveShadow` |
-            | `shadow`, `shadowSampler`, `surfaceSampler` | rebuilt. Each is one `?:` over an `Impl` member, and duplicating the *fallback rule* is the risk to watch: a second copy that forgot `FallbackTexture` is the null-sampler bug the comment there records |
-            | `screenSurface` | dies with the split — it is `bindScreen`'s scratch and belongs inside whatever `drawScreenMirrors` becomes |
-            | `frameUniforms` | a `ViewPass` field. `SubmitTransparent` reads only `.ViewProjection`, for the particles and ribbons |
-            | `drawScreenMirrors` | a member. **This is the actual work of 2f** — it is called by both halves, closes over eight things, and re-pushes `frameUniforms` on the way out so the next draw does not inherit a mirror's projection |
-
-            So the shape is: promote `drawScreenMirrors` to
-            `Impl::DrawScreenMirrors(SDL_GPURenderPass *, bool blended)` reading
-            `CurrentView` and `CurrentFrame`, verify **that alone** is
-            hash-identical, and only then cut the function in two. Two verified
-            steps again, for 2a's reason.
+      - [x] **2f — `transparent` split out.** Two handlers, one render pass:
+            `FramePass::Scene` holds the open `SDL_GPURenderPass`,
+            `SubmitOpaque` opens it and `SubmitTransparent` ends it. All six
+            kinds are registered and `PassTable::Missing` is empty for the
+            standard frame.
 
             **Not two render passes.** The blended draws are depth-tested
-            against what the opaque draws wrote, and that depth is
-            `STOREOP_DONT_CARE` — a second pass would have to store and reload
+            against what the opaque draws wrote and that depth is
+            `STOREOP_DONT_CARE`; a second pass would have to store and reload
             it, paying a full depth round trip for a split the frame does not
-            need. `PassRecorder` already takes this reading: it enters
+            need. `PassRecorder` had already settled this — it enters
             `Pass::Transparent` from inside the opaque render pass, and the
-            comment there is the settled answer — *what the list describes is
-            what is drawn and in what order, not how many times a target is
-            bound.*
+            comment there is the answer: *what the list describes is what is
+            drawn and in what order, not how many times a target is bound.*
+
+            **Done as two verified steps**, for 2a's reason. First
+            `drawScreenMirrors` became `Impl::DrawScreenMirrors` — hash- and
+            probe-identical on its own — and only then was the function cut in
+            two. Promoting it was most of the work: both stages call it, and it
+            re-pushes `ViewPass::Frame` on the way out so the next draw does not
+            inherit a mirror's projection.
+
+            Three things fell out that were not in the plan:
+
+            - **`screenSurface` was never shared.** It looked like state the
+              plain draws and the mirror draws passed between them; it is reset
+              to null before every plain draw, and the plain draws never sample
+              a surface. It is now local to `DrawScreenMirrors` and the plain
+              draws pass `nullptr` outright.
+            - **`Impl::BindingsForWorld`** is the one description of the sampler
+              fallback rule, which three stages now take. That was the flagged
+              risk — a second copy that forgot `FallbackTexture` is the null
+              bind that made a scene of nothing but transparent geometry draw
+              with no samplers at all.
+            - **`Impl::EndScenePass`** closes the pass on the paths that abandon
+              a frame. Submitting a command buffer with a render pass in flight
+              is a validation failure, and those paths are exactly the ones
+              nobody exercises.
 
       ### The golden image does not gate every pass
 
@@ -188,7 +194,7 @@ counter probe that does cover it.
       which point the capture varies run to run for `studio-meshes`' reason.
 
       So the golden image is necessary and **not sufficient**. What was used
-      instead, and what should be used for the remaining four passes:
+      instead for every step of stage 3, and what step 3 itself should use:
 
       **Probe the frame's own counters against the pre-change build.** A
       temporary `ENGINE_ERROR` at the end of `Render` printing `DrawCalls`,
@@ -331,16 +337,71 @@ counter probe that does cover it.
       front — a struct grown one pass at a time is reviewable; one written from a
       grep is not.
 
-- [ ] **Step 3 — the swap and the deletion.** `Render` calls `Execute` instead of
-      walking `PassOrder()`. Then `PassOrder()`, the `Pass` enum and
-      `PassRecorder`'s ordering guard all go — `Execute` is the ordering, so
-      keeping a second one would be the third description of the frame that
-      D00016 is about.
+- [x] **Step 3 — the swap and the deletion.** `Render` calls `Execute`; the walk
+      is gone. `Renderer::Render` went from **1333 lines to 389**.
 
-      **Blocked on 2f**, and the blocker is `PassTable::Missing` telling the
-      truth: `transparent` has no handler, so `Execute` would refuse the frame
-      and name it. That is the seam working as designed rather than a problem to
-      route around.
+      **The enabling change was `Impl::PrepareView`**, not the call to `Execute`.
+      Culling, ordering, the surface partition and the one copy pass that feeds
+      them are what a pass *reads* — they are not passes, and the graph has no
+      word for them. Splitting them out of the view loop is what left something
+      `Execute` could drive.
+
+      **Preparation is lazy, and has to be.** There is one instance buffer, so
+      view N's ranges overwrite view N-1's — a view has to be prepared
+      immediately before its own passes. `Impl::FrameRunner` does it: every node
+      carries the view it is for, and the first node of a view is where that
+      view's preparation belongs. A `World` node belongs to its world's *first*
+      view, which is both a representative — the light is fitted to the whole
+      scene bound, not a camera frustum, so every view of a world would fit the
+      same map — and a necessity, since the shadow pass draws from a buffer
+      nothing has uploaded to until some view is prepared.
+
+      **The interface prepares on the first `Frame` node**, which is the first
+      moment no render pass is in flight. That was a comment in `Render` about
+      `FrameOverlayHook`'s contract; it is now a place in the walk.
+
+      What went, and what stayed:
+
+      - **`Pass` gone.** It was the hand-written half — six enumerators in the
+        same order as six node names, with a test keeping them in step. A test
+        that compares two descriptions can say they disagree and not which is
+        right, and only runs after somebody has already changed one.
+      - **`PassRecorder`'s ordering guard gone.** `Execute` walks the compiled
+        order, so the order is derived rather than asserted. A second check of it
+        would be a second description.
+      - **`SubmitPass` gone** — it was the stand-in for `Execute`.
+      - **`PassOrder()` stayed**, because it never was the duplicate: it reads the
+        names out of `StandardGraph`. It is now the index space for
+        `FrameResult::Passes`, and `Ran` takes a `core::Name` rather than an
+        enumerator.
+      - **`BuildFrameGraph` arrived**, which compiles the standard frame at
+        start-up and asks `PassTable::Missing` whether this renderer can draw
+        every node in it. That is the one place that question is worth asking,
+        and asking it at start-up rather than mid-frame is the difference between
+        a diagnostic and half a frame.
+
+      **The behaviour change that was predicted did not happen, and that is
+      correct.** Both callers — `studio::Editor` and `client::Client` — pass
+      exactly one view per `Render`, and `View::World` is never set. So the
+      shadow pass still runs once per `Render` call. The `NodeScope::World`
+      grouping is live and will share a shadow map the moment anything passes
+      several views, which is what `engine.render.graphrunner` already asserts
+      headlessly.
+
+      **Unblocked.** All six kinds are registered, so `PassTable::Missing` is
+      empty for the standard frame and `Execute` has something to call for every
+      node it walks.
+
+      **One ordering constraint the swap has to respect**, and it is the only
+      thing 2f left behind: `opaque` leaves a render pass open and `transparent`
+      ends it, so nothing may run between them. `Execute` walks the compiled
+      order, and `Compile` puts them adjacent because the blended stage reads
+      what the opaque stage wrote — but that is a *consequence* of the
+      dependencies rather than something the graph states. If a future pipeline
+      ever schedules a node between the two, `EndScenePass` is what stops it
+      being a crash, and the honest fix would be for the node pair to say they
+      are merged. That is Unity's merge bar, and §7 of the design is where it
+      belongs.
 
       **The one behaviour change to expect, and it is intended.** The shadow
       node is `NodeScope::World`, so `Execute` runs it **once per world**; today
@@ -357,20 +418,102 @@ counter probe that does cover it.
 
 ### Stage 7's other half — per-pass GPU timestamps (D00046)
 
-Blocked on stage 3: there is nothing to put a timestamp around until the graph
-is what executes.
+**Not blocked on stage 3 any more, and not buildable either: `SDL_GPU` has no
+timestamp query API.** The entry said "SDL_GPU exposes timestamp queries"; it
+does not. `SDL_gpu.h` at the vendored 3.2.31 has fences —
+`SDL_SubmitGPUCommandBufferAndAcquireFence`, `SDL_QueryGPUFence` — and those are
+whole-command-buffer granularity, which is one number for the frame. There is no
+query pool, no timestamp write, nothing per pass. Checked by reading the header
+rather than by remembering.
 
-- [ ] `SDL_GPU` timestamp queries around each node the runner executes
-- [ ] Into `ProfilePass::Elapsed`, which the panel already shows as *not
-      measured* while it reads zero
+So this is blocked on SDL rather than on us, which is a different kind of
+blocked: no amount of work here moves it.
+
+- [x] **Debug groups instead**, which is the half that *is* available.
+      `FrameRunner::Run` pushes `SDL_PushGPUDebugGroup` named for the node and
+      pops it when the render pass closes — one group spans `opaque` and
+      `transparent` because they share a pass and SDL asks that a group pushed
+      inside a pass be popped inside it, so the second names itself with
+      `SDL_InsertGPUDebugLabel`. RenderDoc, Nsight and Xcode now attribute every
+      draw to a node. That is the *readable capture* half of §7; the *numbers*
+      half needs an API that does not exist.
+
+- [ ] `ProfilePass::Elapsed` stays zero and the panel keeps saying **not
+      measured**, which is the honest state. **Do not fill it with CPU time.** A
+      submit-side number in a field labelled as the pass's cost is worse than a
+      blank: somebody reads "0.4 ms" for the shadow pass, believes the GPU said
+      it, and spends an afternoon optimising the wrong thing.
+
+- [ ] What would actually unblock it, in the order worth trying: an SDL release
+      that adds timestamp queries; or a backend-specific path behind
+      `Renderer::Backend()`, which already hands out the `SDL_GPUDevice` — Vulkan
+      has `vkCmdWriteTimestamp` and a query pool, and D3D12 has
+      `ID3D12GraphicsCommandList::EndQuery`. That second one is a real option and
+      a real cost: it is per-backend code in a module whose whole point is not
+      being per-backend.
 
 ### Stage 8 — readbacks (D00047)
 
-- [ ] A download path with fence discipline. A frame late is fine for a debug
-      view and should be said out loud rather than hidden
-- [ ] The `viewer` node, which is in the catalogue and does nothing
-- [ ] Channel histograms — answers "is this alpha blank", fault 3
-- [ ] An overdraw view — fault 9
+**The arithmetic half is built; the device half is not.** Same split as
+`PassTable`/`GraphRunner` took, and for the same reason: `render` is the one
+module a suite cannot exercise, so everything that can be moved out of it
+should be. `engine.render.readback` is eight cases with no GPU in them.
+
+- [x] **Channel histograms — fault 3, and fault 4 with it.**
+      `render::Histogram` reduces a downloaded image into four
+      `ChannelHistogram`s; `Constant()` is "every pixel the same", `Blank()` is
+      "constant and zero", and `ImageHistogram::Uniform()` is the whole-target
+      version. That is the check that took a specialist half an hour of reading
+      a capture, as arithmetic.
+
+      Three distinctions the cases pin down, each of which was a decision:
+
+      - **Constant is not blank.** A mask that is all ones is doing its job; a
+        channel that is all zero is unwritten or wasted. Only the second earns
+        a warning triangle.
+      - **Empty is not constant.** A target nobody downloaded reports
+        `Counted == 0` and is accused of nothing. Reporting "constant" for it
+        would put a triangle on a node whose only crime is not being looked at.
+      - **Sixteen buckets, not 256.** The question is "blank / two-valued / uses
+        its range", and sixteen bars answer all three in a panel a few hundred
+        pixels wide. 256 bins are a photograph; this is a diagnosis.
+
+- [x] **The download *policy*** — `render::PendingReadback`. One in flight,
+      never stall, and report the age. It takes "is the fence signalled" as an
+      answer rather than asking, which is what makes it testable.
+
+      **`Poll` returns true exactly once**, on the edge that made pixels
+      readable, because that is when a caller maps the transfer buffer — one
+      that kept saying true would re-map and re-reduce the same image every
+      frame.
+
+      **The picture is aged from the request, not the fence.** A panel saying
+      "one frame old" when the answer is three is worse than saying nothing: it
+      is a number that looks measured.
+
+      All four mutations were checked red: swapping the red and blue unpacking
+      (3 cases), `/255` instead of `/256` in the bucket (2 cases), ageing from
+      the fence (1 case), and dropping the in-flight guard in `Poll` (1 case).
+
+- [ ] **The device half.** `Renderer` owns the transfer buffer and the fence and
+      has to drive `PendingReadback` with them. The pieces are already there:
+      `--capture` does exactly this download **with** a stall
+      (`SDL_SubmitGPUCommandBufferAndAcquireFence` then `SDL_WaitForGPUFences`),
+      and the non-stalling version is the same copy pass plus
+      `SDL_QueryGPUFence` polled on a later frame. What it needs that `--capture`
+      does not is a transfer buffer that outlives the frame.
+
+- [ ] **The `viewer` node**, which is in the catalogue and does nothing. A
+      handler registered under `viewer` that copies whatever it reads into the
+      readback slot. It is one blit and it is the bridge between the editor and
+      the inspector — §4.6 calls it the highest-value single addition and that
+      still looks right.
+
+- [ ] **An overdraw view — fault 9.** The one item here that is not a readback
+      of an existing target: it needs a pass that *counts* rather than shades,
+      which is a pipeline with additive blend into an `R8`/`R16` and no depth
+      write. A node kind, a pipeline and a shader — more than the other three
+      put together.
 
 ---
 
