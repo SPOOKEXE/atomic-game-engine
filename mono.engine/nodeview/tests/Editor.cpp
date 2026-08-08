@@ -366,6 +366,74 @@ TEST_CASE("a document with no positions opens arranged", "[nodeview][editor]") {
 	CHECK(opened.Nodes[0].At.X < opened.Nodes[1].At.X);
 }
 
+TEST_CASE("an unwired slot survives the text format", "[nodeview][editor]") {
+	// **The path a save file actually takes**, which the in-memory round trip
+	// above does not: position in the document's read list is the slot index, so
+	// an empty slot has to be written as an empty line and read back as one. A
+	// version that skipped unbound slots would shift every binding after them up
+	// a row — a pipeline that reopened with its wires on the wrong ports.
+	Kinds();
+	EditorGraph graph;
+	(void)AddNode(graph, Name("opaque"), Point{});
+	(void)AddNode(graph, Name("transparent"), Point{300.0f, 0.0f});
+
+	// The second slot only, leaving the first empty.
+	REQUIRE(
+		Connect(graph, Port("opaque", PortDirection::Output, 1), Port("transparent", PortDirection::Input, 1))
+	);
+
+	engine::graph::PipelineDocument reread;
+	Name offender;
+	REQUIRE(
+		engine::graph::Read(engine::graph::Write(ToDocument(graph)), reread, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+
+	const EditorGraph back = FromDocument(reread);
+	const engine::nodeview::EditorNode *blended = back.Find(Name("transparent"));
+	REQUIRE(blended != nullptr);
+	CHECK_FALSE(blended->Inputs[0].IsValid());
+	CHECK(blended->Inputs[1] == Name("opaque.depth"));
+}
+
+TEST_CASE("every catalogued kind can be added and wired", "[nodeview][editor]") {
+	// **The check the two unreachable kinds needed and did not have.**
+	// `graph.pipelinecatalogue` asserts the rule about the catalogue; this
+	// asserts it through the calls a panel actually makes, so a kind that is
+	// registered correctly and still cannot be joined to anything fails here.
+	Kinds();
+
+	for (const engine::graph::NodeKindSpec &spec : NodeCatalogue::All()) {
+		EditorGraph graph;
+		const Name added = AddNode(graph, spec.Kind, Point{});
+		INFO("kind: " << spec.Kind.Text());
+		REQUIRE(added.IsValid());
+
+		// Something in the catalogue has to be able to reach it, or it is a box
+		// nobody can wire.
+		bool reachable = spec.Inputs.empty();
+		for (const engine::graph::NodeKindSpec &other : NodeCatalogue::All()) {
+			if (other.Kind == spec.Kind || other.Outputs.empty()) {
+				continue;
+			}
+			EditorGraph pair;
+			const Name writer = AddNode(pair, other.Kind, Point{});
+			const Name reader = AddNode(pair, spec.Kind, Point{300.0f, 0.0f});
+			for (uint32_t out = 0; out < other.Outputs.size(); out++) {
+				for (uint32_t in = 0; in < spec.Inputs.size(); in++) {
+					reachable = reachable || EvaluateDrop(
+												 pair,
+												 PortRef{writer, PortDirection::Output, out},
+												 PortRef{reader, PortDirection::Input, in}
+											 )
+												 .Allowed;
+				}
+			}
+		}
+		CHECK(reachable);
+	}
+}
+
 TEST_CASE("what the editor saves still compiles", "[nodeview][editor]") {
 	Kinds();
 	EditorGraph graph;

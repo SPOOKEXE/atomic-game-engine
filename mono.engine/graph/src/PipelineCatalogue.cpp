@@ -206,6 +206,19 @@ namespace engine::graph {
 			overlay.Summary = "The debug panels, drawn once over the whole frame rather than per view.";
 			overlay.Category = NodeCategory::Interface;
 			overlay.PerView = false;
+
+			// **What it draws over, and it had none.** A compositing pass with
+			// no input is a pass that composites nothing: `overlay` and
+			// `interface` were the two boxes on the canvas that no wire could
+			// ever reach, because there was nowhere for one to land. The frame
+			// they draw onto is a read-modify-write of the same target, which
+			// is exactly the shape `transparent` already has over `colour`.
+			//
+			// Optional, because `StandardDocument` binds nothing into it: the
+			// renderer clears the window when no pass has touched it, and
+			// declaring a required read there is what made disabling `overlay`
+			// a `ReadsBeforeWrite` earlier in v0.11.
+			overlay.Inputs.push_back(port("window", ResourceKind::Colour, false, "The frame to draw over."));
 			overlay.Outputs.push_back(port("window", ResourceKind::Colour, true, "The swapchain."));
 			NodeCatalogue::Register(std::move(overlay));
 		}
@@ -217,6 +230,9 @@ namespace engine::graph {
 			interface.Summary = "The retained widget tree, last, over everything.";
 			interface.Category = NodeCategory::Interface;
 			interface.PerView = false;
+			interface.Inputs.push_back(
+				port("window", ResourceKind::Colour, false, "The frame to draw over.")
+			);
 			interface.Outputs.push_back(port("window", ResourceKind::Colour, true, "The swapchain."));
 			NodeCatalogue::Register(std::move(interface));
 		}
