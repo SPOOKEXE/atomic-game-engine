@@ -876,6 +876,13 @@ The rendering and camera work this version already carried, unchanged:
 ### v0.12
 
 - [_] deferred items
-- [_] ...
+- [_] studio editing tools; select, move, rotate, 3d scene interactable gimbals, grid step amount input, rotation amount input, anchor toggle, "lock" toggle, pivot editor mode, reset pivot button. Reference "~/Pictures/Screenshot from 2026-08-08 15-59-40.png" and "~/Pictures/Screenshot from 2026-08-08 16-00-19.png".
+- [_] studio tooling tabs
+- [_] plugin system
+- [_] expose ECS underlying to luau and typescript (locked down but can query engine for entities using direct and returns instances)
+- [_] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, or assume per-viewport state for rojo-like sync system with main.default.json being in each subfolder)
+- [_] world => rojo sync, universe => multi-rojo sync (i reckon keep them separately syncing so even if one has bad formatting, the rest still sync)
+- [_] update built-in MCP integrations, add a studio ui button to enable/disable and information panel
+
 
 ---
