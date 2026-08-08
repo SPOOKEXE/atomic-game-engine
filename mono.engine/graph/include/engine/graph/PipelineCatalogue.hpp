@@ -86,6 +86,16 @@ namespace engine::graph {
 		// What may be bound into it.
 		ResourceKind Kind = ResourceKind::Colour;
 
+		// What this slot produces, or expects to be handed.
+		//
+		// **A preference and not a requirement.** A pass that samples an
+		// `RGBA16F` where it declared `RGBA8` works perfectly well; a pass that
+		// *writes* fewer bits than the reader wanted loses them. So a format
+		// mismatch is a mark on the wire rather than a refusal — see
+		// `IsLossy`, and `docs/PIPELINE_NODES.md` §1.5 fault 6 for the frame
+		// that spent four times the bits it needed on its normals.
+		ResourceFormat Format = ResourceFormat::RGBA8;
+
 		// Whether the node is incomplete without it.
 		//
 		// **A warning and not a refusal.** Somebody building a pipeline works in
@@ -149,13 +159,27 @@ namespace engine::graph {
 		std::vector<PortSpec> Outputs;
 		//@}
 
-		// What `PerView` a node of this kind gets when one is added.
+		// Whether this kind produces something from nothing.
 		//
-		// **A default and not a rule.** A pass that runs once per view is a
-		// property of what the pass does, so the catalogue is where the right
-		// answer lives — but `RenderGraph` lets a node say otherwise and an
-		// author may have a reason.
-		bool PerView = true;
+		// **A fact about the pass, and the term the "must have an input" rule
+		// turns on.** A shadow pass renders the world from a light and reads
+		// nothing from the frame; a clear writes a constant; a velocity pass
+		// reads the scene rather than a target. Everything else that declares no
+		// inputs is a box no wire can reach — which is what `overlay` and
+		// `interface` were before v0.11, and the reason the rule exists.
+		//
+		// **Not derived from `Category`.** It was, and `clear` broke it: a pass
+		// can be a compositing kind and still be a source, and the category is
+		// about where a menu puts it rather than about what it reads.
+		bool Source = false;
+
+		// What scope a node of this kind gets when one is added.
+		//
+		// **A default and not a rule.** How often a pass runs is a property of
+		// what the pass does, so the catalogue is where the right answer lives —
+		// but `RenderGraph` lets a node say otherwise and an author may have a
+		// reason.
+		NodeScope Scope = NodeScope::View;
 	};
 
 	// Whether a wire from an output of kind `from` may land in an input of kind
@@ -179,6 +203,30 @@ namespace engine::graph {
 	// @param to   What the reading slot accepts.
 	// @return The reason, or an empty view when the two are compatible.
 	std::string_view WhyIncompatible(ResourceKind from, ResourceKind to);
+
+	// Whether feeding `from` into `to` throws information away.
+	//
+	// **Separate from `PortsCompatible` because it is a different answer.** That
+	// one says whether the connection is *legal*; this says whether it is
+	// *lossy*. An editor refuses the first and marks the second, which is the
+	// only way somebody notices they are writing an HDR frame into eight bits
+	// per channel before it looks wrong on screen.
+	//
+	// Two ways to lose: fewer bits per pixel, or fewer channels. Block
+	// compressed formats are always lossy as a destination and never as a
+	// source, because nothing in a frame renders into one.
+	//
+	// @param from What the writing slot produces.
+	// @param to   What the reading slot expects.
+	// @return Whether information is lost.
+	bool IsLossy(ResourceFormat from, ResourceFormat to);
+
+	// One line saying what a lossy wire costs, for a panel to show.
+	//
+	// @param from What the writing slot produces.
+	// @param to   What the reading slot expects.
+	// @return The description, or an empty view when nothing is lost.
+	std::string_view WhatIsLost(ResourceFormat from, ResourceFormat to);
 
 	// Every node kind this process knows.
 	//

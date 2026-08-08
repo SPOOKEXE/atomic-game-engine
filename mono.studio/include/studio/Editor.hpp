@@ -1017,6 +1017,17 @@ namespace studio {
 		// none, and this panel is the editor's chrome rather than a game's UI.
 		//@{
 		void DrawRenderPipeline();
+
+		// The pipeline as a grid: passes across, resources down, what each does
+		// to each where they meet.
+		//
+		// **A second view of the same graph, not a second graph.** The canvas
+		// shows what somebody wired; this shows what will run, in what order,
+		// touching what, and how much memory is live while it does — which is a
+		// different question and wants a different shape.
+		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
+		// is the arithmetic and this is only the drawing.
+		void DrawPipelineProfile();
 		void DrawAssetsPipeline();
 		//@}
 
@@ -2809,6 +2820,10 @@ namespace studio {
 		//@{
 		bool ShowRenderPipeline = false;
 		bool ShowAssetsPipeline = false;
+
+		// The frame as a grid rather than as a canvas: every pass across the
+		// top, every resource down the side. See `Editor::DrawPipelineProfile`.
+		bool ShowPipelineProfile = false;
 		//@}
 
 		// What each canvas has selected and how far it is scrolled. **Outside the

@@ -27,6 +27,10 @@ namespace engine::graph {
 				return "depth";
 			case ResourceKind::Texture:
 				return "texture";
+			case ResourceKind::Storage:
+				return "storage";
+			case ResourceKind::Buffer:
+				return "buffer";
 			}
 			return "";
 		}
@@ -42,6 +46,14 @@ namespace engine::graph {
 			}
 			if (text == "texture") {
 				kind = ResourceKind::Texture;
+				return true;
+			}
+			if (text == "storage") {
+				kind = ResourceKind::Storage;
+				return true;
+			}
+			if (text == "buffer") {
+				kind = ResourceKind::Buffer;
 				return true;
 			}
 			return false;
@@ -179,6 +191,35 @@ namespace engine::graph {
 			return std::to_string(static_cast<int32_t>(std::lround(value)));
 		}
 
+		// **A word rather than a number**, for `FlagText`'s reason: these files
+		// are meant to be read, and `RGBA16F` says what it is where `8` needs
+		// the header open beside it.
+		bool FormatFromText(std::string_view text, ResourceFormat &out) {
+			for (uint8_t value = 0; value <= static_cast<uint8_t>(ResourceFormat::BC7_SRGB); value++) {
+				const auto candidate = static_cast<ResourceFormat>(value);
+				if (text == Describe(candidate)) {
+					out = candidate;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// A scope, by name.
+		//
+		// **A word rather than the boolean it replaced.** `perview no` said two
+		// different things depending on which "no" was meant; `frame` and
+		// `world` say which.
+		bool ScopeFromText(std::string_view text, NodeScope &out) {
+			for (const NodeScope candidate : {NodeScope::Frame, NodeScope::World, NodeScope::View}) {
+				if (text == Describe(candidate)) {
+					out = candidate;
+					return true;
+				}
+			}
+			return false;
+		}
+
 		bool TakeFlag(std::string_view &line, bool &out) {
 			const std::string_view word = TakeWord(line);
 			if (word == "yes") {
@@ -287,8 +328,14 @@ namespace engine::graph {
 
 			switch (edit.Kind) {
 			case EditKind::AddResource: {
-				const ResourceId added =
-					graph.AddResource({edit.Name, edit.Resource, edit.Width, edit.Height});
+				const ResourceId added = graph.AddResource({
+					.Name = edit.Name,
+					.Kind = edit.Resource,
+					.Format = edit.Format,
+					.Width = edit.Width,
+					.Height = edit.Height,
+					.Divisor = edit.Divisor,
+				});
 				if (!added.IsValid()) {
 					offender = edit.Name;
 					return PipelineDocumentStatus::Refused;
@@ -300,7 +347,7 @@ namespace engine::graph {
 				pending = Node{};
 				pending.Name = edit.Name;
 				pending.Kind = edit.NodeKind;
-				pending.PerView = edit.PerView;
+				pending.Scope = edit.Scope;
 				pending.Optional = edit.Optional;
 				building = true;
 				break;
@@ -390,14 +437,16 @@ namespace engine::graph {
 				out.push_back(' ');
 				AppendQuoted(out, edit.Name.Text());
 				out += ' ' + std::string(ResourceText(edit.Resource));
+				out += ' ' + std::string(Describe(edit.Format));
 				out += ' ' + std::to_string(edit.Width) + ' ' + std::to_string(edit.Height);
+				out += ' ' + std::to_string(edit.Divisor);
 				break;
 			case EditKind::AddNode:
 				out.push_back(' ');
 				AppendQuoted(out, edit.Name.Text());
 				out.push_back(' ');
 				AppendQuoted(out, edit.NodeKind.Text());
-				out += ' ' + std::string(FlagText(edit.PerView));
+				out += ' ' + std::string(Describe(edit.Scope));
 				out += ' ' + std::string(FlagText(edit.Optional));
 				break;
 			case EditKind::Reads:
@@ -461,12 +510,13 @@ namespace engine::graph {
 			if (word == "resource") {
 				edit.Kind = EditKind::AddResource;
 				parsed = TakeQuoted(line, name) && ResourceFromText(TakeWord(line), edit.Resource) &&
-						 TakeUnsigned(line, edit.Width) && TakeUnsigned(line, edit.Height);
+						 FormatFromText(TakeWord(line), edit.Format) && TakeUnsigned(line, edit.Width) &&
+						 TakeUnsigned(line, edit.Height) && TakeUnsigned(line, edit.Divisor);
 				edit.Name = core::Name(name);
 			} else if (word == "node") {
 				edit.Kind = EditKind::AddNode;
-				parsed = TakeQuoted(line, name) && TakeQuoted(line, second) && TakeFlag(line, edit.PerView) &&
-						 TakeFlag(line, edit.Optional);
+				parsed = TakeQuoted(line, name) && TakeQuoted(line, second) &&
+						 ScopeFromText(TakeWord(line), edit.Scope) && TakeFlag(line, edit.Optional);
 				edit.Name = core::Name(name);
 				edit.NodeKind = core::Name(second);
 			} else if (word == "reads" || word == "writes") {
@@ -674,12 +724,12 @@ namespace engine::graph {
 			document.Record(std::move(edit));
 		};
 
-		const auto node = [&document](std::string_view name, bool perView, bool optional) {
+		const auto node = [&document](std::string_view name, NodeScope scope, bool optional) {
 			Edit edit;
 			edit.Kind = EditKind::AddNode;
 			edit.Name = core::Name(name);
 			edit.NodeKind = core::Name(name);
-			edit.PerView = perView;
+			edit.Scope = scope;
 			edit.Optional = optional;
 			document.Record(std::move(edit));
 		};
@@ -697,28 +747,28 @@ namespace engine::graph {
 		resource("depth", ResourceKind::Depth);
 		resource("window", ResourceKind::Colour);
 
-		node("shadow", false, true);
+		node("shadow", NodeScope::World, true);
 		touches(EditKind::Writes, "shadow");
 
-		node("surface", true, true);
+		node("surface", NodeScope::View, true);
 		touches(EditKind::Reads, "shadow");
 		touches(EditKind::Writes, "surface");
 
-		node("opaque", true, false);
+		node("opaque", NodeScope::View, false);
 		touches(EditKind::Reads, "shadow");
 		touches(EditKind::Reads, "surface");
 		touches(EditKind::Writes, "colour");
 		touches(EditKind::Writes, "depth");
 
-		node("transparent", true, true);
+		node("transparent", NodeScope::View, true);
 		touches(EditKind::Reads, "colour");
 		touches(EditKind::Reads, "depth");
 		touches(EditKind::Writes, "colour");
 
-		node("overlay", false, true);
+		node("overlay", NodeScope::Frame, true);
 		touches(EditKind::Writes, "window");
 
-		node("interface", false, true);
+		node("interface", NodeScope::Frame, true);
 		touches(EditKind::Writes, "window");
 
 		return document;

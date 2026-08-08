@@ -77,7 +77,167 @@ namespace engine::graph {
 
 		// A texture a pass samples rather than writes.
 		Texture,
+
+		// A texture a compute pass writes through an unordered access view.
+		//
+		// **Distinct from `Colour` because the hardware treats it so**, and
+		// because a pass writing storage is `Compute` work while a pass writing
+		// a colour attachment is `Raster` work — `docs/PIPELINE_NODES.md` §1.5
+		// fault 10 is what conflating the two costs.
+		Storage,
+
+		// A structured buffer rather than an image: a light list, a draw list,
+		// a reduction's output.
+		Buffer,
 	};
+
+	// What is in each pixel.
+	//
+	// **Separate from `ResourceKind` because the two are orthogonal**, which is
+	// the whole of `docs/PIPELINE_NODES.md` §3. A kind says whether a pass may
+	// render into a thing or only sample it; a format says how many bits it gets
+	// and how many channels. A wire is legal when the kinds allow it and *lossy*
+	// when the formats disagree, and only the second is a warning rather than a
+	// refusal.
+	//
+	// **Not every format the hardware has**, and deliberately: this is the set a
+	// frame is actually described in, plus the block-compressed formats an
+	// uploaded texture arrives in. A format nothing in the engine can produce
+	// would be a name with no meaning.
+	//
+	// @since v0.11
+	enum class ResourceFormat : uint8_t {
+		// Eight bits a channel, which is what a display takes.
+		//@{
+		R8,
+		RG8,
+		RGBA8,
+		//@}
+
+		// The same, read and written through the sRGB transfer curve.
+		RGBA8_SRGB,
+
+		// Ten bits of colour and two of alpha. **The right format for normals**
+		// and for a tone-mapped frame — `PIPELINE_NODES.md` §1.5 fault 6 is a
+		// frame that used four times the bits for the first of those.
+		RGB10A2,
+
+		// Eleven, eleven and ten bits of float with no alpha. HDR colour at half
+		// the cost of `RGBA16F`, when nothing needs the alpha.
+		RG11B10F,
+
+		// Half floats.
+		//@{
+		R16F,
+		RG16F,
+		RGBA16F,
+		//@}
+
+		// Full floats, for depth a pass has linearised and for reductions.
+		//@{
+		R32F,
+		RG32F,
+		//@}
+
+		// Depth, with and without a stencil channel.
+		//@{
+		D24S8,
+		D32F,
+		//@}
+
+		// Block-compressed, which is how a texture arrives from the content
+		// store. **Named here so an upload is describable**: `PIPELINE_NODES.md`
+		// §1.4 counts eight of these bound to one draw, and a pipeline that
+		// cannot say what it sampled cannot say what it cost.
+		//@{
+		BC1_SRGB,
+		BC3,
+		BC5,
+		BC7_SRGB,
+		//@}
+	};
+
+	// A stable, human-readable name for a format.
+	//
+	// **The spelling a capture tool uses**, so a diagnostic here and a row in
+	// somebody's RenderDoc window say the same word.
+	//
+	// @param format The format to name.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(ResourceFormat format);
+
+	// How many bits one pixel of a format takes.
+	//
+	// @param format The format.
+	// @return The bits, counting every channel. Block-compressed formats report
+	//         their amortised cost per pixel, which is what a memory budget
+	//         wants and is why this is bits rather than bytes.
+	uint32_t BitsPerPixel(ResourceFormat format);
+
+	// How many channels a format carries.
+	//
+	// @param format The format.
+	// @return One to four. Depth formats report one; their stencil is not a
+	//         channel anything samples as colour.
+	uint32_t ChannelCount(ResourceFormat format);
+
+	// Whether a format has an alpha channel at all.
+	//
+	// **The question `PIPELINE_NODES.md` fault 3 turns on.** A blank alpha is
+	// only wasteful if there is one; asking this before reporting it is what
+	// stops the check firing on every `RG11B10F` in a frame.
+	//
+	// @param format The format.
+	// @return Whether a fourth channel exists.
+	bool HasAlpha(ResourceFormat format);
+
+	// How often a node runs.
+	//
+	// **Three, and it was a boolean.** `PerView` said per-view or not, which
+	// conflated two different "not"s: a shadow map is rendered once for a
+	// *world* however many views look into it, and an overlay is drawn once for
+	// the *frame* however many worlds it composites. `RenderGraph::Execute`
+	// already runs the shared block once per distinct world — the distinction
+	// was live in the executor and absent from the vocabulary.
+	//
+	// **`Surface` is deliberately not here.** A fourth value for the per-surface
+	// passes would be a word with no block to run in: the surface pass loops
+	// inside a per-view one, and nothing schedules per surface. Shipping it
+	// inert is the shape rule 6 exists to prevent; it arrives when there is
+	// something for it to name.
+	//
+	// @since v0.11
+	enum class NodeScope : uint8_t {
+		// Once for the whole frame. The overlay, the editor's chrome, a present.
+		Frame,
+
+		// Once per distinct world, however many views look into it. A shadow
+		// atlas: four split-screen views of one world pay for one.
+		World,
+
+		// Once per view. Everything that draws what a camera can see.
+		View,
+	};
+
+	// A stable, human-readable name for a scope.
+	//
+	// **The spelling the document format uses**, so a diagnostic and a saved
+	// pipeline never disagree about what something is called.
+	//
+	// @param scope The scope to name.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(NodeScope scope);
+
+	// Whether a scope makes a node run once per view.
+	//
+	// **The predicate `Compile`'s partition turns on**, and the reason it is a
+	// function rather than `scope == NodeScope::View` written out at each site:
+	// that comparison is what the boolean already was, and spelling it by hand
+	// is how a fourth scope would get silently misfiled the day it arrives.
+	//
+	// @param scope The scope.
+	// @return Whether the per-view block is where it belongs.
+	bool RunsPerView(NodeScope scope);
 
 	// One thing a node reads or writes.
 	//
@@ -94,6 +254,9 @@ namespace engine::graph {
 		// What kind of thing it is.
 		ResourceKind Kind = ResourceKind::Colour;
 
+		// What is in each pixel.
+		ResourceFormat Format = ResourceFormat::RGBA8;
+
 		// Its size, or zero to mean "whatever the view is".
 		//
 		// **Zero rather than a separate flag**, because a resource that follows
@@ -103,6 +266,49 @@ namespace engine::graph {
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		//@}
+
+		// Whether this resource exists outside the graph.
+		//
+		// **The swapchain, and a history buffer.** RDG calls these *external*
+		// and everything else *transient*, and the distinction is load-bearing
+		// in three places: an external resource may not be aliased with another,
+		// it may be read before any pass in this graph wrote it, and a pass
+		// writing one is producing the frame rather than producing something for
+		// a later pass.
+		//
+		// **Added because `PipelineDiagnostics` reported the standard frame.**
+		// It said `opaque` was disconnected — nothing in the graph reads the
+		// colour it writes — and it was right: the renderer presents that target
+		// itself, and the graph had no way to say so. The alternative was to
+		// exempt the finding, which would have been the checker lying to protect
+		// a model that was wrong.
+		bool External = false;
+
+		// How much smaller than the view, when the size is not absolute.
+		//
+		// **One means full, two means half on each axis, four means a quarter.**
+		// A fraction rather than a second pair of numbers, because that is what
+		// a downsample chain actually is — `PIPELINE_NODES.md` §1.4 counts six
+		// resolutions in one frame reached by seven halvings, and every one of
+		// them is a divisor rather than an authored size.
+		//
+		// Ignored when `Width` and `Height` are set. Zero is read as one, so a
+		// resource written before this field existed still means "the view".
+		uint32_t Divisor = 1;
+
+		// The size this resolves to for a view of a given size.
+		//
+		// **Here rather than in the renderer**, because it is the answer an
+		// editor has to print on a wire and the answer an allocator has to
+		// honour, and two derivations of it would eventually disagree.
+		//
+		// @param viewWidth  The view's width in pixels.
+		// @param viewHeight Its height.
+		// @param outWidth   Filled in. Never zero — a divisor that would round
+		//                   to nothing clamps to one, because a zero-sized
+		//                   target is not something a driver accepts.
+		// @param outHeight  Filled in.
+		void Resolve(uint32_t viewWidth, uint32_t viewHeight, uint32_t &outWidth, uint32_t &outHeight) const;
 	};
 
 	// A handle to a resource in one graph.
@@ -171,12 +377,13 @@ namespace engine::graph {
 		// What it writes.
 		std::vector<ResourceId> Writes;
 
-		// Whether the work is per view.
+		// How often the work runs.
 		//
-		// **The flag that decides how many worlds cost**, and the reason this
-		// type exists rather than a longer function. False means the node runs
-		// once for the whole frame however many views there are.
-		bool PerView = true;
+		// **The field that decides how many views cost**, and the reason this
+		// type exists rather than a longer function. See `NodeScope`: it was a
+		// boolean, and the boolean could not tell "once for the frame" apart
+		// from "once for the world".
+		NodeScope Scope = NodeScope::View;
 
 		// Whether it may be skipped when there is nothing for it to do.
 		bool Optional = false;

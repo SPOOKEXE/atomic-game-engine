@@ -428,7 +428,7 @@ namespace engine::nodeview {
 			added.Kind = graph::EditKind::AddNode;
 			added.Name = node.Name;
 			added.NodeKind = node.Kind;
-			added.PerView = spec != nullptr ? spec->PerView : true;
+			added.Scope = spec != nullptr ? spec->Scope : graph::NodeScope::View;
 			document.Record(added);
 
 			// **Reads then writes, in slot order**, which is what makes

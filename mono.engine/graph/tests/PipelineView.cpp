@@ -135,7 +135,7 @@ TEST_CASE("the edge comes from the last writer, not from every earlier one", "[g
 	// would be stating something true about the resource and false about the
 	// data.
 	RenderGraph graph;
-	const ResourceId colour = graph.AddResource({Name("colour"), ResourceKind::Colour, 0, 0});
+	const ResourceId colour = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
 
 	graph.AddNode({.Name = Name("opaque"), .Kind = Name("k"), .Writes = {colour}});
 	graph.AddNode({.Name = Name("transparent"), .Kind = Name("k"), .Reads = {colour}, .Writes = {colour}});
@@ -168,8 +168,8 @@ TEST_CASE("a resource nothing wrote draws no edge", "[graph]") {
 	// when a caller laid out a compile it did not check. No edge beats an edge
 	// from nowhere.
 	RenderGraph graph;
-	const ResourceId colour = graph.AddResource({Name("colour"), ResourceKind::Colour, 0, 0});
-	const ResourceId shadow = graph.AddResource({Name("shadow"), ResourceKind::Depth, 0, 0});
+	const ResourceId colour = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+	const ResourceId shadow = graph.AddResource({.Name = Name("shadow"), .Kind = ResourceKind::Depth});
 	graph.AddNode({.Name = Name("opaque"), .Kind = Name("k"), .Reads = {shadow}, .Writes = {colour}});
 
 	CompiledGraph compiled;

@@ -1,10 +1,23 @@
 # Render pipeline nodes — research, taxonomy and design
 
-**Status: research and design. Nothing here is built yet.** What exists today is
-`graph::RenderGraph` (compile and order), `graph::PipelineCatalogue` (eight node
-kinds, three resource types), `nodeview::Editor` (the canvas) and
-`mono.studio/src/Pipelines.cpp` (the panel). This document is what the next
-several versions of that are for, and why.
+**Status: stages 1, 2, 4 and 6 are built and tested. 3, 5, 7 and 8 are not.**
+
+| stage | what | state |
+|---|---|---|
+| 1 | The type system — formats, usage kinds, resolution as a divisor, external resources | **built**, `engine.graph.rendergraph` + `engine.graph.pipelinecatalogue` |
+| 2 | The catalogue — 45 node kinds with typed, formatted slots | **built**, `engine.graph.pipelinecatalogue` |
+| 3 | The executor — `Renderer::Render` runs the graph | **not built**. D00002, and stage 7's other half is downstream of it. Until it lands, editing a pipeline changes a document and not a frame. |
+| 4 | The static checks — nine of the faults in §1.5 | **built**, `engine.graph.pipelinediagnostics`, and marked on the canvas |
+| 5 | Authored order and scopes | **half built.** The order check is `OutOfOrder` in `engine.graph.pipelinediagnostics`. Scopes are D00045 — 85 references wide, deferred for size rather than doubt. |
+| 6 | The access grid | **built**, `engine.graph.pipelineprofile`, drawn by the Pipeline Profile panel |
+| 7 | GPU timestamps and upload counters | **half built.** CPU→GPU traffic is counted at every copy — `FrameResult::UploadedBytes` and `Uploads` — and shown on the profile panel. Per-pass timestamps are D00046, blocked on stage 3. |
+| 8 | Readbacks — the viewer's image, channel histograms, overdraw | **not built**. D00047. Faults 3, 4 and 9 stay out of reach without it. |
+
+Two findings came out of building it, both from the checker reporting our own
+frame and both recorded in place: `window` and `colour` are **external**
+resources — they exist outside the graph, which the model had no way to say —
+and a `Storage` output could not be sampled by anything, which made every
+compute kind in the catalogue an island.
 
 The ask, in the words it arrived in: *extensive; able to change in what order
 things happen; up/down scaling; sampling smaller; visibly see what goes between
@@ -209,7 +222,7 @@ graph.**
 | 8 | A group of draws whose resources "have nothing to do with previous or following draws" | **Disconnected subgraph** — trivially visible on a canvas, which is an argument for the canvas. |
 | 9 | No depth pre-pass, so **21 % of the most expensive material area is overdrawn**; adding a partial pre-pass gained **7 %, nearly a full millisecond** | **Overdraw**, which needs an overdraw view mode — a readback, not a graph property. |
 | 10 | A precision copy done as a full-screen triangle: 2.7 M pixel-shader invocations to move 24-bit depth into 32-bit | **Raster where copy or compute would do.** This is exactly why `Copy`/`Blit`/`Compute` must be distinct node kinds (§3) — the cost is invisible if everything is "a pass". |
-| 11 | Pre-pass objects rendered in the *middle* of the base pass rather than last | **Order**, and the reason §5 exists. |
+| 11 | Pre-pass objects rendered in the *middle* of the base pass rather than last | **Order.** Built as `OutOfOrder` — and building it corrected this row. It assumed our `Compile` sorts silently, as Unreal's and Unity's do; ours *refuses*, with `ReadsBeforeWrite`. So the check is not finding something the compiler misses, it is saying **which pass to move**: the compiler answers with a resource name and stops at the first, and a panel showing `ReadsBeforeWrite (shadow)` has reported a problem and nothing about where. |
 
 Six of the eleven — 1, 2, 5, 6, 7, 8 — are **static properties of the authored
 graph**. They need no capture, no timing and no GPU. A pipeline editor that ran
@@ -514,8 +527,18 @@ specialist an afternoon of reading a capture.
 timings, just who reads and writes what and when each resource lives. Pure
 derivation from data we already have.
 
-**Stage 7 — instrumentation.** GPU timestamps per pass, upload and readback byte
-counts, pipeline statistics where SDL_GPU exposes them. The grid gains numbers.
+**Stage 7 — instrumentation.** Half done. The upload counters exist and are
+measured at the copy rather than derived from a count, so a layout change cannot
+make them quietly wrong; they cover the instance buffer, the particles, the
+ribbons and the overlay image, which is everything that crosses today.
+
+What is left is **per-pass GPU timestamps**, and they are blocked on the
+executor rather than on effort: there is nothing to put a timestamp *around*
+until `Renderer::Render` runs the graph pass by pass. Doing it against the six
+hard-coded passes would be instrumenting the thing stage 3 deletes.
+
+**Readbacks** — the other half of the original stage 7 — moved to stage 8, where
+they belong: they need a path off the GPU that does not exist yet.
 
 **Stage 8 — readbacks.** The `viewer` node's image, channel histograms (which
 answer "is this alpha empty"), and an overdraw view. Last, because it is the most

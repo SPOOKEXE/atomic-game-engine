@@ -519,6 +519,31 @@ namespace engine::render {
 		// @since v0.10
 		uint32_t RibbonVertices = 0;
 
+		// How many bytes crossed from the CPU into GPU memory this frame, and
+		// in how many copies.
+		//
+		// **The traffic nobody could see.** A frame's cost is not only what the
+		// GPU draws; it is also what the CPU had to hand it first — the instance
+		// buffer rebuilt every frame, the particles, the ribbons, and every mesh
+		// or texture a streaming world uploaded while somebody walked into a new
+		// area. `docs/PIPELINE_NODES.md` §7 asks for exactly this, and the ask
+		// was worded as *"visibly see what goes between the CPU and the GPU,
+		// what images are uploaded"*.
+		//
+		// **Counted at the copy, not estimated from the counts.** A version
+		// derived from the instance count would be a number that agreed with the
+		// truth until the layout changed, which is the sort of statistic that is
+		// worse than none.
+		//
+		// Per-frame, and reset with the rest of the result. A steady scene
+		// settles to the instance buffer alone; a spike is something arriving.
+		//
+		// @since v0.11
+		//@{
+		uint64_t UploadedBytes = 0;
+		uint32_t Uploads = 0;
+		//@}
+
 		// How many particles were submitted this frame.
 		//
 		// **Reported because the number is the whole diagnosis for a scene that

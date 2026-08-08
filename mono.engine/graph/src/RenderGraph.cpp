@@ -7,6 +7,143 @@
 
 namespace engine::graph {
 
+	const char *Describe(NodeScope scope) {
+		switch (scope) {
+		case NodeScope::Frame:
+			return "frame";
+		case NodeScope::World:
+			return "world";
+		case NodeScope::View:
+			return "view";
+		}
+		return "?";
+	}
+
+	bool RunsPerView(NodeScope scope) {
+		return scope == NodeScope::View;
+	}
+
+	const char *Describe(ResourceFormat format) {
+		switch (format) {
+		case ResourceFormat::R8:
+			return "R8";
+		case ResourceFormat::RG8:
+			return "RG8";
+		case ResourceFormat::RGBA8:
+			return "RGBA8";
+		case ResourceFormat::RGBA8_SRGB:
+			return "RGBA8_SRGB";
+		case ResourceFormat::RGB10A2:
+			return "RGB10A2";
+		case ResourceFormat::RG11B10F:
+			return "RG11B10F";
+		case ResourceFormat::R16F:
+			return "R16F";
+		case ResourceFormat::RG16F:
+			return "RG16F";
+		case ResourceFormat::RGBA16F:
+			return "RGBA16F";
+		case ResourceFormat::R32F:
+			return "R32F";
+		case ResourceFormat::RG32F:
+			return "RG32F";
+		case ResourceFormat::D24S8:
+			return "D24S8";
+		case ResourceFormat::D32F:
+			return "D32F";
+		case ResourceFormat::BC1_SRGB:
+			return "BC1_SRGB";
+		case ResourceFormat::BC3:
+			return "BC3";
+		case ResourceFormat::BC5:
+			return "BC5";
+		case ResourceFormat::BC7_SRGB:
+			return "BC7_SRGB";
+		}
+		return "?";
+	}
+
+	uint32_t BitsPerPixel(ResourceFormat format) {
+		switch (format) {
+		case ResourceFormat::BC1_SRGB:
+			// Eight bytes a 4x4 block.
+			return 4;
+		case ResourceFormat::BC3:
+		case ResourceFormat::BC5:
+		case ResourceFormat::BC7_SRGB:
+			// Sixteen bytes a 4x4 block. **This is the number that makes a BC5
+			// normal map expensive** — `PIPELINE_NODES.md` §1.4 notes a single
+			// one costing more than the alternatives, and it costs twice what a
+			// BC1 does for the same pixels.
+			return 8;
+		case ResourceFormat::R8:
+			return 8;
+		case ResourceFormat::RG8:
+		case ResourceFormat::R16F:
+			return 16;
+		case ResourceFormat::RGBA8:
+		case ResourceFormat::RGBA8_SRGB:
+		case ResourceFormat::RGB10A2:
+		case ResourceFormat::RG11B10F:
+		case ResourceFormat::RG16F:
+		case ResourceFormat::R32F:
+		case ResourceFormat::D24S8:
+		case ResourceFormat::D32F:
+			return 32;
+		case ResourceFormat::RGBA16F:
+		case ResourceFormat::RG32F:
+			return 64;
+		}
+		return 32;
+	}
+
+	uint32_t ChannelCount(ResourceFormat format) {
+		switch (format) {
+		case ResourceFormat::R8:
+		case ResourceFormat::R16F:
+		case ResourceFormat::R32F:
+		case ResourceFormat::D24S8:
+		case ResourceFormat::D32F:
+			return 1;
+		case ResourceFormat::RG8:
+		case ResourceFormat::RG16F:
+		case ResourceFormat::RG32F:
+		case ResourceFormat::BC5:
+			return 2;
+		case ResourceFormat::RG11B10F:
+		case ResourceFormat::BC1_SRGB:
+			return 3;
+		case ResourceFormat::RGBA8:
+		case ResourceFormat::RGBA8_SRGB:
+		case ResourceFormat::RGB10A2:
+		case ResourceFormat::RGBA16F:
+		case ResourceFormat::BC3:
+		case ResourceFormat::BC7_SRGB:
+			return 4;
+		}
+		return 4;
+	}
+
+	bool HasAlpha(ResourceFormat format) {
+		return ChannelCount(format) == 4;
+	}
+
+	void ResourceDesc::Resolve(
+		uint32_t viewWidth, uint32_t viewHeight, uint32_t &outWidth, uint32_t &outHeight
+	) const {
+		if (Width != 0 && Height != 0) {
+			outWidth = Width;
+			outHeight = Height;
+			return;
+		}
+
+		// **Zero reads as one**, so a resource written before `Divisor` existed
+		// still means "the view" rather than dividing by nothing.
+		const uint32_t by = Divisor == 0 ? 1u : Divisor;
+		outWidth = std::max(1u, viewWidth / by);
+		outHeight = std::max(1u, viewHeight / by);
+	}
+
 	namespace {
 		// Where a resource is written, and by which sort of node.
 		struct Producer {
@@ -130,7 +267,7 @@ namespace engine::graph {
 			for (const ResourceId resource : node.Writes) {
 				Producer &producer = producers[resource.Value];
 				producer.Written = true;
-				(node.PerView ? producer.ByPerView : producer.ByShared) = true;
+				(RunsPerView(node.Scope) ? producer.ByPerView : producer.ByShared) = true;
 			}
 		}
 
@@ -184,7 +321,7 @@ namespace engine::graph {
 			}
 
 			const NodeId id{static_cast<uint32_t>(index + 1)};
-			if (Nodes[index].PerView) {
+			if (RunsPerView(Nodes[index].Scope)) {
 				seenPerView = true;
 				out.PerView.push_back(id);
 			} else {
@@ -333,10 +470,19 @@ namespace engine::graph {
 	RenderGraph StandardGraph() {
 		RenderGraph graph;
 
-		const ResourceId shadow = graph.AddResource({core::Name("shadow"), ResourceKind::Depth, 0, 0});
-		const ResourceId surface = graph.AddResource({core::Name("surface"), ResourceKind::Colour, 0, 0});
-		const ResourceId colour = graph.AddResource({core::Name("colour"), ResourceKind::Colour, 0, 0});
-		const ResourceId depth = graph.AddResource({core::Name("depth"), ResourceKind::Depth, 0, 0});
+		const ResourceId shadow =
+			graph.AddResource({.Name = core::Name("shadow"), .Kind = ResourceKind::Depth});
+		const ResourceId surface =
+			graph.AddResource({.Name = core::Name("surface"), .Kind = ResourceKind::Colour});
+		// **External: the renderer presents this itself.** A view's colour target
+		// is the frame, and nothing in the graph reads it — which
+		// `PipelineDiagnostics` reported as a disconnected `opaque` pass, and was
+		// right to. Saying so is the fix; exempting the check would not have
+		// been.
+		const ResourceId colour =
+			graph.AddResource({.Name = core::Name("colour"), .Kind = ResourceKind::Colour, .External = true});
+		const ResourceId depth =
+			graph.AddResource({.Name = core::Name("depth"), .Kind = ResourceKind::Depth});
 
 		// **The window, which is not a view's colour target.** Every per-view
 		// pass draws into whatever that view was given — a slot's texture for an
@@ -347,7 +493,8 @@ namespace engine::graph {
 		// per-view node writing one resource is `SharedWriteConflict`, and it
 		// fired here, correctly, on a model that said the overlay fought the
 		// world for the same memory.
-		const ResourceId window = graph.AddResource({core::Name("window"), ResourceKind::Colour, 0, 0});
+		const ResourceId window =
+			graph.AddResource({.Name = core::Name("window"), .Kind = ResourceKind::Colour, .External = true});
 
 		// **Shared, and it is the reason this type exists.** A shadow map is per
 		// light: every view of one world samples the same one, so four
@@ -357,7 +504,7 @@ namespace engine::graph {
 			.Kind = core::Name("shadow"),
 			.Reads = {},
 			.Writes = {shadow},
-			.PerView = false,
+			.Scope = NodeScope::World,
 			.Optional = true,
 		});
 
@@ -366,7 +513,7 @@ namespace engine::graph {
 			.Kind = core::Name("surface"),
 			.Reads = {shadow},
 			.Writes = {surface},
-			.PerView = true,
+			.Scope = NodeScope::View,
 			.Optional = true,
 		});
 
@@ -375,7 +522,7 @@ namespace engine::graph {
 			.Kind = core::Name("opaque"),
 			.Reads = {shadow, surface},
 			.Writes = {colour, depth},
-			.PerView = true,
+			.Scope = NodeScope::View,
 		});
 
 		// Reads the colour it also writes, which is the load that makes a second
@@ -385,7 +532,7 @@ namespace engine::graph {
 			.Kind = core::Name("transparent"),
 			.Reads = {colour, depth},
 			.Writes = {colour},
-			.PerView = true,
+			.Scope = NodeScope::View,
 			.Optional = true,
 		});
 
@@ -397,7 +544,7 @@ namespace engine::graph {
 			// never samples what the world drew.
 			.Reads = {},
 			.Writes = {window},
-			.PerView = false,
+			.Scope = NodeScope::Frame,
 			.Optional = true,
 		});
 
@@ -420,7 +567,7 @@ namespace engine::graph {
 			// which is the execution order — not a dependency edge.
 			.Reads = {},
 			.Writes = {window},
-			.PerView = false,
+			.Scope = NodeScope::Frame,
 			.Optional = true,
 		});
 

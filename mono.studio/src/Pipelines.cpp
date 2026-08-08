@@ -29,15 +29,22 @@
 #include <studio/Widgets.hpp>
 
 #include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineDiagnostics.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/PipelineView.hpp>
 #include <engine/nodeview/Assets.hpp>
 #include <engine/nodeview/Editor.hpp>
 
+#include <engine/ui/Metrics.hpp>
+
+#include <SDL3/SDL.h>
 #include <imgui.h>
 
 #include <algorithm>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace studio {
 
@@ -88,6 +95,12 @@ namespace studio {
 				return Colour(0.45f, 0.68f, 0.95f);
 			case ResourceKind::Texture:
 				return Colour(0.55f, 0.85f, 0.55f);
+			case ResourceKind::Storage:
+				// Compute-written, and violet rather than green so a wire out of
+				// a dispatch reads as a different sort of thing at a glance.
+				return Colour(0.72f, 0.58f, 0.95f);
+			case ResourceKind::Buffer:
+				return Colour(0.85f, 0.80f, 0.55f);
 			}
 			return Colour(0.7f, 0.7f, 0.7f);
 		}
@@ -245,6 +258,23 @@ namespace studio {
 		const engine::graph::GraphStatus compiles = builds == engine::graph::PipelineDocumentStatus::Ok
 														? runnable.Compile(compiled, offender)
 														: engine::graph::GraphStatus::Ok;
+
+		// **The faults, every frame, over the graph as it stands.** They are
+		// arithmetic over who writes what and who reads it — no GPU, no capture,
+		// no timing — which is why they can be recomputed continuously rather
+		// than gathered by a profiling run somebody has to remember to do.
+		// `docs/PIPELINE_NODES.md` §1.5 is where the list comes from.
+		std::unordered_map<uint32_t, engine::graph::DiagnosticSeverity> marked;
+		std::vector<engine::graph::Diagnostic> faults;
+		if (builds == engine::graph::PipelineDocumentStatus::Ok) {
+			faults = engine::graph::Diagnose(runnable);
+			for (const engine::graph::Diagnostic &fault : faults) {
+				const auto at = marked.find(fault.Node.Id());
+				if (at == marked.end() || fault.Severity < at->second) {
+					marked[fault.Node.Id()] = fault.Severity;
+				}
+			}
+		}
 
 		ImGui::Separator();
 
@@ -440,6 +470,17 @@ namespace studio {
 				selected ? 2.5f : 1.0f
 			);
 
+			// A warning triangle on the box, so a fault is found by looking at
+			// the pipeline rather than by reading a list beside it.
+			if (const auto fault = marked.find(node.Name.Id()); fault != marked.end()) {
+				const bool warning = fault->second == engine::graph::DiagnosticSeverity::Warning;
+				list.AddCircleFilled(
+					ImVec2{b.x - 9.0f * RenderPipelineCanvas.Zoom, a.y + 9.0f * RenderPipelineCanvas.Zoom},
+					4.5f * RenderPipelineCanvas.Zoom,
+					warning ? Colour(0.95f, 0.55f, 0.25f) : Colour(0.55f, 0.65f, 0.85f)
+				);
+			}
+
 			const std::string title(node.Name.Text());
 			list.AddText(
 				ImVec2{a.x + 8.0f * RenderPipelineCanvas.Zoom, a.y + 6.0f * RenderPipelineCanvas.Zoom},
@@ -558,6 +599,36 @@ namespace studio {
 				engine::graph::Describe(compiles),
 				offender.IsValid() ? std::string(offender.Text()).c_str() : "?"
 			);
+		} else if (!faults.empty()) {
+			size_t warnings = 0;
+			for (const engine::graph::Diagnostic &fault : faults) {
+				warnings += fault.Severity == engine::graph::DiagnosticSeverity::Warning ? 1u : 0u;
+			}
+
+			// **Reported, never refused.** A pipeline mid-edit is half-wired by
+			// definition, so this says what is wrong beside a frame that still
+			// runs rather than blocking it.
+			ImGui::TextColored(
+				warnings > 0 ? ImVec4{0.95f, 0.7f, 0.35f, 1.0f} : ImVec4{0.55f, 0.65f, 0.85f, 1.0f},
+				"%zu warning(s), %zu hint(s)",
+				warnings,
+				faults.size() - warnings
+			);
+			if (ImGui::IsItemHovered()) {
+				ImGui::BeginTooltip();
+				for (const engine::graph::Diagnostic &fault : faults) {
+					ImGui::TextColored(
+						fault.Severity == engine::graph::DiagnosticSeverity::Warning
+							? ImVec4{0.95f, 0.7f, 0.35f, 1.0f}
+							: ImVec4{0.6f, 0.65f, 0.75f, 1.0f},
+						"%s — %s: %s",
+						std::string(fault.Node.Text()).c_str(),
+						engine::graph::Describe(fault.Kind),
+						fault.Message.c_str()
+					);
+				}
+				ImGui::EndTooltip();
+			}
 		} else {
 			ImGui::TextDisabled(
 				"%zu node(s), %zu wire(s) — runs in %zu step(s)",
@@ -620,6 +691,227 @@ namespace studio {
 				placed.Kind.data(),
 				placed.Kind.data() + placed.Kind.size()
 			);
+		}
+
+		ImGui::End();
+	}
+
+	// --- the profile grid ------------------------------------------------------
+
+	void Editor::DrawPipelineProfile() {
+		if (!ShowPipelineProfile) {
+			return;
+		}
+
+		if (!ImGui::Begin("Pipeline Profile", &ShowPipelineProfile)) {
+			ImGui::End();
+			return;
+		}
+
+		engine::graph::RegisterStandardNodeKinds();
+
+		// **The graph the canvas is editing, not the one the world saved.** They
+		// differ the moment somebody drags a wire, and a profile of the saved
+		// version would be answering a question nobody asked.
+		engine::graph::RenderGraph graph;
+		Name offender;
+		const engine::graph::PipelineDocumentStatus builds = engine::graph::Build(
+			engine::nodeview::ToDocument(RenderPipelineGraph), graph, offender
+		);
+
+		engine::graph::CompiledGraph compiled;
+		const engine::graph::GraphStatus compiles =
+			builds == engine::graph::PipelineDocumentStatus::Ok
+				? graph.Compile(compiled, offender)
+				: engine::graph::GraphStatus::DuplicateNode;
+
+		if (builds != engine::graph::PipelineDocumentStatus::Ok ||
+			compiles != engine::graph::GraphStatus::Ok) {
+			ImGui::TextColored(
+				ImVec4{0.95f, 0.5f, 0.4f, 1.0f},
+				"the pipeline does not compile, so there is nothing to profile (%s)",
+				offender.IsValid() ? std::string(offender.Text()).c_str() : "?"
+			);
+			ImGui::End();
+			return;
+		}
+
+		// **Profiled at the viewport's size, because half of what makes a frame
+		// expensive is resolution.** A grid priced at some fixed size would
+		// report the wrong number for every resource that follows the view.
+		int width = 1920;
+		int height = 1080;
+		if (Window != nullptr) {
+			SDL_GetWindowSizeInPixels(Window, &width, &height);
+		}
+
+		const engine::graph::PipelineProfile profile = engine::graph::ProfilePipeline(
+			graph, compiled, static_cast<uint32_t>(std::max(width, 1)),
+			static_cast<uint32_t>(std::max(height, 1))
+		);
+
+		const auto megabytes = [](uint64_t bytes) {
+			return static_cast<double>(bytes) / (1024.0 * 1024.0);
+		};
+
+		ImGui::Text("%zu pass(es), %zu resource(s)", profile.Passes.size(), profile.Resources.size());
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+
+		// **Two numbers, because "how much memory does the frame use" has two
+		// very different answers.** The sum is what an engine with no transient
+		// allocator pays; the peak is what one with a good one pays. Showing
+		// only one of them would be picking a side of an open question.
+		ImGui::Text("peak %.1f MB of %.1f MB declared", megabytes(profile.PeakBytes),
+					megabytes(profile.TotalBytes));
+
+		if (profile.TotalBytes > profile.PeakBytes) {
+			ImGui::SameLine();
+			ImGui::TextDisabled("(%.1f MB aliasable)", megabytes(profile.TotalBytes - profile.PeakBytes));
+		}
+
+		// **The traffic the other way, which the grid cannot show.** Everything
+		// above is memory the GPU holds; this is what the CPU had to hand it to
+		// get there, measured at the copy rather than derived from a count.
+		// `LastFrame` is the frame just drawn, so this moves while somebody
+		// watches it.
+		ImGui::TextDisabled(
+			"uploaded %.2f MB in %u cop%s last frame",
+			megabytes(LastFrame.UploadedBytes),
+			LastFrame.Uploads,
+			LastFrame.Uploads == 1 ? "y" : "ies"
+		);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"What crossed from the CPU into GPU memory: the instance buffer, "
+				"the particles, the ribbons and the overlay image.\n\n"
+				"A steady scene settles to the instance buffer alone. A spike is "
+				"something arriving — a mesh, a texture, a panel redraw."
+			);
+		}
+
+		ImGui::Separator();
+
+		if (profile.Passes.empty()) {
+			ImGui::TextDisabled("nothing to draw");
+			ImGui::End();
+			return;
+		}
+
+		// --- the grid ----------------------------------------------------------
+
+		const float cell = engine::ui::Scaled(22.0f);
+		const float rowHeight = engine::ui::Scaled(20.0f);
+
+		if (ImGui::BeginTable(
+				"grid",
+				static_cast<int>(profile.Passes.size()) + 1,
+				ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY |
+					ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg
+			)) {
+			ImGui::TableSetupScrollFreeze(1, 1);
+			ImGui::TableSetupColumn("resource", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(210.0f));
+			for (const engine::graph::ProfilePass &pass : profile.Passes) {
+				ImGui::TableSetupColumn(
+					std::string(pass.Name.Text()).c_str(), ImGuiTableColumnFlags_WidthFixed, cell
+				);
+			}
+
+			// **The header is rotated in Unity's viewer and is not here.** Names
+			// read horizontally at the cost of a wide table, and a wide table
+			// scrolls; unreadable names do not become readable by scrolling.
+			ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+			ImGui::TableSetColumnIndex(0);
+			ImGui::TextDisabled("resource");
+			// **The column headings are left blank and the name is a tooltip.**
+			// A pass name is a dozen characters and a cell is twenty-two pixels;
+			// written across the top they would each overlap the next four
+			// columns, which is worse than not being there. Every cell in a
+			// column names its pass on hover.
+			for (size_t at = 0; at < profile.Passes.size(); at++) {
+				ImGui::TableSetColumnIndex(static_cast<int>(at) + 1);
+				ImGui::TextDisabled("%zu", at + 1);
+			}
+
+			ImDrawList &list = *ImGui::GetWindowDrawList();
+
+			for (size_t row = 0; row < profile.Resources.size(); row++) {
+				const engine::graph::ProfileResource &resource = profile.Resources[row];
+
+				ImGui::TableNextRow(ImGuiTableRowFlags_None, rowHeight);
+				ImGui::TableSetColumnIndex(0);
+
+				const std::string label(resource.Name.Text());
+				ImGui::TextUnformatted(label.c_str());
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"%s\n%s  %s  %ux%u\n%.2f MB%s",
+						label.c_str(),
+						engine::graph::Describe(resource.Format),
+						resource.External ? "external" : "transient",
+						resource.Width,
+						resource.Height,
+						megabytes(resource.Bytes),
+						resource.External ? "\nlives outside the frame — cannot be aliased" : ""
+					);
+				}
+
+				for (size_t column = 0; column < profile.Passes.size(); column++) {
+					ImGui::TableSetColumnIndex(static_cast<int>(column) + 1);
+
+					const engine::graph::Access access = profile.At(row, column);
+					const bool live = resource.LiveAt(static_cast<uint32_t>(column));
+
+					const ImVec2 a = ImGui::GetCursorScreenPos();
+					const ImVec2 b{a.x + cell - 4.0f, a.y + rowHeight - 4.0f};
+
+					// **Green reads, red writes, both for read-write** — Unity's
+					// colours, deliberately, because somebody who has used that
+					// viewer should not have to learn a second palette.
+					switch (access) {
+					case engine::graph::Access::Read:
+						list.AddRectFilled(a, b, Colour(0.35f, 0.75f, 0.40f), 2.0f);
+						break;
+					case engine::graph::Access::Write:
+						list.AddRectFilled(a, b, Colour(0.85f, 0.35f, 0.32f), 2.0f);
+						break;
+					case engine::graph::Access::ReadWrite:
+						list.AddRectFilled(a, ImVec2{(a.x + b.x) * 0.5f, b.y}, Colour(0.35f, 0.75f, 0.40f), 2.0f);
+						list.AddRectFilled(ImVec2{(a.x + b.x) * 0.5f, a.y}, b, Colour(0.85f, 0.35f, 0.32f), 2.0f);
+						break;
+					case engine::graph::Access::None:
+						// **A thin bar where the resource is merely alive.** The
+						// gap between a resource's first write and its last read
+						// is where its memory is held without being touched, and
+						// that gap is what an allocator would like to shorten.
+						if (live) {
+							const float middle = (a.y + b.y) * 0.5f;
+							list.AddRectFilled(
+								ImVec2{a.x, middle - 1.5f},
+								ImVec2{b.x, middle + 1.5f},
+								Colour(0.45f, 0.48f, 0.55f, 0.55f)
+							);
+						}
+						break;
+					}
+
+					ImGui::Dummy(ImVec2{cell - 4.0f, rowHeight - 4.0f});
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip(
+							"%s\n%s %s\n%s",
+							std::string(profile.Passes[column].Name.Text()).c_str(),
+							engine::graph::Describe(profile.Passes[column].Where),
+							profile.Passes[column].Elapsed > 0.0 ? "" : "(not measured)",
+							access == engine::graph::Access::None
+								? (live ? "alive, untouched" : "not allocated")
+								: engine::graph::Describe(access)
+						);
+					}
+				}
+			}
+
+			ImGui::EndTable();
 		}
 
 		ImGui::End();

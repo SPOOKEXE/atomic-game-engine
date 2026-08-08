@@ -69,11 +69,15 @@ namespace engine::graph {
 			return true;
 		}
 
-		// The one narrowing rule, and the whole of it: something that was
-		// rendered into may be sampled. A shadow map is a `Depth` a pass wrote
-		// and every lit pass samples; a mirror is a `Colour` in the same
-		// position.
-		return to == ResourceKind::Texture && (from == ResourceKind::Colour || from == ResourceKind::Depth);
+		// The one narrowing rule, and the whole of it: **something that was
+		// written may be sampled.** A shadow map is a `Depth` a pass wrote and
+		// every lit pass samples; a mirror is a `Colour` in the same position;
+		// a compute shader's `Storage` output is exactly the same relationship,
+		// and leaving it out made every compute node in the catalogue an island
+		// — `engine.graph.pipelinecatalogue`'s "every output can land
+		// somewhere" is what found it.
+		return to == ResourceKind::Texture &&
+			   (from == ResourceKind::Colour || from == ResourceKind::Depth || from == ResourceKind::Storage);
 	}
 
 	std::string_view WhyIncompatible(ResourceKind from, ResourceKind to) {
@@ -95,6 +99,32 @@ namespace engine::graph {
 			return "a colour attachment is not a depth buffer";
 		}
 		return "these two slots hold different sorts of resource";
+	}
+
+	bool IsLossy(ResourceFormat from, ResourceFormat to) {
+		if (from == to) {
+			return false;
+		}
+
+		// **A block-compressed destination is always lossy**, and there is no
+		// such thing as a block-compressed render target — so this is really a
+		// statement that nothing should be declaring one as an output.
+		if (to == ResourceFormat::BC1_SRGB || to == ResourceFormat::BC3 || to == ResourceFormat::BC5 ||
+			to == ResourceFormat::BC7_SRGB) {
+			return true;
+		}
+
+		return BitsPerPixel(to) < BitsPerPixel(from) || ChannelCount(to) < ChannelCount(from);
+	}
+
+	std::string_view WhatIsLost(ResourceFormat from, ResourceFormat to) {
+		if (!IsLossy(from, to)) {
+			return {};
+		}
+		if (ChannelCount(to) < ChannelCount(from)) {
+			return "channels are dropped — what the writer put in them is gone";
+		}
+		return "precision is dropped — an HDR range lands in fewer bits than it needs";
 	}
 
 	bool NodeCatalogue::Register(NodeKindSpec spec) {
@@ -141,128 +171,540 @@ namespace engine::graph {
 	}
 
 	void RegisterStandardNodeKinds() {
-		const auto port = [](const char *name, ResourceKind kind, bool required, const char *summary) {
-			PortSpec spec;
-			spec.Name = core::Name(name);
-			spec.Kind = kind;
-			spec.Required = required;
-			spec.Summary = summary;
-			return spec;
+		using K = ResourceKind;
+		using F = ResourceFormat;
+		using C = NodeCategory;
+		using S = NodeScope;
+
+		// **A table rather than forty blocks.** The vocabulary is the point; the
+		// registration is not, and forty near-identical paragraphs would bury
+		// what differs between two kinds under what does not. The reasoning for
+		// every entry is `docs/PIPELINE_NODES.md` §4, which is where a reader
+		// should go — this is the machine-readable half of that section.
+		struct Port {
+			const char *Name;
+			K Kind;
+			F Format;
+			bool Required;
+			const char *Summary;
 		};
 
-		{
-			NodeKindSpec shadow;
-			shadow.Kind = core::Name("shadow");
-			shadow.Label = "Shadow";
-			shadow.Summary = "Draws the casters from the light, into a depth map every view samples.";
-			shadow.Category = NodeCategory::Draw;
-			shadow.PerView = false;
-			shadow.Outputs.push_back(port("shadow", ResourceKind::Depth, true, "The light's depth map."));
-			NodeCatalogue::Register(std::move(shadow));
-		}
+		struct Kind {
+			const char *Name;
+			const char *Label;
+			C Category;
+			NodeScope Scope;
+			std::vector<Port> Inputs;
+			std::vector<Port> Outputs;
+			const char *Summary;
 
-		{
-			NodeKindSpec surface;
-			surface.Kind = core::Name("surface");
-			surface.Label = "Surface";
-			surface.Summary = "Renders each mirror's own view into the texture its pane samples.";
-			surface.Category = NodeCategory::Draw;
-			surface.Inputs.push_back(port("shadow", ResourceKind::Texture, false, "Shadows, if any."));
-			surface.Outputs.push_back(
-				port("surface", ResourceKind::Colour, true, "One image per surface index.")
-			);
-			NodeCatalogue::Register(std::move(surface));
-		}
+			// Whether it reads nothing from the frame. See `NodeKindSpec::Source`
+			// — the four that set it are the four that legitimately have no
+			// inputs.
+			bool Source = false;
+		};
 
-		{
-			NodeKindSpec opaque;
-			opaque.Kind = core::Name("opaque");
-			opaque.Label = "Opaque";
-			opaque.Summary = "The solid geometry, front to back against the depth buffer.";
-			opaque.Category = NodeCategory::Draw;
-			opaque.Inputs.push_back(port("shadow", ResourceKind::Texture, false, "Shadows, if any."));
-			opaque.Inputs.push_back(port("surface", ResourceKind::Texture, false, "Mirror images."));
-			opaque.Outputs.push_back(port("colour", ResourceKind::Colour, true, "The lit frame."));
-			opaque.Outputs.push_back(port("depth", ResourceKind::Depth, true, "What it wrote."));
-			NodeCatalogue::Register(std::move(opaque));
-		}
+		// Shorthands, so a row fits on a line and the table reads as a table.
+		constexpr F RGBA8 = F::RGBA8;
+		constexpr F RGBA16 = F::RGBA16F;
+		constexpr F RG16 = F::RG16F;
+		constexpr F R32 = F::R32F;
+		constexpr F D24 = F::D24S8;
+		constexpr F D32 = F::D32F;
+		constexpr F HDR = F::RG11B10F;
+		constexpr F LDR = F::RGB10A2;
 
-		{
-			NodeKindSpec transparent;
-			transparent.Kind = core::Name("transparent");
-			transparent.Label = "Transparent";
-			transparent.Summary = "The blended tail, back to front, tested against the opaque depth.";
-			transparent.Category = NodeCategory::Draw;
-			transparent.Inputs.push_back(port("colour", ResourceKind::Colour, true, "What to blend over."));
-			transparent.Inputs.push_back(port("depth", ResourceKind::Depth, true, "The opaque depth."));
-			transparent.Outputs.push_back(port("colour", ResourceKind::Colour, true, "The blended frame."));
-			NodeCatalogue::Register(std::move(transparent));
-		}
+		const std::vector<Kind> table = {
+			// --- geometry: passes that rasterise the world ---------------------
+			{"depth-prepass",
+			 "Depth pre-pass",
+			 C::Draw,
+			 S::View,
+			 {},
+			 {{"depth", K::Depth, D24, true, "Scene depth, before any shading."}},
+			 "Depth only, so the base pass shades each pixel once. Worth about 7% "
+			 "on a frame that lacks it.",
+			 true},
 
-		{
-			NodeKindSpec overlay;
-			overlay.Kind = core::Name("overlay");
-			overlay.Label = "Overlay";
-			overlay.Summary = "The debug panels, drawn once over the whole frame rather than per view.";
-			overlay.Category = NodeCategory::Interface;
-			overlay.PerView = false;
+			{"shadow",
+			 "Shadow",
+			 C::Draw,
+			 // **Per world, and this is the distinction the boolean could not
+			 // make.** Four split-screen views of one world sample one atlas;
+			 // two worlds need two. `RenderGraph::Execute` was already running
+			 // the shared block once per distinct world — the vocabulary is
+			 // only now catching up with it.
+			 S::World,
+			 {},
+			 {{"shadow", K::Depth, D32, true, "The light's depth atlas."}},
+			 "Draws the casters from the light, into a depth map every view samples.",
+			 true},
 
-			// **What it draws over, and it had none.** A compositing pass with
-			// no input is a pass that composites nothing: `overlay` and
-			// `interface` were the two boxes on the canvas that no wire could
-			// ever reach, because there was nowhere for one to land. The frame
-			// they draw onto is a read-modify-write of the same target, which
-			// is exactly the shape `transparent` already has over `colour`.
-			//
-			// Optional, because `StandardDocument` binds nothing into it: the
-			// renderer clears the window when no pass has touched it, and
-			// declaring a required read there is what made disabling `overlay`
-			// a `ReadsBeforeWrite` earlier in v0.11.
-			overlay.Inputs.push_back(port("window", ResourceKind::Colour, false, "The frame to draw over."));
-			overlay.Outputs.push_back(port("window", ResourceKind::Colour, true, "The swapchain."));
-			NodeCatalogue::Register(std::move(overlay));
-		}
+			{"surface",
+			 "Surface",
+			 C::Draw,
+			 S::View,
+			 {{"shadow", K::Texture, D32, false, "Shadows, if any."}},
+			 {{"surface", K::Colour, RGBA8, true, "One image per surface index."}},
+			 "Renders each mirror's own view into the texture its pane samples."},
 
-		{
-			NodeKindSpec interface;
-			interface.Kind = core::Name("interface");
-			interface.Label = "Interface";
-			interface.Summary = "The retained widget tree, last, over everything.";
-			interface.Category = NodeCategory::Interface;
-			interface.PerView = false;
-			interface.Inputs.push_back(
-				port("window", ResourceKind::Colour, false, "The frame to draw over.")
-			);
-			interface.Outputs.push_back(port("window", ResourceKind::Colour, true, "The swapchain."));
-			NodeCatalogue::Register(std::move(interface));
-		}
+			{"opaque",
+			 "Opaque",
+			 C::Draw,
+			 S::View,
+			 {{"shadow", K::Texture, D32, false, "Shadows, if any."},
+			  {"surface", K::Texture, RGBA8, false, "Mirror images."}},
+			 {{"colour", K::Colour, RGBA16, true, "The lit frame."},
+			  {"depth", K::Depth, D24, true, "What it wrote."}},
+			 "The solid geometry, front to back against the depth buffer."},
 
-		{
-			// **Not in `StandardGraph`, and it is the reason a catalogue is not
-			// just a description of the frame that exists.** A menu with only
-			// the passes already on the canvas offers nothing worth opening;
-			// this is the first kind somebody can *add*, and it is the shape
-			// every later post pass takes.
-			NodeKindSpec tonemap;
-			tonemap.Kind = core::Name("tonemap");
-			tonemap.Label = "Tone map";
-			tonemap.Summary = "Reads one image and writes another. The shape every post pass has.";
-			tonemap.Category = NodeCategory::Composite;
-			tonemap.Inputs.push_back(port("source", ResourceKind::Texture, true, "What to read."));
-			tonemap.Outputs.push_back(port("colour", ResourceKind::Colour, true, "What it wrote."));
-			NodeCatalogue::Register(std::move(tonemap));
-		}
+			{"gbuffer",
+			 "G-buffer",
+			 C::Draw,
+			 S::View,
+			 {{"shadow", K::Texture, D32, false, "Shadows, if any."}},
+			 {{"albedo", K::Colour, RGBA8, true, "Base colour. Alpha is opacity."},
+			  {"normal", K::Colour, LDR, true, "World normals. Ten bits an axis is enough."},
+			  {"material", K::Colour, RGBA8, true, "Roughness, metalness, and material tags."},
+			  {"depth", K::Depth, D24, true, "Scene depth."}},
+			 "The deferred split of the opaque pass: surface properties, not light."},
 
-		{
-			NodeKindSpec present;
-			present.Kind = core::Name("present");
-			present.Label = "Present";
-			present.Summary = "Puts a finished image on the window.";
-			present.Category = NodeCategory::Output;
-			present.PerView = false;
-			present.Inputs.push_back(port("colour", ResourceKind::Texture, true, "The frame to show."));
-			present.Outputs.push_back(port("window", ResourceKind::Colour, true, "The swapchain."));
-			NodeCatalogue::Register(std::move(present));
+			{"velocity",
+			 "Velocity",
+			 C::Draw,
+			 S::View,
+			 {},
+			 {{"velocity", K::Colour, RG16, true, "Per-pixel screen motion."}},
+			 "Where every pixel was last frame. Feeds temporal resolve and motion blur.",
+			 true},
+
+			{"transparent",
+			 "Transparent",
+			 C::Draw,
+			 S::View,
+			 {{"colour", K::Colour, RGBA16, true, "What to blend over."},
+			  {"depth", K::Depth, D24, true, "The opaque depth."}},
+			 {{"colour", K::Colour, RGBA16, true, "The blended frame."}},
+			 "The blended tail, back to front, tested against the opaque depth."},
+
+			{"sky",
+			 "Sky",
+			 C::Draw,
+			 S::View,
+			 {{"depth", K::Depth, D24, true, "So it fills only what nothing covered."}},
+			 {{"colour", K::Colour, RGBA16, true, "The background."}},
+			 "The background, drawn where the depth buffer is still far."},
+
+			{"particles",
+			 "Particles",
+			 C::Draw,
+			 S::View,
+			 {{"colour", K::Colour, RGBA16, true, "What to blend over."},
+			  {"depth", K::Depth, D24, false, "For soft particles."}},
+			 {{"colour", K::Colour, RGBA16, true, "The frame with sprites on it."}},
+			 "The emitter pool's live particles, as camera-facing sprites."},
+
+			{"decals",
+			 "Decals",
+			 C::Draw,
+			 S::View,
+			 {{"depth", K::Texture, R32, true, "Linear depth, to project against."},
+			  {"normal", K::Texture, LDR, false, "For box-projection decals."}},
+			 {{"albedo", K::Colour, RGBA8, true, "The modified surface."},
+			  {"material", K::Colour, RGBA8, true, "And its properties."}},
+			 "Projected modifications to the G-buffer, after it is filled."},
+
+			// --- depth derivatives ---------------------------------------------
+			{"depth-linearise",
+			 "Linearise depth",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, D24, true, "Hardware depth."}},
+			 {{"linear", K::Colour, R32, true, "Linear view-space depth."}},
+			 "Hardware depth to linear float. Cheap as a blit; expensive as a "
+			 "full-screen triangle, which is how most engines do it."},
+
+			{"hzb",
+			 "Hierarchical Z",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, R32, true, "Linear depth."}},
+			 {{"hzb", K::Storage, R32, true, "A min pyramid, for occlusion and SSR."}},
+			 "The depth pyramid occlusion culling and screen-space tracing walk."},
+
+			{"depth-discontinuity",
+			 "Depth edges",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, R32, true, "Linear depth."}},
+			 {{"edges", K::Colour, RGBA16, true, "Min, max and edge strength per 2x2."}},
+			 "Where depth jumps, packed per 2x2. What light culling and upscaling "
+			 "both want and neither should recompute."},
+
+			// --- lighting -------------------------------------------------------
+			{"light-bounds",
+			 "Light bounds",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, D24, true, "A downscaled depth to test against."},
+			  {"edges", K::Texture, RGBA16, false, "Depth discontinuities."}},
+			 {{"lights", K::Buffer, RGBA8, true, "The per-tile light list."}},
+			 "Rasterises each light's volume to build the tile lists. Measured "
+			 "faster than compute culling in at least one shipping engine."},
+
+			{"deferred-lighting",
+			 "Deferred lighting",
+			 C::Composite,
+			 S::View,
+			 {{"albedo", K::Texture, RGBA8, true, "Base colour."},
+			  {"normal", K::Texture, LDR, true, "World normals."},
+			  {"material", K::Texture, RGBA8, true, "Roughness and metalness."},
+			  {"depth", K::Texture, R32, true, "Linear depth."},
+			  {"lights", K::Buffer, RGBA8, false, "The tile lists."},
+			  {"shadow", K::Texture, D32, false, "The shadow atlas."}},
+			 {{"colour", K::Colour, RGBA16, true, "The lit frame."}},
+			 "Shades the G-buffer. One pass over the screen, however much geometry "
+			 "went into it."},
+
+			{"shadow-project",
+			 "Shadow projection",
+			 C::Composite,
+			 S::View,
+			 {{"shadow", K::Texture, D32, true, "The atlas."},
+			  {"depth", K::Texture, R32, true, "Linear scene depth."}},
+			 {{"mask", K::Colour, F::R8, true, "A screen-space shadow mask."}},
+			 "Resolves the shadow atlas into a screen mask. Restrict it with the "
+			 "stencil or it shades pixels no light reaches."},
+
+			{"ssao",
+			 "Ambient occlusion",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, R32, true, "Linear depth."},
+			  {"normal", K::Texture, LDR, true, "World normals."}},
+			 {{"occlusion", K::Colour, F::R8, true, "How shut in each pixel is."}},
+			 "Screen-space ambient occlusion. Noisy by nature; wants a depth-aware "
+			 "blur after it."},
+
+			{"ssr",
+			 "Screen-space reflections",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, RGBA16, true, "Last frame's lit colour."},
+			  {"depth", K::Texture, R32, true, "Linear depth."},
+			  {"normal", K::Texture, LDR, true, "World normals."},
+			  {"hzb", K::Texture, R32, false, "To march the ray cheaply."}},
+			 {{"reflection", K::Colour, RGBA16, true, "Reflected colour and confidence."}},
+			 "Marches rays through the depth buffer. Should cost less than tracing "
+			 "the real geometry, and often does not."},
+
+			{"raytrace",
+			 "Ray trace",
+			 C::Composite,
+			 S::View,
+			 {{"depth", K::Texture, R32, true, "Linear depth."},
+			  {"normal", K::Texture, LDR, true, "World normals and material tags."},
+			  {"material", K::Texture, RGBA8, true, "Roughness, to pick which pixels trace."}},
+			 {{"reflection", K::Storage, RGBA16, true, "Traced colour. Alpha carries ray depth."}},
+			 "Compute-shader tracing of low-roughness pixels. Vendor agnostic: any "
+			 "shader-model-5 GPU can run it."},
+
+			{"volumetrics",
+			 "Volumetric fog",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Colour, RGBA16, true, "The lit frame."},
+			  {"depth", K::Texture, R32, true, "Linear depth."}},
+			 {{"colour", K::Colour, RGBA16, true, "The frame with fog in it."}},
+			 "Froxel fog, composited over the frame. Use blue noise, not an "
+			 "interleaved gradient, or the pattern shows."},
+
+			// --- composite -------------------------------------------------------
+			{"temporal-reconstruct",
+			 "Temporal reconstruct",
+			 C::Composite,
+			 S::View,
+			 {{"current", K::Texture, RGBA16, true, "This frame, at trace resolution."},
+			  {"history", K::Texture, RGBA16, true, "Last frame's accumulation."},
+			  {"velocity", K::Texture, RG16, true, "Where each pixel came from."}},
+			 {{"resolved", K::Colour, RGBA16, true, "Accumulated, at full resolution."},
+			  {"history", K::Colour, RGBA16, true, "Kept for next frame."}},
+			 "Accumulates a sub-resolution buffer against history. The output that "
+			 "feeds next frame is why history resources exist."},
+
+			{"mix",
+			 "Mix",
+			 C::Composite,
+			 S::View,
+			 {{"a", K::Texture, RGBA16, true, "The bottom image."},
+			  {"b", K::Texture, RGBA16, true, "The top image."},
+			  {"factor", K::Texture, F::R8, false, "Per-pixel blend, if any."}},
+			 {{"colour", K::Colour, RGBA16, true, "The blend."}},
+			 "Two images and a blend mode. The most-used node in any compositor."},
+
+			{"blur",
+			 "Blur",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "What to blur."},
+			  {"depth", K::Texture, R32, false, "For a depth-aware blur."}},
+			 {{"colour", K::Colour, RGBA16, true, "The blurred image."}},
+			 "Gaussian, box or directional. Depth-aware when given a depth input."},
+
+			{"bloom",
+			 "Bloom",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "The lit frame."}},
+			 {{"bloom", K::Colour, HDR, true, "The bright parts, spread."}},
+			 "Downsample, blur, upsample. Reuses its own chain, so it is one node "
+			 "rather than a dozen."},
+
+			{"dof",
+			 "Depth of field",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, RGBA16, true, "The frame."},
+			  {"depth", K::Texture, R32, true, "To decide the circle of confusion."}},
+			 {{"colour", K::Colour, RGBA16, true, "Near and far blurred, composited."}},
+			 "Near and far fields at half resolution, composited back."},
+
+			{"motion-blur",
+			 "Motion blur",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, RGBA16, true, "The frame."},
+			  {"velocity", K::Texture, RG16, true, "Screen motion."}},
+			 {{"colour", K::Colour, RGBA16, true, "Smeared along motion."}},
+			 "Smears each pixel along its velocity."},
+
+			{"exposure",
+			 "Exposure",
+			 C::Composite,
+			 S::Frame,
+			 {{"luminance", K::Texture, RG16, true, "A 1x1 average, from a reduce chain."}},
+			 {{"exposure", K::Buffer, RG16, true, "The scale the tone mapper applies."}},
+			 "Turns an average luminance into an exposure scale, with adaptation "
+			 "over time."},
+
+			{"tonemap",
+			 "Tone map",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, RGBA16, true, "The HDR frame."},
+			  {"bloom", K::Texture, HDR, false, "Composited while we are here."},
+			  {"exposure", K::Buffer, RG16, false, "How much to scale by."},
+			  {"lut", K::Texture, RGBA8, false, "A colour grade."}},
+			 {{"colour", K::Colour, LDR, true, "Display range."}},
+			 "HDR to display, with bloom and grading folded in so the frame is read "
+			 "once."},
+
+			{"taa",
+			 "Temporal AA",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "This frame."},
+			  {"history", K::Texture, LDR, true, "Last frame's output."},
+			  {"velocity", K::Texture, RG16, true, "Screen motion."}},
+			 {{"colour", K::Colour, LDR, true, "Resolved."},
+			  {"history", K::Colour, LDR, true, "Kept for next frame."}},
+			 "Jittered accumulation. The more competent it is, the less it can be "
+			 "abused to hide undersampling."},
+
+			{"smaa-edges",
+			 "SMAA edges",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "The tone-mapped frame."}},
+			 {{"edges", K::Colour, F::RG8, true, "A two-channel edge mask."}},
+			 "First of three. Writes the stencil so the blend pass can skip "
+			 "everything it did not touch."},
+
+			{"smaa-blend",
+			 "SMAA blend",
+			 C::Composite,
+			 S::View,
+			 {{"edges", K::Texture, F::RG8, true, "The edge mask."}},
+			 {{"weights", K::Colour, RGBA8, true, "Blending weights."}},
+			 "Second of three."},
+
+			{"smaa-resolve",
+			 "SMAA resolve",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "The tone-mapped frame."},
+			  {"weights", K::Texture, RGBA8, true, "Blending weights."}},
+			 {{"colour", K::Colour, LDR, true, "Edge-smoothed."}},
+			 "Third of three."},
+
+			{"sharpen",
+			 "Sharpen",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "The frame."}},
+			 {{"colour", K::Colour, LDR, true, "Sharpened."}},
+			 "Contrast-adaptive sharpening, to claw back what a temporal resolve "
+			 "blurred."},
+
+			{"grade",
+			 "Grade",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "The frame."},
+			  {"lut", K::Texture, RGBA8, false, "A lookup table."}},
+			 {{"colour", K::Colour, LDR, true, "Graded."}},
+			 "Vignette, grain, chromatic aberration and a LUT. One pass, because "
+			 "each of them alone is a full-screen read."},
+
+			{"separate",
+			 "Separate channels",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "Any image."}},
+			 {{"r", K::Colour, F::R16F, true, "Red."},
+			  {"g", K::Colour, F::R16F, true, "Green."},
+			  {"b", K::Colour, F::R16F, true, "Blue."},
+			  {"a", K::Colour, F::R16F, true, "Alpha."}},
+			 "Splits a target into channels. How an empty alpha becomes visible "
+			 "without a capture tool."},
+
+			{"combine",
+			 "Combine channels",
+			 C::Composite,
+			 S::View,
+			 {{"r", K::Texture, F::R16F, true, "Red."},
+			  {"g", K::Texture, F::R16F, true, "Green."},
+			  {"b", K::Texture, F::R16F, true, "Blue."},
+			  {"a", K::Texture, F::R16F, false, "Alpha."}},
+			 {{"colour", K::Colour, RGBA16, true, "The packed image."}},
+			 "The other half of Separate."},
+
+			// --- resample --------------------------------------------------------
+			{"scale",
+			 "Scale",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "What to resample."}},
+			 {{"colour", K::Colour, RGBA16, true, "At the declared size."}},
+			 "To a fraction or an absolute size. The node that makes resolution "
+			 "something an author sets."},
+
+			{"reduce-chain",
+			 "Reduce",
+			 C::Composite,
+			 S::Frame,
+			 {{"source", K::Texture, RGBA16, true, "What to reduce."}},
+			 {{"result", K::Storage, RG16, true, "Down to 1x1, if asked."}},
+			 "Repeated halving to a fixed size. One node, not seven, because "
+			 "nobody wires the intermediate steps by hand."},
+
+			{"upscale",
+			 "Upscale",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "The low-resolution frame."},
+			  {"depth", K::Texture, R32, false, "For a depth-aware upscale."},
+			  {"edges", K::Texture, RGBA16, false, "Depth discontinuities."}},
+			 {{"colour", K::Colour, RGBA16, true, "At full resolution."}},
+			 "Spatial upscale. Depth-aware when given depth, which is the "
+			 "difference between usable and pixelated."},
+
+			{"blit",
+			 "Blit",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, true, "What to copy."}},
+			 {{"colour", K::Colour, RGBA16, true, "The copy."}},
+			 "A straight copy. Its own kind so that a copy done as a full-screen "
+			 "triangle shows up as the mistake it is."},
+
+			{"clear",
+			 "Clear",
+			 C::Composite,
+			 S::View,
+			 {},
+			 {{"target", K::Colour, RGBA16, true, "Cleared to a constant."}},
+			 "Explicit, because an implicit clear is a cost nobody sees and "
+			 "sometimes a cost nobody needs.",
+			 true},
+
+			{"dispatch",
+			 "Compute",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, false, "Whatever it reads."}},
+			 {{"result", K::Storage, RGBA16, true, "Whatever it writes."}},
+			 "A named compute shader. No triangles, no pixels — the raw parallel "
+			 "machine."},
+
+			// --- interface and output ---------------------------------------------
+			{"overlay",
+			 "Overlay",
+			 C::Interface,
+			 S::Frame,
+			 {{"window", K::Colour, LDR, false, "The frame to draw over."}},
+			 {{"window", K::Colour, LDR, true, "The swapchain."}},
+			 "The debug panels, drawn once over the whole frame rather than per view."},
+
+			{"interface",
+			 "Interface",
+			 C::Interface,
+			 S::Frame,
+			 {{"window", K::Colour, LDR, false, "The frame to draw over."}},
+			 {{"window", K::Colour, LDR, true, "The swapchain."}},
+			 "The retained widget tree, last, over everything."},
+
+			{"present",
+			 "Present",
+			 C::Output,
+			 S::Frame,
+			 {{"colour", K::Texture, LDR, true, "The frame to show."}},
+			 {{"window", K::Colour, LDR, true, "The swapchain."}},
+			 "Puts a finished image on the window."},
+
+			{"viewer",
+			 "Viewer",
+			 C::Output,
+			 S::Frame,
+			 {{"source", K::Texture, RGBA16, true, "Anything at all."}},
+			 {},
+			 "Shows whatever is wired into it. Attach one to any wire to see what "
+			 "is on it — inspection as a node, which is Blender's idea and a good "
+			 "one."},
+
+			{"capture",
+			 "Capture",
+			 C::Output,
+			 S::Frame,
+			 {{"source", K::Texture, LDR, true, "The frame to write out."}},
+			 {},
+			 "Writes a frame to a file. What --capture does today, as a node."},
+		};
+
+		for (const Kind &row : table) {
+			NodeKindSpec spec;
+			spec.Kind = core::Name(row.Name);
+			spec.Label = row.Label;
+			spec.Summary = row.Summary;
+			spec.Category = row.Category;
+			spec.Scope = row.Scope;
+			spec.Source = row.Source;
+
+			const auto fill = [](const std::vector<Port> &from, std::vector<PortSpec> &into) {
+				for (const Port &port : from) {
+					PortSpec made;
+					made.Name = core::Name(port.Name);
+					made.Kind = port.Kind;
+					made.Format = port.Format;
+					made.Required = port.Required;
+					made.Summary = port.Summary;
+					into.push_back(std::move(made));
+				}
+			};
+			fill(row.Inputs, spec.Inputs);
+			fill(row.Outputs, spec.Outputs);
+
+			NodeCatalogue::Register(std::move(spec));
 		}
 	}
 }

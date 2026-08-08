@@ -82,18 +82,34 @@ TEST_CASE("every refusal has a reason and every acceptance has none", "[graph][c
 // box on the canvas that no wire can reach, and it looks exactly like a
 // correctly-registered node until somebody tries to connect it.
 //
-// `Draw` is exempt because a draw pass may legitimately be a source — `shadow`
-// renders the world from the light and reads nothing from the frame.
-TEST_CASE("every pass that composites takes something to composite", "[graph][catalogue]") {
+// **The exemption is `Source` and not `Draw`.** It was `Draw`, and `clear` broke
+// it: a pass can be a compositing kind and still produce from nothing, and the
+// category is about where a menu puts it rather than about what it reads.
+TEST_CASE("every pass that is not a source takes an input", "[graph][catalogue]") {
 	Kinds();
 
 	for (const NodeKindSpec &spec : NodeCatalogue::All()) {
-		if (spec.Category == NodeCategory::Draw) {
+		if (spec.Source) {
 			continue;
 		}
 
 		INFO("kind: " << spec.Kind.Text());
 		CHECK_FALSE(spec.Inputs.empty());
+	}
+}
+
+// And the converse, so `Source` cannot be used to wave a mistake through: a kind
+// that declares itself a source and then declares inputs is confused about which
+// it is.
+TEST_CASE("a source reads nothing", "[graph][catalogue]") {
+	Kinds();
+
+	for (const NodeKindSpec &spec : NodeCatalogue::All()) {
+		if (!spec.Source) {
+			continue;
+		}
+		INFO("kind: " << spec.Kind.Text());
+		CHECK(spec.Inputs.empty());
 	}
 }
 
@@ -163,7 +179,12 @@ TEST_CASE("registering a kind twice replaces it", "[graph][catalogue]") {
 	NodeKindSpec replacement;
 	replacement.Kind = Name("opaque");
 	replacement.Label = "Replaced";
-	replacement.Outputs.push_back(PortSpec{Name("colour"), ResourceKind::Colour, true, {}});
+	replacement.Outputs.push_back(
+		PortSpec{
+			.Name = Name("colour"),
+			.Kind = ResourceKind::Colour,
+		}
+	);
 	REQUIRE(NodeCatalogue::Register(replacement));
 
 	CHECK(NodeCatalogue::All().size() == before);

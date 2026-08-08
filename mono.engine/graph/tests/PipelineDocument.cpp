@@ -21,6 +21,7 @@ using engine::graph::CompiledGraph;
 using engine::graph::Edit;
 using engine::graph::EditKind;
 using engine::graph::GraphStatus;
+using engine::graph::NodeScope;
 using engine::graph::PipelineDocument;
 using engine::graph::PipelineDocumentStatus;
 using engine::graph::PipelineSet;
@@ -45,7 +46,7 @@ namespace {
 		edit.Kind = EditKind::AddNode;
 		edit.Name = Name(name);
 		edit.NodeKind = Name(name);
-		edit.PerView = perView;
+		edit.Scope = perView ? NodeScope::View : NodeScope::Frame;
 		return edit;
 	}
 
@@ -239,7 +240,7 @@ TEST_CASE("per-view and optional survive the round trip", "[graph]") {
 	REQUIRE(Read(Write(document), reloaded, offender) == PipelineDocumentStatus::Ok);
 
 	REQUIRE(reloaded.Count() == 3);
-	CHECK_FALSE(reloaded.Edits()[1].PerView);
+	CHECK(reloaded.Edits()[1].Scope == NodeScope::Frame);
 	CHECK(reloaded.Edits()[1].Optional);
 	CHECK(reloaded.Edits()[0].Resource == ResourceKind::Depth);
 }
@@ -410,7 +411,7 @@ TEST_CASE("a set round trips through text", "[graph]") {
 	// The per-pipeline contents survived, including the field the version turns
 	// on.
 	REQUIRE(reloaded.Find(Name("reflection")) != nullptr);
-	CHECK_FALSE(reloaded.Find(Name("reflection"))->Edits()[1].PerView);
+	CHECK(reloaded.Find(Name("reflection"))->Edits()[1].Scope == NodeScope::Frame);
 
 	// And the main one still builds a frame that compiles.
 	RenderGraph graph;

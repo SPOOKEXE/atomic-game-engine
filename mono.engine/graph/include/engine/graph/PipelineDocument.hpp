@@ -114,17 +114,23 @@ namespace engine::graph {
 		// `AddResource`'s kind.
 		ResourceKind Resource = ResourceKind::Colour;
 
+		// `AddResource`'s pixel format.
+		ResourceFormat Format = ResourceFormat::RGBA8;
+
 		// `AddResource`'s size, or zero to follow the view.
 		//@{
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		//@}
 
+		// `AddResource`'s fraction of the view, when the size is not absolute.
+		uint32_t Divisor = 1;
+
 		// `Reads` and `Writes`: which resource, by name.
 		core::Name Target;
 
 		// `AddNode`'s partition, and the field the whole version turns on.
-		bool PerView = true;
+		NodeScope Scope = NodeScope::View;
 
 		// `AddNode`'s skippability.
 		bool Optional = false;

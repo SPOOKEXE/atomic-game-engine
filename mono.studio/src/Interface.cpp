@@ -265,6 +265,7 @@ namespace studio {
 			DrawAssets();
 			DrawRenderPipeline();
 			DrawAssetsPipeline();
+			DrawPipelineProfile();
 			DrawNetwork();
 			DrawBus();
 			DrawFindInstances();
@@ -900,6 +901,7 @@ namespace studio {
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
 		ImGui::MenuItem("Assets Pipeline", nullptr, &ShowAssetsPipeline);
+		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);

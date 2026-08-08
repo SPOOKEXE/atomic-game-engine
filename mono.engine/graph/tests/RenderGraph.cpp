@@ -22,6 +22,7 @@ using engine::graph::CompiledGraph;
 using engine::graph::GraphStatus;
 using engine::graph::Node;
 using engine::graph::NodeRunner;
+using engine::graph::NodeScope;
 using engine::graph::RenderGraph;
 using engine::graph::ResourceDesc;
 using engine::graph::ResourceId;
@@ -47,7 +48,7 @@ namespace {
 	};
 
 	ResourceId Colour(RenderGraph &graph, const char *name) {
-		return graph.AddResource({Name(name), ResourceKind::Colour, 0, 0});
+		return graph.AddResource({.Name = Name(name), .Kind = ResourceKind::Colour});
 	}
 }
 
@@ -196,8 +197,20 @@ TEST_CASE("a shared node may not read what a per-view node writes", "[graph]") {
 	// Declared first, so it is not an ordering mistake — the shared block runs
 	// before the per-view block whatever order they were written in, so this
 	// read can never be satisfied.
-	graph.AddNode({.Name = Name("consumer"), .Reads = {perView}, .Writes = {shared}, .PerView = false});
-	graph.AddNode({.Name = Name("producer"), .Reads = {}, .Writes = {perView}, .PerView = true});
+	graph.AddNode({
+		.Name = Name("consumer"),
+		.Kind = {},
+		.Reads = {perView},
+		.Writes = {shared},
+		.Scope = NodeScope::Frame,
+	});
+	graph.AddNode({
+		.Name = Name("producer"),
+		.Kind = {},
+		.Reads = {},
+		.Writes = {perView},
+		.Scope = NodeScope::View,
+	});
 
 	// **And "which view's output would it even be" is the reason.** A shared
 	// node runs once for a frame with four views; there is no single per-view
@@ -227,8 +240,12 @@ TEST_CASE("a shared and a per-view node cannot write one resource", "[graph]") {
 	RenderGraph graph;
 	const ResourceId colour = Colour(graph, "colour");
 
-	graph.AddNode({.Name = Name("shared"), .Writes = {colour}, .PerView = false});
-	graph.AddNode({.Name = Name("perview"), .Writes = {colour}, .PerView = true});
+	graph.AddNode(
+		{.Name = Name("shared"), .Kind = {}, .Reads = {}, .Writes = {colour}, .Scope = NodeScope::Frame}
+	);
+	graph.AddNode(
+		{.Name = Name("perview"), .Kind = {}, .Reads = {}, .Writes = {colour}, .Scope = NodeScope::View}
+	);
 
 	// **The one failure the partition can produce and nothing else can catch.**
 	// The shared node runs once, the per-view node runs per view, and the last
@@ -361,6 +378,129 @@ TEST_CASE("the compile is reproducible", "[graph]") {
 	CHECK(first.PerView == second.PerView);
 }
 
+// --- the three scopes ------------------------------------------------------------
+
+// **`Frame` and `World` were one value and the executor could already tell them
+// apart.** `Execute` runs the shared block once per *distinct world* and the
+// final block once for the frame, which is two different "not per view" — and a
+// boolean could say only that neither was per view.
+TEST_CASE("a world-scoped pass runs once per world, not once per view", "[graph]") {
+	RenderGraph graph;
+	const ResourceId atlas = graph.AddResource({.Name = Name("atlas"), .Kind = ResourceKind::Depth});
+	const ResourceId colour = Colour(graph, "colour");
+
+	graph.AddNode({
+		.Name = Name("shadow"),
+		.Kind = Name("shadow"),
+		.Reads = {},
+		.Writes = {atlas},
+		.Scope = NodeScope::World,
+	});
+	graph.AddNode({
+		.Name = Name("opaque"),
+		.Kind = Name("opaque"),
+		.Reads = {atlas},
+		.Writes = {colour},
+		.Scope = NodeScope::View,
+	});
+
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	// Two views of **one** world: the atlas is rendered once and both views
+	// sample it. This is the whole reason the scope exists — four split-screen
+	// players of one map pay for one shadow map.
+	{
+		Recorder runner;
+		const uint64_t worlds[] = {7, 7};
+		REQUIRE(graph.Execute(compiled, runner, worlds));
+
+		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("shadow")) == 1);
+		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("opaque@0")) == 1);
+		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("opaque@1")) == 1);
+	}
+
+	// Two views of **two** worlds: two atlases, because a second world's casters
+	// are different casters. A frame-scoped pass would have rendered one and lit
+	// the second world with the first one's shadows.
+	{
+		Recorder runner;
+		const uint64_t worlds[] = {7, 9};
+		REQUIRE(graph.Execute(compiled, runner, worlds));
+
+		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("shadow")) == 2);
+	}
+}
+
+TEST_CASE("a frame-scoped pass runs once however many worlds there are", "[graph]") {
+	RenderGraph graph;
+	const ResourceId colour = Colour(graph, "colour");
+	const ResourceId window = Colour(graph, "window");
+
+	graph.AddNode({
+		.Name = Name("opaque"),
+		.Kind = Name("opaque"),
+		.Reads = {},
+		.Writes = {colour},
+		.Scope = NodeScope::View,
+	});
+	graph.AddNode({
+		.Name = Name("interface"),
+		.Kind = Name("interface"),
+		.Reads = {},
+		.Writes = {window},
+		.Scope = NodeScope::Frame,
+	});
+
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	// The editor's chrome is drawn over the whole window, once, whatever is
+	// underneath it. Two worlds and two views change nothing about that.
+	Recorder runner;
+	const uint64_t worlds[] = {7, 9};
+	REQUIRE(graph.Execute(compiled, runner, worlds));
+
+	CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("interface")) == 1);
+	CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("opaque@0")) == 1);
+	CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("opaque@1")) == 1);
+}
+
+TEST_CASE("the standard frame's scopes say what its passes are", "[graph]") {
+	const RenderGraph graph = StandardGraph();
+
+	// **The one that could not be said before.** A shadow atlas is per world;
+	// the overlay and the chrome are per frame; everything between is per view.
+	CHECK(graph.Find(engine::graph::NodeId{1})->Scope == NodeScope::World);
+
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	for (const engine::graph::NodeId id : compiled.PerView) {
+		INFO(graph.Find(id)->Name.Text());
+		CHECK(graph.Find(id)->Scope == NodeScope::View);
+	}
+	for (const engine::graph::NodeId id : compiled.Final) {
+		INFO(graph.Find(id)->Name.Text());
+		CHECK(graph.Find(id)->Scope == NodeScope::Frame);
+	}
+}
+
+TEST_CASE("every scope has a name and the names are distinct", "[graph]") {
+	// The document format writes these words, so a collision would be two
+	// scopes that saved as one.
+	CHECK(std::string(engine::graph::Describe(NodeScope::Frame)) == "frame");
+	CHECK(std::string(engine::graph::Describe(NodeScope::World)) == "world");
+	CHECK(std::string(engine::graph::Describe(NodeScope::View)) == "view");
+
+	CHECK(engine::graph::RunsPerView(NodeScope::View));
+	CHECK_FALSE(engine::graph::RunsPerView(NodeScope::World));
+	CHECK_FALSE(engine::graph::RunsPerView(NodeScope::Frame));
+}
+
 TEST_CASE("the graph refuses to grow past its bound", "[graph]") {
 	RenderGraph graph;
 	const ResourceId colour = Colour(graph, "colour");
@@ -380,11 +520,13 @@ TEST_CASE("the graph refuses to grow past its bound", "[graph]") {
 
 TEST_CASE("a shared node declared after the views runs after all of them", "[graph]") {
 	RenderGraph graph;
-	const ResourceId colour = graph.AddResource({Name("colour"), ResourceKind::Colour, 0, 0});
-	const ResourceId window = graph.AddResource({Name("window"), ResourceKind::Colour, 0, 0});
+	const ResourceId colour = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+	const ResourceId window = graph.AddResource({.Name = Name("window"), .Kind = ResourceKind::Colour});
 
-	graph.AddNode({.Name = Name("draw"), .Kind = Name("draw"), .Writes = {colour}, .PerView = true});
-	graph.AddNode({.Name = Name("present"), .Kind = Name("present"), .Writes = {window}, .PerView = false});
+	graph.AddNode({.Name = Name("draw"), .Kind = Name("draw"), .Writes = {colour}, .Scope = NodeScope::View});
+	graph.AddNode(
+		{.Name = Name("present"), .Kind = Name("present"), .Writes = {window}, .Scope = NodeScope::Frame}
+	);
 
 	CompiledGraph compiled;
 	Name offender;
@@ -409,11 +551,13 @@ TEST_CASE("the same node declared before the views runs before all of them", "[g
 	// The identical graph with the declaration order swapped, so the only thing
 	// deciding which end the shared node lands at is its position.
 	RenderGraph graph;
-	const ResourceId colour = graph.AddResource({Name("colour"), ResourceKind::Colour, 0, 0});
-	const ResourceId window = graph.AddResource({Name("window"), ResourceKind::Colour, 0, 0});
+	const ResourceId colour = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+	const ResourceId window = graph.AddResource({.Name = Name("window"), .Kind = ResourceKind::Colour});
 
-	graph.AddNode({.Name = Name("present"), .Kind = Name("present"), .Writes = {window}, .PerView = false});
-	graph.AddNode({.Name = Name("draw"), .Kind = Name("draw"), .Writes = {colour}, .PerView = true});
+	graph.AddNode(
+		{.Name = Name("present"), .Kind = Name("present"), .Writes = {window}, .Scope = NodeScope::Frame}
+	);
+	graph.AddNode({.Name = Name("draw"), .Kind = Name("draw"), .Writes = {colour}, .Scope = NodeScope::View});
 
 	CompiledGraph compiled;
 	Name offender;
@@ -432,13 +576,13 @@ TEST_CASE("a shared node between two per-view nodes is refused", "[graph]") {
 	// then one shared pass, then every view's second. Refused rather than
 	// hoisted to an end, because either end changes what it reads.
 	RenderGraph graph;
-	const ResourceId a = graph.AddResource({Name("a"), ResourceKind::Colour, 0, 0});
-	const ResourceId b = graph.AddResource({Name("b"), ResourceKind::Colour, 0, 0});
-	const ResourceId c = graph.AddResource({Name("c"), ResourceKind::Colour, 0, 0});
+	const ResourceId a = graph.AddResource({.Name = Name("a"), .Kind = ResourceKind::Colour});
+	const ResourceId b = graph.AddResource({.Name = Name("b"), .Kind = ResourceKind::Colour});
+	const ResourceId c = graph.AddResource({.Name = Name("c"), .Kind = ResourceKind::Colour});
 
-	graph.AddNode({.Name = Name("first"), .Kind = Name("k"), .Writes = {a}, .PerView = true});
-	graph.AddNode({.Name = Name("middle"), .Kind = Name("k"), .Writes = {b}, .PerView = false});
-	graph.AddNode({.Name = Name("last"), .Kind = Name("k"), .Writes = {c}, .PerView = true});
+	graph.AddNode({.Name = Name("first"), .Kind = Name("k"), .Writes = {a}, .Scope = NodeScope::View});
+	graph.AddNode({.Name = Name("middle"), .Kind = Name("k"), .Writes = {b}, .Scope = NodeScope::Frame});
+	graph.AddNode({.Name = Name("last"), .Kind = Name("k"), .Writes = {c}, .Scope = NodeScope::View});
 
 	CompiledGraph compiled;
 	Name offender;
@@ -456,14 +600,14 @@ TEST_CASE("switching off the per-view node that trapped a shared one makes it le
 	// `Validate`.** The middle node is only "between" views while the per-view
 	// node after it runs.
 	RenderGraph graph;
-	const ResourceId a = graph.AddResource({Name("a"), ResourceKind::Colour, 0, 0});
-	const ResourceId b = graph.AddResource({Name("b"), ResourceKind::Colour, 0, 0});
-	const ResourceId c = graph.AddResource({Name("c"), ResourceKind::Colour, 0, 0});
+	const ResourceId a = graph.AddResource({.Name = Name("a"), .Kind = ResourceKind::Colour});
+	const ResourceId b = graph.AddResource({.Name = Name("b"), .Kind = ResourceKind::Colour});
+	const ResourceId c = graph.AddResource({.Name = Name("c"), .Kind = ResourceKind::Colour});
 
-	graph.AddNode({.Name = Name("first"), .Kind = Name("k"), .Writes = {a}, .PerView = true});
-	graph.AddNode({.Name = Name("middle"), .Kind = Name("k"), .Writes = {b}, .PerView = false});
+	graph.AddNode({.Name = Name("first"), .Kind = Name("k"), .Writes = {a}, .Scope = NodeScope::View});
+	graph.AddNode({.Name = Name("middle"), .Kind = Name("k"), .Writes = {b}, .Scope = NodeScope::Frame});
 	const engine::graph::NodeId last =
-		graph.AddNode({.Name = Name("last"), .Kind = Name("k"), .Writes = {c}, .PerView = true});
+		graph.AddNode({.Name = Name("last"), .Kind = Name("k"), .Writes = {c}, .Scope = NodeScope::View});
 
 	CompiledGraph compiled;
 	Name offender;

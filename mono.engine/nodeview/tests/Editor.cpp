@@ -109,11 +109,28 @@ TEST_CASE("zoom clamps and still holds the cursor", "[nodeview][editor]") {
 // --- geometry and hit-testing ---------------------------------------------------
 
 TEST_CASE("a node is as tall as its busiest side", "[nodeview][editor]") {
-	EditorGraph graph = Wired();
+	Kinds();
 	const NodeStyle style;
 
-	// `opaque` declares two inputs and two outputs; `tonemap` one and one.
-	CHECK(HeightOf(graph.Nodes[0], style) > HeightOf(graph.Nodes[1], style));
+	// **Asked of the catalogue rather than assumed.** This named two kinds and
+	// asserted which was taller, and the answer flipped the moment `tonemap`
+	// grew its bloom, exposure and LUT inputs — a test that broke on a change it
+	// was not about. What it is actually about is that height follows the port
+	// count, so that is what it asks.
+	EditorGraph graph;
+	(void)AddNode(graph, Name("blit"), Point{});
+	(void)AddNode(graph, Name("deferred-lighting"), Point{300.0f, 0.0f});
+
+	const engine::nodeview::EditorNode &small = graph.Nodes[0];
+	const engine::nodeview::EditorNode &large = graph.Nodes[1];
+
+	REQUIRE(small.Inputs.size() < large.Inputs.size());
+	CHECK(HeightOf(small, style) < HeightOf(large, style));
+
+	// And a node with no ports at all is still a box somebody can grab.
+	EditorGraph bare;
+	(void)AddNode(bare, Name("clear"), Point{});
+	CHECK(HeightOf(bare.Nodes[0], style) > style.HeaderHeight);
 }
 
 TEST_CASE("the pointer finds the header, the body and empty canvas", "[nodeview][editor]") {
@@ -300,10 +317,18 @@ TEST_CASE("the menu finds a kind from an abbreviation", "[nodeview][editor]") {
 	Kinds();
 
 	// The case a substring search gets wrong, and the reason this is not
-	// `find()`: typing "tm" should reach "tonemap".
+	// `find()`: typing "tm" should reach "tonemap" at all.
+	//
+	// **Reached, not ranked first.** With eight kinds it was first; with fifty
+	// `temporal-reconstruct` matches the same two letters with the same score
+	// and sorts ahead of it by name. That is the documented tie-break working,
+	// not a worse search — so this asserts what the abbreviation is *for*.
 	const std::vector<engine::nodeview::CatalogueMatch> loose = SearchCatalogue("tm");
-	REQUIRE_FALSE(loose.empty());
-	CHECK(loose[0].Spec->Kind == Name("tonemap"));
+	bool found = false;
+	for (const engine::nodeview::CatalogueMatch &match : loose) {
+		found = found || match.Spec->Kind == Name("tonemap");
+	}
+	CHECK(found);
 
 	// A run of adjacent letters outranks the same letters scattered.
 	const std::vector<engine::nodeview::CatalogueMatch> exact = SearchCatalogue("tone");

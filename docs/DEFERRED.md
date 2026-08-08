@@ -35,6 +35,75 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00047
+
+**Readbacks: the viewer node's image, channel histograms, and an overdraw view.**
+
+`PIPELINE_NODES.md` stage 8, and the three faults its §1.5 cannot reach without
+a path off the GPU.
+
+- **Faults 3, 4 and 9 all need the same thing.** Is this alpha channel blank; is
+  this whole target uniform; how many times was this pixel shaded. Each is a
+  reduction over a rendered target, and none is answerable from a declaration —
+  `PipelineDiagnostics::UnusedAlpha` gets as close as a declaration can, which
+  is "nothing is *arranged* to read it".
+- **The `viewer` node is already in the catalogue** and does nothing, because
+  showing what is on a wire means reading a target back and putting it
+  somewhere. That is the same machinery, and it is the cheapest first user of it.
+- SDL_GPU has the download path; what is missing is the fence discipline, because
+  a readback that waits is a stall and a readback that does not is a frame late.
+  A frame late is fine for a debug view and is worth saying out loud.
+
+### [_] D00046
+
+**Per-pass GPU timestamps, which are blocked on the executor rather than on
+effort.**
+
+`PIPELINE_NODES.md` stage 7's remaining half. `ProfilePass::Elapsed` is the field
+they land in; it reads zero and the profile panel shows that as *not measured*
+rather than as free.
+
+- **There is nothing to put a timestamp around.** `Renderer::Render` submits six
+  passes by name; the graph's nodes are not what executes. Instrumenting the six
+  would be instrumenting exactly what D00002 deletes.
+- So this is downstream of the executor, not parallel to it — which was not
+  obvious when the plan was written and is why that document now says so.
+- The CPU half **is** built: `FrameResult::UploadedBytes` and `Uploads` count
+  every copy into GPU memory, measured at the region rather than derived from a
+  count, and the profile panel shows them.
+
+### [_] D00045
+
+**`Node::PerView` wants to be a scope, and the change is 85 references wide.**
+
+`PIPELINE_NODES.md` stage 5's remaining half.
+
+- A boolean says per-view or not. What a frame needs is **once per frame, once
+  per world, once per view, once per surface** — and the multi-view seam already
+  needs three of those. A shadow map is per world and is currently spelled "not
+  per view", which is true and is not what it means.
+- **`Compile`'s partition is the consumer.** Frame and World fall into the
+  shared blocks, View and Surface into the per-view one, which maps exactly onto
+  what the boolean does today — so this is a widening rather than a redesign.
+- **The size estimate was wrong and is corrected here.** "85 references across
+  18 files" counted `Band::PerView` and `CompiledGraph::PerView`, which are
+  different symbols entirely. The real edit sites are around twenty-five: one
+  field on `Node`, one on `Edit`, one on `NodeKindSpec`, `Compile`'s partition,
+  and the designated initialisers in `StandardGraph` and the suites. The
+  catalogue's table can keep a private `bool` in its own local row struct and map
+  it at registration, so its forty-five rows do not change.
+- **What actually blocks it is a design question, not the size.** Of the four
+  scopes, `Frame` and `View` are what the boolean already says, and `World` has
+  something real to attach to — `RenderGraph::Execute` runs the shared block once
+  per distinct world. **`Surface` has nothing.** Nothing runs a per-surface
+  block; the surface pass loops inside a per-view one. So a four-value enum would
+  ship one value that is a word with no behaviour, which is the shape rule 6 is
+  about.
+- So the open question is whether this lands as **three** scopes now — `Frame`,
+  `World`, `View` — with `Surface` waiting for a block to run in, or as four with
+  one of them inert. Three is almost certainly right and it is not a call to make
+  in the last few minutes of a session.
+
 ### [CLOSED] D00044
 
 **`PropertyDescriptor::Writes` has no consumer. It is a declared constraint the

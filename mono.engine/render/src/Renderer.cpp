@@ -3057,6 +3057,14 @@ namespace engine::render {
 			// reach — which is now everywhere outside the panels.
 			SDL_UploadToGPUTexture(copy, &source, &destination, false);
 
+			// **The overlay is the one upload a steady scene still pays**, once
+			// per redraw of the panels rather than once per frame, and it is
+			// larger than everything else here — a full-window RGBA image. A
+			// traffic counter that left it out would report a quiet frame as
+			// free and a panel redraw as a mystery spike somewhere else.
+			result.UploadedBytes += static_cast<uint64_t>(destination.w) * destination.h * sizeof(uint32_t);
+			result.Uploads++;
+
 			// The GPU matches the image now, so nothing is pending until
 			// something draws again.
 			overlay.MarkUploaded();
@@ -3616,6 +3624,9 @@ namespace engine::render {
 						ribbonCount * static_cast<uint32_t>(sizeof(effects::RibbonVertex)),
 					};
 					SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+
+					result.UploadedBytes += destination.size;
+					result.Uploads++;
 				}
 
 				if (particleCount > 0) {
@@ -3629,6 +3640,9 @@ namespace engine::render {
 					// rather than a stall on the copy the previous frame may still be
 					// reading.
 					SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+
+					result.UploadedBytes += destination.size;
+					result.Uploads++;
 				}
 
 				if (haveInstances) {
@@ -3641,6 +3655,12 @@ namespace engine::render {
 					// Cycling hands back a fresh allocation rather than stalling on
 					// the copy the previous frame may still be reading.
 					SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+
+					// **Counted here rather than derived from `uploadCount`.** The
+					// region's size is what actually crosses, so a layout change
+					// cannot make the statistic quietly wrong.
+					result.UploadedBytes += destination.size;
+					result.Uploads++;
 				}
 
 				SDL_EndGPUCopyPass(copy);
