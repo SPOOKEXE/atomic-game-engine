@@ -2307,10 +2307,6 @@ namespace engine::render {
 		Shutdown();
 	}
 
-	bool Renderer::IsInitialised() const {
-		return State->Device != nullptr;
-	}
-
 	std::string_view Renderer::BackendName() const {
 		return State->Backend;
 	}
@@ -2659,14 +2655,6 @@ namespace engine::render {
 			return false;
 		}
 		return State->Textures.Drop(name);
-	}
-
-	bool Renderer::HasMesh(const core::Name &name) const {
-		return State != nullptr && State->Meshes.Has(name);
-	}
-
-	bool Renderer::HasTexture(const core::Name &name) const {
-		return State != nullptr && State->Textures.Find(name) != nullptr;
 	}
 
 	bool Renderer::Impl::WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const {

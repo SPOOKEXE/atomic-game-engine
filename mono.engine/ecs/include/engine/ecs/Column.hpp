@@ -300,13 +300,6 @@ namespace engine::ecs {
 		// @return The index of the new row.
 		size_t PushMovedFrom(Column &source, size_t sourceRow);
 
-		// Appends one row copy-constructed from another column of the same type.
-		//
-		// @param source    The column to copy from, which must hold the same type.
-		// @param sourceRow The row to copy.
-		// @return The index of the new row.
-		size_t PushCopiedFrom(const Column &source, size_t sourceRow);
-
 		// Appends every row to a writer.
 		//
 		// Writes nothing and marks nothing for a type with no serialisation;

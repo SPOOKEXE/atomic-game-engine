@@ -162,14 +162,6 @@ namespace engine::ecs {
 		// out of the top of it.
 		static constexpr uint32_t PREDICTED_INDICES = NO_INDEX - PREDICTED_BASE;
 
-		// The range an index belongs to.
-		//
-		// @param index The index to classify.
-		// @return Which half of the space it came from.
-		static constexpr EntityRange RangeOf(uint32_t index) {
-			return index >= PREDICTED_BASE ? EntityRange::Predicted : EntityRange::Authoritative;
-		}
-
 		// Reports whether an index was minted by a replica's prediction.
 		//
 		// @param index The index to classify.

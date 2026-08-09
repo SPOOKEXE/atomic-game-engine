@@ -77,17 +77,6 @@ namespace engine::parallel::platform {
 		::closesocket(Native(handle));
 	}
 
-	bool SocketIsStream(int64_t handle) {
-		EnsureWinsock();
-
-		int kind = 0;
-		int size = sizeof(kind);
-		if (::getsockopt(Native(handle), SOL_SOCKET, SO_TYPE, reinterpret_cast<char *>(&kind), &size) != 0) {
-			return false;
-		}
-		return kind == SOCK_STREAM;
-	}
-
 	bool SocketMakeNonBlocking(int64_t handle) {
 		u_long enabled = 1;
 		return ::ioctlsocket(Native(handle), FIONBIO, &enabled) == 0;

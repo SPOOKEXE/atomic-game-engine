@@ -237,6 +237,11 @@ namespace engine::scene {
 
 	// The `Humanoid` class id, registering the scene tree on first call.
 	//
+	// The third of the tree's class accessors, beside `scene::PartClass` and
+	// `scene::CameraClass` — it lives here rather than in `Part.hpp` because a
+	// humanoid is the thing this file steers, and `StepCharacters` is the
+	// reason the class exists at all.
+	//
 	// @return The class id.
 	ecs::ClassId HumanoidClass();
 }

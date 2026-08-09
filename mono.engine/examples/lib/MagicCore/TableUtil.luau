@@ -86,13 +86,6 @@ function TableUtil.sortedStringKeys(value: { [string]: any }): { string }
 	return keys
 end
 
-function TableUtil.shallowAssign(target: { [any]: any }, source: { [any]: any }): { [any]: any }
-	for key, value in pairs(source) do
-		target[key] = value
-	end
-	return target
-end
-
 TableUtil.DeepCopy = TableUtil.deepCopy
 TableUtil.DeepFreeze = TableUtil.deepFreeze
 TableUtil.DenseArrayLength = TableUtil.denseArrayLength

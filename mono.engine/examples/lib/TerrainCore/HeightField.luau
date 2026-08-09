@@ -415,10 +415,6 @@ function HeightField.edits(self: Field): any
 	return self._edits
 end
 
-function HeightField.setEdits(self: Field, edits: any)
-	self._edits = edits
-end
-
 HeightField.Defaults = DEFAULTS
 HeightField.Surfaces = SURFACES
 HeightField.BaseLattice = BASE_LATTICE

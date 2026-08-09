@@ -238,9 +238,9 @@ namespace engine::scene {
 	}
 
 	ecs::ClassId HumanoidClass() {
-		// Through `PartClass`, for `CameraClass`'s reason: one registration of the
-		// whole tree, whichever class a caller asks for first.
-		PartClass();
-		return ecs::Classes::Find(core::Name("Humanoid"));
+		// Cached through `PartClass`, which is the shape every class accessor in
+		// this module shares; `Part.cpp` carries the argument for both halves.
+		static const ecs::ClassId humanoid = (PartClass(), ecs::Classes::Find(core::Name("Humanoid")));
+		return humanoid;
 	}
 }

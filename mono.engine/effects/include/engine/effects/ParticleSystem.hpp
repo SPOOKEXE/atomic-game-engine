@@ -467,16 +467,4 @@ namespace engine::effects {
 	// @param delta How much time passed, in seconds.
 	// @return What it did.
 	ParticleStatistics StepParticles(ecs::Store &store, float delta);
-
-	// The live particles, contiguous per block but not across the pool.
-	//
-	// **Not one span, and that is what a caller has to know.** A block's live
-	// particles are a prefix of that block, so the pool is a run of live prefixes
-	// separated by dead tails. An upload walks `Blocks` and copies each prefix
-	// rather than taking the whole array.
-	//
-	// @param store The world.
-	// @return The whole instance array, or an empty span when the world has no
-	//         pool. Read it through `Blocks`.
-	std::span<const ParticleInstance> ParticleStream(const ecs::Store &store);
 }

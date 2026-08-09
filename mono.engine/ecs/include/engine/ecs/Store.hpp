@@ -1208,9 +1208,13 @@ namespace engine::ecs {
 		// The runtime counterpart of `Observe<T>`, for the same reason the
 		// component accessors above have one: a layer that resolved a
 		// *property* name cannot name the type it projects onto as a template
-		// parameter. `script`'s `.Changed` is the caller — it observes exactly
-		// the components in the `Reads` set of every property somebody
-		// connected to, and it learns those from a descriptor at run time.
+		// parameter, and a script naming a property is naming the component
+		// underneath it.
+		//
+		// **The polling half, beside `OnChangedComponent`'s signal half.** A
+		// script connecting to `.Changed` goes through the signal; a script
+		// asking "did this change since I last looked" goes through this and
+		// `ChangedComponent`, which costs no connection and no fan-out.
 		//
 		// Idempotent, and carries `Observe<T>`'s own warning about observing
 		// late.

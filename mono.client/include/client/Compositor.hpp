@@ -169,6 +169,16 @@ namespace client {
 		// @return The dropped count.
 		uint64_t Dropped() const;
 
+		// How many times a channel raised its payload ceiling, across every slot.
+		//
+		// The companion to `Dropped`, and the one that says a draw list is
+		// growing without bound: a figure that settles is a set of worlds that
+		// found their size, and one that keeps climbing is memory going up with
+		// no upper edge. `ViewChannel::Growths` carries the argument.
+		//
+		// @return The raise count.
+		uint64_t Growths() const;
+
 		// Views that had nothing new at the last `Compose`.
 		//
 		// @return The stale view count.

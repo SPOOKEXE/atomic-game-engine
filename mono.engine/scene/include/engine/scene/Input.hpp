@@ -304,6 +304,15 @@ namespace engine::scene {
 			const uint8_t bit = 1u << static_cast<uint8_t>(button);
 			return (Buttons & bit) != 0 && (PreviousButtons & bit) == 0;
 		}
+
+		// Whether a mouse button came up since the previous frame.
+		//
+		// @param button The button.
+		// @return `true` on the frame it was released.
+		bool WasButtonReleased(MouseButton button) const {
+			const uint8_t bit = 1u << static_cast<uint8_t>(button);
+			return (Buttons & bit) == 0 && (PreviousButtons & bit) != 0;
+		}
 	};
 
 	// The name a key is known by.

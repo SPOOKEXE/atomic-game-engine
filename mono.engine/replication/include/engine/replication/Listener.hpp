@@ -86,7 +86,12 @@ namespace engine::replication {
 		// @since v0.9
 		void SetClientPolicy(std::function<bool(ClientId, const assets::PublicKey &)> policy);
 
-		// Requires every client to prove an identity.
+		// Requires every client to prove an identity before it is replicated to.
+		//
+		// **Withholds world state; it does not refuse admission.** A claim
+		// arrives after the handshake, so there is nothing to check at the door
+		// — `Publish` is where this is enforced, and an unidentified peer holds
+		// a session that receives nothing until it identifies or times out.
 		//
 		// @param required Whether a claim is mandatory.
 		// @since v0.9

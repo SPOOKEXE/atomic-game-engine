@@ -416,10 +416,6 @@ namespace engine::ui {
 		return Pack(Current().Accent);
 	}
 
-	unsigned int SelectionColour() {
-		return Pack(Fade(Current().Accent, 0.42f));
-	}
-
 	unsigned int WarningColour() {
 		// WarningText.
 		return IM_COL32(255, 191, 77, 255);

@@ -1010,3 +1010,60 @@ TEST_CASE("a claim rides the reliable channel", "[replication][admission]") {
 		engine::net::ChannelKind::Reliable
 	);
 }
+
+// **The gate is on what a peer is given, not on whether it is let in.** A claim
+// arrives after the handshake — `SetIdentityCheck` fills `Peer::Identity` from a
+// message the client sends once the session exists — so there is nothing to
+// check at the door, and a version that refused in `Accept` would refuse
+// everybody. These two cases are the pair that says so: the same peer, admitted
+// the same way, and the only difference is whether the listener was told to
+// require a claim.
+namespace {
+	// Walks a stranger all the way to admitted, which is where both cases start.
+	void Admit(admission_test::Port &port, admission_test::Stranger &peer) {
+		peer.SayHello();
+		port.Server->Poll(0.0);
+		REQUIRE(peer.TakeCookie());
+
+		peer.SayAnswer();
+		port.Server->Poll(0.0);
+		REQUIRE(peer.TakeWelcome());
+		REQUIRE(port.Server->Count() == 1);
+	}
+
+	// Whether anything at all reached this end, framing unread.
+	bool Arrived(Transport &end) {
+		std::vector<std::byte> datagram;
+		return end.Receive(datagram).Status == TransportStatus::Ok;
+	}
+}
+
+TEST_CASE("an unidentified client is admitted and sent nothing", "[replication][admission]") {
+	admission_test::Port port(1);
+	port.Server->RequireClientIdentity(true);
+
+	admission_test::Stranger peer = port.Peer(0, 7);
+	Admit(port, peer);
+
+	// Admitted, and holding a session — the gate is not a refusal.
+	CHECK(port.Server->Count() == 1);
+	CHECK_FALSE(port.Server->IdentityOf(engine::replication::ClientId{0, 0}).has_value());
+
+	Store world("server");
+	port.Server->Publish(world, 1, 0.0);
+
+	// The join snapshot would be here if anything were being sent.
+	CHECK_FALSE(Arrived(*port.Transports[1]));
+}
+
+TEST_CASE("a listener that requires nothing sends the same peer its world", "[replication][admission]") {
+	admission_test::Port port(1);
+
+	admission_test::Stranger peer = port.Peer(0, 7);
+	Admit(port, peer);
+
+	Store world("server");
+	port.Server->Publish(world, 1, 0.0);
+
+	CHECK(Arrived(*port.Transports[1]));
+}

@@ -146,11 +146,6 @@ namespace engine::ui {
 	// @return The accent, in imgui's `IM_COL32` byte order.
 	unsigned int AccentColour();
 
-	// The colour a row uses when it is selected.
-	//
-	// @return The colour, in imgui's `IM_COL32` byte order.
-	unsigned int SelectionColour();
-
 	// The colour a warning or an unsaved marker uses.
 	//
 	// @return The colour, in imgui's `IM_COL32` byte order.
