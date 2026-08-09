@@ -124,7 +124,7 @@ namespace engine::scene {
 	ecs::ClassId AttachmentClass() {
 		// Through `PartClass` for `CameraClass`'s reason: one registration of the
 		// whole tree, whichever class a caller asks for first.
-		PartClass();
+		EnsureClassTree();
 		return ecs::Classes::Find(core::Name("Attachment"));
 	}
 }

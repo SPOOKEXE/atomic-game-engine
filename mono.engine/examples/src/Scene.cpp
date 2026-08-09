@@ -147,7 +147,7 @@ namespace engine::examples {
 		// The class trees a script names, and this module's own components for
 		// the C++ path. A script builds out of `Part`; nothing it touches is
 		// registered here.
-		scene::PartClass();
+		scene::EnsureClassTree();
 
 		// **Both trees, because there are two and a scene may use either.**
 		// `Interface.luau` is built entirely out of `ScreenGui` and `Frame` and

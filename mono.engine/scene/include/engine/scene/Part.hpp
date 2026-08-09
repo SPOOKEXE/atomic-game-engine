@@ -102,11 +102,25 @@ namespace engine::scene {
 	// @since v0.10
 	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target);
 
-	// The `Part` class id, registering the whole tree on first call.
+	// Registers the whole scene class tree, once per process.
 	//
-	// **Every other class accessor here goes through this one**, so a caller
-	// asking for `Material` or `Attachment` first still gets a fully registered
-	// tree — one registration whichever door it is entered by.
+	// **Every class accessor here calls this first**, so a caller asking for
+	// `Humanoid` or `Attachment` still gets a fully registered tree — one
+	// registration whichever door it is entered by.
+	//
+	// **Named rather than spelled `PartClass()`, which is what it used to be.**
+	// The call is made for its side effect and not for the id it returns, and
+	// asking for the *Part* class in order to look up a *Humanoid* reads as a
+	// claim about the hierarchy — which it is not. A humanoid derives from the
+	// instance root, not from a part. What every accessor shares is the
+	// registration, so that is what this is called.
+	//
+	// Nothing else registers these names: `ecs::Classes::RegisterInstanceRoot`
+	// declares `Instance` itself and stops there, so reaching the tree through
+	// it would look up a name nobody had registered and cache the miss.
+	void EnsureClassTree();
+
+	// The `Part` class id, registering the whole tree on first call.
 	//
 	// @return The class id.
 	ecs::ClassId PartClass();

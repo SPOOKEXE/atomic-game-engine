@@ -238,9 +238,11 @@ namespace engine::scene {
 	}
 
 	ecs::ClassId HumanoidClass() {
-		// Cached through `PartClass`, which is the shape every class accessor in
-		// this module shares; `Part.cpp` carries the argument for both halves.
-		static const ecs::ClassId humanoid = (PartClass(), ecs::Classes::Find(core::Name("Humanoid")));
+		// The shape every class accessor in this module shares; `Part.hpp`
+		// carries the argument for both halves. A humanoid derives from the
+		// instance root rather than from a part — what it shares with
+		// `PartClass` is the registration, which is why that is what is called.
+		static const ecs::ClassId humanoid = (EnsureClassTree(), ecs::Classes::Find(core::Name("Humanoid")));
 		return humanoid;
 	}
 }

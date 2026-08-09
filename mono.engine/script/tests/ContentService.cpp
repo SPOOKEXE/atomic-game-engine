@@ -44,7 +44,7 @@ namespace {
 	// compiler's spelling of the type and aborts the process when the real
 	// registration arrives.
 	Store Fresh(const char *name) {
-		(void)engine::scene::PartClass();
+		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
 		return Store(name);
 	}

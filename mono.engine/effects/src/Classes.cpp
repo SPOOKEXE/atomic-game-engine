@@ -179,7 +179,7 @@ namespace engine::effects {
 
 			// The class tree these hang off. `scene` owns `Instance`, and a second
 			// root would be a tree scripts cannot walk.
-			scene::PartClass();
+			scene::EnsureClassTree();
 			const ecs::ClassId instance = ecs::Classes::RegisterInstanceRoot();
 
 			// The member lists, registered once so a script setting one is checked

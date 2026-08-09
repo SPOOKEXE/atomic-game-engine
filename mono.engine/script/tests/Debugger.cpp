@@ -43,7 +43,7 @@ return third
 
 TEST_CASE("a breakpoint reports the line it was set on", "[debugger]") {
 	Store store("debug_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 	engine::script::RegisterScriptComponents();
 	store.SetResource(engine::script::SourceCache{});
 	store.ResourceMutable<engine::script::SourceCache>()->Set(Name("probe.luau"), PROGRAM);

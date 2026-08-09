@@ -139,7 +139,7 @@ namespace surface_bench {
 			return scene;
 		}
 
-		(void)engine::scene::PartClass();
+		engine::scene::EnsureClassTree();
 
 		if (scene.World != nullptr) {
 			scene.Changes.Detach(*scene.World);
@@ -338,7 +338,7 @@ BENCH("Task · 1000 waits scheduled and resumed", 200) {
 // change mark — is this engine's.
 
 BENCH("Luau · 10000 property writes", 20) {
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	for (int pass = 0; pass < 20; pass++) {
 		Store store("bench.script");
@@ -355,7 +355,7 @@ BENCH("Luau · 10000 property writes", 20) {
 }
 
 BENCH("Luau · 10000 property reads", 20) {
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	for (int pass = 0; pass < 20; pass++) {
 		Store store("bench.script");
