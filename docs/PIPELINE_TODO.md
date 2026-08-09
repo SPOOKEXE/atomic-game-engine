@@ -23,6 +23,7 @@ should leave the in-progress item marked with what compiles and what does not.
 | 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
 | 8 | Readbacks — viewer image, histograms, overdraw | **done.** Histograms, the download policy, the non-stalling device path, the `viewer` node, the `overdraw` counter, and `Renderer::SetPipeline` so a pipeline with either in it can run |
 | 9 | Entity flow, cameras, per-camera pipelines, custom shaders | **working.** `Entities` and `Camera` resources, `world`/`camera`/`light-camera` sources, per-camera pipelines, node parameters editable on the canvas, graph-allocated targets, `raster`/`dispatch` running named shaders, and a camera range per wired list |
+| 10 | The passes behind the kinds | **most.** `NodeKindSpec::DefaultShader` makes a catalogue kind a working pass; `ssao`, `blur`, `sharpen` and `grade` ship shaders and need no configuration, and `gbuffer` writes three targets. What is left is fullscreen passes over the G-buffer — a `.frag` and a row each |
 
 ---
 
@@ -447,19 +448,22 @@ blocked: no amount of work here moves it.
       draw to a node. That is the *readable capture* half of §7; the *numbers*
       half needs an API that does not exist.
 
-- [ ] `ProfilePass::Elapsed` stays zero and the panel keeps saying **not
-      measured**, which is the honest state. **Do not fill it with CPU time.** A
-      submit-side number in a field labelled as the pass's cost is worse than a
-      blank: somebody reads "0.4 ms" for the shadow pass, believes the GPU said
-      it, and spends an afternoon optimising the wrong thing.
+**`ProfilePass::Elapsed` stays zero, and that is `D00103` rather than an open
+box here.** SDL 3.2.31 — what `mono.vendor/sdl` is pinned to — has no timestamp
+query, no query pool and no `SDL_GPUQuery`, verified in the header and in the
+Vulkan backend rather than assumed. There is no call to make, so no amount of
+work in this repository moves it and a checkbox would only invite an attempt
+that cannot succeed.
 
-- [ ] What would actually unblock it, in the order worth trying: an SDL release
-      that adds timestamp queries; or a backend-specific path behind
-      `Renderer::Backend()`, which already hands out the `SDL_GPUDevice` — Vulkan
-      has `vkCmdWriteTimestamp` and a query pool, and D3D12 has
-      `ID3D12GraphicsCommandList::EndQuery`. That second one is a real option and
-      a real cost: it is per-backend code in a module whose whole point is not
-      being per-backend.
+**Do not fill it with CPU time.** A submit-side number in a field labelled as
+the pass's cost is worse than a blank: somebody reads "0.4 ms" for the shadow
+pass, believes the GPU said it, and spends an afternoon optimising the wrong
+thing.
+
+The two ways out are an upstream SDL release, or repointing the submodule at a
+fork this project maintains — the second being an infrastructure decision with a
+rebase burden forever, which is why it is recorded with its trigger rather than
+attempted.
 
 ### Stage 9 — the entity flow: what a pass draws, as a wire
 
@@ -998,11 +1002,355 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       nowhere in the other run. Checked three runs each side, before and after,
       identical.
 
-- [ ] **Node parameters.** `cull-distance` has no radius and `filter-tag` no
-      mask, because the document format has no word for a node parameter yet.
-      Both read their unset value as *keep everything*, so an unconfigured node
-      is a no-op rather than a black frame — which is the right default and not
-      a substitute for the feature.
+- [x] **Node parameters**, which the document format grew a word for this
+      version. `EditKind::Set` records one, `Node::Number` and `Node::Integer`
+      read them, and `cull-distance` and `filter-tag` take `radius` and `mask`
+      — the parameter being the difference between a kind and a node, since two
+      `filter-tag` nodes are the same kind filtering different tags.
+
+      Unset still takes the value that makes the node a no-op, so one somebody
+      dropped in and has not configured is a pass-through rather than a black
+      frame. **`strtof` and not `stof`** for the same reason: a half-typed
+      number in an editor is a state somebody is passing through.
+
+### Stage 10 — the passes behind the kinds
+
+**A catalogue entry with nothing behind it is a word.** Stage 2 filled the
+catalogue with 59 kinds; the executor can run six of them plus the flow, and the
+rest are boxes somebody can drop on a canvas that refuse the pipeline. Closing
+that is not 53 handlers — most of those kinds are a fullscreen shader, and the
+engine already runs one of those for `raster`.
+
+- [x] **`NodeKindSpec::DefaultShader`, and `ssao` as the first user.** A kind
+      that is a fullscreen effect names the shader the engine ships for it;
+      `ShaderOf` falls back to it when a node names none, so **an `ssao` node
+      with no parameters at all works**. A node naming its own shader still
+      wins, so a default is a starting point rather than a fixed pass.
+
+      **`raster` deliberately has none**, because a `raster` node *is* somebody's
+      shader — a default there would be a kind pretending to be an effect.
+
+      **One handler for all of them.** They differ in exactly one way, which is
+      the shader, and that is what the catalogue now carries — a handler apiece
+      would be a line of plumbing repeated per effect.
+
+      **`render` registers the catalogue now**, which it did not before: the
+      handlers are registered by asking which kinds ship a shader, and the
+      question is unanswerable against an empty catalogue. The first attempt
+      refused with `nothing can submit a 'ssao' node` — which is
+      `PassTable::Missing` doing exactly its job.
+
+      `ssao.frag` reconstructs the slope from **depth alone**, because normals
+      mean a G-buffer and that pass is not built. It is a real occlusion term
+      rather than a placeholder: it gets better when normals arrive rather than
+      being replaced. Samples spiral and are rotated by a hash of the pixel, so
+      what a flat surface shows is noise a depth-aware blur can remove rather
+      than a grid it cannot.
+
+- [x] **`blur`, `sharpen` and `grade` ship too**, and each was exactly a `.frag`
+      and one field on a catalogue row — no engine code at all, which is what
+      `DefaultShader` was for.
+
+      Verified on a device as a chain: `blur -> sharpen -> grade`, three nodes
+      wired in sequence, **none configured**, each finding its own shader.
+
+      Each is a real implementation with a decision in it rather than a
+      placeholder:
+
+      - **`blur` is a thirteen-tap cross, not a 13x13 kernel.** A true 2D
+        gaussian at this radius is 169 samples; separating it is the usual
+        answer and costs a second target and a second node. The cross's error
+        shows only on high-frequency detail that is about to be blurred away.
+      - **`sharpen` scales by local contrast.** A fixed unsharp mask sharpens
+        flat areas as hard as edges, which turns noise into crawling grain — and
+        a temporal resolve is exactly what this follows.
+      - **`grade` does vignette and grain in one pass**, because each alone is a
+        full-screen read. Vignette is measured in square space so a wide window
+        darkens its corners rather than its sides; grain moves luminance rather
+        than each channel, because per-channel noise is coloured speckle.
+
+- [x] **The rest of the fullscreen effects**: `bloom`, `dof`, `motion-blur`,
+      `ssr`, `tonemap`, the SMAA three — and `depth-linearise`,
+      `depth-discontinuity`, `mix` and `blit` besides. Same shape, a `.frag` and
+      a row. `bloom` and `dof` were expected to need a downsample chain and
+      therefore more than one target each; both ship as a single pass instead,
+      with the comment saying what the chain would buy — `reduce-chain` and
+      `upscale` are in the catalogue for a chain that wants it, and a node
+      dropped in with no configuration produces the effect rather than nothing.
+
+- [x] **`gbuffer` — the one that is not a fullscreen shader.** Three colour
+      targets, a pipeline of its own, and `gbuffer.frag`. Verified on a device
+      writing albedo, normals and material with 20, 108 and 39 opaque instances
+      across three views, every target allocated from the graph.
+
+      **Depth is stored, unlike the forward pass's.** Every consumer of a
+      G-buffer reads depth — that is how a fullscreen pass knows where a pixel
+      is — so discarding it would make the whole arrangement pointless. The
+      forward pass discards it because nothing reads it afterwards; that
+      difference is the reason the two cannot share a target description.
+
+      **Normals in `RGB10A2`, not `RGBA16F`.** §1.5 fault 6 is a captured frame
+      that used four times the bits for exactly this, and ten bits an axis is
+      past what a normal read back through a sampler carries.
+
+      **The alpha of the normal target is a material tag**, which is what the
+      captured frame does — glass and window share a value, concrete another.
+      The fourth channel exists whether used or not.
+
+      **The opaque head only.** A deferred pass cannot blend, because one pixel
+      holds one surface's properties, so blended geometry stays in the forward
+      tail — which the opaque/blended split already produces.
+
+      **A node declaring fewer targets than the shader writes is refused.** A
+      pipeline built for three and given two is a validation failure on some
+      backends and silent garbage on others; the warning names how many of each.
+
+- [x] **`deferred-lighting`, the pass the G-buffer was for.** A fullscreen shade
+      over albedo, normal and material, shipped as a `DefaultShader` like
+      `blur` and `sharpen`. A pixel no geometry covered has a zero-length
+      normal and is left transparent rather than lit as if it faced the camera.
+
+- [x] **The link that made a saved pipeline actually draw.** Every other part
+      of this chain was already built — the catalogue names the kinds, the
+      document records the edits, the panel edits them, `PipelineSet` saves them
+      into the world, `Renderer::SetPipeline` takes a compiled graph, and
+      `Renderer::Render` already picked per view by `View::Pipeline`. Nothing
+      joined the world to the renderer, so **"Save to world" wrote a document
+      that was stored faithfully and never drew a pixel.**
+
+      `client::InstallWorldPipelines` is that join, beside
+      `CollectSurfaceViews` and for its reason: a `PipelineSet` lives on a store
+      and `render` is L12, which does not know what a store is.
+
+      **The installed key is qualified by the world**, because pipelines are
+      global to the renderer by name and two worlds both calling theirs `main`
+      is ordinary rather than a mistake — and with `--viewport2` open both
+      render in one frame, so an unqualified key would mean whichever world
+      installed last drew both.
+
+      **Installed on a world change, not per frame**, because `SetPipeline`
+      compiles and reports what it dislikes; per frame that is a compile per
+      pipeline per frame and sixty complaints a second about a half-wired one.
+      Saving drops the entry, which is what makes a save visible in the
+      viewport.
+
+      **Verified by what ran rather than by the hash**, which is the §1.5
+      lesson again. Saving `StandardDocument` into the world reproduced the
+      golden image exactly and selected `main#0`; saving it with `transparent`
+      disabled dropped `transparent` from the executed set — and left the image
+      byte-identical, because this scene has no transparent geometry. **The
+      pixels could not tell those two apart and the node list could.**
+
+      Two refusals along the way were the graph being right rather than wrong:
+      disabling `opaque` leaves `transparent` reading a `colour` nothing writes,
+      and disabling `shadow` does the same to `surface`. Both are reported
+      against the node that reads, which is where the fault is visible.
+
+      **`overlay` still runs with `overlay` disabled, and that is correct.** The
+      frame's final block always comes from the default graph — a window has one
+      overlay however many cameras drew into it — so a per-camera pipeline
+      cannot switch it off. `Renderer.cpp` says so where `NamedPipeline` is
+      declared.
+
+      Not covered by a test, and deliberately: `SetPipeline` needs a GPU device,
+      so a headless test of this path can only watch every install fail. The
+      device probe above is what stands in for it.
+
+- [x] **Every remaining fullscreen kind ships a shader.** `tonemap`, `bloom`,
+      `dof`, `ssr`, `motion-blur`, the SMAA three, `depth-linearise`,
+      `depth-discontinuity`, `mix` and `blit` — a `.frag` and a `DefaultShader`
+      row each, the shape `blur` and `sharpen` took. Seventeen kinds now run
+      from a node with no configuration at all.
+
+      **`ssao` samples the normal it always declared.** The first version
+      reconstructed slope from depth because there was no normal buffer; it said
+      it would get better rather than different when one arrived, and this is
+      that. The hemisphere test is what the normal buys — occlusion is what
+      blocks light *arriving at a surface*, so only samples on the lit side
+      count, and a depth-only version cannot tell which side that is.
+
+      That also closed a latent fault. The catalogue declares both of `ssao`'s
+      inputs required, the renderer binds every declared read in order, and the
+      pipeline is built for however many were bound — so a node wiring the
+      normal it was told to wire handed a two-sampler pipeline to a one-sampler
+      shader. `deferred-lighting` had the same gap at three against four.
+
+- [x] **Raster passes get a uniform block, which was the ceiling on all of the
+      above.** They had none. A pass that samples an image and writes another
+      needs nothing; a pass that has to *interpret* what it sampled needs the
+      view. Linearising depth needs the near and far planes, marching a
+      reflection needs the projection, sampling a neighbour needs the texel
+      size — so `depth-linearise`, `ssr`, `dof` and SMAA could not be written
+      correctly, only approximated.
+
+      **One block for every raster pass rather than one per kind**, so a shader
+      an author writes gets the same slot with the same layout as a shipped one.
+      A per-kind block would mean a custom `raster` node could not be told the
+      resolution without the renderer knowing what the node was for, which is
+      the coupling `raster` exists to avoid.
+
+      **A shader that does not declare it is not penalised** — verified on a
+      device, not assumed. `tint.frag` predates the block, the pipeline reserves
+      the slot regardless, and the pass runs unchanged. That is what keeps every
+      shader authored before this from breaking.
+
+- [x] **The renderer resolved every custom pipeline against the wrong graph.**
+      A `RunContext` carries node and resource *ids*, and an id is a position in
+      the graph that issued it. `Renderer` looked them up in the standard
+      frame's graph while running a view's own pipeline.
+
+      **Nothing failed loudly, which is why it survived.** A custom `raster`
+      node came back with no parameters, so every authored shader became "no
+      shader set, so it draws nothing"; and a node writing `colour` resolved to
+      a different resource, so a post pass wrote into a texture nothing
+      presented. Both read as a pass that never ran — and a pipeline that
+      installed cleanly, compiled, and reported no fault still drew nothing.
+
+      Found by disbelieving a green result: twelve shaders had been declared
+      verified because their passes ran and logged no error, and the errors were
+      `ENGINE_WARN` at a level the default run suppresses. **Running the same
+      battery with `--verbose` turned twelve passes into twelve
+      `has no shader set`.**
+
+      Fixed with `Impl::Running`, set for the length of a view's block and
+      cleared after — the frame's own block is always the standard graph's.
+      `tests/RenderGraph.cpp` anchors the property underneath it, since the code
+      itself needs a device: the same id names a different node in a different
+      graph, so crossing them finds something rather than nothing.
+
+- [x] **The pipeline has an exit, and until now it had none.** `output` was
+      registered as a no-op that recorded the pass and returned — and the
+      catalogue scoped it `Frame`, so an `output` node in an authored pipeline
+      could never run at all: the frame's own block is always the *standard*
+      graph's.
+
+      `View` scope now, and it blits its wired image into the view's picture.
+      **Which is what makes the composite kinds worth having.** Every one of
+      them writes a target the graph allocated, so a chain of tonemap into bloom
+      into SMAA ran correctly and landed in a texture the frame does not show —
+      produced, then dropped on the floor.
+
+      **A blit rather than a copy**, so a chain working at half resolution lands
+      stretched rather than in a corner; and a pipeline whose last pass already
+      wrote `colour` costs nothing, since blitting a texture onto itself is
+      undefined rather than merely wasteful.
+
+      **Verified as an A/B on the presented image**, which is the one thing a
+      pass-ran probe cannot fake. A chain ending in a constant-magenta pass with
+      an `output` node captured `(255, 0, 255)` and a hash off the golden; the
+      identical chain with the `output` node removed captured byte-identical to
+      the golden.
+
+- [x] **`assets::MaterialData` carries the four maps.** `ROADMAP.md` v0.10 said
+      they arrive "when there is a pass that samples them, which is v0.11's
+      G-buffer" — that pass exists, so `NormalMap`, `RoughnessMap`,
+      `OcclusionMap` and `HeightMap` are named, `.mat` gained the four keys, and
+      `assetc` resolves all five through the one `BakedName` rule rather than
+      five copies of it.
+
+      **Format version 2, and version 1 still reads.** A version 1 file is a
+      colour map and nothing else, which is exactly this material with four
+      empty names — so the old format is read by not reading them rather than by
+      a second parser. The maps are written even when empty, which is what keeps
+      a truncated file distinguishable from an untextured one. Both are tested;
+      the version-1 path is mutation-verified.
+
+      **Names rather than packed channels.** Roughness, occlusion and height are
+      single-channel and could share one RGB texture, but ambientCG, Poly Haven
+      and cgbookcase publish them separately — packing would be a bake step that
+      has to run before anything can be looked at, and a mismatch between packed
+      and unpacked would be invisible until it rendered. That decision can be
+      made later without changing what a material *is*.
+
+- [x] **The maps are sampled, end to end.** `MaterialMaps` replaced the
+      catalogue's single name, `SurfaceAppearance` carries four, the codec
+      writes them the day they were added rather than a release later,
+      `ResolveMaterials` writes all five together and clears all five together,
+      `CollectWantedTextures` demands them, `DrawInstance` carries the three the
+      draw path reads, and `DrawSlots` binds them as slots 3 to 5 for the
+      G-buffer alone. `scripts/fetch-materials.py` names every map it fetched,
+      so the 291 seeded materials stop being colour-only on the next run.
+
+      **Every sampled map ends a batching run.** Two instances of one mesh with
+      one sheet and different normal maps would otherwise draw with whichever
+      came first — which reads as the normal map being wrong rather than the run
+      being too long.
+
+      **Flags rather than testing the texel**, because an absent map binds the
+      engine's default white sheet and white is a legitimate roughness of 1.
+      Nothing in the image distinguishes "no map" from "a map that says one", so
+      `LightingUniforms::Maps` says which.
+
+      **Normals are perturbed from a screen-space basis**, since this vertex
+      format carries no tangent. Deriving one from the derivatives of position
+      and UV is exact wherever the UVs are not degenerate; a collapsed UV island
+      falls back to the geometric normal, which is what it would have had.
+
+      `HeightMap` is carried on the component and not on the instance: nothing
+      samples it, parallax needs a loop this pass does not have, and a field the
+      draw path never reads is bytes moved per instance per frame. It is named
+      so a material round-trips whole rather than losing a map on every save.
+
+- [x] **And the G-buffer's albedo was the shadow map until this change.**
+      `DrawSlots` binds shadow, surface and colour at slots 0 to 2;
+      `gbuffer.frag` declared one sampler at slot 0 and its pipeline was built
+      for one. So the pass wrote three targets, reported three targets, and put
+      the shadow atlas in albedo.
+
+      **The earlier probe checked that three targets were written and never what
+      was in them** — the same mistake in a new place, one turn after writing
+      down that a pass running is not evidence it drew.
+
+      Caught by rendering each G-buffer target to the screen through the new
+      `output` node and measuring it. Albedo now covers the same pixels as the
+      other two at mean `(182, 154, 147)` and 38% greyscale — a depth atlas
+      would be 100%. Normals are 0% greyscale, as packed world vectors are.
+      Material is exactly `(255, 0, 255)`: roughness 1, metalness 0, occlusion
+      1, which is right for a scene whose materials name neither map.
+
+- [x] **Emissive, built and verified against content authored for it.** A sixth
+      name on `MaterialData` (format version 3, with 2 and 1 still reading), an
+      `emissive` key in `.mat`, a channel in the material target and a term in
+      `deferred-lighting`.
+
+      **The strength lives in the material target's alpha and the hue comes from
+      the albedo beside it.** Storing emitted colour properly wants three more
+      channels, and a fourth G-buffer target costs bandwidth on every pixel of
+      every frame to carry something almost nothing in a scene uses. A screen, a
+      sign and a lamp filament all glow the colour they already are.
+
+      **Added after shading and not scaled by the light**, which is the whole
+      point of the term: a sign is as bright at midnight as at noon.
+
+      **`fetch-materials.py` deliberately has no emissive entry.** The three CC0
+      sources publish one for almost nothing — what glows is a decision about an
+      object rather than a property of a substance — so a fetcher looking for one
+      would scan every archive for a file that is never there. A material with
+      one names it by hand and `assetc` reads the key either way.
+
+      Verified by painting a one-texel white emissive map onto 29 appearances and
+      rendering the G-buffer through `output`: the material target's hash moves
+      while its RGB does not, because the strength is in alpha, and the lit image
+      goes from mean `(119, 102, 106)` to `(238, 220, 203)` — which is
+      `lit += albedo * emission` at full strength.
+
+      **Occlusion multiplies the ambient only**, added in the same pass. Ambient
+      occlusion describes how much sky a point can see; applying it to the sun as
+      well darkens surfaces the sun directly hits, which is the mistake that makes
+      an occlusion pass read as dirt.
+
+- [x] **A crash and a near-miss, both worth recording.** Moving the G-buffer to
+      seven samplers left `SDL_BindGPUFragmentSamplers` binding six, because the
+      formatter had reflowed the lines my edit was matching against and the patch
+      silently applied to nothing. **Binding fewer than a pipeline declares is not
+      a blank sampler — it is a segfault inside the driver's descriptor binding**,
+      which is what it did on the first frame that drew a G-buffer.
+
+      The near-miss beside it: an absent map bound `Textures.Default()` with no
+      `FallbackTexture` behind it. The default sheet is uploaded content and is
+      null until it arrives, so that is the same crash on a different frame. The
+      three long-standing bindings have guarded it since they were written; the
+      four new ones had not.
 
 ### Stage 8 — readbacks (D00047)
 

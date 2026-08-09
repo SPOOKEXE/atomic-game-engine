@@ -202,6 +202,11 @@ namespace engine::graph {
 			// — the four that set it are the four that legitimately have no
 			// inputs.
 			bool Source = false;
+
+			// The shader the engine ships for this kind, if it is a fullscreen
+			// effect with one correct implementation. See
+			// `NodeKindSpec::DefaultShader`.
+			const char *Shader = "";
 		};
 
 		// Shorthands, so a row fits on a line and the table reads as a table.
@@ -278,7 +283,10 @@ namespace engine::graph {
 			  {"normal", K::Colour, LDR, true, "World normals. Ten bits an axis is enough."},
 			  {"material", K::Colour, RGBA8, true, "Roughness, metalness, and material tags."},
 			  {"depth", K::Depth, D24, true, "Scene depth."}},
-			 "The deferred split of the opaque pass: surface properties, not light."},
+			 "The deferred split of the opaque pass: surface properties, not light. "
+			 "**Built** — three targets, and the engine ships the shader. Declare "
+			 "albedo, normal and material in that order; a node declaring fewer is "
+			 "refused rather than drawn short."},
 
 			{"velocity",
 			 "Velocity",
@@ -334,7 +342,9 @@ namespace engine::graph {
 			 {{"depth", K::Texture, D24, true, "Hardware depth."}},
 			 {{"linear", K::Colour, R32, true, "Linear view-space depth."}},
 			 "Hardware depth to linear float. Cheap as a blit; expensive as a "
-			 "full-screen triangle, which is how most engines do it."},
+			 "full-screen triangle, which is how most engines do it.",
+			 false,
+			 "depth-linearise.frag"},
 
 			{"hzb",
 			 "Hierarchical Z",
@@ -351,7 +361,9 @@ namespace engine::graph {
 			 {{"depth", K::Texture, R32, true, "Linear depth."}},
 			 {{"edges", K::Colour, RGBA16, true, "Min, max and edge strength per 2x2."}},
 			 "Where depth jumps, packed per 2x2. What light culling and upscaling "
-			 "both want and neither should recompute."},
+			 "both want and neither should recompute.",
+			 false,
+			 "depth-discontinuity.frag"},
 
 			// --- lighting -------------------------------------------------------
 			{"light-bounds",
@@ -376,7 +388,9 @@ namespace engine::graph {
 			  {"shadow", K::Texture, D32, false, "The shadow atlas."}},
 			 {{"colour", K::Colour, RGBA16, true, "The lit frame."}},
 			 "Shades the G-buffer. One pass over the screen, however much geometry "
-			 "went into it."},
+			 "went into it.",
+			 false,
+			 "deferred-lighting.frag"},
 
 			{"shadow-project",
 			 "Shadow projection",
@@ -396,7 +410,10 @@ namespace engine::graph {
 			  {"normal", K::Texture, LDR, true, "World normals."}},
 			 {{"occlusion", K::Colour, F::R8, true, "How shut in each pixel is."}},
 			 "Screen-space ambient occlusion. Noisy by nature; wants a depth-aware "
-			 "blur after it."},
+			 "blur after it. **The engine ships the shader** — drop the node and "
+			 "it works; name your own and yours wins.",
+			 false,
+			 "ssao.frag"},
 
 			{"ssr",
 			 "Screen-space reflections",
@@ -408,7 +425,9 @@ namespace engine::graph {
 			  {"hzb", K::Texture, R32, false, "To march the ray cheaply."}},
 			 {{"reflection", K::Colour, RGBA16, true, "Reflected colour and confidence."}},
 			 "Marches rays through the depth buffer. Should cost less than tracing "
-			 "the real geometry, and often does not."},
+			 "the real geometry, and often does not.",
+			 false,
+			 "ssr.frag"},
 
 			{"raytrace",
 			 "Ray trace",
@@ -452,7 +471,9 @@ namespace engine::graph {
 			  {"b", K::Texture, RGBA16, true, "The top image."},
 			  {"factor", K::Texture, F::R8, false, "Per-pixel blend, if any."}},
 			 {{"colour", K::Colour, RGBA16, true, "The blend."}},
-			 "Two images and a blend mode. The most-used node in any compositor."},
+			 "Two images and a blend mode. The most-used node in any compositor.",
+			 false,
+			 "mix.frag"},
 
 			{"blur",
 			 "Blur",
@@ -461,7 +482,9 @@ namespace engine::graph {
 			 {{"source", K::Texture, RGBA16, true, "What to blur."},
 			  {"depth", K::Texture, R32, false, "For a depth-aware blur."}},
 			 {{"colour", K::Colour, RGBA16, true, "The blurred image."}},
-			 "Gaussian, box or directional. Depth-aware when given a depth input."},
+			 "Gaussian, box or directional. Depth-aware when given a depth input.",
+			 false,
+			 "blur.frag"},
 
 			{"bloom",
 			 "Bloom",
@@ -470,7 +493,9 @@ namespace engine::graph {
 			 {{"source", K::Texture, RGBA16, true, "The lit frame."}},
 			 {{"bloom", K::Colour, HDR, true, "The bright parts, spread."}},
 			 "Downsample, blur, upsample. Reuses its own chain, so it is one node "
-			 "rather than a dozen."},
+			 "rather than a dozen.",
+			 false,
+			 "bloom.frag"},
 
 			{"dof",
 			 "Depth of field",
@@ -479,7 +504,9 @@ namespace engine::graph {
 			 {{"colour", K::Texture, RGBA16, true, "The frame."},
 			  {"depth", K::Texture, R32, true, "To decide the circle of confusion."}},
 			 {{"colour", K::Colour, RGBA16, true, "Near and far blurred, composited."}},
-			 "Near and far fields at half resolution, composited back."},
+			 "Near and far fields at half resolution, composited back.",
+			 false,
+			 "dof.frag"},
 
 			{"motion-blur",
 			 "Motion blur",
@@ -488,7 +515,9 @@ namespace engine::graph {
 			 {{"colour", K::Texture, RGBA16, true, "The frame."},
 			  {"velocity", K::Texture, RG16, true, "Screen motion."}},
 			 {{"colour", K::Colour, RGBA16, true, "Smeared along motion."}},
-			 "Smears each pixel along its velocity."},
+			 "Smears each pixel along its velocity.",
+			 false,
+			 "motion-blur.frag"},
 
 			{"exposure",
 			 "Exposure",
@@ -509,7 +538,9 @@ namespace engine::graph {
 			  {"lut", K::Texture, RGBA8, false, "A colour grade."}},
 			 {{"colour", K::Colour, LDR, true, "Display range."}},
 			 "HDR to display, with bloom and grading folded in so the frame is read "
-			 "once."},
+			 "once.",
+			 false,
+			 "tonemap.frag"},
 
 			{"taa",
 			 "Temporal AA",
@@ -530,7 +561,9 @@ namespace engine::graph {
 			 {{"colour", K::Texture, LDR, true, "The tone-mapped frame."}},
 			 {{"edges", K::Colour, F::RG8, true, "A two-channel edge mask."}},
 			 "First of three. Writes the stencil so the blend pass can skip "
-			 "everything it did not touch."},
+			 "everything it did not touch.",
+			 false,
+			 "smaa-edges.frag"},
 
 			{"smaa-blend",
 			 "SMAA blend",
@@ -538,7 +571,9 @@ namespace engine::graph {
 			 S::View,
 			 {{"edges", K::Texture, F::RG8, true, "The edge mask."}},
 			 {{"weights", K::Colour, RGBA8, true, "Blending weights."}},
-			 "Second of three."},
+			 "Second of three.",
+			 false,
+			 "smaa-blend.frag"},
 
 			{"smaa-resolve",
 			 "SMAA resolve",
@@ -547,7 +582,9 @@ namespace engine::graph {
 			 {{"colour", K::Texture, LDR, true, "The tone-mapped frame."},
 			  {"weights", K::Texture, RGBA8, true, "Blending weights."}},
 			 {{"colour", K::Colour, LDR, true, "Edge-smoothed."}},
-			 "Third of three."},
+			 "Third of three.",
+			 false,
+			 "smaa-resolve.frag"},
 
 			{"sharpen",
 			 "Sharpen",
@@ -556,7 +593,9 @@ namespace engine::graph {
 			 {{"colour", K::Texture, LDR, true, "The frame."}},
 			 {{"colour", K::Colour, LDR, true, "Sharpened."}},
 			 "Contrast-adaptive sharpening, to claw back what a temporal resolve "
-			 "blurred."},
+			 "blurred.",
+			 false,
+			 "sharpen.frag"},
 
 			{"grade",
 			 "Grade",
@@ -566,7 +605,9 @@ namespace engine::graph {
 			  {"lut", K::Texture, RGBA8, false, "A lookup table."}},
 			 {{"colour", K::Colour, LDR, true, "Graded."}},
 			 "Vignette, grain, chromatic aberration and a LUT. One pass, because "
-			 "each of them alone is a full-screen read."},
+			 "each of them alone is a full-screen read.",
+			 false,
+			 "grade.frag"},
 
 			{"separate",
 			 "Separate channels",
@@ -628,7 +669,9 @@ namespace engine::graph {
 			 {{"source", K::Texture, RGBA16, true, "What to copy."}},
 			 {{"colour", K::Colour, RGBA16, true, "The copy."}},
 			 "A straight copy. Its own kind so that a copy done as a full-screen "
-			 "triangle shows up as the mistake it is."},
+			 "triangle shows up as the mistake it is.",
+			 false,
+			 "blit.frag"},
 
 			{"clear",
 			 "Clear",
@@ -799,12 +842,15 @@ namespace engine::graph {
 			{"output",
 			 "Output",
 			 C::Output,
-			 S::Frame,
+			 S::View,
 			 {{"colour", K::Texture, LDR, true, "The image this pipeline produced."}},
 			 {},
 			 "The end of the pipeline: the image it produced, handed back. A "
 			 "graph with no output node draws into targets nobody collects, which "
-			 "is a pipeline that runs and produces nothing.",
+			 "is a pipeline that runs and produces nothing. **Per view, not per "
+			 "frame** — a camera's pipeline ends in that camera's picture, and a "
+			 "frame-scoped output could not be reached by an authored pipeline at "
+			 "all, because the frame's own block is always the standard graph's.",
 			 false},
 
 			{"overdraw",
@@ -846,6 +892,7 @@ namespace engine::graph {
 			spec.Category = row.Category;
 			spec.Scope = row.Scope;
 			spec.Source = row.Source;
+			spec.DefaultShader = row.Shader;
 
 			const auto fill = [](const std::vector<Port> &from, std::vector<PortSpec> &into) {
 				for (const Port &port : from) {

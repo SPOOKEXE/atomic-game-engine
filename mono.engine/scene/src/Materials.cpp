@@ -9,12 +9,12 @@
 
 namespace engine::scene {
 
-	core::Name MaterialCatalogue::Find(const core::Name &material) const {
+	MaterialMaps MaterialCatalogue::Find(const core::Name &material) const {
 		if (!material.IsValid()) {
 			return {};
 		}
 		const auto found = ColourMaps.find(material.Id());
-		return found == ColourMaps.end() ? core::Name{} : found->second;
+		return found == ColourMaps.end() ? MaterialMaps{} : found->second;
 	}
 
 	MaterialCatalogue &MaterialsOf(ecs::Store &store) {
@@ -24,7 +24,7 @@ namespace engine::scene {
 		return *store.ResourceMutable<MaterialCatalogue>();
 	}
 
-	bool RecordMaterial(ecs::Store &store, const core::Name &material, const core::Name &colour) {
+	bool RecordMaterial(ecs::Store &store, const core::Name &material, const MaterialMaps &maps) {
 		if (!material.IsValid()) {
 			return false;
 		}
@@ -34,16 +34,16 @@ namespace engine::scene {
 		// both mean the same thing to a caller — there is nothing here to sample
 		// — and a separate "known to have no texture" state would be a
 		// distinction nothing can act on.
-		MaterialsOf(store).ColourMaps[material.Id()] = colour;
+		MaterialsOf(store).ColourMaps[material.Id()] = maps;
 		return true;
 	}
 
-	core::Name ColourMapOf(const ecs::Store &store, const core::Name &material) {
+	MaterialMaps ColourMapOf(const ecs::Store &store, const core::Name &material) {
 		// **Never creates the resource**, unlike `MaterialsOf`. This is what the
 		// resolve pass calls, and a read that mutated the world would put a
 		// structural change inside iteration.
 		const MaterialCatalogue *catalogue = store.Resource<MaterialCatalogue>();
-		return catalogue == nullptr ? core::Name{} : catalogue->Find(material);
+		return catalogue == nullptr ? MaterialMaps{} : catalogue->Find(material);
 	}
 
 	size_t ResolveMaterials(ecs::Store &store) {
@@ -85,7 +85,16 @@ namespace engine::scene {
 			// last pointed at. That is the case `MaterialRef::Asset` calls the
 			// honest default, and a pass that skipped it would make "None" mean
 			// "keep the previous one".
-			appearance->ColourMap = ColourMapOf(store, material.Asset);
+			// **All five together**, because a part half-updated from a material
+			// is worse than one not updated at all: it would draw this
+			// material's colour with the last one's normals.
+			const MaterialMaps maps = ColourMapOf(store, material.Asset);
+			appearance->ColourMap = maps.Colour;
+			appearance->NormalMap = maps.Normal;
+			appearance->RoughnessMap = maps.Roughness;
+			appearance->OcclusionMap = maps.Occlusion;
+			appearance->HeightMap = maps.Height;
+			appearance->EmissiveMap = maps.Emissive;
 			written.push_back(parent);
 			resolved++;
 		});
@@ -127,7 +136,15 @@ namespace engine::scene {
 			// that no longer draws. All three are misses rather than special
 			// cases.
 			if (SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(previous)) {
+				// Every map, for the reason the write above gives: clearing the
+				// colour and leaving the normals would draw the part untextured
+				// but still bumpy.
 				appearance->ColourMap = core::Name{};
+				appearance->NormalMap = core::Name{};
+				appearance->RoughnessMap = core::Name{};
+				appearance->OcclusionMap = core::Name{};
+				appearance->HeightMap = core::Name{};
+				appearance->EmissiveMap = core::Name{};
 			}
 		}
 

@@ -248,6 +248,13 @@ namespace studio {
 				store.ResourceMutable<engine::graph::PipelineSet>()->Set(Name("main"), document);
 			});
 			RenderPipelineDirty = false;
+
+			// **Dropped so the next frame installs it.** Saving a pipeline that
+			// the renderer then carried on ignoring is the gap this whole path
+			// exists to close — a save has to be visible in the viewport, not
+			// only in the file.
+			PipelineSelected.erase(Active.Index);
+
 			Say("saved the render pipeline into this world");
 		}
 		ImGui::EndDisabled();

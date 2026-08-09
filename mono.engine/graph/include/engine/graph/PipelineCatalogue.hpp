@@ -180,6 +180,26 @@ namespace engine::graph {
 		// but `RenderGraph` lets a node say otherwise and an author may have a
 		// reason.
 		NodeScope Scope = NodeScope::View;
+
+		// The shader this kind runs when a node does not name one.
+		//
+		// **What makes a catalogue entry a working pass rather than a word.**
+		// `raster` runs whatever a node's `shader` parameter names and does
+		// nothing without one — which is right for a kind that *is* "somebody's
+		// shader". An effect like `ssao` is not that: it has one correct
+		// implementation, the engine ships it, and asking every author to type
+		// its filename would be a setting with one right answer.
+		//
+		// **Still overridable.** A node naming its own shader beats this, so a
+		// kind with a default is a starting point rather than a fixed pass —
+		// which is the difference between shipping an ambient-occlusion pass and
+		// shipping *the* ambient-occlusion pass.
+		//
+		// Empty for kinds whose behaviour is not a fullscreen shader at all —
+		// `opaque` rasterises geometry and `entities` produces a list.
+		//
+		// @since v0.11
+		std::string DefaultShader;
 	};
 
 	// Whether a wire from an output of kind `from` may land in an input of kind

@@ -85,6 +85,33 @@ namespace engine::scene {
 	// and a save file carrying last run's texture names would be names that agree
 	// with nothing on disk.
 	//
+	// Every texture one material names.
+	//
+	// **A struct rather than five parallel maps**, because they are written and
+	// read together on every path — recorded from one `.amat`, resolved onto one
+	// part, demanded as one set. Five maps keyed the same way would be five
+	// places for a material to be half-present.
+	//
+	// @since v0.11
+	struct MaterialMaps {
+		core::Name Colour;
+		core::Name Normal;
+		core::Name Roughness;
+		core::Name Occlusion;
+		core::Name Height;
+		core::Name Emissive;
+
+		// Whether this names anything at all.
+		//
+		// @return `true` when any map is set. A material naming none is a real
+		//         state — see `assets::MaterialData` — so this says "the
+		//         catalogue knows this material" rather than "it is usable".
+		bool IsValid() const {
+			return Colour.IsValid() || Normal.IsValid() || Roughness.IsValid() || Occlusion.IsValid() ||
+				   Height.IsValid();
+		}
+	};
+
 	// @since v0.10
 	struct MaterialCatalogue {
 		// The colour map each known material names, keyed by `core::Name::Id`.
@@ -94,7 +121,7 @@ namespace engine::scene {
 		// process, so hashing the integer skips the registry lock comparing text
 		// would take, and the value has to be a `Name` because it is what gets
 		// written onto a component.
-		std::unordered_map<uint32_t, core::Name> ColourMaps;
+		std::unordered_map<uint32_t, MaterialMaps> ColourMaps;
 
 		// The parents `ResolveMaterials` wrote on its last pass, sorted.
 		//
@@ -124,7 +151,7 @@ namespace engine::scene {
 		//
 		// @param material The material's asset name.
 		// @return The texture's name, or an invalid one.
-		core::Name Find(const core::Name &material) const;
+		MaterialMaps Find(const core::Name &material) const;
 	};
 
 	// The world's material catalogue, creating an empty one if it has none.
@@ -148,7 +175,7 @@ namespace engine::scene {
 	// @param colour   The texture its colour map names. May be invalid, which is
 	//                 a material somebody has not textured yet.
 	// @return `false` for an invalid material name.
-	bool RecordMaterial(ecs::Store &store, const core::Name &material, const core::Name &colour);
+	bool RecordMaterial(ecs::Store &store, const core::Name &material, const MaterialMaps &maps);
 
 	// Which texture a material resolves to in this world.
 	//
@@ -159,7 +186,7 @@ namespace engine::scene {
 	// @param store    The world.
 	// @param material The material's asset name.
 	// @return The texture's name, or an invalid one.
-	core::Name ColourMapOf(const ecs::Store &store, const core::Name &material);
+	MaterialMaps ColourMapOf(const ecs::Store &store, const core::Name &material);
 
 	// Writes every material instance's texture onto the part it hangs off.
 	//

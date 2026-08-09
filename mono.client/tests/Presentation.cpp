@@ -550,7 +550,7 @@ TEST_CASE("a material assigned without a tick reaches the draw list", "[client][
 	const Name colour("materials/oak_Color.atex");
 
 	universe.Enter(world, [&asset, &colour](Store &store) {
-		REQUIRE(engine::scene::RecordMaterial(store, asset, colour));
+		REQUIRE(engine::scene::RecordMaterial(store, asset, engine::scene::MaterialMaps{.Colour = colour}));
 
 		const Entity crate = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Crate");
 		const Entity material = store.CreateInstance(engine::scene::MaterialClass(), "Oak");

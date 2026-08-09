@@ -99,6 +99,49 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00103
+
+**Per-pass GPU time cannot be measured, and the blocker is the vendored SDL
+rather than anything in this repository.**
+
+`ProfilePass::Elapsed` stays zero and the Pipeline Profile panel says **not
+measured**, which is the honest state. This entry exists so that "somebody
+should just fill that in" is answered once, in the place blocked work lives,
+rather than sitting in `PIPELINE_TODO.md` as an open box inviting an attempt
+that cannot succeed.
+
+- **Verified against the vendored source, not assumed.** SDL 3.2.31 is what
+  `mono.vendor/sdl` is pinned to. `SDL3/SDL_gpu.h` contains no timestamp query,
+  no query pool and no `SDL_GPUQuery` of any kind, and the Vulkan backend
+  contains zero references to `vkCmdWriteTimestamp` or `VkQueryPool`. There is
+  no call to make.
+- **Do not fill it with CPU time.** A submit-side number in a field labelled as
+  the pass's cost is worse than a blank: somebody reads "0.4 ms" for the shadow
+  pass, believes the GPU said it, and spends an afternoon optimising the wrong
+  thing. The panel saying "not measured" is a feature.
+- **The readable half already landed.** `SDL_PushGPUDebugGroup` names every node
+  in a capture, so RenderDoc, Nsight and Xcode attribute every draw to its pass.
+  What is missing is only the numbers.
+
+**Two ways out, and both are the user's call rather than a code change.**
+
+- **(a) Wait for upstream.** SDL adds timestamp queries to the GPU API, the
+  submodule moves, and `Renderer` gains a few lines. No divergence, no cost, and
+  no control over when.
+- **(b) Fork the submodule.** `mono.vendor/sdl` is a git submodule pointing at
+  `libsdl-org/SDL`, so this is not a patch — it is repointing the project at a
+  fork of SDL that this repository maintains. Commits made inside the submodule
+  without that are unreachable by anyone else who clones, because the parent
+  records a SHA that exists on no remote. It also means per-backend code —
+  `vkCmdWriteTimestamp` and a query pool for Vulkan,
+  `ID3D12GraphicsCommandList::EndQuery` for D3D12 — in a module whose whole
+  point is not being per-backend, and a rebase burden on every SDL update
+  forever.
+
+**Trigger:** an SDL release that ships timestamp queries, or a decision to
+maintain a fork. Nothing in this repository moves it.
+
+
 ### [CLOSED] D00047
 
 **Readbacks: the viewer node's image, channel histograms, and an overdraw view.**

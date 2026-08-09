@@ -11,6 +11,8 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -29,6 +31,7 @@
 #include <algorithm>
 #include <client/Scene.hpp>
 #include <cmath>
+#include <format>
 #include <numbers>
 
 namespace client {
@@ -320,6 +323,10 @@ namespace client {
 								visuals[row].Tint,
 								visuals[row].Mesh,
 								appearances[row].ColourMap,
+								appearances[row].NormalMap,
+								appearances[row].RoughnessMap,
+								appearances[row].OcclusionMap,
+								appearances[row].EmissiveMap,
 								tags[row].Mask,
 
 								// Copied rather than resolved here. Which pass this
@@ -894,6 +901,67 @@ namespace client {
 
 		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		return true;
+	}
+
+	engine::core::Name
+	InstallWorldPipelines(Store &store, engine::render::Renderer &renderer, uint64_t world) {
+		// **Both registrations first, and neither is optional.** A `PipelineSet`
+		// read out of a store that never registered the type would be minted
+		// under the compiler's spelling and found by nobody, and a graph
+		// compiled before the catalogue exists refuses every node in it — that
+		// second one is not hypothetical, it is what made `RegisterPasses` fail
+		// with "nothing can submit a 'ssao' node".
+		engine::graph::RegisterPipelineComponents();
+		engine::graph::RegisterStandardNodeKinds();
+
+		const auto *set = store.Resource<engine::graph::PipelineSet>();
+		if (set == nullptr) {
+			return {};
+		}
+
+		engine::core::Name selected;
+		for (const engine::core::Name &name : set->Names()) {
+			const engine::graph::PipelineDocument *document = set->Find(name);
+			if (document == nullptr) {
+				continue;
+			}
+
+			engine::graph::RenderGraph graph;
+			engine::core::Name offender;
+			const engine::graph::PipelineDocumentStatus builds =
+				engine::graph::Build(*document, graph, offender);
+			if (builds != engine::graph::PipelineDocumentStatus::Ok) {
+				ENGINE_ERROR(
+					"pipeline '{}' does not build: {} at '{}'",
+					name.Text(),
+					engine::graph::Describe(builds),
+					offender.Text()
+				);
+				continue;
+			}
+
+			// `#` because a name is interned text and nothing else in the engine
+			// spells one with it, so a qualified key cannot collide with an
+			// authored name however inventive somebody is.
+			const engine::core::Name key(std::format("{}#{}", name.Text(), world));
+
+			// **No message on failure.** `SetPipeline` compiles the graph and
+			// reports exactly what it disliked and where; saying "and also it
+			// failed" after that is a second line carrying nothing.
+			if (!renderer.SetPipeline(key, graph)) {
+				continue;
+			}
+
+			// **`main` is the one a view draws, and the rest are installed
+			// anyway.** A world holding a pipeline for a reflection or a debug
+			// viewport wants it available for something to select by name; only
+			// the default choice is decided here.
+			if (name == engine::core::Name("main")) {
+				selected = key;
+			}
+		}
+
+		return selected;
 	}
 
 	void RegisterClientComponents() {

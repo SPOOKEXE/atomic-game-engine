@@ -164,6 +164,22 @@ namespace assetc {
 		// key would make every material written for the newer engine unbakeable by
 		// the older one, which is the wrong direction for a content tree that
 		// outlives a build.
+		// **The five keys, read in one pass rather than five.** A `.mat` is a
+		// handful of lines and re-scanning it per key would be five parses of the
+		// same text — but the real reason is that the keys are read *together*,
+		// so a file naming `normal` twice resolves the same way as one naming
+		// `colour` twice and there is one rule about which wins.
+		struct MaterialKeys {
+			std::string Colour;
+			std::string Normal;
+			std::string Roughness;
+			std::string Occlusion;
+			std::string Height;
+			std::string Emissive;
+		};
+
+		MaterialKeys MaterialKeysOf(std::span<const std::byte> bytes);
+
 		std::string MaterialColourOf(std::span<const std::byte> bytes) {
 			const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
 
@@ -197,6 +213,59 @@ namespace assetc {
 				}
 			}
 			return {};
+		}
+
+		MaterialKeys MaterialKeysOf(std::span<const std::byte> bytes) {
+			MaterialKeys out;
+			const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+
+			size_t start = 0;
+			while (start < text.size()) {
+				size_t end = std::min(text.find('\n', start), text.size());
+				std::string_view line = text.substr(start, end - start);
+				start = end + 1;
+
+				line = line.substr(0, std::min(line.find('#'), line.size()));
+
+				const size_t equals = line.find('=');
+				if (equals == std::string_view::npos) {
+					continue;
+				}
+
+				const auto trim = [](std::string_view value) {
+					while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
+						value.remove_prefix(1);
+					}
+					while (!value.empty() &&
+						   (value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
+						value.remove_suffix(1);
+					}
+					return value;
+				};
+
+				const std::string key = Lowered(std::string(trim(line.substr(0, equals))));
+				const std::string value(trim(line.substr(equals + 1)));
+
+				// **Both spellings of colour, and one of everything else.** The
+				// two colour spellings exist because the fetcher wrote `color`
+				// and authors write both; there is no such history for the rest,
+				// so inventing synonyms now would be four more things to keep
+				// answering for.
+				if (key == "color" || key == "colour") {
+					out.Colour = value;
+				} else if (key == "normal") {
+					out.Normal = value;
+				} else if (key == "roughness") {
+					out.Roughness = value;
+				} else if (key == "occlusion" || key == "ao") {
+					out.Occlusion = value;
+				} else if (key == "height") {
+					out.Height = value;
+				} else if (key == "emissive") {
+					out.Emissive = value;
+				}
+			}
+			return out;
 		}
 	}
 
@@ -274,29 +343,48 @@ namespace assetc {
 			// `bake::Graph` would need an import node for a format with nothing to
 			// import.
 			if (IsMaterial(extension)) {
-				const std::string colour = MaterialColourOf(bytes);
+				const MaterialKeys keys = MaterialKeysOf(bytes);
+
+				const size_t slash = relative.find_last_of('/');
+				const std::string directory =
+					slash == std::string::npos ? std::string() : relative.substr(0, slash);
 
 				engine::assets::MaterialData material;
-				if (!colour.empty()) {
-					const size_t slash = relative.find_last_of('/');
-					const std::string directory =
-						slash == std::string::npos ? std::string() : relative.substr(0, slash);
 
-					// **Through the same `BakedName` a model's texture reference
-					// goes through**, which is the whole reason that function is
-					// exported. A material naming `Bricks_Color.png` and a baked
-					// tree holding `Bricks_Color.atex` have to line up, and two
-					// spellings of the rule is a material that resolves to nothing
-					// on a machine nobody tested.
+				// **Through the same `BakedName` a model's texture reference goes
+				// through**, which is the whole reason that function is exported.
+				// A material naming `Bricks_Color.png` and a baked tree holding
+				// `Bricks_Color.atex` have to line up, and two spellings of the
+				// rule is a material that resolves to nothing on a machine nobody
+				// tested.
+				//
+				// **One rule for all five**, so a normal map outside the tree
+				// fails exactly as a colour map does. Written as a loop over
+				// pointers rather than five copies for that reason: five copies
+				// is five places for the rule to drift.
+				const std::pair<const std::string *, std::string *> maps[] = {
+					{&keys.Colour, &material.ColourMap},
+					{&keys.Normal, &material.NormalMap},
+					{&keys.Roughness, &material.RoughnessMap},
+					{&keys.Occlusion, &material.OcclusionMap},
+					{&keys.Height, &material.HeightMap},
+					{&keys.Emissive, &material.EmissiveMap},
+				};
+
+				for (const auto &[named, into] : maps) {
+					if (named->empty()) {
+						continue;
+					}
+
 					std::string resolved;
-					if (Resolve(directory, colour, resolved)) {
-						material.ColourMap = BakedName(resolved);
+					if (Resolve(directory, *named, resolved)) {
+						into->assign(BakedName(resolved));
 					} else {
 						// Refuse references outside the input tree, exactly as a
 						// model's are refused. An untextured material is a real
 						// state — `assets/Material.hpp` — so this is a material
 						// that draws the default rather than a failed row.
-						baked.Failure = "the colour map is outside the input tree";
+						baked.Failure = "a map is outside the input tree";
 						report.Failures++;
 					}
 				}

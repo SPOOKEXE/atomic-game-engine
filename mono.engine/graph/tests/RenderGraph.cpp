@@ -21,6 +21,7 @@ using engine::core::Name;
 using engine::graph::CompiledGraph;
 using engine::graph::GraphStatus;
 using engine::graph::Node;
+using engine::graph::NodeId;
 using engine::graph::NodeRunner;
 using engine::graph::NodeScope;
 using engine::graph::RenderGraph;
@@ -772,4 +773,44 @@ TEST_CASE("the view-count overload is every view in one world", "[graph]") {
 	REQUIRE(graph.Execute(compiled, named, worlds));
 
 	CHECK(counted.Ran == named.Ran);
+}
+
+TEST_CASE("a node id means nothing outside the graph that issued it", "[graph]") {
+	// **The property a renderer got wrong, so it is worth stating outright.** A
+	// `RunContext` carries ids, and ids are positions in the graph that issued
+	// them — so the same number names a different node in a different graph.
+	//
+	// `render::Renderer` resolved every `RunContext` against the *standard*
+	// graph while running a view's own pipeline. Nothing failed loudly: a custom
+	// `raster` node came back with no parameters, so an authored shader became
+	// "no shader set, so it draws nothing"; and a node writing `colour` resolved
+	// to a different resource, so a post pass wrote a texture nothing presented.
+	// Both read as a pass that never ran.
+	//
+	// A headless test cannot reach that code — it needs a GPU device — so this
+	// asserts the property underneath it, which is what makes the mistake
+	// possible and what a future caller has to keep in mind.
+	RenderGraph first;
+	const ResourceId firstColour = first.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+	const NodeId firstNode = first.AddNode({.Name = Name("opaque"), .Kind = Name("opaque")});
+
+	RenderGraph second;
+	const ResourceId secondDepth = second.AddResource({.Name = Name("depth"), .Kind = ResourceKind::Depth});
+	const NodeId secondNode = second.AddNode({.Name = Name("effect"), .Kind = Name("raster")});
+
+	// The same numbers, issued independently.
+	REQUIRE(firstColour.Value == secondDepth.Value);
+	REQUIRE(firstNode.Value == secondNode.Value);
+
+	// And naming entirely different things, which is the whole point: resolving
+	// one graph's id against the other finds something rather than nothing.
+	const Node *crossed = second.Find(firstNode);
+	REQUIRE(crossed != nullptr);
+	CHECK(crossed->Name == Name("effect"));
+	CHECK(crossed->Name != first.Find(firstNode)->Name);
+
+	const ResourceDesc *swapped = second.FindResource(firstColour);
+	REQUIRE(swapped != nullptr);
+	CHECK(swapped->Kind == ResourceKind::Depth);
+	CHECK(swapped->Kind != first.FindResource(firstColour)->Kind);
 }

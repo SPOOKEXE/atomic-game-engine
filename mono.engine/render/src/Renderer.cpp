@@ -3,6 +3,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/EntityFlow.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/GraphRunner.hpp>
@@ -129,6 +130,50 @@ namespace engine::render {
 			glm::mat4 SurfaceViewProjection;
 		};
 
+		// What every fullscreen pass is told about the view it is shading.
+		//
+		// **Raster passes had no uniforms at all, and that was the ceiling on
+		// what a shipped effect could be.** A pass that samples a colour target
+		// and writes another needs nothing; a pass that has to *interpret* what
+		// it sampled needs the view. Linearising a depth buffer needs the near
+		// and far planes, marching a reflection needs the projection, sampling a
+		// neighbour needs the texel size — so `depth-linearise`, `ssr`, `dof`
+		// and the SMAA three could not be written correctly, only approximated.
+		//
+		// **One block for every raster pass rather than a block per kind**, so a
+		// shader an author writes gets the same slot 0 with the same layout as
+		// the shipped ones. A per-kind block would mean a custom `raster` node
+		// could not be told the resolution without the renderer knowing what the
+		// node was for, which is exactly the coupling `raster` exists to avoid.
+		//
+		// Kept to four `vec4`s worth of scalars plus two matrices — the whole
+		// point is that it is pushed per pass and there may be a dozen passes.
+		struct PassUniforms {
+			// The view-projection this pass's camera sees through, and its
+			// inverse. **Both, because a fullscreen pass mostly needs the
+			// inverse** — it starts from a screen position and wants a world
+			// one — and inverting a matrix per pixel is not a thing to do.
+			glm::mat4 ViewProjection{1.0f};
+			glm::mat4 InverseViewProjection{1.0f};
+
+			// x: near plane. y: far plane. z: 1/near. w: 1/far.
+			//
+			// The reciprocals are here rather than computed in the shader
+			// because a divide per pixel to recover a constant is the cheapest
+			// possible thing to have got wrong in four separate shaders.
+			glm::vec4 Planes{0.1f, 500.0f, 10.0f, 0.002f};
+
+			// x: width. y: height. z: 1/width. w: 1/height.
+			//
+			// **The target's size and not the window's.** A half-resolution
+			// bloom pass that offset by the window's texel would sample its own
+			// pixels twice over and blur half as far as it meant to.
+			glm::vec4 Target{1.0f, 1.0f, 1.0f, 1.0f};
+
+			// x: seconds. y: field of view in radians. z: aspect. w: unused.
+			glm::vec4 View{0.0f, 1.22f, 1.777f, 0.0f};
+		};
+
 		// The local light set, pushed once per pass rather than per draw.
 		//
 		// **Separate from `LightingUniforms` because the two change at different
@@ -192,6 +237,15 @@ namespace engine::render {
 			// texture in every other respect, which is what makes one usable on
 			// a part at all.
 			glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
+
+			// Which material maps this draw has: x normal, y roughness, z
+			// occlusion, w emissive.
+			//
+			// **Flags rather than letting the shader test the texel**, because
+			// an absent map is bound as the engine's default white sheet and
+			// white is a legitimate roughness of 1. Nothing in the image
+			// distinguishes "no map" from "a map that says one".
+			glm::vec4 Maps{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
 		// Mix renderer-owned view data into the scene signature.
@@ -225,6 +279,14 @@ namespace engine::render {
 		// 1/255 and 255 layers saturate, which is a long way past the point
 		// where the number stops being interesting. See `overdraw.frag`.
 		constexpr SDL_GPUTextureFormat OVERDRAW_FORMAT = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+
+		// How many colour targets the G-buffer writes.
+		//
+		// **Three, and the shader says the same number.** `gbuffer.frag` has
+		// three outputs; a pipeline built for a different count is a validation
+		// failure on some backends and silent garbage on others, so a node whose
+		// declaration disagrees is refused rather than drawn.
+		constexpr uint32_t GBUFFER_TARGETS = 3;
 
 		// Measured resize threshold; keeps targets stable during viewport drags.
 		constexpr uint32_t SCENE_TARGET_BLOCK = 64;
@@ -634,6 +696,18 @@ namespace engine::render {
 		std::vector<const MeshEntry *> SlotMesh;
 		std::vector<core::Name> SlotTexture;
 
+		// The three sampled material maps per slot, parallel to `SlotTexture`.
+		//
+		// **Parallel arrays rather than a struct**, matching `SlotMesh` and
+		// `SlotTags`: the run-batching loop compares one of them at a time, and
+		// a struct would pull four names into cache to compare one.
+		//@{
+		std::vector<core::Name> SlotNormal;
+		std::vector<core::Name> SlotRoughness;
+		std::vector<core::Name> SlotOcclusion;
+		std::vector<core::Name> SlotEmissive;
+		//@}
+
 		// Each slot's tag mask, for the surface passes that filter by one.
 		std::vector<uint32_t> SlotTags;
 
@@ -970,6 +1044,33 @@ namespace engine::render {
 		graph::RenderGraph Graph;
 		graph::CompiledGraph Compiled;
 		//@}
+
+		// The graph the view being drawn right now is described by.
+		//
+		// **Null means the standard one above, and every lookup has to go
+		// through `Nodes()`.** A `RunContext` carries node and resource *ids*,
+		// and an id is only meaningful in the graph it came from — so a view
+		// running a named pipeline hands out ids that index that pipeline's
+		// nodes, while `Graph` indexes the standard frame's. Resolving one
+		// against the other is not a lookup that fails loudly: it finds a
+		// different node, or a different resource, and the pass draws the wrong
+		// thing into the wrong texture.
+		//
+		// That was real rather than theoretical. A custom `raster` node came out
+		// of `Graph.Find` with no parameters, so every authored shader silently
+		// became "no shader set, so it draws nothing"; and a node writing
+		// `colour` resolved to some other resource, so a post pass wrote into a
+		// texture nothing presented and the frame was unchanged. Both looked
+		// like the pass never ran.
+		//
+		// Set for the length of one view's block and cleared after, because the
+		// frame's own block is always the standard graph's — see `NamedPipeline`.
+		const graph::RenderGraph *Running = nullptr;
+
+		// Which graph a `RunContext`'s ids belong to.
+		const graph::RenderGraph &Nodes() const {
+			return Running != nullptr ? *Running : Graph;
+		}
 
 		// Shader modules somebody delivered, by the name a node asks for.
 		//
@@ -1584,6 +1685,27 @@ namespace engine::render {
 		//         counts nothing and returns `true`.
 		bool SubmitOverdraw();
 
+		// Hands a pipeline's finished image back as the view's picture.
+		//
+		// @param context What it reads.
+		// @return `true` always — an output that cannot resolve says so and the
+		//         frame carries on, for `SubmitRaster`'s reason.
+		bool SubmitOutput(const graph::RunContext &context);
+
+		// Records surface properties into several targets at once.
+		//
+		// **The one catalogue kind that is neither a fullscreen shader nor the
+		// forward pass.** It rasterises the same geometry `opaque` does and
+		// writes what a colour would be computed *from*, so a later pass shades
+		// once per pixel rather than once per fragment. Everything wanting
+		// normals waits behind it: proper `ssao`, `deferred-lighting`, `ssr`,
+		// emissive, PBR.
+		//
+		// @return `false` to abandon the frame. A view with nothing to draw, or
+		//         a node whose declaration disagrees with the shader, writes
+		//         nothing and returns `true`.
+		bool SubmitGBuffer(const graph::RunContext &context);
+
 		// The blended tail of the eye's pass, and the effects after it.
 		//
 		// **Ends the render pass `SubmitOpaque` opened**, which is why it runs
@@ -1843,6 +1965,9 @@ namespace engine::render {
 		// than a graph property.
 		SDL_GPUGraphicsPipeline *OverdrawPipeline = nullptr;
 
+		// Records surface properties into three targets. See `gbuffer.frag`.
+		SDL_GPUGraphicsPipeline *GBufferPipeline = nullptr;
+
 		// What it draws into, and how big. Allocated on demand, because a frame
 		// nobody is inspecting should not pay for it.
 		//@{
@@ -2022,7 +2147,12 @@ namespace engine::render {
 			SDL_GPUTexture *surface,
 			SDL_GPUSampler *surfaceSampler,
 			uint32_t tagFilter,
-			uint64_t &triangles
+			uint64_t &triangles,
+
+			// Whether to bind the three material maps as slots 3 to 5. Only the
+			// G-buffer pass reads them, and a shader that does not declare them
+			// must not have them bound.
+			bool materialMaps = false
 		);
 
 		bool CreateGeometry();
@@ -2135,6 +2265,15 @@ namespace engine::render {
 		// **The overdraw pass shares `opaque.vert`**, so what it counts is what
 		// that pass would actually shade — same instancing, same clip. No
 		// samplers and no fragment uniforms: it writes a constant.
+		// One sampler — the colour map — and no fragment uniforms: it records
+		// what a surface *is* rather than what a light does to it.
+		// **Seven samplers and one uniform buffer**, matching what `DrawSlots` binds
+		// when `materialMaps` is set. It was 1 here while three were bound, which
+		// put the shadow atlas in `colourMap` — the G-buffer's albedo was the
+		// shadow map, and the probe that checked three targets were written
+		// never checked what was in them.
+		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 1);
+
 		SDL_GPUShader *overdrawFragment = LoadShader("overdraw.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
 
 		// **Two samplers now: the shadow map and the surface.** The count is
@@ -2158,8 +2297,8 @@ namespace engine::render {
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
-		if (!opaqueVertex || !opaqueFragment || !overdrawFragment || !shadowVertex || !shadowFragment ||
-			!overlayVertex || !overlayFragment) {
+		if (!opaqueVertex || !opaqueFragment || !overdrawFragment || !gbufferFragment || !shadowVertex ||
+			!shadowFragment || !overlayVertex || !overlayFragment) {
 			return false;
 		}
 
@@ -2256,6 +2395,28 @@ namespace engine::render {
 		OverdrawPipeline = SDL_CreateGPUGraphicsPipeline(Device, &overdraw);
 		if (!OverdrawPipeline) {
 			ENGINE_ERROR("overdraw pipeline: {}", SDL_GetError());
+		}
+
+		// --- the G-buffer -----------------------------------------------------
+		//
+		// The opaque pipeline writing three targets instead of one, and a
+		// fragment shader that records surface properties rather than shading
+		// them. Depth is stored rather than discarded — every consumer of a
+		// G-buffer reads it, which is how a fullscreen pass knows where a pixel
+		// is.
+		SDL_GPUColorTargetDescription gbufferTargets[GBUFFER_TARGETS]{};
+		gbufferTargets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		gbufferTargets[1].format = SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
+		gbufferTargets[2].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+
+		SDL_GPUGraphicsPipelineCreateInfo gbuffer = opaque;
+		gbuffer.fragment_shader = gbufferFragment;
+		gbuffer.target_info.color_target_descriptions = gbufferTargets;
+		gbuffer.target_info.num_color_targets = GBUFFER_TARGETS;
+
+		GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+		if (!GBufferPipeline) {
+			ENGINE_ERROR("gbuffer pipeline: {}", SDL_GetError());
 		}
 
 		// --- shadow ---------------------------------------------------------
@@ -2522,6 +2683,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, opaqueVertex);
 		SDL_ReleaseGPUShader(Device, opaqueFragment);
 		SDL_ReleaseGPUShader(Device, overdrawFragment);
+		SDL_ReleaseGPUShader(Device, gbufferFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
 
@@ -2548,7 +2710,8 @@ namespace engine::render {
 		SDL_GPUTexture *surface,
 		SDL_GPUSampler *surfaceSampler,
 		uint32_t tagFilter,
-		uint64_t &triangles
+		uint64_t &triangles,
+		bool materialMaps
 	) {
 		if (count == 0 || first + count > SlotMesh.size()) {
 			return 0;
@@ -2577,22 +2740,78 @@ namespace engine::render {
 				SDL_GPUTexture *const found = Textures.Find(texture);
 				SDL_GPUTexture *const sampled = found != nullptr ? found : Textures.Default();
 
+				// **Resolved only when the pass binds them.** The forward pass
+				// never reads these, and a hash of three names per draw call to
+				// throw the answer away is the sort of cost that hides.
+				SDL_GPUTexture *normalTexture = nullptr;
+				SDL_GPUTexture *roughnessTexture = nullptr;
+				SDL_GPUTexture *occlusionTexture = nullptr;
+				SDL_GPUTexture *emissiveTexture = nullptr;
+
+				// **`FallbackTexture` behind the default sheet, not the sheet
+				// alone.** `Textures.Default()` is uploaded content and is null
+				// until it arrives, and a null texture in a descriptor is the
+				// same crash. The three bindings above have guarded it this way
+				// since they were written.
+				const auto MapOr = [this](SDL_GPUTexture *map) {
+					if (map != nullptr) {
+						return map;
+					}
+					SDL_GPUTexture *const fallback = Textures.Default();
+					return fallback != nullptr ? fallback : FallbackTexture;
+				};
+				if (materialMaps) {
+					normalTexture = Textures.Find(SlotNormal[slot]);
+					roughnessTexture = Textures.Find(SlotRoughness[slot]);
+					occlusionTexture = Textures.Find(SlotOcclusion[slot]);
+					emissiveTexture = Textures.Find(SlotEmissive[slot]);
+				}
+
 				// **The fallback texel is bound rather than the binding being
 				// skipped** for the other two, because a sampler a pipeline
 				// declares must have something in it — an unbound one is
 				// undefined behaviour on some backends and a validation error on
 				// others. Those two are genuinely absent features rather than
 				// defaulted ones, and their uniform flags still say so.
+				// **Six for the G-buffer, three for everything else**, and the
+				// first three are the same three in the same order — so
+				// `opaque.frag` and `gbuffer.frag` agree about slots 0 to 2 and
+				// only the deferred pass pays for the rest. A shader declaring
+				// fewer than are bound is fine; one declaring more is not, which
+				// is why the count is the caller's decision rather than a
+				// constant.
+				//
+				// The default sheet stands in for an absent map, for the reason
+				// the fallback texel is bound above: a declared sampler must
+				// have something in it. What "absent" means is the shader's to
+				// decide, and `gbuffer.frag` reads its uniform flags rather than
+				// guessing from the texel.
 				const SDL_GPUTextureSamplerBinding samplers[] = {
 					{shadow != nullptr ? shadow : FallbackTexture, shadowSampler},
 					{surface != nullptr ? surface : FallbackTexture, surfaceSampler},
 					{sampled != nullptr ? sampled : FallbackTexture, Textures.Sampler()},
+					{MapOr(normalTexture), Textures.Sampler()},
+					{MapOr(roughnessTexture), Textures.Sampler()},
+					{MapOr(occlusionTexture), Textures.Sampler()},
+					{MapOr(emissiveTexture), Textures.Sampler()},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 3);
+
+				// **Seven or three, and the number must match what the pipeline
+				// was built for exactly.** Binding fewer than a pipeline declares
+				// is not a blank sampler — it is a segfault inside the driver's
+				// descriptor binding, which is how this was found: the shader and
+				// `LoadShader` were moved to seven while this still bound six.
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, materialMaps ? 7 : 3);
 
 				LightingUniforms uniforms = *lighting;
 				uniforms.BaseColour = glm::vec4{colour[0], colour[1], colour[2], colour[3]};
 				uniforms.Surface = glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				uniforms.Maps = glm::vec4{
+					normalTexture != nullptr ? 1.0f : 0.0f,
+					roughnessTexture != nullptr ? 1.0f : 0.0f,
+					occlusionTexture != nullptr ? 1.0f : 0.0f,
+					emissiveTexture != nullptr ? 1.0f : 0.0f,
+				};
 
 				// **The cell is per draw, not per instance**, which is the whole
 				// simplification: a sheet plays on the clock rather than on
@@ -2628,10 +2847,20 @@ namespace engine::render {
 
 			const MeshEntry *const mesh = SlotMesh[slot];
 			const core::Name texture = SlotTexture[slot];
+			const core::Name normal = SlotNormal[slot];
+			const core::Name roughness = SlotRoughness[slot];
+			const core::Name occlusion = SlotOcclusion[slot];
+			const core::Name emissive = SlotEmissive[slot];
 
 			uint32_t run = 1;
+			// **Every sampled map ends a run, not just the colour.** Two
+			// instances of one mesh with one sheet and different normal maps
+			// batched together would all draw with whichever map came first —
+			// which looks like the normal map being wrong rather than the run
+			// being too long.
 			while (slot + run < first + count && SlotMesh[slot + run] == mesh &&
-				   SlotTexture[slot + run] == texture &&
+				   SlotTexture[slot + run] == texture && SlotNormal[slot + run] == normal &&
+				   SlotRoughness[slot + run] == roughness && SlotOcclusion[slot + run] == occlusion &&
 				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
 				run++;
 			}
@@ -4085,7 +4314,7 @@ namespace engine::render {
 
 		for (size_t index = 0; index < State->Graph.ResourceCount(); index++) {
 			const graph::ResourceDesc *desc =
-				State->Graph.FindResource(graph::ResourceId{static_cast<uint32_t>(index + 1)});
+				State->Nodes().FindResource(graph::ResourceId{static_cast<uint32_t>(index + 1)});
 			if (desc == nullptr) {
 				continue;
 			}
@@ -4402,9 +4631,8 @@ namespace engine::render {
 		// pipeline produced the image it was asked for, and the image is
 		// whatever the renderer's target already holds. A graph with no output
 		// node draws into targets nobody collects.
-		Passes.Set(core::Name("output"), [this](const graph::RunContext &) {
-			CurrentFrame.Recorder->Enter(core::Name("output"));
-			return true;
+		Passes.Set(core::Name("output"), [this](const graph::RunContext &context) {
+			return SubmitOutput(context);
 		});
 
 		// **Somebody's own shader over their own inputs.** The one kind whose
@@ -4424,11 +4652,32 @@ namespace engine::render {
 			return SubmitDispatch(context);
 		});
 
+		// **The catalogue has to exist before this question can be asked.**
+		// Nothing else in `render` needs it; this is the call that makes it
+		// answerable rather than a duplicate of the studio's.
+		graph::RegisterStandardNodeKinds();
+
+		// **Every kind the engine ships a shader for is a `raster` pass.** They
+		// differ from one another in exactly one way — which shader — and that
+		// is what `NodeKindSpec::DefaultShader` carries, so a handler apiece
+		// would be one line of plumbing repeated per effect.
+		for (const graph::NodeKindSpec &spec : graph::NodeCatalogue::All()) {
+			if (!spec.DefaultShader.empty()) {
+				Passes.Set(spec.Kind, [this](const graph::RunContext &context) {
+					return SubmitRaster(context);
+				});
+			}
+		}
+
 		Passes.Set(core::Name("overdraw"), [this](const graph::RunContext &) { return SubmitOverdraw(); });
+
+		Passes.Set(core::Name("gbuffer"), [this](const graph::RunContext &context) {
+			return SubmitGBuffer(context);
+		});
 
 		Passes.Set(core::Name("viewer"), [this](const graph::RunContext &context) {
 			for (const graph::ResourceId read : context.Reads) {
-				const graph::ResourceDesc *desc = Graph.FindResource(read);
+				const graph::ResourceDesc *desc = Nodes().FindResource(read);
 				if (desc != nullptr && RequestReadback(desc->Name)) {
 					break;
 				}
@@ -4793,7 +5042,7 @@ namespace engine::render {
 		// would be a second description of where a fullscreen pass puts its
 		// vertices.
 		SDL_GPUShader *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		SDL_GPUShader *fragment = LoadShader(shader.Text(), SDL_GPU_SHADERSTAGE_FRAGMENT, samplers, 0);
+		SDL_GPUShader *fragment = LoadShader(shader.Text(), SDL_GPU_SHADERSTAGE_FRAGMENT, samplers, 1);
 
 		SDL_GPUGraphicsPipeline *built = nullptr;
 		if (vertex != nullptr && fragment != nullptr) {
@@ -4912,7 +5161,7 @@ namespace engine::render {
 		// custom pass have somewhere to write.
 		for (size_t index = 0; index < Graph.ResourceCount(); index++) {
 			const graph::ResourceDesc *desc =
-				Graph.FindResource(graph::ResourceId{static_cast<uint32_t>(index + 1)});
+				Nodes().FindResource(graph::ResourceId{static_cast<uint32_t>(index + 1)});
 			if (desc != nullptr && desc->Name == resource) {
 				return EnsureGraphTarget(*desc);
 			}
@@ -4964,7 +5213,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::SubmitDispatch(const graph::RunContext &context) {
-		const graph::Node *node = Graph.Find(context.Node);
+		const graph::Node *node = Nodes().Find(context.Node);
 		if (node == nullptr) {
 			return true;
 		}
@@ -4979,7 +5228,7 @@ namespace engine::render {
 		// for and the reason a dispatch is not a raster pass with other words.
 		NamedTexture target;
 		for (const graph::ResourceId id : context.Writes) {
-			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			const graph::ResourceDesc *desc = Nodes().FindResource(id);
 			if (desc == nullptr || desc->Kind != graph::ResourceKind::Storage) {
 				continue;
 			}
@@ -5000,7 +5249,7 @@ namespace engine::render {
 			if (samplers >= 4) {
 				break;
 			}
-			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			const graph::ResourceDesc *desc = Nodes().FindResource(id);
 			if (desc == nullptr || desc->Kind == graph::ResourceKind::Entities ||
 				desc->Kind == graph::ResourceKind::Camera) {
 				continue;
@@ -5068,11 +5317,22 @@ namespace engine::render {
 		const std::string *source = node.Parameter(core::Name("source"));
 		if (source == nullptr || source->empty()) {
 			const std::string *named = node.Parameter(core::Name("shader"));
-			if (named == nullptr || named->empty()) {
-				ENGINE_WARN("'{}' has no shader set, so it draws nothing", pass.Text());
-				return {};
+			if (named != nullptr && !named->empty()) {
+				return core::Name(*named);
 			}
-			return core::Name(*named);
+
+			// **The kind's own, when it has one.** An effect like `ssao` has a
+			// correct implementation and the engine ships it; asking every
+			// author to type its filename would be a setting with one right
+			// answer. A `raster` node has no default because a `raster` node
+			// *is* somebody's shader.
+			const graph::NodeKindSpec *spec = graph::NodeCatalogue::Find(node.Kind);
+			if (spec != nullptr && !spec->DefaultShader.empty()) {
+				return core::Name(spec->DefaultShader);
+			}
+
+			ENGINE_WARN("'{}' has no shader set, so it draws nothing", pass.Text());
+			return {};
 		}
 
 		// **Keyed on the node**, so two nodes editing two shaders do not
@@ -5138,7 +5398,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::SubmitRaster(const graph::RunContext &context) {
-		const graph::Node *node = Graph.Find(context.Node);
+		const graph::Node *node = Nodes().Find(context.Node);
 		if (node == nullptr) {
 			return true;
 		}
@@ -5156,7 +5416,7 @@ namespace engine::render {
 		// kind cannot do.
 		NamedTexture target;
 		for (const graph::ResourceId id : context.Writes) {
-			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			const graph::ResourceDesc *desc = Nodes().FindResource(id);
 			if (desc == nullptr || desc->Kind != graph::ResourceKind::Colour) {
 				continue;
 			}
@@ -5180,7 +5440,7 @@ namespace engine::render {
 			if (count >= 4) {
 				break;
 			}
-			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			const graph::ResourceDesc *desc = Nodes().FindResource(id);
 			if (desc == nullptr || desc->Kind == graph::ResourceKind::Entities ||
 				desc->Kind == graph::ResourceKind::Camera) {
 				continue;
@@ -5201,6 +5461,30 @@ namespace engine::render {
 			return true;
 		}
 
+		// **What this pass is shading, as a uniform block.** Built here rather
+		// than by each handler so a custom `raster` node and a shipped effect
+		// are told the same things in the same slot — see `PassUniforms`.
+		const graph::Viewpoint viewpoint = ViewpointFor(context.Reads);
+		const float aspect =
+			target.Height > 0 ? static_cast<float>(target.Width) / static_cast<float>(target.Height) : 1.0f;
+
+		PassUniforms uniforms;
+		uniforms.ViewProjection = graph::ViewProjectionOf(viewpoint, aspect);
+		uniforms.InverseViewProjection = glm::inverse(uniforms.ViewProjection);
+		uniforms.Planes = glm::vec4{
+			viewpoint.Lens.NearPlane,
+			viewpoint.Lens.FarPlane,
+			viewpoint.Lens.NearPlane > 0.0f ? 1.0f / viewpoint.Lens.NearPlane : 0.0f,
+			viewpoint.Lens.FarPlane > 0.0f ? 1.0f / viewpoint.Lens.FarPlane : 0.0f,
+		};
+		uniforms.Target = glm::vec4{
+			static_cast<float>(target.Width),
+			static_cast<float>(target.Height),
+			target.Width > 0 ? 1.0f / static_cast<float>(target.Width) : 0.0f,
+			target.Height > 0 ? 1.0f / static_cast<float>(target.Height) : 0.0f,
+		};
+		uniforms.View = glm::vec4{AnimationSeconds, viewpoint.Lens.FieldOfViewRadians, aspect, 0.0f};
+
 		ENGINE_PROFILE_CAT("raster pass", core::ProfileCategory::Render);
 		CurrentFrame.Recorder->Enter(context.Kind);
 
@@ -5218,6 +5502,7 @@ namespace engine::render {
 		if (count > 0) {
 			SDL_BindGPUFragmentSamplers(pass, 0, bindings, count);
 		}
+		SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 
 		// Three vertices, no buffer: `overlay.vert` builds the triangle.
 		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
@@ -5551,7 +5836,7 @@ namespace engine::render {
 		std::vector<core::Name> wanted;
 		if (FlowRan) {
 			for (const graph::NodeId id : Compiled.PerView) {
-				const graph::Node *node = Graph.Find(id);
+				const graph::Node *node = Nodes().Find(id);
 				if (node == nullptr || !node->Enabled) {
 					continue;
 				}
@@ -5770,6 +6055,10 @@ namespace engine::render {
 					// buffer offset and the instance it came from is gone.
 					SlotMesh.resize(uploadCount);
 					SlotTexture.resize(uploadCount);
+					SlotNormal.resize(uploadCount);
+					SlotRoughness.resize(uploadCount);
+					SlotOcclusion.resize(uploadCount);
+					SlotEmissive.resize(uploadCount);
 					SlotTags.resize(uploadCount);
 
 					// **The mesh is resolved once and used twice.** `ToGpu` needs
@@ -5780,6 +6069,10 @@ namespace engine::render {
 						const MeshEntry &mesh = Meshes.Resolve(instance.Mesh);
 						SlotMesh[slot] = &mesh;
 						SlotTexture[slot] = instance.Texture;
+						SlotNormal[slot] = instance.NormalMap;
+						SlotRoughness[slot] = instance.RoughnessMap;
+						SlotOcclusion[slot] = instance.OcclusionMap;
+						SlotEmissive[slot] = instance.EmissiveMap;
 						SlotTags[slot] = instance.TagMask;
 						return &mesh;
 					};
@@ -6689,7 +6982,7 @@ namespace engine::render {
 
 	core::Name Renderer::Impl::FirstEntityList(std::span<const graph::ResourceId> ids) const {
 		for (const graph::ResourceId id : ids) {
-			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			const graph::ResourceDesc *desc = Nodes().FindResource(id);
 			if (desc != nullptr && desc->Kind == graph::ResourceKind::Entities) {
 				return desc->Name;
 			}
@@ -6701,7 +6994,7 @@ namespace engine::render {
 		FlowRan = false;
 
 		for (const graph::NodeId id : Compiled.PerView) {
-			const graph::Node *node = Graph.Find(id);
+			const graph::Node *node = Nodes().Find(id);
 			if (node == nullptr || !node->Enabled) {
 				continue;
 			}
@@ -6742,7 +7035,7 @@ namespace engine::render {
 
 	core::Name Renderer::Impl::FirstCamera(std::span<const graph::ResourceId> ids) const {
 		for (const graph::ResourceId id : ids) {
-			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			const graph::ResourceDesc *desc = Nodes().FindResource(id);
 			if (desc != nullptr && desc->Kind == graph::ResourceKind::Camera) {
 				return desc->Name;
 			}
@@ -6861,7 +7154,7 @@ namespace engine::render {
 		// the difference between a kind and a node. Unset takes the value that
 		// makes the node a no-op, so one somebody dropped in and has not set up
 		// is a pass-through rather than a black frame.
-		const graph::Node *node = Graph.Find(context.Node);
+		const graph::Node *node = Nodes().Find(context.Node);
 
 		if (kind == "cull-distance") {
 			const float radius = node != nullptr ? node->Number(core::Name("radius"), 0.0f) : 0.0f;
@@ -6882,6 +7175,182 @@ namespace engine::render {
 
 		ENGINE_ERROR("'{}' is not an entity-flow kind", context.Kind.Text());
 		return false;
+	}
+
+	bool Renderer::Impl::SubmitGBuffer(const graph::RunContext &context) {
+		const graph::Node *node = Nodes().Find(context.Node);
+		if (node == nullptr || !CurrentView.HaveInstances || GBufferPipeline == nullptr) {
+			return true;
+		}
+
+		// **Every colour it declares, in slot order**, because which target is
+		// albedo and which is normals is the graph's business and the pipeline's
+		// — not a convention this function invents.
+		SDL_GPUColorTargetInfo targets[GBUFFER_TARGETS]{};
+		uint32_t count = 0;
+		for (const graph::ResourceId id : node->Writes) {
+			if (count >= GBUFFER_TARGETS) {
+				break;
+			}
+			const graph::ResourceDesc *desc = Nodes().FindResource(id);
+			if (desc == nullptr || desc->Kind != graph::ResourceKind::Colour) {
+				continue;
+			}
+
+			const NamedTexture target = TextureFor(desc->Name);
+			if (!target.IsValid()) {
+				continue;
+			}
+
+			targets[count].texture = target.Texture;
+			targets[count].clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
+			targets[count].load_op = SDL_GPU_LOADOP_CLEAR;
+			targets[count].store_op = SDL_GPU_STOREOP_STORE;
+			targets[count].cycle = true;
+			count++;
+		}
+
+		// **Refused rather than drawn short.** A pipeline built for three targets
+		// and given two is a validation failure on some backends and silent
+		// garbage on others; saying which is missing is the only useful answer.
+		if (count < GBUFFER_TARGETS) {
+			ENGINE_WARN(
+				"'{}' declares {} usable colour target(s) and the G-buffer writes {}",
+				context.Name.Text(),
+				count,
+				GBUFFER_TARGETS
+			);
+			return true;
+		}
+
+		if (!EnsureDepth(CurrentView.SceneWidth, CurrentView.SceneHeight)) {
+			return true;
+		}
+
+		ENGINE_PROFILE_CAT("gbuffer pass", core::ProfileCategory::Render);
+		CurrentFrame.Recorder->Enter(context.Kind);
+
+		SDL_GPUCommandBuffer *command = CurrentFrame.Command;
+		const ViewPass::CameraRange &range = CurrentView.RangeFor(FirstEntityList(context.Reads));
+
+		SDL_GPUDepthStencilTargetInfo depth{};
+		depth.texture = DepthTexture;
+		depth.clear_depth = 1.0f;
+		depth.load_op = SDL_GPU_LOADOP_CLEAR;
+
+		// **Stored, unlike the forward pass's.** Every consumer of a G-buffer
+		// reads depth — that is how a fullscreen pass knows where a pixel is —
+		// so discarding it would make the whole arrangement pointless.
+		depth.store_op = SDL_GPU_STOREOP_STORE;
+		depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+		depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+		depth.cycle = true;
+
+		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, targets, count, &depth);
+		SDL_BindGPUGraphicsPipeline(pass, GBufferPipeline);
+
+		const SDL_GPUBufferBinding vertexBindings[] = {
+			{Meshes.Vertices(), 0},
+			{InstanceBuffer, 0},
+		};
+		SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+
+		const SDL_GPUBufferBinding indexBinding{Meshes.Indices(), 0};
+		SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+		SDL_PushGPUVertexUniformData(command, 0, &CurrentView.Frame, sizeof(CurrentView.Frame));
+
+		// **The opaque head only.** A deferred pass cannot blend — one pixel
+		// holds one surface's properties — so blended geometry stays in the
+		// forward tail, which the opaque/blended split already produces.
+		if (range.OpaqueCount > 0) {
+			const WorldBindings bindings = BindingsForWorld();
+			CurrentFrame.Result->DrawCalls += DrawSlots(
+				command,
+				pass,
+				CurrentView.SceneCount + range.Base,
+				static_cast<uint32_t>(range.OpaqueCount),
+				&CurrentView.Lighting,
+				bindings.Shadow,
+				bindings.ShadowSampler,
+				nullptr,
+				bindings.SurfaceSampler,
+				0,
+				CurrentFrame.Result->Triangles,
+				true
+			);
+		}
+
+		SDL_EndGPURenderPass(pass);
+		return true;
+	}
+
+	bool Renderer::Impl::SubmitOutput(const graph::RunContext &context) {
+		CurrentFrame.Recorder->Enter(core::Name("output"));
+
+		// **The way out of a pipeline, and until this existed there was none.**
+		// Every composite kind writes into a target the graph allocated, so a
+		// chain somebody authored — tonemap into bloom into SMAA — ran correctly
+		// and landed in a texture the frame does not show. The image was
+		// produced and then dropped on the floor.
+		const graph::RenderGraph &graph = Nodes();
+		NamedTexture source;
+		for (const graph::ResourceId id : context.Reads) {
+			const graph::ResourceDesc *desc = graph.FindResource(id);
+			if (desc == nullptr || desc->Kind == graph::ResourceKind::Entities ||
+				desc->Kind == graph::ResourceKind::Camera) {
+				continue;
+			}
+			source = TextureFor(desc->Name);
+			if (source.IsValid()) {
+				break;
+			}
+		}
+
+		if (!source.IsValid()) {
+			ENGINE_WARN(
+				"'{}' has nothing wired into it, so the pipeline produces nothing", context.Name.Text()
+			);
+			return true;
+		}
+
+		// Where the view's picture actually lives: the scene slot when there is
+		// one, the swapchain when the view draws straight to the window. The
+		// same choice `TextureFor("colour")` makes, and it has to be.
+		NamedTexture destination = TextureFor(core::Name("colour"));
+		if (!destination.IsValid()) {
+			return true;
+		}
+
+		// **Already there is the ordinary case and must cost nothing.** A
+		// pipeline whose last pass wrote `colour` — which is what the standard
+		// frame does — wires that same resource into its output, and blitting a
+		// texture onto itself is undefined rather than merely wasteful.
+		if (source.Texture == destination.Texture) {
+			return true;
+		}
+
+		// **A blit rather than a copy pass**, for `CollectReadback`'s reason one
+		// screen up: the two need not agree on size, and a chain that worked at
+		// half resolution is exactly the case this has to carry. Scaling is the
+		// destination's business, so a half-res target lands stretched rather
+		// than in a corner.
+		SDL_GPUBlitInfo blit{};
+		blit.source.texture = source.Texture;
+		blit.source.w = source.Width;
+		blit.source.h = source.Height;
+		blit.destination.texture = destination.Texture;
+		blit.destination.w = destination.Width;
+		blit.destination.h = destination.Height;
+
+		// Every texel of the destination is written, so nothing needs loading
+		// first — and linear because a resolution change is the point of
+		// allowing one at all.
+		blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+		blit.filter = SDL_GPU_FILTER_LINEAR;
+		blit.cycle = true;
+
+		SDL_BlitGPUTexture(CurrentFrame.Command, &blit);
+		return true;
 	}
 
 	bool Renderer::Impl::SubmitOverdraw() {
@@ -7398,10 +7867,17 @@ namespace engine::render {
 				sharedDone.push_back(key);
 			}
 
+			// **Which graph this view's ids mean**, for the length of its block
+			// and no longer. See `Impl::Running`.
+			State->Running = named != nullptr ? &named->Graph : nullptr;
 			refused = !graph.ExecuteView(compiled, runner, index, world, first);
+			State->Running = nullptr;
 		}
 
 		if (!refused) {
+			// **The frame's own block is always the standard graph's**, so the
+			// ids it hands out are the standard graph's too — which is exactly
+			// what a null `Running` selects.
 			refused = !State->Graph.ExecuteFinal(State->Compiled, runner);
 		}
 

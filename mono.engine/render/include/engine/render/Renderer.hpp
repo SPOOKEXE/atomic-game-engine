@@ -408,7 +408,10 @@ namespace engine::render {
 		// is L12 `client` and a world's identifier is L4's; what this needs is
 		// only whether two views are of the same world, so it takes whatever the
 		// caller already uses to tell them apart and never learns what a world
-		// is. `world::WorldId::Value` is the obvious thing to pass.
+		// is. `world::WorldId::Index` is the obvious thing to pass, and is what
+		// `client::InstallWorldPipelines` qualifies a pipeline key with — so a
+		// view setting one of the two and not the other names a pipeline nothing
+		// installed.
 		//
 		// **What it decides is how much shared work a frame does.** A shadow map
 		// is per world per light, so views sharing a world share one and views of

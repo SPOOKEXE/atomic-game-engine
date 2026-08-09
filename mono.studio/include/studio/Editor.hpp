@@ -1998,6 +1998,19 @@ namespace studio {
 		// world is also what makes a deleted mirror stop being drawn.
 		std::vector<engine::render::SurfaceView> Surfaces;
 
+		// Each world's installed pipeline, by world index.
+		//
+		// **A map rather than one name, because two viewports can show two
+		// worlds in the same frame** — which is exactly the case
+		// `client::InstallWorldPipelines` qualifies its keys for. Presence means
+		// that world's pipelines are installed, so an absent entry is what makes
+		// the next frame install them.
+		//
+		// **Erased rather than rewritten when a pipeline is saved.** Saving is
+		// the one edit that must reach the renderer, and dropping the entry says
+		// "install this again" without the save having to know how.
+		std::unordered_map<uint32_t, engine::core::Name> PipelineSelected;
+
 		// One world's run, for as long as it is running.
 		//
 		// **A universe is a collection of scenes, so running is per scene.**

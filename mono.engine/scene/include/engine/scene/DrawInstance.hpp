@@ -84,6 +84,22 @@ namespace engine::scene {
 		// decide.
 		core::Name Texture;
 
+		// The surface's other sampled maps, from `SurfaceAppearance`.
+		//
+		// **Four and not five**: `HeightMap` is carried on the component and not
+		// here, because nothing samples it yet and an instance is copied per
+		// world walk. A field the draw path does not read is bytes moved per
+		// instance per frame to no end.
+		//
+		// Invalid means the shader's fallback — the geometric normal, and
+		// constants for roughness and occlusion.
+		//@{
+		core::Name NormalMap;
+		core::Name RoughnessMap;
+		core::Name OcclusionMap;
+		core::Name EmissiveMap;
+		//@}
+
 		// Which tag bits this instance carries, against the world's `TagTable`.
 		//
 		// **The mask travels rather than the names**, so a pass filtering by

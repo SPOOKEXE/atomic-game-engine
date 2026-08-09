@@ -56,6 +56,44 @@ namespace engine::assets {
 		// colour map is one somebody authored and has not textured yet.
 		std::string ColourMap;
 
+		// The other four maps a published material carries.
+		//
+		// **Published since v0.10 and read by nothing until now.** `ROADMAP.md`
+		// said these arrive "when there is a pass that samples them, which is
+		// v0.11's G-buffer" — that pass exists, so they arrive. All 291 seeded
+		// materials already ship the full set at 1K; what was missing was
+		// anywhere to put the names.
+		//
+		// **Each may be empty, for `ColourMap`'s reason.** A material with no
+		// normal map is one somebody authored flat, not a malformed file, and
+		// the shader falls back to the geometric normal. Refusing a material for
+		// an absent map would make the ordinary case unrepresentable.
+		//
+		// **Names rather than packed channels.** Roughness, occlusion and height
+		// are single-channel and an engine that cared most about bandwidth would
+		// pack the three into one RGB texture. The sources do not: ambientCG,
+		// Poly Haven and cgbookcase each publish them separately, so packing
+		// would be a bake step that has to run before anything can be looked at,
+		// and a mismatch between packed and unpacked would be invisible until it
+		// rendered. Separate names now; packing is a bake decision that can be
+		// made later without changing what a material *is*.
+		//@{
+		std::string NormalMap;
+		std::string RoughnessMap;
+		std::string OcclusionMap;
+		std::string HeightMap;
+
+		// What this surface emits regardless of what lights it.
+		//
+		// **The one map with no CC0 source behind it.** ambientCG, Poly Haven
+		// and cgbookcase publish the other four for nearly every material and an
+		// emissive map for almost none — it is authored per-asset, because what
+		// glows is a decision about the object rather than a property of the
+		// substance. So this is carried and sampled with a hand-authored test
+		// material rather than with the seeded set.
+		std::string EmissiveMap;
+		//@}
+
 		// Whether this describes a material at all.
 		//
 		// @return `true` always, today. **A function rather than nothing**, so
@@ -80,7 +118,14 @@ namespace engine::assets {
 		static constexpr uint32_t MAGIC = 0x31544D41;
 
 		// The version. Bumped when the layout changes, never reused.
-		static constexpr uint16_t VERSION = 1;
+		//
+		// **3 adds emissive, 2 added the other four, and 1 still reads.** A version 1 file is a
+		// colour map and nothing else, which is exactly a material whose other
+		// four names are empty — so the older format is not a special case to
+		// translate, it is the newer one with four absent fields. That is what
+		// makes reading it a branch on how many strings to expect rather than a
+		// second parser.
+		static constexpr uint16_t VERSION = 3;
 
 		// The longest asset name this will read.
 		//

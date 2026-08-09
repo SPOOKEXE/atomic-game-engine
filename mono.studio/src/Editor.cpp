@@ -1180,6 +1180,14 @@ namespace studio {
 				// be a second thing to keep in step with what `SurfaceSize` and
 				// `Surface` mean.
 				(void)client::CollectSurfaceViews(store, Surfaces);
+
+				// **The world's own render pipeline.** Absent means it has not
+				// been installed since this world was shown or its pipelines
+				// were saved; see `PipelineSelected`.
+				if (PipelineSelected.find(shown.Index) == PipelineSelected.end()) {
+					PipelineSelected[shown.Index] =
+						client::InstallWorldPipelines(store, Renderer, shown.Index);
+				}
 			});
 			instances = &drawn;
 		}
@@ -1215,6 +1223,17 @@ namespace studio {
 		view.Surfaces = Surfaces;
 		view.Target = target.IsValid() ? &target : nullptr;
 		view.Slot = DrawingViewport;
+
+		// **Which world, and that world's pipeline.** The key
+		// `InstallWorldPipelines` returns is qualified by this same number, so
+		// the two are set together or neither is.
+		if (shown.IsValid()) {
+			view.World = shown.Index;
+			const auto found = PipelineSelected.find(shown.Index);
+			if (found != PipelineSelected.end()) {
+				view.Pipeline = found->second;
+			}
+		}
 
 		LastFrame = Renderer.Render({&view, 1}, Overlay, &Interface);
 

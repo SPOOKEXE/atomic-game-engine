@@ -326,9 +326,20 @@ namespace studio {
 				if (!engine::assets::Material::Read(reader, material)) {
 					continue;
 				}
-				const engine::core::Name colour(material.ColourMap);
-				EachOpenWorld([&name, &colour](engine::ecs::Store &store) {
-					engine::scene::RecordMaterial(store, name, colour);
+				// **All five, built once and recorded together.** A material is
+				// one thing; recording its colour and forgetting its normals
+				// would draw a part textured and flat, which reads as the normal
+				// map being broken rather than absent.
+				const engine::scene::MaterialMaps maps{
+					.Colour = engine::core::Name(material.ColourMap),
+					.Normal = engine::core::Name(material.NormalMap),
+					.Roughness = engine::core::Name(material.RoughnessMap),
+					.Occlusion = engine::core::Name(material.OcclusionMap),
+					.Height = engine::core::Name(material.HeightMap),
+					.Emissive = engine::core::Name(material.EmissiveMap),
+				};
+				EachOpenWorld([&name, &maps](engine::ecs::Store &store) {
+					engine::scene::RecordMaterial(store, name, maps);
 				});
 				ContentMaterials++;
 			}
