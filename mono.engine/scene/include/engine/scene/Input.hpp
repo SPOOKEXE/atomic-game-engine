@@ -262,7 +262,17 @@ namespace engine::scene {
 
 		// Explicit padding, so the object representation a snapshot writes holds
 		// no uninitialised bytes.
-		uint8_t Reserved[2] = {};
+		//
+		// **Eight and not two, and the difference is the whole point of naming
+		// it.** The members above end at 42 and the type aligns to 8, so two
+		// bytes left six the compiler inserted and nobody declared — written to
+		// a save file by `Column::Write`, which sends `sizeof(T)` bytes and does
+		// not know which of them a member claimed. `Reserved` has to reach the
+		// end or it is not doing the job it is here for; this is the only
+		// component in the module where it did not, and the rest are the reason
+		// the rule is worth keeping. `sizeof` is unchanged at 48, so no file
+		// written before this changes meaning.
+		uint8_t Reserved[8] = {};
 
 		// Whether a key is down now.
 		//

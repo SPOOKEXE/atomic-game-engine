@@ -93,13 +93,21 @@ namespace engine::scene {
 	// places for a material to be half-present.
 	//
 	// @since v0.11
+	// **Every map is initialised where it is declared**, which is what lets a
+	// caller name the one it has — `MaterialMaps{.Colour = texture}` is the
+	// ordinary case, because a material with a colour and nothing else is the
+	// ordinary material. Without these `= {}` the omitted five are still
+	// value-initialised and still invalid, and GCC still refuses the designated
+	// initialiser under `-Wmissing-field-initializers`, which the `ci` preset
+	// makes fatal. `core::Name` already defaults to invalid, so this changes no
+	// value — it says so where the compiler can see it.
 	struct MaterialMaps {
-		core::Name Colour;
-		core::Name Normal;
-		core::Name Roughness;
-		core::Name Occlusion;
-		core::Name Height;
-		core::Name Emissive;
+		core::Name Colour = {};
+		core::Name Normal = {};
+		core::Name Roughness = {};
+		core::Name Occlusion = {};
+		core::Name Height = {};
+		core::Name Emissive = {};
 
 		// Whether this names anything at all.
 		//
@@ -163,7 +171,7 @@ namespace engine::scene {
 	// @return The catalogue.
 	MaterialCatalogue &MaterialsOf(ecs::Store &store);
 
-	// Records which texture a material's colour map is.
+	// Records which textures a material's maps name.
 	//
 	// **Last writer wins, and re-registering is legal**, because that is what the
 	// content path does: a publisher may replace a material under a name it
@@ -172,8 +180,8 @@ namespace engine::scene {
 	//
 	// @param store    The world.
 	// @param material The material's asset name.
-	// @param colour   The texture its colour map names. May be invalid, which is
-	//                 a material somebody has not textured yet.
+	// @param maps     The textures its maps name. Every one may be invalid,
+	//                 which is a material somebody has not textured yet.
 	// @return `false` for an invalid material name.
 	bool RecordMaterial(ecs::Store &store, const core::Name &material, const MaterialMaps &maps);
 
