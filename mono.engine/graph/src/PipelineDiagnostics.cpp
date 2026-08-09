@@ -112,6 +112,8 @@ namespace engine::graph {
 			return "format-overspend";
 		case DiagnosticKind::LossyWire:
 			return "lossy-wire";
+		case DiagnosticKind::SamplesOwnTarget:
+			return "samples-own-target";
 		case DiagnosticKind::OutOfOrder:
 			return "out-of-order";
 		case DiagnosticKind::UnusedAlpha:
@@ -278,6 +280,60 @@ namespace engine::graph {
 						graph.FindResource(resource) == nullptr ? core::Name{}
 																: graph.FindResource(resource)->Name,
 						"'" + NameOf(graph, resource) + "' is read here and written by nothing",
+					}
+				);
+			}
+		}
+
+		// --- passes that sample what they are drawing into -----------------------
+		//
+		// **The hazard SDL documents and nothing here was checking.** Every
+		// target this engine writes is cycled, and SDL's rule is that cycling
+		// leaves the resource undefined until it is written again. A fullscreen
+		// pass wired to sample the target it draws into therefore reads
+		// undefined memory — which on most drivers looks like a plausible frame
+		// most of the time, and is the worst way for a bug to behave.
+		//
+		// **Only the kinds that *sample*.** `transparent` reads and writes
+		// `colour` and is perfectly correct: it blends onto the attachment
+		// inside one render pass, which the hardware does natively. What is
+		// wrong is binding your own output as a **texture**, and the catalogue
+		// is what says which slot is which — so this asks it rather than
+		// guessing from the resource's kind.
+		for (const Row &row : rows) {
+			for (size_t slot = 0; slot < row.Body->Reads.size(); slot++) {
+				const ResourceId resource = row.Body->Reads[slot];
+				if (!resource.IsValid()) {
+					continue;
+				}
+
+				const bool alsoWrites =
+					std::find(row.Body->Writes.begin(), row.Body->Writes.end(), resource) !=
+					row.Body->Writes.end();
+				if (!alsoWrites) {
+					continue;
+				}
+
+				// A slot the catalogue calls a texture is sampled; one it calls
+				// a colour or depth target is bound as an attachment.
+				const NodeKindSpec *spec = NodeCatalogue::Find(row.Body->Kind);
+				if (spec == nullptr || slot >= spec->Inputs.size()) {
+					continue;
+				}
+				if (spec->Inputs[slot].Kind != ResourceKind::Texture) {
+					continue;
+				}
+
+				found.push_back(
+					Diagnostic{
+						DiagnosticKind::SamplesOwnTarget,
+						DiagnosticSeverity::Warning,
+						row.Body->Name,
+						graph.FindResource(resource) == nullptr ? core::Name{}
+																: graph.FindResource(resource)->Name,
+						"'" + NameOf(graph, resource) +
+							"' is sampled and written by the same pass; cycling leaves it undefined, "
+							"so this wants two resources and a ping-pong",
 					}
 				);
 			}

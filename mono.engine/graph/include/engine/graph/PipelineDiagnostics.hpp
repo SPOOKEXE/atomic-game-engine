@@ -119,6 +119,29 @@ namespace engine::graph {
 		// channel is *blank* — that needs a readback — but it can say nothing
 		// is arranged to use it.
 		UnusedAlpha,
+
+		// A pass that reads the resource it writes.
+		//
+		// **The hazard `SDL_GPU` documents and nothing was checking.** Every
+		// target this engine writes is *cycled* — SDL's answer to "do not
+		// overwrite what a pending command still references" — and its rule is
+		// that cycling leaves the resource's contents undefined until they are
+		// written again. So a fullscreen pass wired to sample the target it is
+		// drawing into does not read last frame's image or this one's: it reads
+		// undefined memory, which on most drivers looks like a plausible frame
+		// most of the time.
+		//
+		// **A read-modify-write needs two resources**, which is what every
+		// engine's blur and every temporal resolve does — write B from A, then
+		// A from B. The graph can say that, and this is what tells an author
+		// they have not.
+		//
+		// Not reported for a target a pass merely *loads* rather than samples:
+		// `transparent` blends onto what `opaque` wrote and declares both, and
+		// that is a read-modify-write the hardware does natively inside one
+		// render pass. Only a node that binds its own output as a **texture**
+		// is caught — see `PipelineDiagnostics.cpp`.
+		SamplesOwnTarget,
 	};
 
 	// A stable, human-readable name for a diagnostic kind.

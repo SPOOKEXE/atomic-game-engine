@@ -454,3 +454,84 @@ TEST_CASE("an empty graph is not a faulty graph", "[graph][diagnostics]") {
 	const RenderGraph graph;
 	CHECK(Diagnose(graph).empty());
 }
+
+TEST_CASE("a pass that samples its own target is refused", "[graph][diagnostics]") {
+	// **The hazard SDL documents and nothing was checking.** Every target this
+	// engine writes is cycled, and SDL's rule is that cycling leaves the
+	// resource undefined until written again. A fullscreen pass wired to sample
+	// what it draws into reads undefined memory — which on most drivers looks
+	// like a plausible frame most of the time, and is the worst way for a bug to
+	// behave.
+	engine::graph::RegisterStandardNodeKinds();
+
+	RenderGraph graph;
+	const ResourceId scene = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+
+	Node opaque;
+	opaque.Name = Name("opaque");
+	opaque.Kind = Name("opaque");
+	opaque.Writes = {scene};
+	graph.AddNode(opaque);
+
+	// `raster`'s first input slot is a texture, so this one samples.
+	Node blur;
+	blur.Name = Name("blur");
+	blur.Kind = Name("raster");
+	blur.Reads = {scene};
+	blur.Writes = {scene};
+	graph.AddNode(blur);
+
+	const std::vector<Diagnostic> found = Diagnose(graph);
+
+	bool reported = false;
+	for (const Diagnostic &one : found) {
+		if (one.Kind == DiagnosticKind::SamplesOwnTarget && one.Node == Name("blur")) {
+			reported = true;
+			CHECK(one.Resource == Name("colour"));
+			CHECK(one.Severity == DiagnosticSeverity::Warning);
+		}
+	}
+	CHECK(reported);
+}
+
+TEST_CASE("blending onto your own attachment is not the same mistake", "[graph][diagnostics]") {
+	// **`transparent` reads and writes `colour` and is perfectly correct.** It
+	// blends onto the attachment inside one render pass, which the hardware does
+	// natively — no sampling, no cycling hazard. A check that fired on "reads
+	// and writes the same resource" would report the standard frame as broken,
+	// which is how a diagnostic teaches people to ignore it.
+	engine::graph::RegisterStandardNodeKinds();
+
+	RenderGraph graph;
+	const ResourceId scene = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+	const ResourceId depth = graph.AddResource({.Name = Name("depth"), .Kind = ResourceKind::Depth});
+
+	Node opaque;
+	opaque.Name = Name("opaque");
+	opaque.Kind = Name("opaque");
+	opaque.Writes = {scene, depth};
+	graph.AddNode(opaque);
+
+	Node blended;
+	blended.Name = Name("transparent");
+	blended.Kind = Name("transparent");
+	blended.Reads = {scene, depth};
+	blended.Writes = {scene};
+	graph.AddNode(blended);
+
+	for (const Diagnostic &one : Diagnose(graph)) {
+		INFO("reported " << Describe(one.Kind) << " on " << std::string(one.Node.Text()));
+		CHECK(one.Kind != DiagnosticKind::SamplesOwnTarget);
+	}
+}
+
+TEST_CASE("the standard frame samples nothing it writes", "[graph][diagnostics]") {
+	// The check that stops this becoming noise: our own frame must be clean, or
+	// nobody will read what the panel says about anybody else's.
+	engine::graph::RegisterStandardNodeKinds();
+
+	for (const Diagnostic &one : Diagnose(engine::graph::StandardGraph())) {
+		INFO("reported " << Describe(one.Kind) << " on " << std::string(one.Node.Text()));
+		CHECK(one.Kind != DiagnosticKind::SamplesOwnTarget);
+	}
+}

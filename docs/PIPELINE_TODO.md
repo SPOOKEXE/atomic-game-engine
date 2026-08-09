@@ -17,7 +17,7 @@ should leave the in-progress item marked with what compiles and what does not.
 | 1 | Type system — formats, usage kinds, divisor, external resources | **done** |
 | 2 | Catalogue — 59 node kinds, typed and formatted slots | **done** |
 | 3 | Executor — `Renderer::Render` runs the graph | **done.** `graph::Execute` is what submits the frame; `PassOrder()` is a view of the graph and the `Pass` enum is gone |
-| 4 | Static checks — nine fault kinds | **done** |
+| 4 | Static checks — ten fault kinds | **done.** The tenth is `SamplesOwnTarget`, which became reachable when `raster` let a pipeline wire one |
 | 5 | Authored order, and scopes | **done** |
 | 6 | Access grid / profiler visualiser | **done** |
 | 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
@@ -708,12 +708,47 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       strip unwritten instead. Verified on a device at `1088x339` into `136x43`
       groups — a size that exercises exactly that rounding.
 
-      **What is still absent is the barrier.** SDL inserts what it needs between
-      passes in one command buffer, so the standard frame is safe; a pipeline
-      that had a dispatch write what a *later* dispatch reads in the same frame
-      is the case nothing here reasons about. RDG derives these
-      (`PIPELINE_NODES.md` §1.1) and this does not — worth filing before
-      somebody authors a two-stage compute chain.
+- [x] **Barriers: there are none to write, and the real hazard is cycling.**
+
+      This was filed as "derive the barriers RDG derives". Checking the header
+      first — `PIPELINE_NODES.md`'s own lesson, and the one the timestamp entry
+      was written by — says there is nothing to derive: **`SDL_GPU` synchronises
+      itself.** Its contract is cycling, not barriers:
+
+      > *"you don't have to worry about complex state tracking and
+      > synchronization as long as cycling is correctly employed"*
+
+      **But the same paragraph names a hazard nothing here was checking:**
+
+      > *"When cycling, all data in the resource is considered to be undefined
+      > for subsequent commands until that data is written again. You must take
+      > care not to read undefined data."*
+
+      Every target this engine writes is cycled. So a fullscreen pass wired to
+      **sample the target it draws into** does not read last frame's image or
+      this one's — it reads undefined memory, which on most drivers looks like a
+      plausible frame most of the time. That is the worst way for a bug to
+      behave, and it became reachable the moment `raster` let somebody wire one.
+
+      Audited first: every `load_op`/`cycle` pair in the renderer is
+      `CLEAR` + cycle, or `LOAD` + no cycle. **No existing pass has the bug** —
+      the check is for what a pipeline somebody authors can now do.
+
+      `DiagnosticKind::SamplesOwnTarget` is that check, and it is static —
+      `engine.graph.pipelinediagnostics`, no GPU.
+
+      **The exemption is the interesting half.** `transparent` reads and writes
+      `colour` and is perfectly correct: it blends onto the attachment inside one
+      render pass, which the hardware does natively. A check that fired on "reads
+      and writes the same resource" would report the standard frame as broken,
+      which is how a diagnostic teaches people to ignore it. So it asks the
+      *catalogue* which slot is a `Texture` — sampled — and which is an
+      attachment, rather than guessing from the resource's kind.
+
+      Three cases, and both mutations red: exempting nothing reports the standard
+      frame; never firing misses the blur. A read-modify-write wants two
+      resources and a ping-pong, which is what every engine's blur and every
+      temporal resolve already does — and the graph can say that.
 
 - [ ] **Two colour passes, two lists.** `CameraEntityList` reads whatever
       `opaque` is wired to, because the camera range is one range. A pipeline
