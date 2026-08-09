@@ -306,6 +306,21 @@ namespace engine::replication {
 		Authority_.Publish(store, tick);
 
 		for (Peer &peer : Peers) {
+			// **The identity gate, and it is here rather than in `Accept`.** A
+			// claim arrives *after* admission — `SetIdentityCheck` is what fills
+			// `Peer::Identity`, and it runs on a message the client sends once
+			// the session exists. Refusing at admission would refuse everybody,
+			// because nobody has proved anything yet at that point.
+			//
+			// So the gate is on what a peer is *given*: an unidentified client
+			// holds a session and receives no world state. It still ages out
+			// through `Advance`'s ordinary link timeout if it never identifies,
+			// which is why this needs no deadline of its own.
+			if (RequireIdentity && !peer.Identity.has_value()) {
+				peer.Wire->Flush(nowSeconds);
+				continue;
+			}
+
 			const std::span<const std::vector<std::byte>> messages = Authority_.Outgoing(peer.Client);
 			for (size_t index = 0; index < messages.size(); index++) {
 				if (peer.Wire->Send(messages[index], nowSeconds)) {

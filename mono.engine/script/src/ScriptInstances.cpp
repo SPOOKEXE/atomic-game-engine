@@ -61,7 +61,7 @@ namespace engine::script {
 			// every other class does — and `Classes::Register` returning the
 			// existing id for a repeated name would have hidden a second root
 			// rather than prevented one.
-			scene::PartClass();
+			scene::EnsureClassTree();
 
 			// Through the one function, so a caller that registers the class
 			// tree cannot end up with a `SourceCache` the snapshot writer

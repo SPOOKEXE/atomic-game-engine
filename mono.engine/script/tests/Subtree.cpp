@@ -49,7 +49,7 @@ namespace {
 }
 
 TEST_CASE("EachDescendant walks depth first, in the recursive walk's order", "[script][subtree]") {
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 	Store store("subtree_test");
 
 	// root
@@ -71,7 +71,7 @@ TEST_CASE("EachDescendant walks depth first, in the recursive walk's order", "[s
 }
 
 TEST_CASE("EachDescendant visits nothing under a leaf", "[script][subtree]") {
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 	Store store("subtree_test");
 
 	const Entity leaf = Make(store, "leaf", engine::ecs::NULL_ENTITY);
@@ -85,7 +85,7 @@ TEST_CASE("ForgetSubtree drops a grandchild's connections, not only a child's", 
 	// the whole subtree, and both bindings used to forget only the direct
 	// children — so a connection on a grandchild outlived the row it watched,
 	// holding its VM's callable alive for the rest of the world's life.
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 	Store store("subtree_test");
 
 	const Entity model = Make(store, "model", engine::ecs::NULL_ENTITY);
@@ -117,7 +117,7 @@ TEST_CASE("ForgetSubtree drops a grandchild's connections, not only a child's", 
 }
 
 TEST_CASE("ForgetSubtree leaves a sibling subtree alone", "[script][subtree]") {
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 	Store store("subtree_test");
 
 	const Entity keep = Make(store, "keep", engine::ecs::NULL_ENTITY);

@@ -369,7 +369,7 @@ namespace engine::scene {
 		// own texture is used, and a submesh with none draws its base colour
 		// flat — which is how an untextured import looks right rather than
 		// black.
-		core::Name ColourMap;
+		core::Name ColourMap = {};
 
 		// The surface's other maps, sampled by the G-buffer pass.
 		//
@@ -386,14 +386,14 @@ namespace engine::scene {
 		// It is named here so a material round-trips whole rather than losing a
 		// map every time a world is written.
 		//@{
-		core::Name NormalMap;
-		core::Name RoughnessMap;
-		core::Name OcclusionMap;
-		core::Name HeightMap;
+		core::Name NormalMap = {};
+		core::Name RoughnessMap = {};
+		core::Name OcclusionMap = {};
+		core::Name HeightMap = {};
 
 		// What this surface emits with no light on it. Invalid means nothing,
 		// which is what almost every surface emits.
-		core::Name EmissiveMap;
+		core::Name EmissiveMap = {};
 		//@}
 
 		// Below this alpha a fragment is discarded rather than blended, when

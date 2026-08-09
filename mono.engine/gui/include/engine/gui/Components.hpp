@@ -215,7 +215,7 @@ namespace engine::gui {
 		ScaleType Scale = ScaleType::Stretch;
 
 		// The nine-slice centre, in image pixels. Only read for `Slice`.
-		core::Rect SliceCenter;
+		core::Rect SliceCenter = {};
 
 		// How much the four corners of a nine-slice are magnified.
 		float SliceScale = 1.0f;
@@ -224,10 +224,10 @@ namespace engine::gui {
 		core::UDim2 TileSize{1.0f, 0.0f, 1.0f, 0.0f};
 
 		// The top-left of the sub-rectangle to sample, in image pixels.
-		core::Vector2 RectOffset;
+		core::Vector2 RectOffset = {};
 
 		// The size of that sub-rectangle. Zero means the whole image.
-		core::Vector2 RectSize;
+		core::Vector2 RectSize = {};
 	};
 
 	// What makes a button a button.

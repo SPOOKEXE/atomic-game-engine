@@ -219,6 +219,14 @@ namespace client {
 		return dropped;
 	}
 
+	uint64_t Compositor::Growths() const {
+		uint64_t growths = 0;
+		for (const Slot &slot : Slots) {
+			growths += slot.Channel->Growths();
+		}
+		return growths;
+	}
+
 	size_t Compositor::StaleViews() const {
 		size_t stale = 0;
 		for (const Slot &slot : Slots) {

@@ -82,28 +82,19 @@ namespace studio {
 			return text;
 		}
 
+		// **`assets::Describe` names a kind, and this panel does not get to have
+		// its own opinion.** There was a copy of that switch here, and it had
+		// fallen three kinds behind: `Video`, `Data` and `Shader` all reached
+		// the default and drew as "unknown", which is the exact reading the
+		// original comment said it existed to prevent — a row that looks like a
+		// bug in this panel rather than a file nothing will claim.
+		//
+		// The names are identical for every kind both spellings knew, so this
+		// changes no row that was already right and fixes the three that were
+		// not. `assets` is where the enum lives and where the next kind will be
+		// added, which is the only place a name for it can be kept in step.
 		const char *KindName(engine::assets::AssetKind kind) {
-			switch (kind) {
-			case engine::assets::AssetKind::Mesh:
-				return "mesh";
-			case engine::assets::AssetKind::Texture:
-				return "texture";
-			case engine::assets::AssetKind::Audio:
-				return "audio";
-			case engine::assets::AssetKind::Material:
-				return "material";
-			case engine::assets::AssetKind::Font:
-				return "font";
-			case engine::assets::AssetKind::Script:
-				return "script";
-			case engine::assets::AssetKind::Unknown:
-				break;
-			}
-			// **Named rather than blank**, because "unknown" is a thing a
-			// publisher decided from an extension it did not recognise — and a
-			// row that looked empty would read as a bug in this panel instead of
-			// as a file nothing will claim.
-			return "unknown";
+			return engine::assets::Describe(kind);
 		}
 
 		constexpr const char *ADD_FILE = "Add a file";

@@ -155,7 +155,7 @@ namespace engine::scene {
 	ecs::ClassId MaterialClass() {
 		// Through `PartClass` for `AttachmentClass`'s reason: one registration of
 		// the whole tree, whichever class a caller asks for first.
-		PartClass();
+		EnsureClassTree();
 		return ecs::Classes::Find(core::Name("Material"));
 	}
 }

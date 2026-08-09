@@ -193,10 +193,6 @@ namespace engine::ui {
 		ImGui_ImplSDL3_Shutdown();
 	}
 
-	bool Interface::IsInitialised() const {
-		return State->Ready;
-	}
-
 	bool Interface::IsDrawable() const {
 		return State->Drawable;
 	}

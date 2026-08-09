@@ -224,13 +224,6 @@ namespace client {
 			return Connection.get();
 		}
 
-		// The replicated world's handle.
-		//
-		// @return The handle, or an invalid one when not connected.
-		engine::world::WorldId ReplicatedWorld() const {
-			return Replicated;
-		}
-
 	  private:
 		// Builds the demo worlds `--script`/`--worlds` describe.
 		//

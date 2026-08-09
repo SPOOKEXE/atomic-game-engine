@@ -127,11 +127,6 @@ namespace engine::ui {
 		// Tears both backends down and destroys the context. Idempotent.
 		void Shutdown();
 
-		// Reports whether `Initialise` succeeded.
-		//
-		// @return `true` when `Begin` may be called.
-		bool IsInitialised() const;
-
 		// Whether the platform and renderer backends are running.
 		//
 		// False headless, where the context exists and nothing draws it.

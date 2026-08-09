@@ -40,7 +40,7 @@ namespace {
 		Store World{"find_test"};
 
 		Fixture() {
-			(void)engine::scene::PartClass();
+			engine::scene::EnsureClassTree();
 		}
 
 		Entity Part(const char *name) {

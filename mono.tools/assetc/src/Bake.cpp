@@ -178,43 +178,6 @@ namespace assetc {
 			std::string Emissive;
 		};
 
-		MaterialKeys MaterialKeysOf(std::span<const std::byte> bytes);
-
-		std::string MaterialColourOf(std::span<const std::byte> bytes) {
-			const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-
-			size_t start = 0;
-			while (start < text.size()) {
-				size_t end = std::min(text.find('\n', start), text.size());
-				std::string_view line = text.substr(start, end - start);
-				start = end + 1;
-
-				line = line.substr(0, std::min(line.find('#'), line.size()));
-
-				const size_t equals = line.find('=');
-				if (equals == std::string_view::npos) {
-					continue;
-				}
-
-				const auto trim = [](std::string_view value) {
-					while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
-						value.remove_prefix(1);
-					}
-					while (!value.empty() &&
-						   (value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
-						value.remove_suffix(1);
-					}
-					return value;
-				};
-
-				const std::string key = Lowered(std::string(trim(line.substr(0, equals))));
-				if (key == "color" || key == "colour") {
-					return std::string(trim(line.substr(equals + 1)));
-				}
-			}
-			return {};
-		}
-
 		MaterialKeys MaterialKeysOf(std::span<const std::byte> bytes) {
 			MaterialKeys out;
 			const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());

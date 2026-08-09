@@ -605,22 +605,6 @@ namespace engine::render {
 		// @since v0.10
 		bool DropTexture(const core::Name &name);
 
-		// Whether a mesh has been registered under a name.
-		//
-		// **For a caller deciding what to fetch**, not for the draw path: an
-		// unregistered mesh draws as a cube rather than failing, so the renderer
-		// itself never asks.
-		//
-		// @param name The name.
-		// @return `true` when it is registered.
-		bool HasMesh(const core::Name &name) const;
-
-		// Whether a texture has been registered under a name.
-		//
-		// @param name The name.
-		// @return `true` when it is registered.
-		bool HasTexture(const core::Name &name) const;
-
 		// Waits for the display and claims this frame's image, before the caller
 		// has read a single event.
 		//
@@ -655,9 +639,6 @@ namespace engine::render {
 		// @return `true` when the current thread may record and submit.
 		// @threadsafe
 		bool IsOnOwningThread() const;
-
-		// Reports whether Initialise completed and a GPU device is available.
-		bool IsInitialised() const;
 
 		// "vulkan", "metal", "direct3d12". Shown in the F3 panel, because the
 		// first question about a performance report is which backend produced

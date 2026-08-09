@@ -842,11 +842,4 @@ namespace engine::effects {
 		return counted;
 	}
 
-	std::span<const ParticleInstance> ParticleStream(const ecs::Store &store) {
-		const auto *system = store.Resource<ParticleSystem>();
-		if (system == nullptr) {
-			return {};
-		}
-		return {system->Instances.data(), system->Instances.size()};
-	}
 }

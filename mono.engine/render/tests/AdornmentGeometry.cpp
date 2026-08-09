@@ -42,7 +42,7 @@ namespace {
 
 		explicit World(std::string_view name) : Data(name) {
 			engine::gui::RegisterGuiClasses();
-			(void)engine::scene::PartClass();
+			engine::scene::EnsureClassTree();
 			Workspace = Data.CreateInstance(
 				engine::ecs::Classes::Find(engine::core::Name("Instance")),
 				std::string(engine::gui::WORKSPACE)

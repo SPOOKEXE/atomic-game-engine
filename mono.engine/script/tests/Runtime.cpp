@@ -36,7 +36,7 @@ namespace {
 	// Registers the class tree, which is what `Instance.new` resolves against.
 	// A `Store` is not movable, so this is a call rather than a factory.
 	void RegisterClasses() {
-		(void)PartClass();
+		engine::scene::EnsureClassTree();
 	}
 
 	// The one part a script made, found by walking rather than by being handed

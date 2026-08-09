@@ -274,10 +274,6 @@ namespace engine::ecs {
 		return row;
 	}
 
-	size_t Column::PushCopiedFrom(const Column &source, size_t sourceRow) {
-		return PushCopy(source.At(sourceRow));
-	}
-
 	bool Column::Write(core::ByteWriter &writer) const {
 		const TypeDescriptor &descriptor = Describe();
 

@@ -188,10 +188,11 @@ namespace engine::ecs {
 
 	// Drops every attribute an instance carries.
 	//
-	// **Called when an instance is destroyed**, because the table is keyed by
-	// entity id and ids are reused — an entry left behind would surface as
-	// somebody else's attribute on a freshly created part. `Store::Destroy` is
-	// what calls it.
+	// **Not the destroy path.** An instance being destroyed is cleaned up by
+	// `StoreState`'s `DropAttributes`, which reaches the table by component id
+	// because it sits below this header — one hook rather than two, for the
+	// reason written there. This is the deliberate call: a scripting surface
+	// clearing an instance's attributes in one step rather than naming each.
 	//
 	// @param store    The world.
 	// @param instance The instance.

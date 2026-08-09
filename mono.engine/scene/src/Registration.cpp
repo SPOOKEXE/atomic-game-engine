@@ -540,10 +540,10 @@ namespace engine::scene {
 	}
 
 	void RegisterSceneClasses() {
-		// `PartClass` registers the components first and the whole tree on its
-		// first call, so this is the same registration under the name a caller
-		// looks for rather than a second one.
-		(void)PartClass();
+		// The components first and then the whole tree, on the first call —
+		// the same registration under the name a caller looks for rather than
+		// a second one.
+		EnsureClassTree();
 
 		// The services, through the same door. A game file naming `Lighting`
 		// has to resolve it, and a reader that depended on the studio having

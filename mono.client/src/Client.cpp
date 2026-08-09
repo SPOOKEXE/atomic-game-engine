@@ -1580,6 +1580,17 @@ namespace client {
 		Metrics::Count("render.triangles", static_cast<double>(LastFrame.Triangles));
 		Metrics::Count("render.draw-calls", static_cast<double>(LastFrame.DrawCalls));
 
+		// **The three that only mean anything as a series.** A batch count says
+		// whether the interface is being rebuilt into more draws than it needs;
+		// the two compositor figures are the ones that say a run is heading for
+		// trouble rather than in it — drops climbing is a compositor behind its
+		// producers, and growths climbing is a draw list with no upper edge.
+		// Counted rather than merely available, because a number nobody reads
+		// answers no question.
+		Metrics::Count("ui.batches", static_cast<double>(Interface.LastBatchCount()));
+		Metrics::Count("view.drops", static_cast<double>(Views.Dropped()));
+		Metrics::Count("view.growths", static_cast<double>(Views.Growths()));
+
 		// **The peak rather than the latest.** The frame a run exits on is
 		// often one that presented nothing — the window is going away — so the
 		// last frame's counters are zero on almost every bounded run, which

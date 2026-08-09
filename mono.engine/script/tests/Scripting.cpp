@@ -79,7 +79,7 @@ namespace {
 		return store.FindFirstRoot(name);
 	}
 	void RegisterClasses() {
-		(void)PartClass();
+		engine::scene::EnsureClassTree();
 	}
 
 	// Runs a chunk and reports the error rather than a bare false, so a failing

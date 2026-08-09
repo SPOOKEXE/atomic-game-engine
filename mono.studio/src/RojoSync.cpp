@@ -307,7 +307,7 @@ namespace studio {
 		static const ClassId folder = [] {
 			// Through `PartClass` first, so the tree's root exists. A second
 			// root would be a class tree nothing could compare across.
-			(void)engine::scene::PartClass();
+			engine::scene::EnsureClassTree();
 			const ClassId instance = Classes::Find(Name("Instance"));
 			return Classes::Register("Folder", instance, {});
 		}();

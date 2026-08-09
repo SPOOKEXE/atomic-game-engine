@@ -251,7 +251,7 @@ namespace engine::scene {
 			// so registering that again here would be a second root — and
 			// `Classes::Register` handing back the existing id for a repeated
 			// name would have hidden it rather than refused it.
-			PartClass();
+			EnsureClassTree();
 
 			ecs::EnumTable::Register("ServiceScope", SCOPES);
 

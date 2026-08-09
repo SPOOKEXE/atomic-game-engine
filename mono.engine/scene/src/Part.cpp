@@ -1486,26 +1486,36 @@ namespace engine::scene {
 	}
 
 	ecs::ClassId PartClass() {
-		static const ecs::ClassId part = RegisterTree();
+		static const ecs::ClassId part = (EnsureClassTree(), ecs::Classes::Find(core::Name("Part")));
 		return part;
 	}
 
+	// **One registration, and the static that holds it lives here.** Two
+	// function-local statics each calling `RegisterTree` would have raced to
+	// register the same names, which `Classes::Register` tolerates — and then
+	// the *order* of the two would decide which id each class got, which is
+	// rule 4's hazard arriving inside one process. So there is one static, and
+	// every accessor goes through it.
+	void EnsureClassTree() {
+		static const ecs::ClassId root = RegisterTree();
+		(void)root;
+	}
+
+	// The rest of the tree's accessors, and they share one shape.
+	//
+	// **The id is cached, and that is safe because of the above.** Only
+	// `EnsureClassTree` calls `RegisterTree`, so a static here calls a static
+	// there rather than racing beside it — and a class id is fixed for the life
+	// of the process once registered. Without this each call was a `core::Name`
+	// intern plus a lookup, paid every time somebody asked.
 	ecs::ClassId SoundClass() {
-		// Through `PartClass` for `CameraClass`'s reason: one registration of
-		// the whole tree, whichever class a caller asks for first.
-		PartClass();
-		return ecs::Classes::Find(core::Name("Sound"));
+		static const ecs::ClassId sound = (EnsureClassTree(), ecs::Classes::Find(core::Name("Sound")));
+		return sound;
 	}
 
 	ecs::ClassId CameraClass() {
-		// Through `PartClass` rather than through a second static, so the whole
-		// tree is registered exactly once whichever class a caller asks for
-		// first. Two function-local statics each calling `RegisterTree` would
-		// have raced to register the same names, which `Classes::Register`
-		// tolerates — and then the *order* of the two would decide which id each
-		// class got, which is rule 4's hazard arriving inside one process.
-		PartClass();
-		return ecs::Classes::Find(core::Name("Camera"));
+		static const ecs::ClassId camera = (EnsureClassTree(), ecs::Classes::Find(core::Name("Camera")));
+		return camera;
 	}
 
 	ecs::Entity MakePart(ecs::Store &store, const PartDesc &desc) {

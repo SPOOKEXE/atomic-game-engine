@@ -131,7 +131,7 @@ TEST_CASE("malformed json is refused rather than half-read", "[studio][rojosync]
 TEST_CASE("a directory becomes a folder and its scripts become scripts", "[studio][rojosync]") {
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -171,7 +171,7 @@ TEST_CASE("init.luau makes the directory itself the script", "[studio][rojosync]
 	// in the project would gain a level.
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -200,7 +200,7 @@ TEST_CASE("a .client suffix makes a LocalScript", "[studio][rojosync]") {
 	// based on which folder it sat in would disagree with the same file moved.
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -226,7 +226,7 @@ TEST_CASE("a .client suffix makes a LocalScript", "[studio][rojosync]") {
 TEST_CASE("a .server suffix makes a Script", "[studio][rojosync]") {
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -249,7 +249,7 @@ TEST_CASE("a script's text is staged where the runtime will look", "[studio][roj
 	// root — and `ReadSource` checks the world's own table first.
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -272,7 +272,7 @@ TEST_CASE("a path the project names and disk does not have is reported", "[studi
 	// would make the feature unusable on a fresh clone.
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -296,7 +296,7 @@ TEST_CASE("a path the project names and disk does not have is reported", "[studi
 TEST_CASE("a class this engine does not have becomes a folder, and says so", "[studio][rojosync]") {
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -324,7 +324,7 @@ TEST_CASE("syncing twice does not duplicate the tree", "[studio][rojosync]") {
 	// would produce a tree where half the game cannot find the other half.
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;
@@ -352,7 +352,7 @@ TEST_CASE("the three script classes come from the three file shapes", "[studio][
 	// itself, and nothing about the tree would look unusual.
 	Tree tree;
 	Store store("rojo_test");
-	(void)engine::scene::PartClass();
+	engine::scene::EnsureClassTree();
 
 	RojoProject project;
 	std::string error;

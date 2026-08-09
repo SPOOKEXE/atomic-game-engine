@@ -20,6 +20,7 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 
 #include <cstdint>
 
@@ -236,6 +237,11 @@ namespace engine::scene {
 	size_t StepCharacters(ecs::Store &store, float delta);
 
 	// The `Humanoid` class id, registering the scene tree on first call.
+	//
+	// The third of the tree's class accessors, beside `scene::PartClass` and
+	// `scene::CameraClass` — it lives here rather than in `Part.hpp` because a
+	// humanoid is the thing this file steers, and `StepCharacters` is the
+	// reason the class exists at all.
 	//
 	// @return The class id.
 	ecs::ClassId HumanoidClass();
