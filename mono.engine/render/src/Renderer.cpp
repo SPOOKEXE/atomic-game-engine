@@ -929,6 +929,32 @@ namespace engine::render {
 		graph::CompiledGraph Compiled;
 		//@}
 
+		// The pipelines a view may ask for by name.
+		//
+		// **A camera does not have to draw the way another one does**, which is
+		// what `graph::PipelineSet` says about a world and what nothing could
+		// act on until a view could name one. Compiled when they are set, so
+		// picking one per view is a lookup.
+		//
+		// The frame's own block always comes from `Compiled` above — a window
+		// has one overlay however many cameras drew into it.
+		struct NamedPipeline {
+			core::Name Name;
+			graph::RenderGraph Graph;
+			graph::CompiledGraph Compiled;
+		};
+
+		std::vector<NamedPipeline> Extra;
+
+		// Which pipeline a view runs.
+		//
+		// @param name What the view asked for.
+		// @return The named one, or the default when it named nothing or named
+		//         something this renderer does not have. **Falling back rather
+		//         than refusing**: a viewport whose pipeline was deleted should
+		//         keep drawing.
+		const NamedPipeline *PipelineNamed(core::Name name) const;
+
 		// Runs one frame's nodes, preparing each view as the walk reaches it.
 		//
 		// **The preparation is not in the graph, and should not be.** Culling,
@@ -3763,6 +3789,72 @@ namespace engine::render {
 		};
 	}
 
+	bool Renderer::SetPipeline(core::Name name, const graph::RenderGraph &pipeline) {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+		if (!name.IsValid()) {
+			ENGINE_ERROR("a pipeline needs a name a view can ask for");
+			return false;
+		}
+
+		graph::CompiledGraph compiled;
+		core::Name offender;
+		const graph::GraphStatus status = pipeline.Compile(compiled, offender);
+		if (status != graph::GraphStatus::Ok) {
+			ENGINE_ERROR(
+				"pipeline '{}' refused: {} at '{}'", name.Text(), graph::Describe(status), offender.Text()
+			);
+			return false;
+		}
+
+		const std::vector<core::Name> missing = State->Passes.Missing(pipeline);
+		if (!missing.empty()) {
+			for (const core::Name &kind : missing) {
+				ENGINE_ERROR(
+					"pipeline '{}' refused: nothing can submit a '{}' node", name.Text(), kind.Text()
+				);
+			}
+			return false;
+		}
+
+		for (Impl::NamedPipeline &existing : State->Extra) {
+			if (existing.Name == name) {
+				existing.Graph = pipeline;
+				existing.Compiled = std::move(compiled);
+				return true;
+			}
+		}
+
+		State->Extra.push_back(Impl::NamedPipeline{name, pipeline, std::move(compiled)});
+		return true;
+	}
+
+	bool Renderer::RemovePipeline(core::Name name) {
+		if (State == nullptr) {
+			return false;
+		}
+		for (size_t index = 0; index < State->Extra.size(); index++) {
+			if (State->Extra[index].Name == name) {
+				State->Extra.erase(State->Extra.begin() + static_cast<ptrdiff_t>(index));
+				return true;
+			}
+		}
+		return false;
+	}
+
+	std::vector<core::Name> Renderer::Pipelines() const {
+		std::vector<core::Name> names;
+		if (State == nullptr) {
+			return names;
+		}
+		names.reserve(State->Extra.size());
+		for (const Impl::NamedPipeline &pipeline : State->Extra) {
+			names.push_back(pipeline.Name);
+		}
+		return names;
+	}
+
 	bool Renderer::SetPipeline(const graph::RenderGraph &pipeline) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
@@ -3795,6 +3887,7 @@ namespace engine::render {
 		if (State == nullptr || State->Device == nullptr) {
 			return;
 		}
+		State->Extra.clear();
 		State->BuildFrameGraph();
 	}
 
@@ -3862,6 +3955,7 @@ namespace engine::render {
 		// five, because they differ only in the predicate. See `SubmitFlow`.
 		for (const char *kind :
 			 {"entities",
+			  "world",
 			  "camera",
 			  "light-camera",
 			  "cull-frustum",
@@ -5655,6 +5749,18 @@ namespace engine::render {
 		}
 	}
 
+	const Renderer::Impl::NamedPipeline *Renderer::Impl::PipelineNamed(core::Name name) const {
+		if (!name.IsValid()) {
+			return nullptr;
+		}
+		for (const NamedPipeline &pipeline : Extra) {
+			if (pipeline.Name == name) {
+				return &pipeline;
+			}
+		}
+		return nullptr;
+	}
+
 	core::Name Renderer::Impl::FirstCamera(std::span<const graph::ResourceId> ids) const {
 		for (const graph::ResourceId id : ids) {
 			const graph::ResourceDesc *desc = Graph.FindResource(id);
@@ -5706,7 +5812,12 @@ namespace engine::render {
 		std::vector<uint32_t> unused;
 		std::vector<uint32_t> &into = viewpoint ? unused : Flow.Open(out);
 
-		if (kind == "entities") {
+		if (kind == "entities" || kind == "world") {
+			// **The same list, and the difference is what it says.** `entities`
+			// is "what this view was given"; `world` is "what this world put in
+			// the frame". They are one span today because a view carries one
+			// world's geometry — and they are two kinds because the day a view
+			// carries two, only one of them stays true.
 			graph::AllEntities(FlowInstances.size(), into);
 			return true;
 		}
@@ -6257,7 +6368,50 @@ namespace engine::render {
 		// used to be this function's job, and what `PassOrder()` used to
 		// describe a second time, is one description again.
 		Impl::FrameRunner runner{*State, drawing, firstOfWorld, interfaceHook};
-		if (!State->Graph.Execute(State->Compiled, runner, worlds)) {
+
+		// **A pipeline per view, and the frame's own after them.** `Execute`
+		// walks every view and ends with the frame's block, which is exactly
+		// right when one graph describes the whole frame and impossible when
+		// each camera brings its own — so the two halves are driven separately.
+		// See `graph::RenderGraph::ExecuteView`.
+		//
+		// **The shared block runs once per (world, pipeline).** Two views of one
+		// world running one pipeline share its shadow map, which is what
+		// `NodeScope::World` means; two views of one world running *different*
+		// pipelines do not, because the second pipeline's shared work is not the
+		// first's.
+		bool refused = false;
+		std::vector<std::pair<uint64_t, const void *>> sharedDone;
+
+		for (size_t index = 0; index < drawing.size() && !refused; index++) {
+			const Impl::NamedPipeline *named = State->PipelineNamed(drawing[index]->Pipeline);
+			const graph::RenderGraph &graph = named != nullptr ? named->Graph : State->Graph;
+			const graph::CompiledGraph &compiled = named != nullptr ? named->Compiled : State->Compiled;
+
+			// Which world group `Execute` would have put this view in, so a
+			// `World` node still gets a position rather than a caller's number.
+			size_t world = 0;
+			for (size_t at = 0; at < firstOfWorld.size(); at++) {
+				if (worlds[firstOfWorld[at]] == worlds[index]) {
+					world = at;
+					break;
+				}
+			}
+
+			const std::pair<uint64_t, const void *> key{worlds[index], static_cast<const void *>(&compiled)};
+			const bool first = std::find(sharedDone.begin(), sharedDone.end(), key) == sharedDone.end();
+			if (first) {
+				sharedDone.push_back(key);
+			}
+
+			refused = !graph.ExecuteView(compiled, runner, index, world, first);
+		}
+
+		if (!refused) {
+			refused = !State->Graph.ExecuteFinal(State->Compiled, runner);
+		}
+
+		if (refused) {
 			if (runner.Unhandled().IsValid()) {
 				ENGINE_ERROR("no handler registered for render pass '{}'", runner.Unhandled().Text());
 			}

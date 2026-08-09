@@ -64,6 +64,13 @@ namespace engine::graph {
 		// Turns a node on or off.
 		Enable,
 
+		// Configures the node being built.
+		//
+		// **Applies to the node above it**, exactly as `reads` and `writes` do,
+		// so a node and everything about it is one contiguous run of lines. See
+		// `Node::Parameters` for why a parameter is text.
+		Set,
+
 		// Places a node on an editor's canvas.
 		//
 		// **Editor metadata, and `Build` ignores it.** Where a box sits changes
@@ -137,6 +144,12 @@ namespace engine::graph {
 
 		// `Enable`'s new state.
 		bool Enabled = true;
+
+		// For `Set`: which parameter, and what to.
+		//@{
+		core::Name Key;
+		std::string Value;
+		//@}
 
 		// `Move`'s destination, in canvas pixels.
 		//

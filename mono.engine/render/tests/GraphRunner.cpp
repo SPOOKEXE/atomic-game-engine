@@ -465,3 +465,89 @@ TEST_CASE("a pass reading a list nothing produced is refused at compile", "[rend
 	CHECK(graph.Compile(compiled, offender) == GraphStatus::ReadsBeforeWrite);
 	CHECK(offender == Name("opaque"));
 }
+
+TEST_CASE("two cameras can run two different pipelines", "[render][graph]") {
+	// **What `graph::PipelineSet` was built to hold and nothing could select
+	// from.** Its own comment says a world does not have *a* pipeline any more
+	// than it has *a* script — a main chain, a cheaper one for a reflection, a
+	// debug one somebody switches to. Until a view could name one, the renderer
+	// ran a single graph for the whole frame.
+	//
+	// `Execute` cannot express this: it walks every view and ends with the
+	// frame's own block, so a caller picking a graph per view drives
+	// `ExecuteView` itself and calls `ExecuteFinal` once at the end. This is
+	// that, with the frame block coming from neither camera's pipeline.
+	const auto build = [](const char *pass) {
+		RenderGraph graph;
+		const engine::graph::ResourceId colour =
+			graph.AddResource({.Name = Name("colour"), .Kind = engine::graph::ResourceKind::Colour});
+
+		engine::graph::Node node;
+		node.Name = Name(pass);
+		node.Kind = Name(pass);
+		node.Writes = {colour};
+		node.Scope = engine::graph::NodeScope::View;
+		graph.AddNode(node);
+		return graph;
+	};
+
+	const RenderGraph rich = build("opaque");
+	const RenderGraph cheap = build("shadow");
+
+	// **The frame's own pipeline is the default one**, and here that is the
+	// standard frame. It has to have per-view nodes for its `Frame`-scoped tail
+	// to land in `Final` at all: `Compile` puts a frame node *before* any
+	// per-view node into `Shared`, because with nothing per view "before every
+	// view" and "after every one" are the same block. A frame pipeline of
+	// nothing but overlays would therefore run from `ExecuteView`, not from
+	// `ExecuteFinal` — worth knowing before somebody authors one.
+	const RenderGraph frame = StandardGraph();
+
+	CompiledGraph richly;
+	CompiledGraph cheaply;
+	CompiledGraph framely;
+	Name offender;
+	REQUIRE(rich.Compile(richly, offender) == GraphStatus::Ok);
+	REQUIRE(cheap.Compile(cheaply, offender) == GraphStatus::Ok);
+	REQUIRE(frame.Compile(framely, offender) == GraphStatus::Ok);
+
+	std::vector<std::string> ran;
+	PassTable table;
+	Record(table, rich, ran);
+	Record(table, cheap, ran);
+	Record(table, frame, ran);
+
+	GraphRunner runner{table};
+
+	// Camera 0 runs the rich pipeline, camera 1 the cheap one, both in world 0.
+	REQUIRE(rich.ExecuteView(richly, runner, 0, 0, true));
+	REQUIRE(cheap.ExecuteView(cheaply, runner, 1, 0, true));
+	REQUIRE(frame.ExecuteFinal(framely, runner));
+
+	// Camera 0 drew its way, camera 1 drew its way, and the window's own passes
+	// ran once over both — from neither camera's pipeline.
+	CHECK(ran == std::vector<std::string>{"opaque@0", "shadow@1", "overlay", "interface"});
+}
+
+TEST_CASE("views of one world through one pipeline share its shared work", "[render][graph]") {
+	// **The rule per-view pipelines have to keep.** `NodeScope::World` means a
+	// shadow map is per world; two cameras of one world sharing a pipeline
+	// share it, and the caller says so by passing `shared` only for the first.
+	RenderGraph graph = StandardGraph();
+
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	std::vector<std::string> ran;
+	PassTable table;
+	Record(table, graph, ran);
+
+	GraphRunner runner{table};
+	REQUIRE(graph.ExecuteView(compiled, runner, 0, 0, true));
+	REQUIRE(graph.ExecuteView(compiled, runner, 1, 0, false));
+
+	CHECK(std::count(ran.begin(), ran.end(), "shadow") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "opaque@0") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "opaque@1") == 1);
+}

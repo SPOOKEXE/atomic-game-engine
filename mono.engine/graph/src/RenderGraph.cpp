@@ -1,6 +1,7 @@
 #include <engine/graph/RenderGraph.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
@@ -217,6 +218,42 @@ namespace engine::graph {
 		return &Nodes[node.Value - 1];
 	}
 
+	const std::string *Node::Parameter(core::Name key) const {
+		for (const NodeParameter &parameter : Parameters) {
+			if (parameter.Key == key) {
+				return &parameter.Value;
+			}
+		}
+		return nullptr;
+	}
+
+	float Node::Number(core::Name key, float fallback) const {
+		const std::string *text = Parameter(key);
+		if (text == nullptr) {
+			return fallback;
+		}
+
+		// **`strtof` and not `stof`.** The second throws on a half-typed number,
+		// and a half-typed number in an editor is a state somebody is passing
+		// through rather than a pipeline to reject.
+		char *end = nullptr;
+		const float value = std::strtof(text->c_str(), &end);
+		return end == text->c_str() ? fallback : value;
+	}
+
+	uint32_t Node::Integer(core::Name key, uint32_t fallback) const {
+		const std::string *text = Parameter(key);
+		if (text == nullptr) {
+			return fallback;
+		}
+
+		// Base zero, so `0x1f` and `31` both read — a tag mask is written in hex
+		// far more often than in decimal.
+		char *end = nullptr;
+		const unsigned long value = std::strtoul(text->c_str(), &end, 0);
+		return end == text->c_str() ? fallback : static_cast<uint32_t>(value);
+	}
+
 	const ResourceDesc *RenderGraph::FindResource(ResourceId resource) const {
 		if (!resource.IsValid() || resource.Value > Resources.size()) {
 			return nullptr;
@@ -397,28 +434,6 @@ namespace engine::graph {
 	bool RenderGraph::Execute(
 		const CompiledGraph &compiled, NodeRunner &runner, std::span<const uint64_t> worlds
 	) const {
-		const auto runBlock = [&](const std::vector<NodeId> &block, size_t view, size_t world) {
-			for (const NodeId id : block) {
-				const Node *node = Find(id);
-				if (node == nullptr) {
-					continue;
-				}
-
-				RunContext context;
-				context.Node = id;
-				context.Name = node->Name;
-				context.Kind = node->Kind;
-				context.View = view;
-				context.World = world;
-				context.Reads = node->Reads;
-				context.Writes = node->Writes;
-
-				if (!runner.Run(context)) {
-					return false;
-				}
-			}
-			return true;
-		};
 
 		// **Shared first, and that ordering is the whole partition.** Every
 		// shared node produces something the per-view nodes may read — a shadow
@@ -442,9 +457,7 @@ namespace engine::graph {
 		}
 
 		for (size_t world = 0; world < distinct.size(); world++) {
-			if (!runBlock(compiled.Shared, RunContext::WHOLE_FRAME, world)) {
-				return false;
-			}
+			bool shared = true;
 
 			// **This world's views, immediately after its shared work.** The
 			// other grouping — every world's shared block, then every view —
@@ -454,9 +467,16 @@ namespace engine::graph {
 				if (worlds[view] != distinct[world]) {
 					continue;
 				}
-				if (!runBlock(compiled.PerView, view, world)) {
+				if (!ExecuteView(compiled, runner, view, world, shared)) {
 					return false;
 				}
+				shared = false;
+			}
+
+			// A world with no views still runs its shared work: a headless host
+			// presenting nothing still has a world to light.
+			if (shared && !ExecuteView(compiled, runner, RunContext::WHOLE_FRAME, world, true)) {
+				return false;
 			}
 		}
 
@@ -473,7 +493,56 @@ namespace engine::graph {
 		// `WHOLE_FRAME` for the same reason the first block gets it: there is no
 		// view these belong to, and handing over the last one's index would
 		// invite a runner to use it.
-		return runBlock(compiled.Final, RunContext::WHOLE_FRAME, RunContext::WHOLE_FRAME);
+		return ExecuteFinal(compiled, runner);
+	}
+
+	bool RenderGraph::ExecuteView(
+		const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared
+	) const {
+		// **Shared first, and that ordering is the whole partition.** Every
+		// shared node produces something the per-view nodes may read — a shadow
+		// map is the case this was built for — so running them after would have
+		// each view sampling a target written for the frame after it.
+		if (shared && !RunBlock(compiled.Shared, runner, RunContext::WHOLE_FRAME, world)) {
+			return false;
+		}
+
+		if (view == RunContext::WHOLE_FRAME) {
+			return true;
+		}
+		return RunBlock(compiled.PerView, runner, view, world);
+	}
+
+	bool RenderGraph::ExecuteFinal(const CompiledGraph &compiled, NodeRunner &runner) const {
+		// `WHOLE_FRAME` for both, for the reason the shared block gets it for
+		// the view: there is no view or world these belong to, and handing over
+		// the last one's index would invite a runner to use it.
+		return RunBlock(compiled.Final, runner, RunContext::WHOLE_FRAME, RunContext::WHOLE_FRAME);
+	}
+
+	bool RenderGraph::RunBlock(
+		const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world
+	) const {
+		for (const NodeId id : block) {
+			const Node *node = Find(id);
+			if (node == nullptr) {
+				continue;
+			}
+
+			RunContext context;
+			context.Node = id;
+			context.Name = node->Name;
+			context.Kind = node->Kind;
+			context.View = view;
+			context.World = world;
+			context.Reads = node->Reads;
+			context.Writes = node->Writes;
+
+			if (!runner.Run(context)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	RenderGraph StandardGraph() {

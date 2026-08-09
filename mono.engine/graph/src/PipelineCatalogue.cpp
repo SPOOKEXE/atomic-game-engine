@@ -681,6 +681,18 @@ namespace engine::graph {
 			// `ResourceKind::Entities` — a list of indices into the view's draw
 			// list — and every one of them is list-in, list-out, so they compose
 			// in any order somebody wires them.
+			{"world",
+			 "World",
+			 C::Draw,
+			 S::World,
+			 {},
+			 {{"entities", K::Entities, F::R8, true, "Everything this world put in the frame."}},
+			 "The world this view belongs to, as a source of geometry. **Where a "
+			 "frame of several worlds starts**: each world's shared work runs "
+			 "once for it, and what comes out of here is that world's draw list "
+			 "rather than the frame's.",
+			 true},
+
 			{"camera",
 			 "Camera",
 			 C::Draw,

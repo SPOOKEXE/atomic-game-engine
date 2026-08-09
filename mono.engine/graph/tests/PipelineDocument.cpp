@@ -478,3 +478,96 @@ TEST_CASE("a pipeline name holding a newline cannot forge a second pipeline", "[
 	REQUIRE(Read(Write(set), reloaded, offender) == PipelineDocumentStatus::Ok);
 	CHECK(reloaded.Count() == 1);
 }
+
+TEST_CASE("a node's parameters survive a round trip", "[graph][document]") {
+	// **The difference between a kind and a node.** Two `filter-tag` nodes are
+	// the same kind and filter different tags; two `raster` nodes are the same
+	// kind and run different shaders. A save file that lost that would lose
+	// everything about a pipeline except its shape.
+	PipelineDocument document;
+	document.Add(Edit{.Kind = EditKind::AddResource, .Name = Name("colour")});
+
+	document.Add(Edit{.Kind = EditKind::AddNode, .Name = Name("filter"), .NodeKind = Name("filter-tag")});
+	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "0x0f"});
+	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("shader"), .Value = "blur.frag"});
+	document.Add(Edit{.Kind = EditKind::Writes, .Target = Name("colour")});
+
+	const std::string text = Write(document);
+	INFO(text);
+
+	PipelineDocument read;
+	Name offender;
+	REQUIRE(Read(text, read, offender) == PipelineDocumentStatus::Ok);
+
+	// **Byte-identical, not merely equivalent.** A save file that reorders or
+	// respells what it read is a file that shows a diff every time it is opened.
+	CHECK(Write(read) == text);
+}
+
+TEST_CASE("parameters land on the node above them", "[graph][document]") {
+	PipelineDocument document;
+	document.Add(Edit{.Kind = EditKind::AddResource, .Name = Name("a")});
+	document.Add(Edit{.Kind = EditKind::AddResource, .Name = Name("b")});
+
+	document.Add(Edit{.Kind = EditKind::AddNode, .Name = Name("one"), .NodeKind = Name("clear")});
+	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "1"});
+	document.Add(Edit{.Kind = EditKind::Writes, .Target = Name("a")});
+
+	document.Add(Edit{.Kind = EditKind::AddNode, .Name = Name("two"), .NodeKind = Name("clear")});
+	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "2"});
+	document.Add(Edit{.Kind = EditKind::Writes, .Target = Name("b")});
+
+	RenderGraph graph;
+	Name offender;
+	INFO("offender: " << std::string(offender.Text()));
+	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+
+	const engine::graph::Node *one = graph.Find(engine::graph::NodeId{1});
+	const engine::graph::Node *two = graph.Find(engine::graph::NodeId{2});
+	REQUIRE(one != nullptr);
+	REQUIRE(two != nullptr);
+
+	// **Each node keeps its own**, which is the whole point: a second node of
+	// the same kind must not inherit the first's configuration.
+	REQUIRE(one->Parameter(Name("mask")) != nullptr);
+	REQUIRE(two->Parameter(Name("mask")) != nullptr);
+	CHECK(*one->Parameter(Name("mask")) == "1");
+	CHECK(*two->Parameter(Name("mask")) == "2");
+}
+
+TEST_CASE("a parameter reads as a number and falls back when it cannot", "[graph]") {
+	engine::graph::Node node;
+	node.Parameters.push_back(engine::graph::NodeParameter{Name("radius"), "12.5"});
+	node.Parameters.push_back(engine::graph::NodeParameter{Name("mask"), "0x0f"});
+	node.Parameters.push_back(engine::graph::NodeParameter{Name("count"), "31"});
+	node.Parameters.push_back(engine::graph::NodeParameter{Name("half"), "1."});
+	node.Parameters.push_back(engine::graph::NodeParameter{Name("junk"), "wat"});
+
+	CHECK(node.Number(Name("radius"), 0.0f) == 12.5f);
+	CHECK(node.Integer(Name("mask"), 0) == 15);
+	CHECK(node.Integer(Name("count"), 0) == 31);
+
+	// **Unset takes the fallback, and so does unreadable.** A half-typed number
+	// in an editor is a state somebody is passing through, not a pipeline to
+	// reject — see `Node::Number`.
+	CHECK(node.Number(Name("missing"), 7.0f) == 7.0f);
+	CHECK(node.Number(Name("junk"), 7.0f) == 7.0f);
+	CHECK(node.Integer(Name("junk"), 9) == 9);
+
+	// **Unset and set-to-nothing are different answers**, and only the first
+	// should take a default. `Parameter` is what tells them apart.
+	node.Parameters.push_back(engine::graph::NodeParameter{Name("blank"), ""});
+	CHECK(node.Parameter(Name("blank")) != nullptr);
+	CHECK(node.Parameter(Name("missing")) == nullptr);
+}
+
+TEST_CASE("a parameter with no node before it is refused", "[graph][document]") {
+	// A `set` that configures nothing is a document built wrong rather than a
+	// line to skip — the same reading `reads` takes.
+	PipelineDocument document;
+	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "1"});
+
+	RenderGraph graph;
+	Name offender;
+	CHECK(Build(document, graph, offender) == PipelineDocumentStatus::UnknownName);
+}

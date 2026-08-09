@@ -61,6 +61,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace engine::graph {
@@ -392,6 +393,14 @@ namespace engine::graph {
 		constexpr bool operator==(const NodeId &other) const = default;
 	};
 
+	// One thing a node was configured with.
+	//
+	// @since v0.11
+	struct NodeParameter {
+		core::Name Key;
+		std::string Value;
+	};
+
 	// One pass of a frame.
 	//
 	// @since v0.11
@@ -431,6 +440,50 @@ namespace engine::graph {
 		// disabled, and a black screen whose cause is one presented as the other
 		// is unexplainable.
 		bool Enabled = true;
+
+		// What this particular node was configured with.
+		//
+		// **The difference between a kind and a node.** Two `filter-tag` nodes
+		// are the same kind and filter different tags; two `raster` nodes are
+		// the same kind and run different shaders. Without this a pipeline can
+		// only say *which* passes run and never *how* — which is why
+		// `cull-distance` had no radius and every pass ran the shader its kind
+		// was compiled with.
+		//
+		// **Strings, and deliberately.** A parameter is authored text that has
+		// to survive a save file, a diff and somebody typing it; parsing it into
+		// a number here would put the parse in the wrong place and give two
+		// answers for what an unset one means. Whoever reads a parameter decides
+		// what its absence means, which is how `filter-tag` reads no mask as
+		// *keep everything*.
+		//
+		// Small and linear, for `EntityFlow`'s reason: a node has a handful of
+		// these and a map costs more in the lookup than the scan.
+		std::vector<NodeParameter> Parameters;
+
+		// What a parameter was set to.
+		//
+		// @param key Which one.
+		// @return The text, or null when it was never set. **Null rather than
+		//         empty**: "unset" and "set to nothing" are different answers
+		//         and only the first should take a default.
+		const std::string *Parameter(core::Name key) const;
+
+		// A parameter read as a number.
+		//
+		// @param key      Which one.
+		// @param fallback What to use when it is unset or unreadable.
+		// @return The value. **Unreadable falls back rather than refusing**,
+		//         because a half-typed number in an editor is a state somebody
+		//         is passing through rather than a pipeline to reject.
+		float Number(core::Name key, float fallback) const;
+
+		// A parameter read as an unsigned integer, decimal or `0x` hex.
+		//
+		// @param key      Which one.
+		// @param fallback What to use when it is unset or unreadable.
+		// @return The value.
+		uint32_t Integer(core::Name key, uint32_t fallback) const;
 	};
 
 	// Why a graph is not runnable.
@@ -673,6 +726,40 @@ namespace engine::graph {
 		bool
 		Execute(const CompiledGraph &compiled, NodeRunner &runner, std::span<const uint64_t> worlds) const;
 
+		// One view's work: this world's shared block, then that view's.
+		//
+		// **What `Execute` is made of, and what a frame of several pipelines
+		// needs.** A camera with its own pipeline cannot go through `Execute`,
+		// because `Execute` walks every view and ends with the frame's own
+		// block — and the frame has one of those however many pipelines drew
+		// into it. So a caller that is picking a graph per view drives these two
+		// itself.
+		//
+		// @param compiled What `Compile` produced, for *this view's* pipeline.
+		// @param runner   What does the work.
+		// @param view     Which view this is, as `RunContext::View`.
+		// @param world    Which world it belongs to, as a position among the
+		//                 frame's distinct worlds.
+		// @param shared   Whether to run the shared block. A caller running
+		//                 several views of one world through one pipeline passes
+		//                 `true` for the first and `false` after — that is what
+		//                 makes a shadow map per world rather than per view.
+		// @return `false` when the runner abandoned the frame.
+		bool ExecuteView(
+			const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared
+		) const;
+
+		// The frame's own block, once, after every view.
+		//
+		// The overlay and the editor's chrome are the window's rather than any
+		// camera's, so they run once over whatever the cameras produced —
+		// whichever pipelines those were.
+		//
+		// @param compiled What `Compile` produced, for the *frame's* pipeline.
+		// @param runner   What does the work.
+		// @return `false` when the runner abandoned the frame.
+		bool ExecuteFinal(const CompiledGraph &compiled, NodeRunner &runner) const;
+
 		// A node, or null.
 		//
 		// @param node The handle.
@@ -697,6 +784,10 @@ namespace engine::graph {
 
 	  private:
 		std::vector<Node> Nodes;
+		// Runs one compiled block, telling every node which view and world it is
+		// for. What all three `Execute` entry points are made of.
+		bool RunBlock(const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world) const;
+
 		std::vector<ResourceDesc> Resources;
 	};
 

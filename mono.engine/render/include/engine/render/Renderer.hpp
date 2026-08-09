@@ -416,6 +416,22 @@ namespace engine::render {
 		// and a single-panel editor both are.
 		uint64_t World = 0;
 
+		// Which pipeline this camera's frame is described by.
+		//
+		// **A camera does not have to draw the way another one does.** A
+		// reflection can run a cheaper chain, a debug viewport a different one,
+		// and a world's main view its own — which is what
+		// `graph::PipelineSet` was built to hold and what nothing could
+		// previously select from. Hand `Renderer::SetPipeline` a name and put
+		// that name here.
+		//
+		// **Unset means the renderer's default**, which is the standard frame
+		// unless something replaced it. A caller that never names one behaves
+		// exactly as it did before pipelines were selectable.
+		//
+		// @since v0.11
+		core::Name Pipeline;
+
 		// One batch per emitter with live particles, drawn after the blended
 		// geometry and before the overlay.
 		//
@@ -967,7 +983,29 @@ namespace engine::render {
 		//         still running and the reason is logged.
 		bool SetPipeline(const graph::RenderGraph &pipeline);
 
-		// Goes back to `graph::StandardGraph`.
+		// The same, under a name a view can ask for.
+		//
+		// **This is what makes many cameras with many pipelines possible.** A
+		// `View::Pipeline` naming one of these runs it; one naming nothing runs
+		// the default. The frame's own block — the overlay and the editor's
+		// chrome — always comes from the default, because a window has one of
+		// those however many cameras drew into it.
+		//
+		// @param name     What to call it. An invalid name is refused.
+		// @param pipeline What to run. Copied and compiled now, so a view naming
+		//                 it later costs a lookup rather than a compile.
+		// @return Whether it was taken. On `false` nothing was replaced and the
+		//         reason is logged.
+		bool SetPipeline(core::Name name, const graph::RenderGraph &pipeline);
+
+		// Drops a named pipeline. Views naming it fall back to the default.
+		bool RemovePipeline(core::Name name);
+
+		// Every pipeline name this renderer can run.
+		std::vector<core::Name> Pipelines() const;
+
+		// Goes back to `graph::StandardGraph`, and forgets every named
+		// pipeline.
 		void ResetPipeline();
 
 		// The debug download's most recent picture, and how old it is.

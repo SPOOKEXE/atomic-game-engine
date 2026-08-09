@@ -15,14 +15,14 @@ should leave the in-progress item marked with what compiles and what does not.
 | stage | what | state |
 |---|---|---|
 | 1 | Type system — formats, usage kinds, divisor, external resources | **done** |
-| 2 | Catalogue — 54 node kinds, typed and formatted slots | **done** |
+| 2 | Catalogue — 58 node kinds, typed and formatted slots | **done** |
 | 3 | Executor — `Renderer::Render` runs the graph | **done.** `graph::Execute` is what submits the frame; `PassOrder()` is a view of the graph and the `Pass` enum is gone |
 | 4 | Static checks — nine fault kinds | **done** |
 | 5 | Authored order, and scopes | **done** |
 | 6 | Access grid / profiler visualiser | **done** |
 | 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
 | 8 | Readbacks — viewer image, histograms, overdraw | **done.** Histograms, the download policy, the non-stalling device path, the `viewer` node, the `overdraw` counter, and `Renderer::SetPipeline` so a pipeline with either in it can run |
-| 9 | Entity flow — what a pass draws, as a wire | **working.** `ResourceKind::Entities`, `graph::EntityFlow`, eight node kinds, and a filter changes what the frame draws. Two colour passes cannot yet take two different lists |
+| 9 | Entity flow, cameras, per-camera pipelines | **working.** `Entities` and `Camera` resources, `world`/`camera`/`light-camera` sources, and `View::Pipeline` picks a graph per camera. Custom shaders per node are not in |
 
 ---
 
@@ -542,6 +542,67 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       and is not yet a node the renderer runs: the upload is still one operation
       covering the scene range and the camera range together, and splitting it
       is what would let two colour passes take two different lists.
+
+- [x] **The camera is a value, not ambient state.** `ResourceKind::Camera` and
+      `graph::Viewpoint`; `camera` and `light-camera` source nodes;
+      `cull-frustum`, `cull-distance` and `order-draw` take an **optional**
+      camera input.
+
+      **This fixed a limitation the entity flow introduced.** `SubmitFlow`
+      hardcoded `CurrentView.CameraFrame`, so every filter culled against the
+      eye and a pipeline could not say *cull against the light* or *order for
+      this mirror*. §4.7 of the design had asked for `camera` as a wire from the
+      start — "parameters as wires rather than as hidden state" — and this is
+      that.
+
+      **`light-camera` is what makes "do not cull the shadow pass" sayable as
+      something better.** The rule was *never frustum cull the casters*, because
+      one off screen still shadows in. With the light as a viewpoint the honest
+      version is *cull against the light's box*, which drops what casts into
+      nothing instead of keeping everything.
+
+      A `Viewpoint` carries either a lens or a **fitted** projection, because
+      `FitDirectionalLight` produces a box from the scene bound and there is no
+      field of view to describe it with.
+
+- [x] **A pipeline per camera, and a `world` source node.**
+      `Renderer::SetPipeline(name, graph)` holds a table; `View::Pipeline` names
+      which one that camera runs; unset runs the default.
+
+      **The authoring side already existed and was unreachable.**
+      `graph::PipelineSet` is a *named set* of pipelines registered as a world's
+      resource, and its own comment says a world does not have *a* pipeline any
+      more than it has *a* script — a main chain, a cheap one for a reflection,
+      a debug one somebody switches to. Nothing could select from it, because a
+      view had no way to name one.
+
+      **`Execute` cannot express this**, so it was split into the two halves it
+      was made of: `ExecuteView(compiled, runner, view, world, shared)` and
+      `ExecuteFinal(compiled, runner)`. `Execute` is now those two composed —
+      one description, and the split is behaviour-neutral.
+
+      Two rules the frame loop keeps:
+
+      - **The shared block runs once per (world, pipeline).** Two cameras of one
+        world running one pipeline share its shadow map, which is what
+        `NodeScope::World` means. Two cameras of one world running *different*
+        pipelines do not — the second pipeline's shared work is not the first's.
+      - **The frame's own block always comes from the default pipeline.** A
+        window has one overlay however many cameras drew into it.
+
+      **A gotcha worth knowing before authoring one:** `Compile` puts a
+      `Frame`-scoped node that appears *before* any per-view node into `Shared`,
+      not `Final` — with nothing per view, "before every view" and "after every
+      one" are the same block. So a frame pipeline of nothing but overlays runs
+      from `ExecuteView` and `ExecuteFinal` does nothing. Pinned by a case.
+
+- [ ] **Custom shaders per pipeline.** A pipeline can now say which passes run,
+      in what order, over which geometry, from which camera — and every pass
+      still runs the shader the renderer compiled for its *kind*. A `dispatch`
+      or a `raster` node naming a shader asset is the next thing, and it is a
+      content question as much as a graph one: the shader has to come from the
+      store, its bindings have to be declared, and `PassTable` has to key on
+      something finer than the kind.
 
 - [ ] **Two colour passes, two lists.** `CameraEntityList` reads whatever
       `opaque` is wired to, because the camera range is one range. A pipeline

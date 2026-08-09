@@ -265,6 +265,8 @@ namespace engine::graph {
 			return "writes";
 		case EditKind::Enable:
 			return "enable";
+		case EditKind::Set:
+			return "set";
 		case EditKind::Move:
 			return "move";
 		}
@@ -363,6 +365,32 @@ namespace engine::graph {
 				pending.Optional = edit.Optional;
 				building = true;
 				break;
+			case EditKind::Set: {
+				// **The node above it, for `reads`' reason.** A `set` with no
+				// node before it configures nothing, which is a document
+				// somebody built wrong rather than a line to skip.
+				if (!building) {
+					offender = edit.Key;
+					return PipelineDocumentStatus::UnknownName;
+				}
+				if (!edit.Key.IsValid()) {
+					offender = edit.Key;
+					return PipelineDocumentStatus::UnknownName;
+				}
+
+				bool replaced = false;
+				for (NodeParameter &parameter : pending.Parameters) {
+					if (parameter.Key == edit.Key) {
+						parameter.Value = edit.Value;
+						replaced = true;
+						break;
+					}
+				}
+				if (!replaced) {
+					pending.Parameters.push_back(NodeParameter{edit.Key, edit.Value});
+				}
+				break;
+			}
 			case EditKind::Reads:
 			case EditKind::Writes: {
 				if (!building) {
@@ -471,6 +499,12 @@ namespace engine::graph {
 				AppendQuoted(out, edit.Name.Text());
 				out += ' ' + std::string(FlagText(edit.Enabled));
 				break;
+			case EditKind::Set:
+				out.push_back(' ');
+				AppendQuoted(out, edit.Key.Text());
+				out.push_back(' ');
+				AppendQuoted(out, edit.Value);
+				break;
 			case EditKind::Move:
 				out.push_back(' ');
 				AppendQuoted(out, edit.Name.Text());
@@ -540,6 +574,11 @@ namespace engine::graph {
 				parsed =
 					TakeQuoted(line, name) && TakeCoordinate(line, edit.X) && TakeCoordinate(line, edit.Y);
 				edit.Name = core::Name(name);
+			} else if (word == "set") {
+				edit.Kind = EditKind::Set;
+				parsed = TakeQuoted(line, name) && TakeQuoted(line, second);
+				edit.Key = core::Name(name);
+				edit.Value = second;
 			} else if (word == "enable") {
 				edit.Kind = EditKind::Enable;
 				parsed = TakeQuoted(line, name) && TakeFlag(line, edit.Enabled);
