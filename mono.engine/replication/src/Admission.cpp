@@ -3,6 +3,7 @@
 #include <engine/replication/Protocol.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 namespace engine::replication {

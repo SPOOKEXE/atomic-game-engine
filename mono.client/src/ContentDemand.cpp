@@ -38,7 +38,16 @@ namespace client {
 
 		store.Each<engine::scene::SurfaceAppearance>(
 			[&out](engine::ecs::Entity, engine::scene::SurfaceAppearance &appearance) {
+				// **Every map a part names, not just its colour.** A normal map
+				// nothing asked for is a texture that never arrives, and the
+				// G-buffer then samples the default for a material that has one
+				// — which looks like the map being wrong rather than missing.
 				Want(out, appearance.ColourMap);
+				Want(out, appearance.NormalMap);
+				Want(out, appearance.RoughnessMap);
+				Want(out, appearance.OcclusionMap);
+				Want(out, appearance.HeightMap);
+				Want(out, appearance.EmissiveMap);
 			}
 		);
 

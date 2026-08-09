@@ -1,504 +1,509 @@
 {
-	"_comment": [
-		"Checked-in CMake target graph. `links` is the sorted first-party closure;",
-		"`requires` records the preset that must build each entry.",
-		"",
-		"The server row must remain headless. Cross-tier rows name deliberate",
-		"escapes; the graph check complements configure-time tier enforcement.",
-		"",
-		"v0.9 adds delivery, bake, assetc and audio paths.",
-		"",
-		"`delivery` sits above `assets` and `net`; `bake` stays separate from the",
-		"runtime and `assetc` owns filesystem access. `render` consumes `assets`, not",
-		"foreign-format parsers. The server remains headless."
-	],
-	"modules": {
-		"assets": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"bake": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"core"
-			]
-		},
-		"assetc": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"bake",
-				"core"
-			]
-		},
-		"audio": {
-			"tier": "client",
-			"links": [
-				"core"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"cdn": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"core",
-				"delivery",
-				"net",
-				"parallel"
-			]
-		},
-		"client": {
-			"tier": "client",
-			"links": [
-				"assets",
-				"audio",
-				"core",
-				"delivery",
-				"ecs",
-				"effects",
-				"examples",
-				"game",
-				"graph",
-				"gui",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"control": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"world"
-			]
-		},
-		"core": {
-			"tier": "shared",
-			"links": []
-		},
-		"delivery": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"core",
-				"net"
-			]
-		},
-		"docgen": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"ecs": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"parallel"
-			]
-		},
-		"effects": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"scene",
-				"spatial"
-			]
-		},
-		"examples": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"gui",
-				"parallel",
-				"physics",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			]
-		},
-		"game": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"gui",
-				"parallel",
-				"physics",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			]
-		},
-		"graph": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"scene",
-				"spatial"
-			]
-		},
-		"gui": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel"
-			]
-		},
-		"input": {
-			"tier": "client",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"scene",
-				"spatial"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"linecount": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"net": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"parallel": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"physics": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"scene",
-				"spatial"
-			]
-		},
-		"render": {
-			"tier": "client",
-			"links": [
-				"assets",
-				"core",
-				"ecs",
-				"effects",
-				"graph",
-				"gui",
-				"parallel",
-				"scene",
-				"spatial"],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"replication": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"core",
-				"ecs",
-				"net",
-				"parallel",
-				"world"]
-		},
-		"scene": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel",
-				"spatial"
-			]
-		},
-		"script": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"gui",
-				"parallel",
-				"physics",
-				"scene",
-				"spatial",
-				"world"
-			]
-		},
-		"server": {
-			"tier": "server",
-			"links": [
-				"assets",
-				"cdn",
-				"control",
-				"core",
-				"delivery",
-				"ecs",
-				"examples",
-				"game",
-				"gui",
-				"net",
-				"parallel",
-				"physics",
-				"replication",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_SERVER"
-		},
-		"spatial": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"studio": {
-			"tier": "client",
-			"links": [
-				"assetc",
-				"assets",
-				"audio",
-				"bake",
-				"cdn",
-				"client",
-				"control",
-				"core",
-				"delivery",
-				"ecs",
-				"effects",
-				"examples",
-				"game",
-				"graph",
-				"gui",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"server",
-				"spatial",
-				"ui",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"testrunner": {
-			"tier": "shared",
-			"links": [
-				"core"
-			]
-		},
-		"ui": {
-			"tier": "client",
-			"links": [
-				"assets",
-				"core",
-				"ecs",
-				"effects",
-				"graph",
-				"gui",
-				"parallel",
-				"render",
-				"scene",
-				"spatial"],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"unified_server_client": {
-			"tier": "client",
-			"links": [
-				"assets",
-				"audio",
-				"cdn",
-				"client",
-				"control",
-				"core",
-				"delivery",
-				"ecs",
-				"effects",
-				"examples",
-				"game",
-				"graph",
-				"gui",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"server",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"world": {
-			"tier": "shared",
-			"links": [
-				"core",
-				"ecs",
-				"parallel"
-			]
-		}
-	},
-	"programs": {
-		"cdn": {
-			"tier": "shared",
-			"links": [
-				"assets",
-				"core",
-				"delivery",
-				"net",
-				"parallel"
-			],
-			"requires": "MONO_BUILD_CDN"
-		},
-		"client": {
-			"tier": "client",
-			"links": [
-				"assets",
-				"audio",
-
-				"cdn",
-				"core",
-				"delivery",
-				"ecs",
-				"effects",
-				"examples",
-				"game",
-				"graph",
-				"gui",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"server": {
-			"tier": "server",
-			"links": [
-				"assets",
-				"cdn",
-				"control",
-				"core",
-				"delivery",
-				"ecs",
-				"examples",
-				"game",
-				"gui",
-				"net",
-				"parallel",
-				"physics",
-				"replication",
-				"scene",
-				"script",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_SERVER"
-		},
-		"studio": {
-			"tier": "client",
-			"links": [
-				"assetc",
-				"assets",
-				"audio",
-				"bake",
-				"cdn",
-				"client",
-				"control",
-				"core",
-				"delivery",
-				"ecs",
-				"effects",
-				"examples",
-				"game",
-				"graph",
-				"gui",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"server",
-				"spatial",
-				"ui",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		},
-		"unified_server_client": {
-			"tier": "client",
-			"links": [
-				"assets",
-				"audio",
-				"cdn",
-				"client",
-				"control",
-				"core",
-				"delivery",
-				"ecs",
-				"effects",
-				"examples",
-				"game",
-				"graph",
-				"gui",
-				"input",
-				"net",
-				"parallel",
-				"physics",
-				"render",
-				"replication",
-				"scene",
-				"script",
-				"server",
-				"spatial",
-				"world"
-			],
-			"requires": "MONO_BUILD_CLIENT"
-		}
-	}
+  "_comment": [
+    "Checked-in CMake target graph. `links` is the sorted first-party closure;",
+    "`requires` records the preset that must build each entry.",
+    "",
+    "The server row must remain headless. Cross-tier rows name deliberate",
+    "escapes; the graph check complements configure-time tier enforcement.",
+    "",
+    "v0.9 adds delivery, bake, assetc and audio paths.",
+    "",
+    "`delivery` sits above `assets` and `net`; `bake` stays separate from the",
+    "runtime and `assetc` owns filesystem access. `render` consumes `assets`, not",
+    "foreign-format parsers. The server remains headless."
+  ],
+  "modules": {
+    "assets": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "bake": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "core"
+      ]
+    },
+    "assetc": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "bake",
+        "core"
+      ]
+    },
+    "audio": {
+      "tier": "client",
+      "links": [
+        "core"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "cdn": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "core",
+        "delivery",
+        "net",
+        "parallel"
+      ]
+    },
+    "client": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "audio",
+        "core",
+        "delivery",
+        "ecs",
+        "effects",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "input",
+        "net",
+        "parallel",
+        "physics",
+        "render",
+        "replication",
+        "scene",
+        "script",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "control": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "world"
+      ]
+    },
+    "core": {
+      "tier": "shared",
+      "links": []
+    },
+    "delivery": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "core",
+        "net"
+      ]
+    },
+    "docgen": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "ecs": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "parallel"
+      ]
+    },
+    "effects": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
+      ]
+    },
+    "examples": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "gui",
+        "parallel",
+        "physics",
+        "scene",
+        "script",
+        "spatial",
+        "world"
+      ]
+    },
+    "game": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "graph",
+        "gui",
+        "parallel",
+        "physics",
+        "scene",
+        "script",
+        "spatial",
+        "world"
+      ]
+    },
+    "graph": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
+      ]
+    },
+    "gui": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel"
+      ]
+    },
+    "input": {
+      "tier": "client",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "linecount": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "net": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "parallel": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "physics": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
+      ]
+    },
+    "render": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "core",
+        "ecs",
+        "effects",
+        "graph",
+        "gui",
+        "parallel",
+        "scene",
+        "spatial"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "replication": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "core",
+        "ecs",
+        "net",
+        "parallel",
+        "world"
+      ]
+    },
+    "scene": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel",
+        "spatial"
+      ]
+    },
+    "script": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "gui",
+        "parallel",
+        "physics",
+        "scene",
+        "spatial",
+        "world"
+      ]
+    },
+    "server": {
+      "tier": "server",
+      "links": [
+        "assets",
+        "cdn",
+        "control",
+        "core",
+        "delivery",
+        "ecs",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "net",
+        "parallel",
+        "physics",
+        "replication",
+        "scene",
+        "script",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_SERVER"
+    },
+    "spatial": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "studio": {
+      "tier": "client",
+      "links": [
+        "assetc",
+        "assets",
+        "audio",
+        "bake",
+        "cdn",
+        "client",
+        "control",
+        "core",
+        "delivery",
+        "ecs",
+        "effects",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "input",
+        "net",
+        "parallel",
+        "physics",
+        "render",
+        "replication",
+        "scene",
+        "script",
+        "server",
+        "spatial",
+        "ui",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "testrunner": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
+    "ui": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "core",
+        "ecs",
+        "effects",
+        "graph",
+        "gui",
+        "parallel",
+        "render",
+        "scene",
+        "spatial"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "unified_server_client": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "audio",
+        "cdn",
+        "client",
+        "control",
+        "core",
+        "delivery",
+        "ecs",
+        "effects",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "input",
+        "net",
+        "parallel",
+        "physics",
+        "render",
+        "replication",
+        "scene",
+        "script",
+        "server",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "world": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "ecs",
+        "parallel"
+      ]
+    }
+  },
+  "programs": {
+    "cdn": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "core",
+        "delivery",
+        "net",
+        "parallel"
+      ],
+      "requires": "MONO_BUILD_CDN"
+    },
+    "client": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "audio",
+        "cdn",
+        "core",
+        "delivery",
+        "ecs",
+        "effects",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "input",
+        "net",
+        "parallel",
+        "physics",
+        "render",
+        "replication",
+        "scene",
+        "script",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "server": {
+      "tier": "server",
+      "links": [
+        "assets",
+        "cdn",
+        "control",
+        "core",
+        "delivery",
+        "ecs",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "net",
+        "parallel",
+        "physics",
+        "replication",
+        "scene",
+        "script",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_SERVER"
+    },
+    "studio": {
+      "tier": "client",
+      "links": [
+        "assetc",
+        "assets",
+        "audio",
+        "bake",
+        "cdn",
+        "client",
+        "control",
+        "core",
+        "delivery",
+        "ecs",
+        "effects",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "input",
+        "net",
+        "parallel",
+        "physics",
+        "render",
+        "replication",
+        "scene",
+        "script",
+        "server",
+        "spatial",
+        "ui",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "unified_server_client": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "audio",
+        "cdn",
+        "client",
+        "control",
+        "core",
+        "delivery",
+        "ecs",
+        "effects",
+        "examples",
+        "game",
+        "graph",
+        "gui",
+        "input",
+        "net",
+        "parallel",
+        "physics",
+        "render",
+        "replication",
+        "scene",
+        "script",
+        "server",
+        "spatial",
+        "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    }
+  }
 }

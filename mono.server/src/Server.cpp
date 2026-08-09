@@ -16,6 +16,7 @@
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cdn/Origin.hpp>
 #include <cdn/Service.hpp>
@@ -68,11 +69,7 @@ namespace server {
 		// a server started through a shell alias or a symlink still finds
 		// itself.
 		std::filesystem::path ThisProgram() {
-#if defined(_WIN32)
-			return engine::core::Paths::Base() / "server.exe";
-#else
-			return engine::core::Paths::Base() / "server";
-#endif
+			return engine::core::Paths::Base() / engine::core::Paths::Program("server");
 		}
 
 		bool ReadFile(const std::filesystem::path &path, std::vector<std::byte> &bytes) {

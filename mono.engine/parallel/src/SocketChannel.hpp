@@ -2,11 +2,11 @@
 
 // One end of a socket pair, presented as a queue of whole frames.
 //
-// **A stream carrying frames.** `SOCK_STREAM` is used rather than
-// `SOCK_SEQPACKET` because a frame may be megabytes and a datagram socket
-// refuses anything past its buffer. So the framing is this file's: a four-byte
-// length, then the bytes. `SOCK_SEQPACKET` would move the partial-write problem
-// into the kernel rather than solve it.
+// **A stream carrying frames.** A stream socket is used rather than a datagram
+// one because a frame may be megabytes and a datagram socket refuses anything
+// past its buffer. So the framing is this file's: a four-byte length, then the
+// bytes. A sequenced-packet socket would move the partial-write problem into
+// the kernel rather than solve it, and Windows has no such socket at all.
 //
 // **Never blocks, so it buffers.** The handle is non-blocking, which means a
 // write can be partial and a read can stop mid-frame. Neither is allowed to
@@ -22,17 +22,20 @@
 // backpressure arriving the way it should: the producer is told, rather than
 // the machine filling up.
 //
-// **Nothing here can kill the process.** Every write carries `MSG_NOSIGNAL`, so
-// a send to a dead peer fails rather than raising `SIGPIPE`. A driver that died
+// **Nothing here can kill the process.** A send to a dead peer fails rather
+// than raising anything — see `platform::SocketSend`. A driver that died
 // because a host crashed would turn one host's fault into the whole server's,
 // which is the opposite of what processes are here for.
 //
-// Private to the module, and it has to be: no public header may name an
-// operating system, and this one is a socket from top to bottom.
+// Private to the module. It carries no operating system of its own: the handle
+// is a number and the four calls that touch it are `platform/Socket.hpp`. That
+// is what lets this file — the framing, which is the part worth getting right
+// once — be shared rather than copied per platform.
 
 #include <engine/parallel/Channel.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <span>
 #include <vector>
@@ -43,9 +46,10 @@ namespace engine::parallel {
 	class SocketChannel final : public Channel {
 	  public:
 		// @param handle   The socket end, which this takes ownership of and
-		//                 which must already be non-blocking.
+		//                 which must already be non-blocking. Negative for
+		//                 none, which is the same sentinel `ChannelEnd` uses.
 		// @param settings How the frames and the buffers are sized.
-		SocketChannel(int handle, const ChannelSettings &settings);
+		SocketChannel(int64_t handle, const ChannelSettings &settings);
 
 		~SocketChannel() override;
 
@@ -106,7 +110,7 @@ namespace engine::parallel {
 		// state: a frame is where it is, and whether it has reached the kernel
 		// yet is not a caller's question.
 		mutable std::mutex Guard;
-		mutable int Handle = -1;
+		mutable int64_t Handle = -1;
 		ChannelSettings Settings_;
 
 		mutable std::vector<std::byte> Outbound;

@@ -64,11 +64,39 @@ add_subdirectory("${MONO_VENDOR}/tracy" EXCLUDE_FROM_ALL)
 # Header-only, and it ships no CMakeLists, so the target is declared here. Zero
 # configure cost and zero build cost until something links it.
 #
-# `shared` in engine terms — `net` at L11 is where it lands, and both the client
-# and the server link that. Nothing links it yet.
+# **`asio/include`, not `asio/asio/include`, and that is a Windows fix.**
+# Upstream keeps the headers at its repository root, in `include/`. The `asio/`
+# directory sitting beside them is a compatibility shim for the older layout,
+# and the `include` and `src` entries inside it are symlinks back up at the real
+# ones — `git ls-files -s` reports them as mode 120000.
+#
+# Git on Windows does not create symlinks. `core.symlinks` defaults to off
+# there, because creating one needs Developer Mode or an elevated shell, and
+# with it off git writes a small text file holding the target path instead. So
+# on a stock Windows clone `mono.vendor/asio/asio/include` is a ten-byte *file*,
+# the include path resolves to nothing, and every translation unit in `net`
+# stops at
+#
+#   fatal error C1083: Cannot open include file: 'asio/io_context.hpp'
+#
+# with the header on disk one directory up. Nothing warns first: a SYSTEM
+# INTERFACE include directory is not checked for existence at configure time,
+# so this surfaces at the first compile and looks like a missing submodule.
+#
+# Reaching past the shim to the real directory fixes it for everyone and asks
+# nothing of anybody's git config. asio and zstd and blake3 are the only vendors
+# carrying symlinks at all, and the other two are licence files and CLI test
+# fixtures that no include path goes through.
+#
+# The guard is here for the same reason it is on every other vendor: an
+# uninitialised submodule should stop the configure that can explain it rather
+# than the compiler, which cannot.
+if(NOT EXISTS "${MONO_VENDOR}/asio/include/asio.hpp")
+	message(FATAL_ERROR "mono.vendor/asio is missing. Run `just setup`.")
+endif()
 add_library(vendor_asio INTERFACE)
 add_library(Vendor::asio ALIAS vendor_asio)
-target_include_directories(vendor_asio SYSTEM INTERFACE "${MONO_VENDOR}/asio/asio/include")
+target_include_directories(vendor_asio SYSTEM INTERFACE "${MONO_VENDOR}/asio/include")
 # Without this asio looks for Boost. It is the difference between the two
 # distributions and the only reason this is not a bare include path.
 target_compile_definitions(vendor_asio INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECATED)

@@ -34,6 +34,10 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+// TODO(render-pipeline): `<engine/nodeview/Editor.hpp>` and `State.hpp` were
+// included here. `Engine::nodeview` was the node-canvas module the Render and
+// Assets Pipeline panels were built on; it is removed. See the member and
+// method markers below.
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
@@ -1004,6 +1008,50 @@ namespace studio {
 		// upload is a typed path rather than a file dialog.
 		void DrawAssets();
 
+		// The Render Pipeline and Assets Pipeline node editors.
+		//
+		// **Drawn with an ImGui draw list rather than as a `gui` tree**, which is
+		// `DEFERRED.md` D00041's decision: the canvas machinery — layout, edges,
+		// hit-testing, selection — is `graph::PipelineView` and
+		// `nodeview::CanvasState` and is shared either way, but a `gui` subtree
+		// cannot live inside an `ImGui::Begin` block. The engine's own tree would
+		// need a render target per open editor; boxes and lines on a draw list need
+		// none, and this panel is the editor's chrome rather than a game's UI.
+		//@{
+		// TODO(render-pipeline): `void DrawRenderPipeline();` drew the Render Pipeline node editor.
+
+
+		// The pipeline as a grid: passes across, resources down, what each does
+		// to each where they meet.
+		//
+		// **A second view of the same graph, not a second graph.** The canvas
+		// shows what somebody wired; this shows what will run, in what order,
+		// touching what, and how much memory is live while it does — which is a
+		// different question and wants a different shape.
+		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
+		// is the arithmetic and this is only the drawing.
+		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid — passes across the top, resources down the side.
+
+
+		// The picture and histogram under the access grid. See `ProfileWatched`.
+		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the profile grid.
+
+
+		// The selected node's own settings, under the canvas.
+		//
+		// **Without it the parameters are unreachable.** Which shader a `raster`
+		// runs is a node's own business, and a canvas that could only wire
+		// things could describe the shape of a frame and nothing about it.
+		// TODO(render-pipeline): `DrawNodeParameters` edited a node's parameters,
+		// including the multi-line GLSL box a `raster` node's shader was typed into.
+
+
+		// TODO(render-pipeline): `DrawChannelHistogram` drew one channel's
+		// distribution as sixteen bars and a range, over `render::ChannelHistogram`.
+		// TODO(render-pipeline): `void DrawAssetsPipeline();` drew the Assets Pipeline node editor.
+
+		//@}
+
 		// Brings one file, or every file under one folder, into the store.
 		//
 		// @param given What the person chose or dropped.
@@ -1465,6 +1513,16 @@ namespace studio {
 		//@{
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
+
+		// How many shader modules the content store delivered.
+		//
+		// **Counted, because a pipeline naming a shader that never arrived draws
+		// nothing and says so once.** A number beside the mesh and texture
+		// counts is how somebody tells "the pipeline is wrong" from "the content
+		// has not landed".
+		//
+		// @since v0.11
+		size_t ContentShaders = 0;
 		size_t ContentMaterials = 0;
 		//@}
 
@@ -1945,6 +2003,14 @@ namespace studio {
 		// `client::CollectSurfaceViews`; a list assembled from what is in the
 		// world is also what makes a deleted mirror stop being drawn.
 		std::vector<engine::render::SurfaceView> Surfaces;
+
+		// TODO(render-pipeline): `PipelineSelected` mapped world index to the
+		// pipeline key installed for it — a map rather than one name, because two
+		// viewports can show two worlds in the same frame, which is exactly what
+		// `InstallWorldPipelines` qualified its keys for. An absent entry meant
+		// "install on the next frame", and saving a pipeline erased the entry,
+		// which is what made a save visible in the viewport.
+
 
 		// One world's run, for as long as it is running.
 		//
@@ -2787,6 +2853,43 @@ namespace studio {
 		// The local content store. See `DrawAssets`.
 		bool ShowAssets = false;
 
+		// Whether each node editor is open. Closed by default: they are for
+		// somebody editing a pipeline, and every other session should not pay a
+		// panel for it.
+		//@{
+		bool ShowRenderPipeline = false;
+		bool ShowAssetsPipeline = false;
+
+		// The frame as a grid rather than as a canvas: every pass across the
+		// top, every resource down the side. See `Editor::DrawPipelineProfile`.
+		bool ShowPipelineProfile = false;
+
+		// Which resource the profile panel is showing a picture of.
+		//
+		// **The grid says who wrote what; this says what they wrote.** Unset is
+		// the panel being a grid, which is what it was before and what it should
+		// go back to when nobody is looking at anything in particular — a
+		// readback costs a download every frame and should not run because
+		// somebody left a window open.
+		//
+		// @since v0.11
+		engine::core::Name ProfileWatched;
+		//@}
+
+		// TODO(render-pipeline): the Render Pipeline editor's state lived here.
+		//
+		// Roughly a dozen members: two `nodeview::CanvasState`s (selection and
+		// scroll, held **outside** the canvas because they outlive a rebuild), an
+		// `EditorGraph` model, the world it was loaded for, a dirty flag, the
+		// canvas view, what was selected, what was being dragged and from where,
+		// the half-drawn wire, and where the add-node menu was opened.
+		//
+		// **The one that mattered was the load guard.** The graph was rebuilt
+		// from the world's document only when the world changed or the graph was
+		// empty — a panel that rebuilt every frame would throw away a wire on the
+		// frame it was dragged and have nowhere to put a node somebody moved.
+
+
 		// Where the add-file and add-folder dialogs are looking.
 		//
 		// **A `std::string` and no longer a fixed buffer**, because it is no
@@ -3160,6 +3263,16 @@ namespace studio {
 		// A script's own teleports are picked up separately, through the
 		// destination's inbox.
 		WorldId PlayerWorld;
+
+		// Whether the last `Simulate` reached `Universe::Tick`.
+		//
+		// **The universe cannot be asked this and no world's state carries
+		// it.** `SyncWorldStates` leaves every world `Active` when nothing is
+		// running — deliberately, so an author back in Edit does not find their
+		// scenes marked stopped — while `Simulate` returns before the tick.
+		// `Present` needs to tell those apart to pick an interpolation alpha,
+		// and `studio::PresentationAlpha` is where that is decided.
+		bool Advancing = false;
 
 		// Whether the editor's own loop is still going, and what the last frame
 		// through it did.

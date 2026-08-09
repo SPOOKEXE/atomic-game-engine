@@ -385,6 +385,72 @@ namespace {
 		return own;
 	}
 
+	// Every way a property descriptor can contradict itself, checked against
+	// the whole class table.
+	//
+	// **The manifest publishes `reads` and `writes`, so a descriptor that
+	// declares the wrong thing is not a private slip — it is a wrong sentence in
+	// a checked-in contract that script authors and both declaration files are
+	// generated from.** Four read-only properties declared a write set:
+	// `Attachment.WorldCFrame` and `WorldPosition`, `Humanoid.Grounded` and
+	// `MeshPart.TrianglesCount` each said they wrote the component they merely
+	// project. The manifest said so too, in the file, for two versions.
+	//
+	// **Here rather than in a suite**, because this is the one binary that
+	// registers every class in the engine: `scene`, `script`, `effects`, `gui`
+	// and the services all arrive in `main` below, and no test target links the
+	// set. It runs on `--check`, which `just check` runs, so a descriptor that
+	// drifts fails the build rather than the next reader.
+	//
+	// **What is deliberately not checked is an empty `reads` set.**
+	// `Players.LocalPlayer` has one and is right to: it projects a world
+	// *resource*, not a component on the row. The consequence — a property that
+	// reads no component can never fire `.Changed`, because `script::ChangeQueue`
+	// subscribes through `reads` — is a real limitation and not a contradiction,
+	// and that descriptor says so in its own comment.
+	//
+	// @return How many contradictions were reported.
+	size_t ReportDescriptorFaults() {
+		size_t faults = 0;
+
+		for (const ClassId id : AllClasses()) {
+			const ClassInfo &info = Classes::Describe(id);
+			for (const PropertyDescriptor &property : info.Properties) {
+				// A property that cannot be written writes nothing. The
+				// converse is not a fault: a writable property may legitimately
+				// write nothing on a class that has no storage for it, which is
+				// how `Set` reports `false` rather than aborting.
+				if (!property.Writable && property.Writes != nullptr && !property.Writes->Ids().empty()) {
+					ENGINE_ERROR(
+						"{}.{} is read-only and declares a write set. `writes` reaches the "
+						"manifest; a read-only property must write nothing.",
+						info.Name.Text(),
+						property.Name.Text()
+					);
+					faults++;
+				}
+
+				// **And the converse, which is what the studio's scale gizmo
+				// went round.** `scene::SizeProperty` writes `Bounds` *and*
+				// `Collider` — a caller that moved only the first left a part
+				// drawn at one size and collided at another. A writable property
+				// that declares nothing is a setter whose blast radius is
+				// undocumented, and the manifest is where a caller would look.
+				if (property.Writable && (property.Writes == nullptr || property.Writes->Ids().empty())) {
+					ENGINE_ERROR(
+						"{}.{} is writable and declares no write set. `writes` reaches the "
+						"manifest; say what the setter touches.",
+						info.Name.Text(),
+						property.Name.Text()
+					);
+					faults++;
+				}
+			}
+		}
+
+		return faults;
+	}
+
 	std::string Manifest() {
 		std::ostringstream out;
 		out << "{\n";
@@ -2107,6 +2173,14 @@ int main(int argc, char **argv) {
 		{"luau declarations", directory / "engine.d.luau", LuauDeclarations()},
 		{"typescript declarations", directory / "engine.d.ts", TypeScriptDeclarations()},
 	};
+
+	// **Before the artefacts are compared, and it runs on a write too.** A
+	// descriptor that contradicts itself would otherwise be written into the
+	// manifest, checked in, and then agree with itself for ever.
+	if (const size_t faults = ReportDescriptorFaults(); faults > 0) {
+		ENGINE_ERROR("{} property descriptor(s) contradict themselves; see above.", faults);
+		return 1;
+	}
 
 	if (!arguments.Has("check")) {
 		for (const Artefact &artefact : artefacts) {

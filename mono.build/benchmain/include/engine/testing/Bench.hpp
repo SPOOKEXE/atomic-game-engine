@@ -44,6 +44,37 @@
 
 namespace engine::testing {
 
+	// What one iteration of a benchmark is.
+	//
+	// **The divisor means two different things and a row has to say which.**
+	// `BenchMain::Sample` calls a body once and divides the elapsed time by the
+	// declared count, so the count is whatever the author is normalising by:
+	// `graph/benchmarks/Cull.cpp` loops its body and reports nanoseconds per
+	// *call*, while `scene/benchmarks/Ordering.cpp` runs its body once and
+	// passes the instance count to report nanoseconds per *instance*. Both are
+	// reasonable and the rows are four orders of magnitude apart.
+	//
+	// Filed as `DEFERRED.md` D00037 after a body that did not loop reported a
+	// frame at 739 ns, caught only because another suite's published table gave
+	// a number to contradict it.
+	//
+	// @since v0.11
+	enum class BenchUnit : uint8_t {
+		// The body ran `Iterations` times; the figure is per call.
+		Call,
+
+		// The body ran once over `Iterations` things; the figure is per thing.
+		Item,
+	};
+
+	// A stable, human-readable name for a unit, as the report writes it.
+	//
+	// @param unit The unit.
+	// @return A view valid for the lifetime of the process.
+	constexpr std::string_view Describe(BenchUnit unit) {
+		return unit == BenchUnit::Item ? "item" : "call";
+	}
+
 	// One declared benchmark.
 	//
 	// @since v0.2
@@ -60,8 +91,14 @@ namespace engine::testing {
 		// nanosecond.
 		size_t Iterations = 1;
 
-		// Runs the body `Iterations` times.
+		// Runs the body `Iterations` times, unless `Unit` says otherwise.
 		std::function<void()> Body;
+
+		// What one iteration is, which the report carries so two rows are never
+		// silently in different units.
+		//
+		// @since v0.11
+		BenchUnit Unit = BenchUnit::Call;
 	};
 
 	// Every benchmark this binary declares.
@@ -106,9 +143,13 @@ namespace engine::testing {
 	// Registration object. A namespace-scope static, one per macro use.
 	struct BenchDeclaration {
 		BenchDeclaration(
-			std::string_view suite, std::string_view name, size_t iterations, std::function<void()> body
+			std::string_view suite,
+			std::string_view name,
+			size_t iterations,
+			std::function<void()> body,
+			BenchUnit unit = BenchUnit::Call
 		) {
-			BenchRegistry::Declare(BenchCase{suite, name, iterations, std::move(body)});
+			BenchRegistry::Declare(BenchCase{suite, name, iterations, std::move(body), unit});
 		}
 	};
 }
@@ -124,7 +165,31 @@ namespace engine::testing {
 	static void ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__)();                                              \
 	namespace {                                                                                              \
 		const ::engine::testing::BenchDeclaration ENGINE_BENCH_CONCAT(MonoBenchDeclaration, __LINE__){       \
-			MonoTestSuiteId, name, (iterations), &ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__)               \
+			MonoTestSuiteId,                                                                                 \
+			name,                                                                                            \
+			(iterations),                                                                                    \
+			&ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__),                                                   \
+			::engine::testing::BenchUnit::Call                                                               \
+		};                                                                                                   \
+	}                                                                                                        \
+	static void ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__)()
+
+// Declares a benchmark whose body runs **once** over `items` things, reporting
+// the cost of one of them.
+//
+// **The other half of D00037.** `BENCH` promises the body loops; this one
+// promises it does not, and the report says which so two rows are never
+// silently in different units. Use it when the interesting figure is per
+// instance, per byte or per entity rather than per call.
+#define BENCH_PER_ITEM(name, items)                                                                          \
+	static void ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__)();                                              \
+	namespace {                                                                                              \
+		const ::engine::testing::BenchDeclaration ENGINE_BENCH_CONCAT(MonoBenchDeclaration, __LINE__){       \
+			MonoTestSuiteId,                                                                                 \
+			name,                                                                                            \
+			(items),                                                                                         \
+			&ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__),                                                   \
+			::engine::testing::BenchUnit::Item                                                               \
 		};                                                                                                   \
 	}                                                                                                        \
 	static void ENGINE_BENCH_CONCAT(MonoBenchBody, __LINE__)()

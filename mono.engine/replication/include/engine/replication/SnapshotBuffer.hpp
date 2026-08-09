@@ -412,4 +412,32 @@ namespace engine::replication {
 
 		Statistics Stats_;
 	};
+
+	// Registers this module's own resource types under explicit names.
+	//
+	// **Rule 4, and `client::DrawList` is the entry that learned it.** A
+	// `SnapshotBuffer` is set as a world resource, a resource is keyed by a
+	// component id, and `Store::SetResource` mints one under the compiler's
+	// spelling of the type unless a name was registered first. `Store::Save`
+	// then refuses the world — correctly, because it has no way to write a
+	// resource nobody described — and a replica world could not be snapshotted
+	// at all. The studio saves the universe when Play is pressed, so that was a
+	// Play that failed for a reason no message named.
+	//
+	// **Registered here rather than by the client**, because the module that
+	// owns a type is the one that names it: a second host that holds a replica
+	// would otherwise have to know to do this, and would find out the same way.
+	//
+	// The serialisation writes nothing and reads back cleared, exactly as
+	// `client::DrawList`'s does and for a stronger reason: this holds a
+	// connection's ticks in flight, and a file carrying them would describe a
+	// session that ended.
+	//
+	// Idempotent. Call it before anything touches a `SnapshotBuffer`:
+	// `Components::Of<T>` caches its answer per type per process, so an explicit
+	// registration arriving second aborts rather than leaving two names for one
+	// thing.
+	//
+	// @since v0.11
+	void RegisterReplicationComponents();
 }

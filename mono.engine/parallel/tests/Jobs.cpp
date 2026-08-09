@@ -180,9 +180,25 @@ namespace {
 	// Retried for the reason the wide-dispatch case above is: one dispatch is
 	// allowed to stay on the calling thread, because the caller drains too.
 	bool PoolParticipates(size_t count) {
-		constexpr int ATTEMPTS = 25;
+		// **Retried, because a work-stealing pool is not obliged to steal.** If
+		// the calling thread drains the queue before any worker wakes, one
+		// thread saw the whole batch — and that is correct behaviour, not a
+		// broken pool. The property being checked is that the pool *can*
+		// participate, so the honest test is "does it, ever".
+		//
+		// **More attempts than looks necessary, and a yield between them.** A
+		// machine under load is exactly when the caller wins this race, and it
+		// is also exactly when a suite runs alongside everything else. This
+		// failed at roughly one run in four at twenty-five attempts with no
+		// yield. What it still catches is unchanged: a leaked claim makes the
+		// pool serial *forever*, so no number of attempts finds another thread.
+		constexpr int ATTEMPTS = 200;
 
 		for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+			if (attempt > 0) {
+				std::this_thread::yield();
+			}
+
 			std::atomic<bool> elsewhere{false};
 			const std::thread::id caller = std::this_thread::get_id();
 
@@ -409,14 +425,12 @@ TEST_CASE("forcing serial compute runs every span on the caller", "[parallel][jo
 	// build option wearing a function's clothes.
 	CHECK_FALSE(engine::parallel::ForceSerialCompute());
 
-	threads.clear();
-	Jobs::For(COUNT, 64, [&](size_t begin, size_t end) {
-		std::lock_guard lock(guard);
-		threads.insert(std::this_thread::get_id());
-		(void)begin;
-		(void)end;
-	});
-	CHECK(threads.size() > 1);
+	// **Retried, for `PoolParticipates`' reason.** A single dispatch that
+	// happened to be drained by the caller is a pool working correctly, not a
+	// flag stuck on — and asserting on one dispatch made this fail about one run
+	// in four on a loaded machine. What the retry cannot hide is the thing being
+	// checked: a flag that stayed on keeps every attempt single-threaded.
+	CHECK(PoolParticipates(COUNT));
 }
 
 TEST_CASE("a forced dispatch still visits every index exactly once", "[parallel][jobs]") {

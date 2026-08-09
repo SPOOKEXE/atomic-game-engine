@@ -25,6 +25,11 @@ Needs CMake 3.24+, Ninja and a C++20 compiler — nothing else. `glslc` is built
 from the vendored shaderc, so it is not a prerequisite. Everything derived lands
 in `.cache/`.
 
+On Windows the compiler has to be in the shell's environment rather than merely
+installed on the machine, which is a requirement no other platform has and no
+error message names. [On Windows](#on-windows) is what it looks like when it is
+missing, and `scripts\build-windows.bat` is the build that arranges it itself.
+
 ---
 
 # Building
@@ -80,6 +85,47 @@ just build                     # every target the preset configures
 just preset=release build      # the same, optimised
 cmake --build --preset dev     # without just
 ```
+
+## On Windows
+
+```bat
+scripts\build-windows.bat                          :: everything, dev preset
+scripts\build-windows.bat client                   :: one target and its deps
+scripts\build-windows.bat engine_ecs engine_world  :: several
+set PRESET=release  (then run it)                  :: any other preset
+```
+
+The same configure and build as everywhere else, with the compiler environment
+put in front of them. That is the whole of what the script adds, and it is not
+optional: the presets generate Ninja, and Ninja has no per-command environment —
+`build.ninja` is a flat list of literal command lines, so CMake cannot record
+the toolchain's include and library paths in it. MSVC reads those from `INCLUDE`
+and `LIB` in the environment instead, and a plain `cmd` or PowerShell window has
+neither.
+
+Configuring still succeeds without them, so the first sign of it is every source
+file in the repository failing at its first `#include` of anything at all:
+
+```
+fatal error C1083: Cannot open include file: 'cstddef': No such file or directory
+```
+
+which reads like the standard library is missing and is really the shell being
+wrong. `vcvars64.bat` is what sets those variables, and a Developer Command
+Prompt is nothing more than a `cmd` window that has already run it — so this
+script runs it too, inside its own `setlocal`, and nothing it sets outlives the
+build. Started from a Developer Command Prompt it finds the environment already
+there and leaves it alone.
+
+`just build` has the same requirement, because the environment belongs to the
+shell rather than to the tool driving CMake. The Visual Studio generator is the
+one thing that does not, since MSBuild rebuilds the environment from the
+`.vcxproj` — but it is not the generator the presets pin, and it is not the one
+the build times here assume.
+
+Build once with this and the demo and studio scripts work from an ordinary
+window too: they call CMake before running, and a build with nothing to do never
+reaches the compiler.
 
 ## Building one mono
 
@@ -590,8 +636,9 @@ Everything shared lives in `_common.sh` and `_common.bat`; a scene script is a
 header, a filename and its own flags. They call CMake rather than `just`, so the
 two halves cannot drift apart, and they resolve the repository from their own
 path — run them from anywhere. The `.bat` wants a Developer Command Prompt,
-because the presets generate Ninja and a plain `cmd` window has no compiler in
-it.
+because it builds before it runs and a plain `cmd` window has no compiler in it;
+`scripts\build-windows.bat` first leaves nothing for it to compile, and
+[On Windows](#on-windows) is the reason either is necessary.
 
 ### Options
 

@@ -1,4 +1,6 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 
@@ -283,5 +285,18 @@ namespace engine::replication {
 			return 0.0;
 		}
 		return static_cast<double>(Newest_) - RenderTicks;
+	}
+
+	void RegisterReplicationComponents() {
+		ecs::Components::Register<SnapshotBuffer>(
+			"replication.SnapshotBuffer",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *buffers = static_cast<SnapshotBuffer *>(destination);
+				for (size_t index = 0; index < count; index++) {
+					buffers[index].Clear();
+				}
+			}
+		);
 	}
 }

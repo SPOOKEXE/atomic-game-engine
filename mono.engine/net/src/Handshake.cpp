@@ -3,6 +3,7 @@
 #include <engine/core/SecureWipe.hpp>
 #include <engine/net/Handshake.hpp>
 
+#include <array>
 #include <cryptopp/donna.h>
 #include <cryptopp/hkdf.h>
 #include <cryptopp/misc.h>

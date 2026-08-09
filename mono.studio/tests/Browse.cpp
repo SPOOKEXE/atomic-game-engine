@@ -13,7 +13,7 @@
 #include <studio/Browse.hpp>
 
 #include <fstream>
-#include <unistd.h>
+#include <random>
 
 TEST_SUITE_ID("studio.browse")
 
@@ -28,8 +28,11 @@ namespace {
 		std::filesystem::path Root;
 
 		Tree() {
+			// Unique so that two runs of this suite at once do not list each
+			// other's files. Not a process id: `getpid` is POSIX, and Windows
+			// spells it `_getpid` behind <process.h>.
 			Root = std::filesystem::temp_directory_path() /
-				   ("studio-browse-" + std::to_string(::getpid()));
+				   ("studio-browse-" + std::to_string(std::random_device{}()));
 			std::filesystem::remove_all(Root);
 			std::filesystem::create_directories(Root);
 		}

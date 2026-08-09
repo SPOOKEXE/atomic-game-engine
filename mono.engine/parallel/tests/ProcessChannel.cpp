@@ -49,11 +49,7 @@ namespace process_channel_test {
 	}
 
 	std::filesystem::path Self() {
-#if defined(_WIN32)
-		return engine::core::Paths::Base() / "test_parallel.exe";
-#else
-		return engine::core::Paths::Base() / "test_parallel";
-#endif
+		return engine::core::Paths::Base() / engine::core::Paths::Program("test_parallel");
 	}
 
 	// Receives one frame, polling until it arrives or the deadline passes.

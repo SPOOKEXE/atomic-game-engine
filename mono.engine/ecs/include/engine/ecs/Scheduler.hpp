@@ -46,10 +46,31 @@ namespace engine::ecs {
 	// @return `"?"` for Count or a value outside the declared phases.
 	std::string_view GetPhaseName(Phase phase);
 
-	// Runs named systems against a Store in phase order and records their cost.
+	// Runs named systems against a Store in phase order, then in registration
+	// order within a phase, and records their cost.
 	//
-	// Phase order is the only ordering contract. Registration order must not be
-	// used to express a dependency between systems in the same phase.
+	// **Both halves are the contract, and the second one used to be denied.**
+	// This said "phase order is the only ordering contract" and that
+	// registration order "must not be used to express a dependency between
+	// systems in the same phase" — while `client::InstallPresentation` did
+	// exactly that, in four systems, and said so in its own comments: a pass
+	// that resolves a material runs before the pass that reads it, and a pass
+	// that decides what is drawn runs before the one that aims mirrors into it.
+	// It worked, because `RunPhases` walks its vector in insertion order.
+	//
+	// **A rule the code breaks everywhere is not a rule, it is a trap.** It
+	// tells a reader the ordering they can see is accidental, so the honest
+	// options were to make the scheduler sort by declared dependencies or to
+	// admit what it does. A dependency sort is a second mechanism for something
+	// insertion order already expresses exactly, and it would have to be
+	// declared at every one of those call sites to say the same thing — so this
+	// is the admission. `ecs.scheduler`'s "systems in one phase run in the order
+	// they were added" is the test that holds it.
+	//
+	// **What this does not license** is a dependency across a *phase* boundary
+	// expressed by registration. Phases run in their declared order regardless
+	// of when anything was added, and a `PreRender` system registered first
+	// still runs after every `Simulation` one.
 	class Scheduler {
 	  public:
 		// A system takes the world and nothing else.
@@ -69,8 +90,10 @@ namespace engine::ecs {
 		// `name` is copied, so a caller may build one. It becomes the span
 		// label in the overlay and in Tracy.
 		//
-		// Adding systems to the same phase does not establish a supported order
-		// between them.
+		// **Systems added to the same phase run in the order they were added**,
+		// which is how a pass that derives something is put ahead of the pass
+		// that reads it. See the class comment for why that is a contract now
+		// rather than an accident.
 		//
 		// @param name   The profiler label to copy and retain.
 		// @param phase  The phase in which the system runs.

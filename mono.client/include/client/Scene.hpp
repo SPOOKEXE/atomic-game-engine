@@ -201,6 +201,12 @@ namespace client {
 	//         already had one.
 	bool InstallDefaultCamera(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
+	// TODO(render-pipeline): `InstallWorldPipelines` was declared here.
+	//
+	// See the marker in `Scene.cpp` for what it did and the three decisions in
+	// it worth carrying over. Its callers are marked too: `Client.cpp`'s render
+	// call, and the studio's viewport.
+
 	// Registers this module's own types under explicit names.
 	//
 	// **One type, and it had no registration at all until v0.7.** `DrawList` is

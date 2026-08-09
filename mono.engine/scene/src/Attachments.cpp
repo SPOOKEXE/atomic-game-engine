@@ -3,6 +3,9 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 
+#include <utility>
+#include <vector>
+
 namespace engine::scene {
 
 	namespace {
@@ -25,6 +28,20 @@ namespace engine::scene {
 				return nullptr;
 			}
 			return store.Get<Transform>(parent);
+		}
+
+		// Whether two frames are the same value.
+		//
+		// **A free function because `core::CFrame` has no `operator==`**, and
+		// giving it one is not this file's call: an equality on a rotation
+		// invites `q` and `-q` — the same orientation, opposite quaternions — to
+		// compare unequal, and every caller would inherit that surprise. Here
+		// the two sides are the same product of the same inputs, so bitwise is
+		// exactly the question being asked.
+		bool Same(const core::CFrame &left, const core::CFrame &right) {
+			return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
+				   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
+				   left.QuaternionW == right.QuaternionW;
 		}
 	}
 
@@ -59,11 +76,47 @@ namespace engine::scene {
 		// crossover has not been read and the loop is not on the frame's critical
 		// path today. `engine.effects.bench.particles` is where it would show up
 		// if it were.
-		store.Each<Attachment>([&store, &resolved](ecs::Entity entity, Attachment &point) {
+		//
+		// **What moved, gathered before anything is written.**
+		//
+		// This used to write straight through the reference `Each` hands out,
+		// which is a direct memory write and not a reported one — so
+		// `Attachment.WorldCFrame` and `WorldPosition` could never fire
+		// `.Changed`. A script waiting on one waited for ever while the value it
+		// was watching moved every frame, which is the worst shape a signal bug
+		// has: the property reads correctly, so nothing looks wrong until you
+		// notice the callback never ran.
+		//
+		// **Only the rows that actually moved, which is why the compare is here
+		// and not a `MarkAllChanged`.** Reporting every attachment every frame
+		// would advance the world's change counter for ever, and two gates are
+		// built on an unchanged counter meaning nothing authored has happened —
+		// `physics`'s static broadphase and `gui`'s compile. `Store::GetUnobserved`
+		// carries that argument at length; this is the other side of it.
+		std::vector<std::pair<ecs::Entity, core::CFrame>> moved;
+
+		store.Each<const Attachment>([&store,
+									  &resolved,
+									  &moved](ecs::Entity entity, const Attachment &point) {
 			const Transform *placement = ParentPlacement(store, entity);
-			point.WorldFrame = placement == nullptr ? point.Frame : placement->Frame * point.Frame;
+			const core::CFrame world = placement == nullptr ? point.Frame : placement->Frame * point.Frame;
 			resolved++;
+
+			// Exact rather than tolerant. This is a cache of a product the same
+			// two inputs produce bit for bit, so anything but equality would be
+			// a threshold below which a signal is silently dropped.
+			if (!Same(world, point.WorldFrame)) {
+				moved.emplace_back(entity, world);
+			}
 		});
+
+		// **Through `GetMutable`, deliberately.** It is the call that reports a
+		// write, which is the whole point of this shape — see above.
+		for (const auto &[entity, world] : moved) {
+			if (Attachment *point = store.GetMutable<Attachment>(entity)) {
+				point->WorldFrame = world;
+			}
+		}
 
 		return resolved;
 	}

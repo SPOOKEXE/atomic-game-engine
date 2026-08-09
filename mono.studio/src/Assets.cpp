@@ -40,6 +40,7 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <iterator>

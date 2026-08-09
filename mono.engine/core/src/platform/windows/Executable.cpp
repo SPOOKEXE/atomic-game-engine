@@ -28,4 +28,8 @@ namespace engine::core::platform {
 			buffer.resize(buffer.size() * 2);
 		}
 	}
+
+	std::string_view ProgramSuffix() {
+		return ".exe";
+	}
 }

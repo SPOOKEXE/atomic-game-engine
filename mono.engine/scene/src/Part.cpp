@@ -67,11 +67,17 @@ namespace engine::scene {
 		// ticks" is the case that caught it, and it is the case that matters.
 		//
 		// **The editor's problem was a different one and is fixed where it
-		// belongs.** A suspended world never runs `capture-previous` — that is a
-		// `PreSimulation` system and `World::Present` runs `PreRender` alone —
-		// so its `PreviousTransform` is wherever each part was created. The fix
-		// is to present a world that is not ticking at alpha *one*, because
-		// there is no next tick to draw towards; `Editor::Present` does that.
+		// belongs.** A world nothing ticks never runs `capture-previous` —
+		// that is a `PreSimulation` system and `World::Present` runs
+		// `PreRender` alone — so its `PreviousTransform` is wherever each part
+		// was created. The fix is to present such a world at alpha *one*,
+		// because there is no next tick to draw towards.
+		//
+		// **Which world that is cannot be read off `WorldState`**, and getting
+		// that wrong put the bug back for the whole of Edit mode: the studio
+		// leaves every world `Active` while ticking none of them, so a state
+		// test said "interpolate" and every part drew at the origin.
+		// `studio::PresentationAlpha` combines the two halves.
 		//
 		// @param store    The world.
 		// @param instance The entity.
@@ -728,7 +734,12 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Computed;
 			property.Writable = false;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
-			property.Writes = property.Reads;
+
+			// **Nothing, because nothing is written.** `Writes` reaches the
+			// binding manifest, so a read-only property naming a component was
+			// telling every script author that setting it moves storage it
+			// cannot even be given a value for.
+			property.Writes = &ecs::ComponentSet::Intern({});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				if (store.Get<Attachment>(instance) == nullptr) {
@@ -749,7 +760,12 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Computed;
 			property.Writable = false;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Attachment>()});
-			property.Writes = property.Reads;
+
+			// **Nothing, because nothing is written.** `Writes` reaches the
+			// binding manifest, so a read-only property naming a component was
+			// telling every script author that setting it moves storage it
+			// cannot even be given a value for.
+			property.Writes = &ecs::ComponentSet::Intern({});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				if (store.Get<Attachment>(instance) == nullptr) {
@@ -821,7 +837,12 @@ namespace engine::scene {
 			property.Kind = PropertyKind::Computed;
 			property.Writable = false;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Humanoid>()});
-			property.Writes = property.Reads;
+
+			// **Nothing, because nothing is written.** `Writes` reaches the
+			// binding manifest, so a read-only property naming a component was
+			// telling every script author that setting it moves storage it
+			// cannot even be given a value for.
+			property.Writes = &ecs::ComponentSet::Intern({});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Humanoid *humanoid = store.Get<Humanoid>(instance);
@@ -848,7 +869,12 @@ namespace engine::scene {
 
 			// Visual is the dependency for change notifications.
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Visual>()});
-			property.Writes = property.Reads;
+
+			// **Nothing, because nothing is written.** `Writes` reaches the
+			// binding manifest, so a read-only property naming a component was
+			// telling every script author that setting it moves storage it
+			// cannot even be given a value for.
+			property.Writes = &ecs::ComponentSet::Intern({});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const Visual *visual = store.Get<Visual>(instance);
@@ -1199,11 +1225,15 @@ namespace engine::scene {
 			// sets `.Name`, so it has to be writable rather than readable.
 			// `Name` and `Parent` are declared by `RegisterInstanceRoot` above.
 
-			// **Computed rather than a member projection**, which it was: a
-			// projection writes `Transform::Frame` and nothing else, and an
-			// authored placement has to move `PreviousTransform` with it or the
-			// part is drawn between where it was and where it was put.
-			// `PlaceInstance` carries the whole argument.
+			// **Computed rather than a member projection**, because `Position`
+			// and `Orientation` are read-modify-writes over one `CFrame` and a
+			// member pointer cannot express that: writing twelve bytes over the
+			// front of a frame leaves a quaternion that no longer matches it.
+			//
+			// The reason this comment used to give was that an authored
+			// placement has to move `PreviousTransform` with it, and that reason
+			// was wrong — it breaks every scripted animation in the engine.
+			// `PlaceInstance` carries the refutation and the fix.
 			ecs::Classes::Computed(pvInstance, CFrameProperty());
 			ecs::Classes::Computed(pvInstance, PositionProperty());
 			ecs::Classes::Computed(pvInstance, OrientationProperty());

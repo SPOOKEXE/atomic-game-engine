@@ -114,3 +114,110 @@ TEST_CASE("a name past the ceiling is refused rather than written", "[assets]") 
 	CHECK_FALSE(Material::Write(writer, input));
 	CHECK(writer.Bytes().empty());
 }
+
+TEST_CASE("a material round-trips all five maps", "[assets]") {
+	// The four `ROADMAP.md` v0.10 published and nothing could name until the
+	// G-buffer existed to sample them.
+	MaterialData written;
+	written.ColourMap = "materials/bricks_colour.atex";
+	written.NormalMap = "materials/bricks_normal.atex";
+	written.RoughnessMap = "materials/bricks_roughness.atex";
+	written.OcclusionMap = "materials/bricks_occlusion.atex";
+	written.HeightMap = "materials/bricks_height.atex";
+
+	ByteWriter writer;
+	REQUIRE(Material::Write(writer, written));
+
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	REQUIRE(Material::Read(reader, read));
+
+	CHECK(read.ColourMap == written.ColourMap);
+	CHECK(read.NormalMap == written.NormalMap);
+	CHECK(read.RoughnessMap == written.RoughnessMap);
+	CHECK(read.OcclusionMap == written.OcclusionMap);
+	CHECK(read.HeightMap == written.HeightMap);
+}
+
+TEST_CASE("a version 1 material is one with four empty maps", "[assets]") {
+	// **The older format is not a special case to translate.** A version 1 file
+	// is a colour map and nothing else, which is exactly this material with four
+	// absent names — so it is read by not reading them. See `Material::VERSION`.
+	//
+	// Hand-built rather than produced by an older writer, because there is no
+	// older writer to run: the point is that bytes already on disk still load.
+	ByteWriter writer;
+	writer.WriteUInt32(Material::MAGIC);
+	writer.WriteUInt16(1);
+	writer.WriteString("materials/old_colour.atex");
+
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+
+	// Seeded with rubbish, so "left empty" is a thing this can observe rather
+	// than the default it started at.
+	read.NormalMap = "not overwritten";
+
+	REQUIRE(Material::Read(reader, read));
+	CHECK(read.ColourMap == "materials/old_colour.atex");
+	CHECK(read.NormalMap.empty());
+	CHECK(read.RoughnessMap.empty());
+	CHECK(read.OcclusionMap.empty());
+	CHECK(read.HeightMap.empty());
+}
+
+TEST_CASE("a material truncated after its colour map is refused", "[assets]") {
+	// **What the always-written maps buy.** A version 2 file that stops after
+	// the colour map is a truncation, and it has to fail as one rather than read
+	// back as a material whose other four names happen to be empty.
+	ByteWriter writer;
+	writer.WriteUInt32(Material::MAGIC);
+	writer.WriteUInt16(Material::VERSION);
+	writer.WriteString("materials/bricks_colour.atex");
+
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	CHECK_FALSE(Material::Read(reader, read));
+}
+
+TEST_CASE("a material round-trips its emissive map", "[assets]") {
+	// The sixth name, and the one with no CC0 source behind it — see
+	// `MaterialData::EmissiveMap` for why it is authored rather than fetched.
+	MaterialData written;
+	written.ColourMap = "signs/neon_colour.atex";
+	written.EmissiveMap = "signs/neon_emissive.atex";
+
+	ByteWriter writer;
+	REQUIRE(Material::Write(writer, written));
+
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	REQUIRE(Material::Read(reader, read));
+
+	CHECK(read.ColourMap == written.ColourMap);
+	CHECK(read.EmissiveMap == written.EmissiveMap);
+}
+
+TEST_CASE("a version 2 material is one with no emissive map", "[assets]") {
+	// **Each version adds fields and never reorders them**, so reading an older
+	// file is reading fewer strings rather than a different layout. Version 2 is
+	// five names; this checks the sixth is absent rather than misread from
+	// whatever followed.
+	ByteWriter writer;
+	writer.WriteUInt32(Material::MAGIC);
+	writer.WriteUInt16(2);
+	writer.WriteString("materials/bricks_colour.atex");
+	writer.WriteString("materials/bricks_normal.atex");
+	writer.WriteString("materials/bricks_roughness.atex");
+	writer.WriteString("materials/bricks_occlusion.atex");
+	writer.WriteString("materials/bricks_height.atex");
+
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	read.EmissiveMap = "not overwritten";
+
+	REQUIRE(Material::Read(reader, read));
+	CHECK(read.NormalMap == "materials/bricks_normal.atex");
+	CHECK(read.HeightMap == "materials/bricks_height.atex");
+	CHECK(read.EmissiveMap.empty());
+}

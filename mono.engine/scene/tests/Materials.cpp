@@ -26,6 +26,7 @@ using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 using engine::scene::ColourMapOf;
 using engine::scene::MaterialClass;
+using engine::scene::MaterialMaps;
 using engine::scene::MaterialRef;
 using engine::scene::RecordMaterial;
 using engine::scene::ResolveMaterials;
@@ -74,8 +75,8 @@ TEST_CASE("a recorded material resolves to its colour map", "[scene][materials]"
 	const Name material("materials/ambientcg/Bricks075A.amat");
 	const Name colour("materials/ambientcg/Bricks075A_Color.atex");
 
-	REQUIRE(RecordMaterial(store, material, colour));
-	CHECK(ColourMapOf(store, material) == colour);
+	REQUIRE(RecordMaterial(store, material, MaterialMaps{.Colour = colour}));
+	CHECK(ColourMapOf(store, material).Colour == colour);
 }
 
 TEST_CASE("a material nobody recorded resolves to nothing", "[scene][materials]") {
@@ -87,7 +88,7 @@ TEST_CASE("a material nobody recorded resolves to nothing", "[scene][materials]"
 	// asking a question with no use.
 	CHECK_FALSE(ColourMapOf(store, Name("materials/nothing.amat")).IsValid());
 
-	REQUIRE(RecordMaterial(store, Name("materials/blank.amat"), Name()));
+	REQUIRE(RecordMaterial(store, Name("materials/blank.amat"), MaterialMaps{.Colour = Name()}));
 	CHECK_FALSE(ColourMapOf(store, Name("materials/blank.amat")).IsValid());
 }
 
@@ -96,7 +97,7 @@ TEST_CASE("resolving writes the texture onto the parent part", "[scene][material
 
 	const Name asset("materials/oak.amat");
 	const Name colour("materials/oak_Color.atex");
-	REQUIRE(RecordMaterial(store, asset, colour));
+	REQUIRE(RecordMaterial(store, asset, MaterialMaps{.Colour = colour}));
 
 	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Crate");
 	REQUIRE(part != NULL_ENTITY);
@@ -117,7 +118,7 @@ TEST_CASE("a material set back to none clears the part", "[scene][materials]") {
 	Store store = Fresh("materials.none");
 
 	const Name asset("materials/oak.amat");
-	REQUIRE(RecordMaterial(store, asset, Name("materials/oak_Color.atex")));
+	REQUIRE(RecordMaterial(store, asset, MaterialMaps{.Colour = Name("materials/oak_Color.atex")}));
 
 	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Crate");
 	const Entity material = Dress(store, part, asset);
@@ -156,7 +157,7 @@ TEST_CASE("a material parented to nothing resolves onto nothing", "[scene][mater
 	Store store = Fresh("materials.orphan");
 
 	const Name asset("materials/oak.amat");
-	REQUIRE(RecordMaterial(store, asset, Name("materials/oak_Color.atex")));
+	REQUIRE(RecordMaterial(store, asset, MaterialMaps{.Colour = Name("materials/oak_Color.atex")}));
 
 	// A `Material` at the root of a world is legal — an author drags one in
 	// before deciding where it goes — and resolves onto nothing rather than
@@ -172,7 +173,7 @@ TEST_CASE("deleting a material clears the part it dressed", "[scene][materials]"
 	Store store = Fresh("materials.deleted");
 
 	const Name asset("materials/oak.amat");
-	REQUIRE(RecordMaterial(store, asset, Name("materials/oak_Color.atex")));
+	REQUIRE(RecordMaterial(store, asset, MaterialMaps{.Colour = Name("materials/oak_Color.atex")}));
 
 	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Crate");
 	const Entity material = Dress(store, part, asset);
@@ -195,7 +196,7 @@ TEST_CASE("a material moved to another part clears the first", "[scene][material
 
 	const Name asset("materials/oak.amat");
 	const Name colour("materials/oak_Color.atex");
-	REQUIRE(RecordMaterial(store, asset, colour));
+	REQUIRE(RecordMaterial(store, asset, MaterialMaps{.Colour = colour}));
 
 	const engine::ecs::ClassId partClass = engine::ecs::Classes::Find(Name("Part"));
 	const Entity first = store.CreateInstance(partClass, "First");

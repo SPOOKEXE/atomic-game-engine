@@ -1,9 +1,8 @@
 #include "SocketChannel.hpp"
 
-#include <cerrno>
+#include "platform/Socket.hpp"
+
 #include <cstdint>
-#include <sys/socket.h>
-#include <unistd.h>
 
 namespace engine::parallel {
 
@@ -17,7 +16,7 @@ namespace engine::parallel {
 		constexpr size_t READ_CHUNK = 64u * 1024u;
 	}
 
-	SocketChannel::SocketChannel(int handle, const ChannelSettings &settings)
+	SocketChannel::SocketChannel(int64_t handle, const ChannelSettings &settings)
 		: Handle(handle), Settings_(settings) {}
 
 	SocketChannel::~SocketChannel() {
@@ -140,7 +139,7 @@ namespace engine::parallel {
 		// not take it with it.
 		PumpOut();
 
-		::close(Handle);
+		platform::SocketClose(Handle);
 		Handle = -1;
 	}
 
@@ -187,21 +186,20 @@ namespace engine::parallel {
 	void SocketChannel::PumpOut() const {
 		while (Handle >= 0 && OutboundRead < Outbound.size()) {
 			const size_t remaining = Outbound.size() - OutboundRead;
-			const ssize_t written =
-				::send(Handle, Outbound.data() + OutboundRead, remaining, MSG_NOSIGNAL | MSG_DONTWAIT);
+			const ptrdiff_t written = platform::SocketSend(Handle, Outbound.data() + OutboundRead, remaining);
 
-			if (written > 0) {
+			if (written >= 0) {
 				OutboundRead += static_cast<size_t>(written);
 				continue;
 			}
-			if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+			if (written == platform::SOCKET_BLOCKED) {
 				// The socket is full. Not an error: the rest stays buffered and
 				// goes out on a later call.
 				break;
 			}
 
-			// EPIPE or ECONNRESET. The peer is gone, so nothing queued will
-			// ever arrive and holding it would be a leak with a hopeful name.
+			// The peer is gone, so nothing queued will ever arrive and holding
+			// it would be a leak with a hopeful name.
 			PeerAlive = false;
 			break;
 		}
@@ -220,7 +218,7 @@ namespace engine::parallel {
 			const size_t before = Inbound.size();
 			Inbound.resize(before + READ_CHUNK);
 
-			const ssize_t got = ::recv(Handle, Inbound.data() + before, READ_CHUNK, MSG_DONTWAIT);
+			const ptrdiff_t got = platform::SocketReceive(Handle, Inbound.data() + before, READ_CHUNK);
 
 			if (got > 0) {
 				Inbound.resize(before + static_cast<size_t>(got));
@@ -233,10 +231,7 @@ namespace engine::parallel {
 				PeerAlive = false;
 				break;
 			}
-			if (errno == EINTR) {
-				continue;
-			}
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			if (got == platform::SOCKET_BLOCKED) {
 				break;
 			}
 

@@ -24,11 +24,7 @@ namespace process_test {
 	// container. The one executable certain to exist is the one running.
 	std::filesystem::path Self() {
 		// Paths::Base() is already the directory this binary sits in.
-#if defined(_WIN32)
-		return engine::core::Paths::Base() / "test_parallel.exe";
-#else
-		return engine::core::Paths::Base() / "test_parallel";
-#endif
+		return engine::core::Paths::Base() / engine::core::Paths::Program("test_parallel");
 	}
 
 	// Arguments that make this binary exit quickly and cleanly. Listing tests

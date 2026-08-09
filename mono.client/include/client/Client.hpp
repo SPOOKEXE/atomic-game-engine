@@ -430,6 +430,27 @@ namespace client {
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;
 
+		// TODO(render-pipeline): these two are the world-to-renderer seam.
+		//
+		// Kept rather than deleted so the shape of what was here survives: a
+		// world change installed that world's pipelines and chose one, and the
+		// render call named it. Nothing writes them now.
+		//
+		// Which world's saved pipelines are installed in the renderer.
+		//
+		// **A guard so installing happens on a world change and not per frame.**
+		// `client::InstallWorldPipelines` compiles every pipeline it installs
+		// and reports what is wrong with each — worth paying when the world
+		// changes, and sixty complaints a second about a half-wired one if it
+		// were not guarded.
+		engine::world::WorldId PipelinesInstalledFor;
+
+		// What to put in `render::View::Pipeline`, from that install.
+		//
+		// Invalid means the world named no `main` pipeline, which is the
+		// ordinary case and draws the renderer's standard frame.
+		engine::core::Name PipelineSelected;
+
 		// Every world this client simulates, in creation order.
 		std::vector<engine::world::WorldId> Simulated;
 
