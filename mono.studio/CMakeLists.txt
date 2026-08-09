@@ -83,7 +83,6 @@ mono_add_library(studio
 
 		# L10. The node canvases' layout, hit-testing and selection — the half
 		# of both editors that has tests. See `Pipelines.cpp` and D00041.
-		Engine::nodeview
 
 		# The client's presentation seam: `client::InstallPresentation` and
 		# `client::DrawList`. **Reused rather than reimplemented** — a second

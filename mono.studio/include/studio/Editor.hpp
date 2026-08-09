@@ -34,8 +34,10 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
-#include <engine/nodeview/Editor.hpp>
-#include <engine/nodeview/State.hpp>
+// TODO(render-pipeline): `<engine/nodeview/Editor.hpp>` and `State.hpp` were
+// included here. `Engine::nodeview` was the node-canvas module the Render and
+// Assets Pipeline panels were built on; it is removed. See the member and
+// method markers below.
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
@@ -1016,7 +1018,8 @@ namespace studio {
 		// need a render target per open editor; boxes and lines on a draw list need
 		// none, and this panel is the editor's chrome rather than a game's UI.
 		//@{
-		void DrawRenderPipeline();
+		// TODO(render-pipeline): `void DrawRenderPipeline();` drew the Render Pipeline node editor.
+
 
 		// The pipeline as a grid: passes across, resources down, what each does
 		// to each where they meet.
@@ -1027,23 +1030,26 @@ namespace studio {
 		// different question and wants a different shape.
 		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
 		// is the arithmetic and this is only the drawing.
-		void DrawPipelineProfile();
+		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid — passes across the top, resources down the side.
+
 
 		// The picture and histogram under the access grid. See `ProfileWatched`.
-		void DrawProfileWatch();
+		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the profile grid.
+
 
 		// The selected node's own settings, under the canvas.
 		//
 		// **Without it the parameters are unreachable.** Which shader a `raster`
 		// runs is a node's own business, and a canvas that could only wire
 		// things could describe the shape of a frame and nothing about it.
-		void DrawNodeParameters();
+		// TODO(render-pipeline): `DrawNodeParameters` edited a node's parameters,
+		// including the multi-line GLSL box a `raster` node's shader was typed into.
 
-		// One channel's distribution, as sixteen bars and a range.
-		void DrawChannelHistogram(
-			const char *label, const engine::render::ChannelHistogram &channel, unsigned int colour
-		);
-		void DrawAssetsPipeline();
+
+		// TODO(render-pipeline): `DrawChannelHistogram` drew one channel's
+		// distribution as sixteen bars and a range, over `render::ChannelHistogram`.
+		// TODO(render-pipeline): `void DrawAssetsPipeline();` drew the Assets Pipeline node editor.
+
 		//@}
 
 		// Brings one file, or every file under one folder, into the store.
@@ -1998,18 +2004,13 @@ namespace studio {
 		// world is also what makes a deleted mirror stop being drawn.
 		std::vector<engine::render::SurfaceView> Surfaces;
 
-		// Each world's installed pipeline, by world index.
-		//
-		// **A map rather than one name, because two viewports can show two
-		// worlds in the same frame** — which is exactly the case
-		// `client::InstallWorldPipelines` qualifies its keys for. Presence means
-		// that world's pipelines are installed, so an absent entry is what makes
-		// the next frame install them.
-		//
-		// **Erased rather than rewritten when a pipeline is saved.** Saving is
-		// the one edit that must reach the renderer, and dropping the entry says
-		// "install this again" without the save having to know how.
-		std::unordered_map<uint32_t, engine::core::Name> PipelineSelected;
+		// TODO(render-pipeline): `PipelineSelected` mapped world index to the
+		// pipeline key installed for it — a map rather than one name, because two
+		// viewports can show two worlds in the same frame, which is exactly what
+		// `InstallWorldPipelines` qualified its keys for. An absent entry meant
+		// "install on the next frame", and saving a pipeline erased the entry,
+		// which is what made a save visible in the viewport.
+
 
 		// One world's run, for as long as it is running.
 		//
@@ -2875,56 +2876,19 @@ namespace studio {
 		engine::core::Name ProfileWatched;
 		//@}
 
-		// What each canvas has selected and how far it is scrolled. **Outside the
-		// canvas because it outlives a rebuild** — see `nodeview::CanvasState`.
-		//@{
-		engine::nodeview::CanvasState RenderPipelineState;
-		engine::nodeview::CanvasState AssetsPipelineState;
-		//@}
-
-		// --- the Render Pipeline editor --------------------------------------
+		// TODO(render-pipeline): the Render Pipeline editor's state lived here.
 		//
-		// **The pipeline being edited, held here rather than rebuilt per frame.**
-		// A panel that re-derived its graph from the world every frame would
-		// throw away a half-finished wire on the frame it was dragged, and would
-		// have nowhere to put a node somebody moved. `nodeview::EditorGraph` is
-		// the model; the world's `graph::PipelineSet` is where Save puts it.
-
-		// The graph on the canvas, and which world it was loaded from.
+		// Roughly a dozen members: two `nodeview::CanvasState`s (selection and
+		// scroll, held **outside** the canvas because they outlive a rebuild), an
+		// `EditorGraph` model, the world it was loaded for, a dirty flag, the
+		// canvas view, what was selected, what was being dragged and from where,
+		// the half-drawn wire, and where the add-node menu was opened.
 		//
-		// **The world id is the reload trigger.** Switching worlds has to reload
-		// or the panel would be editing one scene's pipeline while showing
-		// another's name, and saving would write it to the wrong place.
-		//@{
-		engine::nodeview::EditorGraph RenderPipelineGraph;
-		engine::world::WorldId RenderPipelineLoaded;
-		bool RenderPipelineDirty = false;
-		//@}
+		// **The one that mattered was the load guard.** The graph was rebuilt
+		// from the world's document only when the world changed or the graph was
+		// empty — a panel that rebuilt every frame would throw away a wire on the
+		// frame it was dragged and have nowhere to put a node somebody moved.
 
-		// How far the canvas is scrolled and zoomed.
-		engine::nodeview::CanvasView RenderPipelineCanvas;
-
-		// Which node is selected, or an invalid name.
-		engine::core::Name RenderPipelineSelected;
-
-		// The node being dragged, and where inside it the pointer grabbed.
-		//
-		// **The offset is what stops the box snapping its corner to the cursor**
-		// on the first frame of every drag.
-		//@{
-		engine::core::Name RenderPipelineDragging;
-		engine::nodeview::Point RenderPipelineGrab;
-		//@}
-
-		// The wire in flight, if one is. Invalid means no drag.
-		engine::graph::PortRef RenderPipelineWire;
-
-		// Where the add-node menu was opened, in canvas pixels, and what has
-		// been typed into it.
-		//@{
-		engine::nodeview::Point RenderPipelineAddAt;
-		std::string RenderPipelineSearch;
-		//@}
 
 		// Where the add-file and add-folder dialogs are looking.
 		//

@@ -201,49 +201,11 @@ namespace client {
 	//         already had one.
 	bool InstallDefaultCamera(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
-	// Installs a world's saved render pipelines and says which one a view of it
-	// should name.
+	// TODO(render-pipeline): `InstallWorldPipelines` was declared here.
 	//
-	// **The link that was missing.** Every other part of the chain existed —
-	// the catalogue names the kinds, `graph::PipelineDocument` records the
-	// edits, the Render Pipeline panel edits them, `PipelineSet` saves them into
-	// the world, and `render::Renderer::SetPipeline` takes a compiled graph. But
-	// nothing joined the last two, so "Save to world" wrote a document that was
-	// stored faithfully and never drew a pixel. This is that join.
-	//
-	// **Here rather than in `render`, for `CollectSurfaceViews`'s reason.** A
-	// `PipelineSet` lives on an `ecs::Store` and `render` does not know what a
-	// store is; `render` is L12 and would be reaching down to L4 to find one. So
-	// the renderer takes a compiled graph and knows nothing about worlds, and
-	// this is where a world and a renderer meet.
-	//
-	// **The installed name is qualified with the world**, because a pipeline is
-	// global to the renderer by name and a world's authored names are not. Two
-	// worlds both calling their pipeline `main` is the ordinary case rather than
-	// a mistake — and with a second viewport open both render in the same frame,
-	// so an unqualified key would mean whichever world installed last drew both.
-	// The author never sees the qualified spelling; it is a key, and the return
-	// value is what to put in `render::View::Pipeline`.
-	//
-	// **Call it when a world's pipelines change, not every frame.**
-	// `SetPipeline` compiles the graph and logs what is wrong with it, so a
-	// per-frame call would pay a compile per pipeline per frame and repeat every
-	// complaint about a half-wired one sixty times a second.
-	//
-	// A pipeline that does not compile is skipped and says so, and the others
-	// still install — one broken pass should cost the pipeline it is in and not
-	// every pipeline in the world.
-	//
-	// @param store    The world.
-	// @param renderer Installed into.
-	// @param world    Which world, to qualify the keys with. `View::World` is
-	//                 the same number, and passing a different one here would
-	//                 name pipelines no view asks for.
-	// @return What to put in `render::View::Pipeline`, or an invalid name when
-	//         the world saved no pipeline called `main` — which is the ordinary
-	//         case, and means the view draws the renderer's standard frame.
-	engine::core::Name
-	InstallWorldPipelines(engine::ecs::Store &store, engine::render::Renderer &renderer, uint64_t world);
+	// See the marker in `Scene.cpp` for what it did and the three decisions in
+	// it worth carrying over. Its callers are marked too: `Client.cpp`'s render
+	// call, and the studio's viewport.
 
 	// Registers this module's own types under explicit names.
 	//

@@ -99,49 +99,41 @@ and for deleted marked items;
 
 ## Deferred Items
 
-### [~] D00103
+### [_] D00103
 
-**Per-pass GPU time is measured on Vulkan, by reaching into SDL's backend. Every
-other backend still reports nothing.**
+**Per-pass GPU time is not measured. The Vulkan path that measured it was
+removed with the rest of the render pipeline.**
 
-`ProfilePass::Elapsed` carries real microseconds and the Pipeline Profile grid
-shows them per pass. What made that possible is not an SDL feature — there still
-is not one — but `render/src/VulkanTimestamps.{hpp,cpp}`, which mirrors the first
-few fields of two SDL-internal structs and casts the opaque pointers the renderer
-already holds.
+`render/src/VulkanTimestamps.{hpp,cpp}` existed and worked: it reached into SDL's
+Vulkan backend, created a query pool, marked each pass and read the results back
+a frame later. It went out with the revert because it was wired into the pass
+executor that no longer exists.
 
-- **The blocker was verified before working around it.** SDL 3.2.31 is what
-  `mono.vendor/sdl` is pinned to. `SDL3/SDL_gpu.h` has no timestamp query, no
-  query pool and no `SDL_GPUQuery`, exposes no native handle, and the Vulkan
-  backend contains zero references to `vkCmdWriteTimestamp` or `VkQueryPool`.
-- **The one supported part is the loader.** `SDL_Vulkan_GetVkGetInstanceProcAddr`
-  is public SDL, so `vkCreateQueryPool`, `vkCmdWriteTimestamp`,
-  `vkCmdResetQueryPool` and `vkGetQueryPoolResults` are loaded rather than
-  linked. Nothing links a Vulkan library and no Vulkan SDK is required — the
+**Everything it established is still true and worth reusing.**
+
+- SDL 3.2.31 — what `mono.vendor/sdl` is pinned to — has no timestamp query, no
+  query pool and no `SDL_GPUQuery`, exposes no native handle, and its Vulkan
+  backend has zero references to `vkCmdWriteTimestamp` or `VkQueryPool`. There is
+  no supported call to make.
+- `SDL_Vulkan_GetVkGetInstanceProcAddr` **is** public SDL, so the entry points can
+  be loaded rather than linked — no Vulkan SDK and no linked Vulkan library. The
   Khronos headers come from SDL's own copy.
-- **Bottom-of-pipe marks, read a frame later, never blocking.** A timestamp is
-  readable only once the GPU has passed it, and waiting on it would serialise the
-  CPU against the GPU in order to report how fast the GPU is.
-- **A pass that runs several times is the sum of its runs**, because what a
-  profile is asked is what a pass cost the frame, not what its last view cost.
+- What is not public is the `VkDevice` and the `VkCommandBuffer`. Those came from
+  mirroring the first fields of `VulkanCommandBuffer` and `VulkanRenderer` and
+  casting the opaque pointers the renderer already holds — pinned to one SDL
+  version, guarded by a plausibility check that gave up rather than reading a
+  wild pointer, and gated on `SDL_GetGPUDeviceDriver` being `vulkan` before any
+  cast, because a D3D12 command buffer read through the Vulkan mirror is a crash
+  rather than a wrong number.
+- Marks belong at the **bottom of pipe**, and the read must not block: waiting on
+  a timestamp serialises the CPU against the GPU in order to report how fast the
+  GPU is.
+- **Never fill the field with CPU time.** A submit-side number labelled as a
+  pass's cost is worse than a blank — somebody reads "0.4 ms" for the shadow
+  pass, believes the GPU said it, and optimises the wrong thing.
 
-**What it still costs, stated rather than hidden.**
-
-- **Pinned to one SDL version.** The mirrored layouts are 3.2.31's. A submodule
-  bump can change them silently, so `Probe` checks what it found — instance,
-  physical device and logical device non-null, the properties `sType` correct,
-  and SDL's own header field pointing back at the device it was asked about —
-  and reports "SDL's internals are not the shape this was built against" rather
-  than reading whatever is at those addresses.
-- **Vulkan only.** `SDL_GetGPUDeviceDriver` gates it before any cast happens,
-  because a D3D12 command buffer read through the Vulkan mirror is a wild
-  pointer rather than a wrong number. D3D12 and Metal say "not measured", as
-  before.
-- **Not a supported use of SDL.** If SDL ships timestamp queries, this file is
-  deleted rather than ported.
-
-**Still open:** the non-Vulkan backends, and the fact that this rests on layouts
-rather than on an interface. Closing it properly needs the upstream feature.
+**Trigger:** a new pass executor to hang the marks off. The file is recoverable
+from git history on `v0.11` or the local branch `renderer-before-revert`.
 
 ### [CLOSED] D00047
 

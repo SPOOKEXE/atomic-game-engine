@@ -1,5 +1,15 @@
 # Pipeline work — progress and what is left
 
+> **REVERTED.** The node-graph rendering pipeline this document describes was
+> taken out of the tree; `mono.engine/render` and `mono.engine/graph` are back to
+> their pre-v0.11 state and `mono.engine/nodeview` is gone. **Read this as a
+> record of what was built and why, not as a description of the code.**
+>
+> The seams it left behind are marked in the source with `TODO(render-pipeline)`
+> — `grep -rn "TODO(render-pipeline)"` lists every point the new system has to
+> meet. The reverted work is reachable in git history on the `v0.11` branch and
+> on the local branch `renderer-before-revert`.
+
 Working list for `docs/PIPELINE_NODES.md`. **That document is the design; this
 one is the state.** Kept separately so the design does not have to be edited
 every time a box is ticked, and so a session that runs out of room hands over

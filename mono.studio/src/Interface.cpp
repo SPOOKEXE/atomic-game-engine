@@ -263,9 +263,8 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			DrawHistory();
 			DrawAssets();
-			DrawRenderPipeline();
-			DrawAssetsPipeline();
-			DrawPipelineProfile();
+			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
+			// and `DrawPipelineProfile()` were drawn here.
 			DrawNetwork();
 			DrawBus();
 			DrawFindInstances();
@@ -899,9 +898,7 @@ namespace studio {
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
-		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
-		ImGui::MenuItem("Assets Pipeline", nullptr, &ShowAssetsPipeline);
-		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
+		// TODO(render-pipeline): the three pipeline panels were opened from here.
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);

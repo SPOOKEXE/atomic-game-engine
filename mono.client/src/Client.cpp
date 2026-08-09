@@ -1214,15 +1214,12 @@ namespace client {
 						// than one wall's image projected across all four.
 						(void)CollectSurfaceViews(store, Surfaces);
 
-						// **The world's own render pipeline, installed when the
-						// world changes.** Everything up to here was already
-						// built — the panel edits a document, the document saves
-						// into the world — and this is what makes a saved
-						// pipeline actually draw the frame.
-						if (PipelinesInstalledFor.Index != id.Index) {
-							PipelinesInstalledFor = id;
-							PipelineSelected = InstallWorldPipelines(store, Renderer, id.Index);
-						}
+						// TODO(render-pipeline): the world's own pipeline was
+						// installed here, on a world change rather than per
+						// frame. `PipelinesInstalledFor` guarded that and
+						// `PipelineSelected` carried the answer to the render
+						// call below — both members are still declared and both
+						// are marked. See `client::InstallWorldPipelines`.
 
 						// **The particles, from the world being drawn and only
 						// that one.** A batch is a span into this world's pool;
@@ -1528,34 +1525,34 @@ namespace client {
 		// `Renderer::SetAnimationTime` carries the rule.
 		Renderer.SetAnimationTime(AnimationSeconds);
 
-		// One view, which is what a game is. The span is of a single local
-		// rather than a member: nothing is retained past the call, so there is
-		// nothing for the client to own.
+		// TODO(render-pipeline): this call took a `render::View` per camera.
 		//
-		// **Assigned rather than brace-initialised**, because a `View` has
-		// fields this caller has nothing to say about and a designated
-		// initialiser list that skips one is a warning per skipped field. The
-		// defaults are the answer for those, and saying so by leaving them
-		// alone is clearer than repeating them.
-		engine::render::View view;
-		view.CameraFrame = Views.CameraFrame();
-		view.Camera = Views.Camera();
-		view.Instances = Views.Instances();
-		view.Surfaces = Surfaces;
-		view.Target = sceneTarget;
-		view.Particles = Particles;
-		view.RibbonVertices = RibbonVertices;
-		view.RibbonRuns = RibbonRuns;
-		view.Lights = Lights;
-
-		// **Which world, and which pipeline of it.** The two go together: the
-		// key `InstallWorldPipelines` returns is qualified by exactly this
-		// number, so a view naming one without the other asks for a pipeline
-		// nothing installed.
-		view.World = Rendered.Index;
-		view.Pipeline = PipelineSelected;
-
-		LastFrame = Renderer.Render({&view, 1}, Overlay, hook);
+		// The old system's `Render` takes one camera's worth of arguments
+		// positionally; the one being replaced took `std::span<const View>`, so a
+		// frame could carry several cameras and each could name **its own
+		// pipeline** — `view.World` and `view.Pipeline` were set together here,
+		// because the pipeline key a world installs is qualified by the world id
+		// and a view naming one without the other asks for a pipeline nothing
+		// installed.
+		//
+		// **The two members that fed it are still on this class**, unused, and
+		// marked: `PipelinesInstalledFor` and `PipelineSelected`. They are where
+		// a world's saved pipelines were installed and which one this view
+		// selected. See `client::InstallWorldPipelines` in `Scene.hpp`.
+		LastFrame = Renderer.Render(
+			Views.CameraFrame(),
+			Views.Camera(),
+			Views.Instances(),
+			Overlay,
+			Surfaces,
+			hook,
+			sceneTarget,
+			0,
+			Particles,
+			RibbonVertices,
+			RibbonRuns,
+			Lights
+		);
 
 		// **After the frame rather than before it**, so the capture is of a
 		// frame whose scene texture exists — the studio's own capture states

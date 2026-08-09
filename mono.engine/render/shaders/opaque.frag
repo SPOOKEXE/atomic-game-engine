@@ -38,13 +38,6 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// is applied unconditionally rather than behind a branch — a divergent
 	// branch per fragment to avoid a multiply and an add is the wrong trade.
 	vec4 Flipbook;
-
-	// Which material maps this draw has: x normal, y roughness, z occlusion.
-	// **Declared here and unread**, because the block is pushed once and both
-	// this shader and `gbuffer.frag` read it — a std140 block that disagreed
-	// about its own tail between two shaders is the sort of mismatch that shows
-	// up as one of them reading garbage.
-	vec4 Maps;
 } lighting;
 
 // How many local lights one draw may be affected by.

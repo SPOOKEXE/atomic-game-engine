@@ -317,8 +317,13 @@ namespace studio {
 				// **Only what a runtime can read.** GLSL routes to this kind too
 				// — what somebody publishes is what they wrote — and
 				// `IsRuntimeReadable` is what says it has not been baked yet.
-				if (engine::assets::IsRuntimeReadable(asset->Name) &&
-					Renderer.AddShader(name, asset->Bytes)) {
+				// TODO(render-pipeline): `Renderer.AddShader(name, asset->Bytes)`
+				// went here, inside this condition. The delivery is kept and
+				// still counted, because `AssetKind::Shader` is part of the asset
+				// pipeline rather than the render one — shaders publish, fetch
+				// and arrive exactly as before. What is missing is the renderer
+				// end: something has to take the bytes and let a node name them.
+				if (engine::assets::IsRuntimeReadable(asset->Name)) {
 					ContentShaders++;
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {

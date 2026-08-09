@@ -10,17 +10,12 @@
 // this file exists to prevent, one level up. The assertions compare the two
 // descriptions against each other and neither against a number.
 //
-// **The second description is gone, and so is most of what this file used to
-// check.** `render::Pass` was a hand-written enum saying the same six things in
-// the same order; `Renderer::Render` walks `graph::Execute` now and the enum has
-// been deleted. What is left is worth keeping: that `PassOrder` really is the
-// graph's order, that the graph is runnable, and that a caller can ask which
-// stages ran by name.
-//
 // **No device is created here and none is needed.** `PassOrder` is a list of
-// names and the graph is arithmetic over names, so all of this runs anywhere.
+// names and `StandardPipeline` is arithmetic over names, so the comparison runs
+// anywhere. That is the whole reason the enum exists as a separate thing from
+// the function body: the body needs a GPU, the description does not.
 
-#include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Pipeline.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -43,88 +38,87 @@ TEST_SUITE_ID("engine.render.passes")
 // closure, so an edit there moves `engine.graph.pipeline`, and this line is
 // what carries that up to here. Without it the check would stay green through
 // exactly the change it was written to catch.
-TEST_DEPENDS("engine.graph.rendergraph")
+TEST_DEPENDS("engine.graph.pipeline")
 
 using engine::core::Name;
-using engine::graph::GraphStatus;
-using engine::graph::Node;
-using engine::graph::NodeId;
-using engine::graph::RenderGraph;
-using engine::graph::StandardGraph;
+using engine::graph::Pipeline;
+using engine::graph::PipelineStatus;
+using engine::graph::Stage;
+using engine::graph::StandardPipeline;
 using engine::render::FrameResult;
+using engine::render::Pass;
 using engine::render::PassOrder;
 
 namespace {
-	// The node names, in declaration order.
-	std::vector<Name> NodeNames(const RenderGraph &graph) {
+	// The stage names, in declaration order.
+	//
+	// Bound to a named `Pipeline` rather than taken from the temporary:
+	// `Stages()` is deleted on an rvalue for exactly this reason, and writing
+	// the mistake here once was how that overload came to exist.
+	std::vector<Name> StageNames(const Pipeline &pipeline) {
 		std::vector<Name> names;
-		for (size_t index = 0; index < graph.Count(); index++) {
-			names.push_back(graph.Find(NodeId{static_cast<uint32_t>(index + 1)})->Name);
+		for (const Stage &stage : pipeline.Stages()) {
+			names.push_back(stage.Name);
 		}
 		return names;
 	}
 }
 
-TEST_CASE("the renderer's passes are the standard graph's nodes", "[render][graph]") {
-	// **This no longer compares two descriptions — it checks that the one
-	// description arrived intact.** `render::PassOrder` used to be a second
-	// hand-written list of these names and this case existed to catch the two
-	// drifting apart; `DEFERRED.md` D00016 is that entry. It reads the names out
-	// of `StandardGraph` now, so drift is not possible.
-	//
-	// Kept rather than deleted because `FrameResult::Passes` is a bitmask over
-	// these positions: a node inserted in the middle of the graph moves every
-	// bit after it, and a caller reading `Ran("overlay")` would get the answer
-	// for a different pass. This is where that surfaces.
-	const RenderGraph standard = StandardGraph();
-	const std::vector<Name> nodes = NodeNames(standard);
+TEST_CASE("the renderer's passes are the standard pipeline's stages", "[render][graph]") {
+	const Pipeline pipeline = StandardPipeline();
+	const std::vector<Name> stages = StageNames(pipeline);
 	const auto order = PassOrder();
 
+	// **Count first, and the message matters more than the assertion.** This is
+	// the failure the entry predicted: a sixth pass added to one description and
+	// not the other. Whichever side was edited, the fix is to edit both.
 	INFO(
-		"Renderer submits " << order.size() << " passes and StandardGraph declares " << nodes.size()
-							<< " nodes. A node added to the graph needs an enumerator beside it."
+		"Renderer submits " << order.size() << " passes and StandardPipeline declares " << stages.size()
+							<< " stages. A pass added to one must be added to the other — see D00016."
 	);
-	REQUIRE(order.size() == nodes.size());
+	REQUIRE(order.size() == stages.size());
 
-	// **In order, not as a set.** A frame holding the right six passes in the
-	// wrong order samples a shadow map nothing has rendered, which is not a
-	// crash on a GPU — it is a frame lit by whatever was in that memory.
-	for (size_t index = 0; index < nodes.size(); index++) {
+	// **In order, not as a set.** A pipeline holding the right five stages in
+	// the wrong order describes a frame where the colour pass samples a shadow
+	// map nothing has rendered, which is not a crash on a GPU — it is a frame
+	// lit by whatever was in that memory.
+	for (size_t index = 0; index < stages.size(); index++) {
 		INFO("position " << index);
-		CHECK(order[index].Text() == nodes[index].Text());
+		CHECK(order[index].Text() == stages[index].Text());
 	}
 }
 
-TEST_CASE("pass order names the six stages the standard frame has", "[render][graph]") {
-	// **The names, not the count.** The count is asserted against the graph
-	// above; naming them here is what catches a *rename* — a node called
-	// `transparent` becoming `blended` would keep every count right and quietly
-	// change what `FrameResult::Ran` answers for.
-	//
-	// This was the case that used to check the hand-written enum indexed its own
-	// names. The enum is gone; the index space it defined is now the graph's, so
-	// what is worth pinning is which name sits at which position.
+TEST_CASE("the pass enum indexes its own names", "[render]") {
+	// `PassRecorder` shifts by the enum value and `PassOrder` is indexed by it,
+	// so a member inserted in the middle without moving the name beside it
+	// silently renames every pass after it. Cheap to assert and impossible to
+	// notice otherwise.
 	const auto order = PassOrder();
 
-	REQUIRE(order.size() == 6);
-	CHECK(order[0].Text() == "shadow");
-	CHECK(order[1].Text() == "surface");
-	CHECK(order[2].Text() == "opaque");
-	CHECK(order[3].Text() == "transparent");
-	CHECK(order[4].Text() == "overlay");
-	CHECK(order[5].Text() == "interface");
+	REQUIRE(order.size() == static_cast<size_t>(Pass::Count));
+	CHECK(order[static_cast<size_t>(Pass::Shadow)].Text() == "shadow");
+	CHECK(order[static_cast<size_t>(Pass::Surface)].Text() == "surface");
+	CHECK(order[static_cast<size_t>(Pass::Opaque)].Text() == "opaque");
+	CHECK(order[static_cast<size_t>(Pass::Transparent)].Text() == "transparent");
+	CHECK(order[static_cast<size_t>(Pass::Overlay)].Text() == "overlay");
+
+	// **Added when the sixth pass arrived, which is the case D00016 was filed
+	// against.** The count assertion above caught the pairing; this list did not
+	// grow with it, so `interface` was the one pass whose *name* nothing
+	// checked. Cheap, and exactly the kind of half-updated check this module has
+	// already watched rot once.
+	CHECK(order[static_cast<size_t>(Pass::Interface)].Text() == "interface");
 }
 
-TEST_CASE("the standard graph the renderer follows is runnable", "[render][graph]") {
-	// The other half of the pairing. The case above says the renderer's passes
-	// are the graph's nodes; this says the graph is worth following — no node
-	// reads a resource that no earlier node wrote, and no shared node fights a
-	// per-view one over the same write.
-	const RenderGraph standard = StandardGraph();
+TEST_CASE("the standard pipeline the renderer follows is runnable", "[render][graph]") {
+	// The other half of the pairing. `PassOrder` says the renderer agrees with
+	// the pipeline; this says the pipeline is worth agreeing with — no stage
+	// reads a target that no earlier stage wrote.
+	const Pipeline pipeline = StandardPipeline();
 
 	Name offender;
-	INFO("offending node: " << std::string(offender.Text()));
-	CHECK(standard.Validate(offender) == GraphStatus::Ok);
+	INFO("offending stage: " << std::string(offender.Text()));
+	CHECK(pipeline.Validate(offender) == PipelineStatus::Ok);
 }
 
 TEST_CASE("a frame result reports which passes ran", "[render]") {
@@ -133,26 +127,22 @@ TEST_CASE("a frame result reports which passes ran", "[render]") {
 	// pass are one draw each and are indistinguishable from there.
 	FrameResult result;
 
-	for (const Name &kind : PassOrder()) {
-		CHECK_FALSE(result.Ran(kind));
+	for (uint8_t index = 0; index < static_cast<uint8_t>(Pass::Count); index++) {
+		CHECK_FALSE(result.Ran(static_cast<Pass>(index)));
 	}
 
-	result.Passes = static_cast<uint8_t>((1u << 2) | (1u << 4));
+	result.Passes = static_cast<uint8_t>(
+		(1u << static_cast<uint8_t>(Pass::Opaque)) | (1u << static_cast<uint8_t>(Pass::Overlay))
+	);
 
-	CHECK(result.Ran(Name("opaque")));
-	CHECK(result.Ran(Name("overlay")));
+	CHECK(result.Ran(Pass::Opaque));
+	CHECK(result.Ran(Pass::Overlay));
 
 	// The interesting one: a frame that drew but cast no shadows, which is what
 	// a scene with no casters looks like and is not a bug.
-	CHECK_FALSE(result.Ran(Name("shadow")));
-	CHECK_FALSE(result.Ran(Name("surface")));
-	CHECK_FALSE(result.Ran(Name("transparent")));
-
-	// **A name the frame does not have is false, not an error.** Asking whether
-	// a pass this renderer has never had ran is a fair question, and the honest
-	// answer is no rather than a crash or a bit belonging to something else.
-	CHECK_FALSE(result.Ran(Name("depth-prepass")));
-	CHECK_FALSE(result.Ran(Name{}));
+	CHECK_FALSE(result.Ran(Pass::Shadow));
+	CHECK_FALSE(result.Ran(Pass::Surface));
+	CHECK_FALSE(result.Ran(Pass::Transparent));
 }
 
 // The other half of D00016's neighbourhood: a decision that was recorded and

@@ -10,11 +10,8 @@
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
-#include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
-#include <engine/render/Readback.hpp>
-#include <engine/render/ShaderCompiler.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
@@ -31,17 +28,38 @@ namespace engine::render {
 
 	// The stages `Render` submits, in submission order.
 	//
-	// **Read out of `graph::StandardGraph` rather than written here**, which is
-	// the whole point: the frame is described once, as a graph, and this is a
-	// view of it. There used to be a `Pass` enum beside it saying the same six
-	// things in the same order with a test to keep the two in step — a test that
-	// can tell you two descriptions disagree but not which one is right, and
-	// that only ever runs after somebody has already changed one. `DEFERRED.md`
-	// D00016 is the entry about what that costs.
+	// Tests compare this order with graph::StandardPipeline.
 	//
-	// What it is still for is the bit positions in `FrameResult::Passes`: a
-	// caller asking whether the shadow pass ran needs an index space, and this
-	// is the one the graph itself defines.
+	// @since v0.6
+	enum class Pass : uint8_t {
+		// Depth from the light, over the whole scene rather than the culled set.
+		Shadow,
+
+		// The surface camera's view, into a texture a mirror samples.
+		Surface,
+
+		// The screen, with depth written.
+		Opaque,
+
+		// Blended, depth-tested, and not depth-written; shares Opaque's pass.
+		Transparent,
+
+		// The overlay texture, loaded over the frame rather than clearing it.
+		Overlay,
+
+		// Whatever a `FrameOverlayHook` records — the editor's chrome, and
+		// nothing a game ships with.
+		//
+		// Last, so interface content stays above the world.
+		//
+		// @since v0.7
+		Interface,
+
+		// Not a pass. The count, for the bitmask below.
+		Count,
+	};
+
+	// The names of those stages, in the same order.
 	//
 	// @return The six names, valid for the life of the program.
 	std::span<const core::Name> PassOrder();
@@ -342,136 +360,6 @@ namespace engine::render {
 		virtual void Record(void *commandBuffer, void *renderPass) = 0;
 	};
 
-	// One view of one world, and everything that is that view's alone.
-	//
-	// **The twelve parameters `Render` used to take, minus the two that were
-	// never the view's.** Four of those twelve arrived after v0.9, each by the
-	// same route — a feature needed one more span, and the shortest change was
-	// one more trailing default argument. `DEFERRED.md` D00002 recorded where
-	// that ends: *"handle multiple worlds in parallel is the first roadmap line
-	// that cannot be met by making the function longer."*
-	//
-	// **What makes this a view rather than a rectangle**, which is the mistake
-	// v0.7 made and deleted inside one version. `render::Viewport` described
-	// *where a view lands*; every field here is about *what is seen* — the eye,
-	// the lens, the world, the lights near it. The test the deleted type failed
-	// is whether `graph::Node::PerView` can be read against it, and it can: a
-	// shadow map is a function of the world and the sun, so it is shared across
-	// these, and a colour pass is a function of `CameraFrame` and is not.
-	//
-	// The overlay and the interface hook are deliberately *not* here. Both are
-	// the window's rather than a view's — one CPU image and one editor's chrome,
-	// drawn once over whatever the views produced — so they stay parameters of
-	// the frame. See `Renderer::Render`.
-	//
-	// Nothing here is retained past the call: the spans are read during it and
-	// the values are copied.
-	//
-	// @since v0.11
-	// @client
-	struct View {
-		// World-space placement of the camera.
-		core::CFrame CameraFrame;
-
-		// Field of view and clipping distances.
-		//
-		// No aspect ratio, because it is the target's rather than the author's —
-		// `scene::ResolveCamera` takes one so a frame caught during a resize is
-		// projected for the image it is actually drawn into.
-		scene::Camera Camera;
-
-		// What to draw, as the world described it.
-		//
-		// **Per view rather than per frame, which is what "multiple worlds"
-		// means.** Two views of one world pass the same span; a studio showing a
-		// server's world beside a client's passes two different ones, and
-		// nothing in the renderer needs to know which case it is in.
-		std::span<const scene::DrawInstance> Instances;
-
-		// The offscreen views to render first, one per surface index. Empty for
-		// a scene with no mirror in it.
-		std::span<const SurfaceView> Surfaces;
-
-		// Draw the world into an offscreen texture of this size instead of into
-		// the window, or null for the window. Decides the aspect ratio and the
-		// cull frustum as well as the target — see `SceneTarget`.
-		const SceneTarget *Target = nullptr;
-
-		// Which viewport this is, selecting both the scene texture and the
-		// surface texture bank. A program with one view uses 0 and never sets
-		// this. See `Renderer::SceneTexture`.
-		size_t Slot = 0;
-
-		// Which world this view is of.
-		//
-		// **An opaque number, and deliberately not a `world::WorldId`.** `render`
-		// is L12 `client` and a world's identifier is L4's; what this needs is
-		// only whether two views are of the same world, so it takes whatever the
-		// caller already uses to tell them apart and never learns what a world
-		// is. `world::WorldId::Index` is the obvious thing to pass, and is what
-		// `client::InstallWorldPipelines` qualifies a pipeline key with — so a
-		// view setting one of the two and not the other names a pipeline nothing
-		// installed.
-		//
-		// **What it decides is how much shared work a frame does.** A shadow map
-		// is per world per light, so views sharing a world share one and views of
-		// different worlds need one each — see `graph::RenderGraph::Execute`.
-		// Leaving it at zero puts every view in one world, which is what a game
-		// and a single-panel editor both are.
-		uint64_t World = 0;
-
-		// Which pipeline this camera's frame is described by.
-		//
-		// **A camera does not have to draw the way another one does.** A
-		// reflection can run a cheaper chain, a debug viewport a different one,
-		// and a world's main view its own — which is what
-		// `graph::PipelineSet` was built to hold and what nothing could
-		// previously select from. Hand `Renderer::SetPipeline` a name and put
-		// that name here.
-		//
-		// **Unset means the renderer's default**, which is the standard frame
-		// unless something replaced it. A caller that never names one behaves
-		// exactly as it did before pipelines were selectable.
-		//
-		// @since v0.11
-		core::Name Pipeline;
-
-		// One batch per emitter with live particles, drawn after the blended
-		// geometry and before the overlay.
-		//
-		// **After the blended pass and never sorted against it**, which is the
-		// same trade `scene::ScenePlan::TransparentSurfaces` makes for mirrors:
-		// a particle in front of a pane of glass is drawn after it whatever the
-		// depths say. One sorted run per pipeline is what lets the blend mode be
-		// a pipeline binding instead of a per-fragment branch, and interleaving
-		// half a million particles into the geometry sort would cost more than
-		// the artefact does.
-		std::span<const ParticleBatch> Particles;
-
-		// Every beam and trail vertex this world produced, as
-		// `effects::BuildRibbons` packed them. The whole stream rather than one
-		// run, because the runs index into it.
-		std::span<const effects::RibbonVertex> RibbonVertices;
-
-		// Where each ribbon sits in that stream.
-		//
-		// **Drawn after the particles**, which is one more fixed ordering in a
-		// pass that has several. A beam is usually the thing an author wants on
-		// top of its own sparks, so the order is the useful one rather than an
-		// accident.
-		std::span<const effects::RibbonRun> RibbonRuns;
-
-		// The point and spot lights near this view, at most `MAX_SCENE_LIGHTS`.
-		//
-		// **Added to the directional term rather than replacing it**, so a scene
-		// with no lamps looks exactly as it did before v0.10.
-		//
-		// Anything past the cap is dropped, and the caller is the one that
-		// should be choosing which: the renderer has no idea which lamp matters.
-		// `client::CollectLights` picks the nearest to the eye.
-		std::span<const SceneLight> Lights;
-	};
-
 	// What one `Render` call submitted, and whether it reached the display.
 	//
 	// A default result means no frame was presented, including while the window
@@ -519,31 +407,6 @@ namespace engine::render {
 		// @since v0.10
 		uint32_t RibbonVertices = 0;
 
-		// How many bytes crossed from the CPU into GPU memory this frame, and
-		// in how many copies.
-		//
-		// **The traffic nobody could see.** A frame's cost is not only what the
-		// GPU draws; it is also what the CPU had to hand it first — the instance
-		// buffer rebuilt every frame, the particles, the ribbons, and every mesh
-		// or texture a streaming world uploaded while somebody walked into a new
-		// area. `docs/PIPELINE_NODES.md` §7 asks for exactly this, and the ask
-		// was worded as *"visibly see what goes between the CPU and the GPU,
-		// what images are uploaded"*.
-		//
-		// **Counted at the copy, not estimated from the counts.** A version
-		// derived from the instance count would be a number that agreed with the
-		// truth until the layout changed, which is the sort of statistic that is
-		// worse than none.
-		//
-		// Per-frame, and reset with the rest of the result. A steady scene
-		// settles to the instance buffer alone; a spike is something arriving.
-		//
-		// @since v0.11
-		//@{
-		uint64_t UploadedBytes = 0;
-		uint32_t Uploads = 0;
-		//@}
-
 		// How many particles were submitted this frame.
 		//
 		// **Reported because the number is the whole diagnosis for a scene that
@@ -575,25 +438,12 @@ namespace engine::render {
 		// @since v0.6
 		uint8_t Passes = 0;
 
-		// Whether one stage submitted work this frame.
+		// Whether one pass submitted work this frame.
 		//
-		// **Named rather than indexed**, because the stages are a graph's nodes
-		// now and not an enumerator a caller can count on staying at the same
-		// number. A kind the standard frame does not name is `false` rather than
-		// an error: a caller asking about a pass this renderer has never had is
-		// asking a fair question with a plain answer.
-		//
-		// @param kind Which stage — `shadow`, `surface`, `opaque`,
-		//             `transparent`, `overlay` or `interface`.
+		// @param pass Which one.
 		// @return True when it ran.
-		bool Ran(core::Name kind) const {
-			const std::span<const core::Name> order = PassOrder();
-			for (size_t index = 0; index < order.size() && index < 8; index++) {
-				if (order[index] == kind) {
-					return (Passes & static_cast<uint8_t>(1u << index)) != 0;
-				}
-			}
-			return false;
+		bool Ran(Pass pass) const {
+			return (Passes & static_cast<uint8_t>(1u << static_cast<uint8_t>(pass))) != 0;
 		}
 	};
 
@@ -682,84 +532,6 @@ namespace engine::render {
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image);
-
-		// Registers compiled shader bytes under the name a node will ask for.
-		//
-		// **The seam that stops the renderer being the thing that reads
-		// files.** A `raster` or `dispatch` node names its shader; until now
-		// that name was a file in the staged shader directory, which works and
-		// which nothing outside a developer's checkout can add to. This is the
-		// same shape `AddMesh` and `AddTexture` already have — the renderer is
-		// handed bytes and never learns where they came from — so a shader
-		// fetched from the content store arrives by the same door a texture
-		// does.
-		//
-		// **Supplied wins over staged.** A name registered here is used even if
-		// a file of that name exists, because a caller that went to the trouble
-		// of delivering one means it; the staged directory stays as the
-		// developer path and the fallback.
-		//
-		// **SPIR-V, because this is the *delivered* path.** A module published
-		// to the content store is compiled once, off the machine that is
-		// drawing. That is not the only path and was never meant to be: this
-		// engine links `libshaderc` into the client deliberately, because a
-		// shader somebody is editing in the studio, a permutation, or a swapped
-		// pass does not exist at build time and cannot be compiled ahead of it.
-		// `CompileShader` is that half — see `render::ShaderCompiler`, which
-		// this header's first draft managed not to notice.
-		//
-		// @param name  The name a node's `shader` parameter gives.
-		// @param spirv The compiled module. Copied. Empty is refused.
-		// @return `false` for an unnamed or empty module.
-		//
-		// @since v0.11
-		// **`std::byte` and not `uint8_t`**, because that is what an asset's
-		// payload is and a shader module is bytes rather than numbers — the
-		// renderer never looks inside it.
-		bool AddShader(const core::Name &name, std::span<const std::byte> spirv);
-
-		// Whether a shader of this name has been supplied.
-		//
-		// **Not "can this be drawn"** — a staged file of the same name is still
-		// found without this saying so. It answers only whether somebody handed
-		// the bytes over.
-		bool HasShader(const core::Name &name) const;
-
-		// Compiles GLSL and registers the result under a name.
-		//
-		// **The half `AddShader` is not.** A shader being edited in the studio
-		// has no baked form yet and will have a different one a keystroke later,
-		// so compiling it here is the point rather than a compromise —
-		// `mono.build/MonoVendor.cmake` says exactly this about why `libshaderc`
-		// is linked into the client at all.
-		//
-		// **The error is returned rather than logged.** Whoever typed the shader
-		// is the one who can fix it, and a compiler message in a log they are
-		// not reading is a message nobody gets. See
-		// `ShaderCompilation::Error`.
-		//
-		// @param name   What a node's `shader` parameter will give.
-		// @param source The GLSL.
-		// @param stage  Which stage it is.
-		// @param error  Filled with the compiler's message when it fails.
-		// @return Whether it compiled and was registered.
-		//
-		// @since v0.11
-		// What a node's live shader last failed to compile with.
-		//
-		// **Beside the text somebody typed, not in a log.** A shader carried as
-		// a node's `source` parameter is recompiled when the text changes; this
-		// is what that compile said, kept so a panel can put it under the box.
-		//
-		// @param node The node's name.
-		// @return The compiler's message, or empty when it compiled or has no
-		//         source.
-		//
-		// @since v0.11
-		std::string_view ShaderError(const core::Name &node) const;
-
-		bool
-		CompileShader(const core::Name &name, std::string_view source, ShaderStage stage, std::string &error);
 
 		// How long animation has been running, for anything played on a clock.
 		//
@@ -909,27 +681,10 @@ namespace engine::render {
 		// @return True when the requested mode was supported and taken.
 		bool SetVerticalSync(bool enabled);
 
-		// Draws one frame from any number of views and presents it.
-		//
-		// **One frame, many views, and that is the whole of this signature.** Every
-		// view in `views` is recorded into one command buffer, which is acquired
-		// once and submitted once. Passing four views draws four viewports in a
-		// frame; passing one is what a game does and costs exactly what it did.
-		//
-		// **What used to be twelve parameters is now `View` and two things that
-		// were never a view's.** The overlay is one CPU image for the window and
-		// the interface hook is the editor's chrome drawn over everything, so both
-		// belong to the frame however many worlds it shows. See `View` for why the
-		// rest moved and for `DEFERRED.md` D00002, which is the entry this closes.
-		//
-		// **An empty `views` is legal and draws no world.** It is what a frame that
-		// is only an interface looks like — the window is still cleared, the
-		// overlay and the hook still draw, and the frame still presents. A caller
-		// with nothing to show should not have to invent a camera to say so.
-		//
-		// Returns `Presented = false` when the swapchain had no texture — minimised,
-		// or resizing — which is not an error and not a reason to stop ticking. It
-		// is also false if SDL rejects command submission.
+		// Draws one frame and presents it. Returns false in Presented when the
+		// swapchain had no texture — minimised, or resizing — which is not an
+		// error and not a reason to stop ticking. It is also false if SDL rejects
+		// command submission.
 		//
 		// `overlay` is uploaded only when it has something pending, and drawn
 		// whenever it has content — the texture holds the last thing sent to it,
@@ -938,25 +693,87 @@ namespace engine::render {
 		// which is the only reason it is not a const reference; nothing else
 		// about it is retained past the call.
 		//
+		// The camera and instances are copied during the call and not retained.
+		//
 		// The aspect ratio comes from the swapchain texture this call acquired
 		// rather than from a caller, so a frame taken during a resize is
 		// projected for the image it is actually drawn into. `scene::Camera`
 		// therefore holds no aspect ratio and `scene::ResolveCamera` takes one.
 		//
-		// @param views    What to draw, one entry per viewport. Read during the
-		//                 call and not retained. Two views naming the same `Slot`
-		//                 is refused with a warning rather than drawn, because the
-		//                 second would overwrite the first\'s texture and the frame
-		//                 would silently show only one of them.
-		// @param overlay  CPU premultiplied RGBA8 overlay. Uploaded only when it
-		//                 has a pending region, drawn whenever it has content, and
-		//                 marked uploaded on the way out.
-		// @param interfaceHook An editor\'s chrome, drawn last, or null. See
-		//                 `FrameOverlayHook` for why this is not imgui.
-		// @return Submitted draw counts, summed over every view, and whether the
-		//         frame was presented.
-		FrameResult
-		Render(std::span<const View> views, OverlayImage &overlay, FrameOverlayHook *interfaceHook = nullptr);
+		// @param cameraFrame World-space placement of the camera.
+		// @param camera      Field of view and clipping distances.
+		// @param instances   What to draw, as the world described it. Each is
+		//                    turned into a model matrix and a colour here.
+		// @param overlay     CPU premultiplied RGBA8 overlay. Uploaded only when
+		//                    it has a pending region, drawn whenever it has
+		//                    content, and marked uploaded on the way out.
+		// @param surfaces    The offscreen views to render first, one per surface
+		//                    index. Empty for a scene with no mirror in it.
+		// @param interfaceHook An editor's chrome, drawn last, or null. See
+		//                    `FrameOverlayHook` for why this is not imgui.
+		// @param sceneTarget Draw the world into an offscreen texture of this
+		//                    size instead of into the window, or null for the
+		//                    window. Decides the aspect ratio and the cull
+		//                    frustum as well as the target — see `SceneTarget`.
+		// @param targetSlot  Which viewport this call is drawing. A game draws
+		//                    one view and never passes this; a studio keeps a
+		//                    slot per viewport so two panels of different sizes
+		//                    do not reallocate one shared texture twice a frame.
+		//                    See `SceneTexture`.
+		//
+		//                    Selects the surface texture bank for this viewport.
+		// @param particles  One batch per emitter with live particles, drawn after
+		//                    the blended geometry and before the overlay. Empty
+		//                    for a scene with no effects in it, which is every
+		//                    scene that has not installed a particle pool.
+		//
+		//                    **After the blended pass and never sorted against
+		//                    it**, which is the same trade `ScenePlan::
+		//                    TransparentSurfaces` makes for mirrors: a particle in
+		//                    front of a pane of glass is drawn after it whatever
+		//                    the depths say. One sorted run per pipeline is what
+		//                    lets the blend mode be a pipeline binding instead of
+		//                    a per-fragment branch, and interleaving half a million
+		//                    particles into the geometry sort would cost more than
+		//                    the artefact does.
+		// @param ribbonVertices Every beam and trail vertex this world produced,
+		//                    as `effects::BuildRibbons` packed them. Passed as the
+		//                    whole stream rather than per run, because the runs
+		//                    index into it.
+		// @param ribbonRuns  Where each ribbon sits in that stream.
+		//
+		//                    **Drawn after the particles**, which is one more
+		//                    fixed ordering in a pass that has several — see the
+		//                    `particles` note above. A beam is usually the thing
+		//                    an author wants on top of its own sparks, so the
+		//                    order is the useful one rather than an accident, and
+		//                    it is fixed rather than sorted for the same reason
+		//                    every other run here is.
+		// @param lights     The point and spot lights near this view, at most
+		//                    `MAX_SCENE_LIGHTS`. **Added to the directional term
+		//                    rather than replacing it**, so a scene with no lamps
+		//                    looks exactly as it did before v0.10 — which is what
+		//                    makes this safe to switch on for every existing world.
+		//
+		//                    Anything past the cap is dropped, and the caller is
+		//                    the one that should be choosing which: the renderer
+		//                    has no idea which lamp matters. `client::CollectLights`
+		//                    picks the nearest to the eye.
+		// @return Submitted draw counts and whether the frame was presented.
+		FrameResult Render(
+			const core::CFrame &cameraFrame,
+			const scene::Camera &camera,
+			std::span<const scene::DrawInstance> instances,
+			OverlayImage &overlay,
+			std::span<const SurfaceView> surfaces = {},
+			FrameOverlayHook *interfaceHook = nullptr,
+			const SceneTarget *sceneTarget = nullptr,
+			size_t targetSlot = 0,
+			std::span<const ParticleBatch> particles = {},
+			std::span<const effects::RibbonVertex> ribbonVertices = {},
+			std::span<const effects::RibbonRun> ribbonRuns = {},
+			std::span<const SceneLight> lights = {}
+		);
 
 		// The texture the most recent `Render` drew that slot's world into.
 		//
@@ -980,65 +797,6 @@ namespace engine::render {
 		// @return The texture, or `nullptr` when nothing has been drawn into
 		//         that slot.
 		void *SceneTexture(size_t slot = 0) const;
-
-		// One of the pipeline's own resources, as something a panel can draw.
-		//
-		// **What makes a profiler show pictures rather than numbers.** The
-		// access grid says which pass wrote what; this is what turns a cell in
-		// it into the image that pass produced. A `void *` for `SceneTexture`'s
-		// reason, and the same contract — it is this frame's texture and it
-		// stops being valid when the resource is resized or the pipeline
-		// changes, so a caller reads it each frame rather than keeping it.
-		//
-		// **Only the ones that outlive a frame.** A scene target, the shadow
-		// atlas, a surface, the overdraw counter and anything the graph
-		// allocated all persist and can be shown; `window` cannot, because the
-		// swapchain image belongs to the driver between frames.
-		//
-		// **Its own type rather than a `SceneExtent`.** That one describes a
-		// scene slot, which is allocated in blocks and shows only its corner, so
-		// it carries fractions and no size. A graph resource is exactly the size
-		// it asked for and a panel needs to print that.
-		//
-		// @since v0.11
-		struct ResourceImage {
-			// A `void *` for `SceneTexture`'s reason: an `SDL_GPUTexture *` is
-			// not a name this header may say.
-			void *Texture = nullptr;
-
-			uint32_t Width = 0;
-			uint32_t Height = 0;
-
-			bool IsValid() const {
-				return Texture != nullptr && Width > 0 && Height > 0;
-			}
-		};
-
-		// @param resource The name, as the graph gives it.
-		// @return The texture and its size, or an invalid image when nothing of
-		//         that name persists.
-		ResourceImage ResourceTexture(const core::Name &resource) const;
-
-		// Every resource name `ResourceTexture` would answer for, this frame.
-		//
-		// **For a panel building a list to click on**, so it offers what can be
-		// shown rather than everything the graph names and then half of them
-		// coming back empty.
-		std::vector<core::Name> InspectableResources() const;
-
-		// Reads one resource back each frame, for its histogram.
-		//
-		// **Separate from `ResourceTexture` because the two answer different
-		// questions.** That one is *show me this*, and costs nothing — the panel
-		// samples the texture the GPU already has. This one is *tell me what is
-		// in it*, and costs a download, so it is one resource at a time and only
-		// while somebody is looking.
-		//
-		// @param resource What to read back, or an invalid name to stop.
-		void Inspect(const core::Name &resource);
-
-		// What `Inspect` was last asked for.
-		core::Name Inspecting() const;
 
 		// Keeps a copy of what a scene slot currently holds, under a name.
 		//
@@ -1105,112 +863,6 @@ namespace engine::render {
 		// The device and swapchain format a `FrameOverlayHook` builds against.
 		//
 		// @return The handles, both empty before Initialise.
-		// Runs this pipeline instead of the standard frame.
-		//
-		// **The thing the whole node editor was for.** Until this existed,
-		// editing a pipeline changed a document and not a frame — which is the
-		// state `docs/PIPELINE_NODES.md` stage 3 called the one most likely to
-		// be misread as the editor being broken. `graph::Execute` already
-		// submits the frame; this is what decides *which* frame it submits.
-		//
-		// **Refused rather than half-applied.** A graph that does not compile,
-		// or that names a node kind nothing can draw, leaves the previous
-		// pipeline running and says why. A renderer that accepted it would
-		// present a dark window and the scene would get the blame.
-		//
-		// @param pipeline What to run. Copied, because a caller editing a
-		//                 document should not be editing the frame in flight.
-		// @return Whether it was taken. On `false` the previous pipeline is
-		//         still running and the reason is logged.
-		bool SetPipeline(const graph::RenderGraph &pipeline);
-
-		// The same, under a name a view can ask for.
-		//
-		// **This is what makes many cameras with many pipelines possible.** A
-		// `View::Pipeline` naming one of these runs it; one naming nothing runs
-		// the default. The frame's own block — the overlay and the editor's
-		// chrome — always comes from the default, because a window has one of
-		// those however many cameras drew into it.
-		//
-		// @param name     What to call it. An invalid name is refused.
-		// @param pipeline What to run. Copied and compiled now, so a view naming
-		//                 it later costs a lookup rather than a compile.
-		// @return Whether it was taken. On `false` nothing was replaced and the
-		//         reason is logged.
-		bool SetPipeline(core::Name name, const graph::RenderGraph &pipeline);
-
-		// Drops a named pipeline. Views naming it fall back to the default.
-		bool RemovePipeline(core::Name name);
-
-		// Every pipeline name this renderer can run.
-		std::vector<core::Name> Pipelines() const;
-
-		// What each pass cost the GPU last frame, in microseconds.
-		//
-		// **Empty when this device cannot measure**, which a caller must show as
-		// "not measured" rather than as zero. `D00103` is why that is a real
-		// state: SDL exposes no timestamp query, so the numbers come from
-		// reaching into its Vulkan backend and every other backend has nothing.
-		//
-		// **A pass that ran several times is the sum of its runs**, because what
-		// a profile is asked is what a pass cost the frame — not what its last
-		// view cost.
-		//
-		// Keyed by `core::Name::Id`, and lagging by a frame or two: a timestamp
-		// is readable only once the GPU has passed it, and blocking to make the
-		// number current would serialise the CPU against the GPU to report how
-		// fast the GPU is.
-		//
-		// @return Name id to microseconds. Valid until the next `Render`.
-		const std::unordered_map<uint32_t, double> &PassTimings() const;
-
-		// Whether per-pass GPU time is being measured at all.
-		//
-		// **Separate from `PassTimings` being empty**, which is also what a
-		// measured frame looks like before the first read resolves.
-		bool Timed() const;
-
-		// Goes back to `graph::StandardGraph`, and forgets every named
-		// pipeline.
-		void ResetPipeline();
-
-		// The debug download's most recent picture, and how old it is.
-		//
-		// **A frame late, and it says so.** A readback that waited would be a
-		// stall in a panel; one that does not is a picture behind. The second is
-		// fine and the staleness is reported rather than hidden — see
-		// `render::PendingReadback`.
-		//
-		// Empty until a `viewer` node has run in a pipeline this renderer was
-		// given, which the standard frame has none of.
-		//
-		// @since v0.11
-		struct ReadbackImage {
-			// Which resource it is of, and how big.
-			//@{
-			core::Name Source;
-			uint32_t Width = 0;
-			uint32_t Height = 0;
-			//@}
-
-			// The pixels, as the transfer buffer held them, and what they reduce
-			// to.
-			//@{
-			std::span<const uint32_t> Pixels;
-			ImageHistogram Histogram;
-			//@}
-
-			// How many frames ago this was asked for. Zero for no picture.
-			uint64_t Age = 0;
-
-			bool IsValid() const {
-				return Width > 0 && Height > 0 && !Pixels.empty();
-			}
-		};
-
-		// What the last `viewer` node produced.
-		ReadbackImage Readback() const;
-
 		BackendHandles Backend() const;
 
 	  private:

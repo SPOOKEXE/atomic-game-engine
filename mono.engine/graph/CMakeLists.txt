@@ -23,16 +23,6 @@ mono_add_library(graph
 	DEPS
 		Engine::core
 
-		# L3. `PipelineSet` is a world's resource, and a resource is keyed by a
-		# component id — so the type has to be registered under an explicit name,
-		# and the module that owns the type is the one that must name it. Letting
-		# `game` register it would put `graph.PipelineSet` in a file that does not
-		# own it, which is how the component-name race happened once already.
-		#
-		# Already in this module's link closure through `scene`; declared so the
-		# include is honest rather than transitive.
-		Engine::ecs
-
 		# `scene` for `DrawInstance` — the thing being culled — and for
 		# `ResolveCamera`, which is the one place the engine decides what a
 		# camera's matrices are. A frustum built from a second answer to that

@@ -41,10 +41,16 @@ mono_add_library(game
 		# need.
 		Engine::script
 
-		# L9. A world carries its render pipelines the way it carries its scripts:
-		# `graph::PipelineSet` is authored content, and a world that exported its
-		# parts but forgot how it was drawn would lose an editor's work on exit.
-		# The set already serialises to text, so this format embeds it rather than
-		# inventing a second one.
+		# TODO(render-pipeline): kept for the save format's sake, and nothing in
+		# `game` names a `graph::` type today.
+		#
+		# A world carried its render pipelines the way it carries its scripts —
+		# authored content, and a world that exported its parts but forgot how it
+		# was drawn would lose an editor's work on exit. The set serialised to
+		# text, so the format embedded it rather than inventing a second one.
+		# `Game.cpp` still recognises the `<Pipelines>` element so those files
+		# load; see the markers there.
+		#
+		# Drop this edge if the new system does not put a resource on the world.
 		Engine::graph
 )

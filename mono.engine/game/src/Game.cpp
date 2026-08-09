@@ -2,7 +2,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
-#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -484,50 +483,21 @@ namespace engine::game {
 			}
 		}
 
-		// A world's render pipelines, as one block of text.
+		// TODO(render-pipeline): a world's render pipelines were saved here.
 		//
-		// **Embedded rather than re-encoded as elements.** `graph::PipelineSet`
-		// already has a line-oriented format that round trips and refuses a
-		// malformed line, and restating it as XML would be a second grammar for
-		// one thing — with the interesting failure that the two could disagree
-		// about what a pipeline is while both parsing.
+		// `WritePipelines` and `ReadPipelines` lived at this point and carried a
+		// `graph::PipelineSet` as one CDATA block — the set's own line-oriented
+		// format embedded verbatim rather than restated as XML, so there was one
+		// grammar for a pipeline rather than two that could disagree while both
+		// parsing. A malformed block warned and dropped rather than failing the
+		// world, because a world whose parts loaded and whose pipeline did not is
+		// recoverable.
 		//
-		// CDATA for `WriteSources`'s reason: this is meant to be read in the
-		// file, and a document full of `&quot;` is not.
-		void WritePipelines(XmlWriter &writer, const Store &store) {
-			const auto *set = store.Resource<graph::PipelineSet>();
-			if (set == nullptr || set->Count() == 0) {
-				return;
-			}
-
-			writer.Open("Pipelines");
-			writer.Verbatim(graph::Write(*set));
-			writer.Close();
-		}
-
-		// **A malformed block is dropped with a line in the log rather than
-		// failing the world.** A world whose parts all loaded and whose pipeline
-		// did not is recoverable — it draws with the standard frame and somebody
-		// fixes the pipeline. Refusing the whole document would lose the parts
-		// too, which is a worse answer to the same file.
-		void ReadPipelines(const XmlElement &element, Store &store) {
-			graph::PipelineSet set;
-			core::Name offender;
-
-			const graph::PipelineDocumentStatus status = graph::Read(element.Text, set, offender);
-			if (status != graph::PipelineDocumentStatus::Ok) {
-				ENGINE_WARN(
-					"world pipelines: {} at '{}' — the world loads and draws with the standard frame",
-					graph::Describe(status),
-					offender.IsValid() ? offender.Text() : ""
-				);
-				return;
-			}
-
-			if (set.Count() > 0) {
-				store.SetResource(std::move(set));
-			}
-		}
+		// **Both rules are worth keeping when the new system lands.** They are
+		// the reason a half-written pipeline never cost somebody their parts.
+		//
+		// See `ReadWorldBody` below, which still recognises the element so that
+		// `.agame` files written while the old system existed still load.
 
 		void ReadSources(const XmlDocument &document, const XmlElement &element, Store &store) {
 			script::SourceCache cache;
@@ -721,14 +691,20 @@ namespace engine::game {
 		// saves, loads, and quietly has no pipelines because the two spellings
 		// never met. Naming it beside the classes is what makes the order
 		// impossible to get wrong from outside.
-		graph::RegisterPipelineComponents();
+		// TODO(render-pipeline): `graph::RegisterPipelineComponents();` went
+		// here, beside the class registrations and for their reason — a resource
+		// is keyed by a component id, and one first minted by `SetResource`
+		// takes the compiler's spelling of the type, which is a world that saves,
+		// loads, and quietly has no pipelines because the two spellings never
+		// met. Register the new system's resource types in this function.
 	}
 
 	void WriteWorldBody(XmlWriter &writer, Store &store) {
 		RegisterGameClasses();
 
 		WriteSources(writer, store);
-		WritePipelines(writer, store);
+
+		// TODO(render-pipeline): `WritePipelines(writer, store);` went here.
 
 		Numbering numbering;
 		store.EachRoot([&](Entity root) { numbering.Walk(store, root); });
@@ -755,8 +731,15 @@ namespace engine::game {
 				continue;
 			}
 
+			// TODO(render-pipeline): `ReadPipelines(*child, store);` went here.
+			//
+			// **Still matched, and deliberately.** Worlds saved while the old
+			// pipeline system existed carry this element, and the fall-through
+			// below only skips things that are not `Item` — so leaving it out
+			// would work by accident rather than on purpose. Skipping it here
+			// says the element is known and currently unused, which is a
+			// different fact from "unrecognised".
 			if (child->Name == "Pipelines") {
-				ReadPipelines(*child, store);
 				continue;
 			}
 

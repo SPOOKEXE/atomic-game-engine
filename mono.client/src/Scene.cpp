@@ -11,8 +11,6 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
-#include <engine/graph/PipelineCatalogue.hpp>
-#include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -903,66 +901,31 @@ namespace client {
 		return true;
 	}
 
-	engine::core::Name
-	InstallWorldPipelines(Store &store, engine::render::Renderer &renderer, uint64_t world) {
-		// **Both registrations first, and neither is optional.** A `PipelineSet`
-		// read out of a store that never registered the type would be minted
-		// under the compiler's spelling and found by nobody, and a graph
-		// compiled before the catalogue exists refuses every node in it — that
-		// second one is not hypothetical, it is what made `RegisterPasses` fail
-		// with "nothing can submit a 'ssao' node".
-		engine::graph::RegisterPipelineComponents();
-		engine::graph::RegisterStandardNodeKinds();
-
-		const auto *set = store.Resource<engine::graph::PipelineSet>();
-		if (set == nullptr) {
-			return {};
-		}
-
-		engine::core::Name selected;
-		for (const engine::core::Name &name : set->Names()) {
-			const engine::graph::PipelineDocument *document = set->Find(name);
-			if (document == nullptr) {
-				continue;
-			}
-
-			engine::graph::RenderGraph graph;
-			engine::core::Name offender;
-			const engine::graph::PipelineDocumentStatus builds =
-				engine::graph::Build(*document, graph, offender);
-			if (builds != engine::graph::PipelineDocumentStatus::Ok) {
-				ENGINE_ERROR(
-					"pipeline '{}' does not build: {} at '{}'",
-					name.Text(),
-					engine::graph::Describe(builds),
-					offender.Text()
-				);
-				continue;
-			}
-
-			// `#` because a name is interned text and nothing else in the engine
-			// spells one with it, so a qualified key cannot collide with an
-			// authored name however inventive somebody is.
-			const engine::core::Name key(std::format("{}#{}", name.Text(), world));
-
-			// **No message on failure.** `SetPipeline` compiles the graph and
-			// reports exactly what it disliked and where; saying "and also it
-			// failed" after that is a second line carrying nothing.
-			if (!renderer.SetPipeline(key, graph)) {
-				continue;
-			}
-
-			// **`main` is the one a view draws, and the rest are installed
-			// anyway.** A world holding a pipeline for a reflection or a debug
-			// viewport wants it available for something to select by name; only
-			// the default choice is decided here.
-			if (name == engine::core::Name("main")) {
-				selected = key;
-			}
-		}
-
-		return selected;
-	}
+	// TODO(render-pipeline): `InstallWorldPipelines` lived here.
+	//
+	// It was the join between a world and the renderer, and **it was the last
+	// link to be built** — the catalogue, the document, the editor panel, the
+	// `PipelineSet` on the world and `Renderer::SetPipeline` all existed while
+	// nothing connected the last two, so "Save to world" wrote a document that
+	// round-tripped perfectly and never drew a pixel. Whatever replaces it, this
+	// is the seam to check first.
+	//
+	// Three decisions in it are worth carrying over:
+	//
+	// - **Here rather than in `render`, for `CollectSurfaceViews`'s reason.** A
+	//   world's pipelines live on an `ecs::Store` and `render` is L12, which does
+	//   not know what a store is. The renderer took a compiled graph and knew
+	//   nothing about worlds; this is where the two met.
+	// - **The installed key was qualified by world id**, because pipelines are
+	//   global to the renderer by name while a world's names are its own. Two
+	//   worlds each calling theirs `main` is ordinary, and with a second viewport
+	//   open both draw in one frame — an unqualified key meant whichever world
+	//   installed last drew both.
+	// - **Installed on a world change, not per frame.** Installing compiles the
+	//   graph and reports what is wrong with it, so per frame that is a compile
+	//   per pipeline per frame and every complaint about a half-wired one
+	//   repeated sixty times a second. Saving dropped the cache entry, which is
+	//   what made a save visible in the viewport rather than only in the file.
 
 	void RegisterClientComponents() {
 		// **A `DrawList` is derived state, and its serialisation says so by

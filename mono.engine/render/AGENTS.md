@@ -144,33 +144,26 @@ chrome into this frame without Dear ImGui appearing anywhere in the engine. A
 game runs five.
 
 **`mono.engine/graph` describes that order and does not execute it.**
-`graph::StandardGraph` is the same six passes as nodes over named resources, and
-`RenderGraph::Validate` catches the mistakes that matter — a node reading a
-resource nothing earlier wrote, and a shared node fighting a per-view one over
-the same write.
+`graph::StandardPipeline` is the same six stages as data, and
+`Pipeline::Validate` catches the one mistake that matters — a stage reading a
+target nothing earlier wrote.
 
-**There is one description, and `PassOrder()` is a view of it.** It reads its
-names out of `StandardGraph` rather than repeating them, so the two cannot
-drift; `D00016` was the entry about their drifting and is closed by the
-deletion of the second list rather than by a check on it. The flat
-`graph::Pipeline` it replaced is gone.
-
-**What `tests/Passes.cpp` still checks is the hand-written half.** The `Pass`
-enum is written out by hand and `PassRecorder` shifts by its values, so a node
-added to the graph without an enumerator beside it — or added in the wrong
-place — silently renames every pass after it. That case is mutation-verified.
-`PassRecorder` also walks the list as `Render` submits and refuses to go
-backwards *within a view*, which is the half a headless test cannot see.
+**Keeping the two in step is a check, not a convention.** `render::Pass` and
+`PassOrder()` name this module's six in submission order, and
+`tests/Passes.cpp` compares them against that pipeline's stage names, in order,
+with no device. A seventh stage on one side and not the other fails the build.
+`PassRecorder` walks the same list as `Render` submits and refuses to go
+backwards, which is the half a headless test cannot see.
 
 **Do not write the count into that test.** This section said "five" until v0.7
 added `interface` and then said something false for a release; `tests/Passes.cpp`
-compares against the graph and never against a number, which is why it did not
-rot with the prose.
+compares the two descriptions against each other and neither against a number,
+which is why it did not rot with the prose.
 
-**So: enter every pass through `PassRecorder`, and add its node to
-`StandardGraph` in the same change.** The first is what the check hangs on —
+**So: enter every pass through `PassRecorder`, and add its stage to
+`StandardPipeline` in the same change.** The first is what the check hangs on —
 a pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to all of
-the above, and that is the one hole left. Closing it is the executor, `D00002`.
+the above, and that is the one hole left. See `D00016`.
 
 The render-node system is where passes become nodes and the description becomes
 the execution. When it arrives, this class becomes the backend those nodes

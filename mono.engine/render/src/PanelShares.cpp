@@ -1,7 +1,6 @@
 #include "PanelShares.hpp"
 
 #include <algorithm>
-#include <array>
 
 namespace engine::render {
 
