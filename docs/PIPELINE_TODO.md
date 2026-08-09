@@ -673,6 +673,69 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       edited has nodes with no shader, no target or a shader that will not
       build, constantly. Taking the window down for one is not a diagnostic.
 
+- [x] **The renderer no longer reads shaders.** `Renderer::AddShader(name,
+      spirv)` — the same shape `AddMesh` and `AddTexture` already have, so a
+      shader from the content store arrives by the door a texture does. Supplied
+      wins over staged, because a caller that went to the trouble of delivering
+      one means it; the staged directory stays as the developer path and the
+      fallback.
+
+      **SPIR-V, not source.** Compiling is `bake`'s business and happens once,
+      off the machine that is drawing — a renderer holding a shader compiler for
+      content it did not write is how a frame ends up paying for a parse.
+
+      **Replacing one drops every pipeline built from it.** A hot reload, or a
+      newer version arriving from the store, that left its cached pipeline in
+      place would look exactly like the delivery having failed — and that is the
+      failure somebody would spend the afternoon on.
+
+      Verified on a device with a shader that **exists in no file**: 1292 bytes
+      handed over under `delivered.frag`, a pipeline built from it, and the pass
+      drawing at 1600x879.
+
+- [x] **The store side: routing and delivery.** `AssetKind::Shader`, the
+      extensions that reach it, and the studio handing a delivered module to
+      `Renderer::AddShader`.
+
+      **Its own kind rather than `Script` or `Data`.** `Script` is source a VM
+      may run in a sandbox; `Data` is bytes handed over whole. A shader is
+      neither — compiled ahead of time, handed to a GPU rather than an
+      interpreter, and whether it is *safe* is a question about a driver rather
+      than about a sandbox. Routing it as either puts it through the wrong
+      subsystem's door.
+
+      **Source and compiled both route here**, because what somebody publishes
+      is what they wrote — `spv`, `frag`, `vert`, `comp`, `glsl`.
+
+      **And the sources are in `IsRuntimeReadable`'s list**, which is the row
+      that would have been forgotten. That function's own comment names the
+      failure: a format added to the extension table without a row there "would
+      be offered as loadable and would not load". A renderer holds no shader
+      compiler, so GLSL reaching a runtime has to be caught at the manifest
+      rather than at the draw. Both mutations checked red — routing `frag` as
+      `Script`, and dropping the sources from that list.
+
+      `ContentShaders` counts what arrived, beside the mesh and texture counts,
+      so somebody can tell "the pipeline is wrong" from "the content has not
+      landed".
+
+- [ ] **The bake step, which is what is left.** A `.frag` published today routes
+      to `AssetKind::Shader`, is correctly refused as not-yet-readable, and
+      nothing turns it into a `.spv`. `shaderc` is already vendored and linked
+      into `render`, and `mono.engine/bake/` is where a mesh becomes an `.amesh`
+      — so this is a new file in a module that has four of the same shape, not a
+      new capability.
+
+      **The interesting decision is includes.** A shader that `#include`s
+      another is a dependency between two assets, and the manifest has no word
+      for one. Either bake resolves them and publishes a flat module — simple,
+      and a shared header edit rebuilds every shader — or the store learns about
+      dependencies, which is a bigger thing than shaders.
+
+      **Split deliberately.** The seam above is the half that had to be in
+      `render` and is now done and proven; the half that is left is content
+      plumbing that can be built and tested on its own, without a GPU.
+
 - [x] **Where the shader comes from — staged SPIR-V, and the path is proven.**
       `mono.engine/render/shaders/tint.frag` is a real custom pass; the build
       stages it to `tint.frag.spv` like every other shader, and the renderer

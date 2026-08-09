@@ -679,6 +679,44 @@ namespace engine::render {
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image);
 
+		// Registers compiled shader bytes under the name a node will ask for.
+		//
+		// **The seam that stops the renderer being the thing that reads
+		// files.** A `raster` or `dispatch` node names its shader; until now
+		// that name was a file in the staged shader directory, which works and
+		// which nothing outside a developer's checkout can add to. This is the
+		// same shape `AddMesh` and `AddTexture` already have — the renderer is
+		// handed bytes and never learns where they came from — so a shader
+		// fetched from the content store arrives by the same door a texture
+		// does.
+		//
+		// **Supplied wins over staged.** A name registered here is used even if
+		// a file of that name exists, because a caller that went to the trouble
+		// of delivering one means it; the staged directory stays as the
+		// developer path and the fallback.
+		//
+		// **SPIR-V, not source.** Compiling is `bake`'s business and happens
+		// once, off the machine that is drawing — the renderer holding a shader
+		// compiler for content it did not write is how a frame ends up paying
+		// for a parse.
+		//
+		// @param name  The name a node's `shader` parameter gives.
+		// @param spirv The compiled module. Copied. Empty is refused.
+		// @return `false` for an unnamed or empty module.
+		//
+		// @since v0.11
+		// **`std::byte` and not `uint8_t`**, because that is what an asset's
+		// payload is and a shader module is bytes rather than numbers — the
+		// renderer never looks inside it.
+		bool AddShader(const core::Name &name, std::span<const std::byte> spirv);
+
+		// Whether a shader of this name has been supplied.
+		//
+		// **Not "can this be drawn"** — a staged file of the same name is still
+		// found without this saying so. It answers only whether somebody handed
+		// the bytes over.
+		bool HasShader(const core::Name &name) const;
+
 		// How long animation has been running, for anything played on a clock.
 		//
 		// **The caller's clock, because this module holds none** — the rule the

@@ -307,6 +307,20 @@ namespace studio {
 				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
 					ContentTextures++;
 				}
+			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
+				// **Handed over whole, not decoded.** A shader asset is a SPIR-V
+				// module; there is nothing here to parse, and a renderer holding
+				// a compiler for content it did not write is how a frame ends up
+				// paying for one. `Renderer::AddShader` takes the bytes and a
+				// `raster` or `dispatch` node names them.
+				//
+				// **Only what a runtime can read.** GLSL routes to this kind too
+				// — what somebody publishes is what they wrote — and
+				// `IsRuntimeReadable` is what says it has not been baked yet.
+				if (engine::assets::IsRuntimeReadable(asset->Name) &&
+					Renderer.AddShader(name, asset->Bytes)) {
+					ContentShaders++;
+				}
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {
 				engine::assets::MaterialData material;
 				if (!engine::assets::Material::Read(reader, material)) {

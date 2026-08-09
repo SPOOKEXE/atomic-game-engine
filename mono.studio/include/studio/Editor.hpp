@@ -1507,6 +1507,16 @@ namespace studio {
 		//@{
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
+
+		// How many shader modules the content store delivered.
+		//
+		// **Counted, because a pipeline naming a shader that never arrived draws
+		// nothing and says so once.** A number beside the mesh and texture
+		// counts is how somebody tells "the pipeline is wrong" from "the content
+		// has not landed".
+		//
+		// @since v0.11
+		size_t ContentShaders = 0;
 		size_t ContentMaterials = 0;
 		//@}
 

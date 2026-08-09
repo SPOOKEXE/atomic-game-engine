@@ -971,6 +971,32 @@ namespace engine::render {
 		graph::CompiledGraph Compiled;
 		//@}
 
+		// Shader modules somebody delivered, by the name a node asks for.
+		//
+		// **Preferred over the staged directory**, because a caller that went to
+		// the trouble of delivering one means it. See `Renderer::AddShader`.
+		struct SuppliedShader {
+			core::Name Name;
+			std::vector<uint8_t> Spirv;
+		};
+
+		std::vector<SuppliedShader> Shaders;
+
+		// Drops every pipeline built from a shader.
+		//
+		// **Because a replaced shader must not keep drawing the old one.** A hot
+		// reload, or a newer version arriving from the store, that left its
+		// cached pipeline in place would look exactly like the delivery having
+		// failed — and the failure it looks like is the one somebody would spend
+		// the afternoon on.
+		void ForgetPipelinesFor(core::Name shader);
+
+		// The bytes for a shader name: supplied first, then the staged file.
+		//
+		// @param name Which shader.
+		// @return Its module, or empty when neither has it.
+		std::vector<uint8_t> ShaderBytes(core::Name name) const;
+
 		// The pipelines a view may ask for by name.
 		//
 		// **A camera does not have to draw the way another one does**, which is
@@ -2000,16 +2026,51 @@ namespace engine::render {
 		bool EnsureOverlay(int width, int height);
 	};
 
+	void Renderer::Impl::ForgetPipelinesFor(core::Name shader) {
+		for (size_t index = ShaderPipelines.size(); index > 0; index--) {
+			ShaderPipeline &entry = ShaderPipelines[index - 1];
+			if (entry.Shader != shader) {
+				continue;
+			}
+			if (entry.Pipeline != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.Pipeline);
+			}
+			ShaderPipelines.erase(ShaderPipelines.begin() + static_cast<ptrdiff_t>(index - 1));
+		}
+
+		for (size_t index = ComputePipelines.size(); index > 0; index--) {
+			ComputePipeline &entry = ComputePipelines[index - 1];
+			if (entry.Shader != shader) {
+				continue;
+			}
+			if (entry.Pipeline != nullptr) {
+				SDL_ReleaseGPUComputePipeline(Device, entry.Pipeline);
+			}
+			ComputePipelines.erase(ComputePipelines.begin() + static_cast<ptrdiff_t>(index - 1));
+		}
+	}
+
+	std::vector<uint8_t> Renderer::Impl::ShaderBytes(core::Name name) const {
+		for (const SuppliedShader &shader : Shaders) {
+			if (shader.Name == name) {
+				return shader.Spirv;
+			}
+		}
+
+		// **The staged directory is the fallback, not the rule.** It is a
+		// developer's checkout; nothing outside one can add to it, which is why
+		// a delivered shader has to be able to win.
+		return ReadFile(core::Paths::Shaders("render") / (std::string(name.Text()) + ".spv"));
+	}
+
 	SDL_GPUShader *Renderer::Impl::LoadShader(
 		std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
 	) const {
 		// Staged under the owning module's name, so that two modules cannot
 		// collide on a common file name like fullscreen.vert.
-		const auto path = core::Paths::Shaders("render") / (std::string(name) + ".spv");
-
-		const auto code = ReadFile(path);
+		const auto code = ShaderBytes(core::Name(name));
 		if (code.empty()) {
-			ENGINE_ERROR("shader not found or empty: {}", path.string());
+			ENGINE_ERROR("shader not found or empty: {}", name);
 			return nullptr;
 		}
 
@@ -3772,6 +3833,44 @@ namespace engine::render {
 		return State->Meshes.Add(name, mesh) && State->Meshes.Flush();
 	}
 
+	bool Renderer::AddShader(const core::Name &name, std::span<const std::byte> spirv) {
+		if (State == nullptr || !name.IsValid() || spirv.empty()) {
+			return false;
+		}
+
+		const auto *first = reinterpret_cast<const uint8_t *>(spirv.data());
+		const std::vector<uint8_t> copied(first, first + spirv.size());
+
+		for (Impl::SuppliedShader &shader : State->Shaders) {
+			if (shader.Name == name) {
+				shader.Spirv = copied;
+
+				// **Every pipeline built from it is dropped.** A shader replaced
+				// at runtime — a hot reload, a newer version arriving from the
+				// store — that left its old pipeline cached would look like the
+				// delivery had failed.
+				State->ForgetPipelinesFor(name);
+				return true;
+			}
+		}
+
+		State->Shaders.push_back(Impl::SuppliedShader{name, copied});
+		State->ForgetPipelinesFor(name);
+		return true;
+	}
+
+	bool Renderer::HasShader(const core::Name &name) const {
+		if (State == nullptr) {
+			return false;
+		}
+		for (const Impl::SuppliedShader &shader : State->Shaders) {
+			if (shader.Name == name) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool Renderer::AddTexture(const core::Name &name, const assets::TextureData &image) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
@@ -4765,12 +4864,11 @@ namespace engine::render {
 			}
 		}
 
-		const auto path = core::Paths::Shaders("render") / (std::string(shader.Text()) + ".spv");
-		const auto code = ReadFile(path);
+		const auto code = ShaderBytes(shader);
 
 		SDL_GPUComputePipeline *built = nullptr;
 		if (code.empty()) {
-			ENGINE_ERROR("compute shader not found or empty: {}", path.string());
+			ENGINE_ERROR("compute shader not found or empty: {}", shader.Text());
 		} else {
 			SDL_GPUComputePipelineCreateInfo info{};
 			info.code = code.data();
