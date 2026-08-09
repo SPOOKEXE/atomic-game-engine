@@ -899,6 +899,65 @@ namespace engine::render {
 		//         that slot.
 		void *SceneTexture(size_t slot = 0) const;
 
+		// One of the pipeline's own resources, as something a panel can draw.
+		//
+		// **What makes a profiler show pictures rather than numbers.** The
+		// access grid says which pass wrote what; this is what turns a cell in
+		// it into the image that pass produced. A `void *` for `SceneTexture`'s
+		// reason, and the same contract — it is this frame's texture and it
+		// stops being valid when the resource is resized or the pipeline
+		// changes, so a caller reads it each frame rather than keeping it.
+		//
+		// **Only the ones that outlive a frame.** A scene target, the shadow
+		// atlas, a surface, the overdraw counter and anything the graph
+		// allocated all persist and can be shown; `window` cannot, because the
+		// swapchain image belongs to the driver between frames.
+		//
+		// **Its own type rather than a `SceneExtent`.** That one describes a
+		// scene slot, which is allocated in blocks and shows only its corner, so
+		// it carries fractions and no size. A graph resource is exactly the size
+		// it asked for and a panel needs to print that.
+		//
+		// @since v0.11
+		struct ResourceImage {
+			// A `void *` for `SceneTexture`'s reason: an `SDL_GPUTexture *` is
+			// not a name this header may say.
+			void *Texture = nullptr;
+
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+
+			bool IsValid() const {
+				return Texture != nullptr && Width > 0 && Height > 0;
+			}
+		};
+
+		// @param resource The name, as the graph gives it.
+		// @return The texture and its size, or an invalid image when nothing of
+		//         that name persists.
+		ResourceImage ResourceTexture(const core::Name &resource) const;
+
+		// Every resource name `ResourceTexture` would answer for, this frame.
+		//
+		// **For a panel building a list to click on**, so it offers what can be
+		// shown rather than everything the graph names and then half of them
+		// coming back empty.
+		std::vector<core::Name> InspectableResources() const;
+
+		// Reads one resource back each frame, for its histogram.
+		//
+		// **Separate from `ResourceTexture` because the two answer different
+		// questions.** That one is *show me this*, and costs nothing — the panel
+		// samples the texture the GPU already has. This one is *tell me what is
+		// in it*, and costs a download, so it is one resource at a time and only
+		// while somebody is looking.
+		//
+		// @param resource What to read back, or an invalid name to stop.
+		void Inspect(const core::Name &resource);
+
+		// What `Inspect` was last asked for.
+		core::Name Inspecting() const;
+
 		// Keeps a copy of what a scene slot currently holds, under a name.
 		//
 		// **A slot is scratch and this is how a picture outlives it.** There are

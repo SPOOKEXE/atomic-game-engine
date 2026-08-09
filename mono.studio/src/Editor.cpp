@@ -350,8 +350,13 @@ namespace studio {
 		// about is a universe that has its worlds rather than an empty one.
 		StartControl();
 
+		ShowPipelineProfile = true;
+		ProfileWatched = engine::core::Name("colour");
+		Renderer.Inspect(ProfileWatched);
+
 		Running = true;
 		return true;
+
 	}
 
 	void Editor::Shutdown() {

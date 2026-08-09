@@ -1233,6 +1233,18 @@ namespace engine::render {
 		// Whether a download went into this frame's command buffer.
 		bool ReadbackSubmitted = false;
 
+		// The same, latched for the frame in progress. Set at the top so a panel
+		// changing its mind mid-frame does not download one resource and label
+		// it another.
+		core::Name InspectWanted;
+
+		// What a panel asked to be read back each frame, or nothing.
+		//
+		// **A standing request rather than a node**, because somebody clicking a
+		// pass in a profiler has not authored anything — they are looking. A
+		// `viewer` node is the authored version of the same download.
+		core::Name Inspected;
+
 		// Maps the transfer buffer and reduces what is in it.
 		//
 		// Called once per arrival, by whichever of the two paths noticed — the
@@ -3826,6 +3838,69 @@ namespace engine::render {
 
 	void *Renderer::SceneTexture(size_t slot) const {
 		return slot < State->SceneSlots.size() ? State->SceneSlots[slot].Texture : nullptr;
+	}
+
+	Renderer::ResourceImage Renderer::ResourceTexture(const core::Name &resource) const {
+		ResourceImage out;
+		if (State == nullptr || State->Device == nullptr || !resource.IsValid()) {
+			return out;
+		}
+
+		// **The swapchain is refused rather than returned.** It belongs to the
+		// driver between frames, and handing a panel one to sample next frame is
+		// the use-after-free `studio-resize` exists to catch.
+		if (resource == core::Name("window")) {
+			return out;
+		}
+
+		const Impl::NamedTexture found = State->TextureFor(resource);
+		if (!found.IsValid()) {
+			return out;
+		}
+
+		out.Texture = found.Texture;
+		out.Width = found.Width;
+		out.Height = found.Height;
+		return out;
+	}
+
+	std::vector<core::Name> Renderer::InspectableResources() const {
+		std::vector<core::Name> names;
+		if (State == nullptr || State->Device == nullptr) {
+			return names;
+		}
+
+		for (size_t index = 0; index < State->Graph.ResourceCount(); index++) {
+			const graph::ResourceDesc *desc =
+				State->Graph.FindResource(graph::ResourceId{static_cast<uint32_t>(index + 1)});
+			if (desc == nullptr) {
+				continue;
+			}
+			if (ResourceTexture(desc->Name).IsValid()) {
+				names.push_back(desc->Name);
+			}
+		}
+		return names;
+	}
+
+	void Renderer::Inspect(const core::Name &resource) {
+		if (State == nullptr) {
+			return;
+		}
+
+		// Changing what is watched drops what was held: a histogram of the
+		// previous resource shown beside the new one's picture is the worst of
+		// both.
+		if (State->Inspected != resource) {
+			State->Readback.Pending.Clear();
+			State->Readback.Pixels.clear();
+			State->Readback.Histogram = ImageHistogram{};
+		}
+		State->Inspected = resource;
+	}
+
+	core::Name Renderer::Inspecting() const {
+		return State != nullptr ? State->Inspected : core::Name{};
 	}
 
 	bool Renderer::CaptureSceneTexture(size_t slot, const core::Name &name) {
@@ -6784,6 +6859,14 @@ namespace engine::render {
 		State->ReadbackSubmitted = false;
 		State->PollReadback();
 
+		// **What a panel is looking at, downloaded once a frame.** A `viewer`
+		// node is the authored version of this; `Inspect` is somebody clicking a
+		// pass in the profiler, which has authored nothing. Both go through the
+		// same non-stalling path, and only one request is in flight at a time —
+		// so the two cannot both be pending and the click wins whatever a
+		// pipeline also asked for.
+		State->InspectWanted = State->Inspected;
+
 		// --- what belongs to the frame rather than to a view ------------------
 		//
 		// Everything below outlives one viewport, which is what makes it frame
@@ -7016,6 +7099,17 @@ namespace engine::render {
 
 		if (!refused) {
 			refused = !State->Graph.ExecuteFinal(State->Compiled, runner);
+		}
+
+		// **After the passes have written, and it has to be.** This was in
+		// `PrepareView` first, which reads earlier in the frame and looks like
+		// it would give the previous frame's picture — it does not. Every scene
+		// target is `cycle = true`, so the texture a pass is about to write may
+		// be a *fresh allocation*; downloading before the write gives that
+		// allocation's contents, which is black. The download is queued here and
+		// still never waited on, so the picture is a frame behind and says so.
+		if (State->InspectWanted.IsValid()) {
+			State->RequestReadback(State->InspectWanted);
 		}
 
 		if (refused) {

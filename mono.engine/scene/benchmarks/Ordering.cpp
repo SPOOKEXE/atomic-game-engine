@@ -27,6 +27,7 @@
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <utility>

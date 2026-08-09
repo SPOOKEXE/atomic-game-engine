@@ -1028,6 +1028,14 @@ namespace studio {
 		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
 		// is the arithmetic and this is only the drawing.
 		void DrawPipelineProfile();
+
+		// The picture and histogram under the access grid. See `ProfileWatched`.
+		void DrawProfileWatch();
+
+		// One channel's distribution, as sixteen bars and a range.
+		void DrawChannelHistogram(
+			const char *label, const engine::render::ChannelHistogram &channel, unsigned int colour
+		);
 		void DrawAssetsPipeline();
 		//@}
 
@@ -2824,6 +2832,17 @@ namespace studio {
 		// The frame as a grid rather than as a canvas: every pass across the
 		// top, every resource down the side. See `Editor::DrawPipelineProfile`.
 		bool ShowPipelineProfile = false;
+
+		// Which resource the profile panel is showing a picture of.
+		//
+		// **The grid says who wrote what; this says what they wrote.** Unset is
+		// the panel being a grid, which is what it was before and what it should
+		// go back to when nobody is looking at anything in particular — a
+		// readback costs a download every frame and should not run because
+		// somebody left a window open.
+		//
+		// @since v0.11
+		engine::core::Name ProfileWatched;
 		//@}
 
 		// What each canvas has selected and how far it is scrolled. **Outside the

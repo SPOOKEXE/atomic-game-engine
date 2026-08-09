@@ -3,6 +3,7 @@
 #include <engine/core/SecureWipe.hpp>
 #include <engine/net/Cookie.hpp>
 
+#include <array>
 #include <cryptopp/hmac.h>
 #include <cryptopp/misc.h>
 #include <cryptopp/osrng.h>

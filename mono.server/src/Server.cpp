@@ -16,6 +16,7 @@
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cdn/Origin.hpp>
 #include <cdn/Service.hpp>

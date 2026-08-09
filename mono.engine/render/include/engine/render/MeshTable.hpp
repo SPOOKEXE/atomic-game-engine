@@ -8,6 +8,7 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Name.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>

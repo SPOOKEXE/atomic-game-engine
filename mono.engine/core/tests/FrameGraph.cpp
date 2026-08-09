@@ -429,6 +429,14 @@ TEST_CASE("the recent maximum keeps a spike an ordinary frame would hide", "[fra
 TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]") {
 	Collecting collecting;
 
+	// **The loop is timed as well as profiled**, and the assertion below is
+	// against that rather than against a number of milliseconds. A ceiling like
+	// "under 3 ms" is a claim about the machine: four one-millisecond burns take
+	// four milliseconds on an idle box and can take three times that on a loaded
+	// one, so the test failed about one run in six while the code was correct.
+	// The wall clock and the profiler stretch together, so a ratio does not.
+	const auto started = std::chrono::steady_clock::now();
+
 	FrameGraph::BeginFrame();
 	for (int repeat = 0; repeat < 4; repeat++) {
 		ENGINE_PROFILE("four-times");
@@ -436,12 +444,20 @@ TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]")
 	}
 	FrameGraph::EndFrame();
 
-	// Four opens of about a millisecond each. A total would read near 4; what
-	// the column has to show is the worst of the four, so that it compares with
-	// the per-frame figure printed beside it.
+	const float spent =
+		std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+
+	// Four opens of about a millisecond each. **A total would read near the
+	// whole loop; a single reading reads near a quarter of it** — and that is
+	// the difference the column has to show, so that it compares with the
+	// per-frame figure printed beside it.
+	//
+	// Six tenths, which is nowhere near either answer: a quarter is well under
+	// it and a total is well over, however slow the machine got.
 	const float worst = FrameGraph::RecentMaximum("four-times");
+	INFO("worst " << worst << " ms of " << spent << " ms spent in the loop");
 	REQUIRE(worst >= 0.5f);
-	REQUIRE(worst < 3.0f);
+	REQUIRE(worst < spent * 0.6f);
 }
 
 TEST_CASE("a span that stops running decays out of the window", "[framegraph]") {

@@ -712,6 +712,8 @@ namespace studio {
 			return;
 		}
 
+		ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2{520.0f, 700.0f}, ImGuiCond_Always);
 		if (!ImGui::Begin("Pipeline Profile", &ShowPipelineProfile)) {
 			ImGui::End();
 			return;
@@ -741,6 +743,13 @@ namespace studio {
 				"the pipeline does not compile, so there is nothing to profile (%s)",
 				offender.IsValid() ? std::string(offender.Text()).c_str() : "?"
 			);
+
+			// **The pictures still show.** What a resource holds is the
+			// renderer's business and not the canvas's — a pipeline somebody is
+			// half way through wiring does not compile, and that is exactly when
+			// being able to look at what the *running* frame produced is worth
+			// most.
+			DrawProfileWatch();
 			ImGui::End();
 			return;
 		}
@@ -804,6 +813,12 @@ namespace studio {
 
 		if (profile.Passes.empty()) {
 			ImGui::TextDisabled("nothing to draw");
+
+			// **The pictures still show**, for the reason they show when the
+			// pipeline does not compile: what a resource holds is the renderer's
+			// business and not the canvas's, and an empty canvas is exactly when
+			// somebody wants to look at what the running frame produced.
+			DrawProfileWatch();
 			ImGui::End();
 			return;
 		}
@@ -852,7 +867,21 @@ namespace studio {
 				ImGui::TableSetColumnIndex(0);
 
 				const std::string label(resource.Name.Text());
-				ImGui::TextUnformatted(label.c_str());
+
+				// **The row name is the control.** A grid that shows which pass
+				// wrote what and cannot show you *what it wrote* is a diagram;
+				// clicking the resource is how it becomes an instrument. The
+				// picture appears below the table, because a thumbnail in a
+				// twenty-two pixel cell would be a coloured dot.
+				const bool watched = ProfileWatched == resource.Name;
+				if (ImGui::Selectable(
+						label.c_str(), watched, ImGuiSelectableFlags_None, ImVec2{0.0f, rowHeight - 4.0f}
+					)) {
+					// Clicking the one already shown puts it away, so the panel
+					// can go back to being a grid without a second control.
+					ProfileWatched = watched ? engine::core::Name{} : resource.Name;
+					Renderer.Inspect(ProfileWatched);
+				}
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip(
 						"%s\n%s  %s  %ux%u\n%.2f MB%s",
@@ -923,6 +952,126 @@ namespace studio {
 			ImGui::EndTable();
 		}
 
+		DrawProfileWatch();
+
 		ImGui::End();
+	}
+
+	void Editor::DrawProfileWatch() {
+		if (!ProfileWatched.IsValid()) {
+			ImGui::Spacing();
+			ImGui::TextDisabled("click a resource to see what wrote into it");
+			return;
+		}
+
+		ImGui::Separator();
+
+		const engine::render::Renderer::ResourceImage image = Renderer.ResourceTexture(ProfileWatched);
+		const std::string name(ProfileWatched.Text());
+
+		if (!image.IsValid()) {
+			// **Named, and said out loud.** A resource the graph describes but
+			// nothing allocated this frame is a real state — a pass that did not
+			// run, or a target only a different pipeline makes — and a blank
+			// panel would read as the tool being broken.
+			ImGui::TextDisabled("'%s' has nothing to show this frame", name.c_str());
+			return;
+		}
+
+		const engine::render::Renderer::ReadbackImage readback = Renderer.Readback();
+		const bool matching = readback.IsValid() && readback.Source == ProfileWatched;
+
+		ImGui::Text("%s  %ux%u", name.c_str(), image.Width, image.Height);
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+
+		// **The staleness is stated rather than hidden.** The picture is live —
+		// it is the texture the GPU holds — but the *numbers* under it come from
+		// a download that is a frame or more behind, and a panel that showed the
+		// two together without saying so would be blamed one day for a bug that
+		// is a frame of latency in the panel.
+		if (matching) {
+			ImGui::TextDisabled(
+				"histogram %llu frame(s) old", static_cast<unsigned long long>(readback.Age)
+			);
+		} else {
+			ImGui::TextDisabled("histogram waiting");
+		}
+
+		// Fitted to the panel, aspect kept. A debug view that stretched its
+		// image would make a squashed render look correct and a correct one look
+		// squashed.
+		const float available = std::max(ImGui::GetContentRegionAvail().x, 64.0f);
+		const float aspect =
+			image.Height > 0 ? static_cast<float>(image.Width) / static_cast<float>(image.Height) : 1.0f;
+		const float shown = std::min(available, 360.0f);
+
+		ImGui::Image(
+			reinterpret_cast<ImTextureID>(image.Texture),
+			ImVec2{shown, shown / std::max(aspect, 0.01f)}
+		);
+
+		if (!matching) {
+			return;
+		}
+
+		DrawChannelHistogram("R", readback.Histogram.Red, Colour(0.90f, 0.35f, 0.35f));
+		DrawChannelHistogram("G", readback.Histogram.Green, Colour(0.40f, 0.85f, 0.40f));
+		DrawChannelHistogram("B", readback.Histogram.Blue, Colour(0.40f, 0.55f, 0.95f));
+		DrawChannelHistogram("A", readback.Histogram.Alpha, Colour(0.80f, 0.80f, 0.80f));
+
+		// **The faults, named where somebody can act on them.** §1.5's 3 and 4:
+		// a blank channel and a uniform target. This is the whole reason the
+		// histogram is here rather than a pretty chart — a specialist found both
+		// of these by reading a capture for half an hour.
+		if (readback.Histogram.Uniform()) {
+			ImGui::TextColored(
+				ImVec4{0.95f, 0.75f, 0.35f, 1.0f}, "every pixel is the same — did this pass run?"
+			);
+		} else if (readback.Histogram.Alpha.Blank()) {
+			ImGui::TextColored(
+				ImVec4{0.95f, 0.75f, 0.35f, 1.0f}, "alpha is blank — the format may be paying for nothing"
+			);
+		}
+	}
+
+	void Editor::DrawChannelHistogram(
+		const char *label, const engine::render::ChannelHistogram &channel, ImU32 colour
+	) {
+		if (channel.Counted == 0) {
+			return;
+		}
+
+		uint32_t peak = 1;
+		for (const uint32_t bucket : channel.Buckets) {
+			peak = std::max(peak, bucket);
+		}
+
+		ImGui::TextDisabled("%s", label);
+		ImGui::SameLine();
+
+		const float height = 26.0f;
+		const float width = std::min(std::max(ImGui::GetContentRegionAvail().x, 64.0f), 240.0f);
+		const ImVec2 origin = ImGui::GetCursorScreenPos();
+		ImDrawList &list = *ImGui::GetWindowDrawList();
+
+		const float step = width / static_cast<float>(engine::render::HISTOGRAM_BUCKETS);
+		for (size_t at = 0; at < engine::render::HISTOGRAM_BUCKETS; at++) {
+			const float tall =
+				height * (static_cast<float>(channel.Buckets[at]) / static_cast<float>(peak));
+			const float left = origin.x + step * static_cast<float>(at);
+			list.AddRectFilled(
+				ImVec2{left, origin.y + height - tall}, ImVec2{left + step - 1.0f, origin.y + height}, colour
+			);
+		}
+
+		ImGui::Dummy(ImVec2{width, height});
+		ImGui::SameLine();
+
+		// **The range, because a shape alone cannot say "this is constant".**
+		// Sixteen bars all in one bucket and sixteen bars spread over a narrow
+		// range look identical at this size.
+		ImGui::TextDisabled("%u..%u", channel.Minimum, channel.Maximum);
 	}
 }

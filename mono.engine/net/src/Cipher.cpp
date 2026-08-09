@@ -3,6 +3,7 @@
 #include <engine/core/SecureWipe.hpp>
 #include <engine/net/Cipher.hpp>
 
+#include <array>
 #include <cryptopp/chachapoly.h>
 #include <cryptopp/misc.h>
 #include <cstring>
