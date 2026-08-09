@@ -843,7 +843,8 @@ namespace studio {
 		const engine::nodeview::AssetLayout layout = engine::nodeview::LayoutAssets(document);
 
 		ImGui::TextDisabled(
-			"no asset pipeline stored in this world yet — see DEFERRED.md D00039 and the v0.11 roadmap"
+			"no asset pipeline stored in this world yet — see DEFERRED.md D00102 and the "
+			"v0.11 roadmap"
 		);
 		ImGui::Separator();
 

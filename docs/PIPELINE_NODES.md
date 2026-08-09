@@ -1,7 +1,18 @@
 # Render pipeline nodes — research, taxonomy and design
 
-**Status: stages 1 to 6 and 8 are built and tested. 7 is half built, and the
-missing half is named rather than pending — `SDL_GPU` has no timestamp query.**
+**Status: stages 1 to 8 are built and tested, plus a ninth this document did not
+plan — the entity flow, cameras as values, per-camera pipelines and custom
+shaders. The only gap is stage 7's GPU timestamps, and `SDL_GPU` has no API for
+them.**
+
+**What stage 9 is, and why it is not in the plan below.** Stages 1 to 8 make the
+frame authorable in every respect but one: a pipeline could add a pass, reorder
+passes and retarget them, and could not say **which geometry any of them took**
+or **what shader any of them ran**. Culling, ordering and every pass's shader
+were fixed inside the renderer. So a list of instances is a resource, a camera
+is a resource, and a pass can name a shader — §4.6b and §4.7 are the vocabulary
+for it. That gap only becomes visible once the executor exists, which is why the
+plan could not have named it.
 
 `docs/PIPELINE_TODO.md` is the working state — this table says which stages
 exist, that one says how far each got and what is next.

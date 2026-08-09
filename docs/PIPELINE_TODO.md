@@ -778,7 +778,7 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       drew as `~live` at 1600x879, and a deliberately broken edit came back with
       a message and no pipeline.
 
-- [ ] **The bake step, and it cannot live in `bake`.** A `.frag` published today
+- [x] **The bake step, and it could not live in `bake`.** A `.frag` published today
       routes to `AssetKind::Shader`, is correctly refused as not-yet-readable,
       and nothing turns it into a `.spv`.
 
@@ -830,11 +830,26 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       Worth knowing before somebody adds `Vendor::shaderc` to `bake` and finds
       out at the architecture check instead of at the design.
 
-      **The interesting decision is includes.** A shader that `#include`s
-      another is a dependency between two assets, and the manifest has no word
-      for one. Either the baker resolves them and publishes a flat module —
-      simple, and a shared header edit rebuilds every shader — or the store
-      learns about dependencies, which is a bigger thing than shaders.
+      **Includes: resolved, and the module published flat.** A shader that
+      `#include`s another is a dependency between two assets and the manifest
+      has no word for one, so it cannot be delivered as two. The cost is that
+      editing a shared header rebuilds every shader that includes it — which is
+      what a build system does anyway, and what a store cannot yet express.
+
+      **`.glsl` is deliberately not a stage.** It is what a shared include is
+      called; compiling one alone fails on every file written to be included
+      rather than compiled. `.vert`, `.frag` and `.comp` are the stages, taken
+      from the extension because that is a fact the filename already carries —
+      a manifest field saying it again would be a second description.
+
+      **A bad shader is logged and skipped, not fatal.** One shader that will
+      not compile should not hold back a publish of forty assets; the compiler's
+      message names the file and the line.
+
+      Verified end to end: two good shaders, one broken, one `.glsl` include,
+      through `contentimport --publish`. Two `.spv` in the store, the include
+      skipped, the broken one reported with a real compiler message, and six
+      assets published anyway.
 
       **Split deliberately.** The seam above is the half that had to be in
       `render` and is now done and proven; the half that is left is content

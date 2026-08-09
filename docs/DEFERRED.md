@@ -16,6 +16,70 @@ Nothing checks this: a fenced block is valid Markdown whatever is inside it.
 If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
 
 ```
+### [_] D00102
+
+**The Assets Pipeline panel draws an empty document, and the blocker is a
+dependency decision rather than the editor.**
+
+`Editor::DrawAssetsPipeline` lays out a default-constructed `bake::Document`
+every frame and says so on screen. The canvas, the layout and the document
+format all exist and are tested — `bake::GraphDocument` records edits, replays
+them and round trips. What is missing is that **a world does not carry one**.
+
+- **The obvious fix is wrong, and the roadmap says so in writing.** The render
+  half landed by giving `game` a dependency on `graph`, which is cheap: `graph`
+  is arithmetic over names and links no device. `bake` is not that shape — it
+  carries the PNG, JPEG, GIF, BMP, OBJ, GLTF and PMX decoders, so `game`
+  depending on it to parse a *text document* pulls every image and model decoder
+  into the save format, and therefore into `server`, which links `game` and has
+  no reason to decode a JPEG.
+- **Three ways out, and the roadmap ranks them.** (a) Split `bake::Graph`,
+  `Document` and their format out of the decoder library into something `game`
+  can link — "the honest fix and a real refactor". (b) Carry asset pipelines as
+  opaque text the save format never parses, which costs the load-time validation
+  the render half has. (c) Put them on the universe rather than the world, and
+  load them only where `bake` is already linked.
+- **Settled: (a), the module split.** The roadmap called it the honest fix and
+  that is the call. (b) buys speed by giving up the load-time validation the
+  render half has, which would make the two halves of one editor behave
+  differently for no reason a user could see. (c) rests on a premise nobody has
+  established — whether a bake chain shared by four worlds is any one world's
+  property — so it trades a dependency question for an ownership question that
+  is harder.
+
+  **The shape:**
+
+  ```
+  Engine::bakegraph   TIER shared, no decoders
+      Graph.hpp / GraphDocument.hpp / the text format
+
+  Engine::bake    ->  DEPS Engine::bakegraph + the decoders
+  Engine::game    ->  DEPS Engine::bakegraph        <- new, and cheap
+  ```
+
+  `server` links `game` and gets no JPEG decoder, which is the property the
+  whole question was about.
+
+  **What it touches**, in the order it wants doing: the new module and its
+  CMakeLists; `bake` losing those files and gaining the dep; `nodeview` and
+  `mono.studio` following the headers; `game::WriteWorldBody` / `ReadWorldBody`
+  emitting and reading the block, the way the render half emits `<Pipelines>`;
+  and `mono.tools/architecture/expected_graph.json`, which will fail on the new
+  edge until it is told — as it is there to.
+
+  **One thing to decide while doing it, not before:** what a world does when it
+  loads a document naming a node kind this build does not have. The render half
+  refuses the pipeline and keeps the world, with a warning; matching that is
+  probably right and is a one-line argument once the code is in front of
+  somebody.
+- **The panel's own pointer was wrong**, which is how this entry came to exist.
+  It cited `D00039`, which is about the physics module having no caller. Fixed
+  to point here.
+
+**Reopen trigger: none needed — it is v0.11 roadmap work and blocked on a
+decision, not on effort.** The render half of the same line is done, so this is
+the remaining half of "many node trees in one editor".
+
 ### [_] D00101
 
 - item 1
