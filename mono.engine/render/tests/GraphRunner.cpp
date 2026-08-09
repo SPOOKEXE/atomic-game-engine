@@ -551,3 +551,75 @@ TEST_CASE("views of one world through one pipeline share its shared work", "[ren
 	CHECK(std::count(ran.begin(), ran.end(), "opaque@0") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "opaque@1") == 1);
 }
+
+TEST_CASE("a custom raster pass is authored, not compiled in", "[render][graph]") {
+	// **The one kind whose behaviour is not in the engine.** A `raster` node
+	// names a fragment shader in a parameter; the renderer builds a pipeline for
+	// it, binds what the node reads as samplers in slot order and draws a
+	// fullscreen triangle. Two of these are the same kind and two different
+	// pipelines, which is the whole reason node parameters exist.
+	//
+	// The device half cannot be reached from here. What can — and what would
+	// break silently — is that the graph carries the shader name through to the
+	// node the runner is handed, and that two nodes of one kind keep their own.
+	RenderGraph graph;
+
+	const engine::graph::ResourceId scene =
+		graph.AddResource({.Name = Name("colour"), .Kind = engine::graph::ResourceKind::Colour});
+	const engine::graph::ResourceId tinted =
+		graph.AddResource({.Name = Name("tinted"), .Kind = engine::graph::ResourceKind::Colour});
+	const engine::graph::ResourceId graded =
+		graph.AddResource({.Name = Name("graded"), .Kind = engine::graph::ResourceKind::Colour});
+
+	engine::graph::Node opaque;
+	opaque.Name = Name("opaque");
+	opaque.Kind = Name("opaque");
+	opaque.Writes = {scene};
+	opaque.Scope = engine::graph::NodeScope::View;
+	REQUIRE(graph.AddNode(opaque).IsValid());
+
+	const auto raster = [&](const char *name,
+							const char *shader,
+							engine::graph::ResourceId from,
+							engine::graph::ResourceId to) {
+		engine::graph::Node node;
+		node.Name = Name(name);
+		node.Kind = Name("raster");
+		node.Reads = {from};
+		node.Writes = {to};
+		node.Scope = engine::graph::NodeScope::View;
+		node.Parameters.push_back(engine::graph::NodeParameter{Name("shader"), shader});
+		REQUIRE(graph.AddNode(node).IsValid());
+	};
+
+	raster("tint", "tint.frag", scene, tinted);
+	raster("grade", "grade.frag", tinted, graded);
+
+	CompiledGraph compiled;
+	Name offender;
+	INFO("offending node: " << std::string(offender.Text()));
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+
+	std::vector<std::string> shaders;
+	PassTable table;
+	table.Set(Name("opaque"), [](const RunContext &) { return true; });
+	table.Set(Name("raster"), [&](const RunContext &context) {
+		const engine::graph::Node *node = graph.Find(context.Node);
+		REQUIRE(node != nullptr);
+		const std::string *shader = node->Parameter(Name("shader"));
+		shaders.push_back(shader != nullptr ? *shader : "<none>");
+		return true;
+	});
+
+	GraphRunner runner{table};
+	REQUIRE(graph.Execute(compiled, runner, size_t{1}));
+
+	// **Each node keeps its own shader.** One kind, two pipelines — a second
+	// node inheriting the first's configuration would make every custom pass in
+	// a frame the same effect.
+	CHECK(shaders == std::vector<std::string>{"tint.frag", "grade.frag"});
+
+	// And the chain is ordered by the resources, so a pass reading what another
+	// wrote runs after it whatever order they were dropped on the canvas.
+	CHECK(compiled.PerView.size() == 3);
+}

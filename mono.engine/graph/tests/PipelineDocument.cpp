@@ -485,12 +485,12 @@ TEST_CASE("a node's parameters survive a round trip", "[graph][document]") {
 	// kind and run different shaders. A save file that lost that would lose
 	// everything about a pipeline except its shape.
 	PipelineDocument document;
-	document.Add(Edit{.Kind = EditKind::AddResource, .Name = Name("colour")});
+	document.Record(Edit{.Kind = EditKind::AddResource, .Name = Name("colour")});
 
-	document.Add(Edit{.Kind = EditKind::AddNode, .Name = Name("filter"), .NodeKind = Name("filter-tag")});
-	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "0x0f"});
-	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("shader"), .Value = "blur.frag"});
-	document.Add(Edit{.Kind = EditKind::Writes, .Target = Name("colour")});
+	document.Record(Edit{.Kind = EditKind::AddNode, .Name = Name("filter"), .NodeKind = Name("filter-tag")});
+	document.Record(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "0x0f"});
+	document.Record(Edit{.Kind = EditKind::Set, .Key = Name("shader"), .Value = "blur.frag"});
+	document.Record(Edit{.Kind = EditKind::Writes, .Target = Name("colour")});
 
 	const std::string text = Write(document);
 	INFO(text);
@@ -506,16 +506,16 @@ TEST_CASE("a node's parameters survive a round trip", "[graph][document]") {
 
 TEST_CASE("parameters land on the node above them", "[graph][document]") {
 	PipelineDocument document;
-	document.Add(Edit{.Kind = EditKind::AddResource, .Name = Name("a")});
-	document.Add(Edit{.Kind = EditKind::AddResource, .Name = Name("b")});
+	document.Record(Edit{.Kind = EditKind::AddResource, .Name = Name("a")});
+	document.Record(Edit{.Kind = EditKind::AddResource, .Name = Name("b")});
 
-	document.Add(Edit{.Kind = EditKind::AddNode, .Name = Name("one"), .NodeKind = Name("clear")});
-	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "1"});
-	document.Add(Edit{.Kind = EditKind::Writes, .Target = Name("a")});
+	document.Record(Edit{.Kind = EditKind::AddNode, .Name = Name("one"), .NodeKind = Name("clear")});
+	document.Record(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "1"});
+	document.Record(Edit{.Kind = EditKind::Writes, .Target = Name("a")});
 
-	document.Add(Edit{.Kind = EditKind::AddNode, .Name = Name("two"), .NodeKind = Name("clear")});
-	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "2"});
-	document.Add(Edit{.Kind = EditKind::Writes, .Target = Name("b")});
+	document.Record(Edit{.Kind = EditKind::AddNode, .Name = Name("two"), .NodeKind = Name("clear")});
+	document.Record(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "2"});
+	document.Record(Edit{.Kind = EditKind::Writes, .Target = Name("b")});
 
 	RenderGraph graph;
 	Name offender;
@@ -565,7 +565,7 @@ TEST_CASE("a parameter with no node before it is refused", "[graph][document]") 
 	// A `set` that configures nothing is a document built wrong rather than a
 	// line to skip — the same reading `reads` takes.
 	PipelineDocument document;
-	document.Add(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "1"});
+	document.Record(Edit{.Kind = EditKind::Set, .Key = Name("mask"), .Value = "1"});
 
 	RenderGraph graph;
 	Name offender;

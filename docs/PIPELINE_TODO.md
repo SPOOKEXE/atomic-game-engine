@@ -15,14 +15,14 @@ should leave the in-progress item marked with what compiles and what does not.
 | stage | what | state |
 |---|---|---|
 | 1 | Type system — formats, usage kinds, divisor, external resources | **done** |
-| 2 | Catalogue — 58 node kinds, typed and formatted slots | **done** |
+| 2 | Catalogue — 59 node kinds, typed and formatted slots | **done** |
 | 3 | Executor — `Renderer::Render` runs the graph | **done.** `graph::Execute` is what submits the frame; `PassOrder()` is a view of the graph and the `Pass` enum is gone |
 | 4 | Static checks — nine fault kinds | **done** |
 | 5 | Authored order, and scopes | **done** |
 | 6 | Access grid / profiler visualiser | **done** |
 | 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
 | 8 | Readbacks — viewer image, histograms, overdraw | **done.** Histograms, the download policy, the non-stalling device path, the `viewer` node, the `overdraw` counter, and `Renderer::SetPipeline` so a pipeline with either in it can run |
-| 9 | Entity flow, cameras, per-camera pipelines | **working.** `Entities` and `Camera` resources, `world`/`camera`/`light-camera` sources, and `View::Pipeline` picks a graph per camera. Custom shaders per node are not in |
+| 9 | Entity flow, cameras, per-camera pipelines, custom shaders | **working.** `Entities` and `Camera` resources, `world`/`camera`/`light-camera` sources, per-camera pipelines, node parameters, graph-allocated targets, and `raster`/`dispatch` nodes running shaders the node names — both verified on a device. Barriers between compute passes are not derived |
 
 ---
 
@@ -596,13 +596,124 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       one" are the same block. So a frame pipeline of nothing but overlays runs
       from `ExecuteView` and `ExecuteFinal` does nothing. Pinned by a case.
 
-- [ ] **Custom shaders per pipeline.** A pipeline can now say which passes run,
-      in what order, over which geometry, from which camera — and every pass
-      still runs the shader the renderer compiled for its *kind*. A `dispatch`
-      or a `raster` node naming a shader asset is the next thing, and it is a
-      content question as much as a graph one: the shader has to come from the
-      store, its bindings have to be declared, and `PassTable` has to key on
-      something finer than the kind.
+- [x] **Node parameters** — `Node::Parameters`, a `set "key" "value"` word in
+      the document format, and `Number`/`Integer` readers.
+
+      **The difference between a kind and a node.** Two `filter-tag` nodes are
+      the same kind and filter different tags; two `raster` nodes are the same
+      kind and run different shaders. Without this a pipeline could say *which*
+      passes run and never *how*.
+
+      **Text, deliberately.** A parameter is authored text that has to survive a
+      save file, a diff, and somebody typing it. Parsing it into a number at the
+      graph layer would put the parse in the wrong place and give two answers
+      for what an unset one means; instead whoever reads a parameter decides
+      what its absence means — which is how `filter-tag` reads no mask as *keep
+      everything*.
+
+      **Unset and set-to-nothing are different**, and only the first takes a
+      default. `Parameter` returns null for one and an empty string for the
+      other.
+
+      **Unreadable falls back rather than refusing.** A half-typed number in an
+      editor is a state somebody is passing through, not a pipeline to reject —
+      `strtof`/`strtoul`, not `stof`. `Integer` reads base zero, so a tag mask
+      can be written `0x0f`.
+
+      This closed the two gaps flagged above: `cull-distance` reads `radius` and
+      `filter-tag` reads `mask`, both from the node.
+
+- [x] **Graph-allocated targets.** `Impl::EnsureGraphTarget` makes a texture
+      from a `ResourceDesc` — its format, and its absolute size or the view's
+      rectangle over `Divisor`. `TextureFor` answers for the renderer's own six
+      names first and falls through to this for anything else a pipeline
+      invented.
+
+      **The first thing the renderer allocates from a description rather than
+      from its own list.** Every other texture exists because `Renderer` was
+      written to have one; these exist because somebody's pipeline said so. That
+      is what makes a half-resolution pass a number in a document rather than a
+      second code path.
+
+      **External resources are refused.** `window` and `colour` name things
+      outside the graph, and allocating for one would make a second window
+      nobody presents.
+
+      `NamedTexture` gained a `Format`, because SDL will not hand a texture's
+      format back and a pipeline is built against the format of what it renders
+      into — so whoever produced the texture is the only one who can say.
+
+- [x] **A shader-keyed pipeline cache.** `Impl::PipelineForShader`, keyed on the
+      shader name *and* the target format. **`PassTable` keys on the kind and two
+      `raster` nodes are one kind and two pipelines** — that mismatch is the
+      whole reason this exists rather than the table doing it.
+
+      Cached even when it fails, so a shader that does not exist is looked for
+      once rather than once per frame per view. The log line is the diagnostic;
+      a thousand of them is not.
+
+- [x] **The `raster` kind and its handler.** `Impl::SubmitRaster` reads the
+      node's `shader` parameter, finds the colour it writes, binds what it reads
+      as samplers in slot order, and draws three vertices.
+
+      **The vertex stage is `overlay.vert` unchanged**, which already builds a
+      fullscreen triangle from three indices and hands out a UV. Every custom
+      raster pass shares it, so where a fullscreen pass puts its vertices is
+      described once.
+
+      **Half-configured draws nothing rather than refusing.** A pipeline being
+      edited has nodes with no shader, no target or a shader that will not
+      build, constantly. Taking the window down for one is not a diagnostic.
+
+- [x] **Where the shader comes from — staged SPIR-V, and the path is proven.**
+      `mono.engine/render/shaders/tint.frag` is a real custom pass; the build
+      stages it to `tint.frag.spv` like every other shader, and the renderer
+      loads it by the name a node gives.
+
+      **Checked on a real device, not only in a table.** An authored pipeline
+      with a `raster` node was set as the default and run headlessly: the pass
+      executed into targets the *graph* allocated — 960x519 and 448x270, sized
+      from the view — with a pipeline built from `tint.frag` and no validation
+      errors. Probe removed afterwards.
+
+      A shader from the content store is the honest end state and is a content
+      question as much as a graph one: baked, published, fetched and
+      version-checked like a mesh. Staged is enough to prove the seam and is
+      what ships today.
+
+- [x] **`dispatch` — the compute half, and it is not the raster one with other
+      words.** `Impl::SubmitDispatch` and `ComputeForShader`;
+      `shaders/desaturate.comp` proves the path.
+
+      **It writes `ResourceKind::Storage`, not a colour attachment**, which is
+      the distinction that kind was made for and the one §1.5 fault 10 is about
+      — a copy done as a full-screen triangle is invisible when everything is
+      "a pass". `EnsureGraphTarget` now picks the usage flags from the resource's
+      kind: `COMPUTE_STORAGE_WRITE` for storage, `DEPTH_STENCIL_TARGET` for
+      depth, `COLOR_TARGET` otherwise, and samplable in every case because the
+      point of writing one is that something reads it.
+
+      **No format in the pipeline key**, unlike `raster`. A compute pass writes
+      through storage rather than into an attachment, so the pipeline does not
+      depend on what it writes into.
+
+      **The group size is declared twice by necessity** — `local_size_x` in the
+      shader and `threadcount_x` in the pipeline — and SDL is explicit that it
+      does not check they agree. So the node says it (`group-x`, `group-y`,
+      default 8) and the renderer passes it on rather than assuming a number.
+
+      **Whole groups, rounded up, and the shader checks its own bounds.** A
+      target whose size is not a multiple of the group size has a last row and
+      column that run past the edge; refusing to dispatch them would leave a
+      strip unwritten instead. Verified on a device at `1088x339` into `136x43`
+      groups — a size that exercises exactly that rounding.
+
+      **What is still absent is the barrier.** SDL inserts what it needs between
+      passes in one command buffer, so the standard frame is safe; a pipeline
+      that had a dispatch write what a *later* dispatch reads in the same frame
+      is the case nothing here reasons about. RDG derives these
+      (`PIPELINE_NODES.md` §1.1) and this does not — worth filing before
+      somebody authors a two-stage compute chain.
 
 - [ ] **Two colour passes, two lists.** `CameraEntityList` reads whatever
       `opaque` is wired to, because the camera range is one range. A pipeline

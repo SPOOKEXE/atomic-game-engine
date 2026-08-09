@@ -1,0 +1,44 @@
+#version 450
+
+// A custom compute pass, and the smallest one that proves the path.
+//
+// **What this file is for is the wiring, not the effect** — `tint.frag`'s
+// reason. A `dispatch` node names a compute shader by parameter; the renderer
+// loads it, builds a compute pipeline, binds what the node reads as samplers and
+// what it writes as read-write storage, and dispatches enough groups to cover the
+// target. Nothing about that is specific to this shader.
+//
+// **Why a compute pass is not a raster pass with different words.** It writes
+// through storage rather than into an attachment, so there is no blend state, no
+// depth, and no fixed-function anything — and the writes are not ordered against
+// a later read the way an attachment's are. That is the barrier problem
+// `docs/PIPELINE_TODO.md` names, and it is why this landed after `raster`.
+//
+// **8x8 and not 16x16.** Sixty-four invocations is one or two waves on every
+// vendor's hardware; 256 is a group that some schedulers will not fill. The
+// number is declared in two places by necessity — here and in the pipeline's
+// `threadcount` — and SDL is explicit that they must agree, so the renderer
+// reads it from the node rather than assuming.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D sourceImage;
+layout(set = 1, binding = 0, rgba8) uniform writeonly image2D resultImage;
+
+void main() {
+	ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = imageSize(resultImage);
+
+	// **The bound check is not optional.** A dispatch covers the target in whole
+	// groups, so the last row and column of groups run past the edge on any size
+	// that is not a multiple of eight — which is nearly every window.
+	if (at.x >= size.x || at.y >= size.y) {
+		return;
+	}
+
+	vec2 uv = (vec2(at) + 0.5) / vec2(size);
+	vec4 source = texture(sourceImage, uv);
+
+	float luminance = dot(source.rgb, vec3(0.299, 0.587, 0.114));
+	imageStore(resultImage, at, vec4(vec3(luminance), source.a));
+}

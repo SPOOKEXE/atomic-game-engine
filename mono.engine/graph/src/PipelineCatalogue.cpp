@@ -681,6 +681,20 @@ namespace engine::graph {
 			// `ResourceKind::Entities` — a list of indices into the view's draw
 			// list — and every one of them is list-in, list-out, so they compose
 			// in any order somebody wires them.
+			{"raster",
+			 "Custom raster",
+			 C::Composite,
+			 S::View,
+			 {{"source", K::Texture, RGBA16, false, "What it samples, in slot order."},
+			  {"second", K::Texture, RGBA16, false, "A second input, if the shader takes one."}},
+			 {{"colour", K::Colour, RGBA16, true, "Whatever it drew."}},
+			 "A fullscreen pass running a fragment shader the node names. **The "
+			 "one kind whose behaviour is not in the engine** — set its `shader` "
+			 "parameter and the renderer builds a pipeline for it, binds what it "
+			 "reads as samplers in slot order, and draws a fullscreen triangle. "
+			 "Two of these are one kind and two pipelines, which is what node "
+			 "parameters are for."},
+
 			{"world",
 			 "World",
 			 C::Draw,

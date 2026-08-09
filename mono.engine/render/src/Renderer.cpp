@@ -1264,10 +1264,134 @@ namespace engine::render {
 			uint32_t Width = 0;
 			uint32_t Height = 0;
 
+			// **Carried rather than asked for**, because SDL does not offer a
+			// texture's format back. A pipeline is built against the format of
+			// what it renders into, so whoever produced the texture is the only
+			// one who can say.
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+
 			bool IsValid() const {
 				return Texture != nullptr && Width > 0 && Height > 0;
 			}
 		};
+
+		// A target the graph asked for, made because the graph asked.
+		//
+		// **The first thing the renderer allocates from a description rather
+		// than from its own list.** Every texture above this exists because
+		// `Renderer` was written to have one; these exist because a
+		// `ResourceDesc` in somebody's pipeline said so — a format, a size or a
+		// divisor, and a name. That is what lets a custom pass have somewhere to
+		// write.
+		//
+		// **Kept between frames and remade when the shape changes**, for
+		// `EnsureOverdraw`'s reason: a viewport being dragged would otherwise
+		// allocate a texture per frame.
+		//
+		// @since v0.11
+		struct GraphTarget {
+			core::Name Name;
+			SDL_GPUTexture *Texture = nullptr;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+		};
+
+		std::vector<GraphTarget> GraphTargets;
+
+		// Makes, or finds, the target a resource describes.
+		//
+		// **The size comes from the description**: absolute when it gives one,
+		// and the view's rectangle over `Divisor` otherwise — which is what
+		// makes a half-resolution pass a number in a document rather than a
+		// second code path.
+		//
+		// @param desc What the graph asked for.
+		// @return The texture, or an invalid one when it could not be made or
+		//         the resource is not something a pass can render into.
+		NamedTexture EnsureGraphTarget(const graph::ResourceDesc &desc);
+
+		// Frees every graph-allocated target.
+		void ReleaseGraphTargets();
+
+		// A pipeline for one fragment shader against one target format.
+		//
+		// **Keyed on the shader and the format, because `PassTable` keys on the
+		// kind and two `raster` nodes are one kind and two pipelines.** That is
+		// the whole reason this cache exists: the thing that differs between two
+		// custom passes is not their kind, it is what they were configured with.
+		//
+		// @since v0.11
+		struct ShaderPipeline {
+			core::Name Shader;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+		};
+
+		std::vector<ShaderPipeline> ShaderPipelines;
+
+		// The pipeline for a named fragment shader, made on first use.
+		//
+		// @param shader   Which shader, as a staged SPIR-V name.
+		// @param format   What it renders into.
+		// @param samplers How many textures it samples.
+		// @return The pipeline, or null when the shader would not load or the
+		//         pipeline would not build. Logged once per attempt.
+		SDL_GPUGraphicsPipeline *
+		PipelineForShader(core::Name shader, SDL_GPUTextureFormat format, uint32_t samplers);
+
+		// A compute pipeline for one shader.
+		//
+		// **Separate from `ShaderPipelines` because the two are different
+		// objects**, not because the caching differs — `SDL_GPUComputePipeline`
+		// and `SDL_GPUGraphicsPipeline` are distinct types with distinct
+		// release calls, and one vector of a variant would be a tag to get
+		// wrong.
+		//
+		// **No format in the key.** A compute pass writes through storage rather
+		// than into an attachment, so the pipeline does not depend on what it
+		// writes into — which is one of the real differences between the two and
+		// not a simplification.
+		//
+		// @since v0.11
+		struct ComputePipeline {
+			core::Name Shader;
+			uint32_t Samplers = 0;
+			uint32_t Storage = 0;
+			SDL_GPUComputePipeline *Pipeline = nullptr;
+		};
+
+		std::vector<ComputePipeline> ComputePipelines;
+
+		// The compute pipeline for a named shader, made on first use.
+		//
+		// @param shader   Which shader, as a staged SPIR-V name.
+		// @param samplers How many textures it reads.
+		// @param storage  How many it writes.
+		// @param groupX   Threads per group in X, which **must** match the
+		//                 shader's `local_size_x` — SDL is explicit that it does
+		//                 not check.
+		// @param groupY   The same in Y.
+		// @return The pipeline, or null. Cached either way.
+		SDL_GPUComputePipeline *ComputeForShader(
+			core::Name shader, uint32_t samplers, uint32_t storage, uint32_t groupX, uint32_t groupY
+		);
+
+		// A custom compute pass: somebody's compute shader over its inputs.
+		//
+		// @param context The node, with what it reads, writes and was set to.
+		// @return `false` to abandon the frame. Half-configured draws nothing
+		//         and returns `true`, for `SubmitRaster`'s reason.
+		bool SubmitDispatch(const graph::RunContext &context);
+
+		// A custom fullscreen pass: somebody's fragment shader over its inputs.
+		//
+		// @param context The node, with what it reads, writes and was set to.
+		// @return `false` to abandon the frame. A node with no shader, no target
+		//         or a shader that will not build draws nothing and returns
+		//         `true` — a pipeline being edited should not take the window
+		//         down with it.
+		bool SubmitRaster(const graph::RunContext &context);
 
 		// Which of this renderer's textures a graph resource is.
 		//
@@ -3533,6 +3657,23 @@ namespace engine::render {
 		if (State->OverdrawTexture) {
 			SDL_ReleaseGPUTexture(device, State->OverdrawTexture);
 		}
+
+		// **The graph's own, which nothing else knows about.** Everything else
+		// released here exists because this file made it; these exist because
+		// somebody's pipeline asked, and the pipeline is gone by now.
+		State->ReleaseGraphTargets();
+		for (const Impl::ShaderPipeline &entry : State->ShaderPipelines) {
+			if (entry.Pipeline != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(device, entry.Pipeline);
+			}
+		}
+		State->ShaderPipelines.clear();
+		for (const Impl::ComputePipeline &entry : State->ComputePipelines) {
+			if (entry.Pipeline != nullptr) {
+				SDL_ReleaseGPUComputePipeline(device, entry.Pipeline);
+			}
+		}
+		State->ComputePipelines.clear();
 		if (State->OverlaySampler) {
 			SDL_ReleaseGPUSampler(device, State->OverlaySampler);
 		}
@@ -3976,6 +4117,23 @@ namespace engine::render {
 			return true;
 		});
 
+		// **Somebody's own shader over their own inputs.** The one kind whose
+		// behaviour is not written here: what it does is a fragment shader the
+		// node names, and two of these are one kind and two pipelines — which is
+		// exactly why `PipelineForShader` keys on the shader rather than the
+		// table keying on it. See `SubmitRaster`.
+		Passes.Set(core::Name("raster"), [this](const graph::RunContext &context) {
+			return SubmitRaster(context);
+		});
+
+		// **And the compute half of the same idea.** It writes storage rather
+		// than an attachment, which is the distinction `PIPELINE_NODES.md` §1.5
+		// fault 10 is about — a copy done as a full-screen triangle is invisible
+		// when everything is "a pass".
+		Passes.Set(core::Name("dispatch"), [this](const graph::RunContext &context) {
+			return SubmitDispatch(context);
+		});
+
 		Passes.Set(core::Name("overdraw"), [this](const graph::RunContext &) { return SubmitOverdraw(); });
 
 		Passes.Set(core::Name("viewer"), [this](const graph::RunContext &context) {
@@ -4186,6 +4344,201 @@ namespace engine::render {
 		return true;
 	}
 
+	namespace {
+		// What the hardware calls one of the graph's formats.
+		//
+		// **Not every format the graph can name.** A pipeline may describe a
+		// `BC7` texture because an uploaded material is one; nothing renders
+		// into a block-compressed target, so those answer `INVALID` and the
+		// caller refuses rather than guessing something adjacent.
+		SDL_GPUTextureFormat DeviceFormat(graph::ResourceFormat format) {
+			switch (format) {
+			case graph::ResourceFormat::R8:
+				return SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+			case graph::ResourceFormat::RG8:
+				return SDL_GPU_TEXTUREFORMAT_R8G8_UNORM;
+			case graph::ResourceFormat::RGBA8:
+				return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+			case graph::ResourceFormat::RGBA8_SRGB:
+				return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+			case graph::ResourceFormat::RGB10A2:
+				return SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
+			case graph::ResourceFormat::RG11B10F:
+				return SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT;
+			case graph::ResourceFormat::R16F:
+				return SDL_GPU_TEXTUREFORMAT_R16_FLOAT;
+			case graph::ResourceFormat::RG16F:
+				return SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
+			case graph::ResourceFormat::RGBA16F:
+				return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			case graph::ResourceFormat::R32F:
+				return SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+			case graph::ResourceFormat::RG32F:
+				return SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT;
+			case graph::ResourceFormat::D24S8:
+				return SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+			case graph::ResourceFormat::D32F:
+				return SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+			default:
+				return SDL_GPU_TEXTUREFORMAT_INVALID;
+			}
+		}
+	}
+
+	void Renderer::Impl::ReleaseGraphTargets() {
+		for (GraphTarget &target : GraphTargets) {
+			if (target.Texture != nullptr) {
+				SDL_ReleaseGPUTexture(Device, target.Texture);
+			}
+		}
+		GraphTargets.clear();
+	}
+
+	Renderer::Impl::NamedTexture Renderer::Impl::EnsureGraphTarget(const graph::ResourceDesc &desc) {
+		NamedTexture out;
+
+		// **External resources are somebody else's.** `window` and `colour` name
+		// things that exist outside the graph; allocating for one would make a
+		// second window nobody presents.
+		if (desc.External) {
+			return out;
+		}
+
+		// **A list or a viewpoint is not a texture.** Both are values a node
+		// reads, and asking for one here is a caller confusing the two sorts of
+		// wire rather than a resource to allocate.
+		if (desc.Kind == graph::ResourceKind::Entities || desc.Kind == graph::ResourceKind::Camera ||
+			desc.Kind == graph::ResourceKind::Buffer) {
+			return out;
+		}
+
+		const SDL_GPUTextureFormat format = DeviceFormat(desc.Format);
+		if (format == SDL_GPU_TEXTUREFORMAT_INVALID) {
+			return out;
+		}
+
+		// **The size comes from the description.** Absolute when it gives one,
+		// and the view's rectangle over the divisor otherwise — which is what
+		// makes a half-resolution pass a number in a document rather than a
+		// second code path in here.
+		const uint32_t divisor = desc.Divisor > 0 ? desc.Divisor : 1;
+		const uint32_t width = desc.Width > 0 ? desc.Width : CurrentView.SceneWidth / divisor;
+		const uint32_t height = desc.Height > 0 ? desc.Height : CurrentView.SceneHeight / divisor;
+		if (width == 0 || height == 0) {
+			return out;
+		}
+
+		for (GraphTarget &target : GraphTargets) {
+			if (target.Name != desc.Name) {
+				continue;
+			}
+			if (target.Format == format && target.Width == width && target.Height == height) {
+				out.Texture = target.Texture;
+				out.Width = width;
+				out.Height = height;
+				out.Format = format;
+				return out;
+			}
+
+			// The shape changed — a viewport was dragged, or the document was
+			// edited. Remade rather than kept, and remade in place so the name
+			// does not accumulate entries.
+			if (target.Texture != nullptr) {
+				SDL_ReleaseGPUTexture(Device, target.Texture);
+				target.Texture = nullptr;
+			}
+
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = format;
+			// **What it is for decides what it may be.** A `Storage` resource is
+			// written by a compute pass through an unordered access view and a
+			// `Colour` one by a render pass into an attachment; the hardware
+			// treats them differently and so must this. Both stay samplable,
+			// because the point of writing one is that something reads it.
+			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			if (desc.Kind == graph::ResourceKind::Storage) {
+				info.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+			} else if (desc.Kind == graph::ResourceKind::Depth) {
+				info.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+			} else {
+				info.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+			}
+
+			info.width = width;
+			info.height = height;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+
+			target.Texture = SDL_CreateGPUTexture(Device, &info);
+			target.Format = format;
+			target.Width = width;
+			target.Height = height;
+			if (target.Texture == nullptr) {
+				ENGINE_ERROR("graph target '{}': {}", desc.Name.Text(), SDL_GetError());
+				return out;
+			}
+
+			out.Texture = target.Texture;
+			out.Width = width;
+			out.Height = height;
+			out.Format = format;
+			return out;
+		}
+
+		GraphTargets.push_back(GraphTarget{desc.Name, nullptr, format, 0, 0});
+		return EnsureGraphTarget(desc);
+	}
+
+	SDL_GPUGraphicsPipeline *
+	Renderer::Impl::PipelineForShader(core::Name shader, SDL_GPUTextureFormat format, uint32_t samplers) {
+		for (const ShaderPipeline &entry : ShaderPipelines) {
+			if (entry.Shader == shader && entry.Format == format) {
+				return entry.Pipeline;
+			}
+		}
+
+		// **The fullscreen vertex stage is `overlay.vert`**, which already
+		// builds a triangle from three indices and hands out a UV. A second one
+		// would be a second description of where a fullscreen pass puts its
+		// vertices.
+		SDL_GPUShader *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		SDL_GPUShader *fragment = LoadShader(shader.Text(), SDL_GPU_SHADERSTAGE_FRAGMENT, samplers, 0);
+
+		SDL_GPUGraphicsPipeline *built = nullptr;
+		if (vertex != nullptr && fragment != nullptr) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = format;
+
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+
+			built = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (built == nullptr) {
+				ENGINE_ERROR("pipeline for shader '{}': {}", shader.Text(), SDL_GetError());
+			}
+		}
+
+		if (vertex != nullptr) {
+			SDL_ReleaseGPUShader(Device, vertex);
+		}
+		if (fragment != nullptr) {
+			SDL_ReleaseGPUShader(Device, fragment);
+		}
+
+		// **Cached even when it failed**, so a shader that does not exist is
+		// looked for once rather than once per frame per view. The log line is
+		// the diagnostic; a thousand of them is not.
+		ShaderPipelines.push_back(ShaderPipeline{shader, format, built});
+		return built;
+	}
+
 	Renderer::Impl::NamedTexture Renderer::Impl::TextureFor(core::Name resource) {
 		NamedTexture out;
 		const std::string_view name = resource.Text();
@@ -4199,11 +4552,13 @@ namespace engine::render {
 				out.Texture = slot.Texture;
 				out.Width = CurrentView.SceneWidth;
 				out.Height = CurrentView.SceneHeight;
+				out.Format = ColourFormat();
 			} else {
 				out.Texture = CurrentFrame.Swapchain;
 				out.Width = CurrentFrame.Width;
 				out.Height = CurrentFrame.Height;
 			}
+			out.Format = ColourFormat();
 			return out;
 		}
 
@@ -4225,6 +4580,7 @@ namespace engine::render {
 			out.Texture = ShadowTexture;
 			out.Width = SHADOW_RESOLUTION;
 			out.Height = SHADOW_RESOLUTION;
+			out.Format = DepthFormat;
 			return out;
 		}
 
@@ -4247,6 +4603,7 @@ namespace engine::render {
 			out.Texture = OverdrawTexture;
 			out.Width = OverdrawWidth;
 			out.Height = OverdrawHeight;
+			out.Format = OVERDRAW_FORMAT;
 			return out;
 		}
 
@@ -4254,10 +4611,256 @@ namespace engine::render {
 			out.Texture = CurrentFrame.Swapchain;
 			out.Width = CurrentFrame.Width;
 			out.Height = CurrentFrame.Height;
+			out.Format = ColourFormat();
 			return out;
 		}
 
+		// **Anything else the graph named, made because the graph named it.**
+		// The five above are this renderer's own textures answering to the
+		// names the standard frame gives them; a pipeline that invents a
+		// resource gets one allocated from its description. That is what lets a
+		// custom pass have somewhere to write.
+		for (size_t index = 0; index < Graph.ResourceCount(); index++) {
+			const graph::ResourceDesc *desc =
+				Graph.FindResource(graph::ResourceId{static_cast<uint32_t>(index + 1)});
+			if (desc != nullptr && desc->Name == resource) {
+				return EnsureGraphTarget(*desc);
+			}
+		}
+
 		return out;
+	}
+
+	SDL_GPUComputePipeline *Renderer::Impl::ComputeForShader(
+		core::Name shader, uint32_t samplers, uint32_t storage, uint32_t groupX, uint32_t groupY
+	) {
+		for (const ComputePipeline &entry : ComputePipelines) {
+			if (entry.Shader == shader && entry.Samplers == samplers && entry.Storage == storage) {
+				return entry.Pipeline;
+			}
+		}
+
+		const auto path = core::Paths::Shaders("render") / (std::string(shader.Text()) + ".spv");
+		const auto code = ReadFile(path);
+
+		SDL_GPUComputePipeline *built = nullptr;
+		if (code.empty()) {
+			ENGINE_ERROR("compute shader not found or empty: {}", path.string());
+		} else {
+			SDL_GPUComputePipelineCreateInfo info{};
+			info.code = code.data();
+			info.code_size = code.size();
+			info.entrypoint = "main";
+			info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+			info.num_samplers = samplers;
+			info.num_readwrite_storage_textures = storage;
+
+			// **Declared in two places by necessity.** The group size is in the
+			// shader's `local_size_x` and in the pipeline, and SDL is explicit
+			// that it does not check they agree — so the node says it and this
+			// passes it on rather than assuming a number.
+			info.threadcount_x = groupX;
+			info.threadcount_y = groupY;
+			info.threadcount_z = 1;
+
+			built = SDL_CreateGPUComputePipeline(Device, &info);
+			if (built == nullptr) {
+				ENGINE_ERROR("compute pipeline for '{}': {}", shader.Text(), SDL_GetError());
+			}
+		}
+
+		// Cached even when it failed, for `PipelineForShader`'s reason.
+		ComputePipelines.push_back(ComputePipeline{shader, samplers, storage, built});
+		return built;
+	}
+
+	bool Renderer::Impl::SubmitDispatch(const graph::RunContext &context) {
+		const graph::Node *node = Graph.Find(context.Node);
+		if (node == nullptr) {
+			return true;
+		}
+
+		const std::string *shader = node->Parameter(core::Name("shader"));
+		if (shader == nullptr || shader->empty()) {
+			ENGINE_WARN("'{}' has no shader set, so it computes nothing", context.Name.Text());
+			return true;
+		}
+
+		// What it writes. A compute pass writes **storage**, not a colour
+		// attachment — that is the distinction `ResourceKind::Storage` was made
+		// for and the reason a dispatch is not a raster pass with other words.
+		NamedTexture target;
+		for (const graph::ResourceId id : context.Writes) {
+			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			if (desc == nullptr || desc->Kind != graph::ResourceKind::Storage) {
+				continue;
+			}
+			target = TextureFor(desc->Name);
+			if (target.IsValid()) {
+				break;
+			}
+		}
+
+		if (!target.IsValid()) {
+			ENGINE_WARN("'{}' has no storage target to write", context.Name.Text());
+			return true;
+		}
+
+		SDL_GPUTextureSamplerBinding reads[4]{};
+		uint32_t samplers = 0;
+		for (const graph::ResourceId id : context.Reads) {
+			if (samplers >= 4) {
+				break;
+			}
+			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			if (desc == nullptr || desc->Kind == graph::ResourceKind::Entities ||
+				desc->Kind == graph::ResourceKind::Camera) {
+				continue;
+			}
+
+			const NamedTexture source = TextureFor(desc->Name);
+			if (!source.IsValid()) {
+				continue;
+			}
+
+			reads[samplers].texture = source.Texture;
+			reads[samplers].sampler = SurfaceSampler != nullptr ? SurfaceSampler : OverlaySampler;
+			samplers++;
+		}
+
+		const uint32_t groupX = node->Integer(core::Name("group-x"), 8);
+		const uint32_t groupY = node->Integer(core::Name("group-y"), 8);
+		if (groupX == 0 || groupY == 0) {
+			ENGINE_WARN("'{}' asks for a zero-sized thread group", context.Name.Text());
+			return true;
+		}
+
+		SDL_GPUComputePipeline *pipeline = ComputeForShader(core::Name(*shader), samplers, 1, groupX, groupY);
+		if (pipeline == nullptr) {
+			return true;
+		}
+
+		ENGINE_PROFILE_CAT("dispatch pass", core::ProfileCategory::Render);
+		CurrentFrame.Recorder->Enter(context.Kind);
+
+		SDL_GPUCommandBuffer *command = CurrentFrame.Command;
+
+		SDL_GPUStorageTextureReadWriteBinding write{};
+		write.texture = target.Texture;
+
+		// **Cycled, like every other target this frame writes.** A compute pass
+		// writing the texture a previous frame may still be read from is the one
+		// hazard here that is not a barrier.
+		write.cycle = true;
+
+		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &write, 1, nullptr, 0);
+		SDL_BindGPUComputePipeline(pass, pipeline);
+		if (samplers > 0) {
+			SDL_BindGPUComputeSamplers(pass, 0, reads, samplers);
+		}
+
+		// **Whole groups, rounded up, and the shader checks its own bounds.**
+		// A target whose size is not a multiple of the group size has a last row
+		// and column that run past the edge; refusing to dispatch them would
+		// leave a strip unwritten instead.
+		SDL_DispatchGPUCompute(
+			pass, (target.Width + groupX - 1) / groupX, (target.Height + groupY - 1) / groupY, 1
+		);
+		SDL_EndGPUComputePass(pass);
+
+		CurrentFrame.Result->DrawCalls++;
+		return true;
+	}
+
+	bool Renderer::Impl::SubmitRaster(const graph::RunContext &context) {
+		const graph::Node *node = Graph.Find(context.Node);
+		if (node == nullptr) {
+			return true;
+		}
+
+		// **A node with no shader draws nothing rather than refusing.** A
+		// pipeline being edited has half-configured nodes in it constantly, and
+		// taking the window down for one is not a diagnostic.
+		const std::string *shader = node->Parameter(core::Name("shader"));
+		if (shader == nullptr || shader->empty()) {
+			ENGINE_WARN("'{}' has no shader set, so it draws nothing", context.Name.Text());
+			return true;
+		}
+
+		// Where it writes. The first colour it produces — a fullscreen pass has
+		// one output, and a node declaring several is describing something this
+		// kind cannot do.
+		NamedTexture target;
+		for (const graph::ResourceId id : context.Writes) {
+			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			if (desc == nullptr || desc->Kind != graph::ResourceKind::Colour) {
+				continue;
+			}
+			target = TextureFor(desc->Name);
+			if (target.IsValid()) {
+				break;
+			}
+		}
+
+		if (!target.IsValid() || target.Format == SDL_GPU_TEXTUREFORMAT_INVALID) {
+			ENGINE_WARN("'{}' has nowhere to draw", context.Name.Text());
+			return true;
+		}
+
+		// What it samples, in the order the node declared them — which is the
+		// order the shader's binding slots are in. A resource that is not a
+		// texture this frame is skipped rather than shifting every later slot.
+		SDL_GPUTextureSamplerBinding bindings[4]{};
+		uint32_t count = 0;
+		for (const graph::ResourceId id : context.Reads) {
+			if (count >= 4) {
+				break;
+			}
+			const graph::ResourceDesc *desc = Graph.FindResource(id);
+			if (desc == nullptr || desc->Kind == graph::ResourceKind::Entities ||
+				desc->Kind == graph::ResourceKind::Camera) {
+				continue;
+			}
+
+			const NamedTexture source = TextureFor(desc->Name);
+			if (!source.IsValid()) {
+				continue;
+			}
+
+			bindings[count].texture = source.Texture;
+			bindings[count].sampler = SurfaceSampler != nullptr ? SurfaceSampler : OverlaySampler;
+			count++;
+		}
+
+		SDL_GPUGraphicsPipeline *pipeline = PipelineForShader(core::Name(*shader), target.Format, count);
+		if (pipeline == nullptr) {
+			return true;
+		}
+
+		ENGINE_PROFILE_CAT("raster pass", core::ProfileCategory::Render);
+		CurrentFrame.Recorder->Enter(context.Kind);
+
+		SDL_GPUCommandBuffer *command = CurrentFrame.Command;
+
+		SDL_GPUColorTargetInfo colour{};
+		colour.texture = target.Texture;
+		colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
+		colour.load_op = SDL_GPU_LOADOP_CLEAR;
+		colour.store_op = SDL_GPU_STOREOP_STORE;
+		colour.cycle = true;
+
+		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+		SDL_BindGPUGraphicsPipeline(pass, pipeline);
+		if (count > 0) {
+			SDL_BindGPUFragmentSamplers(pass, 0, bindings, count);
+		}
+
+		// Three vertices, no buffer: `overlay.vert` builds the triangle.
+		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		SDL_EndGPURenderPass(pass);
+
+		CurrentFrame.Result->DrawCalls++;
+		return true;
 	}
 
 	bool Renderer::Impl::ClaimSlot(const View &view) {
@@ -5877,18 +6480,22 @@ namespace engine::render {
 			return true;
 		}
 
+		// **What this particular node was configured with.** Two `filter-tag`
+		// nodes are the same kind and filter different tags — the parameter is
+		// the difference between a kind and a node. Unset takes the value that
+		// makes the node a no-op, so one somebody dropped in and has not set up
+		// is a pass-through rather than a black frame.
+		const graph::Node *node = Graph.Find(context.Node);
+
 		if (kind == "cull-distance") {
-			// **Unconfigured, for now, and it keeps everything.** A radius is a
-			// node *parameter* and the document format has no word for one yet;
-			// zero is what `FilterByDistance` reads as "not set up", which is a
-			// no-op rather than an empty frame.
-			graph::FilterByDistance(FlowInstances, input, eye.Frame.Position, 0.0f, into);
+			const float radius = node != nullptr ? node->Number(core::Name("radius"), 0.0f) : 0.0f;
+			graph::FilterByDistance(FlowInstances, input, eye.Frame.Position, radius, into);
 			return true;
 		}
 
 		if (kind == "filter-tag") {
-			// Same: no parameter yet, so no mask, so everything matches.
-			graph::FilterByTag(FlowInstances, input, 0, into);
+			const uint32_t mask = node != nullptr ? node->Integer(core::Name("mask"), 0) : 0;
+			graph::FilterByTag(FlowInstances, input, mask, into);
 			return true;
 		}
 
