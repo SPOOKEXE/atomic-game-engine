@@ -719,18 +719,99 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       so somebody can tell "the pipeline is wrong" from "the content has not
       landed".
 
-- [ ] **The bake step, which is what is left.** A `.frag` published today routes
-      to `AssetKind::Shader`, is correctly refused as not-yet-readable, and
-      nothing turns it into a `.spv`. `shaderc` is already vendored and linked
-      into `render`, and `mono.engine/bake/` is where a mesh becomes an `.amesh`
-      — so this is a new file in a module that has four of the same shape, not a
-      new capability.
+- [x] **Compiling at runtime, which this engine already decided to do and
+      grug had not noticed.** `Renderer::CompileShader(name, glsl, stage,
+      error)`.
+
+      **A correction to what is written two bullets up.** `AddShader`'s first
+      draft said compiling is `bake`'s business and a renderer holding a
+      compiler is how a frame pays for a parse. `mono.build/MonoVendor.cmake`
+      had already settled the opposite, in writing, and for a good reason:
+
+      > *"a `ShaderScript` whose revision changed, a swapped antialias pass, a
+      > shader permutation — none of them exist at build time, so none can be
+      > compiled ahead of it."*
+
+      `libshaderc` is linked into the client **on purpose**, and
+      `render/src/ShaderCompiler.cpp` already existed. The two paths are not in
+      competition: a module published to the store is baked once and delivered
+      as SPIR-V; a shader somebody is editing has no baked form yet and will
+      have a different one a keystroke later. `AddShader` is the first,
+      `CompileShader` is the second, and both end in the same table.
+
+      **The error is returned, not logged.** Whoever typed the shader is the one
+      who can fix it, and a compiler message in a log they are not reading is a
+      message nobody gets.
+
+      Verified on a device: GLSL passed as a C string compiled, registered and
+      built a pipeline with no file anywhere; deliberately broken GLSL came back
+      with a non-empty message and no pipeline.
+
+- [x] **Live shader editing, and the document carries the shader.** A `source`
+      parameter holds GLSL; the renderer compiles it when the text changes and a
+      box in the Render Pipeline panel is where somebody types it.
+
+      **The save file is the whole pipeline, not a reference to files beside
+      it.** `AppendQuoted` already escaped newlines — it was written for names
+      and turns out to carry a shader — so a `set "source" "..."` line survives
+      a round trip byte for byte, tabs and all. Pinned by a case, because a
+      shader that came back with its whitespace rearranged would compile and
+      diff forever.
+
+      **Source wins over `shader`.** A name refers to something delivered or
+      staged; source is what somebody is typing. A node carrying both means the
+      one being edited.
+
+      **Keyed on the node and prefixed `~`**, so two nodes editing two shaders
+      do not collide and a live shader can never be confused with a delivered
+      one of the same name.
+
+      **Recompiled only when the text changes.** A compile per frame per view
+      would turn a text box into a stall, which is the whole thing live editing
+      is supposed not to be.
+
+      **The error goes under the box.** Kept on the node rather than logged
+      once: a compiler message in a log somebody is not reading, while they are
+      staring at the shader that caused it, is a message nobody gets.
+
+      Verified on a device: GLSL carried in a `RenderGraph` node compiled and
+      drew as `~live` at 1600x879, and a deliberately broken edit came back with
+      a message and no pipeline.
+
+- [ ] **The bake step, and it cannot live in `bake`.** A `.frag` published today
+      routes to `AssetKind::Shader`, is correctly refused as not-yet-readable,
+      and nothing turns it into a `.spv`.
+
+      **`bake` is `TIER shared` and links no shaderc** — `MonoVendor.cmake` gates
+      the whole vendor on `MONO_BUILD_CLIENT`, and a server configure gets none
+      of it. So does `Tool::assetc`, which wraps `bake` and is `shared` too. The
+      whole baking chain is below the tier the compiler lives at.
+
+      **`contentimport` is the one place that can link both**, and its own
+      CMakeLists already explains why that pattern exists — for `cdn`:
+
+      > *"The baking cannot move into `Mono::cdn` — its short link row is the
+      > whole point of that member and a baker is exactly the interpretation an
+      > origin must not do — so it lives in the programs that can link both."*
+
+      A shader baker is the same shape one layer along. It is a bare
+      `add_executable` with no tier, so `Vendor::shaderc` can go on its link row.
+
+      **What that costs, and it should be decided rather than discovered:**
+      `contentimport` would stop building in a server-only configure, because
+      shaderc is not configured there at all. Today it builds anywhere. Either
+      that is acceptable — it is a developer's tool and a server has no shaders
+      to publish — or the shader baking wants its own small client-tier program
+      beside it, and `contentimport` calls out to that.
+
+      Worth knowing before somebody adds `Vendor::shaderc` to `bake` and finds
+      out at the architecture check instead of at the design.
 
       **The interesting decision is includes.** A shader that `#include`s
       another is a dependency between two assets, and the manifest has no word
-      for one. Either bake resolves them and publishes a flat module — simple,
-      and a shared header edit rebuilds every shader — or the store learns about
-      dependencies, which is a bigger thing than shaders.
+      for one. Either the baker resolves them and publishes a flat module —
+      simple, and a shared header edit rebuilds every shader — or the store
+      learns about dependencies, which is a bigger thing than shaders.
 
       **Split deliberately.** The seam above is the half that had to be in
       `render` and is now done and proven; the half that is left is content

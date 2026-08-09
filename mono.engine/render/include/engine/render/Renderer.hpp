@@ -14,6 +14,7 @@
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/render/Readback.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
@@ -695,10 +696,14 @@ namespace engine::render {
 		// of delivering one means it; the staged directory stays as the
 		// developer path and the fallback.
 		//
-		// **SPIR-V, not source.** Compiling is `bake`'s business and happens
-		// once, off the machine that is drawing — the renderer holding a shader
-		// compiler for content it did not write is how a frame ends up paying
-		// for a parse.
+		// **SPIR-V, because this is the *delivered* path.** A module published
+		// to the content store is compiled once, off the machine that is
+		// drawing. That is not the only path and was never meant to be: this
+		// engine links `libshaderc` into the client deliberately, because a
+		// shader somebody is editing in the studio, a permutation, or a swapped
+		// pass does not exist at build time and cannot be compiled ahead of it.
+		// `CompileShader` is that half — see `render::ShaderCompiler`, which
+		// this header's first draft managed not to notice.
 		//
 		// @param name  The name a node's `shader` parameter gives.
 		// @param spirv The compiled module. Copied. Empty is refused.
@@ -716,6 +721,42 @@ namespace engine::render {
 		// found without this saying so. It answers only whether somebody handed
 		// the bytes over.
 		bool HasShader(const core::Name &name) const;
+
+		// Compiles GLSL and registers the result under a name.
+		//
+		// **The half `AddShader` is not.** A shader being edited in the studio
+		// has no baked form yet and will have a different one a keystroke later,
+		// so compiling it here is the point rather than a compromise —
+		// `mono.build/MonoVendor.cmake` says exactly this about why `libshaderc`
+		// is linked into the client at all.
+		//
+		// **The error is returned rather than logged.** Whoever typed the shader
+		// is the one who can fix it, and a compiler message in a log they are
+		// not reading is a message nobody gets. See
+		// `ShaderCompilation::Error`.
+		//
+		// @param name   What a node's `shader` parameter will give.
+		// @param source The GLSL.
+		// @param stage  Which stage it is.
+		// @param error  Filled with the compiler's message when it fails.
+		// @return Whether it compiled and was registered.
+		//
+		// @since v0.11
+		// What a node's live shader last failed to compile with.
+		//
+		// **Beside the text somebody typed, not in a log.** A shader carried as
+		// a node's `source` parameter is recompiled when the text changes; this
+		// is what that compile said, kept so a panel can put it under the box.
+		//
+		// @param node The node's name.
+		// @return The compiler's message, or empty when it compiled or has no
+		//         source.
+		//
+		// @since v0.11
+		std::string_view ShaderError(const core::Name &node) const;
+
+		bool
+		CompileShader(const core::Name &name, std::string_view source, ShaderStage stage, std::string &error);
 
 		// How long animation has been running, for anything played on a clock.
 		//

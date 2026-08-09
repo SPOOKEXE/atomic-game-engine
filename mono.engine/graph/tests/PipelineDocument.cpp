@@ -571,3 +571,46 @@ TEST_CASE("a parameter with no node before it is refused", "[graph][document]") 
 	Name offender;
 	CHECK(Build(document, graph, offender) == PipelineDocumentStatus::UnknownName);
 }
+
+TEST_CASE("a parameter can carry a multi-line shader", "[graph][document]") {
+	// **The quoting already escapes newlines**, which is what makes a pipeline
+	// document able to carry the shader as well as the shape of a frame. A
+	// shader somebody is editing has no baked form and will have a different one
+	// a keystroke later — keeping it in the node is what makes the save file the
+	// whole pipeline rather than a reference to files beside it.
+	const std::string glsl = "#version 450\n"
+							 "layout(location = 0) in vec2 inUv;\n"
+							 "layout(location = 0) out vec4 outColour;\n"
+							 "void main() {\n"
+							 "\toutColour = vec4(inUv, 0.0, 1.0);\n"
+							 "}\n";
+
+	PipelineDocument document;
+	document.Record(Edit{.Kind = EditKind::AddResource, .Name = Name("colour")});
+	document.Record(Edit{.Kind = EditKind::AddNode, .Name = Name("tint"), .NodeKind = Name("raster")});
+	document.Record(Edit{.Kind = EditKind::Set, .Key = Name("source"), .Value = glsl});
+	document.Record(Edit{.Kind = EditKind::Writes, .Target = Name("colour")});
+
+	const std::string text = Write(document);
+	INFO(text);
+
+	// One line per edit, whatever the shader looks like — a newline that reached
+	// the file raw would make the next line of GLSL read as a document word.
+	CHECK(text.find("\n#version") == std::string::npos);
+
+	PipelineDocument read;
+	Name offender;
+	REQUIRE(Read(text, read, offender) == PipelineDocumentStatus::Ok);
+	CHECK(Write(read) == text);
+
+	RenderGraph graph;
+	REQUIRE(Build(read, graph, offender) == PipelineDocumentStatus::Ok);
+
+	const engine::graph::Node *node = graph.Find(engine::graph::NodeId{1});
+	REQUIRE(node != nullptr);
+	REQUIRE(node->Parameter(Name("source")) != nullptr);
+
+	// Byte for byte, tabs and all: a shader that came back with its whitespace
+	// rearranged would compile and diff forever.
+	CHECK(*node->Parameter(Name("source")) == glsl);
+}

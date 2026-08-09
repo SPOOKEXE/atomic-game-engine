@@ -729,6 +729,68 @@ namespace studio {
 			}
 		};
 
+		// **The shader itself, for the kinds that run one.** A `source`
+		// parameter is GLSL carried in the pipeline document — it survives a
+		// save, it is what somebody is typing, and the renderer recompiles it
+		// when the text changes rather than every frame.
+		//
+		// **It wins over `shader`**, which names something already delivered or
+		// staged. A node with both means the one being edited.
+		if (node->Kind == Name("raster") || node->Kind == Name("dispatch")) {
+			std::string source;
+			for (const engine::graph::NodeParameter &parameter : node->Parameters) {
+				if (parameter.Key == Name("source")) {
+					source = parameter.Value;
+					break;
+				}
+			}
+
+			// Generous, and grown rather than clipped: a shader that lost its
+			// tail at a fixed size would compile and be wrong.
+			std::vector<char> buffer(std::max<size_t>(source.size() * 2 + 1, 4096));
+			std::memcpy(buffer.data(), source.data(), source.size());
+
+			if (ImGui::InputTextMultiline(
+					"##shader-source",
+					buffer.data(),
+					buffer.size(),
+					ImVec2{-1.0f, 200.0f},
+					ImGuiInputTextFlags_AllowTabInput
+				)) {
+				const std::string typed(buffer.data());
+				auto &parameters = node->Parameters;
+				const auto at = std::find_if(
+					parameters.begin(),
+					parameters.end(),
+					[](const engine::graph::NodeParameter &parameter) {
+						return parameter.Key == Name("source");
+					}
+				);
+
+				if (typed.empty()) {
+					if (at != parameters.end()) {
+						parameters.erase(at);
+					}
+				} else if (at != parameters.end()) {
+					at->Value = typed;
+				} else {
+					parameters.push_back(engine::graph::NodeParameter{Name("source"), typed});
+				}
+			}
+
+			// **Under the box, where the person who typed it is looking.** A
+			// compiler message in a log they are not reading is a message nobody
+			// gets.
+			const std::string_view failure = Renderer.ShaderError(node->Name);
+			if (!failure.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{0.95f, 0.5f, 0.4f, 1.0f});
+				ImGui::TextWrapped("%.*s", static_cast<int>(failure.size()), failure.data());
+				ImGui::PopStyleColor();
+			} else if (!source.empty()) {
+				ImGui::TextDisabled("compiled");
+			}
+		}
+
 		bool any = false;
 		for (const auto &offer : OFFERS) {
 			if (node->Kind == Name(offer.Kind)) {

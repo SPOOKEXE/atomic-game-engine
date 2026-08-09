@@ -991,6 +991,45 @@ namespace engine::render {
 		// the afternoon on.
 		void ForgetPipelinesFor(core::Name shader);
 
+		// A shader a node carries the source of, compiled and kept.
+		//
+		// **The live-editing half.** A `source` parameter is GLSL in the
+		// pipeline document — it survives a save, it is what somebody is typing,
+		// and it is recompiled only when the text changes.
+		//
+		// @since v0.11
+		struct LiveShader {
+			core::Name Key;
+			std::string Source;
+			std::string Error;
+			bool Failed = false;
+		};
+
+		std::vector<LiveShader> LiveShaders;
+
+		// Which shader a node means, compiling its source if it carries one.
+		//
+		// @param node  The node.
+		// @param pass  Its name, for a diagnostic.
+		// @param stage Which stage the kind implies.
+		// @return The name to build a pipeline for, or an invalid one when there
+		//         is nothing to draw with.
+		core::Name ShaderOf(const graph::Node &node, core::Name pass, ShaderStage stage);
+
+		// Compiles a live shader and registers it under a key.
+		bool CompileLive(core::Name key, std::string_view source, ShaderStage stage, std::string &error);
+
+		// What a live shader's last compile said, or empty.
+		std::string_view LiveError(core::Name node) const {
+			const core::Name key(std::string("~") + std::string(node.Text()));
+			for (const LiveShader &live : LiveShaders) {
+				if (live.Key == key) {
+					return live.Error;
+				}
+			}
+			return {};
+		}
+
 		// The bytes for a shader name: supplied first, then the staged file.
 		//
 		// @param name Which shader.
@@ -3859,6 +3898,33 @@ namespace engine::render {
 		return true;
 	}
 
+	std::string_view Renderer::ShaderError(const core::Name &node) const {
+		return State != nullptr ? State->LiveError(node) : std::string_view{};
+	}
+
+	bool Renderer::CompileShader(
+		const core::Name &name, std::string_view source, ShaderStage stage, std::string &error
+	) {
+		error.clear();
+		if (State == nullptr || !name.IsValid() || source.empty()) {
+			error = "no shader to compile";
+			return false;
+		}
+
+		ShaderCompiler compiler;
+		const ShaderCompilation result = compiler.Compile(source, stage, name.Text());
+		if (result.Failed) {
+			// **Handed back, not logged.** Whoever typed the shader is the one
+			// who can fix it, and a compiler message in a log they are not
+			// reading is a message nobody gets.
+			error = result.Error;
+			return false;
+		}
+
+		const auto *first = reinterpret_cast<const std::byte *>(result.SpirV.data());
+		return AddShader(name, {first, result.SpirV.size() * sizeof(uint32_t)});
+	}
+
 	bool Renderer::HasShader(const core::Name &name) const {
 		if (State == nullptr) {
 			return false;
@@ -4903,9 +4969,8 @@ namespace engine::render {
 			return true;
 		}
 
-		const std::string *shader = node->Parameter(core::Name("shader"));
-		if (shader == nullptr || shader->empty()) {
-			ENGINE_WARN("'{}' has no shader set, so it computes nothing", context.Name.Text());
+		const core::Name shader = ShaderOf(*node, context.Name, ShaderStage::Compute);
+		if (!shader.IsValid()) {
 			return true;
 		}
 
@@ -4958,7 +5023,7 @@ namespace engine::render {
 			return true;
 		}
 
-		SDL_GPUComputePipeline *pipeline = ComputeForShader(core::Name(*shader), samplers, 1, groupX, groupY);
+		SDL_GPUComputePipeline *pipeline = ComputeForShader(shader, samplers, 1, groupX, groupY);
 		if (pipeline == nullptr) {
 			return true;
 		}
@@ -4995,6 +5060,83 @@ namespace engine::render {
 		return true;
 	}
 
+	core::Name Renderer::Impl::ShaderOf(const graph::Node &node, core::Name pass, ShaderStage stage) {
+		// **Source on the node wins over a name.** A shader somebody is editing
+		// has no baked form and will have a different one a keystroke later; a
+		// name refers to something already delivered or staged. When a node
+		// carries both, the thing being typed is the thing they mean.
+		const std::string *source = node.Parameter(core::Name("source"));
+		if (source == nullptr || source->empty()) {
+			const std::string *named = node.Parameter(core::Name("shader"));
+			if (named == nullptr || named->empty()) {
+				ENGINE_WARN("'{}' has no shader set, so it draws nothing", pass.Text());
+				return {};
+			}
+			return core::Name(*named);
+		}
+
+		// **Keyed on the node**, so two nodes editing two shaders do not
+		// collide, and prefixed so a live shader can never be confused with a
+		// delivered one of the same name.
+		const core::Name key(std::string("~") + std::string(node.Name.Text()));
+
+		for (LiveShader &live : LiveShaders) {
+			if (live.Key != key) {
+				continue;
+			}
+
+			// **Recompiled only when the text changed.** A compile per frame per
+			// view would turn a text box into a stall, and the whole point of
+			// editing one live is that it does not.
+			if (live.Source == *source) {
+				return live.Failed ? core::Name{} : key;
+			}
+
+			live.Source = *source;
+			live.Failed = !CompileLive(key, *source, stage, live.Error);
+			return live.Failed ? core::Name{} : key;
+		}
+
+		LiveShader live;
+		live.Key = key;
+		live.Source = *source;
+		live.Failed = !CompileLive(key, *source, stage, live.Error);
+		LiveShaders.push_back(live);
+		return live.Failed ? core::Name{} : key;
+	}
+
+	bool Renderer::Impl::CompileLive(
+		core::Name key, std::string_view source, ShaderStage stage, std::string &error
+	) {
+		error.clear();
+
+		ShaderCompiler compiler;
+		const ShaderCompilation result = compiler.Compile(source, stage, key.Text());
+		if (result.Failed) {
+			// **Kept rather than logged once and lost.** A panel shows this
+			// beside the text somebody typed; a log line scrolls away while they
+			// are still looking at the shader that caused it.
+			error = result.Error;
+			ENGINE_WARN("shader '{}' did not compile", key.Text());
+			return false;
+		}
+
+		const auto *first = reinterpret_cast<const uint8_t *>(result.SpirV.data());
+		const std::vector<uint8_t> spirv(first, first + result.SpirV.size() * sizeof(uint32_t));
+
+		for (SuppliedShader &supplied : Shaders) {
+			if (supplied.Name == key) {
+				supplied.Spirv = spirv;
+				ForgetPipelinesFor(key);
+				return true;
+			}
+		}
+
+		Shaders.push_back(SuppliedShader{key, spirv});
+		ForgetPipelinesFor(key);
+		return true;
+	}
+
 	bool Renderer::Impl::SubmitRaster(const graph::RunContext &context) {
 		const graph::Node *node = Graph.Find(context.Node);
 		if (node == nullptr) {
@@ -5004,9 +5146,8 @@ namespace engine::render {
 		// **A node with no shader draws nothing rather than refusing.** A
 		// pipeline being edited has half-configured nodes in it constantly, and
 		// taking the window down for one is not a diagnostic.
-		const std::string *shader = node->Parameter(core::Name("shader"));
-		if (shader == nullptr || shader->empty()) {
-			ENGINE_WARN("'{}' has no shader set, so it draws nothing", context.Name.Text());
+		const core::Name shader = ShaderOf(*node, context.Name, ShaderStage::Fragment);
+		if (!shader.IsValid()) {
 			return true;
 		}
 
@@ -5055,7 +5196,7 @@ namespace engine::render {
 			count++;
 		}
 
-		SDL_GPUGraphicsPipeline *pipeline = PipelineForShader(core::Name(*shader), target.Format, count);
+		SDL_GPUGraphicsPipeline *pipeline = PipelineForShader(shader, target.Format, count);
 		if (pipeline == nullptr) {
 			return true;
 		}
