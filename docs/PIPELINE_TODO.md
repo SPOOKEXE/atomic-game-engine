@@ -797,12 +797,35 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       A shader baker is the same shape one layer along. It is a bare
       `add_executable` with no tier, so `Vendor::shaderc` can go on its link row.
 
-      **What that costs, and it should be decided rather than discovered:**
-      `contentimport` would stop building in a server-only configure, because
-      shaderc is not configured there at all. Today it builds anywhere. Either
-      that is acceptable — it is a developer's tool and a server has no shaders
-      to publish — or the shader baking wants its own small client-tier program
-      beside it, and `contentimport` calls out to that.
+      **The cost, and it has been decided: client and studio only.**
+      `contentimport` stops building in a server-only configure, because shaderc
+      is not configured there. That is accepted, and the reason is stronger than
+      "a server has no shaders":
+
+      **A server already carries shaders and always will.** `AssetKind::Shader`
+      is in `assets`, which is `TIER shared`; so is `delivery`. An origin serves
+      shader bytes exactly as it serves a mesh it never triangulates — moving
+      bytes it does not interpret is `cdn`'s stated job. Replication of shaders
+      needs no shaderc and no renderer, and works today.
+
+      What a server has is **nothing to compile them with and nothing to draw
+      them on, by design.** `render` is `TIER client`,
+      `MONO_TIER_ALLOWS_server` is `shared server`, and
+      `just check-server-is-headless` fails the build if a server preset stages
+      a `shaders/` directory. The property being protected is that a dedicated
+      server runs in a container with no Vulkan at all.
+
+      So `Vendor::shaderc` goes on `contentimport`'s link row and the baking
+      lives there, beside the mesh and texture baking it already does — a
+      publish-time operation on a developer's machine, which is what it always
+      was.
+
+      **And headless rendering is not the missing piece it looks like.**
+      Screenshots without a display already work — `studio --headless --capture`
+      is what has verified every step of this document. That is a GPU without a
+      window. Rendering without a *GPU* is a different and much larger thing,
+      and trading the tier rule away for it would buy a screenshot the studio
+      already takes.
 
       Worth knowing before somebody adds `Vendor::shaderc` to `bake` and finds
       out at the architecture check instead of at the design.
