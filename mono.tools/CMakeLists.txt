@@ -18,7 +18,22 @@ add_subdirectory(scriptcheck)
 add_subdirectory(mcpbridge)
 
 # Brings files into the local content store.
-add_subdirectory(contentimport)
+#
+# **Client-gated, because it links `shaderc` and `MonoVendor.cmake` configures
+# shaderc only when `MONO_BUILD_CLIENT` is on.** Its own `CMakeLists.txt` states
+# the decision that put it there — compiling GLSL to SPIR-V at publish time
+# belongs in a program that can link both the baker and the origin, and "this
+# program no longer builds in a server-only configure. That is correct."
+#
+# What was missing is this line. The decision was recorded and the target was
+# still added unconditionally, so `--preset server` and `--preset cdn` both
+# configured a target whose `#include <shaderc/shaderc.hpp>` cannot resolve and
+# failed at compile time — a build break rather than the deliberate absence the
+# comment describes. Absent is what "does not build there" should look like,
+# the same way `mono.studio` is absent above rather than stubbed.
+if(MONO_BUILD_CLIENT)
+	add_subdirectory(contentimport)
+endif()
 
 # Line counter.
 add_subdirectory(linecount)

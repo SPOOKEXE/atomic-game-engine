@@ -89,13 +89,13 @@ namespace engine::delivery {
 	// @since v0.9
 	struct Source {
 		// Display name used by logs and preferences.
-		std::string Name;
+		std::string Name = {};
 
 		// Source type.
 		SourceKind Kind = SourceKind::Http;
 
 		// Directory path or `host:port`.
-		std::string Location;
+		std::string Location = {};
 
 		// Whether the client tries this source.
 		bool Enabled = true;
@@ -113,7 +113,7 @@ namespace engine::delivery {
 		// and what it does not buy.
 		//
 		// @since v0.10
-		std::string IngestKey;
+		std::string IngestKey = {};
 
 		// Returns false for an empty name or location, or an invalid HTTP location.
 		bool IsValid() const;

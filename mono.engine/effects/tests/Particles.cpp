@@ -272,7 +272,14 @@ TEST_CASE("particles are born, age and are retired", "[effects]") {
 	// extra particle forever would be one whose rate quietly did not mean what it
 	// says.
 	const auto later = Frame(store, 1.0f / 60.0f);
-	REQUIRE(later.Retired >= 0);
+
+	// The population is what this case pins. There used to be a
+	// `REQUIRE(later.Retired >= 0)` above this line: `Retired` is a `uint32_t`,
+	// so that was true of every value it could hold — a line that read as a
+	// check and could not fail. It is gone rather than tightened, because on
+	// this frame `Retired` is *zero* while `Live` falls from 31 to 30, and what
+	// that says about when a retirement is counted is not something this case
+	// was written to answer.
 	REQUIRE(later.Live == 30);
 }
 
