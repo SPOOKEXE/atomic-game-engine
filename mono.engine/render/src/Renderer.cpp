@@ -1,3 +1,5 @@
+#include "VulkanTimestamps.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
@@ -649,6 +651,58 @@ namespace engine::render {
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Device = nullptr;
 
+		VulkanTimestamps Timestamps;
+
+		// One pass's pair of marks, waiting for the GPU to reach them.
+		struct PassMarks {
+			core::Name Name;
+			uint32_t Opened = 0;
+			uint32_t Closed = 0;
+		};
+
+		// This frame's pairs, and the last frame's answers.
+		//
+		// **Two collections because they are a frame apart.** A timestamp is
+		// readable only once the GPU has passed it, so the pairs recorded now
+		// are resolved on a later frame — and a panel wants a number every
+		// frame, not a number every time one happens to be ready.
+		std::vector<PassMarks> PendingMarks;
+		std::vector<PassMarks> InFlightMarks;
+		std::unordered_map<uint32_t, double> PassMicroseconds;
+
+		// Turns the frame-before-last's marks into microseconds per pass.
+		//
+		// **Nothing is published unless the whole frame resolved.** A partial
+		// read would mix this frame's numbers with the last one's, and a pass
+		// whose cost jumps because it was read early is worse than one that
+		// keeps saying "not measured" for another frame.
+		void CollectTimestamps() {
+			if (InFlightMarks.empty() || !Timestamps.Ready()) {
+				return;
+			}
+
+			uint32_t highest = 0;
+			for (const PassMarks &marks : InFlightMarks) {
+				highest = std::max(highest, std::max(marks.Opened, marks.Closed));
+			}
+
+			double times[VulkanTimestamps::MARKS]{};
+			if (!Timestamps.Read(times, highest + 1)) {
+				return;
+			}
+
+			PassMicroseconds.clear();
+			for (const PassMarks &marks : InFlightMarks) {
+				// **Accumulated, not assigned.** One pass name can run several
+				// times in a frame — once per view — and what a profile wants is
+				// what that pass cost the frame rather than what its last view
+				// cost.
+				PassMicroseconds[marks.Name.Id()] +=
+					VulkanTimestamps::Between(times, marks.Opened, marks.Closed) / 1000.0;
+			}
+			InFlightMarks.clear();
+		}
+
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
 
 		// The same geometry and the same shaders as the opaque pipeline, with
@@ -1012,6 +1066,15 @@ namespace engine::render {
 				State.CurrentFrame.Result = &result;
 				State.CurrentFrame.Recorder = &recorder;
 				State.CurrentFrame.Swapchain = swapchain;
+
+				// **Last frame's marks are read before this frame's are
+				// recorded**, and in that order for a reason: the read is
+				// non-blocking, so asking after the reset would find a pool the
+				// GPU is about to be told to clear.
+				State.CollectTimestamps();
+				State.Timestamps.Begin(command);
+				State.InFlightMarks = std::move(State.PendingMarks);
+				State.PendingMarks.clear();
 			}
 
 			~FrameScope() {
@@ -3843,6 +3906,11 @@ namespace engine::render {
 			return false;
 		}
 
+		// **Per-pass GPU time, when this device can give it.** Dormant and
+		// silent when it cannot — see `VulkanTimestamps` for what it reaches
+		// into and what that costs.
+		(void)State->Timestamps.Probe(State->Device);
+
 		if (window != nullptr && !SDL_ClaimWindowForGPUDevice(State->Device, window)) {
 			ENGINE_ERROR("SDL_ClaimWindowForGPUDevice: {}", SDL_GetError());
 			Shutdown();
@@ -4501,6 +4569,15 @@ namespace engine::render {
 		return false;
 	}
 
+	const std::unordered_map<uint32_t, double> &Renderer::PassTimings() const {
+		static const std::unordered_map<uint32_t, double> NONE_MEASURED;
+		return State != nullptr ? State->PassMicroseconds : NONE_MEASURED;
+	}
+
+	bool Renderer::Timed() const {
+		return State != nullptr && State->Timestamps.Ready();
+	}
+
 	std::vector<core::Name> Renderer::Pipelines() const {
 		std::vector<core::Name> names;
 		if (State == nullptr) {
@@ -4775,7 +4852,16 @@ namespace engine::render {
 			GroupOpen = true;
 		}
 
+		// **A mark either side, on the same command buffer the pass records
+		// into.** The pair is kept rather than the duration, because the GPU has
+		// not run any of this yet — the times are read a frame or more later,
+		// once the queries have actually resolved.
+		const uint32_t opened = State.Timestamps.Mark(command);
 		const bool ran = Inner.Run(context);
+		const uint32_t closed = State.Timestamps.Mark(command);
+		if (opened < VulkanTimestamps::MARKS && closed < VulkanTimestamps::MARKS) {
+			State.PendingMarks.push_back(Impl::PassMarks{context.Name, opened, closed});
+		}
 
 		// **Closed when the render pass is**, not when the node is. `opaque`
 		// returns with its pass still open and `transparent` draws into the same

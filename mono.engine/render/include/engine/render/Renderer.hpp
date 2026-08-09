@@ -1145,6 +1145,31 @@ namespace engine::render {
 		// Every pipeline name this renderer can run.
 		std::vector<core::Name> Pipelines() const;
 
+		// What each pass cost the GPU last frame, in microseconds.
+		//
+		// **Empty when this device cannot measure**, which a caller must show as
+		// "not measured" rather than as zero. `D00103` is why that is a real
+		// state: SDL exposes no timestamp query, so the numbers come from
+		// reaching into its Vulkan backend and every other backend has nothing.
+		//
+		// **A pass that ran several times is the sum of its runs**, because what
+		// a profile is asked is what a pass cost the frame — not what its last
+		// view cost.
+		//
+		// Keyed by `core::Name::Id`, and lagging by a frame or two: a timestamp
+		// is readable only once the GPU has passed it, and blocking to make the
+		// number current would serialise the CPU against the GPU to report how
+		// fast the GPU is.
+		//
+		// @return Name id to microseconds. Valid until the next `Render`.
+		const std::unordered_map<uint32_t, double> &PassTimings() const;
+
+		// Whether per-pass GPU time is being measured at all.
+		//
+		// **Separate from `PassTimings` being empty**, which is also what a
+		// measured frame looks like before the first read resolves.
+		bool Timed() const;
+
 		// Goes back to `graph::StandardGraph`, and forgets every named
 		// pipeline.
 		void ResetPipeline();

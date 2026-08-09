@@ -57,5 +57,14 @@ mono_add_library(render
 	VENDOR SDL3::SDL3 shaderc
 
 	# Atlas headers only; no imgui library is linked.
-	VENDOR_INCLUDES ${CMAKE_SOURCE_DIR}/mono.vendor/imgui
+	#
+	# **The Khronos headers come from SDL's own copy**, not from a system Vulkan
+	# SDK, so a machine with no SDK still builds. `VulkanTimestamps.cpp` needs
+	# the real `VkPhysicalDeviceProperties2KHR` because its *size* is the offset
+	# to the field it wants — see the file for why that is the arrangement and
+	# what it costs. Nothing links a Vulkan library: every entry point is loaded
+	# through `SDL_Vulkan_GetVkGetInstanceProcAddr`.
+	VENDOR_INCLUDES
+		${CMAKE_SOURCE_DIR}/mono.vendor/imgui
+		${CMAKE_SOURCE_DIR}/mono.vendor/sdl/src/video/khronos
 )

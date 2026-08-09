@@ -448,22 +448,27 @@ blocked: no amount of work here moves it.
       draw to a node. That is the *readable capture* half of §7; the *numbers*
       half needs an API that does not exist.
 
-**`ProfilePass::Elapsed` stays zero, and that is `D00103` rather than an open
-box here.** SDL 3.2.31 — what `mono.vendor/sdl` is pinned to — has no timestamp
-query, no query pool and no `SDL_GPUQuery`, verified in the header and in the
-Vulkan backend rather than assumed. There is no call to make, so no amount of
-work in this repository moves it and a checkbox would only invite an attempt
-that cannot succeed.
+**`ProfilePass::Elapsed` carries real microseconds on Vulkan**, and the grid
+shows them per pass. SDL 3.2.31 still has no timestamp query — verified in the
+header and in the backend — so `VulkanTimestamps` mirrors the first few fields
+of two SDL-internal structs and casts the pointers the renderer already holds,
+loading the entry points through `SDL_Vulkan_GetVkGetInstanceProcAddr`, which is
+the one supported part of the arrangement.
 
-**Do not fill it with CPU time.** A submit-side number in a field labelled as
-the pass's cost is worse than a blank: somebody reads "0.4 ms" for the shadow
-pass, believes the GPU said it, and spends an afternoon optimising the wrong
-thing.
+**Marks at the bottom of pipe, read a frame later, never blocking.** Waiting on
+a timestamp would serialise the CPU against the GPU in order to report how fast
+the GPU is — the classic way a profiler becomes the thing it measures.
 
-The two ways out are an upstream SDL release, or repointing the submodule at a
-fork this project maintains — the second being an infrastructure decision with a
-rebase burden forever, which is why it is recorded with its trigger rather than
-attempted.
+**And still not CPU time.** A device that cannot measure, a backend that is not
+Vulkan, and a pass whose queries have not resolved all leave `Elapsed` at zero
+and all read as "not measured". The panel distinguishes "not measured" from "not
+measured yet" so the two are not confused, but neither is ever a number the GPU
+did not say.
+
+`D00103` carries what this costs: the layouts are pinned to one SDL version and
+guarded by a plausibility check that gives up rather than reading a wild
+pointer, it is Vulkan only, and it is deleted rather than ported if SDL ever
+ships the feature.
 
 ### Stage 9 — the entity flow: what a pass draws, as a wire
 

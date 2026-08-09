@@ -942,10 +942,25 @@ namespace studio {
 			SDL_GetWindowSizeInPixels(Window, &width, &height);
 		}
 
-		const engine::graph::PipelineProfile profile = engine::graph::ProfilePipeline(
+		engine::graph::PipelineProfile profile = engine::graph::ProfilePipeline(
 			graph, compiled, static_cast<uint32_t>(std::max(width, 1)),
 			static_cast<uint32_t>(std::max(height, 1))
 		);
+
+		// **The measured cost, over the predicted layout.** `ProfilePipeline` is
+		// arithmetic over the graph and knows nothing about a device; this is
+		// what the GPU actually spent, matched to it by name. A pass the
+		// renderer has no number for keeps `Elapsed` at zero, which the grid
+		// already shows as "not measured" — so a device that cannot time, a
+		// pipeline the renderer is not running, and a pass that has not resolved
+		// yet all read the same and all read honestly.
+		const auto &timings = Renderer.PassTimings();
+		for (engine::graph::ProfilePass &pass : profile.Passes) {
+			const auto found = timings.find(pass.Name.Id());
+			if (found != timings.end()) {
+				pass.Elapsed = found->second;
+			}
+		}
 
 		const auto megabytes = [](uint64_t bytes) {
 			return static_cast<double>(bytes) / (1024.0 * 1024.0);
@@ -1119,7 +1134,9 @@ namespace studio {
 							"%s\n%s %s\n%s",
 							std::string(profile.Passes[column].Name.Text()).c_str(),
 							engine::graph::Describe(profile.Passes[column].Where),
-							profile.Passes[column].Elapsed > 0.0 ? "" : "(not measured)",
+							profile.Passes[column].Elapsed > 0.0
+								? std::format("— {:.3f} ms", profile.Passes[column].Elapsed / 1000.0).c_str()
+								: (Renderer.Timed() ? "(not measured yet)" : "(not measured)"),
 							access == engine::graph::Access::None
 								? (live ? "alive, untouched" : "not allocated")
 								: engine::graph::Describe(access)
