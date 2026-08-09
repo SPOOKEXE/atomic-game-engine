@@ -41,6 +41,19 @@ REM lasts exactly as long as the build and never leaks into your shell.
 REM
 REM x64 host, x64 target. Nothing here cross-compiles, and neither does the
 REM engine.
+REM
+REM --- Two parsing rules this file is shaped around --------------------------
+REM
+REM cmd expands every percent on a line before it evaluates any condition on
+REM that line. A `:~` substring of a variable that does not exist therefore
+REM cannot be guarded by an `if defined` in front of it: the expansion has
+REM already failed, the percents are stripped, and what is left is not a valid
+REM command. "The syntax of the command is incorrect." Skipping such a line
+REM with goto is the guard that works, because a skipped line is never parsed.
+REM
+REM The same up-front expansion covers a whole `( ... )` block at once, so an
+REM unquoted path holding `(x86)` ends the block at its own `)`. Nothing here
+REM uses those blocks now, and every path in an echo is quoted regardless.
 
 setlocal EnableExtensions
 
@@ -66,8 +79,17 @@ REM VSINSTALLDIR is already set if the caller is a Developer Command Prompt.
 REM Believe it rather than searching for a second opinion that may differ from
 REM the environment the rest of this shell is already carrying.
 set "VSPATH="
-if defined VSINSTALLDIR set "VSPATH=%VSINSTALLDIR%"
-if defined VSPATH if "%VSPATH:~-1%"=="\" set "VSPATH=%VSPATH:~0,-1%"
+if not defined VSINSTALLDIR goto :no_devprompt
+set "VSPATH=%VSINSTALLDIR%"
+REM Reached only when VSPATH holds something. That matters: `set "VSPATH="`
+REM deletes the variable rather than emptying it, and a :~ substring on a
+REM variable that does not exist does not expand to "" - cmd cannot pair the
+REM percent signs, strips them, and leaves `if "~-1VSPATH:~0,-1"` behind. An
+REM `if defined VSPATH` guard on the same line does not help, because every
+REM percent on a line is expanded before any condition on it is evaluated.
+REM Skipping the line with goto is what keeps it from being parsed at all.
+if "%VSPATH:~-1%"=="\" set "VSPATH=%VSPATH:~0,-1%"
+:no_devprompt
 
 REM vswhere ships with the installer, not with any one install, and is the only
 REM supported way to locate them. `-products *` is load-bearing: without it
@@ -75,37 +97,43 @@ REM vswhere matches Community, Professional and Enterprise only, and returns
 REM nothing at all on a machine that has Build Tools - which is the usual
 REM machine for a build that is not also an IDE. `-requires` skips an install
 REM that has the IDE but never had the C++ compiler component added.
+REM
+REM **Exactly one pair of quotes around the vswhere path, and none around the
+REM whole command.** An outer pair looks harmless and is not: the parser pairs
+REM quotes left to right, so a leading `""` is an empty string that closes
+REM immediately and leaves the path itself unquoted. Its `(x86)` then ends the
+REM `in ( ... )` clause at its own `)`, and cmd reports `\Microsoft was
+REM unexpected at this time.` - a parse error naming the middle of a path, with
+REM nothing to say about quoting. Parens are only protected while quoted.
 set "VSWHERE=%PF86%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not defined VSPATH if exist "%VSWHERE%" for /f "usebackq tokens=* delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2^>nul`) do set "VSPATH=%%I"
 
 REM And if vswhere is missing or came back empty, the default locations. Build
 REM Tools 2022 still installs under Program Files (x86) on most machines while
 REM the IDE editions moved to Program Files, so both roots are worth a look.
-if not defined VSPATH (
-    for %%R in ("%PF64%" "%PF86%") do (
-        for %%Y in (2022 2019) do (
-            for %%E in (BuildTools Community Professional Enterprise) do (
-                if not defined VSPATH if exist "%%~R\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat" set "VSPATH=%%~R\Microsoft Visual Studio\%%Y\%%E"
-            )
-        )
-    )
-)
+REM
+REM Written as chained `do` rather than nested `( ... )` blocks: the loop bodies
+REM expand paths that contain `(x86)`, and chaining keeps the parser from having
+REM any block depth to lose count of.
+if defined VSPATH goto :vspath_done
+for %%R in ("%PF64%" "%PF86%") do for %%Y in (2022 2019) do for %%E in (BuildTools Community Professional Enterprise) do if not defined VSPATH if exist "%%~R\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat" set "VSPATH=%%~R\Microsoft Visual Studio\%%Y\%%E"
+:vspath_done
 
-if not defined VSPATH (
-    >&2 echo no Visual Studio C++ toolchain found.
-    >&2 echo   Install "Desktop development with C++" - the Build Tools alone are
-    >&2 echo   enough, no IDE required. CONTRIBUTING.md lists the prerequisites.
-    exit /b 1
-)
+if defined VSPATH goto :vs_found
+>&2 echo no Visual Studio C++ toolchain found.
+>&2 echo   Install "Desktop development with C++" - the Build Tools alone are
+>&2 echo   enough, no IDE required. CONTRIBUTING.md lists the prerequisites.
+exit /b 1
+:vs_found
 
 set "VCVARS=%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
-if not exist "%VCVARS%" (
-    >&2 echo found Visual Studio at %VSPATH%, but no x64 compiler in it:
-    >&2 echo   %VCVARS%
-    >&2 echo   The install is missing the "MSVC v143 - VS 2022 C++ x64/x86 build
-    >&2 echo   tools" component. Add it in the Visual Studio Installer.
-    exit /b 1
-)
+if exist "%VCVARS%" goto :vcvars_found
+>&2 echo found Visual Studio at "%VSPATH%", but no x64 compiler in it:
+>&2 echo   "%VCVARS%"
+>&2 echo   The install is missing the "MSVC v143 - VS 2022 C++ x64/x86 build
+>&2 echo   tools" component. Add it in the Visual Studio Installer.
+exit /b 1
+:vcvars_found
 
 REM VSCMD_VER is set by vcvars and by every Developer Command Prompt. Running
 REM vcvars a second time in a shell that has it appends another copy of the
@@ -117,13 +145,13 @@ if not defined VSCMD_VER call "%VCVARS%" >nul
 
 REM vcvars exits 0 in some partial-install cases having printed its complaint
 REM and set nothing. Check the variable that matters rather than the exit code.
-if not defined INCLUDE (
-    >&2 echo vcvars64.bat ran but set no INCLUDE, so the compiler would report
-    >&2 echo   "Cannot open include file: 'cstddef'" on the first file it read.
-    >&2 echo   Run it on its own to see what it is complaining about:
-    >&2 echo   "%VCVARS%"
-    exit /b 1
-)
+if defined INCLUDE goto :include_ok
+>&2 echo vcvars64.bat ran but set no INCLUDE, so the compiler would report
+>&2 echo   "Cannot open include file: 'cstddef'" on the first file it read.
+>&2 echo   Run it on its own to see what it is complaining about:
+>&2 echo   "%VCVARS%"
+exit /b 1
+:include_ok
 
 REM --- CMake and Ninja -------------------------------------------------------
 REM
@@ -138,20 +166,20 @@ where ninja >nul 2>nul
 if errorlevel 1 if exist "%VSCMAKE%\Ninja\ninja.exe" set "PATH=%VSCMAKE%\Ninja;%PATH%"
 
 where cmake >nul 2>nul
-if errorlevel 1 (
-    >&2 echo cmake is not on PATH, and Visual Studio has no bundled copy at
-    >&2 echo   %VSCMAKE%\CMake\bin
-    >&2 echo   Install CMake 3.24 or newer, or add the "C++ CMake tools for
-    >&2 echo   Windows" component in the Visual Studio Installer.
-    exit /b 1
-)
+if not errorlevel 1 goto :cmake_ok
+>&2 echo cmake is not on PATH, and Visual Studio has no bundled copy at
+>&2 echo   "%VSCMAKE%\CMake\bin"
+>&2 echo   Install CMake 3.24 or newer, or add the "C++ CMake tools for
+>&2 echo   Windows" component in the Visual Studio Installer.
+exit /b 1
+:cmake_ok
 
 where ninja >nul 2>nul
-if errorlevel 1 (
-    >&2 echo ninja is not on PATH, and every preset generates for it.
-    >&2 echo   The "C++ CMake tools for Windows" component ships one.
-    exit /b 1
-)
+if not errorlevel 1 goto :ninja_ok
+>&2 echo ninja is not on PATH, and every preset generates for it.
+>&2 echo   The "C++ CMake tools for Windows" component ships one.
+exit /b 1
+:ninja_ok
 
 REM --- Configure and build ---------------------------------------------------
 REM
@@ -165,12 +193,12 @@ REM these two lines are not symmetrical, and the reason is in run-studio.bat:
 REM `--build --preset` reads CMakePresets.json out of the working directory and
 REM has no `-S` to say otherwise, so it works only when the script is run from
 REM the repository root. The directory is derived from the preset name anyway.
-cmake -S "%ROOT%" --preset %PRESET% >nul
-if errorlevel 1 (
-    >&2 echo configure failed. Re-run it to see why:
-    >&2 echo   cmake -S "%ROOT%" --preset %PRESET%
-    exit /b 1
-)
+cmake -S "%ROOT%" --preset "%PRESET%" >nul
+if not errorlevel 1 goto :configured
+>&2 echo configure failed. Re-run it to see why:
+>&2 echo   cmake -S "%ROOT%" --preset "%PRESET%"
+exit /b 1
+:configured
 
 set "TARGETS="
 if not "%~1"=="" set "TARGETS=--target %*"
