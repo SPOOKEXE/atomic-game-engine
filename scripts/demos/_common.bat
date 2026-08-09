@@ -12,8 +12,11 @@ REM than a script. Eleven copies of a build sequence is eleven places to fix a
 REM preset name, and the copies would stop agreeing the first time one of them
 REM was edited in a hurry - which is the same reason `_common.sh` exists.
 REM
-REM Run these from a Developer Command Prompt for Visual Studio. The presets use
-REM the Ninja generator, which finds no compiler in a plain cmd window.
+REM Run these from a Developer Command Prompt for Visual Studio. They build
+REM before they run, the presets use the Ninja generator, and a plain cmd window
+REM finds no compiler for it. `scripts\build-windows.bat` opens that environment
+REM itself - build with it first and there is nothing left here to compile, at
+REM which point these run from an ordinary window like everything else.
 REM
 REM --- The frame-rate policy -------------------------------------------------
 REM
