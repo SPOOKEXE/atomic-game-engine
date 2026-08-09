@@ -647,7 +647,116 @@ namespace studio {
 			);
 		}
 
+		DrawNodeParameters();
+
 		ImGui::End();
+	}
+
+	void Editor::DrawNodeParameters() {
+		engine::nodeview::EditorNode *node = RenderPipelineSelected.IsValid()
+												 ? RenderPipelineGraph.Find(RenderPipelineSelected)
+												 : nullptr;
+		if (node == nullptr) {
+			return;
+		}
+
+		// **Which keys a kind takes is not in the catalogue, and that is on
+		// purpose for now.** A `shader` on a `raster`, a `mask` on a
+		// `filter-tag`, a `radius` on a `cull-distance` — the set is small and
+		// the renderer is the only reader, so a table here would be a second
+		// description of what `SubmitFlow` and `SubmitRaster` already ask for.
+		// The offered keys below are a convenience, not a schema: anything typed
+		// is kept, because a kind that grows a parameter should not need this
+		// file edited before somebody can use it.
+		static const struct {
+			const char *Kind;
+			const char *Key;
+			const char *Hint;
+		} OFFERS[] = {
+			{"raster", "shader", "a staged fragment shader, e.g. tint.frag"},
+			{"dispatch", "shader", "a staged compute shader, e.g. desaturate.comp"},
+			{"dispatch", "group-x", "threads per group in X — must match the shader"},
+			{"dispatch", "group-y", "threads per group in Y — must match the shader"},
+			{"filter-tag", "mask", "tag bits to keep, decimal or 0x hex. unset keeps all"},
+			{"cull-distance", "radius", "how far is far enough. unset keeps all"},
+		};
+
+		ImGui::Separator();
+		ImGui::Text("%s", std::string(node->Kind.Text()).c_str());
+
+		const auto field = [&](const char *key, const char *hint) {
+			std::string value;
+			for (const engine::graph::NodeParameter &parameter : node->Parameters) {
+				if (parameter.Key == Name(key)) {
+					value = parameter.Value;
+					break;
+				}
+			}
+
+			char buffer[128]{};
+			const size_t copied = std::min(value.size(), sizeof(buffer) - 1);
+			std::memcpy(buffer, value.data(), copied);
+
+			ImGui::SetNextItemWidth(220.0f);
+			if (ImGui::InputText(key, buffer, sizeof(buffer))) {
+				// **Empty removes rather than stores an empty string.** `unset`
+				// and `set to nothing` are different answers to
+				// `Node::Parameter`, and only the first takes the default that
+				// makes an unconfigured node a no-op.
+				const std::string typed(buffer);
+				auto &parameters = node->Parameters;
+				const auto at = std::find_if(
+					parameters.begin(),
+					parameters.end(),
+					[&](const engine::graph::NodeParameter &parameter) {
+						return parameter.Key == Name(key);
+					}
+				);
+
+				if (typed.empty()) {
+					if (at != parameters.end()) {
+						parameters.erase(at);
+					}
+				} else if (at != parameters.end()) {
+					at->Value = typed;
+				} else {
+					parameters.push_back(engine::graph::NodeParameter{Name(key), typed});
+				}
+			}
+
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", hint);
+			}
+		};
+
+		bool any = false;
+		for (const auto &offer : OFFERS) {
+			if (node->Kind == Name(offer.Kind)) {
+				any = true;
+				field(offer.Key, offer.Hint);
+			}
+		}
+
+		// **Anything already set is shown even when it is not offered**, so a
+		// document somebody hand-edited, or a kind that grew a parameter after
+		// this list was written, is visible rather than silently carried.
+		for (const engine::graph::NodeParameter &parameter : node->Parameters) {
+			bool offered = false;
+			for (const auto &offer : OFFERS) {
+				if (node->Kind == Name(offer.Kind) && parameter.Key == Name(offer.Key)) {
+					offered = true;
+					break;
+				}
+			}
+			if (!offered) {
+				any = true;
+				field(std::string(parameter.Key.Text()).c_str(), "set in the document");
+			}
+		}
+
+		if (!any) {
+			ImGui::TextDisabled("this kind takes no settings");
+		}
 	}
 
 	// --- the Assets Pipeline ---------------------------------------------------

@@ -431,6 +431,32 @@ namespace engine::nodeview {
 			added.Scope = spec != nullptr ? spec->Scope : graph::NodeScope::View;
 			document.Record(added);
 
+			// **Parameters before the wires**, because `Build` applies every
+			// edit to the node above it and the order among them does not
+			// matter — but the order *between runs* does. Sorted by key, so a
+			// document written twice with the same contents is byte-identical
+			// whatever order somebody typed them in, which is the argument
+			// `PipelineSet::Names` makes about a save file.
+			std::vector<graph::NodeParameter> sorted = node.Parameters;
+			std::sort(
+				sorted.begin(),
+				sorted.end(),
+				[](const graph::NodeParameter &left, const graph::NodeParameter &right) {
+					return left.Key.Text() < right.Key.Text();
+				}
+			);
+
+			for (const graph::NodeParameter &parameter : sorted) {
+				if (!parameter.Key.IsValid()) {
+					continue;
+				}
+				graph::Edit set;
+				set.Kind = graph::EditKind::Set;
+				set.Key = parameter.Key;
+				set.Value = parameter.Value;
+				document.Record(set);
+			}
+
 			// **Reads then writes, in slot order**, which is what makes
 			// `FromDocument` able to put them back in the right rows: the
 			// document has no slot index, and position in the list is the index.
@@ -510,6 +536,16 @@ namespace engine::nodeview {
 				pending.Name = edit.Name;
 				pending.Kind = edit.NodeKind;
 				building = true;
+				break;
+			case graph::EditKind::Set:
+				// **The node above it**, which is what `Build` does with the
+				// same edit. A `set` before any node configures nothing and is
+				// dropped rather than applied to whichever node comes next —
+				// silently moving somebody's shader onto a different pass is
+				// worse than losing it.
+				if (building) {
+					pending.Parameters.push_back(graph::NodeParameter{edit.Key, edit.Value});
+				}
 				break;
 			case graph::EditKind::Reads:
 				reads.push_back(edit.Target);

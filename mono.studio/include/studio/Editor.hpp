@@ -1032,6 +1032,13 @@ namespace studio {
 		// The picture and histogram under the access grid. See `ProfileWatched`.
 		void DrawProfileWatch();
 
+		// The selected node's own settings, under the canvas.
+		//
+		// **Without it the parameters are unreachable.** Which shader a `raster`
+		// runs is a node's own business, and a canvas that could only wire
+		// things could describe the shape of a frame and nothing about it.
+		void DrawNodeParameters();
+
 		// One channel's distribution, as sixteen bars and a range.
 		void DrawChannelHistogram(
 			const char *label, const engine::render::ChannelHistogram &channel, unsigned int colour

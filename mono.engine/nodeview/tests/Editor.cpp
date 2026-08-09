@@ -478,3 +478,72 @@ TEST_CASE("what the editor saves still compiles", "[nodeview][editor]") {
 	);
 	CHECK_FALSE(offender.IsValid());
 }
+
+TEST_CASE("a node's parameters survive the canvas", "[nodeview][editor]") {
+	// **Without this the parameters are unreachable from the editor.**
+	// `Node::Parameters` is the difference between a kind and a node — which
+	// shader a `raster` runs, which tag a filter keeps — and the document format
+	// has a word for it. `ToDocument` had no writer for that word, so anything
+	// typed on the canvas was dropped on the next save and the custom-shader
+	// node was authorable in code only.
+	Kinds();
+
+	EditorGraph graph;
+	const Name added = AddNode(graph, Name("raster"), Point{0.0f, 0.0f});
+	REQUIRE(added.IsValid());
+
+	engine::nodeview::EditorNode *node = graph.Find(added);
+	REQUIRE(node != nullptr);
+	node->Parameters.push_back(engine::graph::NodeParameter{Name("shader"), "tint.frag"});
+	node->Parameters.push_back(engine::graph::NodeParameter{Name("group-x"), "8"});
+
+	const engine::graph::PipelineDocument document = engine::nodeview::ToDocument(graph);
+	const EditorGraph back = engine::nodeview::FromDocument(document);
+
+	const engine::nodeview::EditorNode *reloaded = back.Find(added);
+	REQUIRE(reloaded != nullptr);
+	REQUIRE(reloaded->Parameters.size() == 2);
+
+	// **Sorted by key**, so a document written twice with the same contents is
+	// byte-identical whatever order somebody typed them in.
+	CHECK(reloaded->Parameters[0].Key == Name("group-x"));
+	CHECK(reloaded->Parameters[0].Value == "8");
+	CHECK(reloaded->Parameters[1].Key == Name("shader"));
+	CHECK(reloaded->Parameters[1].Value == "tint.frag");
+
+	// And through to the graph the renderer actually runs, which is the point of
+	// carrying them at all.
+	engine::graph::RenderGraph built;
+	Name offender;
+	INFO("offender: " << std::string(offender.Text()));
+	REQUIRE(engine::graph::Build(document, built, offender) == engine::graph::PipelineDocumentStatus::Ok);
+
+	const engine::graph::Node *pass = built.Find(engine::graph::NodeId{1});
+	REQUIRE(pass != nullptr);
+	REQUIRE(pass->Parameter(Name("shader")) != nullptr);
+	CHECK(*pass->Parameter(Name("shader")) == "tint.frag");
+}
+
+TEST_CASE("a parameter before any node is dropped, not misapplied", "[nodeview][editor]") {
+	// Silently moving somebody's shader onto a different pass is worse than
+	// losing it — a lost setting is visible, a moved one is a mystery.
+	Kinds();
+
+	engine::graph::PipelineDocument document;
+	engine::graph::Edit stray;
+	stray.Kind = engine::graph::EditKind::Set;
+	stray.Key = Name("shader");
+	stray.Value = "wrong.frag";
+	document.Record(stray);
+
+	engine::graph::Edit added;
+	added.Kind = engine::graph::EditKind::AddNode;
+	added.Name = Name("tint");
+	added.NodeKind = Name("raster");
+	document.Record(added);
+
+	const EditorGraph back = engine::nodeview::FromDocument(document);
+	const engine::nodeview::EditorNode *node = back.Find(Name("tint"));
+	REQUIRE(node != nullptr);
+	CHECK(node->Parameters.empty());
+}

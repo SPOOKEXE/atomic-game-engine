@@ -173,6 +173,18 @@ namespace engine::nodeview {
 		//@{
 		std::vector<core::Name> Inputs;
 		std::vector<core::Name> Outputs;
+
+		// What this particular node was configured with.
+		//
+		// **A canvas that could not carry these would make the parameters
+		// unreachable.** `Node::Parameters` is the difference between a kind and
+		// a node — which shader a `raster` runs, which tag a filter keeps — and
+		// the document format has a word for it. Without a field here the word
+		// had no writer: anything typed would be dropped on the next save.
+		//
+		// Sorted by key on the way out, so a document written twice with the
+		// same contents is byte-identical whatever order the editor added them.
+		std::vector<graph::NodeParameter> Parameters;
 		//@}
 	};
 

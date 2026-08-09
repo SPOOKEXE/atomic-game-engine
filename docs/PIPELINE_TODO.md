@@ -22,7 +22,7 @@ should leave the in-progress item marked with what compiles and what does not.
 | 6 | Access grid / profiler visualiser | **done** |
 | 7 | Instrumentation | uploads **done**; debug groups **done**; GPU timestamps **cannot be built on SDL_GPU** — no such API. See below |
 | 8 | Readbacks — viewer image, histograms, overdraw | **done.** Histograms, the download policy, the non-stalling device path, the `viewer` node, the `overdraw` counter, and `Renderer::SetPipeline` so a pipeline with either in it can run |
-| 9 | Entity flow, cameras, per-camera pipelines, custom shaders | **working.** `Entities` and `Camera` resources, `world`/`camera`/`light-camera` sources, per-camera pipelines, node parameters, graph-allocated targets, and `raster`/`dispatch` nodes running shaders the node names — both verified on a device. Barriers between compute passes are not derived |
+| 9 | Entity flow, cameras, per-camera pipelines, custom shaders | **working.** `Entities` and `Camera` resources, `world`/`camera`/`light-camera` sources, per-camera pipelines, node parameters editable on the canvas, graph-allocated targets, `raster`/`dispatch` running named shaders, and a camera range per wired list |
 
 ---
 
@@ -205,6 +205,14 @@ counter probe that does cover it.
       the log, `git stash pop`, build it again, `diff`. For 2a–2c that came out
       identical over 27 frames including `surfacepasses=4`, which is the check
       the hash could not make.
+
+      **Compare the *distinct* lines, not the transcript.** This originally
+      diffed all 27 `PROBE` lines byte for byte, which held for most of
+      stage 3 and then stopped holding: the mesh grid's content lands on a
+      different frame when the machine is busy, so one frame's `tris` and
+      `culled` wander by one instance. `sort -u` gives five stable lines and
+      still catches a real change — a pass drawing the wrong range produces
+      a count that appears nowhere in the other run.
 
       It is worth keeping this as the routine for anything in `render` that
       claims to be behaviour-neutral: it costs two builds and it covers the
@@ -750,13 +758,63 @@ entities ─▶ cull-frustum ─▶ filter-tag ─▶ order-draw ─▶ opaque �
       resources and a ping-pong, which is what every engine's blur and every
       temporal resolve already does — and the graph can say that.
 
-- [ ] **Two colour passes, two lists.** `CameraEntityList` reads whatever
-      `opaque` is wired to, because the camera range is one range. A pipeline
-      wiring different lists into different colour passes needs a range each,
-      which is `upload-instances` becoming a real node — and that in turn needs
-      the scene range and the camera range uploaded separately, which is the
-      knot `shadow` being `NodeScope::World` ties: it runs before the view's
-      nodes and draws from the scene half.
+- [x] **Parameters reachable from the canvas.** `nodeview::EditorNode` carries
+      them, `ToDocument` emits the `set` word, `FromDocument` puts them back,
+      and the Render Pipeline panel has a field per setting on the selected
+      node.
+
+      **Found by asking whether anybody could actually use the feature.**
+      `Node::Parameters` existed, the document format had a word for it, and the
+      renderer read it — and `ToDocument` had no writer for that word. So
+      anything typed on a canvas was dropped at the next save, and `raster` was
+      authorable in code only. A feature reachable only from C++ is a feature
+      the editor does not have.
+
+      **Sorted by key on the way out**, so a document written twice with the
+      same contents is byte-identical whatever order somebody typed them —
+      `PipelineSet::Names`' argument about a save file.
+
+      **A `set` before any node is dropped, not applied to the next one.**
+      Silently moving somebody's shader onto a different pass is worse than
+      losing it: a lost setting is visible and a moved one is a mystery.
+
+      **Empty removes rather than storing an empty string**, because `unset` and
+      `set to nothing` are different answers to `Node::Parameter` and only the
+      first takes the default that makes an unconfigured node a no-op.
+
+      The offered keys are a convenience and **not a schema** — anything already
+      set is shown whether offered or not, so a hand-edited document or a kind
+      that grows a parameter later is visible rather than silently carried.
+
+- [x] **Two colour passes, two lists.** `ViewPass::CameraRange` — a list, a base
+      into the buffer, and its own three runs. `Ranges` holds one per list a
+      colour pass is wired to, and `RangeFor` is how a handler asks for its own.
+
+      A pipeline with no flow nodes gets exactly one range, built from the cull
+      and sort the renderer has always done — which is what keeps the standard
+      frame byte-identical.
+
+      **The base is added in exactly one place.** A run inside a range is an
+      offset within that range; the draw adds `SceneCount + Base`. A run that
+      already carried the base would count it twice, which is the arithmetic
+      mistake this split makes possible and the reason it is written down.
+
+      **What went with it:** `CameraEntityList` and the warning it carried. That
+      warning said two lists do not work — it was true when written and false an
+      hour later, and a warning that says a working thing is broken is worse
+      than none.
+
+      Verified on a device: `ranges=2`, `opaque list='all' base=0`,
+      `transparent list='few' base=33` — two passes, two lists, two slices.
+
+      **And the counter probe had to change.** It compared 27 `PROBE` lines byte
+      for byte, and stopped being deterministic partway through this work: the
+      mesh grid's content lands on different frames when the machine is busy, so
+      one frame's `tris` and `culled` wander. Comparing the **distinct** lines
+      (`sort -u`, five of them) is stable across runs and still catches a real
+      change — a pass drawing the wrong range produces a count that appears
+      nowhere in the other run. Checked three runs each side, before and after,
+      identical.
 
 - [ ] **Node parameters.** `cull-distance` has no radius and `filter-tag` no
       mask, because the document format has no word for a node parameter yet.

@@ -465,25 +465,67 @@ namespace engine::render {
 			// the window regardless.
 			bool Offscreen = false;
 
-			// The three runs of the camera range: plain opaque, the mirrors
-			// inside the opaque head, then the blended tail with its own mirrors
-			// at the very end.
-			//@{
-			size_t OpaqueCount = 0;
-			uint32_t PlainOpaque = 0;
-			uint32_t SurfaceInCamera = 0;
-			uint32_t TransparentCount = 0;
-			uint32_t PlainTransparent = 0;
-			uint32_t TransparentSurfaces = 0;
-			//@}
-
-			// Where each surface index's instances sit within those runs.
+			// One list of instances the camera's passes draw, as a slice of the
+			// buffer.
 			//
-			// **Grouped by `scene::GroupSurfaces` and not by a second copy of
-			// it**: the scene range is grouped by `OrderScene` with the same
-			// function, and two groupings that disagreed would put a pane's
-			// reflection on another pane's pass.
-			scene::SurfaceRun CameraRuns[scene::MAX_SURFACES];
+			// **A struct because two colour passes may take two different
+			// lists.** These were `ViewPass` fields describing *the* camera
+			// range, back when there was one — a pipeline could wire a filter
+			// into `opaque` and `transparent` and both drew whichever `opaque`
+			// read. What made that a range rather than a field is that a
+			// pipeline can now say which geometry each pass takes, and the
+			// buffer has to hold each answer.
+			//
+			// @since v0.11
+			struct CameraRange {
+				// Which entity resource this is the contents of, or invalid for
+				// the one a pipeline with no flow nodes gets.
+				core::Name List;
+
+				// Where it starts, counted from the end of the scene range. A
+				// draw is `SceneCount + Base + first`.
+				uint32_t Base = 0;
+
+				// The three runs: plain opaque, the mirrors inside the opaque
+				// head, then the blended tail with its own mirrors at the end.
+				//@{
+				size_t OpaqueCount = 0;
+				uint32_t PlainOpaque = 0;
+				uint32_t SurfaceInCamera = 0;
+				uint32_t TransparentCount = 0;
+				uint32_t PlainTransparent = 0;
+				uint32_t TransparentSurfaces = 0;
+				//@}
+
+				// Where each surface index's instances sit within those runs.
+				//
+				// **Grouped by `scene::GroupSurfaces` and not by a second copy
+				// of it**: the scene range is grouped by `OrderScene` with the
+				// same function, and two groupings that disagreed would put a
+				// pane's reflection on another pane's pass.
+				scene::SurfaceRun Runs[scene::MAX_SURFACES];
+			};
+
+			// Every range this view uploaded, in the order they sit in the
+			// buffer. Never empty while `HaveInstances`: index zero is the one a
+			// pipeline with no flow nodes gets.
+			std::vector<CameraRange> Ranges;
+
+			// The range a pass wired to a list should draw.
+			//
+			// @param list What the node reads, or an invalid name.
+			// @return Its range, or the first — **falling back rather than
+			//         drawing nothing**, because a pass whose wire leads
+			//         nowhere should behave as it did before there were wires.
+			const CameraRange &RangeFor(core::Name list) const {
+				for (const CameraRange &range : Ranges) {
+					if (range.List == list) {
+						return range;
+					}
+				}
+				static const CameraRange NONE;
+				return Ranges.empty() ? NONE : Ranges.front();
+			}
 
 			// How many instances survived culling, for the counter that reports
 			// it. Triangles are counted as they are drawn instead — with a mesh
@@ -1055,7 +1097,7 @@ namespace engine::render {
 		// which is the only other thing that draws into it. See the body.
 		//
 		// @return `false` to abandon the frame.
-		bool SubmitOpaque();
+		bool SubmitOpaque(const graph::RunContext &context);
 
 		// The two samplers and the texture every world draw binds, with their
 		// fallbacks applied.
@@ -1196,7 +1238,6 @@ namespace engine::render {
 		// instance buffer's camera half is. A pipeline that wires different
 		// lists into different colour passes needs a range each, which is an
 		// upload node rather than this.
-		core::Name CameraEntityList() const;
 
 		// Whether this view's entity nodes have already run.
 		bool FlowRan = false;
@@ -1452,6 +1493,13 @@ namespace engine::render {
 		//
 		// @param view What to draw.
 		// @return Whether its passes may run. See `ViewReady`.
+		// Splits one range into the three runs a colour pass draws.
+		//
+		// @param range What to fill. `Base` and `OpaqueCount` are already set.
+		// @param count How many instances are in it.
+		// @param eye   Where the camera is. Unused today — the sort already ran.
+		void PartitionCameraRange(ViewPass::CameraRange &range, size_t count, const core::Vector3 &eye);
+
 		ViewReady PrepareView(const View &view);
 
 		// Makes the overdraw target, at the size the world is drawn at.
@@ -1477,7 +1525,7 @@ namespace engine::render {
 		// even for a frame with nothing blended in it.
 		//
 		// @return `false` to abandon the frame.
-		bool SubmitTransparent();
+		bool SubmitTransparent(const graph::RunContext &context);
 
 		// The mirror draws inside the eye's pass, one per surface index.
 		//
@@ -1495,7 +1543,7 @@ namespace engine::render {
 		// @param blended Whether to draw the blended runs rather than the opaque
 		//                ones. The blended mirrors go last of everything, so a
 		//                pane at any transparency still shows its reflection.
-		void DrawScreenMirrors(SDL_GPURenderPass *pass, bool blended);
+		void DrawScreenMirrors(SDL_GPURenderPass *pass, const ViewPass::CameraRange &range, bool blended);
 
 		// The debug overlay, and the editor's chrome. Both onto the window, both
 		// once for the frame rather than once per view.
@@ -4144,9 +4192,11 @@ namespace engine::render {
 		// kind — see its comment.
 		Passes.Set(core::Name("shadow"), [this](const graph::RunContext &) { return SubmitShadow(); });
 		Passes.Set(core::Name("surface"), [this](const graph::RunContext &) { return SubmitSurface(); });
-		Passes.Set(core::Name("opaque"), [this](const graph::RunContext &) { return SubmitOpaque(); });
-		Passes.Set(core::Name("transparent"), [this](const graph::RunContext &) {
-			return SubmitTransparent();
+		Passes.Set(core::Name("opaque"), [this](const graph::RunContext &context) {
+			return SubmitOpaque(context);
+		});
+		Passes.Set(core::Name("transparent"), [this](const graph::RunContext &context) {
+			return SubmitTransparent(context);
 		});
 		Passes.Set(core::Name("overlay"), [this](const graph::RunContext &) { return SubmitOverlay(); });
 		Passes.Set(core::Name("interface"), [this](const graph::RunContext &) { return SubmitInterface(); });
@@ -4953,6 +5003,64 @@ namespace engine::render {
 		return true;
 	}
 
+	void Renderer::Impl::PartitionCameraRange(
+		ViewPass::CameraRange &range, size_t count, const core::Vector3 &eye
+	) {
+		(void)eye;
+		range.TransparentCount = static_cast<uint32_t>(count - range.OpaqueCount);
+
+		uint32_t *const order = DrawOrder.data() + range.Base;
+
+		// **Surface instances moved to the back of the opaque head**, so the
+		// range is three contiguous runs — plain opaque, then mirrors, then
+		// transparent — and each is one draw with one `first_instance`.
+		//
+		// `scene::PartitionSurfaces`, not a fourth copy of it: the scene range
+		// is partitioned by `OrderScene` with the same function, and two
+		// partitions that disagreed would draw a pane with the wrong uniforms.
+		if (range.OpaqueCount > 0) {
+			ENGINE_PROFILE_CAT("partition surfaces", core::ProfileCategory::Render);
+			range.SurfaceInCamera = static_cast<uint32_t>(
+				scene::PartitionSurfaces(VisibleInstances, std::span<uint32_t>(order, range.OpaqueCount))
+			);
+		}
+		range.PlainOpaque = static_cast<uint32_t>(range.OpaqueCount) - range.SurfaceInCamera;
+
+		// **The runs are offsets within this range**, not within the buffer. The
+		// draw adds `SceneCount + Base`, so a run that already carried the base
+		// would count it twice — which is the arithmetic mistake this split
+		// makes possible and the reason the base is added in exactly one place.
+		if (range.SurfaceInCamera > 0) {
+			scene::GroupSurfaces(
+				VisibleInstances,
+				std::span<uint32_t>(order + range.PlainOpaque, range.SurfaceInCamera),
+				range.PlainOpaque,
+				true,
+				range.Runs
+			);
+		}
+
+		if (range.TransparentCount > 0) {
+			ENGINE_PROFILE_CAT("partition blended surfaces", core::ProfileCategory::Render);
+			range.TransparentSurfaces = static_cast<uint32_t>(scene::PartitionSurfaces(
+				VisibleInstances, std::span<uint32_t>(order + range.OpaqueCount, range.TransparentCount)
+			));
+		}
+		range.PlainTransparent = range.TransparentCount - range.TransparentSurfaces;
+
+		if (range.TransparentSurfaces > 0) {
+			scene::GroupSurfaces(
+				VisibleInstances,
+				std::span<uint32_t>(
+					order + range.OpaqueCount + range.PlainTransparent, range.TransparentSurfaces
+				),
+				static_cast<uint32_t>(range.OpaqueCount) + range.PlainTransparent,
+				false,
+				range.Runs
+			);
+		}
+	}
+
 	Renderer::Impl::ViewReady Renderer::Impl::PrepareView(const View &view) {
 		SDL_GPUCommandBuffer *command = CurrentFrame.Command;
 
@@ -4984,7 +5092,6 @@ namespace engine::render {
 		const core::CFrame &cameraFrame = CurrentView.CameraFrame;
 		const scene::Camera &camera = CurrentView.Camera;
 		const std::span<const ParticleBatch> &particles = CurrentView.Particles;
-		const std::span<const effects::RibbonRun> &ribbonRuns = CurrentView.RibbonRuns;
 
 		const std::span<const scene::DrawInstance> instances = view.Instances;
 		const std::span<const SurfaceView> surfaces = view.Surfaces;
@@ -5193,37 +5300,38 @@ namespace engine::render {
 		// See `RunEntityFlow`.
 		RunEntityFlow();
 
-		const core::Name wired = CameraEntityList();
-		const std::span<const uint32_t> chosen = Flow.Get(wired);
-		const bool filtered = FlowRan && wired.IsValid() && Flow.Has(wired);
+		// **One range per list a colour pass is wired to.** The instance buffer
+		// is the scene range and then the camera ranges; a geometry pass draws a
+		// slice of its own. A pipeline with no flow nodes gets exactly one,
+		// built from the cull and sort the renderer has always done — which is
+		// what keeps the standard frame byte-identical.
+		CurrentView.Ranges.clear();
+		VisibleInstances.clear();
+		DrawOrder.clear();
 
-		// Ordered over the survivors, so the two passes are two ranges of one
-		// buffer. Opaque first in whatever order the world produced, then the
-		// transparent tail back to front from where the camera is.
-		//
-		// **Or over whatever the pipeline's filters left**, when it has any. The
-		// list is already in the order an `order-draw` node put it in, so
-		// `DrawOrder` is the identity and the sort is not run twice — a pipeline
-		// that omits `order-draw` gets its blended geometry in world order,
-		// which is the author's decision and visibly so.
-		if (filtered) {
-			VisibleInstances.resize(chosen.size());
-			DrawOrder.resize(chosen.size());
-			for (size_t index = 0; index < chosen.size(); index++) {
-				VisibleInstances[index] =
-					chosen[index] < instances.size() ? instances[chosen[index]] : scene::DrawInstance{};
-				DrawOrder[index] = static_cast<uint32_t>(index);
-			}
-
-			visibleCount = chosen.size();
-			CurrentView.OpaqueCount = 0;
-			for (const scene::DrawInstance &instance : VisibleInstances) {
-				if (scene::IsTransparent(instance)) {
-					break;
+		std::vector<core::Name> wanted;
+		if (FlowRan) {
+			for (const graph::NodeId id : Compiled.PerView) {
+				const graph::Node *node = Graph.Find(id);
+				if (node == nullptr || !node->Enabled) {
+					continue;
 				}
-				CurrentView.OpaqueCount++;
+				if (node->Kind != core::Name("opaque") && node->Kind != core::Name("transparent") &&
+					node->Kind != core::Name("overdraw")) {
+					continue;
+				}
+
+				const core::Name list = FirstEntityList(node->Reads);
+				if (list.IsValid() && Flow.Has(list) &&
+					std::find(wanted.begin(), wanted.end(), list) == wanted.end()) {
+					wanted.push_back(list);
+				}
 			}
-		} else {
+		}
+
+		if (wanted.empty()) {
+			// **The unwired path, unchanged.** Cull to the frustum, order back
+			// to front, and that is the one range every pass takes.
 			VisibleInstances.resize(visibleCount);
 			for (size_t index = 0; index < visibleCount; index++) {
 				VisibleInstances[index] = instances[Visible[index]];
@@ -5231,92 +5339,51 @@ namespace engine::render {
 
 			{
 				ENGINE_PROFILE_CAT("order instances", core::ProfileCategory::Render);
-				CurrentView.OpaqueCount =
+				CurrentView.Ranges.push_back(ViewPass::CameraRange{});
+				CurrentView.Ranges.back().OpaqueCount =
 					scene::OrderForDrawing(VisibleInstances, cameraFrame.Position, DrawOrder);
 			}
+		} else {
+			// **Appended, so the ranges are contiguous slices of one upload.**
+			// A list is already in the order an `order-draw` node put it in, so
+			// the sort is not run twice — a pipeline that omits `order-draw`
+			// gets its blended geometry in world order, which is the author's
+			// decision and visibly so.
+			for (const core::Name &list : wanted) {
+				const std::span<const uint32_t> chosen = Flow.Get(list);
+
+				ViewPass::CameraRange range;
+				range.List = list;
+				range.Base = static_cast<uint32_t>(DrawOrder.size());
+
+				bool blended = false;
+				for (const uint32_t at : chosen) {
+					DrawOrder.push_back(static_cast<uint32_t>(VisibleInstances.size()));
+					VisibleInstances.push_back(at < instances.size() ? instances[at] : scene::DrawInstance{});
+
+					// **Counted by walking to the first blended one**, which is
+					// only correct because `order-draw` puts the opaque head
+					// first. A pipeline that omits it gets an opaque count of
+					// whatever happens to lead, and its blended geometry drawn
+					// with depth writes on — which is wrong on screen rather
+					// than wrong in memory, and is the author's decision.
+					blended = blended || scene::IsTransparent(VisibleInstances.back());
+					if (!blended) {
+						range.OpaqueCount++;
+					}
+				}
+
+				CurrentView.Ranges.push_back(range);
+			}
+
+			visibleCount = VisibleInstances.size();
 		}
 
-		CurrentView.TransparentCount = static_cast<uint32_t>(visibleCount - CurrentView.OpaqueCount);
-
-		// **Surface instances moved to the back of the opaque head**, so the
-		// camera range is three contiguous runs — plain opaque, then mirrors,
-		// then transparent — and each is one draw with one `first_instance`.
-		// Whether an instance samples the surface is per instance and the
-		// uniform that says so is per draw, so the alternative is a branch on
-		// data the fragment shader does not have.
-		//
-		// Stable, for the reason the ordering itself is: an opaque scene with no
-		// mirrors must come out of this exactly as it went in.
-
-		if (CurrentView.OpaqueCount > 0) {
-			ENGINE_PROFILE_CAT("partition surfaces", core::ProfileCategory::Render);
-
-			// **`scene::PartitionSurfaces`, not a fourth copy of it.** The
-			// comment forty lines down insists the mirror partition lives in
-			// `scene` "where a headless suite can get at them" — and this file
-			// had two hand-rolled copies of it, which is what that sentence
-			// exists to prevent. They are one function now, and it is the tested
-			// one.
-			CurrentView.SurfaceInCamera = static_cast<uint32_t>(scene::PartitionSurfaces(
-				VisibleInstances, std::span<uint32_t>(DrawOrder.data(), CurrentView.OpaqueCount)
-			));
-		}
-		CurrentView.PlainOpaque =
-			static_cast<uint32_t>(CurrentView.OpaqueCount) - CurrentView.SurfaceInCamera;
-
-		// **Grouped by index within that run, because each index owns a
-		// texture.** The screen pass binds a sampler and pushes a projection per
-		// surface, so what used to be one draw over "the mirrors" is one draw
-		// per surface — and each has to be contiguous for that to be an offset
-		// and a count rather than a per-instance branch.
-		//
-		// `scene::GroupSurfaces`, not a second copy of it: the scene range is
-		// grouped by `OrderScene` using the same function, and two groupings
-		// that disagreed would put a pane's reflection on another pane's pass.
-
-		if (CurrentView.SurfaceInCamera > 0) {
-			scene::GroupSurfaces(
-				VisibleInstances,
-				std::span<uint32_t>(DrawOrder.data() + CurrentView.PlainOpaque, CurrentView.SurfaceInCamera),
-				CurrentView.PlainOpaque,
-				true,
-				CurrentView.CameraRuns
-			);
-		}
-
-		// **And the same split at the end of the blended tail, which is what
-		// makes a faded mirror still a mirror.** A part leaves the opaque head
-		// the moment its `Transparency` goes above zero — and the head is where
-		// the mirror flag was set, so the reflection did not dim, it vanished.
-		// That reads as the surface camera having stopped rather than as an
-		// ordering rule, and it is the bug this run exists to fix.
-		//
-		// They go *last* of everything, so they draw over the blended geometry
-		// as well as the opaque. Stable, so the back-to-front sort survives
-		// inside each run — see `scene::ScenePlan::TransparentSurfaces` for what
-		// is given up across the two.
-
-		if (CurrentView.TransparentCount > 0) {
-			ENGINE_PROFILE_CAT("partition blended surfaces", core::ProfileCategory::Render);
-
-			CurrentView.TransparentSurfaces = static_cast<uint32_t>(scene::PartitionSurfaces(
-				VisibleInstances,
-				std::span<uint32_t>(DrawOrder.data() + CurrentView.OpaqueCount, CurrentView.TransparentCount)
-			));
-		}
-		CurrentView.PlainTransparent = CurrentView.TransparentCount - CurrentView.TransparentSurfaces;
-
-		if (CurrentView.TransparentSurfaces > 0) {
-			scene::GroupSurfaces(
-				VisibleInstances,
-				std::span<uint32_t>(
-					DrawOrder.data() + CurrentView.OpaqueCount + CurrentView.PlainTransparent,
-					CurrentView.TransparentSurfaces
-				),
-				static_cast<uint32_t>(CurrentView.OpaqueCount) + CurrentView.PlainTransparent,
-				false,
-				CurrentView.CameraRuns
-			);
+		// **Partitioned per range**, because a pane in one list is not a pane in
+		// another and the runs a draw takes are offsets into its own slice.
+		for (ViewPass::CameraRange &range : CurrentView.Ranges) {
+			const size_t count = range.List.IsValid() ? Flow.Get(range.List).size() : visibleCount;
+			PartitionCameraRange(range, count, cameraFrame.Position);
 		}
 
 		// The flip from transparency to opacity happened where each view was
@@ -6045,7 +6112,9 @@ namespace engine::render {
 		CurrentFrame.Scene = nullptr;
 	}
 
-	void Renderer::Impl::DrawScreenMirrors(SDL_GPURenderPass *pass, bool blended) {
+	void Renderer::Impl::DrawScreenMirrors(
+		SDL_GPURenderPass *pass, const ViewPass::CameraRange &range, bool blended
+	) {
 		// **The surface draws, one per index rather than one for "the
 		// mirrors".** Each index owns a texture and a projection, so what would
 		// be a single run is a run each — grouped by `scene::GroupSurfaces` into
@@ -6068,7 +6137,7 @@ namespace engine::render {
 		LightingUniforms mirroredUniforms{};
 
 		for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
-			const scene::SurfaceRun &run = CurrentView.CameraRuns[index];
+			const scene::SurfaceRun &run = range.Runs[index];
 			const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
 			const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
 			if (count == 0) {
@@ -6116,7 +6185,7 @@ namespace engine::render {
 			CurrentFrame.Result->DrawCalls += DrawSlots(
 				command,
 				pass,
-				CurrentView.SceneCount + first,
+				CurrentView.SceneCount + range.Base + first,
 				count,
 				uniforms,
 				bindings.Shadow,
@@ -6133,7 +6202,7 @@ namespace engine::render {
 		}
 	}
 
-	bool Renderer::Impl::SubmitOpaque() {
+	bool Renderer::Impl::SubmitOpaque(const graph::RunContext &context) {
 		// The eye's own pass: the world onto the target the view asked for, and
 		// then the mirrors inside the opaque head.
 		//
@@ -6149,7 +6218,11 @@ namespace engine::render {
 		// `PassRecorder` already took when it entered `Pass::Transparent` from
 		// inside this render pass.
 		SDL_GPUCommandBuffer *command = CurrentFrame.Command;
-		SurfaceBank &bank = SurfacesAt(ActiveSlot);
+
+		// **Whichever list this pass was wired to.** Unwired falls back to the
+		// first range, which is the one a pipeline with no flow nodes gets — so
+		// a frame that says nothing about geometry draws what it always did.
+		const ViewPass::CameraRange &range = CurrentView.RangeFor(FirstEntityList(context.Reads));
 
 		// **The world's target, which is the offscreen texture or the window.**
 		// Everything after this pass draws onto the *window* regardless — the
@@ -6297,12 +6370,12 @@ namespace engine::render {
 				// possible without a second upload: the instance attributes are
 				// per-instance vertex data, so the offset picks up where the
 				// opaque range left off.
-				if (CurrentView.PlainOpaque > 0) {
+				if (range.PlainOpaque > 0) {
 					CurrentFrame.Result->DrawCalls += DrawSlots(
 						command,
 						pass,
-						CurrentView.SceneCount,
-						CurrentView.PlainOpaque,
+						CurrentView.SceneCount + range.Base,
+						range.PlainOpaque,
 						&CurrentView.Lighting,
 						bindings.Shadow,
 						bindings.ShadowSampler,
@@ -6324,8 +6397,8 @@ namespace engine::render {
 				// passes have already run, so the screen shows a reflection that
 				// is current. Only what a mirror sees *of another mirror* is a
 				// frame behind, and that is the staleness the pair exists for.
-				if (CurrentView.SurfaceInCamera > 0) {
-					DrawScreenMirrors(pass, false);
+				if (range.SurfaceInCamera > 0) {
+					DrawScreenMirrors(pass, range, false);
 				}
 			}
 
@@ -6381,17 +6454,6 @@ namespace engine::render {
 			if (desc != nullptr && desc->Kind == graph::ResourceKind::Entities) {
 				return desc->Name;
 			}
-		}
-		return {};
-	}
-
-	core::Name Renderer::Impl::CameraEntityList() const {
-		for (const graph::NodeId id : Compiled.PerView) {
-			const graph::Node *node = Graph.Find(id);
-			if (node == nullptr || !node->Enabled || node->Kind != core::Name("opaque")) {
-				continue;
-			}
-			return FirstEntityList(node->Reads);
 		}
 		return {};
 	}
@@ -6645,7 +6707,7 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::SubmitTransparent() {
+	bool Renderer::Impl::SubmitTransparent(const graph::RunContext &context) {
 		// The blended tail of the eye's pass, and the effects after it.
 		//
 		// **Inside the render pass `SubmitOpaque` opened.** These fragments are
@@ -6664,13 +6726,16 @@ namespace engine::render {
 
 		ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
 
+		// Its own list, which may not be the one `opaque` drew.
+		const ViewPass::CameraRange &range = CurrentView.RangeFor(FirstEntityList(context.Reads));
+
 		// The same guard the opaque half took. A view with no instance buffer
 		// has no blended range to draw and no camera to draw the effects from.
 		if (CurrentView.HaveInstances) {
 			SDL_GPUCommandBuffer *command = CurrentFrame.Command;
 			const WorldBindings bindings = BindingsForWorld();
 
-			if (CurrentView.TransparentCount > 0) {
+			if (range.TransparentCount > 0) {
 				// Same pass, same depth attachment, different pipeline —
 				// blending on and depth writes off. A separate render pass
 				// would have to reload the depth buffer, and the whole point
@@ -6684,12 +6749,12 @@ namespace engine::render {
 
 				SDL_BindGPUGraphicsPipeline(pass, TransparentPipeline);
 
-				if (CurrentView.PlainTransparent > 0) {
+				if (range.PlainTransparent > 0) {
 					CurrentFrame.Result->DrawCalls += DrawSlots(
 						command,
 						pass,
-						CurrentView.SceneCount + static_cast<uint32_t>(CurrentView.OpaqueCount),
-						CurrentView.PlainTransparent,
+						CurrentView.SceneCount + range.Base + static_cast<uint32_t>(range.OpaqueCount),
+						range.PlainTransparent,
 						&CurrentView.Lighting,
 						bindings.Shadow,
 						bindings.ShadowSampler,
@@ -6705,8 +6770,8 @@ namespace engine::render {
 				// that sample a surface texture, so a pane at any
 				// transparency still shows its reflection at the image's own
 				// opacity.
-				if (CurrentView.TransparentSurfaces > 0) {
-					DrawScreenMirrors(pass, true);
+				if (range.TransparentSurfaces > 0) {
+					DrawScreenMirrors(pass, range, true);
 				}
 			}
 
