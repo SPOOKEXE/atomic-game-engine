@@ -15,7 +15,9 @@ REM the nine meshes it expects, so the paths under it have to match. The header
 REM of `MeshGrid.luau` lists them. Its POSIX half (`run-mesh-grid.sh`) carries
 REM the note about Blender files not being source art.
 REM
-REM Run this from a Developer Command Prompt for Visual Studio.
+REM Run this from a Developer Command Prompt for Visual Studio, or build first
+REM with `scripts\build-windows.bat`, which opens that environment itself and
+REM leaves nothing here to compile. `_common.bat` has the reason.
 
 setlocal EnableExtensions EnableDelayedExpansion
 

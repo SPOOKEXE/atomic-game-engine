@@ -729,7 +729,25 @@ namespace studio {
 									grown.Z = std::max(was.Z + half, 0.01f);
 								}
 
-								store.Set<engine::scene::Bounds>(instance, engine::scene::Bounds{grown});
+								// **Through the property, not onto the component.**
+								// This wrote `Bounds` directly, and `Size` is
+								// declared as writing `Bounds` *and* `Collider` —
+								// `scene::SizeProperty` says why in as many
+								// words: a setter that moves only the first
+								// leaves a part drawn at one size and collided at
+								// another, and nothing reports it. Dragging the
+								// scale gizmo was the one caller that bypassed
+								// it, so a part resized in the editor kept the
+								// hitbox it was created with.
+								//
+								// `Size` is the full extent over a stored half,
+								// which is the same conversion the undo command
+								// below makes — and making both go through the
+								// property is what keeps them one answer.
+								const Vector3 full = grown * 2.0f;
+								(void)store.SetProperty(
+									instance, engine::core::Name("Size"), &full, sizeof(full)
+								);
 								break;
 							}
 

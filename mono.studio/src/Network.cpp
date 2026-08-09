@@ -307,14 +307,44 @@ namespace studio {
 				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
 					ContentTextures++;
 				}
+			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
+				// **Handed over whole, not decoded.** A shader asset is a SPIR-V
+				// module; there is nothing here to parse, and a renderer holding
+				// a compiler for content it did not write is how a frame ends up
+				// paying for one. `Renderer::AddShader` takes the bytes and a
+				// `raster` or `dispatch` node names them.
+				//
+				// **Only what a runtime can read.** GLSL routes to this kind too
+				// — what somebody publishes is what they wrote — and
+				// `IsRuntimeReadable` is what says it has not been baked yet.
+				// TODO(render-pipeline): `Renderer.AddShader(name, asset->Bytes)`
+				// went here, inside this condition. The delivery is kept and
+				// still counted, because `AssetKind::Shader` is part of the asset
+				// pipeline rather than the render one — shaders publish, fetch
+				// and arrive exactly as before. What is missing is the renderer
+				// end: something has to take the bytes and let a node name them.
+				if (engine::assets::IsRuntimeReadable(asset->Name)) {
+					ContentShaders++;
+				}
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {
 				engine::assets::MaterialData material;
 				if (!engine::assets::Material::Read(reader, material)) {
 					continue;
 				}
-				const engine::core::Name colour(material.ColourMap);
-				EachOpenWorld([&name, &colour](engine::ecs::Store &store) {
-					engine::scene::RecordMaterial(store, name, colour);
+				// **All five, built once and recorded together.** A material is
+				// one thing; recording its colour and forgetting its normals
+				// would draw a part textured and flat, which reads as the normal
+				// map being broken rather than absent.
+				const engine::scene::MaterialMaps maps{
+					.Colour = engine::core::Name(material.ColourMap),
+					.Normal = engine::core::Name(material.NormalMap),
+					.Roughness = engine::core::Name(material.RoughnessMap),
+					.Occlusion = engine::core::Name(material.OcclusionMap),
+					.Height = engine::core::Name(material.HeightMap),
+					.Emissive = engine::core::Name(material.EmissiveMap),
+				};
+				EachOpenWorld([&name, &maps](engine::ecs::Store &store) {
+					engine::scene::RecordMaterial(store, name, maps);
 				});
 				ContentMaterials++;
 			}

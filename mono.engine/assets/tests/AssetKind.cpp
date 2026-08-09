@@ -112,3 +112,32 @@ TEST_CASE("a source form is not something a runtime reads", "[assets]") {
 	CHECK(IsRuntimeReadable("readme"));
 	CHECK(IsRuntimeReadable("trailing."));
 }
+
+TEST_CASE("a shader routes to its own kind", "[assets]") {
+	// **Its own kind rather than `Script` or `Data`.** `Script` is source a VM
+	// may run in a sandbox and `Data` is bytes handed over whole; a shader is
+	// neither — compiled ahead of time, handed to a GPU rather than an
+	// interpreter, and whether it is safe is a question about a driver. Routing
+	// it as either would put it through the wrong subsystem's door.
+	CHECK(KindOfName("shaders/tint.frag") == AssetKind::Shader);
+	CHECK(KindOfName("shaders/tint.frag.spv") == AssetKind::Shader);
+	CHECK(KindOfName("post/blur.comp") == AssetKind::Shader);
+	CHECK(KindOfName("post/fullscreen.vert") == AssetKind::Shader);
+	CHECK(KindOfName("lib/common.glsl") == AssetKind::Shader);
+
+	CHECK(std::string_view(Describe(AssetKind::Shader)) == "shader");
+}
+
+TEST_CASE("shader source is not runtime readable and SPIR-V is", "[assets]") {
+	// **The failure this list exists to end.** A format added to the extension
+	// table without a row in `SOURCES` is offered as loadable and does not load.
+	// A renderer holds no shader compiler — see `Renderer::AddShader` — so GLSL
+	// reaching a runtime has to be caught here rather than at the draw.
+	CHECK_FALSE(engine::assets::IsRuntimeReadable("shaders/tint.frag"));
+	CHECK_FALSE(engine::assets::IsRuntimeReadable("shaders/fullscreen.vert"));
+	CHECK_FALSE(engine::assets::IsRuntimeReadable("post/blur.comp"));
+	CHECK_FALSE(engine::assets::IsRuntimeReadable("lib/common.glsl"));
+
+	// And the baked form is, which is the whole point of baking one.
+	CHECK(engine::assets::IsRuntimeReadable("shaders/tint.frag.spv"));
+}

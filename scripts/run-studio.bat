@@ -27,8 +27,11 @@ REM This is the only program in the repository where `RunService:IsStudio()` is
 REM true, and the one that writes a `.agame`. `just host --game X.agame` and
 REM `just run --game X.agame` read the same file back.
 REM
-REM Run it from a Developer Command Prompt for Visual Studio. The presets use
-REM the Ninja generator, which finds no compiler in a plain cmd window.
+REM Run it from a Developer Command Prompt for Visual Studio. It builds before
+REM it runs, the presets use the Ninja generator, and a plain cmd window finds
+REM no compiler for it. `scripts\build-windows.bat` opens that environment
+REM itself - build with it first and there is nothing left here to compile, at
+REM which point this runs from an ordinary window like everything else.
 
 setlocal EnableExtensions
 

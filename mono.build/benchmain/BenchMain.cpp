@@ -8,7 +8,7 @@
 // per-case overhead landed inside the numbers.
 //
 //     # mono bench report v1
-//     bench<TAB>suite<TAB>nanoseconds<TAB>spread<TAB>samples<TAB>iterations<TAB>name
+//     bench<TAB>suite<TAB>nanoseconds<TAB>spread<TAB>samples<TAB>iterations<TAB>unit<TAB>name
 //
 // `nanoseconds` is the *minimum* sample, per iteration. See `Bench.hpp` on why
 // that is the right statistic and the mean is not.
@@ -136,9 +136,12 @@ int main(int argc, char **argv) {
 		// comparable and a body that got faster shows as a smaller number.
 		// Integer division: a decimal here would be at the mercy of whatever
 		// locale the binary started in, and the runner splits on tabs.
+		// **The unit goes before the name and not after it.** The name is free
+		// text flattened onto one line, so anything past it cannot be found by
+		// counting tabs.
 		std::cout << "bench\t" << entry.Suite << '\t' << (fastest / iterations) << '\t'
 				  << ((slowest - fastest) / iterations) << '\t' << samples << '\t' << iterations << '\t'
-				  << OneLine(entry.Name) << '\n';
+				  << engine::testing::Describe(entry.Unit) << '\t' << OneLine(entry.Name) << '\n';
 	}
 
 	std::cout.flush();

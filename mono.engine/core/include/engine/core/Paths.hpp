@@ -38,6 +38,21 @@ namespace engine::core {
 		// own name so that two modules cannot collide on fullscreen.vert.
 		static std::filesystem::path Shaders(std::string_view module);
 
+		// A program's file name, with whatever this platform puts on the end.
+		//
+		// **The file name only, not a path**, because the callers disagree
+		// about the directory and agree about nothing else: a supervisor wants
+		// its own staged directory, a test wants a sibling program's. Joining
+		// is left to them; the part that was being copied is the suffix.
+		//
+		// Named rather than spelled at each call site because it was spelled at
+		// five of them, each behind its own `#if`, and a sixth caller would
+		// have been one paste away from being the one that forgot.
+		//
+		// @param name The program's name, without a suffix.
+		// @return `name` on Unix, `name.exe` on Windows.
+		static std::filesystem::path Program(std::string_view name);
+
 		// Where the vendored typefaces are staged.
 		//
 		// Under the assets root rather than beside the binary, so

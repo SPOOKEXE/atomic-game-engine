@@ -353,11 +353,11 @@ namespace engine::scene {
 	// what that shape cannot express. A dense column of mostly-invalid names is
 	// sixteen bytes an entity and no branches.
 	//
-	// **Only `ColourMap` is sampled today**, and the other maps a physically
-	// based pipeline wants are deliberately absent rather than declared and
-	// ignored. `RENDER_PIPELINE.md` puts the G-buffer at v0.10; a
-	// `MetalnessMap` field that nothing reads would be half a feature somebody
-	// would reasonably assume worked.
+	// **The other four maps are here now, and the rule they were held back by is
+	// the reason they could arrive.** They were deliberately absent rather than
+	// declared and ignored, because a field nothing reads is half a feature
+	// somebody would reasonably assume worked. v0.11's G-buffer is the pass that
+	// samples them, so they are declared and read on the same change.
 	//
 	// @since v0.9
 	struct SurfaceAppearance {
@@ -370,6 +370,31 @@ namespace engine::scene {
 		// flat — which is how an untextured import looks right rather than
 		// black.
 		core::Name ColourMap;
+
+		// The surface's other maps, sampled by the G-buffer pass.
+		//
+		// **Invalid is the ordinary state and means "use the default".** A
+		// material authored flat has no normal map, and the shader falls back to
+		// the geometric normal rather than to a texture of straight-up vectors
+		// somebody has to remember to author. Roughness and occlusion fall back
+		// to constants for the same reason.
+		//
+		// **`HeightMap` is carried and not yet sampled**, which is the one
+		// exception to the rule above and is deliberate: parallax needs a loop
+		// in the vertex or fragment stage that the G-buffer pass does not have,
+		// and a name that survives a save file costs nothing to carry meanwhile.
+		// It is named here so a material round-trips whole rather than losing a
+		// map every time a world is written.
+		//@{
+		core::Name NormalMap;
+		core::Name RoughnessMap;
+		core::Name OcclusionMap;
+		core::Name HeightMap;
+
+		// What this surface emits with no light on it. Invalid means nothing,
+		// which is what almost every surface emits.
+		core::Name EmissiveMap;
+		//@}
 
 		// Below this alpha a fragment is discarded rather than blended, when
 		// `Mode` is `Clip`.

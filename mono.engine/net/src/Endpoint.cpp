@@ -1,5 +1,6 @@
 #include <engine/net/Endpoint.hpp>
 
+#include <array>
 // asio parses and formats addresses here and nowhere else in this module's
 // public reach. It is used for that alone — no socket, no io_context — because
 // v6 text is not a format worth reimplementing: `::` compression, an embedded v4

@@ -2,6 +2,22 @@
 
 namespace engine::world {
 
+	bool Ticks(WorldState state) {
+		switch (state) {
+		case WorldState::Active:
+		case WorldState::Idle:
+			return true;
+		case WorldState::Suspended:
+		case WorldState::Faulted:
+		case WorldState::Remote:
+			return false;
+		}
+		// No default label, for `Describe`'s reason — and here the cost of
+		// guessing is higher: a new state silently answering "ticks" would put
+		// interpolation onto a world nothing advances.
+		return false;
+	}
+
 	const char *Describe(WorldState state) {
 		switch (state) {
 		case WorldState::Active:

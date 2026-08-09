@@ -198,6 +198,17 @@ namespace engine::scene {
 			const auto *appearances = static_cast<const SurfaceAppearance *>(source);
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteName(appearances[index].ColourMap);
+
+				// **Written the day they are added**, which is the lesson
+				// `WriteVisuals` records: a field that travels a release later
+				// than the struct it is in is a world that loads with the field
+				// silently empty and nothing saying so.
+				writer.WriteName(appearances[index].NormalMap);
+				writer.WriteName(appearances[index].RoughnessMap);
+				writer.WriteName(appearances[index].OcclusionMap);
+				writer.WriteName(appearances[index].HeightMap);
+				writer.WriteName(appearances[index].EmissiveMap);
+
 				writer.WriteFloat(appearances[index].AlphaCutoff);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Mode));
 			}
@@ -242,6 +253,11 @@ namespace engine::scene {
 			auto *appearances = static_cast<SurfaceAppearance *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				appearances[index].ColourMap = reader.ReadName();
+				appearances[index].NormalMap = reader.ReadName();
+				appearances[index].RoughnessMap = reader.ReadName();
+				appearances[index].OcclusionMap = reader.ReadName();
+				appearances[index].HeightMap = reader.ReadName();
+				appearances[index].EmissiveMap = reader.ReadName();
 				appearances[index].AlphaCutoff = reader.ReadFloat();
 
 				const uint8_t mode = reader.ReadUInt8();

@@ -46,6 +46,22 @@ namespace engine::assets {
 		// table, a game file. The honest bucket rather than a dumping ground:
 		// anything here is delivered and handed over whole.
 		Data = 8,
+
+		// A compiled shader module, for a pipeline node that names one.
+		//
+		// **Its own kind rather than `Script` or `Data`.** `Script` is source a
+		// VM may run in a sandbox and `Data` is bytes handed over whole; a
+		// shader is neither — it is compiled ahead of time, it is handed to a
+		// GPU rather than to an interpreter, and whether it is *safe* is a
+		// question about a driver rather than about a sandbox. Routing it as
+		// either would put it through the wrong subsystem's door.
+		//
+		// **What arrives is SPIR-V.** Source extensions route here too, because
+		// what somebody publishes is what they wrote — `bake` is what turns one
+		// into the other, exactly as it does for a mesh.
+		//
+		// @since v0.11
+		Shader = 9,
 	};
 
 	// Returns a stable, human-readable name for a kind.

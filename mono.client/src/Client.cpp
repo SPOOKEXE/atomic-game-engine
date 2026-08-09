@@ -442,7 +442,18 @@ namespace client {
 				// at all. `ResolveMaterials` turns one into a texture name on a
 				// part, in `shared`, so a headless server resolves the same
 				// materials the client does.
-				const engine::core::Name colour(material.ColourMap);
+				// **All five, built once and recorded together.** A material is
+				// one thing; recording its colour and forgetting its normals
+				// would draw a part textured and flat, which reads as the normal
+				// map being broken rather than absent.
+				const engine::scene::MaterialMaps maps{
+					.Colour = engine::core::Name(material.ColourMap),
+					.Normal = engine::core::Name(material.NormalMap),
+					.Roughness = engine::core::Name(material.RoughnessMap),
+					.Occlusion = engine::core::Name(material.OcclusionMap),
+					.Height = engine::core::Name(material.HeightMap),
+					.Emissive = engine::core::Name(material.EmissiveMap),
+				};
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and
 				// the asymmetry is the point. Every material in the catalogue
@@ -457,13 +468,13 @@ namespace client {
 				// the demand path needs no special case: the next pump asks for
 				// the sheets of the materials something is actually made of.
 				for (const engine::world::WorldId id : Simulated) {
-					Universe_->Enter(id, [&name, &colour](engine::ecs::Store &store) {
-						engine::scene::RecordMaterial(store, name, colour);
+					Universe_->Enter(id, [&name, &maps](engine::ecs::Store &store) {
+						engine::scene::RecordMaterial(store, name, maps);
 					});
 				}
 				if (ReportedJoin) {
-					Universe_->Enter(Replicated, [&name, &colour](engine::ecs::Store &store) {
-						engine::scene::RecordMaterial(store, name, colour);
+					Universe_->Enter(Replicated, [&name, &maps](engine::ecs::Store &store) {
+						engine::scene::RecordMaterial(store, name, maps);
 					});
 				}
 				ContentMaterials++;
@@ -1203,6 +1214,13 @@ namespace client {
 						// than one wall's image projected across all four.
 						(void)CollectSurfaceViews(store, Surfaces);
 
+						// TODO(render-pipeline): the world's own pipeline was
+						// installed here, on a world change rather than per
+						// frame. `PipelinesInstalledFor` guarded that and
+						// `PipelineSelected` carried the answer to the render
+						// call below — both members are still declared and both
+						// are marked. See `client::InstallWorldPipelines`.
+
 						// **The particles, from the world being drawn and only
 						// that one.** A batch is a span into this world's pool;
 						// see `Client.hpp` for why a second world's cannot be
@@ -1507,6 +1525,20 @@ namespace client {
 		// `Renderer::SetAnimationTime` carries the rule.
 		Renderer.SetAnimationTime(AnimationSeconds);
 
+		// TODO(render-pipeline): this call took a `render::View` per camera.
+		//
+		// The old system's `Render` takes one camera's worth of arguments
+		// positionally; the one being replaced took `std::span<const View>`, so a
+		// frame could carry several cameras and each could name **its own
+		// pipeline** — `view.World` and `view.Pipeline` were set together here,
+		// because the pipeline key a world installs is qualified by the world id
+		// and a view naming one without the other asks for a pipeline nothing
+		// installed.
+		//
+		// **The two members that fed it are still on this class**, unused, and
+		// marked: `PipelinesInstalledFor` and `PipelineSelected`. They are where
+		// a world's saved pipelines were installed and which one this view
+		// selected. See `client::InstallWorldPipelines` in `Scene.hpp`.
 		LastFrame = Renderer.Render(
 			Views.CameraFrame(),
 			Views.Camera(),

@@ -28,6 +28,7 @@
 #include <imgui.h>
 #include <mutex>
 #include <studio/Editor.hpp>
+#include <studio/Presentation.hpp>
 #include <studio/RojoSync.hpp>
 
 #include <fstream>
@@ -349,8 +350,13 @@ namespace studio {
 		// about is a universe that has its worlds rather than an empty one.
 		StartControl();
 
+		// TODO(render-pipeline): the Pipeline Profile panel opened here with
+		// `colour` watched, and `Renderer::Inspect` told the renderer to keep a
+		// readable copy of that resource so the panel could show its picture.
+
 		Running = true;
 		return true;
+
 	}
 
 	void Editor::Shutdown() {
@@ -509,6 +515,12 @@ namespace studio {
 	}
 
 	void Editor::Simulate(float frameSeconds) {
+		// **Cleared first and set once, at the tick.** Every early return below
+		// is a frame the universe does not advance, and `Present` has to know
+		// which — see `studio::PresentationAlpha` for what reading it wrong
+		// did.
+		Advancing = false;
+
 		if (!AnyRunning()) {
 			// **A world being edited does not tick, and that is deliberate.**
 			// A universe that simulated while somebody was authoring would
@@ -589,6 +601,7 @@ namespace studio {
 			}
 		}
 
+		Advancing = true;
 		Universe->Tick(frameSeconds);
 	}
 
@@ -1110,17 +1123,28 @@ namespace studio {
 			// never ticks, so a gate maintained by the simulation would leave a
 			// part dragged into `Workspace` invisible until somebody pressed
 			// play. See `scene/Visibility.hpp`.
-			// **A world that is not ticking is presented at one, not at its
-			// accumulator.** Alpha is where *between* two ticks to draw, and a
-			// suspended world has no next tick to draw towards — its accumulator
-			// stops wherever it stopped, which is usually zero, and zero means
-			// "draw the previous frame". `capture-previous` is a `PreSimulation`
-			// system and `Present` runs `PreRender` alone, so that previous frame
-			// is wherever each part was created: an edited world drew every part
-			// at its birthplace while the selection outline followed the real
-			// transform.
-			const bool ticking = Universe->StateOf(shown) == engine::world::WorldState::Active;
-			Universe->Present(shown, frameSeconds, ticking ? Universe->AlphaOf(shown) : 1.0f);
+			// **A world that is not being ticked is presented at one, not at
+			// its accumulator.** Alpha is where *between* two ticks to draw,
+			// and a world nothing advances has no next tick to draw towards —
+			// its accumulator stops wherever it stopped, which is usually zero,
+			// and zero means "draw the previous frame". `capture-previous` is a
+			// `PreSimulation` system and `Present` runs `PreRender` alone, so
+			// that previous frame is wherever each part was created: an edited
+			// world drew every part at its birthplace while the selection
+			// outline followed the real transform.
+			//
+			// **This asked `StateOf` alone and that was wrong for Edit mode**,
+			// which is where an author spends most of their time.
+			// `SyncWorldStates` leaves every world `Active` when nothing is
+			// running, so the state said "ticking" while `Simulate` was
+			// returning before the tick. `studio::PresentationAlpha` carries
+			// the whole argument and is where it is now decided, because
+			// nothing in this class is reachable from a test.
+			Universe->Present(
+				shown,
+				frameSeconds,
+				PresentationAlpha(Advancing, Universe->StateOf(shown), Universe->AlphaOf(shown))
+			);
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
@@ -1156,6 +1180,10 @@ namespace studio {
 				// be a second thing to keep in step with what `SurfaceSize` and
 				// `Surface` mean.
 				(void)client::CollectSurfaceViews(store, Surfaces);
+
+				// TODO(render-pipeline): the world's pipelines were installed here
+				// on first sight of the world, and the chosen key went into the
+				// view below. See `client::InstallWorldPipelines`.
 			});
 			instances = &drawn;
 		}
@@ -1178,6 +1206,10 @@ namespace studio {
 		// another panel's current one. They shared one set until v0.75, and
 		// flying either camera moved the mirrors in both windows.
 
+		// TODO(render-pipeline): this took a `render::View` per camera, and the
+		// viewport set `view.World` and `view.Pipeline` together — the pipeline
+		// key a world installs is qualified by the world id, so naming one
+		// without the other asks for a pipeline nothing installed.
 		LastFrame = Renderer.Render(
 			eye,
 			lens,

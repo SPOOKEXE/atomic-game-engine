@@ -156,7 +156,11 @@ TEST_CASE("a material's texture is collected once it has resolved", "[client][co
 	Store store = Fresh("contentdemand.material");
 	engine::scene::RegisterSceneClasses();
 
-	REQUIRE(engine::scene::RecordMaterial(store, Name("oak.amat"), Name("oak_Color.atex")));
+	REQUIRE(
+		engine::scene::RecordMaterial(
+			store, Name("oak.amat"), engine::scene::MaterialMaps{.Colour = Name("oak_Color.atex")}
+		)
+	);
 
 	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Crate");
 	REQUIRE(part != engine::ecs::NULL_ENTITY);

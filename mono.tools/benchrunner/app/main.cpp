@@ -62,6 +62,9 @@ namespace {
 		uint64_t Nanoseconds = 0;
 		uint64_t Spread = 0;
 		uint64_t Iterations = 0;
+
+		// What one iteration is — `call` or `item`. See `BenchUnit`.
+		std::string Unit;
 	};
 
 	std::vector<std::string> Split(const std::string &text, char separator) {
@@ -135,8 +138,8 @@ namespace {
 		std::string line;
 		while (std::getline(lines, line)) {
 			const auto fields = Split(line, '\t');
-			// bench <TAB> suite <TAB> ns <TAB> spread <TAB> samples <TAB> iterations <TAB> name
-			if (fields.size() < 7 || fields[0] != "bench") {
+			// bench <TAB> suite <TAB> ns <TAB> spread <TAB> samples <TAB> iterations <TAB> unit <TAB> name
+			if (fields.size() < 8 || fields[0] != "bench") {
 				continue;
 			}
 
@@ -145,7 +148,8 @@ namespace {
 			measurement.Nanoseconds = std::strtoull(fields[2].c_str(), nullptr, 10);
 			measurement.Spread = std::strtoull(fields[3].c_str(), nullptr, 10);
 			measurement.Iterations = std::strtoull(fields[5].c_str(), nullptr, 10);
-			measurement.Name = fields[6];
+			measurement.Unit = fields[6];
+			measurement.Name = fields[7];
 			into.push_back(std::move(measurement));
 		}
 		return true;

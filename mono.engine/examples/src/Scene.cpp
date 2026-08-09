@@ -215,7 +215,14 @@ namespace engine::examples {
 		const std::filesystem::path absolute = std::filesystem::absolute(path);
 		const std::filesystem::path relative = std::filesystem::relative(absolute, core::Paths::Assets());
 
-		const bool underAssets = !relative.empty() && relative.native().rfind("..", 0) != 0;
+		// The first component rather than a text prefix, and `native()` is why.
+		// `path::native()` returns the platform's own string type — `std::wstring`
+		// on Windows, `std::string` everywhere else — so `rfind("..", 0)` against
+		// it does not compile with MSVC at all. `string()` would transcode and
+		// build, but a prefix test is the wrong question regardless: it calls a
+		// directory honestly named `..config` an escape from the assets root.
+		// Comparing components asks what the paragraph above says we are asking.
+		const bool underAssets = !relative.empty() && *relative.begin() != "..";
 
 		const ecs::Entity program = script::MakeScript(
 			store, underAssets ? relative.string() : absolute.string(), absolute.stem().string()

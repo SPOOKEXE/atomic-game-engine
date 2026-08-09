@@ -81,6 +81,9 @@ mono_add_library(studio
 		# includes is one its build file should say out loud.
 		Engine::gui
 
+		# L10. The node canvases' layout, hit-testing and selection — the half
+		# of both editors that has tests. See `Pipelines.cpp` and D00041.
+
 		# The client's presentation seam: `client::InstallPresentation` and
 		# `client::DrawList`. **Reused rather than reimplemented** — a second
 		# draw-list collector would be a second answer to what a world hands its

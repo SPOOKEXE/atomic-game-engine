@@ -208,6 +208,16 @@ namespace engine::parallel {
 		// Opaque so that no public header names an operating system —
 		// `MonoLibrary.cmake` says the build is the only place that does.
 		uint64_t Identifier = 0;
+
+		// A second handle, for the platforms whose process id is not enough to
+		// act on. Unused where it is: an id that can be waited on and signalled
+		// directly needs nothing beside it.
+		//
+		// It exists rather than the id being made to mean two things, because
+		// `Id()` promises the number a person types into a debugger, and a
+		// handle is not that number.
+		uint64_t Native = 0;
+
 		ProcessStatus Last;
 	};
 

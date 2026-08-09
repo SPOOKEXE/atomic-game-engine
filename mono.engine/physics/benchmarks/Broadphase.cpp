@@ -35,12 +35,36 @@
 // rises with the count and the pair walk is quadratic in it — a bigger world
 // with the same spacing would not.
 //
-// Cell size, over the same 4000: 515 us at 2 m, 232 us at 4 m, 185 us at 8 m.
-// `spatial::HashGrid::DEFAULT_CELL_SIZE` is 4 m, chosen against the index alone
-// over bare proxies, and this world would prefer 8. That is one scene and one
-// density, and changing a default that another module measured wants its own
-// measurement — `PreparePhysicsWorld` takes a cell size for exactly this
-// reason, and a world that has measured its own should pass it.
+// ## Cell size, at three densities — v0.11
+//
+// The note that stood here said this scene would prefer 8 m to the 4 m
+// `spatial` chose, and stopped, because one scene at one density is not a
+// reason to move another module's default. That measurement was taken:
+//
+// | Colliders | 2 m | 4 m | 8 m | 16 m |
+// |---|---|---|---|---|
+// | 1000 | 26.4 us | 15.6 us | **12.9 us** | 13.0 us |
+// | 4000 | 517 us | 231 us | **179 us** | 208 us |
+// | 16000 | 4443 us | 2651 us | **2544 us** | |
+//
+// **Eight metres wins at every density, and the minimum is bracketed** — 16 m
+// is worse than 8 m at 4000, so these rows are not still walking down a curve.
+// Against the 4 m default that is 17% at a thousand colliders, 23% at four
+// thousand and 4% at sixteen.
+//
+// **And the default still should not change**, which is the useful half.
+// `spatial/benchmarks/HashGrid.cpp` measures the same grid under the queries it
+// exists for, and they disagree with this one: at 4000 colliders `OverlapBox`
+// is fastest at 4 m and costs 42% more at 8 m, and a short raycast is fastest
+// at 4 m too. Only the rebuild and long raycasts want bigger cells. So 4 m is
+// right for the query shapes `spatial` chose it against, 8 m is right for a
+// pair walk, and no single number is right for both — which is precisely why
+// `PreparePhysicsWorld` takes one.
+//
+// **The number to pass is 8 m, and there is nowhere to pass it from.** See
+// `DEFERRED.md` D00039: nothing outside these suites calls
+// `PreparePhysicsWorld`, so no shipped world runs a broad phase at any cell
+// size. That is the reason this row is a measurement and not a change.
 
 #include <engine/core/Random.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -241,6 +265,79 @@ BENCH("Sync + pairs · 4000 colliders, 2m cells", 50) {
 BENCH("Sync + pairs · 4000 colliders, 8m cells", 50) {
 	Store &store = WorldOf(4000, 8.0f);
 	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+// --- and whether one cell size can be right for every world -------------------
+//
+// **The measurement the note above asked for and did not have.** The rows at
+// 4000 said this scene would prefer 8 m to the 4 m `spatial` chose, and stopped
+// there — one scene at one density is not a reason to move a default another
+// module measured. So the same ladder is run at a quarter of the count and at
+// four times it.
+//
+// The scene volume is fixed, so collider *density* rises with the count. The
+// two halves of the cost move against each other: smaller cells cost more to
+// build and hand back fewer candidates to reject, larger cells cost less to
+// build and hand back more. Where the two cross is a function of density, so
+// the interesting result is not which cell size wins but whether the *same* one
+// wins at all three counts.
+
+BENCH("Sync + pairs · 1000 colliders, 2m cells", 200) {
+	Store &store = WorldOf(1000, 2.0f);
+	for (int pass = 0; pass < 200; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 1000 colliders, 8m cells", 200) {
+	Store &store = WorldOf(1000, 8.0f);
+	for (int pass = 0; pass < 200; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 1000 colliders, 16m cells", 200) {
+	Store &store = WorldOf(1000, 16.0f);
+	for (int pass = 0; pass < 200; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+// **Sixteen metres at 4000 as well**, because if eight beats four the next
+// question is whether the curve has turned yet or the rows are still walking
+// down it. A minimum that has not been bracketed on both sides is not a
+// minimum.
+BENCH("Sync + pairs · 4000 colliders, 16m cells", 50) {
+	Store &store = WorldOf(4000, 16.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 16000 colliders, 2m cells", 20) {
+	Store &store = WorldOf(16000, 2.0f);
+	for (int pass = 0; pass < 20; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 16000 colliders, 8m cells", 20) {
+	Store &store = WorldOf(16000, 8.0f);
+	for (int pass = 0; pass < 20; pass++) {
 		SyncBroadphase(store);
 		BroadPhase(store);
 		Consume(PairCount(store));

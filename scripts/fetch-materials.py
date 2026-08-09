@@ -48,11 +48,17 @@ naming whichever spelling its source happened to use would make the material
 format's reference depend on where the pixels came from, which is a dialect in
 the one place this engine has been careful not to grow one.
 
-**Only `Color` is named by the `.mat`**, because only a colour map is sampled
-today. The other four sit beside it as ordinary textures — published, fetchable,
-and waiting for the pass that reads them. A `.mat` key that nothing read would be
-half a feature somebody would reasonably assume worked; `ROADMAP.md` v0.11 is
-where the other four get one.
+**All five maps are named by the `.mat`**, since v0.11. Only `Color` was, on the
+rule that a key nothing read would be half a feature somebody would reasonably
+assume worked — the other four sat beside it as ordinary textures, published and
+fetchable and waiting for a pass. v0.11's G-buffer samples normal, roughness and
+occlusion, so they are named. `height` is named and not yet sampled, which is
+the one exception: parallax needs a loop the G-buffer pass does not have, and a
+name that survives a bake costs nothing to carry meanwhile.
+
+**A key is written only when that map was actually fetched.** Not every material
+in every source publishes all five, and a `.mat` naming a PNG that is not beside
+it is exactly what the write-last ordering below exists to prevent.
 
 ## Resumable, because it is six gigabytes over somebody's home connection
 
@@ -84,8 +90,24 @@ USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Ge
 # What the engine calls each map, whatever its source called it.
 COLOR, NORMAL, ROUGHNESS, AO, HEIGHT = "Color", "Normal", "Roughness", "AO", "Height"
 
-# The one map a `.mat` names today. See the module docstring.
-SAMPLED_MAP = COLOR
+# **Emissive has no entry here and that is deliberate.** The three sources
+# publish it for almost nothing — what glows is a decision about an object
+# rather than a property of a substance — so a fetcher that looked for one would
+# be scanning every archive for a file that is essentially never there. A
+# material that has one names it by hand; `assetc` reads the key either way.
+
+# What each map is called by the `.mat`, in the order the file lists them.
+#
+# **`ao` and not `occlusion`**, matching the suffix the sources use and the
+# spelling `assetc` accepts as an alias — a key that had to be spelled the long
+# way while every file beside it said `AO` is a trap for whoever hand-edits one.
+MAT_KEYS = {
+    COLOR: "color",
+    NORMAL: "normal",
+    ROUGHNESS: "roughness",
+    AO: "ao",
+    HEIGHT: "height",
+}
 
 
 def log(message: str) -> None:
@@ -135,12 +157,14 @@ class Material:
         # the skip check reads, and a half-written material that answered "done"
         # would be one nobody could tell from a finished one.
         mat = directory / f"{self.name}.mat"
-        mat.write_text(
-            "# atomic material — see engine/assets/Material.hpp\n"
-            "# Paths are relative to this file; assetc rewrites them to baked names.\n"
-            f"color = {self.name}_{SAMPLED_MAP}.png\n",
-            encoding="utf-8",
-        )
+        lines = [
+            "# atomic material — see engine/assets/Material.hpp\n",
+            "# Paths are relative to this file; assetc rewrites them to baked names.\n",
+        ]
+        for role, key in MAT_KEYS.items():
+            if role in self.maps:
+                lines.append(f"{key} = {self.name}_{role}.png\n")
+        mat.write_text("".join(lines), encoding="utf-8")
         return written
 
     def done(self, root: Path) -> bool:
@@ -332,10 +356,12 @@ def run_source(source: str, count: int, resolution: str, root: Path, workers: in
         except Exception as failure:  # noqa: BLE001
             return asset_id, 0, str(failure)
 
-        # **A material with no colour map is not written at all.** The `.mat`
-        # names one, so writing the rest would publish a material referencing an
-        # asset nobody has — which draws as the default and gives no clue why.
-        if SAMPLED_MAP not in material.maps:
+        # **A material with no colour map is not written at all.** Every other
+        # key is written only when its map was fetched, so an absent normal map
+        # is simply an unnamed one — but a material with no colour at all is not
+        # a material anybody can look at, and publishing it would draw the
+        # default and give no clue why.
+        if COLOR not in material.maps:
             return asset_id, 0, "no colour map in the archive"
         return asset_id, material.write(root), ""
 

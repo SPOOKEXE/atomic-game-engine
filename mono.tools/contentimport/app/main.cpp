@@ -25,6 +25,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <shaderc/shaderc.hpp>
 #include <string>
 #include <vector>
 
@@ -103,6 +105,107 @@ namespace {
 		}
 
 		return files;
+	}
+}
+
+namespace {
+	// Which shaderc stage a shader's extension means.
+	//
+	// **The extension, because that is what an author already writes.** SDL and
+	// every compiler in this vendor tree agree on `.vert`, `.frag` and `.comp`,
+	// and inventing a manifest field to say the same thing again would be a
+	// second description of a fact the filename already carries.
+	bool StageOf(const std::string &extension, shaderc_shader_kind &kind) {
+		if (extension == "vert") {
+			kind = shaderc_glsl_vertex_shader;
+			return true;
+		}
+		if (extension == "frag") {
+			kind = shaderc_glsl_fragment_shader;
+			return true;
+		}
+		if (extension == "comp") {
+			kind = shaderc_glsl_compute_shader;
+			return true;
+		}
+
+		// **`.glsl` is deliberately not a stage.** It is what a shared include
+		// is called, and compiling one on its own would fail on every file
+		// somebody wrote to be included rather than compiled.
+		return false;
+	}
+
+	// Compiles every shader under `raw` into `baked`, as `<name>.spv`.
+	//
+	// **Includes are resolved and the module is published flat.** The manifest
+	// has no word for a dependency between two assets, so a shader that
+	// `#include`s another cannot be delivered as two. The cost is that editing a
+	// shared header rebuilds every shader that includes it, which is what a
+	// build system does anyway and what a store cannot yet express.
+	//
+	// @param raw   Where the sources are.
+	// @param baked Where the modules go.
+	// @return How many compiled. Failures are logged and skipped rather than
+	//         stopping the import — one bad shader should not hold back a
+	//         publish of forty assets.
+	size_t BakeShaders(const std::filesystem::path &raw, const std::filesystem::path &baked) {
+		namespace fs = std::filesystem;
+
+		std::error_code error;
+		if (!fs::is_directory(raw, error)) {
+			return 0;
+		}
+
+		shaderc::Compiler compiler;
+		shaderc::CompileOptions options;
+		options.SetOptimizationLevel(shaderc_optimization_level_performance);
+
+		size_t compiled = 0;
+		for (const fs::directory_entry &entry : fs::recursive_directory_iterator(raw, error)) {
+			if (!entry.is_regular_file()) {
+				continue;
+			}
+
+			std::string extension = entry.path().extension().string();
+			if (!extension.empty() && extension.front() == '.') {
+				extension.erase(extension.begin());
+			}
+
+			shaderc_shader_kind kind{};
+			if (!StageOf(extension, kind)) {
+				continue;
+			}
+
+			std::ifstream file(entry.path(), std::ios::binary);
+			const std::string source(
+				(std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>()
+			);
+			if (source.empty()) {
+				ENGINE_ERROR("shader: {} is empty", entry.path().string());
+				continue;
+			}
+
+			const std::string name = entry.path().filename().string();
+			const shaderc::SpvCompilationResult result =
+				compiler.CompileGlslToSpv(source, kind, name.c_str(), options);
+			if (result.GetCompilationStatus() != shaderc_compilation_status_success) {
+				ENGINE_ERROR("shader: {}: {}", name, result.GetErrorMessage());
+				continue;
+			}
+
+			const fs::path relative = fs::relative(entry.path(), raw, error);
+			const fs::path out = baked / (relative.string() + ".spv");
+			fs::create_directories(out.parent_path(), error);
+
+			const std::vector<uint32_t> words(result.cbegin(), result.cend());
+			std::ofstream sink(out, std::ios::binary | std::ios::trunc);
+			sink.write(
+				reinterpret_cast<const char *>(words.data()),
+				static_cast<std::streamsize>(words.size() * sizeof(uint32_t))
+			);
+			compiled++;
+		}
+		return compiled;
 	}
 }
 
@@ -220,6 +323,19 @@ int main(int argc, char **argv) {
 	// names and published a model that arrives, draws, and is untextured.
 	baking.ResolveTexture = cdn::StoreTextureResolver(paths);
 
+	// **Shaders are baked here rather than in `assetc`, and the tier is why.**
+	// `Tool::assetc` is `TIER shared` and so is `Engine::bake`; `libshaderc` is
+	// gated on `MONO_BUILD_CLIENT`, so neither can link it. This program is a
+	// bare `add_executable` with no tier, which is the same reason the mesh
+	// baking lives here rather than in `Mono::cdn` — see this directory's
+	// CMakeLists.
+	//
+	// **The server keeps carrying shaders regardless.** `AssetKind::Shader` is
+	// in `assets`, which is shared, and an origin serves those bytes exactly as
+	// it serves a mesh it never triangulates. What a server cannot do is compile
+	// one, and this is the publish-time step that means it never has to.
+	const size_t shaders = BakeShaders(paths.Raw, paths.Baked);
+
 	std::string bakeFailure;
 	const assetc::Report baked = assetc::Bake(baking, bakeFailure);
 	if (!bakeFailure.empty()) {
@@ -229,6 +345,9 @@ int main(int argc, char **argv) {
 	ENGINE_INFO(
 		"baked {} asset(s), {} failed — {} bytes out", baked.Assets.size(), baked.Failures, baked.OutputBytes
 	);
+	if (shaders > 0) {
+		ENGINE_INFO("compiled {} shader(s) to SPIR-V", shaders);
+	}
 
 	// **Said separately, because it is a different kind of wrong.** A failed
 	// asset did not bake and its row says so; a dangling texture reference bakes

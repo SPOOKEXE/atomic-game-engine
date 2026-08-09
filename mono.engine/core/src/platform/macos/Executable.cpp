@@ -26,4 +26,8 @@ namespace engine::core::platform {
 		}
 		return canonical;
 	}
+
+	std::string_view ProgramSuffix() {
+		return {};
+	}
 }

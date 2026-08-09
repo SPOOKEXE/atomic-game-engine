@@ -14,4 +14,8 @@ namespace engine::core::platform {
 		}
 		return resolved;
 	}
+
+	std::string_view ProgramSuffix() {
+		return {};
+	}
 }

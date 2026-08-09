@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 namespace engine::scene {
 
@@ -126,29 +127,60 @@ namespace engine::scene {
 	size_t OrderForDrawing(
 		std::span<const DrawInstance> instances, const core::Vector3 &eye, std::vector<uint32_t> &order
 	) {
+		// **Every instance, which is what this always meant.** The body moved to
+		// `OrderSubset` when the culling became graph nodes and a pass started
+		// being handed a list rather than the whole world; the sort itself is
+		// unchanged and is deliberately not written twice — see the comment on
+		// the reverse, which is there because a test caught it.
+		order.resize(instances.size());
+		for (size_t index = 0; index < instances.size(); index++) {
+			order[index] = static_cast<uint32_t>(index);
+		}
+
+		std::vector<uint32_t> ordered;
+		const size_t opaque = OrderSubset(instances, order, eye, ordered);
+		order = std::move(ordered);
+		return opaque;
+	}
+
+	size_t OrderSubset(
+		std::span<const DrawInstance> instances,
+		std::span<const uint32_t> from,
+		const core::Vector3 &eye,
+		std::vector<uint32_t> &order
+	) {
 		// **Resized rather than cleared and filled.** A steady scene calls this
 		// every frame per view, and `clear` followed by `push_back` would
 		// value-initialise every element only to overwrite it a moment later.
-		order.resize(instances.size());
+		order.resize(from.size());
 
 		// The opaque head keeps the order the world produced it in, so an opaque
 		// scene comes out of this exactly as it went in — which is what makes a
 		// recording of one replay, and what makes the cost on a scene with no
 		// transparency a single pass and no comparisons.
 		size_t opaque = 0;
-		size_t transparent = instances.size();
+		size_t transparent = from.size();
 
-		for (size_t index = 0; index < instances.size(); index++) {
+		for (const uint32_t index : from) {
+			// **A bad index is dropped rather than dereferenced.** A list is
+			// whatever a chain of filter nodes produced, and one of them naming
+			// an instance that no longer exists is a mis-wired pipeline — which
+			// should be a missing object, not a read off the end.
+			if (index >= instances.size()) {
+				order[--transparent] = index;
+				continue;
+			}
+
 			if (IsTransparent(instances[index])) {
 				// Filled from the back, so both halves are written in one pass
 				// without knowing either count in advance.
-				order[--transparent] = static_cast<uint32_t>(index);
+				order[--transparent] = index;
 			} else {
-				order[opaque++] = static_cast<uint32_t>(index);
+				order[opaque++] = index;
 			}
 		}
 
-		if (opaque == instances.size()) {
+		if (opaque == from.size()) {
 			return opaque;
 		}
 
@@ -166,8 +198,13 @@ namespace engine::scene {
 		// instance every frame per view.
 		std::stable_sort(
 			order.begin() + static_cast<ptrdiff_t>(opaque), order.end(), [&](uint32_t left, uint32_t right) {
-				return (instances[left].Frame.Position - eye).MagnitudeSquared() >
-					   (instances[right].Frame.Position - eye).MagnitudeSquared();
+				const float far = std::numeric_limits<float>::max();
+				const float leftDistance =
+					left < instances.size() ? (instances[left].Frame.Position - eye).MagnitudeSquared() : far;
+				const float rightDistance = right < instances.size()
+												? (instances[right].Frame.Position - eye).MagnitudeSquared()
+												: far;
+				return leftDistance > rightDistance;
 			}
 		);
 
