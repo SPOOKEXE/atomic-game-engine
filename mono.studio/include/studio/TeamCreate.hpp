@@ -151,10 +151,11 @@ namespace studio {
 		// no session is open, which is what keeps an editor that never opens
 		// the panel from paying for any of this.
 		//
+		// @param waypoint   Which waypoint it is, so a refusal can name it.
 		// @param commands   One waypoint's worth.
 		// @param nowSeconds The current time.
 		// @since v0.13
-		void PublishEdits(std::span<const Command> commands, double nowSeconds);
+		void PublishEdits(uint64_t waypoint, std::span<const Command> commands, double nowSeconds);
 
 		// Tells the world how many editors are in.
 		//

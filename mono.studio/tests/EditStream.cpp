@@ -50,6 +50,7 @@ using studio::CommandLog;
 using studio::EditRecord;
 using studio::EditStream;
 using studio::FinishOperation;
+using studio::HOST_EDITOR;
 using studio::InstancePath;
 
 namespace {
@@ -168,14 +169,14 @@ namespace {
 			// Each editor publishes its own committed waypoints, which is the
 			// wiring `Editor::InstallHistoryWatcher` does in the real thing.
 			CommandLog::Watcher hosting;
-			hosting.Committed = [this](uint64_t, std::span<const Command> group) {
-				HostStream->Publish(group, Now);
+			hosting.Committed = [this](uint64_t waypoint, std::span<const Command> group) {
+				HostStream->Publish(waypoint, group, Now);
 			};
 			Host.Log.Watch(hosting);
 
 			CommandLog::Watcher guesting;
-			guesting.Committed = [this](uint64_t, std::span<const Command> group) {
-				GuestStream->Publish(group, Now);
+			guesting.Committed = [this](uint64_t waypoint, std::span<const Command> group) {
+				GuestStream->Publish(waypoint, group, Now);
 			};
 			Guest.Log.Watch(guesting);
 		}
@@ -500,7 +501,14 @@ TEST_CASE("one editor creates and the other edits it", "[studio][editstream]") {
 	REQUIRE(session.Connect());
 
 	const Entity mine = session.Host.Insert(session.Host.Workspace(), "Shared");
-	session.Settle();
+	// Creating holds what was made, so let the host's hold lapse before the
+	// guest starts — this case is about two people sharing a document, not
+	// about contention, which `a hold covers the subtree` covers. In steps,
+	// because a link has an idle timeout as well as a hold.
+	for (double elapsed = 0.0; elapsed < 20.0; elapsed += 0.5) {
+		session.Now += 0.5;
+		session.Settle(2);
+	}
 
 	const Entity theirs = session.Guest.Find({"Workspace", "Shared"});
 	REQUIRE(theirs != NULL_ENTITY);
@@ -578,7 +586,7 @@ TEST_CASE("rubbish on the link is counted and ignored", "[studio][editstream]") 
 	// way: the host broadcasts it and the guest refuses it.
 	session.Settle();
 	const uint64_t before = session.GuestStream->Counters().Malformed;
-	session.HostStream->Publish({}, session.Now);
+	session.HostStream->Publish(0, {}, session.Now);
 	session.Settle();
 	CHECK(session.GuestStream->Counters().Malformed == before);
 	CHECK(session.GuestStream->Counters().Applied == 0);
@@ -591,7 +599,7 @@ TEST_CASE("an unpublished waypoint is one nobody sent", "[studio][editstream]") 
 
 	// An empty group is not a message. A publish that put an empty waypoint on
 	// the wire would be a peer waking up to apply nothing.
-	CHECK_FALSE(session.HostStream->Publish({}, session.Now));
+	CHECK_FALSE(session.HostStream->Publish(0, {}, session.Now));
 	CHECK(session.HostStream->Counters().Sent == 0);
 
 	// And an undo publishes nothing: it is this author navigating their own
@@ -602,4 +610,322 @@ TEST_CASE("an unpublished waypoint is one nobody sent", "[studio][editstream]") 
 	REQUIRE(session.Host.Log.Undo());
 	session.Settle();
 	CHECK(session.HostStream->Counters().Sent == sent);
+}
+
+// --- contention ---------------------------------------------------------------
+//
+// Two guests and a host, which is the smallest arrangement in which "somebody
+// else is working there" means anything. What is checked is that the refusal
+// happens at the *host* — a guest deciding for itself would be two answers to
+// one question, and the two would differ exactly when it mattered.
+
+namespace {
+	// A host and two guests, all three sharing one document.
+	struct Crowd {
+		Editor Host;
+		Editor First;
+		Editor Second;
+		std::vector<std::unique_ptr<Transport>> Transports;
+		std::unique_ptr<EditStream> HostStream;
+		std::unique_ptr<EditStream> FirstStream;
+		std::unique_ptr<EditStream> SecondStream;
+		double Now = 0.0;
+
+		Crowd() {
+			Transports = MakeLoopbackTransport(3);
+			REQUIRE(Transports.size() == 3);
+
+			HostStream = EditStream::Host(*Transports[0], Host.Log, Host.Worlds);
+			FirstStream =
+				EditStream::Join(*Transports[1], Transports[0]->Local(), Now, First.Log, First.Worlds);
+			SecondStream =
+				EditStream::Join(*Transports[2], Transports[0]->Local(), Now, Second.Log, Second.Worlds);
+
+			Wire(Host.Log, *HostStream);
+			Wire(First.Log, *FirstStream);
+			Wire(Second.Log, *SecondStream);
+		}
+
+		void Wire(CommandLog &log, EditStream &stream) {
+			CommandLog::Watcher watcher;
+			watcher.Committed = [this, &stream](uint64_t waypoint, std::span<const Command> group) {
+				stream.Publish(waypoint, group, Now);
+			};
+			log.Watch(watcher);
+		}
+
+		void Tick() {
+			Now += 1.0 / 60.0;
+			FirstStream->Pump(Now);
+			SecondStream->Pump(Now);
+			HostStream->Pump(Now);
+			FirstStream->Pump(Now);
+			SecondStream->Pump(Now);
+		}
+
+		void Settle(int ticks = 12) {
+			for (int step = 0; step < ticks; ++step) {
+				Tick();
+			}
+		}
+
+		// Lets every hold lapse.
+		//
+		// **What "a scene that already exists" means here.** Creating an
+		// instance holds it, which is right — you have just made it and are
+		// probably about to move it — but every case below is about two people
+		// arriving at a document somebody built earlier.
+		//
+		// **In steps rather than one jump**, because a link has an idle timeout
+		// too: skipping thirty seconds in one go is indistinguishable from
+		// every peer having gone away, and the session would be closed rather
+		// than quiet. Half a second at a time keeps the keep-alives flowing,
+		// which is what a real editor sitting idle does.
+		void Quiesce(double seconds = 20.0) {
+			for (double elapsed = 0.0; elapsed < seconds; elapsed += 0.5) {
+				Now += 0.5;
+				Settle(2);
+			}
+		}
+
+		bool Connect() {
+			for (int step = 0; step < 256; ++step) {
+				Tick();
+				if (FirstStream->Connected() && SecondStream->Connected() &&
+					FirstStream->Self() != HOST_EDITOR && SecondStream->Self() != HOST_EDITOR) {
+					return true;
+				}
+			}
+			return false;
+		}
+	};
+}
+
+TEST_CASE("a guest learns which editor it is", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	// **Without this a guest could see that somebody holds a model and not
+	// whether that somebody is itself**, and would grey out its own work.
+	CHECK(crowd.HostStream->Self() == HOST_EDITOR);
+	CHECK(crowd.FirstStream->Self() != HOST_EDITOR);
+	CHECK(crowd.SecondStream->Self() != HOST_EDITOR);
+	CHECK(crowd.FirstStream->Self() != crowd.SecondStream->Self());
+}
+
+TEST_CASE("the first editor to touch a model holds it against the other", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	// Something for both of them to want.
+	const Entity mine = crowd.Host.Insert(crowd.Host.Workspace(), "Contested");
+	crowd.Quiesce();
+	REQUIRE(crowd.First.Find({"Workspace", "Contested"}) != NULL_ENTITY);
+	REQUIRE(crowd.Second.Find({"Workspace", "Contested"}) != NULL_ENTITY);
+	(void)mine;
+
+	// The first guest edits it, which is how a hold is taken — nobody asks and
+	// nobody waits.
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Contested"}), 5.0f);
+	crowd.Settle();
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Contested"})) == 5.0f);
+
+	// The second guest tries the same instance and is refused *by the host*.
+	const uint64_t before = crowd.HostStream->Counters().Contested;
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Contested"}), 9.0f);
+	crowd.Settle();
+
+	CHECK(crowd.HostStream->Counters().Contested == before + 1);
+
+	// **The document is unchanged everywhere**, which is the property the whole
+	// thing exists for: last write wins would have left 9 on all three.
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Contested"})) == 5.0f);
+	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Contested"})) == 5.0f);
+
+	// And the second guest is told who is in the way rather than left to
+	// wonder why its edit vanished.
+	REQUIRE(crowd.SecondStream->LastRefusal().has_value());
+	CHECK(crowd.SecondStream->LastRefusal()->Holder == crowd.FirstStream->Self());
+	CHECK(crowd.SecondStream->LastRefusal()->Subject == InstancePath{"Workspace", "Contested"});
+}
+
+TEST_CASE("a hold covers the subtree, not just the instance", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	const Entity model = crowd.Host.Insert(crowd.Host.Workspace(), "Model");
+	crowd.Host.Insert(model, "Part");
+	crowd.Quiesce();
+	REQUIRE(crowd.Second.Find({"Workspace", "Model", "Part"}) != NULL_ENTITY);
+
+	// One guest takes the model.
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Model"}), 4.0f);
+	crowd.Settle();
+
+	// The other cannot edit a part inside it. A lock over a model that let
+	// somebody else edit its children would protect nothing — moving a model
+	// moves its children, and that is the collision this exists for.
+	const uint64_t before = crowd.HostStream->Counters().Contested;
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Model", "Part"}), 8.0f);
+	crowd.Settle();
+
+	CHECK(crowd.HostStream->Counters().Contested == before + 1);
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Model", "Part"})) != 8.0f);
+
+	// And the refusal names the *model*, which is the useful thing to show:
+	// "somebody is editing Workspace.Model" explains it in a way the part's own
+	// name does not.
+	REQUIRE(crowd.SecondStream->LastRefusal().has_value());
+	CHECK(crowd.SecondStream->LastRefusal()->Subject == InstancePath{"Workspace", "Model"});
+}
+
+TEST_CASE("a hold lapses and the model becomes editable again", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	crowd.Host.Insert(crowd.Host.Workspace(), "Shared");
+	crowd.Quiesce();
+
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Shared"}), 3.0f);
+	crowd.Settle();
+
+	// Past the default ten-second hold, with nobody renewing it.
+	crowd.Quiesce();
+
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Shared"}), 7.0f);
+	crowd.Settle();
+
+	// **An editor that crashed must not hold a model for ever**, and there is
+	// nobody to notice that it has.
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Shared"})) == 7.0f);
+}
+
+TEST_CASE("two editors in different corners never collide", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	crowd.Host.Insert(crowd.Host.Workspace(), "Mine");
+	crowd.Host.Insert(crowd.Host.Workspace(), "Yours");
+	crowd.Quiesce();
+
+	// The ordinary case, and the one a lock must not get in the way of.
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Mine"}), 2.0f);
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Yours"}), 6.0f);
+	crowd.Settle();
+
+	CHECK(crowd.HostStream->Counters().Contested == 0);
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Mine"})) == 2.0f);
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Yours"})) == 6.0f);
+}
+
+TEST_CASE("a claim reserves a subtree before anybody edits it", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	crowd.Host.Insert(crowd.Host.Workspace(), "Reserved");
+	crowd.Quiesce();
+
+	// Nothing needs this — a hold is taken by editing. It is for the person who
+	// wants to say *before* they start that they are about to work somewhere.
+	REQUIRE(crowd.FirstStream->Claim({"Workspace", "Reserved"}, crowd.Now));
+	crowd.Settle();
+
+	const uint64_t before = crowd.HostStream->Counters().Contested;
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Reserved"}), 9.0f);
+	crowd.Settle();
+	CHECK(crowd.HostStream->Counters().Contested == before + 1);
+
+	// The claimer can still work there, which is the point of having claimed.
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Reserved"}), 4.0f);
+	crowd.Settle();
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Reserved"})) == 4.0f);
+
+	// And giving it up hands it over.
+	REQUIRE(crowd.FirstStream->Release({"Workspace", "Reserved"}, crowd.Now));
+	crowd.Settle();
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Reserved"}), 6.0f);
+	crowd.Settle();
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Reserved"})) == 6.0f);
+}
+
+TEST_CASE("everybody sees who is holding what", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	crowd.Host.Insert(crowd.Host.Workspace(), "Busy");
+	crowd.Quiesce();
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Busy"}), 3.0f);
+	crowd.Settle();
+
+	// The host's table is the one that decides; a guest's is a picture of it,
+	// so the editor can grey out what somebody else has.
+	const InstancePath busy{"Workspace", "Busy"};
+	REQUIRE(crowd.HostStream->Locks().HolderOf(busy) != nullptr);
+	CHECK(crowd.HostStream->Locks().HolderOf(busy)->Holder == crowd.FirstStream->Self());
+
+	REQUIRE(crowd.SecondStream->Locks().HolderOf(busy) != nullptr);
+	CHECK(crowd.SecondStream->Locks().HolderOf(busy)->Holder == crowd.FirstStream->Self());
+
+	// And the holder can tell it is their own.
+	REQUIRE(crowd.FirstStream->Locks().HolderOf(busy) != nullptr);
+	CHECK(crowd.FirstStream->Locks().HolderOf(busy)->Holder == crowd.FirstStream->Self());
+}
+
+TEST_CASE("a refused waypoint is refused whole", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	crowd.Host.Insert(crowd.Host.Workspace(), "Held");
+	crowd.Host.Insert(crowd.Host.Workspace(), "Free");
+	crowd.Quiesce();
+
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Held"}), 3.0f);
+	crowd.Settle();
+
+	// A recording touching both — one contended, one not. **Half a waypoint is
+	// a state the author never saw**, which is the same reason a waypoint is
+	// the unit in the first place.
+	const auto recording = crowd.Second.Log.TryBeginRecording("Both");
+	REQUIRE(recording.has_value());
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Free"}), 8.0f);
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Held"}), 8.0f);
+	REQUIRE(crowd.Second.Log.FinishRecording(*recording, FinishOperation::Commit));
+	crowd.Settle();
+
+	CHECK(crowd.HostStream->Counters().Contested >= 1);
+
+	// Neither landed, including the one nobody was holding.
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Free"})) != 8.0f);
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Held"})) == 3.0f);
+}
+
+TEST_CASE("the host is an editor like any other", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	crowd.Host.Insert(crowd.Host.Workspace(), "Theirs");
+	crowd.Quiesce();
+
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Theirs"}), 5.0f);
+	crowd.Settle();
+
+	// A host that could edit through somebody else's hold would make the whole
+	// thing advisory.
+	const uint64_t before = crowd.HostStream->Counters().Contested;
+	crowd.Host.Resize(crowd.Host.Find({"Workspace", "Theirs"}), 9.0f);
+	crowd.Settle();
+
+	CHECK(crowd.HostStream->Counters().Contested == before + 1);
+	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Theirs"})) == 5.0f);
+	REQUIRE(crowd.HostStream->LastRefusal().has_value());
+	CHECK(crowd.HostStream->LastRefusal()->Holder == crowd.FirstStream->Self());
 }

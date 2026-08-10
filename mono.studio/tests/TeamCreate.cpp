@@ -278,8 +278,8 @@ TEST_CASE("a hosted session carries an edit to a guest", "[studio][teamcreate]")
 	// the editor installs, so this suite does what `InstallHistoryWatcher`
 	// does.
 	CommandLog::Watcher watcher;
-	watcher.Committed = [&](uint64_t, std::span<const studio::Command> group) {
-		host.Team.PublishEdits(group, now);
+	watcher.Committed = [&](uint64_t waypoint, std::span<const studio::Command> group) {
+		host.Team.PublishEdits(waypoint, group, now);
 	};
 	host.Log.Watch(watcher);
 
@@ -324,5 +324,5 @@ TEST_CASE("leaving takes the session and its socket down", "[studio][teamcreate]
 	CHECK_FALSE(host.Team.Watching());
 
 	// And publishing into nothing is a null check rather than a crash.
-	host.Team.PublishEdits({}, 2.0);
+	host.Team.PublishEdits(0, {}, 2.0);
 }

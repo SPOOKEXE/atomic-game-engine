@@ -3,6 +3,7 @@
 
 #include <imgui.h>
 #include <optional>
+#include <span>
 #include <studio/Editor.hpp>
 #include <studio/TeamCreate.hpp>
 #include <utility>
@@ -79,9 +80,9 @@ namespace studio {
 		return true;
 	}
 
-	void TeamCreate::PublishEdits(std::span<const Command> commands, double nowSeconds) {
+	void TeamCreate::PublishEdits(uint64_t waypoint, std::span<const Command> commands, double nowSeconds) {
 		if (Stream != nullptr) {
-			Stream->Publish(commands, nowSeconds);
+			Stream->Publish(waypoint, commands, nowSeconds);
 		}
 	}
 
@@ -347,6 +348,42 @@ namespace studio {
 
 		if (const EditStream *stream = Team->Edits()) {
 			const EditCounters &edits = stream->Counters();
+
+			// **Who is where, which is the half a lock is actually for.** The
+			// refusal is the mechanism; seeing that somebody is working on a
+			// model *before* you try is what stops the refusal happening.
+			const std::span<const Lease> held = stream->Locks().Held();
+			if (!held.empty() && ImGui::BeginTable("holds", 2, ImGuiTableFlags_RowBg)) {
+				ImGui::TableSetupColumn("Editing");
+				ImGui::TableSetupColumn("Who");
+				ImGui::TableHeadersRow();
+
+				for (const Lease &lease : held) {
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(Describe(lease.Subject).c_str());
+					ImGui::TableNextColumn();
+					if (lease.Holder == stream->Self()) {
+						ImGui::TextUnformatted("you");
+					} else {
+						ImGui::Text("editor %u", lease.Holder);
+					}
+				}
+				ImGui::EndTable();
+			}
+
+			if (const std::optional<Blocked> &refusal = stream->LastRefusal()) {
+				// Named rather than left as a counter. An edit that vanished
+				// with no message gets reported as replication being broken,
+				// and it is not — somebody else is working there.
+				ImGui::TextColored(
+					ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+					"%s is being edited by %s",
+					Describe(refusal->Subject).c_str(),
+					refusal->Holder == stream->Self() ? "you" : "somebody else"
+				);
+			}
+
 			ImGui::Text(
 				"%s · %zu editor%s",
 				stream->Connected() ? "connected" : "connecting",
@@ -359,6 +396,11 @@ namespace studio {
 				static_cast<unsigned long long>(edits.Received),
 				static_cast<unsigned long long>(edits.Applied)
 			);
+			if (edits.Contested > 0) {
+				ImGui::TextDisabled(
+					"%llu edit(s) held back", static_cast<unsigned long long>(edits.Contested)
+				);
+			}
 			if (edits.Undelivered > 0 || edits.Malformed > 0) {
 				// **Both are worth seeing and they are different problems.**
 				// Undelivered is this end's link refusing; malformed is the
@@ -376,7 +418,8 @@ namespace studio {
 
 		ImGui::TextDisabled(
 			"Edits replicate; undo does not. Ctrl+Z reverses what you did,\n"
-			"never what somebody else did."
+			"never what somebody else did. Whoever touches a model first holds\n"
+			"it until they stop."
 		);
 
 		ImGui::End();

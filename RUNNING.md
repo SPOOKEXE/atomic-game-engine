@@ -1135,11 +1135,28 @@ underneath reports what has crossed.
 did, never what somebody else did. An editor that undid a colleague's change
 because you pressed it once too often would be an editor nobody could work in.
 
-**Last write wins, and there is no locking.** Two editors that move the same
-part in the same beat both send a property write, and the second one applied
-wins for everybody — which is what Roblox's own team create does. Locking fails
-in the ordinary case rather than the rare one: two people laying out one model
-touch the same parts constantly.
+**Whoever touches a model first holds it.** Nobody asks for a lock and nobody
+waits for one: the first editor to edit a subtree holds it, every further edit
+renews the hold, and everybody else is refused until it lapses — ten seconds
+after they stop. The panel lists who is holding what, and an edit that is
+refused says who is in the way rather than vanishing.
+
+A hold covers a subtree, not one instance: a lock over a model that let
+somebody else edit its parts would protect nothing, because moving a model
+moves its children.
+
+**A hold lapses on its own**, which is what makes an editor that crashed
+survivable — there is nobody to notice that it has, so nothing can depend on it
+tidying up. Leaving a session releases everything at once, which is the tidy
+path rather than the one correctness depends on.
+
+**The refusal is at the host.** The panel greys things out as a courtesy; what
+is enforced is that a waypoint touching somebody else's hold is refused there,
+whole, and taken back at the sender. A guest running a modified build cannot
+edit through a hold.
+
+You can reserve a subtree before you start rather than by starting — that is
+what a hold taken deliberately is — but nothing needs it.
 
 **Everybody has to have the project open already.** A join carries edits, not
 the document — a scene the peer does not have is an edit that is dropped and
