@@ -1124,9 +1124,26 @@ still what admits a fetch.
 other editors on the subnet or through a point, and hands over a session id and
 a key to invite somebody with.
 
-**Sessions only.** Two editors can find each other; editing one place together
-needs a shared document with an ordering, and the layer that carries it is not
-built yet. The panel says so rather than implying otherwise.
+**Edits replicate.** Host a session, and every editor that joins sees what you
+do — a create, a delete, a reparent, a property write. A recording crosses as
+one message, so "set these forty parts to neon" arrives whole or not at all.
+
+The panel lists the editors it can see; **Join** connects to one, and the row
+underneath reports what has crossed.
+
+**Undo does not replicate, and that is deliberate.** Ctrl+Z reverses what *you*
+did, never what somebody else did. An editor that undid a colleague's change
+because you pressed it once too often would be an editor nobody could work in.
+
+**Last write wins, and there is no locking.** Two editors that move the same
+part in the same beat both send a property write, and the second one applied
+wins for everybody — which is what Roblox's own team create does. Locking fails
+in the ordinary case rather than the rare one: two people laying out one model
+touch the same parts constantly.
+
+**Everybody has to have the project open already.** A join carries edits, not
+the document — a scene the peer does not have is an edit that is dropped and
+counted. Open the same `.agame` on both machines first.
 
 ### ChangeHistoryService
 

@@ -1331,7 +1331,17 @@ split, and a texture that is briefly purple during a load is not a bug report.
 
 ---
 
-### [_] D00108
+### [x] D00108
+
+**Closed at v0.13 by `studio::EditStream`.** What follows is the entry as it
+was written, kept because the reasoning is what the answer was built against.
+
+The identity turned out to be an instance path rather than a new field in the
+document format: two logs both issue `1` for their first instance, so an
+`EditId` cannot cross, and a path is the one name two editors already share.
+Ordering comes from the host relaying, which is also what keeps paths resolving
+to the same instance everywhere. What the entry says about locking still holds
+and is why there is none.
 
 **Team create finds people and cannot yet let them edit together.**
 
