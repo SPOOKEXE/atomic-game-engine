@@ -780,22 +780,169 @@ namespace client {
 		engine::parallel::Jobs::Stop();
 	}
 
+	bool Client::FindSession() {
+		std::optional<network::SessionKey> key;
+		if (!Settings.SessionSecret.empty()) {
+			key = network::SessionKey::FromText(Settings.SessionSecret);
+			if (!key) {
+				key = network::SessionKey::FromPassphrase(Settings.SessionSecret);
+			}
+			if (!key) {
+				ENGINE_ERROR("--session-key is neither 64 hex characters nor a passphrase");
+				return false;
+			}
+		}
+
+		std::optional<network::SessionId> wanted;
+		if (!Settings.SessionIdText.empty()) {
+			wanted = network::SessionId::Parse(Settings.SessionIdText);
+			if (!wanted) {
+				ENGINE_ERROR("--session-id is not 32 hex characters");
+				return false;
+			}
+		}
+
+		network::PresenceSettings presence;
+		presence.Announce = false;
+		presence.Discover = Settings.Browse;
+		presence.RendezvousAddress = Settings.RendezvousAddress;
+		presence.Protocol = engine::replication::PROTOCOL_VERSION;
+		presence.Use = network::Purpose::Game;
+
+		// The connector's socket, handed over so the punch lands on the port
+		// the session will use. See `FindSession`'s declaration.
+		Discovery = network::Presence::Open(presence, {}, std::nullopt, Socket.get());
+		if (Discovery->Fault() != network::PresenceFault::None) {
+			ENGINE_WARN("discovery: {}", network::Describe(Discovery->Fault()));
+		}
+		if (key) {
+			// The directory holds the key so a private session on the subnet
+			// verifies and lists as joinable; the reach below takes its own
+			// copy for the poke.
+			auto forTable = network::SessionKey::FromText(key->Text());
+			if (forTable) {
+				Discovery->Seen().Trust(std::move(*forTable));
+			}
+		}
+
+		const bool reaching = Discovery->Rendezvousing() && wanted.has_value();
+		if (reaching) {
+			Discovery->Reach(*wanted, std::move(key), engine::core::Clock::Seconds());
+		} else if (Discovery->Rendezvousing()) {
+			// No id, so ask the point what it has. A private session is never
+			// in that answer — reaching one needs its id, which is what the
+			// host handed over with the key.
+			Discovery->Browse(engine::core::Clock::Seconds());
+		}
+		if (!Settings.Browse && !Discovery->Rendezvousing()) {
+			ENGINE_ERROR("--browse needs a subnet or --rendezvous needs an address; neither is usable");
+			return false;
+		}
+
+		// The one blocking wait in this program, before the loop rather than
+		// inside it. The connector does not exist yet, so nothing else is
+		// draining the socket and the presence may take it whole.
+		const double startedAt = engine::core::Clock::Seconds();
+		const double deadline = startedAt + std::max(Settings.BrowseSeconds, 0.25);
+		std::vector<std::byte> datagram;
+
+		while (engine::core::Clock::Seconds() < deadline) {
+			const double now = engine::core::Clock::Seconds();
+
+			for (;;) {
+				const engine::net::Transport::Inbound inbound = Socket->Receive(datagram);
+				if (inbound.Status != engine::net::TransportStatus::Ok) {
+					break;
+				}
+				// Anything that is not the discovery module's is dropped. There
+				// is no server yet to have sent one, so a packet here is a
+				// stray from a previous run or somebody probing the port.
+				Discovery->Deliver(datagram, inbound.From, now);
+			}
+			Discovery->Pump(now);
+
+			if (reaching) {
+				if (Discovery->Reaching() == network::ReachState::Reached) {
+					Settings.ConnectAddress = Discovery->Reached().Text();
+					ENGINE_INFO("reached session {} at {}", wanted->Text(), Settings.ConnectAddress);
+					return true;
+				}
+				if (Discovery->Reaching() == network::ReachState::Failed) {
+					ENGINE_ERROR(
+						"could not reach session {} through {}", wanted->Text(), Settings.RendezvousAddress
+					);
+					return false;
+				}
+			} else {
+				for (const network::Listing &row : Discovery->Seen().Listings()) {
+					if (!row.Joinable() || !row.Dial().IsValid()) {
+						continue;
+					}
+					if (wanted && row.Session.Session != *wanted) {
+						continue;
+					}
+					if (!Settings.SessionName.empty() && row.Session.Name != Settings.SessionName) {
+						continue;
+					}
+					Settings.ConnectAddress = row.Dial().Text();
+					ENGINE_INFO(
+						"found \"{}\" ({}, {}) at {}",
+						row.Session.Name,
+						network::Describe(row.Via),
+						network::Describe(row.Session.Admits),
+						Settings.ConnectAddress
+					);
+					return true;
+				}
+			}
+
+			// A tenth of the beacon's interval: short enough that the first
+			// announcement is acted on without waiting out a poll, long enough
+			// that this is not a spin.
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		}
+
+		// Said out loud rather than falling through to single-player. A client
+		// that meant to join and quietly ran the demo alone looks exactly like
+		// a server that is broken.
+		if (Discovery->Seen().Listings().empty()) {
+			ENGINE_ERROR("no session found in {:.1f}s", Settings.BrowseSeconds);
+		} else {
+			ENGINE_ERROR(
+				"{} session(s) found in {:.1f}s and none was joinable",
+				Discovery->Seen().Listings().size(),
+				Settings.BrowseSeconds
+			);
+		}
+		return false;
+	}
+
 	bool Client::BeginConnecting() {
-		if (Settings.ConnectAddress.empty()) {
+		const bool searching =
+			Settings.ConnectAddress.empty() && (Settings.Browse || !Settings.RendezvousAddress.empty());
+		if (Settings.ConnectAddress.empty() && !searching) {
 			return true;
+		}
+
+		// Let the OS choose the client port so multiple clients can coexist.
+		//
+		// **Opened before the search, not after it.** The search punches on
+		// this socket, and a hole punched on any other one is a hole to a port
+		// the server will never send to.
+		Socket = engine::net::MakeUdpTransport(0);
+		if (Socket == nullptr) {
+			ENGINE_ERROR("could not open a socket to connect from");
+			return false;
+		}
+
+		if (searching && !FindSession()) {
+			return false;
 		}
 
 		const std::optional<engine::net::Endpoint> server =
 			engine::net::Endpoint::Parse(Settings.ConnectAddress);
 		if (!server.has_value()) {
 			ENGINE_ERROR("--connect '{}' is not a host:port", Settings.ConnectAddress);
-			return false;
-		}
-
-		// Let the OS choose the client port so multiple clients can coexist.
-		Socket = engine::net::MakeUdpTransport(0);
-		if (Socket == nullptr) {
-			ENGINE_ERROR("could not open a socket to connect from");
 			return false;
 		}
 
@@ -848,11 +995,30 @@ namespace client {
 			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
 
+		if (Discovery != nullptr) {
+			// The connector owns the drain from here. Rendezvous traffic keeps
+			// arriving on this socket — the registration this client's peer is
+			// repeating, and the pokes that keep the mapping alive — so it is
+			// routed back rather than counted as a refusal.
+			Connection->SetForeign(
+				[this](std::span<const std::byte> datagram, const engine::net::Endpoint &from) {
+					return Discovery != nullptr && Discovery->Deliver(datagram, from, DiscoveryNow);
+				}
+			);
+		}
+
 		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
 		return true;
 	}
 
 	void Client::PollServer(double nowSeconds) {
+		if (Discovery != nullptr) {
+			// Before the connector's drain, so a rendezvous message routed out
+			// of it is stamped with this tick rather than the previous one.
+			DiscoveryNow = nowSeconds;
+			Discovery->Pump(nowSeconds);
+		}
+
 		if (Connection == nullptr) {
 			return;
 		}

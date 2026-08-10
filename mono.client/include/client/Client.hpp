@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <network/Presence.hpp>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -152,6 +153,53 @@ namespace client {
 		// Adds a read-only replica world beside the local worlds.
 		std::string ConnectAddress;
 
+		// Whether to look for a session on the local subnet instead of being
+		// told an address.
+		//
+		// **The point of the whole discovery layer, seen from a player**: the
+		// host runs a server and says nothing, and their friends on the same
+		// switch find it. `ConnectAddress` still wins when both are given,
+		// because an address somebody typed is a decision and a browse result
+		// is a guess.
+		//
+		// @since v0.13
+		bool Browse = false;
+
+		// How long to look before giving up, in seconds.
+		//
+		// **A blocking wait, and the only one in this program.** It happens
+		// once, before the loop starts, in the same place as binding a socket —
+		// which is the one moment where waiting is not a stall in a tick. A
+		// beacon announces once a second, so anything under two is a coin flip.
+		//
+		// @since v0.13
+		double BrowseSeconds = 3.0;
+
+		// Join the session with this name, rather than the first one found.
+		//
+		// @since v0.13
+		std::string SessionName;
+
+		// Join the session with this id — 32 hex characters.
+		//
+		// Also what reaches a session through a rendezvous point, because a
+		// private one is never listed and possession of its id is what stands
+		// in for a listing.
+		//
+		// @since v0.13
+		std::string SessionIdText;
+
+		// The pre-shared secret for a private session: 64 hex characters, or a
+		// passphrase.
+		//
+		// @since v0.13
+		std::string SessionSecret;
+
+		// A rendezvous point to reach a session through, as `host:port`.
+		//
+		// @since v0.13
+		std::string RendezvousAddress;
+
 		// Content origins, in priority order — the first one that answers wins.
 		//
 		// Sources are tried in order; `dir:` selects a local store.
@@ -258,6 +306,24 @@ namespace client {
 		//         open. A client that meant to connect and silently did not is
 		//         a client that looks like a server bug.
 		bool BeginConnecting();
+
+		// Finds a session to connect to, and fills in `ConnectAddress`.
+		//
+		// **The one blocking wait in this program**, and it is before the loop
+		// rather than inside it — the same place as binding a socket. A beacon
+		// announces once a second, so a search has to be able to sit still for
+		// longer than that or it is a coin flip.
+		//
+		// **Punches on `Socket`, which is why the socket is opened first.** A
+		// router's NAT mapping belongs to a port: a hole punched on some other
+		// socket punches a hole to a socket the server will never send to. The
+		// connector then drains that socket and routes rendezvous traffic back
+		// through the presence — `replication::Connector::SetForeign`.
+		//
+		// @return `false` when nothing was found, or when what was given does
+		//         not parse. A client that meant to find a session and silently
+		//         ran single-player is one that looks like a broken server.
+		bool FindSession();
 
 		// Builds the delivery client and fetches the catalogue.
 		//
@@ -453,6 +519,20 @@ namespace client {
 		// opening a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
 		std::unique_ptr<engine::replication::Connector> Connection;
+
+		// How this client finds a session, when it was not told an address.
+		// Null unless `--browse` or `--rendezvous` was given.
+		//
+		// **Kept for the life of the run rather than dropped after the search.**
+		// A rendezvous registration has to keep repeating or the router's
+		// mapping expires underneath the session it opened, and the punch that
+		// established the address is on the same socket the connector uses.
+		std::unique_ptr<network::Presence> Discovery;
+
+		// This tick's time, for the foreign-datagram handler — see
+		// `server::Server::DiscoveryNow`, which has the same problem for the
+		// same reason.
+		double DiscoveryNow = 0.0;
 
 		// The delivery client, when content sources were configured.
 		std::unique_ptr<engine::delivery::AssetClient> Content;
