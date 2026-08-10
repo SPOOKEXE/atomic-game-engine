@@ -137,6 +137,7 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.PivotEditing = true;
 	written.ControlPort = 9001;
 	written.ShowControl = true;
+	written.Sides = studio::ScaleSide::BothHalf;
 	REQUIRE(written.Save());
 
 	Preferences read;
@@ -149,6 +150,18 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	CHECK(read.PivotEditing);
 	CHECK(read.ControlPort == 9001);
 	CHECK(read.ShowControl);
+
+	// **Written as its name rather than its index**, so reordering `ScaleSide`
+	// cannot silently change how everybody's scale drag behaves. A name nobody
+	// knows leaves the default alone rather than landing on whichever member
+	// happens to be first.
+	CHECK(read.Sides == studio::ScaleSide::BothHalf);
+
+	scratch.Write("preferences.json", R"({"scaleSides": "Sideways"})");
+	Preferences unknown;
+	unknown.Sides = studio::ScaleSide::Both;
+	REQUIRE(unknown.Load());
+	CHECK(unknown.Sides == studio::ScaleSide::Both);
 
 	// **A document written by an older build leaves what it does not mention
 	// alone**, which is what makes adding a field a change rather than a

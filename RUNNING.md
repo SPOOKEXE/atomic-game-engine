@@ -304,7 +304,7 @@ row under it is whichever tab is selected:
 
 | Tab | What is on it |
 |---|---|
-| Home | Insert Object · Select, Move, Rotate, Scale · Snap and its two steps · Anchor, Lock |
+| Home | Insert Object · Select, Move, Rotate, Scale · Snap, its two steps and **Faces** · Anchor, Lock |
 | Model | Edit Pivot, Reset Pivot · Duplicate, Delete, Deselect · Undo, Redo · how many are selected |
 | Script | Script, LocalScript, ModuleScript · Script Editor, Debugger, Command Bar |
 | View | Grid and the panel toggles · camera speed |
@@ -369,6 +369,36 @@ caught.
 
 Drag a row onto another to reparent it. `Ctrl+D` duplicates, `Del` deletes,
 `Ctrl+S` saves.
+
+#### The handles *(v0.13)*
+
+Select, Move, Rotate and Scale are on the Home tab, in the command palette, and
+in Preferences → Keybinds as `Select Tool`, `Move Tool`, `Rotate Tool` and
+`Scale Tool`. **They ship unbound**, like every action in this editor — a
+default nobody asked for is how one key came to mean two things in three files,
+and `tests/Keybinds.cpp` holds that rule. Studio uses `1` to `4` and the
+Keybinds page is one visit away. They are scoped to the viewport, which is what
+lets them be plain digits: a `1` bound globally is a `1` a rename field swallows.
+
+**Move and Scale have an arm on both ends of each axis.** One arm is a handle
+you cannot reach from half the angles you orbit to. Both arms of a Move do the
+same thing; the two arms of a Scale differ in which face grows, and the lit one
+is the one you are about to take hold of.
+
+**Faces** — beside the snap steps — says which faces a resize moves:
+
+| | |
+|---|---|
+| `Side` | the face you grabbed. The opposite one stays exactly where it is |
+| `Both` | both faces move by the step, so the part grows by twice it and stays centred |
+| `Both Half` | both faces move by half the step, so it grows by the step and stays centred |
+
+`Side` is the default and is what "drag this face" means — a wall grows into the
+room rather than through the one behind it. It is the only drag that changes a
+size *and* a placement, since holding the far face still is a centre that moves
+by half of what the size gained; both go into one undo step.
+
+A whole drag is one press of `Ctrl+Z` however many parts it moved.
 
 ### The command bar *(v0.13)*
 

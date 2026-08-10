@@ -296,6 +296,40 @@ namespace studio {
 
 		Divider();
 
+		// --- which faces a resize moves --------------------------------------
+		//
+		// **Beside the steps rather than in Preferences**, because it is the
+		// same kind of decision: how far a drag goes and which end of the part
+		// it goes from are one thought, and separating them puts half of it two
+		// clicks away.
+		//
+		// Not disabled when the scale tool is not selected. A person sets this
+		// before reaching for the tool as often as after, and a control that
+		// greys itself out until you are already doing the thing it configures
+		// is a control you find by accident.
+		ImGui::TextDisabled("Faces");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
+		if (ImGui::BeginCombo("##scale-sides", Describe(ScaleSides))) {
+			for (size_t index = 0; index < SCALE_SIDE_COUNT; index++) {
+				const auto side = static_cast<ScaleSide>(index);
+				if (ImGui::Selectable(Describe(side), side == ScaleSides)) {
+					ScaleSides = side;
+				}
+			}
+			ImGui::EndCombo();
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Which faces a scale drag moves.\\n\\n"
+				"Side       the face you grabbed, and the opposite one stays put\\n"
+				"Both       both faces move by the step, so the part grows by twice it\\n"
+				"Both Half  both faces move by half the step, so it grows by the step"
+			);
+		}
+
+		Divider();
+
 		// --- what is selected ------------------------------------------------
 
 		ImGui::BeginDisabled(Selection.empty());

@@ -2848,6 +2848,15 @@ namespace studio {
 		// Which manipulator is offered right now.
 		ToolMode CurrentTool = ToolMode::Select;
 
+		// Which faces a scale drag moves. See `studio::ScaleSide`.
+		//
+		// **Mirrors `Prefs.Sides`, like the snap fields beside it**, and for the
+		// same reason the root `AGENTS.md` gives: the frame reads this and the
+		// file is written from it on the way out.
+		//
+		// @since v0.13
+		ScaleSide ScaleSides = ScaleSide::Side;
+
 		// Snap steps, and whether they are on.
 		//
 		// **Off by default.** Snapping is a constraint somebody turns on for a
@@ -2981,6 +2990,42 @@ namespace studio {
 			// read live, so changing tool mid-drag cannot turn a move into a
 			// rotation halfway through it.
 			ToolMode Mode = ToolMode::Move;
+
+			// Which faces this scale drag moves. Captured on grab for the same
+			// reason `Mode` is.
+			//
+			// @since v0.13
+			ScaleSide Sides = ScaleSide::Side;
+
+			// Which end of the axis was grabbed: `1` for the positive arm and
+			// `-1` for the negative one.
+			//
+			// **It decides which face grows and nothing else.** A move drag
+			// measures along the axis either way, so both arms move the
+			// selection identically and the sign only lights the right one; a
+			// scale drag in `ScaleSide::Side` has to know which face was taken
+			// hold of, because that is the one that is meant to move.
+			//
+			// @since v0.13
+			int Sign = 1;
+
+			// Where the selection was centred when the drag began.
+			//
+			// **The whole drag is measured from here, and it is not the live
+			// centre.** `Grabbed` is a distance along the axis from the centre
+			// at grab time; reading the centre live means it has already moved
+			// by the delta being applied, so the next frame measures a delta of
+			// zero, puts everything back, and the frame after that measures the
+			// full delta again. That is a part flickering between where it was
+			// and where it is being dragged to — visible, reported, and fixed
+			// by capturing this.
+			//
+			// The handles are still *drawn* at the live centre, because a
+			// manipulator that stayed behind while the part moved would be a
+			// second thing that looks broken.
+			//
+			// @since v0.13
+			engine::core::Vector3 Centre;
 
 			// Where on the rotation plane the drag began, for a rotate.
 			engine::core::Vector3 GrabbedPoint;

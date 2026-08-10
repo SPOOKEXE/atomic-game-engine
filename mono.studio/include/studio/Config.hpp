@@ -46,6 +46,7 @@
 // @tier client
 
 #include <cstddef>
+#include <cstdint>
 #include <engine/ui/Theme.hpp>
 #include <filesystem>
 #include <map>
@@ -162,6 +163,45 @@ namespace studio {
 		bool Save() const;
 	};
 
+	// Which faces a scale drag moves.
+	//
+	// **A preference rather than a modifier key**, because it is a decision
+	// about how somebody builds rather than about one drag: an author laying out
+	// a room wants walls to grow from the face they grabbed, and one adjusting a
+	// symmetrical prop wants it to stay centred. Studio spells the second one
+	// with a checkbox and this spells all three with a list, because the two
+	// "both" answers differ in a way a checkbox cannot say.
+	//
+	// Declared here rather than beside `Editor::ToolMode` because `Preferences`
+	// has to name it and this header is the one the editor includes rather than
+	// the other way round.
+	//
+	// @since v0.13
+	enum class ScaleSide : uint8_t {
+		// Only the face that was grabbed moves. The opposite one stays exactly
+		// where it is, which is what "drag this face" means and what makes a
+		// wall grow into a room rather than through the one behind it.
+		Side,
+
+		// Both faces move by the increment, so the part grows by twice it and
+		// stays centred where it was.
+		Both,
+
+		// Both faces move by half the increment. The part grows by the
+		// increment and stays centred — which is what a snapped drag wants,
+		// since the size lands on the step rather than on twice it.
+		BothHalf,
+	};
+
+	// How many there are, for a list that iterates them.
+	inline constexpr size_t SCALE_SIDE_COUNT = 3;
+
+	// A stable name, for the ribbon's list and for the file.
+	//
+	// @param side Which one.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(ScaleSide side);
+
 	// What the interface looks like and how it behaves, between sessions.
 	//
 	// **Deliberately not `EditorSettings`.** That struct is the command line —
@@ -192,6 +232,11 @@ namespace studio {
 
 		// How far a rotation handle steps, in degrees.
 		float SnapDegrees = 15.0f;
+
+		// Which faces a scale drag moves. See `Editor::ScaleSides`.
+		//
+		// @since v0.13
+		ScaleSide Sides = ScaleSide::Side;
 
 		// Whether a handle edits the pivot offset rather than the placement.
 		//
