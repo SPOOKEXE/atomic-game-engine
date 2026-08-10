@@ -46,7 +46,9 @@
 // @tier client
 
 #include <cstddef>
+#include <engine/ui/Theme.hpp>
 #include <filesystem>
+#include <map>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <vector>
@@ -212,6 +214,23 @@ namespace studio {
 		bool ShowAssets = false;
 		bool ShowControl = false;
 		//@}
+
+		// What a panel was coloured, keyed by the title imgui identifies it with.
+		//
+		// **Here rather than in the layout ini, unlike the global theme.** The
+		// global override is one line of numbers and belongs beside the palette
+		// it overrides; this is a document — a map of maps that grows with every
+		// panel somebody recolours — and the header above is explicit that JSON
+		// is where documents go and the INI convention for saying so was the
+		// thing that replaced.
+		//
+		// **Absent means "the theme", not "black".** A panel with no entry draws
+		// exactly as it did before anybody could colour one, which is what keeps
+		// this feature something somebody opts into per panel rather than a
+		// second set of defaults to maintain.
+		//
+		// @since v0.13
+		std::map<std::string, engine::ui::ThemeColours> PanelColours;
 
 		// Reads `preferences.json`, leaving anything it does not mention alone.
 		//

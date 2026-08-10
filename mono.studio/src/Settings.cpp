@@ -52,6 +52,69 @@ namespace studio {
 
 			ImGui::Dummy(ImVec2(size * 2.0f, size));
 		}
+
+		// One editable colour, and the cross that gives it back to the theme.
+		//
+		// **The picker always shows a colour, and the label says whose it is.**
+		// A row that was blank until somebody chose something would make the
+		// seven defaults invisible — and the first thing anybody wants when
+		// recolouring is the colour they are departing from, to nudge it.
+		//
+		// @param colours  The set being edited.
+		// @param which    Which colour.
+		// @param inherited What this colour is when nothing overrides it.
+		// @return Whether the set changed.
+		bool ColourRow(
+			engine::ui::ThemeColours &colours, engine::ui::ThemeColour which, unsigned int inherited
+		) {
+			const bool overridden = colours[which].has_value();
+			const unsigned int packed = overridden ? *colours[which] : inherited;
+
+			ImGui::PushID(static_cast<int>(which));
+
+			bool changed = false;
+			ImVec4 value = ImGui::ColorConvertU32ToFloat4(packed);
+
+			// **`NoInputs`, so the row is a swatch and not four number fields.**
+			// The picker behind the swatch has the numbers, and the hex field
+			// in it, for anybody who arrived with a colour rather than a
+			// feeling.
+			if (ImGui::ColorEdit4("##colour", &value.x, ImGuiColorEditFlags_NoInputs)) {
+				colours[which] = ImGui::ColorConvertFloat4ToU32(value);
+				changed = true;
+			}
+
+			ImGui::SameLine();
+			ImGui::TextUnformatted(engine::ui::Describe(which));
+
+			// **The reset is only there when there is something to reset.** A
+			// permanently visible cross beside seven rows that are all
+			// inherited is seven invitations to press something that does
+			// nothing.
+			if (overridden) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("·");
+				ImGui::SameLine();
+				if (ImGui::SmallButton("reset")) {
+					colours[which].reset();
+					changed = true;
+				}
+			}
+
+			ImGui::PopID();
+			return changed;
+		}
+
+		// A panel's title as somebody reads it, which is the part before `###`.
+		//
+		// imgui keys a window on the whole label and hides the id half from the
+		// title bar; a settings page that listed the raw string would be the one
+		// place in the editor showing "Preferences###Studio Settings".
+		std::string PanelLabel(const char *title) {
+			const std::string_view whole(title);
+			const size_t marker = whole.find("###");
+			return std::string(marker == std::string_view::npos ? whole : whole.substr(0, marker));
+		}
 	}
 
 	void Editor::DrawGeneralSettings() {
@@ -163,6 +226,9 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::TextDisabled("remembered in the layout file, beside the panel positions");
 
+		DrawThemeColours();
+		DrawPanelColours();
+
 		ImGui::SeparatorText("Interface");
 
 		// The scale the whole interface is built from. Not applied live on
@@ -180,6 +246,126 @@ namespace studio {
 			Say("interface scale is now " + std::to_string(Settings.Scale) +
 				"x — restart to rasterise the fonts at it");
 		}
+	}
+
+	void Editor::DrawThemeColours() {
+		ImGui::SeparatorText("Colours");
+
+		// **Over the palette, not instead of it**, and this line is the whole
+		// mental model: choosing a theme still works after somebody has picked
+		// an accent, because only the accent is pinned. Without the sentence,
+		// the first person to override a colour and then switch theme reads it
+		// as a bug.
+		ImGui::TextDisabled("chosen over whichever theme is selected — the rest still follows it");
+		ImGui::Spacing();
+
+		engine::ui::ThemeColours chosen = engine::ui::GlobalColours();
+		const engine::ui::Palette palette = engine::ui::CurrentPalette();
+
+		bool changed = false;
+		for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
+			const auto which = static_cast<engine::ui::ThemeColour>(index);
+			changed |= ColourRow(chosen, which, engine::ui::ColourOf(palette, which));
+		}
+
+		if (chosen.Any()) {
+			ImGui::Spacing();
+			if (ImGui::Button("Reset all")) {
+				chosen.Clear();
+				changed = true;
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("back to the palette, every colour");
+		}
+
+		if (changed) {
+			// Restyles and persists in one call, like `SetPalette` — see its
+			// note for why neither is left to the caller.
+			engine::ui::SetGlobalColours(chosen);
+		}
+	}
+
+	void Editor::DrawPanelColours() {
+		ImGui::SeparatorText("One panel");
+
+		ImGui::TextDisabled("a panel of its own colour, over the theme above");
+		ImGui::Spacing();
+
+		const std::span<const char *const> panels = SkinnablePanels();
+		if (panels.empty()) {
+			return;
+		}
+
+		ColourPanel = std::clamp(ColourPanel, 0, static_cast<int>(panels.size()) - 1);
+		const char *panel = panels[static_cast<size_t>(ColourPanel)];
+
+		ImGui::SetNextItemWidth(engine::ui::Scaled(220.0f));
+		if (ImGui::BeginCombo("##panel", PanelLabel(panel).c_str())) {
+			for (size_t index = 0; index < panels.size(); index++) {
+				const bool selected = static_cast<int>(index) == ColourPanel;
+
+				// **A dot beside the ones that carry a colour**, so a person
+				// who set one three panels ago can find it again. Without it
+				// the only way to audit what has been recoloured is to walk
+				// twenty-odd entries one at a time.
+				const bool carries = Prefs.PanelColours.count(panels[index]) != 0;
+				const std::string label =
+					PanelLabel(panels[index]) + (carries ? std::string("  ·") : std::string());
+
+				if (ImGui::Selectable(label.c_str(), selected)) {
+					ColourPanel = static_cast<int>(index);
+				}
+				if (selected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		ImGui::Spacing();
+
+		// **Looked up rather than inserted here.** `operator[]` on the map would
+		// give every panel somebody merely *looked at* an empty entry, and an
+		// empty entry is a line in `preferences.json` claiming a colour that is
+		// not there.
+		const auto found = Prefs.PanelColours.find(panel);
+		engine::ui::ThemeColours chosen =
+			found == Prefs.PanelColours.end() ? engine::ui::ThemeColours{} : found->second;
+
+		bool changed = false;
+		for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
+			const auto which = static_cast<engine::ui::ThemeColour>(index);
+
+			// The colour it inherits is the *live* one — the palette with the
+			// editor's overrides already on it — because that is what this
+			// panel is actually drawn in today.
+			changed |= ColourRow(chosen, which, engine::ui::ColourOf(which));
+		}
+
+		if (chosen.Any()) {
+			ImGui::Spacing();
+			if (ImGui::Button("Clear this panel")) {
+				chosen.Clear();
+				changed = true;
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("back to the theme");
+		}
+
+		if (!changed) {
+			return;
+		}
+
+		if (chosen.Any()) {
+			Prefs.PanelColours[panel] = chosen;
+		} else {
+			Prefs.PanelColours.erase(panel);
+		}
+
+		// **Nothing to restyle and nothing to mark dirty.** A panel's colours
+		// are pushed as it draws rather than installed in the style, so the
+		// next frame is already right; and they live in `preferences.json`,
+		// which `SaveConfiguration` writes on the way out.
 	}
 
 	void Editor::DrawKeybindSettings() {

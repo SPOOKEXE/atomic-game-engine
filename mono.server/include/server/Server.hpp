@@ -22,6 +22,8 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <network/Advert.hpp>
+#include <network/Presence.hpp>
 #include <optional>
 #include <string>
 #include <vector>
@@ -175,6 +177,43 @@ namespace server {
 		//
 		// Empty generates an in-process-only grant key at startup.
 		std::string ContentGrantKey;
+
+		// Whether to announce this server on the local subnet.
+		//
+		// Off by default, and only meaningful with `Listening`: a server that
+		// announced a port it never bound would be advertising nothing. The
+		// default is off for `Listening`'s reason — a process that broadcast
+		// because nobody said not to would be a behaviour change in every
+		// existing recipe.
+		//
+		// @since v0.13
+		bool Advertise = false;
+
+		// What to call this session in somebody's browser. Empty uses the game
+		// file's name, or a placeholder when there is none.
+		//
+		// @since v0.13
+		std::string SessionName;
+
+		// The pre-shared secret that makes this session private, or empty for a
+		// public one.
+		//
+		// Taken as 64 hex characters when it is exactly that, and as a
+		// passphrase otherwise. Both are the same key on the other end, and a
+		// person who was given words types words.
+		//
+		// @since v0.13
+		std::string SessionSecret;
+
+		// A rendezvous point to register with, as `host:port`, or empty.
+		//
+		// What makes this server reachable by somebody who is not on the same
+		// subnet. Independent of `Advertise`: a dedicated server on the
+		// internet registers and announces to nobody, and a LAN game announces
+		// and registers nowhere.
+		//
+		// @since v0.13
+		std::string RendezvousAddress;
 
 		// The Ed25519 seed this server proves its identity with, as 64 hex
 		// characters, or empty for none.
@@ -415,6 +454,23 @@ namespace server {
 		// @return `false` when there is no link, or no worlds to hold.
 		bool InitialiseHost();
 
+		// Opens the discovery presence, once the listening port is known.
+		//
+		// **After the socket, and it has to be**: `--listen 0` binds an
+		// ephemeral port, and an announcement carrying the port that was asked
+		// for rather than the one that was bound sends every client somewhere
+		// nothing is listening.
+		//
+		// @return `false` only when a secret was given and is not one. A
+		//         subnet that will not carry a broadcast is a fault recorded on
+		//         the presence, not a refusal to serve.
+		bool BeginAnnouncing();
+
+		// Announces, and tells the world how full this server is.
+		//
+		// @param nowSeconds The current time.
+		void ServeDiscovery(double nowSeconds);
+
 		// How many hosts `RemoteWorlds` will be placed into.
 		//
 		// Run before anything is spawned, because the worker budget depends on
@@ -490,6 +546,26 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+
+		// How this server is found — the LAN beacon and the rendezvous
+		// registration. Null when `--advertise` and `--rendezvous` were both
+		// absent, which is every existing recipe.
+		//
+		// Held by pointer for the reason the driver is: the header stays free
+		// of what it takes to build one.
+		//
+		// @since v0.13
+		std::unique_ptr<network::Presence> Discovery;
+
+		// What is being announced, kept so the player count can be refreshed
+		// without rebuilding the record every tick.
+		network::Advert Announcement;
+
+		// This tick's time, for the foreign-datagram handler. The listener's
+		// drain has no clock of its own to pass on, and reading one inside
+		// would put a wall clock in the middle of the tick — which is the thing
+		// `net/AGENTS.md` bans.
+		double DiscoveryNow = 0.0;
 
 		// The content origin this process serves, when one was asked for.
 		//

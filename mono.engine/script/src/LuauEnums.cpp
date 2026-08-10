@@ -142,6 +142,17 @@ namespace engine::script {
 		lua_setmetatable(state, -2);
 	}
 
+	bool ReadAnyEnumValue(lua_State *state, int index, core::Name &enumName, core::Name &member) {
+		void *value = lua_touserdatatagged(state, index, TAG_ENUM_ITEM);
+		if (value == nullptr) {
+			return false;
+		}
+		const EnumItem &item = *static_cast<EnumItem *>(value);
+		enumName = item.Enum;
+		member = item.Member;
+		return true;
+	}
+
 	bool ReadEnumValue(lua_State *state, int index, core::Name enumName, core::Name &out) {
 		// An `EnumItem` of the *right* enum. A member of the wrong one is the
 		// error a bare string could never have caught, so it is refused here

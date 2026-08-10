@@ -317,3 +317,41 @@ TEST_CASE("an endpoint is a value that survives its own text", "[net][transport]
 	CHECK_FALSE(Endpoint::Parse("127.0.0.1:77x").has_value());
 	CHECK_FALSE(Endpoint::Parse("").has_value());
 }
+
+TEST_CASE("a broadcast reaches every other end, and only when it was asked for", "[net][transport]") {
+	// Off, which is the default and is what a socket does without the option:
+	// the send is refused rather than delivered to nobody.
+	std::vector<std::unique_ptr<Transport>> quiet = engine::net::MakeLoopbackTransport(3);
+	CHECK(quiet[0]->Send(Endpoint::BroadcastIPv4(47600), Bytes("hello")) == TransportStatus::Unreachable);
+
+	TransportSettings settings;
+	settings.Broadcast = true;
+	std::vector<std::unique_ptr<Transport>> ends = engine::net::MakeLoopbackTransport(3, settings);
+
+	REQUIRE(ends[0]->Send(Endpoint::BroadcastIPv4(47600), Bytes("hello")) == TransportStatus::Ok);
+
+	// Both of the others, and neither is the sender: a beacon that heard its
+	// own announcement would list itself, and every browser would show a copy
+	// of the session it is already hosting.
+	std::vector<std::byte> received;
+	for (size_t index = 1; index < ends.size(); ++index) {
+		const Transport::Inbound inbound = ends[index]->Receive(received);
+		CHECK(inbound.Status == TransportStatus::Ok);
+		CHECK(inbound.From == ends[0]->Local());
+		CHECK(received == Bytes("hello"));
+	}
+	CHECK(ends[0]->Receive(received).Status == TransportStatus::Empty);
+
+	// The port is carried, not matched. A loopback end's address is its
+	// numbering rather than a port anybody bound, so a broadcast that only
+	// reached ends "on the same port" would reach nothing at all.
+	CHECK(ends[1]->Send(Endpoint::BroadcastIPv4(1), Bytes("any port")) == TransportStatus::Ok);
+	CHECK(ends[2]->Receive(received).Status == TransportStatus::Ok);
+}
+
+TEST_CASE("the broadcast address is 255.255.255.255 and reads back", "[net][transport]") {
+	const Endpoint everywhere = Endpoint::BroadcastIPv4(47600);
+	CHECK(everywhere.Text() == "255.255.255.255:47600");
+	CHECK(Endpoint::Parse("255.255.255.255:47600") == everywhere);
+	CHECK(everywhere != Endpoint::LoopbackIPv4(47600));
+}

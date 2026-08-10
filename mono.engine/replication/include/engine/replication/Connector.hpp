@@ -15,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -85,6 +86,43 @@ namespace engine::replication {
 		bool Admitted() const {
 			return Phase == Stage::Admitted;
 		}
+
+		// Sends a message this module does not read.
+		//
+		// `Listener::SendTo`'s twin — see the note there on why widening this
+		// pair beats standing up a fourth session type.
+		//
+		// @param message    The payload.
+		// @param nowSeconds The current time.
+		// @return `false` when the link refused it, including before admission:
+		//         there is no session to carry it on until then, and queueing
+		//         one would be an outbox this module deliberately does not keep.
+		// @since v0.13
+		bool SendUser(std::span<const std::byte> message, double nowSeconds);
+
+		// Hears the messages this module does not read.
+		//
+		// Called from `Poll`, on the thread that called it.
+		//
+		// @param handler Called as `handler(payload)`.
+		// @since v0.13
+		void OnUserMessage(std::function<void(std::span<const std::byte>)> handler);
+
+		// Offers every datagram to somebody else before this connector reads it.
+		//
+		// `Listener::SetForeign`'s twin, and it exists for exactly the same
+		// physical reason: a NAT mapping belongs to a port, so a client that
+		// punched a hole on some other socket punched a hole to a socket its
+		// server will never send to. Both ends of a peer-to-peer session run
+		// their rendezvous traffic over the port the session itself uses.
+		//
+		// Consulted before the source check, because a rendezvous message
+		// arrives from a coordination point rather than from the server.
+		//
+		// @param handler Called as `handler(datagram, from)`, returning whether
+		//        it took the datagram. An empty handler is the default.
+		// @since v0.13
+		void SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler);
 
 		// Whether the exchange failed and this connector will not retry.
 		// @return `true` when the exchange is over and failed.
@@ -196,6 +234,12 @@ namespace engine::replication {
 		bool Spoken = false;
 
 		std::vector<std::byte> Datagram;
+
+		// Whoever else is sharing this socket. See SetForeign.
+		std::function<bool(std::span<const std::byte>, const net::Endpoint &)> Foreign;
+
+		// Whoever is carrying something over this link. See OnUserMessage.
+		std::function<void(std::span<const std::byte>)> UserMessages;
 
 		Statistics Stats_;
 	};

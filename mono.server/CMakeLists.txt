@@ -40,6 +40,18 @@ mono_add_library(server
 		Engine::net
 		Engine::replication
 
+		# `shared`. Being findable: `--advertise` announces this server on the
+		# subnet and `--rendezvous` registers it with a point, so a person can
+		# join without being told an address. Both are off by default, so a
+		# recipe that never asks for either opens no extra socket.
+		#
+		# **It costs the headless property nothing**, which is the line to check
+		# when this row is edited: `Mono::network` is `shared` tier and links
+		# `core`, `net` and Crypto++ — a UDP socket and an HMAC, neither of
+		# which needs a device. `just check-server-is-headless` is the standing
+		# proof.
+		Mono::network
+
 		# L10, `shared`. What a game file is. `--game FILE.agame` hosts a
 		# universe of worlds authored in the studio; the same module the studio
 		# wrote it with reads it back, which is what keeps one description of

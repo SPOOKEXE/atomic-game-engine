@@ -35,6 +35,30 @@ namespace engine::replication {
 		std::copy(mine.begin(), mine.end(), Mine.begin());
 	}
 
+	void
+	Connector::SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler) {
+		Foreign = std::move(handler);
+	}
+
+	void Connector::OnUserMessage(std::function<void(std::span<const std::byte>)> handler) {
+		UserMessages = std::move(handler);
+	}
+
+	bool Connector::SendUser(std::span<const std::byte> message, double nowSeconds) {
+		if (Phase != Stage::Admitted) {
+			// No session to carry it on. Refused rather than queued: an outbox
+			// here would hold payloads whose meaning this module is not allowed
+			// to understand, which is the same reason `net` keeps none.
+			return false;
+		}
+
+		core::ByteWriter writer;
+		User payload;
+		payload.Bytes.assign(message.begin(), message.end());
+		WriteMessage(writer, payload);
+		return Wire.Send(writer.Bytes(), nowSeconds);
+	}
+
 	void Connector::Refuse() {
 		Phase = Stage::Refused;
 		Exchange.reset();
@@ -203,6 +227,13 @@ namespace engine::replication {
 				break;
 			}
 
+			// Before the source check: a rendezvous message arrives from a
+			// coordination point rather than from the server, and would
+			// otherwise be counted as a refusal.
+			if (Foreign && Foreign(Datagram, inbound.From)) {
+				continue;
+			}
+
 			if (!(inbound.From == Wire.Peer())) {
 				Stats_.Refused++;
 				continue;
@@ -227,6 +258,21 @@ namespace engine::replication {
 		}
 
 		for (const std::vector<std::byte> &message : Wire.Inbound()) {
+			// Routed before the replica sees it, for `Listener::Poll`'s reason:
+			// a user message is not this module's, and handing one to the
+			// replica would count a failure for a message that arrived
+			// perfectly well.
+			if (PeekMessageKind(message) == MessageKind::User) {
+				if (UserMessages) {
+					core::ByteReader reader(message);
+					Message read;
+					if (ReadMessage(reader, read)) {
+						UserMessages(read.User.Bytes);
+					}
+				}
+				continue;
+			}
+
 			const ApplyStatus status = Replica_.Receive(store, message);
 			if (status == ApplyStatus::Ok) {
 				Stats_.Applied++;

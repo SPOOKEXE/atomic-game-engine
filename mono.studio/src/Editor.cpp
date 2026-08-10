@@ -3,8 +3,9 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
-#include <engine/gui/Registration.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -22,19 +23,18 @@
 
 #include <algorithm>
 #include <chrono>
-#include <thread>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
+#include <fstream>
 #include <imgui.h>
 #include <mutex>
+#include <sstream>
 #include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
 #include <studio/RojoSync.hpp>
-
-#include <fstream>
-#include <sstream>
-#include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
+#include <thread>
 
 namespace studio {
 
@@ -239,7 +239,6 @@ namespace studio {
 		// rule, which every other resolver in this stack already follows.
 		RebuildContentClients();
 
-
 		// **The interface runs headless, and that is the point.** Its backends
 		// need a window and are not started without one — but the context is, so
 		// every panel's code executes, every layout is computed and every action
@@ -268,8 +267,19 @@ namespace studio {
 		engine::gui::RegisterGuiClasses();
 		engine::script::ScriptClass();
 
+		// `Enum.FinishRecordingOperation.Commit` and friends, so a plugin
+		// written against Roblox's `ChangeHistoryService` passes the value it
+		// already types. An `EnumItem` crosses the host seam as its member's
+		// name, which is the same latitude every other enum surface gives.
+		{
+			static constexpr std::string_view OPERATIONS[] = {"Commit", "Cancel", "Append"};
+			engine::ecs::EnumTable::Register("FinishRecordingOperation", OPERATIONS);
+		}
+
 		Universe = std::make_unique<engine::world::Universe>();
 		Commands = std::make_unique<CommandLog>(*Universe);
+		Team = std::make_unique<TeamCreate>(*Commands, *Universe);
+		InstallHistoryWatcher();
 
 		// After both, because several polls read them.
 		RegisterOperators();
@@ -301,7 +311,9 @@ namespace studio {
 				Active = wanted;
 				SelectionWorld = Active;
 			} else {
-				ENGINE_WARN("capture: no world called '{}' — capturing the active one", Settings.CaptureWorld);
+				ENGINE_WARN(
+					"capture: no world called '{}' — capturing the active one", Settings.CaptureWorld
+				);
 			}
 		}
 
@@ -354,7 +366,6 @@ namespace studio {
 
 		Running = true;
 		return true;
-
 	}
 
 	void Editor::Shutdown() {
@@ -440,6 +451,14 @@ namespace studio {
 			// point in the frame and needs no separate ordering story.
 			PumpControl();
 			ControlWantsProfile = ControlSurface.WantsProfiling();
+
+			// Beside the control surface, and idle unless somebody has opened
+			// the panel: `TeamCreate` holds no socket until it is asked to look,
+			// so this is a null check on every frame of every editor that never
+			// uses it.
+			if (Team != nullptr) {
+				Team->Pump(engine::core::Clock::Seconds());
+			}
 
 			// **Beside the control surface and for its reason**, which the
 			// comment above already gives: a plugin writing a property is doing
@@ -618,6 +637,7 @@ namespace studio {
 		// list is written, which is what keeps the panel free of a lock.
 		if (Sink != nullptr) {
 			for (Message &line : Sink->Take()) {
+				line.Serial = NextOutputSerial++;
 				Output.push_back(std::move(line));
 			}
 			while (Output.size() > OUTPUT_LIMIT) {
@@ -1082,7 +1102,6 @@ namespace studio {
 			});
 		}
 
-
 		// PreRender runs whether or not the simulation did: it is the phase
 		// that turns state into something to draw, and an edited world's state
 		// changes without a tick.
@@ -1097,9 +1116,7 @@ namespace studio {
 		// which is a reflection that lags the camera by one frame and reads as
 		// a mirror that is not tracking.
 		if (shown.IsValid() && IsReplicaWorld(shown)) {
-			Universe->Enter(shown, [&](Store &store) {
-				(void)client::AimReplicaViewer(store, eye, lens);
-			});
+			Universe->Enter(shown, [&](Store &store) { (void)client::AimReplicaViewer(store, eye, lens); });
 		}
 
 		// **And the same for a world that is not a replica, which is the half
@@ -1541,8 +1558,8 @@ namespace studio {
 			return;
 		}
 
-		Say("synced " + std::to_string(report.Instances) + " instances, " +
-			std::to_string(report.Scripts) + " scripts from " + parsed.Name);
+		Say("synced " + std::to_string(report.Instances) + " instances, " + std::to_string(report.Scripts) +
+			" scripts from " + parsed.Name);
 
 		for (const std::string &missing : report.Missing) {
 			Say("  no such path: " + missing, engine::core::LogLevel::Warning);
@@ -1630,8 +1647,8 @@ namespace studio {
 			return;
 		}
 
-		Say("synced " + std::to_string(report.Synced()) + " of " +
-			std::to_string(report.Worlds.size()) + " world(s) from " + universe.filename().string());
+		Say("synced " + std::to_string(report.Synced()) + " of " + std::to_string(report.Worlds.size()) +
+			" world(s) from " + universe.filename().string());
 
 		// The active world may have been the only one, or there may not have
 		// been one at all before this ran.
@@ -1907,9 +1924,7 @@ namespace studio {
 			// the instance as a root — an undo followed by a redo would quietly
 			// move it out of the tree.
 			if (Commands != nullptr) {
-				Commands->RecordCreate(
-					store, world, created, "Insert " + std::string(Label(info.Name))
-				);
+				Commands->RecordCreate(store, world, created, "Insert " + std::string(Label(info.Name)));
 			}
 		});
 
@@ -2245,83 +2260,83 @@ namespace studio {
 			// three pictures nobody asked for and a slice of the centre pane
 			// each.
 			for (int client = 0; client < PlayClients; client++) {
-			auto link = std::make_unique<PlayLink>();
+				auto link = std::make_unique<PlayLink>();
 
-			const std::string label =
-				PlayClients == 1 ? std::string("client") : "client " + std::to_string(client + 1);
+				const std::string label =
+					PlayClients == 1 ? std::string("client") : "client " + std::to_string(client + 1);
 
-			std::string linkError;
-			if (link->Start(*Universe, world, Settings.TickRate, linkError, label)) {
-				// **A viewport pinned to it, or the whole thing is invisible.**
-				// The point of a client view is the *difference* between it and
-				// the server's, and a difference nobody is shown is a feature
-				// that exists in a log line. An extra viewport with no world of
-				// its own draws whatever is being edited, so pinning is what
-				// stops the second panel showing the server's scene twice.
-				//
-				// The first free panel, and one that is already pinned somewhere
-				// is left alone: somebody who put a viewport on another scene
-				// meant it, and taking that panel would be the editor
-				// rearranging their layout when they pressed Play.
-				//
-				// **At most one, and this was over-reach when it was written.**
-				// `--run play` starts every world in the game, so a rule of "one
-				// panel per run" opened a viewport per *world* — three or four
-				// pictures nobody asked for, each one a slice of the centre pane
-				// and a turn in `PresentWorld`'s round robin, so every view also
-				// refreshed a third as often. One client view is the feature;
-				// the rest are reachable from the scene selector like any other
-				// world.
-				const bool anotherIsShown =
-					std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
-						return std::any_of(
-							other.Links.begin(),
-							other.Links.end(),
-							[](const std::unique_ptr<PlayLink> &link) {
-								return link != nullptr && link->IsRunning();
+				std::string linkError;
+				if (link->Start(*Universe, world, Settings.TickRate, linkError, label)) {
+					// **A viewport pinned to it, or the whole thing is invisible.**
+					// The point of a client view is the *difference* between it and
+					// the server's, and a difference nobody is shown is a feature
+					// that exists in a log line. An extra viewport with no world of
+					// its own draws whatever is being edited, so pinning is what
+					// stops the second panel showing the server's scene twice.
+					//
+					// The first free panel, and one that is already pinned somewhere
+					// is left alone: somebody who put a viewport on another scene
+					// meant it, and taking that panel would be the editor
+					// rearranging their layout when they pressed Play.
+					//
+					// **At most one, and this was over-reach when it was written.**
+					// `--run play` starts every world in the game, so a rule of "one
+					// panel per run" opened a viewport per *world* — three or four
+					// pictures nobody asked for, each one a slice of the centre pane
+					// and a turn in `PresentWorld`'s round robin, so every view also
+					// refreshed a third as often. One client view is the feature;
+					// the rest are reachable from the scene selector like any other
+					// world.
+					const bool anotherIsShown =
+						std::any_of(Runs.begin(), Runs.end(), [](const WorldRun &other) {
+							return std::any_of(
+								other.Links.begin(),
+								other.Links.end(),
+								[](const std::unique_ptr<PlayLink> &link) {
+									return link != nullptr && link->IsRunning();
+								}
+							);
+						});
+
+					// **Hoisted out of the loop it disables.** It cannot change
+					// across iterations, so testing it inside the body made a reader
+					// check every iteration for a mutation that is not there.
+					if (!anotherIsShown) {
+						const WorldId replica = link->ReplicaWorld();
+
+						for (ViewportState &view : Extras) {
+							if (view.World.IsValid() && view.World != replica) {
+								continue;
 							}
-						);
-					});
 
-				// **Hoisted out of the loop it disables.** It cannot change
-				// across iterations, so testing it inside the body made a reader
-				// check every iteration for a mutation that is not there.
-				if (!anotherIsShown) {
-					const WorldId replica = link->ReplicaWorld();
+							view.World = replica;
+							view.Open = true;
 
-					for (ViewportState &view : Extras) {
-						if (view.World.IsValid() && view.World != replica) {
-							continue;
+							// Where the main camera is, so the two panels start
+							// looking at the same thing from the same place. Two
+							// views of one game from different angles is a
+							// comparison somebody has to do in their head.
+							view.Frame = CameraFrame;
+							view.Yaw = CameraYaw;
+							view.Pitch = CameraPitch;
+							break;
 						}
-
-						view.World = replica;
-						view.Open = true;
-
-						// Where the main camera is, so the two panels start
-						// looking at the same thing from the same place. Two
-						// views of one game from different angles is a
-						// comparison somebody has to do in their head.
-						view.Frame = CameraFrame;
-						view.Yaw = CameraYaw;
-						view.Pitch = CameraPitch;
-						break;
 					}
+
+					run.Links.push_back(std::move(link));
+				} else {
+					// **Not fatal, and the run goes on without it.** A Play that
+					// refused to start because its client view could not be made
+					// would be a studio you cannot use to fix whatever broke it —
+					// and the server half is exactly what Run already gives, so
+					// there is a working thing to fall back to.
+					Say("no client view: " + linkError, LogLevel::Warning);
+
+					// And no point asking for the rest: whatever refused the first
+					// one refuses them all, and four copies of one warning is a log
+					// nobody reads.
+					break;
 				}
-
-				run.Links.push_back(std::move(link));
-			} else {
-				// **Not fatal, and the run goes on without it.** A Play that
-				// refused to start because its client view could not be made
-				// would be a studio you cannot use to fix whatever broke it —
-				// and the server half is exactly what Run already gives, so
-				// there is a working thing to fall back to.
-				Say("no client view: " + linkError, LogLevel::Warning);
-
-				// And no point asking for the rest: whatever refused the first
-				// one refuses them all, and four copies of one warning is a log
-				// nobody reads.
-				break;
-			}
 			}
 		}
 

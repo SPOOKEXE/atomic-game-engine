@@ -63,6 +63,14 @@ int main(int argc, char **argv) {
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
+	arguments.Flag("browse", "Look for a server announcing itself on this subnet instead of naming one");
+	arguments.Value("browse-seconds", "N", "How long to look before giving up (default 3)");
+	arguments.Value("session-name", "NAME", "Join the session with this name rather than the first found");
+	arguments.Value("session-id", "HEX", "Join the session with this id — 32 hex characters");
+	arguments.Value(
+		"session-key", "SECRET", "The secret for a private session: 64 hex characters, or a passphrase"
+	);
+	arguments.Value("rendezvous", "HOST:PORT", "Reach a session through this rendezvous point");
 	arguments.Value(
 		"server-key",
 		"HEX",
@@ -140,6 +148,20 @@ int main(int argc, char **argv) {
 	}
 	if (auto server = arguments.Get("connect")) {
 		options.ConnectAddress = std::string(*server);
+	}
+	options.Browse = arguments.Has("browse");
+	options.BrowseSeconds = arguments.GetNumber("browse-seconds", options.BrowseSeconds);
+	if (auto name = arguments.Get("session-name")) {
+		options.SessionName = std::string(*name);
+	}
+	if (auto session = arguments.Get("session-id")) {
+		options.SessionIdText = std::string(*session);
+	}
+	if (auto secret = arguments.Get("session-key")) {
+		options.SessionSecret = std::string(*secret);
+	}
+	if (auto point = arguments.Get("rendezvous")) {
+		options.RendezvousAddress = std::string(*point);
 	}
 	if (auto key = arguments.Get("server-key")) {
 		options.ServerKey = std::string(*key);

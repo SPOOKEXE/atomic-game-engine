@@ -603,6 +603,22 @@ namespace engine::script {
 	//         neither an `EnumItem` nor a string.
 	bool ReadEnumValue(lua_State *state, int index, core::Name enumName, core::Name &out);
 
+	// Reads an `EnumItem` of any set, for a reader that does not know which one
+	// to expect.
+	//
+	// **What `HostSurface` needs and `ReadEnumValue` cannot give it.** A host
+	// call is a generic bridge — it converts whatever a script passed without
+	// knowing what the host will do with it — so it has no enum name to check
+	// against. This answers "is this an EnumItem, and which member" and leaves
+	// the checking to whoever asked.
+	//
+	// @param state    The VM.
+	// @param index    The stack index to read.
+	// @param enumName Filled in with the set it belongs to.
+	// @param member   Filled in with the member's name.
+	// @return `false` when the value is not an `EnumItem`.
+	bool ReadAnyEnumValue(lua_State *state, int index, core::Name &enumName, core::Name &member);
+
 	// --- the camera -----------------------------------------------------------
 
 	// Pushes the world's live camera, or nil when nothing has made one.

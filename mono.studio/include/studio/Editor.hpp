@@ -29,52 +29,57 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
-#include <studio/Config.hpp>
-#include <studio/Plugins.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+
+#include <studio/Config.hpp>
+#include <studio/Plugins.hpp>
 // TODO(render-pipeline): `<engine/nodeview/Editor.hpp>` and `State.hpp` were
 // included here. `Engine::nodeview` was the node-canvas module the Render and
 // Assets Pipeline panels were built on; it is removed. See the member and
 // method markers below.
-#include <engine/gui/Compile.hpp>
-#include <engine/gui/Input.hpp>
-#include <engine/render/DebugPanels.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Input.hpp>
+#include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
+#include <engine/ui/Theme.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <array>
+#include <cdn/LocalStore.hpp>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
+#include <span>
 #include <string>
-#include <cdn/LocalStore.hpp>
 #include <studio/Commands.hpp>
-#include <studio/Preview.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
-#include <functional>
+#include <studio/TeamCreate.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 struct SDL_Window;
+struct ImGuiInputTextCallbackData;
 
 // **Forward-declared rather than including imgui here.** `Editor.hpp` is
 // included by every panel and by the tests, and dragging imgui in to name one
@@ -239,6 +244,23 @@ namespace studio {
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(RunMode mode);
 
+	// Every panel that can be given colours of its own.
+	//
+	// **The titles imgui keys the windows on**, which is also what the layout
+	// ini and `Prefs.PanelColours` use — one name for a panel everywhere rather
+	// than a display name beside an identifier that has to be kept in step.
+	//
+	// **This list and the `Skinned` calls in `DrawInterface` have to agree**, and
+	// nothing enforces it: a panel added to one and not the other is a panel the
+	// settings page offers to colour and nothing colours, or the reverse. Both
+	// live in `Interface.cpp`, next to each other, for that reason. A plugin's
+	// dock widget is deliberately absent — a plugin colours its own, from Luau,
+	// and a list of them here would be a list that changes as plugins load.
+	//
+	// @return The titles, valid for the lifetime of the process.
+	// @since v0.13
+	std::span<const char *const> SkinnablePanels();
+
 	// One line in the output panel.
 	//
 	// @since v0.7
@@ -249,6 +271,16 @@ namespace studio {
 		// Whether it is an error, a warning or ordinary progress. Drawn as a
 		// colour, which is the only thing the panel does with it.
 		engine::core::LogLevel Level = engine::core::LogLevel::Info;
+
+		// A number that only ever goes up, and never repeats.
+		//
+		// **What a selection is made of, because an index is not stable.** The
+		// list is a deque trimmed from the *front* at `OUTPUT_LIMIT`, so the
+		// line at index 40 is a different line a moment later — a selection
+		// held as indices would slide up the log while somebody read it.
+		//
+		// @since v0.13
+		uint64_t Serial = 0;
 	};
 
 	// Everything the command line decides.
@@ -663,6 +695,50 @@ namespace studio {
 		void ToggleBreakpoint(engine::core::Name path, int line);
 		void DrawOutput();
 
+		// Whether a line is inside the output's selected span.
+		//
+		// @param serial The line's serial.
+		// @return Whether it is selected.
+		// @since v0.13
+		bool OutputSelected(uint64_t serial) const;
+
+		// Puts the selected lines on the clipboard, oldest first.
+		//
+		// **Only the lines the filter is showing.** A copy that included
+		// hidden lines would hand somebody text they cannot see on screen, and
+		// the reason they filtered was to be rid of it.
+		//
+		// @return How many lines were copied.
+		// @since v0.13
+		size_t CopyOutputSelection();
+
+		// The zoom control a text panel puts beside what it scales.
+		//
+		// **Written once because two panels have it**, and a second copy of
+		// the step and the clamp would be two panels that disagree about what
+		// a zoom level is the first time either is tuned.
+		//
+		// Draws the percentage and the three buttons, and applies Ctrl+wheel
+		// and Ctrl+= / Ctrl+- for the window it is called in. The keys are
+		// guarded on the window being focused so that zooming one panel does
+		// not zoom another.
+		//
+		// @param zoom What to adjust. Clamped in place.
+		// @param what What the tooltip calls the thing being zoomed.
+		// @since v0.13
+		void DrawZoomControl(float &zoom, const char *what);
+
+		// Applies Ctrl+wheel to a zoom, for the item just drawn.
+		//
+		// Separate from the control because the wheel belongs over the *text*
+		// and the buttons belong in the toolbar, and putting both in one call
+		// would tie where a panel shows the control to where it reads the
+		// wheel.
+		//
+		// @param zoom What to adjust. Clamped in place.
+		// @since v0.13
+		void ApplyZoomWheel(float &zoom);
+
 		// The editor's own settings, in pages.
 		//
 		// **A panel rather than a modal**, because choosing a theme means
@@ -672,6 +748,16 @@ namespace studio {
 
 		// The theme picker and the interface scale.
 		void DrawAppearanceSettings();
+
+		// The seven colours, chosen over whichever palette is selected.
+		//
+		// @since v0.13
+		void DrawThemeColours();
+
+		// The same seven, for one panel rather than for the editor.
+		//
+		// @since v0.13
+		void DrawPanelColours();
 
 		// The Preferences page that is not about looks: the world lifecycle
 		// and how frames are paced.
@@ -1052,7 +1138,6 @@ namespace studio {
 		//@{
 		// TODO(render-pipeline): `void DrawRenderPipeline();` drew the Render Pipeline node editor.
 
-
 		// The pipeline as a grid: passes across, resources down, what each does
 		// to each where they meet.
 		//
@@ -1062,12 +1147,12 @@ namespace studio {
 		// different question and wants a different shape.
 		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
 		// is the arithmetic and this is only the drawing.
-		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid — passes across the top, resources down the side.
-
+		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid — passes across the top,
+		// resources down the side.
 
 		// The picture and histogram under the access grid. See `ProfileWatched`.
-		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the profile grid.
-
+		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the
+		// profile grid.
 
 		// The selected node's own settings, under the canvas.
 		//
@@ -1076,7 +1161,6 @@ namespace studio {
 		// things could describe the shape of a frame and nothing about it.
 		// TODO(render-pipeline): `DrawNodeParameters` edited a node's parameters,
 		// including the multi-line GLSL box a `raster` node's shader was typed into.
-
 
 		// TODO(render-pipeline): `DrawChannelHistogram` drew one channel's
 		// distribution as sixteen bars and a range, over `render::ChannelHistogram`.
@@ -1144,8 +1228,7 @@ namespace studio {
 		// @param name    The asset's name, which is its path under `raw/`.
 		// @param kind    What it is, for the glyph when there is no picture.
 		void PaintPreview(
-			float cornerX, float cornerY, float side, const std::string &name,
-			engine::assets::AssetKind kind
+			float cornerX, float cornerY, float side, const std::string &name, engine::assets::AssetKind kind
 		);
 
 		// Orders the published view by whatever headers were clicked.
@@ -1153,9 +1236,7 @@ namespace studio {
 		// **The view and never `PickerContents`.** That is what the manifest
 		// says, in the order it says it, and every picker reads it — a header
 		// click must not reorder what another panel is looking at.
-		void SortPublished(
-			std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs
-		);
+		void SortPublished(std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs);
 
 		// The same for the raw view.
 		void SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
@@ -1340,9 +1421,7 @@ namespace studio {
 		// How wide that target should be.
 		uint32_t PreviewSide = 132;
 
-
 	  public:
-
 		// Publishes `raw/` into `processed/`.
 		//
 		// @param hexSeed 64 hex characters of Ed25519 seed. Not stored.
@@ -1480,6 +1559,62 @@ namespace studio {
 		// `Network.cpp`.
 		void DrawNetwork();
 
+		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
+		void DrawTeamCreate();
+
+		// The colours a panel was given, by the title imgui identifies it with.
+		//
+		// @param panel The panel's title.
+		// @return Its override, or an empty one when it has none. The reference
+		//         is valid until `Prefs.PanelColours` is next changed.
+		// @since v0.13
+		const engine::ui::ThemeColours &PanelColoursFor(const char *panel) const;
+
+		// Draws one panel with whatever colours it was given.
+		//
+		// **The push has to bracket `Begin` and `End`, not sit inside them** —
+		// a window's background is read at `Begin`, so an override pushed within
+		// the window colours everything except the window. Which is why this
+		// wraps the call rather than living in each panel: one place to get it
+		// right, and a panel author cannot get it wrong.
+		//
+		// @param panel The panel's title, as the settings panel lists it.
+		// @param body  The draw call.
+		// @since v0.13
+		template <typename Body>
+		void Skinned(const char *panel, Body &&body) {
+			const engine::ui::ScopedColours skin(PanelColoursFor(panel));
+			body();
+		}
+
+		// A prompt that runs a line of Luau against the scene being edited.
+		// `CommandBar.cpp`.
+		//
+		// @since v0.13
+		void DrawCommandBar();
+
+		// Runs one command, bracketed by a history recording.
+		//
+		// **The whole run is one waypoint**, which is the point: a line that
+		// moves forty parts is one press of Ctrl+Z, not forty. A run that
+		// changed nothing commits nothing, so an empty step never appears in
+		// the Edit menu for somebody who typed a query.
+		//
+		// @param source The Luau to run.
+		// @return Whether it compiled and ran without raising.
+		// @since v0.13
+		bool RunCommand(const std::string &source);
+
+		// Walks the command history for the input's arrow keys.
+		//
+		// **Public because imgui's callback is a free function** and the only
+		// way it reaches an editor is through the user pointer it carries.
+		//
+		// @param data The callback's data.
+		// @return Zero, which is what imgui expects of a history callback.
+		// @since v0.13
+		int WalkCommandHistory(ImGuiInputTextCallbackData *data);
+
 		// The control surface: whether it is listening, and what it offers.
 		//
 		// **A panel rather than a log line, because the interesting facts about
@@ -1511,7 +1646,24 @@ namespace studio {
 		// @param plugin   Whose handler.
 		// @param callback What to call.
 		// @param drawing  Whether the widget calls are legal inside it.
-		void InvokePlugin(LoadedPlugin &plugin, engine::script::HostCallback callback, bool drawing);
+		void InvokePlugin(
+			LoadedPlugin &plugin,
+			engine::script::HostCallback callback,
+			bool drawing,
+			engine::script::HostArguments arguments = {}
+		);
+
+		// Points the command log at the plugins and, when one is open, at the
+		// team-create edit stream.
+		//
+		// **One watcher, fanned out here.** `CommandLog` has one seam because a
+		// log that knew what a plugin was would be a log that knows what an
+		// editor is; deciding who hears about a waypoint is this class's job
+		// and nobody else's.
+		//
+		// @since v0.13
+		void InstallHistoryWatcher();
+
 		//@}
 
 		// Publishes the selection into the world as `studio.Selected`.
@@ -2213,7 +2365,6 @@ namespace studio {
 		// "install on the next frame", and saving a pipeline erased the entry,
 		// which is what made a save visible in the viewport.
 
-
 		// One world's run, for as long as it is running.
 		//
 		// **A universe is a collection of scenes, so running is per scene.**
@@ -2371,6 +2522,35 @@ namespace studio {
 		// per-tab zoom is a setting that appears to reset itself every time
 		// they switch file.
 		float ScriptZoom = 1.0f;
+
+		// The same, for the output panel.
+		//
+		// **Its own number rather than the script editor's.** They are read in
+		// different situations — code somebody is writing, and a log somebody
+		// is squinting at — and one setting would mean making a stack trace
+		// legible also made every script enormous.
+		//
+		// @since v0.13
+		float OutputZoom = 1.0f;
+
+		// The selected span of the output, as the serials at each end.
+		//
+		// **An anchor and a head rather than a first and a last**, so a drag
+		// that goes upwards selects what it crosses rather than nothing: the
+		// anchor is where the mouse went down and the head is where it is now,
+		// and either may be the larger.
+		//
+		// Equal and zero means nothing is selected, which is safe because a
+		// serial is never zero.
+		//
+		// @since v0.13
+		//@{
+		uint64_t OutputAnchor = 0;
+		uint64_t OutputHead = 0;
+		//@}
+
+		// What the next line's serial will be. Never zero.
+		uint64_t NextOutputSerial = 1;
 
 		// The output panel's lines, oldest first.
 		//
@@ -3184,7 +3364,6 @@ namespace studio {
 		// empty — a panel that rebuilt every frame would throw away a wire on the
 		// frame it was dragged and have nowhere to put a node somebody moved.
 
-
 		// Where the add-file and add-folder dialogs are looking.
 		//
 		// **A `std::string` and no longer a fixed buffer**, because it is no
@@ -3275,6 +3454,74 @@ namespace studio {
 
 		// The control surface's own panel. See `DrawControl`.
 		bool ShowControl = false;
+
+		// Team create's panel. See `DrawTeamCreate`.
+		bool ShowTeamCreate = false;
+
+		// Which panel the per-panel colour rows are editing.
+		//
+		// **Not saved.** It is where somebody's cursor was in a settings page,
+		// not a preference — and a restored one would open the page on a panel
+		// they have no memory of choosing. Indexes `SkinnablePanels`.
+		//
+		// @since v0.13
+		int ColourPanel = 0;
+
+		// The command bar. See `DrawCommandBar`.
+		//
+		// @since v0.13
+		bool ShowCommandBar = false;
+
+		// What is typed into it.
+		//
+		// A character buffer for `InputText`'s sake, like the team-create
+		// fields: this repository's imgui has no `imgui_stdlib` on its link
+		// line.
+		char CommandField[1024] = {};
+
+		// What has been run, oldest first, so the arrows can walk back through
+		// it.
+		//
+		// **Kept even when a command failed.** A command with a typo in it is
+		// exactly the one somebody wants back to fix rather than retype.
+		std::vector<std::string> CommandHistory;
+
+		// Where the arrows have walked to, or -1 for "at the prompt".
+		int CommandCursor = -1;
+
+		// The runtime commands are run in, and the scene it was built against.
+		//
+		// **Kept between commands, so globals persist.** A bar that threw its
+		// VM away after every line would make `local helper = ...` on one line
+		// and using it on the next impossible, which is most of what a person
+		// wants a prompt for. Rebuilt when the active scene changes, because a
+		// runtime is bound to one store.
+		//
+		// **Its own runtime rather than a plugin's**, so a command cannot spend
+		// a plugin's step budget or see its globals — the same reason plugins
+		// get one each.
+		LoadedPlugin CommandHost;
+		engine::world::WorldId CommandWorld;
+
+		// This editor's presence among the others, and the edits between them.
+		// Idle — and holding no socket — until somebody opens the panel and
+		// asks it to look.
+		//
+		// Held by pointer because it borrows the command log and the universe,
+		// and both are built during `Initialise` rather than at construction.
+		std::unique_ptr<TeamCreate> Team;
+
+		// What the team-create fields hold while somebody is editing them.
+		// Kept on the editor rather than static inside the draw, for
+		// `ControlPortField`'s reason: a panel that is closed and reopened
+		// should not forget what was half typed into it.
+		//
+		// Character buffers rather than strings, because that is the imgui this
+		// repository vendors — there is no `imgui_stdlib` on the link line and
+		// adding one for three fields would widen what the editor pulls in.
+		char TeamNameField[64] = {};
+		char TeamKeyField[80] = {};
+		char TeamPointField[64] = {};
 
 		// The plugins panel. See `DrawPlugins`.
 		bool ShowPlugins = false;

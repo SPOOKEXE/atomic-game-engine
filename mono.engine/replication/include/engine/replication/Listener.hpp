@@ -74,6 +74,77 @@ namespace engine::replication {
 		//        default above.
 		void SetAdmission(AdmissionPolicy policy);
 
+		// --- carrying somebody else's messages ---------------------------------
+		//
+		// **A connected, admitted, encrypted, reliable link is expensive to
+		// build and this module already has one.** A caller that needs to carry
+		// something else between the same two ends — a game's remote call, the
+		// studio's edit stream — should widen this rather than stand up a
+		// fourth session type beside it, which is the mistake this pair exists
+		// to prevent.
+		//
+		// The payload is opaque and stays opaque. A listener that parsed one
+		// would be a listener that knows what a studio edit is.
+
+		// Sends a message to one client.
+		//
+		// @param client     Who to send it to.
+		// @param message    The payload.
+		// @param nowSeconds The current time.
+		// @return `false` for an unknown client, or when the link refused it —
+		//         over budget, closed, or not yet admitted. A caller that has to
+		//         know whether it landed reads this.
+		// @since v0.13
+		bool SendTo(ClientId client, std::span<const std::byte> message, double nowSeconds);
+
+		// Sends a message to every admitted client except one.
+		//
+		// **The relay a shared document needs, and the exception is the point.**
+		// A host that echoed an edit back to whoever sent it would have them
+		// apply their own change twice.
+		//
+		// @param message    The payload.
+		// @param nowSeconds The current time.
+		// @param except      Who not to send it to. A default `ClientId` is
+		//        nobody, which sends to all.
+		// @return How many clients took it.
+		// @since v0.13
+		size_t Broadcast(std::span<const std::byte> message, double nowSeconds, ClientId except = {});
+
+		// Hears the messages this module does not read.
+		//
+		// Called from `Poll`, on the thread that called it, before anything
+		// else is done with the datagram.
+		//
+		// @param handler Called as `handler(client, payload)`.
+		// @since v0.13
+		void OnUserMessage(std::function<void(ClientId, std::span<const std::byte>)> handler);
+
+		// Offers every datagram to somebody else before this listener reads it.
+		//
+		// **One socket, more than one protocol, and the reason is physical.** A
+		// router's NAT mapping belongs to a *port*: a hole punched on some
+		// other socket gets that socket through and leaves this one exactly as
+		// unreachable as it was. So a server that wants to be reachable
+		// peer-to-peer has to run its rendezvous traffic over the port its
+		// clients will connect to — which means something has to arrive here
+		// and not be a `net::Packet`.
+		//
+		// **Routing is by magic and is safe rather than lucky.**
+		// `net::Packet::MAGIC` is `ATN1`; the discovery module's frames are
+		// `ATNA` and `ATNR`. A handler that claims a datagram it should not
+		// have is a handler with a bug, not an ambiguity in the formats.
+		//
+		// Consulted before anything else, including the source check: a
+		// rendezvous message arrives from a coordination point this listener
+		// has never heard of, and would otherwise be counted as a refusal.
+		//
+		// @param handler Called as `handler(datagram, from)`, returning whether
+		//        it took the datagram. An empty handler is the default and
+		//        costs one branch per datagram.
+		// @since v0.13
+		void SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler);
+
 		// Gives this server an identity, so a client can tell it from a relay.
 		//
 		// @param key The server's signing key, borrowed for the listener lifetime.
@@ -122,6 +193,25 @@ namespace engine::replication {
 		// Advances every link and resets its per-tick budget.
 		// @param nowSeconds The current time.
 		void Advance(double nowSeconds);
+
+		// Sends what is queued and resends what has gone unacknowledged.
+		//
+		// **What a listener that never publishes a world still has to do.**
+		// Until v0.13 the only flush was inside `Publish`, which was true of
+		// every caller: a server publishes every tick. A listener carrying
+		// nothing but user messages does not, and without this its
+		// acknowledgements never leave — so the far side's reliable window
+		// fills, its payloads are resent until the resend limit, and a link
+		// that is working perfectly gives up.
+		//
+		// `Publish` still flushes, so a server that publishes need not call
+		// this and a caller that does is flushing twice into a sender that
+		// sends by due time. That is a no-op rather than a double send.
+		//
+		// @param nowSeconds The current time.
+		// @return How many peers had something to send.
+		// @since v0.13
+		size_t Flush(double nowSeconds);
 
 		// The inputs every client has sent and the game has not consumed.
 		//
@@ -238,6 +328,12 @@ namespace engine::replication {
 		std::optional<net::Cookie> Cookie_;
 
 		AdmissionPolicy Policy;
+
+		// Whoever else is sharing this socket. See SetForeign.
+		std::function<bool(std::span<const std::byte>, const net::Endpoint &)> Foreign;
+
+		// Whoever is carrying something over these links. See OnUserMessage.
+		std::function<void(ClientId, std::span<const std::byte>)> UserMessages;
 
 		std::vector<Peer> Peers;
 

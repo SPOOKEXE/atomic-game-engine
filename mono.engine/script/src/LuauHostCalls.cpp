@@ -150,6 +150,24 @@ namespace engine::script {
 					out.Frame = *static_cast<core::CFrame *>(value);
 					return true;
 				}
+
+				// **An `EnumItem` crosses as its member's name.** That is the
+				// same latitude `ReadEnumValue` already gives everywhere else —
+				// `part.AlphaMode = "Clip"` is accepted, so a host that takes
+				// `Enum.FinishRecordingOperation.Commit` and a host that takes
+				// `"Commit"` should not be two hosts.
+				//
+				// The set it belongs to is dropped, which is a real loss and the
+				// honest trade: carrying it would make every host that takes an
+				// enum read a two-field map, to catch a mistake — passing a
+				// member of the wrong set whose name happens to match — that
+				// costs one clear refusal when it happens.
+				core::Name enumName;
+				core::Name member;
+				if (ReadAnyEnumValue(state, index, enumName, member)) {
+					out = HostValue::Of(member.Text());
+					return true;
+				}
 				return false;
 			}
 

@@ -132,6 +132,26 @@ namespace engine::net {
 		// @return The endpoint.
 		static Endpoint LoopbackIPv4(uint16_t port);
 
+		// The limited broadcast address, 255.255.255.255, on `port`.
+		//
+		// **The limited one rather than a subnet-directed one, deliberately.**
+		// A subnet broadcast — 192.168.1.255 — has to be computed from an
+		// interface's address and netmask, which means enumerating interfaces
+		// and picking one, and a machine with a VPN or a container bridge has
+		// several that all look plausible. The limited address needs none of
+		// that: the kernel puts it out of the interface the route table
+		// chooses, every host on that link receives it, and no router forwards
+		// it. That is exactly the reach LAN discovery wants.
+		//
+		// A socket may only send here with `TransportSettings::Broadcast` set;
+		// without it the send is refused by the operating system rather than
+		// silently delivered to nobody.
+		//
+		// @param port The port, in host order.
+		// @return The endpoint.
+		// @since v0.13
+		static Endpoint BroadcastIPv4(uint16_t port);
+
 		// Parses what Text produced, refusing anything else.
 		//
 		// **The text is hostile.** It arrives from a command line, a

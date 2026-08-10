@@ -24,9 +24,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <studio/Commands.hpp>
-
+#include <span>
 #include <string>
+#include <string_view>
+#include <studio/Commands.hpp>
+#include <vector>
 
 TEST_SUITE_ID("studio.commands")
 
@@ -172,7 +174,9 @@ namespace {
 				}
 			});
 
-			Log.RecordProperty(Scene, instance, property, before, value, "Set " + std::string(property.Text()));
+			Log.RecordProperty(
+				Scene, instance, property, before, value, "Set " + std::string(property.Text())
+			);
 		}
 
 		// A `Vector3` property value, which is what `Size` and `Position` are.
@@ -480,8 +484,7 @@ TEST_CASE("forgetting a scene nothing was recorded in changes nothing", "[studio
 	CHECK(fixture.Log.Depth() == 1);
 }
 
-TEST_CASE("the history reads oldest first, and the last entry is what undo reverses",
-		  "[studio][commands]") {
+TEST_CASE("the history reads oldest first, and the last entry is what undo reverses", "[studio][commands]") {
 	// **What the History panel walks.** The stacks are stored as stacks — the
 	// back is the top — and a history list reads downwards in the order things
 	// happened. Getting that backwards would put the newest edit at the top of
@@ -516,4 +519,317 @@ TEST_CASE("an empty log offers no history", "[studio][commands]") {
 	Fixture fixture;
 	CHECK(fixture.Log.Undoable().empty());
 	CHECK(fixture.Log.Redoable().empty());
+}
+
+// --- recordings ---------------------------------------------------------------
+//
+// The grouping layer, which is Roblox's `ChangeHistoryService` shape and is what
+// team create replicates. The property to hold onto while reading these: a
+// command recorded outside a recording is a waypoint of its own, so everything
+// above this line describes the same log as everything below it.
+
+TEST_CASE("a recording is one step however many edits are in it", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	const auto recording = fixture.Log.TryBeginRecording("Insert three", "Insert three parts");
+	REQUIRE(recording.has_value());
+	CHECK(fixture.Log.IsRecordingInProgress());
+	CHECK(fixture.Log.IsRecordingInProgress(*recording));
+	CHECK_FALSE(fixture.Log.IsRecordingInProgress("rec-somebody-else"));
+
+	fixture.Insert(workspace, "A");
+	fixture.Insert(workspace, "B");
+	fixture.Insert(workspace, "C");
+	REQUIRE(fixture.ChildCount(workspace) == 3);
+
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Commit));
+	CHECK_FALSE(fixture.Log.IsRecordingInProgress());
+
+	// Three commands, one step. Without grouping this is three presses of
+	// Ctrl+Z for one action, and three messages on the wire for one action.
+	CHECK(fixture.Log.Depth() == 3);
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK_FALSE(fixture.Log.CanUndo());
+
+	REQUIRE(fixture.Log.Redo());
+	CHECK(fixture.ChildCount(workspace) == 3);
+	CHECK_FALSE(fixture.Log.CanRedo());
+}
+
+TEST_CASE("only one recording at a time, and the second is refused", "[studio][commands]") {
+	Fixture fixture;
+
+	const auto first = fixture.Log.TryBeginRecording("First");
+	REQUIRE(first.has_value());
+
+	// Refused rather than nested. A cancel of an outer recording holding a
+	// committed inner one has no answer that is not surprising, so there is no
+	// way to ask the question.
+	CHECK_FALSE(fixture.Log.TryBeginRecording("Second").has_value());
+
+	// And a finish naming somebody else's identifier does not close it.
+	CHECK_FALSE(fixture.Log.FinishRecording("rec-999", studio::FinishOperation::Commit));
+	CHECK(fixture.Log.IsRecordingInProgress());
+
+	REQUIRE(fixture.Log.FinishRecording(*first, studio::FinishOperation::Commit));
+	CHECK(fixture.Log.TryBeginRecording("Second").has_value());
+}
+
+TEST_CASE("cancelling a recording puts back what it changed", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	fixture.Insert(workspace, "Kept");
+	REQUIRE(fixture.ChildCount(workspace) == 1);
+	const size_t before = fixture.Log.Depth();
+
+	const auto recording = fixture.Log.TryBeginRecording("Insert two");
+	REQUIRE(recording.has_value());
+	fixture.Insert(workspace, "A");
+	fixture.Insert(workspace, "B");
+	REQUIRE(fixture.ChildCount(workspace) == 3);
+
+	// **The identifier is ignored for a cancel**, which is Roblox's rule and is
+	// the one case where not having kept it is the normal situation: a plugin
+	// abandoning its own edit knows it has one open.
+	REQUIRE(fixture.Log.FinishRecording({}, studio::FinishOperation::Cancel));
+
+	CHECK(fixture.ChildCount(workspace) == 1);
+	CHECK(fixture.Log.Depth() == before);
+
+	// Nothing on the redo stack. A cancel is "this never happened", not "step
+	// back", and offering to redo it would offer a state nobody asked for.
+	CHECK_FALSE(fixture.Log.CanRedo());
+
+	// And the edit before it is still reachable.
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.ChildCount(workspace) == 0);
+}
+
+TEST_CASE("appending folds a recording into the step before it", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	fixture.Insert(workspace, "First");
+
+	const auto recording = fixture.Log.TryBeginRecording("More");
+	REQUIRE(recording.has_value());
+	fixture.Insert(workspace, "Second");
+	fixture.Insert(workspace, "Third");
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Append));
+
+	REQUIRE(fixture.ChildCount(workspace) == 3);
+	CHECK(fixture.Log.Depth() == 3);
+
+	// One undo, because the recording was folded into the waypoint before it —
+	// which is what a drag that resumes should feel like.
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK_FALSE(fixture.Log.CanUndo());
+}
+
+TEST_CASE("a waypoint merges everything since the previous cut", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	fixture.Insert(workspace, "A");
+	fixture.Insert(workspace, "B");
+
+	// Roblox's rule: the changes between two waypoints are one undo. Over a log
+	// whose default is one command per step, that is a merge.
+	fixture.Log.SetWaypoint("Insert two parts");
+	CHECK(fixture.Log.NextUndo() == "Insert two parts");
+
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK_FALSE(fixture.Log.CanUndo());
+
+	// **The editor never calls it, and is unaffected.** Two inserts with no cut
+	// between them are still two steps, which is what every case above this
+	// line asserts.
+	Fixture uncut;
+	const Entity theirs = uncut.Workspace();
+	uncut.Insert(theirs, "A");
+	uncut.Insert(theirs, "B");
+	REQUIRE(uncut.Log.Undo());
+	CHECK(uncut.ChildCount(theirs) == 1);
+}
+
+TEST_CASE("a cut cannot merge across an undo", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	fixture.Insert(workspace, "A");
+	fixture.Insert(workspace, "B");
+	REQUIRE(fixture.Log.Undo());
+	fixture.Insert(workspace, "C");
+
+	// The cut moved with the undo, so this merges the one command made since
+	// and not the one the undo left behind. Merging across would name a
+	// waypoint that no longer holds what it did when it was made.
+	fixture.Log.SetWaypoint("Insert C");
+	REQUIRE(fixture.Log.Undo());
+	CHECK(fixture.ChildCount(workspace) == 1);
+}
+
+TEST_CASE("resetting collapses the history and reverts nothing", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	fixture.Insert(workspace, "A");
+	fixture.Insert(workspace, "B");
+	REQUIRE(fixture.Log.Undo());
+	REQUIRE(fixture.Log.CanUndo());
+	REQUIRE(fixture.Log.CanRedo());
+
+	fixture.Log.ResetWaypoints();
+
+	CHECK_FALSE(fixture.Log.CanUndo());
+	CHECK_FALSE(fixture.Log.CanRedo());
+
+	// A floor rather than a restore. What is on screen is what was on screen.
+	CHECK(fixture.ChildCount(workspace) == 1);
+}
+
+TEST_CASE("a disabled log records nothing and forgets what it had", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	fixture.Insert(workspace, "Before");
+	REQUIRE(fixture.Log.CanUndo());
+
+	fixture.Log.SetEnabled(false);
+	CHECK_FALSE(fixture.Log.Enabled());
+
+	// Cleared, and it does not repopulate when it comes back — a log that kept
+	// its stacks across a period it was told not to watch would offer to undo
+	// across edits it never saw.
+	CHECK_FALSE(fixture.Log.CanUndo());
+
+	fixture.Insert(workspace, "During");
+	CHECK(fixture.Log.Depth() == 0);
+	CHECK_FALSE(fixture.Log.TryBeginRecording("Anything").has_value());
+
+	fixture.Log.SetEnabled(true);
+	CHECK_FALSE(fixture.Log.CanUndo());
+
+	fixture.Insert(workspace, "After");
+	CHECK(fixture.Log.Depth() == 1);
+}
+
+TEST_CASE("a watcher hears a waypoint once, whole", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	size_t started = 0;
+	size_t finished = 0;
+	std::vector<size_t> commits;
+	std::string undone;
+	std::string redone;
+
+	studio::CommandLog::Watcher watcher;
+	watcher.RecordingStarted = [&](const studio::Recording &) { started++; };
+	watcher.RecordingFinished = [&](const studio::Recording &, studio::FinishOperation) { finished++; };
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> group) {
+		commits.push_back(group.size());
+	};
+	watcher.Undone = [&](std::string_view name) { undone = std::string(name); };
+	watcher.Redone = [&](std::string_view name) { redone = std::string(name); };
+	fixture.Log.Watch(watcher);
+
+	// An ungrouped command publishes on its own, one command at a time.
+	fixture.Insert(workspace, "Alone");
+	REQUIRE(commits.size() == 1);
+	CHECK(commits[0] == 1);
+
+	// A recording publishes once, on the commit, with everything in it. A peer
+	// that applied half of a group would show a state the author never saw.
+	const auto recording = fixture.Log.TryBeginRecording("Three");
+	REQUIRE(recording.has_value());
+	fixture.Insert(workspace, "A");
+	fixture.Insert(workspace, "B");
+	fixture.Insert(workspace, "C");
+	CHECK(commits.size() == 1);
+
+	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Commit));
+	REQUIRE(commits.size() == 2);
+	CHECK(commits[1] == 3);
+
+	CHECK(started == 1);
+	CHECK(finished == 1);
+
+	REQUIRE(fixture.Log.Undo());
+	CHECK(undone == "Insert C");
+	REQUIRE(fixture.Log.Redo());
+	CHECK(redone == "Insert C");
+
+	// Undo and redo publish nothing. They are this author's navigation of their
+	// own history, and a peer is told about the edits rather than about the
+	// walking.
+	CHECK(commits.size() == 2);
+}
+
+TEST_CASE("a cancelled recording is never published", "[studio][commands]") {
+	Fixture fixture;
+	const Entity workspace = fixture.Workspace();
+
+	size_t commits = 0;
+	studio::CommandLog::Watcher watcher;
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command>) { commits++; };
+	fixture.Log.Watch(watcher);
+
+	const auto recording = fixture.Log.TryBeginRecording("Abandoned");
+	REQUIRE(recording.has_value());
+	fixture.Insert(workspace, "A");
+	fixture.Insert(workspace, "B");
+	REQUIRE(fixture.Log.FinishRecording({}, studio::FinishOperation::Cancel));
+
+	// The rollback already put everything back, so there is nothing for a peer
+	// to apply — and telling them would be telling them about a state that
+	// never existed anywhere.
+	CHECK(commits == 0);
+	CHECK(fixture.ChildCount(workspace) == 0);
+}
+
+TEST_CASE("a foreign waypoint lands without entering this author's history", "[studio][commands]") {
+	// Two logs over two universes, which is what two editors are. What crosses
+	// is what `Watcher::Committed` hands over and nothing else.
+	Fixture author;
+	Fixture peer;
+
+	std::vector<studio::Command> sent;
+	studio::CommandLog::Watcher watcher;
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> group) {
+		sent.assign(group.begin(), group.end());
+	};
+	author.Log.Watch(watcher);
+
+	const Entity theirs = author.Workspace();
+	const auto recording = author.Log.TryBeginRecording("Insert two");
+	REQUIRE(recording.has_value());
+	author.Insert(theirs, "A");
+	author.Insert(theirs, "B");
+	REQUIRE(author.Log.FinishRecording(*recording, studio::FinishOperation::Commit));
+	REQUIRE(sent.size() == 2);
+
+	// The peer's world is its own and the sender's ids mean nothing here, so
+	// both are repointed the way a real edit stream does before applying: the
+	// world by name, and each id the command *reads* by resolving it locally.
+	// A create binds its own subject as a side effect of rebuilding.
+	const Entity ours = peer.Workspace();
+	for (studio::Command &command : sent) {
+		command.World = peer.Scene;
+		peer.Log.Adopt(command.OldParent, peer.Scene, ours);
+	}
+
+	CHECK(peer.Log.ApplyForeign(sent) == 2);
+	CHECK(peer.ChildCount(peer.Workspace()) == 2);
+
+	// **Applied and not recorded.** Ctrl+Z is a promise about what you did, and
+	// an editor that reversed a colleague's change because you pressed it once
+	// too often would be an editor nobody could work in.
+	CHECK(peer.Log.Depth() == 0);
+	CHECK_FALSE(peer.Log.CanUndo());
 }

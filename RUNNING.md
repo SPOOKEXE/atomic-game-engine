@@ -241,6 +241,11 @@ Both skip `mono.vendor/` by construction: the directory list is explicit rather
 than `find .`, because reformatting a submodule turns every future update into a
 conflict.
 
+**`mono.studio/` is not in that list, and it should be.** It is a first-party
+member that has never been swept, so its files are formatted by whoever last
+edited them. Adding it is a one-line change and a fifty-eight file diff, which
+is why it has not been folded into a feature commit — do it on its own.
+
 ---
 
 # What there is to run
@@ -346,6 +351,40 @@ caught.
 Drag a row onto another to reparent it. `Ctrl+D` duplicates, `Del` deletes,
 `Ctrl+S` saves.
 
+### The command bar *(v0.13)*
+
+View → Command Bar. One line of Luau, run against the scene that is active, with
+the same vocabulary a plugin gets — `Selection`, `game`, `ChangeHistoryService`
+and the script readers:
+
+```lua
+for _, part in Selection:Get() do part.Anchored = true end
+```
+
+**The whole run is one waypoint.** A line that moves forty parts is one press of
+`Ctrl+Z`, not forty, because the bar opens a `ChangeHistoryService` recording
+before it runs and commits it after. A line that changed nothing commits
+nothing, so a query — a count, a `print` — leaves no empty step in the Edit menu.
+
+`Enter` runs it and keeps the focus, so a run of commands is typed rather than
+clicked between. The arrows walk back through what has been run this session,
+failures included: a command with a typo in it is exactly the one worth getting
+back to fix. Everything typed and everything printed goes to the Output panel, so
+the log reads as a transcript rather than as answers with no questions.
+
+Globals persist between commands — `local helper = ...` on one line and using it
+on the next works. The runtime is rebuilt when the active scene changes, since
+one is bound to one store, and it is the bar's own rather than a plugin's, so a
+command cannot spend a plugin's step budget or see its globals.
+
+**A command runs once and is over**, which is the one place the vocabulary falls
+short of a plugin's: nothing beats the bar's runtime afterwards, so a widget or a
+toolbar it creates is never drawn and a handler it binds never fires again. Ask
+for a lasting surface and you are asking for a plugin — write one.
+
+It is not the command palette. That one is the list of things the editor already
+knows how to do, reachable by name; this runs code the editor has never heard of.
+
 ### Run, Play and Stop
 
 | | |
@@ -362,6 +401,72 @@ says so rather than leaving you to find out.
 **Nothing ticks in edit mode.** A world that simulated while you were building it
 would settle physics under your hands — a part placed in the air would be on the
 floor by the time you looked away.
+
+### Colours *(v0.13)*
+
+Preferences → Appearance. Seven themes to pick from, then **Colours** underneath
+to change any of them:
+
+| | |
+|---|---|
+| `Surface` | the panel colour, and the anchor every other surface comes from |
+| `Accent` | the highlight, and `AccentHot` is the same colour hovered |
+| `Text`, `TextMuted` | ordinary text, and the secondary text beside it |
+| `Warning`, `Error` | the semantic pair — no palette declares these |
+
+**Seven knobs, not fifty.** imgui has fifty-odd style slots and this exposes
+seven, because the other forty-odd are *derived*: a button's face, an input's
+well, a border and a tab are shades of `Surface` on one ladder. Change the
+surface and all of them move together and stay the right distance apart, which is
+what a per-slot editor would let you get wrong.
+
+**An override rides over the theme rather than replacing it.** Set an accent and
+every other colour still follows whichever palette is selected — so picking a
+different theme afterwards still does something. Each row has a **reset** while
+it is overridden, and `Reset all` puts the whole thing back.
+
+The global choice lives in the layout ini beside the palette. It is written as
+`RRGGBBAA` text, so it is a colour you can read and edit by hand.
+
+#### One panel of its own colour
+
+Under **One panel**, pick any panel and give it the same seven. A dot beside a
+name in the list means that one carries a colour. It resolves on top of the
+global theme, so a panel that sets only a surface keeps the editor's accent.
+
+These live in `preferences.json` rather than the layout ini, because it is a
+document rather than a line:
+
+```json
+"panelColours": {
+  "Explorer": { "Surface": "2E3440FF" },
+  "Output":   { "Accent": "FF0080C0" }
+}
+```
+
+A name nobody recognises, a colour that is not one, and a panel with nothing left
+in it each cost only themselves — the rest of the file still loads. `#2E3440`
+works too; six digits is opaque.
+
+#### A plugin colouring its own dock widget
+
+A plugin owns the widgets it creates, so it colours them from Luau rather than
+from the settings page:
+
+```lua
+local panel = plugin.CreateWidget("Align", true)
+plugin.SetWidgetColour(panel, "Surface", "#2E3440")
+plugin.SetWidgetColour(panel, "Accent", "#FF0080")
+plugin.SetWidgetColour(panel, "Accent", nil)   -- back to the editor's theme
+```
+
+The same seven names, the same `RRGGBB`/`RRGGBBAA` text, and the same rule that
+it resolves *over* the editor's theme — so a widget that sets a surface still
+gets a matching button, border and input well without naming any of them.
+
+**Deliberately not in the settings page.** A list of plugin widgets there would
+be a list whose rows appear and vanish as plugins load, holding entries that
+outlive the plugin that made them.
 
 ### Options
 
@@ -1008,6 +1113,218 @@ two chances to pin the wrong one.
 **Both ends default to the weaker mode and both say so**, because refusing to
 run without a key would refuse every deployment in this engine today, and
 refusing quietly would be worse than either.
+
+---
+
+## Finding a server without being told an address
+
+Everything below is off by default. A recipe that does not ask for it opens no
+extra socket and broadcasts nothing.
+
+### On the same switch
+
+```sh
+server --listen 0 --advertise --session-name "Declan's game"
+client --browse
+```
+
+The server announces itself once a second to `255.255.255.255:47600` and the
+client listens there. `--listen 0` binds an ephemeral port and the announcement
+carries **the port that was bound**, so nothing has to be agreed in advance.
+
+The address a client dials is the address the announcement *arrived from*, with
+the advertised port. A host binds `0.0.0.0` and cannot know which of its
+addresses a given client can route to; the one a datagram already crossed needs
+no guess.
+
+| Flag | On | What it does |
+|---|---|---|
+| `--advertise` | server, cdn | announce on the subnet |
+| `--session-name NAME` | server | what a browser shows |
+| `--browse` | client | look instead of being told |
+| `--browse-seconds N` | client | how long to look (default 3) |
+| `--session-name NAME` | client | join that one rather than the first |
+
+**The search is the one blocking wait in the client**, and it happens before the
+loop starts, in the same place as binding a socket. A beacon announces once a
+second, so anything under two seconds is a coin flip.
+
+### Invited only
+
+```sh
+server --listen 0 --advertise --session-key "a sentence we agreed on"
+client --browse --session-key "a sentence we agreed on"
+```
+
+A private session's announcement carries a MAC under the key, so a client
+holding it can tell the session it was invited to from somebody else's wearing
+the same name. A key is 64 hex characters or a passphrase, and the same words
+derive the same key on both machines.
+
+**Private authenticates; it does not hide.** A private session on a subnet is
+visible to everybody on that subnet and joinable by nobody without the key. A
+browser shows it as locked, which is deliberate — the person about to be given
+the key has to be able to see it exists.
+
+### Across the internet
+
+```sh
+cdn    --store DIR --rendezvous-listen 47601      # somewhere already reachable
+server --listen 0 --rendezvous ORIGIN:47601 --session-name "mine"
+client --rendezvous ORIGIN:47601 --session-id 036e0c6d109c14220d0d7d2bdae7239a
+```
+
+The point introduces two peers and carries none of their traffic. Both sides
+then poke each other directly until one gets through; the address that results
+is on **the same socket the session uses**, because a router's NAT mapping
+belongs to a port.
+
+The rendezvous point runs inside the content origin rather than as a fifth
+program: it holds an id, an address and a timestamp, and it needs to be
+somewhere an operator has already put on an address.
+
+**A private session is not listed at the point and cannot be.** The point holds
+no key and must not — that would make every operator of one a holder of every
+private session's secret. So reaching a private session needs its id, which the
+host hands over along with the key. `server --advertise` prints both:
+
+```
+announcing session 036e0c6d109c14220d0d7d2bdae7239a (private) on the local subnet
+```
+
+**There is no relay.** When both routers refuse, the attempt fails and says so:
+
+```
+could not reach session 036e... through ORIGIN:47601
+```
+
+That is an honest answer. A hidden fallback would make "peer-to-peer" mean two
+different things depending on the day, and a relay is bandwidth somebody pays
+for.
+
+### Distribution streams
+
+The same three reaches, offered by a content origin instead of a game server:
+
+```sh
+cdn --store DIR --advertise                       # LAN
+cdn --store DIR --advertise --stream-key SECRET   # private, key required
+cdn --store DIR --rendezvous POINT:47601          # listed for anyone off-subnet
+cdn --store DIR --rendezvous-listen 47601         # be the meeting place
+```
+
+A stream is not a second kind of origin — the same six routes are served to
+everybody. What a stream decides is how a client *finds* it and whether it was
+invited, and `--stream-key` gates discovery rather than delivery: a grant is
+still what admits a fetch.
+
+### In the editor
+
+**View → Team Create.** The editor announces itself at the same layer, sees the
+other editors on the subnet or through a point, and hands over a session id and
+a key to invite somebody with.
+
+**Edits replicate.** Host a session, and every editor that joins sees what you
+do — a create, a delete, a reparent, a property write. A recording crosses as
+one message, so "set these forty parts to neon" arrives whole or not at all.
+
+The panel lists the editors it can see; **Join** connects to one, and the row
+underneath reports what has crossed.
+
+**Undo does not replicate, and that is deliberate.** Ctrl+Z reverses what *you*
+did, never what somebody else did. An editor that undid a colleague's change
+because you pressed it once too often would be an editor nobody could work in.
+
+**Two editors on one model take turns, and neither loses their work.** Before a
+waypoint goes out, its author asks the host for the subtree it touches. If
+nobody has it, the host hands it over and the edit goes; if somebody does, the
+request waits in line. When the person in front is done the next one goes, and
+their change lands *on top of* the first.
+
+**Nobody is ever refused for being second.** That is the whole reason there is
+a queue rather than a rejection: somebody asking for a model in use is not
+doing anything wrong, they are second, and second still gets a turn.
+
+**The person does not wait.** Their edit is applied at their own machine the
+moment they make it; what waits for the turn is the *message*. A queued editor
+carries on working and their waypoints go out in the order they made them.
+
+If somebody else's edit is ordered ahead of one you are still waiting to send,
+your machine re-applies yours on top when theirs arrives — so every editor ends
+on the same answer, and it is the host's order that decides which.
+
+A turn covers a subtree, not one instance: a turn over a model that let
+somebody else edit its parts would order nothing, because moving a model moves
+its children. Two editors in different corners never wait for each other.
+
+**A grant has a short guard**, so an editor that is handed a subtree and then
+dies costs the next person a pause rather than the session. It is a bound on
+one protocol step, not a lease on editing.
+
+**The ordering is at the host**, which is already the thing that decides order.
+The panel shows whose turn it is and how many edits are waiting; a guest running
+a modified build cannot jump the queue.
+
+**Everybody has to have the project open already.** A join carries edits, not
+the document — a scene the peer does not have is an edit that is dropped and
+counted. Open the same `.agame` on both machines first.
+
+### ChangeHistoryService
+
+A plugin tells the editor what one undo should reverse, exactly as it does in
+Roblox:
+
+```lua
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+
+local recording = ChangeHistoryService:TryBeginRecording("Set selection to neon")
+if not recording then
+    return -- a recording was already in progress
+end
+
+for _, part in Selection:Get() do
+    part.Material = "Neon"
+end
+
+ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+```
+
+Forty property writes, one press of Ctrl+Z. That grouping is the reason the
+service exists and is also the unit a shared document will travel in — a peer
+that applied half of a group would show a state the author never saw.
+
+`Commit` keeps the recording as its own step, `Cancel` reverts it and puts
+nothing on the redo stack, and `Append` folds it into the step before.
+
+| Method | |
+|---|---|
+| `TryBeginRecording(name, displayName?)` | the identifier, or nil when one is already open |
+| `FinishRecording(id, operation, finalOptions?)` | `Commit`, `Cancel` or `Append` |
+| `IsRecordingInProgress(id?)` | |
+| `GetCanUndo()` / `GetCanRedo()` | |
+| `Undo()` / `Redo()` | raises when there is nothing |
+| `SetWaypoint(name)` | merges everything since the last cut |
+| `ResetWaypoints()` / `SetEnabled(state)` | |
+| `OnUndo(f)` · `OnRedo(f)` · `OnRecordingStarted(f)` · `OnRecordingFinished(f)` | |
+
+**Two differences from Roblox, and both are the seam rather than a choice.**
+
+`GetCanUndo` and `GetCanRedo` return a table, because a host call answers one
+value — `local can, name = table.unpack(ChangeHistoryService:GetCanUndo())`.
+
+The events are calls that take a handler rather than signals with `:Connect`,
+because the host seam has no `RBXScriptSignal` type and inventing one for four
+events would be a second way to hear about something.
+
+**One recording at a time for the editor, not per plugin.** This service is the
+editor's single history; two plugins recording into one undo stack would produce
+a step neither of them described.
+
+**`SetWaypoint` merges and the editor never calls it.** Roblox's rule is that the
+changes between two waypoints are one undo; this log's default is one edit per
+step, so a cut merges everything since the previous one. A plugin that writes
+forty properties and then calls it gets one step. The editor's own edits are
+unaffected, which is the point rather than an oversight.
 
 ---
 

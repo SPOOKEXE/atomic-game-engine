@@ -106,6 +106,50 @@ namespace engine::replication {
 		Policy = std::move(policy);
 	}
 
+	void Listener::OnUserMessage(std::function<void(ClientId, std::span<const std::byte>)> handler) {
+		UserMessages = std::move(handler);
+	}
+
+	bool Listener::SendTo(ClientId client, std::span<const std::byte> message, double nowSeconds) {
+		for (Peer &peer : Peers) {
+			if (!(peer.Client == client) || peer.Wire == nullptr) {
+				continue;
+			}
+			core::ByteWriter writer;
+			User payload;
+			payload.Bytes.assign(message.begin(), message.end());
+			WriteMessage(writer, payload);
+			return peer.Wire->Send(writer.Bytes(), nowSeconds);
+		}
+		return false;
+	}
+
+	size_t Listener::Broadcast(std::span<const std::byte> message, double nowSeconds, ClientId except) {
+		// Encoded once for everybody. The envelope is the same bytes whoever it
+		// goes to, and re-encoding per client would be the same work done once
+		// per person in the session.
+		core::ByteWriter writer;
+		User payload;
+		payload.Bytes.assign(message.begin(), message.end());
+		WriteMessage(writer, payload);
+
+		size_t taken = 0;
+		for (Peer &peer : Peers) {
+			if (peer.Wire == nullptr || peer.Client == except) {
+				continue;
+			}
+			if (peer.Wire->Send(writer.Bytes(), nowSeconds)) {
+				taken++;
+			}
+		}
+		return taken;
+	}
+
+	void
+	Listener::SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler) {
+		Foreign = std::move(handler);
+	}
+
 	void Listener::Greet(const net::Endpoint &from, std::span<const std::byte> datagram, double nowSeconds) {
 		core::ByteReader reader(datagram);
 		const std::optional<net::Packet::Inbound> packet = net::Packet::Read(reader);
@@ -270,6 +314,13 @@ namespace engine::replication {
 				break;
 			}
 
+			// Before the handshake check and before the source check. A
+			// rendezvous message comes from a coordination point this listener
+			// has never heard of and would otherwise be counted as a refusal.
+			if (Foreign && Foreign(Datagram, inbound.From)) {
+				continue;
+			}
+
 			if (net::Packet::PeekChannel(Datagram) == net::ChannelKind::Handshake) {
 				Greet(inbound.From, Datagram, nowSeconds);
 				continue;
@@ -284,10 +335,35 @@ namespace engine::replication {
 			peer->Wire->Receive(Datagram, nowSeconds);
 
 			for (const std::vector<std::byte> &message : peer->Wire->Inbound()) {
+				// **Routed before the authority sees it.** A user message is
+				// not this module's, and handing one to `Authority::Receive`
+				// parses fine and then falls off the end of its switch — so the
+				// message would look delivered while a refusal counter an
+				// operator reads climbed.
+				if (PeekMessageKind(message) == MessageKind::User) {
+					if (UserMessages) {
+						core::ByteReader reader(message);
+						Message read;
+						if (ReadMessage(reader, read)) {
+							UserMessages(peer->Client, read.User.Bytes);
+						}
+					}
+					continue;
+				}
 				Authority_.Receive(peer->Client, message);
 			}
 			peer->Wire->ClearInbound();
 		}
+	}
+
+	size_t Listener::Flush(double nowSeconds) {
+		size_t busy = 0;
+		for (Peer &peer : Peers) {
+			if (peer.Wire != nullptr && peer.Wire->Flush(nowSeconds) > 0) {
+				busy++;
+			}
+		}
+		return busy;
 	}
 
 	void Listener::Advance(double nowSeconds) {

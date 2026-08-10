@@ -150,6 +150,16 @@ endif()
 # test directory.
 add_subdirectory(mono.engine)
 
+# Finding a peer, and being findable. Above `Engine::net` and below every
+# program: the client, the server, the studio and the content origin all import
+# it, and none of them is a layer of the engine — which is why it is a member
+# beside them rather than a module inside `mono.engine`.
+#
+# Unconditional, like `mono.engine`. It is `shared` tier and links `core`, `net`
+# and Crypto++, so a `server` or `cdn` preset pays a static library holding a
+# socket and an HMAC and nothing that wants a window.
+add_subdirectory(mono.network)
+
 if(MONO_BUILD_CLIENT)
 	add_subdirectory(mono.client)
 endif()
