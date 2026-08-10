@@ -67,8 +67,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -117,6 +120,43 @@ namespace studio {
 		Property,
 	};
 
+	// What to do with a recording that has finished.
+	//
+	// Roblox's `Enum.FinishRecordingOperation`, and the three values are the
+	// three answers there are: keep it as its own step, throw it away, or fold
+	// it into the step before.
+	//
+	// **A closed list whose ordinal reaches a wire** — a committed waypoint is
+	// what team create replicates — so a value may be added at the end and none
+	// may be reordered.
+	//
+	// @since v0.13
+	enum class FinishOperation : uint8_t {
+		// Keep it. The recording becomes one waypoint that one undo reverses.
+		Commit = 0,
+
+		// Throw it away, and put back what it changed.
+		//
+		// **Reverted rather than merely forgotten.** A plugin that cancels has
+		// decided its edit should not have happened, and a cancel that left the
+		// changes in place while removing the only way to undo them would be
+		// the worst of both.
+		Cancel = 1,
+
+		// Fold it into the waypoint before it.
+		//
+		// For an edit that continues one already recorded — a drag that
+		// resumes, a property nudged again — where two steps in the history
+		// would be two presses of Ctrl+Z for one action.
+		Append = 2,
+	};
+
+	// Returns a stable, human-readable name for a finish operation.
+	//
+	// @param operation The operation to name.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(FinishOperation operation);
+
 	// One undoable edit.
 	//
 	// **A document rather than a component list**, for `Create` and `Destroy`.
@@ -152,11 +192,57 @@ namespace studio {
 		// Which property changed.
 		engine::core::Name Property;
 
-		engine::game::PropertyValue Before;  // What it read before the edit.
-		engine::game::PropertyValue After;   // What it reads after it.
+		engine::game::PropertyValue Before; // What it read before the edit.
+		engine::game::PropertyValue After;	// What it reads after it.
 
 		// What to call this in the Edit menu — "Delete Part", not "Destroy".
 		std::string Description;
+
+		// Which waypoint this belongs to.
+		//
+		// **The unit undo and redo actually move by, and the unit team create
+		// replicates.** A command recorded outside a recording gets a waypoint
+		// of its own, so a log that nobody groups behaves exactly as it did
+		// before this field existed — one command, one press of Ctrl+Z. A
+		// recording gives every command inside it one number, and then a
+		// plugin's "make these forty parts neon" is one step rather than forty.
+		//
+		// Monotonic within one log and never reused, so a waypoint that was
+		// undone and then superseded cannot be confused with a later one.
+		//
+		// @since v0.13
+		uint64_t Waypoint = 0;
+	};
+
+	// A recording that has been started and not yet finished.
+	//
+	// @since v0.13
+	struct Recording {
+		// The identifier `TryBeginRecording` handed out. Empty for none.
+		//
+		// **Opaque text rather than a number**, because it is what a script
+		// holds between two calls and a number invites arithmetic on it.
+		std::string Identifier;
+
+		// What the action is called, for logging.
+		std::string Name;
+
+		// What to show a person. Falls back to `Name`.
+		std::string DisplayName;
+
+		// The waypoint every command recorded during it is stamped with.
+		uint64_t Waypoint = 0;
+
+		// How many commands the log held when it started, so a cancel knows
+		// how far to reverse and an append knows what it is folding into.
+		size_t DepthAtStart = 0;
+
+		// Whether this names a recording in progress.
+		//
+		// @return `true` when an identifier was issued.
+		bool InProgress() const {
+			return !Identifier.empty();
+		}
 	};
 
 	// The undo and redo stacks, and the id table that makes them survive a
@@ -164,7 +250,7 @@ namespace studio {
 	//
 	// @since v0.7
 	class CommandLog {
-	public:
+	  public:
 		// How many commands are kept.
 		//
 		// **Bounded rather than unbounded, and the bound is depth rather than
@@ -274,6 +360,189 @@ namespace studio {
 			std::string description
 		);
 
+		// --- recordings -------------------------------------------------------
+		//
+		// Roblox's `ChangeHistoryService` shape, and it is the shape this log
+		// wanted anyway. A recording is a **named, atomic group of commands**:
+		// one undo reverses all of it, and — once team create exists — one
+		// message carries all of it. Without grouping, "make these forty parts
+		// neon" is forty presses of Ctrl+Z locally and forty messages on the
+		// wire, and the second is worse because a peer could apply half.
+		//
+		// **One recording at a time, per log.** Roblox allows one per plugin
+		// and refuses the second; this log is the editor's single history, so
+		// the same rule applies to it as a whole. Nesting would need an
+		// answer to what a cancel of the outer one does to a committed inner
+		// one, and there is no answer that is not surprising.
+
+		// Starts a recording.
+		//
+		// @param name        What the action is called, for logging.
+		// @param displayName What to show a person. Empty uses `name`.
+		// @return The identifier to pass to `FinishRecording`, or nothing when
+		//         a recording is already in progress or the log is disabled.
+		//         **Nothing is a refusal to record, not a licence to edit
+		//         anyway** — a caller that ignores it and edits produces changes
+		//         that land in whatever recording is already open.
+		// @since v0.13
+		std::optional<std::string> TryBeginRecording(std::string name, std::string displayName = {});
+
+		// Finishes the recording `identifier` names.
+		//
+		// @param identifier What `TryBeginRecording` returned. Ignored for
+		//        `Cancel`, so a caller can abandon its own recording without
+		//        having kept the identifier — Roblox's rule, and it is the one
+		//        case where not knowing is the normal situation.
+		// @param operation  What to do with it.
+		// @return `false` when no recording is in progress, or when the
+		//         identifier does not match one that is.
+		// @since v0.13
+		bool FinishRecording(std::string_view identifier, FinishOperation operation);
+
+		// Whether a recording is in progress.
+		//
+		// @param identifier A specific one to ask about, or empty for any.
+		// @return Whether a matching recording is open.
+		// @since v0.13
+		bool IsRecordingInProgress(std::string_view identifier = {}) const;
+
+		// The recording in progress, for a panel that shows one.
+		//
+		// @return The recording. `InProgress` is false when there is none.
+		// @since v0.13
+		const Recording &InFlight() const {
+			return Open;
+		}
+
+		// Closes whatever waypoint is open and starts a new one.
+		//
+		// Roblox's `SetWaypoint`, which its own documentation says will be
+		// deprecated in favour of recordings. It is here because plugins
+		// written against it exist, and because it is one line over the
+		// machinery recordings already need: the next command recorded gets a
+		// fresh waypoint whether or not anything asked for one.
+		//
+		// **Not a place to record from.** It marks a cut in a stream of edits
+		// that have already happened, so calling it before an edit does nothing
+		// the next command would not have done anyway.
+		//
+		// @param name What to call the waypoint that just closed. Applied to
+		//        the commands in it, so the Edit menu names the action rather
+		//        than the last property that changed inside it.
+		// @since v0.13
+		void SetWaypoint(std::string name);
+
+		// Collapses the whole history into one base waypoint.
+		//
+		// Nothing is left to undo or redo and nothing is reverted — this
+		// establishes a clean floor rather than restoring one. What it is for
+		// is the moment after a load or a save, where reaching back past the
+		// current state means reaching into a document that is no longer open.
+		//
+		// @since v0.13
+		void ResetWaypoints();
+
+		// Turns recording on or off.
+		//
+		// **Off clears both stacks and does not repopulate**, which is Roblox's
+		// behaviour and is the safe one: a log that kept recording while
+		// disabled would offer, the moment it was re-enabled, to undo across a
+		// period it had been told not to watch.
+		//
+		// @param enabled Whether to record.
+		// @since v0.13
+		void SetEnabled(bool enabled);
+
+		// Whether anything is being recorded.
+		//
+		// @return `true` unless `SetEnabled(false)` was called.
+		// @since v0.13
+		bool Enabled() const {
+			return Recording_;
+		}
+
+		// --- watching ---------------------------------------------------------
+
+		// What the log tells whoever is listening.
+		//
+		// **One seam for four listeners**, and they are genuinely different
+		// things: the scripting service raises `OnUndo` and friends, team
+		// create puts a committed waypoint on the wire, the History panel
+		// repaints, and a test asserts. A log that called any one of them by
+		// name would be a log that knows what a plugin is.
+		//
+		// @since v0.13
+		struct Watcher {
+			// A recording started.
+			std::function<void(const Recording &)> RecordingStarted;
+
+			// A recording finished, however it finished.
+			std::function<void(const Recording &, FinishOperation)> RecordingFinished;
+
+			// A waypoint was committed, with every command in it.
+			//
+			// **The replication seam.** What this hands over is exactly what a
+			// peer has to apply to arrive at the same document, and it is
+			// handed over once per waypoint rather than once per command
+			// because a peer that applied half of a group would be showing a
+			// state the author never saw.
+			std::function<void(uint64_t, std::span<const Command>)> Committed;
+
+			// A waypoint was undone, by name.
+			std::function<void(std::string_view)> Undone;
+
+			// A waypoint was redone, by name.
+			std::function<void(std::string_view)> Redone;
+		};
+
+		// Sets who is listening. One watcher; the editor fans out.
+		//
+		// @param watcher The callbacks. Any of them may be empty.
+		// @since v0.13
+		void Watch(Watcher watcher) {
+			Listener = std::move(watcher);
+		}
+
+		// Points an id at a local instance.
+		//
+		// **What makes a foreign command applicable at all.** An `EditId` is
+		// this log's own name for an instance, so a command that arrived from
+		// another editor names ids this log has never issued. Before applying
+		// one, whoever carries it resolves each id to a local instance — by
+		// path, which is the only identity two editors share — and says so
+		// here.
+		//
+		// A `Create` binds its own subject as a side effect of rebuilding, so
+		// only the ids a command *reads* have to be adopted: the parent it
+		// hangs under, and the subject of anything that is not a create.
+		//
+		// @param id       The foreign id.
+		// @param world    Which local scene it lives in.
+		// @param instance What it names here.
+		// @since v0.13
+		void Adopt(EditId id, engine::world::WorldId world, engine::ecs::Entity instance);
+
+		// Records commands that arrived from somewhere else.
+		//
+		// **The other end of `Watcher::Committed`, and it must not enter the
+		// undo stack.** Somebody else's edit is not a step in *this* author's
+		// history: Ctrl+Z is a promise about what you did, and an editor that
+		// reversed a colleague's change because you pressed it once too often
+		// would be an editor nobody could work in. Roblox's team create makes
+		// the same split and it is the right one.
+		//
+		// The ids in the commands are the sender's, so they are resolved
+		// through this log's own table by the same `Track`/`Rebind` mechanism
+		// an undo uses — a peer that has never seen the instance creates it
+		// from the document and binds the id.
+		//
+		// @param commands One waypoint's worth, in the order they were made.
+		// @return How many landed. A command whose subject does not resolve is
+		//         dropped and counted out rather than applied to whatever now
+		//         occupies the row.
+		// @since v0.13
+		size_t ApplyForeign(std::span<const Command> commands);
+
 		// Reports whether there is anything to undo.
 		//
 		// @return `true` when the undo stack is not empty.
@@ -302,19 +571,29 @@ namespace studio {
 			return Undone.empty() ? std::string_view() : std::string_view(Undone.back().Description);
 		}
 
-		// Reverses the most recent command.
+		// Reverses the most recent waypoint.
 		//
 		// **Called from outside `Universe::Enter`**, and enters for itself.
 		//
-		// @return `true` when a command was reversed. `false` when there was
-		//         nothing to undo, or when the command's subject no longer
+		// **A waypoint rather than a command, since v0.13.** A command recorded
+		// outside a recording is a waypoint of its own, so a log nobody groups
+		// behaves exactly as it did before — and a recording is one press
+		// rather than one per property it touched, which is the whole reason
+		// recordings exist.
+		//
+		// Every command in the waypoint is reversed, newest first, because the
+		// commands inside one are ordered and reversing them forwards would
+		// re-create a parent after restoring the child that hangs from it.
+		//
+		// @return `true` when anything was reversed. `false` when there was
+		//         nothing to undo, or when every command's subject no longer
 		//         resolves — which is dropped rather than applied to whatever
 		//         now occupies the row.
 		bool Undo();
 
-		// Reapplies the most recently undone command.
+		// Reapplies the most recently undone waypoint.
 		//
-		// @return `true` when a command was reapplied.
+		// @return `true` when anything was reapplied.
 		bool Redo();
 
 		// Throws both stacks away.
@@ -376,7 +655,7 @@ namespace studio {
 			return Undone;
 		}
 
-	private:
+	  private:
 		// Applies one command in one direction.
 		//
 		// @param command The command.
@@ -401,10 +680,53 @@ namespace studio {
 		// @param command The command to record.
 		void Push(Command &&command);
 
+		// Reverses and drops every command back to `depth`.
+		//
+		// What a cancelled recording does. Separate from `Undo` because it
+		// crosses waypoint boundaries deliberately and must not put anything on
+		// the redo stack — a cancel is "this never happened", not "step back".
+		//
+		// @param depth How deep the undo stack was before the recording.
+		void RollBackTo(size_t depth);
+
+		// The next waypoint number, and it never repeats.
+		uint64_t NextWaypoint();
+
 		engine::world::Universe *Universe = nullptr;
 
 		std::vector<Command> Done;
 		std::vector<Command> Undone;
+
+		// The recording in progress, if any.
+		Recording Open;
+
+		// Where waypoint numbers come from. Monotonic, so a waypoint that was
+		// undone and superseded cannot be confused with a later one.
+		uint64_t Waypoints = 0;
+
+		// How deep the stack was at the last cut.
+		//
+		// **What `SetWaypoint` merges back to.** Roblox's rule is that the
+		// changes between two waypoints are one undo, and this is where "since
+		// the previous one" is kept. Advanced by an undo, a redo, a recording
+		// and a reset, so a merge can never reach across a boundary into
+		// commands the stack no longer holds in the order they were made.
+		size_t Cut = 0;
+
+		// Whether anything is recorded at all. See `SetEnabled`.
+		bool Recording_ = true;
+
+		// Set while `Undo`, `Redo` or `ApplyForeign` is writing, so the writes
+		// they make are not themselves recorded.
+		//
+		// **The one flag in this class, and it earns its place.** Undo applies
+		// a command by performing the opposite edit, and every path that
+		// performs an edit is a path that records one — without this, undoing
+		// a delete records a create, which the next undo then reverses, and
+		// Ctrl+Z toggles one instance in and out of existence for ever.
+		bool Replaying = false;
+
+		Watcher Listener;
 
 		// What an id currently names: a world and a handle within it.
 		//
