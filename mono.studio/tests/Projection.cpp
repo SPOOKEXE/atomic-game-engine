@@ -26,6 +26,7 @@
 #include <studio/Projection.hpp>
 
 #include <cmath>
+#include <glm/gtc/quaternion.hpp>
 
 TEST_SUITE_ID("studio.projection")
 
@@ -403,4 +404,66 @@ TEST_CASE("a plane behind the eye is not what the cursor is pointing at", "[stud
 	CHECK_FALSE(studio::IntersectRayPlane(
 		Vector3{0.0f, 0.0f, 5.0f}, Vector3{0.0f, 0.0f, 1.0f}, ray, point
 	));
+}
+
+TEST_CASE("a box reaches to its corner along a slope's normal", "[studio][projection]") {
+	// **What "resting on it" needs.** Placing a part by half its height works
+	// only while it is axis-aligned; a turned box touches a surface at a corner,
+	// and the distance to that corner is what stops it sinking in.
+	const Vector3 half{1.0f, 2.0f, 3.0f};
+
+	// Unturned, the reach along each axis is that axis's half-extent.
+	const CFrame flat;
+	CHECK_THAT(studio::SupportAlong(flat, half, Vector3::YAxis), WithinAbs(2.0f, 0.0001f));
+	CHECK_THAT(studio::SupportAlong(flat, half, Vector3::XAxis), WithinAbs(1.0f, 0.0001f));
+
+	// Negative is the same distance: a box reaches as far down as it does up,
+	// and a signed answer would place a part underneath a floor half the time.
+	CHECK_THAT(studio::SupportAlong(flat, half, Vector3::YAxis * -1.0f), WithinAbs(2.0f, 0.0001f));
+
+	// Turned a quarter about Z, the world's up is the box's own X.
+	const CFrame turned(Vector3{}, glm::angleAxis(1.5707963f, glm::vec3(0.0f, 0.0f, 1.0f)));
+	CHECK_THAT(studio::SupportAlong(turned, half, Vector3::YAxis), WithinAbs(1.0f, 0.0001f));
+
+	// And at forty-five degrees it is the corner, which is the case that made
+	// this a function rather than a half-extent lookup.
+	const CFrame tilted(Vector3{}, glm::angleAxis(0.7853982f, glm::vec3(0.0f, 0.0f, 1.0f)));
+	CHECK_THAT(
+		studio::SupportAlong(tilted, half, Vector3::YAxis), WithinAbs((1.0f + 2.0f) * 0.7071068f, 0.0005f)
+	);
+}
+
+TEST_CASE("aligning to a surface keeps the facing it can", "[studio][projection]") {
+	// **The handedness is the whole risk here.** `LookVector` is `-Z`, so the
+	// basis's third column is the back — building it the other way round mirrors
+	// every part that is dropped, which reads as the model being wrong rather
+	// than the maths, and is invisible on anything symmetrical.
+	const CFrame flat;
+
+	// A surface whose normal is already up leaves the rotation alone.
+	const CFrame same(Vector3{}, studio::AlignedTo(flat, Vector3::YAxis));
+	CHECK_THAT(same.UpVector().Y, WithinAbs(1.0f, 0.0005f));
+	CHECK_THAT(same.LookVector().Z, WithinAbs(-1.0f, 0.0005f));
+
+	// A wall facing +X: up becomes +X, and the old facing survives as far as it
+	// can — it was already perpendicular to the new up, so it survives intact.
+	const CFrame wall(Vector3{}, studio::AlignedTo(flat, Vector3::XAxis));
+	CHECK_THAT(wall.UpVector().X, WithinAbs(1.0f, 0.0005f));
+	CHECK_THAT(wall.LookVector().Z, WithinAbs(-1.0f, 0.0005f));
+
+	// Right-handed throughout: right cross up is the back, which is what a
+	// mirrored basis would get wrong and nothing else here would notice.
+	const Vector3 back = wall.VectorToWorldSpace(Vector3::ZAxis);
+	const Vector3 crossed = wall.RightVector().Cross(wall.UpVector());
+	CHECK_THAT(crossed.X, WithinAbs(back.X, 0.0005f));
+	CHECK_THAT(crossed.Y, WithinAbs(back.Y, 0.0005f));
+	CHECK_THAT(crossed.Z, WithinAbs(back.Z, 0.0005f));
+
+	// A part looking straight down at a floor has a facing that says nothing
+	// about the floor's plane, so its right-hand side is used instead — and the
+	// answer is still a rotation rather than a degenerate basis.
+	const CFrame looking(Vector3{}, glm::angleAxis(1.5707963f, glm::vec3(1.0f, 0.0f, 0.0f)));
+	const CFrame onFloor(Vector3{}, studio::AlignedTo(looking, Vector3::YAxis));
+	CHECK_THAT(onFloor.UpVector().Y, WithinAbs(1.0f, 0.0005f));
+	CHECK_THAT(onFloor.LookVector().Magnitude(), WithinAbs(1.0f, 0.0005f));
 }
