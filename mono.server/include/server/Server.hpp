@@ -15,6 +15,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
+#include <engine/world/Lifecycle.hpp>
 #include <engine/world/Recording.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -66,6 +67,42 @@ namespace server {
 		// Run every tick back to back instead of pacing to TickRate. For
 		// measuring the simulation rather than the sleep between ticks.
 		bool Unpaced = false;
+
+		// Whether to manage world lifetime at all.
+		//
+		// **Off by default, and that is the whole reason this is a setting.**
+		// `docs/DEFERRED.md` D00017 hoisted the idle policy into
+		// `world::DecideLifecycle` so an editor and a server could not disagree
+		// about when a world closes, and then deliberately left this program
+		// without a caller: suspension is a behaviour change to the one program
+		// whose output `just determinism` and `just replay-check` compare byte
+		// for byte. Off by default makes those comparisons unaffected by
+		// construction rather than by the runs happening to be short.
+		//
+		// The policy is not repeated here. What a host supplies is what only it
+		// can know — whether a world is occupied — and for a server that is a
+		// player standing in it.
+		//
+		// @since v0.13
+		bool ManageWorldLifetime = false;
+
+		// When an empty world stops ticking, once management is on.
+		//
+		// **`Never` is a real answer rather than a way of switching this off.**
+		// A world can be empty of players and full of things that have to keep
+		// happening — NPCs on a route, an economy, a countdown between rounds.
+		// `world::IdleSleep` says why that is an enum instead of a very large
+		// number.
+		//
+		// @since v0.13
+		engine::world::IdleSleep IdleSleepMode = engine::world::IdleSleep::Timeout;
+
+		// How long a world may sit empty under `IdleSleep::Timeout`.
+		//
+		// Clamped by the decision to `world::MAXIMUM_IDLE_LIMIT_SECONDS`.
+		//
+		// @since v0.13
+		double IdleCloseSeconds = engine::world::DEFAULT_IDLE_LIMIT_SECONDS;
 
 		// The scene to host. Empty means the placeholder world.
 		//
@@ -521,6 +558,53 @@ namespace server {
 		//
 		// @param nowSeconds The current time.
 		void ServeClients(double nowSeconds);
+
+		// Suspends worlds nobody is in, and wakes ones something arrived for.
+		//
+		// **The decision is `world::DecideLifecycle` and none of it is repeated
+		// here.** This gathers what only a server can know and applies what came
+		// back — D00017's whole argument is that a host growing its own idle
+		// policy makes a world that closes in the editor and not on the server,
+		// with nothing reporting the difference.
+		//
+		// What a server supplies that an editor does not: occupancy is a player
+		// standing in the world, where the studio also counts the active scene
+		// and a viewport looking at it. Nothing here has a viewport.
+		//
+		// Does nothing at all when `Options::IdleCloseSeconds` is zero, which is
+		// the default — see there for why that matters to two recipes.
+		//
+		// @param nowSeconds The current time.
+		void UpdateWorldLifecycle(double nowSeconds);
+
+		// When each active world was last occupied.
+		//
+		// **Only active worlds have an entry, and that is the ordering bug
+		// D00017 records from the studio's own move.** Looking the clock up for a
+		// suspended world creates an entry it has no use for and delays waking it
+		// by a frame — so the lookup happens inside the `Active` branch.
+		struct WorldLife {
+			engine::world::WorldId World;
+			double LastOccupied = 0.0;
+
+			// Whether a `scene::AwakeWorld` claim was holding it up last pass,
+			// so the log line is written when that starts rather than every
+			// tick it stays true.
+			bool HeldAwake = false;
+		};
+		std::vector<WorldLife> Lives;
+
+		// Whether a claim was holding this world up on the previous pass.
+		bool WasHeldAwake(engine::world::WorldId world) const;
+
+		// Records whether a claim is holding this world up.
+		void SetHeldAwake(engine::world::WorldId world, bool held);
+
+		// Restarts one world's idle clock, adding an entry if it has none.
+		//
+		// @param world The world that was just occupied.
+		// @param nowSeconds The current time.
+		void TouchWorld(engine::world::WorldId world, double nowSeconds);
 
 		// The control surface. Started only when asked; a server that was never
 		// started costs a thread that was never spawned.

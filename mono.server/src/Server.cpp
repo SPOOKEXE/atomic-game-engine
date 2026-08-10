@@ -14,9 +14,11 @@
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Priority.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
+#include <engine/scene/Awake.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/world/Lifecycle.hpp>
 
 #include <algorithm>
 #include <array>
@@ -947,6 +949,144 @@ namespace server {
 		Discovery->Pump(nowSeconds);
 	}
 
+	void Server::UpdateWorldLifecycle(double nowSeconds) {
+		// **Off is the default and the check is first**, so a server nobody
+		// asked for this costs one comparison a tick and behaves exactly as it
+		// did — which is what keeps `just determinism` and `just replay-check`
+		// comparing the program they were written against.
+		if (Settings.IdleCloseSeconds <= 0.0) {
+			return;
+		}
+
+		for (const engine::world::WorldId world : Worlds().Worlds()) {
+			// A world somebody else hosts is somebody else's to suspend.
+			if (Worlds().IsRemote(world)) {
+				continue;
+			}
+
+			engine::world::LifecycleInputs inputs;
+			inputs.State = Worlds().StateOf(world);
+			inputs.IdleLimit = Settings.IdleCloseSeconds;
+			inputs.LastWorld = Worlds().Count() <= 1;
+
+			// **Occupancy is a player standing in it, and players live in the
+			// primary world.** That is the whole of what a headless server can
+			// mean by "somebody is using this" — the studio's other two answers,
+			// the active scene and a viewport showing it, are questions only an
+			// editor can ask.
+			inputs.Occupied = world == PrimaryWorld && !Players.empty();
+
+			// **And whatever the game says is still happening.** A host can see
+			// players and nothing else, so a world of NPCs on a route looks
+			// abandoned from here — `scene::AwakeWorld` is the game's answer and
+			// this is the only place a server can ask it. See `scene/Awake.hpp`.
+			if (!inputs.Occupied) {
+				engine::core::Name reason;
+				bool held = false;
+				Worlds().Enter(world, [&held, &reason](engine::ecs::Store &store) {
+					held = engine::scene::WorldIsHeldAwake(store, &reason);
+				});
+				if (held) {
+					inputs.Occupied = true;
+
+					// Once, on the tick the claim starts holding it up, rather
+					// than every tick — a line a second per world is a log
+					// nobody reads and a claim is usually long-lived.
+					if (inputs.State == engine::world::WorldState::Active && !WasHeldAwake(world)) {
+						ENGINE_INFO(
+							"server: '{}' is empty but held awake by '{}'",
+							Worlds().NameOf(world).Text(),
+							reason.Text()
+						);
+					}
+				}
+				SetHeldAwake(world, held);
+			} else {
+				SetHeldAwake(world, false);
+			}
+
+			// A suspended world's inbox is the one queue nothing drains, which
+			// is what makes reading it reliable rather than a race with the
+			// tick. Read only while suspended, for that reason.
+			if (inputs.State == engine::world::WorldState::Suspended) {
+				Worlds().Enter(world, [&inputs](engine::ecs::Store &store) {
+					if (const auto *inbox = store.Resource<engine::world::Inbox>()) {
+						inputs.InboxWaiting = !inbox->Arrived.empty();
+					}
+				});
+			}
+
+			// Only an active world has an idle clock and only it needs one.
+			if (inputs.State == engine::world::WorldState::Active) {
+				const auto found = std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
+					return life.World == world;
+				});
+
+				if (found == Lives.end()) {
+					// First seen. Its clock starts now rather than at zero, so a
+					// world created mid-run is not immediately eligible.
+					Lives.push_back(WorldLife{world, nowSeconds});
+					continue;
+				}
+				inputs.IdleSeconds = nowSeconds - found->LastOccupied;
+			}
+
+			const engine::world::LifecycleAction action = engine::world::DecideLifecycle(inputs);
+
+			if (action == engine::world::LifecycleAction::Resume) {
+				Worlds().SetState(world, engine::world::WorldState::Active);
+				TouchWorld(world, nowSeconds);
+				ENGINE_INFO("server: resumed '{}' — something arrived for it", Worlds().NameOf(world).Text());
+				continue;
+			}
+
+			if (action == engine::world::LifecycleAction::Leave) {
+				// An occupied world's clock is restarted rather than merely not
+				// read, which is what makes `IdleSeconds` mean "since the last
+				// player left" on the next pass instead of "since it was made".
+				if (inputs.Occupied) {
+					TouchWorld(world, nowSeconds);
+				}
+				continue;
+			}
+
+			Worlds().SetState(world, engine::world::WorldState::Suspended);
+			ENGINE_INFO(
+				"server: suspended '{}' — empty for {:.4g}s",
+				Worlds().NameOf(world).Text(),
+				Settings.IdleCloseSeconds
+			);
+		}
+	}
+
+	bool Server::WasHeldAwake(engine::world::WorldId world) const {
+		for (const WorldLife &life : Lives) {
+			if (life.World == world) {
+				return life.HeldAwake;
+			}
+		}
+		return false;
+	}
+
+	void Server::SetHeldAwake(engine::world::WorldId world, bool held) {
+		for (WorldLife &life : Lives) {
+			if (life.World == world) {
+				life.HeldAwake = held;
+				return;
+			}
+		}
+	}
+
+	void Server::TouchWorld(engine::world::WorldId world, double nowSeconds) {
+		for (WorldLife &life : Lives) {
+			if (life.World == world) {
+				life.LastOccupied = nowSeconds;
+				return;
+			}
+		}
+		Lives.push_back(WorldLife{world, nowSeconds});
+	}
+
 	void Server::ServeClients(double nowSeconds) {
 		ServeDiscovery(nowSeconds);
 
@@ -1355,6 +1495,13 @@ namespace server {
 			// being byte-identical.
 			if (!Replayer_) {
 				ServeClients(static_cast<double>(tickStarted) / 1e9);
+
+				// **After serving, so a client that joined this tick counts as
+				// occupancy before anything decides the world is empty.** Not on
+				// the replay path for the same reason `ServeClients` is not: a
+				// recording reproduces a run, and suspending against wall time
+				// would make it depend on how long the replay took.
+				UpdateWorldLifecycle(static_cast<double>(tickStarted) / 1e9);
 			}
 
 			engine::core::FrameGraph::EndFrame();
