@@ -1650,6 +1650,84 @@ namespace studio {
 		ImGui::End();
 	}
 
+	namespace {
+		// What a zoom may be, and how far one press moves it.
+		//
+		// **Stated once because two panels zoom.** The script editor and the
+		// output panel both scale their text, and two copies of these numbers
+		// would be two panels that disagree about what a zoom level is the
+		// first time either is tuned.
+		//
+		// The floor is where the vendored faces stop being readable and the
+		// ceiling is where stretching the atlas's glyphs starts to look like a
+		// mistake rather than a setting — `SetWindowFontScale` resizes what has
+		// already been rasterised, so a long way from 1 goes soft in both
+		// directions.
+		constexpr float ZOOM_MINIMUM = 0.6f;
+		constexpr float ZOOM_MAXIMUM = 3.0f;
+		constexpr float ZOOM_STEP = 0.1f;
+	}
+
+	void Editor::ApplyZoomWheel(float &zoom) {
+		// Guarded on hovering, so scrolling a tab bar or the panel around the
+		// text does not resize it by accident.
+		if (!ImGui::IsItemHovered() || !ImGui::GetIO().KeyCtrl) {
+			return;
+		}
+		if (const float wheel = ImGui::GetIO().MouseWheel; wheel != 0.0f) {
+			zoom = std::clamp(zoom + wheel * ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
+		}
+	}
+
+	void Editor::DrawZoomControl(float &zoom, const char *what) {
+		// The zoom, beside the thing it applies to. A control nobody can find
+		// is a control that only exists for people who already knew the wheel
+		// did something.
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::Text("%.0f%%", static_cast<double>(zoom * 100.0f));
+		ImGui::PopStyleColor();
+
+		ImGui::SameLine();
+		if (ImGui::SmallButton("-")) {
+			zoom = std::clamp(zoom - ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("+")) {
+			zoom = std::clamp(zoom + ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Reset")) {
+			zoom = 1.0f;
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Ctrl+wheel over the %s, or Ctrl+= and Ctrl+-", what);
+		}
+
+		// **Focused rather than hovered, unlike the wheel.** A person reaching
+		// for Ctrl+= has their hand on the keyboard and their pointer wherever
+		// they left it; requiring them to hover the text as well would make the
+		// shortcut work only by accident.
+		if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
+			return;
+		}
+
+		// **Both the plus and the equals, because they are one key.** Ctrl and
+		// shift-equals is what a person means by "zoom in" and what every
+		// editor binds; requiring the shift would make the obvious press do
+		// nothing.
+		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Equal) ||
+			ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd)) {
+			zoom = std::clamp(zoom + ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
+		}
+		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Minus) ||
+			ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_KeypadSubtract)) {
+			zoom = std::clamp(zoom - ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
+		}
+		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_0)) {
+			zoom = 1.0f;
+		}
+	}
+
 	void Editor::DrawOutput() {
 		if (!ShowOutput) {
 			return;
@@ -1678,6 +1756,11 @@ namespace studio {
 		ImGui::Checkbox("errors", &ShowErrors);
 
 		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+		DrawZoomControl(OutputZoom, "output");
+
+		ImGui::SameLine();
 		ImGui::SetNextItemWidth(-1.0f);
 
 		// The same `FuzzyMatch` the explorer, the properties panel and the
@@ -1694,6 +1777,13 @@ namespace studio {
 			const engine::ui::ScopedFont code(
 				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small
 			);
+
+			// **Scales the font rather than the interface.** `Options::Scale`
+			// rebuilds every metric in the editor and needs a restart to
+			// rasterise the faces at the new size; this is one panel's text,
+			// and wanting a bigger stack trace is not wanting a bigger
+			// properties panel.
+			ImGui::SetWindowFontScale(OutputZoom);
 
 			size_t shown = 0;
 
@@ -1739,15 +1829,31 @@ namespace studio {
 				);
 			}
 
+			// **Restored before the child ends.** The scale is a property of
+			// the window rather than of the widget, so leaving it set would
+			// zoom whatever the panel draws next as well.
+			ImGui::SetWindowFontScale(1.0f);
+
 			// Pinned to the bottom while the view is already there, and left
 			// alone when it is not. Scrolling up to read an error and being
 			// yanked back down by the next line is the thing that makes an
 			// output panel useless.
-			if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f) {
+			//
+			// **Read before the wheel is consumed below.** Ctrl+wheel must not
+			// also scroll the log, and imgui has already applied it to this
+			// child by the time the panel sees it — so a zoom that left the
+			// view where it was is one the person has to scroll back from.
+			const bool pinned = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f;
+			if (pinned) {
 				ImGui::SetScrollHereY(1.0f);
 			}
 		}
 		ImGui::EndChild();
+
+		// The wheel belongs over the lines rather than over the toolbar, so it
+		// is read against the child that holds them.
+		ApplyZoomWheel(OutputZoom);
+
 		ImGui::End();
 	}
 

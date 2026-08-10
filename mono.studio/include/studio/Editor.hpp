@@ -665,6 +665,33 @@ namespace studio {
 		void ToggleBreakpoint(engine::core::Name path, int line);
 		void DrawOutput();
 
+		// The zoom control a text panel puts beside what it scales.
+		//
+		// **Written once because two panels have it**, and a second copy of
+		// the step and the clamp would be two panels that disagree about what
+		// a zoom level is the first time either is tuned.
+		//
+		// Draws the percentage and the three buttons, and applies Ctrl+wheel
+		// and Ctrl+= / Ctrl+- for the window it is called in. The keys are
+		// guarded on the window being focused so that zooming one panel does
+		// not zoom another.
+		//
+		// @param zoom What to adjust. Clamped in place.
+		// @param what What the tooltip calls the thing being zoomed.
+		// @since v0.13
+		void DrawZoomControl(float &zoom, const char *what);
+
+		// Applies Ctrl+wheel to a zoom, for the item just drawn.
+		//
+		// Separate from the control because the wheel belongs over the *text*
+		// and the buttons belong in the toolbar, and putting both in one call
+		// would tie where a panel shows the control to where it reads the
+		// wheel.
+		//
+		// @param zoom What to adjust. Clamped in place.
+		// @since v0.13
+		void ApplyZoomWheel(float &zoom);
+
 		// The editor's own settings, in pages.
 		//
 		// **A panel rather than a modal**, because choosing a theme means
@@ -2385,6 +2412,16 @@ namespace studio {
 		// per-tab zoom is a setting that appears to reset itself every time
 		// they switch file.
 		float ScriptZoom = 1.0f;
+
+		// The same, for the output panel.
+		//
+		// **Its own number rather than the script editor's.** They are read in
+		// different situations — code somebody is writing, and a log somebody
+		// is squinting at — and one setting would mean making a stack trace
+		// legible also made every script enormous.
+		//
+		// @since v0.13
+		float OutputZoom = 1.0f;
 
 		// The output panel's lines, oldest first.
 		//
