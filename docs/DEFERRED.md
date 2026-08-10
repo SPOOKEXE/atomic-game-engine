@@ -569,6 +569,88 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **Correction at v0.7: this entry's trigger named a version rather than a thing, and the version moved.** It said "v0.8's cdn wire streaming"; the scripted interface took v0.8 and cdn wire streaming is **v0.9's**. Nothing about the argument changes — the trigger was always the streaming, not the number — but for a version it read as due when it was not, which is the same drift `D00004`'s figure and `D00001`'s "two of four" are recorded for. Stated against the work from here on.
 - **Reopen trigger: whichever comes first of cdn wire streaming — v0.9 as this is written — or the first deployment over a path that is not loopback or a LAN.** The second is the one that bites without warning — the absence of congestion control is invisible until it is a stall nobody can reproduce, and `ConnectionStats` counts refusals against our own fixed budget, not against what the path would have carried.
 
+**Scoped at v0.13 and deliberately not started.** The library question this entry
+left open is now answered and the cost is written out, because the useful thing
+to know before starting is how much has to be true at once. **This is not a
+change; it is a project.** Nothing below is speculative — every claim was checked
+against the upstream trees rather than remembered.
+
+**The library is `ngtcp2`, and the reason is that its core needs no TLS at all.**
+Nothing under `ngtcp2/lib/` references OpenSSL, wolfSSL, GnuTLS or picotls — the
+backends are separate `ngtcp2_crypto_*` helper libraries behind `ENABLE_*`
+options, and so is every `find_package` in its top-level CMake. So the core is
+**one MIT submodule with no Perl and no Go**, which is the only shape that keeps
+the property this entry already names: a fresh clone needs CMake, Ninja and a C++
+compiler and nothing else. It also settles the clock question by construction —
+every entry point takes an explicit `ngtcp2_tstamp` — and it carries Reno, Cubic
+and BBRv2, which is this entry's first argument, and RFC 9221 DATAGRAM, which is
+its third.
+
+**What was ruled out, so it is not re-evaluated from scratch.** `picoquic` hard
+-requires picotls through `find_package(PTLS REQUIRED)` or a configure-time
+`FetchContent`, which is a third-party dependency arriving by download rather
+than by submodule, and defaults `WITH_OPENSSL` on. **wolfSSL is GPLv2 or
+commercial**, which is a licence problem against MPL-2.0 and not a preference.
+BoringSSL needs Go *and* Perl; quictls and LibreSSL need Perl.
+
+**The crypto is a callback table, which is the good news and the trap.** ngtcp2
+asks the application for `encrypt`, `decrypt`, `hp_mask`, `update_key`,
+`client_initial`, `recv_crypto_data` and `rand`. That makes the TLS backend a
+*later, contained* decision rather than a foundational one. It also means
+**`net::Cipher` cannot serve those callbacks as it stands**, and the three
+mismatches are structural rather than plumbing:
+
+- **QUIC owns the nonce and `Cipher` owns it privately.** RFC 9001 derives the
+  nonce by XORing the packet number into a static IV, so ngtcp2 supplies the full
+  twelve bytes on every call. `Sealer` takes a four-byte prefix and holds a
+  private counter that only moves forward, which is the invariant `Cipher.hpp`
+  says may not be weakened "to make plumbing convenient". This is exactly that
+  request, and the answer is a *second* type rather than a loosened `Sealer`.
+- **Header protection is a primitive this engine does not have.** It is a raw
+  ChaCha20 keystream block masking five bytes, not an AEAD, and `Cipher` exposes
+  no keystream and no constructor from raw key material by design.
+- **AES-128-GCM is mandatory whatever cipher suite is negotiated.** Initial
+  packets are keyed by HKDF from the destination connection id (RFC 9001 §5.2)
+  and Retry integrity is AES-128-GCM under a fixed key (§5.8). Crypto++ has it;
+  `net` does not expose it, and there is no version of QUIC that skips it.
+
+**The TLS backend is the one open decision, and the three answers differ in what
+they buy rather than in effort alone.** (i) A minimal real TLS 1.3 in-tree over
+the primitives D00006 already vendored, with RFC 7250 raw public keys so no X.509
+parser is needed — standards-compliant on the wire, no new dependency, and about
+two thousand lines of security-critical code this repository would own. (ii)
+D00006's existing exchange carried inside QUIC's CRYPTO frames — smallest and
+lowest risk, and a private variant: no HTTP/3, no Wireshark decode, and **the
+cdn second-consumer argument above is not served**, which is half of why this
+entry exists. (iii) quictls beside ngtcp2 — fully interoperable, and it costs the
+fresh-clone property and adds a very large vendor tree.
+
+**The whole of what has to land, because the cost is the count and not any one
+item.** The vendor and its `MonoVendor.cmake` target with everything but `lib/`
+disabled, and a `THIRD_PARTY_NOTICES.md` line. The TLS answer above. A crypto
+seam for the three mismatches. Connection ids, transport parameters, Retry and
+stateless-reset tokens — which subsume `Cookie` and have to keep its rule that an
+unanswered challenge costs zero bytes. The expiry timer driven off the tick's
+`nowSeconds` through `ngtcp2_conn_get_expiry`/`handle_expiry`, since a QUIC stack
+that arms its own timer breaks `just determinism` and `just replay-check` in a
+way that shows as neither passing nor failing but as two runs disagreeing. The
+channel model mapped onto QUIC — unreliable to DATAGRAM frames, reliable to
+streams, and the stream layout is a design decision because head-of-line blocking
+still applies within one. Then the deletions this entry already lists, with their
+suites and benchmarks. Then the rewiring: `replication::Session`, `Listener`,
+`Connector`, `mono.server`, `mono.client`, `mono.studio`,
+`mono.unified_server_client`, and `mono.network`'s discovery. Then
+`ConnectionStats`, where **`SendsOverBudget` stops meaning what it means today** —
+a fixed cap refusing is not a congestion controller pacing, and `render`'s debug
+panel documents that distinction against `D00007`, so the panel and its header
+move with this. Then `expected_graph.json` and the tier check. Then the suites,
+most of which currently test things that would no longer exist.
+
+**Staging is not a preference here.** This entry already says two overlapping
+reliability stacks is worse than either, so the order is: land the QUIC session
+beside the old one and prove it, rewire, and only then delete — with every commit
+green, rather than a sweep that leaves the tree with no working link.
+
 ### [_] D00008
 
 - **The single-player `ALLOW_TIER_ESCAPE` in `mono.client/CMakeLists.txt`.** It is written out in a comment there and deliberately not declared: `DEPS ... Mono::server` plus `ALLOW_TIER_ESCAPE Mono::server`, the one edge the tier rule has to permit by name rather than by rule, so that a `client`-tier program may link a `server`-tier library.
