@@ -15,17 +15,33 @@
 // | On disk | In the world |
 // |---|---|
 // | a directory | a `Folder` |
-// | `X.luau` | a `Script` named `X` |
+// | `X.luau` | a `ModuleScript` named `X` |
 // | `X.server.luau` | a `Script` named `X` |
 // | `X.client.luau` | a `LocalScript` named `X` |
-// | `init.luau` in `D/` | `D` itself becomes the script, keeping its children |
+// | `init.luau` in `D/` | `D` itself becomes a `ModuleScript`, keeping its children |
+// | `init.server.luau` in `D/` | `D` itself becomes a `Script` |
+// | `init.client.luau` in `D/` | `D` itself becomes a `LocalScript` |
 //
-// `init.luau` is the one that looks like a special case and is not: Rojo uses it
-// so a script can have children, which is exactly what an instance tree is for.
+// `.lua` is accepted everywhere `.luau` is, because Rojo's own table is written
+// in terms of `.lua` and a project may predate the newer extension.
+//
+// `init` is the one that looks like a special case and is not: Rojo uses it so a
+// script can have children, which is exactly what an instance tree is for.
 // Without it a module with sub-modules would have to be a folder *beside* a
-// script, and every path in the project would gain a level.
+// script, and every path in the project would gain a level. **Which class the
+// directory becomes is the init file's own suffix**, exactly as it is for any
+// other file — reading only `init.luau` made every `init.server.luau` project a
+// folder plus a stray script called `init`.
 //
 // ## What this does not do
+//
+// **The rest of Rojo's table is reported, not built.** `.rbxm`, `.rbxmx`,
+// `.model.json`, `.meta.json`, `.txt`, `.csv`, `.json` and `.toml` all map to
+// something in Rojo and to nothing here — some because this engine has no such
+// class, some because the sync has nowhere to apply a property patch yet. Each
+// is named in the report **by what Rojo says it is**, so a gap here reads as a
+// gap rather than as an unrecognised file, and `D00104` carries what closing
+// each would take.
 //
 // **It builds, it does not watch.** A file watcher is a thread, a debounce and a
 // decision about what happens when a sync lands mid-tick — and the last of those
@@ -37,9 +53,33 @@
 // for every instance the editor can touch, which `docs/retired/v07v08.md` files under
 // v0.10 as a real piece of work rather than a flag.
 //
+// ## A universe is a folder of them
+//
+// One project file builds one world, because Rojo's `tree` is one place. A game
+// here is a *universe* of worlds, so v0.12 adds one level above: a
+// `main.universe.json` naming which world is built from which subfolder, and an
+// ordinary Rojo project inside each.
+//
+//     main.universe.json
+//     worlds/
+//       main/    default.project.json   src/...
+//       lobby/   default.project.json   src/...
+//
+// **Each world syncs on its own, and a failure is per world.** That is the whole
+// reason the universe layer is a loop over independent syncs rather than one big
+// build: a project file with a typo in it should cost its own world and nothing
+// else. A sync that stopped at the first bad file would make one mistake look
+// like the whole game was broken, and the author would have no way to tell which
+// of five folders was at fault.
+//
+// The subfolders are ordinary Rojo projects, unchanged, so `rojo serve` and
+// every other tool in that ecosystem still works on one of them in isolation.
+// That is the same trade the format choice above already made.
+//
 // @tier client
 
 #include <engine/ecs/Store.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <filesystem>
 #include <string>
@@ -131,6 +171,137 @@ namespace studio {
 		const std::filesystem::path &root,
 		engine::ecs::Store &store,
 		RojoSyncReport &report,
+		std::string &error
+	);
+
+	// --- the universe above them ---------------------------------------------
+
+	// One world, and where its project lives.
+	//
+	// @since v0.12
+	struct RojoUniverseWorld {
+		// The world's name. This is what `world::Universe::Find` is asked for,
+		// so it is the name everything crossing a world boundary already uses —
+		// a teleport, a topic, a reply.
+		std::string Name;
+
+		// The directory or project file holding it, relative to the universe
+		// file.
+		std::string Path;
+	};
+
+	// A parsed `main.universe.json`.
+	//
+	// @since v0.12
+	struct RojoUniverse {
+		// The universe's `name`, for a message rather than for identity.
+		std::string Name;
+
+		// The worlds, in the order they were written.
+		//
+		// **Order is kept rather than sorted**, for the reason `RojoNode` keeps
+		// its children in order: worlds are created in this order, a world id is
+		// assigned on creation, and a list that reordered itself would hand out
+		// different ids for the same file.
+		std::vector<RojoUniverseWorld> Worlds;
+	};
+
+	// What syncing one world did.
+	//
+	// @since v0.12
+	struct RojoWorldSync {
+		// The world named by the universe file.
+		std::string World;
+
+		// The project file that was read, once one was found.
+		std::filesystem::path Project;
+
+		// Whether the world's tree was built.
+		bool Synced = false;
+
+		// Why it was not. Empty when it was.
+		//
+		// **Per world rather than one error for the run**, which is the whole
+		// point of the universe layer: a project file with a typo costs its own
+		// world and nothing else.
+		std::string Error;
+
+		// What the sync did, when it happened.
+		RojoSyncReport Report;
+	};
+
+	// What a universe sync did, world by world.
+	//
+	// @since v0.12
+	struct RojoUniverseReport {
+		// One entry per world named by the file, in that order — including the
+		// ones that failed, which is what makes this readable as a result rather
+		// than as a list of successes with gaps.
+		std::vector<RojoWorldSync> Worlds;
+
+		// How many worlds built.
+		//
+		// @return The number of entries whose `Synced` is set.
+		size_t Synced() const;
+
+		// How many did not.
+		//
+		// @return The number of entries whose `Synced` is clear.
+		size_t Failed() const;
+	};
+
+	// Parses a universe file.
+	//
+	// The shape is deliberately small — a name and a map of worlds to folders —
+	// because everything else about a world is already `world::WorldSettings`,
+	// and a second place to say what a tick rate is would be two that disagree.
+	//
+	//     { "name": "MyGame", "worlds": { "Main": "worlds/main" } }
+	//
+	// @param json  The file's contents.
+	// @param out   Filled on success.
+	// @param error Filled on failure.
+	// @return `false` when the document is not a universe file.
+	// @since v0.12
+	bool ParseRojoUniverse(std::string_view json, RojoUniverse &out, std::string &error);
+
+	// The project file one world's entry resolves to.
+	//
+	// A `path` naming a file is taken as it is. A `path` naming a directory is
+	// searched for **`default.project.json` first** — Rojo's own name, so a
+	// subfolder is a project every tool in that ecosystem already understands —
+	// and then for `main.default.json`, which `ROADMAP.md` proposed for a folder
+	// that is only ever a world of this engine.
+	//
+	// @param root  The directory the universe file sits in.
+	// @param world The world's entry.
+	// @return The project file, or an empty path when there is none.
+	// @since v0.12
+	std::filesystem::path RojoProjectFor(const std::filesystem::path &root, const RojoUniverseWorld &world);
+
+	// Builds every world a universe file names.
+	//
+	// A world already in the universe is synced into; one that is not is
+	// created. Nothing is destroyed, for the reason a project sync deletes
+	// nothing: a sync that removed the worlds it did not recognise would eat an
+	// author's hand-built scene the first time they ran it.
+	//
+	// **One world's failure is that world's.** Every entry is attempted, and
+	// each carries its own error — a project file that does not parse, a folder
+	// with no project in it, a world the driver refused to create.
+	//
+	// @param universe The parsed universe file.
+	// @param root     The directory it sits in. Every `path` is relative to it.
+	// @param worlds   The universe to build into.
+	// @param report   Filled with one entry per world, in file order.
+	// @param error    Filled when nothing at all could be synced.
+	// @return `false` when no world built.
+	// @since v0.12
+	bool SyncRojoUniverse(
+		const RojoUniverse &universe,
+		const std::filesystem::path &root,
+		engine::world::Universe &worlds,
+		RojoUniverseReport &report,
 		std::string &error
 	);
 

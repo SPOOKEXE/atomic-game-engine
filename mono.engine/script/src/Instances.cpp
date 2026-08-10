@@ -70,202 +70,14 @@ namespace engine::script {
 		// tomorrow is readable and writable from Luau today, because this code
 		// only ever learned the shapes a value can have.
 
-		// How wide a property value can be, and therefore how big the shared
-		// buffers below are.
-		//
-		// **This was `sizeof(core::CFrame)` until v0.10 added the sequences.** A
-		// `core::ColorSequence` is twenty keypoints and does not fit in
-		// twenty-eight bytes, and the guard is `property.Size > sizeof(bytes)` —
-		// so an emitter's `Color` would have failed the read with "could not
-		// read 'Color'", naming a property that is declared and readable and
-		// whose only problem was a buffer one file away.
-		//
-		// A named constant rather than a `sizeof` at each buffer, because there
-		// are two and the getter's being narrower than the setter's is a bug with
-		// no symptom on the setter.
-		constexpr size_t WIDEST_PROPERTY =
-			std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
-
-		// Pushes a property's value, having read it into a buffer of its size.
-		bool PushValue(lua_State *state, const PropertyDescriptor &property, const void *bytes) {
-			switch (property.Type) {
-			case PropertyType::Bool:
-				lua_pushboolean(state, *static_cast<const bool *>(bytes));
-				return true;
-			case PropertyType::Float:
-				lua_pushnumber(state, *static_cast<const float *>(bytes));
-				return true;
-			case PropertyType::Double:
-				lua_pushnumber(state, *static_cast<const double *>(bytes));
-				return true;
-			case PropertyType::Int32:
-				lua_pushinteger(state, *static_cast<const int32_t *>(bytes));
-				return true;
-			case PropertyType::Int64:
-				lua_pushnumber(state, static_cast<double>(*static_cast<const int64_t *>(bytes)));
-				return true;
-			case PropertyType::Name:
-				// Text, never the interned id. A number that means a string in
-				// one process and a different string in the next is the whole
-				// hazard `core::Name` exists around.
-				lua_pushstring(state, static_cast<const Name *>(bytes)->Text().data());
-				return true;
-			case PropertyType::String:
-				// **Never reached, and refused rather than handled.** The caller
-				// takes a `std::string` down its own path before it gets here,
-				// because these `bytes` are uninitialised storage and a
-				// `std::string` cannot be assigned into that. Returning false
-				// makes a future caller that forgot the branch fail loudly
-				// rather than corrupt a heap.
-				return false;
-			case PropertyType::Enum:
-				// An `EnumItem`, not a string — that is the whole difference
-				// this type buys. The value is an interned `Name` exactly as
-				// `PropertyType::Name` is; what changes is that userland gets a
-				// value it can compare against `Enum.AlphaMode.Clip` and be
-				// told when it is wrong.
-				PushEnumItem(state, property.EnumName, *static_cast<const Name *>(bytes));
-				return true;
-			case PropertyType::Vector3:
-				*PushVector3(state) = *static_cast<const core::Vector3 *>(bytes);
-				return true;
-			case PropertyType::Color3:
-				*PushColor3(state) = *static_cast<const core::Color3 *>(bytes);
-				return true;
-			case PropertyType::CFrame:
-				*PushCFrame(state) = *static_cast<const core::CFrame *>(bytes);
-				return true;
-			case PropertyType::Vector2:
-				*PushVector2(state) = *static_cast<const core::Vector2 *>(bytes);
-				return true;
-			case PropertyType::UDim:
-				*PushUDim(state) = *static_cast<const core::UDim *>(bytes);
-				return true;
-			case PropertyType::UDim2:
-				*PushUDim2(state) = *static_cast<const core::UDim2 *>(bytes);
-				return true;
-			case PropertyType::Rect:
-				*PushRect(state) = *static_cast<const core::Rect *>(bytes);
-				return true;
-			case PropertyType::NumberRange:
-				*PushNumberRange(state) = *static_cast<const core::NumberRange *>(bytes);
-				return true;
-			case PropertyType::NumberSequence:
-				*PushNumberSequence(state) = *static_cast<const core::NumberSequence *>(bytes);
-				return true;
-			case PropertyType::ColorSequence:
-				*PushColorSequence(state) = *static_cast<const core::ColorSequence *>(bytes);
-				return true;
-			case PropertyType::Reference: {
-				// **Nil, and this is where "an orphan is not in the world"
-				// begins.** This used to hand back `workspace` for a null
-				// reference, because `workspace` *was* the world and a root
-				// therefore belonged to it. Now `workspace` is an instance like
-				// any other, `Workspace` is somewhere a thing can be parented,
-				// and having no parent is an ordinary state a script can both
-				// produce and read back — which is what makes
-				// `Instance.new("Part")` an object nothing draws and nothing
-				// lists until somebody says where it goes.
-				const Entity referenced = *static_cast<const Entity *>(bytes);
-				if (referenced == ecs::NULL_ENTITY) {
-					lua_pushnil(state);
-				} else {
-					PushInstance(state, referenced);
-				}
-				return true;
-			}
-			case PropertyType::Opaque:
-				break;
-			}
-			return false;
-		}
-
-		// Reads a Luau value into a buffer of the property's size.
-		bool ReadValue(lua_State *state, int index, const PropertyDescriptor &property, void *out) {
-			switch (property.Type) {
-			case PropertyType::Bool:
-				*static_cast<bool *>(out) = lua_toboolean(state, index) != 0;
-				return true;
-			case PropertyType::Float:
-				*static_cast<float *>(out) = static_cast<float>(luaL_checknumber(state, index));
-				return true;
-			case PropertyType::Double:
-				*static_cast<double *>(out) = luaL_checknumber(state, index);
-				return true;
-			case PropertyType::Int32:
-				*static_cast<int32_t *>(out) = luaL_checkinteger(state, index);
-				return true;
-			case PropertyType::Int64:
-				*static_cast<int64_t *>(out) = static_cast<int64_t>(luaL_checknumber(state, index));
-				return true;
-			case PropertyType::Name:
-				*static_cast<Name *>(out) = Name(luaL_checkstring(state, index));
-				return true;
-			case PropertyType::String:
-				// Refused here for `PushValue`'s reason, and the caller's own
-				// branch is what actually serves this type.
-				return false;
-			case PropertyType::Enum:
-				// **A string is accepted as well as an `EnumItem`**, because
-				// `part.AlphaMode = "Clip"` is what Roblox accepts and what a
-				// migrating script already contains. What is refused is a
-				// member of the *wrong* enum, which is the error a bare string
-				// could never have caught.
-				return ReadEnumValue(state, index, property.EnumName, *static_cast<Name *>(out));
-			case PropertyType::Vector3:
-				*static_cast<core::Vector3 *>(out) = CheckVector3(state, index);
-				return true;
-			case PropertyType::Color3:
-				*static_cast<core::Color3 *>(out) = CheckColor3(state, index);
-				return true;
-			case PropertyType::CFrame:
-				*static_cast<core::CFrame *>(out) = CheckCFrame(state, index);
-				return true;
-			case PropertyType::Vector2:
-				*static_cast<core::Vector2 *>(out) = CheckVector2Value(state, index);
-				return true;
-			case PropertyType::UDim:
-				*static_cast<core::UDim *>(out) = CheckUDim(state, index);
-				return true;
-			case PropertyType::UDim2:
-				*static_cast<core::UDim2 *>(out) = CheckUDim2(state, index);
-				return true;
-			case PropertyType::Rect:
-				*static_cast<core::Rect *>(out) = CheckRect(state, index);
-				return true;
-			case PropertyType::NumberRange:
-				*static_cast<core::NumberRange *>(out) = CheckNumberRange(state, index);
-				return true;
-
-			// **Placement-new, where every case above assigns.** `out` is
-			// uninitialised stack bytes, and assigning a 328-byte value over it is
-			// harmless only because these types are trivially copyable — which
-			// they are, and which the caller's zeroed buffer already relies on.
-			// Written as a plain assignment for the same reason as the rest: one
-			// shape, so a future non-trivial member is caught by the compiler here
-			// rather than by a corrupt gradient.
-			case PropertyType::NumberSequence:
-				*static_cast<core::NumberSequence *>(out) = CheckNumberSequence(state, index);
-				return true;
-			case PropertyType::ColorSequence:
-				*static_cast<core::ColorSequence *>(out) = CheckColorSequence(state, index);
-				return true;
-			case PropertyType::Reference:
-				// `part.Parent = nil` detaches. `part.Parent = workspace` is now
-				// an ordinary instance reference and needs no case of its own —
-				// which is the whole of what collapsing the two notions of "the
-				// workspace" bought.
-				if (lua_isnil(state, index)) {
-					*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
-					return true;
-				}
-				*static_cast<Entity *>(out) = CheckInstance(state, index);
-				return true;
-			case PropertyType::Opaque:
-				break;
-			}
-			return false;
-		}
+		// **Both halves live at the bottom of this file and are declared in
+		// `Bindings.hpp`.** They used to be file-local and took a
+		// `PropertyDescriptor`, which was right while a property was the only
+		// thing with a `PropertyType`. It is not: v0.12's ECS surface marshals
+		// the same value types for a **component field**, which is not a
+		// property and has no descriptor. Taking the type and the enum name
+		// instead of the descriptor is what keeps that one switch rather than
+		// two that agree until somebody edits one.
 
 		// Compare the stored spelling directly. Interning each lookup takes the
 		// process-wide registry lock and adds a hash lookup to every property access.
@@ -710,7 +522,7 @@ namespace engine::script {
 					luaL_errorL(state, "could not read '%s'", field);
 				}
 
-				if (!PushValue(state, *property, bytes)) {
+				if (!PushPropertyValue(state, property->Type, property->EnumName, bytes)) {
 					luaL_errorL(state, "'%s' has no script representation", field);
 				}
 				return 1;
@@ -805,7 +617,8 @@ namespace engine::script {
 			}
 
 			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
-			if (property->Size > sizeof(bytes) || !ReadValue(state, 3, *property, bytes)) {
+			if (property->Size > sizeof(bytes) ||
+				!ReadPropertyValue(state, 3, property->Type, property->EnumName, bytes)) {
 				luaL_errorL(state, "'%s' cannot take that value", field);
 			}
 
@@ -1127,6 +940,201 @@ namespace engine::script {
 			PushSignal(state, SignalKind::PropertyChanged, instance, name);
 			return 1;
 		}
+	}
+
+	// --- marshalling, shared with the ECS surface ---------------------------
+	//
+	// **The type and the enum name, never a descriptor.** A property has one and
+	// a component field does not, and both carry exactly the same values — so a
+	// second switch for fields would be the duplicate `script/AGENTS.md` calls
+	// the marshalling design's whole reason for existing.
+
+	bool PushPropertyValue(lua_State *state, ecs::PropertyType type, core::Name enumName, const void *bytes) {
+		using core::Name;
+		using ecs::Entity;
+		using ecs::PropertyType;
+
+		switch (type) {
+		case PropertyType::Bool:
+			lua_pushboolean(state, *static_cast<const bool *>(bytes));
+			return true;
+		case PropertyType::Float:
+			lua_pushnumber(state, *static_cast<const float *>(bytes));
+			return true;
+		case PropertyType::Double:
+			lua_pushnumber(state, *static_cast<const double *>(bytes));
+			return true;
+		case PropertyType::Int32:
+			lua_pushinteger(state, *static_cast<const int32_t *>(bytes));
+			return true;
+		case PropertyType::Int64:
+			lua_pushnumber(state, static_cast<double>(*static_cast<const int64_t *>(bytes)));
+			return true;
+		case PropertyType::Name:
+			// Text, never the interned id. A number that means a string in
+			// one process and a different string in the next is the whole
+			// hazard `core::Name` exists around.
+			lua_pushstring(state, static_cast<const Name *>(bytes)->Text().data());
+			return true;
+		case PropertyType::String:
+			// **Never reached, and refused rather than handled.** The caller
+			// takes a `std::string` down its own path before it gets here,
+			// because these `bytes` are uninitialised storage and a
+			// `std::string` cannot be assigned into that. Returning false
+			// makes a future caller that forgot the branch fail loudly
+			// rather than corrupt a heap.
+			return false;
+		case PropertyType::Enum:
+			// An `EnumItem`, not a string — that is the whole difference
+			// this type buys. The value is an interned `Name` exactly as
+			// `PropertyType::Name` is; what changes is that userland gets a
+			// value it can compare against `Enum.AlphaMode.Clip` and be
+			// told when it is wrong.
+			PushEnumItem(state, enumName, *static_cast<const Name *>(bytes));
+			return true;
+		case PropertyType::Vector3:
+			*PushVector3(state) = *static_cast<const core::Vector3 *>(bytes);
+			return true;
+		case PropertyType::Color3:
+			*PushColor3(state) = *static_cast<const core::Color3 *>(bytes);
+			return true;
+		case PropertyType::CFrame:
+			*PushCFrame(state) = *static_cast<const core::CFrame *>(bytes);
+			return true;
+		case PropertyType::Vector2:
+			*PushVector2(state) = *static_cast<const core::Vector2 *>(bytes);
+			return true;
+		case PropertyType::UDim:
+			*PushUDim(state) = *static_cast<const core::UDim *>(bytes);
+			return true;
+		case PropertyType::UDim2:
+			*PushUDim2(state) = *static_cast<const core::UDim2 *>(bytes);
+			return true;
+		case PropertyType::Rect:
+			*PushRect(state) = *static_cast<const core::Rect *>(bytes);
+			return true;
+		case PropertyType::NumberRange:
+			*PushNumberRange(state) = *static_cast<const core::NumberRange *>(bytes);
+			return true;
+		case PropertyType::NumberSequence:
+			*PushNumberSequence(state) = *static_cast<const core::NumberSequence *>(bytes);
+			return true;
+		case PropertyType::ColorSequence:
+			*PushColorSequence(state) = *static_cast<const core::ColorSequence *>(bytes);
+			return true;
+		case PropertyType::Reference: {
+			// **Nil, and this is where "an orphan is not in the world"
+			// begins.** This used to hand back `workspace` for a null
+			// reference, because `workspace` *was* the world and a root
+			// therefore belonged to it. Now `workspace` is an instance like
+			// any other, `Workspace` is somewhere a thing can be parented,
+			// and having no parent is an ordinary state a script can both
+			// produce and read back — which is what makes
+			// `Instance.new("Part")` an object nothing draws and nothing
+			// lists until somebody says where it goes.
+			const Entity referenced = *static_cast<const Entity *>(bytes);
+			if (referenced == ecs::NULL_ENTITY) {
+				lua_pushnil(state);
+			} else {
+				PushInstance(state, referenced);
+			}
+			return true;
+		}
+		case PropertyType::Opaque:
+			break;
+		}
+		return false;
+	}
+
+	bool
+	ReadPropertyValue(lua_State *state, int index, ecs::PropertyType type, core::Name enumName, void *out) {
+		using core::Name;
+		using ecs::Entity;
+		using ecs::PropertyType;
+
+		switch (type) {
+		case PropertyType::Bool:
+			*static_cast<bool *>(out) = lua_toboolean(state, index) != 0;
+			return true;
+		case PropertyType::Float:
+			*static_cast<float *>(out) = static_cast<float>(luaL_checknumber(state, index));
+			return true;
+		case PropertyType::Double:
+			*static_cast<double *>(out) = luaL_checknumber(state, index);
+			return true;
+		case PropertyType::Int32:
+			*static_cast<int32_t *>(out) = luaL_checkinteger(state, index);
+			return true;
+		case PropertyType::Int64:
+			*static_cast<int64_t *>(out) = static_cast<int64_t>(luaL_checknumber(state, index));
+			return true;
+		case PropertyType::Name:
+			*static_cast<Name *>(out) = Name(luaL_checkstring(state, index));
+			return true;
+		case PropertyType::String:
+			// Refused here for `PushValue`'s reason, and the caller's own
+			// branch is what actually serves this type.
+			return false;
+		case PropertyType::Enum:
+			// **A string is accepted as well as an `EnumItem`**, because
+			// `part.AlphaMode = "Clip"` is what Roblox accepts and what a
+			// migrating script already contains. What is refused is a
+			// member of the *wrong* enum, which is the error a bare string
+			// could never have caught.
+			return ReadEnumValue(state, index, enumName, *static_cast<Name *>(out));
+		case PropertyType::Vector3:
+			*static_cast<core::Vector3 *>(out) = CheckVector3(state, index);
+			return true;
+		case PropertyType::Color3:
+			*static_cast<core::Color3 *>(out) = CheckColor3(state, index);
+			return true;
+		case PropertyType::CFrame:
+			*static_cast<core::CFrame *>(out) = CheckCFrame(state, index);
+			return true;
+		case PropertyType::Vector2:
+			*static_cast<core::Vector2 *>(out) = CheckVector2Value(state, index);
+			return true;
+		case PropertyType::UDim:
+			*static_cast<core::UDim *>(out) = CheckUDim(state, index);
+			return true;
+		case PropertyType::UDim2:
+			*static_cast<core::UDim2 *>(out) = CheckUDim2(state, index);
+			return true;
+		case PropertyType::Rect:
+			*static_cast<core::Rect *>(out) = CheckRect(state, index);
+			return true;
+		case PropertyType::NumberRange:
+			*static_cast<core::NumberRange *>(out) = CheckNumberRange(state, index);
+			return true;
+
+		// **Placement-new, where every case above assigns.** `out` is
+		// uninitialised stack bytes, and assigning a 328-byte value over it is
+		// harmless only because these types are trivially copyable — which
+		// they are, and which the caller's zeroed buffer already relies on.
+		// Written as a plain assignment for the same reason as the rest: one
+		// shape, so a future non-trivial member is caught by the compiler here
+		// rather than by a corrupt gradient.
+		case PropertyType::NumberSequence:
+			*static_cast<core::NumberSequence *>(out) = CheckNumberSequence(state, index);
+			return true;
+		case PropertyType::ColorSequence:
+			*static_cast<core::ColorSequence *>(out) = CheckColorSequence(state, index);
+			return true;
+		case PropertyType::Reference:
+			// `part.Parent = nil` detaches. `part.Parent = workspace` is now
+			// an ordinary instance reference and needs no case of its own —
+			// which is the whole of what collapsing the two notions of "the
+			// workspace" bought.
+			if (lua_isnil(state, index)) {
+				*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
+				return true;
+			}
+			*static_cast<Entity *>(out) = CheckInstance(state, index);
+			return true;
+		case PropertyType::Opaque:
+			break;
+		}
+		return false;
 	}
 
 	void PushInstanceValue(lua_State *state, ecs::Entity instance) {

@@ -721,6 +721,42 @@ namespace engine::ecs {
 			return CountRows(terms);
 		}
 
+		// Visits every entity carrying all of `components`, named at run time.
+		//
+		// **The runtime counterpart of `Each<Ts...>`, and it hands over the
+		// entity alone.** `Each` gives a reference per component because the
+		// caller named the types and the compiler knows what they are; a caller
+		// that resolved *names* has no type to hand a reference to, so it reads
+		// what it wants through `GetComponent` and the descriptor behind it.
+		// That is the same split the component accessors above already draw.
+		//
+		// This is what a script's query is: a list of component names, resolved
+		// once, and the entities carrying all of them. An empty list matches
+		// nothing rather than everything — a query is defined by what it names,
+		// and `EachEntity` is the walk that answers "everything".
+		//
+		// Tables are walked in id order and rows in row order, so two runs of
+		// one world visit the same entities in the same sequence.
+		//
+		// **Structural changes are deferred**, exactly as they are inside
+		// `Each`: the body is free to create and destroy, and the loop will not
+		// see it.
+		//
+		// @param components The components an entity must carry, in any order.
+		// @param body       Called as `body(Entity)` for each match.
+		// @since v0.12
+		void EachMatching(std::span<const ComponentId> components, const std::function<void(Entity)> &body);
+
+		// How many entities `EachMatching` would visit.
+		//
+		// The plan is cached per term list exactly as `CountMatching<Ts...>`'s
+		// is, so a caller may ask every tick.
+		//
+		// @param components The components an entity must carry.
+		// @return The live number of entities carrying every one of them.
+		// @since v0.12
+		size_t CountMatching(std::span<const ComponentId> components);
+
 		// --- instances -----------------------------------------------------
 		//
 		// The Roblox-shaped half. An instance is an entity in the archetype its
@@ -1165,6 +1201,24 @@ namespace engine::ecs {
 		// @param entity    The entity to write to.
 		// @param component The component's id.
 		void RemoveComponent(Entity entity, ComponentId component);
+
+		// Everything an entity carries, in component-id order.
+		//
+		// **The question a query cannot ask.** `EachMatching` answers "who has
+		// these", and an editor row, a debug view and a script inspecting an
+		// entity it did not build all need the other direction — and the only
+		// way to get it before this was to test every registered id in turn.
+		//
+		// The span is the entity's archetype's own id list, so it is valid until
+		// the entity's row moves: adding or removing a component on it, or
+		// destroying it. That is the same lifetime `Get` hands out and for the
+		// same reason.
+		//
+		// @param entity The entity to inspect.
+		// @return Its components, or an empty span for a dead entity or one
+		//         carrying nothing.
+		// @since v0.12
+		std::span<const ComponentId> ComponentsOf(Entity entity) const;
 
 		// --- change tracking -----------------------------------------------
 

@@ -99,6 +99,47 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00104
+
+**The rest of Rojo's file table: `.rbxm`, `.model.json`, `.meta.json`, `.txt`,
+`.csv`, `.json` and `.toml`.**
+
+`studio::SyncRojoProject` builds the whole script half of
+`rojo.space/docs/v7/sync-details` — directories, the three script suffixes and
+the three `init` forms — and reports every other mapping by name rather than
+building it. The report is deliberate: "not a script" is the right thing to say
+about a stray `.DS_Store` and the wrong thing to say about a `.rbxm`, which Rojo
+maps and this engine has no reader for.
+
+They are not one piece of work, and lumping them would hide that three of them
+are cheap and three are not:
+
+- **`.txt` and `.csv` want classes this engine does not have.** A `StringValue`
+  is a class with one `String` property, which `PropertyType::String` has
+  supported since v0.8 — that one is small. A `LocalizationTable` is a class plus
+  a translation lookup plus whatever resolves it at run time, which is a feature
+  rather than a mapping.
+- **`.json` and `.toml` are a code generator.** Rojo makes them a `ModuleScript`
+  returning a table, so this would emit Luau source from a parsed document. The
+  hazard is the round trip: a key that is not an identifier, a number that does
+  not survive a `%.17g`, a string with an embedded newline. Whatever emits it
+  needs its own suite before anything depends on the values.
+- **`.meta.json` is a property patch and is the one worth doing first.** It sets
+  properties on the instance a file or a directory produced, which is the
+  mechanism an author reaches for as soon as a folder needs to be anything but a
+  `Folder` — `init.meta.json` can change the class outright. Every piece is
+  already here: `Store::SetProperty` takes a name and bytes, and `game::Values`
+  already converts a JSON document into property values for the save format.
+- **`.rbxm` and `.rbxmx` are a format reader**, binary and XML respectively, and
+  the honest answer is that they belong beside the other model decoders in
+  `bake` rather than in the editor.
+- **`.project.json` under a `$path` is a nested project.** Rojo follows it; this
+  reports it. Following one is a recursion with a cycle check, and the cycle
+  check is the part that has to exist before the recursion does.
+
+**Trigger:** an author hitting one. `.meta.json` is the likeliest and the
+cheapest, and it is the one to take first.
+
 ### [_] D00103
 
 **Per-pass GPU time is not measured. The Vulkan path that measured it was

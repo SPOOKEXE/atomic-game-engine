@@ -1550,6 +1550,88 @@ namespace studio {
 		Touch(Active);
 	}
 
+	void Editor::SyncRojoWorlds(const std::filesystem::path &universe) {
+		if (Universe == nullptr) {
+			Say("no universe to sync into", engine::core::LogLevel::Warning);
+			return;
+		}
+
+		std::ifstream in(universe, std::ios::binary);
+		if (!in) {
+			Say("could not read " + universe.string(), engine::core::LogLevel::Error);
+			return;
+		}
+
+		std::ostringstream buffer;
+		buffer << in.rdbuf();
+
+		RojoUniverse parsed;
+		std::string error;
+		if (!ParseRojoUniverse(buffer.str(), parsed, error)) {
+			Say("not a Rojo universe: " + error, engine::core::LogLevel::Error);
+			return;
+		}
+
+		// Relative to the universe file, for the reason a project's `$path` is
+		// relative to its own: a launcher's cwd must not decide which tree gets
+		// read.
+		const std::filesystem::path root = universe.parent_path();
+
+		RojoUniverseReport report;
+		const bool built = SyncRojoUniverse(parsed, root, *Universe, report, error);
+
+		// **Every world is reported, including the ones that worked, and the
+		// failures are not fatal to the run.** That is the whole reason the
+		// worlds sync separately — an author with five folders and one typo has
+		// to be told which folder, and a single "sync failed" would tell them
+		// nothing they could act on.
+		for (const RojoWorldSync &world : report.Worlds) {
+			if (!world.Synced) {
+				Say("  " + world.World + ": " + world.Error, engine::core::LogLevel::Error);
+				continue;
+			}
+
+			Say("  " + world.World + ": " + std::to_string(world.Report.Instances) + " instances, " +
+				std::to_string(world.Report.Scripts) + " scripts");
+
+			for (const std::string &missing : world.Report.Missing) {
+				Say("    no such path: " + missing, engine::core::LogLevel::Warning);
+			}
+
+			// Capped per world for the reason the project sync caps its own: a
+			// project with a thousand unrecognised files is a thousand lines
+			// nobody reads, and the count still says how many there were.
+			size_t shown = 0;
+			for (const std::string &note : world.Report.Notes) {
+				if (shown++ >= 4) {
+					Say("    ... and " + std::to_string(world.Report.Notes.size() - 4) + " more notes");
+					break;
+				}
+				Say("    " + note);
+			}
+		}
+
+		if (!built) {
+			Say("sync failed: " + error, engine::core::LogLevel::Error);
+			return;
+		}
+
+		Say("synced " + std::to_string(report.Synced()) + " of " +
+			std::to_string(report.Worlds.size()) + " world(s) from " + universe.filename().string());
+
+		// The active world may have been the only one, or there may not have
+		// been one at all before this ran.
+		if (!Active.IsValid() && !Universe->Worlds().empty()) {
+			Active = Universe->Worlds().front();
+			SelectionWorld = Active;
+		}
+
+		Modified = true;
+		for (const WorldId id : Universe->Worlds()) {
+			Touch(id);
+		}
+	}
+
 	bool Editor::SaveGame(const std::filesystem::path &path) {
 		// **Unsaved script buffers are flushed into their worlds first.**
 		// Otherwise the file on disk is the game minus whatever is currently

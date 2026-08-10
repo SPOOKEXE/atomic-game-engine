@@ -293,6 +293,10 @@ namespace engine::script {
 		OpenServices(State);
 		OpenContentService(State);
 		OpenQueries(State);
+
+		// After `OpenInstances`, whose method table this adds the component
+		// half of the ECS surface to.
+		OpenEcs(State);
 		OpenTask(State);
 		OpenClock(State);
 		OpenBaseExtras(State);

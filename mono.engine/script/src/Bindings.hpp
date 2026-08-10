@@ -25,10 +25,12 @@
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Runtime.hpp>
 
+#include <algorithm>
 #include <lua.h>
 #include <span>
 #include <string>
@@ -289,6 +291,57 @@ namespace engine::script {
 
 	// --- values ---------------------------------------------------------------
 
+	// How wide one marshalled value can be, and therefore how big the stack
+	// buffers that carry one are.
+	//
+	// **This was `sizeof(core::CFrame)` until v0.10 added the sequences.** A
+	// `core::ColorSequence` is twenty keypoints and does not fit in twenty-eight
+	// bytes, and every guard is `size > sizeof(bytes)` — so an emitter's `Color`
+	// failed its read with "could not read 'Color'", naming a property that is
+	// declared and readable and whose only problem was a buffer one file away.
+	//
+	// A named constant rather than a `sizeof` at each buffer, because there are
+	// several and a getter's being narrower than the setter's is a bug with no
+	// symptom on the setter.
+	constexpr size_t WIDEST_PROPERTY = std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
+
+	// Pushes a value of one `PropertyType`, read into a buffer of its size.
+	//
+	// **The type and the enum name, never a descriptor**, because the second
+	// caller has no descriptor to give: an ECS component field carries exactly
+	// these values and is not a property. One switch rather than two that agree
+	// until somebody edits one.
+	//
+	// `PropertyType::String` is refused rather than handled, and the refusal is
+	// the design: `bytes` is uninitialised storage and a `std::string` cannot be
+	// assigned into that, so every caller takes strings down a path of its own.
+	// Failing loudly is what catches a future caller that forgot the branch.
+	//
+	// @param state    The VM.
+	// @param type     What the bytes mean.
+	// @param enumName Which set an `Enum` value belongs to. Ignored otherwise.
+	// @param bytes    The value.
+	// @return `false` when the type has no script representation.
+	// @since v0.12
+	bool PushPropertyValue(lua_State *state, ecs::PropertyType type, core::Name enumName, const void *bytes);
+
+	// Reads a Luau value into a buffer of that type's size.
+	//
+	// Raises a Luau type error for a value of the wrong shape, exactly as the
+	// `Check*` helpers below do — so a caller checks the return for "this type
+	// cannot cross" and never for "the script passed the wrong thing".
+	//
+	// @param state    The VM.
+	// @param index    The stack index to read.
+	// @param type     What to read it as.
+	// @param enumName Which set an `Enum` value must belong to.
+	// @param out      Where to write it. At least `Schemas::SizeOf(type)` bytes.
+	// @return `false` when the type has no script representation, or when an
+	//         `Enum` value belongs to a different set.
+	// @since v0.12
+	bool
+	ReadPropertyValue(lua_State *state, int index, ecs::PropertyType type, core::Name enumName, void *out);
+
 	// Installs `Vector3`, `Color3` and `CFrame` as globals.
 	void OpenValues(lua_State *state);
 
@@ -457,6 +510,20 @@ namespace engine::script {
 	//
 	// Called after `OpenWorkspace`, because it adds to the world's method table.
 	void OpenQueries(lua_State *state);
+
+	// Installs `World`, and the component methods every instance gains.
+	//
+	// **The storage named directly, underneath the Roblox vocabulary the rest of
+	// this file installs.** A game's own data — a health, a cooldown, an
+	// inventory slot — has been an attribute or a C++ component until now, and
+	// neither is a component a query can reach without a rebuild.
+	//
+	// Called after `OpenInstances`, because the instance half of the surface adds
+	// to the method table that function creates.
+	//
+	// @param state The VM.
+	// @since v0.12
+	void OpenEcs(lua_State *state);
 
 	// Installs `Enum`, over the sets `ecs::EnumTable` holds.
 	void OpenEnums(lua_State *state);

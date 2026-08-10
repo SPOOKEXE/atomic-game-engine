@@ -15,6 +15,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -35,6 +36,12 @@ using studio::ParseRojoProject;
 using studio::RojoProject;
 using studio::RojoSyncReport;
 using studio::SyncRojoProject;
+using engine::world::Universe;
+using engine::world::WorldId;
+using studio::ParseRojoUniverse;
+using studio::RojoUniverse;
+using studio::RojoUniverseReport;
+using studio::SyncRojoUniverse;
 
 namespace {
 	constexpr const char *PROJECT = R"({
@@ -388,3 +395,421 @@ TEST_CASE("the three script classes come from the three file shapes", "[studio][
 	CHECK(classOf(client, "Hud") == engine::ecs::Classes::Find(Name("LocalScript")));
 }
 
+
+// --- the rest of Rojo's file table -------------------------------------------
+//
+// `rojo.space/docs/v7/sync-details` is the table these assert against. The three
+// `init` forms are the half that was wrong: only `init.luau` was consumed, so a
+// project using `init.server.luau` — which is most of them — got a folder plus a
+// stray script called `init`.
+
+namespace {
+	// A tree whose only content is the file conventions under test.
+	struct MappingTree {
+		std::filesystem::path Root;
+
+		MappingTree() {
+			Root = std::filesystem::temp_directory_path() /
+				   ("atomic-rojo-mapping-" +
+					std::to_string(std::filesystem::hash_value(
+						std::filesystem::temp_directory_path() / "rojo-mapping"
+					)));
+			std::filesystem::remove_all(Root);
+
+			Write("src/Module/init.luau", "return {}\n");
+			Write("src/Module/Leaf.luau", "return {}\n");
+			Write("src/Server/init.server.luau", "print('server')\n");
+			Write("src/Client/init.client.luau", "print('client')\n");
+			Write("src/Legacy/init.lua", "return {}\n");
+
+			// Rojo says only one may be present. This one breaks that rule on
+			// purpose, so the engine's answer to it is pinned rather than left
+			// to whichever name sorts first.
+			Write("src/Both/init.luau", "return {}\n");
+			Write("src/Both/init.server.luau", "print('also')\n");
+
+			// One of each mapping this engine reports rather than builds.
+			Write("src/Other/Model.rbxm", "binary\n");
+			Write("src/Other/Notes.txt", "text\n");
+			Write("src/Other/Strings.csv", "key,value\n");
+			Write("src/Other/Data.json", "{}\n");
+			Write("src/Other/Thing.model.json", "{}\n");
+			Write("src/Other/Leaf.meta.json", "{}\n");
+		}
+
+		~MappingTree() {
+			std::filesystem::remove_all(Root);
+		}
+
+		void Write(const std::string &relative, const char *text) {
+			const std::filesystem::path file = Root / relative;
+			std::filesystem::create_directories(file.parent_path());
+			std::ofstream out(file);
+			out << text;
+		}
+	};
+
+	constexpr const char *MAPPING_PROJECT = R"({
+	  "name": "Mapping",
+	  "tree": {
+	    "$className": "DataModel",
+	    "ReplicatedStorage": {
+	      "$className": "ReplicatedStorage",
+	      "Shared": { "$className": "Folder", "$path": "src" }
+	    }
+	  }
+	})";
+
+	// Whether any note mentions a fragment, so a case can assert that a file
+	// was accounted for without pinning the whole sentence.
+	bool Noted(const RojoSyncReport &report, std::string_view fragment) {
+		for (const std::string &note : report.Notes) {
+			if (note.find(fragment) != std::string::npos) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+TEST_CASE("each init form decides what its directory becomes", "[studio][rojosync]") {
+	MappingTree tree;
+	Store store("rojo_mapping");
+	engine::scene::EnsureClassTree();
+
+	RojoProject project;
+	std::string error;
+	REQUIRE(ParseRojoProject(MAPPING_PROJECT, project, error));
+
+	RojoSyncReport report;
+	REQUIRE(SyncRojoProject(project, tree.Root, store, report, error));
+
+	// `$path` maps a directory's *contents* into the node, so these sit
+	// directly under `Shared` rather than under an extra `src` level.
+	const Entity src = Child(store, store.FindFirstRoot("ReplicatedStorage"), "Shared");
+	REQUIRE(src != NULL_ENTITY);
+
+	// The directory *is* the script, and it keeps its children — which is the
+	// whole reason Rojo has the convention.
+	const Entity module = Child(store, src, "Module");
+	REQUIRE(module != NULL_ENTITY);
+	CHECK(store.ClassOf(module) == engine::ecs::Classes::Find(Name("ModuleScript")));
+	CHECK(Child(store, module, "Leaf") != NULL_ENTITY);
+
+	// **The suffix decides the class.** These two were the bug: without the
+	// init family they were plain `Folder`s holding a script called `init`.
+	const Entity server = Child(store, src, "Server");
+	REQUIRE(server != NULL_ENTITY);
+	CHECK(store.ClassOf(server) == engine::ecs::Classes::Find(Name("Script")));
+	CHECK(Child(store, server, "init") == NULL_ENTITY);
+
+	const Entity client = Child(store, src, "Client");
+	REQUIRE(client != NULL_ENTITY);
+	CHECK(store.ClassOf(client) == engine::ecs::Classes::Find(Name("LocalScript")));
+
+	// `.lua` is accepted wherever `.luau` is.
+	const Entity legacy = Child(store, src, "Legacy");
+	REQUIRE(legacy != NULL_ENTITY);
+	CHECK(store.ClassOf(legacy) == engine::ecs::Classes::Find(Name("ModuleScript")));
+}
+
+TEST_CASE("a directory with two init files picks one and says so", "[studio][rojosync]") {
+	MappingTree tree;
+	Store store("rojo_mapping");
+	engine::scene::EnsureClassTree();
+
+	RojoProject project;
+	std::string error;
+	REQUIRE(ParseRojoProject(MAPPING_PROJECT, project, error));
+
+	RojoSyncReport report;
+	REQUIRE(SyncRojoProject(project, tree.Root, store, report, error));
+
+	const Entity src = Child(store, store.FindFirstRoot("ReplicatedStorage"), "Shared");
+	const Entity both = Child(store, src, "Both");
+	REQUIRE(both != NULL_ENTITY);
+
+	// The order is fixed and written down — module, then server, then client —
+	// so the class does not depend on which name sorts first.
+	CHECK(store.ClassOf(both) == engine::ecs::Classes::Find(Name("ModuleScript")));
+
+	// And the one it ignored is neither silently dropped nor a child called
+	// `init`.
+	CHECK(Child(store, both, "init") == NULL_ENTITY);
+	CHECK(Noted(report, "more than one init file"));
+}
+
+TEST_CASE("a mapping this engine cannot build is named by what it is", "[studio][rojosync]") {
+	MappingTree tree;
+	Store store("rojo_mapping");
+	engine::scene::EnsureClassTree();
+
+	RojoProject project;
+	std::string error;
+	REQUIRE(ParseRojoProject(MAPPING_PROJECT, project, error));
+
+	RojoSyncReport report;
+	REQUIRE(SyncRojoProject(project, tree.Root, store, report, error));
+
+	// "not a script" is the right thing to say about a stray `.DS_Store` and the
+	// wrong thing to say about a `.rbxm`. One is noise in the project; the other
+	// is a gap here, and an author should be able to tell which they have.
+	CHECK(Noted(report, "Model.rbxm is a Roblox model"));
+	CHECK(Noted(report, "Notes.txt is a StringValue"));
+	CHECK(Noted(report, "Strings.csv is a LocalizationTable"));
+	CHECK(Noted(report, "Thing.model.json is a model definition"));
+	CHECK(Noted(report, "Leaf.meta.json is a property patch"));
+	CHECK(Noted(report, "Data.json is a ModuleScript"));
+
+	// The longer suffix wins: a `.meta.json` is not reported as a plain `.json`.
+	CHECK_FALSE(Noted(report, "Leaf.meta.json is a ModuleScript"));
+}
+
+// --- the universe above them -------------------------------------------------
+//
+// **The property under test is that the worlds are independent.** One project
+// file with a typo in it has to cost its own world and nothing else — a sync
+// that stopped at the first bad file would make one mistake look like the whole
+// game was broken, and the author would have no way to tell which folder was at
+// fault.
+
+namespace {
+	constexpr const char *WORLD_PROJECT = R"({
+	  "name": "World",
+	  "tree": {
+	    "$className": "DataModel",
+	    "ReplicatedStorage": {
+	      "$className": "ReplicatedStorage",
+	      "Shared": { "$className": "Folder", "$path": "src" }
+	    }
+	  }
+	})";
+
+	// A universe laid out the way `RojoSync.hpp` describes: a file at the root
+	// and an ordinary Rojo project inside each subfolder.
+	struct UniverseTree {
+		std::filesystem::path Root;
+
+		UniverseTree() {
+			Root = std::filesystem::temp_directory_path() /
+				   ("atomic-rojo-universe-" +
+					std::to_string(std::filesystem::hash_value(
+						std::filesystem::temp_directory_path() / "rojo-universe"
+					)));
+			std::filesystem::remove_all(Root);
+
+			Write("worlds/main/default.project.json", WORLD_PROJECT);
+			Write("worlds/main/src/Boot.server.luau", "print('main')\n");
+
+			// The second name, for a folder that is only ever a world of this
+			// engine's universe rather than a project Rojo also serves.
+			Write("worlds/lobby/main.default.json", WORLD_PROJECT);
+			Write("worlds/lobby/src/Boot.server.luau", "print('lobby')\n");
+
+			// The one that should fail on its own.
+			Write("worlds/broken/default.project.json", "{ this is not json");
+			Write("worlds/broken/src/Boot.server.luau", "print('broken')\n");
+		}
+
+		~UniverseTree() {
+			std::filesystem::remove_all(Root);
+		}
+
+		void Write(const std::string &relative, const char *text) {
+			const std::filesystem::path file = Root / relative;
+			std::filesystem::create_directories(file.parent_path());
+			std::ofstream out(file);
+			out << text;
+		}
+	};
+
+}
+
+TEST_CASE("a universe file names worlds in order", "[studio][rojosync]") {
+	RojoUniverse universe;
+	std::string error;
+
+	REQUIRE(ParseRojoUniverse(
+		R"({ "name": "MyGame", "worlds": { "Main": "worlds/main", "Lobby": "worlds/lobby" } })",
+		universe,
+		error
+	));
+	CHECK(universe.Name == "MyGame");
+	REQUIRE(universe.Worlds.size() == 2);
+}
+
+TEST_CASE("a document with no worlds is refused", "[studio][rojosync]") {
+	RojoUniverse universe;
+	std::string error;
+
+	CHECK_FALSE(ParseRojoUniverse(R"({"name": "no worlds here"})", universe, error));
+	CHECK_FALSE(error.empty());
+
+	CHECK_FALSE(ParseRojoUniverse(R"({"worlds": {}})", universe, error));
+	CHECK_FALSE(error.empty());
+
+	CHECK_FALSE(ParseRojoUniverse("{ this is not json", universe, error));
+	CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("a world entry resolves to a project file under either name", "[studio][rojosync]") {
+	UniverseTree tree;
+
+	CHECK(
+		studio::RojoProjectFor(tree.Root, {"Main", "worlds/main"}).filename() ==
+		"default.project.json"
+	);
+	CHECK(
+		studio::RojoProjectFor(tree.Root, {"Lobby", "worlds/lobby"}).filename() ==
+		"main.default.json"
+	);
+
+	// A path naming the file directly is taken as it is.
+	CHECK_FALSE(
+		studio::RojoProjectFor(tree.Root, {"Main", "worlds/main/default.project.json"}).empty()
+	);
+
+	// A folder with no project in it, and a folder that is not there.
+	CHECK(studio::RojoProjectFor(tree.Root, {"Empty", "worlds"}).empty());
+	CHECK(studio::RojoProjectFor(tree.Root, {"Gone", "worlds/nowhere"}).empty());
+	CHECK(studio::RojoProjectFor(tree.Root, {"Unnamed", ""}).empty());
+}
+
+TEST_CASE("every world in a universe is built into its own store", "[studio][rojosync]") {
+	UniverseTree tree;
+	engine::scene::EnsureClassTree();
+
+	RojoUniverse universe;
+	std::string error;
+	REQUIRE(ParseRojoUniverse(
+		R"({ "name": "MyGame", "worlds": { "Main": "worlds/main", "Lobby": "worlds/lobby" } })",
+		universe,
+		error
+	));
+
+	Universe worlds;
+	RojoUniverseReport report;
+	REQUIRE(SyncRojoUniverse(universe, tree.Root, worlds, report, error));
+
+	REQUIRE(report.Worlds.size() == 2);
+	CHECK(report.Synced() == 2);
+	CHECK(report.Failed() == 0);
+
+	// Each world got its own tree, and only its own — the scripts are staged
+	// per store, so a world reading the other's source would show up here.
+	for (const auto &synced : report.Worlds) {
+		INFO(synced.World << ": " << synced.Error);
+		REQUIRE(synced.Synced);
+		CHECK(synced.Report.Scripts == 1);
+
+		const WorldId id = worlds.Find(Name(synced.World));
+		REQUIRE(id.IsValid());
+
+		bool found = false;
+		worlds.Enter(id, [&](Store &store) {
+			const Entity storage = store.FindFirstRoot("ReplicatedStorage");
+			REQUIRE(storage != NULL_ENTITY);
+			found = Child(store, Child(store, storage, "Shared"), "Boot") != NULL_ENTITY;
+		});
+		CHECK(found);
+	}
+}
+
+TEST_CASE("one world's bad project file does not stop the rest", "[studio][rojosync]") {
+	UniverseTree tree;
+	engine::scene::EnsureClassTree();
+
+	RojoUniverse universe;
+	std::string error;
+	REQUIRE(ParseRojoUniverse(
+		R"({ "worlds": {
+		      "Broken": "worlds/broken",
+		      "Main": "worlds/main",
+		      "Missing": "worlds/nowhere"
+		    } })",
+		universe,
+		error
+	));
+
+	Universe worlds;
+	RojoUniverseReport report;
+
+	// True overall, because something built. That is the contract: a universe
+	// sync fails only when *no* world could be built.
+	REQUIRE(SyncRojoUniverse(universe, tree.Root, worlds, report, error));
+	REQUIRE(report.Worlds.size() == 3);
+	CHECK(report.Synced() == 1);
+	CHECK(report.Failed() == 2);
+
+	for (const auto &synced : report.Worlds) {
+		if (synced.World == "Main") {
+			CHECK(synced.Synced);
+			CHECK(synced.Error.empty());
+			continue;
+		}
+
+		// Each failure carries its own reason, which is what tells an author
+		// which of five folders is at fault.
+		CHECK_FALSE(synced.Synced);
+		CHECK_FALSE(synced.Error.empty());
+	}
+
+	// The world that failed to parse was never created, and the one that built
+	// is there.
+	CHECK(worlds.Find(Name("Main")).IsValid());
+	CHECK_FALSE(worlds.Find(Name("Missing")).IsValid());
+}
+
+TEST_CASE("a universe where nothing builds is a failure", "[studio][rojosync]") {
+	UniverseTree tree;
+	engine::scene::EnsureClassTree();
+
+	RojoUniverse universe;
+	std::string error;
+	REQUIRE(ParseRojoUniverse(R"({ "worlds": { "Broken": "worlds/broken" } })", universe, error));
+
+	Universe worlds;
+	RojoUniverseReport report;
+
+	CHECK_FALSE(SyncRojoUniverse(universe, tree.Root, worlds, report, error));
+	CHECK_FALSE(error.empty());
+	CHECK(report.Failed() == 1);
+}
+
+TEST_CASE("syncing a universe twice builds into the worlds it made", "[studio][rojosync]") {
+	UniverseTree tree;
+	engine::scene::EnsureClassTree();
+
+	RojoUniverse universe;
+	std::string error;
+	REQUIRE(ParseRojoUniverse(R"({ "worlds": { "Main": "worlds/main" } })", universe, error));
+
+	Universe worlds;
+
+	RojoUniverseReport first;
+	REQUIRE(SyncRojoUniverse(universe, tree.Root, worlds, first, error));
+
+	RojoUniverseReport second;
+	REQUIRE(SyncRojoUniverse(universe, tree.Root, worlds, second, error));
+
+	// One world, not two: `Universe::Create` returns the world already holding
+	// a name, and a second world called `Main` would be a game whose halves
+	// cannot find each other.
+	CHECK(worlds.Worlds().size() == 1);
+
+	// And it reused the existing `ReplicatedStorage` rather than making a
+	// second beside it, which is the same rule `BuildNode` follows.
+	worlds.Enter(worlds.Find(Name("Main")), [&](Store &store) {
+		size_t roots = 0;
+		store.EachRoot([&roots](Entity) { roots++; });
+
+		size_t storages = 0;
+		store.EachRoot([&](Entity root) {
+			if (store.InstanceNameOf(root) == Name("ReplicatedStorage")) {
+				storages++;
+			}
+		});
+		CHECK(storages == 1);
+		CHECK(roots > 0);
+	});
+}

@@ -1586,6 +1586,21 @@ namespace studio {
 		// @param project The path to `default.project.json`.
 		void SyncRojo(const std::filesystem::path &project);
 
+		// Builds every world a `main.universe.json` names.
+		//
+		// **The universe counterpart of `SyncRojo`, and a separate command
+		// rather than a mode of it.** One project file is one world, which is
+		// what an author editing a scene wants; a universe file is a whole game
+		// laid out as a folder of them, which is what an author opening a
+		// checkout wants. Folding the two into one path would mean guessing
+		// which they meant from the file's contents.
+		//
+		// Every world syncs on its own, so a project file with a typo costs its
+		// own world and nothing else — the report names which.
+		//
+		// @param universe The path to `main.universe.json`.
+		void SyncRojoWorlds(const std::filesystem::path &universe);
+
 		// Breakpoints, the paused stack, and stepping.
 		void DrawDebugger();
 
@@ -2701,6 +2716,9 @@ namespace studio {
 
 		// Whether the Rojo project picker is up. See `SyncRojo`.
 		bool AskingRojo = false;
+
+		// Whether the Rojo universe picker is up. See `SyncRojoWorlds`.
+		bool AskingRojoUniverse = false;
 		// Which of the file modals is up. At most one at a time.
 		//@{
 		bool AskingExport = false;

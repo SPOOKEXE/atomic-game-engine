@@ -456,6 +456,62 @@ namespace engine::ecs {
 		return total;
 	}
 
+	namespace {
+		// The caller's terms, canonicalised.
+		//
+		// **Sorted and deduplicated so that two spellings of one query share a
+		// plan.** `VisitTables` keys its cache on the term bytes, so `{A, B}`
+		// and `{B, A}` would otherwise build and top up two plans that match
+		// exactly the same tables — and a script writing its query arguments in
+		// a different order in two files would pay for it twice.
+		//
+		// A duplicate term is dropped rather than refused: naming a component
+		// twice is a redundant filter, not a different one.
+		std::vector<ComponentId> Canonical(std::span<const ComponentId> components) {
+			std::vector<ComponentId> terms(components.begin(), components.end());
+			std::sort(terms.begin(), terms.end());
+			terms.erase(std::unique(terms.begin(), terms.end()), terms.end());
+			return terms;
+		}
+	}
+
+	void
+	Store::EachMatching(std::span<const ComponentId> components, const std::function<void(Entity)> &body) {
+		RequireOwningThread("EachMatching");
+
+		// **An empty query matches nothing.** A query is defined by what it
+		// names, and `VisitTables` with no terms would match every table — which
+		// is a different question, and `EachEntity` is the one that answers it
+		// honestly by walking the directory rather than the tables.
+		if (components.empty()) {
+			return;
+		}
+
+		const std::vector<ComponentId> terms = Canonical(components);
+
+		// Deferred, as `Each` is: the body is a script, and a script destroying
+		// what it just found is the ordinary case rather than the exotic one.
+		const DeferScope defer(*this);
+
+		VisitTables(terms, [&body](const TableSlice &slice) {
+			// `Archetype::Ids` is one contiguous array whatever the columns do,
+			// so the entities need no chunk walk — see `ecs/AGENTS.md` on why
+			// the columns underneath do.
+			for (size_t row = 0; row < slice.Rows; row++) {
+				body(slice.Entities[row]);
+			}
+		});
+	}
+
+	size_t Store::CountMatching(std::span<const ComponentId> components) {
+		RequireOwningThread("CountMatching");
+
+		if (components.empty()) {
+			return 0;
+		}
+		return CountRows(Canonical(components));
+	}
+
 	// --- instances ---------------------------------------------------------
 
 	Entity Store::CreateInstance(ClassId id, std::string_view name) {
@@ -887,6 +943,26 @@ namespace engine::ecs {
 
 	void Store::RemoveComponent(Entity entity, ComponentId component) {
 		RemoveRaw(entity, component);
+	}
+
+	std::span<const ComponentId> Store::ComponentsOf(Entity entity) const {
+		const EntityId key = EntityId::Of(entity);
+		if (!State->Directory.Alive(key.Index, key.Generation)) {
+			return {};
+		}
+
+		// An entity with no components is in no table, which is the ordinary
+		// state of one that has just been created — a row is what a component
+		// buys.
+		const EntityLocation *location = State->Directory.Locate(key.Index);
+		if (location == nullptr || location->Archetype == EntityLocation::NO_ARCHETYPE) {
+			return {};
+		}
+
+		// The interned set's own list, which is sorted by id and lives as long
+		// as the set does. Copying it here would allocate on a path an editor
+		// calls once per visible row per frame.
+		return State->Tables[location->Archetype].Set().Ids();
 	}
 
 	void Store::EachChangedRuns(

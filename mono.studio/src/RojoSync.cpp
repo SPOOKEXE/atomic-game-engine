@@ -3,6 +3,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 
@@ -69,6 +70,118 @@ namespace studio {
 
 			found.Name = stem;
 			return found;
+		}
+
+		// What Rojo says a file becomes, for the ones this engine cannot build.
+		//
+		// **Named by what they *would* be rather than skipped as unrecognised**,
+		// and the difference matters to whoever reads the log: "not a script" is
+		// what you say about a stray `.DS_Store`, and it is the wrong thing to
+		// say about a `.rbxm`, which Rojo maps and this engine has no reader
+		// for. One is noise in the project and the other is a gap here.
+		//
+		// The list is `rojo.space/docs/v7/sync-details`. `D00104` carries what
+		// closing each of them would take.
+		const char *UnbuiltKind(const std::filesystem::path &file) {
+			const std::string leaf = file.filename().string();
+
+			// **Before the plain `.json` case**, because both suffixes match and
+			// the longer one is the specific rule. A `.meta.json` beside a file
+			// is properties for it, which is a patch this sync has nowhere to
+			// apply yet.
+			if (EndsWith(leaf, ".meta.json")) {
+				return "a property patch (.meta.json), which this sync cannot apply yet";
+			}
+			if (EndsWith(leaf, ".model.json")) {
+				return "a model definition (.model.json), which this sync cannot build yet";
+			}
+			if (EndsWith(leaf, ".project.json")) {
+				return "a nested project, which this sync does not follow yet";
+			}
+			if (EndsWith(leaf, ".rbxm") || EndsWith(leaf, ".rbxmx")) {
+				return "a Roblox model, which this engine has no reader for";
+			}
+			if (EndsWith(leaf, ".txt")) {
+				return "a StringValue, which this engine has no class for";
+			}
+			if (EndsWith(leaf, ".csv")) {
+				return "a LocalizationTable, which this engine has no class for";
+			}
+			if (EndsWith(leaf, ".json") || EndsWith(leaf, ".toml")) {
+				return "a ModuleScript returning a table, which this sync cannot generate yet";
+			}
+			return nullptr;
+		}
+
+		// The `init` file a directory carries, which makes the directory itself
+		// the script rather than a folder holding one.
+		//
+		// **Rojo's rule is that only one may be present**, and this engine has
+		// to do something when an author breaks it. Refusing the whole sync
+		// would be one mistake costing every other folder; picking silently
+		// would be a directory whose class depends on which name happened to
+		// sort first. So the order is fixed and written down — module, then
+		// server, then client — and the extras are reported.
+		struct InitFile {
+			std::filesystem::path File;
+			bool Local = false;
+			bool Module = false;
+
+			bool Present() const {
+				return !File.empty();
+			}
+		};
+
+		InitFile FindInit(const std::filesystem::path &directory, RojoSyncReport &report) {
+			static const struct {
+				const char *Leaf;
+				bool Local;
+				bool Module;
+			} CANDIDATES[] = {
+				{"init.luau", false, true},
+				{"init.lua", false, true},
+				{"init.server.luau", false, false},
+				{"init.server.lua", false, false},
+				{"init.client.luau", true, false},
+				{"init.client.lua", true, false},
+			};
+
+			InitFile chosen;
+			for (const auto &candidate : CANDIDATES) {
+				const std::filesystem::path file = directory / candidate.Leaf;
+
+				std::error_code kind;
+				if (!std::filesystem::is_regular_file(file, kind)) {
+					continue;
+				}
+
+				if (chosen.Present()) {
+					report.Notes.push_back(
+						directory.filename().string() + " has more than one init file — used " +
+						chosen.File.filename().string() + " and ignored " + candidate.Leaf
+					);
+					continue;
+				}
+
+				chosen.File = file;
+				chosen.Local = candidate.Local;
+				chosen.Module = candidate.Module;
+			}
+			return chosen;
+		}
+
+		// Whether a file is *an* init file, whichever one the directory chose.
+		//
+		// The loop over a directory has to skip every one of them: the chosen
+		// one was consumed by the directory itself, and an ignored one must not
+		// come back as a child called `init`. That second case is the bug this
+		// replaced — only `init.luau` was skipped, so `init.server.luau` became
+		// a folder plus a stray `Script` named `init`.
+		bool IsInitFile(const std::filesystem::path &file) {
+			const std::string leaf = file.filename().string();
+			return leaf == "init.luau" || leaf == "init.lua" || leaf == "init.server.luau" ||
+				   leaf == "init.server.lua" || leaf == "init.client.luau" ||
+				   leaf == "init.client.lua";
 		}
 
 		// The class a `$className` names, or an invalid id.
@@ -181,19 +294,26 @@ namespace studio {
 				if (std::filesystem::is_directory(entry, kind)) {
 					const std::string leaf = entry.filename().string();
 
-					// `init.luau` makes the directory itself the script rather
-					// than a folder containing one — which is how a module gets
-					// children without every path gaining a level.
+					// An `init` file makes the directory itself the script
+					// rather than a folder containing one — which is how a
+					// program gets children without every path gaining a level.
+					//
+					// **Which class it becomes is the init file's suffix**,
+					// exactly as it is for any other file: `init.luau` is a
+					// module, `init.server.luau` a `Script`, `init.client.luau`
+					// a `LocalScript`. Reading only `init.luau` — which this did
+					// — made every `init.server.luau` project a folder plus a
+					// stray script called `init`.
 					Entity node = NULL_ENTITY;
-					const std::filesystem::path init = entry / "init.luau";
+					const InitFile init = FindInit(entry, report);
 
-					if (std::filesystem::exists(init, kind)) {
-						const std::string key = keyPrefix + leaf + "/init.luau";
-						if (StageProgram(store, init, key)) {
-							// A module, like any other plain `.luau`. `init` is
-							// how a module gets children, not how a folder
-							// becomes a program.
-							node = engine::script::MakeModule(store, key, leaf);
+					if (init.Present()) {
+						const std::string key =
+							keyPrefix + leaf + "/" + init.File.filename().string();
+						if (StageProgram(store, init.File, key)) {
+							node = init.Module
+									   ? engine::script::MakeModule(store, key, leaf)
+									   : engine::script::MakeScript(store, key, leaf, init.Local);
 							report.Scripts++;
 						}
 					}
@@ -211,17 +331,27 @@ namespace studio {
 					continue;
 				}
 
-				const ScriptFile file = ClassifyFile(entry);
-				if (!file.IsScript) {
-					// Models, images and everything else a project may carry.
-					// Named rather than skipped in silence, so an author whose
-					// `.rbxm` did not appear knows why.
-					report.Notes.push_back(entry.filename().string() + " is not a script — skipped");
+				if (IsInitFile(entry)) {
+					// Consumed by the directory above, or reported there as one
+					// init file too many. Either way it is not a child.
 					continue;
 				}
 
-				if (entry.filename() == "init.luau") {
-					// Already consumed by the directory above it.
+				const ScriptFile file = ClassifyFile(entry);
+				if (!file.IsScript) {
+					// Named rather than skipped in silence, so an author whose
+					// `.rbxm` did not appear knows why — and named by *what Rojo
+					// says it is* where there is an answer, so a gap here reads
+					// as a gap rather than as an unrecognised file.
+					if (const char *kind_ = UnbuiltKind(entry); kind_ != nullptr) {
+						report.Notes.push_back(
+							entry.filename().string() + " is " + kind_ + " — skipped"
+						);
+					} else {
+						report.Notes.push_back(
+							entry.filename().string() + " is not a script — skipped"
+						);
+					}
 					continue;
 				}
 
@@ -278,7 +408,17 @@ namespace studio {
 					BuildDirectory(store, source, node_, node.Path + "/", report);
 				} else if (std::filesystem::exists(source, kind)) {
 					const ScriptFile file = ClassifyFile(source);
-					if (file.IsScript && StageProgram(store, source, node.Path)) {
+					if (!file.IsScript) {
+						// The same accounting a directory walk does. A `$path`
+						// naming a `.rbxm` used to produce nothing and say
+						// nothing, which is the one outcome an author cannot
+						// act on.
+						const char *kind_ = UnbuiltKind(source);
+						report.Notes.push_back(
+							node.Path + " is " +
+							(kind_ != nullptr ? kind_ : "not a script") + " — skipped"
+						);
+					} else if (StageProgram(store, source, node.Path)) {
 						const Entity script =
 							file.Module ? engine::script::MakeModule(store, node.Path, file.Name)
 										: engine::script::MakeScript(
@@ -362,6 +502,175 @@ namespace studio {
 
 		if (report.Instances == 0) {
 			error = "the project named nothing this world could build";
+			return false;
+		}
+		return true;
+	}
+
+	// --- the universe above them -------------------------------------------
+
+	size_t RojoUniverseReport::Synced() const {
+		return static_cast<size_t>(
+			std::count_if(Worlds.begin(), Worlds.end(), [](const RojoWorldSync &world) {
+				return world.Synced;
+			})
+		);
+	}
+
+	size_t RojoUniverseReport::Failed() const {
+		return Worlds.size() - Synced();
+	}
+
+	bool ParseRojoUniverse(std::string_view json_, RojoUniverse &out, std::string &error) {
+		json document = json::parse(json_, nullptr, false);
+		if (document.is_discarded() || !document.is_object()) {
+			error = "not a JSON object";
+			return false;
+		}
+
+		const auto worlds = document.find("worlds");
+		if (worlds == document.end() || !worlds->is_object()) {
+			error = "no 'worlds' — this is not a universe file";
+			return false;
+		}
+
+		if (const auto name = document.find("name"); name != document.end() && name->is_string()) {
+			out.Name = name->get<std::string>();
+		}
+
+		for (const auto &entry : worlds->items()) {
+			if (entry.key().empty() || !entry.value().is_string()) {
+				// **Skipped and not fatal**, which is the rule the whole layer
+				// is built on: one malformed entry costs its own world. A
+				// refusal here would be one typo taking every other world with
+				// it, which is exactly what syncing them separately is for.
+				continue;
+			}
+			out.Worlds.push_back(RojoUniverseWorld{entry.key(), entry.value().get<std::string>()});
+		}
+
+		if (out.Worlds.empty()) {
+			error = "'worlds' names nothing";
+			return false;
+		}
+		return true;
+	}
+
+	std::filesystem::path RojoProjectFor(const std::filesystem::path &root, const RojoUniverseWorld &world) {
+		if (world.Path.empty()) {
+			return {};
+		}
+
+		const std::filesystem::path candidate = root / world.Path;
+		std::error_code kind;
+
+		if (std::filesystem::is_regular_file(candidate, kind)) {
+			return candidate;
+		}
+		if (!std::filesystem::is_directory(candidate, kind)) {
+			return {};
+		}
+
+		// Rojo's own name first, so a subfolder stays a project every tool in
+		// that ecosystem understands.
+		for (const char *leaf : {"default.project.json", "main.default.json"}) {
+			const std::filesystem::path project = candidate / leaf;
+			if (std::filesystem::is_regular_file(project, kind)) {
+				return project;
+			}
+		}
+		return {};
+	}
+
+	bool SyncRojoUniverse(
+		const RojoUniverse &universe,
+		const std::filesystem::path &root,
+		engine::world::Universe &worlds,
+		RojoUniverseReport &report,
+		std::string &error
+	) {
+		std::error_code failed;
+		if (!std::filesystem::is_directory(root, failed)) {
+			error = root.string() + " is not a directory";
+			return false;
+		}
+
+		for (const RojoUniverseWorld &declared : universe.Worlds) {
+			RojoWorldSync &result = report.Worlds.emplace_back();
+			result.World = declared.Name;
+
+			result.Project = RojoProjectFor(root, declared);
+			if (result.Project.empty()) {
+				result.Error = "no project file at " + declared.Path;
+				continue;
+			}
+
+			std::ifstream in(result.Project, std::ios::binary);
+			if (!in) {
+				result.Error = "could not read " + result.Project.string();
+				continue;
+			}
+
+			std::ostringstream buffer;
+			buffer << in.rdbuf();
+
+			RojoProject project;
+			if (!ParseRojoProject(buffer.str(), project, result.Error)) {
+				continue;
+			}
+
+			// **Found before created**, so a second sync builds into the world
+			// the first one made rather than beside it. `Universe::Create`
+			// already returns the world holding a name, and this says so at the
+			// call site because the difference decides whether an author's
+			// hand-placed instances survive.
+			const engine::core::Name key(declared.Name);
+			engine::world::WorldId id = worlds.Find(key);
+			bool created = false;
+
+			if (!id.IsValid()) {
+				engine::world::WorldSettings settings;
+				settings.Name = key;
+
+				engine::world::WorldStatus status = engine::world::WorldStatus::Ok;
+				id = worlds.Create(settings, &status);
+				created = true;
+
+				if (!id.IsValid()) {
+					result.Error = "the driver refused to create a world called " + declared.Name;
+					continue;
+				}
+			}
+
+			const std::filesystem::path directory = result.Project.parent_path();
+			std::string built;
+
+			worlds.Enter(id, [&](Store &store) {
+				// A world this call made has none of the services a place
+				// needs, and `BuildNode` reuses an existing `Workspace` rather
+				// than making a second — so installing them first is what stops
+				// a synced world from having two.
+				if (created) {
+					engine::scene::InstallServices(store);
+				}
+				if (!SyncRojoProject(project, directory, store, result.Report, built)) {
+					result.Error = built;
+					return;
+				}
+				result.Synced = true;
+			});
+
+			if (!result.Synced && result.Error.empty()) {
+				// `Enter` refused — the world is remote, faulted or held down.
+				// Named rather than left as a silent failure, because "nothing
+				// happened and nothing said why" is the report this layer exists
+				// to avoid.
+				result.Error = "could not enter world " + declared.Name;
+			}
+		}
+
+		if (report.Synced() == 0) {
+			error = "no world in the universe could be built";
 			return false;
 		}
 		return true;

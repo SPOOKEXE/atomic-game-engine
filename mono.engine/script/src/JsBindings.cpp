@@ -176,236 +176,242 @@ namespace engine::script {
 		constexpr size_t WIDEST_PROPERTY =
 			std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
 
-		JSValue ToJs(JSContext *context, const PropertyDescriptor &property, const void *bytes) {
-			switch (property.Type) {
-			case PropertyType::Bool:
-				return JS_NewBool(context, *static_cast<const bool *>(bytes));
-			case PropertyType::Float:
-				return JS_NewFloat64(context, *static_cast<const float *>(bytes));
-			case PropertyType::Double:
-				return JS_NewFloat64(context, *static_cast<const double *>(bytes));
-			case PropertyType::Int32:
-				return JS_NewInt32(context, *static_cast<const int32_t *>(bytes));
-			case PropertyType::Int64:
-				return JS_NewInt64(context, *static_cast<const int64_t *>(bytes));
-			case PropertyType::Name:
-				// Text, never the interned id — the number means a different
-				// string in the next process.
-				return JS_NewString(context, static_cast<const Name *>(bytes)->Text().data());
-			case PropertyType::String:
-				// **Never reached, and refused rather than handled**, exactly as
-				// the Luau side refuses it: the caller takes a `std::string`
-				// down its own path before it gets here, and these `bytes` are
-				// uninitialised storage. Throwing makes a future caller that
-				// forgot the branch fail loudly instead of corrupting a heap.
-				return JS_ThrowTypeError(context, "a string property is read through its own path");
-			case PropertyType::Enum:
-				// An `EnumItem`, not a string — the same value the Luau side
-				// hands back, so a property declared once behaves the same in
-				// both languages. The storage is an interned `Name` either way;
-				// what the type buys is that a wrong member is refused.
-				return MakeEnumItem(context, property.EnumName, *static_cast<const Name *>(bytes));
-			case PropertyType::Vector3:
-				return MakeVector3(context, *static_cast<const core::Vector3 *>(bytes));
-			case PropertyType::Color3:
-				return MakeColor3(context, *static_cast<const core::Color3 *>(bytes));
-			case PropertyType::CFrame:
-				return MakeCFrame(context, *static_cast<const core::CFrame *>(bytes));
-			case PropertyType::Vector2:
-				return MakeVector2(context, *static_cast<const core::Vector2 *>(bytes));
-			case PropertyType::UDim:
-				return MakeUDim(context, *static_cast<const core::UDim *>(bytes));
-			case PropertyType::UDim2:
-				return MakeUDim2(context, *static_cast<const core::UDim2 *>(bytes));
-			case PropertyType::Rect:
-				return MakeRect(context, *static_cast<const core::Rect *>(bytes));
-			case PropertyType::NumberRange:
-				return MakeNumberRange(context, *static_cast<const core::NumberRange *>(bytes));
-			case PropertyType::NumberSequence:
-				return MakeNumberSequence(context, *static_cast<const core::NumberSequence *>(bytes));
-			case PropertyType::ColorSequence:
-				return MakeColorSequence(context, *static_cast<const core::ColorSequence *>(bytes));
-			case PropertyType::Reference: {
-				// **Null, and it means nil rather than "a root".** This handed
-				// back `workspace` before v0.7, because `workspace` *was* the
-				// world and a root therefore belonged to it. `workspace` is now
-				// the `Workspace` instance, so having no parent is an ordinary
-				// state a script can produce and read back — and an instance in
-				// that state is drawn by nothing and listed by nothing. The Luau
-				// side says the same thing in `PushValue`; one property
-				// declaration, two languages, one answer.
-				const Entity referenced = *static_cast<const Entity *>(bytes);
-				if (referenced == ecs::NULL_ENTITY) {
-					return JS_NULL;
-				}
+	}
 
-				// **The stored object for the Workspace, not a fresh one.**
-				// `MakeJsInstance` mints a new JS object per call, and
-				// JavaScript's `===` is object identity with no `__eq` to
-				// override — so `part.Parent === workspace` would be false for
-				// the one comparison every script makes. Luau has no such
-				// problem: its `Instance` metatable carries `__eq` and compares
-				// entities.
-				//
-				// Narrow on purpose. This does not give instances identity in
-				// general — `child.Parent === model` is still false — and
-				// pretending otherwise would need every live instance interned
-				// in the context. What it does is keep the one object a script
-				// is handed as a global comparable with itself.
-				if (JsContext &bound = JsOf(context); referenced == JsEntityOf(context, bound.Workspace)) {
-					return JS_DupValue(context, bound.Workspace);
-				}
-				return MakeJsInstance(context, referenced);
+	JSValue ToJsValue(JSContext *context, PropertyType type, core::Name enumName, const void *bytes) {
+		switch (type) {
+		case PropertyType::Bool:
+			return JS_NewBool(context, *static_cast<const bool *>(bytes));
+		case PropertyType::Float:
+			return JS_NewFloat64(context, *static_cast<const float *>(bytes));
+		case PropertyType::Double:
+			return JS_NewFloat64(context, *static_cast<const double *>(bytes));
+		case PropertyType::Int32:
+			return JS_NewInt32(context, *static_cast<const int32_t *>(bytes));
+		case PropertyType::Int64:
+			return JS_NewInt64(context, *static_cast<const int64_t *>(bytes));
+		case PropertyType::Name:
+			// Text, never the interned id — the number means a different
+			// string in the next process.
+			return JS_NewString(context, static_cast<const Name *>(bytes)->Text().data());
+		case PropertyType::String:
+			// **Never reached, and refused rather than handled**, exactly as
+			// the Luau side refuses it: the caller takes a `std::string`
+			// down its own path before it gets here, and these `bytes` are
+			// uninitialised storage. Throwing makes a future caller that
+			// forgot the branch fail loudly instead of corrupting a heap.
+			return JS_ThrowTypeError(context, "a string property is read through its own path");
+		case PropertyType::Enum:
+			// An `EnumItem`, not a string — the same value the Luau side
+			// hands back, so a property declared once behaves the same in
+			// both languages. The storage is an interned `Name` either way;
+			// what the type buys is that a wrong member is refused.
+			return MakeEnumItem(context, enumName, *static_cast<const Name *>(bytes));
+		case PropertyType::Vector3:
+			return MakeVector3(context, *static_cast<const core::Vector3 *>(bytes));
+		case PropertyType::Color3:
+			return MakeColor3(context, *static_cast<const core::Color3 *>(bytes));
+		case PropertyType::CFrame:
+			return MakeCFrame(context, *static_cast<const core::CFrame *>(bytes));
+		case PropertyType::Vector2:
+			return MakeVector2(context, *static_cast<const core::Vector2 *>(bytes));
+		case PropertyType::UDim:
+			return MakeUDim(context, *static_cast<const core::UDim *>(bytes));
+		case PropertyType::UDim2:
+			return MakeUDim2(context, *static_cast<const core::UDim2 *>(bytes));
+		case PropertyType::Rect:
+			return MakeRect(context, *static_cast<const core::Rect *>(bytes));
+		case PropertyType::NumberRange:
+			return MakeNumberRange(context, *static_cast<const core::NumberRange *>(bytes));
+		case PropertyType::NumberSequence:
+			return MakeNumberSequence(context, *static_cast<const core::NumberSequence *>(bytes));
+		case PropertyType::ColorSequence:
+			return MakeColorSequence(context, *static_cast<const core::ColorSequence *>(bytes));
+		case PropertyType::Reference: {
+			// **Null, and it means nil rather than "a root".** This handed
+			// back `workspace` before v0.7, because `workspace` *was* the
+			// world and a root therefore belonged to it. `workspace` is now
+			// the `Workspace` instance, so having no parent is an ordinary
+			// state a script can produce and read back — and an instance in
+			// that state is drawn by nothing and listed by nothing. The Luau
+			// side says the same thing in `PushValue`; one property
+			// declaration, two languages, one answer.
+			const Entity referenced = *static_cast<const Entity *>(bytes);
+			if (referenced == ecs::NULL_ENTITY) {
+				return JS_NULL;
 			}
-			case PropertyType::Opaque:
-				break;
+
+			// **The stored object for the Workspace, not a fresh one.**
+			// `MakeJsInstance` mints a new JS object per call, and
+			// JavaScript's `===` is object identity with no `__eq` to
+			// override — so `part.Parent === workspace` would be false for
+			// the one comparison every script makes. Luau has no such
+			// problem: its `Instance` metatable carries `__eq` and compares
+			// entities.
+			//
+			// Narrow on purpose. This does not give instances identity in
+			// general — `child.Parent === model` is still false — and
+			// pretending otherwise would need every live instance interned
+			// in the context. What it does is keep the one object a script
+			// is handed as a global comparable with itself.
+			if (JsContext &bound = JsOf(context); referenced == JsEntityOf(context, bound.Workspace)) {
+				return JS_DupValue(context, bound.Workspace);
 			}
-			return JS_ThrowTypeError(
-				context, "'%s' has no script representation", property.Name.Text().data()
-			);
+			return MakeJsInstance(context, referenced);
 		}
+		case PropertyType::Opaque:
+			break;
+		}
+		// **The type rather than the property's name**, because the second
+		// caller has no property: an ECS component field carries exactly these
+		// values and is not one.
+		return JS_ThrowTypeError(context, "a %s has no script representation", ecs::Describe(type));
+	}
 
-		bool FromJs(JSContext *context, JSValueConst value, const PropertyDescriptor &property, void *out) {
-			switch (property.Type) {
-			case PropertyType::Bool:
-				*static_cast<bool *>(out) = JS_ToBool(context, value) == 1;
-				return true;
-			case PropertyType::Float: {
-				double number = 0.0;
-				if (JS_ToFloat64(context, &number, value) != 0) {
-					return false;
-				}
-				*static_cast<float *>(out) = static_cast<float>(number);
-				return true;
-			}
-			case PropertyType::Double:
-				return JS_ToFloat64(context, static_cast<double *>(out), value) == 0;
-			case PropertyType::Int32:
-				return JS_ToInt32(context, static_cast<int32_t *>(out), value) == 0;
-			case PropertyType::Int64:
-				return JS_ToInt64(context, static_cast<int64_t *>(out), value) == 0;
-			case PropertyType::String:
-				// Refused here for `ToJs`'s reason; the caller's own branch is
-				// what actually serves this type.
+	bool
+	FromJsValue(JSContext *context, JSValueConst value, PropertyType type, core::Name enumName, void *out) {
+		switch (type) {
+		case PropertyType::Bool:
+			*static_cast<bool *>(out) = JS_ToBool(context, value) == 1;
+			return true;
+		case PropertyType::Float: {
+			double number = 0.0;
+			if (JS_ToFloat64(context, &number, value) != 0) {
 				return false;
-			case PropertyType::Name: {
-				const char *text = JS_ToCString(context, value);
-				if (text == nullptr) {
-					return false;
-				}
-				*static_cast<Name *>(out) = Name(text);
-				JS_FreeCString(context, text);
-				return true;
 			}
-			case PropertyType::Enum:
-				// A string is accepted as well as an `EnumItem`, because
-				// `part.AlphaMode = "Clip"` is what a migrating script
-				// already contains. A member of the *wrong* enum is refused,
-				// which is the error a bare string could never have caught.
-				return ReadEnumValueImpl(context, value, property.EnumName, *static_cast<Name *>(out));
-			case PropertyType::Vector3: {
-				const core::Vector3 *vector = AsVector3(context, value);
-				if (vector == nullptr) {
-					return false;
-				}
-				*static_cast<core::Vector3 *>(out) = *vector;
-				return true;
-			}
-			case PropertyType::Color3: {
-				const core::Color3 *colour = AsColor3(context, value);
-				if (colour == nullptr) {
-					return false;
-				}
-				*static_cast<core::Color3 *>(out) = *colour;
-				return true;
-			}
-			case PropertyType::CFrame: {
-				const core::CFrame *frame = AsCFrame(context, value);
-				if (frame == nullptr) {
-					return false;
-				}
-				*static_cast<core::CFrame *>(out) = *frame;
-				return true;
-			}
-			case PropertyType::Vector2: {
-				const core::Vector2 *vector = AsVector2(context, value);
-				if (vector == nullptr) {
-					return false;
-				}
-				*static_cast<core::Vector2 *>(out) = *vector;
-				return true;
-			}
-			case PropertyType::UDim: {
-				const core::UDim *length = AsUDim(context, value);
-				if (length == nullptr) {
-					return false;
-				}
-				*static_cast<core::UDim *>(out) = *length;
-				return true;
-			}
-			case PropertyType::UDim2: {
-				const core::UDim2 *size = AsUDim2(context, value);
-				if (size == nullptr) {
-					return false;
-				}
-				*static_cast<core::UDim2 *>(out) = *size;
-				return true;
-			}
-			case PropertyType::Rect: {
-				const core::Rect *rect = AsRect(context, value);
-				if (rect == nullptr) {
-					return false;
-				}
-				*static_cast<core::Rect *>(out) = *rect;
-				return true;
-			}
-			case PropertyType::NumberRange: {
-				const core::NumberRange *range = AsNumberRange(context, value);
-				if (range == nullptr) {
-					return false;
-				}
-				*static_cast<core::NumberRange *>(out) = *range;
-				return true;
-			}
-			case PropertyType::NumberSequence: {
-				const core::NumberSequence *curve = AsNumberSequence(context, value);
-				if (curve == nullptr) {
-					return false;
-				}
-				*static_cast<core::NumberSequence *>(out) = *curve;
-				return true;
-			}
-			case PropertyType::ColorSequence: {
-				const core::ColorSequence *gradient = AsColorSequence(context, value);
-				if (gradient == nullptr) {
-					return false;
-				}
-				*static_cast<core::ColorSequence *>(out) = *gradient;
-				return true;
-			}
-			case PropertyType::Reference: {
-				// An instance arrives as its object; `null` detaches, which is
-				// what Roblox's `Parent = nil` means. `workspace` needs no case
-				// of its own any more — it is an instance object like any other,
-				// which is the whole of what collapsing the two notions of "the
-				// workspace" bought.
-				if (JS_IsNull(value) || JS_IsUndefined(value)) {
-					*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
-					return true;
-				}
-
-				void *opaque = JS_GetOpaque2(context, value, JsOf(context).InstanceClass);
-				if (opaque == nullptr) {
-					return false;
-				}
-				*static_cast<Entity *>(out) = *static_cast<Entity *>(opaque);
-				return true;
-			}
-			case PropertyType::Opaque:
-				break;
-			}
-			return false;
+			*static_cast<float *>(out) = static_cast<float>(number);
+			return true;
 		}
+		case PropertyType::Double:
+			return JS_ToFloat64(context, static_cast<double *>(out), value) == 0;
+		case PropertyType::Int32:
+			return JS_ToInt32(context, static_cast<int32_t *>(out), value) == 0;
+		case PropertyType::Int64:
+			return JS_ToInt64(context, static_cast<int64_t *>(out), value) == 0;
+		case PropertyType::String:
+			// Refused here for `ToJs`'s reason; the caller's own branch is
+			// what actually serves this type.
+			return false;
+		case PropertyType::Name: {
+			const char *text = JS_ToCString(context, value);
+			if (text == nullptr) {
+				return false;
+			}
+			*static_cast<Name *>(out) = Name(text);
+			JS_FreeCString(context, text);
+			return true;
+		}
+		case PropertyType::Enum:
+			// A string is accepted as well as an `EnumItem`, because
+			// `part.AlphaMode = "Clip"` is what a migrating script
+			// already contains. A member of the *wrong* enum is refused,
+			// which is the error a bare string could never have caught.
+			return ReadEnumValueImpl(context, value, enumName, *static_cast<Name *>(out));
+		case PropertyType::Vector3: {
+			const core::Vector3 *vector = AsVector3(context, value);
+			if (vector == nullptr) {
+				return false;
+			}
+			*static_cast<core::Vector3 *>(out) = *vector;
+			return true;
+		}
+		case PropertyType::Color3: {
+			const core::Color3 *colour = AsColor3(context, value);
+			if (colour == nullptr) {
+				return false;
+			}
+			*static_cast<core::Color3 *>(out) = *colour;
+			return true;
+		}
+		case PropertyType::CFrame: {
+			const core::CFrame *frame = AsCFrame(context, value);
+			if (frame == nullptr) {
+				return false;
+			}
+			*static_cast<core::CFrame *>(out) = *frame;
+			return true;
+		}
+		case PropertyType::Vector2: {
+			const core::Vector2 *vector = AsVector2(context, value);
+			if (vector == nullptr) {
+				return false;
+			}
+			*static_cast<core::Vector2 *>(out) = *vector;
+			return true;
+		}
+		case PropertyType::UDim: {
+			const core::UDim *length = AsUDim(context, value);
+			if (length == nullptr) {
+				return false;
+			}
+			*static_cast<core::UDim *>(out) = *length;
+			return true;
+		}
+		case PropertyType::UDim2: {
+			const core::UDim2 *size = AsUDim2(context, value);
+			if (size == nullptr) {
+				return false;
+			}
+			*static_cast<core::UDim2 *>(out) = *size;
+			return true;
+		}
+		case PropertyType::Rect: {
+			const core::Rect *rect = AsRect(context, value);
+			if (rect == nullptr) {
+				return false;
+			}
+			*static_cast<core::Rect *>(out) = *rect;
+			return true;
+		}
+		case PropertyType::NumberRange: {
+			const core::NumberRange *range = AsNumberRange(context, value);
+			if (range == nullptr) {
+				return false;
+			}
+			*static_cast<core::NumberRange *>(out) = *range;
+			return true;
+		}
+		case PropertyType::NumberSequence: {
+			const core::NumberSequence *curve = AsNumberSequence(context, value);
+			if (curve == nullptr) {
+				return false;
+			}
+			*static_cast<core::NumberSequence *>(out) = *curve;
+			return true;
+		}
+		case PropertyType::ColorSequence: {
+			const core::ColorSequence *gradient = AsColorSequence(context, value);
+			if (gradient == nullptr) {
+				return false;
+			}
+			*static_cast<core::ColorSequence *>(out) = *gradient;
+			return true;
+		}
+		case PropertyType::Reference: {
+			// An instance arrives as its object; `null` detaches, which is
+			// what Roblox's `Parent = nil` means. `workspace` needs no case
+			// of its own any more — it is an instance object like any other,
+			// which is the whole of what collapsing the two notions of "the
+			// workspace" bought.
+			if (JS_IsNull(value) || JS_IsUndefined(value)) {
+				*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
+				return true;
+			}
+
+			void *opaque = JS_GetOpaque2(context, value, JsOf(context).InstanceClass);
+			if (opaque == nullptr) {
+				return false;
+			}
+			*static_cast<Entity *>(out) = *static_cast<Entity *>(opaque);
+			return true;
+		}
+		case PropertyType::Opaque:
+			break;
+		}
+		return false;
+	}
+
+	namespace {
 
 		// --- instances -------------------------------------------------------
 
@@ -461,7 +467,7 @@ namespace engine::script {
 				!bound.World->GetProperty(instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
 			}
-			return ToJs(context, *property, bytes);
+			return ToJsValue(context, property->Type, property->EnumName, bytes);
 		}
 
 		JSValue PropertySet(
@@ -504,7 +510,8 @@ namespace engine::script {
 			}
 
 			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
-			if (property->Size > sizeof(bytes) || !FromJs(context, argv[0], *property, bytes)) {
+			if (property->Size > sizeof(bytes) ||
+				!FromJsValue(context, argv[0], property->Type, property->EnumName, bytes)) {
 				return JS_ThrowTypeError(
 					context, "'%s' cannot take that value", property->Name.Text().data()
 				);
@@ -1205,12 +1212,26 @@ namespace engine::script {
 			return JS_NULL;
 		}
 
-		const ecs::ClassId id = bound.World->ClassOf(instance);
-		if (!id.IsValid()) {
+		// **Alive, not "has a class", and the difference arrived with v0.12.**
+		// This used to refuse anything `ClassOf` could not name, which conflated
+		// two things: a handle naming nothing, and an entity that is simply not
+		// an instance of a registered class. The second is an ordinary state —
+		// `World.CreateEntity()` produces one — and refusing it meant the ECS
+		// surface handed back `null` for every entity it created.
+		//
+		// A dead handle is still `null`, which is the check that was doing the
+		// real work: an object standing for a row that no longer exists would
+		// answer every question with a plausible default.
+		//
+		// `PrototypeFor` needs no case for it. An invalid class has no
+		// properties, so it builds the one prototype carrying the shared methods
+		// and nothing else, and caches it under the invalid id — which is what a
+		// classless entity's members are.
+		if (!bound.World->Alive(instance)) {
 			return JS_NULL;
 		}
 
-		JSValue proto = PrototypeFor(context, id, instance);
+		JSValue proto = PrototypeFor(context, bound.World->ClassOf(instance), instance);
 		JSValue object = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound.InstanceClass));
 		JS_FreeValue(context, proto);
 

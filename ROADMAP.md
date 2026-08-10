@@ -37,9 +37,10 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.12
 
-- [_] expose ECS underlying to luau and typescript (query engine for entities using direct and returns instances, create custom components and create custom entities and attach components, set component values, etc).
-- [_] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, or assume per-viewport state for rojo-like sync system with main.default.json being in each subfolder)
-- [_] world => rojo sync, universe => multi-rojo sync (i reckon keep them separately syncing so even if one has bad formatting, the rest still sync)
+- [x] expose ECS underlying to luau and typescript (query engine for entities using direct and returns instances, create custom components and create custom entities and attach components, set component values, etc).
+- [x] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, main.default.json accepted beside Rojo's own default.project.json in each subfolder)
+- [x] world => rojo sync, universe => multi-rojo sync (each world syncs separately, so one bad project file costs its own world and the rest still sync)
+- [_] deferred `D00104` — the rest of Rojo's file table: .rbxm, .model.json, .meta.json, .txt, .csv, .json, .toml.
 - [_] update built-in MCP integrations, add a studio ui button to enable/disable and information panel
 - [_] deferred items
 - [_] create a api for setting up configs in the studio and saving them to the ~/Documents/atomic-game-engine/studio folder. Save for preferences.json, cdn.json, recent.json (last 5 projects), etc. Also materials preview only renders in when i hover my mouse over it in the assets editor. It needs to auto-fetch it and put it on the ball.

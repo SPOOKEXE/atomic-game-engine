@@ -955,6 +955,19 @@ namespace studio {
 											  : (GamePath.parent_path() / "default.project.json").string();
 			}
 
+			// **A second command rather than a mode of the first.** One project
+			// file is one world, which is what an author editing a scene wants;
+			// a universe file is a whole game laid out as a folder of them,
+			// which is what an author opening a checkout wants. Deciding which
+			// they meant by looking inside the file would be a guess, and the
+			// wrong guess builds a game into one world.
+			if (ImGui::MenuItem("Sync Rojo Universe...")) {
+				AskingRojoUniverse = true;
+				PathBuffer = GamePath.empty()
+								 ? std::string("main.universe.json")
+								 : (GamePath.parent_path() / "main.universe.json").string();
+			}
+
 			ImGui::Separator();
 
 			if (ImGui::MenuItem("Save", Keybinds::Of(Action::Save).Text().c_str())) {
@@ -1773,6 +1786,9 @@ namespace studio {
 		if (AskingOpen) {
 			ImGui::OpenPopup("Open Game");
 		}
+		if (AskingRojoUniverse) {
+			ImGui::OpenPopup("Sync Rojo Universe");
+		}
 		if (AskingRojo) {
 			ImGui::OpenPopup("Sync Rojo Project");
 		}
@@ -1814,6 +1830,13 @@ namespace studio {
 			AskingRojo = false;
 		} else if (!ImGui::IsPopupOpen("Sync Rojo Project")) {
 			AskingRojo = false;
+		}
+
+		if (FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
+			SyncRojoWorlds(std::filesystem::path(PathBuffer));
+			AskingRojoUniverse = false;
+		} else if (!ImGui::IsPopupOpen("Sync Rojo Universe")) {
+			AskingRojoUniverse = false;
 		}
 
 		if (FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {

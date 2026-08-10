@@ -1437,6 +1437,10 @@ namespace engine::script {
 		InstallJsDatatypes(context, global);
 		InstallJsServices(context, global);
 
+		// After `InstallJsInstanceMethods`, which `OpenJsBindings` ran — this
+		// adds the component half of the ECS surface to the table it built.
+		InstallJsEcs(context, global);
+
 		JS_FreeValue(context, global);
 	}
 }

@@ -100,6 +100,30 @@ Do not make this "work" by resuming on the next tick. That is the design
 decision v0.6 has to take deliberately, and a convenient default taken here is
 how it would get taken by accident.
 
+## The ECS surface names the storage, and refuses to name it twice
+
+`World` and the component methods on every instance are the same store the class
+tree sits on, reached without a class. Two refusals in it are the design rather
+than gaps to fill in later:
+
+- **A component the engine declared is not readable or writable through
+  `GetComponent`/`SetComponent`.** A C++ struct has no field list at run time,
+  so there is nothing to marshal a table from — and it already has a property
+  surface. Adding a byte-level path to `scene::Visual` would be two ways to
+  write one component, which the root `AGENTS.md` calls the most expensive kind
+  of debt. `HasComponent` answers for any component, because asking is not
+  reaching.
+- **A query naming a component nothing declared is an error, not an empty
+  result.** A typo would otherwise be a loop that never runs, and a loop that
+  never runs reads exactly like a world with nothing in it.
+
+`World:CreateEntity` makes a **bare** entity: no class, no place in the tree,
+nothing drawn. It is still an `Instance` on the script side because an instance
+*is* an entity, and reading `.Name` on one fails the way any missing member
+does. That is not a wart to smooth over — it is the model stated in the section
+above, and a handle that pretended to have a class would be the scripting-only
+view this module does not have.
+
 ## One runtime, one world
 
 The `Store` is an upvalue on every bound function rather than a global, so two
