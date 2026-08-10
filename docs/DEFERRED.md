@@ -264,8 +264,22 @@ TypeScript plugin big enough that its author asks for one.
 
 ### [PARTIAL] D00104
 
-**Rojo's file table: six of the nine landed at v0.12, and the three left each
-need a dependency this repository does not vendor.**
+**Rojo's file table: seven of the nine are built, and the two left are format
+readers rather than mappings.**
+
+**`.toml` closed at v0.13 and it went exactly as this entry predicted.** The
+entry called it "the cheapest by a distance and the only one whose cost is a
+submodule rather than a format reader", and that is what it cost: toml++
+vendored — MIT, header-only, no dependencies — a conversion into `json`, and
+`LuauModuleFor` reused unchanged, because Rojo maps `*.toml` and `*.json` to the
+same `ModuleScript`. Nothing downstream of the parse is new.
+
+The one thing the entry did not predict is what a TOML date becomes. There is no
+JSON type and no Luau one, so it arrives as its TOML spelling in a string —
+dropping it would make a key silently vanish and a table of parts would invent an
+interface this engine then owes an author.
+
+What follows is the entry as it was, less the `.toml` row.
 
 `studio::SyncRojoProject` builds `rojo.space/docs/v7/sync-details` except for
 three rows. What it builds now, beyond the scripts it always did:
@@ -298,9 +312,10 @@ three rows. What it builds now, beyond the scripts it always did:
   vendors JSON and nothing else that reads a markup tree. Roblox's XML model
   format is also not simply "XML" — it is `Item`/`Properties` elements with typed
   children and a referent table, so the parser is the smaller half.
-- **`.toml` needs a TOML parser, and `mono.vendor` has none.** This one is
+- ~~**`.toml` needs a TOML parser, and `mono.vendor` has none.** This one is
   otherwise free: the JSON path already emits the Luau, so a TOML document
-  parsed into the same tree would reuse `LuauModuleFor` unchanged.
+  parsed into the same tree would reuse `LuauModuleFor` unchanged.~~ **Done at
+  v0.13**, and "otherwise free" was accurate.
 - **`.rbxm` is Roblox's binary model** — LZ4-framed chunks, interned strings and
   a referent table. That is a format reader and it belongs beside the other model
   decoders in `bake` rather than in an editor, which is also where `.rbxmx`
@@ -310,9 +325,9 @@ Each of the three is reported by name and by what Rojo says it is, so a gap
 reads as a gap rather than as an unrecognised file — `studio.rojosync` asserts
 both halves, that the three are named and that the six are silent.
 
-**Reopen trigger: a project that carries one of the three.** `.toml` is the
-cheapest by a distance and the only one whose cost is a submodule rather than a
-format reader.
+**Reopen trigger: a project that carries one of the two.** Both are format
+readers now that the cheap one is gone, and `.rbxmx` needs an XML parser before
+it needs anything else.
 
 ### [_] D00103
 
@@ -518,8 +533,10 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **The split that made it hoistable is decision versus gathering.** Whether somebody is *looking* at a world is a question only an editor can answer, and whether a world is inside a scoped run is a `WorldRun` concept meaning nothing to a server — so those stay in `mono.studio` and arrive as facts in `LifecycleInputs`. What moved is the part that must not differ between hosts: the thresholds, the order the tests are applied in, and the three refusals.
 - **The dividend that arrived first was not the one this entry argues for.** The case against a second copy is right, and `mono.server` still has no caller — so nothing has been de-duplicated yet. What changed immediately is that the policy became **testable**: every branch of it was previously reachable only by opening the studio and waiting five minutes, and there are now eight cases, including the two that were pure comment before — a `Faulted` world belongs to the supervisor, and occupancy cannot wake a suspended world because nothing can occupy a world that is not running.
 - **One real ordering bug came out of the move.** Routing the studio through the shared decision put the idle-clock lookup ahead of the suspended-world case, so a suspended world with a teleport waiting would have been delayed a frame while an entry it has no use for was created for it. The clock is now looked up only for an `Active` world, which is also the honest statement of what an idle clock is for.
-- **`mono.server` is deliberately not wired up.** It loads every world in a game file and ticks all of them forever, and giving it suspension is a behaviour change to a program whose output `just determinism` and `just replay-check` compare byte for byte. The policy being reachable is what this entry asked for; using it is a decision with its own consequences.
-- **Reopen trigger, split in two because the halves are no longer due together.** *Lifetime* — when a world starts and stops — **is hoisted and this half is closed**; what is left of it is a caller in `mono.server`, which is a decision about server behaviour rather than about where the code lives. *Placement* — which host a world runs on, and what happens when it dies — is unchanged: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
+- ~~**`mono.server` is deliberately not wired up.**~~ **Wired at v0.13, and the decision this bullet describes is what shaped how.** `--idle-close` turns lifetime management on and its absence is the behaviour this program had before — so the two byte-comparing recipes are unaffected *by construction* rather than by their runs happening to be shorter than five minutes. Both still pass byte-identical. None of the policy is repeated: what the server supplies is occupancy, which for it is a player standing in the world, where the studio also counts the active scene and a viewport looking at it.
+- **Two things came out of the wiring that were not this entry's and are worth recording here anyway, because a second caller is what found them.** The first is that **`LastWorld` could not do its job**: the refusal is "a universe with every world suspended is a game that has stopped without saying so", and the only caller derived it from `Universe::Count()`, which that function documents as including suspended worlds. The count never drops, so N idle worlds suspend one after another, each the last only after the others had gone. `Universe::CountInState` is the fact the refusal is about and both hosts now use it. **That is this entry's own argument arriving from the other direction** — it warns about one policy written twice, and what actually happened is one policy read wrongly by its only reader, with nothing to compare it against until there were two.
+- **The second is that an empty world is not always an idle one.** NPCs on a route, a shop restocking, a round counting down. So the timeout became one of three answers — `world::IdleSleep` — with `Never` for a 24/7 world spelled as an enum member rather than as a very large number, and a ten-minute ceiling the decision clamps to rather than trusting a host to remember. And `scene::AwakeWorld` is the half a host cannot work out for itself: a script attaches a claim to the entity that needs the world running, so the claim dies with the entity instead of outliving whatever set it.
+- **Reopen trigger. *Lifetime* is closed at v0.13** — the policy is hoisted, both hosts call it, and the server's caller is behind a flag whose absence is the old behaviour. *Placement* — which host a world runs on, and what happens when it dies — is unchanged and is the whole of what this entry is now: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
 
 ### [_] D00015
 
