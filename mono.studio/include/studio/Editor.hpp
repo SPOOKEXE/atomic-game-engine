@@ -1643,9 +1643,14 @@ namespace studio {
 
 		// Calls one of a plugin's handlers, counting a raise as a fault.
 		//
-		// @param plugin   Whose handler.
-		// @param callback What to call.
-		// @param drawing  Whether the widget calls are legal inside it.
+		// @param plugin    Whose handler.
+		// @param callback  What to call.
+		// @param drawing   Whether the widget calls are legal inside it.
+		// @param arguments What to pass it. Empty for a handler that takes
+		//        none — a render callback and a toolbar button both do; the
+		//        `ChangeHistoryService` events are what this exists for, and
+		//        they carry a waypoint's name and the operation it finished
+		//        with.
 		void InvokePlugin(
 			LoadedPlugin &plugin,
 			engine::script::HostCallback callback,

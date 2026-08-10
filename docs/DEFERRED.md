@@ -15,9 +15,27 @@ front of this *format example*, which is where D00025 through D00032 spent v0.9
 and v0.10 — eight real entries, the newest of them, rendering as a code sample.
 Nothing checks this: a fenced block is valid Markdown whatever is inside it.
 
-If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
+**It happened again, and D00102 spent v0.11 to v0.13 in there.** Sixty lines of a
+live decision, invisible as a sample. The example below is one dummy entry and
+nothing else; anything with real content in it is in the wrong place.
+
+**An item that is closed or no longer exists is removed, not marked.** It used to
+be flagged `[DELETED]` and left in place, which grew a register where most of the
+entries were about code that is not there — so the open ones, which are the point
+of the file, were the minority. What a closed item decided belongs in
+`ROADMAP.md` and in the commit that closed it, both of which survive; retired
+entries are in `docs/retired/DEFERRED.md`.
 
 ```
+### [_] D00101
+
+- item 1
+- item 2
+- item 3
+```
+
+## Deferred Items
+
 ### [_] D00102
 
 **The Assets Pipeline panel draws an empty document, and the blocker is a
@@ -81,25 +99,6 @@ them and round trips. What is missing is that **a world does not carry one**.
 **Reopen trigger: none needed — it is v0.11 roadmap work and blocked on a
 decision, not on effort.** The render half of the same line is done, so this is
 the remaining half of "many node trees in one editor".
-
-### [_] D00101
-
-- item 1
-- item 2
-- item 3
-```
-
-and for deleted marked items;
-
-```
-### [DELETED] D00001
-
-- item 1
-- item 2
-- item 3
-```
-
-## Deferred Items
 
 ### [_] D00106
 
@@ -494,65 +493,6 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **Correction at v0.7: this entry's trigger named a version rather than a thing, and the version moved.** It said "v0.8's cdn wire streaming"; the scripted interface took v0.8 and cdn wire streaming is **v0.9's**. Nothing about the argument changes — the trigger was always the streaming, not the number — but for a version it read as due when it was not, which is the same drift `D00004`'s figure and `D00001`'s "two of four" are recorded for. Stated against the work from here on.
 - **Reopen trigger: whichever comes first of cdn wire streaming — v0.9 as this is written — or the first deployment over a path that is not loopback or a LAN.** The second is the one that bites without warning — the absence of congestion control is invisible until it is a stall nobody can reproduce, and `ConnectionStats` counts refusals against our own fixed budget, not against what the path would have carried.
 
-### [DELETED] D00013
-
-**Closed by doing it, and the entry's own reopen trigger is what settled it** — `replication/tests/Loss.cpp`'s *"a value lost from a tick that took several messages is not repaired"* started failing, and was rewritten to assert the repair with the same world and the same nominated datagram.
-
-- **The wire change is three bytes and the version is 3.** `Delta::Part` and `Delta::Final` — a position and a marker — between the baseline and the component count. They come out of the packer's existing 64-byte overhead allowance rather than out of `MAXIMUM_MESSAGE_BYTES`, so no budget moved; a delta's real header is 23 bytes and is now 26. **The module has had five bugs from messages that did not fit, so this is now measured rather than argued**: `engine.replication.stream` builds at the capped `ChunkBytes` and asserts every message against `net::Packet::MAXIMUM_MESSAGE_BYTES`, and a mutation removing the overhead from the cap kills it.
-- **"All parts" means the parts the sender emitted, and getting that wrong would have broken the budget path rather than the loss path.** The marker is written by `Authority::Pack` after packing has finished, on the last part that actually went. A tick the priority rotation trimmed is therefore *complete*: what was held back was never part of that tick, it keeps its unconfirmed entry and comes back later. A marker meaning "nothing else changed" would leave every tick of a world larger than its link unacknowledged. `just unified --entities 2000` is byte-identical before and after.
-- **The give-up rule is that there is nothing to give up on, and that is the finding.** An incomplete tick is abandoned the moment a newer one arrives — never waited for, because the unreliable channel does not resend. It is sound because every value the missing part carried is still unconfirmed, so the next tick re-offers it and acknowledging *that* tick confirms it. **The bound is one tick of acknowledgement per lost part**, asserted as `Applied == lostAt + 1` rather than described. The bound on the case where no tick ever completes is `ResnapshotAfterTicks`, this module's existing answer to a client that cannot be caught up by deltas.
-- **The two alternatives, and what they cost.** Bounding the wait and then acknowledging anyway reinstates this entry at a lower rate — the ack retires the missing part's values, and **a bound on how often a bug happens is not a fix**. Escalating to a re-snapshot spends the whole visible world to repair one colour, on a client that is one tick behind rather than adrift.
-- **A part number is a position, not an arrival order.** The receiver keeps a set of positions and walks it to the final index. A count of arrivals passes a case where every part is delivered twice and fails only when one is missing *and* another is duplicated, which is the case that was added.
-- **A refusal by the transport was the regression this nearly shipped, and an existing case caught it.** With `PacketsPerTick` below `MessagesPerTick` the link refuses the tail of every tick, so no tick could ever complete and the client was re-snapshotted every 120 ticks for ever. `Authority::Unsent` now rolls `Client::Streamed` back for a tick the transport cut short: **a client cannot acknowledge a tick it holds only some of, so that tick must not be what its silence is measured against.** Same argument as the quiet world and the held-back budget, one layer down.
-- **The snapshot buffer needed no change and that is the point.** `client::RecordReplicatedTick` is fed `Replica::Applied`, which now skips an incomplete tick — so no pose is ever taken from a store holding one datagram's rows beside another's previous values.
-- **Eleven mutations, eleven killed, and one needed a new test.** Removing the part-record reset on a re-snapshot survived the first sweep — its only effect is miscounting `Statistics::Incomplete` after a rejoin, which is the number an operator reads to tell a lossy link from a broken one. The sequence is real rather than contrived: a streaming snapshot sends no delta at all, so the last delta before a rejoin is often an incomplete one nothing supersedes.
-
-### [DELETED] D00012
-
-**Closed by doing it.** The crossover was re-measured at `-O3` for `Each`, `EachBatch` and `IntegrateMotion`; `Jobs`' two constants are unchanged and their justifications are not; `physics::INTEGRATE_GRAIN` moved from 512 to 1024. Kept rather than deleted, because *why nothing changed* is the finding.
-
-- **The 17.6% on `EachParallel · 10k` was never the job system, and believing it was is the confident wrong answer this entry invited.** 10k rows is below `DEFAULT_GRAIN * MINIMUM_GRAINS`, so the floor did exactly its job and that row times the **inline** path — `engine.ecs.parallel` now carries a case requiring `Participants == 1` there, twenty-five times running, so nobody re-derives it. What moved is the optimiser. That body writes one float of a twelve-byte row, and `-O3` vectorises a stride-12 read-modify-write into shuffles slower than the scalar loop `-O2` emitted. Proved by rebuilding the same translation unit at `-O2`: `Each · 10k` (three adds) **4.04 us to 1.76**, `EachParallel · 10k` (one add) **2.12 to 2.44**, and a new serial control with the *same* one-field body **2.13 to 2.40**. **The serial and parallel one-field rows move together and neither moves with `Each`.** The 2.12 us reproduces the accepted `-O2` baseline of 2,110 ns to three figures. Two rows that were never a fair pair, too — `Each · 10k` does three adds and `EachParallel · 10k` does one — so `Each · one field · 10k entities` now sits beside them as the row to read against.
-- **The crossover for the cheapest body is ~262,144 rows, not 32,768 and not the 60-80k this file has carried since v0.1.** Measured at `-O3` on 24 threads, three float adds per row, `Each` against `EachParallel`: 8k **1.45 us / 25.9**, 32k **5.54 / 31.5**, 128k **23.3 / 36.1**, 256k **49.1 / 48.6**, 500k 1.33x faster batched. `EachBatch` gives the same crossover. **So the floor of 32,768 permits a measured 5.7x loss**, and the ceiling past the crossover is 1.3x rather than 3.5x — at 500k both paths stream twelve megabytes and the limit is bandwidth.
-- **The other half of the ratio had never been measured on its own, and now is.** `engine.parallel.bench.dispatch` is new and times an empty `For`: **48 ns** for the decision not to dispatch, **31 us** dispatched to 23 workers, **2.3 us** dispatched to one, ~95 ns per further range. **The handover is linear in the pool, not in the work** — every worker decrements `Batch::Outstanding` under `Pool::Guard` whether it took a range or not, so a batch waits for 23 threads to take one mutex in turn. That serialised join, not the `notify_all`, is what a short span cannot repay, and it is the thing to attack if the crossover ever has to come down. That is a rewrite of the join, not a change to a constant.
-- **A grain constant is a row count and the thing it is trying to express is a duration, which is why one default cannot serve two bodies.** The two crossovers are 262,144 rows and 8,000 rows — 32x apart. As serial work they are 49 us and 29 us — one handover either way. Rows differ by the row cost; microseconds do not.
-- **So both `Jobs` constants stay, and the reason is that neither can move.** `MINIMUM_GRAINS` multiplies *every* caller's floor including the one that measured: physics passes 1024 and wants its floor at 8192, and 64 would put it at 65,536 and give back a measured 1.8x. `DEFAULT_GRAIN` would need to be 32,768 to put the floor where the cheap body wants it, which would break the only long-lived caller that takes the default — `mono.client/src/Replicated.cpp` writes a `CFrame`, two vectors and two ids per row and is worth dispatching an order of magnitude sooner. One constant, two jobs, opposite directions. The justification at both now says so with the numbers, replacing one that described a machine that no longer exists.
-- **The second data point asked for, and it came back as another stale constant.** `INTEGRATE_GRAIN`'s own comment claimed a crossover at ~4096 rows; at `-O3` it is **~8000**, so 512 was dispatching a six-thousand-row world into a 1.27x loss. **1024 now**, floor at 8192, on the measurement — and better at every count above it too, by 9-18%, because a range costs ~95 ns to hand out whatever is in it. Same failure as this entry's, one version later, in the constant that was *supposed* to be the careful one.
-- Worth keeping, because it is the shape of the problem rather than an instance of it: **`Jobs::For` already separates the two questions and `Store` does not.** `For` takes `minimum` beside `grain`; `Store::EachParallel` and `EachBatchParallel` expose only `grain`, so an ECS caller can move its floor only by distorting its range size. physics did exactly that and landed right by coincidence of the coupling. Not plumbed through, because that is a public parameter with no caller and `D00008` is the entry about adding one of those.
-- **Every number here was taken with about three of twenty-four hardware threads busy with someone else's process.** Serial rows are min-of-61 and reproduce to ~3%; parallel rows carry spreads from ±85% to ±860% and their minima wobble ~25% between runs. Nothing above turns on less than 1.5x. The baselines were deliberately **not** accepted.
-
-### [DELETED] D00011
-
-**Closed by doing what the entry said to do first.** The reopen trigger was "the first packet loss on a link that is not loopback" and the advice was that building a link that drops was worth more than the fix. It was: the lossy transport found four more bugs than this one, **two of which needed no packet loss at all** and were therefore live in the shipped code.
-
-- **`net::LossyTransport`** — a wrapper over any `Transport` that discards, duplicates and reorders arrivals under the caller's control. Deterministic by construction: no clock, no `std::random_device`, and whether arrival *n* is lost is a pure function of *n* and a stated seed, so a failure is reported as a seed and reproduced from it. Loss is applied on the way *in*, so `Send` never has to invent or hide a status the transport underneath would have given. `DropNext` rather than a percentage is what made these cases deterministic instead of flaky.
-- **The fix is not the protocol change this entry proposed, and the entry's own argument is why.** Acknowledging structure entity by entity is a second acknowledgement channel beside `net::ReliableSender`, which is already a per-message acknowledgement channel with a window, a resend timer and a bound. What shipped instead: creations and destroys left `Delta` and joined forgets in a `Structure` message, which `Session::ChannelFor` puts on the reliable channel — **where the forget already was, for exactly this reasoning. The asymmetry was the bug.** Wire version 2.
-- **Extending v0.3's unconfirmed-entry mechanism to known-set edits was tried on paper and does not close it**, which is worth recording because it is the obvious cheap answer. It retires against `Applied`, and `Applied` names a tick rather than a message: a tick split across several messages is acknowledged by the client on the strength of the ones that arrived, so an edit in the lost one is retired unconfirmed and the hole is as permanent as before. Making it sound needs per-part completeness on the wire, which is the protocol change arrived at sideways.
-- **Two things the reliable channel alone did not cover, both found by the new transport.** A structural message is not judged by its tick on arrival — it is resent six ticks later into a world that moved on, and refusing it as stale is how a destroy never happens. And a delta naming a row the client does not hold yet no longer advances `Applied`, which is what `Protocol.hpp` always claimed it meant: without it the creation arrived reliably and the entity held none of its components.
-- **What the sweep found besides this, and the two that shame the existing suites.** A forget was discarded as stale whenever its tick also carried a delta — **no packet loss required**, and it survived because every existing forget case happened to sit on a tick where nothing else moved. And an entity entering a client's interest arrived with **none of its components**, because a delta comes from the dirty bits and an entity coming into view has not moved, so nothing was ever sent for it until it changed — which for anything stationary is never. Both fixed. The join chunk stream, the handshake retransmission and the priority rotation were all put under seeded loss for the first time and all held.
-- **What was left is closed at `D00013`**: a value lost from a tick that took several messages, fixed by numbering the parts.
-
-### [DELETED] D00010
-
-**Closed by doing it.** Kept rather than deleted, because the entry's own refusal — "it cannot simply be given a `PreviousTransform`" — is what shaped the answer, and that is worth being able to point at.
-
-- **`replication::SnapshotBuffer`, beside the tick agreement and not in the client**, exactly where this entry put it. It holds **per-entity pose history rather than snapshots of the world**: one ring of `HistoryTicks` poses per entity, one `uint64_t` and one `CFrame` each. A whole snapshot per tick was the obvious reading and is wrong at scale — it copies every component of every entity sixteen times over to interpolate a transform.
-- **The delay is two ticks and the reasoning is at the constant.** What it buys is `DelayTicks - 1` tick periods of lateness, because one of them is the gap between two on-time arrivals: at zero there is nothing to interpolate between, at one the first slightly-late packet is a stall, at two there is one tick period of slack, and above about four everything that is not the local player is drawn far enough in the past that a player starts leading their aim. **A starting point rather than a measurement**, and the header says so and says to lower it only with one.
-- **The dry buffer stops rather than extrapolating**, which this entry said was the case that decides whether the feature is good or annoying. On screen the world freezes at the last pose the server actually described and resumes from where it stopped; guessing forward is a freeze *plus a lie*, because the snap arrives when the next tick disagrees with the guess. A gap wider than the delay is walked back at five percent rather than teleported; past eight ticks it jumps once and counts it.
-- **Prediction was the interaction this entry warned about, and it is structural.** `Record` refuses the nominated entity and the whole `CreatePredicted` index range *before* it does the tick accounting, so a caller cannot delay the local player by forgetting something. Found by a mutation showing only `Sample`'s half was tested — the buffer kept sixteen poses per predicted entity that nothing could ever read, and every test stayed green.
-- **The tick rate had to be measured, which nobody predicted.** Nothing on the wire carries the authority's rate and the two programs do not share a default: `server --listen` paces at 30 and `client` at 60. A configured rate is therefore wrong by a factor of two in the most ordinary setup there is, which is not a drift a five percent correction absorbs. `MeasuredTickRate` is the ticks and the seconds the caller passed in, divided — a real run against a 30 Hz server reads 30.2.
-- **Verified against a real `--listen` server rather than by reasoning**: 513 entities replicated, 512 drawn, **80% of poses interpolated rather than held**.
-- Two things left undone and named rather than hidden. `SnapshotBuffer::Forget` exists and is tested but **no caller wires the forget list to it** — today nothing forgets, so the case cannot arise, but the day interest management starts forgetting, an entity that leaves view and returns within sixteen ticks will be interpolated across the gap. And the join transient is real and bounded: the rate is wrong by 2x for the first few ticks, so the clock stalls about once per tick and then refills over ~40. Every clean fix broke either the dry-buffer case or the resync case; **the one that actually removes it is putting the authority's tick rate on the wire**, which is a protocol change.
-- **What remains is not this entry's.** The replicated world is drawn correctly and is still hard to *see*, because the composited camera is the demo world's — placed from a 24-metre scene's bounds, looking at a 128-metre one, so most of it is past the far plane and the rest is sub-pixel. `--view-spacing 0` overlays them and brings it into view. That is `mono.client/AGENTS.md`'s second gap, needs the predicted-entity promotion policy, and is recorded there with the numbers.
-
-### [DELETED] D00009
-
-**Closed the same day it was opened, by doing it.** Kept rather than deleted, because the entry's own stated test is what settled it and that is worth being able to point at.
-
-- The finding: `release` and `bench` compiled at `-O2`, and the ECS iteration control ran 100k rows in 38.74 us at `-O2` against **16.61 us at `-O3`**. Found sideways, while disproving v0.4's vectorisable-layout item — measured at `-O2` alone, the packed and padded layouts look the same and that item reads as merely unhelpful rather than backwards.
-- The objection was floating point: `-O3` vectorises and inlines more aggressively, and this repository diffs two runs byte for byte. **This entry named the measurement that would settle it — `just determinism` and `just replay-check` at `-O3` — and both are byte-identical.** GCC enables neither `-ffast-math` nor `-funsafe-math-optimizations` at any `-O` level, so IEEE semantics never moved. The whole suite was also built and run optimised, which nothing in the presets otherwise does: `release` has `MONO_BUILD_TESTS` off, so **the shipping optimisation level had never had the tests run against it at all**, and raising the level is exactly what surfaces latent undefined behaviour. 104 suites, 18 `ctest` targets, all pass.
-- Both places moved, and the second one is the one that would have rotted: first-party targets now state `-O3` rather than inheriting `RelWithDebInfo`'s `-O2`, and `mono_add_benchmarks` pinned `-O2` of its own. Those two had agreed by coincidence, not by construction, so the benchmark binaries would have gone on reporting the old number for the thing that ships. `MonoLibrary.cmake` now says to change them in one commit.
-- **See `ROADMAP.md` v0.4 for the measured outcome**, which is not uniform: serial row iteration roughly halves, and a handful of structural and query-planning paths get 4-12% worse. And see `D00012`, which is the new question this opened.
-
 ### [_] D00008
 
 - **The single-player `ALLOW_TIER_ESCAPE` in `mono.client/CMakeLists.txt`.** It is written out in a comment there and deliberately not declared: `DEPS ... Mono::server` plus `ALLOW_TIER_ESCAPE Mono::server`, the one edge the tier rule has to permit by name rather than by rule, so that a `client`-tier program may link a `server`-tier library.
@@ -598,14 +538,6 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **So the trigger is a link-line property and the cost is a call-graph property, and this entry conflated them for two versions.** Restated: **a program that *calls* `Random` while linking neither `net` nor `assets` pays the whole 36.** Linking `core` is not enough and never was — every measurement in this entry is consistent with that and none of them said it.
 - **Reopen trigger, re-phrased: a program that calls `core::Random` and links neither `net` nor `assets`.** There is still not one. The nearest miss is `mono.tools/bindings`, which has the link line and not the call.
 
-### [DELETED] D00003
-
-- **Closed at v0.2 by the storage rewrite.** Every iteration path now goes through one cached `QueryPlan` per term list, topped up rather than rebuilt as tables appear, so nothing builds a query per call. The flecs-shaped problem below no longer exists — there is no `flecs::query` to be typed or untyped about.
-- `Each` and `EachParallel` still build a query per call. `CountMatching` now caches its query and a typed cache for the iteration paths is the same idea, but it needs a per-store map of typed `flecs::query<Ts...>` rather than the one untyped kind, so it is a bigger change than the count was.
-- Not urgent and not measured. Both iteration paths cost what they always cost — this is a saving, not a regression to fix — and the number to have before doing it is what query construction is as a fraction of a tick at a realistic entity count.
-- Likely moot at v0.2, when `Column`/`ComponentSet` replace flecs as the storage and the query object stops being flecs's to build.
-- Resources are per-world with no ordering guarantee against each other, which is fine while they are written by one system each. When two systems write one resource, that ordering is a phase question, not a resource question.
-
 ### [_] D00001
 
 - ~~`--script PATH` is accepted and warns.~~ **Closed at v0.5**, and it was the oldest thing in this entry — accepted and ignored since v0.1. Two VMs are vendored and linked, the file extension picks between them, and the flag loads a scene: `--script` on the client, `--game` on the server (ignored since v0.3), `--scene` on the unified harness. `mono.engine/examples/Rings.luau` and `Rings.js` build the same world through the same bindings, and the unified harness reads 512 entities on the server and 512 on the client from either.
@@ -615,76 +547,3 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **Correction at v0.6, to the second bullet's reasoning rather than to its verdict.** "`Vector2` was considered and refused because §3.4 gates it on 'the overlay or editor needs it' and neither does" — **`Vector2` shipped at v0.6, and for neither of those reasons.** `UDim2` and `Rect` are made of it, and both arrived with the datatype vocabulary a script surface owes an author. The gate was right and the list of things that could open it was short by one, which is the useful half: a gate phrased as "who needs it" only names the consumers somebody had thought of. The other half of that sentence closed exactly as written — the `AABB` operations got their caller in `graph::Cull`, and `Frustum::Intersects` is the positive-vertex test that wanted an `AABB` rather than eight points.
 
 **Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed — recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. `v02v03v04.md` predicted the v0.4 edit and said it belonged "with the next pass over `docs/DEFERRED.md`, not here".
-
-### [DELETED] D00107
-
-**Closed by doing it, and by doing the half this entry warned would be skipped.**
-Kept rather than deleted, because the entry's own refusal — that a timer here
-"trades a visible wrong picture for an invisible one" — is what shaped the
-answer, and that is worth being able to point at.
-
-- **`render::ChooseTexture` is the rule**, a free function so a suite can state
-  it without a device: found, or named-and-expected, or named-and-not. The
-  middle case draws the default material, so a scene load now looks like
-  untextured parts becoming textured instead of a purple shimmer.
-- **The renderer is told rather than asking**, because what is in flight belongs
-  to the content pump and `render` must not reach up into it.
-  `Renderer::ExpectTexture` on the request, `StopExpectingTexture` when it
-  finishes; `TextureTable::Add` clears the mark itself, so no host can leave an
-  arrival marked.
-- **The failure half is the one the entry said not to skip, and it needed a new
-  call.** A request that succeeds carries its name in the `Asset`; one that fails
-  answers nothing at all, so `delivery::AssetClient::NameOf` was added — one
-  virtual on an interface with one implementation. Both hosts read the name
-  *before* `Take`, because a take is what destroys the record, and both unmark
-  above every `continue` so no branch can forget. Two cases pin exactly that: a
-  failed request still names what it was for, and a taken one no longer does.
-- **No timer, and the entry was right that this was the temptation.** A grace
-  period hides a genuinely missing texture for as long as it hides a streaming
-  one, and with a byte budget in the path there is no N right for both a small
-  scene and a large one.
-- **The demo the entry did not ask for and should have.** `MeshGrid.luau` and
-  `Meshes.luau` each gained one part naming a sheet nobody published, so both
-  scenes now show all three answers at once — and the timing distinction is
-  visible without reading a log. Verified by capturing the meshes world at 120
-  frames, mid-load: the imports draw white and only the deliberate one is purple.
-
-**What it looked like before:**
-
-**A streaming texture and a texture that will never arrive look identical to
-the renderer.**
-
-`TextureTable` knows what it holds. It does not know what is in flight, and the
-colour slot resolves a name that is not registered to `MissingTexture` — the
-purple checkerboard — with no way to ask whether something is on its way. So a
-sheet still crossing the network wears the marker for the frames it takes to
-land, which on a scene load is a purple shimmer across every imported model as
-their submesh textures arrive a step behind the geometry they belong to.
-
-The gap is real rather than theoretical: the intake loop requests a mesh's own
-sheets *while decoding the mesh*, so the mesh becomes resident at least one
-frame before any of them can, and `delivery::IntakeBudget` may spread the sheets
-over several more.
-
-**Why it is not fixed with a timer here.** A grace period — "draw the default
-for the first N frames after the name is first asked for" — hides a genuinely
-missing texture for exactly as long as it hides a streaming one, and with a byte
-budget in the path there is no N that is right for both a small scene and a
-large one. It trades a visible wrong picture for an invisible one.
-
-**What closing it takes.** The content pump knows what it has outstanding, and
-that is the fact the renderer is missing. Roughly: the host marks a name as
-expected when it issues a request for it and unmarks it when the asset arrives
-*or the request fails*, and the colour slot draws the default for an expected
-name and the marker for an unexpected one. The marker then means "nothing is
-coming for this", which is the only meaning that is useful.
-
-The cost is the bookkeeping, and the failure half is where it sits: the intake
-loops hold `RequestId`s and a failed `Take` yields no name, so unmarking on
-failure needs a request-to-name map in both the studio and the client. Skipping
-that half is worse than not doing it at all — a misspelled texture name is
-requested, misses, and would stay "expected" for ever, which is precisely the
-case the marker exists for.
-
-Until then: `render/AGENTS.md` records the limitation beside the three-way
-split, and a texture that is briefly purple during a load is not a bug report.
