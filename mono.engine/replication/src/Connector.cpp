@@ -313,4 +313,16 @@ namespace engine::replication {
 		WriteMessage(writer, input);
 		return Wire.Send(writer.Bytes(), nowSeconds);
 	}
+
+	bool Connector::SubmitState(const Delta &delta, double nowSeconds) {
+		// **The same message the server sends, going the other way**, which is
+		// the whole reason this is four lines: a delta is a delta, and the
+		// direction is carried by which end is reading it rather than by the
+		// format. What differs is that the server checks the sender's right to
+		// say it — see `Authority::SetOwnership` — and the client does not,
+		// because the server has no right to check.
+		core::ByteWriter writer;
+		WriteMessage(writer, delta);
+		return Wire.Send(writer.Bytes(), nowSeconds);
+	}
 }

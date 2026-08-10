@@ -23,20 +23,28 @@
 // a headless test asserts. So the backend draws at `Resolved::TextSize` and
 // does not second-guess it.
 //
-// **`AutomaticSize` measures children and never text**, and the second half of
-// that sentence follows from the first. A container grows to hold what is in
-// it — a stack to the sum of its rows, a grid to its lines, a free container to
-// the far edge of the furthest child. A *label* does not grow to hold its
-// string, because the only measurement available is the estimate above, and a
-// box sized to an estimate of the text inside it is a box the text spills out
-// of. That is worse than the box the author typed.
+// **`AutomaticSize` measures children, and a labelled element measures its
+// string.** The second half used to be a refusal, on the grounds that growing a
+// box to an estimate produces a box the text spills out of. It does not, and the
+// reason is the paragraph above: nothing downstream re-measures, so within this
+// engine `AVERAGE_ADVANCE` is not an approximation of the truth — it *is* the
+// measurement, the one answer the hit test, a headless assertion and the
+// renderer all agree on. A box grown to it fits by the same definition of
+// fitting the module uses everywhere else, and `TextScaled` on a grown axis
+// recovers exactly the size it started from because `FittedTextSize` divides by
+// the product the growth multiplies.
 //
-// Refused rather than approximated, which also rules out the failure that would
-// otherwise be silent: a `TextLabel` has no children, so an implementation that
-// measured children and did not notice the text would collapse every labelled
-// element the property was set on to nothing at all. `D00021` closed the
-// container half; the text half needs *shared* metrics rather than merely real
-// ones, and the entry says why.
+// What is still true is that the estimate may be wrong about real glyphs. That
+// risk is not introduced by growing — it is the risk `TextScaled` has carried
+// since v0.8 — and closing it means metrics shared *below* L7 rather than a
+// second opinion at the point of use.
+//
+// **The failure the old refusal also named is still refused, and now by
+// construction rather than by a branch.** A `TextLabel` has no children, so an
+// implementation that measured children and did not notice the text would
+// collapse every labelled element an author set the property on to nothing at
+// all. A labelled element is sized from its text, so that is not the path it
+// takes.
 //
 // @tier L7 · shared
 

@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
@@ -15,29 +16,6 @@ namespace studio {
 		using engine::core::Name;
 		using engine::ecs::Store;
 		using engine::replication::ChangeDetection;
-
-		// Keep this list local: the studio's client-tier link cannot depend on the
-		// generic replication module's component policy.
-		struct Replicated {
-			const char *Component;
-			ChangeDetection Detection;
-		};
-
-		const Replicated REPLICATED[] = {
-			{"scene.Transform", ChangeDetection::Observed},
-			{"scene.Motion", ChangeDetection::Observed},
-			{"scene.Bounds", ChangeDetection::Signature},
-			{"scene.Visual", ChangeDetection::Signature},
-
-			// Signature-detected; tag names remain local, but masks cross in `Tags`.
-			{"scene.SurfaceAppearance", ChangeDetection::Signature},
-			{"scene.Tags", ChangeDetection::Signature},
-
-			// Replicate the mirror and its parent; aim is derived from this viewer.
-			{"scene.SurfaceCamera", ChangeDetection::Signature},
-			{"scene.Camera", ChangeDetection::Signature},
-			{"ecs.Hierarchy", ChangeDetection::Signature},
-		};
 
 		size_t PosedEntities(Store &store) {
 			size_t count = 0;
@@ -93,8 +71,9 @@ namespace studio {
 			store.SetAdoptOnly(true);
 		});
 
-		for (const Replicated &component : REPLICATED) {
-			Server.Replicate(Name(component.Component), component.Detection);
+		for (const engine::replication::ReplicatedComponent &component :
+			 engine::replication::DefaultReplicatedComponents()) {
+			Server.Replicate(Name(component.Name), component.Detection);
 		}
 
 		Handle = Server.Admit();

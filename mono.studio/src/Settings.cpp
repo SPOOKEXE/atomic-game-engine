@@ -133,14 +133,40 @@ namespace studio {
 		ImGui::BeginDisabled(!AutoManageWorlds);
 		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
 
+		// **Three answers rather than a number with two special values**, which
+		// is `world::IdleSleep`'s whole argument: "this world runs forever" is a
+		// decision somebody pays for, and it should not be reachable by dragging
+		// a slider to its end.
+		static const char *MODES[] = {"After a while", "As soon as it is empty", "Never"};
+		int mode = static_cast<int>(IdleSleepMode);
+		if (ImGui::Combo("Close empty worlds", &mode, MODES, IM_ARRAYSIZE(MODES))) {
+			IdleSleepMode = static_cast<engine::world::IdleSleep>(mode);
+		}
+
+		ImGui::BeginDisabled(IdleSleepMode != engine::world::IdleSleep::Timeout);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+
+		// **The slider stops where the policy does.** `DecideLifecycle` clamps
+		// to ten minutes, so a control offering thirty would be offering a
+		// number that is silently ignored — which reads as the setting being
+		// broken rather than as the ceiling being deliberate.
+		constexpr float MAXIMUM_MINUTES =
+			static_cast<float>(engine::world::MAXIMUM_IDLE_LIMIT_SECONDS) / 60.0f;
+
 		float minutes = IdleCloseSeconds / 60.0f;
-		if (ImGui::SliderFloat("Close after", &minutes, 0.5f, 30.0f, "%.1f min")) {
+		if (ImGui::SliderFloat("Close after", &minutes, 0.5f, MAXIMUM_MINUTES, "%.1f min")) {
 			IdleCloseSeconds = minutes * 60.0f;
 		}
 		ImGui::EndDisabled();
+		ImGui::EndDisabled();
 
-		ImGui::TextDisabled("a world with no player and nobody looking at it stops ticking;");
-		ImGui::TextDisabled("teleporting into a closed world opens it first");
+		if (IdleSleepMode == engine::world::IdleSleep::Never) {
+			ImGui::TextDisabled("every world keeps ticking, so NPCs and clocks keep running —");
+			ImGui::TextDisabled("and every world keeps costing what it costs");
+		} else {
+			ImGui::TextDisabled("a world with no player and nobody looking at it stops ticking;");
+			ImGui::TextDisabled("teleporting into a closed world opens it first");
+		}
 
 		ImGui::SeparatorText("Frames");
 

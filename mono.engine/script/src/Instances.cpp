@@ -4,6 +4,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/scene/Awake.hpp>
+#include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -90,6 +92,20 @@ namespace engine::script {
 			return nullptr;
 		}
 
+		// The `Players` service's class, resolved once.
+		//
+		// A `ClassId` is a registration index and registration is process-wide
+		// and idempotent, so this is stable for the life of the process — which
+		// is what lets the test below be two integer compares rather than a
+		// lookup per tree change.
+		ecs::ClassId PlayersClass() {
+			static const ecs::ClassId id = [] {
+				scene::ServiceClass();
+				return ecs::Classes::Find(Name("Players"));
+			}();
+			return id;
+		}
+
 		// --- methods ---------------------------------------------------------
 		//
 		// Every one of these is a call `Store` already had and a script could
@@ -165,6 +181,29 @@ namespace engine::script {
 		// `TagTable::MAXIMUM` — rather than erroring, because a scene that has
 		// run out of tags is a scene mistake and not a script one, and a script
 		// that wanted to know can read the answer.
+		// `players:GetPlayers()`
+		//
+		// **The `Player` children of the receiver, which on `Players` is the
+		// answer Roblox gives and on anything else is an empty table.** Filtered
+		// rather than returning every child, because `Players` is an ordinary
+		// container: a `Folder` somebody parented there is not a player, and a
+		// list that included it is a list every caller has to re-filter.
+		int InstanceGetPlayers(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			lua_newtable(state);
+			int index = 1;
+			store.EachChild(instance, [&](Entity child) {
+				if (!ecs::Classes::IsA(store.ClassOf(child), scene::PlayerClass())) {
+					return;
+				}
+				PushInstance(state, child);
+				lua_rawseti(state, -2, index++);
+			});
+			return 1;
+		}
+
 		int InstanceAddTag(lua_State *state) {
 			Store &store = StoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
@@ -183,6 +222,84 @@ namespace engine::script {
 			Store &store = StoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
 			lua_pushboolean(state, scene::HasTag(store, instance, Name(luaL_checkstring(state, 2))));
+			return 1;
+		}
+
+		// `instance:SetNetworkOwner(player)` and `instance:GetNetworkOwner()`
+		//
+		// **Roblox's pair, spelled Roblox's way, including the nil.** Passing no
+		// argument gives the body back to the server, which is what
+		// `SetNetworkOwner(nil)` means there and what a script that has just seen
+		// a player leave will reach for.
+		//
+		// The refusal raises rather than answering `false`, which departs from
+		// `AddTag` above and for the reason that one gives: a full tag table is a
+		// *scene* running out of room, where handing a body to a `Folder` is a
+		// script naming the wrong variable. A silent `false` there is a body
+		// nothing simulates and no line of output.
+		//
+		// **Two things are refused and the message names both**, because a
+		// script that gets this wrong is far more likely to have passed a good
+		// player and an anchored part than a bad player: ownership decides who
+		// runs the physics, and an anchored part has none to run.
+		int InstanceSetNetworkOwner(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			Entity player = ecs::NULL_ENTITY;
+			if (!lua_isnoneornil(state, 2)) {
+				player = CheckInstance(state, 2);
+			}
+
+			if (!scene::SetNetworkOwner(store, instance, player)) {
+				luaL_error(
+					state, "SetNetworkOwner needs a Player or nil, and an unanchored part to hand over"
+				);
+			}
+			return 0;
+		}
+
+		int InstanceGetNetworkOwner(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			const Entity owner = scene::NetworkOwnerOf(store, instance);
+			if (owner == ecs::NULL_ENTITY) {
+				// Nil is "the server", which is the same answer Roblox gives and
+				// the same answer an unassigned body gives. A script that wants
+				// to know which of the two it is asked the wrong question.
+				lua_pushnil(state);
+				return 1;
+			}
+
+			PushInstance(state, owner);
+			return 1;
+		}
+
+		int InstanceKeepWorldAwake(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			// **The reason is required**, which is the one thing this surface
+			// insists on. A world that will not sleep costs a machine until
+			// somebody works out what is holding it up, and the answer should be
+			// a sentence rather than an entity id — see `scene/Awake.hpp`.
+			const char *reason = luaL_checkstring(state, 2);
+			if (!scene::KeepWorldAwake(store, instance, core::Name(reason))) {
+				luaL_error(state, "KeepWorldAwake needs a live instance");
+			}
+			return 0;
+		}
+
+		int InstanceLetWorldSleep(lua_State *state) {
+			Store &store = StoreOf(state);
+			scene::LetWorldSleep(store, CheckInstance(state, 1));
+			return 0;
+		}
+
+		int InstanceIsKeepingWorldAwake(lua_State *state) {
+			Store &store = StoreOf(state);
+			lua_pushboolean(state, scene::HoldsWorldAwake(store, CheckInstance(state, 1)) ? 1 : 0);
 			return 1;
 		}
 
@@ -448,6 +565,22 @@ namespace engine::script {
 			}
 			if (name == "AncestryChanged") {
 				PushSignal(state, SignalKind::AncestryChanged, instance);
+				return 1;
+			}
+
+			// **Offered on every instance rather than gated to `Players`**,
+			// matching every signal above it and for the reason the gui pair
+			// below gives: a connection on anything else is inert by
+			// construction, because nothing ever fires one at a subject that is
+			// not the service. A class test here would run on every field
+			// access on every instance to turn a signal that never fires into
+			// an error.
+			if (name == "PlayerAdded") {
+				PushSignal(state, SignalKind::PlayerAdded, instance);
+				return 1;
+			}
+			if (name == "PlayerRemoving") {
+				PushSignal(state, SignalKind::PlayerRemoving, instance);
 				return 1;
 			}
 
@@ -1153,6 +1286,12 @@ namespace engine::script {
 			{"IsA", InstanceIsA},
 			{"GetPivot", InstanceGetPivot},
 			{"PivotTo", InstancePivotTo},
+			{"KeepWorldAwake", InstanceKeepWorldAwake},
+			{"LetWorldSleep", InstanceLetWorldSleep},
+			{"IsKeepingWorldAwake", InstanceIsKeepingWorldAwake},
+			{"SetNetworkOwner", InstanceSetNetworkOwner},
+			{"GetNetworkOwner", InstanceGetNetworkOwner},
+			{"GetPlayers", InstanceGetPlayers},
 			{"AddTag", InstanceAddTag},
 			{"RemoveTag", InstanceRemoveTag},
 			{"HasTag", InstanceHasTag},
@@ -1258,6 +1397,14 @@ namespace engine::script {
 		return firstError;
 	}
 
+	bool IsPlayerOfService(const Store &store, ecs::Entity container, ecs::Entity instance) {
+		if (container == ecs::NULL_ENTITY || instance == ecs::NULL_ENTITY) {
+			return false;
+		}
+		return ecs::Classes::IsA(store.ClassOf(container), PlayersClass()) &&
+			   ecs::Classes::IsA(store.ClassOf(instance), scene::PlayerClass());
+	}
+
 	std::string PumpTree(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 		if (!context.World->TreeObserved()) {
@@ -1295,6 +1442,17 @@ namespace engine::script {
 			if (change.To != ecs::NULL_ENTITY) {
 				PushInstance(state, change.Instance);
 				note(FireSignal(state, SignalKind::ChildAdded, change.To, 1));
+
+				// **`PlayerAdded` is that same arrival, filtered.** Fired here
+				// rather than anywhere else because a player joining *is* a
+				// reparent — `scene::AddPlayer` puts the instance under the
+				// service — so a separate recording would be a second place the
+				// same fact lived, and the two would come apart the first time
+				// something parented a player by hand.
+				if (IsPlayerOfService(*context.World, change.To, change.Instance)) {
+					PushInstance(state, change.Instance);
+					note(FireSignal(state, SignalKind::PlayerAdded, change.To, 1));
+				}
 
 				// `DescendantAdded` is every ancestor's, not just the new
 				// parent's — that is the whole difference between it and

@@ -28,6 +28,12 @@ mono_add_library(bake
 	DEPS
 		Engine::core
 		Engine::assets
+
+		# L9, `shared`. The node vocabulary and the document format, split out at
+		# v0.13 so that `Engine::game` can read a pipeline without linking the
+		# decoders below. `D00102`, and `bakegraph/CMakeLists.txt` carries the
+		# argument. What is left here is everything that touches a payload.
+		Engine::bakegraph
 	VENDOR
 		Vendor::cryptopp
 		Vendor::json

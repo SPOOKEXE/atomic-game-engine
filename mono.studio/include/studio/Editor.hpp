@@ -54,6 +54,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/Lifecycle.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <array>
@@ -1562,6 +1563,24 @@ namespace studio {
 		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
 		void DrawTeamCreate();
 
+		// Gives one world everything this editor expects every world to have.
+		//
+		// **Five call sites wrote three lines each and one of them wrote two**,
+		// which is how a world restored by Stop ended up without services while
+		// every other path had them. A new place, an opened file, an imported
+		// world, a merged one and a restored one are all the same question —
+		// what does a world need before anybody looks at it — and the answer
+		// belongs in one place.
+		//
+		// Every part of it is idempotent, which is what lets it run on a world
+		// that already has some of it: a game saved before services existed gets
+		// them here and one saved after gets nothing back.
+		//
+		// @param store   The world.
+		// @param systems Its scheduler.
+		// @since v0.13
+		static void PrepareWorld(engine::ecs::Store &store, engine::ecs::Scheduler &systems);
+
 		// The colours a panel was given, by the title imgui identifies it with.
 		//
 		// @param panel The panel's title.
@@ -1643,9 +1662,14 @@ namespace studio {
 
 		// Calls one of a plugin's handlers, counting a raise as a fault.
 		//
-		// @param plugin   Whose handler.
-		// @param callback What to call.
-		// @param drawing  Whether the widget calls are legal inside it.
+		// @param plugin    Whose handler.
+		// @param callback  What to call.
+		// @param drawing   Whether the widget calls are legal inside it.
+		// @param arguments What to pass it. Empty for a handler that takes
+		//        none — a render callback and a toolbar button both do; the
+		//        `ChangeHistoryService` events are what this exists for, and
+		//        they carry a waypoint's name and the operation it finished
+		//        with.
 		void InvokePlugin(
 			LoadedPlugin &plugin,
 			engine::script::HostCallback callback,
@@ -1757,6 +1781,27 @@ namespace studio {
 		// @param extent Its own half-extent, from the renderer's table.
 		void FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent);
 
+		// Fits every part still waiting to be fitted, whatever brought it here.
+		//
+		// **Because arrival is not the only moment a part meets a mesh, and it
+		// was the only one this handled.** `FitPartsToMesh` runs when geometry
+		// lands, which covers the ordinary case — naming a mesh is what fetches
+		// it — and covers nothing else. Assigning a `MeshId` that is *already*
+		// loaded fetches nothing, so no arrival ever came and the part kept the
+		// cubic box it was created with: a character squashed into a cube, with
+		// the mesh sitting right there in the table. The same hole swallowed a
+		// paste, an undo, a duplicate and a world opened after the content had
+		// landed.
+		//
+		// **`Visual::Fitted` is what makes this a per-frame pass rather than a
+		// per-frame walk of the scene.** A part that has been fitted to the mesh
+		// it names is skipped, so the steady state is one comparison per part
+		// and nothing is written — which is the same guard that already let the
+		// arrival path run on every republish.
+		//
+		// @since v0.13
+		void FitPendingParts();
+
 		// Rebuilds `PublishedMeshNames` from the signed manifest.
 		//
 		// **Names, not content.** It is what makes
@@ -1815,6 +1860,27 @@ namespace studio {
 		// texture and no mesh reads as working until somebody looks at it.
 		//@{
 		size_t ContentMeshes = 0;
+
+		// What each registered mesh is, so a world can be told after the fact.
+		//
+		// **Because the catalogue was arrival-driven and a world is not.**
+		// `RecordMesh` runs once, into whatever worlds were open when the bytes
+		// landed — so a world created afterwards, or opened from a file, never
+		// hears about a mesh it is full of parts naming. Its
+		// `MeshPart.TrianglesCount` reads zero for ever while the geometry draws
+		// perfectly, which is the properties panel appearing not to update.
+		//
+		// The renderer holds the geometry and answers `MeshExtentOf`, but it
+		// keeps neither a triangle count nor the sheets a submesh named — those
+		// are world data and this is where the editor learned them. Kept rather
+		// than re-derived, because re-deriving means re-decoding an `.amesh`.
+		//
+		// @since v0.13
+		struct RegisteredMesh {
+			uint32_t Triangles = 0;
+			std::vector<engine::core::Name> Sheets;
+		};
+		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
 		size_t ContentTextures = 0;
 
 		// How many shader modules the content store delivered.
@@ -3937,7 +4003,18 @@ namespace studio {
 		// and long enough that an author who walked away from one subarea to
 		// build in another does not come back to a stopped clock. Set from
 		// `Options::IdleCloseSeconds`.
+		//
+		// **Capped at `world::MAXIMUM_IDLE_LIMIT_SECONDS`**, which the decision
+		// clamps to anyway — so the slider stops where the policy does rather
+		// than offering a number that would be quietly ignored.
 		float IdleCloseSeconds = 300.0f;
+
+		// Whether an empty world waits, closes at once, or never closes.
+		//
+		// **`Never` is what an author building a world full of NPCs wants**, and
+		// it is a separate answer from a very long timeout on purpose — see
+		// `world::IdleSleep`.
+		engine::world::IdleSleep IdleSleepMode = engine::world::IdleSleep::Timeout;
 
 		// Which world the studio's player token is in.
 		//

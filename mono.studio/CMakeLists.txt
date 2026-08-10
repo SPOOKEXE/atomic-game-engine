@@ -25,6 +25,13 @@ mono_add_library(studio
 		Engine::scene
 		Engine::script
 
+		# L6, `shared`. The simulation. **Named here rather than reached
+		# through `Engine::script`**, which is where it was arriving from: since
+		# v0.13 this editor prepares and ticks a `PhysicsWorld` on every world it
+		# makes, so `Editor.cpp` includes `physics/Pipeline.hpp` directly and a
+		# dependency a file includes is one its build file should say out loud.
+		Engine::physics
+
 		# L13, `shared`. The Model Context Protocol surface: the socket, the
 		# handshake and the tools any program with worlds can answer. This
 		# module adds the editor's own on top.
@@ -107,6 +114,13 @@ mono_add_library(studio
 		# Hosting a server in this process is what "Play" means. The escape
 		# below.
 		Mono::server
+
+	# TOML, for the Rojo sync's `*.toml` row alone — `rojo.space` maps it to the
+	# same `ModuleScript` a `*.json` produces, so `RojoSync.cpp` converts the
+	# document and reuses that emitter. **Private, and it stays private**: this
+	# is a parser for one file extension in an editor, and nothing in a public
+	# header here names a `toml::` type.
+	VENDOR Vendor::tomlplusplus
 	ALLOW_TIER_ESCAPE Mono::server
 )
 

@@ -36,7 +36,9 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -101,7 +103,11 @@ namespace server_replication_test {
 		Store World{"replica"};
 		double Now = 0.0;
 
-		bool Start(uint32_t entities) {
+		// The port the child bound, so a second client can be pointed at the
+		// same server rather than starting one of its own.
+		uint16_t Port = 0;
+
+		bool Start(uint32_t entities, const std::string &game = {}) {
 			RegisterTypes();
 
 			for (int attempt = 0; attempt < 4 && !Child.Started(); attempt++) {
@@ -110,17 +116,22 @@ namespace server_replication_test {
 					return false;
 				}
 
-				if (!Child.Start(
-						ServerProgram(),
-						{"--listen",
-						 std::to_string(port),
-						 "--entities",
-						 std::to_string(entities),
-						 "--tick-rate",
-						 "60",
-						 "--seconds",
-						 "30"}
-					)) {
+				std::vector<std::string> arguments{
+					"--listen",
+					std::to_string(port),
+					"--entities",
+					std::to_string(entities),
+					"--tick-rate",
+					"60",
+					"--seconds",
+					"30",
+				};
+				if (!game.empty()) {
+					arguments.emplace_back("--game");
+					arguments.push_back(game);
+				}
+
+				if (!Child.Start(ServerProgram(), arguments)) {
 					continue;
 				}
 
@@ -138,11 +149,25 @@ namespace server_replication_test {
 					return false;
 				}
 
+				Port = port;
 				Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
 				return true;
 			}
 
 			return false;
+		}
+
+		// A second client on somebody else's server. No child process: this one
+		// is a socket and a connector, which is what a second player is.
+		bool Connect(uint16_t port) {
+			RegisterTypes();
+			Socket = MakeUdpTransport(0);
+			if (Socket == nullptr) {
+				return false;
+			}
+			Port = port;
+			Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
+			return true;
 		}
 
 		// One client tick: say something so the server knows where to send, then
@@ -190,6 +215,18 @@ namespace server_replication_test {
 }
 
 using namespace server_replication_test;
+
+namespace server_replication_test {
+	// Client ticks until whatever the server just did has reached this replica.
+	// Real sleeps, because the far side is a real process running at its own
+	// rate rather than a function this loop calls.
+	void Settle(Remote &remote) {
+		for (int tick = 0; tick < 200; tick++) {
+			remote.Tick();
+			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		}
+	}
+}
 
 TEST_CASE("a client joins a server that is a separate process", "[server][replication]") {
 	if (!ServerAvailable()) {
@@ -313,4 +350,74 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	// worth. A split that dropped its tail would show as a short count here and
 	// as nothing at all anywhere else.
 	REQUIRE(remote.World.CountMatching<Transform>() == 2000);
+}
+
+TEST_CASE("a connecting client becomes a player in the hosted world", "[server][replication]") {
+	// **The thing that had to exist before ownership could be assigned to
+	// anybody.** `scene::AddPlayer` had no production caller: every world this
+	// engine ran had a `Players` service with nobody in it, so a server script
+	// asking for the player to hand a body to had nothing to be handed.
+	//
+	// Observed from a *second* client's replica rather than from the server's
+	// log, because a log line is not a fact a test can hold: client one joins, is
+	// counted, and then client two joins — and what client one's world gains is
+	// exactly the one entity that is client two's player.
+	//
+	// The leaving half is `engine.scene.ownership`'s and is asserted there
+	// directly. It is not asserted here because it would mean waiting out a link
+	// timeout, which is a slow test measuring the drop interval rather than the
+	// behaviour.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	// **A scene with a part in it, which is not incidental.** An empty world
+	// replicates only services, whose archetypes are small enough that the two
+	// processes happen to agree about column order. A `Part` is nine components
+	// wide and is what caught `Archetype::Read` reading columns in the reader's
+	// id order rather than the writer's — the client could not join at all, and
+	// the same mismatch on a narrower row loads silently wrong.
+	//
+	// Anchored, so it stays where it was put and the entity count below is not
+	// racing a body falling out of the world.
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_players.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local block = Instance.new(\"Part\")\n"
+			 << "block.Anchored = true\n"
+			 << "block.Parent = workspace\n";
+	}
+
+	Remote first;
+	REQUIRE(first.Start(0, scene.string()));
+	REQUIRE(first.Join(400));
+	Settle(first);
+
+	const size_t alone = first.Entities();
+	REQUIRE(alone > 0);
+
+	// **Measured twice, so what is asserted is the rule and not the number.** A
+	// `Player` is not one entity — `AddPlayer` furnishes it with a `PlayerGui`
+	// — and pinning the count here would be pinning that arrangement from the
+	// far side of a wire. Two more clients say the useful thing instead: each
+	// arrival costs the same, and it is not nothing.
+	Remote second;
+	REQUIRE(second.Connect(first.Port));
+	REQUIRE(second.Join(400));
+	Settle(first);
+	const size_t withTwo = first.Entities();
+
+	Remote third;
+	REQUIRE(third.Connect(first.Port));
+	REQUIRE(third.Join(400));
+	Settle(first);
+	const size_t withThree = first.Entities();
+
+	CHECK(withTwo > alone);
+	CHECK(withThree - withTwo == withTwo - alone);
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
 }

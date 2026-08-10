@@ -540,6 +540,45 @@ example, so seeing one is a command rather than a path to look up:
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
 
+### Things fall *(v0.13)*
+
+A new game opens with four worlds now, and the fourth is **Slide** — a curved
+ramp with blocks that spawn at the top, slide down, launch off the lip and are
+destroyed ten seconds later. It is the first world this engine ever simulated.
+
+**The physics module was complete and connected to nothing.** Integrate, broad
+phase, narrow phase and solver had suites, benchmarks and no consumer:
+`RegisterPhysicsSystems` was called from `physics/tests/` and nowhere else. Every
+world that shipped was anchored throughout, which is why nobody noticed — an
+anchored part carries no rigid body at all, so a scene of anchored geometry
+integrates nothing and solves nothing.
+
+Two things were missing, and they are separate features:
+
+| | |
+|---|---|
+| the pipeline | `PreparePhysicsWorld` and `RegisterPhysicsSystems`, per world |
+| the weight | `scene::PrepareGravity` and `RegisterGravitySystem` |
+
+**`Engine::physics` deliberately has no gravity and should not gain one.** A
+top-down game should not have to switch one off, so `RigidBody` carries no
+gravity scale and the pipeline has no gravity step — weight is a rule the world
+holds. `scene::Gravity` is that rule: a resource, so a world under water or on
+the moon authors a different vector, defaulting to 9.81 m/s² down. Earth's, in
+metres, because this engine measures parts in metres — Roblox's 196.2 is the same
+acceleration in studs and copying it here would make everything fall twenty times
+too fast.
+
+The editor installs both on every world it makes. **It costs an anchored world
+nothing**, which is why it can be on everywhere rather than behind a switch
+nobody would find.
+
+For a script the whole of it is one line:
+
+```lua
+part.Anchored = false   -- and it has a rigid body, and it falls
+```
+
 ### Swapping a mesh's texture *(v0.13)*
 
 A `MeshPart` names two things and they are independent:

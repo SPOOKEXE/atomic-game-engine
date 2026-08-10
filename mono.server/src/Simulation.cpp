@@ -2,7 +2,10 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Gravity.hpp>
+#include <engine/scene/Ownership.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/world/Postbox.hpp>
@@ -153,6 +156,28 @@ namespace server {
 		}
 	}
 
+	void PrepareSimulation(Store &store, Scheduler &scheduler) {
+		// The cell size is measured rather than authored, for the reason the
+		// studio gives: `PreparePhysicsWorld` with no size means "measure it",
+		// and a constant tuned now against a synthetic slab would be the wrong
+		// number for whichever world actually gains a tick.
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(scheduler);
+
+		// Non-overwriting, so a world that authored its own vector — under
+		// water, on the moon — keeps it and a world that said nothing gets
+		// Earth's.
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(scheduler);
+
+		// **This process is the authority, so this process reclaims.** A body
+		// handed to a player who then leaves is owned by a dead entity, and
+		// nothing would ever simulate it again. Registered even though nothing
+		// reads ownership yet, because the day something does is the day this
+		// being absent is a bug rather than a gap.
+		engine::scene::RegisterOwnershipSystem(scheduler);
+	}
+
 	void RegisterPlaceholderComponents() {
 		// The shared set first, and under `scene`'s names rather than this
 		// program's. A client registers the same strings, which is what makes a
@@ -160,6 +185,14 @@ namespace server {
 		// used to be one, and keeping two declarations of one wire type in step
 		// by hand is what it cost.
 		engine::scene::RegisterSceneComponents();
+
+		// `PhysicsWorld` is a resource, and a resource is keyed by a component
+		// id like any other — so one never registered here is minted by the
+		// first `SetResource`, under whatever the compiler calls the type, and
+		// aborts outright once the table is sealed. Registered on every path
+		// including the placeholder's, because the cost is a hash lookup and
+		// the failure is a crash in a program that did nothing wrong.
+		engine::physics::RegisterPhysicsComponents();
 
 		// `Chatter` holds a `core::Name`, which is a process-local id — writing
 		// it as an object representation would restore as whatever name

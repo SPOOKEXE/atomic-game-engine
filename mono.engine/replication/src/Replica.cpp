@@ -2,6 +2,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/replication/Replica.hpp>
+#include <engine/replication/Submission.hpp>
 
 #include <algorithm>
 
@@ -140,55 +141,16 @@ namespace engine::replication {
 			return ApplyStatus::Stale;
 		}
 
-		std::vector<ecs::ComponentId> resolved;
-		resolved.reserve(delta.Components.size());
-		for (const ComponentDelta &component : delta.Components) {
-			const ecs::ComponentId id = ecs::Components::Find(component.Component);
-			if (!id.IsValid()) {
-				ENGINE_ERROR(
-					"replication: a delta names component '{}', which this build has not registered.",
-					component.Component.Text()
-				);
-				return ApplyStatus::UnknownComponent;
-			}
-			resolved.push_back(id);
+		// **The write itself is shared with the inbound direction**, which is
+		// what `Submission.hpp` is for: a delta going up the wire is the same
+		// bytes as one coming down, and the only difference is whether the
+		// sender was allowed to say it. No filter here — the sender is the
+		// authority.
+		const WriteOutcome outcome = WriteComponents(store, delta);
+		if (outcome.Status != ApplyStatus::Ok) {
+			return outcome.Status;
 		}
-
-		bool whole = true;
-
-		for (size_t index = 0; index < delta.Components.size(); index++) {
-			const ComponentDelta &component = delta.Components[index];
-			const ecs::ComponentId id = resolved[index];
-			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
-
-			core::ByteReader values(component.Values);
-			std::vector<std::byte> scratch(descriptor.Size);
-
-			for (const ecs::Entity entity : component.Entities) {
-				if (descriptor.Size == 0) {
-					store.SetComponent(entity, id, nullptr);
-					continue;
-				}
-
-				descriptor.DefaultConstruct(scratch.data(), 1);
-				if (descriptor.Wire.Present()) {
-					descriptor.Wire.Read(values, scratch.data(), 1);
-				} else {
-					descriptor.Read(values, scratch.data(), 1);
-				}
-				if (values.Failed()) {
-					descriptor.Destruct(scratch.data(), 1);
-					return ApplyStatus::Malformed;
-				}
-
-				if (store.Alive(entity)) {
-					store.SetComponent(entity, id, scratch.data());
-				} else {
-					whole = false;
-				}
-				descriptor.Destruct(scratch.data(), 1);
-			}
-		}
+		const bool whole = outcome.Whole;
 
 		const bool complete = Count(delta);
 

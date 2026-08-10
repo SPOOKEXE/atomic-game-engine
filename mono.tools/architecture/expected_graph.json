@@ -29,6 +29,13 @@
       "tier": "shared",
       "links": [
         "assets",
+        "bakegraph",
+        "core"
+      ]
+    },
+    "bakegraph": {
+      "tier": "shared",
+      "links": [
         "core"
       ]
     },
@@ -37,6 +44,7 @@
       "links": [
         "assets",
         "bake",
+        "bakegraph",
         "core"
       ]
     },
@@ -308,6 +316,7 @@
         "assets",
         "audio",
         "bake",
+        "bakegraph",
         "cdn",
         "client",
         "control",
@@ -470,6 +479,7 @@
         "assets",
         "audio",
         "bake",
+        "bakegraph",
         "cdn",
         "client",
         "control",

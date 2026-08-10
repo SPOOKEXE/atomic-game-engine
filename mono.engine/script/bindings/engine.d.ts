@@ -84,6 +84,18 @@ declare interface ChangedSignal {
 	Equals(other: ChangedSignal): boolean;
 }
 
+// The instance tree's signals, matching the Luau half — undeclared until v0.13
+// for the reason given there.
+declare interface InstanceSignal {
+	Connect(handler: (instance: Instance) => void): RBXScriptConnection;
+	Once(handler: (instance: Instance) => void): RBXScriptConnection;
+}
+
+declare interface AncestrySignal {
+	Connect(handler: (instance: Instance, parent: Instance) => void): RBXScriptConnection;
+	Once(handler: (instance: Instance, parent: Instance) => void): RBXScriptConnection;
+}
+
 // What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
 //
 // **Named at file scope rather than nested**, because TypeScript has no
@@ -684,6 +696,19 @@ declare interface Instance {
 	GetPivot(): CFrame;
 	PivotTo(target: CFrame): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
+	readonly ChildAdded: InstanceSignal;
+	readonly ChildRemoved: InstanceSignal;
+	readonly DescendantAdded: InstanceSignal;
+	readonly DescendantRemoving: InstanceSignal;
+	readonly AncestryChanged: AncestrySignal;
+	readonly PlayerAdded: InstanceSignal;
+	readonly PlayerRemoving: InstanceSignal;
+	GetPlayers(): Instance[];
+	KeepWorldAwake(reason: string): void;
+	LetWorldSleep(): void;
+	IsKeepingWorldAwake(): boolean;
+	SetNetworkOwner(player?: Instance | null): void;
+	GetNetworkOwner(): Instance | null;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };

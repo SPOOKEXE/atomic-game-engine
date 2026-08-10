@@ -165,7 +165,7 @@ namespace engine::ecs {
 		return true;
 	}
 
-	bool Archetype::Read(core::ByteReader &reader, size_t rows) {
+	bool Archetype::Read(core::ByteReader &reader, size_t rows, std::span<const ComponentId> order) {
 		Ids.clear();
 		Ids.reserve(rows);
 
@@ -177,8 +177,30 @@ namespace engine::ecs {
 			return false;
 		}
 
-		for (Column &column : Columns) {
-			if (!column.Read(reader, rows)) {
+		// This table's own order, which is only right when the same process
+		// wrote the bytes. See the header for why that is a real distinction.
+		if (order.empty()) {
+			for (Column &column : Columns) {
+				if (!column.Read(reader, rows)) {
+					Ids.clear();
+					return false;
+				}
+			}
+			return true;
+		}
+
+		// **The writer's order, column by column, and every one of them has to
+		// be found.** An id in `order` this table does not hold would mean the
+		// caller interned a different set from the one it is reading, and there
+		// is no way to skip a column whose length is only knowable by reading
+		// it — so the whole table is refused rather than read halfway.
+		for (const ComponentId id : order) {
+			Column *column = Find(id);
+			if (column == nullptr) {
+				Ids.clear();
+				return false;
+			}
+			if (!column->Read(reader, rows)) {
 				Ids.clear();
 				return false;
 			}

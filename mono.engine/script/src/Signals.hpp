@@ -29,6 +29,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace engine::ecs {
+	class Store;
+}
+
 namespace engine::script {
 
 	// Which signal a connection sits on.
@@ -78,6 +82,26 @@ namespace engine::script {
 		// and the handler is called with the instance and its new parent.
 		AncestryChanged,
 
+		// `Players.PlayerAdded` and `Players.PlayerRemoving`. The subject is
+		// the `Players` service, and the handler is called with the player.
+		//
+		// **These are the tree's signals wearing the name a game expects.** A
+		// `Player` is an instance parented under `Players`, so arriving and
+		// leaving are already a `ChildAdded` and a removal — what these add is
+		// the filter, which is not cosmetic: `Players` may hold something that
+		// is not a player, and a handler that had to test the class itself is a
+		// handler every game writes and one of them forgets.
+		//
+		// **They are two different mechanisms, matching the pair they wrap.**
+		// `PlayerAdded` is recorded and delivered at the barrier like every
+		// other tree change. `PlayerRemoving` is dispatched synchronously from
+		// `Store::OnDescendantRemoving`, before anything is unlinked, for the
+		// reason `DescendantRemoving` is: the whole point of the signal is that
+		// the player is still there when the handler runs — a game saving
+		// somebody's progress on the way out has nothing to save otherwise.
+		PlayerAdded,
+		PlayerRemoving,
+
 		// --- the 2D tree's input, from `gui::Router` ------------------------
 		//
 		// **The six below are one mechanism and it is not the tree's.** Every
@@ -119,6 +143,26 @@ namespace engine::script {
 		// `guiObject.MouseMoved` — it moved while over the element.
 		GuiMouseMoved,
 	};
+
+	// Whether a tree change is a player arriving in or leaving the `Players`
+	// service.
+	//
+	// **The filter behind `PlayerAdded` and `PlayerRemoving`, shared by both
+	// languages and by both mechanisms.** `Players` is an ordinary container
+	// and may hold something that is not a player, so the test is on both ends:
+	// the container is that service, and the thing moving is a `Player`. A
+	// handler that had to check the class itself is a check every game writes
+	// and one of them forgets.
+	//
+	// By class rather than by `scene::PlayersOf`, which is a scan of every root
+	// in the world — this runs once per tree change.
+	//
+	// @param store    The world.
+	// @param container The parent gaining or losing the instance.
+	// @param instance The instance that moved.
+	// @return `true` when a player joined or left.
+	// @since v0.13
+	bool IsPlayerOfService(const ecs::Store &store, ecs::Entity container, ecs::Entity instance);
 
 	// A callable, as the VM that owns it names one.
 	//
