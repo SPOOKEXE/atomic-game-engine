@@ -630,9 +630,22 @@ namespace {
 			            "Again": { "$className": "Folder", "$path": "." } }
 			})");
 
-			// The three still reported rather than built.
+			// **The same awkward cases `Data.json` carries, in TOML.** Rojo maps
+			// the two to the same `ModuleScript`, so the emitter is shared and
+			// the interesting question is whether the *parse* reaches it intact
+			// — plus a date, which is the one TOML type JSON has no answer for.
+			Write("src/Config.toml", R"(plain = 1
+"not-an-identifier" = true
+quoted = 'a "quoted" word'
+tiny = 1e-8
+stamped = 1979-05-27
+
+[nested]
+list = [1, 2, 3]
+)");
+
+			// The two still reported rather than built.
 			Write("src/Model.rbxm", "binary\n");
-			Write("src/Config.toml", "key = 1\n");
 		}
 
 		~TableTree() {
@@ -836,7 +849,7 @@ TEST_CASE("a nested project is followed, and a cycle in one is not", "[studio][r
 	CHECK(Mentioned(report, "includes itself"));
 }
 
-TEST_CASE("the three unbuilt mappings are named by what they are", "[studio][rojosync]") {
+TEST_CASE("the unbuilt mappings are named by what they are", "[studio][rojosync]") {
 	TableTree tree;
 	Store store("rojo_table");
 	engine::scene::EnsureClassTree();
@@ -847,12 +860,65 @@ TEST_CASE("the three unbuilt mappings are named by what they are", "[studio][roj
 	// Each names the dependency that is missing rather than saying "not a
 	// script", so a gap reads as a gap.
 	CHECK(Mentioned(report, "Model.rbxm is a binary Roblox model"));
-	CHECK(Mentioned(report, "Config.toml is a ModuleScript from TOML"));
 
-	// And nothing that *is* built is reported as missing.
+	// And nothing that *is* built is reported as missing. **`.toml` is in this
+	// list rather than the one above as of v0.13** — it was the third unbuilt
+	// mapping and the only one whose cost was a submodule rather than a format
+	// reader, so closing it moved the assertion instead of adding one.
+	CHECK_FALSE(Mentioned(report, "Config.toml is"));
 	CHECK_FALSE(Mentioned(report, "Crate.model.json"));
 	CHECK_FALSE(Mentioned(report, "Data.json is"));
 	CHECK_FALSE(Mentioned(report, "Notes.txt is"));
+}
+
+TEST_CASE("a toml file becomes a module whose source compiles", "[studio][rojosync]") {
+	// **The `.json` case's twin, deliberately**, because Rojo maps the two to
+	// one thing and this engine emits them through one function. What is worth
+	// asserting separately is the half that is *not* shared: the parse, and the
+	// three TOML types JSON cannot express.
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	const Entity shared = SyncTable(store, tree, report);
+
+	const Entity config = Child(store, shared, "Config");
+	REQUIRE(config != NULL_ENTITY);
+	CHECK(store.ClassOf(config) == engine::ecs::Classes::Find(Name("ModuleScript")));
+
+	const auto *cache = store.Resource<engine::script::SourceCache>();
+	REQUIRE(cache != nullptr);
+
+	const std::string *staged = cache->Find(Name("src/Config.toml"));
+	REQUIRE(staged != nullptr);
+	const std::string_view source = *staged;
+
+	// The same two hazards the JSON case pins, because they are properties of
+	// the emitter and the emitter is shared: a key that is not an identifier is
+	// bracketed, and a number `%f` would round away survives.
+	CHECK(source.find("[\"not-an-identifier\"]") != std::string_view::npos);
+	CHECK(source.find("1e-08") != std::string_view::npos);
+
+	// **A date arrives as its TOML spelling.** There is no JSON type and no Luau
+	// one, and the two alternatives are worse in ways an author would have to
+	// debug: dropping the key makes it silently absent, and a table of parts
+	// invents an interface this engine would then owe them.
+	CHECK(source.find("1979-05-27") != std::string_view::npos);
+
+	// The run is what proves it compiles, exactly as the JSON case does.
+	const auto runtime = MakeRuntime(store, engine::script::Language::Luau);
+	INFO(source);
+	REQUIRE(runtime->Run(
+		"local shared = game:GetService('ReplicatedStorage').Shared\n"
+		"local config = require(shared.Config)\n"
+		"assert(config.plain == 1, 'plain')\n"
+		"assert(config['not-an-identifier'] == true, 'bracketed key')\n"
+		"assert(config.quoted == 'a \"quoted\" word', 'quote')\n"
+		"assert(config.nested.list[2] == 2, 'nested array')\n"
+		"assert(type(config.stamped) == 'string', 'date is text')\n",
+		"toml_module"
+	));
 }
 
 // --- the universe above them -------------------------------------------------

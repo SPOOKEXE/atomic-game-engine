@@ -54,6 +54,57 @@ namespace engine::world {
 		Suspend,
 	};
 
+	// When an empty world stops ticking.
+	//
+	// **A world with nobody in it is not necessarily a world with nothing
+	// happening**, which is the reason this is a choice rather than a constant.
+	// A shop that restocks, a patrol that walks its route, a match that is
+	// counting down between rounds — all of them are worlds whose only occupant
+	// left and whose simulation still means something. Suspending those is a
+	// game that quietly stops keeping its promises while nobody is looking.
+	//
+	// @since v0.13
+	enum class IdleSleep : uint8_t {
+		// Suspend once it has been empty for `LifecycleInputs::IdleLimit`.
+		//
+		// The default, and what an ordinary place wants: a player who
+		// disconnects and reconnects finds the world they left, and a world
+		// nobody comes back to eventually costs nothing.
+		Timeout,
+
+		// Suspend as soon as nobody is in it.
+		//
+		// For worlds that are purely a stage — a lobby, an instanced dungeon
+		// that resets anyway — where a tick with nobody watching is waste.
+		Immediate,
+
+		// Never suspend it.
+		//
+		// **This is the one that costs a machine and it is a real answer.** A
+		// world whose NPCs have to keep living, an economy that has to keep
+		// running, anything a player expects to have moved on while they were
+		// away. Nothing reclaims it, so it is asked for rather than reached by
+		// leaving a number high.
+		Never,
+	};
+
+	// How long a world may sit empty before `IdleSleep::Timeout` suspends it.
+	//
+	// @since v0.13
+	inline constexpr double DEFAULT_IDLE_LIMIT_SECONDS = 300.0;
+
+	// The longest any host may set that to.
+	//
+	// **A ceiling rather than a suggestion, and `DecideLifecycle` clamps to it**
+	// so no host can be the one that ignores it. Ten minutes is where a timeout
+	// stops being a timeout: past it the world is being kept alive rather than
+	// given a grace period, and that is what `IdleSleep::Never` is for. Saying
+	// so with an enum makes the intent visible to whoever pays for the machine,
+	// where a very large number reads as a tuning accident.
+	//
+	// @since v0.13
+	inline constexpr double MAXIMUM_IDLE_LIMIT_SECONDS = 600.0;
+
 	// What a host knows about one world when it asks.
 	//
 	// @since v0.10
@@ -83,11 +134,27 @@ namespace engine::world {
 		// How long it has gone without occupancy, in seconds.
 		double IdleSeconds = 0.0;
 
-		// How long it may do so before being suspended.
-		double IdleLimit = 300.0;
+		// When an empty world should stop ticking.
+		//
+		// @since v0.13
+		IdleSleep Sleep = IdleSleep::Timeout;
+
+		// How long it may sit empty before being suspended.
+		//
+		// Read only under `IdleSleep::Timeout`, and **clamped to
+		// `MAXIMUM_IDLE_LIMIT_SECONDS` by the decision** rather than by whoever
+		// set it.
+		double IdleLimit = DEFAULT_IDLE_LIMIT_SECONDS;
 
 		// Whether suspending this one would leave the universe with nothing
 		// ticking.
+		//
+		// **Worlds that are still ticking, not worlds that exist.** `Universe::
+		// Count()` includes suspended ones by its own documentation, so a host
+		// deriving this from it would suspend an entire universe one world at a
+		// time — each of them the "last" only after the others had already gone
+		// — which is precisely the outcome this refusal is named for.
+		// `Universe::CountInState` is the count that answers it.
 		bool LastWorld = false;
 	};
 

@@ -2,6 +2,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
@@ -22,23 +23,6 @@ namespace unified {
 	namespace {
 		// Jobs is process-wide and this diagnostic owns it only for its last instance.
 		int LiveHarnesses = 0;
-
-		// Deliberately duplicated with the server so disagreement is observable.
-		struct Replicated {
-			const char *Name;
-			engine::replication::ChangeDetection Detection;
-		};
-
-		const Replicated REPLICATED[] = {
-			{"scene.Transform", engine::replication::ChangeDetection::Observed},
-			{"scene.Motion", engine::replication::ChangeDetection::Observed},
-			{"scene.Bounds", engine::replication::ChangeDetection::Signature},
-			{"scene.Visual", engine::replication::ChangeDetection::Signature},
-
-			// Mesh appearance crosses; tag names remain local resources.
-			{"scene.SurfaceAppearance", engine::replication::ChangeDetection::Signature},
-			{"scene.Tags", engine::replication::ChangeDetection::Signature},
-		};
 	}
 
 	Harness::Harness(const Settings &settings)
@@ -71,7 +55,8 @@ namespace unified {
 		}
 		client::BuildReplicatedWorld(Client, ClientSystems, Options.Interpolation);
 
-		for (const Replicated &component : REPLICATED) {
+		for (const engine::replication::ReplicatedComponent &component :
+			 engine::replication::DefaultReplicatedComponents()) {
 			Authority_.Replicate(engine::core::Name(component.Name), component.Detection);
 		}
 

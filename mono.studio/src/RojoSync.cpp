@@ -13,6 +13,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <toml++/toml.hpp>
 
 namespace studio {
 
@@ -88,18 +89,19 @@ namespace studio {
 		const char *UnbuiltKind(const std::filesystem::path &file) {
 			const std::string leaf = file.filename().string();
 
-			// **Three left, and each needs a dependency this repository does
-			// not vendor.** Everything else in Rojo's table is built —
-			// `BuildMapped` is the dispatcher — so anything reaching here is a
-			// gap with a named cause rather than an unrecognised file.
+			// **Two left, and each is a format reader rather than a mapping.**
+			// Everything else in Rojo's table is built — `BuildMapped` is the
+			// dispatcher — so anything reaching here is a gap with a named cause
+			// rather than an unrecognised file.
+			//
+			// `.toml` was the third and closed at v0.13: it was the one whose
+			// cost was a submodule rather than a decoder, because the mapping is
+			// the `*.json` one and only the parser was missing.
 			if (EndsWith(leaf, ".rbxm")) {
 				return "a binary Roblox model, which needs a reader for that format";
 			}
 			if (EndsWith(leaf, ".rbxmx")) {
 				return "an XML Roblox model, and nothing here parses XML";
-			}
-			if (EndsWith(leaf, ".toml")) {
-				return "a ModuleScript from TOML, and nothing here parses TOML";
 			}
 			return nullptr;
 		}
@@ -377,6 +379,103 @@ namespace studio {
 			return true;
 		}
 
+		// A TOML value as the equivalent `json` one.
+		//
+		// **A conversion rather than a second emitter, which is the whole reason
+		// this row was cheap.** `LuauModuleFor` already turns a document into a
+		// `ModuleScript` that returns it, and Rojo maps `*.toml` and `*.json` to
+		// exactly the same thing — so the only part that was ever missing was a
+		// parser, and everything downstream of this function is shared with the
+		// JSON path unchanged. `D00104` predicted that and it held.
+		//
+		// **A date, a time or a date-time becomes its TOML spelling as a
+		// string.** Those three have no JSON equivalent and no Luau one either,
+		// and the alternatives are worse in ways an author would have to debug:
+		// dropping them makes a key silently disappear, and inventing a table of
+		// parts invents an interface this engine would then have to keep. The
+		// text that round-trips back through a TOML parser is the one form that
+		// loses nothing a reader cannot recover.
+		json JsonFromToml(const toml::node &node) {
+			if (const auto *table = node.as_table()) {
+				json out = json::object();
+				for (const auto &[key, value] : *table) {
+					out[std::string(key.str())] = JsonFromToml(value);
+				}
+				return out;
+			}
+			if (const auto *array = node.as_array()) {
+				json out = json::array();
+				for (const auto &value : *array) {
+					out.push_back(JsonFromToml(value));
+				}
+				return out;
+			}
+			if (const auto *text = node.as_string()) {
+				return json(text->get());
+			}
+			if (const auto *integer = node.as_integer()) {
+				return json(integer->get());
+			}
+			if (const auto *number = node.as_floating_point()) {
+				return json(number->get());
+			}
+			if (const auto *boolean = node.as_boolean()) {
+				return json(boolean->get());
+			}
+
+			// The three date and time types, named one at a time rather than
+			// streamed through the base: `toml::node` is abstract and has no
+			// `operator<<`, and the formatters are on the concrete values.
+			std::ostringstream text;
+			if (const auto *date = node.as_date()) {
+				text << date->get();
+			} else if (const auto *time = node.as_time()) {
+				text << time->get();
+			} else if (const auto *stamp = node.as_date_time()) {
+				text << stamp->get();
+			} else {
+				// Anything a later toml++ adds. `nil` rather than a guess, and a
+				// key that vanishes is the honest report of a type this
+				// conversion has never seen.
+				return json();
+			}
+			return json(text.str());
+		}
+
+		// Reads a TOML file, or reports why it could not be.
+		bool ReadTomlFile(const std::filesystem::path &path, json &out, RojoSyncReport &report) {
+			std::ifstream in(path, std::ios::binary);
+			if (!in) {
+				report.Missing.push_back(path.string());
+				return false;
+			}
+
+			std::ostringstream buffer;
+			buffer << in.rdbuf();
+
+			// **The non-throwing overload**, because a parse failure here is an
+			// ordinary outcome — somebody is editing the file by hand — and this
+			// sync reports rather than aborts. Same reason `ReadJsonFile` passes
+			// `false` for its `allow_exceptions`.
+			toml::parse_result parsed = toml::parse(buffer.str());
+			if (!parsed) {
+				// Named rather than skipped, and **with the parser's own
+				// message**, which is the half a JSON note cannot give: TOML
+				// fails on things that look right — a repeated key, a table
+				// redefined, a bare string with a stray quote — and "is not
+				// valid TOML" on its own sends an author back to stare at a file
+				// they have already stared at.
+				report.Notes.push_back(
+					path.filename().string() + " is not valid TOML (" +
+					std::string(parsed.error().description()) + ") — skipped"
+				);
+				return false;
+			}
+
+			out = JsonFromToml(parsed.table());
+			return true;
+		}
+
 		// The whole text of a file, or nothing.
 		bool ReadTextFile(const std::filesystem::path &path, std::string &out) {
 			std::ifstream in(path, std::ios::binary);
@@ -577,7 +676,7 @@ namespace studio {
 		}
 
 		std::string LuauModuleFor(const json &document) {
-			std::string source = "-- generated from a .json by the Rojo sync\nreturn ";
+			std::string source = "-- generated from a .json or .toml by the Rojo sync\nreturn ";
 			EmitLuauValue(document, source, 0);
 			source += "\n";
 			return source;
@@ -757,6 +856,20 @@ namespace studio {
 				// A plain `*.json` is a `ModuleScript` returning a table.
 				json document;
 				if (ReadJsonFile(file, document, report)) {
+					const std::string key = keyPrefix + leaf;
+					if (StageProgramSource(store, key, LuauModuleFor(document))) {
+						node = engine::script::MakeModule(store, key, name);
+						report.Instances++;
+						report.Scripts++;
+					}
+				}
+			} else if (EndsWith(leaf, ".toml")) {
+				// **The same instance a `*.json` produces**, because Rojo maps
+				// them to the same thing. The document is converted to a `json`
+				// and handed to the same emitter rather than getting a second
+				// one — see `JsonFromToml`.
+				json document;
+				if (ReadTomlFile(file, document, report)) {
 					const std::string key = keyPrefix + leaf;
 					if (StageProgramSource(store, key, LuauModuleFor(document))) {
 						node = engine::script::MakeModule(store, key, name);

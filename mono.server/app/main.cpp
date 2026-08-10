@@ -4,6 +4,7 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/world/Lifecycle.hpp>
 
 #include <csignal>
 #include <cstdio>
@@ -43,6 +44,11 @@ int main(int argc, char **argv) {
 	arguments.Value("entities", "N", "Entities in the placeholder world (default 4096)");
 	arguments.Value("ticks", "N", "Exit after N ticks");
 	arguments.Value("seconds", "N", "Exit after N seconds");
+	arguments.Value(
+		"idle-close",
+		"N|never|immediate",
+		"Manage world lifetime: suspend after N seconds, never (24/7), or as soon as empty"
+	);
 	arguments.Value("game", "PATH", "Game file to host (v0.5+)");
 	arguments.Value("record", "PATH", "Write a recording of this run");
 	arguments.Value("replay", "PATH", "Replay a recording instead of simulating");
@@ -101,6 +107,34 @@ int main(int argc, char **argv) {
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
 	options.MaximumTicks = arguments.GetInteger("ticks", -1);
 	options.Seconds = arguments.GetNumber("seconds", 0.0);
+	// **Absent means unmanaged, which is not the same as `never`.** Unmanaged is
+	// this program's behaviour before v0.13 and the one `just determinism` and
+	// `just replay-check` compare against; `never` is a deliberate 24/7 server
+	// that still resumes a suspended world when something arrives for it.
+	if (const std::optional<std::string_view> idleFlag = arguments.Get("idle-close"); idleFlag) {
+		const std::string_view idle = *idleFlag;
+		options.ManageWorldLifetime = true;
+		if (idle == "never") {
+			options.IdleSleepMode = engine::world::IdleSleep::Never;
+		} else if (idle == "immediate") {
+			options.IdleSleepMode = engine::world::IdleSleep::Immediate;
+		} else {
+			options.IdleSleepMode = engine::world::IdleSleep::Timeout;
+			options.IdleCloseSeconds = arguments.GetNumber("idle-close", options.IdleCloseSeconds);
+
+			// Said out loud rather than clamped in silence. The decision clamps
+			// anyway — see `world::MAXIMUM_IDLE_LIMIT_SECONDS` — and a number
+			// quietly ignored reads as the flag not working.
+			if (options.IdleCloseSeconds > engine::world::MAXIMUM_IDLE_LIMIT_SECONDS) {
+				ENGINE_WARN(
+					"--idle-close {:.4g}s is above the {:.4g}s ceiling and will be capped; "
+					"use --idle-close never for a server that should not sleep",
+					options.IdleCloseSeconds,
+					engine::world::MAXIMUM_IDLE_LIMIT_SECONDS
+				);
+			}
+		}
+	}
 	options.Unpaced = arguments.Has("unpaced");
 
 	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare

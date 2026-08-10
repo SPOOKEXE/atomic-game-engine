@@ -32,6 +32,7 @@ it is built in a tree of its own — `.gitmodules` carries the reasoning.
 | [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and compiler; its analysis library behind `mono.tools/scriptcheck` | yes, where the Luau runtime is linked |
 | [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no — never built by this build; `just luau-lsp` builds it separately |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | Model Context Protocol control messages and glTF import | server/studio control and studio tooling |
+| [toml++](https://github.com/marzer/tomlplusplus) | MIT | the Rojo sync's `*.toml` row, from v0.13 | studio only |
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM | yes, where the JavaScript runtime is linked |
 | [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | interface text in the editor and game UI | staged beside programs linking `engine::ui` or `engine::render` |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | the monospace typeface the script editor uses, from v0.7 | as above |

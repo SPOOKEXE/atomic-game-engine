@@ -21,6 +21,17 @@ mono_add_library(server
 		# `--mcp-port` asks for it.
 		Engine::control
 
+		# L8, `shared`. The server is the authority, so the server is what
+		# simulates: a hosted game integrates its bodies and resolves its
+		# contacts here, and every client watches the result. This row was
+		# missing while `Server.cpp` already called `physics::Raycast` — the
+		# link came in sideways through `examples` and `game`, which is a
+		# dependency that works and is not declared. Naming it changes no
+		# closure and costs the headless property nothing: a broad phase and a
+		# solver are arithmetic, and `just check-server-is-headless` is the
+		# standing proof.
+		Engine::physics
+
 		# L7, `shared`. The component set both programs share, so a snapshot
 		# this process writes resolves in a client with no translation layer.
 		# `shared`, so it costs the headless property nothing: a `Transform` and

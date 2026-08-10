@@ -15,10 +15,126 @@ front of this *format example*, which is where D00025 through D00032 spent v0.9
 and v0.10 — eight real entries, the newest of them, rendering as a code sample.
 Nothing checks this: a fenced block is valid Markdown whatever is inside it.
 
-If a deferred item no longer exists, say the related code was deleted, then mark with [DELETED] flag.
+**It happened again, and D00102 spent v0.11 to v0.13 in there.** Sixty lines of a
+live decision, invisible as a sample. The example below is one dummy entry and
+nothing else; anything with real content in it is in the wrong place.
+
+**An item that is closed or no longer exists is removed, not marked.** It used to
+be flagged `[DELETED]` and left in place, which grew a register where most of the
+entries were about code that is not there — so the open ones, which are the point
+of the file, were the minority. What a closed item decided belongs in
+`ROADMAP.md` and in the commit that closed it, both of which survive; retired
+entries are in `docs/retired/DEFERRED.md`.
 
 ```
+### [_] D00101
+
+- item 1
+- item 2
+- item 3
+```
+
+## Deferred Items
+
+### [_] D00109
+
+**Filed as `D00108` and renumbered, because that number was already taken.**
+`docs/retired/DEFERRED.md` carries a `D00108` closed at v0.13 by
+`studio::EditStream` — team create's shared-document model — and the counter is
+supposed to increment past retired entries rather than reuse them. The number
+was picked by reading the front of the live file, which is exactly the half of
+the register that does not contain the used numbers. `ROADMAP.md`'s ownership
+entry cited the wrong one for a version and now cites this.
+
+**`replication::Prediction` still has no caller, and ownership was not the one
+it was waiting for.** The plan that produced v0.13's ownership work assumed the
+two would meet — build the upward state path, and prediction gets its consumer
+on the way past. They do not meet, and the reason is worth writing down because
+it looks like they should.
+
+`Prediction.hpp` says what it is for in its first line: "the local player and
+nothing else. Everything else is interpolated authoritative state." An entity a
+client *owns* is neither of those. It is simulated by that client and never
+corrected — there is no authoritative state arriving for it to reconcile
+against, because the client is the authority for it. So ownership does not give
+prediction a caller; it describes a third category that prediction deliberately
+does not cover, which is exactly Roblox's arrangement.
+
+**What is actually unwired is larger than prediction**, and finding it is the
+useful part of this entry:
+
+- **Nothing calls `Connector::Submit`.** No client in this repository has ever
+  sent an input. The only reference is `replication/tests/Admission.cpp`
+  asserting that submitting *before admission* is refused.
+- **So `Prediction` never holds anything.** `Connector::Poll` calls
+  `Reconcile(Replica_.Applied())` every tick, faithfully, against an empty
+  buffer.
+- **And the server's whole input path has no sender.** `Server::ApplyInputs`
+  decodes an `examples::Shot`, rewinds the client's view with
+  `Rewind::TickSeenBy`, hit-tests against the recorded history and recolours
+  what was struck — a complete, careful, server-authoritative feature whose
+  `examples::EncodeShot` has no caller anywhere in the tree.
+
+That is `D00039`'s shape again: two halves, each finished, connected to nothing,
+and neither of them looking unfinished from its own side.
+
+**Replay is the caller's job and that is correct rather than missing.**
+`Prediction::Pending()` hands back what to replay and `Connector` does not
+replay it, because replaying an input means knowing what an input *means* — the
+same line every other opaque payload in this module sits on. A caller has to
+apply them. What that means is that the first consumer writes the whole third
+step of the loop, and a consumer that forgets it gets the rubber-band the header
+warns about with nothing reporting why.
+
+**The natural consumer is the character controller**, which is `ROADMAP.md`
+v0.14's "character controller + humanoid + character states". A local player
+walking is precisely the case prediction is for, and a shot is precisely the
+case `ApplyInputs` is for. Building either one before there is a character to
+control would be inventing a client to exercise a server, which is how the
+harness in D00018 came to disagree with the thing it was checking.
+
+**Reopen trigger: the first client that controls something.** Whichever lands
+first — a character or the shooting demo's other half — brings the input
+encoding, and prediction's caller comes with it.
+
 ### [_] D00102
+
+**The dependency decision is settled and done. What is left is that the panel it
+was blocking no longer exists.**
+
+- **The split shipped at v0.13 and stands on its own.** `Engine::bakegraph` is
+  the node vocabulary and the document format at `shared`, linking `Engine::core`
+  and nothing else; `bake` keeps every importer and the evaluator and depends on
+  it. So `Engine::game` *can* now carry a pipeline in a place file without
+  pulling the PNG, JPEG, GIF, BMP, OBJ, glTF and PMX readers into `server`, which
+  is the whole property this entry was about. `expected_graph.json` carries the
+  new edge, and a `bakegraph` suite proves the format is testable with no
+  importer linked.
+- **It was cheaper than this entry assumed and the reason is worth recording.**
+  `GraphDocument` needed only `Graph.hpp` and `core`; `Graph.hpp` needed
+  `assets`, which is what a baked mesh *is* rather than a decoder. Only
+  `Graph.cpp` — the evaluator — reaches an importer at all, and only six files in
+  the repository included either header. `Build` is the one function needing both
+  halves and stayed in `bake`. `IsBareNode` had to become public, because a
+  closed list of parameterless kinds is exactly the thing that must not be
+  copied.
+- **Correction, and it is the same one D00038 needed.** The heading used to read
+  "the Assets Pipeline panel draws an empty document". **There is no panel.**
+  `Editor::DrawAssetsPipeline` is a `TODO(render-pipeline)` marker, as are the
+  `WritePipelines`/`ReadPipelines` pair in `game/src/Game.cpp` and
+  `client::InstallWorldPipelines` — all of it went out with the render-pipeline
+  revert. Checked by grepping for the symbols rather than by remembering.
+- **So the `<AssetPipelines>` block was deliberately not written.** A save-format
+  section with no producer and no consumer is a feature that looks present and is
+  not, which is the trade `D00017` and `D00008` both come down against — and the
+  format break is cheap to take later precisely because the module split is the
+  part that was expensive. When a panel exists, the block is a small change
+  against a dependency graph that already permits it.
+- **What is left is not this entry's any more.** It is the extended rendering
+  pipeline in `ROADMAP.md`, behind a prototype project, and the asset half comes
+  back with it.
+
+**What it looked like before:**
 
 **The Assets Pipeline panel draws an empty document, and the blocker is a
 dependency decision rather than the editor.**
@@ -81,25 +197,6 @@ them and round trips. What is missing is that **a world does not carry one**.
 **Reopen trigger: none needed — it is v0.11 roadmap work and blocked on a
 decision, not on effort.** The render half of the same line is done, so this is
 the remaining half of "many node trees in one editor".
-
-### [_] D00101
-
-- item 1
-- item 2
-- item 3
-```
-
-and for deleted marked items;
-
-```
-### [DELETED] D00001
-
-- item 1
-- item 2
-- item 3
-```
-
-## Deferred Items
 
 ### [_] D00106
 
@@ -167,8 +264,22 @@ TypeScript plugin big enough that its author asks for one.
 
 ### [PARTIAL] D00104
 
-**Rojo's file table: six of the nine landed at v0.12, and the three left each
-need a dependency this repository does not vendor.**
+**Rojo's file table: seven of the nine are built, and the two left are format
+readers rather than mappings.**
+
+**`.toml` closed at v0.13 and it went exactly as this entry predicted.** The
+entry called it "the cheapest by a distance and the only one whose cost is a
+submodule rather than a format reader", and that is what it cost: toml++
+vendored — MIT, header-only, no dependencies — a conversion into `json`, and
+`LuauModuleFor` reused unchanged, because Rojo maps `*.toml` and `*.json` to the
+same `ModuleScript`. Nothing downstream of the parse is new.
+
+The one thing the entry did not predict is what a TOML date becomes. There is no
+JSON type and no Luau one, so it arrives as its TOML spelling in a string —
+dropping it would make a key silently vanish and a table of parts would invent an
+interface this engine then owes an author.
+
+What follows is the entry as it was, less the `.toml` row.
 
 `studio::SyncRojoProject` builds `rojo.space/docs/v7/sync-details` except for
 three rows. What it builds now, beyond the scripts it always did:
@@ -201,9 +312,10 @@ three rows. What it builds now, beyond the scripts it always did:
   vendors JSON and nothing else that reads a markup tree. Roblox's XML model
   format is also not simply "XML" — it is `Item`/`Properties` elements with typed
   children and a referent table, so the parser is the smaller half.
-- **`.toml` needs a TOML parser, and `mono.vendor` has none.** This one is
+- ~~**`.toml` needs a TOML parser, and `mono.vendor` has none.** This one is
   otherwise free: the JSON path already emits the Luau, so a TOML document
-  parsed into the same tree would reuse `LuauModuleFor` unchanged.
+  parsed into the same tree would reuse `LuauModuleFor` unchanged.~~ **Done at
+  v0.13**, and "otherwise free" was accurate.
 - **`.rbxm` is Roblox's binary model** — LZ4-framed chunks, interned strings and
   a referent table. That is a format reader and it belongs beside the other model
   decoders in `bake` rather than in an editor, which is also where `.rbxmx`
@@ -213,9 +325,9 @@ Each of the three is reported by name and by what Rojo says it is, so a gap
 reads as a gap rather than as an unrecognised file — `studio.rojosync` asserts
 both halves, that the three are named and that the six are silent.
 
-**Reopen trigger: a project that carries one of the three.** `.toml` is the
-cheapest by a distance and the only one whose cost is a submodule rather than a
-format reader.
+**Reopen trigger: a project that carries one of the two.** Both are format
+readers now that the cheap one is gone, and `.rbxmx` needs an XML parser before
+it needs anything else.
 
 ### [_] D00103
 
@@ -257,6 +369,40 @@ from git history on `v0.11` or the local branch `renderer-before-revert`.
 
 **Per-pass GPU timestamps, which `SDL_GPU` cannot express.**
 
+**Correction at v0.13, and it is the largest one in this file: every symbol and
+every document this entry named has been deleted.** Checked by grepping for each
+one rather than by remembering, the way `D00038` and `D00103` were.
+
+- **`ProfilePass::Elapsed` does not exist.** The only occurrence of `ProfilePass`
+  anywhere in the tree is the sentence below that names it. So the field the
+  timestamps "land in" is not there to land in.
+- **`PIPELINE_NODES.md` does not exist**, so "stage 7's remaining half" points at
+  nothing a reader can open. The staging it refers to is `ROADMAP.md`'s extended
+  rendering pipeline now.
+- **`graph::Execute` is gone, and with it the node to hang a mark off.** The
+  bullet below saying this entry is no longer blocked on the executor was true
+  when it was written and stopped being true at the render-pipeline revert. It is
+  blocked on the executor again.
+- **`FrameRunner::Run` and its `SDL_PushGPUDebugGroup` calls are gone.** There are
+  no GPU debug groups anywhere in this repository, so the "readable-capture half
+  that could be built, was" describes work that is no longer in the tree.
+- **`FrameResult::UploadedBytes` and `Uploads` are gone.** `FrameResult` carries
+  `Presented`, `DrawCalls`, `Triangles`, `SurfaceInstances`, `SurfacePasses`,
+  `RibbonVertices`, `Particles`, `Culled` and `Passes`, and none of them counts a
+  copy into GPU memory. The one surviving `UploadedBytes` is `TextureTable`'s own
+  private counter, which is a different number about a different thing.
+
+**This entry and `D00103` are now one item seen from two sides**, and the split
+is worth keeping only because the two halves are blocked on different things.
+This one is the *portable* question — SDL exposes no way to write a timestamp,
+so no amount of work here moves it. `D00103` is the *Vulkan* answer that existed,
+worked, and was reverted, and is recoverable from git. **Whoever builds the pass
+executor should read both and close both**; building one without the other
+produces a number on Vulkan and a blank everywhere else with nothing saying why.
+
+What it said before, with the deleted names left in place so the correction above
+is checkable:
+
 `PIPELINE_NODES.md` stage 7's remaining half. `ProfilePass::Elapsed` is the field
 they land in; it reads zero and the profile panel shows that as *not measured*
 rather than as free.
@@ -287,45 +433,11 @@ rather than as free.
   count every copy into GPU memory, measured at the region rather than derived
   from a count, and the profile panel shows them.
 
-### [_] D00039
-
-**No world this engine ships runs a physics tick. The module is complete,
-tested, benchmarked, and connected to nothing.**
-
-Found while starting v0.11 §4.6, which was scoped as "pre-emptive — nothing has
-been reported slow, so begin with benchmarks and touch nothing a number has not
-pointed at". The benchmarks were the right first move and they pointed
-somewhere else.
-
-- **`RegisterPhysicsSystems` is called from `physics/tests/` and nowhere else.**
-  Checked across the whole repository, not inferred: no client, server, studio,
-  `world` or `game` translation unit calls it.
-- **`PreparePhysicsWorld` is the same story.** Every call outside the module's
-  own tests and benchmarks is one of those tests. Without it a store has no
-  `PhysicsWorld` resource, and `WorldResource.cpp` is explicit about what that
-  means: *"a world with no `PhysicsWorld` produces no pairs, no contacts and no
-  query answers at all"*.
-- **Only `Engine::script` lists `Engine::physics`** in a `CMakeLists.txt`. The
-  client and server reach it transitively.
-- **Four production call sites use `physics::Raycast`** — the client's humanoid
-  ground check, one server path, and the Luau and JS `Raycast` bindings. None
-  of them is reached in the default scenes: a headless `studio --run play` and a
-  60-tick server run each log **zero** occurrences of the every-call error that
-  an unprepared world produces. So the queries are not silently returning
-  nothing today; they are simply not being asked.
-- **What this costs is that the whole simulation half is unexercised outside its
-  own suites.** Integrate, broad phase, narrow phase and solver have tests and
-  benchmarks and no consumer, so nothing about them is checked end to end and
-  the numbers below describe a module rather than a frame.
-- **What it means for optimisation work: do not.** The solver is by far the
-  largest figure in the suite — 13.7 ms for 800 stacks of four, which would be
-  82% of a 60 Hz frame — and the broad phase is 2.6 ms at sixteen thousand
-  colliders. Both are honest measurements of code no world runs, so a
-  percentage taken off either buys nothing until this entry is closed.
-- **The order is wiring first, then measuring the real thing.** Whichever world
-  gains a physics tick will have its own collider count, density and
-  static/dynamic split, and every constant here — cell size included — should be
-  re-measured against it rather than tuned now against a synthetic slab.
+**Reopen trigger, which this entry never had: a pass executor to hang a mark off,
+same as `D00103`'s** — or an SDL release with a timestamp query, which would make
+this the portable answer and `D00103` a fallback rather than the only path.
+Written down because an entry with no trigger is one nobody can decide is due,
+and this one has been carried since v0.4 on an argument alone.
 
 ### [_] D00038
 
@@ -382,6 +494,7 @@ through it — so two viewports each update at half the rate.**
 - `just typecheck` accepts `local m: Enum.Material` — `scriptcheck` registers `importedTypeBindings["Enum"]` itself. luau-lsp loads the same definitions file and does not, so an author writing the dotted form sees a red squiggle on a line that builds and passes.
 - **The flat spelling still resolves everywhere**, so this is a cosmetic gap with a workaround rather than a broken surface: `Enum_Material` is what the declaration file declares and what the editor understands.
 - **Three ways to close it, and none is obviously right yet.** Teach luau-lsp the prefix, which means a patch to a vendored tool and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork. Switch `luau-lsp.platform.type` to `roblox`, which makes the editor typecheck against Roblox's class tree rather than this engine's — worse than the squiggle. Or generate an `Enum.luau` module and have scripts `require` it, which works in both and costs a line at the top of every file.
+- **Re-examined at v0.13 and deliberately left as it is, because all three ways out cost more than the problem.** Patching luau-lsp is a fork to maintain against a moving target for a cosmetic squiggle. Switching to the `roblox` platform typechecks against the wrong class tree. And generating an `Enum.luau` to require has a hazard the entry did not name: `local Enum = require(...)` **shadows the runtime `Enum` global**, so every value use — `Enum.Material.Plastic` — would then resolve through the module rather than the engine, and the fix for the annotation would break the thing the annotation is about. `scriptcheck` reports 35 enums reachable as `Enum.<Name>` in a type position, so the build is not what is wrong; one editor is.
 - **Reopen trigger: somebody writing enum annotations often enough to be annoyed.** The engine's own scripts have three.
 
 ### [_] D00030
@@ -395,19 +508,6 @@ through it — so two viewports each update at half the rate.**
 - **What closing it would take.** Either not sandboxing — which is not on the table, `LuauRuntime` freezes the globals so one script cannot change the language the next one runs in — or making the service a *function call* rather than a global, which changes the surface away from Roblox's. Neither is worth it for a property nobody reaches the broken way.
 - **Reopen trigger: a second mutable global property.** One is an oddity with a workaround everybody already uses; two is a pattern, and at that point the surface should stop being globals.
 
-### [PARTIAL] D00021
-
-**`AutomaticSize` is declared, saved, bound and read by nothing.** The container half closed at v0.8; the text half is still open and is the harder one.
-
-- `Element::Automatic` was a real property with a real enum that reached the layout pass and got ignored. An author setting `AutomaticSize = "Y"` got the size their `UDim2` resolved to.
-- **Why it is declared anyway, which is the part that needs defending.** The roadmap's rule is that a class registered with nothing behind it is worse than no class — "a feature that looks present and is not". A *property* is a weaker case than a class and the trade came out the other way: the field crosses a save file and both bindings, so adding it later is a format change, and adding it now costs a byte. What is not acceptable is leaving it undocumented, which is what this entry is.
-- **The container half is done**, and it is the second phase this entry predicted: `gui::ContentExtent` measures a node's children against a basis with the growing axes zeroed, and `Measure` adds the padding back and then constrains. A stack sums along its fill axis and takes the maximum across it, a grid counts its lines, and a container with neither grows to the far edge of the furthest child. Nine cases in `gui/tests/Layout.cpp` carry it.
-- **The circularity got Roblox's answer, stated rather than inherited.** A child sized `{1, 0}` inside a parent sized by its content is asking to be as wide as the thing whose width it is deciding, and there is no fixed point. The growing axes resolve to zero for everything inside, so such a child measures as empty and then fills the grown parent when it is placed. Pinned by a case that asserts *both* halves, because either alone is satisfied by a different bug.
-- **The extent is accumulated, not collected.** A sum, a maximum and a count are all single-pass, so an automatically sized container allocates nothing per frame — which is what keeps this off the layout benchmark for every tree that does not use it. The cost it does add is real and bounded: measuring is linear in the subtree and placing measures again, so a fully automatic tree of *N* nodes and depth *d* is O(N·d) rather than O(N). Only elements that set the property pay it.
-- **Text is a separate and harder half, and the reason sharpened.** The obvious reading — "it needs real glyph metrics, and `render::GlyphAtlas` now has them" — is wrong, and wrong in a way worth writing down. `gui` is L7 and `render` is L12, so the metrics would have to arrive through an injected measurer; and the moment they do, a client with an atlas lays a tree out differently from a headless server, a studio and a test that do not. `Layout.hpp`'s stated invariant is not that the measurement is exact but that **there is one answer**. So this half needs metrics that are *shared* — a font table below L7, or the glyph advances themselves as engine data — and not merely metrics that exist.
-- **Meanwhile a labelled element refuses to grow rather than approximating**, which is the branch that keeps the failure loud: growing to the estimate makes a box the text spills out of, and measuring the (absent) children of a `TextLabel` would collapse it to nothing.
-- **Reopen trigger for what is left: the first author who sets `AutomaticSize` on a `TextLabel` and files it as a bug.** That is now a documented refusal rather than a silent no-op, so it will arrive as a question rather than as a mystery.
-
 ### [_] D00019
 
 **The engine's Luau is held at the revision the editor tool can consume so that
@@ -418,17 +518,8 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **Checked, not written down.** `just luau-lsp` compares the two `HEAD`s and refuses to build when they differ, naming both. Verified by mutation: bumping `mono.vendor/luau` alone makes the recipe fail with the two SHAs printed. Without that, the drift is invisible — the engine keeps passing every check it has, and only an editor is wrong.
 - **What the choice actually costs, so a later reader can weigh it.** The engine follows the editor's compatible revision rather than independently following upstream. The trade is only defensible while the gap stays small; a long-lived gap would invert it, and the answer then is the fork below rather than a wider gap.
 - **The fork is the way out and was declined at v0.7 on purpose.** Pointing luau-lsp at `mono.vendor/luau` needs sixteen mechanical call-site changes, and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork whose remote is recorded in `.gitmodules` — never into a file in this tree. That is a fork to maintain against a moving target, for a developer tool.
+- **Checked at v0.13 and the trigger has not fired.** Upstream luau-lsp at `53f4238` pins Luau `f8ca77acdcb50241e3da21af663f8ef97b4b5ce4`, which is byte for byte the commit `mono.vendor/luau` is on. **There is no gap to close**: this engine is already at the editor's ceiling rather than lagging behind it, which is the state this entry describes as defensible. Worth recording because "held at the revision the editor can consume" reads as a compromise, and right now it costs nothing at all.
 - **Reopen trigger: luau-lsp syncs to a later Luau revision.** Bump both submodules together, run `just luau-lsp` — which refuses if only one moved — then run `just check`.
-
-### [_] D00018
-
-**What a game replicates is written out three times, and the third copy was added at v0.7 by the change that noticed it.** Filed rather than fixed, because there is nowhere correct to put it yet and the obstacle is a layer rather than an opinion.
-
-- The table pairs a component name with a `replication::ChangeDetection`: `scene.Transform` and `scene.Motion` observed, `scene.Bounds` and `scene.Visual` signed. It appears in `mono.server/src/Server.cpp`, `mono.unified_server_client/src/Harness.cpp` and `mono.studio/src/PlayLink.cpp`. **All three agree today**, which is the only reason this is an entry and not a bug.
-- **The pairing is not arbitrary and that is what makes drift expensive.** A `Transform` is written every tick by a system, so the dirty bits already know and hashing it would be a pass over the world to learn what was free. `Bounds` and `Visual` are written once by a script and then never, so observing them buys a dirty column paid for every tick and read never — and *not* signing them is the bug v0.7 fixed, where a part recoloured by a script kept its old colour on every client for ever. **Getting one entry wrong in one program is silent in both directions**: the wrong detector sends nothing and reports nothing.
-- **Why it is not simply hoisted.** `scene` owns the components and already pairs each with its wire form in `Registration.cpp`, which is exactly the right shape — but `scene` is L7 and `replication` is L12, so `scene` cannot name `ChangeDetection` without inverting the layer rule. Putting the table in `replication` instead makes a module that must not know what a component *is* name four of them, which is the property that keeps `net` and `replication` separable at all.
-- **The real answer is the one `mono.server` already wrote down and then did not get**: *"These four are the placeholder scene; a game file names its own at v0.5."* A `<Replicated>` section in the game document is a per-game declaration read by whoever loads it, which deletes all three copies rather than moving them — and it is the only version of this that also lets a game replicate a component `scene` does not own.
-- **Reopen trigger: a fourth copy, or the first component whose detector differs between two of the three.** The second is the one that bites without warning — the copies are in three programs, so nothing in the build compares them, and the symptom is a value that crosses in the studio and not on a server.
 
 ### [PARTIAL] D00017
 
@@ -444,8 +535,10 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **The split that made it hoistable is decision versus gathering.** Whether somebody is *looking* at a world is a question only an editor can answer, and whether a world is inside a scoped run is a `WorldRun` concept meaning nothing to a server — so those stay in `mono.studio` and arrive as facts in `LifecycleInputs`. What moved is the part that must not differ between hosts: the thresholds, the order the tests are applied in, and the three refusals.
 - **The dividend that arrived first was not the one this entry argues for.** The case against a second copy is right, and `mono.server` still has no caller — so nothing has been de-duplicated yet. What changed immediately is that the policy became **testable**: every branch of it was previously reachable only by opening the studio and waiting five minutes, and there are now eight cases, including the two that were pure comment before — a `Faulted` world belongs to the supervisor, and occupancy cannot wake a suspended world because nothing can occupy a world that is not running.
 - **One real ordering bug came out of the move.** Routing the studio through the shared decision put the idle-clock lookup ahead of the suspended-world case, so a suspended world with a teleport waiting would have been delayed a frame while an entry it has no use for was created for it. The clock is now looked up only for an `Active` world, which is also the honest statement of what an idle clock is for.
-- **`mono.server` is deliberately not wired up.** It loads every world in a game file and ticks all of them forever, and giving it suspension is a behaviour change to a program whose output `just determinism` and `just replay-check` compare byte for byte. The policy being reachable is what this entry asked for; using it is a decision with its own consequences.
-- **Reopen trigger, split in two because the halves are no longer due together.** *Lifetime* — when a world starts and stops — **is hoisted and this half is closed**; what is left of it is a caller in `mono.server`, which is a decision about server behaviour rather than about where the code lives. *Placement* — which host a world runs on, and what happens when it dies — is unchanged: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
+- ~~**`mono.server` is deliberately not wired up.**~~ **Wired at v0.13, and the decision this bullet describes is what shaped how.** `--idle-close` turns lifetime management on and its absence is the behaviour this program had before — so the two byte-comparing recipes are unaffected *by construction* rather than by their runs happening to be shorter than five minutes. Both still pass byte-identical. None of the policy is repeated: what the server supplies is occupancy, which for it is a player standing in the world, where the studio also counts the active scene and a viewport looking at it.
+- **Two things came out of the wiring that were not this entry's and are worth recording here anyway, because a second caller is what found them.** The first is that **`LastWorld` could not do its job**: the refusal is "a universe with every world suspended is a game that has stopped without saying so", and the only caller derived it from `Universe::Count()`, which that function documents as including suspended worlds. The count never drops, so N idle worlds suspend one after another, each the last only after the others had gone. `Universe::CountInState` is the fact the refusal is about and both hosts now use it. **That is this entry's own argument arriving from the other direction** — it warns about one policy written twice, and what actually happened is one policy read wrongly by its only reader, with nothing to compare it against until there were two.
+- **The second is that an empty world is not always an idle one.** NPCs on a route, a shop restocking, a round counting down. So the timeout became one of three answers — `world::IdleSleep` — with `Never` for a 24/7 world spelled as an enum member rather than as a very large number, and a ten-minute ceiling the decision clamps to rather than trusting a host to remember. And `scene::AwakeWorld` is the half a host cannot work out for itself: a script attaches a claim to the entity that needs the world running, so the claim dies with the entity instead of outliving whatever set it.
+- **Reopen trigger. *Lifetime* is closed at v0.13** — the policy is hoisted, both hosts call it, and the server's caller is behind a flag whose absence is the old behaviour. *Placement* — which host a world runs on, and what happens when it dies — is unchanged and is the whole of what this entry is now: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
 
 ### [_] D00015
 
@@ -478,7 +571,8 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **That rule was written about players, and this proposal is about objects.** Predicting an input-driven agent is guessing at a human; dead-reckoning a ballistic crate is evaluating a known function. They deserve different rules and the invariant does not currently distinguish them. **Amend it deliberately or not at all** — quietly reading it narrowly is how an invariant stops being one.
 - **The hazard is error growth, and it is different in kind from (a)'s.** Interpolating between two quantised poses keeps the error inside the quantisation step. *Integrating* from a quantised velocity accumulates it linearly with elapsed time, so the bound is a function of how long since the last correction rather than of the grid.
 - **It collides head-on with `D00010`'s decision**, which was that a dry buffer **stops rather than extrapolates**, on the stated grounds that guessing forward is "a freeze plus a lie" — the snap arrives when the next tick disagrees with the guess. Reconciling those is the actual design question and it is answerable: a physics-driven object has a *right* answer to extrapolate toward and a player does not.
-- Needs `physics` on the client for the entities it extrapolates, which today it does not link.
+- ~~Needs `physics` on the client for the entities it extrapolates, which today it does not link.~~ **It links it, and has since v0.7. What it does not do is call it**, and the linker is what makes the difference visible. Measured on the `release` preset: `client` carries 51 `engine::physics::` symbols and **8 of `libengine_physics.a`'s 15 members**, arriving through `Engine::script` beneath `Engine::game` and `Engine::examples` rather than because anybody asked for physics. **Which eight is the useful half.** `Shapes`, `ShapeRay`, `ShapeSupport`, `Query`, `ContactPairs`, `FaceManifold`, `PhysicsWorld` and `WorldResource` are in — the *query* half, because a script raycasts. `BroadPhase`, `NarrowPhase`, `IntegrateMotion`, `Solve`, `SyncBroadphase` and `Pipeline` are **out**, dropped because nothing under `mono.client/` calls `RegisterPhysicsSystems`. So (c) costs a caller and a tick order, not a dependency edge — **the same link-line-versus-call-graph distinction `D00004` had to make twice** and conflated for two versions before it did.
+- **v0.13's network ownership is a second way to get a client integrating, and it is deliberately not this one.** An owned body is simulated by its owner *authoritatively* — the client's answer is the one that crosses the wire, and there is nothing arriving for it to be reconciled against. (c) is the opposite arrangement: the server stays right by definition and the client integrates a guess between corrections. **They must not both apply to one entity.** A body extrapolated under (c) that also carries a `scene::NetworkOwner` would be simulated twice with one of the two wrong, and the wrong one is whichever the local machine happens not to own. Whatever ships for (c) states which set it walks, and `NetworkOwner` is the cheap way to say it: extrapolate what nobody owns.
 
 **Sequencing, and it falls out of the above rather than being chosen:** (a) is self-contained, needs no invariant changed, and makes (b) sound. (b) is a design with one open question. (c) needs a rule rewritten and a bound nobody has measured. **Reopen trigger for (a): the first world whose delta does not fit at the current budget** — which the priority work made survivable rather than fatal, so it is now a bandwidth question rather than a correctness one.
 
@@ -494,64 +588,87 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **Correction at v0.7: this entry's trigger named a version rather than a thing, and the version moved.** It said "v0.8's cdn wire streaming"; the scripted interface took v0.8 and cdn wire streaming is **v0.9's**. Nothing about the argument changes — the trigger was always the streaming, not the number — but for a version it read as due when it was not, which is the same drift `D00004`'s figure and `D00001`'s "two of four" are recorded for. Stated against the work from here on.
 - **Reopen trigger: whichever comes first of cdn wire streaming — v0.9 as this is written — or the first deployment over a path that is not loopback or a LAN.** The second is the one that bites without warning — the absence of congestion control is invisible until it is a stall nobody can reproduce, and `ConnectionStats` counts refusals against our own fixed budget, not against what the path would have carried.
 
-### [DELETED] D00013
+**Scoped at v0.13 and deliberately not started.** The library question this entry
+left open is now answered and the cost is written out, because the useful thing
+to know before starting is how much has to be true at once. **This is not a
+change; it is a project.** Nothing below is speculative — every claim was checked
+against the upstream trees rather than remembered.
 
-**Closed by doing it, and the entry's own reopen trigger is what settled it** — `replication/tests/Loss.cpp`'s *"a value lost from a tick that took several messages is not repaired"* started failing, and was rewritten to assert the repair with the same world and the same nominated datagram.
+**The library is `ngtcp2`, and the reason is that its core needs no TLS at all.**
+Nothing under `ngtcp2/lib/` references OpenSSL, wolfSSL, GnuTLS or picotls — the
+backends are separate `ngtcp2_crypto_*` helper libraries behind `ENABLE_*`
+options, and so is every `find_package` in its top-level CMake. So the core is
+**one MIT submodule with no Perl and no Go**, which is the only shape that keeps
+the property this entry already names: a fresh clone needs CMake, Ninja and a C++
+compiler and nothing else. It also settles the clock question by construction —
+every entry point takes an explicit `ngtcp2_tstamp` — and it carries Reno, Cubic
+and BBRv2, which is this entry's first argument, and RFC 9221 DATAGRAM, which is
+its third.
 
-- **The wire change is three bytes and the version is 3.** `Delta::Part` and `Delta::Final` — a position and a marker — between the baseline and the component count. They come out of the packer's existing 64-byte overhead allowance rather than out of `MAXIMUM_MESSAGE_BYTES`, so no budget moved; a delta's real header is 23 bytes and is now 26. **The module has had five bugs from messages that did not fit, so this is now measured rather than argued**: `engine.replication.stream` builds at the capped `ChunkBytes` and asserts every message against `net::Packet::MAXIMUM_MESSAGE_BYTES`, and a mutation removing the overhead from the cap kills it.
-- **"All parts" means the parts the sender emitted, and getting that wrong would have broken the budget path rather than the loss path.** The marker is written by `Authority::Pack` after packing has finished, on the last part that actually went. A tick the priority rotation trimmed is therefore *complete*: what was held back was never part of that tick, it keeps its unconfirmed entry and comes back later. A marker meaning "nothing else changed" would leave every tick of a world larger than its link unacknowledged. `just unified --entities 2000` is byte-identical before and after.
-- **The give-up rule is that there is nothing to give up on, and that is the finding.** An incomplete tick is abandoned the moment a newer one arrives — never waited for, because the unreliable channel does not resend. It is sound because every value the missing part carried is still unconfirmed, so the next tick re-offers it and acknowledging *that* tick confirms it. **The bound is one tick of acknowledgement per lost part**, asserted as `Applied == lostAt + 1` rather than described. The bound on the case where no tick ever completes is `ResnapshotAfterTicks`, this module's existing answer to a client that cannot be caught up by deltas.
-- **The two alternatives, and what they cost.** Bounding the wait and then acknowledging anyway reinstates this entry at a lower rate — the ack retires the missing part's values, and **a bound on how often a bug happens is not a fix**. Escalating to a re-snapshot spends the whole visible world to repair one colour, on a client that is one tick behind rather than adrift.
-- **A part number is a position, not an arrival order.** The receiver keeps a set of positions and walks it to the final index. A count of arrivals passes a case where every part is delivered twice and fails only when one is missing *and* another is duplicated, which is the case that was added.
-- **A refusal by the transport was the regression this nearly shipped, and an existing case caught it.** With `PacketsPerTick` below `MessagesPerTick` the link refuses the tail of every tick, so no tick could ever complete and the client was re-snapshotted every 120 ticks for ever. `Authority::Unsent` now rolls `Client::Streamed` back for a tick the transport cut short: **a client cannot acknowledge a tick it holds only some of, so that tick must not be what its silence is measured against.** Same argument as the quiet world and the held-back budget, one layer down.
-- **The snapshot buffer needed no change and that is the point.** `client::RecordReplicatedTick` is fed `Replica::Applied`, which now skips an incomplete tick — so no pose is ever taken from a store holding one datagram's rows beside another's previous values.
-- **Eleven mutations, eleven killed, and one needed a new test.** Removing the part-record reset on a re-snapshot survived the first sweep — its only effect is miscounting `Statistics::Incomplete` after a rejoin, which is the number an operator reads to tell a lossy link from a broken one. The sequence is real rather than contrived: a streaming snapshot sends no delta at all, so the last delta before a rejoin is often an incomplete one nothing supersedes.
+**What was ruled out, so it is not re-evaluated from scratch.** `picoquic` hard
+-requires picotls through `find_package(PTLS REQUIRED)` or a configure-time
+`FetchContent`, which is a third-party dependency arriving by download rather
+than by submodule, and defaults `WITH_OPENSSL` on. **wolfSSL is GPLv2 or
+commercial**, which is a licence problem against MPL-2.0 and not a preference.
+BoringSSL needs Go *and* Perl; quictls and LibreSSL need Perl.
 
-### [DELETED] D00012
+**The crypto is a callback table, which is the good news and the trap.** ngtcp2
+asks the application for `encrypt`, `decrypt`, `hp_mask`, `update_key`,
+`client_initial`, `recv_crypto_data` and `rand`. That makes the TLS backend a
+*later, contained* decision rather than a foundational one. It also means
+**`net::Cipher` cannot serve those callbacks as it stands**, and the three
+mismatches are structural rather than plumbing:
 
-**Closed by doing it.** The crossover was re-measured at `-O3` for `Each`, `EachBatch` and `IntegrateMotion`; `Jobs`' two constants are unchanged and their justifications are not; `physics::INTEGRATE_GRAIN` moved from 512 to 1024. Kept rather than deleted, because *why nothing changed* is the finding.
+- **QUIC owns the nonce and `Cipher` owns it privately.** RFC 9001 derives the
+  nonce by XORing the packet number into a static IV, so ngtcp2 supplies the full
+  twelve bytes on every call. `Sealer` takes a four-byte prefix and holds a
+  private counter that only moves forward, which is the invariant `Cipher.hpp`
+  says may not be weakened "to make plumbing convenient". This is exactly that
+  request, and the answer is a *second* type rather than a loosened `Sealer`.
+- **Header protection is a primitive this engine does not have.** It is a raw
+  ChaCha20 keystream block masking five bytes, not an AEAD, and `Cipher` exposes
+  no keystream and no constructor from raw key material by design.
+- **AES-128-GCM is mandatory whatever cipher suite is negotiated.** Initial
+  packets are keyed by HKDF from the destination connection id (RFC 9001 §5.2)
+  and Retry integrity is AES-128-GCM under a fixed key (§5.8). Crypto++ has it;
+  `net` does not expose it, and there is no version of QUIC that skips it.
 
-- **The 17.6% on `EachParallel · 10k` was never the job system, and believing it was is the confident wrong answer this entry invited.** 10k rows is below `DEFAULT_GRAIN * MINIMUM_GRAINS`, so the floor did exactly its job and that row times the **inline** path — `engine.ecs.parallel` now carries a case requiring `Participants == 1` there, twenty-five times running, so nobody re-derives it. What moved is the optimiser. That body writes one float of a twelve-byte row, and `-O3` vectorises a stride-12 read-modify-write into shuffles slower than the scalar loop `-O2` emitted. Proved by rebuilding the same translation unit at `-O2`: `Each · 10k` (three adds) **4.04 us to 1.76**, `EachParallel · 10k` (one add) **2.12 to 2.44**, and a new serial control with the *same* one-field body **2.13 to 2.40**. **The serial and parallel one-field rows move together and neither moves with `Each`.** The 2.12 us reproduces the accepted `-O2` baseline of 2,110 ns to three figures. Two rows that were never a fair pair, too — `Each · 10k` does three adds and `EachParallel · 10k` does one — so `Each · one field · 10k entities` now sits beside them as the row to read against.
-- **The crossover for the cheapest body is ~262,144 rows, not 32,768 and not the 60-80k this file has carried since v0.1.** Measured at `-O3` on 24 threads, three float adds per row, `Each` against `EachParallel`: 8k **1.45 us / 25.9**, 32k **5.54 / 31.5**, 128k **23.3 / 36.1**, 256k **49.1 / 48.6**, 500k 1.33x faster batched. `EachBatch` gives the same crossover. **So the floor of 32,768 permits a measured 5.7x loss**, and the ceiling past the crossover is 1.3x rather than 3.5x — at 500k both paths stream twelve megabytes and the limit is bandwidth.
-- **The other half of the ratio had never been measured on its own, and now is.** `engine.parallel.bench.dispatch` is new and times an empty `For`: **48 ns** for the decision not to dispatch, **31 us** dispatched to 23 workers, **2.3 us** dispatched to one, ~95 ns per further range. **The handover is linear in the pool, not in the work** — every worker decrements `Batch::Outstanding` under `Pool::Guard` whether it took a range or not, so a batch waits for 23 threads to take one mutex in turn. That serialised join, not the `notify_all`, is what a short span cannot repay, and it is the thing to attack if the crossover ever has to come down. That is a rewrite of the join, not a change to a constant.
-- **A grain constant is a row count and the thing it is trying to express is a duration, which is why one default cannot serve two bodies.** The two crossovers are 262,144 rows and 8,000 rows — 32x apart. As serial work they are 49 us and 29 us — one handover either way. Rows differ by the row cost; microseconds do not.
-- **So both `Jobs` constants stay, and the reason is that neither can move.** `MINIMUM_GRAINS` multiplies *every* caller's floor including the one that measured: physics passes 1024 and wants its floor at 8192, and 64 would put it at 65,536 and give back a measured 1.8x. `DEFAULT_GRAIN` would need to be 32,768 to put the floor where the cheap body wants it, which would break the only long-lived caller that takes the default — `mono.client/src/Replicated.cpp` writes a `CFrame`, two vectors and two ids per row and is worth dispatching an order of magnitude sooner. One constant, two jobs, opposite directions. The justification at both now says so with the numbers, replacing one that described a machine that no longer exists.
-- **The second data point asked for, and it came back as another stale constant.** `INTEGRATE_GRAIN`'s own comment claimed a crossover at ~4096 rows; at `-O3` it is **~8000**, so 512 was dispatching a six-thousand-row world into a 1.27x loss. **1024 now**, floor at 8192, on the measurement — and better at every count above it too, by 9-18%, because a range costs ~95 ns to hand out whatever is in it. Same failure as this entry's, one version later, in the constant that was *supposed* to be the careful one.
-- Worth keeping, because it is the shape of the problem rather than an instance of it: **`Jobs::For` already separates the two questions and `Store` does not.** `For` takes `minimum` beside `grain`; `Store::EachParallel` and `EachBatchParallel` expose only `grain`, so an ECS caller can move its floor only by distorting its range size. physics did exactly that and landed right by coincidence of the coupling. Not plumbed through, because that is a public parameter with no caller and `D00008` is the entry about adding one of those.
-- **Every number here was taken with about three of twenty-four hardware threads busy with someone else's process.** Serial rows are min-of-61 and reproduce to ~3%; parallel rows carry spreads from ±85% to ±860% and their minima wobble ~25% between runs. Nothing above turns on less than 1.5x. The baselines were deliberately **not** accepted.
+**The TLS backend is the one open decision, and the three answers differ in what
+they buy rather than in effort alone.** (i) A minimal real TLS 1.3 in-tree over
+the primitives D00006 already vendored, with RFC 7250 raw public keys so no X.509
+parser is needed — standards-compliant on the wire, no new dependency, and about
+two thousand lines of security-critical code this repository would own. (ii)
+D00006's existing exchange carried inside QUIC's CRYPTO frames — smallest and
+lowest risk, and a private variant: no HTTP/3, no Wireshark decode, and **the
+cdn second-consumer argument above is not served**, which is half of why this
+entry exists. (iii) quictls beside ngtcp2 — fully interoperable, and it costs the
+fresh-clone property and adds a very large vendor tree.
 
-### [DELETED] D00011
+**The whole of what has to land, because the cost is the count and not any one
+item.** The vendor and its `MonoVendor.cmake` target with everything but `lib/`
+disabled, and a `THIRD_PARTY_NOTICES.md` line. The TLS answer above. A crypto
+seam for the three mismatches. Connection ids, transport parameters, Retry and
+stateless-reset tokens — which subsume `Cookie` and have to keep its rule that an
+unanswered challenge costs zero bytes. The expiry timer driven off the tick's
+`nowSeconds` through `ngtcp2_conn_get_expiry`/`handle_expiry`, since a QUIC stack
+that arms its own timer breaks `just determinism` and `just replay-check` in a
+way that shows as neither passing nor failing but as two runs disagreeing. The
+channel model mapped onto QUIC — unreliable to DATAGRAM frames, reliable to
+streams, and the stream layout is a design decision because head-of-line blocking
+still applies within one. Then the deletions this entry already lists, with their
+suites and benchmarks. Then the rewiring: `replication::Session`, `Listener`,
+`Connector`, `mono.server`, `mono.client`, `mono.studio`,
+`mono.unified_server_client`, and `mono.network`'s discovery. Then
+`ConnectionStats`, where **`SendsOverBudget` stops meaning what it means today** —
+a fixed cap refusing is not a congestion controller pacing, and `render`'s debug
+panel documents that distinction against `D00007`, so the panel and its header
+move with this. Then `expected_graph.json` and the tier check. Then the suites,
+most of which currently test things that would no longer exist.
 
-**Closed by doing what the entry said to do first.** The reopen trigger was "the first packet loss on a link that is not loopback" and the advice was that building a link that drops was worth more than the fix. It was: the lossy transport found four more bugs than this one, **two of which needed no packet loss at all** and were therefore live in the shipped code.
-
-- **`net::LossyTransport`** — a wrapper over any `Transport` that discards, duplicates and reorders arrivals under the caller's control. Deterministic by construction: no clock, no `std::random_device`, and whether arrival *n* is lost is a pure function of *n* and a stated seed, so a failure is reported as a seed and reproduced from it. Loss is applied on the way *in*, so `Send` never has to invent or hide a status the transport underneath would have given. `DropNext` rather than a percentage is what made these cases deterministic instead of flaky.
-- **The fix is not the protocol change this entry proposed, and the entry's own argument is why.** Acknowledging structure entity by entity is a second acknowledgement channel beside `net::ReliableSender`, which is already a per-message acknowledgement channel with a window, a resend timer and a bound. What shipped instead: creations and destroys left `Delta` and joined forgets in a `Structure` message, which `Session::ChannelFor` puts on the reliable channel — **where the forget already was, for exactly this reasoning. The asymmetry was the bug.** Wire version 2.
-- **Extending v0.3's unconfirmed-entry mechanism to known-set edits was tried on paper and does not close it**, which is worth recording because it is the obvious cheap answer. It retires against `Applied`, and `Applied` names a tick rather than a message: a tick split across several messages is acknowledged by the client on the strength of the ones that arrived, so an edit in the lost one is retired unconfirmed and the hole is as permanent as before. Making it sound needs per-part completeness on the wire, which is the protocol change arrived at sideways.
-- **Two things the reliable channel alone did not cover, both found by the new transport.** A structural message is not judged by its tick on arrival — it is resent six ticks later into a world that moved on, and refusing it as stale is how a destroy never happens. And a delta naming a row the client does not hold yet no longer advances `Applied`, which is what `Protocol.hpp` always claimed it meant: without it the creation arrived reliably and the entity held none of its components.
-- **What the sweep found besides this, and the two that shame the existing suites.** A forget was discarded as stale whenever its tick also carried a delta — **no packet loss required**, and it survived because every existing forget case happened to sit on a tick where nothing else moved. And an entity entering a client's interest arrived with **none of its components**, because a delta comes from the dirty bits and an entity coming into view has not moved, so nothing was ever sent for it until it changed — which for anything stationary is never. Both fixed. The join chunk stream, the handshake retransmission and the priority rotation were all put under seeded loss for the first time and all held.
-- **What was left is closed at `D00013`**: a value lost from a tick that took several messages, fixed by numbering the parts.
-
-### [DELETED] D00010
-
-**Closed by doing it.** Kept rather than deleted, because the entry's own refusal — "it cannot simply be given a `PreviousTransform`" — is what shaped the answer, and that is worth being able to point at.
-
-- **`replication::SnapshotBuffer`, beside the tick agreement and not in the client**, exactly where this entry put it. It holds **per-entity pose history rather than snapshots of the world**: one ring of `HistoryTicks` poses per entity, one `uint64_t` and one `CFrame` each. A whole snapshot per tick was the obvious reading and is wrong at scale — it copies every component of every entity sixteen times over to interpolate a transform.
-- **The delay is two ticks and the reasoning is at the constant.** What it buys is `DelayTicks - 1` tick periods of lateness, because one of them is the gap between two on-time arrivals: at zero there is nothing to interpolate between, at one the first slightly-late packet is a stall, at two there is one tick period of slack, and above about four everything that is not the local player is drawn far enough in the past that a player starts leading their aim. **A starting point rather than a measurement**, and the header says so and says to lower it only with one.
-- **The dry buffer stops rather than extrapolating**, which this entry said was the case that decides whether the feature is good or annoying. On screen the world freezes at the last pose the server actually described and resumes from where it stopped; guessing forward is a freeze *plus a lie*, because the snap arrives when the next tick disagrees with the guess. A gap wider than the delay is walked back at five percent rather than teleported; past eight ticks it jumps once and counts it.
-- **Prediction was the interaction this entry warned about, and it is structural.** `Record` refuses the nominated entity and the whole `CreatePredicted` index range *before* it does the tick accounting, so a caller cannot delay the local player by forgetting something. Found by a mutation showing only `Sample`'s half was tested — the buffer kept sixteen poses per predicted entity that nothing could ever read, and every test stayed green.
-- **The tick rate had to be measured, which nobody predicted.** Nothing on the wire carries the authority's rate and the two programs do not share a default: `server --listen` paces at 30 and `client` at 60. A configured rate is therefore wrong by a factor of two in the most ordinary setup there is, which is not a drift a five percent correction absorbs. `MeasuredTickRate` is the ticks and the seconds the caller passed in, divided — a real run against a 30 Hz server reads 30.2.
-- **Verified against a real `--listen` server rather than by reasoning**: 513 entities replicated, 512 drawn, **80% of poses interpolated rather than held**.
-- Two things left undone and named rather than hidden. `SnapshotBuffer::Forget` exists and is tested but **no caller wires the forget list to it** — today nothing forgets, so the case cannot arise, but the day interest management starts forgetting, an entity that leaves view and returns within sixteen ticks will be interpolated across the gap. And the join transient is real and bounded: the rate is wrong by 2x for the first few ticks, so the clock stalls about once per tick and then refills over ~40. Every clean fix broke either the dry-buffer case or the resync case; **the one that actually removes it is putting the authority's tick rate on the wire**, which is a protocol change.
-- **What remains is not this entry's.** The replicated world is drawn correctly and is still hard to *see*, because the composited camera is the demo world's — placed from a 24-metre scene's bounds, looking at a 128-metre one, so most of it is past the far plane and the rest is sub-pixel. `--view-spacing 0` overlays them and brings it into view. That is `mono.client/AGENTS.md`'s second gap, needs the predicted-entity promotion policy, and is recorded there with the numbers.
-
-### [DELETED] D00009
-
-**Closed the same day it was opened, by doing it.** Kept rather than deleted, because the entry's own stated test is what settled it and that is worth being able to point at.
-
-- The finding: `release` and `bench` compiled at `-O2`, and the ECS iteration control ran 100k rows in 38.74 us at `-O2` against **16.61 us at `-O3`**. Found sideways, while disproving v0.4's vectorisable-layout item — measured at `-O2` alone, the packed and padded layouts look the same and that item reads as merely unhelpful rather than backwards.
-- The objection was floating point: `-O3` vectorises and inlines more aggressively, and this repository diffs two runs byte for byte. **This entry named the measurement that would settle it — `just determinism` and `just replay-check` at `-O3` — and both are byte-identical.** GCC enables neither `-ffast-math` nor `-funsafe-math-optimizations` at any `-O` level, so IEEE semantics never moved. The whole suite was also built and run optimised, which nothing in the presets otherwise does: `release` has `MONO_BUILD_TESTS` off, so **the shipping optimisation level had never had the tests run against it at all**, and raising the level is exactly what surfaces latent undefined behaviour. 104 suites, 18 `ctest` targets, all pass.
-- Both places moved, and the second one is the one that would have rotted: first-party targets now state `-O3` rather than inheriting `RelWithDebInfo`'s `-O2`, and `mono_add_benchmarks` pinned `-O2` of its own. Those two had agreed by coincidence, not by construction, so the benchmark binaries would have gone on reporting the old number for the thing that ships. `MonoLibrary.cmake` now says to change them in one commit.
-- **See `ROADMAP.md` v0.4 for the measured outcome**, which is not uniform: serial row iteration roughly halves, and a handful of structural and query-planning paths get 4-12% worse. And see `D00012`, which is the new question this opened.
+**Staging is not a preference here.** This entry already says two overlapping
+reliability stacks is worse than either, so the order is: land the QUIC session
+beside the old one and prove it, rewire, and only then delete — with every commit
+green, rather than a sweep that leaves the tree with no working link.
 
 ### [_] D00008
 
@@ -562,16 +679,6 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **A second declared user arrived and it is a product rather than a diagnostic.** `mono.studio` declares `ALLOW_TIER_ESCAPE Mono::server`: an editor genuinely runs both halves, and `expected_graph.json` is where the fact is visible. With `mono.unified_server_client` that is two users, neither of them this entry's, and the mechanism is now ordinary rather than untried.
 - **Reopen trigger, unchanged and now twice unmet: a client linking server code to host a server in its own process.** Restated against the link line rather than against the feature, because the feature has now shipped twice without needing it. When it does arrive the edge is two lines and the comment already says which two.
 - Worth keeping straight, because the two are easy to confuse: the escape is about *linking*, not about connecting. A single-player client that spawned `mono.server` as a child process and connected to it over loopback would need no escape either, and is a legitimate third option to weigh at that point — it costs a process and buys the same crash isolation `parallel/process` already argues for.
-
-### [_] D00007
-
-**The bandwidth half closed at v0.4. Lag compensation is untouched. They were filed together and should not have been — one had a trigger that could fire and the other has a trigger that cannot yet.**
-
-- ~~Priority under a bandwidth cap.~~ **Closed, and the reopen trigger fired exactly as this entry wrote it.** `SendsOverBudget` came off zero in a real cross-process run: a 2000-entity world's tick was ~137 messages against a 64-packet budget, so 73 were dropped every tick with the tail chosen by position in a vector — the precise failure this entry predicted, found because the number it named as the signal was the number that moved. What shipped is what this entry asked for: a score per entity per client supplied by the game (this module carries named components and cannot know which one is a position, the same argument `SetInterest` already makes), **a rotation that outranks the score rather than being weighted against it**, and an explicit per-client answer with the reasoning in the header — the budget belongs to a link and there is one link per connection, so a per-server cap would have to be divided before it could be enforced, and that division *is* a per-client cap. The starvation bound is `StarvationTicks + ceil(n/k)` and is asserted by a test rather than argued for. Ordering costs nothing when there is no pressure: rows go out in dirty-bit order and are only re-packed by score if that did not fit.
-- Worth keeping from the closure, because it was nearly missed: **the item was found by a bug, not by a measurement anybody set out to take.** The refusals were being blamed on load and on a wall-clock deadline for four separate investigations. The entry's own advice — "`ConnectionStats` already counts the refusals; read it before concluding a component is not replicating" — was right, and nobody read it. A counter that is not looked at is not a mitigation.
-- **Still open: lag compensation** — rewinding the server to what a client saw when it fired. It needs a server-side history buffer of past ticks that `replication` deliberately does not keep, and a policy for how far back it will honour, which is a game-design decision about fairness rather than an engine one. **Reopen trigger: the first hitscan weapon**, which cannot be built without it. v0.4 brought the physics and the `Part` that trigger was implicitly waiting on, so the blocker is now the game rather than the engine.
-
-- **Lag compensation** — rewinding the server to what a client saw when it fired. It needs a server-side history buffer of past ticks that `replication` deliberately does not keep, and a policy for how far back it will honour, which is a game-design decision about fairness rather than an engine one. **Reopen trigger: the first hitscan weapon**, which cannot be built without it and which nothing before v0.4's physics can express.
 
 ### [_] D00005
 
@@ -596,15 +703,8 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **The old trigger fired at v0.6, and the question it was holding is answered.** The C++ demo died — `BuildDemoWorld` is deleted, `Demo.hpp`/`Demo.cpp` are gone — so "does anything still need `Random` when the demo dies" can finally be asked. **It does.** `Random.new(seed)` is bound into both script VMs, drawn as a counter over `core::Random::Float` so a stream is indexed rather than stateful. That is the first consumer that exists because somebody wanted the numbers rather than because a demo needed some, and it is *userland* — which settles the direction: the interface stays. It settles nothing about what is behind it, so the small specified integer mixer is still the cheaper option and still costs the shipped programs nothing either way.
 - **The narrowed trigger fired too, and the measurement says the trigger was phrased wrong.** `mono.tools/bindings` arrived at v0.6 linking `core`, `ecs`, `scene` and `script` — and `script` reaches `world`, `physics`, `spatial` and `parallel` and **neither `net` nor `assets`**. That is precisely the shape this bullet named. It pays **zero**: 16,593 symbols in the binary, **0 `CryptoPP::`, 0 `core::Random`**, against the client's 10,307 and 3 in the same preset. Nothing was pulled because static archives link per object — the tool's `main` calls `ScriptClass()` and never reaches the datatype bindings, so `LuauDatatypes.cpp.o` is not in the binary and `Random.cpp.o` is not pulled behind it.
 - **So the trigger is a link-line property and the cost is a call-graph property, and this entry conflated them for two versions.** Restated: **a program that *calls* `Random` while linking neither `net` nor `assets` pays the whole 36.** Linking `core` is not enough and never was — every measurement in this entry is consistent with that and none of them said it.
+- **Re-examined at v0.13 and the swap is deliberately not done.** Everything above says it costs the shipped programs nothing, and the other half of the trade has not been written down until now: **`Random.new(seed)` is bound into both script VMs**, so changing what is behind the interface changes every seeded stream every game has. That is a real behaviour change for a saving this entry has already measured at zero. The interface stays and so does what is behind it, until the trigger below actually fires.
 - **Reopen trigger, re-phrased: a program that calls `core::Random` and links neither `net` nor `assets`.** There is still not one. The nearest miss is `mono.tools/bindings`, which has the link line and not the call.
-
-### [DELETED] D00003
-
-- **Closed at v0.2 by the storage rewrite.** Every iteration path now goes through one cached `QueryPlan` per term list, topped up rather than rebuilt as tables appear, so nothing builds a query per call. The flecs-shaped problem below no longer exists — there is no `flecs::query` to be typed or untyped about.
-- `Each` and `EachParallel` still build a query per call. `CountMatching` now caches its query and a typed cache for the iteration paths is the same idea, but it needs a per-store map of typed `flecs::query<Ts...>` rather than the one untyped kind, so it is a bigger change than the count was.
-- Not urgent and not measured. Both iteration paths cost what they always cost — this is a saving, not a regression to fix — and the number to have before doing it is what query construction is as a fraction of a tick at a realistic entity count.
-- Likely moot at v0.2, when `Column`/`ComponentSet` replace flecs as the storage and the query object stops being flecs's to build.
-- Resources are per-world with no ordering guarantee against each other, which is fine while they are written by one system each. When two systems write one resource, that ordering is a phase question, not a resource question.
 
 ### [_] D00001
 
@@ -615,76 +715,3 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 - **Correction at v0.6, to the second bullet's reasoning rather than to its verdict.** "`Vector2` was considered and refused because §3.4 gates it on 'the overlay or editor needs it' and neither does" — **`Vector2` shipped at v0.6, and for neither of those reasons.** `UDim2` and `Rect` are made of it, and both arrived with the datatype vocabulary a script surface owes an author. The gate was right and the list of things that could open it was short by one, which is the useful half: a gate phrased as "who needs it" only names the consumers somebody had thought of. The other half of that sentence closed exactly as written — the `AABB` operations got their caller in `graph::Cull`, and `Frustum::Intersects` is the positive-vertex test that wanted an `AABB` rather than eight points.
 
 **Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed — recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. `v02v03v04.md` predicted the v0.4 edit and said it belonged "with the next pass over `docs/DEFERRED.md`, not here".
-
-### [DELETED] D00107
-
-**Closed by doing it, and by doing the half this entry warned would be skipped.**
-Kept rather than deleted, because the entry's own refusal — that a timer here
-"trades a visible wrong picture for an invisible one" — is what shaped the
-answer, and that is worth being able to point at.
-
-- **`render::ChooseTexture` is the rule**, a free function so a suite can state
-  it without a device: found, or named-and-expected, or named-and-not. The
-  middle case draws the default material, so a scene load now looks like
-  untextured parts becoming textured instead of a purple shimmer.
-- **The renderer is told rather than asking**, because what is in flight belongs
-  to the content pump and `render` must not reach up into it.
-  `Renderer::ExpectTexture` on the request, `StopExpectingTexture` when it
-  finishes; `TextureTable::Add` clears the mark itself, so no host can leave an
-  arrival marked.
-- **The failure half is the one the entry said not to skip, and it needed a new
-  call.** A request that succeeds carries its name in the `Asset`; one that fails
-  answers nothing at all, so `delivery::AssetClient::NameOf` was added — one
-  virtual on an interface with one implementation. Both hosts read the name
-  *before* `Take`, because a take is what destroys the record, and both unmark
-  above every `continue` so no branch can forget. Two cases pin exactly that: a
-  failed request still names what it was for, and a taken one no longer does.
-- **No timer, and the entry was right that this was the temptation.** A grace
-  period hides a genuinely missing texture for as long as it hides a streaming
-  one, and with a byte budget in the path there is no N right for both a small
-  scene and a large one.
-- **The demo the entry did not ask for and should have.** `MeshGrid.luau` and
-  `Meshes.luau` each gained one part naming a sheet nobody published, so both
-  scenes now show all three answers at once — and the timing distinction is
-  visible without reading a log. Verified by capturing the meshes world at 120
-  frames, mid-load: the imports draw white and only the deliberate one is purple.
-
-**What it looked like before:**
-
-**A streaming texture and a texture that will never arrive look identical to
-the renderer.**
-
-`TextureTable` knows what it holds. It does not know what is in flight, and the
-colour slot resolves a name that is not registered to `MissingTexture` — the
-purple checkerboard — with no way to ask whether something is on its way. So a
-sheet still crossing the network wears the marker for the frames it takes to
-land, which on a scene load is a purple shimmer across every imported model as
-their submesh textures arrive a step behind the geometry they belong to.
-
-The gap is real rather than theoretical: the intake loop requests a mesh's own
-sheets *while decoding the mesh*, so the mesh becomes resident at least one
-frame before any of them can, and `delivery::IntakeBudget` may spread the sheets
-over several more.
-
-**Why it is not fixed with a timer here.** A grace period — "draw the default
-for the first N frames after the name is first asked for" — hides a genuinely
-missing texture for exactly as long as it hides a streaming one, and with a byte
-budget in the path there is no N that is right for both a small scene and a
-large one. It trades a visible wrong picture for an invisible one.
-
-**What closing it takes.** The content pump knows what it has outstanding, and
-that is the fact the renderer is missing. Roughly: the host marks a name as
-expected when it issues a request for it and unmarks it when the asset arrives
-*or the request fails*, and the colour slot draws the default for an expected
-name and the marker for an unexpected one. The marker then means "nothing is
-coming for this", which is the only meaning that is useful.
-
-The cost is the bookkeeping, and the failure half is where it sits: the intake
-loops hold `RequestId`s and a failed `Take` yields no name, so unmarking on
-failure needs a request-to-name map in both the studio and the client. Skipping
-that half is worse than not doing it at all — a misspelled texture name is
-requested, misses, and would stay "expected" for ever, which is precisely the
-case the marker exists for.
-
-Until then: `render/AGENTS.md` records the limitation beside the three-way
-split, and a texture that is briefly purple during a load is not a bug report.

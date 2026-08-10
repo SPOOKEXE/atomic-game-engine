@@ -11,9 +11,14 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/replication/Priority.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
+#include <engine/scene/Awake.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Ownership.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/world/Lifecycle.hpp>
 
 #include <algorithm>
 #include <array>
@@ -419,6 +424,14 @@ namespace server {
 			Worlds().Enter(
 				id,
 				[this, &limits, &failure, id](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					// **Before the scripts, because a script may create a
+					// part.** `PreparePhysicsWorld` calls `Store::Observe`,
+					// which moves every row already carrying the component
+					// into an archetype with somewhere to put the change
+					// bits — a structural change, and one that is free on an
+					// empty world and a re-shuffle on a populated one.
+					PrepareSimulation(store, systems);
+
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
 					// first thing to drift is the heartbeat's delta.
@@ -451,6 +464,13 @@ namespace server {
 
 	bool Server::BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
 		if (Settings.GamePath.empty()) {
+			// **No physics on the placeholder, deliberately.** It is a
+			// benchmark scene rather than a game: its entities carry no
+			// `Part` and so no rigid body, its own `Integrate` and `Bounce`
+			// are what it exists to measure, and `--entities 512 --ticks 200`
+			// is the shape `just determinism` and `just replay-check` compare.
+			// Preparing it would add a resource and two systems that find
+			// nothing to do, and put them inside the thing being measured.
 			BuildPlaceholderWorld(store, scheduler, Settings.Entities);
 			return true;
 		}
@@ -462,6 +482,8 @@ namespace server {
 		// What it does *not* install is the client's half — there is no camera
 		// and no draw list here, because a server draws nothing. That split is
 		// the reason the loader stops where it does.
+		PrepareSimulation(store, scheduler);
+
 		std::string error;
 		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {
 			ENGINE_ERROR("--game '{}' failed:\n{}", Settings.GamePath, error);
@@ -501,63 +523,22 @@ namespace server {
 			return false;
 		}
 
-		// **Opt in, by name.** A world holds components no client has any
-		// business receiving, and a default of "everything" makes leaking one
-		// the consequence of forgetting rather than of deciding. These four are
-		// the placeholder scene; a game file names its own at v0.5.
+		// **One table, and it is `replication`'s.** This was written out here,
+		// in `mono.unified_server_client` and in `mono.studio`, and D00018 said
+		// all three agreed — which was true of this one and the studio's and
+		// not of the harness, whose own comment claimed it was duplicated from
+		// here. Nothing in the build compared them. `DefaultReplicatedComponents`
+		// is where the pairing lives now, and it carries the argument for every
+		// row: which are written every tick and therefore observed, which are
+		// written once by a script and therefore signed, and why getting one
+		// wrong is silent in both directions.
 		//
-		// They are `scene`'s names, which are the same strings a client
-		// registers. They used to be `server.Position` and `server.Velocity`,
-		// and the client declared a matching pair of its own to receive them.
-		Replication->Authority().Replicate(engine::core::Name("scene.Transform"));
-		Replication->Authority().Replicate(engine::core::Name("scene.Motion"));
-
-		// **Signed rather than observed, and until v0.7 they crossed once and
-		// never again.** The placeholder world resizes and recolours nothing,
-		// so observing them would buy a dirty column paid for every tick and
-		// read never — which is why they were left unobserved. The cost of that
-		// only appeared once a *script* could write one: a part recoloured at
-		// runtime kept its old colour on every client for ever, because no
-		// delta could carry a component with no dirty bits, and nothing said
-		// so. `ChangeDetection::Signature` notices the write itself instead of
-		// waiting to be told about it.
-		//
-		// They are here at all because a client that received a position and no
-		// size has nothing to draw.
-		using engine::replication::ChangeDetection;
-		Replication->Authority().Replicate(engine::core::Name("scene.Bounds"), ChangeDetection::Signature);
-		Replication->Authority().Replicate(engine::core::Name("scene.Visual"), ChangeDetection::Signature);
-
-		// **What v0.9's meshes are drawn with**, and the reason they are here at
-		// all is the reason `scene.Bounds` is: a client that received a mesh
-		// name and no texture name has half a model. Without these two a replica
-		// draws every imported mesh untextured and untagged, which reads as a
-		// broken texture path rather than as a component nobody sent.
-		//
-		// `Signature`, because neither changes on a steady world — a colour map
-		// and a tag set are authored once and then sit still, and observing them
-		// would pay a comparison per part per tick to learn nothing.
-		//
-		// **The tag *names* do not cross, and that is a stated gap rather than a
-		// bug.** `scene::TagTable` is a resource and resources have no wire form,
-		// so a replica's table stays empty and `HasTag(name)` there answers
-		// false. Mask-against-mask filtering is unaffected — a surface camera's
-		// filter and an instance's mask both come from this authority, so the
-		// bits mean the same thing on both ends whatever they are called.
-		Replication->Authority().Replicate(
-			engine::core::Name("scene.SurfaceAppearance"), ChangeDetection::Signature
-		);
-		Replication->Authority().Replicate(engine::core::Name("scene.Tags"), ChangeDetection::Signature);
-
-		// The mirror and the tree that says what it is a mirror of. See the
-		// same three lines in `studio/PlayLink.cpp` for why the *aim* is not
-		// among them: a reflection is of the viewer, and every client has its
-		// own. `client::AimReplicaViewer` is the other half.
-		Replication->Authority().Replicate(
-			engine::core::Name("scene.SurfaceCamera"), ChangeDetection::Signature
-		);
-		Replication->Authority().Replicate(engine::core::Name("scene.Camera"), ChangeDetection::Signature);
-		Replication->Authority().Replicate(engine::core::Name("ecs.Hierarchy"), ChangeDetection::Signature);
+		// Still opt-in: a host declares these and may declare more. What is
+		// gone is three chances to declare them differently.
+		for (const engine::replication::ReplicatedComponent &component :
+			 engine::replication::DefaultReplicatedComponents()) {
+			Replication->Authority().Replicate(engine::core::Name(component.Name), component.Detection);
+		}
 
 		// **The priority score, and it is the first thing ever to fill this
 		// hook in.** `Authority::SetPriority` has existed since v0.4 with
@@ -628,6 +609,80 @@ namespace server {
 
 			Replication->Authority().SetPriority(score);
 		}
+
+		// **A `Player` per connection, which nothing in this engine was
+		// making.** `scene::AddPlayer` had no production caller at all — every
+		// world that ever ran had a `Players` service with nobody in it — and
+		// the consequence was not cosmetic: ownership is assigned to a player,
+		// so a server with no players had nobody to assign it to and
+		// `SetNetworkOwner` had no argument a script could obtain.
+		//
+		Replication->OnAdmitted([this](engine::replication::ClientId client) {
+			Worlds().Enter(PrimaryWorld, [this, client](engine::ecs::Store &store) {
+				// **A world with no `Players` service gets no player, quietly.**
+				// That is not a misconfiguration to warn about — it is the
+				// placeholder world, which is furnished by nobody and is what
+				// `--entities` builds. A game file has services and gets one.
+				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
+					return;
+				}
+
+				// Named for the slot rather than for anything the client said.
+				// A name a client chose is a field of an inbound message, and
+				// this one ends up in the world tree where scripts index by it.
+				const std::string name = "Player" + std::to_string(client.Index + 1);
+				const engine::ecs::Entity player = engine::scene::AddPlayer(store, name);
+				if (player == engine::ecs::NULL_ENTITY) {
+					return;
+				}
+
+				Players[client.Index] = Occupant{player, client.Generation};
+				ENGINE_INFO("server: {} joined as '{}'", name, Worlds().NameOf(PrimaryWorld).Text());
+			});
+		});
+
+		// **And destroyed when they leave, which is what makes the reclaim
+		// fire.** `scene.ownership` gives back every body owned by an entity
+		// that is no longer alive; destroying the player is what makes that
+		// entity not alive. Leaving it behind would be a body owned for ever by
+		// somebody who has gone.
+		Replication->OnDropped([this](engine::replication::ClientId client) {
+			const auto found = Players.find(client.Index);
+			if (found == Players.end() || found->second.Generation != client.Generation) {
+				return;
+			}
+
+			const engine::ecs::Entity player = found->second.Instance;
+			Players.erase(found);
+
+			Worlds().Enter(PrimaryWorld, [player](engine::ecs::Store &store) {
+				store.DestroyInstance(player);
+			});
+		});
+
+		// **Who may write what, and it is the only thing between a client's
+		// delta and this world.** The predicate is the division
+		// `SetOwnership` asks for: that module carries entity handles and has
+		// no idea what a player is, and this is the part that knows a
+		// `NetworkOwner` names one.
+		//
+		// Absent means the server owns it, so an unowned entity refuses — which
+		// is every entity in every world this repository ships until a script
+		// hands one over.
+		Replication->Authority().SetOwnership([this](
+												  engine::replication::ClientId client,
+												  engine::ecs::Entity entity,
+												  const engine::ecs::Store &store
+											  ) {
+			const auto found = Players.find(client.Index);
+			if (found == Players.end() || found->second.Generation != client.Generation) {
+				return false;
+			}
+
+			// The world it was handed, not one this looks up: `ApplySubmitted`
+			// runs inside a world the host has already entered.
+			return engine::scene::NetworkOwnerOf(store, entity) == found->second.Instance;
+		});
 
 		// A delta is the third reader of the dirty bits, so the components that
 		// travel *and change every tick* have to be observed or nothing ever
@@ -894,6 +949,144 @@ namespace server {
 		Discovery->Pump(nowSeconds);
 	}
 
+	void Server::UpdateWorldLifecycle(double nowSeconds) {
+		// **Off is the default and the check is first**, so a server nobody
+		// asked for this costs one comparison a tick and behaves exactly as it
+		// did — which is what keeps `just determinism` and `just replay-check`
+		// comparing the program they were written against.
+		if (Settings.IdleCloseSeconds <= 0.0) {
+			return;
+		}
+
+		for (const engine::world::WorldId world : Worlds().Worlds()) {
+			// A world somebody else hosts is somebody else's to suspend.
+			if (Worlds().IsRemote(world)) {
+				continue;
+			}
+
+			engine::world::LifecycleInputs inputs;
+			inputs.State = Worlds().StateOf(world);
+			inputs.IdleLimit = Settings.IdleCloseSeconds;
+			inputs.LastWorld = Worlds().Count() <= 1;
+
+			// **Occupancy is a player standing in it, and players live in the
+			// primary world.** That is the whole of what a headless server can
+			// mean by "somebody is using this" — the studio's other two answers,
+			// the active scene and a viewport showing it, are questions only an
+			// editor can ask.
+			inputs.Occupied = world == PrimaryWorld && !Players.empty();
+
+			// **And whatever the game says is still happening.** A host can see
+			// players and nothing else, so a world of NPCs on a route looks
+			// abandoned from here — `scene::AwakeWorld` is the game's answer and
+			// this is the only place a server can ask it. See `scene/Awake.hpp`.
+			if (!inputs.Occupied) {
+				engine::core::Name reason;
+				bool held = false;
+				Worlds().Enter(world, [&held, &reason](engine::ecs::Store &store) {
+					held = engine::scene::WorldIsHeldAwake(store, &reason);
+				});
+				if (held) {
+					inputs.Occupied = true;
+
+					// Once, on the tick the claim starts holding it up, rather
+					// than every tick — a line a second per world is a log
+					// nobody reads and a claim is usually long-lived.
+					if (inputs.State == engine::world::WorldState::Active && !WasHeldAwake(world)) {
+						ENGINE_INFO(
+							"server: '{}' is empty but held awake by '{}'",
+							Worlds().NameOf(world).Text(),
+							reason.Text()
+						);
+					}
+				}
+				SetHeldAwake(world, held);
+			} else {
+				SetHeldAwake(world, false);
+			}
+
+			// A suspended world's inbox is the one queue nothing drains, which
+			// is what makes reading it reliable rather than a race with the
+			// tick. Read only while suspended, for that reason.
+			if (inputs.State == engine::world::WorldState::Suspended) {
+				Worlds().Enter(world, [&inputs](engine::ecs::Store &store) {
+					if (const auto *inbox = store.Resource<engine::world::Inbox>()) {
+						inputs.InboxWaiting = !inbox->Arrived.empty();
+					}
+				});
+			}
+
+			// Only an active world has an idle clock and only it needs one.
+			if (inputs.State == engine::world::WorldState::Active) {
+				const auto found = std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
+					return life.World == world;
+				});
+
+				if (found == Lives.end()) {
+					// First seen. Its clock starts now rather than at zero, so a
+					// world created mid-run is not immediately eligible.
+					Lives.push_back(WorldLife{world, nowSeconds});
+					continue;
+				}
+				inputs.IdleSeconds = nowSeconds - found->LastOccupied;
+			}
+
+			const engine::world::LifecycleAction action = engine::world::DecideLifecycle(inputs);
+
+			if (action == engine::world::LifecycleAction::Resume) {
+				Worlds().SetState(world, engine::world::WorldState::Active);
+				TouchWorld(world, nowSeconds);
+				ENGINE_INFO("server: resumed '{}' — something arrived for it", Worlds().NameOf(world).Text());
+				continue;
+			}
+
+			if (action == engine::world::LifecycleAction::Leave) {
+				// An occupied world's clock is restarted rather than merely not
+				// read, which is what makes `IdleSeconds` mean "since the last
+				// player left" on the next pass instead of "since it was made".
+				if (inputs.Occupied) {
+					TouchWorld(world, nowSeconds);
+				}
+				continue;
+			}
+
+			Worlds().SetState(world, engine::world::WorldState::Suspended);
+			ENGINE_INFO(
+				"server: suspended '{}' — empty for {:.4g}s",
+				Worlds().NameOf(world).Text(),
+				Settings.IdleCloseSeconds
+			);
+		}
+	}
+
+	bool Server::WasHeldAwake(engine::world::WorldId world) const {
+		for (const WorldLife &life : Lives) {
+			if (life.World == world) {
+				return life.HeldAwake;
+			}
+		}
+		return false;
+	}
+
+	void Server::SetHeldAwake(engine::world::WorldId world, bool held) {
+		for (WorldLife &life : Lives) {
+			if (life.World == world) {
+				life.HeldAwake = held;
+				return;
+			}
+		}
+	}
+
+	void Server::TouchWorld(engine::world::WorldId world, double nowSeconds) {
+		for (WorldLife &life : Lives) {
+			if (life.World == world) {
+				life.LastOccupied = nowSeconds;
+				return;
+			}
+		}
+		Lives.push_back(WorldLife{world, nowSeconds});
+	}
+
 	void Server::ServeClients(double nowSeconds) {
 		ServeDiscovery(nowSeconds);
 
@@ -906,6 +1099,17 @@ namespace server {
 		Replication->Poll(nowSeconds);
 
 		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
+			// **What the clients that own something said, applied before this
+			// tick is published.** Applying after would publish a delta built
+			// from last tick's value and send the owner's own state back to it
+			// one tick stale, which is a client fighting its own echo.
+			//
+			// What gets through is `Authority::SetOwnership`'s business — see
+			// the predicate in `BeginListening`. A world where nothing has been
+			// handed over, which is every world this repository ships, sees an
+			// empty loop.
+			Replication->ApplyOwnedState(store);
+
 			// **The rewind history, recorded beside the delta and from the same
 			// state.** Both answer questions about this tick, so taking them at
 			// two different moments is how a hit test starts disagreeing with
@@ -1291,6 +1495,13 @@ namespace server {
 			// being byte-identical.
 			if (!Replayer_) {
 				ServeClients(static_cast<double>(tickStarted) / 1e9);
+
+				// **After serving, so a client that joined this tick counts as
+				// occupancy before anything decides the world is empty.** Not on
+				// the replay path for the same reason `ServeClients` is not: a
+				// recording reproduces a run, and suspending against wall time
+				// would make it depend on how long the replay took.
+				UpdateWorldLifecycle(static_cast<double>(tickStarted) / 1e9);
 			}
 
 			engine::core::FrameGraph::EndFrame();

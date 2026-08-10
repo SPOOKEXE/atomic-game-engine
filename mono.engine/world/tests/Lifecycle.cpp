@@ -134,3 +134,61 @@ TEST_CASE("two world states tick and three do not", "[world][lifecycle]") {
 	// not merely not ticking here — there is no storage to tick.
 	CHECK_FALSE(engine::world::Ticks(WorldState::Remote));
 }
+
+// --- how it sleeps ------------------------------------------------------------
+//
+// **A world with nobody in it is not always a world with nothing happening**, so
+// the timeout is one of three answers rather than the only one. The cases below
+// are the two that are not it, plus the ceiling — which is enforced here so that
+// no host can be the one that forgets it.
+
+TEST_CASE("a world set never to sleep does not, however long it is empty", "[world][lifecycle]") {
+	LifecycleInputs inputs = Stale();
+	inputs.Sleep = engine::world::IdleSleep::Never;
+
+	// The arrangement every other case suspends on — empty, an hour past a
+	// five-minute limit, not the last world.
+	CHECK(DecideLifecycle(inputs) == LifecycleAction::Leave);
+
+	// **And it is still a lifecycle rather than a switch that turns one off.** A
+	// world that was suspended before the mode changed still wakes for its
+	// inbox, because the alternative is a teleport into a world nothing can
+	// open.
+	inputs.State = WorldState::Suspended;
+	inputs.InboxWaiting = true;
+	CHECK(DecideLifecycle(inputs) == LifecycleAction::Resume);
+}
+
+TEST_CASE("an immediate world suspends the moment it is empty", "[world][lifecycle]") {
+	LifecycleInputs inputs = Stale();
+	inputs.Sleep = engine::world::IdleSleep::Immediate;
+	inputs.IdleSeconds = 0.0;
+	inputs.IdleLimit = 3600.0;
+
+	// **The clock is not consulted at all**, which is why this is a mode rather
+	// than a limit of zero: a host would otherwise have to set two fields
+	// consistently to get one behaviour.
+	CHECK(DecideLifecycle(inputs) == LifecycleAction::Suspend);
+
+	// Occupancy still outranks it. "As soon as it is empty" is a statement about
+	// when, not about whether.
+	inputs.Occupied = true;
+	CHECK(DecideLifecycle(inputs) == LifecycleAction::Leave);
+}
+
+TEST_CASE("the idle limit is capped rather than trusted", "[world][lifecycle]") {
+	// **A ceiling every host has to remember is a ceiling one of them will
+	// not**, so it is applied by the decision. Past ten minutes a timeout has
+	// stopped being a grace period and become "keep this world up", which is
+	// what `IdleSleep::Never` is for and should be visible as that.
+	LifecycleInputs inputs = Stale();
+	inputs.IdleLimit = 86400.0;
+	inputs.IdleSeconds = engine::world::MAXIMUM_IDLE_LIMIT_SECONDS + 1.0;
+
+	CHECK(DecideLifecycle(inputs) == LifecycleAction::Suspend);
+
+	// And just under the ceiling still waits, so the cap is a cap rather than
+	// the limit being ignored altogether.
+	inputs.IdleSeconds = engine::world::MAXIMUM_IDLE_LIMIT_SECONDS - 1.0;
+	CHECK(DecideLifecycle(inputs) == LifecycleAction::Leave);
+}

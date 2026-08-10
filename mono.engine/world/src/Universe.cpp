@@ -295,6 +295,16 @@ namespace engine::world {
 		return count;
 	}
 
+	size_t Universe::CountInState(WorldState state) const {
+		size_t count = 0;
+		for (const auto &world : Registry) {
+			if (world != nullptr && world->State() == state) {
+				count++;
+			}
+		}
+		return count;
+	}
+
 	std::vector<WorldId> Universe::Worlds() const {
 		std::vector<WorldId> handles;
 		for (size_t index = 0; index < Registry.size(); index++) {

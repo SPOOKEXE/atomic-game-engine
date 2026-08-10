@@ -27,8 +27,26 @@ namespace engine::world {
 			return LifecycleAction::Leave;
 		}
 
-		if (inputs.IdleSeconds < inputs.IdleLimit) {
+		// **A world with nobody in it is not always a world with nothing
+		// happening.** NPCs, an economy, a countdown between rounds — see
+		// `IdleSleep`. This is asked for rather than reached by leaving a number
+		// high, so that "this world costs a machine forever" is visible.
+		if (inputs.Sleep == IdleSleep::Never) {
 			return LifecycleAction::Leave;
+		}
+
+		// `Immediate` skips the clock entirely rather than comparing against a
+		// zero limit, so a host does not have to set two fields consistently to
+		// get one behaviour.
+		if (inputs.Sleep == IdleSleep::Timeout) {
+			// **Clamped here rather than trusted from the caller**, because a
+			// ceiling every host has to remember is a ceiling one of them will
+			// not. See `MAXIMUM_IDLE_LIMIT_SECONDS`.
+			const double limit =
+				inputs.IdleLimit < MAXIMUM_IDLE_LIMIT_SECONDS ? inputs.IdleLimit : MAXIMUM_IDLE_LIMIT_SECONDS;
+			if (inputs.IdleSeconds < limit) {
+				return LifecycleAction::Leave;
+			}
 		}
 
 		// **Last, so the reason a world survived is the interesting one.** Put

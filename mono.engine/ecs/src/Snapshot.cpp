@@ -267,7 +267,11 @@ namespace engine::ecs {
 			state.Tables.emplace_back(set);
 			state.TableBySet.emplace(set.Id(), table);
 
-			if (!state.Tables.back().Read(reader, static_cast<size_t>(rows))) {
+			// **`ids` rather than nothing, and it is the whole cross-process
+			// fix.** The columns were written in the *writer's* id order and
+			// this table's are in this process's, which differ whenever the two
+			// programs registered their components in a different sequence.
+			if (!state.Tables.back().Read(reader, static_cast<size_t>(rows), ids)) {
 				ClearWorld(state);
 				return false;
 			}

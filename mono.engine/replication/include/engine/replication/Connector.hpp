@@ -81,6 +81,27 @@ namespace engine::replication {
 		// @return `false` when the link refused it.
 		bool Submit(uint64_t tick, std::span<const std::byte> bytes, double nowSeconds);
 
+		// Sends state for the entities this client owns.
+		//
+		// **Distinct from `Submit`, and the difference is not cosmetic.** An
+		// input is what the player *did* and the server decides what it means;
+		// this is what the client says the world *is*, for the part of it the
+		// server handed over. So the server checks the sender's right to say it
+		// and drops what it does not own — `Authority::SetOwnership` carries the
+		// policy, including the half deliberately left to the host.
+		//
+		// Nothing is predicted or replayed here: an owned entity is simulated by
+		// this machine and there is no correction to reconcile against, which is
+		// exactly what being the owner means. `Prediction` remains the local
+		// player's alone.
+		//
+		// @param delta      The state to send. `BuildSubmission` in
+		//                   `Submission.hpp` builds one from a world.
+		// @param nowSeconds The current time.
+		// @return `false` when the link refused it.
+		// @since v0.13
+		bool SubmitState(const Delta &delta, double nowSeconds);
+
 		// Whether the key exchange finished and the server let this client in.
 		// @return `true` once admitted.
 		bool Admitted() const {

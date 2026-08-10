@@ -732,6 +732,25 @@ declare extern type PropertyChangedSignal with
 	function Once(self, handler: () -> ()): RBXScriptConnection
 end
 
+-- The instance tree's signals, in two shapes because the arguments differ.
+--
+-- **These were undeclared until v0.13**, which is the same omission the
+-- generator's own note about `AddTag` describes: `ChildAdded` and its four
+-- neighbours have been answered by `InstanceIndex` since v0.6 and named
+-- nowhere here, so every script connecting one typechecked as an error against
+-- a signal the engine hands back. A host member is only declared where it is
+-- written down.
+declare extern type InstanceSignal with
+	function Connect(self, handler: (instance: Instance) -> ()): RBXScriptConnection
+	function Once(self, handler: (instance: Instance) -> ()): RBXScriptConnection
+end
+
+-- `AncestryChanged` is the one that takes two: what moved, and where it is now.
+declare extern type AncestrySignal with
+	function Connect(self, handler: (instance: Instance, parent: Instance) -> ()): RBXScriptConnection
+	function Once(self, handler: (instance: Instance, parent: Instance) -> ()): RBXScriptConnection
+end
+
 -- The 2D tree's input, in two shapes because the arguments differ.
 --
 -- **`GuiSignal` takes no arguments and that is deliberate rather than
@@ -1318,6 +1337,39 @@ declare task: {
 				// putting one inside is a syntax error four lines later that
 				// reads as an unclosed function, which is exactly how it was
 				// found. `EngineAttribute` is declared beside the datatypes.
+				// **Ownership, declared on `Instance` like everything above it,
+				// and the argument is an `Instance` rather than a `Player`.**
+				// There is no `Player` type in this file — a class is a run-time
+				// registration and the declared vocabulary stops at `Instance` —
+				// so pinning the argument tighter than the file can spell would
+				// mean inventing a type the run time does not check. What it is
+				// checked against is `scene::PlayerClass`, at the call.
+				//
+				// Optional on the way in because that is how a body is given back
+				// to the server, and optional on the way out because that is what
+				// a server-owned body reads as.
+				// **The `Players` pair, declared on `Instance` like every signal
+				// above it.** Nothing fires one at a subject that is not the
+				// service, so a connection on anything else is inert by
+				// construction — the same answer a class gate would give, at
+				// none of the cost. `GetPlayers` is the same shape: the
+				// `Player` children of the receiver, which is the answer on
+				// `Players` and an empty table anywhere else.
+				out << "\tChildAdded: InstanceSignal\n";
+				out << "\tChildRemoved: InstanceSignal\n";
+				out << "\tDescendantAdded: InstanceSignal\n";
+				out << "\tDescendantRemoving: InstanceSignal\n";
+				out << "\tAncestryChanged: AncestrySignal\n";
+				out << "\tPlayerAdded: InstanceSignal\n";
+				out << "\tPlayerRemoving: InstanceSignal\n";
+				out << "\tfunction GetPlayers(self): { Instance }\n";
+
+				out << "\tfunction KeepWorldAwake(self, reason: string): ()\n";
+				out << "\tfunction LetWorldSleep(self): ()\n";
+				out << "\tfunction IsKeepingWorldAwake(self): boolean\n";
+				out << "\tfunction SetNetworkOwner(self, player: Instance?): ()\n";
+				out << "\tfunction GetNetworkOwner(self): Instance?\n";
+
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
@@ -1559,6 +1611,18 @@ declare interface ChangedSignal {
 	Connect(handler: (property: string) => void): RBXScriptConnection;
 	Once(handler: (property: string) => void): RBXScriptConnection;
 	Equals(other: ChangedSignal): boolean;
+}
+
+// The instance tree's signals, matching the Luau half — undeclared until v0.13
+// for the reason given there.
+declare interface InstanceSignal {
+	Connect(handler: (instance: Instance) => void): RBXScriptConnection;
+	Once(handler: (instance: Instance) => void): RBXScriptConnection;
+}
+
+declare interface AncestrySignal {
+	Connect(handler: (instance: Instance, parent: Instance) => void): RBXScriptConnection;
+	Once(handler: (instance: Instance, parent: Instance) => void): RBXScriptConnection;
 }
 
 // What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
@@ -2098,6 +2162,26 @@ declare const task: {
 				out << "\tGetPivot(): CFrame;\n";
 				out << "\tPivotTo(target: CFrame): void;\n";
 				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
+
+				// Ownership, matching the Luau half. `Instance` rather than a
+				// `Player` type for the reason given there, and `null` rather
+				// than `undefined` because `null` is what `GetNetworkOwner`
+				// returns for a server-owned body.
+				// The `Players` pair, matching the Luau half.
+				out << "\treadonly ChildAdded: InstanceSignal;\n";
+				out << "\treadonly ChildRemoved: InstanceSignal;\n";
+				out << "\treadonly DescendantAdded: InstanceSignal;\n";
+				out << "\treadonly DescendantRemoving: InstanceSignal;\n";
+				out << "\treadonly AncestryChanged: AncestrySignal;\n";
+				out << "\treadonly PlayerAdded: InstanceSignal;\n";
+				out << "\treadonly PlayerRemoving: InstanceSignal;\n";
+				out << "\tGetPlayers(): Instance[];\n";
+
+				out << "\tKeepWorldAwake(reason: string): void;\n";
+				out << "\tLetWorldSleep(): void;\n";
+				out << "\tIsKeepingWorldAwake(): boolean;\n";
+				out << "\tSetNetworkOwner(player?: Instance | null): void;\n";
+				out << "\tGetNetworkOwner(): Instance | null;\n";
 
 				// Attributes, matching the Luau half. The union is the same
 				// closed set and for the same reason.

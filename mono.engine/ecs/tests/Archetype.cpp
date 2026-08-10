@@ -3,11 +3,13 @@
 // AGENTS.md says not to do.
 #include "Archetype.hpp"
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <span>
 #include <string>
 #include <vector>
 
@@ -347,4 +349,52 @@ TEST_CASE("a column position is the same for every table sharing a set", "[ecs]"
 		REQUIRE(first.ColumnAt(position).Type() == second.ColumnAt(position).Type());
 		REQUIRE(first.ColumnAt(position).Type() == set.Ids()[position]);
 	}
+}
+
+TEST_CASE("a table reads its columns in the writer's order", "[ecs][archetype]") {
+	// **The cross-process case, reproduced in one.** `Write` emits columns in
+	// its own set order, which is ascending by *its* component ids, and
+	// `ComponentSet::Intern` sorts by the reading process's — so a server whose
+	// `ecs.Hierarchy` is registered last and a client whose `ecs.Hierarchy` is
+	// id 2 hold the same set in two different column orders.
+	//
+	// One process cannot have two id assignments, so the divergence is supplied
+	// as the argument it really is: the order the snapshot recorded. Reading
+	// with the wrong one is what a client did before this, and it read a
+	// `Transform`'s bytes as a `Hierarchy`.
+	const ComponentId place = P();
+	const ComponentId health = H();
+
+	Archetype source(ComponentSet::Intern({place, health}));
+
+	REQUIRE(source.Append(Entity{7}) == 0);
+	*static_cast<Place *>(source.Find(place)->At(0)) = Place{4.5f};
+	*static_cast<Health *>(source.Find(health)->At(0)) = Health{99};
+
+	// Written in this table's own order, whatever that is.
+	const std::span<const ComponentId> members = source.Set().Ids();
+	const std::vector<ComponentId> order(members.begin(), members.end());
+
+	engine::core::ByteWriter writer;
+	REQUIRE(source.Write(writer));
+
+	// The reader's table holds the same set — interning guarantees the same
+	// column order here, so the *reversed* order below stands in for a process
+	// whose ids ran the other way.
+	Archetype restored(ComponentSet::Intern({place, health}));
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Read(reader, 1, order));
+
+	CHECK(static_cast<const Place *>(restored.Find(place)->At(0))->X == 4.5f);
+	CHECK(static_cast<const Health *>(restored.Find(health)->At(0))->Value == 99);
+
+	// And the same bytes read against the wrong order do not quietly succeed:
+	// `Place` is four bytes and `Health` is four, so this is the narrow case
+	// that *would* have loaded silently wrong before — the values swap.
+	std::vector<ComponentId> reversed(order.rbegin(), order.rend());
+	Archetype confused(ComponentSet::Intern({place, health}));
+	engine::core::ByteReader again(writer.Bytes());
+	REQUIRE(confused.Read(again, 1, reversed));
+
+	CHECK(static_cast<const Place *>(confused.Find(place)->At(0))->X != 4.5f);
 }

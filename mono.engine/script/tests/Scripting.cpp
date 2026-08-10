@@ -3923,3 +3923,324 @@ TEST_CASE("an instance with no placement answers a pivot anyway", "[scripting]")
 		folder:PivotTo(CFrame.new(Vector3.new(5, 0, 0)))
 	)");
 }
+
+// --- network ownership ------------------------------------------------------
+//
+// **The surface, not the effect.** Nothing in the engine reads ownership yet —
+// physics integrates every body on whichever machine runs it — so what these
+// pin is that a script can say who owns a body, read it back, and be stopped
+// from saying something that cannot be true. `engine.scene.ownership` owns the
+// reclaim.
+
+TEST_CASE("a script hands a body to a player and back to the server", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part')
+		part.Parent = workspace
+
+		-- **Unanchored first, and this engine's default is not Roblox's.**
+		-- `Instance.new('Part')` here carries neither `RigidBody` nor `Motion`
+		-- — the class sets deliberately leave them out, so whether a part is a
+		-- body is a decision rather than a flag — and ownership is about who
+		-- runs the physics, so an anchored part is refused.
+		part.Anchored = false
+
+		-- Absent reads as the server rather than as an error, which is the
+		-- state every body in every world this engine ships is in.
+		assert(part:GetNetworkOwner() == nil, 'a fresh part should be the server\'s')
+
+		local ada = game:GetService('Players'):FindFirstChild('Ada')
+		assert(ada ~= nil, 'the fixture should have a player in it')
+
+		part:SetNetworkOwner(ada)
+		assert(part:GetNetworkOwner() == ada, 'the owner should read back')
+
+		-- Roblox's spelling for handing it back, and the argument is optional
+		-- for the same reason it is there.
+		part:SetNetworkOwner(nil)
+		assert(part:GetNetworkOwner() == nil, 'nil should give it back')
+	)");
+}
+
+TEST_CASE("a script cannot hand over an anchored part", "[scripting]") {
+	// **The case a game will actually hit.** Ownership decides who runs the
+	// physics, and an anchored part has none to run — so this is a script
+	// mistake with a visible symptom rather than a silent no-op, and the
+	// message names the anchoring because that is the likelier of the two
+	// things to have gone wrong.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Anchored = true
+		part:SetNetworkOwner(game:GetService('Players'):FindFirstChild('Ada'))
+	)"));
+	CHECK(runtime->LastError().find("SetNetworkOwner") != std::string::npos);
+}
+
+TEST_CASE("a script cannot hand a body to something that is not a player", "[scripting]") {
+	// **Raises rather than answering false**, which is the departure from
+	// `AddTag` the binding documents: a full tag table is a scene running out
+	// of room, where this is a script naming the wrong variable — and a silent
+	// refusal is a body nothing simulates and no line of output.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Anchored = false
+		local folder = Instance.new('Instance')
+		part:SetNetworkOwner(folder)
+	)"));
+	CHECK(runtime->LastError().find("SetNetworkOwner") != std::string::npos);
+}
+
+TEST_CASE("javascript hands a body to a player and back", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const part = Instance.new('Part');
+		part.Parent = workspace;
+		// Unanchored first, for the Luau half's reason.
+		part.Anchored = false;
+		if (part.GetNetworkOwner() !== null) throw new Error('a fresh part should be the server\'s');
+
+		const ada = game.GetService('Players').FindFirstChild('Ada');
+		if (!ada) throw new Error('the fixture should have a player in it');
+
+		part.SetNetworkOwner(ada);
+		if (part.GetNetworkOwner().GetFullName() !== ada.GetFullName())
+			throw new Error('the owner should read back');
+
+		// `null` here where Luau says `nil`, which is the only difference.
+		part.SetNetworkOwner(null);
+		if (part.GetNetworkOwner() !== null) throw new Error('null should give it back');
+	)");
+}
+
+// --- the Players service ----------------------------------------------------
+//
+// **Two signals wrapping one mechanism each, and the pair is not symmetric.**
+// `PlayerAdded` is a tree change delivered at the barrier; `PlayerRemoving` is
+// dispatched from inside the store while the player is still there. That
+// asymmetry is the feature rather than an inconsistency, and the third case
+// below is the one that says so.
+
+TEST_CASE("PlayerAdded fires for a player and not for anything else", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity log = MakeLog(store);
+
+	// **Recorded onto an instance rather than into a global.** Each `Run` is
+	// its own chunk, so a global one chunk sets is not a global the next one
+	// reads — which is what every other signal case here works around the same
+	// way.
+	MustRun(*runtime, R"(
+		local log = workspace:FindFirstChild('Log')
+		game:GetService('Players').PlayerAdded:Connect(function(player)
+			log.Name = log.Name .. '+' .. player.Name
+		end)
+	)");
+
+	// Added from the host, which is what a server does when somebody connects.
+	engine::scene::AddPlayer(store, "Ada");
+
+	// **A `Folder` under `Players` too**, because the service is an ordinary
+	// container and the filter is the whole point of the signal existing.
+	{
+		const Entity folder =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "NotAPlayer");
+		store.SetParent(folder, engine::scene::PlayersOf(store));
+	}
+
+	Beat(store, *runtime);
+
+	// One arrival, and it is the player. The folder is a child of the same
+	// container and fires nothing.
+	CHECK(Trace(store, log) == "+Ada");
+}
+
+TEST_CASE("GetPlayers answers the players and nothing else", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+	engine::scene::AddPlayer(store, "Grace");
+
+	{
+		const Entity folder =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "NotAPlayer");
+		store.SetParent(folder, engine::scene::PlayersOf(store));
+	}
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local players = game:GetService('Players'):GetPlayers()
+		assert(#players == 2, 'expected two players, got ' .. #players)
+
+		-- Order is insertion order, which is what the tree gives.
+		assert(players[1].Name == 'Ada', players[1].Name)
+		assert(players[2].Name == 'Grace', players[2].Name)
+
+		-- And the filter is real: the container has three children.
+		assert(#game:GetService('Players'):GetChildren() == 3)
+	)");
+}
+
+TEST_CASE("PlayerRemoving fires while the player is still there", "[scripting]") {
+	// **The reason it is not a queued signal.** A game saving somebody's
+	// progress on the way out reads the player in the handler; a signal
+	// delivered at the next barrier would hand it an instance that has gone.
+	// So the handler reads `.Name` — which is only answerable while the row is
+	// alive — rather than merely counting the call.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		local log = workspace:FindFirstChild('Log')
+		game:GetService('Players').PlayerRemoving:Connect(function(player)
+			-- Reads the leaving player, which is only answerable while the row
+			-- is alive. A queued signal would have nothing to read.
+			log.Name = log.Name .. '-' .. player.Name
+		end)
+	)");
+
+	const Entity ada = engine::scene::AddPlayer(store, "Ada");
+	REQUIRE(ada != engine::ecs::NULL_ENTITY);
+	Beat(store, *runtime);
+
+	store.DestroyInstance(ada);
+
+	// No beat: the signal already fired, synchronously, from inside the destroy.
+	CHECK(Trace(store, log) == "-Ada");
+}
+
+TEST_CASE("javascript hears players join and leave", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const Entity log = MakeLog(store);
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = workspace.FindFirstChild('Log');
+		const players = game.GetService('Players');
+		players.PlayerAdded.Connect((player) => { log.Name = log.Name + '+' + player.Name; });
+		players.PlayerRemoving.Connect((player) => { log.Name = log.Name + '-' + player.Name; });
+	)");
+
+	const Entity ada = engine::scene::AddPlayer(store, "Ada");
+	REQUIRE(ada != engine::ecs::NULL_ENTITY);
+	Beat(store, *runtime);
+
+	CHECK(Trace(store, log) == "+Ada");
+
+	MustRun(*runtime, R"(
+		if (game.GetService('Players').GetPlayers().length !== 1) throw new Error('GetPlayers');
+	)");
+
+	store.DestroyInstance(ada);
+	CHECK(Trace(store, log) == "+Ada-Ada");
+}
+
+TEST_CASE("a script keeps its world awake and lets it sleep again", "[scripting]") {
+	// **The surface a game reaches for when its world is empty and busy.** An
+	// NPC on a route, a shop restocking, a round counting down — a host can see
+	// players and nothing else, so this is how a game says the world still has
+	// work in it. `scene/Awake.hpp` carries the argument; this is the spelling.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local npc = Instance.new('Part')
+		npc.Parent = workspace
+
+		assert(npc:IsKeepingWorldAwake() == false, 'nothing should hold a fresh world up')
+
+		npc:KeepWorldAwake('patrol')
+		assert(npc:IsKeepingWorldAwake(), 'the claim should read back')
+
+		-- Restating replaces rather than stacking, so a script may say this
+		-- every tick without tracking whether it already has.
+		npc:KeepWorldAwake('returning')
+		assert(npc:IsKeepingWorldAwake(), 'restating should still hold it')
+
+		npc:LetWorldSleep()
+		assert(npc:IsKeepingWorldAwake() == false, 'withdrawing should release it')
+
+		-- And withdrawing twice is not an error: tidying up should not require
+		-- remembering whether the claim was made.
+		npc:LetWorldSleep()
+	)");
+}
+
+TEST_CASE("keeping a world awake needs a reason", "[scripting]") {
+	// **Required rather than optional, and the test is what keeps it that way.**
+	// The question somebody asks about a world that will not sleep is what is
+	// holding it up, and an entity id is not an answer.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local npc = Instance.new('Part')
+		npc:KeepWorldAwake()
+	)"));
+}
+
+TEST_CASE("javascript keeps its world awake too", "[scripting]") {
+	// The roadmap's gate: a member lands in both languages or it is not done.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const npc = Instance.new('Part');
+		npc.Parent = workspace;
+
+		if (npc.IsKeepingWorldAwake()) { throw new Error('a fresh world should be free'); }
+
+		npc.KeepWorldAwake('patrol');
+		if (!npc.IsKeepingWorldAwake()) { throw new Error('the claim should read back'); }
+
+		npc.LetWorldSleep();
+		if (npc.IsKeepingWorldAwake()) { throw new Error('withdrawing should release it'); }
+	)");
+}
