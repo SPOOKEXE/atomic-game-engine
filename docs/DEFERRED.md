@@ -354,6 +354,40 @@ from git history on `v0.11` or the local branch `renderer-before-revert`.
 
 **Per-pass GPU timestamps, which `SDL_GPU` cannot express.**
 
+**Correction at v0.13, and it is the largest one in this file: every symbol and
+every document this entry named has been deleted.** Checked by grepping for each
+one rather than by remembering, the way `D00038` and `D00103` were.
+
+- **`ProfilePass::Elapsed` does not exist.** The only occurrence of `ProfilePass`
+  anywhere in the tree is the sentence below that names it. So the field the
+  timestamps "land in" is not there to land in.
+- **`PIPELINE_NODES.md` does not exist**, so "stage 7's remaining half" points at
+  nothing a reader can open. The staging it refers to is `ROADMAP.md`'s extended
+  rendering pipeline now.
+- **`graph::Execute` is gone, and with it the node to hang a mark off.** The
+  bullet below saying this entry is no longer blocked on the executor was true
+  when it was written and stopped being true at the render-pipeline revert. It is
+  blocked on the executor again.
+- **`FrameRunner::Run` and its `SDL_PushGPUDebugGroup` calls are gone.** There are
+  no GPU debug groups anywhere in this repository, so the "readable-capture half
+  that could be built, was" describes work that is no longer in the tree.
+- **`FrameResult::UploadedBytes` and `Uploads` are gone.** `FrameResult` carries
+  `Presented`, `DrawCalls`, `Triangles`, `SurfaceInstances`, `SurfacePasses`,
+  `RibbonVertices`, `Particles`, `Culled` and `Passes`, and none of them counts a
+  copy into GPU memory. The one surviving `UploadedBytes` is `TextureTable`'s own
+  private counter, which is a different number about a different thing.
+
+**This entry and `D00103` are now one item seen from two sides**, and the split
+is worth keeping only because the two halves are blocked on different things.
+This one is the *portable* question — SDL exposes no way to write a timestamp,
+so no amount of work here moves it. `D00103` is the *Vulkan* answer that existed,
+worked, and was reverted, and is recoverable from git. **Whoever builds the pass
+executor should read both and close both**; building one without the other
+produces a number on Vulkan and a blank everywhere else with nothing saying why.
+
+What it said before, with the deleted names left in place so the correction above
+is checkable:
+
 `PIPELINE_NODES.md` stage 7's remaining half. `ProfilePass::Elapsed` is the field
 they land in; it reads zero and the profile panel shows that as *not measured*
 rather than as free.
@@ -383,6 +417,12 @@ rather than as free.
 - The upload counters **are** built: `FrameResult::UploadedBytes` and `Uploads`
   count every copy into GPU memory, measured at the region rather than derived
   from a count, and the profile panel shows them.
+
+**Reopen trigger, which this entry never had: a pass executor to hang a mark off,
+same as `D00103`'s** — or an SDL release with a timestamp query, which would make
+this the portable answer and `D00103` a fallback rather than the only path.
+Written down because an entry with no trigger is one nobody can decide is due,
+and this one has been carried since v0.4 on an argument alone.
 
 ### [_] D00038
 
