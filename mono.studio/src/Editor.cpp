@@ -278,6 +278,7 @@ namespace studio {
 
 		Universe = std::make_unique<engine::world::Universe>();
 		Commands = std::make_unique<CommandLog>(*Universe);
+		Team = std::make_unique<TeamCreate>(*Commands, *Universe);
 		InstallHistoryWatcher();
 
 		// After both, because several polls read them.
@@ -455,7 +456,9 @@ namespace studio {
 			// the panel: `TeamCreate` holds no socket until it is asked to look,
 			// so this is a null check on every frame of every editor that never
 			// uses it.
-			Team.Pump(engine::core::Clock::Seconds());
+			if (Team != nullptr) {
+				Team->Pump(engine::core::Clock::Seconds());
+			}
 
 			// **Beside the control surface and for its reason**, which the
 			// comment above already gives: a plugin writing a property is doing

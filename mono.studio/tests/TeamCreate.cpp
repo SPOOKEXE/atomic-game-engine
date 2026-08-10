@@ -6,22 +6,65 @@
 // hosting produces an invitation somebody can pass on, and that leaving takes
 // it all back down.
 
+#include <engine/ecs/Store.hpp>
+#include <engine/net/Endpoint.hpp>
+#include <engine/parallel/Jobs.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <span>
 #include <string>
+#include <studio/Commands.hpp>
 #include <studio/TeamCreate.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.teamcreate")
 TEST_DEPENDS("network.presence")
+TEST_DEPENDS("studio.editstream")
 
+using studio::CommandLog;
 using studio::TeamCreate;
 using studio::TeamCreateSettings;
 
+namespace {
+	// A whole editor's worth of state, because `TeamCreate` borrows the command
+	// log and the universe that arriving edits are applied through — hosting is
+	// not a thing an editor does beside its document, it is a thing it does
+	// *to* its document.
+	struct Editor {
+		engine::world::Universe Worlds;
+		engine::world::WorldId Scene;
+		CommandLog Log;
+		TeamCreate Team;
+
+		Editor() : Log(Worlds), Team(Log, Worlds) {
+			engine::parallel::Jobs::Start(1);
+			engine::scene::RegisterSceneComponents();
+			engine::scene::RegisterSceneClasses();
+
+			engine::world::WorldSettings settings;
+			settings.Name = engine::core::Name("Scene");
+			Scene = Worlds.Create(settings);
+			Worlds.Enter(Scene, [](engine::ecs::Store &store) { engine::scene::InstallServices(store); });
+		}
+
+		~Editor() {
+			engine::parallel::Jobs::Stop();
+		}
+
+		Editor(const Editor &) = delete;
+		Editor &operator=(const Editor &) = delete;
+	};
+}
+
 TEST_CASE("a fresh editor holds no socket and sees nobody", "[studio][teamcreate]") {
-	TeamCreate team;
+	Editor editor;
+	TeamCreate &team = editor.Team;
 
 	// The property that keeps this off every editor's start-up path: nothing
 	// is opened until somebody asks.
@@ -38,7 +81,8 @@ TEST_CASE("a fresh editor holds no socket and sees nobody", "[studio][teamcreate
 }
 
 TEST_CASE("watching announces nothing about this editor", "[studio][teamcreate]") {
-	TeamCreate team;
+	Editor editor;
+	TeamCreate &team = editor.Team;
 	const std::vector<std::string> noKeys;
 	team.Watch({}, noKeys);
 
@@ -54,7 +98,8 @@ TEST_CASE("watching announces nothing about this editor", "[studio][teamcreate]"
 }
 
 TEST_CASE("hosting produces a session and an invitation to pass on", "[studio][teamcreate]") {
-	TeamCreate team;
+	Editor editor;
+	TeamCreate &team = editor.Team;
 
 	TeamCreateSettings offering;
 	offering.Name = "the shared project";
@@ -85,7 +130,8 @@ TEST_CASE("hosting produces a session and an invitation to pass on", "[studio][t
 }
 
 TEST_CASE("a public session says so and carries no invitation", "[studio][teamcreate]") {
-	TeamCreate team;
+	Editor editor;
+	TeamCreate &team = editor.Team;
 
 	TeamCreateSettings offering;
 	offering.Name = "anybody";
@@ -98,7 +144,8 @@ TEST_CASE("a public session says so and carries no invitation", "[studio][teamcr
 }
 
 TEST_CASE("leaving takes the session back down", "[studio][teamcreate]") {
-	TeamCreate team;
+	Editor editor;
+	TeamCreate &team = editor.Team;
 
 	TeamCreateSettings offering;
 	offering.Name = "briefly";
@@ -130,7 +177,8 @@ TEST_CASE("leaving takes the session back down", "[studio][teamcreate]") {
 }
 
 TEST_CASE("the collaborator count only moves what it changes", "[studio][teamcreate]") {
-	TeamCreate team;
+	Editor editor;
+	TeamCreate &team = editor.Team;
 
 	TeamCreateSettings offering;
 	offering.Name = "counting";
@@ -154,4 +202,127 @@ TEST_CASE("the collaborator count only moves what it changes", "[studio][teamcre
 
 	team.SetCollaborators(4);
 	CHECK(team.Session().IsFull());
+}
+
+TEST_CASE("hosting opens a session other editors can join", "[studio][teamcreate]") {
+	Editor host;
+
+	TeamCreateSettings offering;
+	offering.Name = "the shared project";
+	// Ephemeral, which is what a person hosting from a laptop wants: the
+	// announcement carries the port that was bound, so nothing has to be agreed
+	// in advance.
+	offering.Port = 0;
+
+	std::string trouble;
+	REQUIRE(host.Team.Host(offering, trouble));
+
+	// **The advert names the port that was bound**, not the zero that was
+	// asked for. An advert carrying zero sends every guest nowhere.
+	REQUIRE(host.Team.Edits() != nullptr);
+	CHECK(host.Team.Edits()->Hosting());
+	CHECK(host.Team.Session().At.Port != 0);
+
+	// A host needs nobody's permission to edit its own document.
+	CHECK(host.Team.Edits()->Connected());
+	CHECK(host.Team.Edits()->Editors() == 1);
+}
+
+TEST_CASE("joining a session with no address is refused with a reason", "[studio][teamcreate]") {
+	Editor guest;
+
+	std::string trouble;
+	CHECK_FALSE(guest.Team.Join({}, 0.0, trouble));
+	CHECK_FALSE(trouble.empty());
+	CHECK(guest.Team.Edits() == nullptr);
+}
+
+TEST_CASE("a hosted session carries an edit to a guest", "[studio][teamcreate]") {
+	// **The two halves together**, which is the whole point of the panel:
+	// discovery hands over an address and the edit stream makes joining mean
+	// something. A join that only connected would be a browser.
+	Editor host;
+	Editor guest;
+
+	TeamCreateSettings offering;
+	offering.Name = "shared";
+	offering.Port = 0;
+
+	std::string trouble;
+	REQUIRE(host.Team.Host(offering, trouble));
+	REQUIRE(host.Team.Edits() != nullptr);
+
+	// What a guest reads off a listing: the host's address, resolved.
+	const uint16_t port = host.Team.Session().At.Port;
+	REQUIRE(port != 0);
+	REQUIRE(guest.Team.Join(engine::net::Endpoint::LoopbackIPv4(port), 0.0, trouble));
+	REQUIRE(guest.Team.Edits() != nullptr);
+
+	double now = 0.0;
+	const auto pump = [&](int ticks) {
+		for (int step = 0; step < ticks; ++step) {
+			now += 1.0 / 60.0;
+			guest.Team.Pump(now);
+			host.Team.Pump(now);
+			guest.Team.Pump(now);
+		}
+	};
+
+	for (int step = 0; step < 256 && !guest.Team.Edits()->Connected(); ++step) {
+		pump(1);
+	}
+	REQUIRE(guest.Team.Edits()->Connected());
+	CHECK(host.Team.Edits()->Editors() == 2);
+
+	// The host makes an edit. Nothing wires the two together but the watcher
+	// the editor installs, so this suite does what `InstallHistoryWatcher`
+	// does.
+	CommandLog::Watcher watcher;
+	watcher.Committed = [&](uint64_t, std::span<const studio::Command> group) {
+		host.Team.PublishEdits(group, now);
+	};
+	host.Log.Watch(watcher);
+
+	engine::ecs::Entity created;
+	host.Worlds.Enter(host.Scene, [&](engine::ecs::Store &store) {
+		created = store.CreateInstance(engine::scene::PartClass(), "Part");
+		store.SetParent(created, engine::scene::WorkspaceOf(store));
+		host.Log.RecordCreate(store, host.Scene, created, "Insert Part");
+	});
+
+	pump(16);
+
+	size_t children = 0;
+	guest.Worlds.Enter(guest.Scene, [&](engine::ecs::Store &store) {
+		store.EachChild(engine::scene::WorkspaceOf(store), [&children](engine::ecs::Entity) { children++; });
+	});
+	CHECK(children == 1);
+	CHECK(host.Team.Edits()->Counters().Sent == 1);
+	CHECK(guest.Team.Edits()->Counters().Applied == 1);
+
+	// And it is not in the guest's history.
+	CHECK(guest.Log.Depth() == 0);
+}
+
+TEST_CASE("leaving takes the session and its socket down", "[studio][teamcreate]") {
+	Editor host;
+
+	TeamCreateSettings offering;
+	offering.Name = "briefly";
+	offering.Port = 0;
+
+	std::string trouble;
+	REQUIRE(host.Team.Host(offering, trouble));
+	REQUIRE(host.Team.Edits() != nullptr);
+
+	host.Team.Leave(1.0);
+
+	// The stream goes with the announcement. A stream outliving its transport
+	// is a dangling reference in a destructor, which is the least debuggable
+	// place for one.
+	CHECK(host.Team.Edits() == nullptr);
+	CHECK_FALSE(host.Team.Watching());
+
+	// And publishing into nothing is a null check rather than a crash.
+	host.Team.PublishEdits({}, 2.0);
 }

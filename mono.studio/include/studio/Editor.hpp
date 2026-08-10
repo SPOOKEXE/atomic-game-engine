@@ -3292,9 +3292,13 @@ namespace studio {
 		// Team create's panel. See `DrawTeamCreate`.
 		bool ShowTeamCreate = false;
 
-		// This editor's presence among the others. Idle — and holding no
-		// socket — until somebody opens the panel and asks it to look.
-		TeamCreate Team;
+		// This editor's presence among the others, and the edits between them.
+		// Idle — and holding no socket — until somebody opens the panel and
+		// asks it to look.
+		//
+		// Held by pointer because it borrows the command log and the universe,
+		// and both are built during `Initialise` rather than at construction.
+		std::unique_ptr<TeamCreate> Team;
 
 		// What the team-create fields hold while somebody is editing them.
 		// Kept on the editor rather than static inside the draw, for

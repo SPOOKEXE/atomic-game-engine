@@ -32,12 +32,57 @@ namespace studio {
 		}
 	}
 
-	TeamCreate::TeamCreate() = default;
+	TeamCreate::TeamCreate(CommandLog &log, engine::world::Universe &universe)
+		: Log(&log), Worlds(&universe) {}
 
 	TeamCreate::~TeamCreate() = default;
 
 	bool TeamCreate::Host(const TeamCreateSettings &settings, std::string &error) {
-		return Open(settings, true, {}, error);
+		// The stream first, because the port it binds is the port the
+		// announcement has to carry — `settings.Port` of zero binds an
+		// ephemeral one, and an advert naming zero sends every guest nowhere.
+		engine::net::TransportSettings socket;
+		Socket = engine::net::MakeUdpTransport(settings.Port, socket);
+		if (Socket == nullptr) {
+			error = "could not open a socket to host the session on";
+			return false;
+		}
+		Stream = EditStream::Host(*Socket, *Log, *Worlds);
+
+		TeamCreateSettings offering = settings;
+		offering.Port = Socket->Local().Port;
+
+		if (!Open(offering, true, {}, error)) {
+			Stream.reset();
+			Socket.reset();
+			return false;
+		}
+		return true;
+	}
+
+	bool TeamCreate::Join(const engine::net::Endpoint &at, double nowSeconds, std::string &error) {
+		if (!at.IsValid()) {
+			error = "that session has no address to join";
+			return false;
+		}
+
+		// An ephemeral port: a guest is dialling out, and a well-known one
+		// would be a port a second editor on the same machine could not take.
+		engine::net::TransportSettings socket;
+		Socket = engine::net::MakeUdpTransport(0, socket);
+		if (Socket == nullptr) {
+			error = "could not open a socket to join from";
+			return false;
+		}
+
+		Stream = EditStream::Join(*Socket, at, nowSeconds, *Log, *Worlds);
+		return true;
+	}
+
+	void TeamCreate::PublishEdits(std::span<const Command> commands, double nowSeconds) {
+		if (Stream != nullptr) {
+			Stream->Publish(commands, nowSeconds);
+		}
 	}
 
 	bool TeamCreate::Watch(const std::string &rendezvousAddress, std::span<const std::string> secrets) {
@@ -126,6 +171,12 @@ namespace studio {
 	}
 
 	void TeamCreate::Leave(double nowSeconds) {
+		// The stream before the socket it borrows. A stream outliving its
+		// transport is a dangling reference in a destructor, which is the least
+		// debuggable place for one.
+		Stream.reset();
+		Socket.reset();
+
 		if (Presence_ != nullptr) {
 			Presence_->Withdraw(nowSeconds);
 			Presence_.reset();
@@ -138,6 +189,9 @@ namespace studio {
 	void TeamCreate::Pump(double nowSeconds) {
 		if (Presence_ != nullptr) {
 			Presence_->Pump(nowSeconds);
+		}
+		if (Stream != nullptr) {
+			Stream->Pump(nowSeconds);
 		}
 	}
 
@@ -179,37 +233,37 @@ namespace studio {
 
 		const double now = engine::core::Clock::Seconds();
 
-		if (!Team.Watching()) {
+		if (!Team->Watching()) {
 			ImGui::TextUnformatted("Not looking for anybody yet.");
 			ImGui::Spacing();
 			if (ImGui::Button("Look for editors")) {
 				// Watching costs one socket and announces nothing, which is
 				// what somebody opening this panel to look wants.
-				Team.Watch(TeamPointField, {});
+				Team->Watch(TeamPointField, {});
 			}
 		} else {
-			if (Team.Hosting()) {
-				ImGui::Text("Hosting \"%s\"", Team.Session().Name.c_str());
-				ImGui::TextUnformatted(Team.Session().Session.Text().c_str());
+			if (Team->Hosting()) {
+				ImGui::Text("Hosting \"%s\"", Team->Session().Name.c_str());
+				ImGui::TextUnformatted(Team->Session().Session.Text().c_str());
 				if (ImGui::SmallButton("Copy session id")) {
-					ImGui::SetClipboardText(Team.Session().Session.Text().c_str());
+					ImGui::SetClipboardText(Team->Session().Session.Text().c_str());
 				}
-				if (!Team.Invitation().empty()) {
+				if (!Team->Invitation().empty()) {
 					ImGui::SameLine();
 					// The key is the invitation. It has to be copyable or a
 					// private session is a session of one — `SessionKey::Text`
 					// carries that argument in full.
 					if (ImGui::SmallButton("Copy key")) {
-						ImGui::SetClipboardText(Team.Invitation().c_str());
+						ImGui::SetClipboardText(Team->Invitation().c_str());
 					}
 				}
 			} else {
 				ImGui::TextUnformatted("Watching. Nothing is being announced about this editor.");
 			}
 
-			if (Team.Fault() != network::PresenceFault::None) {
+			if (Team->Fault() != network::PresenceFault::None) {
 				ImGui::TextColored(
-					ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "discovery: %s", network::Describe(Team.Fault())
+					ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "discovery: %s", network::Describe(Team->Fault())
 				);
 			}
 		}
@@ -228,9 +282,9 @@ namespace studio {
 			"Rendezvous", "host:port, for editors off this subnet", TeamPointField, sizeof(TeamPointField)
 		);
 
-		if (ImGui::Button(Team.Hosting() ? "Stop hosting" : "Host")) {
-			if (Team.Hosting()) {
-				Team.Leave(now);
+		if (ImGui::Button(Team->Hosting() ? "Stop hosting" : "Host")) {
+			if (Team->Hosting()) {
+				Team->Leave(now);
 			} else {
 				TeamCreateSettings offering;
 				offering.Name = TeamNameField;
@@ -244,7 +298,7 @@ namespace studio {
 				offering.Port = 0;
 
 				std::string trouble;
-				if (!Team.Host(offering, trouble)) {
+				if (!Team->Host(offering, trouble)) {
 					Say("team create: " + trouble, engine::core::LogLevel::Error);
 				}
 			}
@@ -252,7 +306,7 @@ namespace studio {
 
 		ImGui::Separator();
 
-		const std::span<const network::Listing> peers = Team.Peers();
+		const std::span<const network::Listing> peers = Team->Peers();
 		if (peers.empty()) {
 			ImGui::TextDisabled("No other editors seen.");
 		} else if (ImGui::BeginTable(
@@ -265,7 +319,7 @@ namespace studio {
 			ImGui::TableHeadersRow();
 
 			for (const network::Listing &row : peers) {
-				if (row.Session.Session == Team.Session().Session) {
+				if (row.Session.Session == Team->Session().Session) {
 					// This editor, listed back by the rendezvous point. Useful
 					// to know and not useful to look at.
 					continue;
@@ -290,9 +344,39 @@ namespace studio {
 		}
 
 		ImGui::Separator();
+
+		if (const EditStream *stream = Team->Edits()) {
+			const EditCounters &edits = stream->Counters();
+			ImGui::Text(
+				"%s · %zu editor%s",
+				stream->Connected() ? "connected" : "connecting",
+				stream->Editors(),
+				stream->Editors() == 1 ? "" : "s"
+			);
+			ImGui::TextDisabled(
+				"sent %llu · received %llu · applied %llu",
+				static_cast<unsigned long long>(edits.Sent),
+				static_cast<unsigned long long>(edits.Received),
+				static_cast<unsigned long long>(edits.Applied)
+			);
+			if (edits.Undelivered > 0 || edits.Malformed > 0) {
+				// **Both are worth seeing and they are different problems.**
+				// Undelivered is this end's link refusing; malformed is the
+				// other end sending something this build cannot read.
+				ImGui::TextColored(
+					ImVec4(0.95f, 0.45f, 0.35f, 1.0f),
+					"undelivered %llu · malformed %llu",
+					static_cast<unsigned long long>(edits.Undelivered),
+					static_cast<unsigned long long>(edits.Malformed)
+				);
+			}
+		} else {
+			ImGui::TextDisabled("Host or join to share edits.");
+		}
+
 		ImGui::TextDisabled(
-			"Sessions only. Two editors can find each other; editing one place together\n"
-			"needs a shared document, which is not built yet."
+			"Edits replicate; undo does not. Ctrl+Z reverses what you did,\n"
+			"never what somebody else did."
 		);
 
 		ImGui::End();

@@ -27,6 +27,8 @@
 //
 // @tier client
 
+#include <engine/net/Transport.hpp>
+
 #include <cstdint>
 #include <memory>
 #include <network/Advert.hpp>
@@ -34,6 +36,7 @@
 #include <network/Presence.hpp>
 #include <span>
 #include <string>
+#include <studio/EditStream.hpp>
 
 namespace studio {
 
@@ -56,9 +59,10 @@ namespace studio {
 		// find it. Empty is LAN only.
 		std::string RendezvousAddress;
 
-		// The port peers would connect to. Zero when nothing is hosted yet, and
-		// an announcement carrying zero is one nothing can act on — which is
-		// why `Hosting` reports it rather than hiding it.
+		// The UDP port the edit stream listens on. Zero binds an ephemeral one,
+		// which is what a person hosting from a laptop wants — the announcement
+		// carries the port that was bound, so nothing has to be agreed in
+		// advance.
 		uint16_t Port = 0;
 
 		// How many editors this session will take, or zero for no stated limit.
@@ -74,7 +78,10 @@ namespace studio {
 	// @since v0.13
 	class TeamCreate {
 	  public:
-		TeamCreate();
+		// @param log      The command log this editor's edits come from and
+		//        arriving edits are applied through.
+		// @param universe The worlds those edits touch.
+		TeamCreate(CommandLog &log, engine::world::Universe &universe);
 		~TeamCreate();
 
 		TeamCreate(const TeamCreate &) = delete;
@@ -94,6 +101,28 @@ namespace studio {
 		//         `Fault` and the rest runs.
 		bool Host(const TeamCreateSettings &settings, std::string &error);
 
+		// Joins the session a listing names.
+		//
+		// **The two halves arrive together and that is the point.** Discovery
+		// hands over an address; the edit stream is what makes joining mean
+		// something. A `Join` that only connected would be a browser.
+		//
+		// @param at         Where the host is — `network::Listing::Dial`.
+		// @param nowSeconds The current time.
+		// @param[out] error Filled when this returns false.
+		// @return `false` when the address is not one, or no socket could be
+		//         opened.
+		// @since v0.13
+		bool Join(const engine::net::Endpoint &at, double nowSeconds, std::string &error);
+
+		// The edits crossing between this editor and the others.
+		//
+		// @return The stream, or null when nothing is hosted or joined.
+		// @since v0.13
+		EditStream *Edits() {
+			return Stream.get();
+		}
+
 		// Watches for other editors without announcing this one.
 		//
 		// What somebody opening the panel to look gets, before they have
@@ -111,10 +140,21 @@ namespace studio {
 		// @param nowSeconds The current time.
 		void Leave(double nowSeconds);
 
-		// Announces what is due and drains what arrived.
+		// Announces what is due, drains what arrived, and carries edits.
 		//
 		// @param nowSeconds The current time.
 		void Pump(double nowSeconds);
+
+		// Puts one committed waypoint on the wire.
+		//
+		// What `CommandLog::Watcher::Committed` is wired to. Does nothing when
+		// no session is open, which is what keeps an editor that never opens
+		// the panel from paying for any of this.
+		//
+		// @param commands   One waypoint's worth.
+		// @param nowSeconds The current time.
+		// @since v0.13
+		void PublishEdits(std::span<const Command> commands, double nowSeconds);
 
 		// Tells the world how many editors are in.
 		//
@@ -175,6 +215,18 @@ namespace studio {
 		);
 
 		std::unique_ptr<network::Presence> Presence_;
+
+		// The socket the edit stream runs on, and the stream over it.
+		//
+		// **Its own socket, not the discovery one.** Discovery announces from
+		// an ephemeral port and listens on a well-known one; a session is a
+		// third thing with a lifetime of its own, and a guest that joined has
+		// no reason to stop browsing.
+		std::unique_ptr<engine::net::Transport> Socket;
+		std::unique_ptr<EditStream> Stream;
+
+		CommandLog *Log = nullptr;
+		engine::world::Universe *Worlds = nullptr;
 		network::Advert Announcement;
 		std::string KeyText;
 		bool Announcing = false;

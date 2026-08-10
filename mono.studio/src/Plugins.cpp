@@ -678,11 +678,16 @@ namespace studio {
 			}
 		};
 
-		// `Watcher::Committed` is deliberately not hooked here. It is the edit
-		// stream's seam — one waypoint, whole, in the order it was made — and
-		// wiring it to nothing would be a fan-out with a branch nobody takes.
-		// `tests/Commands.cpp` covers it; the consumer is team create's
-		// replication layer.
+		watcher.Committed = [this](uint64_t, std::span<const Command> group) {
+			// **One waypoint, whole, in the order it was made.** Team create's
+			// end of it: a peer that applied half of a group would show a state
+			// the author never saw. Does nothing when no session is open, which
+			// is what keeps an editor that never opens the panel from paying
+			// for any of this.
+			if (Team != nullptr) {
+				Team->PublishEdits(group, engine::core::Clock::Seconds());
+			}
+		};
 
 		Commands->Watch(std::move(watcher));
 	}
