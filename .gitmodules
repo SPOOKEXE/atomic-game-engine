@@ -229,3 +229,7 @@
 	url = https://github.com/lieff/minimp3.git
 	branch = master
 	shallow = true
+[submodule "mono.vendor/tomlplusplus"]
+	path = mono.vendor/tomlplusplus
+	url = https://github.com/marzer/tomlplusplus.git
+	branch = master

@@ -122,6 +122,35 @@ add_library(vendor_json INTERFACE)
 add_library(Vendor::json ALIAS vendor_json)
 target_include_directories(vendor_json SYSTEM INTERFACE "${MONO_VENDOR}/json/single_include")
 
+# --- toml++ -------------------------------------------------------------------
+# TOML, for the one thing in this repository that reads it: `mono.studio`'s Rojo
+# sync maps a `*.toml` to a `ModuleScript`, which `rojo.space/docs/v7/sync-details`
+# lists beside the `*.json` case. `D00104` carried it as deferred for exactly one
+# reason — the mapping was free and the parser was not vendored.
+#
+# Header-only, MIT, and declared here rather than added as a subdirectory for
+# json's reason: upstream's CMakeLists builds tests, examples and an install
+# package nobody here wants.
+#
+# **`include/`, not the amalgamated `toml.hpp` at the repository root**, which is
+# the opposite of the choice made for json one section up and is deliberate. The
+# amalgamation would put a bare `toml.hpp` on an include path, and a header that
+# generic is one any other vendor or system directory can shadow. The modular
+# copy is reached as `<toml++/toml.hpp>` and cannot be.
+if(NOT EXISTS "${MONO_VENDOR}/tomlplusplus/include/toml++/toml.hpp")
+	message(FATAL_ERROR "mono.vendor/tomlplusplus is missing. Run `just setup`.")
+endif()
+add_library(vendor_tomlplusplus INTERFACE)
+add_library(Vendor::tomlplusplus ALIAS vendor_tomlplusplus)
+target_include_directories(vendor_tomlplusplus SYSTEM INTERFACE "${MONO_VENDOR}/tomlplusplus/include")
+# **Without this the parser throws and `parse_result` is an alias for `table`,**
+# so there is no error to read and a malformed file becomes an exception crossing
+# a sync that is built to report and carry on. Off makes `parse_result` the
+# result type with `error()` on it, which is the same shape `ReadJsonFile` gets
+# from nlohmann's `allow_exceptions = false` one function above its caller.
+# asio's `ASIO_STANDALONE` is here for the same class of reason.
+target_compile_definitions(vendor_tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
+
 # --- minimp3 ------------------------------------------------------------------
 # MP3 decoding, for `Engine::audio`. Two headers, no build system, CC0.
 #

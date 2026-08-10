@@ -114,6 +114,13 @@ mono_add_library(studio
 		# Hosting a server in this process is what "Play" means. The escape
 		# below.
 		Mono::server
+
+	# TOML, for the Rojo sync's `*.toml` row alone — `rojo.space` maps it to the
+	# same `ModuleScript` a `*.json` produces, so `RojoSync.cpp` converts the
+	# document and reuses that emitter. **Private, and it stays private**: this
+	# is a parser for one file extension in an editor, and nothing in a public
+	# header here names a `toml::` type.
+	VENDOR Vendor::tomlplusplus
 	ALLOW_TIER_ESCAPE Mono::server
 )
 
