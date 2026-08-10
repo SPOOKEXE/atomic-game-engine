@@ -41,7 +41,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, main.default.json accepted beside Rojo's own default.project.json in each subfolder)
 - [x] world => rojo sync, universe => multi-rojo sync (each world syncs separately, so one bad project file costs its own world and the rest still sync)
 - [_] deferred `D00104` — the rest of Rojo's file table: .rbxm, .model.json, .meta.json, .txt, .csv, .json, .toml.
-- [_] update built-in MCP integrations, add a studio ui button to enable/disable and information panel
+- [x] update built-in MCP integrations (component_list, entity_query, component_get, component_set over the v0.12 storage surface; first suite for `control`), add a studio ui button to enable/disable and information panel
 - [_] deferred items
 - [_] create a api for setting up configs in the studio and saving them to the ~/Documents/atomic-game-engine/studio folder. Save for preferences.json, cdn.json, recent.json (last 5 projects), etc. Also materials preview only renders in when i hover my mouse over it in the assets editor. It needs to auto-fetch it and put it on the ball.
 - [_] studio editing tools; select, move, rotate, 3d scene interactable gimbals, grid step amount input, rotation amount input, anchor toggle, "lock" toggle, pivot editor mode, reset pivot button. Reference "~/Pictures/Screenshot from 2026-08-08 15-59-40.png" and "~/Pictures/Screenshot from 2026-08-08 16-00-19.png".

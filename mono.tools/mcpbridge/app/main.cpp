@@ -9,8 +9,9 @@
 // says goes back out.
 //
 // Because it parses nothing, there is no second copy of the protocol to keep in
-// step. A tool added to `mono.studio/src/ControlDispatch.cpp` is reachable
-// through here the moment it exists, and this file never changes.
+// step. A tool added to `engine/control/src/Tools.cpp` or to the editor's own
+// `mono.studio/src/Control.cpp` is reachable through here the moment it exists,
+// and this file never changes.
 //
 // **Two threads, because both directions block.** A single-threaded pump would
 // have to poll one side while the other was mid-read, and the whole point of

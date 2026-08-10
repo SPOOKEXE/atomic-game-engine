@@ -1423,6 +1423,23 @@ namespace studio {
 		// `Network.cpp`.
 		void DrawNetwork();
 
+		// The control surface: whether it is listening, and what it offers.
+		//
+		// **A panel rather than a log line, because the interesting facts about
+		// it change.** Whether a client is attached, how many requests have been
+		// answered and which tools this program declares are all things somebody
+		// checks while debugging an agent, and the startup line said the first
+		// two once and the third never.
+		void DrawControl();
+
+		// Starts the control server, or stops it.
+		//
+		// **One button rather than a setting that needs a restart.** The port is
+		// a setting; whether the socket is open is a decision somebody makes
+		// while working, and an editor that had to be relaunched to answer an
+		// agent is one nobody would use that way.
+		void ToggleControl();
+
 		// Builds the delivery client and the uploader from the current sources.
 		//
 		// Called at start-up and whenever the Content page is edited, because a
@@ -2995,6 +3012,17 @@ namespace studio {
 
 		// What is moving to and from the origins. See `DrawNetwork`.
 		bool ShowNetwork = false;
+
+		// The control surface's own panel. See `DrawControl`.
+		bool ShowControl = false;
+
+		// What the port field holds while somebody is editing it.
+		//
+		// **Separate from `Settings.ControlPort`, which is what the editor
+		// starts with.** A half-typed number must not be the port a restart
+		// would use, and `Settings.ControlPort` is negative for "do not listen"
+		// — a state a text field cannot express while it is being typed in.
+		int ControlPortField = 8720;
 
 		// The editor's own delivery client, built from `Content`.
 		//
