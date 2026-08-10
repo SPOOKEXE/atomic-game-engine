@@ -4,6 +4,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/scene/Awake.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -272,6 +273,33 @@ namespace engine::script {
 			}
 
 			PushInstance(state, owner);
+			return 1;
+		}
+
+		int InstanceKeepWorldAwake(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			// **The reason is required**, which is the one thing this surface
+			// insists on. A world that will not sleep costs a machine until
+			// somebody works out what is holding it up, and the answer should be
+			// a sentence rather than an entity id — see `scene/Awake.hpp`.
+			const char *reason = luaL_checkstring(state, 2);
+			if (!scene::KeepWorldAwake(store, instance, core::Name(reason))) {
+				luaL_error(state, "KeepWorldAwake needs a live instance");
+			}
+			return 0;
+		}
+
+		int InstanceLetWorldSleep(lua_State *state) {
+			Store &store = StoreOf(state);
+			scene::LetWorldSleep(store, CheckInstance(state, 1));
+			return 0;
+		}
+
+		int InstanceIsKeepingWorldAwake(lua_State *state) {
+			Store &store = StoreOf(state);
+			lua_pushboolean(state, scene::HoldsWorldAwake(store, CheckInstance(state, 1)) ? 1 : 0);
 			return 1;
 		}
 
@@ -1258,6 +1286,9 @@ namespace engine::script {
 			{"IsA", InstanceIsA},
 			{"GetPivot", InstanceGetPivot},
 			{"PivotTo", InstancePivotTo},
+			{"KeepWorldAwake", InstanceKeepWorldAwake},
+			{"LetWorldSleep", InstanceLetWorldSleep},
+			{"IsKeepingWorldAwake", InstanceIsKeepingWorldAwake},
 			{"SetNetworkOwner", InstanceSetNetworkOwner},
 			{"GetNetworkOwner", InstanceGetNetworkOwner},
 			{"GetPlayers", InstanceGetPlayers},

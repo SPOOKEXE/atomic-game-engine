@@ -208,6 +208,42 @@ namespace engine::scene {
 		ecs::Entity Player;
 	};
 
+	// A reason this world must keep ticking even with nobody in it.
+	//
+	// **Occupancy is a host's question and this is the game's answer to it.**
+	// `world::DecideLifecycle` suspends a world nobody is in, and a host can see
+	// players and viewports and nothing else — so a world whose NPCs are walking
+	// a route, whose economy is settling, or which is counting down between
+	// rounds looks exactly like an abandoned one from outside. A script attaching
+	// this to any entity says otherwise, and it is the only way to say it that
+	// does not require the engine to guess what a game considers activity.
+	//
+	// **Attached to an entity rather than set on the world**, because the thing
+	// that needs the world awake is a thing in it: the NPC, the conveyor, the
+	// round timer. That makes the lifetime automatic — destroy the entity and the
+	// claim goes with it, which is the failure mode a world-level flag has, where
+	// somebody sets it and the code that would have cleared it never runs.
+	//
+	// Any number of entities may hold one and the world stays awake while at
+	// least one does. Cheap on the shape every game actually has: the host walks
+	// this component, and a game that never attaches one has no rows to walk.
+	//
+	// **Deliberately not replicated** — see `replication::LocalToTheClient`. It
+	// is a statement about hosting rather than about what the world looks like,
+	// and a client has no use for it and no business setting it.
+	//
+	// @since v0.13
+	struct AwakeWorld {
+		// Why, for whoever reads the log or the panel.
+		//
+		// **Required rather than optional, and that is the point of it.** A world
+		// that will not sleep is a world that costs a machine indefinitely, and
+		// the question somebody eventually asks is not whether one is held awake
+		// but *what* is holding it. A tag component answers that with a scan of
+		// entity ids; a reason answers it with a sentence.
+		core::Name Reason;
+	};
+
 	// What a thing collides as.
 	//
 	// Separate from `Bounds` because the two answer different questions: bounds

@@ -58,6 +58,16 @@ namespace engine::replication {
 			return true;
 		}
 
+		// **A statement about hosting, not about what the world looks like.**
+		// `scene.AwakeWorld` is how a game tells its host that a world with
+		// nobody in it still has to tick — NPCs, an economy, a round timer. A
+		// client neither needs it nor has any business setting it, and a
+		// replicated one would be a client asking a server to keep a machine
+		// running.
+		if (component == "scene.AwakeWorld") {
+			return true;
+		}
+
 		// **Derived every frame on whichever machine draws.** A previous
 		// transform is what interpolation is measured from and the client builds
 		// its own in `replication::SnapshotBuffer`; the render gate is computed

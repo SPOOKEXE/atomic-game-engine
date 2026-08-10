@@ -704,6 +704,9 @@ declare interface Instance {
 	readonly PlayerAdded: InstanceSignal;
 	readonly PlayerRemoving: InstanceSignal;
 	GetPlayers(): Instance[];
+	KeepWorldAwake(reason: string): void;
+	LetWorldSleep(): void;
+	IsKeepingWorldAwake(): boolean;
 	SetNetworkOwner(player?: Instance | null): void;
 	GetNetworkOwner(): Instance | null;
 	GetAttribute(name: string): EngineAttribute | null;

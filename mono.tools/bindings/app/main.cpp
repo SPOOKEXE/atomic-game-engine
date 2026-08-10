@@ -1364,6 +1364,9 @@ declare task: {
 				out << "\tPlayerRemoving: InstanceSignal\n";
 				out << "\tfunction GetPlayers(self): { Instance }\n";
 
+				out << "\tfunction KeepWorldAwake(self, reason: string): ()\n";
+				out << "\tfunction LetWorldSleep(self): ()\n";
+				out << "\tfunction IsKeepingWorldAwake(self): boolean\n";
 				out << "\tfunction SetNetworkOwner(self, player: Instance?): ()\n";
 				out << "\tfunction GetNetworkOwner(self): Instance?\n";
 
@@ -2174,6 +2177,9 @@ declare const task: {
 				out << "\treadonly PlayerRemoving: InstanceSignal;\n";
 				out << "\tGetPlayers(): Instance[];\n";
 
+				out << "\tKeepWorldAwake(reason: string): void;\n";
+				out << "\tLetWorldSleep(): void;\n";
+				out << "\tIsKeepingWorldAwake(): boolean;\n";
 				out << "\tSetNetworkOwner(player?: Instance | null): void;\n";
 				out << "\tGetNetworkOwner(): Instance | null;\n";
 

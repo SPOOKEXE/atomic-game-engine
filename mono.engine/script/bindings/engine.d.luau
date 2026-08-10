@@ -787,6 +787,9 @@ declare extern type Instance with
 	PlayerAdded: InstanceSignal
 	PlayerRemoving: InstanceSignal
 	function GetPlayers(self): { Instance }
+	function KeepWorldAwake(self, reason: string): ()
+	function LetWorldSleep(self): ()
+	function IsKeepingWorldAwake(self): boolean
 	function SetNetworkOwner(self, player: Instance?): ()
 	function GetNetworkOwner(self): Instance?
 	function GetAttribute(self, name: string): EngineAttribute?

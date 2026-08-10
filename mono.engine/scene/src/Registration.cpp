@@ -571,6 +571,10 @@ namespace engine::scene {
 		// The generated form, for the reason `ecs.Hierarchy` uses it: the field
 		// is an `Entity`, which is a directory index a snapshot restores exactly.
 		ecs::Components::Register<NetworkOwner>("scene.NetworkOwner");
+
+		// Appended, like every addition here: a component id is registration
+		// order and it decides column order in a snapshot.
+		ecs::Components::Register<AwakeWorld>("scene.AwakeWorld");
 	}
 
 	void RegisterSceneClasses() {

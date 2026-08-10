@@ -40,6 +40,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Awake.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
@@ -525,6 +526,48 @@ namespace engine::script {
 				);
 			}
 			return JS_UNDEFINED;
+		}
+
+		JSValue InstanceKeepWorldAwake(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+
+			// **The reason is required.** A world that will not sleep costs a
+			// machine until somebody finds what is holding it up, and the answer
+			// should be a sentence — see `scene/Awake.hpp`.
+			if (argc < 1) {
+				return JS_ThrowTypeError(context, "KeepWorldAwake needs a reason");
+			}
+			const char *reason = JS_ToCString(context, argv[0]);
+			if (reason == nullptr) {
+				return JS_ThrowTypeError(context, "KeepWorldAwake needs a reason");
+			}
+
+			const bool held = scene::KeepWorldAwake(*JsOf(context).World, instance, core::Name(reason));
+			JS_FreeCString(context, reason);
+			if (!held) {
+				return JS_ThrowTypeError(context, "KeepWorldAwake needs a live instance");
+			}
+			return JS_UNDEFINED;
+		}
+
+		JSValue InstanceLetWorldSleep(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+			scene::LetWorldSleep(*JsOf(context).World, instance);
+			return JS_UNDEFINED;
+		}
+
+		JSValue InstanceIsKeepingWorldAwake(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+			return JS_NewBool(context, scene::HoldsWorldAwake(*JsOf(context).World, instance) ? 1 : 0);
 		}
 
 		JSValue InstanceGetNetworkOwner(JSContext *context, JSValueConst self, int, JSValueConst *) {
@@ -1397,6 +1440,9 @@ namespace engine::script {
 			JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
 			JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
 			JS_CFUNC_DEF("GetPlayers", 0, InstanceGetPlayers),
+			JS_CFUNC_DEF("KeepWorldAwake", 1, InstanceKeepWorldAwake),
+			JS_CFUNC_DEF("LetWorldSleep", 0, InstanceLetWorldSleep),
+			JS_CFUNC_DEF("IsKeepingWorldAwake", 0, InstanceIsKeepingWorldAwake),
 			JS_CFUNC_DEF("SetNetworkOwner", 1, InstanceSetNetworkOwner),
 			JS_CFUNC_DEF("GetNetworkOwner", 0, InstanceGetNetworkOwner),
 			JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),

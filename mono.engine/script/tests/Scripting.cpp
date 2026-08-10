@@ -4172,3 +4172,75 @@ TEST_CASE("javascript hears players join and leave", "[scripting][js]") {
 	store.DestroyInstance(ada);
 	CHECK(Trace(store, log) == "+Ada-Ada");
 }
+
+TEST_CASE("a script keeps its world awake and lets it sleep again", "[scripting]") {
+	// **The surface a game reaches for when its world is empty and busy.** An
+	// NPC on a route, a shop restocking, a round counting down — a host can see
+	// players and nothing else, so this is how a game says the world still has
+	// work in it. `scene/Awake.hpp` carries the argument; this is the spelling.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local npc = Instance.new('Part')
+		npc.Parent = workspace
+
+		assert(npc:IsKeepingWorldAwake() == false, 'nothing should hold a fresh world up')
+
+		npc:KeepWorldAwake('patrol')
+		assert(npc:IsKeepingWorldAwake(), 'the claim should read back')
+
+		-- Restating replaces rather than stacking, so a script may say this
+		-- every tick without tracking whether it already has.
+		npc:KeepWorldAwake('returning')
+		assert(npc:IsKeepingWorldAwake(), 'restating should still hold it')
+
+		npc:LetWorldSleep()
+		assert(npc:IsKeepingWorldAwake() == false, 'withdrawing should release it')
+
+		-- And withdrawing twice is not an error: tidying up should not require
+		-- remembering whether the claim was made.
+		npc:LetWorldSleep()
+	)");
+}
+
+TEST_CASE("keeping a world awake needs a reason", "[scripting]") {
+	// **Required rather than optional, and the test is what keeps it that way.**
+	// The question somebody asks about a world that will not sleep is what is
+	// holding it up, and an entity id is not an answer.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local npc = Instance.new('Part')
+		npc:KeepWorldAwake()
+	)"));
+}
+
+TEST_CASE("javascript keeps its world awake too", "[scripting]") {
+	// The roadmap's gate: a member lands in both languages or it is not done.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const npc = Instance.new('Part');
+		npc.Parent = workspace;
+
+		if (npc.IsKeepingWorldAwake()) { throw new Error('a fresh world should be free'); }
+
+		npc.KeepWorldAwake('patrol');
+		if (!npc.IsKeepingWorldAwake()) { throw new Error('the claim should read back'); }
+
+		npc.LetWorldSleep();
+		if (npc.IsKeepingWorldAwake()) { throw new Error('withdrawing should release it'); }
+	)");
+}
