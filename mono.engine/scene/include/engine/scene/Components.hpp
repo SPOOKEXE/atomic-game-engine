@@ -35,6 +35,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
@@ -170,6 +171,41 @@ namespace engine::scene {
 		// and it is the same state the solver already has to keep. `physics`
 		// owns it now, and `physics/AGENTS.md` carries the whole decision.
 		uint8_t Reserved[3] = {};
+	};
+
+	// Which player simulates a body, when it is not the server.
+	//
+	// **Absent means the server owns it, and that is the whole default.** Every
+	// world this engine has ever run is server-owned throughout, so ownership had
+	// to cost an unowned world nothing — a component nobody attaches is an
+	// archetype nobody visits, where a `bool ServerOwned = true` on `RigidBody`
+	// would have been a byte on every body in every scene to say what all of them
+	// already said.
+	//
+	// **A `Player` instance rather than a `replication::ClientId`.** A client
+	// handle is `replication`'s at L11 and this is `scene` at L7, so naming one
+	// here would invert the stack; but the deeper reason is that a script is the
+	// thing that assigns ownership and a script has a `Player`, not a socket. The
+	// host maps the one to the other, which is the same direction every other
+	// authority decision travels. It is also what Roblox does.
+	//
+	// **What this does *not* yet do**: nothing reads it. Physics still integrates
+	// every body on the server and `Authority` still sends every replicated
+	// component to every interested client, exactly as before. It is here first
+	// so ownership is expressible and observable before it is load-bearing —
+	// making it load-bearing means a client→server state path, and that is a wire
+	// change with a trust decision inside it rather than a component.
+	//
+	// An `ecs::Entity` needs no hand-written serialiser: it is a directory index
+	// and a snapshot restores the directory exactly, which is the same reason
+	// `ecs.Hierarchy` uses the generated form.
+	//
+	// @since v0.13
+	struct NetworkOwner {
+		// The `Player` instance that simulates this body. A null entity is the
+		// same statement as having no component at all — a script that sets the
+		// owner to `nil` removes it rather than storing a hole.
+		ecs::Entity Player;
 	};
 
 	// What a thing collides as.

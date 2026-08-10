@@ -684,6 +684,8 @@ declare interface Instance {
 	GetPivot(): CFrame;
 	PivotTo(target: CFrame): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
+	SetNetworkOwner(player?: Instance | null): void;
+	GetNetworkOwner(): Instance | null;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };

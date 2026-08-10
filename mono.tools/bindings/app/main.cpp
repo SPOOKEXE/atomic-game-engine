@@ -1318,6 +1318,20 @@ declare task: {
 				// putting one inside is a syntax error four lines later that
 				// reads as an unclosed function, which is exactly how it was
 				// found. `EngineAttribute` is declared beside the datatypes.
+				// **Ownership, declared on `Instance` like everything above it,
+				// and the argument is an `Instance` rather than a `Player`.**
+				// There is no `Player` type in this file — a class is a run-time
+				// registration and the declared vocabulary stops at `Instance` —
+				// so pinning the argument tighter than the file can spell would
+				// mean inventing a type the run time does not check. What it is
+				// checked against is `scene::PlayerClass`, at the call.
+				//
+				// Optional on the way in because that is how a body is given back
+				// to the server, and optional on the way out because that is what
+				// a server-owned body reads as.
+				out << "\tfunction SetNetworkOwner(self, player: Instance?): ()\n";
+				out << "\tfunction GetNetworkOwner(self): Instance?\n";
+
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
@@ -2098,6 +2112,13 @@ declare const task: {
 				out << "\tGetPivot(): CFrame;\n";
 				out << "\tPivotTo(target: CFrame): void;\n";
 				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
+
+				// Ownership, matching the Luau half. `Instance` rather than a
+				// `Player` type for the reason given there, and `null` rather
+				// than `undefined` because `null` is what `GetNetworkOwner`
+				// returns for a server-owned body.
+				out << "\tSetNetworkOwner(player?: Instance | null): void;\n";
+				out << "\tGetNetworkOwner(): Instance | null;\n";
 
 				// Attributes, matching the Luau half. The union is the same
 				// closed set and for the same reason.

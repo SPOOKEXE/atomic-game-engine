@@ -3923,3 +3923,85 @@ TEST_CASE("an instance with no placement answers a pivot anyway", "[scripting]")
 		folder:PivotTo(CFrame.new(Vector3.new(5, 0, 0)))
 	)");
 }
+
+// --- network ownership ------------------------------------------------------
+//
+// **The surface, not the effect.** Nothing in the engine reads ownership yet —
+// physics integrates every body on whichever machine runs it — so what these
+// pin is that a script can say who owns a body, read it back, and be stopped
+// from saying something that cannot be true. `engine.scene.ownership` owns the
+// reclaim.
+
+TEST_CASE("a script hands a body to a player and back to the server", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part')
+		part.Parent = workspace
+
+		-- Absent reads as the server rather than as an error, which is the
+		-- state every body in every world this engine ships is in.
+		assert(part:GetNetworkOwner() == nil, 'a fresh part should be the server\'s')
+
+		local ada = game:GetService('Players'):FindFirstChild('Ada')
+		assert(ada ~= nil, 'the fixture should have a player in it')
+
+		part:SetNetworkOwner(ada)
+		assert(part:GetNetworkOwner() == ada, 'the owner should read back')
+
+		-- Roblox's spelling for handing it back, and the argument is optional
+		-- for the same reason it is there.
+		part:SetNetworkOwner(nil)
+		assert(part:GetNetworkOwner() == nil, 'nil should give it back')
+	)");
+}
+
+TEST_CASE("a script cannot hand a body to something that is not a player", "[scripting]") {
+	// **Raises rather than answering false**, which is the departure from
+	// `AddTag` the binding documents: a full tag table is a scene running out
+	// of room, where this is a script naming the wrong variable — and a silent
+	// refusal is a body nothing simulates and no line of output.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		local folder = Instance.new('Instance')
+		part:SetNetworkOwner(folder)
+	)"));
+	CHECK(runtime->LastError().find("SetNetworkOwner") != std::string::npos);
+}
+
+TEST_CASE("javascript hands a body to a player and back", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const part = Instance.new('Part');
+		part.Parent = workspace;
+		if (part.GetNetworkOwner() !== null) throw new Error('a fresh part should be the server\'s');
+
+		const ada = game.GetService('Players').FindFirstChild('Ada');
+		if (!ada) throw new Error('the fixture should have a player in it');
+
+		part.SetNetworkOwner(ada);
+		if (part.GetNetworkOwner().GetFullName() !== ada.GetFullName())
+			throw new Error('the owner should read back');
+
+		// `null` here where Luau says `nil`, which is the only difference.
+		part.SetNetworkOwner(null);
+		if (part.GetNetworkOwner() !== null) throw new Error('null should give it back');
+	)");
+}

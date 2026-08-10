@@ -4,6 +4,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -183,6 +184,50 @@ namespace engine::script {
 			Store &store = StoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
 			lua_pushboolean(state, scene::HasTag(store, instance, Name(luaL_checkstring(state, 2))));
+			return 1;
+		}
+
+		// `instance:SetNetworkOwner(player)` and `instance:GetNetworkOwner()`
+		//
+		// **Roblox's pair, spelled Roblox's way, including the nil.** Passing no
+		// argument gives the body back to the server, which is what
+		// `SetNetworkOwner(nil)` means there and what a script that has just seen
+		// a player leave will reach for.
+		//
+		// The bad-owner case raises rather than answering `false`, which departs
+		// from `AddTag` above and for the reason that one gives: a full tag table
+		// is a *scene* running out of room, where handing a body to a `Folder` is
+		// a script naming the wrong variable. A silent `false` there is a body
+		// nothing simulates and no line of output.
+		int InstanceSetNetworkOwner(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			Entity player = ecs::NULL_ENTITY;
+			if (!lua_isnoneornil(state, 2)) {
+				player = CheckInstance(state, 2);
+			}
+
+			if (!scene::SetNetworkOwner(store, instance, player)) {
+				luaL_error(state, "SetNetworkOwner expects a Player or nil");
+			}
+			return 0;
+		}
+
+		int InstanceGetNetworkOwner(lua_State *state) {
+			Store &store = StoreOf(state);
+			const Entity instance = CheckInstance(state, 1);
+
+			const Entity owner = scene::NetworkOwnerOf(store, instance);
+			if (owner == ecs::NULL_ENTITY) {
+				// Nil is "the server", which is the same answer Roblox gives and
+				// the same answer an unassigned body gives. A script that wants
+				// to know which of the two it is asked the wrong question.
+				lua_pushnil(state);
+				return 1;
+			}
+
+			PushInstance(state, owner);
 			return 1;
 		}
 
@@ -1153,6 +1198,8 @@ namespace engine::script {
 			{"IsA", InstanceIsA},
 			{"GetPivot", InstanceGetPivot},
 			{"PivotTo", InstancePivotTo},
+			{"SetNetworkOwner", InstanceSetNetworkOwner},
+			{"GetNetworkOwner", InstanceGetNetworkOwner},
 			{"AddTag", InstanceAddTag},
 			{"RemoveTag", InstanceRemoveTag},
 			{"HasTag", InstanceHasTag},

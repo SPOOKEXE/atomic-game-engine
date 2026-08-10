@@ -5,6 +5,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
+#include <engine/scene/Ownership.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/world/Postbox.hpp>
@@ -168,6 +169,13 @@ namespace server {
 		// Earth's.
 		engine::scene::PrepareGravity(store);
 		engine::scene::RegisterGravitySystem(scheduler);
+
+		// **This process is the authority, so this process reclaims.** A body
+		// handed to a player who then leaves is owned by a dead entity, and
+		// nothing would ever simulate it again. Registered even though nothing
+		// reads ownership yet, because the day something does is the day this
+		// being absent is a bug rather than a gap.
+		engine::scene::RegisterOwnershipSystem(scheduler);
 	}
 
 	void RegisterPlaceholderComponents() {

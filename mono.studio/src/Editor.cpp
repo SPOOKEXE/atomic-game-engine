@@ -13,6 +13,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -1399,6 +1400,12 @@ namespace studio {
 		// it, which is exactly the arrangement the physics suites describe.
 		engine::scene::PrepareGravity(store);
 		engine::scene::RegisterGravitySystem(systems);
+
+		// **The studio is an authority too**, which is what makes this the right
+		// place rather than a server-only concern: a world here is played, not
+		// replicated in. A body handed to a player who then leaves would
+		// otherwise be owned by a dead entity for the rest of the session.
+		engine::scene::RegisterOwnershipSystem(systems);
 	}
 
 	void Editor::NewGame() {

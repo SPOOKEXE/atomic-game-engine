@@ -40,6 +40,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Ownership.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -473,6 +474,43 @@ namespace engine::script {
 			// question — the same one the render gate asks — so a script and the
 			// renderer cannot disagree about whether something is in the scene.
 			return JS_NewBool(context, bound.World->IsDescendantOf(instance, JsEntityOf(context, argv[0])));
+		}
+
+		// The other half of the Luau pair in `Instances.cpp`, spelled the way
+		// this language spells it: `null` rather than `nil`, and a missing
+		// argument means the same thing as passing it.
+		JSValue InstanceSetNetworkOwner(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+
+			// **The absent cases are named rather than derived.** `JsEntityOf`
+			// answers a null entity for *anything* that is not an instance, so
+			// letting it decide would turn `SetNetworkOwner(5)` into a silent
+			// hand-back to the server — the failure this whole method exists to
+			// make visible.
+			const bool toTheServer = argc < 1 || JS_IsNull(argv[0]) != 0 || JS_IsUndefined(argv[0]) != 0;
+			const Entity player = toTheServer ? ecs::NULL_ENTITY : JsEntityOf(context, argv[0]);
+
+			if (!toTheServer && player == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "SetNetworkOwner expects a Player or null");
+			}
+
+			if (!scene::SetNetworkOwner(*JsOf(context).World, instance, player)) {
+				return JS_ThrowTypeError(context, "SetNetworkOwner expects a Player or null");
+			}
+			return JS_UNDEFINED;
+		}
+
+		JSValue InstanceGetNetworkOwner(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+
+			const Entity owner = scene::NetworkOwnerOf(*JsOf(context).World, instance);
+			return owner == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, owner);
 		}
 
 		JSValue InstanceClearAllChildren(JSContext *context, JSValueConst self, int, JSValueConst *) {
@@ -1307,6 +1345,8 @@ namespace engine::script {
 			JS_CFUNC_DEF("GetFullName", 0, InstanceGetFullName),
 			JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
 			JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
+			JS_CFUNC_DEF("SetNetworkOwner", 1, InstanceSetNetworkOwner),
+			JS_CFUNC_DEF("GetNetworkOwner", 0, InstanceGetNetworkOwner),
 			JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
 			JS_CGETSET_DEF("Changed", InstanceChanged, nullptr),
 			JS_CGETSET_DEF("ChildAdded", InstanceTreeSignal<SignalKind::ChildAdded>, nullptr),

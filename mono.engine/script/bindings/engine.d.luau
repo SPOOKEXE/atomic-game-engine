@@ -760,6 +760,8 @@ declare extern type Instance with
 	function GetPivot(self): CFrame
 	function PivotTo(self, target: CFrame): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
+	function SetNetworkOwner(self, player: Instance?): ()
+	function GetNetworkOwner(self): Instance?
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
 	function GetAttributes(self): { [string]: EngineAttribute }
