@@ -4005,3 +4005,139 @@ TEST_CASE("javascript hands a body to a player and back", "[scripting][js]") {
 		if (part.GetNetworkOwner() !== null) throw new Error('null should give it back');
 	)");
 }
+
+// --- the Players service ----------------------------------------------------
+//
+// **Two signals wrapping one mechanism each, and the pair is not symmetric.**
+// `PlayerAdded` is a tree change delivered at the barrier; `PlayerRemoving` is
+// dispatched from inside the store while the player is still there. That
+// asymmetry is the feature rather than an inconsistency, and the third case
+// below is the one that says so.
+
+TEST_CASE("PlayerAdded fires for a player and not for anything else", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity log = MakeLog(store);
+
+	// **Recorded onto an instance rather than into a global.** Each `Run` is
+	// its own chunk, so a global one chunk sets is not a global the next one
+	// reads — which is what every other signal case here works around the same
+	// way.
+	MustRun(*runtime, R"(
+		local log = workspace:FindFirstChild('Log')
+		game:GetService('Players').PlayerAdded:Connect(function(player)
+			log.Name = log.Name .. '+' .. player.Name
+		end)
+	)");
+
+	// Added from the host, which is what a server does when somebody connects.
+	engine::scene::AddPlayer(store, "Ada");
+
+	// **A `Folder` under `Players` too**, because the service is an ordinary
+	// container and the filter is the whole point of the signal existing.
+	{
+		const Entity folder =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "NotAPlayer");
+		store.SetParent(folder, engine::scene::PlayersOf(store));
+	}
+
+	Beat(store, *runtime);
+
+	// One arrival, and it is the player. The folder is a child of the same
+	// container and fires nothing.
+	CHECK(Trace(store, log) == "+Ada");
+}
+
+TEST_CASE("GetPlayers answers the players and nothing else", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+	engine::scene::AddPlayer(store, "Grace");
+
+	{
+		const Entity folder =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "NotAPlayer");
+		store.SetParent(folder, engine::scene::PlayersOf(store));
+	}
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local players = game:GetService('Players'):GetPlayers()
+		assert(#players == 2, 'expected two players, got ' .. #players)
+
+		-- Order is insertion order, which is what the tree gives.
+		assert(players[1].Name == 'Ada', players[1].Name)
+		assert(players[2].Name == 'Grace', players[2].Name)
+
+		-- And the filter is real: the container has three children.
+		assert(#game:GetService('Players'):GetChildren() == 3)
+	)");
+}
+
+TEST_CASE("PlayerRemoving fires while the player is still there", "[scripting]") {
+	// **The reason it is not a queued signal.** A game saving somebody's
+	// progress on the way out reads the player in the handler; a signal
+	// delivered at the next barrier would hand it an instance that has gone.
+	// So the handler reads `.Name` — which is only answerable while the row is
+	// alive — rather than merely counting the call.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	const Entity log = MakeLog(store);
+
+	MustRun(*runtime, R"(
+		local log = workspace:FindFirstChild('Log')
+		game:GetService('Players').PlayerRemoving:Connect(function(player)
+			-- Reads the leaving player, which is only answerable while the row
+			-- is alive. A queued signal would have nothing to read.
+			log.Name = log.Name .. '-' .. player.Name
+		end)
+	)");
+
+	const Entity ada = engine::scene::AddPlayer(store, "Ada");
+	REQUIRE(ada != engine::ecs::NULL_ENTITY);
+	Beat(store, *runtime);
+
+	store.DestroyInstance(ada);
+
+	// No beat: the signal already fired, synchronously, from inside the destroy.
+	CHECK(Trace(store, log) == "-Ada");
+}
+
+TEST_CASE("javascript hears players join and leave", "[scripting][js]") {
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+
+	const Entity log = MakeLog(store);
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const log = workspace.FindFirstChild('Log');
+		const players = game.GetService('Players');
+		players.PlayerAdded.Connect((player) => { log.Name = log.Name + '+' + player.Name; });
+		players.PlayerRemoving.Connect((player) => { log.Name = log.Name + '-' + player.Name; });
+	)");
+
+	const Entity ada = engine::scene::AddPlayer(store, "Ada");
+	REQUIRE(ada != engine::ecs::NULL_ENTITY);
+	Beat(store, *runtime);
+
+	CHECK(Trace(store, log) == "+Ada");
+
+	MustRun(*runtime, R"(
+		if (game.GetService('Players').GetPlayers().length !== 1) throw new Error('GetPlayers');
+	)");
+
+	store.DestroyInstance(ada);
+	CHECK(Trace(store, log) == "+Ada-Ada");
+}

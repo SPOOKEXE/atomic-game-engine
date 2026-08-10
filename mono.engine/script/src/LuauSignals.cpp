@@ -23,7 +23,12 @@ namespace engine::script {
 				return;
 			}
 
-			if (kind != SignalKind::DescendantRemoving) {
+			if (kind == SignalKind::PlayerAdded) {
+				context.World->ObserveTree();
+				return;
+			}
+
+			if (kind != SignalKind::DescendantRemoving && kind != SignalKind::PlayerRemoving) {
 				return;
 			}
 
@@ -42,7 +47,8 @@ namespace engine::script {
 			context.RemovingHooked = true;
 
 			lua_State *state = context.State;
-			context.World->OnDescendantRemoving([state](ecs::Entity ancestor, ecs::Entity leaving) {
+			ecs::Store *world = context.World;
+			context.World->OnDescendantRemoving([state, world](ecs::Entity ancestor, ecs::Entity leaving) {
 				PushInstanceValue(state, leaving);
 
 				// **The error is logged rather than returned**, because there
@@ -53,6 +59,21 @@ namespace engine::script {
 				const std::string failed = FireSignal(state, SignalKind::DescendantRemoving, ancestor, 1);
 				if (!failed.empty()) {
 					ENGINE_WARN("[script] a DescendantRemoving handler failed: {}", failed);
+				}
+
+				// **`PlayerRemoving` rides this hook rather than the barrier**,
+				// which is the whole reason it is worth having: a game saving
+				// somebody's progress on the way out needs the player still
+				// there to read, and a queue drained a tick later has nothing
+				// to hand it.
+				if (!IsPlayerOfService(*world, ancestor, leaving)) {
+					return;
+				}
+
+				PushInstanceValue(state, leaving);
+				const std::string left = FireSignal(state, SignalKind::PlayerRemoving, ancestor, 1);
+				if (!left.empty()) {
+					ENGINE_WARN("[script] a PlayerRemoving handler failed: {}", left);
 				}
 			});
 		}

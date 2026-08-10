@@ -41,6 +41,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Ownership.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -158,12 +159,20 @@ namespace engine::script {
 				return;
 			}
 
-			if (kind != SignalKind::DescendantRemoving || bound.RemovingHooked) {
+			if (kind == SignalKind::PlayerAdded) {
+				bound.World->ObserveTree();
+				return;
+			}
+
+			const bool removing =
+				kind == SignalKind::DescendantRemoving || kind == SignalKind::PlayerRemoving;
+			if (!removing || bound.RemovingHooked) {
 				return;
 			}
 			bound.RemovingHooked = true;
 
-			bound.World->OnDescendantRemoving([context](Entity ancestor, Entity leaving) {
+			ecs::Store *world = bound.World;
+			bound.World->OnDescendantRemoving([context, world](Entity ancestor, Entity leaving) {
 				JSValue subject = MakeJsInstance(context, leaving);
 
 				// **Logged rather than returned**, because there is nowhere to
@@ -174,6 +183,17 @@ namespace engine::script {
 					FireJsSignal(context, SignalKind::DescendantRemoving, ancestor, 1, &subject);
 				if (!failed.empty()) {
 					ENGINE_WARN("[script] a DescendantRemoving handler failed: {}", failed);
+				}
+
+				// The Luau side's reason, unchanged: `PlayerRemoving` rides
+				// this hook because a game saving somebody's progress on the
+				// way out needs the player still there to read.
+				if (IsPlayerOfService(*world, ancestor, leaving)) {
+					const std::string left =
+						FireJsSignal(context, SignalKind::PlayerRemoving, ancestor, 1, &subject);
+					if (!left.empty()) {
+						ENGINE_WARN("[script] a PlayerRemoving handler failed: {}", left);
+					}
 				}
 
 				JS_FreeValue(context, subject);
@@ -511,6 +531,26 @@ namespace engine::script {
 
 			const Entity owner = scene::NetworkOwnerOf(*JsOf(context).World, instance);
 			return owner == ecs::NULL_ENTITY ? JS_NULL : MakeJsInstance(context, owner);
+		}
+
+		// The Luau half's twin: the `Player` children of the receiver, which on
+		// `Players` is the answer and on anything else is an empty array.
+		JSValue InstanceGetPlayers(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const Entity instance = SelfEntity(context, self);
+			if (instance == ecs::NULL_ENTITY) {
+				return JS_ThrowTypeError(context, "not an instance");
+			}
+
+			JsContext &bound = JsOf(context);
+			JSValue array = JS_NewArray(context);
+			uint32_t index = 0;
+			bound.World->EachChild(instance, [&](Entity child) {
+				if (!ecs::Classes::IsA(bound.World->ClassOf(child), scene::PlayerClass())) {
+					return;
+				}
+				JS_SetPropertyUint32(context, array, index++, MakeJsInstance(context, child));
+			});
+			return array;
 		}
 
 		JSValue InstanceClearAllChildren(JSContext *context, JSValueConst self, int, JSValueConst *) {
@@ -1156,6 +1196,13 @@ namespace engine::script {
 			if (change.To != ecs::NULL_ENTITY) {
 				fire(SignalKind::ChildAdded, change.To, change.Instance);
 
+				// The Luau pump's reason, unchanged: a player joining *is* a
+				// reparent, so this is that arrival filtered rather than a
+				// second recording of the same fact.
+				if (IsPlayerOfService(*bound.World, change.To, change.Instance)) {
+					fire(SignalKind::PlayerAdded, change.To, change.Instance);
+				}
+
 				// `DescendantAdded` is every ancestor's, not just the new
 				// parent's — that is the whole difference between it and
 				// `ChildAdded`.
@@ -1345,6 +1392,7 @@ namespace engine::script {
 			JS_CFUNC_DEF("GetFullName", 0, InstanceGetFullName),
 			JS_CFUNC_DEF("IsDescendantOf", 1, InstanceIsDescendantOf),
 			JS_CFUNC_DEF("ClearAllChildren", 0, InstanceClearAllChildren),
+			JS_CFUNC_DEF("GetPlayers", 0, InstanceGetPlayers),
 			JS_CFUNC_DEF("SetNetworkOwner", 1, InstanceSetNetworkOwner),
 			JS_CFUNC_DEF("GetNetworkOwner", 0, InstanceGetNetworkOwner),
 			JS_CFUNC_DEF("GetPropertyChangedSignal", 1, InstancePropertyChangedSignal),
@@ -1354,6 +1402,8 @@ namespace engine::script {
 			JS_CGETSET_DEF("DescendantAdded", InstanceTreeSignal<SignalKind::DescendantAdded>, nullptr),
 			JS_CGETSET_DEF("DescendantRemoving", InstanceTreeSignal<SignalKind::DescendantRemoving>, nullptr),
 			JS_CGETSET_DEF("AncestryChanged", InstanceTreeSignal<SignalKind::AncestryChanged>, nullptr),
+			JS_CGETSET_DEF("PlayerAdded", InstanceTreeSignal<SignalKind::PlayerAdded>, nullptr),
+			JS_CGETSET_DEF("PlayerRemoving", InstanceTreeSignal<SignalKind::PlayerRemoving>, nullptr),
 
 			// The 2D tree's input. Same template, because a gui signal is a
 			// handle onto `SignalTable` exactly as a tree signal is — what

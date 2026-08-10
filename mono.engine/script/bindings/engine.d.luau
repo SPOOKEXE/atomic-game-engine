@@ -143,6 +143,25 @@ declare extern type PropertyChangedSignal with
 	function Once(self, handler: () -> ()): RBXScriptConnection
 end
 
+-- The instance tree's signals, in two shapes because the arguments differ.
+--
+-- **These were undeclared until v0.13**, which is the same omission the
+-- generator's own note about `AddTag` describes: `ChildAdded` and its four
+-- neighbours have been answered by `InstanceIndex` since v0.6 and named
+-- nowhere here, so every script connecting one typechecked as an error against
+-- a signal the engine hands back. A host member is only declared where it is
+-- written down.
+declare extern type InstanceSignal with
+	function Connect(self, handler: (instance: Instance) -> ()): RBXScriptConnection
+	function Once(self, handler: (instance: Instance) -> ()): RBXScriptConnection
+end
+
+-- `AncestryChanged` is the one that takes two: what moved, and where it is now.
+declare extern type AncestrySignal with
+	function Connect(self, handler: (instance: Instance, parent: Instance) -> ()): RBXScriptConnection
+	function Once(self, handler: (instance: Instance, parent: Instance) -> ()): RBXScriptConnection
+end
+
 -- The 2D tree's input, in two shapes because the arguments differ.
 --
 -- **`GuiSignal` takes no arguments and that is deliberate rather than
@@ -760,6 +779,14 @@ declare extern type Instance with
 	function GetPivot(self): CFrame
 	function PivotTo(self, target: CFrame): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
+	ChildAdded: InstanceSignal
+	ChildRemoved: InstanceSignal
+	DescendantAdded: InstanceSignal
+	DescendantRemoving: InstanceSignal
+	AncestryChanged: AncestrySignal
+	PlayerAdded: InstanceSignal
+	PlayerRemoving: InstanceSignal
+	function GetPlayers(self): { Instance }
 	function SetNetworkOwner(self, player: Instance?): ()
 	function GetNetworkOwner(self): Instance?
 	function GetAttribute(self, name: string): EngineAttribute?
