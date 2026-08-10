@@ -362,7 +362,47 @@ namespace studio {
 			);
 		}
 
+		ImGui::SameLine();
+
+		// **Two buttons about a drag, beside the two about the selection**,
+		// because that is what somebody is doing when they reach for either:
+		// Anchor and Lock decide what a drag may touch, and these two decide
+		// what it does and what it shows while it does it.
+		//
+		// Not disabled with an empty selection, unlike the pair above. Both are
+		// modes rather than edits — there is nothing to apply them to and
+		// nothing to fail — and greying a mode until you have chosen a target
+		// is the wrong way round for somebody who sets it before reaching for
+		// the part.
 		ImGui::EndDisabled();
+
+		if (RunButton("Align", DragAligns, engine::ui::AccentColour())) {
+			DragAligns = !DragAligns;
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Held: a dragged part turns to sit flat on whatever it lands on.\n"
+				"Off: it keeps the rotation it already had.\n\n"
+				"The old facing is turned onto the new surface rather than\n"
+				"thrown away, so parts dropped on one wall do not all end up\n"
+				"pointing the same way."
+			);
+		}
+
+		ImGui::SameLine();
+
+		if (RunButton("Facing", ShowFacing, engine::ui::AccentColour())) {
+			ShowFacing = !ShowFacing;
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Draws which way the selection is facing: a line out of the\n"
+				"front face to a ball, and a ring round the ball with an arrow\n"
+				"at the point that is up.\n\n"
+				"A box says nothing about its orientation — two parts sitting\n"
+				"identically may be turned a quarter apart."
+			);
+		}
 	}
 
 	void Editor::DrawModelTools() {

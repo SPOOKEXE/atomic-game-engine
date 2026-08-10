@@ -3040,6 +3040,92 @@ namespace studio {
 		// The drag in flight, if any.
 		GizmoDrag Dragging;
 
+		// A selection being carried across the surfaces under the cursor.
+		//
+		// **Select's own manipulation, and it needs no handles.** Every other
+		// tool asks somebody to hit a line a few pixels wide; this one is the
+		// whole part, which is how a person expects to move something in a
+		// picture of a room. It is also why Select is not simply "no tool".
+		//
+		// @since v0.13
+		struct SurfaceGrab {
+			// Whether one is under way.
+			bool Active = false;
+
+			// Which panel it started in, so turning to another mid-drag does
+			// not retarget it.
+			size_t Viewport = 0;
+
+			// The part that was taken hold of. The rest of the selection is
+			// carried by the same rigid transform this one gets, which is what
+			// keeps a built thing built rather than piling it into one place.
+			Entity Primary;
+
+			// What was carried, and where each member was before any of it.
+			//@{
+			std::vector<Entity> Instances;
+			std::vector<engine::core::CFrame> Before;
+			//@}
+
+			// Whether anything actually moved, so a drag that found no surface
+			// records nothing.
+			bool Moved = false;
+		};
+
+		// The surface drag in flight, if any.
+		SurfaceGrab SurfaceDragging;
+
+		// Whether a dragged part turns to sit flat on what it lands on.
+		//
+		// **Off keeps the rotation it was authored with**, which is what
+		// somebody laying out a grid of identical props wants; on is what
+		// somebody dressing a slope wants. Neither is right often enough to be
+		// the only behaviour, which is why it is a button rather than a rule.
+		//
+		// @since v0.13
+		bool DragAligns = false;
+
+		// Whether the selection shows which way it is facing.
+		//
+		// A box says nothing about its orientation: two parts sitting
+		// identically may be turned a quarter apart, and the outline cannot
+		// tell them apart. This draws the look out of the front face and the
+		// up as an arrow round it.
+		//
+		// @since v0.13
+		bool ShowFacing = false;
+
+		// Carries the selection across whatever is under the cursor.
+		//
+		// **Called every frame with the Select tool in hand**, and does nothing
+		// until the pointer crosses imgui's drag threshold — which is the same
+		// line `DrawViewport` uses to decide a press was a click, so a
+		// selection and a move cannot both fire from one gesture.
+		//
+		// @param viewport Which panel.
+		// @param panel    That panel's projection, already resolved.
+		// @return Whether a drag is in progress.
+		// @since v0.13
+		bool DragOnSurface(size_t viewport, const PanelProjection &panel);
+
+		// The nearest drawable thing along a ray.
+		//
+		// **Built from what is drawable rather than from the physics
+		// broadphase**, for the reason `PickInViewport` gives: an editor picks
+		// what it can see, and a part with no collider is still a part somebody
+		// clicked on.
+		//
+		// @param world  Which scene.
+		// @param ray    Where to look.
+		// @param ignore Instances to leave out of the index entirely. **Left
+		//        out rather than filtered from the hit**: a part that swallowed
+		//        its own ray would rest on itself and never reach the floor.
+		// @return The hit, or nothing.
+		// @since v0.13
+		std::optional<engine::core::RayHit>
+		RaycastWorld(engine::world::WorldId world, const engine::core::Ray &ray,
+					 std::span<const Entity> ignore);
+
 		// Draws the translate gizmo and runs a drag. Called from the overlay.
 		//
 		// @param viewport Which panel.

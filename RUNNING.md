@@ -304,7 +304,7 @@ row under it is whichever tab is selected:
 
 | Tab | What is on it |
 |---|---|
-| Home | Insert Object · Select, Move, Rotate, Scale · Snap, its two steps and **Faces** · Anchor, Lock |
+| Home | Insert Object · Select, Move, Rotate, Scale · Snap, its two steps and **Faces** · Anchor, Lock, Align, Facing |
 | Model | Edit Pivot, Reset Pivot · Duplicate, Delete, Deselect · Undo, Redo · how many are selected |
 | Script | Script, LocalScript, ModuleScript · Script Editor, Debugger, Command Bar |
 | View | Grid and the panel toggles · camera speed |
@@ -399,6 +399,39 @@ size *and* a placement, since holding the far face still is a centre that moves
 by half of what the size gained; both go into one undo step.
 
 A whole drag is one press of `Ctrl+Z` however many parts it moved.
+
+#### Dragging with Select *(v0.13)*
+
+**Select is not "no tool".** Press on a part and drag, and it goes wherever the
+pointer does — resting on whatever surface is under the cursor, exactly as far
+into it as its own corner reaches, so a turned part sits on a slope rather than
+sinking into it. Dragging something unselected selects it first; dragging
+something already in a selection carries the whole selection by the part you took
+hold of, so a built thing stays built.
+
+Pointing at nothing leaves the selection where it is. A part dropped at some
+arbitrary distance down a ray aimed at the sky is a part you then have to go and
+find; standing still is the answer you undo by moving the mouse back. With Snap
+on, the *destination* is rounded rather than the distance travelled, which is
+what puts parts on a shared grid rather than on parallel ones.
+
+Two buttons beside Lock:
+
+| | |
+|---|---|
+| **Align** | held, a dragged part turns to sit flat on what it lands on. Off, it keeps the rotation it had |
+| **Facing** | draws which way the selection is facing |
+
+Align turns the old facing *onto* the new surface rather than throwing it away —
+so parts dropped on one wall do not all end up pointing the same direction.
+
+Facing draws a line out of the front face to a ball, with a ring round the ball
+and an arrow at the point that is up. A box says nothing about its orientation:
+two parts sitting identically may be turned a quarter apart, and the selection
+outline cannot tell them apart. The line is the look and the arrow is the roll,
+which between them are the whole of a rotation you can act on.
+
+Both are remembered in `preferences.json`.
 
 ### The command bar *(v0.13)*
 

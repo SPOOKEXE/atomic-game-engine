@@ -124,6 +124,22 @@ namespace studio {
 		return projection;
 	}
 
+	namespace {
+		// How far past the front face the facing marker reaches, as a fraction
+		// of the part's largest half-extent.
+		//
+		// **Proportional rather than fixed**, because it is a property of the
+		// part rather than a control: a marker that stayed one metre long would
+		// be invisible on a baseplate and enormous on a bolt.
+		constexpr float FACING_REACH = 0.9f;
+
+		// The look is blue and the up is green, which are the same two colours
+		// the Z and Y handles already use. A third palette for the same two
+		// directions would be a third thing to learn.
+		constexpr ImU32 FACING_LOOK = IM_COL32(85, 130, 235, 235);
+		constexpr ImU32 FACING_UP = IM_COL32(115, 215, 105, 235);
+	}
+
 	void Editor::DrawViewportOverlays() {
 		// **One projection per panel, resolved once and shared by everything
 		// below.** Three passes want it — the gizmo, the pending pick, and the
@@ -173,6 +189,11 @@ namespace studio {
 			if (DrawGizmo(index, panel) && index == PendingPick.Viewport) {
 				overHandle = true;
 			}
+
+			// **After the gizmo, and it declines while a handle is held.** Both
+			// write placements, and two of them running against one selection
+			// is two answers to where it is.
+			DragOnSurface(index, panel);
 		}
 
 		if (PendingPick.Wanted) {
@@ -357,6 +378,86 @@ namespace studio {
 						for (const auto &edge : EDGES) {
 							segment(corner[edge[0]], corner[edge[1]], outline, 1.5f);
 						}
+
+						if (!ShowFacing) {
+							continue;
+						}
+
+						// --- which way it is facing ------------------------
+						//
+						// **A box says nothing about its orientation.** Two
+						// parts sitting identically may be turned a quarter
+						// apart, and nothing in the outline distinguishes them
+						// — which matters the moment anything is placed by
+						// script, welded, or driven along its own look.
+						//
+						// So: a line out of the front face to a ball, and a
+						// ring round the ball with an arrow at the point that
+						// is up. The line is the look and the arrow is the
+						// roll, which together are the whole of the rotation a
+						// person can act on.
+						const Vector3 look = transform->Frame.LookVector();
+						const Vector3 up = transform->Frame.UpVector();
+
+						// In metres and proportional to the part, unlike the
+						// gizmo's pixels: this is a property of the thing being
+						// looked at rather than a control being aimed at, so it
+						// should grow with the part and shrink into the
+						// distance exactly as the part does.
+						const float reach =
+							std::max({half.X, half.Y, half.Z, 0.05f}) * FACING_REACH;
+
+						const Vector3 face = transform->Frame.Position + look * half.Z;
+						const Vector3 ballAt = face + look * reach;
+
+						segment(face, ballAt, FACING_LOOK, 2.0f);
+
+						glm::vec2 ball{};
+						if (!panel.WorldToPanel(ballAt, ball)) {
+							continue;
+						}
+						list->AddCircleFilled(ImVec2(ball.x, ball.y), 4.5f, FACING_LOOK);
+
+						// The ring lies in the plane the look is normal to, so
+						// it reads as a collar round the line rather than as a
+						// second circle floating beside it.
+						const Vector3 side = look.Cross(up).Unit();
+						const float ringRadius = reach * 0.42f;
+
+						constexpr int RING = 24;
+						glm::vec2 previous{};
+						bool havePrevious = false;
+						for (int step = 0; step <= RING; step++) {
+							const float angle =
+								6.2831853f * static_cast<float>(step) / static_cast<float>(RING);
+							const Vector3 at = ballAt + up * (std::cos(angle) * ringRadius) +
+											   side * (std::sin(angle) * ringRadius);
+
+							glm::vec2 screen{};
+							if (!panel.WorldToPanel(at, screen)) {
+								havePrevious = false;
+								continue;
+							}
+							if (havePrevious) {
+								list->AddLine(
+									ImVec2(previous.x, previous.y),
+									ImVec2(screen.x, screen.y),
+									FACING_UP,
+									1.5f
+								);
+							}
+							previous = screen;
+							havePrevious = true;
+						}
+
+						// The head sits where the ring is highest and points
+						// away from the ball, so "which way is up" is answered
+						// by one glance rather than by counting.
+						const Vector3 tip = ballAt + up * (ringRadius * 1.55f);
+						const Vector3 base = ballAt + up * ringRadius;
+						segment(base, tip, FACING_UP, 2.0f);
+						segment(tip, base + side * (ringRadius * 0.42f), FACING_UP, 2.0f);
+						segment(tip, base - side * (ringRadius * 0.42f), FACING_UP, 2.0f);
 					}
 				});
 			}
@@ -1066,23 +1167,17 @@ namespace studio {
 		return hovered >= 0 || Dragging.Axis >= 0;
 	}
 
-	void Editor::PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel) {
-		const WorldId shown = ViewportWorld(viewport);
-		if (!shown.IsValid() || Universe == nullptr) {
-			return;
+	std::optional<engine::core::RayHit>
+	Editor::RaycastWorld(WorldId world, const Ray &ray, std::span<const Entity> ignore) {
+		if (!world.IsValid() || Universe == nullptr) {
+			return std::nullopt;
 		}
-
-		if (!panel.IsValid() || !panel.ContainsPanel(glm::vec2(x, y))) {
-			return;
-		}
-
-		const Ray ray = panel.PanelToRay(glm::vec2(x, y));
 
 		// Built from what is drawable now. See the declaration for why this is
 		// not the physics broadphase.
 		std::vector<engine::spatial::Proxy> proxies;
 
-		Universe->Enter(shown, [&](Store &store) {
+		Universe->Enter(world, [&](Store &store) {
 			store.Each<engine::scene::Transform, engine::scene::Bounds>(
 				[&](Entity entity,
 					const engine::scene::Transform &transform,
@@ -1104,6 +1199,15 @@ namespace studio {
 						return;
 					}
 
+					// **The same argument, one door along.** A part being
+					// dragged is left out rather than skipped in the hit,
+					// because a part that swallowed its own ray would rest on
+					// itself: the surface under the cursor would be the thing
+					// in the author's hand, and it would never reach the floor.
+					if (std::find(ignore.begin(), ignore.end(), entity) != ignore.end()) {
+						return;
+					}
+
 					engine::spatial::Proxy proxy;
 					proxy.Id = entity.Id;
 					proxy.Bounds = AABB::FromOrientedBox(transform.Frame, bounds.HalfExtent);
@@ -1114,13 +1218,240 @@ namespace studio {
 		});
 
 		if (proxies.empty()) {
-			return;
+			return std::nullopt;
 		}
 
 		engine::spatial::HashGrid grid;
 		grid.Rebuild(proxies);
+		return engine::spatial::Raycast(grid, ray, PICK_REACH);
+	}
 
-		const std::optional<engine::core::RayHit> hit = engine::spatial::Raycast(grid, ray, PICK_REACH);
+	bool Editor::DragOnSurface(size_t viewport, const PanelProjection &panel) {
+		// **Select's own manipulation, and it needs no handles.** Every other
+		// tool asks you to hit a line a few pixels wide; this one is the whole
+		// part, which is how a person expects to move something in a picture of
+		// a room. Roblox's drag, and the reason Select is not simply "no tool".
+		const WorldId world = ViewportWorld(viewport);
+		if (world != SelectionWorld || !world.IsValid() || Universe == nullptr) {
+			return false;
+		}
+
+		const bool holding = SurfaceDragging.Active && SurfaceDragging.Viewport == viewport;
+
+		// **Never while a handle is held.** A gizmo drag and a surface drag both
+		// write placements, and two of them running against one selection is
+		// two answers to where it is.
+		if (!holding && (CurrentTool != ToolMode::Select || Dragging.Axis >= 0)) {
+			return false;
+		}
+
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const glm::vec2 cursor(mouse.x, mouse.y);
+
+		// --- starting one ----------------------------------------------------
+
+		if (!holding) {
+			// **Past the threshold, not on the press.** A click is a selection
+			// and a drag is a move, and imgui already draws that line — the
+			// pick in `DrawViewport` is recorded only for a release that never
+			// crossed it, so the two cannot both fire.
+			if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left) || !panel.ContainsPanel(cursor)) {
+				return false;
+			}
+			if (!(viewport == 0 ? ViewportHovered : (ExtraAt(viewport) != nullptr &&
+													ExtraAt(viewport)->Hovered))) {
+				return false;
+			}
+
+			// The part under where the drag *began*, not under the cursor now —
+			// by the time this fires the pointer has already moved, and picking
+			// from where it is would grab whatever it happened to have travelled
+			// over.
+			const ImVec2 began = ImVec2(
+				mouse.x - ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).x,
+				mouse.y - ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).y
+			);
+
+			// A drag that began outside this panel is somebody else's gesture
+			// arriving over the top of it — a slider released across the
+			// viewport, most often.
+			const glm::vec2 from(began.x, began.y);
+			if (!panel.ContainsPanel(from)) {
+				return false;
+			}
+
+			const std::optional<engine::core::RayHit> grabbed =
+				RaycastWorld(world, panel.PanelToRay(from), {});
+			if (!grabbed) {
+				return false;
+			}
+
+			const Entity taken(grabbed->Id);
+
+			// **Dragging something unselected selects it first**, which is what
+			// a person means by putting the pointer on a thing and pulling it.
+			// Dragging something already in a selection moves the whole
+			// selection, which is what they mean the rest of the time.
+			if (std::find(Selection.begin(), Selection.end(), taken) == Selection.end()) {
+				Select(world, taken, false);
+				SelectionAnchor = taken;
+			}
+
+			SurfaceDragging = SurfaceGrab{};
+			SurfaceDragging.Viewport = viewport;
+			SurfaceDragging.Primary = taken;
+
+			Universe->Enter(world, [&](Store &store) {
+				for (const Entity instance : Selection) {
+					if (!store.Alive(instance)) {
+						continue;
+					}
+					if (const auto *transform = store.Get<engine::scene::Transform>(instance)) {
+						SurfaceDragging.Instances.push_back(instance);
+						SurfaceDragging.Before.push_back(transform->Frame);
+					}
+				}
+			});
+
+			if (SurfaceDragging.Instances.empty()) {
+				SurfaceDragging = SurfaceGrab{};
+				return false;
+			}
+
+			SurfaceDragging.Active = true;
+			return true;
+		}
+
+		// --- releasing one ---------------------------------------------------
+
+		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			if (SurfaceDragging.Moved && Commands != nullptr) {
+				// One waypoint for the whole drag, exactly as the gizmo's
+				// release does — a drag is one action to the person who made it
+				// however many parts it carried.
+				const std::optional<std::string> group = Commands->TryBeginRecording("Move", "Move");
+
+				Universe->Enter(world, [&](Store &store) {
+					for (size_t index = 0; index < SurfaceDragging.Instances.size(); index++) {
+						const Entity instance = SurfaceDragging.Instances[index];
+						const auto *transform = store.Get<engine::scene::Transform>(instance);
+						if (!store.Alive(instance) || transform == nullptr) {
+							continue;
+						}
+
+						engine::game::PropertyValue before;
+						before.Type = engine::ecs::PropertyType::CFrame;
+						before.CFrame = SurfaceDragging.Before[index];
+
+						engine::game::PropertyValue after;
+						after.Type = engine::ecs::PropertyType::CFrame;
+						after.CFrame = transform->Frame;
+
+						Commands->RecordProperty(
+							world, instance, engine::core::Name("CFrame"), before, after, "Move"
+						);
+					}
+				});
+
+				if (group) {
+					Commands->FinishRecording(*group, FinishOperation::Commit);
+				}
+				MarkModified();
+			}
+
+			SurfaceDragging = SurfaceGrab{};
+			return false;
+		}
+
+		// --- carrying one ----------------------------------------------------
+
+		const std::optional<engine::core::RayHit> resting =
+			RaycastWorld(world, panel.PanelToRay(cursor), SurfaceDragging.Instances);
+		if (!resting) {
+			// **Nothing under the cursor leaves the selection where it is.** A
+			// part dropped at some arbitrary distance down a ray pointed at the
+			// sky is a part somebody then has to go and find; standing still is
+			// the answer they can undo by moving the mouse back.
+			return true;
+		}
+
+		const size_t primary = static_cast<size_t>(std::distance(
+			SurfaceDragging.Instances.begin(),
+			std::find(
+				SurfaceDragging.Instances.begin(), SurfaceDragging.Instances.end(),
+				SurfaceDragging.Primary
+			)
+		));
+		if (primary >= SurfaceDragging.Instances.size()) {
+			return true;
+		}
+
+		const CFrame &was = SurfaceDragging.Before[primary];
+
+		Vector3 half;
+		Universe->Enter(world, [&](Store &store) {
+			if (const auto *bounds = store.Get<engine::scene::Bounds>(SurfaceDragging.Instances[primary])) {
+				half = bounds->HalfExtent;
+			}
+		});
+
+		// **The rotation is decided before the position, because the position
+		// depends on it.** How far the box reaches toward the surface is a
+		// function of which way it is turned, so aligning after placing would
+		// leave the part hanging above a slope or buried in it.
+		const glm::quat rotation =
+			DragAligns ? AlignedTo(was, resting->Normal) : was.Rotation();
+
+		const CFrame turned(was.Position, rotation);
+		Vector3 position =
+			resting->Position + resting->Normal * SupportAlong(turned, half, resting->Normal);
+
+		// Snapping applies to where it lands, not to how far it travelled: a
+		// drag has no origin to step from, and rounding the destination is what
+		// puts parts on a shared grid rather than on parallel ones.
+		if (SnapEnabled && SnapDistance > 0.0f) {
+			position.X = std::round(position.X / SnapDistance) * SnapDistance;
+			position.Z = std::round(position.Z / SnapDistance) * SnapDistance;
+		}
+
+		// **One rigid transform, applied to every member from its captured
+		// frame.** Moving each instance to the cursor would pile a selection
+		// into one place; carrying the group by the part that was grabbed is
+		// what keeps a built thing built.
+		const CFrame target(position, rotation);
+		const CFrame carry = target * was.Inverse();
+
+		SurfaceDragging.Moved = true;
+
+		Universe->Enter(world, [&](Store &store) {
+			for (size_t index = 0; index < SurfaceDragging.Instances.size(); index++) {
+				const Entity instance = SurfaceDragging.Instances[index];
+				const auto *transform = store.Get<engine::scene::Transform>(instance);
+				if (!store.Alive(instance) || transform == nullptr) {
+					continue;
+				}
+
+				engine::scene::Transform moved = *transform;
+				moved.Frame = index == primary ? target : carry * SurfaceDragging.Before[index];
+				store.Set<engine::scene::Transform>(instance, moved);
+			}
+		});
+
+		return true;
+	}
+
+	void Editor::PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel) {
+		const WorldId shown = ViewportWorld(viewport);
+		if (!shown.IsValid() || Universe == nullptr) {
+			return;
+		}
+
+		if (!panel.IsValid() || !panel.ContainsPanel(glm::vec2(x, y))) {
+			return;
+		}
+
+		const Ray ray = panel.PanelToRay(glm::vec2(x, y));
+		const std::optional<engine::core::RayHit> hit = RaycastWorld(shown, ray, {});
 
 		if (!hit.has_value()) {
 			// **A click on nothing clears the selection**, unless it is adding

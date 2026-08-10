@@ -238,6 +238,16 @@ namespace studio {
 		// @since v0.13
 		ScaleSide Sides = ScaleSide::Side;
 
+		// Whether a dragged part turns to sit flat on what it lands on, and
+		// whether the selection shows which way it faces. See
+		// `Editor::DragAligns` and `Editor::ShowFacing`.
+		//
+		// @since v0.13
+		//@{
+		bool DragAligns = false;
+		bool ShowFacing = false;
+		//@}
+
 		// Whether a handle edits the pivot offset rather than the placement.
 		//
 		// **A mode, because the handles are the same ones.** Roblox spells it

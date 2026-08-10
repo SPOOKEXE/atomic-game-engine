@@ -270,6 +270,8 @@ namespace studio {
 		SnapDistance = Number(document, "gridStep", SnapDistance);
 		SnapDegrees = Number(document, "rotationStep", SnapDegrees);
 		PivotEditing = Flag(document, "pivotEditing", PivotEditing);
+		DragAligns = Flag(document, "dragAligns", DragAligns);
+		ShowFacing = Flag(document, "showFacing", ShowFacing);
 
 		// **Written as its name rather than its index.** An index would make
 		// reordering `ScaleSide` a silent change to how everybody's scale drag
@@ -376,6 +378,8 @@ namespace studio {
 			{"rotationStep", SnapDegrees},
 			{"pivotEditing", PivotEditing},
 			{"scaleSides", Describe(Sides)},
+			{"dragAligns", DragAligns},
+			{"showFacing", ShowFacing},
 			{"controlPort", ControlPort},
 			{"panels",
 			 json{
@@ -441,6 +445,8 @@ namespace studio {
 		SnapDegrees = Prefs.SnapDegrees;
 		PivotEditing = Prefs.PivotEditing;
 		ScaleSides = Prefs.Sides;
+		DragAligns = Prefs.DragAligns;
+		ShowFacing = Prefs.ShowFacing;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file —
@@ -489,6 +495,8 @@ namespace studio {
 		Prefs.SnapDegrees = SnapDegrees;
 		Prefs.PivotEditing = PivotEditing;
 		Prefs.Sides = ScaleSides;
+		Prefs.DragAligns = DragAligns;
+		Prefs.ShowFacing = ShowFacing;
 		Prefs.Scale = Settings.Scale;
 
 		Prefs.Save();
