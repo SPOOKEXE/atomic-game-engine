@@ -77,6 +77,7 @@
 #include <vector>
 
 struct SDL_Window;
+struct ImGuiInputTextCallbackData;
 
 // **Forward-declared rather than including imgui here.** `Editor.hpp` is
 // included by every panel and by the tests, and dragging imgui in to name one
@@ -1531,6 +1532,34 @@ namespace studio {
 
 		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
 		void DrawTeamCreate();
+
+		// A prompt that runs a line of Luau against the scene being edited.
+		// `CommandBar.cpp`.
+		//
+		// @since v0.13
+		void DrawCommandBar();
+
+		// Runs one command, bracketed by a history recording.
+		//
+		// **The whole run is one waypoint**, which is the point: a line that
+		// moves forty parts is one press of Ctrl+Z, not forty. A run that
+		// changed nothing commits nothing, so an empty step never appears in
+		// the Edit menu for somebody who typed a query.
+		//
+		// @param source The Luau to run.
+		// @return Whether it compiled and ran without raising.
+		// @since v0.13
+		bool RunCommand(const std::string &source);
+
+		// Walks the command history for the input's arrow keys.
+		//
+		// **Public because imgui's callback is a free function** and the only
+		// way it reaches an editor is through the user pointer it carries.
+		//
+		// @param data The callback's data.
+		// @return Zero, which is what imgui expects of a history callback.
+		// @since v0.13
+		int WalkCommandHistory(ImGuiInputTextCallbackData *data);
 
 		// The control surface: whether it is listening, and what it offers.
 		//
@@ -3374,6 +3403,42 @@ namespace studio {
 
 		// Team create's panel. See `DrawTeamCreate`.
 		bool ShowTeamCreate = false;
+
+		// The command bar. See `DrawCommandBar`.
+		//
+		// @since v0.13
+		bool ShowCommandBar = false;
+
+		// What is typed into it.
+		//
+		// A character buffer for `InputText`'s sake, like the team-create
+		// fields: this repository's imgui has no `imgui_stdlib` on its link
+		// line.
+		char CommandField[1024] = {};
+
+		// What has been run, oldest first, so the arrows can walk back through
+		// it.
+		//
+		// **Kept even when a command failed.** A command with a typo in it is
+		// exactly the one somebody wants back to fix rather than retype.
+		std::vector<std::string> CommandHistory;
+
+		// Where the arrows have walked to, or -1 for "at the prompt".
+		int CommandCursor = -1;
+
+		// The runtime commands are run in, and the scene it was built against.
+		//
+		// **Kept between commands, so globals persist.** A bar that threw its
+		// VM away after every line would make `local helper = ...` on one line
+		// and using it on the next impossible, which is most of what a person
+		// wants a prompt for. Rebuilt when the active scene changes, because a
+		// runtime is bound to one store.
+		//
+		// **Its own runtime rather than a plugin's**, so a command cannot spend
+		// a plugin's step budget or see its globals — the same reason plugins
+		// get one each.
+		LoadedPlugin CommandHost;
+		engine::world::WorldId CommandWorld;
 
 		// This editor's presence among the others, and the edits between them.
 		// Idle — and holding no socket — until somebody opens the panel and

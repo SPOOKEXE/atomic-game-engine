@@ -233,6 +233,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Render);
 			DrawOutput();
+			DrawCommandBar();
 		}
 		{
 			ENGINE_PROFILE_CAT("settings", engine::core::ProfileCategory::Render);
@@ -889,6 +890,7 @@ namespace studio {
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
 		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
+		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);
 
 		ImGui::Separator();

@@ -351,6 +351,40 @@ caught.
 Drag a row onto another to reparent it. `Ctrl+D` duplicates, `Del` deletes,
 `Ctrl+S` saves.
 
+### The command bar *(v0.13)*
+
+View → Command Bar. One line of Luau, run against the scene that is active, with
+the same vocabulary a plugin gets — `Selection`, `game`, `ChangeHistoryService`
+and the script readers:
+
+```lua
+for _, part in Selection:Get() do part.Anchored = true end
+```
+
+**The whole run is one waypoint.** A line that moves forty parts is one press of
+`Ctrl+Z`, not forty, because the bar opens a `ChangeHistoryService` recording
+before it runs and commits it after. A line that changed nothing commits
+nothing, so a query — a count, a `print` — leaves no empty step in the Edit menu.
+
+`Enter` runs it and keeps the focus, so a run of commands is typed rather than
+clicked between. The arrows walk back through what has been run this session,
+failures included: a command with a typo in it is exactly the one worth getting
+back to fix. Everything typed and everything printed goes to the Output panel, so
+the log reads as a transcript rather than as answers with no questions.
+
+Globals persist between commands — `local helper = ...` on one line and using it
+on the next works. The runtime is rebuilt when the active scene changes, since
+one is bound to one store, and it is the bar's own rather than a plugin's, so a
+command cannot spend a plugin's step budget or see its globals.
+
+**A command runs once and is over**, which is the one place the vocabulary falls
+short of a plugin's: nothing beats the bar's runtime afterwards, so a widget or a
+toolbar it creates is never drawn and a handler it binds never fires again. Ask
+for a lasting surface and you are asking for a plugin — write one.
+
+It is not the command palette. That one is the list of things the editor already
+knows how to do, reachable by name; this runs code the editor has never heard of.
+
 ### Run, Play and Stop
 
 | | |
