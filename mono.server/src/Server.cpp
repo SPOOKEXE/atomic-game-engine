@@ -11,6 +11,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/replication/Priority.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Components.hpp>
@@ -501,63 +502,22 @@ namespace server {
 			return false;
 		}
 
-		// **Opt in, by name.** A world holds components no client has any
-		// business receiving, and a default of "everything" makes leaking one
-		// the consequence of forgetting rather than of deciding. These four are
-		// the placeholder scene; a game file names its own at v0.5.
+		// **One table, and it is `replication`'s.** This was written out here,
+		// in `mono.unified_server_client` and in `mono.studio`, and D00018 said
+		// all three agreed — which was true of this one and the studio's and
+		// not of the harness, whose own comment claimed it was duplicated from
+		// here. Nothing in the build compared them. `DefaultReplicatedComponents`
+		// is where the pairing lives now, and it carries the argument for every
+		// row: which are written every tick and therefore observed, which are
+		// written once by a script and therefore signed, and why getting one
+		// wrong is silent in both directions.
 		//
-		// They are `scene`'s names, which are the same strings a client
-		// registers. They used to be `server.Position` and `server.Velocity`,
-		// and the client declared a matching pair of its own to receive them.
-		Replication->Authority().Replicate(engine::core::Name("scene.Transform"));
-		Replication->Authority().Replicate(engine::core::Name("scene.Motion"));
-
-		// **Signed rather than observed, and until v0.7 they crossed once and
-		// never again.** The placeholder world resizes and recolours nothing,
-		// so observing them would buy a dirty column paid for every tick and
-		// read never — which is why they were left unobserved. The cost of that
-		// only appeared once a *script* could write one: a part recoloured at
-		// runtime kept its old colour on every client for ever, because no
-		// delta could carry a component with no dirty bits, and nothing said
-		// so. `ChangeDetection::Signature` notices the write itself instead of
-		// waiting to be told about it.
-		//
-		// They are here at all because a client that received a position and no
-		// size has nothing to draw.
-		using engine::replication::ChangeDetection;
-		Replication->Authority().Replicate(engine::core::Name("scene.Bounds"), ChangeDetection::Signature);
-		Replication->Authority().Replicate(engine::core::Name("scene.Visual"), ChangeDetection::Signature);
-
-		// **What v0.9's meshes are drawn with**, and the reason they are here at
-		// all is the reason `scene.Bounds` is: a client that received a mesh
-		// name and no texture name has half a model. Without these two a replica
-		// draws every imported mesh untextured and untagged, which reads as a
-		// broken texture path rather than as a component nobody sent.
-		//
-		// `Signature`, because neither changes on a steady world — a colour map
-		// and a tag set are authored once and then sit still, and observing them
-		// would pay a comparison per part per tick to learn nothing.
-		//
-		// **The tag *names* do not cross, and that is a stated gap rather than a
-		// bug.** `scene::TagTable` is a resource and resources have no wire form,
-		// so a replica's table stays empty and `HasTag(name)` there answers
-		// false. Mask-against-mask filtering is unaffected — a surface camera's
-		// filter and an instance's mask both come from this authority, so the
-		// bits mean the same thing on both ends whatever they are called.
-		Replication->Authority().Replicate(
-			engine::core::Name("scene.SurfaceAppearance"), ChangeDetection::Signature
-		);
-		Replication->Authority().Replicate(engine::core::Name("scene.Tags"), ChangeDetection::Signature);
-
-		// The mirror and the tree that says what it is a mirror of. See the
-		// same three lines in `studio/PlayLink.cpp` for why the *aim* is not
-		// among them: a reflection is of the viewer, and every client has its
-		// own. `client::AimReplicaViewer` is the other half.
-		Replication->Authority().Replicate(
-			engine::core::Name("scene.SurfaceCamera"), ChangeDetection::Signature
-		);
-		Replication->Authority().Replicate(engine::core::Name("scene.Camera"), ChangeDetection::Signature);
-		Replication->Authority().Replicate(engine::core::Name("ecs.Hierarchy"), ChangeDetection::Signature);
+		// Still opt-in: a host declares these and may declare more. What is
+		// gone is three chances to declare them differently.
+		for (const engine::replication::ReplicatedComponent &component :
+			 engine::replication::DefaultReplicatedComponents()) {
+			Replication->Authority().Replicate(engine::core::Name(component.Name), component.Detection);
+		}
 
 		// **The priority score, and it is the first thing ever to fill this
 		// hook in.** `Authority::SetPriority` has existed since v0.4 with
