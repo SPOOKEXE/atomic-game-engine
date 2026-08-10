@@ -24,6 +24,7 @@
 #include <engine/ecs/Entity.hpp>
 
 #include <cstddef>
+#include <span>
 #include <vector>
 
 namespace engine::ecs {
@@ -171,10 +172,31 @@ namespace engine::ecs {
 
 		// Replaces this table's contents with `rows` rows read from `reader`.
 		//
+		// **`order` is the writer's column order and is not optional across
+		// processes.** `Write` emits columns in *its* set order, which is
+		// ascending by *its* component ids — and `ComponentSet::Intern` sorts
+		// by the reading process's ids, which are assignment order and differ
+		// whenever the two programs registered their components in a different
+		// sequence. A server whose `ecs.Hierarchy` is registered last and a
+		// client whose `ecs.Hierarchy` is id 2 hold the same set in two
+		// different column orders, and a reader that walked its own order would
+		// read a `Transform`'s bytes as a `Hierarchy`.
+		//
+		// That is not a hypothetical and it is not usually a *failure*: it
+		// happens to abort when a mismatched pair disagrees about length, and
+		// loads silently wrong when it does not. Passing the order the snapshot
+		// recorded is what makes the bytes land on the column they were written
+		// from.
+		//
+		// An empty `order` means "this reader's own order", which is correct
+		// only when the same process wrote them — a scratch copy inside one
+		// program — and is the default for that reason.
+		//
 		// @param reader The reader to consume.
 		// @param rows   The row count the caller read from the header.
+		// @param order  The writer's column order, as this process's ids.
 		// @return `false` on a short or corrupt buffer, leaving the table empty.
-		bool Read(core::ByteReader &reader, size_t rows);
+		bool Read(core::ByteReader &reader, size_t rows, std::span<const ComponentId> order = {});
 
 	  private:
 		// Gives back the id array's capacity once it is far past the row count.

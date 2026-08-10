@@ -371,15 +371,23 @@ TEST_CASE("a connecting client becomes a player in the hosted world", "[server][
 		SKIP("the server program is not built into this preset");
 	}
 
-	// A scene with nothing in it. The services are still furnished — that is
-	// `LoadScene`'s doing — so the world has a `Players` for people to arrive
-	// in, and nothing else that could move underneath the count.
+	// **A scene with a part in it, which is not incidental.** An empty world
+	// replicates only services, whose archetypes are small enough that the two
+	// processes happen to agree about column order. A `Part` is nine components
+	// wide and is what caught `Archetype::Read` reading columns in the reader's
+	// id order rather than the writer's — the client could not join at all, and
+	// the same mismatch on a narrower row loads silently wrong.
+	//
+	// Anchored, so it stays where it was put and the entity count below is not
+	// racing a body falling out of the world.
 	const std::filesystem::path scene =
 		std::filesystem::temp_directory_path() / "server_replication_players.luau";
 	{
 		std::ofstream file(scene, std::ios::trunc);
 		REQUIRE(file);
-		file << "-- deliberately empty: the fixtures are what this case is about\n";
+		file << "local block = Instance.new(\"Part\")\n"
+			 << "block.Anchored = true\n"
+			 << "block.Parent = workspace\n";
 	}
 
 	Remote first;
