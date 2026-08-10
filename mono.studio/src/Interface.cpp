@@ -66,6 +66,36 @@ namespace studio {
 		constexpr const char *STATISTICS = "Statistics";
 		constexpr const char *FRAMEGRAPH = "Frame Graph";
 
+		// The rest, which have no constant of their own because only this list
+		// and their own `Begin` ever name them. Spelled here rather than
+		// hoisted into a dozen more constants: a name used twice in one file is
+		// not the drift a constant prevents.
+		constexpr const char *SKINNABLE[]{
+			VIEWPORT,
+			VIEWPORT2,
+			EXPLORER,
+			WORLDS,
+			PROPERTIES,
+			SCRIPTS,
+			OUTPUT,
+			"Command Bar",
+			SETTINGS,
+			STATISTICS,
+			FRAMEGRAPH,
+			"Tools",
+			"History",
+			"Assets",
+			"Network",
+			"Team Create",
+			"Control (MCP)",
+			"Plugins",
+			"Bus",
+			"Find Instances",
+			"Script Profile",
+			"Changes",
+			"Debugger",
+		};
+
 		// The first-run layout, built once and then owned by the ini file.
 		//
 		// **Only when imgui has no layout of its own.** Rebuilding every run
@@ -127,6 +157,25 @@ namespace studio {
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
+	}
+
+	std::span<const char *const> SkinnablePanels() {
+		return std::span<const char *const>(SKINNABLE, std::size(SKINNABLE));
+	}
+
+	const engine::ui::ThemeColours &Editor::PanelColoursFor(const char *panel) const {
+		// **One empty set, handed out to every panel that has none.** The common
+		// case by a mile — most panels are never recoloured — and it has to cost
+		// a pointer rather than a construction, because this runs once per panel
+		// per frame.
+		static const engine::ui::ThemeColours NONE;
+
+		if (panel == nullptr) {
+			return NONE;
+		}
+
+		const auto found = Prefs.PanelColours.find(panel);
+		return found == Prefs.PanelColours.end() ? NONE : found->second;
 	}
 
 	void Editor::DrawInterface() {
@@ -205,7 +254,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("viewports", engine::core::ProfileCategory::Render);
 			for (size_t index = 0; index <= EXTRA_VIEWPORTS; index++) {
-				DrawViewport(index);
+				Skinned(index == 0 ? VIEWPORT : VIEWPORT2, [&] { DrawViewport(index); });
 			}
 		}
 
@@ -215,33 +264,33 @@ namespace studio {
 
 		{
 			ENGINE_PROFILE_CAT("explorer", engine::core::ProfileCategory::Render);
-			DrawExplorer();
+			Skinned(EXPLORER, [&] { DrawExplorer(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("worlds", engine::core::ProfileCategory::Render);
-			DrawWorlds();
+			Skinned(WORLDS, [&] { DrawWorlds(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("properties", engine::core::ProfileCategory::Render);
-			DrawProperties();
+			Skinned(PROPERTIES, [&] { DrawProperties(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("scripts", engine::core::ProfileCategory::Render);
-			DrawScripts();
+			Skinned(SCRIPTS, [&] { DrawScripts(); });
 		}
 
 		{
 			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Render);
-			DrawOutput();
-			DrawCommandBar();
+			Skinned(OUTPUT, [&] { DrawOutput(); });
+			Skinned("Command Bar", [&] { DrawCommandBar(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("settings", engine::core::ProfileCategory::Render);
-			DrawSettings();
+			Skinned(SETTINGS, [&] { DrawSettings(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("statistics", engine::core::ProfileCategory::Render);
-			DrawStatistics();
+			Skinned(STATISTICS, [&] { DrawStatistics(); });
 		}
 		// **The panel that reports the frame, inside the frame it reports.** It
 		// draws a row per span and a bar per span, so it scales with exactly the
@@ -250,7 +299,7 @@ namespace studio {
 		// account for while being read.
 		{
 			ENGINE_PROFILE_CAT("frame graph", engine::core::ProfileCategory::Render);
-			DrawFrameGraph();
+			Skinned(FRAMEGRAPH, [&] { DrawFrameGraph(); });
 		}
 
 		// v0.10's panels. Each returns immediately when closed, which is what
@@ -262,21 +311,28 @@ namespace studio {
 		// the next step rather than the current one.
 		{
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
-			DrawTools();
-			DrawHistory();
-			DrawAssets();
+			Skinned("Tools", [&] { DrawTools(); });
+			Skinned("History", [&] { DrawHistory(); });
+			Skinned("Assets", [&] { DrawAssets(); });
 			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
 			// and `DrawPipelineProfile()` were drawn here.
-			DrawNetwork();
-			DrawTeamCreate();
-			DrawControl();
-			DrawPlugins();
+			Skinned("Network", [&] { DrawNetwork(); });
+			Skinned("Team Create", [&] { DrawTeamCreate(); });
+			Skinned("Control (MCP)", [&] { DrawControl(); });
+			Skinned("Plugins", [&] { DrawPlugins(); });
+
+			// **Not `Skinned`, and that is the difference between the two
+			// halves of this feature.** Every panel above is the editor's and
+			// takes its colours from the settings page; a plugin's dock widget
+			// is the plugin's and takes them from `SetWidgetColour`, per widget,
+			// inside the loop.
 			DrawPluginWidgets();
-			DrawBus();
-			DrawFindInstances();
-			DrawScriptProfile();
-			DrawDiff();
-			DrawDebugger();
+
+			Skinned("Bus", [&] { DrawBus(); });
+			Skinned("Find Instances", [&] { DrawFindInstances(); });
+			Skinned("Script Profile", [&] { DrawScriptProfile(); });
+			Skinned("Changes", [&] { DrawDiff(); });
+			Skinned("Debugger", [&] { DrawDebugger(); });
 		}
 
 		// **After every panel, because any of them may be the one under the

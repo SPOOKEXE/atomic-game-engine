@@ -53,6 +53,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
+#include <engine/ui/Theme.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <array>
@@ -63,6 +64,7 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
+#include <span>
 #include <string>
 #include <studio/Commands.hpp>
 #include <studio/ContentSources.hpp>
@@ -241,6 +243,23 @@ namespace studio {
 	// @param mode The mode.
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(RunMode mode);
+
+	// Every panel that can be given colours of its own.
+	//
+	// **The titles imgui keys the windows on**, which is also what the layout
+	// ini and `Prefs.PanelColours` use — one name for a panel everywhere rather
+	// than a display name beside an identifier that has to be kept in step.
+	//
+	// **This list and the `Skinned` calls in `DrawInterface` have to agree**, and
+	// nothing enforces it: a panel added to one and not the other is a panel the
+	// settings page offers to colour and nothing colours, or the reverse. Both
+	// live in `Interface.cpp`, next to each other, for that reason. A plugin's
+	// dock widget is deliberately absent — a plugin colours its own, from Luau,
+	// and a list of them here would be a list that changes as plugins load.
+	//
+	// @return The titles, valid for the lifetime of the process.
+	// @since v0.13
+	std::span<const char *const> SkinnablePanels();
 
 	// One line in the output panel.
 	//
@@ -729,6 +748,16 @@ namespace studio {
 
 		// The theme picker and the interface scale.
 		void DrawAppearanceSettings();
+
+		// The seven colours, chosen over whichever palette is selected.
+		//
+		// @since v0.13
+		void DrawThemeColours();
+
+		// The same seven, for one panel rather than for the editor.
+		//
+		// @since v0.13
+		void DrawPanelColours();
 
 		// The Preferences page that is not about looks: the world lifecycle
 		// and how frames are paced.
@@ -1532,6 +1561,31 @@ namespace studio {
 
 		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
 		void DrawTeamCreate();
+
+		// The colours a panel was given, by the title imgui identifies it with.
+		//
+		// @param panel The panel's title.
+		// @return Its override, or an empty one when it has none. The reference
+		//         is valid until `Prefs.PanelColours` is next changed.
+		// @since v0.13
+		const engine::ui::ThemeColours &PanelColoursFor(const char *panel) const;
+
+		// Draws one panel with whatever colours it was given.
+		//
+		// **The push has to bracket `Begin` and `End`, not sit inside them** —
+		// a window's background is read at `Begin`, so an override pushed within
+		// the window colours everything except the window. Which is why this
+		// wraps the call rather than living in each panel: one place to get it
+		// right, and a panel author cannot get it wrong.
+		//
+		// @param panel The panel's title, as the settings panel lists it.
+		// @param body  The draw call.
+		// @since v0.13
+		template <typename Body>
+		void Skinned(const char *panel, Body &&body) {
+			const engine::ui::ScopedColours skin(PanelColoursFor(panel));
+			body();
+		}
 
 		// A prompt that runs a line of Luau against the scene being edited.
 		// `CommandBar.cpp`.
@@ -3403,6 +3457,15 @@ namespace studio {
 
 		// Team create's panel. See `DrawTeamCreate`.
 		bool ShowTeamCreate = false;
+
+		// Which panel the per-panel colour rows are editing.
+		//
+		// **Not saved.** It is where somebody's cursor was in a settings page,
+		// not a preference — and a restored one would open the page on a panel
+		// they have no memory of choosing. Indexes `SkinnablePanels`.
+		//
+		// @since v0.13
+		int ColourPanel = 0;
 
 		// The command bar. See `DrawCommandBar`.
 		//

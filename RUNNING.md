@@ -402,6 +402,72 @@ says so rather than leaving you to find out.
 would settle physics under your hands — a part placed in the air would be on the
 floor by the time you looked away.
 
+### Colours *(v0.13)*
+
+Preferences → Appearance. Seven themes to pick from, then **Colours** underneath
+to change any of them:
+
+| | |
+|---|---|
+| `Surface` | the panel colour, and the anchor every other surface comes from |
+| `Accent` | the highlight, and `AccentHot` is the same colour hovered |
+| `Text`, `TextMuted` | ordinary text, and the secondary text beside it |
+| `Warning`, `Error` | the semantic pair — no palette declares these |
+
+**Seven knobs, not fifty.** imgui has fifty-odd style slots and this exposes
+seven, because the other forty-odd are *derived*: a button's face, an input's
+well, a border and a tab are shades of `Surface` on one ladder. Change the
+surface and all of them move together and stay the right distance apart, which is
+what a per-slot editor would let you get wrong.
+
+**An override rides over the theme rather than replacing it.** Set an accent and
+every other colour still follows whichever palette is selected — so picking a
+different theme afterwards still does something. Each row has a **reset** while
+it is overridden, and `Reset all` puts the whole thing back.
+
+The global choice lives in the layout ini beside the palette. It is written as
+`RRGGBBAA` text, so it is a colour you can read and edit by hand.
+
+#### One panel of its own colour
+
+Under **One panel**, pick any panel and give it the same seven. A dot beside a
+name in the list means that one carries a colour. It resolves on top of the
+global theme, so a panel that sets only a surface keeps the editor's accent.
+
+These live in `preferences.json` rather than the layout ini, because it is a
+document rather than a line:
+
+```json
+"panelColours": {
+  "Explorer": { "Surface": "2E3440FF" },
+  "Output":   { "Accent": "FF0080C0" }
+}
+```
+
+A name nobody recognises, a colour that is not one, and a panel with nothing left
+in it each cost only themselves — the rest of the file still loads. `#2E3440`
+works too; six digits is opaque.
+
+#### A plugin colouring its own dock widget
+
+A plugin owns the widgets it creates, so it colours them from Luau rather than
+from the settings page:
+
+```lua
+local panel = plugin.CreateWidget("Align", true)
+plugin.SetWidgetColour(panel, "Surface", "#2E3440")
+plugin.SetWidgetColour(panel, "Accent", "#FF0080")
+plugin.SetWidgetColour(panel, "Accent", nil)   -- back to the editor's theme
+```
+
+The same seven names, the same `RRGGBB`/`RRGGBBAA` text, and the same rule that
+it resolves *over* the editor's theme — so a widget that sets a surface still
+gets a matching button, border and input well without naming any of them.
+
+**Deliberately not in the settings page.** A list of plugin widgets there would
+be a list whose rows appear and vanish as plugins load, holding entries that
+outlive the plugin that made them.
+
 ### Options
 
 | Option | Default | What it does |

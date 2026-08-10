@@ -156,6 +156,7 @@ namespace studio {
 				"SetWidgetRender",
 				"SetWidgetOpen",
 				"IsWidgetOpen",
+				"SetWidgetColour",
 				"Label",
 				"Button",
 				"Checkbox",
@@ -232,7 +233,8 @@ namespace studio {
 				result = HostValue::Of(static_cast<double>(Plugin.Widgets.size()));
 				return true;
 			}
-			if (name == "SetWidgetRender" || name == "SetWidgetOpen" || name == "IsWidgetOpen") {
+			if (name == "SetWidgetRender" || name == "SetWidgetOpen" || name == "IsWidgetOpen" ||
+				name == "SetWidgetColour") {
 				return Widget(name, arguments, result, failure);
 			}
 
@@ -720,6 +722,9 @@ namespace studio {
 				Plugin.Widgets[widget].Open = At(arguments, 1).AsBoolean();
 				return true;
 			}
+			if (name == "SetWidgetColour") {
+				return SetWidgetColour(widget, At(arguments, 1), At(arguments, 2), failure);
+			}
 
 			const HostValue &handler = At(arguments, 1);
 			if (handler.Tag != HostTag::Callback) {
@@ -735,6 +740,48 @@ namespace studio {
 			}
 
 			Plugin.Widgets[widget].Render = handler.Callback;
+			return true;
+		}
+
+		// `plugin.SetWidgetColour(id, "Surface", "#2E3440")`, and clearing one.
+		//
+		// **A name and text rather than an index and a number**, which is the
+		// same choice the preferences file makes and for the same reason: a
+		// plugin author writing `0xFF403020` has to know imgui's byte order to
+		// get it right, and one writing `"#203040"` does not.
+		bool SetWidgetColour(
+			size_t widget, const HostValue &which, const HostValue &value, std::string &failure
+		) {
+			const std::string name(which.AsText());
+			const std::optional<engine::ui::ThemeColour> colour = engine::ui::ParseThemeColour(name);
+			if (!colour) {
+				// The whole list in the message, because there are seven of them
+				// and the one somebody meant is certainly in it.
+				std::string names;
+				for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
+					names += index > 0 ? ", " : "";
+					names += engine::ui::Describe(static_cast<engine::ui::ThemeColour>(index));
+				}
+				failure = "no colour called '" + name + "' — one of: " + names;
+				return false;
+			}
+
+			// **Nil clears it**, so a plugin has one call rather than two and
+			// the widget goes back to the editor's theme rather than to a colour
+			// the plugin had to know.
+			if (value.Tag == HostTag::Nil) {
+				Plugin.Widgets[widget].Colours[*colour].reset();
+				return true;
+			}
+
+			const std::optional<unsigned int> packed = engine::ui::ParseColourText(value.AsText());
+			if (!packed) {
+				failure = "a colour is RRGGBB or RRGGBBAA text, and '" +
+						  std::string(value.AsText()) + "' is neither";
+				return false;
+			}
+
+			Plugin.Widgets[widget].Colours[*colour] = *packed;
 			return true;
 		}
 

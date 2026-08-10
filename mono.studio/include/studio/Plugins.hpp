@@ -141,6 +141,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/ui/Theme.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <filesystem>
@@ -248,6 +249,22 @@ namespace studio {
 
 		// What to call while it is open, in the plugin's own VM.
 		engine::script::HostCallback Render;
+
+		// What the plugin coloured it, if anything. See `SetWidgetColour`.
+		//
+		// **The plugin's, not the person's.** Every other panel in the editor
+		// takes its colours from the settings page, because they are the
+		// editor's panels and the person owns them; this one was created by a
+		// script and the script owns it. A settings page that listed a plugin's
+		// widgets would be a page whose rows appear and vanish as plugins load,
+		// and whose entries outlive the plugin that made them.
+		//
+		// Resolved over the editor's theme rather than instead of it, so a
+		// widget that sets one colour keeps every other colour in step with the
+		// palette around it — see `engine::ui::ScopedColours`.
+		//
+		// @since v0.13
+		engine::ui::ThemeColours Colours;
 	};
 
 	// One plugin, as the editor holds it.

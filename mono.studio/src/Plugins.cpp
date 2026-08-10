@@ -472,6 +472,14 @@ namespace studio {
 				const std::string label =
 					widget.Title + "###plugin." + plugin.Manifest.Name + "." + widget.Title;
 
+				// **Around `Begin` and `End`, not inside them.** A window's
+				// background is read at `Begin`, so colours pushed within the
+				// window would tint everything in it except the window itself —
+				// which reads as a bug in the theme rather than as a widget that
+				// was coloured wrong. Same bracket the editor's own panels get
+				// from `Editor::Skinned`.
+				const engine::ui::ScopedColours skin(widget.Colours);
+
 				if (ImGui::Begin(label.c_str(), &widget.Open)) {
 					InvokePlugin(plugin, widget.Render, true);
 				}
