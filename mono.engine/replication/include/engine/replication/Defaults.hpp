@@ -73,11 +73,37 @@ namespace engine::replication {
 		ChangeDetection Detection = ChangeDetection::Signature;
 	};
 
+	// Whether a component is deliberately kept off the wire.
+	//
+	// **The list is short and every entry has a reason**, which is the whole
+	// point of inverting this: a component added to `scene` tomorrow crosses
+	// without anybody remembering to add it, and one that must *not* cross is a
+	// decision somebody wrote down here.
+	//
+	// @param component The component's registered name.
+	// @return `true` for a component the default set leaves out.
+	// @since v0.13
+	bool LocalToTheClient(std::string_view component);
+
 	// The components a `scene`-built world replicates.
 	//
-	// **A default rather than a rule.** A host declares these and may declare
-	// more; nothing here forces the set on anybody, which is what keeps
-	// `Authority::Replicate` opt-in.
+	// **Everything the world holds, less the list above.** This was a hand-kept
+	// allow-list of nine names and it was the wrong shape: a component added to
+	// `scene` did not cross until somebody remembered, and "somebody remembered"
+	// is exactly what three copies of this table had already failed at. The
+	// question a host should answer is which components are *local*, and that is
+	// a much shorter list than which are shared.
+	//
+	// **`Authority::Replicate` stays opt-in and this does not change that.** Its
+	// argument — that a world holds state no client has business receiving, so a
+	// default of everything makes leaking one the consequence of forgetting —
+	// is answered by `LocalToTheClient` rather than overridden: the deciding is
+	// still done, once, in a place with the reasons beside it.
+	//
+	// **Call it after components are registered.** It walks the registry, so a
+	// host that asked before `RegisterSceneComponents` would get whatever had
+	// been registered by then. Every caller already registers at start-up and
+	// replicates when a world is built.
 	//
 	// @return The table, valid for the lifetime of the process.
 	// @since v0.13

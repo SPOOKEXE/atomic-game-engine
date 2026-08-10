@@ -1,51 +1,131 @@
+#include <engine/ecs/Components.hpp>
+#include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/replication/Defaults.hpp>
+
+#include <string>
+#include <vector>
 
 namespace engine::replication {
 
+	namespace {
+		// The prefixes a world's shared state lives under.
+		//
+		// **`scene.` is the game's state and `ecs.Hierarchy` is where it hangs
+		// from.** Nothing else is included by prefix: `physics.` is derived from
+		// the shared state every tick and reconstructed on the far side,
+		// `script.` is a server's own, and a module that wants its components on
+		// the wire says so rather than inheriting it from a naming convention.
+		constexpr std::string_view SHARED_PREFIX = "scene.";
+		constexpr std::string_view HIERARCHY = "ecs.Hierarchy";
+
+		// The two written by a system every tick, so the dirty bits already
+		// know.
+		//
+		// Hashing either would be a pass over the world to learn what was free.
+		// Everything else is written once by a script and then never — observing
+		// those buys a dirty column paid every tick and read never, and *not*
+		// signing them is the v0.7 bug where a part recoloured at runtime kept
+		// its old colour on every client for ever.
+		bool WrittenEveryTick(std::string_view component) {
+			return component == "scene.Transform" || component == "scene.Motion";
+		}
+	}
+
+	bool LocalToTheClient(std::string_view component) {
+		// **The client makes its own main camera, and the component that says
+		// *which* camera that is, is the one to keep local.** `ActiveCamera`
+		// names the live one and `client::AimReplicaViewer` mints a predicted
+		// camera and points it there — a replica may not mint an authoritative
+		// entity — so a replicated `ActiveCamera` would be a second answer to
+		// which eye the world is seen through, and the two would fight every
+		// frame. `CameraController` is how a machine drives its own.
+		//
+		// **`scene.Camera` itself must cross, and that is not a hedge.** It is a
+		// *lens*, not a viewpoint: a `SurfaceCamera` carries one, so a mirror
+		// with no replicated `Camera` cannot be aimed at all —
+		// `AimSurfaceCameras` finds nothing, the pane samples nothing, and the
+		// mirror is a flat grey rectangle on every client. That is not
+		// hypothetical: excluding it broke `studio.playlink`'s "a mirror arrives
+		// on the client whole", which is the case that exists to catch exactly
+		// this. An authored `Camera` instance is scene content like any other.
+		if (component == "scene.ActiveCamera" || component == "scene.CameraController") {
+			return true;
+		}
+
+		// A client's own input and its own identity. Sending the server's copy
+		// would tell every client what some other machine is pressing.
+		if (component == "scene.InputState" || component == "scene.LocalPlayer") {
+			return true;
+		}
+
+		// **Derived every frame on whichever machine draws.** A previous
+		// transform is what interpolation is measured from and the client builds
+		// its own in `replication::SnapshotBuffer`; the render gate is computed
+		// by the client's own presentation pass; the hash exists to notice a
+		// change and means nothing to a receiver. Sending any of them is paying
+		// wire for something the far side is about to overwrite.
+		if (component == "scene.PreviousTransform" || component == "scene.Rendered" ||
+			component == "scene.QuickHash") {
+			return true;
+		}
+
+		// Marked as not outliving the run that made it, so replicating it would
+		// be shipping a thing whose whole point is that it is not kept.
+		return component == "scene.Transient";
+	}
+
 	std::span<const ReplicatedComponent> DefaultReplicatedComponents() {
-		// **Ordered by what a client cannot draw without.** Position first,
-		// then what gives a part a shape, then what gives it a surface, then the
-		// tree and the cameras — so a reader can see at a glance what a replica
-		// would be missing if the list were truncated.
-		static constexpr ReplicatedComponent TABLE[] = {
-			// Written every tick by a system, so the dirty bits already know.
-			// Hashing these would be a pass over the world to learn what was
-			// free.
-			{"scene.Transform", ChangeDetection::Observed},
-			{"scene.Motion", ChangeDetection::Observed},
+		// **Built on first use rather than at static-initialisation time**,
+		// because it walks the component registry and that registry is filled by
+		// `RegisterSceneComponents` during start-up. A table built before that
+		// would be empty and nothing would say so.
+		static const std::vector<ReplicatedComponent> table = [] {
+			std::vector<ReplicatedComponent> found;
 
-			// Written once by a script and then never. Observing them would buy
-			// a dirty column paid every tick and read never — and *not* signing
-			// them is the v0.7 bug where a part recoloured at runtime kept its
-			// old colour on every client for ever.
-			//
-			// They cross at all because a client that received a position and no
-			// size has nothing to draw.
-			{"scene.Bounds", ChangeDetection::Signature},
-			{"scene.Visual", ChangeDetection::Signature},
+			for (size_t index = 0; index < ecs::Components::Count(); index++) {
+				const ecs::TypeDescriptor &type =
+					ecs::Components::Describe(ecs::ComponentId{static_cast<uint32_t>(index)});
 
-			// What an imported mesh is drawn with. A client that received a mesh
-			// name and no texture name has half a model.
-			{"scene.SurfaceAppearance", ChangeDetection::Signature},
+				const std::string_view name = type.Name.Text();
+				const bool shared = name.starts_with(SHARED_PREFIX) || name == HIERARCHY;
+				if (!shared || LocalToTheClient(name)) {
+					continue;
+				}
 
-			// **The masks cross and the names do not**, and that is a stated gap
-			// rather than a bug: `scene::TagTable` is a resource and resources
-			// have no wire form, so a replica's table stays empty and
-			// `HasTag(name)` there answers false. Mask-against-mask filtering is
-			// unaffected, because both sides of that comparison come from this
-			// authority.
-			{"scene.Tags", ChangeDetection::Signature},
+				// **A type with no serialisation cannot cross and is skipped
+				// rather than declared.** Declaring one would have the authority
+				// refuse it per tick — a component that looks replicated,
+				// reports nothing and costs a check for ever.
+				if (!type.Serialisable) {
+					continue;
+				}
 
-			// The mirror and the lens it is aimed with. Without the first a
-			// surface camera does not exist on a replica at all, so a pane
-			// samples nothing and the mirror is a flat grey rectangle.
-			{"scene.SurfaceCamera", ChangeDetection::Signature},
-			{"scene.Camera", ChangeDetection::Signature},
+				// **And a type that is not trivially copyable cannot be
+				// *signed*, which is what everything here but the two above
+				// uses.** `Authority` warns and declines it, so declaring one is
+				// a warning per host per run describing a component nobody meant
+				// to send: the catalogues are the case — `scene.TextureCatalogue`
+				// and its two siblings are resources holding maps, they hang off
+				// no entity, and they arrived here only because they share the
+				// prefix.
+				//
+				// A non-trivial component that genuinely should cross needs
+				// `Observed` and a matching `Store::Observe`, which is a decision
+				// per component rather than something a prefix can infer — so it
+				// is named in the host that wants it rather than defaulted here.
+				if (!type.Trivial && !WrittenEveryTick(name)) {
+					continue;
+				}
 
-			// The tree, because a surface camera is aimed off the part it is
-			// parented to and a replica with no parent link cannot find it.
-			{"ecs.Hierarchy", ChangeDetection::Signature},
-		};
-		return TABLE;
+				found.push_back(
+					ReplicatedComponent{
+						name,
+						WrittenEveryTick(name) ? ChangeDetection::Observed : ChangeDetection::Signature,
+					}
+				);
+			}
+			return found;
+		}();
+		return table;
 	}
 }
