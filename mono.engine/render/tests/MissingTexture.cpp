@@ -9,6 +9,7 @@
 #include <engine/assets/Texture.hpp>
 #include <engine/render/DefaultTexture.hpp>
 #include <engine/render/MissingTexture.hpp>
+#include <engine/render/TextureTable.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -139,4 +140,41 @@ TEST_CASE("the marker is built once", "[render][missing]") {
 	// It is bound every frame a part is missing its sheet, so a call that
 	// rebuilt the pixels would be sixteen kilobytes of work per lookup.
 	CHECK(&MissingTexture() == &MissingTexture());
+}
+
+TEST_CASE("a sheet still on its way is not a missing one", "[render][missingtexture]") {
+	// **`D00107`, and this is the one part of it a suite can reach.** The loop
+	// around the rule needs a device, a frame and content in flight; the rule
+	// itself is three lines and is the whole of what the entry decided, so it
+	// lives in a free function precisely so this can state it.
+	using engine::render::ChooseTexture;
+	using engine::render::TextureChoice;
+
+	// Here. Nothing else matters — a name that resolves is the answer whatever
+	// anybody expected.
+	CHECK(ChooseTexture(true, true, false) == TextureChoice::Named);
+	CHECK(ChooseTexture(true, true, true) == TextureChoice::Named);
+
+	// Named nothing. The default material, which is what an untextured part is
+	// made of — see `DefaultTexture.hpp` for why that is not the fallback texel.
+	CHECK(ChooseTexture(false, false, false) == TextureChoice::Default);
+
+	// **Named something, and it is coming.** White, not purple. This is the
+	// case the entry was about: an imported model's sheets land a frame or more
+	// behind the geometry they belong to, and drawing the marker meanwhile made
+	// a load look like a scene full of misspellings.
+	CHECK(ChooseTexture(false, true, true) == TextureChoice::Default);
+
+	// **Named something, and nothing is coming.** The marker, and now it means
+	// only that — which is the only meaning that is useful.
+	CHECK(ChooseTexture(false, true, false) == TextureChoice::Missing);
+
+	// **A name nobody expects can never be the middle case**, which is the
+	// property that keeps the marker honest: there is no state where a part
+	// draws white for ever because somebody forgot to unmark it. That is a
+	// claim about the hosts rather than about this function, and the hosts
+	// unmark on the request *finishing* rather than on it succeeding — which is
+	// what makes it true in the branch that matters, a misspelled name that
+	// fails.
+	CHECK(ChooseTexture(false, true, false) != TextureChoice::Default);
 }

@@ -546,6 +546,34 @@ namespace engine::render {
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image);
 
+		// Says that content is on its way under this name, and that it is not.
+		//
+		// **The fact the renderer cannot learn for itself.** It knows what it
+		// holds; what is in flight belongs to the content pump, which is a layer
+		// above. Between these two calls a drawable naming that texture draws as
+		// the default material rather than as the purple marker — so a scene
+		// load looks like untextured parts becoming textured, instead of a
+		// purple shimmer indistinguishable from forty misspellings.
+		//
+		// **`StopExpecting` goes on the request *finishing*, not on it
+		// succeeding.** A host that unmarks only on arrival leaves a misspelled
+		// name expected for ever, which is exactly the case the marker exists
+		// for. An arrival needs no call at all: `AddTexture` clears it.
+		//
+		// @param name What was asked for.
+		// @since v0.13
+		//@{
+		void ExpectTexture(const core::Name &name);
+		void StopExpectingTexture(const core::Name &name);
+		//@}
+
+		// Whether content is on its way under this name.
+		//
+		// @param name The name.
+		// @return `true` between the two calls above.
+		// @since v0.13
+		bool ExpectingTexture(const core::Name &name) const;
+
 		// How long animation has been running, for anything played on a clock.
 		//
 		// **The caller's clock, because this module holds none** — the rule the

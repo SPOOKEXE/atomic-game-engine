@@ -364,7 +364,19 @@ namespace client {
 				continue;
 			}
 
+			// **Read before the take, because a take is what destroys it.** A
+			// failed request answers no asset and therefore no name, and the
+			// name is what has to be unmarked — see `render::ChooseTexture`.
+			const engine::core::Name asked(Content->NameOf(id));
+
 			std::optional<engine::delivery::Asset> asset = Content->Take(id);
+
+			// **On the request finishing, not on it succeeding**, and above
+			// every `continue` below so no branch can forget. Unmarking only on
+			// arrival would leave a misspelled sheet expected for ever, which is
+			// precisely the case the purple marker exists for.
+			Renderer.StopExpectingTexture(asked);
+
 			if (!asset) {
 				// Failed, or already taken. Either way there is nothing more to
 				// wait for; `delivery` has already counted it.
@@ -616,6 +628,13 @@ namespace client {
 		// grown, which is what it looks like: the walk lost its place and one
 		// texture out of the several hundred asked for arrived.
 		ContentIssued.push_back(Content->Request(texture.Text()));
+
+		// **Marked before the answer, which is the whole point.** Until this
+		// request finishes, a part naming this sheet draws as the default
+		// material rather than as the purple marker — so a scene load looks like
+		// untextured parts becoming textured instead of a purple shimmer across
+		// every imported model. See `render::ChooseTexture`.
+		Renderer.ExpectTexture(texture);
 	}
 
 	void Client::PumpSounds() {

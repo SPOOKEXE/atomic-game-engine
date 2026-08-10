@@ -598,7 +598,40 @@ the editor and the type check agree. The current engine revision is Luau 0.732.*
 
 **Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed — recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. `v02v03v04.md` predicted the v0.4 edit and said it belonged "with the next pass over `docs/DEFERRED.md`, not here".
 
-### [_] D00107
+### [DELETED] D00107
+
+**Closed by doing it, and by doing the half this entry warned would be skipped.**
+Kept rather than deleted, because the entry's own refusal — that a timer here
+"trades a visible wrong picture for an invisible one" — is what shaped the
+answer, and that is worth being able to point at.
+
+- **`render::ChooseTexture` is the rule**, a free function so a suite can state
+  it without a device: found, or named-and-expected, or named-and-not. The
+  middle case draws the default material, so a scene load now looks like
+  untextured parts becoming textured instead of a purple shimmer.
+- **The renderer is told rather than asking**, because what is in flight belongs
+  to the content pump and `render` must not reach up into it.
+  `Renderer::ExpectTexture` on the request, `StopExpectingTexture` when it
+  finishes; `TextureTable::Add` clears the mark itself, so no host can leave an
+  arrival marked.
+- **The failure half is the one the entry said not to skip, and it needed a new
+  call.** A request that succeeds carries its name in the `Asset`; one that fails
+  answers nothing at all, so `delivery::AssetClient::NameOf` was added — one
+  virtual on an interface with one implementation. Both hosts read the name
+  *before* `Take`, because a take is what destroys the record, and both unmark
+  above every `continue` so no branch can forget. Two cases pin exactly that: a
+  failed request still names what it was for, and a taken one no longer does.
+- **No timer, and the entry was right that this was the temptation.** A grace
+  period hides a genuinely missing texture for as long as it hides a streaming
+  one, and with a byte budget in the path there is no N right for both a small
+  scene and a large one.
+- **The demo the entry did not ask for and should have.** `MeshGrid.luau` and
+  `Meshes.luau` each gained one part naming a sheet nobody published, so both
+  scenes now show all three answers at once — and the timing distinction is
+  visible without reading a log. Verified by capturing the meshes world at 120
+  frames, mid-load: the imports draw white and only the deliberate one is purple.
+
+**What it looked like before:**
 
 **A streaming texture and a texture that will never arrive look identical to
 the renderer.**

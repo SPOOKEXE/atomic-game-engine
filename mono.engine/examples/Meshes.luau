@@ -98,6 +98,31 @@ local function addImport(mesh: string, slot: number)
 	imported[mesh] = part
 end
 
+-- **One part that asks for a sheet nobody published**, which is the live demo of
+-- the other half of the texture story. The renderer has three answers and this
+-- scene now shows all three side by side: the built-ins above name no texture
+-- and draw as the default white plastic, the imports name sheets that arrive and
+-- draw as themselves, and this one names something that will never come and
+-- wears the purple checkerboard.
+--
+-- **The distinction it is here to prove is the timing one.** Until `D00107` the
+-- imports wore that same checkerboard for the frames their sheets took to land,
+-- so a load looked like a scene full of mistakes. The marker means *nothing is
+-- coming* now, so this part is purple from the first frame and the imports never
+-- are — and the difference is visible without reading a log.
+--
+-- It reuses a built-in mesh rather than importing one, because the point is the
+-- texture and a mesh that also had to arrive would confuse which half is being
+-- shown.
+local absent = Instance.new("MeshPart")
+absent.Name = "MissingTexture"
+absent.Anchored = true
+absent.MeshId = "engine.Cube"
+absent.TextureID = "examples/there-is-no-such-sheet.atex"
+absent.Size = Vector3.new(3, 3, 3)
+absent.CFrame = CFrame.new(Vector3.new(0, 1.8, -14))
+absent.Parent = workspace
+
 -- **The mirror, in front of everything.** `ROADMAP.md` v0.9 asks in as many
 -- words to "put in front mirrors to see if it works with texture rendering",
 -- and this is that check: the pane samples a surface texture and the meshes

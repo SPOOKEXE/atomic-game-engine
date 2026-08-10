@@ -1404,10 +1404,20 @@ namespace engine::render {
 				// textured this" and "this asked for something that never
 				// arrived" are different facts and only one of them is finished.
 				// The same split `scene::KeepLoaded` makes for geometry.
+				//
+				// **A sheet still on its way is the first case, not the third**,
+				// which is `D00107` closed: the marker now means *nothing is
+				// coming*. `ChooseTexture` is the rule and carries the argument;
+				// it is a free function so a suite can state it without a
+				// device.
 				SDL_GPUTexture *const found = Textures.Find(texture);
-				const bool absent = found == nullptr && texture.IsValid();
-				SDL_GPUTexture *const sampled =
-					found != nullptr ? found : (absent ? Textures.Missing() : Textures.Default());
+				const TextureChoice choice =
+					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
+
+				SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? found
+												: choice == TextureChoice::Missing ? Textures.Missing()
+																				   : Textures.Default();
+				const bool absent = choice == TextureChoice::Missing;
 
 				// **The fallback texel is bound rather than the binding being
 				// skipped** for the other two, because a sampler a pipeline
@@ -2680,6 +2690,22 @@ namespace engine::render {
 			return false;
 		}
 		return State->Textures.Add(name, image);
+	}
+
+	void Renderer::ExpectTexture(const core::Name &name) {
+		if (State != nullptr) {
+			State->Textures.Expect(name);
+		}
+	}
+
+	void Renderer::StopExpectingTexture(const core::Name &name) {
+		if (State != nullptr) {
+			State->Textures.StopExpecting(name);
+		}
+	}
+
+	bool Renderer::ExpectingTexture(const core::Name &name) const {
+		return State != nullptr && State->Textures.Expecting(name);
 	}
 
 	void Renderer::SetAnimationTime(double seconds) {

@@ -388,7 +388,11 @@ whole reason the marker exists:
 | --- | --- |
 | no texture named | `Default` — the plastic. `Material = None` is a finished state. |
 | a name, registered | that texture. |
-| a name, not registered | `Missing` — the purple checkerboard. Not a finished state. |
+| a name, not registered, **expected** | `Default` — it is on its way. |
+| a name, not registered, not expected | `Missing` — the purple checkerboard. Not a finished state. |
+
+`ChooseTexture` is that table as a function, and it is a free one so a suite can
+state the rule without a device.
 
 **Drawing the last two the same way is the bug this closes.** An author's typo
 and a sheet that never published both rendered as the default material, which
@@ -403,9 +407,22 @@ material's colour — one grey sheet serving a whole palette — but a magenta c
 multiplied by a dark red part is a dark pattern that reads as intent. A marker
 that can be tinted into looking deliberate is not a marker.
 
-**"Not here yet" and "never coming" are the same state here, and the renderer
-cannot tell them apart.** It knows what it holds, not what is in flight, so a
-sheet that is still streaming shows the marker for the frames it takes to
-arrive. Closing that needs the content pump to say what it has outstanding —
-`D00107` — and not a timer in this module: a grace period would hide a genuinely
-missing texture for exactly as long as it hid a streaming one.
+**"Not here yet" and "never coming" used to be the same state here, and that was
+`D00107`.** This module knows what it holds and not what is in flight, so a
+sheet still streaming wore the marker for the frames it took to arrive — a purple
+shimmer across every imported model on a scene load, indistinguishable from forty
+misspellings.
+
+**The fix is that the content pump says what it has outstanding**, through
+`Renderer::ExpectTexture` and `StopExpectingTexture`, and the marker now means
+only *nothing is coming*. Not a timer in this module, and that was never a close
+call: a grace period hides a genuinely missing texture for exactly as long as it
+hides a streaming one, and with a byte budget in the path there is no N right for
+both a small scene and a large one.
+
+**The load-bearing half is the unmark, and it goes on the request *finishing*
+rather than on it succeeding.** A host that unmarked only on arrival would leave
+a misspelled sheet expected for ever and the marker would never appear for the
+one case it exists for. A failure carries no name — `Take` answers nothing — so
+`delivery::AssetClient::NameOf` exists for it, and both hosts read the name
+*before* taking because a take is what destroys the record.

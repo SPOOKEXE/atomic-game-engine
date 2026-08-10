@@ -255,6 +255,32 @@ local function layout(names: { string })
 	end
 end
 
+-- **One part that asks for a sheet nobody published**, and it is here so this
+-- scene shows all three of the renderer's texture answers at once. The cells
+-- above name no texture and draw as the default white plastic until their own
+-- baked sheets land; this one names something that will never come and wears the
+-- purple checkerboard from the first frame.
+--
+-- **The distinction it exists to prove is the timing one.** Until `D00107` the
+-- cells wore that same checkerboard for the frames their sheets took to arrive,
+-- so a load looked like a plate full of mistakes and a real misspelling was
+-- invisible among them. The marker means *nothing is coming* now — so this part
+-- is purple immediately, the cells never are, and the difference is visible
+-- without reading a log.
+--
+-- A built-in mesh rather than an imported one, deliberately: the point is the
+-- texture, and geometry that also had to arrive would confuse which half is
+-- being shown. It is also why this cell needs no content at all — it draws the
+-- same on a machine with no `--cdn`.
+local absent = Instance.new("MeshPart")
+absent.Name = "MissingTexture"
+absent.Anchored = true
+absent.MeshId = "engine.Cube"
+absent.TextureID = "examples/there-is-no-such-sheet.atex"
+absent.Size = Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
+absent.CFrame = CFrame.new(Vector3.new(0, MODEL_SIZE * 0.5 + PEDESTAL_HEIGHT, SPACING * 1.6))
+absent.Parent = workspace
+
 -- **A sign, so an empty plate is a sentence rather than a mystery.** With no
 -- `--cdn` this scene has nothing to show, and a bare floor gives no clue
 -- whether the scene failed or the content did.

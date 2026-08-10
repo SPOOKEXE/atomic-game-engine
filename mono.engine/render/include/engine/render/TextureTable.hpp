@@ -13,12 +13,64 @@
 #include <cstdint>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 struct SDL_GPUDevice;
 struct SDL_GPUSampler;
 struct SDL_GPUTexture;
 
 namespace engine::render {
+
+	// Which of the three textures a drawable naming one should sample.
+	//
+	// @since v0.13
+	enum class TextureChoice : uint8_t {
+		// The one it named. It is here.
+		Named,
+
+		// The default material — white plastic. What a drawable that named
+		// nothing gets, and **what one whose sheet is still on its way gets
+		// too**.
+		Default,
+
+		// The purple checkerboard. Nothing is coming for this name.
+		Missing,
+	};
+
+	// The three-way choice, as a rule a suite can state.
+	//
+	// **A free function rather than three lines inside the draw loop**, because
+	// the rule is the whole of `D00107` and it is the one part of that entry a
+	// test can reach — the loop around it needs a device, a frame and content in
+	// flight. A rule nothing can assert is a rule that drifts back.
+	//
+	// **The middle case is what the entry was about.** A texture still streaming
+	// and one that will never arrive used to be the same answer, so an imported
+	// model wore the marker for the frames its sheets took to land — a purple
+	// shimmer across a scene load, indistinguishable from a misspelling. Now the
+	// marker means *nothing is coming*, which is the only meaning that is
+	// useful, and a sheet in flight looks like an untextured part until it lands.
+	//
+	// **No timer, deliberately.** A grace period — "draw the default for the
+	// first N frames after a name is asked for" — hides a genuinely missing
+	// texture for exactly as long as it hides a streaming one, and with a byte
+	// budget in the path there is no N right for both a small scene and a large
+	// one.
+	//
+	// @param found    Whether the table holds it.
+	// @param named    Whether the drawable named a texture at all.
+	// @param expected Whether content is on its way under that name.
+	// @return Which texture to sample.
+	// @since v0.13
+	constexpr TextureChoice ChooseTexture(bool found, bool named, bool expected) {
+		if (found) {
+			return TextureChoice::Named;
+		}
+		if (!named || expected) {
+			return TextureChoice::Default;
+		}
+		return TextureChoice::Missing;
+	}
 
 	// The textures a renderer can sample.
 	//
@@ -134,6 +186,54 @@ namespace engine::render {
 			return MissingHandle;
 		}
 
+		// Says that content is on its way under this name.
+		//
+		// **The fact the renderer was missing, and only a host can supply it.**
+		// This table knows what it holds; what is in flight belongs to the
+		// content pump, which is a layer this module must not reach up into. So
+		// the pump tells it, on both edges — see `StopExpecting`.
+		//
+		// Idempotent, and it says nothing about the *kind* of the content: a
+		// host asking for a mesh marks that name too, which costs a set entry
+		// and is honest — "something is coming for this name" is exactly what
+		// the draw loop wants to know.
+		//
+		// @param name What was asked for.
+		// @since v0.13
+		void Expect(const core::Name &name);
+
+		// Says that nothing more is coming under this name.
+		//
+		// **Called when the request finishes, whichever way it finished**, and
+		// that is the half the deferred entry warned about: unmarking only on
+		// arrival leaves a misspelled name expected for ever, which is precisely
+		// the case the marker exists for. A host that unmarks on completion
+		// rather than on success cannot get it wrong in any branch.
+		//
+		// `Add` and `Adopt` unmark too, so an arrival needs no second call.
+		//
+		// @param name What was asked for.
+		// @since v0.13
+		void StopExpecting(const core::Name &name);
+
+		// Whether content is on its way under this name.
+		//
+		// @param name The name.
+		// @return `true` between `Expect` and whatever finishes it.
+		// @since v0.13
+		bool Expecting(const core::Name &name) const;
+
+		// How many names are in flight.
+		//
+		// For a diagnostic panel and for a test: a set that only ever grows is
+		// the failure mode of this pair, and a number is how somebody sees it.
+		//
+		// @return The count.
+		// @since v0.13
+		size_t Awaited() const {
+			return Awaiting.size();
+		}
+
 		// How big a registered texture is, in source pixels.
 		//
 		// @param name   The name.
@@ -244,6 +344,14 @@ namespace engine::render {
 		SDL_GPUTexture *MissingHandle = nullptr;
 
 		std::unordered_map<uint32_t, Entry> Textures;
+
+		// The names something is fetching right now. See `Expect`.
+		//
+		// **Interned ids rather than strings**, like `Textures` beside it: the
+		// draw loop asks this once per submesh per frame and a string compare
+		// per draw is what `core::Name` exists to avoid.
+		std::unordered_set<uint32_t> Awaiting;
+
 		size_t UploadedBytes = 0;
 	};
 }

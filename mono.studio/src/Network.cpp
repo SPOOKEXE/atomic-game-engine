@@ -282,7 +282,22 @@ namespace studio {
 				continue;
 			}
 
+			// **Read before the take, because a take is what destroys it.** A
+			// failed request answers no asset and therefore no name, and the
+			// name is what has to be unmarked — the half `D00107` warned about,
+			// where unmarking only on arrival leaves a misspelled sheet expected
+			// for ever and the marker never appears for the one case it exists
+			// for.
+			const engine::core::Name asked(ContentClient->NameOf(id));
+
 			std::optional<engine::delivery::Asset> asset = ContentClient->Take(id);
+
+			// **On the request finishing, not on it succeeding**, and above
+			// every `continue` below so no branch can forget. An arrival needs
+			// no call — `AddTexture` clears it — but doing it here as well costs
+			// a hash and removes the question.
+			Renderer.StopExpectingTexture(asked);
+
 			if (!asset) {
 				continue;
 			}
@@ -560,6 +575,14 @@ namespace studio {
 			return false;
 		}
 		ContentIssued.push_back(ContentClient->Request(asset.Text()));
+
+		// **Marked before the answer, which is the whole point.** Until this
+		// request finishes, a part naming this sheet draws as the default
+		// material rather than as the purple marker — so a scene load looks like
+		// untextured parts becoming textured instead of a purple shimmer. See
+		// `render::ChooseTexture`; the unmark is in `DrainContent`, on the
+		// request finishing rather than on it succeeding.
+		Renderer.ExpectTexture(asset);
 		return true;
 	}
 
