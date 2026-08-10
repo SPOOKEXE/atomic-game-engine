@@ -17,6 +17,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -159,6 +160,64 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	REQUIRE(partial.Load());
 	CHECK(partial.SnapDistance == 2.0f);
 	CHECK(partial.SnapDegrees == 30.0f);
+}
+
+TEST_CASE("a panel's colours round trip, and a broken one is skipped", "[studio][config]") {
+	Scratch scratch;
+
+	// **The one preference that is a document rather than a number**, and the
+	// only one somebody would plausibly hand-edit a colour into — so what is
+	// worth asserting is that a name nobody knows, a colour that is not one,
+	// and a panel with nothing left in it each cost only themselves.
+	Preferences written;
+	written.PanelColours["Explorer"][engine::ui::ThemeColour::Surface] =
+		IM_COL32(0x2E, 0x34, 0x40, 0xFF);
+	written.PanelColours["Output"][engine::ui::ThemeColour::Accent] =
+		IM_COL32(0xFF, 0x00, 0x80, 0xC0);
+	REQUIRE(written.Save());
+
+	Preferences read;
+	REQUIRE(read.Load());
+	REQUIRE(read.PanelColours.count("Explorer") == 1);
+	CHECK(
+		read.PanelColours["Explorer"][engine::ui::ThemeColour::Surface] ==
+		IM_COL32(0x2E, 0x34, 0x40, 0xFF)
+	);
+	CHECK(
+		read.PanelColours["Output"][engine::ui::ThemeColour::Accent] == IM_COL32(0xFF, 0x00, 0x80, 0xC0)
+	);
+
+	// Nothing else was pinned by writing one colour, which is what keeps a
+	// recoloured panel following the theme in every other respect.
+	CHECK_FALSE(read.PanelColours["Explorer"][engine::ui::ThemeColour::Accent].has_value());
+
+	// Written the way a person reads a colour, not the way imgui packs one.
+	json document;
+	std::string error;
+	REQUIRE(studio::ReadConfigDocument("preferences.json", document, error));
+	CHECK(document["panelColours"]["Explorer"]["Surface"] == "2E3440FF");
+
+	scratch.Write(
+		"preferences.json",
+		R"({"panelColours": {
+			"Explorer": {"Surface": "#1A1A1A", "Sparkle": "FFFFFFFF", "Accent": "not a colour"},
+			"Ghost": {"Accent": "zzz"},
+			"Empty": {}
+		}})"
+	);
+
+	Preferences salvaged;
+	REQUIRE(salvaged.Load());
+	CHECK(
+		salvaged.PanelColours["Explorer"][engine::ui::ThemeColour::Surface] ==
+		IM_COL32(0x1A, 0x1A, 0x1A, 0xFF)
+	);
+	CHECK_FALSE(salvaged.PanelColours["Explorer"][engine::ui::ThemeColour::Accent].has_value());
+
+	// A panel whose every line was unreadable is not a panel — an entry with
+	// nothing in it would be written straight back out on the next save.
+	CHECK(salvaged.PanelColours.count("Ghost") == 0);
+	CHECK(salvaged.PanelColours.count("Empty") == 0);
 }
 
 TEST_CASE("a hand-edited preference is clamped rather than obeyed", "[studio][config]") {

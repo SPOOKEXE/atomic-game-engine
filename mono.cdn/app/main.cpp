@@ -33,6 +33,7 @@
 #include <cdn/Origin.hpp>
 #include <cdn/Publisher.hpp>
 #include <cdn/Service.hpp>
+#include <cdn/Stream.hpp>
 #include <cdn/Terminal.hpp>
 #include <chrono>
 #include <cstdio>
@@ -146,6 +147,17 @@ int main(int argc, char **argv) {
 	arguments.Flag("no-cache-upstream", "Do not keep what an upstream returned");
 	arguments.Value("compression-level", "N", "Zstd level groups are prepared at (default: 9)");
 	arguments.Value("cache-bytes", "N", "What the prepared-group cache may hold");
+	arguments.Flag(
+		"advertise", "Announce this origin on the local subnet so clients find it without an address"
+	);
+	arguments.Value("stream-name", "NAME", "What to call this distribution stream");
+	arguments.Value(
+		"stream-key",
+		"SECRET",
+		"Make this a private stream: 64 hex characters, or a passphrase. Gates discovery, not delivery"
+	);
+	arguments.Value("rendezvous", "HOST:PORT", "Register this stream with a rendezvous point");
+	arguments.Value("rendezvous-listen", "PORT", "Run a rendezvous point here, so peers can find each other");
 	arguments.Value("frames", "N", "Serve this many pumps and exit. For a smoke test");
 	arguments.Flag("gui", "Watch it serve in the terminal — content, traffic and rates");
 
@@ -318,6 +330,49 @@ int main(int argc, char **argv) {
 		settings.AllowUpstream ? "on" : "off"
 	);
 
+	// --- the distribution stream, when one was asked for ---------------------
+
+	std::unique_ptr<cdn::Stream> stream;
+	if (arguments.Has("advertise") || arguments.Has("rendezvous") || arguments.Has("rendezvous-listen")) {
+		cdn::StreamSettings offering;
+		offering.Announce = arguments.Has("advertise");
+		if (auto point = arguments.Get("rendezvous")) {
+			offering.RendezvousAddress = std::string(*point);
+		}
+		if (auto listen = arguments.Get("rendezvous-listen")) {
+			offering.RendezvousListenPort = static_cast<uint16_t>(std::atoi(std::string(*listen).c_str()));
+		}
+		if (auto secret = arguments.Get("stream-key")) {
+			offering.Secret = std::string(*secret);
+		}
+		if (auto name = arguments.Get("stream-name")) {
+			offering.Name = std::string(*name);
+		}
+		// The manifest this origin is currently serving, which is what somebody
+		// looking at a list of streams needs in order to tell two apart.
+		offering.Detail = origin.Current() != nullptr
+							  ? origin.Current()->Contents().Root().ToHex().substr(0, 12)
+							  : std::string();
+		// **The port that was bound**, which is not the port that was
+		// configured when it was zero.
+		offering.Port = serving->Local().Port;
+
+		std::string trouble;
+		stream = cdn::Stream::Open(offering, trouble);
+		if (!stream) {
+			ENGINE_ERROR("cdn: {}", trouble);
+			return 1;
+		}
+		if (stream->Announcing()) {
+			ENGINE_INFO(
+				"cdn: announcing stream {} ({}) on {}",
+				stream->Advertised().Session.Text(),
+				network::Describe(stream->Advertised().Admits),
+				serving->Local().Text()
+			);
+		}
+	}
+
 	// --- the dashboard, when one was asked for -------------------------------
 
 	std::unique_ptr<cdn::Terminal> screen;
@@ -345,6 +400,14 @@ int main(int argc, char **argv) {
 
 	for (long frame = 0; frames < 0 || frame < frames; ++frame) {
 		const size_t answered = serving->Pump(NowSeconds());
+
+		// Beside the content pump rather than on a thread of its own: an
+		// announcement is one datagram a second and a rendezvous point is a
+		// table lookup, and a second thread would buy nothing but a place for
+		// two clocks to disagree.
+		if (stream) {
+			stream->Pump(NowSeconds());
+		}
 
 		if (dashboard) {
 			const uint64_t nowMilliseconds = NowMilliseconds();

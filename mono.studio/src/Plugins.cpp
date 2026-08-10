@@ -1,16 +1,15 @@
-#include <studio/Plugins.hpp>
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
-#include <imgui.h>
-#include <studio/Editor.hpp>
 #include <engine/ecs/Schema.hpp>
-#include <studio/Config.hpp>
 
 #include <algorithm>
 #include <fstream>
+#include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <studio/Config.hpp>
+#include <studio/Editor.hpp>
+#include <studio/Plugins.hpp>
 
 namespace studio {
 
@@ -79,8 +78,7 @@ namespace studio {
 		// A tag: no fields, matched by a query and nothing else. Registering it
 		// twice agrees rather than conflicting, which is what makes this
 		// callable from wherever the editor happens to reach first.
-		const engine::ecs::Schemas::Result result =
-			engine::ecs::Schemas::Register(SELECTED_COMPONENT, {});
+		const engine::ecs::Schemas::Result result = engine::ecs::Schemas::Register(SELECTED_COMPONENT, {});
 
 		if (result.Why != engine::ecs::Schemas::Status::Ok) {
 			ENGINE_WARN("plugins: could not register {}", SELECTED_COMPONENT);
@@ -111,8 +109,7 @@ namespace studio {
 
 		out.Name = name->get<std::string>();
 
-		if (const auto found = document.find("description");
-			found != document.end() && found->is_string()) {
+		if (const auto found = document.find("description"); found != document.end() && found->is_string()) {
 			out.Description = found->get<std::string>();
 		}
 		if (const auto found = document.find("main"); found != document.end() && found->is_string()) {
@@ -333,12 +330,10 @@ namespace studio {
 			// Named on the way in rather than only in the panel, because the
 			// output pane is where somebody is already looking when a plugin
 			// they just installed does nothing.
-			Say("plugin '" + plugin.Manifest.Name + "': " + plugin.Error,
-				engine::core::LogLevel::Warning);
+			Say("plugin '" + plugin.Manifest.Name + "': " + plugin.Error, engine::core::LogLevel::Warning);
 		}
 
-		Say("plugins: " + std::to_string(running) + " of " + std::to_string(Plugins.size()) +
-			" running");
+		Say("plugins: " + std::to_string(running) + " of " + std::to_string(Plugins.size()) + " running");
 	}
 
 	std::string Editor::ActiveWorldName() const {
@@ -368,9 +363,7 @@ namespace studio {
 		}
 
 		std::vector<Entity> wanted(Selection.begin(), Selection.end());
-		std::sort(wanted.begin(), wanted.end(), [](Entity left, Entity right) {
-			return left.Id < right.Id;
-		});
+		std::sort(wanted.begin(), wanted.end(), [](Entity left, Entity right) { return left.Id < right.Id; });
 
 		// **Nothing written when nothing changed**, which is not a
 		// micro-optimisation: a tag written every frame moves
@@ -420,7 +413,12 @@ namespace studio {
 		(void)beaten;
 	}
 
-	void Editor::InvokePlugin(LoadedPlugin &plugin, engine::script::HostCallback callback, bool drawing) {
+	void Editor::InvokePlugin(
+		LoadedPlugin &plugin,
+		engine::script::HostCallback callback,
+		bool drawing,
+		engine::script::HostArguments arguments
+	) {
 		if (!plugin.Running || plugin.Vm == nullptr || !callback.Valid()) {
 			return;
 		}
@@ -433,7 +431,7 @@ namespace studio {
 			SetPluginDrawing(*plugin.Surface, true);
 		}
 
-		const bool ok = plugin.Vm->Invoke(callback, {});
+		const bool ok = plugin.Vm->Invoke(callback, arguments);
 
 		if (plugin.Surface != nullptr && drawing) {
 			SetPluginDrawing(*plugin.Surface, false);
@@ -473,6 +471,14 @@ namespace studio {
 				// without putting a prefix in front of what a person reads.
 				const std::string label =
 					widget.Title + "###plugin." + plugin.Manifest.Name + "." + widget.Title;
+
+				// **Around `Begin` and `End`, not inside them.** A window's
+				// background is read at `Begin`, so colours pushed within the
+				// window would tint everything in it except the window itself —
+				// which reads as a bug in the theme rather than as a widget that
+				// was coloured wrong. Same bracket the editor's own panels get
+				// from `Editor::Skinned`.
+				const engine::ui::ScopedColours skin(widget.Colours);
 
 				if (ImGui::Begin(label.c_str(), &widget.Open)) {
 					InvokePlugin(plugin, widget.Render, true);
@@ -615,5 +621,82 @@ namespace studio {
 		}
 
 		ImGui::End();
+	}
+
+	// --- ChangeHistoryService's events ----------------------------------------
+	//
+	// **One watcher on the log, fanned out here.** `CommandLog` has a single
+	// seam because a log that knew what a plugin was would be a log that knows
+	// what an editor is. Deciding who hears about a waypoint is this class's
+	// job: the plugins, and — when one is open — the team-create edit stream.
+	//
+	// **Every running plugin hears every event, including its own.** Roblox does
+	// the same, and the alternative needs the log to record which plugin made a
+	// change, which it deliberately does not: an edit is an edit whoever asked
+	// for it, and a plugin that reacts to its own undo is a plugin that asked to.
+
+	void Editor::InstallHistoryWatcher() {
+		if (Commands == nullptr) {
+			return;
+		}
+
+		CommandLog::Watcher watcher;
+
+		watcher.Undone = [this](std::string_view waypoint) {
+			const engine::script::HostValue name = engine::script::HostValue::Of(waypoint);
+			for (LoadedPlugin &plugin : Plugins) {
+				InvokePlugin(plugin, plugin.OnUndo, false, engine::script::HostArguments(&name, 1));
+			}
+		};
+
+		watcher.Redone = [this](std::string_view waypoint) {
+			const engine::script::HostValue name = engine::script::HostValue::Of(waypoint);
+			for (LoadedPlugin &plugin : Plugins) {
+				InvokePlugin(plugin, plugin.OnRedo, false, engine::script::HostArguments(&name, 1));
+			}
+		};
+
+		watcher.RecordingStarted = [this](const Recording &recording) {
+			// Roblox passes name and displayName, in that order.
+			const engine::script::HostValue arguments[] = {
+				engine::script::HostValue::Of(std::string_view(recording.Name)),
+				engine::script::HostValue::Of(std::string_view(recording.DisplayName)),
+			};
+			for (LoadedPlugin &plugin : Plugins) {
+				InvokePlugin(
+					plugin, plugin.OnRecordingStarted, false, engine::script::HostArguments(arguments, 2)
+				);
+			}
+		};
+
+		watcher.RecordingFinished = [this](const Recording &recording, FinishOperation operation) {
+			// Name, displayName, identifier, operation — Roblox's order. The
+			// operation crosses as its member's name, which is how an
+			// `EnumItem` crosses in the other direction too.
+			const engine::script::HostValue arguments[] = {
+				engine::script::HostValue::Of(std::string_view(recording.Name)),
+				engine::script::HostValue::Of(std::string_view(recording.DisplayName)),
+				engine::script::HostValue::Of(std::string_view(recording.Identifier)),
+				engine::script::HostValue::Of(std::string_view(Describe(operation))),
+			};
+			for (LoadedPlugin &plugin : Plugins) {
+				InvokePlugin(
+					plugin, plugin.OnRecordingFinished, false, engine::script::HostArguments(arguments, 4)
+				);
+			}
+		};
+
+		watcher.Committed = [this](uint64_t waypoint, std::span<const Command> group) {
+			// **One waypoint, whole, in the order it was made.** Team create's
+			// end of it: a peer that applied half of a group would show a state
+			// the author never saw. Does nothing when no session is open, which
+			// is what keeps an editor that never opens the panel from paying
+			// for any of this.
+			if (Team != nullptr) {
+				Team->PublishEdits(waypoint, group, engine::core::Clock::Seconds());
+			}
+		};
+
+		Commands->Watch(std::move(watcher));
 	}
 }

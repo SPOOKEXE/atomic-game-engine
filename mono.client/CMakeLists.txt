@@ -39,6 +39,12 @@ mono_add_library(client
 		Engine::net
 		Engine::replication
 
+		# `shared`. Finding a server rather than being told where one is:
+		# `--browse` lists what is announcing itself on the subnet and
+		# `--rendezvous` reaches one that is not. Both are off by default, so a
+		# single-player run opens no socket for either.
+		Mono::network
+
 		# L10, `shared`. `--script` builds the scene by running a Luau file
 		# instead of the C++ loop in Demo.cpp. The VM itself is private to that
 		# module — nothing here compiles against Luau — so this row says "the

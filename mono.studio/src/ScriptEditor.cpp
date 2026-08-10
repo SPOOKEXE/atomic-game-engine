@@ -108,29 +108,12 @@ namespace studio {
 							ImGui::PopStyleColor();
 						}
 
-						// The zoom, beside the state it applies to. A control
-						// nobody can find is a control that only exists for
-						// people who already knew the wheel did something.
+						// **The same control the output panel has**, rather
+						// than a second copy of the step and the clamp — two
+						// panels that disagreed about what a zoom level is
+						// would disagree the first time either was tuned.
 						ImGui::SameLine();
-						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-						ImGui::Text("   %.0f%%", static_cast<double>(ScriptZoom * 100.0f));
-						ImGui::PopStyleColor();
-
-						ImGui::SameLine();
-						if (ImGui::SmallButton("-")) {
-							ScriptZoom = std::clamp(ScriptZoom - 0.1f, 0.6f, 3.0f);
-						}
-						ImGui::SameLine();
-						if (ImGui::SmallButton("+")) {
-							ScriptZoom = std::clamp(ScriptZoom + 0.1f, 0.6f, 3.0f);
-						}
-						ImGui::SameLine();
-						if (ImGui::SmallButton("Reset")) {
-							ScriptZoom = 1.0f;
-						}
-						if (ImGui::IsItemHovered()) {
-							ImGui::SetTooltip("Ctrl+wheel over the code zooms it");
-						}
+						DrawZoomControl(ScriptZoom, "code");
 
 						ImGui::SameLine();
 						if (ImGui::SmallButton(ShowFind ? "Hide Find" : "Find")) {
@@ -248,14 +231,8 @@ namespace studio {
 						ImGui::SetWindowFontScale(1.0f);
 
 						// Ctrl+wheel over the text, which is what every editor
-						// binds it to. Guarded on hovering the field so that
-						// scrolling the tab bar or the panel does not resize
-						// the code by accident.
-						if (ImGui::IsItemHovered() && ImGui::GetIO().KeyCtrl) {
-							if (const float wheel = ImGui::GetIO().MouseWheel; wheel != 0.0f) {
-								ScriptZoom = std::clamp(ScriptZoom + wheel * 0.1f, 0.6f, 3.0f);
-							}
-						}
+						// binds it to.
+						ApplyZoomWheel(ScriptZoom);
 
 						// Ctrl+S inside the editor saves the *script*, not the
 						// game. The menu bar's shortcut is guarded on

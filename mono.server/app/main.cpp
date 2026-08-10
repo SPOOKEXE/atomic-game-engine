@@ -54,6 +54,16 @@ int main(int argc, char **argv) {
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("listen", "PORT", "Serve the world to clients on this UDP port (0 for ephemeral)");
+	arguments.Flag("advertise", "Announce this server on the local subnet so clients can find it");
+	arguments.Value("session-name", "NAME", "What to call this session in somebody's browser");
+	arguments.Value(
+		"session-key",
+		"SECRET",
+		"Make this session private: 64 hex characters, or a passphrase. Only clients holding it may join"
+	);
+	arguments.Value(
+		"rendezvous", "HOST:PORT", "Register with a rendezvous point, so clients off this subnet can reach it"
+	);
 	arguments.Value("content-store", "DIR", "Serve this content store to clients — CDN.md §6's local store");
 	arguments.Value("content-port", "PORT", "Port the attached origin listens on (0 for ephemeral)");
 	arguments.Value(
@@ -156,6 +166,17 @@ int main(int argc, char **argv) {
 		// being present is what turns listening on.
 		options.ListenPort = static_cast<uint16_t>(port);
 		options.Listening = true;
+	}
+
+	options.Advertise = arguments.Has("advertise");
+	if (auto name = arguments.Get("session-name")) {
+		options.SessionName = std::string(*name);
+	}
+	if (auto secret = arguments.Get("session-key")) {
+		options.SessionSecret = std::string(*secret);
+	}
+	if (auto point = arguments.Get("rendezvous")) {
+		options.RendezvousAddress = std::string(*point);
 	}
 
 	if (!options.HostName.empty() && !options.RemoteWorlds.empty()) {

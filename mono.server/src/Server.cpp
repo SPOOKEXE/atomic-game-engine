@@ -356,6 +356,12 @@ namespace server {
 			return false;
 		}
 
+		// After the listening socket, because the port it announces is the one
+		// that was bound rather than the one that was asked for.
+		if (!BeginAnnouncing()) {
+			return false;
+		}
+
 		if (!BeginServingContent()) {
 			return false;
 		}
@@ -771,7 +777,126 @@ namespace server {
 		return Socket == nullptr ? engine::net::Endpoint{} : Socket->Local();
 	}
 
+	bool Server::BeginAnnouncing() {
+		if (!Settings.Advertise && Settings.RendezvousAddress.empty()) {
+			return true;
+		}
+		if (Socket == nullptr) {
+			// Nothing to announce. A server that broadcast a port it never
+			// bound would send every client somewhere nothing is listening,
+			// which reads from the other end as a firewall problem.
+			ENGINE_WARN("--advertise and --rendezvous need --listen; nothing is being announced.");
+			return true;
+		}
+
+		std::optional<network::SessionKey> key;
+		if (!Settings.SessionSecret.empty()) {
+			// Hex when it is exactly that, words otherwise. A person who was
+			// given words types words, and a launcher that generated a key
+			// passes the key.
+			key = network::SessionKey::FromText(Settings.SessionSecret);
+			if (!key) {
+				key = network::SessionKey::FromPassphrase(Settings.SessionSecret);
+			}
+			if (!key) {
+				ENGINE_ERROR("--session-key is neither 64 hex characters nor a passphrase.");
+				return false;
+			}
+		}
+
+		Announcement.Session = network::SessionId::Draw();
+		if (!Announcement.Session.IsValid()) {
+			ENGINE_ERROR("no entropy for a session id, so this server cannot be announced.");
+			return false;
+		}
+		Announcement.Use = network::Purpose::Game;
+		Announcement.Admits = key ? network::Access::Private : network::Access::Public;
+		Announcement.Protocol = engine::replication::PROTOCOL_VERSION;
+		// The port that was bound rather than the one that was asked for:
+		// `--listen 0` binds an ephemeral one. The address is left as the
+		// socket has it — usually the wildcard — because the browser at the
+		// other end resolves that against where the datagram came from, which
+		// is the one route known to work. `network::Listing::Dial`.
+		Announcement.At = Socket->Local();
+		Announcement.Name =
+			Settings.SessionName.empty() ? std::string("atomic server") : Settings.SessionName;
+		Announcement.Detail = Settings.GamePath.empty()
+								  ? std::string()
+								  : std::filesystem::path(Settings.GamePath).stem().string();
+		Announcement.PeerLimit =
+			static_cast<uint16_t>(engine::replication::ListenerSettings{}.MaximumClients);
+
+		network::PresenceSettings presence;
+		presence.Announce = Settings.Advertise;
+		// A dedicated server does not browse. It has nothing to look for and a
+		// listener on the well-known port would be a port it did not need to
+		// take.
+		presence.Discover = false;
+		presence.RendezvousAddress = Settings.RendezvousAddress;
+		presence.Protocol = engine::replication::PROTOCOL_VERSION;
+		presence.Use = network::Purpose::Game;
+
+		// **The listening socket, not a socket of its own.** A router's NAT
+		// mapping belongs to a port: a hole punched on some other socket leaves
+		// this one exactly as unreachable as it was, so the rendezvous traffic
+		// has to travel over the port clients will connect to. The listener
+		// drains that socket and hands anything foreign back here.
+		Discovery = network::Presence::Open(presence, Announcement, std::move(key), Socket.get());
+		if (Replication != nullptr) {
+			Replication->SetForeign(
+				[this](std::span<const std::byte> datagram, const engine::net::Endpoint &from) {
+					return Discovery != nullptr && Discovery->Deliver(datagram, from, DiscoveryNow);
+				}
+			);
+		}
+		if (Discovery->Fault() != network::PresenceFault::None) {
+			// Recorded rather than fatal. A machine with no route to the subnet
+			// broadcast address still wants its rendezvous registration, and a
+			// server that refused to start over discovery would be refusing
+			// over a feature nobody asked to be essential.
+			ENGINE_WARN("discovery: {}", network::Describe(Discovery->Fault()));
+		}
+		if (Discovery->Announcing()) {
+			ENGINE_INFO(
+				"announcing session {} ({}) on the local subnet",
+				Announcement.Session.Text(),
+				network::Describe(Announcement.Admits)
+			);
+		}
+		if (Discovery->Rendezvousing()) {
+			ENGINE_INFO(
+				"registering session {} with {}", Announcement.Session.Text(), Settings.RendezvousAddress
+			);
+		}
+		return true;
+	}
+
+	void Server::ServeDiscovery(double nowSeconds) {
+		if (Discovery == nullptr) {
+			return;
+		}
+
+		// The clock the foreign-datagram handler reads. It is set here, before
+		// `Listener::Poll` runs in the same tick, so a rendezvous message
+		// routed out of that drain is stamped with this tick's time rather than
+		// the previous one's.
+		DiscoveryNow = nowSeconds;
+
+		// The count changes as people join and leave, and it is the one field
+		// somebody reads before deciding to click. Set every tick and sent on
+		// the beacon's own interval, so a server whose count churns does not
+		// broadcast every tick.
+		const auto peers = static_cast<uint16_t>(Replication == nullptr ? 0 : Replication->Count());
+		if (peers != Announcement.Peers) {
+			Announcement.Peers = peers;
+			Discovery->SetAdvert(Announcement);
+		}
+		Discovery->Pump(nowSeconds);
+	}
+
 	void Server::ServeClients(double nowSeconds) {
+		ServeDiscovery(nowSeconds);
+
 		if (Replication == nullptr) {
 			return;
 		}
@@ -1001,6 +1126,15 @@ namespace server {
 		if (Link != nullptr) {
 			Link->Close();
 			Link.reset();
+		}
+
+		if (Discovery != nullptr) {
+			// Best effort and unacknowledged: a process shutting down has
+			// nothing to wait for, and the rendezvous point's expiry is what
+			// makes a host that crashed indistinguishable from one that was
+			// killed. This only makes the common case tidy.
+			Discovery->Withdraw(0.0);
+			Discovery.reset();
 		}
 
 		Running = false;

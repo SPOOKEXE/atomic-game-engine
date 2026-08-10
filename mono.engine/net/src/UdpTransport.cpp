@@ -1,6 +1,7 @@
 #include <engine/net/Transport.hpp>
 
 #include <algorithm>
+#include <asio/detail/socket_option.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/udp.hpp>
 #include <asio/socket_base.hpp>
@@ -89,6 +90,28 @@ namespace engine::net {
 				if (failure) {
 					return false;
 				}
+
+				// Before the bind, and it has to be: both options change what
+				// the bind is allowed to do, and setting them afterwards is a
+				// no-op the operating system reports as success.
+				if (Limits.ReuseAddress) {
+					std::error_code sharing;
+					Socket.set_option(asio::socket_base::reuse_address(true), sharing);
+#if defined(SO_REUSEPORT)
+					// SO_REUSEADDR alone does not let two sockets hold one UDP
+					// port on Linux or macOS — it only shortens the wait after a
+					// close. SO_REUSEPORT is the one that shares, and it has no
+					// asio name, so it is spelled out. Windows has no such
+					// option and does not need one: SO_REUSEADDR already means
+					// sharing there.
+					const asio::detail::socket_option::boolean<SOL_SOCKET, SO_REUSEPORT> reusePort(true);
+					Socket.set_option(reusePort, sharing);
+#endif
+					// Both are advisory. A kernel that refuses leaves a second
+					// listener unable to bind, which fails at the bind below
+					// with the reason rather than here without one.
+				}
+
 				Socket.bind(local, failure);
 				if (failure) {
 					Socket.close(failure);
@@ -103,6 +126,18 @@ namespace engine::net {
 				// The setting means the same thing on both implementations: how
 				// much may wait before a send is refused. Advisory — a kernel
 				// may round it — which is why nothing reads it back.
+				if (Limits.Broadcast) {
+					// Asked for rather than always on. A socket that could
+					// broadcast by default is one where a mistyped destination
+					// reaches every machine on the link instead of nobody.
+					std::error_code reach;
+					Socket.set_option(asio::socket_base::broadcast(true), reach);
+					if (reach) {
+						Socket.close(failure);
+						return false;
+					}
+				}
+
 				std::error_code sizing;
 				Socket.set_option(
 					asio::socket_base::receive_buffer_size(static_cast<int>(Limits.ReceiveQueueBytes)), sizing

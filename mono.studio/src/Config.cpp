@@ -6,9 +6,11 @@
 #include <studio/Keybinds.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <sstream>
 
 namespace studio {
@@ -265,6 +267,44 @@ namespace studio {
 			ShowControl = Flag(*panels, "control", ShowControl);
 		}
 
+		// **A colour nobody recognises is skipped, not an error.** This document
+		// is one a person edits by hand and one an older build wrote, and the
+		// same rule holds for both: read what is understood, leave the rest, and
+		// never refuse the whole file over one line. A panel that no longer
+		// exists keeps its entry rather than being pruned — renaming a panel
+		// back would otherwise silently lose the colours somebody chose.
+		if (const auto colours = document.find("panelColours");
+			colours != document.end() && colours->is_object()) {
+			for (const auto &[panel, chosen] : colours->items()) {
+				if (panel.empty() || !chosen.is_object()) {
+					continue;
+				}
+
+				engine::ui::ThemeColours entry;
+				for (const auto &[name, value] : chosen.items()) {
+					const std::optional<engine::ui::ThemeColour> which =
+						engine::ui::ParseThemeColour(name);
+					if (!which || !value.is_string()) {
+						continue;
+					}
+
+					// Written as `RRGGBBAA` text rather than as a number,
+					// because a colour in a file somebody reads is `"2E3440FF"`
+					// and not `4281545792`. `ParseColourText` takes a leading
+					// `#` and a six-digit form, so what somebody pastes out of a
+					// palette works.
+					if (const std::optional<unsigned int> packed =
+							engine::ui::ParseColourText(value.get<std::string>())) {
+						entry[*which] = *packed;
+					}
+				}
+
+				if (entry.Any()) {
+					PanelColours[panel] = entry;
+				}
+			}
+		}
+
 		// **Clamped on the way in, not on the way out.** A scale of zero is a
 		// window nobody can read and a port past 65535 is a bind that fails with
 		// a message about the port rather than about the file — and both are one
@@ -280,6 +320,26 @@ namespace studio {
 	}
 
 	bool Preferences::Save() const {
+		// **Only the panels that carry a colour, and only the colours they
+		// carry.** A document listing every panel with every slot would be four
+		// hundred lines describing the default, and the one panel somebody
+		// actually recoloured would be impossible to find in it.
+		json panelColours = json::object();
+		for (const auto &[panel, chosen] : PanelColours) {
+			json entry = json::object();
+			for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
+				if (!chosen.Values[index]) {
+					continue;
+				}
+
+				entry[engine::ui::Describe(static_cast<engine::ui::ThemeColour>(index))] =
+					engine::ui::ColourText(*chosen.Values[index]);
+			}
+			if (!entry.empty()) {
+				panelColours[panel] = std::move(entry);
+			}
+		}
+
 		const json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
@@ -295,6 +355,7 @@ namespace studio {
 				 {"assets", ShowAssets},
 				 {"control", ShowControl},
 			 }},
+			{"panelColours", std::move(panelColours)},
 		};
 
 		std::string error;

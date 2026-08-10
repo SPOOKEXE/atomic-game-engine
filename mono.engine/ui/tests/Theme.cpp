@@ -162,6 +162,121 @@ TEST_CASE("a palette chosen before a context survives to it", "[ui][theme]") {
 	engine::ui::SetPalette(engine::ui::Palette::Dark);
 }
 
+TEST_CASE("a colour survives a round trip through text", "[ui][theme]") {
+	// The text form is the only place the byte order differs from `IM_COL32`,
+	// and it is a boundary two files write and two read — the layout ini and
+	// `preferences.json`. A swap that is wrong in one direction only would show
+	// up as colours that drift a little further from what somebody chose every
+	// time the editor is restarted, which is the worst kind of bug to find.
+	const unsigned int packed = IM_COL32(0x2E, 0x34, 0x40, 0xC0);
+
+	CHECK(engine::ui::ColourText(packed) == "2E3440C0");
+	CHECK(engine::ui::ParseColourText("2E3440C0") == packed);
+	CHECK(engine::ui::ParseColourText("#2e3440c0") == packed);
+
+	// Six digits is opaque, because that is what somebody pastes out of a
+	// palette and appending `FF` is a step they will forget once.
+	CHECK(engine::ui::ParseColourText("#2E3440") == IM_COL32(0x2E, 0x34, 0x40, 0xFF));
+
+	// **Refused rather than read as zero.** A typo would otherwise turn a panel
+	// black and look like a bug in the theme rather than one in the file.
+	CHECK(!engine::ui::ParseColourText("2E344"));
+	CHECK(!engine::ui::ParseColourText("2E3440GG"));
+	CHECK(!engine::ui::ParseColourText(""));
+}
+
+TEST_CASE("every colour has a name that parses back", "[ui][theme]") {
+	// The names are the key in two files and the argument a plugin passes to
+	// `SetWidgetColour`, so a name that does not parse back is a setting that
+	// writes and never reads.
+	for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
+		const auto colour = static_cast<engine::ui::ThemeColour>(index);
+		INFO("colour: " << engine::ui::Describe(colour));
+		CHECK(engine::ui::ParseThemeColour(engine::ui::Describe(colour)) == colour);
+	}
+
+	CHECK(!engine::ui::ParseThemeColour("Surfaces"));
+	CHECK(!engine::ui::ParseThemeColour(""));
+}
+
+TEST_CASE("an override rides over the palette rather than replacing it", "[ui][theme]") {
+	// **The claim the whole design rests on.** An override that was a full copy
+	// of a palette would pin all seven colours the moment anybody touched one,
+	// and choosing a theme afterwards would appear to do nothing — which is
+	// exactly the complaint a customisable theme usually earns.
+	const Context context;
+
+	engine::ui::SetPalette(engine::ui::Palette::Dark);
+	engine::ui::ApplyEditorTheme();
+	const ImVec4 darkSurface = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+
+	engine::ui::ThemeColours chosen;
+	chosen[engine::ui::ThemeColour::Accent] = IM_COL32(0xFF, 0x00, 0x80, 0xFF);
+	engine::ui::SetGlobalColours(chosen);
+
+	CHECK(engine::ui::AccentColour() == IM_COL32(0xFF, 0x00, 0x80, 0xFF));
+
+	// The surface is still the palette's, because nobody chose one.
+	const ImVec4 afterAccent = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+	CHECK(afterAccent.x == darkSurface.x);
+
+	// And switching palette moves everything except the accent that was pinned.
+	engine::ui::SetPalette(engine::ui::Palette::Green);
+	CHECK(engine::ui::AccentColour() == IM_COL32(0xFF, 0x00, 0x80, 0xFF));
+	CHECK(ImGui::GetStyle().Colors[ImGuiCol_WindowBg].y != darkSurface.y);
+
+	// A surface override reaches the whole ladder, not just the window: this is
+	// what makes seven knobs enough, and what a per-slot editor would lose.
+	chosen[engine::ui::ThemeColour::Surface] = IM_COL32(0x40, 0x20, 0x10, 0xFF);
+	engine::ui::SetGlobalColours(chosen);
+
+	const ImGuiStyle &style = ImGui::GetStyle();
+	CHECK(style.Colors[ImGuiCol_WindowBg].x > style.Colors[ImGuiCol_WindowBg].z);
+	CHECK(style.Colors[ImGuiCol_Button].x > style.Colors[ImGuiCol_WindowBg].x);
+	CHECK(style.Colors[ImGuiCol_FrameBg].x < style.Colors[ImGuiCol_WindowBg].x);
+
+	// Left as it was found, so the case order cannot change another's result.
+	engine::ui::SetGlobalColours(engine::ui::ThemeColours{});
+	engine::ui::SetPalette(engine::ui::Palette::Dark);
+}
+
+TEST_CASE("a panel's colours are pushed and popped", "[ui][theme]") {
+	// `ScopedColours` is the per-widget half, and the two things that can go
+	// wrong with it are both silent: pushing nothing when something was asked
+	// for, and leaving the stack unbalanced — which imgui reports a frame later
+	// as an assertion in an unrelated window.
+	const Context context;
+	engine::ui::SetPalette(engine::ui::Palette::Dark);
+	engine::ui::ApplyEditorTheme();
+
+	const ImVec4 before = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+
+	{
+		// Empty is a no-op, which is what every panel nobody recoloured gets.
+		const engine::ui::ScopedColours none{engine::ui::ThemeColours{}};
+		CHECK(ImGui::GetStyle().Colors[ImGuiCol_WindowBg].x == before.x);
+	}
+
+	engine::ui::ThemeColours chosen;
+	chosen[engine::ui::ThemeColour::Surface] = IM_COL32(0x10, 0x40, 0x20, 0xFF);
+
+	{
+		const engine::ui::ScopedColours skin(chosen);
+
+		// The style imgui reads is the pushed one, and the whole ladder moved
+		// with it rather than the window alone.
+		const ImGuiStyle &style = ImGui::GetStyle();
+		CHECK(style.Colors[ImGuiCol_WindowBg].y > style.Colors[ImGuiCol_WindowBg].x);
+		CHECK(style.Colors[ImGuiCol_Button].y > style.Colors[ImGuiCol_WindowBg].y);
+	}
+
+	// And it is back, exactly, on the way out.
+	const ImVec4 after = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+	CHECK(after.x == before.x);
+	CHECK(after.y == before.y);
+	CHECK(after.z == before.z);
+}
+
 TEST_CASE("the drawn colours are the styled ones", "[ui][theme]") {
 	// The accent is both a style entry and a packed constant, because a few
 	// things are drawn rather than styled — the explorer's selection band, the

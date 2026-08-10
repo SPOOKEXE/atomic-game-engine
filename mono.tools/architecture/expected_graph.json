@@ -10,7 +10,13 @@
     "",
     "`delivery` sits above `assets` and `net`; `bake` stays separate from the",
     "runtime and `assetc` owns filesystem access. `render` consumes `assets`, not",
-    "foreign-format parsers. The server remains headless."
+    "foreign-format parsers. The server remains headless.",
+    "",
+    "v0.13 adds `network` — finding a peer, and being findable. It sits above",
+    "`net` and below every program, which is why four rows gained it at once and",
+    "no row gained anything else. It is `shared` and links only `core` and",
+    "`net`, so the server row is still headless and the cdn row still configures",
+    "on a machine with no Vulkan SDK."
   ],
   "modules": {
     "assets": {
@@ -48,6 +54,7 @@
         "core",
         "delivery",
         "net",
+        "network",
         "parallel"
       ]
     },
@@ -66,6 +73,7 @@
         "gui",
         "input",
         "net",
+        "network",
         "parallel",
         "physics",
         "render",
@@ -191,6 +199,13 @@
         "core"
       ]
     },
+    "network": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "net"
+      ]
+    },
     "parallel": {
       "tier": "shared",
       "links": [
@@ -269,6 +284,7 @@
         "graph",
         "gui",
         "net",
+        "network",
         "parallel",
         "physics",
         "replication",
@@ -305,6 +321,7 @@
         "gui",
         "input",
         "net",
+        "network",
         "parallel",
         "physics",
         "render",
@@ -358,6 +375,7 @@
         "gui",
         "input",
         "net",
+        "network",
         "parallel",
         "physics",
         "render",
@@ -387,6 +405,7 @@
         "core",
         "delivery",
         "net",
+        "network",
         "parallel"
       ],
       "requires": "MONO_BUILD_CDN"
@@ -407,6 +426,7 @@
         "gui",
         "input",
         "net",
+        "network",
         "parallel",
         "physics",
         "render",
@@ -432,6 +452,7 @@
         "graph",
         "gui",
         "net",
+        "network",
         "parallel",
         "physics",
         "replication",
@@ -462,6 +483,7 @@
         "gui",
         "input",
         "net",
+        "network",
         "parallel",
         "physics",
         "render",
@@ -493,6 +515,7 @@
         "gui",
         "input",
         "net",
+        "network",
         "parallel",
         "physics",
         "render",

@@ -74,6 +74,10 @@ namespace engine::net {
 		return FromIPv4({127, 0, 0, 1}, port);
 	}
 
+	Endpoint Endpoint::BroadcastIPv4(uint16_t port) {
+		return FromIPv4({255, 255, 255, 255}, port);
+	}
+
 	std::optional<Endpoint> Endpoint::Parse(std::string_view text) {
 		if (text.empty()) {
 			return std::nullopt;

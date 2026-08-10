@@ -470,7 +470,7 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched — reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.tools mono.build"
+mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #
