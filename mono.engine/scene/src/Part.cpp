@@ -1316,6 +1316,14 @@ namespace engine::scene {
 			// the whole argument for why collapsing any two of them is wrong.
 			ecs::Classes::Property<&Visual::CastShadow>(basePart, "CastShadow");
 
+			// **The one property on a part that only an editor reads.** A
+			// locked part still draws, still collides and is still reachable
+			// from a script — what it refuses is a pointer pick, which is
+			// `Visual::Locked`'s whole surface. Declared here rather than kept
+			// in the editor because it is authoring data that has to survive a
+			// save, which an editor-side set could not.
+			ecs::Classes::Property<&Visual::Locked>(basePart, "Locked");
+
 			// Which surface texture this part shows, or -1 for none. An `int32`
 			// rather than a reference to the camera: the renderer indexes a
 			// small fixed set, and a handle would have to be resolved back to an

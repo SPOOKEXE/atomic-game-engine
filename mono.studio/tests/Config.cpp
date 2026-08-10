@@ -105,9 +105,9 @@ TEST_CASE("a document that is not JSON says so once", "[studio][config]") {
 	// preference with no line anywhere saying why is the failure this is
 	// written against.
 	Preferences preferences;
-	preferences.GridStep = 4.0f;
+	preferences.SnapDistance = 4.0f;
 	CHECK_FALSE(preferences.Load());
-	CHECK(preferences.GridStep == 4.0f);
+	CHECK(preferences.SnapDistance == 4.0f);
 }
 
 TEST_CASE("writing a document creates the folder", "[studio][config]") {
@@ -130,9 +130,10 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	Preferences written;
 	written.Scale = 1.25f;
 	written.ShowGrid = false;
-	written.GridStep = 0.25f;
-	written.RotationStep = 45.0f;
-	written.PivotAnchored = false;
+	written.SnapEnabled = true;
+	written.SnapDistance = 0.25f;
+	written.SnapDegrees = 45.0f;
+	written.PivotEditing = true;
 	written.ControlPort = 9001;
 	written.ShowControl = true;
 	REQUIRE(written.Save());
@@ -141,9 +142,10 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	REQUIRE(read.Load());
 	CHECK(read.Scale == 1.25f);
 	CHECK_FALSE(read.ShowGrid);
-	CHECK(read.GridStep == 0.25f);
-	CHECK(read.RotationStep == 45.0f);
-	CHECK_FALSE(read.PivotAnchored);
+	CHECK(read.SnapEnabled);
+	CHECK(read.SnapDistance == 0.25f);
+	CHECK(read.SnapDegrees == 45.0f);
+	CHECK(read.PivotEditing);
 	CHECK(read.ControlPort == 9001);
 	CHECK(read.ShowControl);
 
@@ -153,10 +155,10 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	scratch.Write("preferences.json", R"({"gridStep": 2.0})");
 
 	Preferences partial;
-	partial.RotationStep = 30.0f;
+	partial.SnapDegrees = 30.0f;
 	REQUIRE(partial.Load());
-	CHECK(partial.GridStep == 2.0f);
-	CHECK(partial.RotationStep == 30.0f);
+	CHECK(partial.SnapDistance == 2.0f);
+	CHECK(partial.SnapDegrees == 30.0f);
 }
 
 TEST_CASE("a hand-edited preference is clamped rather than obeyed", "[studio][config]") {
@@ -172,8 +174,11 @@ TEST_CASE("a hand-edited preference is clamped rather than obeyed", "[studio][co
 	Preferences preferences;
 	REQUIRE(preferences.Load());
 	CHECK(preferences.Scale >= 0.5f);
-	CHECK(preferences.GridStep == 0.0f);
-	CHECK(preferences.RotationStep == 0.0f);
+
+	// A step of zero would round every drag onto one point. Snapping is turned
+	// off with the checkbox, never by writing nothing in the box.
+	CHECK(preferences.SnapDistance > 0.0f);
+	CHECK(preferences.SnapDegrees > 0.0f);
 	CHECK(preferences.ControlPort == 65535);
 }
 
@@ -182,11 +187,11 @@ TEST_CASE("a field of the wrong type falls back rather than throwing", "[studio]
 	scratch.Write("preferences.json", R"({"gridStep": "half a stud", "showGrid": 1})");
 
 	Preferences preferences;
-	preferences.GridStep = 3.0f;
+	preferences.SnapDistance = 3.0f;
 	preferences.ShowGrid = true;
 
 	REQUIRE(preferences.Load());
-	CHECK(preferences.GridStep == 3.0f);
+	CHECK(preferences.SnapDistance == 3.0f);
 	CHECK(preferences.ShowGrid);
 }
 

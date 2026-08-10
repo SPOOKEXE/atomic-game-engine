@@ -261,6 +261,7 @@ namespace studio {
 		// the next step rather than the current one.
 		{
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
+			DrawTools();
 			DrawHistory();
 			DrawAssets();
 			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
@@ -894,6 +895,7 @@ namespace studio {
 		// a thing somebody turns on by accident and cannot turn off. No
 		// shortcuts of their own — the Keybinds page is where keys are decided
 		// now, and two places to bind a key is one too many.
+		ImGui::MenuItem("Tools", nullptr, &ShowTools);
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);

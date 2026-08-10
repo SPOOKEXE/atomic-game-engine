@@ -597,6 +597,7 @@ namespace studio {
 				Dragging.Grabbed = grabbed;
 				Dragging.GrabbedPoint = grabbedPoint;
 				Dragging.Mode = mode;
+				Dragging.Pivots = PivotEditing && mode != ToolMode::Scale;
 
 				Universe->Enter(world, [&](Store &store) {
 					for (const Entity instance : Selection) {
@@ -609,6 +610,9 @@ namespace studio {
 
 							const auto *bounds = store.Get<engine::scene::Bounds>(instance);
 							Dragging.BeforeSize.push_back(bounds != nullptr ? bounds->HalfExtent : Vector3{});
+
+							const auto *pivot = store.Get<engine::scene::Pivot>(instance);
+							Dragging.BeforePivot.push_back(pivot != nullptr ? pivot->Offset : CFrame{});
 						}
 					}
 				});
@@ -681,6 +685,60 @@ namespace studio {
 							// translate gizmo must not touch orientation,
 							// and rebuilding the frame from a position
 							// alone would quietly reset it.
+							// **A pivot edit moves the handle and leaves the
+							// part exactly where it is**, which is the whole
+							// point of the mode: a door whose hinge is in the
+							// wrong place is fixed by moving the hinge, and an
+							// editor that moved the door with it would leave the
+							// author where they started.
+							//
+							// The delta is in world space and `Pivot::Offset` is
+							// in the part's own, so it is carried across by the
+							// frame the part was grabbed at. `PivotOf` composes
+							// them the same way round.
+							if (Dragging.Pivots) {
+								const CFrame &frame = Dragging.Before[index];
+								const CFrame &was = Dragging.BeforePivot[index];
+
+								CFrame offset = was;
+								if (Dragging.Mode == ToolMode::Move) {
+									// The world delta carried into the part's own
+									// frame, so dragging the X handle moves the
+									// pivot along the world X whatever the part
+									// is turned to. A *vector* rather than a
+									// point: a translation has no origin.
+									offset.Position =
+										was.Position +
+										frame.Inverse().VectorToWorldSpace(axis * delta);
+								} else {
+									// **About the pivot's own position, not the
+									// selection's centre.** A move gizmo swings a
+									// group because that is what turning a group
+									// means; a pivot orbiting the group would put
+									// the hinge somewhere nobody pointed at.
+									//
+									// The axis is a world one, so it is carried
+									// into the part's frame the same way the
+									// translation is.
+									const Vector3 local =
+										frame.Inverse().VectorToWorldSpace(axis).Unit();
+									const glm::quat spin = glm::angleAxis(
+										radians, glm::vec3(local.X, local.Y, local.Z)
+									);
+
+									offset = CFrame(was.Position) * CFrame(Vector3{}, spin) *
+											 CFrame(was.Position).Inverse() * was;
+								}
+
+								(void)store.SetProperty(
+									instance,
+									engine::core::Name("PivotOffset"),
+									&offset,
+									sizeof(offset)
+								);
+								continue;
+							}
+
 							engine::scene::Transform moved = *transform;
 							moved.Frame = Dragging.Before[index];
 
@@ -771,8 +829,11 @@ namespace studio {
 					// the size it actually changed exactly where it was — an
 					// undo that reports success and reverses nothing.
 					const bool scaling = Dragging.Mode == ToolMode::Scale;
-					const engine::core::Name property(scaling ? "Size" : "CFrame");
-					const char *what = scaling							   ? "Resize"
+					const engine::core::Name property(
+						Dragging.Pivots ? "PivotOffset" : (scaling ? "Size" : "CFrame")
+					);
+					const char *what = Dragging.Pivots					   ? "Edit Pivot"
+									   : scaling						   ? "Resize"
 									   : Dragging.Mode == ToolMode::Rotate ? "Rotate"
 																		   : "Move";
 
@@ -802,6 +863,17 @@ namespace studio {
 
 								after.Type = engine::ecs::PropertyType::Vector3;
 								after.Vector3 = bounds->HalfExtent * 2.0f;
+							} else if (Dragging.Pivots) {
+								const auto *pivot = store.Get<engine::scene::Pivot>(instance);
+								if (pivot == nullptr) {
+									continue;
+								}
+
+								before.Type = engine::ecs::PropertyType::CFrame;
+								before.CFrame = Dragging.BeforePivot[index];
+
+								after.Type = engine::ecs::PropertyType::CFrame;
+								after.CFrame = pivot->Offset;
 							} else {
 								const auto *transform = store.Get<engine::scene::Transform>(instance);
 								if (transform == nullptr) {
@@ -851,6 +923,23 @@ namespace studio {
 				[&](Entity entity,
 					const engine::scene::Transform &transform,
 					const engine::scene::Bounds &bounds) {
+					// **A locked part is left out of the grid rather than
+					// filtered out of the hit**, which is the difference between
+					// "cannot be picked" and "can be picked and is then
+					// ignored": the second one still swallows the ray, so a
+					// locked wall in front of the thing somebody wants would
+					// make that thing unclickable too. Leaving it out lets the
+					// ray carry on to whatever is behind it, which is what
+					// locking a wall was for.
+					//
+					// `Visual` rather than a set the editor keeps: locking is
+					// authoring data that survives a save — see
+					// `scene::Visual::Locked`.
+					if (const auto *visual = store.Get<engine::scene::Visual>(entity);
+						visual != nullptr && visual->Locked) {
+						return;
+					}
+
 					engine::spatial::Proxy proxy;
 					proxy.Id = entity.Id;
 					proxy.Bounds = AABB::FromOrientedBox(transform.Frame, bounds.HalfExtent);

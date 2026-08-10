@@ -2564,6 +2564,80 @@ namespace studio {
 		float SnapDegrees = 15.0f;
 		//@}
 
+		// Whether the handles edit the pivot rather than the placement.
+		//
+		// **A mode over the same handles, which is Roblox's "Edit Pivot" and is
+		// the right shape.** A pivot is a `CFrame` in the part's own space, so
+		// moving one is the same drag arithmetic pointed at `PivotOffset`
+		// instead of at `Transform::Frame` — a second set of gizmos would be a
+		// second set of handles over one object, which the `ToolMode` comment
+		// above already rules out for the same reason.
+		//
+		// **The part does not move while this is on.** That is the whole point:
+		// a door whose hinge is in the wrong place is fixed by moving the hinge,
+		// and an editor that moved the door with it would leave the author
+		// exactly where they started.
+		//
+		// @since v0.12
+		bool PivotEditing = false;
+
+		// Puts every selected instance's pivot back at its centre.
+		//
+		// **A button rather than typing zeroes into three fields**, which is
+		// what it replaced: `PivotOffset` is a `CFrame` and the properties panel
+		// spells it as a position and an orientation, so undoing a pivot edit by
+		// hand is six numbers and a chance to get one wrong.
+		//
+		// Recorded as one command, so it undoes in one press.
+		void ResetSelectionPivot();
+
+		// Sets a boolean property on everything selected.
+		//
+		// **One function for `Anchored` and `Locked`**, because the two toolbar
+		// buttons differ only in the name they write — and a second copy of "walk
+		// the selection, write a bool, record a command" is the duplicate that
+		// drifts the first time one of them learns about mixed selections.
+		//
+		// @param property What to write.
+		// @param value    What to write to it.
+		// @param label    What the undo entry is called.
+		void SetSelectionFlag(const char *property, bool value, const char *label);
+
+		// Whether every selected instance already reads `true` for a property.
+		//
+		// **Used to decide what a toggle button does next.** A mixed selection
+		// answers `false`, so the first press turns everything on rather than
+		// half of it off — which is what a person pressing one button means.
+		//
+		// @param property What to read.
+		// @return `true` when everything selected has it set.
+		bool SelectionFlag(const char *property) const;
+
+		// The tools panel: the manipulators, the steps and the toggles.
+		//
+		// **One strip rather than the menus these came from.** Every one of them
+		// is a thing somebody changes while their other hand is on the mouse,
+		// which is exactly the case a menu is worst at.
+		void DrawTools();
+
+		// One tab each. Split so that each is a list of controls rather than a
+		// list of controls with a `BeginTabItem` between every fourth one.
+		//@{
+		void DrawHomeTools();
+		void DrawModelTools();
+		void DrawScriptTools();
+		void DrawViewTools();
+		//@}
+
+		// A button that runs a registered command, greyed with its reason.
+		//
+		// @param id    Which command.
+		// @param label What the button says.
+		void OperatorButton(Action id, const char *label);
+
+		// Whether the tools panel is open.
+		bool ShowTools = true;
+
 		// A translate gizmo, mid-drag.
 		//
 		// **One command per drag, not one per frame.** A drag that recorded on
@@ -2596,6 +2670,22 @@ namespace studio {
 			// The half-extents before the drag, for a scale. Parallel to
 			// `Instances`; an entry is zero for anything with no `Bounds`.
 			std::vector<engine::core::Vector3> BeforeSize;
+
+			// The pivot offsets before the drag, for a pivot edit. Parallel to
+			// `Instances`; the identity for anything with no `Pivot`.
+			//
+			// **Captured on grab like the frames beside it**, and for the same
+			// reason: a pivot edit applies an absolute delta from where things
+			// were, so accumulating onto the live value would drift by one
+			// frame's rounding every frame.
+			std::vector<engine::core::CFrame> BeforePivot;
+
+			// Whether this drag is editing pivots rather than placements.
+			//
+			// Captured on grab rather than read live, exactly as `Mode` is:
+			// leaving the mode mid-drag must not turn a pivot edit into a move
+			// halfway through it.
+			bool Pivots = false;
 
 			// Which manipulation this drag is. Captured on grab rather than
 			// read live, so changing tool mid-drag cannot turn a move into a
@@ -2696,25 +2786,6 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
-
-		// How far a dragged handle steps, in studs. Zero is continuous.
-		//
-		// **On the editor rather than on the tool**, because it is one setting
-		// for every handle: an author who set a one-stud grid means it for a
-		// move whichever axis they drag. `Preferences` keeps it between
-		// sessions.
-		float GridStep = 1.0f;
-
-		// How far a rotation handle steps, in degrees. Zero is continuous.
-		float RotationStep = 15.0f;
-
-		// Whether a handle moves an instance about its pivot or its centre.
-		//
-		// **The pivot is the default and it is the useful one.** A door turns on
-		// its hinge and a lid sits on its rim — `scene::PivotOf` is what says
-		// where the handle is, and an editor that always used the centre would
-		// make every one of those a subtraction the author has to do.
-		bool PivotAnchored = true;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//

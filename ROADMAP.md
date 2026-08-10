@@ -42,10 +42,16 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] world => rojo sync, universe => multi-rojo sync (each world syncs separately, so one bad project file costs its own world and the rest still sync)
 - [_] deferred `D00104` — the rest of Rojo's file table: .rbxm, .model.json, .meta.json, .txt, .csv, .json, .toml.
 - [x] update built-in MCP integrations (component_list, entity_query, component_get, component_set over the v0.12 storage surface; first suite for `control`), add a studio ui button to enable/disable and information panel
-- [_] deferred items
+- [x] walked the deferred register. One new item filed — `D00104`, the rest of
+      Rojo's file table. Every other open entry's reopen trigger is unfired:
+      `D00102` wants the `bake` module split, `D00039` wants a world that ticks
+      physics (v0.13), `D00038`/`D00046`/`D00103` want a render pass executor,
+      `D00030`/`D00031` are tooling gaps with working workarounds, and
+      `D00014`/`D00015`/`D00018`/`D00019` are net and replication decisions
+      waiting on a deployment.
 - [x] create a api for setting up configs in the studio and saving them to the ~/Documents/atomic-game-engine/studio folder. Save for preferences.json, cdn.json, recent.json (last 5 projects), keybinds.json. Also materials preview now renders without a hover and fetches a missing colour map through the delivery client.
-- [_] studio editing tools; select, move, rotate, 3d scene interactable gimbals, grid step amount input, rotation amount input, anchor toggle, "lock" toggle, pivot editor mode, reset pivot button. Reference "~/Pictures/Screenshot from 2026-08-08 15-59-40.png" and "~/Pictures/Screenshot from 2026-08-08 16-00-19.png".
-- [_] studio tooling tabs
+- [x] studio editing tools; select, move, rotate, 3d scene interactable gimbals, grid step amount input, rotation amount input, anchor toggle, "lock" toggle, pivot editor mode, reset pivot button.
+- [x] studio tooling tabs (Home, Model, Script, View)
 
 ### v0.13
 

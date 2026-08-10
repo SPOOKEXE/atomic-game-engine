@@ -175,18 +175,28 @@ namespace studio {
 		// Whether the ground grid is drawn.
 		bool ShowGrid = true;
 
-		// How far a dragged handle steps, in studs. Zero is continuous.
+		// Whether a dragged handle snaps at all.
 		//
-		// **Here rather than in the tool that reads it**, because it is the
-		// first thing anybody changes and the last thing they want to set again
-		// tomorrow.
-		float GridStep = 1.0f;
+		// **These three are `Editor::SnapEnabled`, `SnapDistance` and
+		// `SnapDegrees`, spelled the same and holding the same numbers.** They
+		// are here rather than duplicated because a step is the first thing
+		// anybody changes and the last thing they want to set again tomorrow —
+		// and a second pair of fields meaning the same thing is the debt the
+		// root `AGENTS.md` calls the most expensive kind.
+		bool SnapEnabled = false;
 
-		// How far a rotation handle steps, in degrees. Zero is continuous.
-		float RotationStep = 15.0f;
+		// How far a dragged handle steps, in studs.
+		float SnapDistance = 1.0f;
 
-		// Whether the handles move an instance about its pivot or its centre.
-		bool PivotAnchored = true;
+		// How far a rotation handle steps, in degrees.
+		float SnapDegrees = 15.0f;
+
+		// Whether a handle edits the pivot offset rather than the placement.
+		//
+		// **A mode, because the handles are the same ones.** Roblox spells it
+		// "Edit Pivot" and it is the same translate and rotate gizmo pointed at
+		// `PivotOffset` — see `Editor::PivotEditing`.
+		bool PivotEditing = false;
 
 		// The loopback port the control surface offers in its panel.
 		//

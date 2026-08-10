@@ -328,13 +328,38 @@ namespace engine::scene {
 		// type without one is the day three uninitialised bytes start ending up
 		// in a recording.
 		//
-		// **One now, not two.** `CastShadow` took another, which is what named
+		// **None now.** `CastShadow` took one, `Surface` took the first the
+		// same way, and `Locked` below took the last — which is what named
 		// padding is for: a field that fits goes in the hole rather than
-		// widening the row. `Surface` took the first the same way, and
-		// `Transparency` did not fit — a float needs four-byte alignment and
-		// these are the tail after a `bool` — so the struct grew by four for
-		// that one and by nothing for the other two.
-		uint8_t Reserved[1] = {};
+		// widening the row. `Transparency` did not fit — a float needs
+		// four-byte alignment and these are the tail after a `bool` — so the
+		// struct grew by four for that one and by nothing for the other three.
+		//
+		// The next `bool` added here widens `Visual` by four bytes on every
+		// drawable in the world. That is a real cost and it should be a
+		// deliberate one; there is nowhere left to hide it.
+
+		// Whether an editor's click may select this entity.
+		//
+		// **Roblox's `BasePart.Locked`, and it is authoring data rather than an
+		// editor mode.** A locked part is one somebody deliberately took out of
+		// reach — a baseplate, a wall they keep catching while boxing over it —
+		// and the whole value of saying so is that it survives a save and comes
+		// back tomorrow. An editor-side set of "parts I am ignoring" would be a
+		// second copy of a fact the world could have held, kept nowhere the
+		// game file can see.
+		//
+		// **It changes nothing about the simulation.** Physics, the draw list
+		// and every script read straight past it; the only consumer is a
+		// pointer pick, which is why the field is one byte in existing padding
+		// rather than a component of its own.
+		//
+		// **Not the same as `Anchored`**, which is where it would most easily be
+		// confused: anchored decides whether the physics moves it, and this
+		// decides whether a person can grab it. A locked part still falls.
+		//
+		// @since v0.12
+		bool Locked = false;
 	};
 
 	// What a surface is made of, beyond the flat colour `Visual` carries.

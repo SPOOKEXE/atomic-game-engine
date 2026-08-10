@@ -251,9 +251,10 @@ namespace studio {
 		// clearing whatever it did not mention.
 		Scale = Number(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
-		GridStep = Number(document, "gridStep", GridStep);
-		RotationStep = Number(document, "rotationStep", RotationStep);
-		PivotAnchored = Flag(document, "pivotAnchored", PivotAnchored);
+		SnapEnabled = Flag(document, "snap", SnapEnabled);
+		SnapDistance = Number(document, "gridStep", SnapDistance);
+		SnapDegrees = Number(document, "rotationStep", SnapDegrees);
+		PivotEditing = Flag(document, "pivotEditing", PivotEditing);
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
 		if (const auto panels = document.find("panels");
@@ -269,8 +270,11 @@ namespace studio {
 		// a message about the port rather than about the file — and both are one
 		// hand edit away.
 		Scale = std::clamp(Scale, 0.5f, 4.0f);
-		GridStep = std::max(0.0f, GridStep);
-		RotationStep = std::max(0.0f, RotationStep);
+		// A step of zero would round every drag onto one point. Snapping is
+		// turned *off* rather than set to nothing, which is what the checkbox
+		// beside the field already means.
+		SnapDistance = std::max(0.001f, SnapDistance);
+		SnapDegrees = std::max(0.001f, SnapDegrees);
 		ControlPort = std::clamp(ControlPort, 0, 65535);
 		return true;
 	}
@@ -279,9 +283,10 @@ namespace studio {
 		const json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
-			{"gridStep", GridStep},
-			{"rotationStep", RotationStep},
-			{"pivotAnchored", PivotAnchored},
+			{"snap", SnapEnabled},
+			{"gridStep", SnapDistance},
+			{"rotationStep", SnapDegrees},
+			{"pivotEditing", PivotEditing},
 			{"controlPort", ControlPort},
 			{"panels",
 			 json{
@@ -341,9 +346,10 @@ namespace studio {
 		ShowGrid = Prefs.ShowGrid;
 		ShowControl = Prefs.ShowControl;
 		ControlPortField = Prefs.ControlPort;
-		GridStep = Prefs.GridStep;
-		RotationStep = Prefs.RotationStep;
-		PivotAnchored = Prefs.PivotAnchored;
+		SnapEnabled = Prefs.SnapEnabled;
+		SnapDistance = Prefs.SnapDistance;
+		SnapDegrees = Prefs.SnapDegrees;
+		PivotEditing = Prefs.PivotEditing;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file —
@@ -387,9 +393,10 @@ namespace studio {
 		Prefs.ShowFrameGraph = ShowFrameGraph;
 		Prefs.ShowAssets = ShowAssets;
 		Prefs.ControlPort = ControlPortField;
-		Prefs.GridStep = GridStep;
-		Prefs.RotationStep = RotationStep;
-		Prefs.PivotAnchored = PivotAnchored;
+		Prefs.SnapEnabled = SnapEnabled;
+		Prefs.SnapDistance = SnapDistance;
+		Prefs.SnapDegrees = SnapDegrees;
+		Prefs.PivotEditing = PivotEditing;
 		Prefs.Scale = Settings.Scale;
 
 		Prefs.Save();

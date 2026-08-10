@@ -708,6 +708,7 @@ declare interface BasePart extends PVInstance {
 	CastShadow: boolean;
 	CollisionGroup: string;
 	Color: Color3;
+	Locked: boolean;
 	Size: Vector3;
 	Transparency: number;
 	Visible: boolean;

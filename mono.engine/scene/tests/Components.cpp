@@ -120,9 +120,15 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// same trade `SurfaceAppearance` makes one component over. Four bytes an
 	// entity buys a fit rule with nothing to keep in step — see `Visual::Fitted`
 	// for why a bool would have been cheaper and wrong.
+	//
+	// **No bytes left, as of v0.12.** `Locked` took the last one — an editor
+	// pick reads it and nothing else does, which is exactly the shape a byte of
+	// padding is for. The next `bool` widens this struct by four on every
+	// drawable in the world, and this line is what makes that visible in a diff
+	// rather than discovered in a profile.
 	CHECK(
-		sizeof(Visual) ==
-		sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) + sizeof(bool) + 1
+		sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) +
+							  sizeof(bool) + sizeof(bool)
 	);
 
 	CHECK(sizeof(Rendered) == sizeof(uint8_t) + 3);
@@ -137,7 +143,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// packed.
 	CHECK(offsetof(RigidBody, Reserved) + sizeof(RigidBody::Reserved) == sizeof(RigidBody));
 	CHECK(offsetof(Collider, Reserved) + sizeof(Collider::Reserved) == sizeof(Collider));
-	CHECK(offsetof(Visual, Reserved) + sizeof(Visual::Reserved) == sizeof(Visual));
+	CHECK(offsetof(Visual, Locked) + sizeof(Visual::Locked) == sizeof(Visual));
 	CHECK(offsetof(Rendered, Reserved) + sizeof(Rendered::Reserved) == sizeof(Rendered));
 }
 

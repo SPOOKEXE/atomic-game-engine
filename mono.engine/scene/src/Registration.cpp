@@ -79,6 +79,11 @@ namespace engine::scene {
 				// written here in the same breath rather than a release later —
 				// which is the whole lesson of the paragraph above.
 				writer.WriteBool(visual.CastShadow);
+
+				// Added at v0.12, in the same breath, for the same reason. A
+				// part somebody locked and then saved would otherwise come back
+				// grabbable, which is the one thing locking it was for.
+				writer.WriteBool(visual.Locked);
 			}
 		}
 
@@ -95,6 +100,7 @@ namespace engine::scene {
 				visual.Transparency = reader.ReadFloat();
 				visual.Surface = reader.ReadInt8();
 				visual.CastShadow = reader.ReadBool();
+				visual.Locked = reader.ReadBool();
 			}
 		}
 

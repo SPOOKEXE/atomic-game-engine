@@ -782,6 +782,7 @@ declare extern type BasePart extends PVInstance with
 	CastShadow: boolean
 	CollisionGroup: string
 	Color: Color3
+	Locked: boolean
 	Size: Vector3
 	Transparency: number
 	Visible: boolean

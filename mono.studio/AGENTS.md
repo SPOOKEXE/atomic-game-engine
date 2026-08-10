@@ -290,3 +290,40 @@ that provokes the fault on purpose with imgui's assert switched off, so the
 detector is known to work rather than merely known to pass. **Reach for that
 harness before extracting a free function**: a panel's imgui behaviour is now
 testable, and moving logic out to avoid testing it is no longer the only option.
+
+## Configuration lives in the person's folder, not beside the binary
+
+`studio-layout.ini`, `studio-content.ini` and `studio-keybinds.ini` used to sit
+in `Paths::Base()`, which is `.cache/build/<preset>/` for anybody working on the
+engine. Every `just build` against another preset therefore read as a fresh
+install, and deleting the build directory threw away somebody's keybinds and
+their origin list.
+
+`studio/Config.hpp` is the one place that decides where these go —
+`~/Documents/atomic-game-engine/studio`, beside the content store that already
+lives there. Three conventions the build cannot check:
+
+- **Every document goes through `ReadConfigDocument`/`WriteConfigDocument`.** A
+  second path that spelled its own filename would be a second place to change
+  when the folder moves, and the first one to be forgotten.
+- **A flag beats a preference and is never written back.** `Options` is what
+  somebody asked for on one run and `Preferences` is what they configured;
+  `app/main.cpp` reconciles the two because it is the only code that can tell a
+  flag that was given from one left at its default. `--headless` once must not
+  make an editor headless for ever.
+- **A missing file is not an error.** Every `Load` answers `false` and leaves
+  the caller's defaults alone, so nothing has to tell "not configured yet" from
+  "configured to the default".
+
+## A locked part is left out of the pick, not filtered out of the hit
+
+`scene::Visual::Locked` is authoring data — it survives a save, which an
+editor-side set of "instances I am ignoring" could not. What the editor does
+with it is the part that is easy to get subtly wrong: `PickInViewport` omits a
+locked entity from the proxy list **before** the raycast.
+
+Filtering the *hit* afterwards passes every simple test and is wrong: the locked
+proxy still swallows the ray, so a locked wall makes everything behind it
+unclickable too — which is the opposite of what locking a wall is for.
+`studio.tools` has the case, and it is the one that needs something *behind* the
+locked thing to fail at all.

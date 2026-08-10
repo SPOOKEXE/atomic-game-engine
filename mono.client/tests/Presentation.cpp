@@ -303,6 +303,14 @@ TEST_CASE("a part's transparency survives a snapshot", "[client][presentation]")
 		// Same for `Visible`, which had no coverage here either.
 		const bool visible = false;
 		REQUIRE(store.SetProperty(part, Name("Visible"), &visible, sizeof(visible)));
+
+		// **And `Locked`, which arrived at v0.12 into the same serialiser.**
+		// Set to `true` here for `CastShadow`'s reason inverted: the default is
+		// `false`, so a reader that dropped the field would come back unlocked
+		// and this would fail. A part somebody locked and then saved coming
+		// back grabbable is the one thing locking it was for.
+		const bool locked = true;
+		REQUIRE(store.SetProperty(part, Name("Locked"), &locked, sizeof(locked)));
 	});
 
 	engine::core::ByteWriter writer;
@@ -331,6 +339,10 @@ TEST_CASE("a part's transparency survives a snapshot", "[client][presentation]")
 		bool visible = true;
 		REQUIRE(store.GetProperty(part, Name("Visible"), &visible, sizeof(visible)));
 		CHECK_FALSE(visible);
+
+		bool locked = false;
+		REQUIRE(store.GetProperty(part, Name("Locked"), &locked, sizeof(locked)));
+		CHECK(locked);
 	});
 }
 
