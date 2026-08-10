@@ -1732,11 +1732,26 @@ namespace studio {
 	}
 
 	void Editor::ApplyZoomWheel(float &zoom) {
-		// Guarded on hovering, so scrolling a tab bar or the panel around the
-		// text does not resize it by accident.
-		if (!ImGui::IsItemHovered() || !ImGui::GetIO().KeyCtrl) {
+		// **Anywhere in the panel, not only over the text.** This asked
+		// `IsItemHovered` — the rectangle of the widget submitted last — which
+		// in the output panel is the whole list and in the script editor is the
+		// code field *only*. So Ctrl+wheel did nothing over the breakpoint
+		// gutter beside the code, over the scrollbar, over the tab bar or over
+		// the toolbar row, which between them are most of the panel and much of
+		// where a pointer actually sits while reading code.
+		//
+		// **Still hover-guarded**, unlike the keyboard half in
+		// `DrawZoomControl`: a wheel belongs to whatever is under the pointer,
+		// so scrolling one panel must never resize another. `ChildWindows`
+		// because both panels put their content in one.
+		if (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) || !ImGui::GetIO().KeyCtrl) {
 			return;
 		}
+
+		// **Nothing has to suppress the scroll that would otherwise go with
+		// it.** imgui's `UpdateMouseWheel` returns early while Ctrl is held, so
+		// the wheel reaches this and moves no scrollbar — which is why the text
+		// zooms in place rather than zooming and running away up the file.
 		if (const float wheel = ImGui::GetIO().MouseWheel; wheel != 0.0f) {
 			zoom = std::clamp(zoom + wheel * ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
 		}
@@ -1763,7 +1778,7 @@ namespace studio {
 			zoom = 1.0f;
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Ctrl+wheel over the %s, or Ctrl+= and Ctrl+-", what);
+			ImGui::SetTooltip("Ctrl+wheel over the %s, Ctrl+ and Ctrl-, Ctrl+0 to reset", what);
 		}
 
 		// **Focused rather than hovered, unlike the wheel.** A person reaching
@@ -1774,15 +1789,28 @@ namespace studio {
 			return;
 		}
 
-		// **Both the plus and the equals, because they are one key.** Ctrl and
-		// shift-equals is what a person means by "zoom in" and what every
-		// editor binds; requiring the shift would make the obvious press do
-		// nothing.
+		// **Three chords for "zoom in", and the shifted one is the one that was
+		// missing.** On most layouts `+` *is* Shift and the equals key, so
+		// pressing what everybody calls Ctrl-plus reports `Ctrl+Shift+Equal` —
+		// and `IsKeyChordPressed` matches modifiers exactly, so a rule listing
+		// only `Ctrl+Equal` answers no to the very press it was written for. The
+		// keypad has a `+` of its own that needs no shift, which is why it is
+		// spelled separately rather than folded in.
+		//
+		// The old comment here claimed the shift was already handled. It was
+		// not: it said requiring the shift would break the obvious press, and
+		// then required its absence instead.
 		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Equal) ||
+			ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Equal) ||
 			ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd)) {
 			zoom = std::clamp(zoom + ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
 		}
+
+		// The same courtesy for the other direction. `_` is Shift and the minus
+		// key, and somebody who has just pressed Ctrl-plus with a finger on
+		// shift will press Ctrl-minus with it still there.
 		if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Minus) ||
+			ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Minus) ||
 			ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_KeypadSubtract)) {
 			zoom = std::clamp(zoom - ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
 		}

@@ -16,7 +16,7 @@ local dataSpecs = {
 	require(script.Parent.Specs.TerrainField),
 }
 
-local EXPECTED_DATA_TEST_COUNT = 183
+local EXPECTED_DATA_TEST_COUNT = 215
 
 local Run = {}
 
@@ -62,6 +62,7 @@ local function loadTerrain(terrainRoot: Instance?): any
 	end
 	return {
 		Noise = require(moduleChild(terrainRoot, "Noise")),
+		NoiseMap = require(moduleChild(terrainRoot, "NoiseMap")),
 		HeightField = require(moduleChild(terrainRoot, "HeightField")),
 		Edits = require(moduleChild(terrainRoot, "Edits")),
 		Chunker = require(moduleChild(terrainRoot, "Chunker")),
