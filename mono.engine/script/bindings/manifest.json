@@ -283,6 +283,39 @@
 			]
 		},
 		{
+			"name": "ValueBase",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.TextContent"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+			]
+		},
+		{
+			"name": "StringValue",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.TextContent"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+			]
+		},
+		{
+			"name": "LocalizationTable",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.TextContent"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+			]
+		},
+		{
 			"name": "LuaSourceContainer",
 			"parent": "Instance",
 			"constructible": true,

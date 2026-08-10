@@ -99,46 +99,57 @@ and for deleted marked items;
 
 ## Deferred Items
 
-### [_] D00104
+### [PARTIAL] D00104
 
-**The rest of Rojo's file table: `.rbxm`, `.model.json`, `.meta.json`, `.txt`,
-`.csv`, `.json` and `.toml`.**
+**Rojo's file table: six of the nine landed at v0.12, and the three left each
+need a dependency this repository does not vendor.**
 
-`studio::SyncRojoProject` builds the whole script half of
-`rojo.space/docs/v7/sync-details` — directories, the three script suffixes and
-the three `init` forms — and reports every other mapping by name rather than
-building it. The report is deliberate: "not a script" is the right thing to say
-about a stray `.DS_Store` and the wrong thing to say about a `.rbxm`, which Rojo
-maps and this engine has no reader for.
+`studio::SyncRojoProject` builds `rojo.space/docs/v7/sync-details` except for
+three rows. What it builds now, beyond the scripts it always did:
 
-They are not one piece of work, and lumping them would hide that three of them
-are cheap and three are not:
+- **`.meta.json` and `init.meta.json`** — properties patched onto whatever the
+  file of that stem produced, including a script. `game::WriteProperty` does the
+  write and `ReadPropertyJson` accepts both spellings Rojo has used, the bare
+  value and the named-part object. **A class change is the one part not
+  honoured**: a class is the archetype an entity was created in, and `Store`
+  offers no way to move a live row between class trees, so `className` in an
+  `init.meta.json` is reported as a property the instance does not have.
+- **`.model.json`** — the class, its properties and its children, sharing the
+  patch above because Rojo documents one property syntax for both.
+- **`.json`** — a `ModuleScript` whose source is generated rather than parsed at
+  run time. Every key is bracketed, because a JSON key may be anything and
+  `{ foo-bar = 1 }` is a syntax error; numbers go through
+  `game::FormatNumber`, because `std::to_string` is `%f` and writes 1e-8 as
+  "0.000000".
+- **`.txt` and `.csv`** — a `StringValue` and a `LocalizationTable`, both over
+  the new `scene::TextContent` and both under a `ValueBase` so `:IsA` answers
+  the question a script would ask. **A `LocalizationTable` holds its CSV and
+  resolves nothing**: translation lookup is a service with a locale and a
+  fallback chain, and none of that is a file mapping.
+- **`.project.json` under a `$path`** — followed, with a cycle check that is the
+  part which had to exist before the recursion did.
 
-- **`.txt` and `.csv` want classes this engine does not have.** A `StringValue`
-  is a class with one `String` property, which `PropertyType::String` has
-  supported since v0.8 — that one is small. A `LocalizationTable` is a class plus
-  a translation lookup plus whatever resolves it at run time, which is a feature
-  rather than a mapping.
-- **`.json` and `.toml` are a code generator.** Rojo makes them a `ModuleScript`
-  returning a table, so this would emit Luau source from a parsed document. The
-  hazard is the round trip: a key that is not an identifier, a number that does
-  not survive a `%.17g`, a string with an embedded newline. Whatever emits it
-  needs its own suite before anything depends on the values.
-- **`.meta.json` is a property patch and is the one worth doing first.** It sets
-  properties on the instance a file or a directory produced, which is the
-  mechanism an author reaches for as soon as a folder needs to be anything but a
-  `Folder` — `init.meta.json` can change the class outright. Every piece is
-  already here: `Store::SetProperty` takes a name and bytes, and `game::Values`
-  already converts a JSON document into property values for the save format.
-- **`.rbxm` and `.rbxmx` are a format reader**, binary and XML respectively, and
-  the honest answer is that they belong beside the other model decoders in
-  `bake` rather than in the editor.
-- **`.project.json` under a `$path` is a nested project.** Rojo follows it; this
-  reports it. Following one is a recursion with a cycle check, and the cycle
-  check is the part that has to exist before the recursion does.
+**What is left, and why each is a vendor decision before it is a feature:**
 
-**Trigger:** an author hitting one. `.meta.json` is the likeliest and the
-cheapest, and it is the one to take first.
+- **`.rbxmx` needs an XML parser and `mono.vendor` has none.** The engine
+  vendors JSON and nothing else that reads a markup tree. Roblox's XML model
+  format is also not simply "XML" — it is `Item`/`Properties` elements with typed
+  children and a referent table, so the parser is the smaller half.
+- **`.toml` needs a TOML parser, and `mono.vendor` has none.** This one is
+  otherwise free: the JSON path already emits the Luau, so a TOML document
+  parsed into the same tree would reuse `LuauModuleFor` unchanged.
+- **`.rbxm` is Roblox's binary model** — LZ4-framed chunks, interned strings and
+  a referent table. That is a format reader and it belongs beside the other model
+  decoders in `bake` rather than in an editor, which is also where `.rbxmx`
+  would go once something could parse it.
+
+Each of the three is reported by name and by what Rojo says it is, so a gap
+reads as a gap rather than as an unrecognised file — `studio.rojosync` asserts
+both halves, that the three are named and that the six are silent.
+
+**Reopen trigger: a project that carries one of the three.** `.toml` is the
+cheapest by a distance and the only one whose cost is a submodule rather than a
+format reader.
 
 ### [_] D00103
 

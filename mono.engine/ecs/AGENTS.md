@@ -304,8 +304,18 @@ cannot check:
 
 The number of described components is **capped**, because the six lifetime
 hooks are bare function pointers with nowhere to put a schema — one hook set is
-generated per slot at compile time. `Schema.cpp` carries the number and the
-argument for it; the refusal is `Status::Exhausted` rather than silence.
+generated per slot at compile time. `Schema.cpp` carries the number, the
+measurements behind it and the argument for it; the refusal is
+`Status::Exhausted` rather than silence.
+
+**The hook bodies must stay out of line, and the macro that holds them there is
+load-bearing rather than tidy.** `Thunks<N>` is meant to be a trampoline — load
+the index, jump — and with the bodies inlinable the compiler put a copy of each
+`PropertyType` switch into every one of them: the same file compiled to 113 MB
+of object at 4096 slots. With `SCHEMA_OUT_OF_LINE` the table costs about 192
+bytes of `.text` a slot, which is what makes the cap a number somebody picked
+rather than a constraint. Removing the attribute would not fail a test; it
+would make the build slow and the binary large, so it is written down here.
 
 ## Not here yet
 

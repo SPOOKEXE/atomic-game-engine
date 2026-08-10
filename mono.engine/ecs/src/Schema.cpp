@@ -38,14 +38,33 @@ namespace engine::ecs {
 		// The alternative was threading a context through the six hooks, which
 		// is a public signature change reaching all hundred-odd
 		// `Components::Register<T>` calls plus every hand-written serialiser in
-		// the engine — a very large edit so that a game could describe its
-		// two-hundred-and-fifty-seventh component.
+		// the engine — a very large edit so that a game could describe one more
+		// component.
 		//
-		// Two hundred and fifty-six described components is a lot of game. The
-		// refusal is reported rather than silent, which is the part that
-		// matters: `Status::Exhausted` names the limit and this comment says why
-		// it exists.
-		constexpr size_t MAX_SCHEMAS = 256;
+		// **The number is measured rather than guessed, and here is the table.**
+		// `.text` of the release `server` binary, which is what a player would
+		// download:
+		//
+		//     slots    .text        over 256     configure+build
+		//       256    6 056 426           —          —
+		//      1024    6 203 882    +147 KB       5.0 s
+		//      2048    6 400 490    +344 KB       8.1 s
+		//      4096    6 793 706    +737 KB      14.4 s
+		//
+		// About **192 bytes of code a slot** — six thunks of roughly thirty-two
+		// bytes each — so the curve is flat and the choice is nearly free at any
+		// of these. 2048 is taken because it is eight times what a game has ever
+		// needed and still costs a third of a megabyte; going to 4096 doubles
+		// the bill to buy headroom above a number nothing is near.
+		//
+		// **Those figures depend on `SCHEMA_OUT_OF_LINE` and are meaningless
+		// without it.** With the hook bodies inlinable the compiler put a copy of
+		// each switch into every thunk: the same file compiled to 113 MB of
+		// object at 4096 slots and took ninety seconds. See the macro.
+		//
+		// The refusal is reported rather than silent: `Status::Exhausted` names
+		// the limit and this comment says what moving it costs.
+		constexpr size_t MAX_SCHEMAS = 2048;
 
 		// What one field type occupies.
 		struct ValueLayout {
@@ -293,55 +312,105 @@ namespace engine::ecs {
 
 		// --- the generated hook sets -----------------------------------------
 
+		// Never inlined, and that is the whole reason the table is affordable.
+		//
+		// **Measured, because the first version was not.** `Thunks<N>` is meant
+		// to be a two-instruction trampoline — load the index, jump — and with
+		// these six bodies inlinable the compiler put a copy of each *switch*
+		// into every one of them instead. `Schema.cpp` compiled to **7.9 MB of
+		// object at 256 slots and 113 MB at 4096**, growing at about 28 KB a
+		// slot, which is what made the cap look like a hard constraint rather
+		// than a number somebody picked.
+		//
+		// With the bodies held out of line each thunk is a handful of bytes and
+		// the table costs what it looks like it should. The numbers are in
+		// `MAX_SCHEMAS` above.
+		//
+		// MSVC spells it differently and has no attribute syntax for it, which
+		// is why this is a macro rather than `[[gnu::noinline]]` at each
+		// definition.
+#if defined(_MSC_VER)
+#define SCHEMA_OUT_OF_LINE __declspec(noinline)
+#else
+#define SCHEMA_OUT_OF_LINE __attribute__((noinline))
+#endif
+
+		SCHEMA_OUT_OF_LINE void ConstructAt(size_t slot, void *destination, size_t count) {
+			const Schema &schema = LiveAt(slot);
+			auto *bytes = static_cast<std::byte *>(destination);
+			for (size_t value = 0; value < count; value++) {
+				ConstructOne(schema, bytes + value * schema.Size());
+			}
+		}
+
+		SCHEMA_OUT_OF_LINE void DestructAt(size_t slot, void *destination, size_t count) {
+			const Schema &schema = LiveAt(slot);
+			auto *bytes = static_cast<std::byte *>(destination);
+			for (size_t value = 0; value < count; value++) {
+				DestructOne(schema, bytes + value * schema.Size());
+			}
+		}
+
+		SCHEMA_OUT_OF_LINE void CopyAt(size_t slot, void *destination, const void *source, size_t count) {
+			const Schema &schema = LiveAt(slot);
+			auto *bytes = static_cast<std::byte *>(destination);
+			const auto *from = static_cast<const std::byte *>(source);
+			for (size_t value = 0; value < count; value++) {
+				CopyOne(schema, bytes + value * schema.Size(), from + value * schema.Size());
+			}
+		}
+
+		SCHEMA_OUT_OF_LINE void MoveAt(size_t slot, void *destination, void *source, size_t count) {
+			const Schema &schema = LiveAt(slot);
+			auto *bytes = static_cast<std::byte *>(destination);
+			auto *from = static_cast<std::byte *>(source);
+			for (size_t value = 0; value < count; value++) {
+				MoveOne(schema, bytes + value * schema.Size(), from + value * schema.Size());
+			}
+		}
+
+		SCHEMA_OUT_OF_LINE void
+		WriteAt(size_t slot, core::ByteWriter &writer, const void *source, size_t count) {
+			const Schema &schema = LiveAt(slot);
+			const auto *from = static_cast<const std::byte *>(source);
+			for (size_t value = 0; value < count; value++) {
+				WriteOne(schema, writer, from + value * schema.Size());
+			}
+		}
+
+		SCHEMA_OUT_OF_LINE void
+		ReadAt(size_t slot, core::ByteReader &reader, void *destination, size_t count) {
+			const Schema &schema = LiveAt(slot);
+			auto *bytes = static_cast<std::byte *>(destination);
+			for (size_t value = 0; value < count; value++) {
+				ReadOne(schema, reader, bytes + value * schema.Size());
+			}
+		}
+
+		// One slot's six hooks. Nothing here but the index.
 		template <size_t Index> struct Thunks {
 			static void DefaultConstruct(void *destination, size_t count) {
-				const Schema &schema = LiveAt(Index);
-				auto *bytes = static_cast<std::byte *>(destination);
-				for (size_t value = 0; value < count; value++) {
-					ConstructOne(schema, bytes + value * schema.Size());
-				}
+				ConstructAt(Index, destination, count);
 			}
 
 			static void Destruct(void *destination, size_t count) {
-				const Schema &schema = LiveAt(Index);
-				auto *bytes = static_cast<std::byte *>(destination);
-				for (size_t value = 0; value < count; value++) {
-					DestructOne(schema, bytes + value * schema.Size());
-				}
+				DestructAt(Index, destination, count);
 			}
 
 			static void CopyConstruct(void *destination, const void *source, size_t count) {
-				const Schema &schema = LiveAt(Index);
-				auto *bytes = static_cast<std::byte *>(destination);
-				const auto *from = static_cast<const std::byte *>(source);
-				for (size_t value = 0; value < count; value++) {
-					CopyOne(schema, bytes + value * schema.Size(), from + value * schema.Size());
-				}
+				CopyAt(Index, destination, source, count);
 			}
 
 			static void MoveConstruct(void *destination, void *source, size_t count) {
-				const Schema &schema = LiveAt(Index);
-				auto *bytes = static_cast<std::byte *>(destination);
-				auto *from = static_cast<std::byte *>(source);
-				for (size_t value = 0; value < count; value++) {
-					MoveOne(schema, bytes + value * schema.Size(), from + value * schema.Size());
-				}
+				MoveAt(Index, destination, source, count);
 			}
 
 			static void Write(core::ByteWriter &writer, const void *source, size_t count) {
-				const Schema &schema = LiveAt(Index);
-				const auto *from = static_cast<const std::byte *>(source);
-				for (size_t value = 0; value < count; value++) {
-					WriteOne(schema, writer, from + value * schema.Size());
-				}
+				WriteAt(Index, writer, source, count);
 			}
 
 			static void Read(core::ByteReader &reader, void *destination, size_t count) {
-				const Schema &schema = LiveAt(Index);
-				auto *bytes = static_cast<std::byte *>(destination);
-				for (size_t value = 0; value < count; value++) {
-					ReadOne(schema, reader, bytes + value * schema.Size());
-				}
+				ReadAt(Index, reader, destination, count);
 			}
 		};
 

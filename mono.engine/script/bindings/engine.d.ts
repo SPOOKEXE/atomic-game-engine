@@ -784,6 +784,16 @@ declare interface SpotLight extends Light {
 declare interface SurfaceLight extends Light {
 }
 
+declare interface ValueBase extends Instance {
+	Value: string;
+}
+
+declare interface StringValue extends ValueBase {
+}
+
+declare interface LocalizationTable extends ValueBase {
+}
+
 declare interface LuaSourceContainer extends Instance {
 	Disabled: boolean;
 	Source: string;
@@ -1349,6 +1359,9 @@ declare const Instance: {
 		(className: "PointLight", parent?: Instance): PointLight;
 		(className: "SpotLight", parent?: Instance): SpotLight;
 		(className: "SurfaceLight", parent?: Instance): SurfaceLight;
+		(className: "ValueBase", parent?: Instance): ValueBase;
+		(className: "StringValue", parent?: Instance): StringValue;
+		(className: "LocalizationTable", parent?: Instance): LocalizationTable;
 		(className: "LuaSourceContainer", parent?: Instance): LuaSourceContainer;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;

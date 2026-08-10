@@ -2,6 +2,8 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/EnumTable.hpp>
+#include <engine/game/Values.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
@@ -21,6 +23,7 @@ namespace studio {
 		using engine::ecs::Entity;
 		using engine::ecs::NULL_ENTITY;
 		using engine::ecs::Store;
+		using engine::ecs::PropertyType;
 		using nlohmann::json;
 
 		// Whether a name ends with a suffix.
@@ -85,30 +88,18 @@ namespace studio {
 		const char *UnbuiltKind(const std::filesystem::path &file) {
 			const std::string leaf = file.filename().string();
 
-			// **Before the plain `.json` case**, because both suffixes match and
-			// the longer one is the specific rule. A `.meta.json` beside a file
-			// is properties for it, which is a patch this sync has nowhere to
-			// apply yet.
-			if (EndsWith(leaf, ".meta.json")) {
-				return "a property patch (.meta.json), which this sync cannot apply yet";
+			// **Three left, and each needs a dependency this repository does
+			// not vendor.** Everything else in Rojo's table is built —
+			// `BuildMapped` is the dispatcher — so anything reaching here is a
+			// gap with a named cause rather than an unrecognised file.
+			if (EndsWith(leaf, ".rbxm")) {
+				return "a binary Roblox model, which needs a reader for that format";
 			}
-			if (EndsWith(leaf, ".model.json")) {
-				return "a model definition (.model.json), which this sync cannot build yet";
+			if (EndsWith(leaf, ".rbxmx")) {
+				return "an XML Roblox model, and nothing here parses XML";
 			}
-			if (EndsWith(leaf, ".project.json")) {
-				return "a nested project, which this sync does not follow yet";
-			}
-			if (EndsWith(leaf, ".rbxm") || EndsWith(leaf, ".rbxmx")) {
-				return "a Roblox model, which this engine has no reader for";
-			}
-			if (EndsWith(leaf, ".txt")) {
-				return "a StringValue, which this engine has no class for";
-			}
-			if (EndsWith(leaf, ".csv")) {
-				return "a LocalizationTable, which this engine has no class for";
-			}
-			if (EndsWith(leaf, ".json") || EndsWith(leaf, ".toml")) {
-				return "a ModuleScript returning a table, which this sync cannot generate yet";
+			if (EndsWith(leaf, ".toml")) {
+				return "a ModuleScript from TOML, and nothing here parses TOML";
 			}
 			return nullptr;
 		}
@@ -184,6 +175,221 @@ namespace studio {
 				   leaf == "init.client.lua";
 		}
 
+		// --- the rest of Rojo's table ----------------------------------------
+		//
+		// `rojo.space/docs/v7/sync-details` maps nine more things than the
+		// scripts above. Six of them are built here; the three that are not each
+		// need a dependency this repository does not vendor, and `D00104` says
+		// which.
+
+		// One JSON value, read as a property of a declared type.
+		//
+		// **Accepts both shapes Rojo has used**, because a project in the wild
+		// has either: the bare value — `"Size": [4, 1, 2]` — and the named-part
+		// object — `"Size": {"X": 4, "Y": 1, "Z": 2}`. Neither is more correct
+		// and refusing one would refuse half the projects.
+		//
+		// **Keyed on the property's declared type and never on the JSON's
+		// shape.** An array of three numbers is a `Vector3` for a `Vector3`
+		// property and nothing at all for a `bool` one — guessing from the value
+		// would make `"Anchored": 1` mean something.
+		bool ReadPropertyJson(
+			const engine::ecs::PropertyDescriptor &property, const json &value, engine::game::PropertyValue &out
+		) {
+			out = engine::game::PropertyValue{};
+			out.Type = property.Type;
+
+			// A number out of either shape: `at` names the object member and
+			// `index` the array slot, so one call covers both spellings.
+			const auto number = [&value](const char *at, size_t index) -> float {
+				if (value.is_object()) {
+					const auto found = value.find(at);
+					return found != value.end() && found->is_number() ? found->get<float>() : 0.0f;
+				}
+				if (value.is_array() && index < value.size() && value[index].is_number()) {
+					return value[index].get<float>();
+				}
+				return 0.0f;
+			};
+
+			switch (property.Type) {
+			case PropertyType::Bool:
+				if (!value.is_boolean()) {
+					return false;
+				}
+				out.Bool = value.get<bool>();
+				return true;
+
+			case PropertyType::Int32:
+			case PropertyType::Int64:
+			case PropertyType::Float:
+			case PropertyType::Double:
+				if (!value.is_number()) {
+					return false;
+				}
+				out.Int32 = value.get<int32_t>();
+				out.Int64 = value.get<int64_t>();
+				out.Float = value.get<float>();
+				out.Double = value.get<double>();
+				return true;
+
+			case PropertyType::String:
+				if (!value.is_string()) {
+					return false;
+				}
+				out.String = value.get<std::string>();
+				return true;
+
+			case PropertyType::Name:
+			case PropertyType::Enum:
+				// **An enum member is refused here rather than at the store.**
+				// `ecs::EnumTable` is what decides membership, and letting a
+				// typo through would land a name in a component that renders as
+				// the default for reasons nobody can see — which is the whole
+				// argument `PropertyType::Enum` was added on.
+				if (!value.is_string()) {
+					return false;
+				}
+				out.Name = Name(value.get<std::string>());
+				if (property.Type == PropertyType::Enum &&
+					!engine::ecs::EnumTable::Has(property.EnumName, out.Name)) {
+					return false;
+				}
+				return true;
+
+			case PropertyType::Vector3:
+				out.Vector3 = engine::core::Vector3{number("X", 0), number("Y", 1), number("Z", 2)};
+				return true;
+
+			case PropertyType::Vector2:
+				out.Vector2 = engine::core::Vector2{number("X", 0), number("Y", 1)};
+				return true;
+
+			case PropertyType::Color3:
+				out.Color3 = engine::core::Color3{number("R", 0), number("G", 1), number("B", 2)};
+				return true;
+
+			case PropertyType::CFrame: {
+				// Position only. A `.model.json` writes a `CFrame` as twelve
+				// numbers — three of position and a nine-element rotation
+				// matrix — and this engine's `CFrame` is a quaternion, so the
+				// conversion is real work for a case no project in the seed
+				// content uses. Reported by the caller rather than done wrong.
+				const json position = value.is_object() ? value.value("Position", value) : value;
+				const auto axis = [&position](const char *at, size_t index) -> float {
+					if (position.is_object()) {
+						const auto found = position.find(at);
+						return found != position.end() && found->is_number() ? found->get<float>() : 0.0f;
+					}
+					return position.is_array() && index < position.size() && position[index].is_number()
+							   ? position[index].get<float>()
+							   : 0.0f;
+				};
+				out.CFrame = engine::core::CFrame(engine::core::Vector3{axis("X", 0), axis("Y", 1), axis("Z", 2)});
+				return true;
+			}
+
+			case PropertyType::UDim:
+				out.UDim = engine::core::UDim{number("Scale", 0), number("Offset", 1)};
+				return true;
+
+			case PropertyType::NumberRange:
+				out.NumberRange = engine::core::NumberRange{number("Min", 0), number("Max", 1)};
+				return true;
+
+			default:
+				// `UDim2`, `Rect`, the two sequences and a `Reference`. A
+				// reference is the one that cannot be done at all from a file —
+				// it names an instance, and a `.meta.json` has no way to say
+				// which. The rest are shapes nothing has asked for.
+				return false;
+			}
+		}
+
+		// Applies a `{"Name": ..., "Properties": {...}}` patch to one instance.
+		//
+		// **Every key is looked up in the class's own property list**, so a
+		// patch naming something the class does not have is reported rather than
+		// silently dropped — which is the difference between "this engine has no
+		// `Reflectance`" and "your file has a typo", and an author needs to be
+		// told which.
+		void ApplyMetadata(Store &store, Entity instance, const json &document, RojoSyncReport &report) {
+			if (!document.is_object()) {
+				return;
+			}
+
+			if (const auto name = document.find("name"); name != document.end() && name->is_string()) {
+				store.SetInstanceName(instance, name->get<std::string>());
+			}
+
+			const auto properties = document.find("properties");
+			if (properties == document.end() || !properties->is_object()) {
+				return;
+			}
+
+			for (const auto &entry : properties->items()) {
+				const engine::ecs::PropertyDescriptor *found = nullptr;
+				for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(instance)) {
+					if (property.Spelling == entry.key()) {
+						found = &property;
+						break;
+					}
+				}
+
+				if (found == nullptr) {
+					report.Notes.push_back(entry.key() + " is not a property here — skipped");
+					continue;
+				}
+
+				engine::game::PropertyValue value;
+				if (!ReadPropertyJson(*found, entry.value(), value)) {
+					report.Notes.push_back(entry.key() + " could not be read as a " +
+										   engine::ecs::Describe(found->Type) + " — skipped");
+					continue;
+				}
+
+				if (!engine::game::WriteProperty(store, instance, *found, value)) {
+					report.Notes.push_back(entry.key() + " was refused by the world — skipped");
+				}
+			}
+		}
+
+		// Reads a JSON document off disk, or reports why not.
+		bool ReadJsonFile(const std::filesystem::path &path, json &out, RojoSyncReport &report) {
+			std::ifstream in(path, std::ios::binary);
+			if (!in) {
+				report.Missing.push_back(path.string());
+				return false;
+			}
+
+			std::ostringstream buffer;
+			buffer << in.rdbuf();
+
+			out = json::parse(buffer.str(), nullptr, false);
+			if (out.is_discarded()) {
+				// **Named rather than skipped.** A file somebody is editing by
+				// hand and has broken is the one case where silence costs the
+				// most: the instance simply does not appear, and nothing says
+				// the file was even looked at.
+				report.Notes.push_back(path.filename().string() + " is not valid JSON — skipped");
+				return false;
+			}
+			return true;
+		}
+
+		// The whole text of a file, or nothing.
+		bool ReadTextFile(const std::filesystem::path &path, std::string &out) {
+			std::ifstream in(path, std::ios::binary);
+			if (!in) {
+				return false;
+			}
+
+			std::ostringstream buffer;
+			buffer << in.rdbuf();
+			out = buffer.str();
+			return true;
+		}
+
 		// The class a `$className` names, or an invalid id.
 		//
 		// **`Folder` is substituted rather than refused when a class is not
@@ -235,6 +441,26 @@ namespace studio {
 			return true;
 		}
 
+		// The same, for source this sync generated rather than read.
+		//
+		// **Split from `StageProgram` rather than given a "text or path"
+		// argument**, because the two differ in what can go wrong: reading a
+		// file can fail and a `std::string` cannot. A single function would have
+		// had a failure path one of its callers could never take.
+		bool StageProgramSource(Store &store, const std::string &key, const std::string &source) {
+			auto *cache = store.ResourceMutable<engine::script::SourceCache>();
+			if (cache == nullptr) {
+				store.SetResource(engine::script::SourceCache{});
+				cache = store.ResourceMutable<engine::script::SourceCache>();
+			}
+			if (cache == nullptr) {
+				return false;
+			}
+
+			cache->Set(Name(key), source);
+			return true;
+		}
+
 		void ReadNode(const std::string &name, const json &value, RojoNode &out) {
 			out.Name = name;
 
@@ -265,6 +491,292 @@ namespace studio {
 				ReadNode(entry.key(), entry.value(), child);
 				out.Children.push_back(std::move(child));
 			}
+		}
+
+		// A JSON document as a Luau chunk that returns it.
+		//
+		// **Rojo makes a `*.json` a `ModuleScript` returning a table**, and this
+		// is that, emitted rather than parsed at run time — a module is source,
+		// and generating source is what keeps `require` one mechanism instead of
+		// two.
+		//
+		// **Every key is emitted as `["..."]` rather than as a bare
+		// identifier.** A JSON key may be anything at all, and `{ foo-bar = 1 }`
+		// is a syntax error where `{ ["foo-bar"] = 1 }` is not — so the bracket
+		// form is used for all of them rather than a rule that has to decide.
+		//
+		// **Numbers go through `FormatNumber`.** `std::to_string` is `%f`, which
+		// writes 1e-8 as "0.000000" — a value that round-trips through this
+		// module as zero. `game::FormatNumber` is the shortest text that reads
+		// back as the same double, and it exists because a document has numbers
+		// that are not property values.
+		void EmitLuauValue(const json &value, std::string &out, int depth) {
+			// **A bound, because JSON nests as deep as a file says it does.** A
+			// hand-written document twenty thousand levels deep would otherwise
+			// recurse until the C stack ran out — a crash with no line number,
+			// from a sync of a file somebody dropped in a folder.
+			constexpr int MAXIMUM_DEPTH = 64;
+
+			if (depth > MAXIMUM_DEPTH) {
+				out += "nil";
+				return;
+			}
+
+			switch (value.type()) {
+			case json::value_t::null:
+				out += "nil";
+				return;
+			case json::value_t::boolean:
+				out += value.get<bool>() ? "true" : "false";
+				return;
+			case json::value_t::number_integer:
+			case json::value_t::number_unsigned:
+			case json::value_t::number_float:
+				out += engine::game::FormatNumber(value.get<double>());
+				return;
+			case json::value_t::string: {
+				// Through the JSON dumper, whose escaping is a superset of
+				// Luau's for the characters that matter — quotes, backslashes
+				// and control codes all come out in a form Luau reads back
+				// identically. Writing a second escaper here would be a second
+				// thing to get wrong about a tab.
+				out += json(value.get<std::string>()).dump();
+				return;
+			}
+			case json::value_t::array: {
+				out += "{";
+				for (size_t index = 0; index < value.size(); index++) {
+					if (index > 0) {
+						out += ", ";
+					}
+					EmitLuauValue(value[index], out, depth + 1);
+				}
+				out += "}";
+				return;
+			}
+			case json::value_t::object: {
+				out += "{";
+				bool first = true;
+				for (const auto &entry : value.items()) {
+					if (!first) {
+						out += ", ";
+					}
+					first = false;
+					out += "[";
+					out += json(entry.key()).dump();
+					out += "] = ";
+					EmitLuauValue(entry.value(), out, depth + 1);
+				}
+				out += "}";
+				return;
+			}
+			default:
+				out += "nil";
+				return;
+			}
+		}
+
+		std::string LuauModuleFor(const json &document) {
+			std::string source = "-- generated from a .json by the Rojo sync\nreturn ";
+			EmitLuauValue(document, source, 0);
+			source += "\n";
+			return source;
+		}
+
+		// Builds a `*.model.json` — a class, its properties and its children.
+		//
+		// **The same patch `ApplyMetadata` applies**, which is why the two share
+		// it: a `.model.json` is a `.meta.json` with a class name and children,
+		// and Rojo documents them with one property syntax on purpose.
+		Entity BuildModel(
+			Store &store, const json &document, const std::string &fallback, RojoSyncReport &report, int depth
+		) {
+			// The same bound `EmitLuauValue` takes, for the same reason.
+			constexpr int MAXIMUM_DEPTH = 64;
+			if (depth > MAXIMUM_DEPTH || !document.is_object()) {
+				return NULL_ENTITY;
+			}
+
+			const std::string className = document.value("className", std::string("Folder"));
+			const std::string name = document.value("name", fallback);
+
+			const Entity node = store.CreateInstance(ClassFor(className, report), name);
+			if (node == NULL_ENTITY) {
+				return NULL_ENTITY;
+			}
+			report.Instances++;
+
+			ApplyMetadata(store, node, document, report);
+
+			if (const auto children = document.find("children");
+				children != document.end() && children->is_array()) {
+				for (const json &child : *children) {
+					const Entity built = BuildModel(store, child, "Model", report, depth + 1);
+					if (built != NULL_ENTITY) {
+						store.SetParent(built, node);
+					}
+				}
+			}
+			return node;
+		}
+
+		// An instance whose whole content is one file's text.
+		//
+		// `*.txt` becomes a `StringValue` and `*.csv` a `LocalizationTable`,
+		// which is Rojo's table exactly. See `scene::TextContent` for what a
+		// `LocalizationTable` here does and does not do.
+		Entity BuildTextValue(
+			Store &store,
+			const std::filesystem::path &file,
+			const char *className,
+			const std::string &name,
+			RojoSyncReport &report
+		) {
+			std::string text;
+			if (!ReadTextFile(file, text)) {
+				report.Missing.push_back(file.string());
+				return NULL_ENTITY;
+			}
+
+			const ClassId klass = Classes::Find(Name(className));
+			if (!klass.IsValid()) {
+				report.Notes.push_back(
+					file.filename().string() + " wants a " + className + ", which is not registered"
+				);
+				return NULL_ENTITY;
+			}
+
+			const Entity node = store.CreateInstance(klass, name);
+			if (node == NULL_ENTITY) {
+				return NULL_ENTITY;
+			}
+
+			(void)store.SetProperty(node, Name("Value"), &text, sizeof(text));
+			report.Instances++;
+			return node;
+		}
+
+		// **Declared before the dispatcher and defined after it**, because a
+		// nested project builds a tree that builds directories that may hold
+		// another nested project. The recursion is real and the cycle check in
+		// `BuildProjectFile` is what bounds it.
+		bool BuildProjectFile(
+			Store &store, const std::filesystem::path &file, Entity parent, RojoSyncReport &report
+		);
+
+		// Whether a file is a sidecar rather than an instance.
+		//
+		// `*.meta.json` sets properties on the instance its *sibling* produced,
+		// so it is consumed by that sibling and never becomes a node of its own.
+		bool IsMetadataFile(const std::filesystem::path &file) {
+			return EndsWith(file.filename().string(), ".meta.json");
+		}
+
+		// The `.meta.json` beside a file, if any, applied to what it produced.
+		//
+		// **Named from the *stem* rather than from the whole filename**, which
+		// is Rojo's rule: `Button.meta.json` patches whatever `Button.luau`,
+		// `Button.model.json` or `Button.txt` built. That is why one lookup
+		// serves every mapping below rather than each having its own.
+		void ApplySidecar(
+			Store &store,
+			const std::filesystem::path &file,
+			Entity instance,
+			RojoSyncReport &report
+		) {
+			if (instance == NULL_ENTITY) {
+				return;
+			}
+
+			// The stem with every extension off: `Button.model.json` is
+			// `Button`, and so is `Button.luau`.
+			std::string stem = file.filename().string();
+			if (const size_t dot = stem.find('.'); dot != std::string::npos) {
+				stem.resize(dot);
+			}
+
+			const std::filesystem::path sidecar = file.parent_path() / (stem + ".meta.json");
+
+			std::error_code missing;
+			if (!std::filesystem::is_regular_file(sidecar, missing)) {
+				return;
+			}
+
+			json document;
+			if (ReadJsonFile(sidecar, document, report)) {
+				ApplyMetadata(store, instance, document, report);
+			}
+		}
+
+		// Everything in Rojo's table that is not a script and not a directory.
+		//
+		// **One function, because every one of them is "read a file, make an
+		// instance, parent it"** — and because the order the suffixes are tested
+		// in is a rule rather than an accident: `.meta.json` and `.model.json`
+		// both end in `.json`, so the specific ones have to be asked first or a
+		// model would become a module returning its own description.
+		//
+		// @return `true` when the file was this function's to handle, whether or
+		//         not it produced an instance. A `false` sends it on to the
+		//         script classifier.
+		bool BuildMapped(
+			Store &store,
+			const std::filesystem::path &file,
+			Entity parent,
+			const std::string &keyPrefix,
+			RojoSyncReport &report
+		) {
+			const std::string leaf = file.filename().string();
+
+			// Consumed by whatever it sits beside. Never a node.
+			if (IsMetadataFile(file)) {
+				return true;
+			}
+
+			// A nested project. Followed rather than reported since v0.12; the
+			// cycle check is `BuildProjectFile`'s and it is what makes the
+			// recursion safe rather than merely possible.
+			if (EndsWith(leaf, ".project.json")) {
+				return BuildProjectFile(store, file, parent, report);
+			}
+
+			Entity node = NULL_ENTITY;
+			std::string name = file.stem().string();
+
+			if (EndsWith(leaf, ".model.json")) {
+				// `Thing.model.json` is named `Thing`, not `Thing.model`.
+				if (const size_t dot = name.rfind('.'); dot != std::string::npos) {
+					name.resize(dot);
+				}
+
+				json document;
+				if (ReadJsonFile(file, document, report)) {
+					node = BuildModel(store, document, name, report, 0);
+				}
+			} else if (EndsWith(leaf, ".json")) {
+				// A plain `*.json` is a `ModuleScript` returning a table.
+				json document;
+				if (ReadJsonFile(file, document, report)) {
+					const std::string key = keyPrefix + leaf;
+					if (StageProgramSource(store, key, LuauModuleFor(document))) {
+						node = engine::script::MakeModule(store, key, name);
+						report.Instances++;
+						report.Scripts++;
+					}
+				}
+			} else if (EndsWith(leaf, ".txt")) {
+				node = BuildTextValue(store, file, "StringValue", name, report);
+			} else if (EndsWith(leaf, ".csv")) {
+				node = BuildTextValue(store, file, "LocalizationTable", name, report);
+			} else {
+				return false;
+			}
+
+			if (node != NULL_ENTITY) {
+				store.SetParent(node, parent);
+				ApplySidecar(store, file, node, report);
+			}
+			return true;
 		}
 
 		// Builds one directory into an instance tree.
@@ -327,6 +839,26 @@ namespace studio {
 
 					report.Instances++;
 					store.SetParent(node, parent);
+
+					// **`init.meta.json` patches the directory's own instance,
+					// and may change its class outright** — which is Rojo's one
+					// way of saying "this folder is really a `Model`". Applied
+					// after the node exists and before its children are built,
+					// so a child parented into it lands under the right thing.
+					//
+					// The class change is the one part not honoured: a class is
+					// the archetype an entity was created in, and moving a live
+					// row between class trees is not something `Store` offers.
+					// Reported by `ApplyMetadata` as a property it does not
+					// have, which is the honest answer.
+					const std::filesystem::path metadata = entry / "init.meta.json";
+					if (std::filesystem::is_regular_file(metadata, kind)) {
+						json document;
+						if (ReadJsonFile(metadata, document, report)) {
+							ApplyMetadata(store, node, document, report);
+						}
+					}
+
 					BuildDirectory(store, entry, node, keyPrefix + leaf + "/", report);
 					continue;
 				}
@@ -334,6 +866,14 @@ namespace studio {
 				if (IsInitFile(entry)) {
 					// Consumed by the directory above, or reported there as one
 					// init file too many. Either way it is not a child.
+					continue;
+				}
+
+				// **The rest of Rojo's table, before the script test**, because
+				// a `.model.json` is not a script and a `.meta.json` is not an
+				// instance at all — and both end in an extension the script
+				// classifier has never heard of.
+				if (BuildMapped(store, entry, parent, keyPrefix, report)) {
 					continue;
 				}
 
@@ -371,6 +911,12 @@ namespace studio {
 				store.SetParent(script, parent);
 				report.Instances++;
 				report.Scripts++;
+
+				// **A script takes a sidecar like anything else.** Rojo's
+				// `.meta.json` patches whatever the file of that stem produced,
+				// and a script is the most common thing it produces —
+				// `Disabled` on a `Script` is the first patch anybody writes.
+				ApplySidecar(store, entry, script, report);
 			}
 		}
 
@@ -407,6 +953,21 @@ namespace studio {
 				if (std::filesystem::is_directory(source, kind)) {
 					BuildDirectory(store, source, node_, node.Path + "/", report);
 				} else if (std::filesystem::exists(source, kind)) {
+					// **The same dispatcher a directory walk uses**, so a
+					// `$path` naming a `.model.json` builds the same instance it
+					// would have built one folder up. Two answers to one mapping
+					// is the duplicate this whole file is written against.
+					//
+					// The prefix is the file's *folder*, because `BuildMapped`
+					// appends the leaf — passing `node.Path` whole would key a
+					// staged module under `src/data.json/data.json`.
+					const std::string folder = node.Path.substr(0, node.Path.find_last_of('/') + 1);
+
+					// **Not a `return`.** The node's declared children are built
+					// after this block, and a project may put both a `$path` and
+					// children on one node.
+					if (!BuildMapped(store, source, node_, folder, report)) {
+
 					const ScriptFile file = ClassifyFile(source);
 					if (!file.IsScript) {
 						// The same accounting a directory walk does. A `$path`
@@ -430,6 +991,8 @@ namespace studio {
 							report.Scripts++;
 						}
 					}
+
+					}
 				} else {
 					report.Missing.push_back(node.Path);
 				}
@@ -438,6 +1001,66 @@ namespace studio {
 			for (const RojoNode &child : node.Children) {
 				BuildNode(store, child, root, node_, report);
 			}
+		}
+
+		// A `*.project.json` found under a `$path`, followed.
+		//
+		// **Rojo lets a project include another and this now does too**, which
+		// is what a package manager's output looks like: `Packages/` is a folder
+		// of projects, and a sync that reported each one instead of building it
+		// would build the half of a game an author wrote and none of the half
+		// they installed.
+		//
+		// **The cycle check is the part that has to exist before the
+		// recursion.** Two projects that include each other — or one that
+		// includes itself, which is what a copy-pasted `$path` produces — would
+		// otherwise recurse until the stack ran out, with no line number and no
+		// file named. The set is of *canonical* paths, so two spellings of one
+		// file are one entry.
+		bool BuildProjectFile(
+			Store &store, const std::filesystem::path &file, Entity parent, RojoSyncReport &report
+		) {
+			// **A file-local static would be wrong and a member would be
+			// surface.** The set has to live exactly as long as one top-level
+			// sync, and this is the only recursion in it — so it is a static
+			// inside the function that opens and closes the scope, cleared by
+			// the outermost call.
+			static std::vector<std::filesystem::path> loading;
+
+			std::error_code failed;
+			const std::filesystem::path canonical = std::filesystem::weakly_canonical(file, failed);
+			const std::filesystem::path key = failed ? file : canonical;
+
+			if (std::find(loading.begin(), loading.end(), key) != loading.end()) {
+				report.Notes.push_back(
+					file.filename().string() + " includes itself — the second visit was skipped"
+				);
+				return true;
+			}
+
+			json document;
+			if (!ReadJsonFile(file, document, report)) {
+				return true;
+			}
+
+			RojoProject nested;
+			std::string error;
+			if (!ParseRojoProject(document.dump(), nested, error)) {
+				report.Notes.push_back(file.filename().string() + " is not a project: " + error);
+				return true;
+			}
+
+			loading.push_back(key);
+
+			// **The tree's own children, exactly as a top-level sync builds
+			// them** — and under the *including* node rather than as roots,
+			// because a nested project is a subtree of the one that named it.
+			for (const RojoNode &child : nested.Tree.Children) {
+				BuildNode(store, child, file.parent_path(), parent, report);
+			}
+
+			loading.pop_back();
+			return true;
 		}
 	}
 

@@ -13,6 +13,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
@@ -35,6 +36,7 @@ using engine::ecs::Store;
 using studio::ParseRojoProject;
 using studio::RojoProject;
 using studio::RojoSyncReport;
+using engine::script::MakeRuntime;
 using studio::SyncRojoProject;
 using engine::world::Universe;
 using engine::world::WorldId;
@@ -554,15 +556,303 @@ TEST_CASE("a mapping this engine cannot build is named by what it is", "[studio]
 	// "not a script" is the right thing to say about a stray `.DS_Store` and the
 	// wrong thing to say about a `.rbxm`. One is noise in the project; the other
 	// is a gap here, and an author should be able to tell which they have.
-	CHECK(Noted(report, "Model.rbxm is a Roblox model"));
-	CHECK(Noted(report, "Notes.txt is a StringValue"));
-	CHECK(Noted(report, "Strings.csv is a LocalizationTable"));
-	CHECK(Noted(report, "Thing.model.json is a model definition"));
-	CHECK(Noted(report, "Leaf.meta.json is a property patch"));
-	CHECK(Noted(report, "Data.json is a ModuleScript"));
+	CHECK(Noted(report, "Model.rbxm is a binary Roblox model"));
 
-	// The longer suffix wins: a `.meta.json` is not reported as a plain `.json`.
-	CHECK_FALSE(Noted(report, "Leaf.meta.json is a ModuleScript"));
+	// **And the six that v0.12 built are not reported at all**, which is the
+	// half of this case that would go stale silently: a mapping that stopped
+	// working would come back as a note, and a note nobody asserts the absence
+	// of is a regression nobody sees.
+	CHECK_FALSE(Noted(report, "Notes.txt is"));
+	CHECK_FALSE(Noted(report, "Strings.csv is"));
+	CHECK_FALSE(Noted(report, "Thing.model.json is"));
+	CHECK_FALSE(Noted(report, "Leaf.meta.json is"));
+	CHECK_FALSE(Noted(report, "Data.json is"));
+}
+
+// --- the rest of the table ----------------------------------------------------
+//
+// Six mappings landed at v0.12 and each fails in a way a simpler check would
+// miss: a model whose properties were parsed but never written, a JSON module
+// that emits source Luau will not compile, a sidecar applied to the wrong
+// sibling, a nested project that recurses for ever.
+
+namespace {
+	struct TableTree {
+		std::filesystem::path Root;
+
+		TableTree() {
+			Root = std::filesystem::temp_directory_path() /
+				   ("atomic-rojo-table-" +
+					std::to_string(std::filesystem::hash_value(
+						std::filesystem::temp_directory_path() / "rojo-table"
+					)));
+			std::filesystem::remove_all(Root);
+
+			// A model with properties and a child, which is the whole of
+			// `.model.json`.
+			Write("src/Crate.model.json", R"({
+			  "className": "Part",
+			  "name": "Crate",
+			  "properties": { "Anchored": true, "Transparency": 0.5,
+			                  "Size": [4, 1, 2], "Color": {"R": 1, "G": 0, "B": 0} },
+			  "children": [ { "className": "Part", "name": "Lid" } ]
+			})");
+
+			// A patch on the instance its sibling produced.
+			Write("src/Widget.luau", "return {}\n");
+			Write("src/Widget.meta.json", R"({ "properties": { "Disabled": true } })");
+
+			// A document that has to survive being turned into Luau and back:
+			// a key that is not an identifier, a string with a quote in it, and
+			// a number `%f` would round to nothing.
+			Write("src/Data.json", R"({
+			  "plain": 1,
+			  "not-an-identifier": true,
+			  "quoted": "a \"quoted\" word",
+			  "tiny": 1e-8,
+			  "nested": { "list": [1, 2, 3] }
+			})");
+
+			Write("src/Notes.txt", "some text\n");
+			Write("src/Strings.csv", "key,en\nhello,Hello\n");
+
+			// A nested project, and one that includes itself.
+			Write("src/Package/default.project.json", R"({
+			  "name": "Package",
+			  "tree": { "$className": "Folder",
+			            "Inner": { "$className": "Folder", "$path": "lib" } }
+			})");
+			Write("src/Package/lib/Helper.luau", "return {}\n");
+
+			Write("src/Loop/default.project.json", R"({
+			  "name": "Loop",
+			  "tree": { "$className": "Folder",
+			            "Again": { "$className": "Folder", "$path": "." } }
+			})");
+
+			// The three still reported rather than built.
+			Write("src/Model.rbxm", "binary\n");
+			Write("src/Config.toml", "key = 1\n");
+		}
+
+		~TableTree() {
+			std::filesystem::remove_all(Root);
+		}
+
+		void Write(const std::string &relative, const char *text) {
+			const std::filesystem::path file = Root / relative;
+			std::filesystem::create_directories(file.parent_path());
+			std::ofstream out(file);
+			out << text;
+		}
+	};
+
+	constexpr const char *TABLE_PROJECT = R"({
+	  "name": "Table",
+	  "tree": {
+	    "$className": "DataModel",
+	    "ReplicatedStorage": {
+	      "$className": "ReplicatedStorage",
+	      "Shared": { "$className": "Folder", "$path": "src" }
+	    }
+	  }
+	})";
+
+	// The synced `src`, which `$path` maps into `Shared` directly.
+	Entity SyncTable(Store &store, const TableTree &tree, RojoSyncReport &report) {
+		RojoProject project;
+		std::string error;
+		REQUIRE(ParseRojoProject(TABLE_PROJECT, project, error));
+		REQUIRE(SyncRojoProject(project, tree.Root, store, report, error));
+
+		const Entity shared = Child(store, store.FindFirstRoot("ReplicatedStorage"), "Shared");
+		REQUIRE(shared != NULL_ENTITY);
+		return shared;
+	}
+
+	bool Mentioned(const RojoSyncReport &report, std::string_view fragment) {
+		for (const std::string &note : report.Notes) {
+			if (note.find(fragment) != std::string::npos) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+TEST_CASE("a model file builds its class, its properties and its children", "[studio][rojosync]") {
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	const Entity shared = SyncTable(store, tree, report);
+
+	const Entity crate = Child(store, shared, "Crate");
+	REQUIRE(crate != NULL_ENTITY);
+	CHECK(store.ClassOf(crate) == engine::ecs::Classes::Find(Name("Part")));
+
+	// **The properties are read back off the store**, not off the document — a
+	// version that parsed them and never wrote them passes any check that only
+	// looks at the tree.
+	bool anchored = false;
+	REQUIRE(store.GetProperty(crate, Name("Anchored"), &anchored, sizeof(anchored)));
+	CHECK(anchored);
+
+	float transparency = 0.0f;
+	REQUIRE(store.GetProperty(crate, Name("Transparency"), &transparency, sizeof(transparency)));
+	CHECK(transparency == 0.5f);
+
+	// Both spellings Rojo has used: an array for `Size`, named parts for `Color`.
+	engine::core::Vector3 size;
+	REQUIRE(store.GetProperty(crate, Name("Size"), &size, sizeof(size)));
+	CHECK(size.X == 4.0f);
+	CHECK(size.Z == 2.0f);
+
+	engine::core::Color3 colour;
+	REQUIRE(store.GetProperty(crate, Name("Color"), &colour, sizeof(colour)));
+	CHECK(colour.R == 1.0f);
+	CHECK(colour.G == 0.0f);
+
+	CHECK(Child(store, crate, "Lid") != NULL_ENTITY);
+}
+
+TEST_CASE("a meta.json patches the instance its sibling built", "[studio][rojosync]") {
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	const Entity shared = SyncTable(store, tree, report);
+
+	const Entity widget = Child(store, shared, "Widget");
+	REQUIRE(widget != NULL_ENTITY);
+
+	bool disabled = false;
+	REQUIRE(store.GetProperty(widget, Name("Disabled"), &disabled, sizeof(disabled)));
+	CHECK(disabled);
+
+	// **And the sidecar is not an instance of its own.** A `.meta.json` that
+	// became a node would put a `Widget` folder beside the script it was
+	// describing.
+	CHECK(Child(store, shared, "Widget.meta") == NULL_ENTITY);
+	CHECK(Child(store, shared, "Widget.meta.json") == NULL_ENTITY);
+}
+
+TEST_CASE("a json file becomes a module whose source compiles", "[studio][rojosync]") {
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	const Entity shared = SyncTable(store, tree, report);
+
+	const Entity data = Child(store, shared, "Data");
+	REQUIRE(data != NULL_ENTITY);
+	CHECK(store.ClassOf(data) == engine::ecs::Classes::Find(Name("ModuleScript")));
+
+	const auto *cache = store.Resource<engine::script::SourceCache>();
+	REQUIRE(cache != nullptr);
+
+	const std::string *staged = cache->Find(Name("src/Data.json"));
+	REQUIRE(staged != nullptr);
+	const std::string_view source = *staged;
+
+	// **A key that is not an identifier has to be bracketed**, or the chunk is a
+	// syntax error — which is the failure a round trip through a table would not
+	// have caught, because the table is never built.
+	CHECK(source.find("[\"not-an-identifier\"]") != std::string_view::npos);
+
+	// **And the small number has to survive.** `std::to_string` is `%f`, so 1e-8
+	// would have been written as "0.000000" and read back as zero.
+	CHECK(source.find("1e-08") != std::string_view::npos);
+
+	// The run is what proves it: a chunk that does not compile fails here.
+	const auto runtime = MakeRuntime(store, engine::script::Language::Luau);
+	INFO(source);
+	REQUIRE(runtime->Run(
+		// **Through the service, because a bare chunk has no `script`.** That
+		// global is written onto the thread by `RunInstance`, and this chunk is
+		// not a script instance — the module it wants is still reachable the way
+		// any script would reach one in another container.
+		"local shared = game:GetService('ReplicatedStorage').Shared\n"
+		"local data = require(shared.Data)\n"
+		"assert(data.plain == 1, 'plain')\n"
+		"assert(data['not-an-identifier'] == true, 'bracketed key')\n"
+		"assert(data.quoted == 'a \"quoted\" word', 'escaped quote')\n"
+		"assert(data.tiny > 0, 'the small number was rounded away')\n"
+		"assert(data.nested.list[2] == 2, 'nested')\n",
+		"table-test"
+	));
+}
+
+TEST_CASE("a text file becomes the instance that holds it", "[studio][rojosync]") {
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	const Entity shared = SyncTable(store, tree, report);
+
+	const Entity notes = Child(store, shared, "Notes");
+	REQUIRE(notes != NULL_ENTITY);
+	CHECK(store.ClassOf(notes) == engine::ecs::Classes::Find(Name("StringValue")));
+
+	std::string held;
+	REQUIRE(store.GetProperty(notes, Name("Value"), &held, sizeof(held)));
+	CHECK(held == "some text\n");
+
+	const Entity strings = Child(store, shared, "Strings");
+	REQUIRE(strings != NULL_ENTITY);
+	CHECK(store.ClassOf(strings) == engine::ecs::Classes::Find(Name("LocalizationTable")));
+
+	REQUIRE(store.GetProperty(strings, Name("Value"), &held, sizeof(held)));
+	CHECK(held.find("hello,Hello") != std::string::npos);
+
+	// Both are a `ValueBase`, which is the question a script would ask.
+	CHECK(store.IsA(notes, engine::ecs::Classes::Find(Name("ValueBase"))));
+	CHECK(store.IsA(strings, engine::ecs::Classes::Find(Name("ValueBase"))));
+}
+
+TEST_CASE("a nested project is followed, and a cycle in one is not", "[studio][rojosync]") {
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	const Entity shared = SyncTable(store, tree, report);
+
+	// The nested project's own tree, built under the folder that held it.
+	const Entity package = Child(store, shared, "Package");
+	REQUIRE(package != NULL_ENTITY);
+
+	const Entity inner = Child(store, package, "Inner");
+	REQUIRE(inner != NULL_ENTITY);
+	CHECK(Child(store, inner, "Helper") != NULL_ENTITY);
+
+	// **A project that includes itself terminates and says so**, which is the
+	// case that recurses until the stack runs out without the check — a crash
+	// with no line number, from a file somebody copy-pasted a `$path` into.
+	CHECK(Mentioned(report, "includes itself"));
+}
+
+TEST_CASE("the three unbuilt mappings are named by what they are", "[studio][rojosync]") {
+	TableTree tree;
+	Store store("rojo_table");
+	engine::scene::EnsureClassTree();
+
+	RojoSyncReport report;
+	(void)SyncTable(store, tree, report);
+
+	// Each names the dependency that is missing rather than saying "not a
+	// script", so a gap reads as a gap.
+	CHECK(Mentioned(report, "Model.rbxm is a binary Roblox model"));
+	CHECK(Mentioned(report, "Config.toml is a ModuleScript from TOML"));
+
+	// And nothing that *is* built is reported as missing.
+	CHECK_FALSE(Mentioned(report, "Crate.model.json"));
+	CHECK_FALSE(Mentioned(report, "Data.json is"));
+	CHECK_FALSE(Mentioned(report, "Notes.txt is"));
 }
 
 // --- the universe above them -------------------------------------------------

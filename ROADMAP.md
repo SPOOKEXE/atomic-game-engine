@@ -40,7 +40,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] expose ECS underlying to luau and typescript (query engine for entities using direct and returns instances, create custom components and create custom entities and attach components, set component values, etc).
 - [x] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, main.default.json accepted beside Rojo's own default.project.json in each subfolder)
 - [x] world => rojo sync, universe => multi-rojo sync (each world syncs separately, so one bad project file costs its own world and the rest still sync)
-- [_] deferred `D00104` — the rest of Rojo's file table: .rbxm, .model.json, .meta.json, .txt, .csv, .json, .toml.
+- [x] the rest of Rojo's file table: .meta.json, init.meta.json, .model.json,
+      .json, .txt, .csv and nested .project.json all build.
+- [_] deferred `D00104` — .rbxm, .rbxmx and .toml, each blocked on a parser
+      `mono.vendor` does not carry.
 - [x] update built-in MCP integrations (component_list, entity_query, component_get, component_set over the v0.12 storage surface; first suite for `control`), add a studio ui button to enable/disable and information panel
 - [x] walked the deferred register. One new item filed — `D00104`, the rest of
       Rojo's file table. Every other open entry's reopen trigger is unfired:

@@ -44,6 +44,20 @@ namespace engine::scene {
 			}
 		}
 
+		void WriteTexts(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *texts = static_cast<const TextContent *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteString(texts[index].Value);
+			}
+		}
+
+		void ReadTexts(core::ByteReader &reader, void *destination, size_t count) {
+			auto *texts = static_cast<TextContent *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				texts[index].Value = std::string(reader.ReadString());
+			}
+		}
+
 		void WriteVisuals(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *visuals = static_cast<const Visual *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -424,6 +438,11 @@ namespace engine::scene {
 		// bits travel together or not at all.
 		ecs::Components::Register<Tags>("scene.Tags");
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
+
+		// **A written pair rather than the generated one**, because the type
+		// holds a `std::string` and is therefore not trivially copyable —
+		// `DescribeType` offers raw serialisation only for a type that is.
+		ecs::Components::Register<TextContent>("scene.TextContent", WriteTexts, ReadTexts);
 		ecs::Components::Register<Camera>("scene.Camera");
 
 		// A name again, so a hand-written pair again. See `WriteSounds`.

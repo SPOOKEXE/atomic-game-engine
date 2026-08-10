@@ -39,6 +39,7 @@
 #include <engine/spatial/LayerMask.hpp>
 
 #include <cstdint>
+#include <string>
 
 namespace engine::scene {
 
@@ -328,16 +329,29 @@ namespace engine::scene {
 		// type without one is the day three uninitialised bytes start ending up
 		// in a recording.
 		//
-		// **None now.** `CastShadow` took one, `Surface` took the first the
-		// same way, and `Locked` below took the last — which is what named
-		// padding is for: a field that fits goes in the hole rather than
-		// widening the row. `Transparency` did not fit — a float needs
-		// four-byte alignment and these are the tail after a `bool` — so the
-		// struct grew by four for that one and by nothing for the other three.
+		// **`Surface`, `CastShadow` and `Locked` each took one of the three
+		// bytes this originally held**, which is what named padding is for: a
+		// field that fits goes in the hole rather than widening the row.
+		// `Transparency` did not fit — a float needs four-byte alignment and
+		// these are the tail after a `bool` — so the struct grew by four for
+		// that one and by nothing for the other three.
 		//
-		// The next `bool` added here widens `Visual` by four bytes on every
-		// drawable in the world. That is a real cost and it should be a
-		// deliberate one; there is nowhere left to hide it.
+		// **Widened back to four at v0.12, deliberately and once.** The hole was
+		// empty and the next `bool` would have grown the row anyway; taking the
+		// four bytes now means the *next four* one-byte fields are free rather
+		// than the next one costing four and the three after it being free. Same
+		// total, paid at a moment somebody chose.
+		//
+		// **What the four bytes cost, stated rather than waved at.** `Visual` is
+		// on every drawable, so a scene of 4096 parts pays 16 KB — one L2 way on
+		// most machines, against a component the draw-list walk reads once per
+		// entity per frame. `client::CollectInstances` is the loop that would
+		// feel it and it is bandwidth-bound on `Transform` long before this.
+		//
+		// **The invariant is that this stays the last member.** A field appended
+		// after it reopens a hole in the middle silently, which
+		// `engine.scene.components` checks by asserting that the padding ends
+		// where the struct does.
 
 		// Whether an editor's click may select this entity.
 		//
@@ -360,6 +374,49 @@ namespace engine::scene {
 		//
 		// @since v0.12
 		bool Locked = false;
+
+		// Room for the next four one-byte fields.
+		//
+		// **Explicit, because padding is never initialised and this component
+		// reaches a snapshot.** `Visual` is registered with a written serialiser
+		// so these bytes do not cross today — they are named anyway, because the
+		// day somebody re-registers this type without one is the day four
+		// uninitialised bytes start ending up in a recording and every
+		// comparison of two worlds becomes unreliable. `ecs::WorldTime` learned
+		// that the expensive way and `just determinism` is what catches it.
+		uint8_t Reserved[4] = {};
+	};
+
+	// The text a `StringValue` or a `LocalizationTable` carries.
+	//
+	// **One component for both, because both are an instance whose whole content
+	// is a string.** Roblox has a `ValueBase` family — `StringValue`, `IntValue`,
+	// `BoolValue` and the rest — and this engine has the one member of it that
+	// something already needs: Rojo maps `*.txt` onto a `StringValue` and
+	// `*.csv` onto a `LocalizationTable`, and a folder sync that could not build
+	// either is a folder sync that silently drops files.
+	//
+	// **The other value classes are deliberately absent.** A class per primitive
+	// is Roblox's answer to not having attributes; this engine has
+	// `ecs::Attributes`, which holds a typed value under a name on *any*
+	// instance and is strictly better for the job. Adding `IntValue` would be
+	// adding a second way to hang a number off the tree.
+	//
+	// **A `LocalizationTable` here holds its CSV and does not resolve
+	// anything.** Translation lookup is a service with a locale, a fallback
+	// chain and a runtime API, and none of that is a file mapping — what this
+	// buys is that the file survives a sync and a save, in the instance Roblox
+	// would have put it in, ready for whoever writes the service.
+	//
+	// @since v0.12
+	struct TextContent {
+		// The file's contents, verbatim.
+		//
+		// **Not interned.** A `core::Name` never releases, and this is a value a
+		// game *computes* as often as it reads one — `ecs::PropertyType::String`
+		// exists for exactly this distinction and `D00020` is the leak that
+		// established it.
+		std::string Value;
 	};
 
 	// What a surface is made of, beyond the flat colour `Visual` carries.

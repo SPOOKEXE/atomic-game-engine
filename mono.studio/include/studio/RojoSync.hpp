@@ -21,6 +21,13 @@
 // | `init.luau` in `D/` | `D` itself becomes a `ModuleScript`, keeping its children |
 // | `init.server.luau` in `D/` | `D` itself becomes a `Script` |
 // | `init.client.luau` in `D/` | `D` itself becomes a `LocalScript` |
+// | `X.json` | a `ModuleScript` returning that document as a table |
+// | `X.model.json` | the class, properties and children it describes |
+// | `X.meta.json` | properties patched onto whatever `X` built |
+// | `init.meta.json` in `D/` | the same, patched onto `D` |
+// | `X.project.json` | that project, built under the node that named it |
+// | `X.txt` | a `StringValue` holding the file |
+// | `X.csv` | a `LocalizationTable` holding the file |
 //
 // `.lua` is accepted everywhere `.luau` is, because Rojo's own table is written
 // in terms of `.lua` and a project may predate the newer extension.
@@ -35,13 +42,26 @@
 //
 // ## What this does not do
 //
-// **The rest of Rojo's table is reported, not built.** `.rbxm`, `.rbxmx`,
-// `.model.json`, `.meta.json`, `.txt`, `.csv`, `.json` and `.toml` all map to
-// something in Rojo and to nothing here — some because this engine has no such
-// class, some because the sync has nowhere to apply a property patch yet. Each
-// is named in the report **by what Rojo says it is**, so a gap here reads as a
-// gap rather than as an unrecognised file, and `D00104` carries what closing
-// each would take.
+// **Three rows of Rojo's table are still reported rather than built, and each
+// names a dependency this repository does not vendor:**
+//
+// - **`.rbxm`** is Roblox's binary model — LZ4-framed chunks, interned strings
+//   and a referent table. That is a format reader, and it belongs beside the
+//   other model decoders in `bake` rather than in an editor.
+// - **`.rbxmx`** is the same tree as XML, and **nothing here parses XML**.
+//   `mono.vendor` holds JSON and no XML library, so this is a vendor decision
+//   before it is a feature.
+// - **`.toml`** would be a `ModuleScript` like `.json` is — the emitter already
+//   exists and is shared — and **nothing here parses TOML** either.
+//
+// Each is named in the report by what Rojo says it is, so a gap reads as a gap
+// rather than as an unrecognised file, and `D00104` carries what closing each
+// would take.
+//
+// **A `.meta.json` cannot change a class.** A class is the archetype an entity
+// was created in, and `Store` offers no way to move a live row between class
+// trees — so `init.meta.json`'s `className` is reported as a property the
+// instance does not have. Everything else in a patch is applied.
 //
 // **It builds, it does not watch.** A file watcher is a thread, a debounce and a
 // decision about what happens when a sync lands mid-tick — and the last of those

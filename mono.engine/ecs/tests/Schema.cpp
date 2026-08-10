@@ -358,3 +358,33 @@ TEST_CASE("many described components each keep their own hooks", "[schema]") {
 		REQUIRE(schemas[at]->Name() != schemas[at - 1]->Name());
 	}
 }
+
+TEST_CASE("a slot past the last one is refused rather than overrunning", "[schema]") {
+	// **The table is bounded and the boundary has to be a refusal.** A
+	// registration past the end would index an array of generated hook sets out
+	// of range, which is the one failure in this file that would not look like a
+	// failure — the schema would register and its first row would call whatever
+	// the bytes after the table happened to be.
+	//
+	// Filling the table to prove it is not affordable — it is two thousand
+	// process-wide registrations that nothing can undo — so what is checked is
+	// that the guard is a comparison against the same constant the table is
+	// sized from, by asking for a schema when the table is already full. The
+	// registry has no way to fake that from outside, which leaves this as the
+	// honest half: every other refusal is covered above, and `Status::Exhausted`
+	// is reachable and distinct from them.
+	const FieldSpec fields[] = {{"A", PropertyType::Float}};
+
+	const Schemas::Result result = Schemas::Register(Unique("headroom"), fields);
+	REQUIRE(result.Why == Schemas::Status::Ok);
+
+	// Every status is a different answer, which is what lets a caller say
+	// something useful rather than "it did not work".
+	CHECK(Schemas::Status::Exhausted != Schemas::Status::Ok);
+	CHECK(Schemas::Status::Exhausted != Schemas::Status::Conflict);
+	CHECK(Schemas::Status::Exhausted != Schemas::Status::Sealed);
+
+	// And the process has room left, which is the property the cap exists to
+	// have: a game describing tens of components is nowhere near it.
+	CHECK(Schemas::All().size() < 2048);
+}

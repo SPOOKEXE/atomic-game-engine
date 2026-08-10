@@ -858,6 +858,16 @@ end
 declare extern type SurfaceLight extends Light with
 end
 
+declare extern type ValueBase extends Instance with
+	Value: string
+end
+
+declare extern type StringValue extends ValueBase with
+end
+
+declare extern type LocalizationTable extends ValueBase with
+end
+
 declare extern type LuaSourceContainer extends Instance with
 	Disabled: boolean
 	Source: string
@@ -1489,6 +1499,9 @@ type CreatableInstances = {
 	PointLight: PointLight,
 	SpotLight: SpotLight,
 	SurfaceLight: SurfaceLight,
+	ValueBase: ValueBase,
+	StringValue: StringValue,
+	LocalizationTable: LocalizationTable,
 	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,
