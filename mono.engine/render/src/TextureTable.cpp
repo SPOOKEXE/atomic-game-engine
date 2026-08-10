@@ -75,6 +75,7 @@ namespace engine::render {
 		}
 
 		Textures.clear();
+		Awaiting.clear();
 		DefaultHandle = nullptr;
 		MissingHandle = nullptr;
 		SharedSampler = nullptr;
@@ -218,6 +219,12 @@ namespace engine::render {
 		}
 
 		UploadedBytes += uploadBytes;
+
+		// Arrived, so nothing is coming for it any more. Done here rather than
+		// left to the caller because there is no path where a registered
+		// texture is still in flight, and a rule the type enforces is one no
+		// host can forget.
+		Awaiting.erase(name.Id());
 		return true;
 	}
 
@@ -278,7 +285,35 @@ namespace engine::render {
 		}
 
 		UploadedBytes += bytes;
+
+		// Arrived, so nothing is coming for it any more. Done here rather than
+		// left to the caller because there is no path where a registered
+		// texture is still in flight, and a rule the type enforces is one no
+		// host can forget.
+		Awaiting.erase(name.Id());
 		return true;
+	}
+
+	void TextureTable::Expect(const core::Name &name) {
+		if (!name.IsValid()) {
+			return;
+		}
+
+		// **Not conditioned on the table already holding it.** Content is
+		// republished, and a name asked for again while the old texture is
+		// still registered is still in flight — refusing the mark here would
+		// make the second fetch invisible for no gain.
+		Awaiting.insert(name.Id());
+	}
+
+	void TextureTable::StopExpecting(const core::Name &name) {
+		if (name.IsValid()) {
+			Awaiting.erase(name.Id());
+		}
+	}
+
+	bool TextureTable::Expecting(const core::Name &name) const {
+		return name.IsValid() && Awaiting.find(name.Id()) != Awaiting.end();
 	}
 
 	bool TextureTable::Drop(const core::Name &name) {

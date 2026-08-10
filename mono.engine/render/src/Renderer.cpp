@@ -188,6 +188,18 @@ namespace engine::render {
 			// texture in every other respect, which is what makes one usable on
 			// a part at all.
 			glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
+
+			// x: which `scene::SurfaceEffect` the projected image goes through.
+			// y: the animation clock, for the effects that move.
+			// zw: unused, and named so the struct's size is stated rather than
+			//     implied.
+			//
+			// **A field of its own rather than the spare lanes in `Surface` or
+			// `Flipbook`.** Both of those are rewritten wholesale per submesh by
+			// `DrawSlots`, so anything parked in their unused components would
+			// be silently zeroed by the next draw — a bug that presents as "the
+			// effect only works on some parts".
+			glm::vec4 Mirror{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
 		// Mix renderer-owned view data into the scene signature.
@@ -771,6 +783,15 @@ namespace engine::render {
 
 			// How solid this surface's image is, from the view that wrote it.
 			float ImageOpacity = 1.0f;
+
+			// What the pane puts the image through when it samples it.
+			//
+			// **Not part of the signature**, unlike the matrix beside it: the
+			// effect changes no texel of the texture, only how the screen pass
+			// reads it. A mirror switched to thermal has to change this frame
+			// rather than on whichever later frame something happens to move —
+			// the same argument `ImageOpacity` makes one line up.
+			scene::SurfaceEffect Effect = scene::SurfaceEffect::None;
 
 			// What the scene looked like when this surface last rendered.
 			//
@@ -1383,10 +1404,20 @@ namespace engine::render {
 				// textured this" and "this asked for something that never
 				// arrived" are different facts and only one of them is finished.
 				// The same split `scene::KeepLoaded` makes for geometry.
+				//
+				// **A sheet still on its way is the first case, not the third**,
+				// which is `D00107` closed: the marker now means *nothing is
+				// coming*. `ChooseTexture` is the rule and carries the argument;
+				// it is a free function so a suite can state it without a
+				// device.
 				SDL_GPUTexture *const found = Textures.Find(texture);
-				const bool absent = found == nullptr && texture.IsValid();
-				SDL_GPUTexture *const sampled =
-					found != nullptr ? found : (absent ? Textures.Missing() : Textures.Default());
+				const TextureChoice choice =
+					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
+
+				SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? found
+												: choice == TextureChoice::Missing ? Textures.Missing()
+																				   : Textures.Default();
+				const bool absent = choice == TextureChoice::Missing;
 
 				// **The fallback texel is bound rather than the binding being
 				// skipped** for the other two, because a sampler a pipeline
@@ -1423,6 +1454,16 @@ namespace engine::render {
 				// particles, where the cell is a function of a particle's age.
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
+
+				// **The clock is stamped here and the effect arrives from the
+				// caller.** Which effect is a fact about the surface being
+				// sampled; what time it is, is a fact about the frame, and this
+				// is the one place that already holds it.
+				//
+				// Wrapped rather than passed whole: a `float` a session old has
+				// lost the precision these effects step by, and a scan line that
+				// coarsens over an afternoon is a bug nobody would reproduce.
+				uniforms.Mirror.y = static_cast<float>(std::fmod(AnimationSeconds, 1000.0));
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 			}
 
@@ -2651,6 +2692,22 @@ namespace engine::render {
 		return State->Textures.Add(name, image);
 	}
 
+	void Renderer::ExpectTexture(const core::Name &name) {
+		if (State != nullptr) {
+			State->Textures.Expect(name);
+		}
+	}
+
+	void Renderer::StopExpectingTexture(const core::Name &name) {
+		if (State != nullptr) {
+			State->Textures.StopExpecting(name);
+		}
+	}
+
+	bool Renderer::ExpectingTexture(const core::Name &name) const {
+		return State != nullptr && State->Textures.Expecting(name);
+	}
+
 	void Renderer::SetAnimationTime(double seconds) {
 		if (State != nullptr) {
 			State->AnimationSeconds = seconds;
@@ -3074,6 +3131,10 @@ namespace engine::render {
 
 			float ImageOpacity = 1.0f;
 
+			// What the pane puts the image through. Carried for the same reason
+			// the opacity is: it is composited with, not rendered with.
+			scene::SurfaceEffect Effect = scene::SurfaceEffect::None;
+
 			// Whether this surface renders this frame. False when its signature
 			// matches the one its texture was drawn with.
 			bool Refresh = true;
@@ -3114,6 +3175,7 @@ namespace engine::render {
 			entry.View = &view;
 			entry.ViewProjection = scene::ResolveCamera(view.Frame, view.Lens, aspect).ViewProjection;
 			entry.ImageOpacity = std::clamp(view.ImageOpacity, 0.0f, 1.0f);
+			entry.Effect = view.Effect;
 
 			accepted[acceptedCount++] = entry;
 		}
@@ -3317,6 +3379,7 @@ namespace engine::render {
 				// this frame rather than on whichever later frame something else
 				// happens to move.
 				state.ImageOpacity = accepted[index].ImageOpacity;
+				state.Effect = accepted[index].Effect;
 
 				accepted[index].Refresh = !state.Ready || state.Signature != surfaceSignature;
 				refreshCount += accepted[index].Refresh ? 1u : 0u;
@@ -3907,7 +3970,7 @@ namespace engine::render {
 							lightViewProjection,
 							shown.PreviousViewProjection,
 						};
-						const LightingUniforms mirrorLighting{
+						LightingUniforms mirrorLighting{
 							glm::vec4{SUN_DIRECTION, 0.0f},
 							SUN_AMBIENT,
 							glm::vec4{
@@ -3917,6 +3980,11 @@ namespace engine::render {
 								shown.ImageOpacity
 							},
 						};
+
+						// Which grade this surface's image goes through. On the
+						// composite rather than on the render, so switching one
+						// costs no redraw of the texture.
+						mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
 
 						SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
 						bindSurface(shown.Texture[shown.Slot ^ 1u]);
@@ -4236,7 +4304,7 @@ namespace engine::render {
 								lightViewProjection,
 								shown.ViewProjection,
 							};
-							const LightingUniforms mirrored{
+							LightingUniforms mirrored{
 								glm::vec4{SUN_DIRECTION, 0.0f},
 								SUN_AMBIENT,
 								glm::vec4{
@@ -4246,6 +4314,11 @@ namespace engine::render {
 									shown.ImageOpacity
 								},
 							};
+
+							// Which grade this surface's image goes through. On the
+							// composite rather than on the render, so switching one
+							// costs no redraw of the texture.
+							mirrored.Mirror.x = static_cast<float>(shown.Effect);
 
 							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
 							bindScreen(shown.Texture[shown.Slot]);

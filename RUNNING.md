@@ -292,182 +292,6 @@ just host --game My.agame       # a dedicated server hosting every world in it
 just run  --game My.agame       # single-player, both roles in one process
 ```
 
-### The window
-
-A menu bar, a toolbar, and three docked panels around a hole in the middle that
-the world is drawn into. The layout is yours after the first run — it is written
-to `studio-layout.ini` beside the binary, and the built-in arrangement is only
-used when that file does not exist.
-
-| Panel | What it is |
-|---|---|
-| Viewport | the world, drawn into the panel |
-| Explorer | the universe, its worlds, and every instance in the active one |
-| Worlds | every scene: which is active, what state it is in, how much is in it |
-| Properties | whatever is selected, grouped by which class declares each property |
-| Script Editor | a tab per open script |
-| Output | the engine log, including what your scripts `print` |
-
-**Every panel is a panel** — dock it, tear it off, resize it, close it. The
-Viewport is one of them and not a hole in the middle: the world is rendered into
-a texture and the panel shows it, so it moves and docks like the rest. **View**
-brings back anything you closed, and **View ▸ Reset Layout** puts everything
-back where it started.
-
-**The Worlds panel is where scenes are managed.** New, Duplicate, Rename,
-Export and Remove, plus a click to choose which one you are working on. Renaming
-and duplicating go through the save format — a scene is written out and read
-back — so both are refused while a game is running, when a world's name is
-carrying live bus traffic.
-
-**The tree is the mapping `game` and `workspace` already had.** The root is the
-universe, which is what a script calls `game`; each world under it is a scene,
-and the active one is what a script running in it calls `workspace`. That is not
-a resemblance — `script/src/Services.cpp` established the mapping at v0.6 and the
-explorer draws the same objects.
-
-### Getting around
-
-| | |
-|---|---|
-| Right mouse, held | look |
-| `W` `A` `S` `D`, while looking | move |
-| `Q` `E`, while looking | down and up |
-| Wheel, while looking | how fast, not how far |
-
-The camera is not an entity in any world, which is why it is not saved, not
-replicated and not reset by Stop.
-
-### Editing
-
-Insert Object on the toolbar, or right-click in the tree. The list is every
-class registered under `Instance` — it is read from `ecs::Classes` rather than
-written down, so a class added by any module appears in it with nothing in the
-editor changing. The same is true of the properties panel: it walks the class's
-declared properties, and an `Enum` property is a list of its registered members
-rather than a text field, so a mistyped material is impossible rather than
-caught.
-
-Drag a row onto another to reparent it. `Ctrl+D` duplicates, `Del` deletes,
-`Ctrl+S` saves.
-
-### The command bar *(v0.13)*
-
-View → Command Bar. One line of Luau, run against the scene that is active, with
-the same vocabulary a plugin gets — `Selection`, `game`, `ChangeHistoryService`
-and the script readers:
-
-```lua
-for _, part in Selection:Get() do part.Anchored = true end
-```
-
-**The whole run is one waypoint.** A line that moves forty parts is one press of
-`Ctrl+Z`, not forty, because the bar opens a `ChangeHistoryService` recording
-before it runs and commits it after. A line that changed nothing commits
-nothing, so a query — a count, a `print` — leaves no empty step in the Edit menu.
-
-`Enter` runs it and keeps the focus, so a run of commands is typed rather than
-clicked between. The arrows walk back through what has been run this session,
-failures included: a command with a typo in it is exactly the one worth getting
-back to fix. Everything typed and everything printed goes to the Output panel, so
-the log reads as a transcript rather than as answers with no questions.
-
-Globals persist between commands — `local helper = ...` on one line and using it
-on the next works. The runtime is rebuilt when the active scene changes, since
-one is bound to one store, and it is the bar's own rather than a plugin's, so a
-command cannot spend a plugin's step budget or see its globals.
-
-**A command runs once and is over**, which is the one place the vocabulary falls
-short of a plugin's: nothing beats the bar's runtime afterwards, so a widget or a
-toolbar it creates is never drawn and a handler it binds never fires again. Ask
-for a lasting surface and you are asking for a plugin — write one.
-
-It is not the command palette. That one is the list of things the editor already
-knows how to do, reachable by name; this runs code the editor has never heard of.
-
-### Run, Play and Stop
-
-| | |
-|---|---|
-| **Run** (`F6`) | the server's scripts — `Script`, not `LocalScript` |
-| **Play** (`F5`) | both, which is what single-player is |
-| **Stop** (`Shift+F5`) | ends it, and *puts the scene back* |
-
-Stop is a snapshot restore, exactly as it is in Roblox: what your scripts did to
-the world is undone, and what you authored before pressing Play is not. Edits
-made to a script while the game is running apply on the next run, and the editor
-says so rather than leaving you to find out.
-
-**Nothing ticks in edit mode.** A world that simulated while you were building it
-would settle physics under your hands — a part placed in the air would be on the
-floor by the time you looked away.
-
-### Colours *(v0.13)*
-
-Preferences → Appearance. Seven themes to pick from, then **Colours** underneath
-to change any of them:
-
-| | |
-|---|---|
-| `Surface` | the panel colour, and the anchor every other surface comes from |
-| `Accent` | the highlight, and `AccentHot` is the same colour hovered |
-| `Text`, `TextMuted` | ordinary text, and the secondary text beside it |
-| `Warning`, `Error` | the semantic pair — no palette declares these |
-
-**Seven knobs, not fifty.** imgui has fifty-odd style slots and this exposes
-seven, because the other forty-odd are *derived*: a button's face, an input's
-well, a border and a tab are shades of `Surface` on one ladder. Change the
-surface and all of them move together and stay the right distance apart, which is
-what a per-slot editor would let you get wrong.
-
-**An override rides over the theme rather than replacing it.** Set an accent and
-every other colour still follows whichever palette is selected — so picking a
-different theme afterwards still does something. Each row has a **reset** while
-it is overridden, and `Reset all` puts the whole thing back.
-
-The global choice lives in the layout ini beside the palette. It is written as
-`RRGGBBAA` text, so it is a colour you can read and edit by hand.
-
-#### One panel of its own colour
-
-Under **One panel**, pick any panel and give it the same seven. A dot beside a
-name in the list means that one carries a colour. It resolves on top of the
-global theme, so a panel that sets only a surface keeps the editor's accent.
-
-These live in `preferences.json` rather than the layout ini, because it is a
-document rather than a line:
-
-```json
-"panelColours": {
-  "Explorer": { "Surface": "2E3440FF" },
-  "Output":   { "Accent": "FF0080C0" }
-}
-```
-
-A name nobody recognises, a colour that is not one, and a panel with nothing left
-in it each cost only themselves — the rest of the file still loads. `#2E3440`
-works too; six digits is opaque.
-
-#### A plugin colouring its own dock widget
-
-A plugin owns the widgets it creates, so it colours them from Luau rather than
-from the settings page:
-
-```lua
-local panel = plugin.CreateWidget("Align", true)
-plugin.SetWidgetColour(panel, "Surface", "#2E3440")
-plugin.SetWidgetColour(panel, "Accent", "#FF0080")
-plugin.SetWidgetColour(panel, "Accent", nil)   -- back to the editor's theme
-```
-
-The same seven names, the same `RRGGBB`/`RRGGBBAA` text, and the same rule that
-it resolves *over* the editor's theme — so a widget that sets a surface still
-gets a matching button, border and input well without naming any of them.
-
-**Deliberately not in the settings page.** A list of plugin widgets there would
-be a list whose rows appear and vanish as plugins load, holding entries that
-outlive the plugin that made them.
-
 ### Options
 
 | Option | Default | What it does |
@@ -711,10 +535,92 @@ example, so seeing one is a command rather than a path to look up:
 | `run-magic-tests` | the ported libraries' 183 tests, run here |
 | `run-libraries` | `MagicCore` and `TerrainCore`, loaded and exercised |
 | `run-interface` | a `ScreenGui` built entirely from a script |
-| `run-mirrors` | one room of mirrors — the rendering path |
+| `run-mirrors` | one room of mirrors, each with a different effect — the rendering path |
 | `run-mirrors-4-worlds` | four worlds composited into one frame |
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
+
+### Swapping a mesh's texture *(v0.13)*
+
+A `MeshPart` names two things and they are independent:
+
+```lua
+part.MeshId = "characters/hero.amesh"
+part.TextureID = "skins/hero-winter.atex"
+```
+
+**Setting only `MeshId` still works** — the part wears whatever each of its
+submeshes recorded at bake time, which is how a character with six sheets loads
+without a script knowing any of them. What it does not give you is a handle: the
+sheet names live *inside* the mesh file, so there is nothing to read and nothing
+to put back.
+
+`ContentService:GetMeshTextures(mesh)` is that handle:
+
+```lua
+local worn = ContentService:GetMeshTextures("characters/hero.amesh")
+part.TextureID = worn[1]        -- the same picture, said out loud
+part.TextureID = "skins/summer.atex"  -- a different outfit
+```
+
+It answers in **submesh order, unsorted, duplicates kept** — unlike every other
+list that service hands out. Which run wears which is a fact, and a character
+with twenty submeshes sharing four sheets is four names repeated. An untextured
+run is an empty string in its own slot rather than a hole, so the index keeps
+meaning "submesh number". A built-in wears nothing and answers an empty table,
+as does a mesh this world has not been told about.
+
+**`TextureID` overrides every run at once** — Roblox's rule and this one's — so a
+twenty-submesh character given one sheet wears that sheet all over. That is the
+thing to know before reaching for it on an imported model.
+
+`run-mesh-grid` shows both halves: each cell names its own sheet explicitly when
+it has exactly one, and a row of identical cubes below wears the characters'
+sheets, so the only difference between them is a string.
+
+### What a mirror can show *(v0.13)*
+
+A `SurfaceCamera` has an `Effect`, and `run-mirrors` gives each of its four walls
+a different one:
+
+| `Enum.SurfaceEffect` | What it looks like |
+|---|---|
+| `None` | the reflection as rendered |
+| `NightVision` | an image intensifier — everything to green, lifted, grained, vignetted |
+| `Thermal` | a heat map, black through blue, magenta, red and yellow to white |
+| `Cctv` | grey, scanlined, with a bright band rolling down it |
+| `Swirl` | the image twisted about its own centre, turning slowly |
+
+```lua
+local reflection = Instance.new("SurfaceCamera")
+reflection.Face = Enum.NormalId.Back
+reflection.Effect = Enum.SurfaceEffect.Thermal
+reflection.Parent = pane
+```
+
+**A grade on the way out, not a second render.** The surface pass draws the world
+exactly as it would have whatever the effect says; the effect is applied in
+`opaque.frag` where the pane samples the texture. So a graded wall costs the same
+as an ungraded one — no extra target, no extra pipeline, no extra bind — and
+switching one at runtime redraws nothing.
+
+That is also why a reflection of a reflection is graded once. The texture holds
+an ungraded picture and only the pane showing it grades, so standing between the
+thermal wall and the swirl gives you a corridor carrying both, each applied by
+the wall it belongs to rather than compounding down the recursion.
+
+**Thermal reads luminance as temperature**, which is a lie an engine with no
+thermal model cannot avoid. It looks right because bright things in a lit scene
+usually are the hot ones, and `scene::SurfaceEffect` says so rather than implying
+otherwise.
+
+**A closed list rather than a shader name**, and that is a deliberate limit. This
+pipeline has one fragment program for opaque geometry; a mirror naming an
+arbitrary program would need a pipeline per program, a compilation path, and an
+answer for what happens when the file is missing on somebody else's machine —
+which is the render graph `ROADMAP.md` puts behind a prototype project, not a
+field. Every effect here is a handful of instructions on the fragment that
+samples an image somebody already rendered.
 
 ```sh
 scripts/demos/run-terrain.sh                 # uncapped, held at 165 fps

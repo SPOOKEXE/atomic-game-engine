@@ -37,6 +37,7 @@ using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
 using engine::scene::SurfaceCamera;
+using engine::scene::SurfaceEffect;
 using engine::scene::Transform;
 using engine::scene::Visual;
 using engine::scene::WorldBounds;
@@ -88,14 +89,22 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// a component every mirror in a world carries, and it is worth it because
 	// the alternative — a name resolved per instance per pass — is a lookup in
 	// the draw loop rather than four bytes in a row that is already sixteen.
+	//
+	// **`Effect` widened nothing**, and that is the point of a named reserve: a
+	// byte-wide addition to a component every mirror carries came out of the two
+	// spare bytes rather than out of a fourth word. One is left, and the day it
+	// runs out this case fails rather than a hole appearing in a snapshot.
 	CHECK(
-		sizeof(SurfaceCamera) ==
-		2 * sizeof(uint16_t) + sizeof(float) + sizeof(uint32_t) + sizeof(int8_t) + sizeof(NormalId) + 2
+		sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + sizeof(float) + sizeof(uint32_t) + sizeof(int8_t) +
+									 sizeof(NormalId) + sizeof(SurfaceEffect) + 1
 	);
 	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
 
 	// A face is one byte, so a component can hold one without the row noticing.
 	CHECK(sizeof(NormalId) == sizeof(uint8_t));
+
+	// And so is an effect, which is what let it come out of the reserve.
+	CHECK(sizeof(SurfaceEffect) == sizeof(uint8_t));
 
 	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + sizeof(BodyKind) + 3);
 	CHECK(

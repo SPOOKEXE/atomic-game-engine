@@ -364,7 +364,19 @@ namespace client {
 				continue;
 			}
 
+			// **Read before the take, because a take is what destroys it.** A
+			// failed request answers no asset and therefore no name, and the
+			// name is what has to be unmarked — see `render::ChooseTexture`.
+			const engine::core::Name asked(Content->NameOf(id));
+
 			std::optional<engine::delivery::Asset> asset = Content->Take(id);
+
+			// **On the request finishing, not on it succeeding**, and above
+			// every `continue` below so no branch can forget. Unmarking only on
+			// arrival would leave a misspelled sheet expected for ever, which is
+			// precisely the case the purple marker exists for.
+			Renderer.StopExpectingTexture(asked);
+
 			if (!asset) {
 				// Failed, or already taken. Either way there is nothing more to
 				// wait for; `delivery` has already counted it.
@@ -400,16 +412,27 @@ namespace client {
 				if (Renderer.AddMesh(name, mesh)) {
 					ContentMeshes++;
 
+					// **The sheets its submeshes name, recorded where they are
+					// readable.** They live inside the mesh file, so this is the
+					// one point anything can learn them — and without them a
+					// script that wants to swap a model's texture has no way to
+					// find out what it is wearing or what to put back.
+					std::vector<engine::core::Name> sheets;
+					sheets.reserve(mesh.Submeshes.size());
+					for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
+						sheets.emplace_back(submesh.Texture);
+					}
+
 					// Mesh metadata is world data, not renderer state.
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
 					for (const engine::world::WorldId id : Simulated) {
-						Universe_->Enter(id, [&name, triangles](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles);
+						Universe_->Enter(id, [&name, triangles, &sheets](engine::ecs::Store &store) {
+							engine::scene::RecordMesh(store, name, triangles, sheets);
 						});
 					}
 					if (ReportedJoin) {
-						Universe_->Enter(Replicated, [&name, triangles](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles);
+						Universe_->Enter(Replicated, [&name, triangles, &sheets](engine::ecs::Store &store) {
+							engine::scene::RecordMesh(store, name, triangles, sheets);
 						});
 					}
 				}
@@ -616,6 +639,13 @@ namespace client {
 		// grown, which is what it looks like: the walk lost its place and one
 		// texture out of the several hundred asked for arrived.
 		ContentIssued.push_back(Content->Request(texture.Text()));
+
+		// **Marked before the answer, which is the whole point.** Until this
+		// request finishes, a part naming this sheet draws as the default
+		// material rather than as the purple marker — so a scene load looks like
+		// untextured parts becoming textured instead of a purple shimmer across
+		// every imported model. See `render::ChooseTexture`.
+		Renderer.ExpectTexture(texture);
 	}
 
 	void Client::PumpSounds() {

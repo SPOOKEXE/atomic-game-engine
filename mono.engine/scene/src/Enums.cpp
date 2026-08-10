@@ -28,6 +28,24 @@ namespace engine::scene {
 		return "?";
 	}
 
+	const char *Describe(SurfaceEffect effect) {
+		switch (effect) {
+		case SurfaceEffect::None:
+			return "None";
+		case SurfaceEffect::NightVision:
+			return "NightVision";
+		case SurfaceEffect::Thermal:
+			return "Thermal";
+		case SurfaceEffect::Cctv:
+			return "Cctv";
+		case SurfaceEffect::Swirl:
+			return "Swirl";
+		}
+		// No default label, so adding one is a warning here rather than a name
+		// nobody registered.
+		return "None";
+	}
+
 	const char *Describe(NormalId face) {
 		// **Capitalised, unlike the two above, because these are not
 		// diagnostics.** `Describe(BodyKind)` produces "dynamic" for a log line;

@@ -3,10 +3,11 @@
 -- Voxel terrain, as pure data.
 --
 -- `TerrainCore` is to terrain what `MagicCore` is to spells: it computes and it
--- never touches an Instance. `Noise` is coherent noise, `HeightField` is the
--- world's shape, `Edits` is what has been blown out of it, and `Chunker` turns a
--- square of columns into as few boxes as it can. `TerrainRuntime` is the only
--- place any of that becomes a Part.
+-- never touches an Instance. `Noise` is coherent noise, `NoiseMap` is that noise
+-- sampled onto a grid, `HeightField` is the world's shape, `Edits` is what has
+-- been blown out of it, and `Chunker` turns a square of columns into as few
+-- boxes as it can. `TerrainRuntime` is the only place any of that becomes a
+-- Part.
 --
 -- The split is not tidiness. Every number in these files' comments -- boxes per
 -- chunk, milliseconds per chunk, the measured range of an fBm -- came from
@@ -26,6 +27,7 @@
 
 local TerrainCore = {
 	Noise = require(script.Noise),
+	NoiseMap = require(script.NoiseMap),
 	HeightField = require(script.HeightField),
 	Edits = require(script.Edits),
 	Chunker = require(script.Chunker),

@@ -67,6 +67,20 @@ namespace studio {
 			// away rather than baked in.
 			{Action::Rename, "edit.rename", "Rename", "Rename the selected instance", Scope::Tree, {}},
 
+			// **`Viewport`, and that scope is the whole reason these can be
+			// digits at all.** A plain `1` bound globally is a `1` the script
+			// editor never sees and a rename field swallows; scoped here it can
+			// only fire while somebody is working in a picture of the world,
+			// which is the only place a handle exists to switch between.
+			{Action::ToolSelect, "tool.select", "Select Tool", "Click to select, with no handles",
+			 Scope::Viewport, {}},
+			{Action::ToolMove, "tool.move", "Move Tool", "Drag an axis to move the selection",
+			 Scope::Viewport, {}},
+			{Action::ToolRotate, "tool.rotate", "Rotate Tool", "Drag a ring to turn the selection",
+			 Scope::Viewport, {}},
+			{Action::ToolScale, "tool.scale", "Scale Tool", "Drag an axis to resize the selection",
+			 Scope::Viewport, {}},
+
 			{Action::ShowStatistics, "panel.statistics", "Statistics", "Show the frame rate panel",
 			 Scope::Global, {}},
 			{Action::ShowFrameGraph, "panel.framegraph", "Frame Graph", "Show where the frame went",

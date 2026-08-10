@@ -461,6 +461,59 @@ namespace engine::scene {
 			return name;
 		}
 
+		// The surface effect's enum name, interned for `NormalIdEnum`'s reason.
+		const core::Name &SurfaceEffectEnum() {
+			static const core::Name name("SurfaceEffect");
+			return name;
+		}
+
+		// What a surface camera's image is put through, as an enum member.
+		//
+		// The same shape as `FaceProperty` below and deliberately not shared
+		// with it: both read a `SurfaceCamera`, but a descriptor is a pair of
+		// function pointers over one field, and a template over the field would
+		// save nine lines and cost the reader the ability to see what the
+		// property touches.
+		PropertyDescriptor SurfaceEffectProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Effect");
+			property.Type = PropertyType::Enum;
+			property.EnumName = SurfaceEffectEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceCamera>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceCamera *surface = store.Get<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(SurfaceEffectEnum(), static_cast<size_t>(surface->Effect));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				SurfaceCamera *surface = store.GetMutable<SurfaceCamera>(instance);
+				if (surface == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						SurfaceEffectEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				surface->Effect = static_cast<SurfaceEffect>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor FaceProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Face");
@@ -976,6 +1029,15 @@ namespace engine::scene {
 			}
 			ecs::EnumTable::Register(NormalIdEnum().Text(), normals);
 
+			// The surface effects, generated from `Describe` for the same reason
+			// the faces are: a member list written out twice is a member list
+			// that gains an entry in one place.
+			std::array<std::string_view, SURFACE_EFFECT_COUNT> effects{};
+			for (size_t index = 0; index < effects.size(); index++) {
+				effects[index] = Describe(static_cast<SurfaceEffect>(index));
+			}
+			ecs::EnumTable::Register(SurfaceEffectEnum().Text(), effects);
+
 			// The alpha modes, by the same rule: a member list registered once
 			// so a script setting `.AlphaMode = "Clip"` is checked against it.
 			ecs::EnumTable::Register(
@@ -1386,6 +1448,7 @@ namespace engine::scene {
 				surfaceCameraClass, "ImageTransparency"
 			);
 			ecs::Classes::Computed(surfaceCameraClass, FaceProperty());
+			ecs::Classes::Computed(surfaceCameraClass, SurfaceEffectProperty());
 			ecs::Classes::Computed(surfaceCameraClass, TagFilterProperty());
 
 			// The sound's six. All plain fields, which is unusual enough here

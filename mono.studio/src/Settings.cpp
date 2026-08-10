@@ -262,11 +262,21 @@ namespace studio {
 		engine::ui::ThemeColours chosen = engine::ui::GlobalColours();
 		const engine::ui::Palette palette = engine::ui::CurrentPalette();
 
+		// **Both colour sections are the same seven rows in one window**, so
+		// `ColourRow`'s own id — the colour it edits — repeats between them.
+		// imgui keys a widget on the whole stack, and two swatches sharing an id
+		// is two swatches that drag each other. The scope is pushed here rather
+		// than inside `ColourRow` because the row cannot know which section it
+		// is in, and a caller that forgot would get a conflict rather than a
+		// compile error.
+		ImGui::PushID("theme");
+
 		bool changed = false;
 		for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
 			const auto which = static_cast<engine::ui::ThemeColour>(index);
 			changed |= ColourRow(chosen, which, engine::ui::ColourOf(palette, which));
 		}
+		ImGui::PopID();
 
 		if (chosen.Any()) {
 			ImGui::Spacing();
@@ -332,6 +342,10 @@ namespace studio {
 		engine::ui::ThemeColours chosen =
 			found == Prefs.PanelColours.end() ? engine::ui::ThemeColours{} : found->second;
 
+		// Scoped apart from the section above, which draws the same seven rows
+		// in the same window. See the note there.
+		ImGui::PushID("panel");
+
 		bool changed = false;
 		for (size_t index = 0; index < engine::ui::THEME_COLOUR_COUNT; index++) {
 			const auto which = static_cast<engine::ui::ThemeColour>(index);
@@ -341,6 +355,7 @@ namespace studio {
 			// panel is actually drawn in today.
 			changed |= ColourRow(chosen, which, engine::ui::ColourOf(which));
 		}
+		ImGui::PopID();
 
 		if (chosen.Any()) {
 			ImGui::Spacing();

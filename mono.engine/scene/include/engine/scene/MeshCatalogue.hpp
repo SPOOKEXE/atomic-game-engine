@@ -30,8 +30,11 @@
 
 #include <engine/core/Name.hpp>
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -69,6 +72,35 @@ namespace engine::scene {
 		// @param mesh The mesh's name.
 		// @return The count, or zero.
 		uint32_t Find(const core::Name &mesh) const;
+
+		// The sheets a mesh's own submeshes name, keyed the same way.
+		//
+		// **What a script cannot otherwise find out.** A `MeshPart` naming no
+		// `TextureID` wears whatever each submesh recorded at bake time, and
+		// those names live *inside* the mesh file — so an author who wants to
+		// swap a model's sheet has no way to learn what it is wearing, and no
+		// name to put back. Recorded here at intake, where the file is open and
+		// the names are readable, exactly as the triangle count is.
+		//
+		// **In submesh order and duplicates kept.** A character with twenty
+		// submeshes sharing four sheets is four names repeated, and collapsing
+		// them would lose which run wears which — a fact the day something wants
+		// per-submesh overrides.
+		//
+		// @since v0.13
+		std::unordered_map<uint32_t, std::vector<core::Name>> Textures;
+
+		// The sheets a mesh names, or an empty span.
+		//
+		// **Empty means "not known here", like `Find`'s zero.** A mesh whose
+		// submeshes name nothing is a real thing — every built-in is one — so
+		// this cannot distinguish that from a mesh nothing has recorded, and
+		// says so rather than implying otherwise.
+		//
+		// @param mesh The mesh's name.
+		// @return Its sheets, valid until the catalogue is next written.
+		// @since v0.13
+		std::span<const core::Name> Sheets(const core::Name &mesh) const;
 	};
 
 	// The world's catalogue, creating an empty one if it has none.
@@ -94,8 +126,26 @@ namespace engine::scene {
 	// @param store     The world.
 	// @param mesh      The mesh's name.
 	// @param triangles How many triangles it has.
+	// @param sheets    The textures its submeshes name, in submesh order.
+	//        Replaces whatever was recorded, because a republished mesh may
+	//        name different ones and a merge would leave a sheet listed that
+	//        the geometry no longer wears.
 	// @return `false` for an invalid name.
-	bool RecordMesh(ecs::Store &store, const core::Name &mesh, uint32_t triangles);
+	bool RecordMesh(
+		ecs::Store &store, const core::Name &mesh, uint32_t triangles, std::span<const core::Name> sheets = {}
+	);
+
+	// The sheets a mesh's submeshes name, in this world.
+	//
+	// The `const` reader, like `TrianglesOf`: it never creates the resource, so
+	// a property getter and a script binding can both use it.
+	//
+	// @param store The world.
+	// @param mesh  The mesh's name.
+	// @param out   Filled with the sheets. Cleared first.
+	// @return How many there are.
+	// @since v0.13
+	size_t SheetsOf(const ecs::Store &store, const core::Name &mesh, std::vector<core::Name> &out);
 
 	// How many triangles a mesh has in this world, or zero.
 	//

@@ -157,6 +157,29 @@ namespace studio {
 					   [this] { return NeedsSelection(!Selection.empty()); },
 					   [this] { BeginRename(Selection.empty() ? Entity{} : Selection.front()); }});
 
+		// --- the manipulators -----------------------------------------------
+		//
+		// **Registered rather than switched on directly by the key**, like
+		// everything else here: the ribbon's buttons, the palette and the
+		// binding all end up in one place, so a fifth way to change tool cannot
+		// disagree with the other four about what "Scale" means.
+		//
+		// Always available. A tool with nothing selected draws no handles and
+		// costs nothing, and greying the buttons would make picking a tool
+		// something you can only do *after* choosing what to point it at —
+		// which is the wrong way round for a person who selects with the tool
+		// already in hand.
+		const auto tool = [this, always](Action id, const char *name, const char *what, ToolMode mode) {
+			Operators.Add({id, name, what, always, [this, mode] {
+							   CurrentTool = mode;
+						   }});
+		};
+
+		tool(Action::ToolSelect, "Select Tool", "Click to select, with no handles", ToolMode::Select);
+		tool(Action::ToolMove, "Move Tool", "Drag an axis to move the selection", ToolMode::Move);
+		tool(Action::ToolRotate, "Rotate Tool", "Drag a ring to turn the selection", ToolMode::Rotate);
+		tool(Action::ToolScale, "Scale Tool", "Drag an axis to resize the selection", ToolMode::Scale);
+
 		// --- the panels -----------------------------------------------------
 
 		Operators.Add({Action::ShowStatistics, "Statistics", "Show the frame rate panel", always, [this] {

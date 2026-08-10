@@ -237,6 +237,19 @@ namespace studio {
 
 	// --- preferences ---------------------------------------------------------
 
+	const char *Describe(ScaleSide side) {
+		switch (side) {
+		case ScaleSide::Side:
+			return "Side";
+		case ScaleSide::Both:
+			return "Both";
+		case ScaleSide::BothHalf:
+			return "Both Half";
+		}
+		// No default label, so adding a mode is a warning here.
+		return "Side";
+	}
+
 	bool Preferences::Load() {
 		json document;
 		std::string error;
@@ -257,6 +270,23 @@ namespace studio {
 		SnapDistance = Number(document, "gridStep", SnapDistance);
 		SnapDegrees = Number(document, "rotationStep", SnapDegrees);
 		PivotEditing = Flag(document, "pivotEditing", PivotEditing);
+		DragAligns = Flag(document, "dragAligns", DragAligns);
+		ShowFacing = Flag(document, "showFacing", ShowFacing);
+
+		// **Written as its name rather than its index.** An index would make
+		// reordering `ScaleSide` a silent change to how everybody's scale drag
+		// behaves, and this is a file a person reads.
+		if (const auto sides = document.find("scaleSides");
+			sides != document.end() && sides->is_string()) {
+			const std::string wanted = sides->get<std::string>();
+			for (size_t index = 0; index < SCALE_SIDE_COUNT; index++) {
+				const auto side = static_cast<ScaleSide>(index);
+				if (wanted == Describe(side)) {
+					Sides = side;
+					break;
+				}
+			}
+		}
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
 		if (const auto panels = document.find("panels");
@@ -347,6 +377,9 @@ namespace studio {
 			{"gridStep", SnapDistance},
 			{"rotationStep", SnapDegrees},
 			{"pivotEditing", PivotEditing},
+			{"scaleSides", Describe(Sides)},
+			{"dragAligns", DragAligns},
+			{"showFacing", ShowFacing},
 			{"controlPort", ControlPort},
 			{"panels",
 			 json{
@@ -411,6 +444,9 @@ namespace studio {
 		SnapDistance = Prefs.SnapDistance;
 		SnapDegrees = Prefs.SnapDegrees;
 		PivotEditing = Prefs.PivotEditing;
+		ScaleSides = Prefs.Sides;
+		DragAligns = Prefs.DragAligns;
+		ShowFacing = Prefs.ShowFacing;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file —
@@ -458,6 +494,9 @@ namespace studio {
 		Prefs.SnapDistance = SnapDistance;
 		Prefs.SnapDegrees = SnapDegrees;
 		Prefs.PivotEditing = PivotEditing;
+		Prefs.Sides = ScaleSides;
+		Prefs.DragAligns = DragAligns;
+		Prefs.ShowFacing = ShowFacing;
 		Prefs.Scale = Settings.Scale;
 
 		Prefs.Save();

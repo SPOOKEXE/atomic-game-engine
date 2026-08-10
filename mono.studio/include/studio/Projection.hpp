@@ -46,9 +46,11 @@
 //
 // @tier L12 · client
 
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
 
+#include <glm/gtc/quaternion.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
 
@@ -103,6 +105,47 @@ namespace studio {
 	bool ClosestPointOnAxis(
 		engine::core::Vector3 origin, engine::core::Vector3 axis, const engine::core::Ray &ray, float &along
 	);
+
+	// How far an oriented box reaches from its centre along a direction.
+	//
+	// **The support function, which is what "resting on it" needs.** A box laid
+	// on a slope touches it at one corner, and the distance from the centre to
+	// that corner along the surface normal is exactly this sum — using half the
+	// height instead would sink a tilted part into the ground by however much it
+	// is tilted.
+	//
+	// @param frame     Where the box is and how it is turned.
+	// @param half      Its half-extents, in its own axes.
+	// @param direction Which way to reach. Length one.
+	// @return The distance from the centre to the surface along `direction`.
+	// @since v0.13
+	float SupportAlong(
+		const engine::core::CFrame &frame,
+		const engine::core::Vector3 &half,
+		const engine::core::Vector3 &direction
+	);
+
+	// A rotation with its up along a surface normal, turned as little as it can
+	// be.
+	//
+	// **The old facing is projected onto the new plane rather than discarded.**
+	// A part dropped onto a wall has to keep pointing the way its author left it
+	// pointing; rebuilding the basis from the normal alone would spin it to
+	// whatever the arbitrary second axis happened to be, and every part dropped
+	// on that wall would end up facing the same way whatever anybody had done.
+	//
+	// **`LookVector` is `-Z`**, so the basis's third column is the *back*.
+	// Getting that the other way round mirrors every part that is dropped, which
+	// reads as the model being wrong rather than the maths — which is most of
+	// why this is a named function with a suite rather than eight lines inside a
+	// drag.
+	//
+	// @param was    The rotation to keep as much of as possible.
+	// @param normal The surface's outward normal. Need not be unit length.
+	// @return The aligned rotation, or `was.Rotation()` when the old facing says
+	//         nothing about the new plane.
+	// @since v0.13
+	glm::quat AlignedTo(const engine::core::CFrame &was, const engine::core::Vector3 &normal);
 
 	// One viewport panel's mapping, for one frame.
 	//

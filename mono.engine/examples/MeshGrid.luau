@@ -211,12 +211,28 @@ local function buildCell(mesh: string)
 
 	part.Size = Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
 
-	-- **No `TextureID`.** A `MeshPart` that names none samples whatever texture
-	-- each of its own submeshes recorded at bake time — which is how a
-	-- character with six sheets works without this file knowing any of them,
-	-- and why the PMX models need no entry here while the glTF ones need no
-	-- exception.
+	-- **Both halves named, and that is the point of this line.** A `MeshPart`
+	-- that sets only `MeshId` shows whatever each of its submeshes recorded at
+	-- bake time — which works, and which leaves an author no handle on it: the
+	-- sheet names live inside the mesh file, so there is nothing to read and
+	-- nothing to put back.
 	--
+	-- `ContentService:GetMeshTextures` is that handle. It answers what the
+	-- geometry is wearing, in submesh order, and setting `TextureID` to one of
+	-- them makes the pairing explicit — the same picture, said out loud. From
+	-- there swapping an outfit is assigning a different name, which is exactly
+	-- what `swatches` below does.
+	--
+	-- **A whole-instance override, not a per-submesh one.** `TextureID` replaces
+	-- the sheet for *every* run in the mesh — Roblox's rule and this engine's —
+	-- so a twenty-submesh character given one sheet wears that sheet all over.
+	-- That is why this takes the first only when there is exactly one: naming
+	-- the first of six would be a deliberate mistake dressed up as a default.
+	local sheets = ContentService:GetMeshTextures(mesh)
+	if #sheets == 1 then
+		part.TextureID = sheets[1]
+	end
+
 	-- The colour is the *untextured* fallback and multiplies with anything
 	-- sampled, so it stays near white: a tint here would look like a texture
 	-- bug on the models that do have sheets.
@@ -254,6 +270,95 @@ local function layout(names: { string })
 		end
 	end
 end
+
+-- **The swap row: one mesh, several sheets.** Whatever the cells above are
+-- wearing, this row proves the two halves are independent — every cube here has
+-- the same `MeshId` and a different `TextureID`, so the only thing that differs
+-- between them is a string. Change that string and you have changed the outfit.
+--
+-- **Built from what the models brought with them.** The sheets come from
+-- `GetMeshTextures` over the meshes already placed, so this row costs no content
+-- of its own: it is dressing a cube in the characters' own textures. On a
+-- machine with an empty store there is nothing to show and the row is simply
+-- absent, which is the honest answer rather than four purple cubes.
+local SWATCHES = 4
+local swatches: { MeshPart } = {}
+
+local function dressSwatches()
+	if #swatches >= SWATCHES then
+		return
+	end
+
+	-- Gathered fresh each time, because the cells arrive over several frames and
+	-- a list taken once would be whatever had landed by the first Heartbeat.
+	local sheets: { string } = {}
+	for mesh in pairs(placed) do
+		for _, sheet in ipairs(ContentService:GetMeshTextures(mesh)) do
+			if sheet ~= "" and not table.find(sheets, sheet) then
+				table.insert(sheets, sheet)
+			end
+		end
+	end
+
+	-- Sorted, so the row is the same on every run for a given store — the same
+	-- rule the plate's own layout follows.
+	table.sort(sheets)
+
+	while #swatches < SWATCHES and #swatches < #sheets do
+		local slot = #swatches + 1
+
+		local part = Instance.new("MeshPart")
+		part.Name = `Swatch_{slot}`
+		part.Anchored = true
+
+		-- **The same mesh every time.** If these differed in geometry as well as
+		-- in sheet, the row would prove nothing about which half is doing the
+		-- work.
+		part.MeshId = "engine.Cube"
+		part.TextureID = sheets[slot]
+
+		part.Size = Vector3.new(MODEL_SIZE * 0.6, MODEL_SIZE * 0.6, MODEL_SIZE * 0.6)
+		part.CFrame = CFrame.new(
+			Vector3.new((slot - (SWATCHES + 1) / 2) * SPACING, MODEL_SIZE * 0.4, SPACING * 2.6)
+		)
+		part.Color = Color3.new(1, 1, 1)
+		part.Parent = workspace
+
+		table.insert(swatches, part)
+
+		-- **Said out loud, because the whole row is one claim.** Printing the
+		-- pairing is what lets somebody check from the log that a cube is
+		-- wearing a character's sheet rather than its own — which is the thing
+		-- being demonstrated and is otherwise a judgement about pixels.
+		print(`mesh grid: swatch {slot} is engine.Cube wearing {sheets[slot]}`)
+	end
+end
+
+-- **One part that asks for a sheet nobody published**, and it is here so this
+-- scene shows all three of the renderer's texture answers at once. The cells
+-- above name no texture and draw as the default white plastic until their own
+-- baked sheets land; this one names something that will never come and wears the
+-- purple checkerboard from the first frame.
+--
+-- **The distinction it exists to prove is the timing one.** Until `D00107` the
+-- cells wore that same checkerboard for the frames their sheets took to arrive,
+-- so a load looked like a plate full of mistakes and a real misspelling was
+-- invisible among them. The marker means *nothing is coming* now — so this part
+-- is purple immediately, the cells never are, and the difference is visible
+-- without reading a log.
+--
+-- A built-in mesh rather than an imported one, deliberately: the point is the
+-- texture, and geometry that also had to arrive would confuse which half is
+-- being shown. It is also why this cell needs no content at all — it draws the
+-- same on a machine with no `--cdn`.
+local absent = Instance.new("MeshPart")
+absent.Name = "MissingTexture"
+absent.Anchored = true
+absent.MeshId = "engine.Cube"
+absent.TextureID = "examples/there-is-no-such-sheet.atex"
+absent.Size = Vector3.new(MODEL_SIZE, MODEL_SIZE, MODEL_SIZE)
+absent.CFrame = CFrame.new(Vector3.new(0, MODEL_SIZE * 0.5 + PEDESTAL_HEIGHT, SPACING * 1.6))
+absent.Parent = workspace
 
 -- **A sign, so an empty plate is a sentence rather than a mystery.** With no
 -- `--cdn` this scene has nothing to show, and a bare floor gives no clue
@@ -383,6 +488,13 @@ local function everyMesh(): { string }
 end
 
 RunService.Heartbeat:Connect(function()
+	-- **Outside the early return below.** The swatches depend on the meshes\'
+	-- sheets rather than on how many meshes there are, and both arrive over
+	-- several frames — so a row built only when the *count* changes is a row
+	-- built on one frame and never corrected. It returns immediately once it is
+	-- full.
+	dressSwatches()
+
 	local meshes = everyMesh()
 	if #meshes == known then
 		return

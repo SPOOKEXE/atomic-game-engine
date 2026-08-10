@@ -18,6 +18,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <vector>
+
 TEST_SUITE_ID("engine.scene.meshcatalogue")
 
 using engine::core::Name;
@@ -177,4 +180,63 @@ TEST_CASE("a catalogue is not carried by a save file", "[scene][meshcatalogue]")
 	// run's numbers would disagree with the content sitting beside it, and a
 	// wrong count is worse than the zero that says "not known here".
 	CHECK(TrianglesOf(restored, Name("catalogue_test/fox.amesh")) == 0);
+}
+
+TEST_CASE("a mesh reports the sheets its submeshes name", "[scene][meshcatalogue]") {
+	// **What a model is wearing, which nothing else could answer.** The names
+	// live inside the mesh file, so an author who wants to swap a character's
+	// outfit had no way to learn the current sheet and no name to put back.
+	Store store = Fresh("mesh_catalogue_test.sheets");
+
+	const Name fox("catalogue_test/fox.amesh");
+	const std::array<Name, 3> worn{Name("skins/body.atex"), Name("skins/eyes.atex"), Name("skins/body.atex")};
+
+	REQUIRE(RecordMesh(store, fox, 17052, worn));
+
+	std::vector<Name> read;
+	CHECK(engine::scene::SheetsOf(store, fox, read) == 3);
+	REQUIRE(read.size() == 3);
+
+	// **In submesh order with duplicates kept**, unlike every other list this
+	// module hands out. A character with twenty runs sharing four sheets is four
+	// names repeated, and which run wears which is a fact — collapsing it here
+	// would lose it for good.
+	CHECK(read[0] == Name("skins/body.atex"));
+	CHECK(read[1] == Name("skins/eyes.atex"));
+	CHECK(read[2] == Name("skins/body.atex"));
+
+	// **Replaced rather than merged**, for the same reason the count is: a
+	// republished mesh may name different sheets, and a leftover would be a name
+	// somebody puts back onto geometry that no longer wears it — worse than not
+	// knowing, because it looks like an answer.
+	REQUIRE(RecordMesh(store, fox, 9, std::array<Name, 1>{Name("skins/plain.atex")}));
+	CHECK(engine::scene::SheetsOf(store, fox, read) == 1);
+	REQUIRE(read.size() == 1);
+	CHECK(read[0] == Name("skins/plain.atex"));
+
+	// A mesh recorded with none — every built-in is one — reads back empty
+	// rather than keeping what it had.
+	REQUIRE(RecordMesh(store, fox, 12));
+	CHECK(engine::scene::SheetsOf(store, fox, read) == 0);
+	CHECK(read.empty());
+}
+
+TEST_CASE("sheets for an unknown mesh are empty, and asking creates nothing", "[scene][meshcatalogue]") {
+	Store store = Fresh("mesh_catalogue_test.sheets_unknown");
+
+	// **The reader's path**, and it must not acquire the resource — the same
+	// rule `TrianglesOf` keeps, for the same reason: it is what a script binding
+	// calls, and a read that mutated the world would be a structural write from
+	// inside one.
+	std::vector<Name> read{Name("stale.atex")};
+	CHECK(engine::scene::SheetsOf(store, Name("catalogue_test/never.amesh"), read) == 0);
+
+	// Cleared, so a caller reusing a vector cannot read the previous answer as
+	// this one.
+	CHECK(read.empty());
+	CHECK_FALSE(store.HasResource<engine::scene::MeshCatalogue>());
+
+	// An invalid name is what a part with no `MeshId` produces, and it is the
+	// same answer rather than a lookup on a null id.
+	CHECK(engine::scene::SheetsOf(store, Name(), read) == 0);
 }

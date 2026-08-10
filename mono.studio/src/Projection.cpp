@@ -3,10 +3,12 @@
 #include <cmath>
 
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/mat3x3.hpp>
 #include <glm/vec4.hpp>
 
 namespace studio {
 
+	using engine::core::CFrame;
 	using engine::core::Ray;
 	using engine::core::Vector3;
 
@@ -179,5 +181,60 @@ namespace studio {
 	bool PanelProjection::ContainsPanel(glm::vec2 panel) const {
 		return IsValid() && panel.x >= ImageMin.x && panel.y >= ImageMin.y &&
 			   panel.x <= ImageMin.x + ImageSize.x && panel.y <= ImageMin.y + ImageSize.y;
+	}
+
+	// How far an oriented box reaches along a direction from its centre.
+	//
+	// **The support function, which is what "resting on it" needs.** A box
+	// laid on a slope touches the slope at one corner, and the distance
+	// from the centre to that corner along the surface normal is exactly
+	// this sum — using half the height instead would sink a tilted part
+	// into the ground by however much it is tilted.
+	float SupportAlong(const CFrame &frame, const Vector3 &half, const Vector3 &direction) {
+		const Vector3 right = frame.RightVector();
+		const Vector3 up = frame.UpVector();
+		const Vector3 back = frame.VectorToWorldSpace(Vector3::ZAxis);
+
+		return std::abs(direction.Dot(right)) * half.X + std::abs(direction.Dot(up)) * half.Y +
+			   std::abs(direction.Dot(back)) * half.Z;
+	}
+
+	// A rotation with its up along a surface normal, turned as little as
+	// possible.
+	//
+	// **The old facing is projected onto the new plane rather than
+	// discarded.** A part dropped onto a wall has to keep pointing the way
+	// the author left it pointing; rebuilding the basis from the normal
+	// alone would spin it to whatever the arbitrary second axis happened to
+	// be, and every part dropped on that wall would face the same way
+	// whatever the author had done.
+	glm::quat AlignedTo(const CFrame &was, const Vector3 &normal) {
+		const Vector3 up = normal.Unit();
+
+		Vector3 forward = was.LookVector() - up * was.LookVector().Dot(up);
+		if (forward.Magnitude() < 0.001f) {
+			// The part was already looking straight at the surface, so its
+			// facing says nothing about the new plane. Its right-hand side
+			// does, and is the next-best thing it was left pointing at.
+			forward = was.RightVector() - up * was.RightVector().Dot(up);
+		}
+		if (forward.Magnitude() < 0.001f) {
+			return was.Rotation();
+		}
+		forward = forward.Unit();
+
+		// Right-handed, and `LookVector` is `-Z` — so the basis's third
+		// column is the *back*. Getting this the other way round mirrors
+		// every part that is dropped, which reads as the model being wrong
+		// rather than the maths.
+		const Vector3 back = forward * -1.0f;
+		const Vector3 right = up.Cross(back);
+
+		const glm::mat3 basis(
+			glm::vec3(right.X, right.Y, right.Z),
+			glm::vec3(up.X, up.Y, up.Z),
+			glm::vec3(back.X, back.Y, back.Z)
+		);
+		return glm::normalize(glm::quat_cast(basis));
 	}
 }

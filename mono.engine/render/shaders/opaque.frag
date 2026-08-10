@@ -38,7 +38,132 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// is applied unconditionally rather than behind a branch — a divergent
 	// branch per fragment to avoid a multiply and an add is the wrong trade.
 	vec4 Flipbook;
+
+	// x: which `scene::SurfaceEffect` the projected image goes through.
+	// y: the animation clock, for the effects that move.
+	vec4 Mirror;
 } lighting;
+
+// The effect ordinals, which are `scene::SurfaceEffect`'s and are the format.
+//
+// **Spelled here as well as there, and that is the one duplication in this
+// pair.** A shader cannot include a C++ header; what stops the two drifting is
+// that the enum's own comment says the ordinals are on the wire and may only be
+// appended to, and that the four below are checked by looking at a mirror.
+#define EFFECT_NIGHT_VISION 1
+#define EFFECT_THERMAL      2
+#define EFFECT_CCTV         3
+#define EFFECT_SWIRL        4
+
+// A cheap hash, for the grain the two sensor effects want.
+//
+// Not a texture: a noise lookup would be a fourth sampler bound on every draw
+// in the frame so that two mirrors can be grainy.
+float MirrorNoise(vec2 at) {
+	return fract(sin(dot(at, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+// Where a fragment reads the surface texture, once the effect has had its say.
+//
+// **Only `Swirl` moves texels**, so this is a branch that almost always falls
+// through — and it has to be separate from the grade below because a warp
+// happens before the fetch and a grade happens after it.
+vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
+	if (effect < float(EFFECT_SWIRL) - 0.5) {
+		return uv;
+	}
+
+	// About the middle of the pane, falling off to nothing at the edge, and
+	// turning slowly. Clamped rather than wrapped: a mirror whose image tiled
+	// at the rim would read as a texture rather than as a twist.
+	vec2 centred = uv - 0.5;
+	float radius = length(centred);
+	float twist = (0.35 - min(radius, 0.35)) * 7.0 + seconds * 0.4;
+
+	float sine = sin(twist);
+	float cosine = cos(twist);
+	vec2 turned = vec2(
+		centred.x * cosine - centred.y * sine,
+		centred.x * sine + centred.y * cosine
+	);
+	return clamp(turned + 0.5, vec2(0.0), vec2(1.0));
+}
+
+// The heat ramp `Thermal` reads luminance through.
+//
+// Five stops, black through blue, magenta, red and yellow to white — the ramp
+// every thermal camera ships with, because it is the one that keeps its
+// ordering legible to somebody who has never seen one before.
+vec3 ThermalRamp(float level) {
+	vec3 colour = mix(vec3(0.0, 0.0, 0.18), vec3(0.35, 0.0, 0.62), smoothstep(0.0, 0.28, level));
+	colour = mix(colour, vec3(0.90, 0.10, 0.25), smoothstep(0.28, 0.52, level));
+	colour = mix(colour, vec3(1.0, 0.55, 0.0), smoothstep(0.52, 0.74, level));
+	colour = mix(colour, vec3(1.0, 0.95, 0.35), smoothstep(0.74, 0.90, level));
+	return mix(colour, vec3(1.0), smoothstep(0.90, 1.0, level));
+}
+
+// What the pane shows, once the sampled image has been graded.
+//
+// **A grade over an image that is already rendered**, which is the whole reason
+// these are affordable: the surface pass draws the world exactly as it would
+// have, and every effect here is a handful of instructions on the fragment that
+// samples it.
+vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
+	float level = dot(image, vec3(0.2126, 0.7152, 0.0722));
+
+	// Distance from the middle, which three of the four want for a vignette. A
+	// sensor image that reached the corners as brightly as the centre is the
+	// one thing that stops any of these reading as a screen.
+	float edge = length(uv - 0.5);
+
+	if (effect < float(EFFECT_NIGHT_VISION) + 0.5) {
+		// Night vision: an intensifier, so the gain comes first and the tint
+		// second. Lifted, because the point of one is that a dark scene stops
+		// being dark — but not as hard as an intensifier really does. A gain
+		// that saturated the mid-tones made a lit room a flat green rectangle,
+		// which is a filter rather than a picture: what makes this read as a
+		// scope is that the shapes survive it.
+		float gained = pow(clamp(level * 1.35 + 0.03, 0.0, 1.0), 0.85);
+
+		// Grain that moves. A still grain reads as dirt on the glass.
+		float grain = MirrorNoise(uv * 640.0 + seconds * 37.0);
+		gained = clamp(gained + (grain - 0.5) * 0.16, 0.0, 1.0);
+
+		float lines = 0.90 + 0.10 * sin(uv.y * 900.0);
+		float vignette = smoothstep(0.78, 0.16, edge);
+		return vec3(gained * 0.18, gained, gained * 0.30) * lines * vignette;
+	}
+
+	if (effect < float(EFFECT_THERMAL) + 0.5) {
+		// Thermal: luminance stands in for temperature, which is a lie an
+		// engine with no thermal model cannot avoid — `scene::SurfaceEffect`
+		// says so rather than implying otherwise. It reads right because bright
+		// things in a lit scene usually are the hot ones.
+		return ThermalRamp(clamp(level * 1.25, 0.0, 1.0));
+	}
+
+	if (effect < float(EFFECT_CCTV) + 0.5) {
+		// A security camera: grey, contrast-crushed, scanlined, and with a
+		// bright band rolling down it. The band is what makes it read as a
+		// *feed* rather than as a black-and-white photograph.
+		float grey = clamp((level - 0.5) * 1.35 + 0.5, 0.0, 1.0);
+
+		float lines = 0.82 + 0.18 * sin(uv.y * 620.0);
+		float grain = MirrorNoise(uv * 380.0 + seconds * 53.0);
+		float band = smoothstep(0.10, 0.0, abs(fract(uv.y + seconds * 0.22) - 0.5));
+		float vignette = smoothstep(0.85, 0.25, edge);
+
+		float value = clamp(grey * lines + (grain - 0.5) * 0.07 + band * 0.16, 0.0, 1.0);
+
+		// Faintly warm rather than neutral, which is what a cheap sensor's
+		// white balance does and what stops this looking like a greyscale
+		// filter.
+		return vec3(value * 1.02, value, value * 0.94) * vignette;
+	}
+
+	// Swirl grades nothing. The warp already happened, in `MirrorLookup`.
+	return image;
+}
 
 // How many local lights one draw may be affected by.
 //
@@ -235,11 +360,22 @@ void main() {
 		vec2 surfaceUv = vec2(surface.x * 0.5 + 0.5, 0.5 - surface.y * 0.5);
 
 		if (surfaceUv.x >= 0.0 && surfaceUv.x <= 1.0 && surfaceUv.y >= 0.0 && surfaceUv.y <= 1.0) {
+			// **The effect gets the coordinate before the fetch and the colour
+			// after it.** A swirl moves texels and the three sensors grade
+			// them, and doing either at the other's moment is doing it to the
+			// wrong thing.
+			const float effect = lighting.Mirror.x;
+			const float seconds = lighting.Mirror.y;
+
 			// Tinted rather than replaced, so a coloured mirror is possible and
 			// a white one is unchanged.
 			//
 			// A mirror is not lit by the scene: what it shows is already lit.
-			vec3 image = texture(surfaceMap, surfaceUv).rgb * inColour.rgb;
+			vec3 image = texture(surfaceMap, MirrorLookup(surfaceUv, effect, seconds)).rgb * inColour.rgb;
+			if (effect > 0.5) {
+				image = MirrorGrade(image, surfaceUv, effect, seconds);
+			}
+
 			float imageAlpha = lighting.Flags.w;
 
 			// Preserve the image opacity independently from the pane transparency.

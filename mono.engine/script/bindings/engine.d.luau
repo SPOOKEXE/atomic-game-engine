@@ -257,6 +257,9 @@ end
 declare extern type Enum_StartCorner extends EnumItem with
 end
 
+declare extern type Enum_SurfaceEffect extends EnumItem with
+end
+
 declare extern type Enum_SurfaceSizingMode extends EnumItem with
 end
 
@@ -489,6 +492,13 @@ declare Enum: {
 		TopRight: Enum_StartCorner,
 		BottomLeft: Enum_StartCorner,
 		BottomRight: Enum_StartCorner,
+	},
+	SurfaceEffect: {
+		None: Enum_SurfaceEffect,
+		NightVision: Enum_SurfaceEffect,
+		Thermal: Enum_SurfaceEffect,
+		Cctv: Enum_SurfaceEffect,
+		Swirl: Enum_SurfaceEffect,
 	},
 	SurfaceSizingMode: {
 		FixedSize: Enum_SurfaceSizingMode,
@@ -805,6 +815,7 @@ declare extern type Camera extends PVInstance with
 end
 
 declare extern type SurfaceCamera extends Camera with
+	Effect: Enum_SurfaceEffect
 	Face: Enum_NormalId
 	ImageTransparency: number
 	TagFilter: string
@@ -1352,6 +1363,24 @@ declare extern type ContentService with
 	-- and the next content pump fetches that one asset. Empty on a process with
 	-- no content source, which is the honest answer.
 	function GetPublishedMeshes(self): { string }
+
+	-- The sheets a mesh's own submeshes name, in submesh order.
+	--
+	-- **What a model is wearing, which nothing else can answer.** A `MeshPart`
+	-- naming no `TextureID` shows whatever each submesh recorded at bake time,
+	-- and those names live inside the mesh file — so swapping a character's
+	-- outfit meant guessing, with no way to learn the current sheet and no name
+	-- to put back.
+	--
+	-- **Not sorted and not deduplicated**, unlike every other list here: which
+	-- run wears which is a fact, and a character with twenty submeshes sharing
+	-- four sheets is four names repeated. Empty for a built-in, which names
+	-- none, and for a mesh this world has not been told about — the same two
+	-- answers `GetTriangleCount` folds into zero, for the same reason.
+	--
+	-- `TextureID` overrides *every* run at once, so naming one of several is a
+	-- character wearing one sheet all over.
+	function GetMeshTextures(self, mesh: string): { string }
 
 	-- Every texture registered in this world, sorted.
 	function GetTextures(self): { string }

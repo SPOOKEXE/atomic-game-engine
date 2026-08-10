@@ -58,6 +58,20 @@ namespace studio {
 		ShowStatistics,
 		ShowFrameGraph,
 
+		// The four manipulators.
+		//
+		// **Scoped to the viewport**, because that is the only place a handle
+		// exists — and because a plain digit is a digit everywhere else. Studio
+		// puts these on 1 to 4 and this ships them unbound for the reason the
+		// table in `Keybinds.cpp` gives at length; the Keybinds page is one
+		// visit away and `tests/Keybinds.cpp` is what stops the shortcut here.
+		//
+		// @since v0.13
+		ToolSelect,
+		ToolMove,
+		ToolRotate,
+		ToolScale,
+
 		// The palette itself, which is a command like any other — it appears in
 		// its own list, and that is correct rather than a curiosity: somebody
 		// who has found the palette once should be able to find out what opens
