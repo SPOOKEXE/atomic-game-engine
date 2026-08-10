@@ -74,6 +74,31 @@ namespace engine::replication {
 		//        default above.
 		void SetAdmission(AdmissionPolicy policy);
 
+		// Offers every datagram to somebody else before this listener reads it.
+		//
+		// **One socket, more than one protocol, and the reason is physical.** A
+		// router's NAT mapping belongs to a *port*: a hole punched on some
+		// other socket gets that socket through and leaves this one exactly as
+		// unreachable as it was. So a server that wants to be reachable
+		// peer-to-peer has to run its rendezvous traffic over the port its
+		// clients will connect to — which means something has to arrive here
+		// and not be a `net::Packet`.
+		//
+		// **Routing is by magic and is safe rather than lucky.**
+		// `net::Packet::MAGIC` is `ATN1`; the discovery module's frames are
+		// `ATNA` and `ATNR`. A handler that claims a datagram it should not
+		// have is a handler with a bug, not an ambiguity in the formats.
+		//
+		// Consulted before anything else, including the source check: a
+		// rendezvous message arrives from a coordination point this listener
+		// has never heard of, and would otherwise be counted as a refusal.
+		//
+		// @param handler Called as `handler(datagram, from)`, returning whether
+		//        it took the datagram. An empty handler is the default and
+		//        costs one branch per datagram.
+		// @since v0.13
+		void SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler);
+
 		// Gives this server an identity, so a client can tell it from a relay.
 		//
 		// @param key The server's signing key, borrowed for the listener lifetime.
@@ -238,6 +263,9 @@ namespace engine::replication {
 		std::optional<net::Cookie> Cookie_;
 
 		AdmissionPolicy Policy;
+
+		// Whoever else is sharing this socket. See SetForeign.
+		std::function<bool(std::span<const std::byte>, const net::Endpoint &)> Foreign;
 
 		std::vector<Peer> Peers;
 

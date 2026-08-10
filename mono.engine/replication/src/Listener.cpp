@@ -106,6 +106,11 @@ namespace engine::replication {
 		Policy = std::move(policy);
 	}
 
+	void
+	Listener::SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler) {
+		Foreign = std::move(handler);
+	}
+
 	void Listener::Greet(const net::Endpoint &from, std::span<const std::byte> datagram, double nowSeconds) {
 		core::ByteReader reader(datagram);
 		const std::optional<net::Packet::Inbound> packet = net::Packet::Read(reader);
@@ -268,6 +273,13 @@ namespace engine::replication {
 			const net::Transport::Inbound inbound = Transport_->Receive(Datagram);
 			if (inbound.Status != net::TransportStatus::Ok) {
 				break;
+			}
+
+			// Before the handshake check and before the source check. A
+			// rendezvous message comes from a coordination point this listener
+			// has never heard of and would otherwise be counted as a refusal.
+			if (Foreign && Foreign(Datagram, inbound.From)) {
+				continue;
 			}
 
 			if (net::Packet::PeekChannel(Datagram) == net::ChannelKind::Handshake) {

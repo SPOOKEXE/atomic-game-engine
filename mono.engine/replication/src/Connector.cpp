@@ -35,6 +35,11 @@ namespace engine::replication {
 		std::copy(mine.begin(), mine.end(), Mine.begin());
 	}
 
+	void
+	Connector::SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler) {
+		Foreign = std::move(handler);
+	}
+
 	void Connector::Refuse() {
 		Phase = Stage::Refused;
 		Exchange.reset();
@@ -201,6 +206,13 @@ namespace engine::replication {
 			const net::Transport::Inbound inbound = Transport_->Receive(Datagram);
 			if (inbound.Status != net::TransportStatus::Ok) {
 				break;
+			}
+
+			// Before the source check: a rendezvous message arrives from a
+			// coordination point rather than from the server, and would
+			// otherwise be counted as a refusal.
+			if (Foreign && Foreign(Datagram, inbound.From)) {
+				continue;
 			}
 
 			if (!(inbound.From == Wire.Peer())) {
