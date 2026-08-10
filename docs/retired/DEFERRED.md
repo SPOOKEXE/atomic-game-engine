@@ -637,4 +637,3 @@ should file rather than a bullet here.
 - §12.3's remaining additions to F5 — per-stage cache hit/miss, and the undemanded capability of a dead node — **unchanged, and now for the right reason**: they need the cache and the executor, not the directory. The tick rate on F3 and the tick/render split of §14 are done.
 - **Reopen trigger, stated for the first time: v0.8's extended pipeline.** "Handle multiple worlds in parallel" is the first roadmap line that cannot be met by making the function longer — per-world pass sharing is exactly the decision `Stage::PerView` was written to record and that nothing yet reads, and HDR plus a G-buffer change what every later stage reads, which is the change a hand-rolled list makes by editing five call sites and a graph makes by editing a list.
 
-

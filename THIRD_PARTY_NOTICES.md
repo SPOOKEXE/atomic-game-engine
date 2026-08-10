@@ -183,6 +183,34 @@ gigabytes of art belong — `mono.cdn/AGENTS.md` says a monorepo carrying them
 makes every clone slow forever. The one exception is the four-kilobyte tile
 above, and it is four kilobytes.
 
+## Code that was ported, rather than linked
+
+One entry is neither a submodule nor a file copied in. **The simplex kernels,
+the analytical-derivative algebra and the Worley cell search in
+`mono.engine/examples/lib/TerrainCore/Noise.luau` were ported from
+[Atlas](https://github.com/shmeatley/atlas) (MIT)**, a procedural generation
+toolkit for Roblox.
+
+| Source | Licence | What came from it | In a shipped game |
+|---|---|---|---|
+| [Atlas](https://github.com/shmeatley/atlas) | MIT | simplex, Worley and derivative kernels in the `TerrainCore` example library | only if a game ships that example |
+
+It is a port rather than a dependency because Atlas is a Wally package built
+against Roblox: its samplers are objects, its point scattering takes `Vector2`
+and its visualiser needs an `EditableImage`. None of that exists here. What was
+kept is the maths, and the file names it at the top and says which parts.
+
+**One thing was deliberately not ported: the lattice hashing.** Atlas builds a
+shuffled 256-entry permutation table per sampler, which repeats the field every
+256 units on every axis; `Noise.luau` predates the port in rejecting exactly
+that, so the kernels were rehashed onto its arithmetic hash instead. The
+difference is asserted by a test rather than left as a comment.
+
+A port is the awkward case for a notices file, because there is no submodule to
+point at and no licence text landing in the tree beside it. The rule this
+follows is the one the compiled-in texture above follows: **provenance is
+recorded where the work came from, whether or not anything obliges it.**
+
 ## If you add one
 
 1. Check the licence is compatible with MPL-2.0 **before** anything else.

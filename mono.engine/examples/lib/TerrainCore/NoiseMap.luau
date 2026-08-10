@@ -148,7 +148,7 @@ function NoiseMap.build2(spec: Spec2): Map2
 	local step = spec.step or 1
 	local sample = spec.sample
 
-	local values = table.create(width * depth)
+	local values: { number } = table.create(width * depth, 0)
 	local min = math.huge
 	local max = -math.huge
 
@@ -192,7 +192,7 @@ function NoiseMap.build3(spec: Spec3): Map3
 	local step = spec.step or 1
 	local sample = spec.sample
 
-	local values = table.create(width * height * depth)
+	local values: { number } = table.create(width * height * depth, 0)
 	local min = math.huge
 	local max = -math.huge
 
@@ -351,7 +351,7 @@ function NoiseMap.normalized2(map: Map2): Map2
 	local low = map.min
 
 	local source = map.values
-	local values = table.create(#source)
+	local values: { number } = table.create(#source, 0)
 	for index = 1, #source do
 		values[index] = (source[index] - low) * scale
 	end
@@ -375,7 +375,7 @@ end
 -- carrying stale bounds silently breaks `normalized2` and `toText2` downstream.
 function NoiseMap.remapped2(map: Map2, transform: (number) -> number): Map2
 	local source = map.values
-	local values = table.create(#source)
+	local values: { number } = table.create(#source, 0)
 	local min = math.huge
 	local max = -math.huge
 
@@ -413,7 +413,7 @@ function NoiseMap.slice3(map: Map3, layer: number): Map2
 	local source = map.values
 	local offset = (layer - 1) * depth * width
 
-	local values = table.create(width * depth)
+	local values: { number } = table.create(width * depth, 0)
 	local min = math.huge
 	local max = -math.huge
 
@@ -451,10 +451,7 @@ end
 function NoiseMap.histogram2(map: Map2, buckets: number): { number }
 	positiveInteger(buckets, "buckets")
 
-	local counts = table.create(buckets, 0)
-	for index = 1, buckets do
-		counts[index] = 0
-	end
+	local counts: { number } = table.create(buckets, 0)
 
 	local span = map.max - map.min
 	if span <= 0 then
@@ -485,8 +482,8 @@ function NoiseMap.toText2(map: Map2): string
 	local values = map.values
 	local width = map.width
 
-	local rows = table.create(map.depth)
-	local cells = table.create(width)
+	local rows: { string } = table.create(map.depth, "")
+	local cells: { string } = table.create(width, "")
 
 	for row = 1, map.depth do
 		local base = (row - 1) * width

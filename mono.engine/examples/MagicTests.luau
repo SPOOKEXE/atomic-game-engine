@@ -8,6 +8,12 @@
 -- engine, so `Run.luau` uses `FindFirstChild`. Everything else — the harness,
 -- every spec, the inventory guard — is the file that shipped.
 --
+-- The count is 215 now. **The 183 are still the parity check and the 32 since
+-- are not**: those cover `Noise`'s simplex, Worley and derivative samplers and
+-- the `NoiseMap` grids, which were written in this tree and never ran in Studio.
+-- The distinction matters only if the port is ever re-checked against its
+-- origin, and it is cheap to record now and impossible to reconstruct later.
+--
 -- A failure raises, so `LoadScene` returns false with the first failure in its
 -- error. `mono.engine/examples/tests/Scene.cpp` loads this scene, which is what
 -- makes the suite part of `just test` rather than something somebody remembers
