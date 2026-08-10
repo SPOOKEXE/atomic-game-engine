@@ -1125,8 +1125,65 @@ other editors on the subnet or through a point, and hands over a session id and
 a key to invite somebody with.
 
 **Sessions only.** Two editors can find each other; editing one place together
-needs a shared document with an ordering, and that is not built. The panel says
-so rather than implying otherwise.
+needs a shared document with an ordering, and the layer that carries it is not
+built yet. The panel says so rather than implying otherwise.
+
+### ChangeHistoryService
+
+A plugin tells the editor what one undo should reverse, exactly as it does in
+Roblox:
+
+```lua
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+
+local recording = ChangeHistoryService:TryBeginRecording("Set selection to neon")
+if not recording then
+    return -- a recording was already in progress
+end
+
+for _, part in Selection:Get() do
+    part.Material = "Neon"
+end
+
+ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+```
+
+Forty property writes, one press of Ctrl+Z. That grouping is the reason the
+service exists and is also the unit a shared document will travel in — a peer
+that applied half of a group would show a state the author never saw.
+
+`Commit` keeps the recording as its own step, `Cancel` reverts it and puts
+nothing on the redo stack, and `Append` folds it into the step before.
+
+| Method | |
+|---|---|
+| `TryBeginRecording(name, displayName?)` | the identifier, or nil when one is already open |
+| `FinishRecording(id, operation, finalOptions?)` | `Commit`, `Cancel` or `Append` |
+| `IsRecordingInProgress(id?)` | |
+| `GetCanUndo()` / `GetCanRedo()` | |
+| `Undo()` / `Redo()` | raises when there is nothing |
+| `SetWaypoint(name)` | merges everything since the last cut |
+| `ResetWaypoints()` / `SetEnabled(state)` | |
+| `OnUndo(f)` · `OnRedo(f)` · `OnRecordingStarted(f)` · `OnRecordingFinished(f)` | |
+
+**Two differences from Roblox, and both are the seam rather than a choice.**
+
+`GetCanUndo` and `GetCanRedo` return a table, because a host call answers one
+value — `local can, name = table.unpack(ChangeHistoryService:GetCanUndo())`.
+
+The events are calls that take a handler rather than signals with `:Connect`,
+because the host seam has no `RBXScriptSignal` type and inventing one for four
+events would be a second way to hear about something.
+
+**One recording at a time for the editor, not per plugin.** This service is the
+editor's single history; two plugins recording into one undo stack would produce
+a step neither of them described.
+
+**`SetWaypoint` merges and the editor never calls it.** Roblox's rule is that the
+changes between two waypoints are one undo; this log's default is one edit per
+step, so a cut merges everything since the previous one. A plugin that writes
+forty properties and then calls it gets one step. The editor's own edits are
+unaffected, which is the point rather than an oversight.
 
 ---
 

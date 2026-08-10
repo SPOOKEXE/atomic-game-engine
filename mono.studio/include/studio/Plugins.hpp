@@ -281,6 +281,21 @@ namespace studio {
 		std::vector<PluginWidget> Widgets;
 		//@}
 
+		// What it asked to hear about from `ChangeHistoryService`.
+		//
+		// **One slot per event rather than a list**, because a list would need
+		// a disconnect to go with it and the seam has no handle to disconnect
+		// by. Registering twice replaces, which is the behaviour a plugin that
+		// re-registers on reload actually wants.
+		//
+		// @since v0.13
+		//@{
+		engine::script::HostCallback OnUndo;
+		engine::script::HostCallback OnRedo;
+		engine::script::HostCallback OnRecordingStarted;
+		engine::script::HostCallback OnRecordingFinished;
+		//@}
+
 		// Its half of the seam, kept alive as long as its runtime is.
 		//
 		// **A `unique_ptr` because `HostSurface` is not copyable and the plugin

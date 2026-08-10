@@ -29,24 +29,25 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
-#include <studio/Config.hpp>
-#include <studio/Plugins.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+
+#include <studio/Config.hpp>
+#include <studio/Plugins.hpp>
 // TODO(render-pipeline): `<engine/nodeview/Editor.hpp>` and `State.hpp` were
 // included here. `Engine::nodeview` was the node-canvas module the Render and
 // Assets Pipeline panels were built on; it is removed. See the member and
 // method markers below.
-#include <engine/gui/Compile.hpp>
-#include <engine/gui/Input.hpp>
-#include <engine/render/DebugPanels.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Input.hpp>
+#include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/Components.hpp>
@@ -55,22 +56,22 @@
 #include <engine/world/Universe.hpp>
 
 #include <array>
+#include <cdn/LocalStore.hpp>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
-#include <cdn/LocalStore.hpp>
 #include <studio/Commands.hpp>
-#include <studio/Preview.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
-#include <studio/TeamCreate.hpp>
+#include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
-#include <functional>
+#include <studio/TeamCreate.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -1053,7 +1054,6 @@ namespace studio {
 		//@{
 		// TODO(render-pipeline): `void DrawRenderPipeline();` drew the Render Pipeline node editor.
 
-
 		// The pipeline as a grid: passes across, resources down, what each does
 		// to each where they meet.
 		//
@@ -1063,12 +1063,12 @@ namespace studio {
 		// different question and wants a different shape.
 		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
 		// is the arithmetic and this is only the drawing.
-		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid — passes across the top, resources down the side.
-
+		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid — passes across the top,
+		// resources down the side.
 
 		// The picture and histogram under the access grid. See `ProfileWatched`.
-		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the profile grid.
-
+		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the
+		// profile grid.
 
 		// The selected node's own settings, under the canvas.
 		//
@@ -1077,7 +1077,6 @@ namespace studio {
 		// things could describe the shape of a frame and nothing about it.
 		// TODO(render-pipeline): `DrawNodeParameters` edited a node's parameters,
 		// including the multi-line GLSL box a `raster` node's shader was typed into.
-
 
 		// TODO(render-pipeline): `DrawChannelHistogram` drew one channel's
 		// distribution as sixteen bars and a range, over `render::ChannelHistogram`.
@@ -1145,8 +1144,7 @@ namespace studio {
 		// @param name    The asset's name, which is its path under `raw/`.
 		// @param kind    What it is, for the glyph when there is no picture.
 		void PaintPreview(
-			float cornerX, float cornerY, float side, const std::string &name,
-			engine::assets::AssetKind kind
+			float cornerX, float cornerY, float side, const std::string &name, engine::assets::AssetKind kind
 		);
 
 		// Orders the published view by whatever headers were clicked.
@@ -1154,9 +1152,7 @@ namespace studio {
 		// **The view and never `PickerContents`.** That is what the manifest
 		// says, in the order it says it, and every picker reads it — a header
 		// click must not reorder what another panel is looking at.
-		void SortPublished(
-			std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs
-		);
+		void SortPublished(std::vector<const cdn::PublishedEntry *> &rows, const ImGuiTableSortSpecs *specs);
 
 		// The same for the raw view.
 		void SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
@@ -1341,9 +1337,7 @@ namespace studio {
 		// How wide that target should be.
 		uint32_t PreviewSide = 132;
 
-
 	  public:
-
 		// Publishes `raw/` into `processed/`.
 		//
 		// @param hexSeed 64 hex characters of Ed25519 seed. Not stored.
@@ -1515,7 +1509,24 @@ namespace studio {
 		// @param plugin   Whose handler.
 		// @param callback What to call.
 		// @param drawing  Whether the widget calls are legal inside it.
-		void InvokePlugin(LoadedPlugin &plugin, engine::script::HostCallback callback, bool drawing);
+		void InvokePlugin(
+			LoadedPlugin &plugin,
+			engine::script::HostCallback callback,
+			bool drawing,
+			engine::script::HostArguments arguments = {}
+		);
+
+		// Points the command log at the plugins and, when one is open, at the
+		// team-create edit stream.
+		//
+		// **One watcher, fanned out here.** `CommandLog` has one seam because a
+		// log that knew what a plugin was would be a log that knows what an
+		// editor is; deciding who hears about a waypoint is this class's job
+		// and nobody else's.
+		//
+		// @since v0.13
+		void InstallHistoryWatcher();
+
 		//@}
 
 		// Publishes the selection into the world as `studio.Selected`.
@@ -2216,7 +2227,6 @@ namespace studio {
 		// `InstallWorldPipelines` qualified its keys for. An absent entry meant
 		// "install on the next frame", and saving a pipeline erased the entry,
 		// which is what made a save visible in the viewport.
-
 
 		// One world's run, for as long as it is running.
 		//
@@ -3187,7 +3197,6 @@ namespace studio {
 		// from the world's document only when the world changed or the graph was
 		// empty — a panel that rebuilt every frame would throw away a wire on the
 		// frame it was dragged and have nowhere to put a node somebody moved.
-
 
 		// Where the add-file and add-folder dialogs are looking.
 		//

@@ -50,12 +50,12 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
-#include <imgui.h>
-#include <studio/Editor.hpp>
-#include <studio/Plugins.hpp>
 
 #include <algorithm>
+#include <imgui.h>
 #include <string>
+#include <studio/Editor.hpp>
+#include <studio/Plugins.hpp>
 #include <vector>
 
 namespace studio {
@@ -121,6 +121,26 @@ namespace studio {
 				"Selection.Add",
 				"Selection.Remove",
 
+				// **`ChangeHistoryService` is how a plugin tells the editor what
+				// one undo should reverse**, and since v0.13 it is also how a
+				// plugin's edits reach the other people in a team-create
+				// session — a committed recording is the unit that travels.
+				// Roblox's shape, method for method.
+				"ChangeHistoryService.TryBeginRecording",
+				"ChangeHistoryService.FinishRecording",
+				"ChangeHistoryService.IsRecordingInProgress",
+				"ChangeHistoryService.GetCanUndo",
+				"ChangeHistoryService.GetCanRedo",
+				"ChangeHistoryService.Undo",
+				"ChangeHistoryService.Redo",
+				"ChangeHistoryService.SetWaypoint",
+				"ChangeHistoryService.ResetWaypoints",
+				"ChangeHistoryService.SetEnabled",
+				"ChangeHistoryService.OnUndo",
+				"ChangeHistoryService.OnRedo",
+				"ChangeHistoryService.OnRecordingStarted",
+				"ChangeHistoryService.OnRecordingFinished",
+
 				// Scripts in the world being edited.
 				"GetScriptSource",
 				"SetScriptSource",
@@ -144,8 +164,9 @@ namespace studio {
 			};
 		}
 
-		bool Call(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure)
-			override {
+		bool Call(
+			std::string_view name, HostArguments arguments, HostValue &result, std::string &failure
+		) override {
 			// A plain chain rather than a table of member pointers: nineteen
 			// names, each a handful of lines, and a dispatch table would be a
 			// second list to keep in step with `Names`.
@@ -167,6 +188,11 @@ namespace studio {
 			}
 			if (name == "Selection.Set" || name == "Selection.Add" || name == "Selection.Remove") {
 				return Selection(name, At(arguments, 0), failure);
+			}
+			if (name.rfind("ChangeHistoryService.", 0) == 0) {
+				return History(
+					name.substr(std::string_view("ChangeHistoryService.").size()), arguments, result, failure
+				);
 			}
 			if (name == "GetScriptSource") {
 				return GetScriptSource(At(arguments, 0), result, failure);
@@ -245,6 +271,176 @@ namespace studio {
 		// `Selection:Set({})` is how a plugin deselects everything, and it is
 		// the reason the binding reads an empty Luau table as an array — see
 		// `HostValue::Items`.
+		// --- ChangeHistoryService ---------------------------------------------
+		//
+		// **Two differences from Roblox, both forced by the seam and both worth
+		// stating rather than discovering.**
+		//
+		// `GetCanUndo` and `GetCanRedo` return a *table* rather than a tuple,
+		// because a host call answers one value. A Roblox script writes
+		// `local can, name = ChangeHistoryService:GetCanUndo()`; here that is
+		// `local can, name = table.unpack(ChangeHistoryService:GetCanUndo())`.
+		//
+		// The events are calls that take a handler rather than
+		// `RBXScriptSignal`s with `:Connect`, because the seam has no signal
+		// type and inventing one for four events would be a second way for a
+		// script to hear about something. `ChangeHistoryService.OnUndo(f)`.
+		//
+		// **The service is the editor's single history, so one recording at a
+		// time is a rule about the editor rather than about a plugin.** Roblox
+		// allows one per plugin; two plugins recording into one undo stack
+		// would produce a step neither of them described.
+		bool
+		History(std::string_view method, HostArguments arguments, HostValue &result, std::string &failure) {
+			CommandLog *log = Owner.Commands.get();
+			if (log == nullptr) {
+				failure = "ChangeHistoryService is not available — this editor has no command log";
+				return false;
+			}
+
+			if (method == "TryBeginRecording") {
+				const std::string_view name = At(arguments, 0).AsText();
+				if (name.empty()) {
+					failure = "TryBeginRecording expects a name";
+					return false;
+				}
+				// Nil for a refusal, which is Roblox's answer and the one a
+				// plugin already checks for. It is a refusal to *record*, not a
+				// licence to edit anyway.
+				if (const auto identifier =
+						log->TryBeginRecording(std::string(name), std::string(At(arguments, 1).AsText()))) {
+					result = HostValue::Of(std::string_view(*identifier));
+				}
+				return true;
+			}
+
+			if (method == "FinishRecording") {
+				FinishOperation operation = FinishOperation::Commit;
+				if (!ReadOperation(At(arguments, 1), operation, failure)) {
+					return false;
+				}
+				// The third argument is Roblox's `finalOptions`, forwarded to
+				// the finish handler. Nothing in this editor reads it yet, and
+				// accepting it costs nothing against refusing a call a plugin
+				// already writes.
+				result = HostValue::Of(log->FinishRecording(At(arguments, 0).AsText(), operation));
+				return true;
+			}
+
+			if (method == "IsRecordingInProgress") {
+				result = HostValue::Of(log->IsRecordingInProgress(At(arguments, 0).AsText()));
+				return true;
+			}
+
+			if (method == "GetCanUndo" || method == "GetCanRedo") {
+				const bool undo = method == "GetCanUndo";
+				const bool can = undo ? log->CanUndo() : log->CanRedo();
+
+				std::vector<HostValue> answer;
+				answer.push_back(HostValue::Of(can));
+				if (can) {
+					answer.push_back(HostValue::Of(undo ? log->NextUndo() : log->NextRedo()));
+				}
+				result = HostValue::List(std::move(answer));
+				return true;
+			}
+
+			if (method == "Undo" || method == "Redo") {
+				// **Raises rather than answering false when there is nothing**,
+				// which is Roblox's behaviour: a plugin that walks the history
+				// without asking `GetCanUndo` first has a bug, and a silent
+				// no-op is how that bug survives to the next release.
+				const bool moved = method == "Undo" ? log->Undo() : log->Redo();
+				if (!moved) {
+					failure = std::string("there is nothing to ") + (method == "Undo" ? "undo" : "redo");
+					return false;
+				}
+				return true;
+			}
+
+			if (method == "SetWaypoint") {
+				log->SetWaypoint(std::string(At(arguments, 0).AsText()));
+				return true;
+			}
+
+			if (method == "ResetWaypoints") {
+				log->ResetWaypoints();
+				return true;
+			}
+
+			if (method == "SetEnabled") {
+				log->SetEnabled(At(arguments, 0).AsBoolean());
+				return true;
+			}
+
+			// The four events. A handler replaces whatever this plugin had
+			// registered rather than adding to it: one per plugin per event is
+			// what a `HostCallback` slot holds, and a list would need a
+			// disconnect to go with it.
+			const HostValue &handler = At(arguments, 0);
+			if (handler.Tag != engine::script::HostTag::Callback) {
+				if (method == "OnUndo" || method == "OnRedo" || method == "OnRecordingStarted" ||
+					method == "OnRecordingFinished") {
+					failure = std::string(method) + " expects a function, and was given " +
+							  engine::script::Describe(handler.Tag);
+					return false;
+				}
+				failure = "ChangeHistoryService has no member '" + std::string(method) + "'";
+				return false;
+			}
+
+			if (method == "OnUndo") {
+				Plugin.OnUndo = handler.Callback;
+				return true;
+			}
+			if (method == "OnRedo") {
+				Plugin.OnRedo = handler.Callback;
+				return true;
+			}
+			if (method == "OnRecordingStarted") {
+				Plugin.OnRecordingStarted = handler.Callback;
+				return true;
+			}
+			if (method == "OnRecordingFinished") {
+				Plugin.OnRecordingFinished = handler.Callback;
+				return true;
+			}
+
+			failure = "ChangeHistoryService has no member '" + std::string(method) + "'";
+			return false;
+		}
+
+		// Reads a finish operation from an `EnumItem`, a string or a number.
+		//
+		// An `EnumItem` crosses the seam as its member's name, so the first two
+		// are one case. The number is accepted because the ordinals are on a
+		// wire anyway and a plugin generated from a table may have one.
+		bool ReadOperation(const HostValue &value, FinishOperation &out, std::string &failure) {
+			const std::string_view text = value.AsText();
+			if (text == "Commit") {
+				out = FinishOperation::Commit;
+				return true;
+			}
+			if (text == "Cancel") {
+				out = FinishOperation::Cancel;
+				return true;
+			}
+			if (text == "Append") {
+				out = FinishOperation::Append;
+				return true;
+			}
+			if (value.Tag == engine::script::HostTag::Number) {
+				const double ordinal = value.AsNumber(-1.0);
+				if (ordinal >= 0.0 && ordinal <= 2.0) {
+					out = static_cast<FinishOperation>(static_cast<uint8_t>(ordinal));
+					return true;
+				}
+			}
+
+			failure = "FinishRecording expects Enum.FinishRecordingOperation.Commit, .Cancel or .Append";
+			return false;
+		}
+
 		bool Selection(std::string_view name, const HostValue &value, std::string &failure) {
 			const std::string method(name.substr(name.find('.') + 1));
 
@@ -302,8 +498,8 @@ namespace studio {
 				// exact, which is the part somebody acts on.
 				constexpr size_t SHOWN = 3;
 
-				std::string message = "Selection:" + method + " ignored " +
-									  std::to_string(ignored.size()) + " item(s): ";
+				std::string message =
+					"Selection:" + method + " ignored " + std::to_string(ignored.size()) + " item(s): ";
 
 				for (size_t at = 0; at < std::min(ignored.size(), SHOWN); at++) {
 					message += (at > 0 ? ", " : "") + ignored[at];
@@ -327,9 +523,7 @@ namespace studio {
 
 			if (method == "Remove") {
 				for (const Entity instance : instances) {
-					selected.erase(
-						std::remove(selected.begin(), selected.end(), instance), selected.end()
-					);
+					selected.erase(std::remove(selected.begin(), selected.end(), instance), selected.end());
 				}
 				return true;
 			}
