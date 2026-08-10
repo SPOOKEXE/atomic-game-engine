@@ -57,7 +57,13 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.13
 
+- [_] asynchronous mesh loading (keep invisible until mesh loads, do not 'interrupt' the studio and asynchronously render it)
 - [_] create a unified networking system for LAN, Peer2Peer and remote connections. Put in mono.network, then, build by import for the engine, studio and the cdn. I plan the engine to support direct connections between users (the host runs a server + client, then other clients connect to the local server) like LAN and Peer2Peer, then the studio supports it as well for team create with many users, then the cdn supports it to support different distribution streams like LAN, Peer2Peer, private (key accessed) networks and public distribution.
+
+### v0.14
+
+- use tools and see what needs fixing
+- use tools and see what to improve
 
 ### v0.?? (needs prototype project first)
 
