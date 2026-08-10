@@ -49,7 +49,7 @@ For now, all media relating to development builds will be in the discord server 
 
 ## Version
 
-Current Version: **v0.10.5**
+Current Version: **v0.13**
 
 See more in [`ROADMAP.md`](ROADMAP.md).
 
