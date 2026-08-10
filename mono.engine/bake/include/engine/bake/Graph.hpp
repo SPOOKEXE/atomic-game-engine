@@ -2,11 +2,18 @@
 
 // In-memory bake graph. Nodes consume at most one input and cycles are rejected
 // when connected. Filesystem access stays outside the graph.
+//
+// **The vocabulary is `Engine::bakegraph`'s and the runtime is this.** `NodeKind`
+// and `NodeId` moved out at v0.13 so that `Engine::game` can read a pipeline
+// document without linking the PNG, JPEG, glTF and PMX readers this module
+// carries — `D00102`. What is left here is everything that touches a payload:
+// the importers, the evaluator and the exports.
 // @tier L9 · shared
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/bakegraph/Nodes.hpp>
 #include <engine/core/types/Vector3.hpp>
 
 #include <cstddef>
@@ -54,67 +61,6 @@ namespace engine::bake {
 		assets::MeshData Mesh;
 		assets::TextureData Texture;
 		//@}
-	};
-
-	// Closed list of node operations.
-	enum class NodeKind : uint8_t {
-		// Input bytes supplied by the caller.
-		Source,
-
-		// Input built-in mesh by name.
-		Builtin,
-
-		// Import bytes to a mesh or texture.
-		Import,
-
-		// Fit a mesh to a size and recenter it.
-		Fit,
-
-		// Scale mesh positions per axis.
-		Scale,
-
-		// Recompute area-weighted vertex normals.
-		Smooth,
-
-		// Box-filter a texture to a size.
-		Resize,
-
-		// Force a texture's alpha opaque.
-		Opaque,
-
-		// Restate a flipbook's frame rate.
-		//
-		// @since v0.10
-		Retime,
-
-		// Serialize input into the engine format.
-		Write,
-	};
-
-	// A node's handle.
-	//
-	// A number rather than a pointer, so a graph may be copied and a node may
-	// be named in a log line.
-	//
-	// @since v0.9
-	struct NodeId {
-		// The value meaning "no node". Zero is never issued.
-		static constexpr uint32_t NONE = 0;
-
-		// The handle itself, an index into the graph's node list.
-		uint32_t Value = NONE;
-
-		// Whether this names a node.
-		//
-		// @return `false` for a default handle, which is what `AddX` returns
-		//         when it refuses.
-		constexpr bool IsValid() const {
-			return Value != NONE;
-		}
-
-		// @param other The handle to compare.
-		// @return `true` when both name the same node.
-		constexpr bool operator==(const NodeId &other) const = default;
 	};
 
 	// One export node's result.

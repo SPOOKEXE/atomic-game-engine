@@ -38,6 +38,43 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ### [_] D00102
 
+**The dependency decision is settled and done. What is left is that the panel it
+was blocking no longer exists.**
+
+- **The split shipped at v0.13 and stands on its own.** `Engine::bakegraph` is
+  the node vocabulary and the document format at `shared`, linking `Engine::core`
+  and nothing else; `bake` keeps every importer and the evaluator and depends on
+  it. So `Engine::game` *can* now carry a pipeline in a place file without
+  pulling the PNG, JPEG, GIF, BMP, OBJ, glTF and PMX readers into `server`, which
+  is the whole property this entry was about. `expected_graph.json` carries the
+  new edge, and a `bakegraph` suite proves the format is testable with no
+  importer linked.
+- **It was cheaper than this entry assumed and the reason is worth recording.**
+  `GraphDocument` needed only `Graph.hpp` and `core`; `Graph.hpp` needed
+  `assets`, which is what a baked mesh *is* rather than a decoder. Only
+  `Graph.cpp` — the evaluator — reaches an importer at all, and only six files in
+  the repository included either header. `Build` is the one function needing both
+  halves and stayed in `bake`. `IsBareNode` had to become public, because a
+  closed list of parameterless kinds is exactly the thing that must not be
+  copied.
+- **Correction, and it is the same one D00038 needed.** The heading used to read
+  "the Assets Pipeline panel draws an empty document". **There is no panel.**
+  `Editor::DrawAssetsPipeline` is a `TODO(render-pipeline)` marker, as are the
+  `WritePipelines`/`ReadPipelines` pair in `game/src/Game.cpp` and
+  `client::InstallWorldPipelines` — all of it went out with the render-pipeline
+  revert. Checked by grepping for the symbols rather than by remembering.
+- **So the `<AssetPipelines>` block was deliberately not written.** A save-format
+  section with no producer and no consumer is a feature that looks present and is
+  not, which is the trade `D00017` and `D00008` both come down against — and the
+  format break is cheap to take later precisely because the module split is the
+  part that was expensive. When a panel exists, the block is a small change
+  against a dependency graph that already permits it.
+- **What is left is not this entry's any more.** It is the extended rendering
+  pipeline in `ROADMAP.md`, behind a prototype project, and the asset half comes
+  back with it.
+
+**What it looked like before:**
+
 **The Assets Pipeline panel draws an empty document, and the blocker is a
 dependency decision rather than the editor.**
 

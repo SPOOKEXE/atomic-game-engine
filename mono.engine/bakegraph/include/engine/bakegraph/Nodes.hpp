@@ -89,4 +89,21 @@ namespace engine::bake {
 		// @return `true` when both name the same node.
 		constexpr bool operator==(const NodeId &other) const = default;
 	};
+
+	// Whether a node kind carries no parameter of its own.
+	//
+	// **A closed list rather than the complement of the parameterised ones.** A
+	// node kind added later arrives here as "not bare" and has to be thought
+	// about, rather than silently becoming legal with its parameter dropped.
+	//
+	// **Public because two modules need the same answer.** The document format
+	// asks it to decide how an operation is spelled, and `bake::Build` asks it
+	// to decide which `Graph::Add` overload to call. It was a private helper
+	// beside the first until the split; a copy beside the second is exactly the
+	// drift a closed list exists to prevent.
+	//
+	// @param kind The kind.
+	// @return `true` for a kind that `Graph::Add(NodeKind)` takes whole.
+	// @since v0.13
+	bool IsBareNode(NodeKind kind);
 }
