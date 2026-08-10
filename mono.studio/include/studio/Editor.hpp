@@ -1841,6 +1841,27 @@ namespace studio {
 		// texture and no mesh reads as working until somebody looks at it.
 		//@{
 		size_t ContentMeshes = 0;
+
+		// What each registered mesh is, so a world can be told after the fact.
+		//
+		// **Because the catalogue was arrival-driven and a world is not.**
+		// `RecordMesh` runs once, into whatever worlds were open when the bytes
+		// landed — so a world created afterwards, or opened from a file, never
+		// hears about a mesh it is full of parts naming. Its
+		// `MeshPart.TrianglesCount` reads zero for ever while the geometry draws
+		// perfectly, which is the properties panel appearing not to update.
+		//
+		// The renderer holds the geometry and answers `MeshExtentOf`, but it
+		// keeps neither a triangle count nor the sheets a submesh named — those
+		// are world data and this is where the editor learned them. Kept rather
+		// than re-derived, because re-deriving means re-decoding an `.amesh`.
+		//
+		// @since v0.13
+		struct RegisteredMesh {
+			uint32_t Triangles = 0;
+			std::vector<engine::core::Name> Sheets;
+		};
+		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
 		size_t ContentTextures = 0;
 
 		// How many shader modules the content store delivered.

@@ -358,6 +358,13 @@ namespace studio {
 					EachOpenWorld([&name, triangles, &sheets](engine::ecs::Store &store) {
 						engine::scene::RecordMesh(store, name, triangles, sheets);
 					});
+
+					// **Kept, because a world can arrive after a mesh does.**
+					// The line above tells the worlds that are open now; one
+					// created or opened later has parts naming this mesh and a
+					// catalogue that has never heard of it. `FitPendingParts`
+					// is what tells it, out of this.
+					ContentMeshFacts[name.Id()] = RegisteredMesh{triangles, sheets};
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
@@ -511,12 +518,25 @@ namespace studio {
 		std::vector<engine::core::Name> waiting;
 
 		EachOpenWorld([&waiting](engine::ecs::Store &store) {
-			store.Each<const engine::scene::Visual>([&waiting](
+			store.Each<const engine::scene::Visual>([&waiting, &store](
 														engine::ecs::Entity, const engine::scene::Visual &visual
 													) {
-				if (!visual.Mesh.IsValid() || visual.Fitted == visual.Mesh) {
+				if (!visual.Mesh.IsValid()) {
 					return;
 				}
+
+				// **Two reasons a mesh is pending, and the second is not the
+				// first.** A part that has never been fitted needs the shape; a
+				// world whose catalogue has never heard of the mesh needs the
+				// facts. They come apart when a world is loaded from a file —
+				// `Visual::Fitted` is saved with the part, so a reopened place
+				// is fully fitted and knows no triangle counts at all.
+				const bool unfitted = visual.Fitted != visual.Mesh;
+				const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
+				if (!unfitted && !unknown) {
+					return;
+				}
+
 				if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
 					waiting.push_back(visual.Mesh);
 				}
@@ -529,9 +549,34 @@ namespace studio {
 			// nothing, which is what keeps a misspelled `MeshId` a fallback cube
 			// instead of a part collapsed to zero.
 			engine::core::Vector3 extent;
-			if (Renderer.MeshExtentOf(mesh, extent)) {
-				FitPartsToMesh(mesh, extent);
+			if (!Renderer.MeshExtentOf(mesh, extent)) {
+				continue;
 			}
+
+			FitPartsToMesh(mesh, extent);
+
+			// **And tell any world that has not heard of it.** The catalogue is
+			// written at intake into the worlds that were open then, so a world
+			// created or opened afterwards holds parts naming a mesh it knows
+			// nothing about: `TrianglesCount` reads zero for ever while the
+			// geometry draws perfectly, which is the properties panel appearing
+			// never to update.
+			//
+			// Guarded on the count rather than written unconditionally, so this
+			// is a lookup per pending mesh rather than a write per frame — and
+			// so a republish, which *does* go through the intake path, is not
+			// overwritten here with what this cached.
+			const auto known = ContentMeshFacts.find(mesh.Id());
+			if (known == ContentMeshFacts.end()) {
+				continue;
+			}
+
+			EachOpenWorld([&mesh, &known](engine::ecs::Store &store) {
+				if (engine::scene::TrianglesOf(store, mesh) != 0) {
+					return;
+				}
+				engine::scene::RecordMesh(store, mesh, known->second.Triangles, known->second.Sheets);
+			});
 		}
 	}
 
