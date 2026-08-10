@@ -699,6 +699,56 @@ the parser remains in `bake`.
 - **What it did not do is close the entry, and the distinction matters more now than when it was filed.** Keeping two descriptions in step is not the same as having one. v0.8's `gui` rendering attaches a **seventh** pass at exactly this seam, and the cost of the convention is paid again per pass, forever, by whoever remembers.
 - **Reopen trigger, now fired: a sixth pass shipped at v0.7 and v0.8 has started.** Both halves of the original trigger are met. **This should not be actioned on its own** — running the frame from the list is `D00002`, and a runtime *deletes* the second description rather than checking it, so doing this entry separately buys a third copy of a mitigation that is already a sentence in an `AGENTS.md` and a comparison in a test. Merge it into that work or leave it as the standing check; do not build a third thing here.
 
+### [CLOSED] D00007
+
+**Both halves are closed. The second one closed at v0.9 and nobody told this
+entry, so it spent four versions asking for a file that was already in the
+tree.** Found at v0.13 while walking the register against `D00109`, which is
+about the same code from the other end.
+
+**Lag compensation is built.** `replication::Rewind` is the "server-side history
+buffer of past ticks" the entry below says this module deliberately does not
+keep: `RewindSettings::HistoryTicks` frames of position, `Begin`/`Record` per
+tick, `Sample` and `Each` at a fractional tick, `Oldest` for the bound.
+`Server::ApplyInputs` uses it exactly as written — a client's input tick, less
+the interpolation delay it renders behind and the half round trip its snapshot
+took, through `Rewind::TickSeenBy`, then a hit test against *the history's*
+candidates rather than the world's, because an entity destroyed since the tick
+the client saw is still a legitimate thing to have shot at.
+
+**The fairness policy the entry calls a game-design decision was made, and the
+entry's own sentence is now the header comment.** `HistoryTicks = 32` — half a
+second at sixty hertz, "because it covers an ordinary connection and not an
+excuse". Somebody built this from this entry and did not come back to it.
+
+**The reopen trigger fired too.** "The first hitscan weapon, which cannot be
+built without it" — `examples::Shooting` is one: `Shot`, `MAXIMUM_SHOT_RANGE`,
+`NearestHit`, and a server that recolours what was struck so every client sees
+the server's verdict rather than the shooter's.
+
+**What is left is not this entry's and is filed as `D00109`:** nothing ever
+*sends* a shot. `examples::EncodeShot` has no caller outside its own suite, so
+the whole rewound path decodes an input no client has produced. That is a
+missing consumer, not a missing mechanism, and the mechanism is what this entry
+was about.
+
+**The lesson is the one this register keeps relearning, in a new place.**
+`D00005` records a check whose claim aged into a false one; `D00004` records a
+figure that drifted. This is the third shape: **an entry whose blocker was
+removed by work that cited it.** A deferred item is only as good as the walk
+over it, and the walk has to be against the tree rather than against the entry.
+
+What it said before:
+
+**The bandwidth half closed at v0.4. Lag compensation is untouched. They were filed together and should not have been — one had a trigger that could fire and the other has a trigger that cannot yet.**
+
+- ~~Priority under a bandwidth cap.~~ **Closed, and the reopen trigger fired exactly as this entry wrote it.** `SendsOverBudget` came off zero in a real cross-process run: a 2000-entity world's tick was ~137 messages against a 64-packet budget, so 73 were dropped every tick with the tail chosen by position in a vector — the precise failure this entry predicted, found because the number it named as the signal was the number that moved. What shipped is what this entry asked for: a score per entity per client supplied by the game (this module carries named components and cannot know which one is a position, the same argument `SetInterest` already makes), **a rotation that outranks the score rather than being weighted against it**, and an explicit per-client answer with the reasoning in the header — the budget belongs to a link and there is one link per connection, so a per-server cap would have to be divided before it could be enforced, and that division *is* a per-client cap. The starvation bound is `StarvationTicks + ceil(n/k)` and is asserted by a test rather than argued for. Ordering costs nothing when there is no pressure: rows go out in dirty-bit order and are only re-packed by score if that did not fit.
+- Worth keeping from the closure, because it was nearly missed: **the item was found by a bug, not by a measurement anybody set out to take.** The refusals were being blamed on load and on a wall-clock deadline for four separate investigations. The entry's own advice — "`ConnectionStats` already counts the refusals; read it before concluding a component is not replicating" — was right, and nobody read it. A counter that is not looked at is not a mitigation.
+- **Still open: lag compensation** — rewinding the server to what a client saw when it fired. It needs a server-side history buffer of past ticks that `replication` deliberately does not keep, and a policy for how far back it will honour, which is a game-design decision about fairness rather than an engine one. **Reopen trigger: the first hitscan weapon**, which cannot be built without it. v0.4 brought the physics and the `Part` that trigger was implicitly waiting on, so the blocker is now the game rather than the engine.
+
+*(The paragraph above appeared twice, once as a trailing bullet with the same
+words. The duplicate is not reproduced.)*
+
 ### [CLOSED] D00006
 
 **Closed in v0.9.** The stateless challenge prevents an unknown peer from
