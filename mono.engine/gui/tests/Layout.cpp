@@ -819,15 +819,22 @@ TEST_CASE("a size limit bounds what an automatic container grows to", "[gui][lay
 	CHECK(world.Where(box).AbsoluteSize.Y == Approx(100.0f));
 }
 
-TEST_CASE("an element that draws text keeps the size it was given", "[gui][layout][automatic]") {
-	// **The refusal, and it is the case worth having most.** This module
-	// measures a string with `AVERAGE_ADVANCE`, which is an estimate on purpose
-	// — so a label grown to that estimate is a box its own text spills out of.
+TEST_CASE("an element that draws text grows to its string", "[gui][layout][automatic]") {
+	// **This case used to assert the opposite**, on the grounds that a string
+	// measured with `AVERAGE_ADVANCE` is an estimate and "a label grown to that
+	// estimate is a box its own text spills out of".
 	//
-	// The alternative failure is worse and is what this branch exists to stop: a
-	// `TextLabel` has no children, so an implementation that measured children
-	// and did not notice the text would collapse every labelled element an
-	// author set the property on to nothing at all.
+	// It is not, and the reason is the invariant `Layout.hpp` already states:
+	// the backend draws at `Resolved::TextSize` and does not second-guess it.
+	// Nothing downstream re-measures with real metrics, so within this engine
+	// the estimate *is* the measurement — the one answer a hit test, a headless
+	// assertion and a renderer all agree on. A box grown to it fits by the same
+	// definition of fitting used everywhere else in the module.
+	//
+	// The other failure the old refusal named is still refused, and by
+	// construction rather than by a branch: a labelled element is sized from its
+	// *text*, so the children path that would have collapsed a `TextLabel` to
+	// nothing is not the one it takes.
 	World world("gui_layout.automatic_text");
 	const Entity screen = world.Make("ScreenGui");
 	const Entity label = world.Make("TextLabel", screen);
@@ -843,8 +850,67 @@ TEST_CASE("an element that draws text keeps the size it was given", "[gui][layou
 
 	Layout(world.Data, world.Display);
 
-	CHECK(world.Where(label).AbsoluteSize.X == Approx(120.0f));
-	CHECK(world.Where(label).AbsoluteSize.Y == Approx(24.0f));
+	// Eight characters at the module's own advance, and one line at its own
+	// spacing. Spelled as the arithmetic rather than as the number, so a change
+	// to either constant moves this case with it instead of failing it.
+	const float expectedWidth = 8.0f * engine::gui::AVERAGE_ADVANCE * 14.0f;
+	const float expectedHeight = engine::gui::LINE_SPACING * 14.0f;
+
+	CHECK(world.Where(label).AbsoluteSize.X == Approx(expectedWidth));
+	CHECK(world.Where(label).AbsoluteSize.Y == Approx(expectedHeight));
+}
+
+TEST_CASE("a grown label is one axis at a time", "[gui][layout][automatic]") {
+	// `AutomaticSize.Y` on a fixed-width label is the ordinary case — a caption
+	// column whose rows are as tall as their text and as wide as the column.
+	World world("gui_layout.automatic_text_axis");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+
+	Element element;
+	element.Size = UDim2{0.0f, 200.0f, 0.0f, 4.0f};
+	element.Automatic = AutomaticSize::Y;
+	world.Data.Set(label, element);
+
+	Label text;
+	text.Text = "wrapped";
+	world.Data.Set(label, text);
+
+	Layout(world.Data, world.Display);
+
+	// The authored width survives, which is what makes this an axis rather than
+	// a mode.
+	CHECK(world.Where(label).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(label).AbsoluteSize.Y == Approx(engine::gui::LINE_SPACING * 14.0f));
+}
+
+TEST_CASE("TextScaled on a grown label returns the size asked for", "[gui][layout][automatic]") {
+	// **The pair means something now, and by construction rather than by a
+	// special case.** `FittedTextSize` divides the box by exactly the product
+	// the growth multiplies, so it recovers the size it started from: an author
+	// who sets both gets the size they typed in a box that holds it.
+	//
+	// Before the growth landed, setting both gave a label shrunk to fit a box
+	// that had nothing to do with its text.
+	World world("gui_layout.automatic_text_scaled");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+
+	Element element;
+	element.Size = UDim2{0.0f, 10.0f, 0.0f, 10.0f};
+	element.Automatic = AutomaticSize::XY;
+	world.Data.Set(label, element);
+
+	Label text;
+	text.Text = "Fits";
+	text.Size = 20;
+	text.Scaled = true;
+	world.Data.Set(label, text);
+
+	Layout(world.Data, world.Display);
+
+	// Not shrunk: the box was grown to exactly what this size needs.
+	CHECK(world.Where(label).TextSize == 20);
 }
 
 TEST_CASE("automatic sizing nests", "[gui][layout][automatic]") {

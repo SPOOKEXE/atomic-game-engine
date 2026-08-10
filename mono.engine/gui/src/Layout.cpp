@@ -604,20 +604,58 @@ namespace engine::gui {
 			scan = ScanChildren(store, instance, arena);
 			Vector2 size = element->Size.Resolve(Basis(element->Constraint, parent));
 
-			// **Refused on anything that draws text, and that is the rule rather
-			// than an omission.** The content of a `TextLabel` is its string, and
-			// this module measures a string with `AVERAGE_ADVANCE` — an estimate,
-			// deliberately, for the reason `Layout.hpp` gives at length. Growing
-			// a box to an estimate of what goes in it produces a box the text
-			// does not fit, which is the one outcome worse than not growing.
+			// **What a labelled element grows to is its string, and it is
+			// measured with the same estimate that decides whether the string
+			// fits.** That is the whole soundness argument and it is worth
+			// stating, because this used to be a refusal on the grounds that
+			// "growing a box to an estimate produces a box the text does not
+			// fit".
 			//
-			// So a labelled element keeps the size its `UDim2` resolved to.
-			// Silently sizing it to its *children* instead would collapse every
-			// `TextLabel` an author set this on to nothing, which is the failure
-			// mode this branch exists to refuse rather than to risk.
-			const bool textual = store.Get<Label>(instance) != nullptr;
+			// It does not, and the reason is the invariant `Layout.hpp` already
+			// states: the backend draws at `Resolved::TextSize` and does not
+			// second-guess it. Nothing downstream re-measures with real metrics,
+			// so `AVERAGE_ADVANCE` is not an approximation of the truth — within
+			// this engine it *is* the truth, the one answer a hit test, a
+			// headless assertion and a renderer all agree on. A box grown to it
+			// fits by the same definition of fitting the module uses everywhere
+			// else.
+			//
+			// **`TextScaled` stays a no-op on a grown axis, by construction
+			// rather than by a special case.** `FittedTextSize` divides the box
+			// by exactly the product this multiplies, so it recovers the size it
+			// started from: an author who sets both gets the size they asked for
+			// in a box that holds it, which is the only reading under which the
+			// pair means anything.
+			//
+			// The residual risk is that the estimate is wrong about real glyphs.
+			// That risk is not introduced here — it is the same risk `TextScaled`
+			// has carried since v0.8, and closing it means metrics shared below
+			// L7 rather than a second opinion in this branch.
+			const Label *label = store.Get<Label>(instance);
 
-			if (element->Automatic != AutomaticSize::None && !textual && depth < MAXIMUM_DEPTH) {
+			if (element->Automatic != AutomaticSize::None && label != nullptr) {
+				const bool growX = Grows(element->Automatic, true);
+				const bool growY = Grows(element->Automatic, false);
+
+				const Insets insets = InsetsOf(scan.Mods.Inset, size);
+
+				// One line, because this module wraps nothing: `Label` carries a
+				// string and a size and no wrap mode, so the height of a label
+				// is one line's height whatever the width is. The day wrapping
+				// arrives this is where the line count comes from, and it will
+				// need the width *before* the height — which is why the two are
+				// computed apart rather than as one extent.
+				const auto characters = static_cast<float>(label->Text.size());
+				const float advance = characters * AVERAGE_ADVANCE * static_cast<float>(label->Size);
+				const float lineHeight = LINE_SPACING * static_cast<float>(label->Size);
+
+				if (growX) {
+					size.X = std::max(advance + insets.Left + insets.Right, 0.0f);
+				}
+				if (growY) {
+					size.Y = std::max(lineHeight + insets.Top + insets.Bottom, 0.0f);
+				}
+			} else if (element->Automatic != AutomaticSize::None && depth < MAXIMUM_DEPTH) {
 				const bool growX = Grows(element->Automatic, true);
 				const bool growY = Grows(element->Automatic, false);
 
