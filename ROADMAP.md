@@ -40,18 +40,12 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] expose ECS underlying to luau and typescript (query engine for entities using direct and returns instances, create custom components and create custom entities and attach components, set component values, etc).
 - [x] rojo folder syncing + tests, support multi-world by subfoldering (main.universe.json for universe mapping, main.default.json accepted beside Rojo's own default.project.json in each subfolder)
 - [x] world => rojo sync, universe => multi-rojo sync (each world syncs separately, so one bad project file costs its own world and the rest still sync)
-- [x] the rest of Rojo's file table: .meta.json, init.meta.json, .model.json,
-      .json, .txt, .csv and nested .project.json all build.
-- [_] deferred `D00104` — .rbxm, .rbxmx and .toml, each blocked on a parser
-      `mono.vendor` does not carry.
+- [x] the rest of Rojo's file table: .meta.json and init.meta.json patch properties onto whatever the file of that stem built, .model.json builds a class with its properties and children, .json becomes a ModuleScript with generated source, .txt and .csv become a StringValue and a LocalizationTable over the new scene::TextContent, and a nested .project.json is followed with a cycle check.
+- [x] room in scene::Visual again — Surface, CastShadow and Locked used the original three padding bytes, so it was widened once on purpose and the next four one-byte fields are free. engine.scene.components pins the size.
+- [x] expanded ecs::Schemas from 256 to 2048 described components. The cap was never the real constraint: the generated hook bodies were inlinable, so every thunk carried a copy of the PropertyType switch — 113 MB of object at 4096 slots. Held out of line it is about 192 bytes of .text a slot, and the measurements are in Schema.cpp.
 - [x] update built-in MCP integrations (component_list, entity_query, component_get, component_set over the v0.12 storage surface; first suite for `control`), add a studio ui button to enable/disable and information panel
-- [x] walked the deferred register. One new item filed — `D00104`, the rest of
-      Rojo's file table. Every other open entry's reopen trigger is unfired:
-      `D00102` wants the `bake` module split, `D00039` wants a world that ticks
-      physics (v0.13), `D00038`/`D00046`/`D00103` want a render pass executor,
-      `D00030`/`D00031` are tooling gaps with working workarounds, and
-      `D00014`/`D00015`/`D00018`/`D00019` are net and replication decisions
-      waiting on a deployment.
+- [x] walked the deferred register. Every open entry's reopen trigger is unfired: `D00102` wants the `bake` module split, `D00039` wants a world that ticks physics (v0.13), `D00038`/`D00046`/`D00103` want a render pass executor, `D00030`/`D00031` are tooling gaps with working workarounds, and `D00014`/`D00015`/`D00018`/`D00019` are net and replication decisions waiting on a deployment.
+- [_] deferred `D00104` — the last three rows of Rojo's file table. `.rbxmx` needs an XML parser and `.toml` a TOML parser, neither of which `mono.vendor` carries; `.rbxm` is a binary format reader that belongs beside the model decoders in `bake`.
 - [x] create a api for setting up configs in the studio and saving them to the ~/Documents/atomic-game-engine/studio folder. Save for preferences.json, cdn.json, recent.json (last 5 projects), keybinds.json. Also materials preview now renders without a hover and fetches a missing colour map through the delivery client.
 - [x] studio editing tools; select, move, rotate, 3d scene interactable gimbals, grid step amount input, rotation amount input, anchor toggle, "lock" toggle, pivot editor mode, reset pivot button.
 - [x] studio tooling tabs (Home, Model, Script, View)
