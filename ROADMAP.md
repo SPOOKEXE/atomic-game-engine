@@ -51,7 +51,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] studio tooling tabs (Home, Model, Script, View)
 - [x] improved physics pipeline with spatial optimisations — the broad phase's grids size themselves from the colliders they hold (spatial::SuggestCellSize), which lands on the hand-picked optimum at every density: 22% off the default at 4000 colliders, 17% at 1000. An author who names a size still gets it.
 - [x] plugin system — a plugin is a folder in the studio config directory holding a plugin.json and a script, run as its own script::Runtime against the world being edited. It reaches everything a game script does, including World; the selection crosses as the studio.Selected component rather than as an API. One runtime each and one failure each: a plugin that will not start, or that throws three beats running, is switched off and named while the rest keep running.
-- [_] deferred `D00105` — a plugin cannot add a button or run an editor command. That needs a host-call seam through script::ScriptValue, which is a real widening of `script`'s public surface.
+- [x] plugin editor API — script::HostSurface is the seam (one virtual, a value tree, no lua_State crossing a module boundary) and script::HostValue carries an Instance and a Callback where ScriptValue carries neither. A plugin creates toolbar sections and buttons with real handlers, dock widgets that draw immediate-mode like every other panel, and reads or writes the source of scripts in the scene. `D00105` is closed.
 
 ### v0.13
 

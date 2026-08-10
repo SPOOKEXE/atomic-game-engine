@@ -1472,6 +1472,16 @@ namespace studio {
 		void LoadPlugins();
 		void PumpPlugins(float delta);
 		void DrawPlugins();
+
+		// Draws every open plugin panel, each in its own window.
+		void DrawPluginWidgets();
+
+		// Calls one of a plugin's handlers, counting a raise as a fault.
+		//
+		// @param plugin   Whose handler.
+		// @param callback What to call.
+		// @param drawing  Whether the widget calls are legal inside it.
+		void InvokePlugin(LoadedPlugin &plugin, engine::script::HostCallback callback, bool drawing);
 		//@}
 
 		// Publishes the selection into the world as `studio.Selected`.
@@ -1483,6 +1493,34 @@ namespace studio {
 		// frame would move `Store::ChangeVersion` every frame and defeat the
 		// gate the physics broad phase reads.
 		void PublishSelection();
+
+		// **The plugin surface is a friend rather than a widening of this
+		// class.** It is the editor's own half of the seam and lives in
+		// `PluginSurface.cpp`; making `Select` public so one file could call it
+		// would offer it to every other file too, which is the opposite of what
+		// a plugin API is for.
+		friend class PluginSurface;
+
+		// The active world's name, for a plugin that wants to say which scene it
+		// is looking at.
+		//
+		// @return The name, or empty when there is none.
+		std::string ActiveWorldName() const;
+
+		// Whether there is a scene to act on.
+		//
+		// @return `true` when a world is active.
+		bool HasActiveWorld() const;
+
+		// Runs `body` against the world the selection belongs to.
+		//
+		// **One entry point, because a plugin call is not allowed to guess.**
+		// Every host call that touches storage goes through this, so a call made
+		// when nothing is open is a no-op rather than a crash — and there is one
+		// place that knows which world "the world" means.
+		//
+		// @param body What to run. Not called when there is no world.
+		void WithSelectionWorld(const std::function<void(engine::ecs::Store &)> &body);
 
 		// What was published last, so the frame that changed nothing does
 		// nothing. Sorted, because it is compared against a sorted selection.

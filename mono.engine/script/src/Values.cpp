@@ -602,4 +602,39 @@ namespace engine::script {
 		SetVectorConstant(state, "Vector3", "zero", core::Vector3::Zero);
 		SetVectorConstant(state, "Vector3", "one", core::Vector3::One);
 	}
+
+	// --- the host seam's builders ---------------------------------------------
+	//
+	// Here rather than in the header, so `Host.hpp` stays a description of what
+	// crosses and carries no code a consumer compiles.
+
+	HostValue HostValue::Of(bool value) {
+		HostValue out(HostTag::Boolean);
+		out.Boolean = value;
+		return out;
+	}
+
+	HostValue HostValue::Of(double value) {
+		HostValue out(HostTag::Number);
+		out.Number = value;
+		return out;
+	}
+
+	HostValue HostValue::Of(std::string_view value) {
+		HostValue out(HostTag::String);
+		out.Text = value;
+		return out;
+	}
+
+	HostValue HostValue::Of(ecs::Entity value) {
+		HostValue out(HostTag::Instance);
+		out.Instance = value;
+		return out;
+	}
+
+	HostValue HostValue::List(std::vector<HostValue> items) {
+		HostValue out(HostTag::Array);
+		out.Items = std::move(items);
+		return out;
+	}
 }

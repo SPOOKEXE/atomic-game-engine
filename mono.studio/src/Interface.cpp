@@ -269,6 +269,7 @@ namespace studio {
 			DrawNetwork();
 			DrawControl();
 			DrawPlugins();
+			DrawPluginWidgets();
 			DrawBus();
 			DrawFindInstances();
 			DrawScriptProfile();

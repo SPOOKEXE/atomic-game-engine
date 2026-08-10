@@ -99,10 +99,26 @@ and for deleted marked items;
 
 ## Deferred Items
 
-### [_] D00105
+### [CLOSED] D00105
 
 **A plugin can change the world and cannot add a button, and the missing piece
 is a channel rather than a function.**
+
+**Closed at v0.12 by building the channel.** `script::HostSurface` is the seam —
+one virtual taking a name and a `HostValue` list — and `script::HostValue` is a
+value tree rather than `ScriptValue` widened, for the reason this entry
+predicted: an instance handle means something inside one process and nothing on
+a bus, so the two types stay apart. A Luau function passed as an argument
+becomes a `HostCallback`, which is what makes a button's handler possible, and
+`Runtime::Invoke` is the other direction. `mono.studio/src/PluginSurface.cpp` is
+the editor's implementation and `engine.script.host` covers the crossing.
+
+Two things the entry got right and one it did not. The value tree and the
+callback were both needed, as predicted. What it called "the honest options" —
+a polled queue or a registry-ref dispatch — turned out to be one option: the ref
+lives in the module behind `Invoke`, so the host holds an id and polls nothing.
+
+The original text follows.
 
 `studio::PluginHost` runs a plugin as an ordinary `script::Runtime` against the
 world an author is editing, so everything a game script can reach it can reach —

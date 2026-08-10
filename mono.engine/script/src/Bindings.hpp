@@ -28,6 +28,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Debugger.hpp>
+#include <engine/script/Host.hpp>
 #include <engine/script/Runtime.hpp>
 
 #include <algorithm>
@@ -254,6 +255,23 @@ namespace engine::script {
 		// How many arguments a `task.defer` or `task.delay` left on its
 		// thread's stack, so the resume passes them on.
 		std::unordered_map<lua_State *, int> PendingArguments;
+
+		// What this program offers beyond the world, or null.
+		//
+		// **Null for a game script and set for a tool**, which is the whole of
+		// the distinction: a game's vocabulary is the scene and an editor tool's
+		// is the program running it. See `script/Host.hpp`.
+		HostSurface *Host = nullptr;
+
+		// Which registry ref holds each function a host was handed.
+		//
+		// **Keyed by a counter rather than by an address**, because an address
+		// is not stable between runs and this module refuses one in an id
+		// anywhere. Starting at one leaves zero meaning "no callback".
+		//@{
+		std::unordered_map<uint64_t, int> HostCallbacks;
+		uint64_t NextHostCallback = 0;
+		//@}
 
 		// Which thread is suspended on which `world::Ticket`.
 		//
@@ -524,6 +542,35 @@ namespace engine::script {
 	// @param state The VM.
 	// @since v0.12
 	void OpenEcs(lua_State *state);
+
+	// Installs `host`, when the runtime has one.
+	//
+	// **One closure per `HostSurface::Names` entry**, so a name the host does
+	// not list is not a member — which turns a typo into "attempt to call a nil
+	// value" at the call site rather than a refusal from inside a program the
+	// author cannot see.
+	//
+	// Does nothing when there is no host, which is every game script.
+	//
+	// @param state The VM.
+	// @since v0.12
+	void OpenHost(lua_State *state);
+
+	// Calls a function a script handed the host.
+	//
+	// @param state     The VM.
+	// @param callback  What to call.
+	// @param arguments What to pass.
+	// @return `false` when the callback is unknown or the handler raised.
+	// @since v0.12
+	bool CallHostCallback(lua_State *state, HostCallback callback, HostArguments arguments);
+
+	// Lets go of one, so its closure can be collected.
+	//
+	// @param state    The VM.
+	// @param callback What to release.
+	// @since v0.12
+	void ReleaseHostCallback(lua_State *state, HostCallback callback);
 
 	// Installs `Enum`, over the sets `ecs::EnumTable` holds.
 	void OpenEnums(lua_State *state);

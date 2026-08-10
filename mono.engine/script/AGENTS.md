@@ -124,6 +124,38 @@ does. That is not a wart to smooth over — it is the model stated in the sectio
 above, and a handle that pretended to have a class would be the scripting-only
 view this module does not have.
 
+## A host adds names, and it does it through one seam
+
+`script::HostSurface` is how a *program* offers a script something the engine
+does not — a toolbar, a docked panel, the source of another script. The editor
+adds `CreateDockWidget` and nothing in this module changes, which is the whole
+point of the shape.
+
+Four rules a reviewer should hold to:
+
+- **`HostValue` is not `ScriptValue` widened, and merging them is the change to
+  refuse.** `ScriptValue` is what crosses a *world boundary*, where rule 3 says
+  everything is a copy and a handle means nothing; `HostValue` carries an
+  `Instance` precisely because a host call is inside one process against one
+  store. Adding an instance tag to the first would make the wrong thing
+  expressible on a bus.
+- **The global is built from `Names()`, not answered by an `__index`.** A name
+  the host does not list is not a member, so a typo is "attempt to call a nil
+  value" at the call site rather than a refusal from inside a program the author
+  cannot see.
+- **The globals are unfrozen for exactly one assignment.** `SetHost` runs after
+  `luaL_sandbox`, so the table is readonly and a plain `lua_setglobal` throws.
+  The host table is frozen too — a plugin replacing one of its own host
+  functions would be replacing it for every later chunk in that VM.
+- **`ReadHostValue` grows the stack before it recurses.** A C function is
+  guaranteed `LUA_MINSTACK` slots and a map traversal holds a key and a value
+  per level; overrunning it is a `LUAU_ASSERT`, so the symptom was an illegal
+  instruction from a script that merely nested a table.
+
+**A refusal is a message and never an abort.** `Call` answers `false` with a
+reason and the script sees an ordinary error, because a host that aborted would
+take the program down with a plugin's typo.
+
 ## One runtime, one world
 
 The `Store` is an upvalue on every bound function rather than a global, so two

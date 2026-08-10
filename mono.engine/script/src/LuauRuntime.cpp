@@ -301,6 +301,11 @@ namespace engine::script {
 		OpenClock(State);
 		OpenBaseExtras(State);
 
+		// **After every engine surface and before `OpenRequire`**, so a host
+		// cannot replace one of the engine's globals by naming it — the table is
+		// its own and `host.Thing` is the only way in.
+		OpenHost(State);
+
 		// **After `OpenBaseExtras`, which installs the refusal.** Overwriting it
 		// here rather than deleting it there keeps a runtime that never calls this
 		// refusing with a sentence rather than with a nil global.
@@ -777,5 +782,22 @@ namespace engine::script {
 
 		Error = firstError;
 		return Error.empty();
+	}
+
+	void LuauRuntime::SetHost(HostSurface *host) {
+		// **Recorded on the context and the global rebuilt**, because
+		// `OpenHost` reads `Names()` once: a host installed after a chunk had
+		// already captured `host` would be invisible to it, which is `D00030`'s
+		// mechanism biting a different surface.
+		ContextOf(State).Host = host;
+		OpenHost(State);
+	}
+
+	bool LuauRuntime::Invoke(HostCallback callback, HostArguments arguments) {
+		return CallHostCallback(State, callback, arguments);
+	}
+
+	void LuauRuntime::Release(HostCallback callback) {
+		ReleaseHostCallback(State, callback);
 	}
 }

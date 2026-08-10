@@ -35,15 +35,49 @@
 // rule 2 is the argument, and it applies to the editor's own state as much as to
 // a game's.
 //
-// ## What a plugin cannot reach, stated rather than discovered
+// ## What a plugin reaches of the editor
 //
-// **There is no toolbar API and no editor command surface.** A plugin runs on
-// `RunService.Heartbeat` and acts on the world; it cannot add a button, open a
-// panel or invoke a menu item. Those need a channel between a script and the
-// editor that is neither the world nor a `lua_State` crossing a module
-// boundary — `script/AGENTS.md` forbids the second — and designing that channel
-// is a piece of work rather than a parameter. `D00105` carries what it would
-// take.
+// Everything above is the *world*. The editor itself arrives through
+// `script::HostSurface` — one seam, a value tree, no `lua_State` crossing a
+// module boundary — as a `plugin` global:
+//
+//     local bar = plugin.CreateToolbar("My Tools")
+//     plugin.CreateButton(bar, "Align", "Align the selection", function()
+//         for _, part in plugin.GetSelection() do
+//             part.CFrame = CFrame.new(0, part.Position.Y, 0)
+//         end
+//     end)
+//
+//     local panel = plugin.CreateWidget("Align", true)
+//     plugin.SetWidgetRender(panel, function()
+//         plugin.Label("Selected: " .. #plugin.GetSelection())
+//         if plugin.Button("Clear") then plugin.SetSelection({}) end
+//     end)
+//
+// | Group | Calls |
+// |---|---|
+// | the editor | `Notify`, `GetSelection`, `SetSelection`, `GetActiveWorld` |
+// | scripts in the scene | `GetScripts`, `GetScriptSource`, `SetScriptSource` |
+// | toolbars | `CreateToolbar`, `CreateButton`, `SetButtonActive` |
+// | panels | `CreateWidget`, `SetWidgetRender`, `SetWidgetOpen`, `IsWidgetOpen` |
+// | inside a panel | `Label`, `Button`, `Checkbox`, `Separator`, `InputText` |
+//
+// **Ids rather than objects, because the seam carries values.** A `HostValue`
+// has no userdata to hang a toolbar on, so `CreateToolbar` answers a number and
+// `CreateButton` takes it back — the one place this reads differently from
+// Roblox's, and it is stated rather than smoothed over.
+//
+// **The panel calls are only legal while a panel is drawing.** They are
+// immediate-mode ImGui underneath, which is how every other panel in this editor
+// works, so a `plugin.Label` from a heartbeat would draw into whatever window
+// the editor happened to be building. The gate is set by the editor around the
+// invoke rather than promised by the plugin.
+//
+// **Reading another script's source is not a hole in the sandbox.**
+// `GetScriptSource` goes through `script::ReadSource` against this world's own
+// `SourceCache`, so a name resolves to text the editor already holds and never
+// to a file on disk. A plugin is a tool running on a project somebody opened; it
+// reads what its user is already looking at.
 //
 // ## One runtime each, and one failure each
 //
@@ -61,10 +95,12 @@
 // @tier client
 
 #include <engine/ecs/Store.hpp>
+#include <engine/script/Host.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -117,6 +153,59 @@ namespace studio {
 		bool Enabled = true;
 	};
 
+	// A toolbar a plugin asked for, and the buttons on it.
+	//
+	// **Flat ids rather than objects, because the seam carries values.** A
+	// `HostValue` has no userdata tag to hang a toolbar on, so a plugin holds
+	// the number it was given and passes it back — which is the same shape every
+	// immediate-mode API in this editor already has.
+	//
+	// @since v0.12
+	struct PluginButton {
+		// What the plugin called it, and what the button says.
+		std::string Name;
+
+		// The line under the cursor when somebody hovers it.
+		std::string Tooltip;
+
+		// What to call when it is pressed, in the plugin's own VM.
+		engine::script::HostCallback OnClick;
+
+		// Whether it draws as held. A plugin sets this to show a mode.
+		bool Active = false;
+	};
+
+	// @since v0.12
+	struct PluginToolbar {
+		// The section's title.
+		std::string Name;
+
+		// Its buttons, in the order they were created.
+		std::vector<PluginButton> Buttons;
+	};
+
+	// A docked panel a plugin asked for.
+	//
+	// **Immediate mode, which is how the rest of this editor works.** The
+	// contents are not a retained tree the plugin builds and the editor walks —
+	// the editor calls `Render` while its window is open and the plugin issues
+	// widget calls from inside it, exactly as `DrawTools` and every other panel
+	// here does. A retained tree would be a second widget model beside ImGui,
+	// and the engine already has one of those in `gui` for the *game's* UI.
+	//
+	// @since v0.12
+	struct PluginWidget {
+		// The window title, which is also how ImGui identifies it.
+		std::string Title;
+
+		// Whether the window is open. A plugin may set it and a person may close
+		// it, and both write here.
+		bool Open = false;
+
+		// What to call while it is open, in the plugin's own VM.
+		engine::script::HostCallback Render;
+	};
+
 	// One plugin, as the editor holds it.
 	//
 	// @since v0.12
@@ -141,6 +230,19 @@ namespace studio {
 		// How many times its heartbeat has raised. A plugin that throws every
 		// frame is switched off rather than logged sixty times a second.
 		size_t Faults = 0;
+
+		// What it asked the editor for.
+		//@{
+		std::vector<PluginToolbar> Toolbars;
+		std::vector<PluginWidget> Widgets;
+		//@}
+
+		// Its half of the seam, kept alive as long as its runtime is.
+		//
+		// **A `unique_ptr` because `HostSurface` is not copyable and the plugin
+		// list is**, and because the runtime holds a raw pointer to it — so it
+		// has to sit still while the vector it lives beside grows.
+		std::unique_ptr<engine::script::HostSurface> Surface;
 	};
 
 	// How many times a plugin may raise before it is switched off.
@@ -150,6 +252,33 @@ namespace studio {
 	// tell a transient from a broken one and few enough that the log stays
 	// readable.
 	inline constexpr size_t PLUGIN_FAULT_LIMIT = 3;
+
+	class Editor;
+
+	// The editor's half of the seam, for one plugin.
+	//
+	// **One per plugin rather than one shared**, because every call has to know
+	// which plugin made it: a toolbar belongs to whoever created it, and a
+	// shared surface would need the caller's identity on every call — which the
+	// seam cannot supply and a plugin could forge.
+	//
+	// @param editor The editor answering.
+	// @param plugin The plugin asking. Must outlive the surface.
+	// @return The surface, for `Runtime::SetHost`.
+	// @since v0.12
+	std::unique_ptr<engine::script::HostSurface> MakePluginSurface(Editor &editor, LoadedPlugin &plugin);
+
+	// Opens or closes the gate on the widget calls.
+	//
+	// **Set by the editor around a render invoke**, so "am I drawing" is a fact
+	// about where the call came from rather than a promise the plugin makes. A
+	// `plugin.Label` from a heartbeat would otherwise draw into whatever window
+	// the editor happened to be building.
+	//
+	// @param surface The plugin's surface.
+	// @param drawing Whether a render callback is on the stack.
+	// @since v0.12
+	void SetPluginDrawing(engine::script::HostSurface &surface, bool drawing);
 
 	// Where plugins are looked for.
 	//
@@ -192,10 +321,20 @@ namespace studio {
 	// or spend another's step budget. A plugin whose entry script fails to run is
 	// left with `Running` clear and its error kept; the rest still start.
 	//
+	// **The surface is installed before the entry script runs**, because a
+	// plugin's top level is where it creates its toolbar — a host set afterwards
+	// would be a global the chunk had already failed to find.
+	//
 	// @param plugins What `DiscoverPlugins` found, updated in place.
 	// @param store   The world they run against.
+	// @param surface Builds each plugin's host surface, or empty for a plugin
+	//                that gets the world and no editor.
 	// @since v0.12
-	void StartPlugins(std::vector<LoadedPlugin> &plugins, engine::ecs::Store &store);
+	void StartPlugins(
+		std::vector<LoadedPlugin> &plugins,
+		engine::ecs::Store &store,
+		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface = {}
+	);
 
 	// Beats every running plugin once.
 	//

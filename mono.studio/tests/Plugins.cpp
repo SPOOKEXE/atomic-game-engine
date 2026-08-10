@@ -14,6 +14,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/testing/Suite.hpp>
 #include <studio/Config.hpp>
+#include <engine/script/Host.hpp>
 #include <studio/Plugins.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -21,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <memory>
 #include <vector>
 
 TEST_SUITE_ID("studio.plugins")
@@ -37,6 +39,9 @@ using studio::PluginManifest;
 using studio::PLUGIN_FAULT_LIMIT;
 using studio::RegisterSelectionComponent;
 using studio::SELECTED_COMPONENT;
+using studio::PluginButton;
+using studio::PluginToolbar;
+using studio::PluginWidget;
 using studio::StartPlugins;
 
 namespace {
@@ -303,6 +308,216 @@ TEST_CASE("a plugin reads the selection as a component", "[studio][plugins]") {
 
 	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
 	StartPlugins(plugins, store);
+
+	INFO(plugins.front().Error);
+	CHECK(plugins.front().Running);
+}
+
+// --- the editor's surface ------------------------------------------------------
+//
+// **A stand-in host rather than a live `Editor`.** Starting one needs a window,
+// a renderer and a universe; what these cases are about is the *shape* a plugin
+// sees — that a toolbar answers an id, that a button's handler is held and can
+// be called, that the widget calls are refused outside a render. The editor's
+// own implementation is `PluginSurface.cpp` and is exercised by running it.
+
+namespace {
+	using engine::script::HostArguments;
+	using engine::script::HostCallback;
+	using engine::script::HostSurface;
+	using engine::script::HostTag;
+	using engine::script::HostValue;
+
+	// The same surface shape `PluginSurface` offers, over a plugin's own record.
+	class Surface final : public HostSurface {
+	  public:
+		explicit Surface(LoadedPlugin &plugin) : Plugin(plugin) {}
+
+		std::string_view GlobalName() const override {
+			return "plugin";
+		}
+
+		std::vector<std::string> Names() const override {
+			return {"CreateToolbar", "CreateButton", "CreateWidget", "SetWidgetRender", "Label"};
+		}
+
+		bool Call(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure)
+			override {
+			const auto text = [&](size_t at) {
+				return at < arguments.size() ? std::string(arguments[at].AsText()) : std::string{};
+			};
+
+			if (name == "CreateToolbar") {
+				Plugin.Toolbars.push_back(PluginToolbar{text(0), {}});
+				result = HostValue::Of(static_cast<double>(Plugin.Toolbars.size()));
+				return true;
+			}
+			if (name == "CreateButton") {
+				const auto bar = static_cast<size_t>(arguments[0].AsNumber(0.0));
+				if (bar < 1 || bar > Plugin.Toolbars.size()) {
+					failure = "no such toolbar";
+					return false;
+				}
+
+				PluginButton button;
+				button.Name = text(1);
+				button.Tooltip = text(2);
+				if (arguments.size() > 3 && arguments[3].Tag == HostTag::Callback) {
+					button.OnClick = arguments[3].Callback;
+				}
+
+				Plugin.Toolbars[bar - 1].Buttons.push_back(button);
+				result = HostValue::Of(static_cast<double>(Plugin.Toolbars[bar - 1].Buttons.size()));
+				return true;
+			}
+			if (name == "CreateWidget") {
+				Plugin.Widgets.push_back(PluginWidget{text(0), true, {}});
+				result = HostValue::Of(static_cast<double>(Plugin.Widgets.size()));
+				return true;
+			}
+			if (name == "SetWidgetRender") {
+				const auto at = static_cast<size_t>(arguments[0].AsNumber(0.0));
+				if (at < 1 || at > Plugin.Widgets.size() || arguments[1].Tag != HostTag::Callback) {
+					failure = "SetWidgetRender takes a widget and a function";
+					return false;
+				}
+				Plugin.Widgets[at - 1].Render = arguments[1].Callback;
+				return true;
+			}
+			if (name == "Label") {
+				if (!Drawing) {
+					failure = "Label may only be called while a widget is drawing";
+					return false;
+				}
+				Drawn.push_back(text(0));
+				return true;
+			}
+			return false;
+		}
+
+		LoadedPlugin &Plugin;
+		bool Drawing = false;
+		std::vector<std::string> Drawn;
+	};
+}
+
+TEST_CASE("a plugin creates toolbars and buttons at its top level", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+
+	folder.Add(
+		"tools",
+		R"({"name": "Tools"})",
+		"local bar = plugin.CreateToolbar('My Tools')\n"
+		"assert(bar == 1, 'the first toolbar is 1, got ' .. tostring(bar))\n"
+		"pressed = 0\n"
+		"plugin.CreateButton(bar, 'Align', 'Align the selection', function()\n"
+		"  pressed += 1\n"
+		"end)\n"
+		"plugin.CreateButton(bar, 'Clear', '', function() end)\n"
+	);
+
+	Store store("plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+
+	Surface *surface = nullptr;
+	StartPlugins(plugins, store, [&surface](LoadedPlugin &plugin) {
+		auto made = std::make_unique<Surface>(plugin);
+		surface = made.get();
+		return made;
+	});
+
+	REQUIRE(plugins.size() == 1);
+	INFO(plugins.front().Error);
+	REQUIRE(plugins.front().Running);
+
+	// **The top level is where a plugin builds its toolbar**, which is why the
+	// host is installed before the entry script rather than after it.
+	REQUIRE(plugins.front().Toolbars.size() == 1);
+	CHECK(plugins.front().Toolbars[0].Name == "My Tools");
+	REQUIRE(plugins.front().Toolbars[0].Buttons.size() == 2);
+	CHECK(plugins.front().Toolbars[0].Buttons[0].Name == "Align");
+	CHECK(plugins.front().Toolbars[0].Buttons[0].Tooltip == "Align the selection");
+
+	// The handler crossed and can be called from the editor's frame, which is
+	// the whole reason a button is possible at all.
+	const HostCallback click = plugins.front().Toolbars[0].Buttons[0].OnClick;
+	REQUIRE(click.Valid());
+	CHECK(plugins.front().Vm->Invoke(click, {}));
+	CHECK(plugins.front().Vm->Invoke(click, {}));
+
+	(void)surface;
+}
+
+TEST_CASE("a widget renders through its callback and only then", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+
+	folder.Add(
+		"panel",
+		R"({"name": "Panel"})",
+		"local widget = plugin.CreateWidget('Align', true)\n"
+		"plugin.SetWidgetRender(widget, function()\n"
+		"  plugin.Label('drawn')\n"
+		"end)\n"
+	);
+
+	Store store("plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+
+	Surface *surface = nullptr;
+	StartPlugins(plugins, store, [&surface](LoadedPlugin &plugin) {
+		auto made = std::make_unique<Surface>(plugin);
+		surface = made.get();
+		return made;
+	});
+
+	REQUIRE(plugins.front().Running);
+	REQUIRE(surface != nullptr);
+	REQUIRE(plugins.front().Widgets.size() == 1);
+	CHECK(plugins.front().Widgets[0].Title == "Align");
+	CHECK(plugins.front().Widgets[0].Open);
+
+	const HostCallback render = plugins.front().Widgets[0].Render;
+	REQUIRE(render.Valid());
+
+	// **Inside the gate**, which is where the editor calls it from.
+	surface->Drawing = true;
+	CHECK(plugins.front().Vm->Invoke(render, {}));
+	surface->Drawing = false;
+
+	REQUIRE(surface->Drawn.size() == 1);
+	CHECK(surface->Drawn.front() == "drawn");
+
+	// **Outside it the same call is refused**, because a `Label` from a
+	// heartbeat would draw into whatever window the editor was building. The
+	// invoke fails, which is what the fault counter reads.
+	CHECK_FALSE(plugins.front().Vm->Invoke(render, {}));
+	CHECK(surface->Drawn.size() == 1);
+}
+
+TEST_CASE("a plugin that misuses the surface is refused, not crashed", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+
+	// Every one of these is a plugin author's ordinary mistake, and each has to
+	// arrive as a script error rather than as an editor that is no longer there.
+	folder.Add(
+		"wrong",
+		R"({"name": "Wrong"})",
+		"local ok, message = pcall(function() plugin.CreateButton(99, 'x', '', function() end) end)\n"
+		"assert(not ok, 'a button on a toolbar that does not exist was accepted')\n"
+		"assert(string.find(message, 'toolbar') ~= nil, 'the reason was lost: ' .. message)\n"
+		"\n"
+		"local caught = pcall(function() plugin.Label('outside a widget') end)\n"
+		"assert(not caught, 'a widget call from the top level was accepted')\n"
+		"\n"
+		"assert(plugin.NoSuchThing == nil, 'an unlisted name is a member')\n"
+	);
+
+	Store store("plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [](LoadedPlugin &plugin) { return std::make_unique<Surface>(plugin); });
 
 	INFO(plugins.front().Error);
 	CHECK(plugins.front().Running);

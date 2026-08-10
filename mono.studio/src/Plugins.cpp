@@ -186,7 +186,11 @@ namespace studio {
 		return found;
 	}
 
-	void StartPlugins(std::vector<LoadedPlugin> &plugins, engine::ecs::Store &store) {
+	void StartPlugins(
+		std::vector<LoadedPlugin> &plugins,
+		engine::ecs::Store &store,
+		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface
+	) {
 		for (LoadedPlugin &plugin : plugins) {
 			plugin.Running = false;
 			plugin.Faults = 0;
@@ -230,12 +234,29 @@ namespace studio {
 				continue;
 			}
 
+			// **Before the entry script**, because a plugin's top level is where
+			// it creates its toolbar — a host set afterwards would be a global
+			// the chunk had already failed to find.
+			//
+			// The surface holds a reference to `plugin`, so it is stored beside
+			// the runtime that points at it and both go away together.
+			if (surface) {
+				plugin.Surface = surface(plugin);
+				if (plugin.Surface != nullptr) {
+					plugin.Vm->SetHost(plugin.Surface.get());
+				}
+			}
+
 			if (!plugin.Vm->Run(source, plugin.Manifest.Name)) {
 				// **The whole error, because a plugin author is the person
 				// reading it.** A truncated message costs them the line number,
 				// which is the only part that matters.
 				plugin.Error = plugin.Vm->LastError();
+
+				// The surface goes with the runtime that pointed at it, and in
+				// that order: a host outliving its VM is a pointer nothing owns.
 				plugin.Vm.reset();
+				plugin.Surface.reset();
 				continue;
 			}
 
@@ -297,7 +318,11 @@ namespace studio {
 			return;
 		}
 
-		Universe->Enter(Active, [this](Store &store) { StartPlugins(Plugins, store); });
+		Universe->Enter(Active, [this](Store &store) {
+			StartPlugins(Plugins, store, [this](LoadedPlugin &plugin) {
+				return MakePluginSurface(*this, plugin);
+			});
+		});
 
 		size_t running = 0;
 		for (const LoadedPlugin &plugin : Plugins) {
@@ -314,6 +339,27 @@ namespace studio {
 
 		Say("plugins: " + std::to_string(running) + " of " + std::to_string(Plugins.size()) +
 			" running");
+	}
+
+	std::string Editor::ActiveWorldName() const {
+		if (Universe == nullptr || !Active.IsValid()) {
+			return {};
+		}
+		return std::string(Universe->NameOf(Active).Text());
+	}
+
+	bool Editor::HasActiveWorld() const {
+		return Universe != nullptr && Active.IsValid();
+	}
+
+	void Editor::WithSelectionWorld(const std::function<void(engine::ecs::Store &)> &body) {
+		if (Universe == nullptr || !SelectionWorld.IsValid()) {
+			// **A no-op rather than a refusal**, because "nothing is open" is an
+			// ordinary state for a plugin's heartbeat to run in and a plugin
+			// should not have to guard every call against it.
+			return;
+		}
+		Universe->Enter(SelectionWorld, body);
 	}
 
 	void Editor::PublishSelection() {
@@ -374,6 +420,68 @@ namespace studio {
 		(void)beaten;
 	}
 
+	void Editor::InvokePlugin(LoadedPlugin &plugin, engine::script::HostCallback callback, bool drawing) {
+		if (!plugin.Running || plugin.Vm == nullptr || !callback.Valid()) {
+			return;
+		}
+
+		// **The gate is opened around the call and closed after it**, so
+		// "am I drawing" is a fact about where a host call came from rather than
+		// a promise the plugin makes. A `plugin.Label` from a heartbeat would
+		// otherwise draw into whatever window the editor was building.
+		if (plugin.Surface != nullptr && drawing) {
+			SetPluginDrawing(*plugin.Surface, true);
+		}
+
+		const bool ok = plugin.Vm->Invoke(callback, {});
+
+		if (plugin.Surface != nullptr && drawing) {
+			SetPluginDrawing(*plugin.Surface, false);
+		}
+
+		if (ok) {
+			return;
+		}
+
+		// **A handler that raised is counted with the heartbeat's faults**, and
+		// for the same reason: a render callback that throws does it every frame
+		// its window is open, which is a log nobody can read.
+		plugin.Faults++;
+		plugin.Error = plugin.Vm->LastError();
+
+		if (plugin.Faults >= PLUGIN_FAULT_LIMIT) {
+			plugin.Running = false;
+			Say("plugin '" + plugin.Manifest.Name + "' switched off: " + plugin.Error,
+				engine::core::LogLevel::Error);
+		}
+	}
+
+	void Editor::DrawPluginWidgets() {
+		for (LoadedPlugin &plugin : Plugins) {
+			if (!plugin.Running) {
+				continue;
+			}
+
+			for (PluginWidget &widget : plugin.Widgets) {
+				if (!widget.Open) {
+					continue;
+				}
+
+				// **The plugin's name in the id and not in the title.** Two
+				// plugins may both call a panel "Settings", and ImGui keys a
+				// window on its whole label — so the id suffix keeps them apart
+				// without putting a prefix in front of what a person reads.
+				const std::string label =
+					widget.Title + "###plugin." + plugin.Manifest.Name + "." + widget.Title;
+
+				if (ImGui::Begin(label.c_str(), &widget.Open)) {
+					InvokePlugin(plugin, widget.Render, true);
+				}
+				ImGui::End();
+			}
+		}
+	}
+
 	void Editor::DrawPlugins() {
 		if (!ShowPlugins) {
 			return;
@@ -394,6 +502,56 @@ namespace studio {
 		ImGui::TextDisabled("A reload restarts every plugin against the active scene.");
 
 		ImGui::Spacing();
+
+		// --- what the plugins asked for --------------------------------------
+		//
+		// **Above the list, because this is the half somebody uses.** The table
+		// below is for working out why a plugin is not running; the toolbars are
+		// what it is for when it is.
+		bool anyToolbar = false;
+		for (LoadedPlugin &plugin : Plugins) {
+			for (size_t bar = 0; bar < plugin.Toolbars.size(); bar++) {
+				PluginToolbar &toolbar = plugin.Toolbars[bar];
+				anyToolbar = true;
+
+				ImGui::SeparatorText(toolbar.Name.c_str());
+
+				for (size_t at = 0; at < toolbar.Buttons.size(); at++) {
+					PluginButton &button = toolbar.Buttons[at];
+
+					if (at > 0) {
+						ImGui::SameLine();
+					}
+
+					// The id keeps two buttons of one name apart; the label is
+					// what somebody reads.
+					const std::string id = button.Name + "###plugin." + plugin.Manifest.Name + "." +
+										   std::to_string(bar) + "." + std::to_string(at);
+
+					const bool pressed = button.Active
+											 ? ImGui::Selectable(id.c_str(), true, 0, ImVec2(92.0f, 0.0f))
+											 : ImGui::Button(id.c_str(), ImVec2(92.0f, 0.0f));
+
+					if (!button.Tooltip.empty() && ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("%s", button.Tooltip.c_str());
+					}
+
+					if (pressed) {
+						// **Not drawing.** A click handler runs the plugin's own
+						// code, which may open a widget or change the selection;
+						// letting it draw here would put its widgets in this
+						// panel rather than in its own.
+						InvokePlugin(plugin, button.OnClick, false);
+					}
+				}
+			}
+		}
+
+		if (anyToolbar) {
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+		}
 
 		if (Plugins.empty()) {
 			ImGui::TextDisabled("nothing installed");
@@ -432,6 +590,15 @@ namespace studio {
 				}
 
 				ImGui::TableNextColumn();
+
+				// A panel somebody closed is reopened from here, which is the
+				// one thing they cannot do from the plugin's own surface.
+				for (PluginWidget &widget : plugin.Widgets) {
+					const std::string id =
+						widget.Title + "###toggle." + plugin.Manifest.Name + "." + widget.Title;
+					ImGui::Checkbox(id.c_str(), &widget.Open);
+					ImGui::SameLine();
+				}
 
 				// **The error where the description would be**, because a
 				// plugin that is not running is one somebody is trying to fix
