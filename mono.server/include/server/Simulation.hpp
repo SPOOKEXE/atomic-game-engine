@@ -85,4 +85,28 @@ namespace server {
 	// the same count produces the same world, which is what lets two runs be
 	// compared.
 	void BuildPlaceholderWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t count);
+
+	// Gives a hosted world physics and weight — the server's half of what
+	// `studio::Editor::PrepareWorld` does, less the presentation this binary
+	// has no renderer for.
+	//
+	// **The server was not simulating anything, and that is a stranger
+	// sentence than it sounds.** `D00039` wired physics into the studio and
+	// deliberately stopped there, so a game hosted headlessly integrated no
+	// body and resolved no contact: a part dropped in a hosted world hung in
+	// the air, and every client watching it agreed, because they were watching
+	// an authority that was not simulating. It is also the precondition for
+	// anything to *own* a simulation — an owner of nothing is a field.
+	//
+	// Both halves, for the reason the studio takes both: `physics` has no
+	// gravity of its own by design, so the pipeline alone integrates every
+	// body at zero acceleration for ever. `scene::Gravity` is the world's
+	// answer and this is the host applying it.
+	//
+	// Call it once per world. `Scheduler::Add` takes a name and does not
+	// deduplicate, so a world prepared twice integrates twice per tick — which
+	// is a world running at double gravity rather than an error anybody sees.
+	//
+	// @since v0.13
+	void PrepareSimulation(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 }

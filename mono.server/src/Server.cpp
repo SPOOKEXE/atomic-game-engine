@@ -420,6 +420,14 @@ namespace server {
 			Worlds().Enter(
 				id,
 				[this, &limits, &failure, id](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					// **Before the scripts, because a script may create a
+					// part.** `PreparePhysicsWorld` calls `Store::Observe`,
+					// which moves every row already carrying the component
+					// into an archetype with somewhere to put the change
+					// bits — a structural change, and one that is free on an
+					// empty world and a re-shuffle on a populated one.
+					PrepareSimulation(store, systems);
+
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
 					// first thing to drift is the heartbeat's delta.
@@ -452,6 +460,13 @@ namespace server {
 
 	bool Server::BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
 		if (Settings.GamePath.empty()) {
+			// **No physics on the placeholder, deliberately.** It is a
+			// benchmark scene rather than a game: its entities carry no
+			// `Part` and so no rigid body, its own `Integrate` and `Bounce`
+			// are what it exists to measure, and `--entities 512 --ticks 200`
+			// is the shape `just determinism` and `just replay-check` compare.
+			// Preparing it would add a resource and two systems that find
+			// nothing to do, and put them inside the thing being measured.
 			BuildPlaceholderWorld(store, scheduler, Settings.Entities);
 			return true;
 		}
@@ -463,6 +478,8 @@ namespace server {
 		// What it does *not* install is the client's half — there is no camera
 		// and no draw list here, because a server draws nothing. That split is
 		// the reason the loader stops where it does.
+		PrepareSimulation(store, scheduler);
+
 		std::string error;
 		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {
 			ENGINE_ERROR("--game '{}' failed:\n{}", Settings.GamePath, error);
