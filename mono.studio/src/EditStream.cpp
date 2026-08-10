@@ -135,6 +135,55 @@ namespace studio {
 			return true;
 		}
 
+		// The smallest subtree covering everything a waypoint touches.
+		//
+		// **One request per waypoint, not one per record.** A waypoint is
+		// granted and applied whole — half of one is a state the author never
+		// saw — so it takes one turn, and a waypoint spanning two models asks
+		// for the smallest subtree that covers both. That is coarser than
+		// asking per record and it is the only shape in which "applied whole"
+		// and "took a turn" are the same statement.
+		//
+		// A create contends for where it is *going*: somebody holding a model
+		// owns what gets put inside it.
+		InstancePath CommonRoot(std::span<const EditRecord> records) {
+			InstancePath root;
+			bool first = true;
+
+			for (const EditRecord &record : records) {
+				const InstancePath &touched =
+					record.Kind == CommandKind::Create ? record.OldParent : record.Subject;
+				if (touched.empty()) {
+					continue;
+				}
+
+				if (first) {
+					root = touched;
+					first = false;
+				} else {
+					size_t shared = 0;
+					while (shared < root.size() && shared < touched.size() &&
+						   root[shared] == touched[shared]) {
+						shared++;
+					}
+					root.resize(shared);
+				}
+
+				// A reparent moves an instance *into* somewhere, so the
+				// destination is part of what the turn has to cover.
+				if (record.Kind == CommandKind::Reparent && !record.NewParent.empty()) {
+					size_t shared = 0;
+					while (shared < root.size() && shared < record.NewParent.size() &&
+						   root[shared] == record.NewParent[shared]) {
+						shared++;
+					}
+					root.resize(shared);
+				}
+			}
+
+			return root;
+		}
+
 		// The world a name belongs to, or an invalid id.
 		//
 		// **By name, because a `WorldId` is an index into one process's
@@ -159,14 +208,10 @@ namespace studio {
 		writer.WriteUInt8(static_cast<uint8_t>(message.Kind));
 
 		switch (message.Kind) {
-		case EditFrame::Claim:
+		case EditFrame::Request:
 		case EditFrame::Release:
+		case EditFrame::Granted:
 			WritePath(writer, message.Subject);
-			break;
-
-		case EditFrame::Denied:
-			WritePath(writer, message.Subject);
-			writer.WriteUInt32(message.Holder);
 			break;
 
 		case EditFrame::Welcome:
@@ -181,7 +226,6 @@ namespace studio {
 			for (const Lease &lease : message.Locks) {
 				WritePath(writer, lease.Subject);
 				writer.WriteUInt32(lease.Holder);
-				writer.WriteBool(lease.Claimed);
 			}
 			break;
 
@@ -215,18 +259,12 @@ namespace studio {
 		message.Kind = static_cast<EditFrame>(kind);
 
 		switch (message.Kind) {
-		case EditFrame::Claim:
+		case EditFrame::Request:
 		case EditFrame::Release:
+		case EditFrame::Granted:
 			if (!ReadPath(reader, message.Subject)) {
 				return std::nullopt;
 			}
-			break;
-
-		case EditFrame::Denied:
-			if (!ReadPath(reader, message.Subject)) {
-				return std::nullopt;
-			}
-			message.Holder = reader.ReadUInt32();
 			break;
 
 		case EditFrame::Welcome:
@@ -251,7 +289,6 @@ namespace studio {
 					return std::nullopt;
 				}
 				lease.Holder = reader.ReadUInt32();
-				lease.Claimed = reader.ReadBool();
 				if (reader.Failed()) {
 					return std::nullopt;
 				}
@@ -480,89 +517,140 @@ namespace studio {
 	}
 
 	bool EditStream::Publish(uint64_t waypoint, std::span<const Command> commands, double nowSeconds) {
+		(void)waypoint;
 		if (commands.empty() || Worlds == nullptr || Log == nullptr) {
 			return false;
 		}
 
+		// Described now, while the instances the commands name still exist — a
+		// delete's subject is gone by the time a queued turn comes round.
 		const std::vector<EditRecord> records = DescribeEdits(*Log, *Worlds, commands);
 		if (records.empty()) {
 			return false;
 		}
 
-		Published = waypoint;
-
-		const std::vector<std::byte> payload = EncodeEdits(records);
+		Held held;
+		held.Subject = CommonRoot(records);
+		held.Payload = EncodeEdits(records);
+		held.Records = records;
+		held.AskedAtSeconds = nowSeconds;
 
 		if (Server != nullptr) {
-			// The host contends against its own table too. It is not exempt:
-			// an editor hosting is still an editor, and a host that could edit
-			// through somebody else's hold would make the whole thing
-			// advisory.
-			if (const std::optional<Blocked> blocked = Contest(records, HOST_EDITOR, nowSeconds)) {
-				Refused = blocked;
-				Tally.Contested++;
-
-				// The same rollback a guest does on a denial. A host is an
-				// editor like any other, including in what happens when it
-				// loses.
-				if (Log != nullptr && Log->CanUndo() && Log->Undoable().back().Waypoint == waypoint) {
-					Log->Undo();
+			// The host asks its own table, which answers immediately — there is
+			// nobody to ask. It is not exempt from the queue, though: a host
+			// that could edit through somebody else's turn would make the whole
+			// thing advisory.
+			const Turn turn = Holds.Request(held.Subject, HOST_EDITOR, nowSeconds);
+			if (turn == Turn::Granted) {
+				Server->Broadcast(held.Payload, nowSeconds);
+				Tally.Sent++;
+				for (const Waiting &woken : Holds.Release(held.Subject, HOST_EDITOR, nowSeconds)) {
+					Grant(woken.Holder, woken.Subject, nowSeconds);
 				}
-				return false;
-			}
-			for (const EditRecord &record : records) {
-				Holds.Hold(record.Subject, HOST_EDITOR, nowSeconds);
+				PublishLocks(nowSeconds);
+				return true;
 			}
 
-			// Nobody excepted: this is the host's own edit and every guest has
-			// to hear it.
-			Server->Broadcast(payload, nowSeconds);
-			Tally.Sent++;
+			// Queued behind somebody. Kept and sent when the turn arrives,
+			// which is what makes this lossless: the edit lands on top of
+			// theirs rather than being thrown away.
+			Pending.push_back(std::move(held));
+			Tally.Queued++;
 			PublishLocks(nowSeconds);
 			return true;
 		}
 
-		if (Client == nullptr || !Client->SendUser(payload, nowSeconds)) {
-			// Counted rather than queued. A guest whose link is not up yet has
-			// not joined the session, and holding edits until it does would
-			// replay a burst of them into a document that has moved on.
+		if (Client == nullptr) {
 			Tally.Undelivered++;
 			return false;
 		}
-		Tally.Sent++;
+
+		// A guest asks and waits for the grant. **The person does not wait** —
+		// the edit is already applied at this machine; what waits is the
+		// message.
+		//
+		// **Held first, and asked for second.** A request the link would not
+		// take is a reason to ask again, not a reason to lose the edit: the
+		// retry in `Pump` picks it up, and the whole point of the queue is that
+		// nobody's work is thrown away.
+		EditMessage request;
+		request.Kind = EditFrame::Request;
+		request.Subject = held.Subject;
+		if (!Client->SendUser(EncodeMessage(request), nowSeconds)) {
+			Tally.Undelivered++;
+			// Asked for again a retry from now rather than immediately, so a
+			// link that is briefly full is not hammered.
+			held.AskedAtSeconds = nowSeconds;
+		}
+
+		Pending.push_back(std::move(held));
+		Tally.Queued++;
 		return true;
 	}
 
-	std::optional<Blocked>
-	EditStream::Contest(std::span<const EditRecord> records, EditorId holder, double nowSeconds) {
-		// **Every path a record touches, and the whole waypoint refused if any
-		// of them is held.** Half a waypoint is a state the author never saw,
-		// which is the same reason a waypoint is the unit in the first place.
-		for (const EditRecord &record : records) {
-			// **A create contends against where it is going and holds what it
-			// made, and those are two different paths.** Somebody holding a
-			// model owns what gets put inside it, so the parent is what decides
-			// whether the create may happen — but *holding* the parent would
-			// mean creating one part under Workspace locks the entire scene
-			// against everybody, which is not a lock anybody asked for.
-			const InstancePath &against =
-				record.Kind == CommandKind::Create ? record.OldParent : record.Subject;
+	void EditStream::Grant(EditorId editor, const InstancePath &path, double nowSeconds) {
+		if (Server == nullptr) {
+			return;
+		}
 
-			if (const std::optional<Blocked> blocked = Holds.Blocking(against, holder, nowSeconds)) {
-				return blocked;
+		if (editor == HOST_EDITOR) {
+			// The host grants itself by sending what was waiting, with no
+			// message in between.
+			Flush(path, nowSeconds);
+			return;
+		}
+
+		for (const auto &member : Members) {
+			if (member.first != editor) {
+				continue;
+			}
+			EditMessage granted;
+			granted.Kind = EditFrame::Granted;
+			granted.Subject = path;
+			Server->SendTo(member.second, EncodeMessage(granted), nowSeconds);
+			return;
+		}
+	}
+
+	void EditStream::Flush(const InstancePath &granted, double nowSeconds) {
+		// **Oldest first, and only what the grant covers.** An editor's own
+		// edits must reach everybody else in the order they were made, whatever
+		// order the turns come back in.
+		for (size_t index = 0; index < Pending.size();) {
+			if (!Contains(granted, Pending[index].Subject) && !Contains(Pending[index].Subject, granted)) {
+				index++;
+				continue;
 			}
 
-			// A reparent moves an instance *into* somewhere, so the destination
-			// is contended too — otherwise two editors could drop parts into
-			// one model nobody else was allowed to touch.
-			if (record.Kind == CommandKind::Reparent) {
-				if (const std::optional<Blocked> blocked =
-						Holds.Blocking(record.NewParent, holder, nowSeconds)) {
-					return blocked;
+			const std::vector<std::byte> payload = Pending[index].Payload;
+			const InstancePath subject = Pending[index].Subject;
+			Pending.erase(Pending.begin() + static_cast<ptrdiff_t>(index));
+
+			if (Server != nullptr) {
+				Server->Broadcast(payload, nowSeconds);
+				Tally.Sent++;
+				for (const Waiting &woken : Holds.Release(subject, HOST_EDITOR, nowSeconds)) {
+					Grant(woken.Holder, woken.Subject, nowSeconds);
+				}
+				PublishLocks(nowSeconds);
+			} else if (Client != nullptr) {
+				if (Client->SendUser(payload, nowSeconds)) {
+					Tally.Sent++;
+				} else {
+					Tally.Undelivered++;
 				}
 			}
 		}
-		return std::nullopt;
+	}
+
+	void EditStream::Remember(EditorId editor, engine::replication::ClientId client) {
+		for (auto &member : Members) {
+			if (member.first == editor) {
+				member.second = client;
+				return;
+			}
+		}
+		Members.emplace_back(editor, client);
 	}
 
 	void EditStream::PublishLocks(double nowSeconds) {
@@ -592,14 +680,13 @@ namespace studio {
 		//
 		// **One past the client's slot, because slots start at zero and zero is
 		// the host.** Without the offset the first guest to join *is* the host
-		// as far as every hold is concerned, and the two would edit through
-		// each other's locks — which is the one collision this whole mechanism
-		// exists to prevent, arriving by arithmetic.
+		// as far as every turn is concerned, and the two take turns with
+		// themselves.
 		const EditorId sender = Server != nullptr ? from.Index + 1 : HOST_EDITOR;
 
 		switch (message->Kind) {
 		case EditFrame::Locks:
-			// A guest taking the host's picture of who holds what. Never
+			// A guest taking the host's picture of whose turn it is. Never
 			// consulted to decide anything — a decision two processes could
 			// reach differently is a decision that will be.
 			Holds.Adopt(message->Locks);
@@ -607,31 +694,15 @@ namespace studio {
 
 		case EditFrame::Welcome:
 			// Which editor the host is calling this one. Without it a guest
-			// could see that somebody holds a model and not whether that
-			// somebody is itself, and would grey out its own work.
+			// could see that somebody has a turn and not whether that somebody
+			// is itself.
 			Me = message->Holder;
 			return;
 
-		case EditFrame::Denied:
-			// Somebody else is working there. Kept so a panel can say who,
-			// rather than leaving an edit to vanish with no explanation.
-			Refused = Blocked{message->Subject, message->Holder};
-			Tally.Contested++;
-
-			// **And taken back**, because a guest applies its own edit the
-			// moment it is made and only then hears that the host refused it.
-			// Without this the loser of a race keeps a change nobody else has,
-			// which is exactly the divergence an ordered stream exists to
-			// prevent.
-			//
-			// Only when it is still the top of the stack: a person who has gone
-			// on to do something else has built on it, and silently reaching
-			// past their newer work would be worse than the divergence.
-			if (Published != 0 && Log != nullptr && Log->CanUndo() &&
-				Log->Undoable().back().Waypoint == Published) {
-				Log->Undo();
-				Published = 0;
-			}
+		case EditFrame::Granted:
+			// The turn came round. Everything this editor was holding back for
+			// that subtree goes now, oldest first.
+			Flush(message->Subject, nowSeconds);
 			return;
 
 		case EditFrame::Hello: {
@@ -641,6 +712,8 @@ namespace studio {
 				Tally.Malformed++;
 				return;
 			}
+
+			Remember(sender, from);
 
 			EditMessage welcome;
 			welcome.Kind = EditFrame::Welcome;
@@ -657,16 +730,31 @@ namespace studio {
 			return;
 		}
 
-		case EditFrame::Claim:
+		case EditFrame::Request: {
+			if (Server == nullptr) {
+				Tally.Malformed++;
+				return;
+			}
+			Remember(sender, from);
+
+			// **Granted or queued, and never refused for being busy.** Somebody
+			// asking for a subtree in use is not somebody doing anything wrong;
+			// they are second, and second still gets a turn.
+			const Turn turn = Holds.Request(message->Subject, sender, nowSeconds);
+			if (turn == Turn::Granted) {
+				Grant(sender, message->Subject, nowSeconds);
+			}
+			PublishLocks(nowSeconds);
+			return;
+		}
+
 		case EditFrame::Release: {
 			if (Server == nullptr) {
 				Tally.Malformed++;
 				return;
 			}
-			if (message->Kind == EditFrame::Claim) {
-				Holds.Hold(message->Subject, sender, nowSeconds, true);
-			} else {
-				Holds.Release(message->Subject, sender);
+			for (const Waiting &woken : Holds.Release(message->Subject, sender, nowSeconds)) {
+				Grant(woken.Holder, woken.Subject, nowSeconds);
 			}
 			PublishLocks(nowSeconds);
 			return;
@@ -676,35 +764,18 @@ namespace studio {
 			break;
 		}
 
-		if (Server != nullptr) {
-			// **The arbitration, and it happens here because the ordering
-			// already does.** One process decides who was first; a guest
-			// deciding for itself would be two answers to one question, and the
-			// two would differ exactly when it mattered.
-			if (const std::optional<Blocked> blocked = Contest(message->Records, sender, nowSeconds)) {
-				EditMessage denial;
-				denial.Kind = EditFrame::Denied;
-				denial.Subject = blocked->Subject;
-				denial.Holder = blocked->Holder;
-				Server->SendTo(from, EncodeMessage(denial), nowSeconds);
-
-				Tally.Contested++;
-				return;
-			}
-
-			// Taken by editing rather than asked for. Every further edit renews
-			// it, so somebody working on a model holds it for as long as they
-			// keep working and for `HoldSeconds` after they stop.
-			//
-			// What is held is what was *touched* — for a create that is the
-			// instance it made, not the parent it made it under.
-			for (const EditRecord &record : message->Records) {
-				Holds.Hold(record.Subject, sender, nowSeconds);
-			}
-		}
-
 		Tally.Received++;
 		Tally.Applied += ApplyEdits(*Log, *Worlds, message->Records);
+
+		// **And then everything of this editor's that has not gone yet, on
+		// top.** The waypoint just applied was ordered by the host *before*
+		// them; without the replay this machine would sit on a value the host
+		// has already superseded while everybody else moved on.
+		for (const Held &waiting : Pending) {
+			if (Overlaps(waiting.Subject, CommonRoot(message->Records))) {
+				ApplyEdits(*Log, *Worlds, waiting.Records);
+			}
+		}
 
 		if (Server != nullptr) {
 			// **The relay, and the exception is the point.** Everybody else
@@ -714,66 +785,46 @@ namespace studio {
 			// change twice.
 			Server->Broadcast(payload, nowSeconds, from);
 			Tally.Relayed++;
-			PublishLocks(nowSeconds);
-		}
-	}
 
-	bool EditStream::Claim(const InstancePath &path, double nowSeconds) {
-		if (path.empty()) {
-			return false;
-		}
-
-		if (Server != nullptr) {
-			if (!Holds.Hold(path, HOST_EDITOR, nowSeconds, true)) {
-				return false;
+			// The turn is over the moment the edit has landed and gone out.
+			// Whoever was next gets it now, and their edit lands on top.
+			const InstancePath root = CommonRoot(message->Records);
+			for (const Waiting &woken : Holds.Release(root, sender, nowSeconds)) {
+				Grant(woken.Holder, woken.Subject, nowSeconds);
 			}
 			PublishLocks(nowSeconds);
-			return true;
 		}
-
-		if (Client == nullptr) {
-			return false;
-		}
-		// A guest asks and hears the answer in the next table. The host is the
-		// one that decides, so a guest that returned "yes" from here would be
-		// answering a question it does not have the information for.
-		EditMessage message;
-		message.Kind = EditFrame::Claim;
-		message.Subject = path;
-		return Client->SendUser(EncodeMessage(message), nowSeconds);
-	}
-
-	bool EditStream::Release(const InstancePath &path, double nowSeconds) {
-		if (path.empty()) {
-			return false;
-		}
-
-		if (Server != nullptr) {
-			const bool released = Holds.Release(path, HOST_EDITOR);
-			if (released) {
-				PublishLocks(nowSeconds);
-			}
-			return released;
-		}
-
-		if (Client == nullptr) {
-			return false;
-		}
-		EditMessage message;
-		message.Kind = EditFrame::Release;
-		message.Subject = path;
-		return Client->SendUser(EncodeMessage(message), nowSeconds);
 	}
 
 	void EditStream::Pump(double nowSeconds) {
 		PollingAt = nowSeconds;
 
 		if (Server != nullptr) {
-			// A hold that has lapsed stops blocking whether or not anybody
-			// sweeps it, so this is tidiness — but it is also what makes the
-			// table a guest sees match the one the host enforces.
-			if (Holds.Expire(nowSeconds) > 0) {
+			// A grant whose guard has fired holds nobody up whether or not
+			// anybody sweeps it — but sweeping is what hands the turn to
+			// whoever was waiting behind an editor that died.
+			const std::vector<Waiting> woken = Holds.Expire(nowSeconds);
+			for (const Waiting &next : woken) {
+				Grant(next.Holder, next.Subject, nowSeconds);
+			}
+			if (!woken.empty()) {
 				PublishLocks(nowSeconds);
+			}
+		}
+
+		// A grant that never arrived is asked for again rather than waited on
+		// for ever. One lost datagram must not strand an edit.
+		if (Client != nullptr && Client->Admitted()) {
+			for (Held &held : Pending) {
+				if (nowSeconds - held.AskedAtSeconds < RETRY_SECONDS) {
+					continue;
+				}
+				EditMessage request;
+				request.Kind = EditFrame::Request;
+				request.Subject = held.Subject;
+				if (Client->SendUser(EncodeMessage(request), nowSeconds)) {
+					held.AskedAtSeconds = nowSeconds;
+				}
 			}
 		}
 

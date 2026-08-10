@@ -33,22 +33,27 @@
 // buys, and it is why the relay goes through one process rather than
 // peer-to-peer among the guests.
 //
-// ## Conflicts
+// ## Conflicts: take turns, and lose nothing
 //
-// **Whoever touched a subtree first holds it** — `studio::EditLocks`, enforced
-// here at the host because the host is already the thing that decides order. A
-// waypoint touching something somebody else holds is refused whole and the
-// sender is told who is in the way; a hold lapses on its own, so an editor that
-// crashed does not keep a model for ever.
+// **Ask, hold, edit, give back.** A guest asks the host before it publishes;
+// the host hands out the subtree if it is free and queues the request behind
+// whoever has it; the guest sends its waypoint; the host applies it, relays it,
+// gives the subtree back and grants the next in line — `studio::EditLocks`.
 //
-// Nobody asks for a hold and nobody waits for one. A design where a guest
-// requests and then edits costs a round trip before the first edit of every
-// interaction, so clicking a part and dragging it would fail until the answer
-// came back — worse than the problem it solves. `EditLocks.hpp` carries that
-// argument in full.
+// **Nobody's work is thrown away.** Two editors on one model do not race and
+// they do not lose: the second edit lands *on top of* the first, in the order
+// the host granted. That is the whole reason there is a queue rather than a
+// refusal.
 //
-// **Refused whole, never in part.** Half a waypoint is a state the author never
-// saw, which is the same reason a waypoint is the unit in the first place.
+// **The person never waits.** Their edit is applied at their own machine the
+// moment they make it; what waits for the grant is the *message*. A queued
+// editor carries on working and their waypoints go out in the order the host
+// lets them.
+//
+// **A waypoint is granted and applied whole.** Half of one is a state the
+// author never saw, which is the same reason a waypoint is the unit at all — so
+// a waypoint touching two models asks for the smallest subtree that covers
+// both.
 //
 // **No history merge.** A guest's undo stack holds what that guest did. Undoing
 // something a colleague has since built on is a conflict this layer does not
@@ -140,9 +145,10 @@ namespace studio {
 		// One committed waypoint's records, in the order they were made.
 		Waypoint = 0,
 
-		// A guest asking to hold a subtree before working on it, or giving one
-		// up. The host answers by sending the table.
-		Claim = 1,
+		// A guest asking for a turn on a subtree, and giving one back. The host
+		// answers a request with `Granted` when it is free, and with silence
+		// when it is not — the grant arrives when the turn does.
+		Request = 1,
 		Release = 2,
 
 		// The host telling everybody who holds what. A snapshot rather than a
@@ -151,12 +157,12 @@ namespace studio {
 		// until something else happened to correct it.
 		Locks = 3,
 
-		// The host telling one guest that a waypoint was refused, and by whom.
+		// The host telling one guest that a subtree is theirs to edit now.
 		//
-		// **Sent rather than left to be inferred from the lock table.** A guest
-		// whose edit vanished with no message would report it as replication
-		// being broken, and it is not — somebody else is working there.
-		Denied = 4,
+		// **The only thing a guest waits for.** It arrives immediately when
+		// nobody had the subtree, and when the person in front gives it back
+		// otherwise.
+		Granted = 4,
 
 		// A guest saying it has arrived, and the host telling it which editor
 		// it is.
@@ -181,10 +187,10 @@ namespace studio {
 		// `Waypoint`.
 		std::vector<EditRecord> Records;
 
-		// `Claim`, `Release` and `Denied`.
+		// `Request`, `Release` and `Granted`.
 		InstancePath Subject;
 
-		// `Denied` and `Welcome`.
+		// `Welcome`.
 		EditorId Holder = HOST_EDITOR;
 
 		// `Locks`.
@@ -281,16 +287,15 @@ namespace studio {
 		// Payloads that were not a message.
 		uint64_t Malformed = 0;
 
-		// Waypoints refused because somebody else was holding what they
-		// touched.
+		// Waypoints that had to wait for a turn.
 		//
 		// **Counted apart from `Malformed`**, because they are different
-		// events: one is somebody working where you are, the other is a peer
-		// speaking a language this build does not. An operator — or a person
-		// wondering why their edit did not stick — wants to tell them apart.
+		// events: one is somebody working where you are — which is ordinary and
+		// costs nothing but a moment — and the other is a peer speaking a
+		// language this build does not.
 		//
 		// @since v0.13
-		uint64_t Contested = 0;
+		uint64_t Queued = 0;
 	};
 
 	// The editors in one team-create session, and the edits between them.
@@ -338,30 +343,6 @@ namespace studio {
 		EditStream(const EditStream &) = delete;
 		EditStream &operator=(const EditStream &) = delete;
 
-		// Reserves a subtree before working on it.
-		//
-		// Nothing needs this: a hold is taken by editing. It is here for the
-		// person who wants to say *before* they start that they are about to
-		// work somewhere, which is the one thing the implicit path cannot
-		// express.
-		//
-		// @param path       The subtree.
-		// @param nowSeconds The current time.
-		// @return `false` when there is no session, or the host already knows
-		//         somebody else holds it. A guest's answer arrives with the
-		//         next lock table rather than from this call, because the host
-		//         is the one that decides.
-		// @since v0.13
-		bool Claim(const InstancePath &path, double nowSeconds);
-
-		// Gives up a subtree.
-		//
-		// @param path       The subtree.
-		// @param nowSeconds The current time.
-		// @return Whether anything was said.
-		// @since v0.13
-		bool Release(const InstancePath &path, double nowSeconds);
-
 		// Who is holding what, as this editor last heard it.
 		//
 		// On a host this is the table itself. On a guest it is the last
@@ -383,13 +364,19 @@ namespace studio {
 			return Me;
 		}
 
-		// The last refusal, for a panel that has to explain one.
+		// How many of this editor's waypoints are waiting for a turn.
 		//
-		// @return What was in the way, or nothing since the last edit that
-		//         landed.
-		// @since v0.13
-		const std::optional<Blocked> &LastRefusal() const {
-			return Refused;
+		// **For a panel, and it is the honest thing to show**: an edit that has
+		// not replicated yet is not an edit that failed, and a person watching
+		// a colleague's screen not change wants to know which.
+		//
+		// @return The count, zero when everything has gone.
+		//
+		// **Not called `Waiting`**, which is the name of the queue entry a
+		// lock table hands back — one word for a count and a record would make
+		// `for (const Waiting &...)` inside this class resolve to the method.
+		size_t Backlog() const {
+			return Pending.size();
 		}
 
 		// Puts one waypoint on the wire.
@@ -442,17 +429,47 @@ namespace studio {
 		void
 		Receive(std::span<const std::byte> payload, double nowSeconds, engine::replication::ClientId from);
 
+		// One waypoint this editor has made and not yet been allowed to send.
+		//
+		// **The records rather than the commands**, because a path is read out
+		// of the store while the instances still exist and a queued waypoint
+		// may outlive them — a delete's subject is gone by the time the turn
+		// comes round.
+		struct Held {
+			// The subtree the whole waypoint asked for.
+			InstancePath Subject;
+
+			// What to send once the turn arrives.
+			std::vector<std::byte> Payload;
+
+			// The same waypoint, kept unencoded so it can be *replayed*.
+			//
+			// **This is what makes an optimistic edit converge.** A person's
+			// edit is applied at their own machine the moment they make it, and
+			// somebody else's may then arrive from the host having been ordered
+			// *before* it — at which point this machine holds the wrong answer
+			// and everybody else holds the right one. Re-applying what is still
+			// waiting, after each foreign waypoint, puts it back on top. That
+			// is the loser's view of "applied on top after the first person".
+			std::vector<EditRecord> Records;
+
+			// When the request was last sent, so a lost grant is asked for
+			// again rather than waited on for ever.
+			double AskedAtSeconds = 0.0;
+		};
+
 		// Sends the table to every guest. Host only.
 		void PublishLocks(double nowSeconds);
 
-		// Whether a waypoint may land, and what to hold if it does.
-		//
-		// @param records    The waypoint.
-		// @param holder     Who sent it.
-		// @param nowSeconds The current time.
-		// @return What is in the way, or nothing.
-		std::optional<Blocked>
-		Contest(std::span<const EditRecord> records, EditorId holder, double nowSeconds);
+		// Sends what a granted subtree was waiting to say.
+		void Flush(const InstancePath &granted, double nowSeconds);
+
+		// Tells one editor a subtree is theirs. Host only.
+		void Grant(EditorId editor, const InstancePath &path, double nowSeconds);
+
+		// Notes which client an editor id belongs to, so a grant can be
+		// addressed. Host only.
+		void Remember(EditorId editor, engine::replication::ClientId client);
 
 		CommandLog *Log = nullptr;
 		engine::world::Universe *Worlds = nullptr;
@@ -466,17 +483,22 @@ namespace studio {
 		// Whether this guest has said hello. Once, when the link comes up.
 		bool Greeted = false;
 
-		// What blocked the last refused waypoint, for a panel to explain.
-		std::optional<Blocked> Refused;
-
-		// The waypoint this editor published most recently.
+		// How long a guest waits for a grant before asking again.
 		//
-		// **So a refusal can be taken back.** A guest applies its own edit
-		// locally the moment it is made and only then finds out the host
-		// refused it — without this the loser of a race keeps a change nobody
-		// else has, which is the divergence the whole ordered stream exists to
-		// prevent.
-		uint64_t Published = 0;
+		// Longer than a round trip and shorter than a person notices. One lost
+		// datagram must not strand an edit.
+		static constexpr double RETRY_SECONDS = 1.0;
+
+		// Waypoints made and not yet allowed out, oldest first.
+		//
+		// **Oldest first, because that is the order they were made in.** An
+		// editor's own edits must reach everybody else in the order they
+		// happened, whatever order the turns come back in.
+		std::vector<Held> Pending;
+
+		// Which client each editor id belongs to, so a grant can be addressed.
+		// Host only.
+		std::vector<std::pair<EditorId, engine::replication::ClientId>> Members;
 
 		// Exactly one of these. A host orders; a guest is ordered.
 		std::unique_ptr<engine::replication::Listener> Server;

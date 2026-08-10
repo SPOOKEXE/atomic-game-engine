@@ -1135,28 +1135,35 @@ underneath reports what has crossed.
 did, never what somebody else did. An editor that undid a colleague's change
 because you pressed it once too often would be an editor nobody could work in.
 
-**Whoever touches a model first holds it.** Nobody asks for a lock and nobody
-waits for one: the first editor to edit a subtree holds it, every further edit
-renews the hold, and everybody else is refused until it lapses — ten seconds
-after they stop. The panel lists who is holding what, and an edit that is
-refused says who is in the way rather than vanishing.
+**Two editors on one model take turns, and neither loses their work.** Before a
+waypoint goes out, its author asks the host for the subtree it touches. If
+nobody has it, the host hands it over and the edit goes; if somebody does, the
+request waits in line. When the person in front is done the next one goes, and
+their change lands *on top of* the first.
 
-A hold covers a subtree, not one instance: a lock over a model that let
-somebody else edit its parts would protect nothing, because moving a model
-moves its children.
+**Nobody is ever refused for being second.** That is the whole reason there is
+a queue rather than a rejection: somebody asking for a model in use is not
+doing anything wrong, they are second, and second still gets a turn.
 
-**A hold lapses on its own**, which is what makes an editor that crashed
-survivable — there is nobody to notice that it has, so nothing can depend on it
-tidying up. Leaving a session releases everything at once, which is the tidy
-path rather than the one correctness depends on.
+**The person does not wait.** Their edit is applied at their own machine the
+moment they make it; what waits for the turn is the *message*. A queued editor
+carries on working and their waypoints go out in the order they made them.
 
-**The refusal is at the host.** The panel greys things out as a courtesy; what
-is enforced is that a waypoint touching somebody else's hold is refused there,
-whole, and taken back at the sender. A guest running a modified build cannot
-edit through a hold.
+If somebody else's edit is ordered ahead of one you are still waiting to send,
+your machine re-applies yours on top when theirs arrives — so every editor ends
+on the same answer, and it is the host's order that decides which.
 
-You can reserve a subtree before you start rather than by starting — that is
-what a hold taken deliberately is — but nothing needs it.
+A turn covers a subtree, not one instance: a turn over a model that let
+somebody else edit its parts would order nothing, because moving a model moves
+its children. Two editors in different corners never wait for each other.
+
+**A grant has a short guard**, so an editor that is handed a subtree and then
+dies costs the next person a pause rather than the session. It is a bound on
+one protocol step, not a lease on editing.
+
+**The ordering is at the host**, which is already the thing that decides order.
+The panel shows whose turn it is and how many edits are waiting; a guest running
+a modified build cannot jump the queue.
 
 **Everybody has to have the project open already.** A join carries edits, not
 the document — a scene the peer does not have is an edit that is dropped and

@@ -1,54 +1,54 @@
 #pragma once
 
-// Who is holding what, so two editors do not fight over one model.
+// The turn-taking that keeps two editors off one model, and loses neither edit.
 //
-// The answer to the question `EditStream.hpp` used to say it had no answer for.
-// Last write wins is fine for two people working in different corners and is
-// exactly wrong for two people working on the same thing: the second write is
-// applied everywhere, the first person's is gone, and neither of them is told.
+// ## Ask, hold, edit, give back
 //
-// ## A lease on first touch, not a claim they have to ask for
+// A guest asks the host before it publishes; the host hands out the subtree if
+// nobody has it and **queues the request behind whoever does**; the guest sends
+// its waypoint; the host applies it, relays it, gives the subtree back and
+// grants the next in line.
 //
-// **Nobody asks for a lock and nobody waits for one.** The obvious design — a
-// guest requests, the host grants, the guest then edits — costs a round trip
-// *before the first edit of every interaction*, so clicking a part and dragging
-// it would fail until the answer came back. That is a worse experience than the
-// problem it solves.
+// **Nobody's work is thrown away, and that is the whole point of the queue.**
+// The version this replaced refused the second editor and rolled their change
+// back at their own machine — which is correct, survivable, and still means
+// somebody watched their edit disappear. Here the second edit lands *on top of*
+// the first, in the order the host granted, and both people keep what they did.
 //
-// So the host grants implicitly: the first editor to touch a subtree holds it,
-// every further edit renews the hold, and everybody else is refused until it
-// lapses. The check happens where the ordering already is — one process decides
-// who was first, which is the same reason the relay goes through the host.
+// ## What the round trip costs, and why it is affordable
 //
-// An explicit `Claim` exists on top of that for the case a person genuinely
-// wants to reserve something before working on it, and it is the same table.
+// The guest waits for a grant before its edit *replicates*. It does not wait to
+// *see* it: the edit is applied locally the moment it is made, so the person
+// feels no latency at all. What waits is the message, by one round trip — a
+// millisecond on a subnet, tens across the internet — and what it buys is that
+// the host, and only the host, decides who was first.
 //
-// ## Why a lease and not a lock
+// ## Why there is still a timeout
 //
-// An editor that crashes must not hold a model for ever, and there is nobody to
-// notice that it has. So a hold expires on its own — `HoldSeconds` after the
-// last edit that touched it — and an editor that is still working renews it
-// simply by working. Leaving releases everything at once, which is the tidy
-// path rather than the one correctness depends on.
+// A guest that is granted a subtree and then dies would hold it for ever, and
+// there is nobody to notice. So a grant has a guard — not a lease on editing,
+// which is what the previous design got wrong, but a bound on one protocol
+// step: the time between "you may" and "here it is". It is short, because
+// nothing legitimate takes long, and it exists so a crash costs the next person
+// a pause rather than the session.
 //
 // ## Why subtrees
 //
-// A lock over `Workspace.Model` that let somebody else edit
-// `Workspace.Model.Part` would protect nothing: moving a model moves its
+// A hold over `Workspace.Model` that let somebody else edit
+// `Workspace.Model.Part` would order nothing: moving a model moves its
 // children, and two people doing that at once is the case this exists for. So a
-// hold covers a path and everything under it, and two holds conflict when
-// either contains the other.
+// hold covers a path and everything under it, and two overlap when either
+// contains the other.
 //
 // ## What it is not
 //
-// **Not a permission system.** A hold says somebody is working there, not that
-// they are allowed to and you are not. Everybody in a session already has the
-// key that let them in; this stops collisions, not people.
+// **Not a permission system.** A hold says whose turn it is, not that somebody
+// is allowed and somebody else is not. Everybody in a session already has the
+// key that let them in.
 //
-// **Not enforced on the person who holds it.** The editor greys out what
-// somebody else holds, and that is a courtesy; what is actually enforced is at
-// the host, which refuses a waypoint touching somebody else's hold. A guest
-// running a modified build cannot edit through it.
+// **Not visible as waiting.** A queued editor is not blocked at their own
+// machine — they carry on editing, and their messages queue behind each other
+// in the order the host grants them.
 //
 // @tier L12 · client
 
@@ -71,8 +71,7 @@ namespace studio {
 	//
 	// The offset is load-bearing rather than cosmetic: client slots are dense
 	// and start at zero, so without it the first guest to join is the host as
-	// far as every hold is concerned, and the two edit through each other's
-	// locks.
+	// far as every hold is concerned, and the two take turns with themselves.
 	//
 	// @since v0.13
 	using EditorId = uint32_t;
@@ -80,131 +79,148 @@ namespace studio {
 	// The host's own id. Never issued to a guest.
 	inline constexpr EditorId HOST_EDITOR = 0;
 
-	// One editor holding one subtree.
+	// One editor holding one subtree, for the length of one edit.
 	//
 	// @since v0.13
 	struct Lease {
 		// The subtree's root. Everything under it is held too.
 		InstancePath Subject;
 
-		// Who holds it.
+		// Whose turn it is.
 		EditorId Holder = HOST_EDITOR;
 
-		// When it lapses, on the host's clock.
-		double ExpiresAtSeconds = 0.0;
-
-		// Whether somebody asked for this rather than earning it by editing.
+		// When the grant stops being honoured, on the host's clock.
 		//
-		// **Only so a panel can say which.** An explicit hold and one taken by
-		// touching a part behave identically — both expire, both block, both
-		// renew — and a table that treated them differently would be two
-		// mechanisms wearing one name.
-		bool Claimed = false;
+		// **A guard on one protocol step, not a lease on editing.** It bounds
+		// the gap between "you may" and "here it is", so an editor that died
+		// holding a turn costs the next person a pause rather than the session.
+		double ExpiresAtSeconds = 0.0;
 	};
 
-	// How long a hold lasts and how many there may be.
+	// Somebody waiting for a turn.
+	//
+	// @since v0.13
+	struct Waiting {
+		// What they asked for.
+		InstancePath Subject;
+
+		// Who asked.
+		EditorId Holder = HOST_EDITOR;
+	};
+
+	// What asking produced.
+	//
+	// @since v0.13
+	enum class Turn : uint8_t {
+		// Nobody had it. Go ahead.
+		Granted,
+
+		// Somebody has it. The request is remembered and will be granted when
+		// they give it back.
+		Queued,
+
+		// The queue is full. **Refused rather than dropped silently**, because
+		// a request that is neither granted nor queued is an editor waiting for
+		// a message that will never come.
+		Refused,
+	};
+
+	// Returns a stable, human-readable name for a turn.
+	//
+	// @param turn The turn to name.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(Turn turn);
+
+	// How long a grant is honoured and how many may wait.
 	//
 	// @since v0.13
 	struct LockSettings {
-		// How long after the last edit a hold lapses.
+		// How long after a grant the hold lapses if the edit never arrives.
 		//
-		// **Long enough to cover thinking, short enough to survive a crash.**
-		// Somebody dragging a model renews it constantly; somebody who alt-tabs
-		// mid-thought should not have to re-take it; somebody whose editor died
-		// should not block the model for the rest of the session. Ten seconds
-		// is chosen rather than measured, and saying so is better than implying
-		// otherwise.
-		double HoldSeconds = 10.0;
+		// **Short, because nothing legitimate takes long.** The gap it bounds
+		// is one message in each direction: the grant going out and the
+		// waypoint coming back. Two seconds is many times a bad connection's
+		// round trip and far less than a person would wait staring at a model
+		// they cannot move. Chosen rather than measured, and saying so is
+		// better than implying otherwise.
+		double GrantSeconds = 2.0;
 
-		// The most holds one table keeps.
-		//
-		// Bounded like every other table fed from a wire: a guest that claimed
-		// in a loop would otherwise be a guest spending the host's memory.
-		// Past the cap a *new* hold is refused and the existing ones stand,
-		// which is the same way round `network::Directory` does it and for the
-		// same reason.
+		// The most turns held at once.
 		size_t MaximumHolds = 256;
+
+		// The most requests waiting at once.
+		//
+		// Bounded like every other table fed from a wire: a guest that asked in
+		// a loop would otherwise be a guest spending the host's memory. Past
+		// the cap a new request is refused and the queue stands, which is the
+		// way round `network::Directory` bounds its table and for the same
+		// reason — a bound that lets a flood push out somebody's place in the
+		// queue is not a bound.
+		size_t MaximumWaiting = 256;
 	};
 
-	// Why an edit was refused.
+	// Whose turn it is, and who is next.
 	//
-	// @since v0.13
-	struct Blocked {
-		// The path the holder holds — which may be an ancestor of what was
-		// edited, and that is the useful thing to show a person: "Ana is
-		// editing Workspace.Model" explains a refusal on
-		// `Workspace.Model.Part` in a way the part's own name does not.
-		InstancePath Subject;
-
-		// Who holds it.
-		EditorId Holder = HOST_EDITOR;
-	};
-
-	// Who is holding what.
+	// **One per session, on the host, and only the host's is consulted.** A
+	// guest keeps a copy of what the host broadcasts purely so the editor can
+	// show who is where; a decision two processes could reach differently is a
+	// decision that will be.
 	//
-	// One per session, on the host. A guest keeps one too, filled from what the
-	// host broadcasts, purely so the editor can grey out what somebody else has
-	// — a guest's copy is never consulted to decide anything, because a decision
-	// two processes could reach differently is a decision that will be.
-	//
-	// **Time is passed in, never read**, like everything else that crosses this
-	// layer: an expiry is something a suite states rather than waits for.
+	// **Time is passed in, never read**, like everything else at this layer: a
+	// guard is something a suite states rather than waits for.
 	//
 	// @since v0.13
 	class LockTable {
 	  public:
-		// @param settings How long a hold lasts, and how many.
+		// @param settings How long a grant lasts, and how much may queue.
 		explicit LockTable(const LockSettings &settings = {});
 
-		// Whether `holder` may edit `path` right now.
+		// Asks for a turn on a subtree.
 		//
-		// @param path       What is being edited.
-		// @param holder     Who wants to.
-		// @param nowSeconds The current time.
-		// @return Nothing when the edit may go ahead — either nobody holds an
-		//         overlapping subtree, or `holder` does. Otherwise who is in
-		//         the way.
-		std::optional<Blocked> Blocking(const InstancePath &path, EditorId holder, double nowSeconds) const;
-
-		// Takes or renews a hold.
-		//
-		// **Renewing is the ordinary case and is why this is one call.** Every
-		// edit an editor makes passes through here, so a person working on a
-		// model holds it for as long as they keep working and for
-		// `HoldSeconds` after they stop.
+		// **Idempotent for an editor that already holds it.** An editor
+		// publishing twice in a row asks twice, and the second ask has to be a
+		// grant rather than a place in a queue behind itself.
 		//
 		// @param path       The subtree.
-		// @param holder     Who is holding it.
+		// @param holder     Who is asking.
 		// @param nowSeconds The current time.
-		// @param claimed    Whether this was asked for rather than earned.
-		// @return `false` when somebody else holds an overlapping subtree, or
-		//         the table is full.
-		bool Hold(const InstancePath &path, EditorId holder, double nowSeconds, bool claimed = false);
+		// @return Whether they may go ahead, are waiting, or were refused.
+		Turn Request(const InstancePath &path, EditorId holder, double nowSeconds);
 
-		// Gives up one hold.
+		// Gives a turn back, and says who gets it next.
 		//
-		// @param path   The subtree.
-		// @param holder Who is giving it up. Somebody else's hold is left
-		//        alone — a release that could take another editor's lock would
-		//        be a lock anybody can pick.
-		// @return Whether anything was released.
-		bool Release(const InstancePath &path, EditorId holder);
+		// @param path       The subtree.
+		// @param holder     Who is giving it up. Somebody else's turn is left
+		//        alone — a release that could end another editor's turn would
+		//        be a queue anybody can jump.
+		// @param nowSeconds The current time.
+		// @return Everybody who was waiting and may now go, in the order they
+		//         asked. **In order, because that is the promise**: whoever was
+		//         there first goes first, and the next edit lands on top.
+		std::vector<Waiting> Release(const InstancePath &path, EditorId holder, double nowSeconds);
 
-		// Gives up everything one editor holds.
+		// Gives up everything one editor holds or is waiting for.
 		//
-		// What a departure calls. Tidy rather than load-bearing: the expiry is
-		// what makes a crash survivable, and this is what makes a clean exit
-		// immediate.
+		// What a departure calls, and what makes a clean exit immediate — the
+		// guard is what makes a crash survivable.
 		//
-		// @param holder Who left.
-		// @return How many holds went.
-		size_t ReleaseAll(EditorId holder);
+		// @param holder     Who left.
+		// @param nowSeconds The current time.
+		// @return Everybody who may now go.
+		std::vector<Waiting> ReleaseAll(EditorId holder, double nowSeconds);
 
-		// Drops every hold that has lapsed.
+		// Drops every grant whose guard has fired, and says who may go.
 		//
 		// @param nowSeconds The current time.
-		// @return How many went.
-		size_t Expire(double nowSeconds);
+		// @return Everybody who may now go.
+		std::vector<Waiting> Expire(double nowSeconds);
+
+		// Who holds the subtree a path sits in, if anybody.
+		//
+		// @param path       The path.
+		// @param nowSeconds The current time.
+		// @return The lease, or null when the turn is free.
+		const Lease *HolderOf(const InstancePath &path, double nowSeconds) const;
 
 		// Replaces the whole table.
 		//
@@ -216,26 +232,32 @@ namespace studio {
 		// @param leases What the host holds.
 		void Adopt(std::span<const Lease> leases);
 
-		// Everything held, in no particular order.
+		// Every turn in progress.
 		//
 		// @return The leases, valid until the next call that changes the table.
 		std::span<const Lease> Held() const {
 			return Leases;
 		}
 
-		// Who holds the subtree a path sits in, whoever they are.
+		// Everybody waiting, in the order they asked.
 		//
-		// For a panel: what to grey out, and whose name to put on it.
-		//
-		// @param path The path.
-		// @return The lease, or null when nobody holds it.
-		const Lease *HolderOf(const InstancePath &path) const;
+		// @return The queue.
+		std::span<const Waiting> Queue() const {
+			return Waiters;
+		}
 
 		// Empties the table.
 		void Clear();
 
 	  private:
+		// Everybody in the queue who may now go, removed from it as they are.
+		std::vector<Waiting> Wake(double nowSeconds);
+
+		// Whether anything overlapping is held by somebody else.
+		bool Busy(const InstancePath &path, EditorId holder, double nowSeconds) const;
+
 		LockSettings Limits;
 		std::vector<Lease> Leases;
+		std::vector<Waiting> Waiters;
 	};
 }

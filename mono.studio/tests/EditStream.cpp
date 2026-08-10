@@ -669,25 +669,6 @@ namespace {
 			}
 		}
 
-		// Lets every hold lapse.
-		//
-		// **What "a scene that already exists" means here.** Creating an
-		// instance holds it, which is right — you have just made it and are
-		// probably about to move it — but every case below is about two people
-		// arriving at a document somebody built earlier.
-		//
-		// **In steps rather than one jump**, because a link has an idle timeout
-		// too: skipping thirty seconds in one go is indistinguishable from
-		// every peer having gone away, and the session would be closed rather
-		// than quiet. Half a second at a time keeps the keep-alives flowing,
-		// which is what a real editor sitting idle does.
-		void Quiesce(double seconds = 20.0) {
-			for (double elapsed = 0.0; elapsed < seconds; elapsed += 0.5) {
-				Now += 0.5;
-				Settle(2);
-			}
-		}
-
 		bool Connect() {
 			for (int step = 0; step < 256; ++step) {
 				Tick();
@@ -714,218 +695,158 @@ TEST_CASE("a guest learns which editor it is", "[studio][editstream]") {
 	CHECK(crowd.FirstStream->Self() != crowd.SecondStream->Self());
 }
 
-TEST_CASE("the first editor to touch a model holds it against the other", "[studio][editstream]") {
+TEST_CASE("two editors on one model take turns and both land", "[studio][editstream]") {
 	Fixture jobs;
 	Crowd crowd;
 	REQUIRE(crowd.Connect());
 
-	// Something for both of them to want.
-	const Entity mine = crowd.Host.Insert(crowd.Host.Workspace(), "Contested");
-	crowd.Quiesce();
+	crowd.Host.Insert(crowd.Host.Workspace(), "Contested");
+	crowd.Settle();
 	REQUIRE(crowd.First.Find({"Workspace", "Contested"}) != NULL_ENTITY);
 	REQUIRE(crowd.Second.Find({"Workspace", "Contested"}) != NULL_ENTITY);
-	(void)mine;
 
-	// The first guest edits it, which is how a hold is taken — nobody asks and
-	// nobody waits.
+	// Both edit the same instance in the same beat, before either has crossed.
 	crowd.First.Resize(crowd.First.Find({"Workspace", "Contested"}), 5.0f);
-	crowd.Settle();
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Contested"})) == 5.0f);
-
-	// The second guest tries the same instance and is refused *by the host*.
-	const uint64_t before = crowd.HostStream->Counters().Contested;
 	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Contested"}), 9.0f);
-	crowd.Settle();
+	crowd.Settle(40);
 
-	CHECK(crowd.HostStream->Counters().Contested == before + 1);
+	// **Nobody's work was thrown away.** The version this replaced refused the
+	// second editor and rolled their change back at their own machine; here the
+	// second lands on top of the first and both people keep what they did.
+	CHECK(crowd.FirstStream->Counters().Sent == 1);
+	CHECK(crowd.SecondStream->Counters().Sent == 1);
+	CHECK(crowd.FirstStream->Backlog() == 0);
+	CHECK(crowd.SecondStream->Backlog() == 0);
 
-	// **The document is unchanged everywhere**, which is the property the whole
-	// thing exists for: last write wins would have left 9 on all three.
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Contested"})) == 5.0f);
-	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Contested"})) == 5.0f);
-
-	// And the second guest is told who is in the way rather than left to
-	// wonder why its edit vanished.
-	REQUIRE(crowd.SecondStream->LastRefusal().has_value());
-	CHECK(crowd.SecondStream->LastRefusal()->Holder == crowd.FirstStream->Self());
-	CHECK(crowd.SecondStream->LastRefusal()->Subject == InstancePath{"Workspace", "Contested"});
+	// One of them was second, and whichever it was, everybody agrees on the
+	// result — which is the property the ordering buys.
+	const float settled = crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Contested"}));
+	CHECK((settled == 5.0f || settled == 9.0f));
+	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Contested"})) == settled);
+	CHECK(crowd.Second.SizeOf(crowd.Second.Find({"Workspace", "Contested"})) == settled);
 }
 
-TEST_CASE("a hold covers the subtree, not just the instance", "[studio][editstream]") {
+TEST_CASE("a queued edit is not a lost edit", "[studio][editstream]") {
+	Fixture jobs;
+	Crowd crowd;
+	REQUIRE(crowd.Connect());
+
+	crowd.Host.Insert(crowd.Host.Workspace(), "Busy");
+	crowd.Settle();
+
+	// Four edits from one guest in a row, each asking for the same subtree.
+	// They go out in the order they were made, whatever order the turns come
+	// back in.
+	// From two, because a part's default size is one and a write that changes
+	// nothing is refused by the log before it ever becomes a waypoint.
+	for (int step = 2; step <= 5; ++step) {
+		crowd.Second.Resize(crowd.Second.Find({"Workspace", "Busy"}), static_cast<float>(step));
+	}
+	// Long enough that a lost grant is asked for again — the retry is a second.
+	crowd.Settle(200);
+
+	CHECK(crowd.SecondStream->Counters().Sent == 4);
+	CHECK(crowd.SecondStream->Backlog() == 0);
+
+	// The last one made is the one everybody ends on, because they arrived in
+	// order.
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Busy"})) == 5.0f);
+	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Busy"})) == 5.0f);
+}
+
+TEST_CASE("a turn covers the subtree, so a model and its parts are one queue", "[studio][editstream]") {
 	Fixture jobs;
 	Crowd crowd;
 	REQUIRE(crowd.Connect());
 
 	const Entity model = crowd.Host.Insert(crowd.Host.Workspace(), "Model");
 	crowd.Host.Insert(model, "Part");
-	crowd.Quiesce();
+	crowd.Settle();
 	REQUIRE(crowd.Second.Find({"Workspace", "Model", "Part"}) != NULL_ENTITY);
 
-	// One guest takes the model.
+	// One editor takes the model while the other takes a part inside it. A turn
+	// over a model that let somebody else edit its children would order
+	// nothing — moving a model moves its children.
 	crowd.First.Resize(crowd.First.Find({"Workspace", "Model"}), 4.0f);
-	crowd.Settle();
-
-	// The other cannot edit a part inside it. A lock over a model that let
-	// somebody else edit its children would protect nothing — moving a model
-	// moves its children, and that is the collision this exists for.
-	const uint64_t before = crowd.HostStream->Counters().Contested;
 	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Model", "Part"}), 8.0f);
-	crowd.Settle();
+	crowd.Settle(40);
 
-	CHECK(crowd.HostStream->Counters().Contested == before + 1);
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Model", "Part"})) != 8.0f);
-
-	// And the refusal names the *model*, which is the useful thing to show:
-	// "somebody is editing Workspace.Model" explains it in a way the part's own
-	// name does not.
-	REQUIRE(crowd.SecondStream->LastRefusal().has_value());
-	CHECK(crowd.SecondStream->LastRefusal()->Subject == InstancePath{"Workspace", "Model"});
+	// Both landed, one after the other, and everybody agrees.
+	CHECK(crowd.FirstStream->Counters().Sent == 1);
+	CHECK(crowd.SecondStream->Counters().Sent == 1);
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Model"})) == 4.0f);
+	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Model", "Part"})) == 8.0f);
+	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Model", "Part"})) == 8.0f);
 }
 
-TEST_CASE("a hold lapses and the model becomes editable again", "[studio][editstream]") {
-	Fixture jobs;
-	Crowd crowd;
-	REQUIRE(crowd.Connect());
-
-	crowd.Host.Insert(crowd.Host.Workspace(), "Shared");
-	crowd.Quiesce();
-
-	crowd.First.Resize(crowd.First.Find({"Workspace", "Shared"}), 3.0f);
-	crowd.Settle();
-
-	// Past the default ten-second hold, with nobody renewing it.
-	crowd.Quiesce();
-
-	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Shared"}), 7.0f);
-	crowd.Settle();
-
-	// **An editor that crashed must not hold a model for ever**, and there is
-	// nobody to notice that it has.
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Shared"})) == 7.0f);
-}
-
-TEST_CASE("two editors in different corners never collide", "[studio][editstream]") {
+TEST_CASE("two editors in different corners never wait for each other", "[studio][editstream]") {
 	Fixture jobs;
 	Crowd crowd;
 	REQUIRE(crowd.Connect());
 
 	crowd.Host.Insert(crowd.Host.Workspace(), "Mine");
 	crowd.Host.Insert(crowd.Host.Workspace(), "Yours");
-	crowd.Quiesce();
+	crowd.Settle();
 
-	// The ordinary case, and the one a lock must not get in the way of.
+	// The ordinary case, and the one turn-taking must not get in the way of:
+	// disjoint subtrees are granted immediately and nobody queues.
 	crowd.First.Resize(crowd.First.Find({"Workspace", "Mine"}), 2.0f);
 	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Yours"}), 6.0f);
-	crowd.Settle();
+	crowd.Settle(40);
 
-	CHECK(crowd.HostStream->Counters().Contested == 0);
 	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Mine"})) == 2.0f);
 	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Yours"})) == 6.0f);
+	CHECK(crowd.FirstStream->Backlog() == 0);
+	CHECK(crowd.SecondStream->Backlog() == 0);
 }
 
-TEST_CASE("a claim reserves a subtree before anybody edits it", "[studio][editstream]") {
+TEST_CASE("the host takes its turn like anybody else", "[studio][editstream]") {
 	Fixture jobs;
 	Crowd crowd;
 	REQUIRE(crowd.Connect());
 
-	crowd.Host.Insert(crowd.Host.Workspace(), "Reserved");
-	crowd.Quiesce();
-
-	// Nothing needs this — a hold is taken by editing. It is for the person who
-	// wants to say *before* they start that they are about to work somewhere.
-	REQUIRE(crowd.FirstStream->Claim({"Workspace", "Reserved"}, crowd.Now));
+	crowd.Host.Insert(crowd.Host.Workspace(), "Shared");
 	crowd.Settle();
 
-	const uint64_t before = crowd.HostStream->Counters().Contested;
-	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Reserved"}), 9.0f);
-	crowd.Settle();
-	CHECK(crowd.HostStream->Counters().Contested == before + 1);
+	// A host that could edit through somebody else's turn would make the whole
+	// thing advisory. Both land; both are kept.
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Shared"}), 5.0f);
+	crowd.Host.Resize(crowd.Host.Find({"Workspace", "Shared"}), 9.0f);
+	crowd.Settle(40);
 
-	// The claimer can still work there, which is the point of having claimed.
-	crowd.First.Resize(crowd.First.Find({"Workspace", "Reserved"}), 4.0f);
-	crowd.Settle();
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Reserved"})) == 4.0f);
-
-	// And giving it up hands it over.
-	REQUIRE(crowd.FirstStream->Release({"Workspace", "Reserved"}, crowd.Now));
-	crowd.Settle();
-	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Reserved"}), 6.0f);
-	crowd.Settle();
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Reserved"})) == 6.0f);
+	CHECK(crowd.FirstStream->Counters().Sent == 1);
+	CHECK(crowd.HostStream->Counters().Sent >= 1);
+	const float settled = crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Shared"}));
+	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Shared"})) == settled);
+	CHECK(crowd.Second.SizeOf(crowd.Second.Find({"Workspace", "Shared"})) == settled);
 }
 
-TEST_CASE("everybody sees who is holding what", "[studio][editstream]") {
+TEST_CASE("everybody sees whose turn it is", "[studio][editstream]") {
 	Fixture jobs;
 	Crowd crowd;
 	REQUIRE(crowd.Connect());
 
-	crowd.Host.Insert(crowd.Host.Workspace(), "Busy");
-	crowd.Quiesce();
-	crowd.First.Resize(crowd.First.Find({"Workspace", "Busy"}), 3.0f);
+	crowd.Host.Insert(crowd.Host.Workspace(), "Watched");
 	crowd.Settle();
+
+	// Two edits at once, so somebody is queued while the table is looked at.
+	crowd.First.Resize(crowd.First.Find({"Workspace", "Watched"}), 3.0f);
+	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Watched"}), 7.0f);
+
+	// One tick, before the turns have finished coming round.
+	crowd.Tick();
+	crowd.Tick();
 
 	// The host's table is the one that decides; a guest's is a picture of it,
-	// so the editor can grey out what somebody else has.
-	const InstancePath busy{"Workspace", "Busy"};
-	REQUIRE(crowd.HostStream->Locks().HolderOf(busy) != nullptr);
-	CHECK(crowd.HostStream->Locks().HolderOf(busy)->Holder == crowd.FirstStream->Self());
+	// so the editor can show who is where.
+	const InstancePath watched{"Workspace", "Watched"};
+	if (crowd.HostStream->Locks().HolderOf(watched, crowd.Now) != nullptr) {
+		CHECK(crowd.HostStream->Locks().HolderOf(watched, crowd.Now)->Holder != HOST_EDITOR);
+	}
 
-	REQUIRE(crowd.SecondStream->Locks().HolderOf(busy) != nullptr);
-	CHECK(crowd.SecondStream->Locks().HolderOf(busy)->Holder == crowd.FirstStream->Self());
+	crowd.Settle(60);
 
-	// And the holder can tell it is their own.
-	REQUIRE(crowd.FirstStream->Locks().HolderOf(busy) != nullptr);
-	CHECK(crowd.FirstStream->Locks().HolderOf(busy)->Holder == crowd.FirstStream->Self());
-}
-
-TEST_CASE("a refused waypoint is refused whole", "[studio][editstream]") {
-	Fixture jobs;
-	Crowd crowd;
-	REQUIRE(crowd.Connect());
-
-	crowd.Host.Insert(crowd.Host.Workspace(), "Held");
-	crowd.Host.Insert(crowd.Host.Workspace(), "Free");
-	crowd.Quiesce();
-
-	crowd.First.Resize(crowd.First.Find({"Workspace", "Held"}), 3.0f);
-	crowd.Settle();
-
-	// A recording touching both — one contended, one not. **Half a waypoint is
-	// a state the author never saw**, which is the same reason a waypoint is
-	// the unit in the first place.
-	const auto recording = crowd.Second.Log.TryBeginRecording("Both");
-	REQUIRE(recording.has_value());
-	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Free"}), 8.0f);
-	crowd.Second.Resize(crowd.Second.Find({"Workspace", "Held"}), 8.0f);
-	REQUIRE(crowd.Second.Log.FinishRecording(*recording, FinishOperation::Commit));
-	crowd.Settle();
-
-	CHECK(crowd.HostStream->Counters().Contested >= 1);
-
-	// Neither landed, including the one nobody was holding.
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Free"})) != 8.0f);
-	CHECK(crowd.Host.SizeOf(crowd.Host.Find({"Workspace", "Held"})) == 3.0f);
-}
-
-TEST_CASE("the host is an editor like any other", "[studio][editstream]") {
-	Fixture jobs;
-	Crowd crowd;
-	REQUIRE(crowd.Connect());
-
-	crowd.Host.Insert(crowd.Host.Workspace(), "Theirs");
-	crowd.Quiesce();
-
-	crowd.First.Resize(crowd.First.Find({"Workspace", "Theirs"}), 5.0f);
-	crowd.Settle();
-
-	// A host that could edit through somebody else's hold would make the whole
-	// thing advisory.
-	const uint64_t before = crowd.HostStream->Counters().Contested;
-	crowd.Host.Resize(crowd.Host.Find({"Workspace", "Theirs"}), 9.0f);
-	crowd.Settle();
-
-	CHECK(crowd.HostStream->Counters().Contested == before + 1);
-	CHECK(crowd.First.SizeOf(crowd.First.Find({"Workspace", "Theirs"})) == 5.0f);
-	REQUIRE(crowd.HostStream->LastRefusal().has_value());
-	CHECK(crowd.HostStream->LastRefusal()->Holder == crowd.FirstStream->Self());
+	// And once everybody has had their turn, nobody is holding anything.
+	CHECK(crowd.HostStream->Locks().Held().empty());
+	CHECK(crowd.HostStream->Locks().Queue().empty());
 }

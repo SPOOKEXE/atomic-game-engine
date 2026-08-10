@@ -372,16 +372,9 @@ namespace studio {
 				ImGui::EndTable();
 			}
 
-			if (const std::optional<Blocked> &refusal = stream->LastRefusal()) {
-				// Named rather than left as a counter. An edit that vanished
-				// with no message gets reported as replication being broken,
-				// and it is not — somebody else is working there.
-				ImGui::TextColored(
-					ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
-					"%s is being edited by %s",
-					Describe(refusal->Subject).c_str(),
-					refusal->Holder == stream->Self() ? "you" : "somebody else"
-				);
+			const std::span<const studio::Waiting> queue = stream->Locks().Queue();
+			if (!queue.empty()) {
+				ImGui::TextDisabled("%zu waiting behind them", queue.size());
 			}
 
 			ImGui::Text(
@@ -396,10 +389,12 @@ namespace studio {
 				static_cast<unsigned long long>(edits.Received),
 				static_cast<unsigned long long>(edits.Applied)
 			);
-			if (edits.Contested > 0) {
-				ImGui::TextDisabled(
-					"%llu edit(s) held back", static_cast<unsigned long long>(edits.Contested)
-				);
+			if (stream->Backlog() > 0) {
+				// **Waiting is not failing**, and a person watching a
+				// colleague's screen not change wants to know which. An edit
+				// held back has already happened here; what is waiting is the
+				// message.
+				ImGui::TextDisabled("%zu edit(s) waiting for a turn", stream->Backlog());
 			}
 			if (edits.Undelivered > 0 || edits.Malformed > 0) {
 				// **Both are worth seeing and they are different problems.**
@@ -418,8 +413,8 @@ namespace studio {
 
 		ImGui::TextDisabled(
 			"Edits replicate; undo does not. Ctrl+Z reverses what you did,\n"
-			"never what somebody else did. Whoever touches a model first holds\n"
-			"it until they stop."
+			"never what somebody else did. Two people on one model take turns —\n"
+			"whoever asked first goes first, and nobody's work is lost."
 		);
 
 		ImGui::End();

@@ -9,18 +9,20 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <string_view>
 #include <studio/EditLocks.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.editlocks")
 
-using studio::Blocked;
 using studio::EditorId;
 using studio::HOST_EDITOR;
 using studio::InstancePath;
 using studio::Lease;
 using studio::LockSettings;
 using studio::LockTable;
+using studio::Turn;
+using studio::Waiting;
 
 namespace {
 	constexpr EditorId ANA = 1;
@@ -49,232 +51,234 @@ TEST_CASE("a path contains itself and everything under it", "[studio][editlocks]
 	CHECK_FALSE(studio::Overlaps(PART, OTHER));
 
 	CHECK(studio::Describe(PART) == "Workspace.Model.Part");
-	CHECK(studio::Describe({}) == "nothing");
+	// Spelled out, because `Describe` is also overloaded on `Turn` and a bare
+	// `{}` picks whichever the compiler likes.
+	CHECK(studio::Describe(InstancePath{}) == "nothing");
 }
 
-TEST_CASE("nobody is blocked by an empty table", "[studio][editlocks]") {
+TEST_CASE("an empty table grants everybody", "[studio][editlocks]") {
 	LockTable locks;
-	CHECK_FALSE(locks.Blocking(PART, ANA, 0.0).has_value());
-	CHECK(locks.Held().empty());
-	CHECK(locks.HolderOf(PART) == nullptr);
-}
-
-TEST_CASE("the first editor to touch a subtree holds it", "[studio][editlocks]") {
-	LockTable locks;
-
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
+	CHECK(locks.Request(PART, ANA, 0.0) == Turn::Granted);
 	CHECK(locks.Held().size() == 1);
-
-	// The holder is not blocked by their own hold, which is the whole point of
-	// taking it.
-	CHECK_FALSE(locks.Blocking(MODEL, ANA, 1.0).has_value());
-	CHECK_FALSE(locks.Blocking(PART, ANA, 1.0).has_value());
-
-	// Somebody else is, and is told what is in the way rather than merely that
-	// something is — "Ana is editing Workspace.Model" explains a refusal on the
-	// part in a way the part's own name does not.
-	const std::optional<Blocked> blocked = locks.Blocking(PART, BEN, 1.0);
-	REQUIRE(blocked.has_value());
-	CHECK(blocked->Holder == ANA);
-	CHECK(blocked->Subject == MODEL);
-
-	// And a subtree nobody holds is free.
-	CHECK_FALSE(locks.Blocking(OTHER, BEN, 1.0).has_value());
+	CHECK(locks.Queue().empty());
+	CHECK(locks.HolderOf(PART, 0.0) != nullptr);
 }
 
-TEST_CASE("a hold covers upwards as well as downwards", "[studio][editlocks]") {
+TEST_CASE("the second editor queues rather than being refused", "[studio][editlocks]") {
 	LockTable locks;
-	REQUIRE(locks.Hold(PART, ANA, 0.0));
+
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+
+	// **Nobody's work is thrown away, and that is the point of the queue.**
+	// Somebody asking for a subtree in use is not doing anything wrong; they
+	// are second, and second still gets a turn.
+	CHECK(locks.Request(PART, BEN, 0.0) == Turn::Queued);
+	REQUIRE(locks.Queue().size() == 1);
+	CHECK(locks.Queue().front().Holder == BEN);
+
+	// Asking again does not move them or duplicate them.
+	CHECK(locks.Request(PART, BEN, 0.1) == Turn::Queued);
+	CHECK(locks.Queue().size() == 1);
+
+	// And when the first gives it back, the second goes.
+	const std::vector<Waiting> woken = locks.Release(MODEL, ANA, 1.0);
+	REQUIRE(woken.size() == 1);
+	CHECK(woken.front().Holder == BEN);
+	CHECK(locks.Queue().empty());
+	REQUIRE(locks.HolderOf(PART, 1.0) != nullptr);
+	CHECK(locks.HolderOf(PART, 1.0)->Holder == BEN);
+}
+
+TEST_CASE("turns come round in the order they were asked for", "[studio][editlocks]") {
+	LockTable locks;
+	constexpr EditorId CAT = 3;
+
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	REQUIRE(locks.Request(MODEL, BEN, 0.1) == Turn::Queued);
+	REQUIRE(locks.Request(MODEL, CAT, 0.2) == Turn::Queued);
+
+	// **Whoever was there first goes first**, which is the promise the whole
+	// queue exists to keep: the next edit lands on top of theirs, in order.
+	std::vector<Waiting> woken = locks.Release(MODEL, ANA, 1.0);
+	REQUIRE(woken.size() == 1);
+	CHECK(woken.front().Holder == BEN);
+
+	woken = locks.Release(MODEL, BEN, 2.0);
+	REQUIRE(woken.size() == 1);
+	CHECK(woken.front().Holder == CAT);
+
+	woken = locks.Release(MODEL, CAT, 3.0);
+	CHECK(woken.empty());
+	CHECK(locks.Held().empty());
+}
+
+TEST_CASE("a release wakes everybody it unblocks", "[studio][editlocks]") {
+	LockTable locks;
+	constexpr EditorId CAT = 3;
+
+	// One editor holding a model blocks two others waiting on separate parts
+	// inside it. Both become free at once, and both are handed a turn.
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	REQUIRE(locks.Request({"Workspace", "Model", "First"}, BEN, 0.1) == Turn::Queued);
+	REQUIRE(locks.Request({"Workspace", "Model", "Second"}, CAT, 0.2) == Turn::Queued);
+
+	const std::vector<Waiting> woken = locks.Release(MODEL, ANA, 1.0);
+	REQUIRE(woken.size() == 2);
+	CHECK(woken[0].Holder == BEN);
+	CHECK(woken[1].Holder == CAT);
+	CHECK(locks.Held().size() == 2);
+}
+
+TEST_CASE("a turn covers the subtree in both directions", "[studio][editlocks]") {
+	LockTable locks;
 
 	// Somebody holding a part stops somebody else moving the model it is in.
-	// Without this the model could be deleted out from under the hold, which
-	// is the collision the lock exists to prevent wearing a different hat.
-	const std::optional<Blocked> blocked = locks.Blocking(MODEL, BEN, 1.0);
-	REQUIRE(blocked.has_value());
-	CHECK(blocked->Subject == PART);
+	// Without this the model could be deleted out from under the turn, which is
+	// the collision the ordering exists to prevent wearing a different hat.
+	REQUIRE(locks.Request(PART, ANA, 0.0) == Turn::Granted);
+	CHECK(locks.Request(MODEL, BEN, 0.1) == Turn::Queued);
+
+	// And a subtree nobody is on is free.
+	CHECK(locks.Request(OTHER, BEN, 0.1) == Turn::Granted);
 }
 
-TEST_CASE("editing renews rather than accumulating", "[studio][editlocks]") {
+TEST_CASE("asking twice for what you already hold renews it", "[studio][editlocks]") {
 	LockSettings settings;
-	settings.HoldSeconds = 10.0;
+	settings.GrantSeconds = 2.0;
 	LockTable locks(settings);
 
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
-
-	// Somebody working on a model and then dragging a part inside it is still
-	// working on the model. A table that took a second hold for the child would
-	// fill with one lease per part they touched.
-	for (double now = 1.0; now < 40.0; now += 1.0) {
-		REQUIRE(locks.Hold(PART, ANA, now));
-		CHECK(locks.Held().size() == 1);
-		CHECK(locks.Expire(now) == 0);
-	}
-
-	// And it is still held, forty seconds past a ten-second lease, because it
-	// was renewed the whole way.
-	CHECK(locks.Blocking(MODEL, BEN, 39.0).has_value());
-}
-
-TEST_CASE("a hold lapses on its own", "[studio][editlocks]") {
-	LockSettings settings;
-	settings.HoldSeconds = 10.0;
-	LockTable locks(settings);
-
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
-	CHECK(locks.Blocking(PART, BEN, 9.0).has_value());
-
-	// **An editor that crashed must not hold a model for ever**, and there is
-	// nobody to notice that it has. So the hold stops blocking at its expiry
-	// whether or not anybody has swept it.
-	CHECK_FALSE(locks.Blocking(PART, BEN, 10.0).has_value());
-
-	CHECK(locks.Expire(9.0) == 0);
-	CHECK(locks.Expire(10.0) == 1);
-	CHECK(locks.Held().empty());
-
-	// And now somebody else can take it.
-	CHECK(locks.Hold(MODEL, BEN, 10.0));
-}
-
-TEST_CASE("a hold cannot be taken from its holder", "[studio][editlocks]") {
-	LockTable locks;
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
-
-	CHECK_FALSE(locks.Hold(PART, BEN, 1.0));
-	CHECK_FALSE(locks.Hold(MODEL, BEN, 1.0));
-	CHECK(locks.Held().size() == 1);
-	CHECK(locks.Held().front().Holder == ANA);
-
-	// A release that could take another editor's lock would be a lock anybody
-	// can pick.
-	CHECK_FALSE(locks.Release(MODEL, BEN));
+	// **An editor publishing twice in a row asks twice**, and the second ask
+	// has to be a grant rather than a place in a queue behind itself.
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	CHECK(locks.Request(MODEL, ANA, 1.0) == Turn::Granted);
+	CHECK(locks.Request(PART, ANA, 1.5) == Turn::Granted);
 	CHECK(locks.Held().size() == 1);
 
-	CHECK(locks.Release(MODEL, ANA));
+	// Renewed each time, so the guard is measured from the last ask.
+	CHECK(locks.Expire(3.0).empty());
+	CHECK(locks.Held().size() == 1);
+	CHECK(locks.Expire(3.6).empty());
 	CHECK(locks.Held().empty());
 }
 
-TEST_CASE("releasing a parent releases what it covers", "[studio][editlocks]") {
-	LockTable locks;
-	REQUIRE(locks.Hold(PART, ANA, 0.0));
-	REQUIRE(locks.Hold(OTHER, ANA, 0.0));
-	REQUIRE(locks.Held().size() == 2);
-
-	// Letting go of the model lets go of the part inside it. Leaving the child
-	// behind would be a lock somebody thought they had released.
-	CHECK(locks.Release(MODEL, ANA));
-	REQUIRE(locks.Held().size() == 1);
-	CHECK(locks.Held().front().Subject == OTHER);
-}
-
-TEST_CASE("moving up replaces the hold rather than adding one", "[studio][editlocks]") {
-	LockTable locks;
-	REQUIRE(locks.Hold(PART, ANA, 0.0));
-
-	// Editing a model after editing one of its parts is one interaction and
-	// should be one lease.
-	REQUIRE(locks.Hold(MODEL, ANA, 1.0));
-	REQUIRE(locks.Held().size() == 1);
-	CHECK(locks.Held().front().Subject == MODEL);
-}
-
-TEST_CASE("leaving gives up everything at once", "[studio][editlocks]") {
-	LockTable locks;
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
-	REQUIRE(locks.Hold(OTHER, BEN, 0.0));
-
-	CHECK(locks.ReleaseAll(ANA) == 1);
-	CHECK(locks.Held().size() == 1);
-	CHECK(locks.Held().front().Holder == BEN);
-
-	// Tidy rather than load-bearing: the expiry is what makes a crash
-	// survivable, and this is what makes a clean exit immediate.
-	CHECK(locks.ReleaseAll(ANA) == 0);
-}
-
-TEST_CASE("an empty path holds nothing and blocks nobody", "[studio][editlocks]") {
-	LockTable locks;
-
-	// An edit that names nothing is not an edit anybody can hold against.
-	// Whatever it is, a lock is not the thing that should stop it.
-	CHECK_FALSE(locks.Hold({}, ANA, 0.0));
-	CHECK(locks.Held().empty());
-
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
-	CHECK_FALSE(locks.Blocking({}, BEN, 1.0).has_value());
-}
-
-TEST_CASE("the table is bounded and a flood cannot evict a hold", "[studio][editlocks]") {
+TEST_CASE("a guard hands the turn on when an editor dies", "[studio][editlocks]") {
 	LockSettings settings;
-	settings.MaximumHolds = 4;
+	settings.GrantSeconds = 2.0;
 	LockTable locks(settings);
 
-	std::vector<InstancePath> taken;
-	for (int index = 0; index < 4; ++index) {
-		InstancePath path{"Workspace", "Model" + std::to_string(index)};
-		REQUIRE(locks.Hold(path, ANA, 0.0));
-		taken.push_back(std::move(path));
-	}
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	REQUIRE(locks.Request(MODEL, BEN, 0.1) == Turn::Queued);
 
-	// Past the cap a new hold is refused and the existing ones stand — the way
-	// round `network::Directory` bounds its table, and for the same reason: a
-	// bound that lets a flood push out what somebody is working on is not a
-	// bound.
-	for (int index = 4; index < 100; ++index) {
-		CHECK_FALSE(locks.Hold({"Workspace", "Flood" + std::to_string(index)}, BEN, 0.0));
-	}
-	CHECK(locks.Held().size() == 4);
-	for (const InstancePath &path : taken) {
-		CHECK(locks.Blocking(path, BEN, 0.0).has_value());
-	}
+	// **Not a lease on editing — a bound on one protocol step.** An editor
+	// granted a subtree that then dies would hold it for ever, and there is
+	// nobody to notice; the guard costs the next person a pause rather than the
+	// session.
+	CHECK(locks.Expire(1.9).empty());
 
-	// And a renewal of something already held still works when the table is
-	// full, which is the other half of that: somebody working must not lose
-	// their hold because somebody else started flooding.
-	CHECK(locks.Hold(taken.front(), ANA, 1.0));
+	const std::vector<Waiting> woken = locks.Expire(2.0);
+	REQUIRE(woken.size() == 1);
+	CHECK(woken.front().Holder == BEN);
+	REQUIRE(locks.HolderOf(MODEL, 2.0) != nullptr);
+	CHECK(locks.HolderOf(MODEL, 2.0)->Holder == BEN);
 }
 
-TEST_CASE("a claimed hold behaves exactly like an earned one", "[studio][editlocks]") {
+TEST_CASE("a turn cannot be ended by somebody else", "[studio][editlocks]") {
 	LockTable locks;
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
 
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0, true));
-	CHECK(locks.Held().front().Claimed);
+	// A release that could end another editor's turn would be a queue anybody
+	// can jump.
+	CHECK(locks.Release(MODEL, BEN, 1.0).empty());
+	REQUIRE(locks.HolderOf(MODEL, 1.0) != nullptr);
+	CHECK(locks.HolderOf(MODEL, 1.0)->Holder == ANA);
 
-	// Both expire, both block, both renew. A table that treated them
-	// differently would be two mechanisms wearing one name; the flag is only
-	// so a panel can say which.
-	CHECK(locks.Blocking(PART, BEN, 1.0).has_value());
-	CHECK(locks.Expire(11.0) == 1);
+	CHECK(locks.Release(MODEL, ANA, 1.0).empty());
+	CHECK(locks.Held().empty());
 }
 
-TEST_CASE("a guest's copy is replaced whole", "[studio][editlocks]") {
+TEST_CASE("leaving gives up the turn and the place in the queue", "[studio][editlocks]") {
 	LockTable locks;
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
+	constexpr EditorId CAT = 3;
+
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	REQUIRE(locks.Request(MODEL, BEN, 0.1) == Turn::Queued);
+	REQUIRE(locks.Request(MODEL, CAT, 0.2) == Turn::Queued);
+
+	// Somebody in the queue leaving takes their place with them rather than
+	// leaving a turn nobody will ever claim.
+	CHECK(locks.ReleaseAll(BEN, 1.0).empty());
+	CHECK(locks.Queue().size() == 1);
+
+	const std::vector<Waiting> woken = locks.ReleaseAll(ANA, 2.0);
+	REQUIRE(woken.size() == 1);
+	CHECK(woken.front().Holder == CAT);
+}
+
+TEST_CASE("an edit that names nothing takes no turn", "[studio][editlocks]") {
+	LockTable locks;
+
+	// Whatever it is, the queue is not the thing that should order it.
+	CHECK(locks.Request({}, ANA, 0.0) == Turn::Granted);
+	CHECK(locks.Held().empty());
+}
+
+TEST_CASE("the queue is bounded and a flood cannot take somebody's place", "[studio][editlocks]") {
+	LockSettings settings;
+	settings.MaximumWaiting = 2;
+	LockTable locks(settings);
+
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	REQUIRE(locks.Request(MODEL, BEN, 0.1) == Turn::Queued);
+	REQUIRE(locks.Request(MODEL, 3, 0.2) == Turn::Queued);
+
+	// Past the cap a new request is refused and the queue stands — a bound that
+	// lets a flood push out somebody's place is not a bound. **Refused rather
+	// than dropped silently**, because a request that is neither granted nor
+	// queued is an editor waiting for a message that will never come.
+	for (EditorId flood = 4; flood < 40; ++flood) {
+		CHECK(locks.Request(MODEL, flood, 0.3) == Turn::Refused);
+	}
+	CHECK(locks.Queue().size() == 2);
+	CHECK(locks.Queue().front().Holder == BEN);
+}
+
+TEST_CASE("a guest's copy is a picture, not a clock", "[studio][editlocks]") {
+	LockTable locks;
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
 
 	// A snapshot rather than a difference: the table is small, it changes
 	// rarely, and a guest that missed one difference would show the wrong
-	// person's name on a model until something else happened to correct it.
-	const std::vector<Lease> theirs{Lease{OTHER, BEN, 0.0, false}};
+	// person's name on a model until something else corrected it.
+	const std::vector<Lease> theirs{Lease{OTHER, BEN, 0.0}};
 	locks.Adopt(theirs);
 
 	REQUIRE(locks.Held().size() == 1);
 	CHECK(locks.Held().front().Holder == BEN);
-	CHECK(locks.HolderOf(OTHER) != nullptr);
-	CHECK(locks.HolderOf(MODEL) == nullptr);
+
+	// **The guard belongs to the host's clock and means nothing here.** Adopted
+	// rows do not lapse at a moment the host never chose.
+	CHECK(locks.HolderOf(OTHER, 1'000'000.0) != nullptr);
+	CHECK(locks.HolderOf(MODEL, 0.0) == nullptr);
 
 	locks.Adopt({});
 	CHECK(locks.Held().empty());
 }
 
-TEST_CASE("the host is an editor like any other", "[studio][editlocks]") {
+TEST_CASE("the host takes its turn like anybody else", "[studio][editlocks]") {
 	LockTable locks;
 
-	// A host that could edit through somebody else's hold would make the whole
+	// A host that could edit through somebody else's turn would make the whole
 	// thing advisory.
-	REQUIRE(locks.Hold(MODEL, ANA, 0.0));
-	CHECK(locks.Blocking(PART, HOST_EDITOR, 1.0).has_value());
+	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
+	CHECK(locks.Request(PART, HOST_EDITOR, 0.1) == Turn::Queued);
 
-	REQUIRE(locks.ReleaseAll(ANA) == 1);
-	REQUIRE(locks.Hold(MODEL, HOST_EDITOR, 1.0));
-	CHECK(locks.Blocking(PART, ANA, 2.0).has_value());
+	const std::vector<Waiting> woken = locks.Release(MODEL, ANA, 1.0);
+	REQUIRE(woken.size() == 1);
+	CHECK(woken.front().Holder == HOST_EDITOR);
+}
+
+TEST_CASE("every turn names itself", "[studio][editlocks]") {
+	CHECK(std::string_view(studio::Describe(Turn::Granted)) == "granted");
+	CHECK(std::string_view(studio::Describe(Turn::Queued)) == "queued");
+	CHECK(std::string_view(studio::Describe(Turn::Refused)) == "refused");
 }
