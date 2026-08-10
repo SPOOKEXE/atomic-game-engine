@@ -99,6 +99,49 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00106
+
+**JavaScript and TypeScript have no breakpoints, and the obstacle is the VM
+rather than this engine.**
+
+The Luau half of `script::Debugger` works through `lua_callbacks(L)->debugstep`,
+which Luau calls after every instruction while single-step mode is on — so a
+breakpoint is a line comparison in a hook that only exists while one is armed.
+QuickJS as vendored offers no equivalent:
+
+- **`JS_SetInterruptHandler` is the whole of it**, and its callback takes a
+  runtime and an opaque pointer. No line, no file, no frame — it exists to let a
+  host abort a long-running script, which is what `RuntimeLimits::StepBudget`
+  already uses it for.
+- **There is no debugger API at all.** `js_debugger` appears zero times in
+  `mono.vendor/quickjs`. Some quickjs forks carry one — the Ladybird and
+  quickjs-debugger trees both add `js_debugger_*` with breakpoint and stack
+  support — and this vendored quickjs-ng does not.
+- **`JS_GetScriptOrModuleName` is not a substitute.** It answers which module a
+  frame belongs to and nothing about where in it, so it cannot tell a line from
+  the next one.
+
+**Three ways out, and none is a small change.**
+
+- **A vendor bump or a fork.** `mono.vendor/AGENTS.md` says a patch goes
+  upstream or into a fork whose remote is recorded in `.gitmodules`, never into
+  a file in this tree — so this is a submodule decision with a maintenance cost
+  against a moving target, which is the same trade `D00019` records for Luau.
+- **Source instrumentation.** Rewriting a plugin's JavaScript to call a hook at
+  each statement would work in any VM and changes what runs, which makes every
+  line number in a stack trace a translation and every measurement a lie about
+  the program the author wrote.
+- **A second VM for tooling.** Out of proportion to the feature.
+
+**What exists in the meantime is stated rather than implied.**
+`script/Debugger.hpp` says the capture is Luau's; `BreakpointService` is
+installed by the Luau binding alone, so a JavaScript plugin gets `undefined`
+from `game.GetService("BreakpointService")` rather than an object that refuses
+everything.
+
+**Reopen trigger: a vendored QuickJS with a debugger API**, or the first
+TypeScript plugin big enough that its author asks for one.
+
 ### [CLOSED] D00105
 
 **A plugin can change the world and cannot add a button, and the missing piece

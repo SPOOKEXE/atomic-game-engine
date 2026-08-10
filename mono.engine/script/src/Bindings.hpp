@@ -543,6 +543,17 @@ namespace engine::script {
 	// @since v0.12
 	void OpenEcs(lua_State *state);
 
+	// Installs `BreakpointService`, when this runtime is a studio's.
+	//
+	// **Absent outside a studio**, so `game:GetService("BreakpointService")`
+	// fails the way it does for any service this engine does not provide. Arming
+	// a breakpoint switches Luau's step mode on and costs the whole runtime its
+	// speed, which a shipped server has no business letting a game script do.
+	//
+	// @param state The VM.
+	// @since v0.12
+	void OpenBreakpointService(lua_State *state);
+
 	// Installs `host`, when the runtime has one.
 	//
 	// **One closure per `HostSurface::Names` entry**, so a name the host does

@@ -142,6 +142,42 @@ namespace engine::script {
 					}
 				}
 
+				// **The upvalues, which need the function itself on the
+				// stack.** `lua_getlocal` takes a level and `lua_getupvalue`
+				// takes a closure, so the two walks cannot share a loop — which
+				// is why this is a second pass rather than a second column in
+				// the first.
+				//
+				// `lua_getinfo` with `f` pushes the running function; anything
+				// that leaves it there leaks a stack slot per frame, so the pop
+				// is unconditional.
+				lua_Debug closure;
+				if (lua_getinfo(state, level, "f", &closure) != 0) {
+					for (int slot = 1;; slot++) {
+						const char *name = lua_getupvalue(state, -1, slot);
+						if (name == nullptr) {
+							break;
+						}
+
+						// An unnamed upvalue is one the compiler made, and
+						// `lua_getupvalue` reports those as an empty string
+						// rather than as null. Numbered rather than blank, so a
+						// reader can tell two of them apart.
+						frame.Upvalues.push_back(
+							DebugLocal{
+								*name != '\0' ? name : ("(upvalue " + std::to_string(slot) + ")"),
+								Rendered(state, -1)
+							}
+						);
+						lua_pop(state, 1);
+
+						if (frame.Upvalues.size() >= 32) {
+							break;
+						}
+					}
+					lua_pop(state, 1);
+				}
+
 				hit.Frames.push_back(std::move(frame));
 			}
 		}
@@ -320,6 +356,12 @@ namespace engine::script {
 		lua_callbacks(State)->debugstep = DebugStep;
 
 		BoundsOf(State).Context.Breakpoints = &Breakpoints;
+
+		// **After that assignment and before the sandbox**, and the position is
+		// forced from both sides. The service reads the pointer to decide
+		// whether to install itself at all, so it cannot run earlier; and it
+		// writes a global, so it cannot run once the table is frozen.
+		OpenBreakpointService(State);
 
 		// Freezes the global table and the library tables. After this a script
 		// can read `math.floor` and cannot replace it, so one script cannot

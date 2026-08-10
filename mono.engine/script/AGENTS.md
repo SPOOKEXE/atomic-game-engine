@@ -170,6 +170,36 @@ reason: two objects for one service is two things to keep in step. Both call
 forms work, and the binding drops the leading `self` only when it is *that
 service's own* table, so `Selection:Set({part})` does not lose its argument.
 
+## The debugger captures, and `BreakpointService` is the same object
+
+`Debugger.hpp` carries the argument for why a breakpoint records rather than
+pauses; two rules about the surface around it are this file's:
+
+- **`BreakpointService` writes the runtime's own `Debugger` and never a second
+  list.** The editor's panel writes `Runtime::Debug()` directly and a script
+  writes the service; a service that kept breakpoints of its own would be two
+  things to keep in step and a breakpoint that fired in one place and not the
+  other.
+- **It is installed only when `RuntimeLimits::Role::Studio` is set, and it is
+  absent rather than refusing.** Arming a breakpoint switches Luau's step mode
+  on and costs the whole runtime its speed, which a shipped server has no
+  business letting a game script decide — and a service that existed and
+  answered "not in a game" to everything is a surface somebody writes against
+  and then finds does nothing where it matters.
+
+**Locals and upvalues are captured as two lists and must stay two.** A local is
+a value the frame made and an upvalue is one it captured from an enclosing
+scope; merging them answers "what is in scope" and loses "where did it come
+from", which is the question an upvalue is looked at to answer. A Luau main
+chunk closes over nothing — Lua 5.2's `_ENV` upvalue is not Luau's model — so an
+empty upvalue list is the ordinary state of a top-level frame and the panel says
+so rather than only drawing "none".
+
+**Only Luau has breakpoints.** The vendored QuickJS exposes no line hook and no
+debugger API, so the service is installed by the Luau binding alone and a
+JavaScript plugin gets nothing rather than an object that refuses everything.
+`D00106` carries what closing that would take.
+
 ## One runtime, one world
 
 The `Store` is an upvalue on every bound function rather than a global, so two

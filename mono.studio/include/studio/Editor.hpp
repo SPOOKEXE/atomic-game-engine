@@ -631,6 +631,35 @@ namespace studio {
 		void ResolveFocusedViewport();
 		void DrawProperties();
 		void DrawScripts();
+
+		// The breakpoint column beside a script's text.
+		//
+		// **A sibling of the code rather than part of it**, because
+		// `CodeField` is an `InputTextMultiline` and owns its own scrolling
+		// child — so the column is drawn next to it and told where that child
+		// has scrolled to.
+		//
+		// @param tab The script being edited.
+		// @return How wide the column drew, so the caller can lay out beside it.
+		float DrawScriptGutter(const OpenScript &tab);
+
+		// The breakpoint on a line of a script, or null.
+		//
+		// @param path The script's source path.
+		// @param line The 1-based line.
+		// @return The breakpoint, or null when there is none.
+		const engine::script::Breakpoint *BreakpointAt(engine::core::Name path, int line) const;
+
+		// Adds a breakpoint to a line, or takes the one there away.
+		//
+		// **Writes the editor's list and every live runtime's**, in that order.
+		// The editor's is the one that survives a Stop; a runtime's is a copy it
+		// was handed when the run began, so writing only those would make a
+		// breakpoint disappear the next time somebody pressed Stop.
+		//
+		// @param path The script's source path.
+		// @param line The 1-based line.
+		void ToggleBreakpoint(engine::core::Name path, int line);
 		void DrawOutput();
 
 		// The editor's own settings, in pages.
@@ -1724,6 +1753,25 @@ namespace studio {
 
 		// Breakpoints, the paused stack, and stepping.
 		void DrawDebugger();
+
+		// One frame's locals or upvalues, as a two-column table.
+		//
+		// @param values What to show, or null when no frame is chosen.
+		// @param empty  What to say when there are none, in words that give the
+		//               reason rather than only the absence.
+		void DrawDebugValues(const std::vector<engine::script::DebugLocal> *values, const char *empty);
+
+		// Which capture the debugger panel is showing.
+		//
+		// **An index rather than a pointer, because the hit log is bounded and
+		// rolls.** A pointer into it would dangle the moment a loop pushed the
+		// sixty-fifth capture; an index that has gone past the end reads as
+		// "pick a capture", which is the honest answer.
+		//@{
+		uint32_t SelectedWorld = 0;
+		size_t SelectedHit = 0;
+		size_t SelectedFrame = 0;
+		//@}
 
 		// Reverses the last edit, and tells the author what was reversed.
 		//

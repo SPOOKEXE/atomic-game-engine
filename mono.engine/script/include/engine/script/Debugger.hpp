@@ -115,6 +115,26 @@ namespace engine::script {
 
 		// Every local and argument in scope.
 		std::vector<DebugLocal> Locals;
+
+		// Every upvalue the running function closed over.
+		//
+		// **Kept apart from the locals rather than merged into them**, and the
+		// separation is what makes the capture worth reading. A local is a value
+		// this frame made; an upvalue is one it *captured* from an enclosing
+		// scope, so it is shared with whoever else closed over the same
+		// variable — and "why did this change when nothing in this function
+		// touched it" is the question upvalues answer and locals cannot.
+		//
+		// **Empty for a chunk's own top level, and that is Luau rather than a
+		// gap here.** Lua 5.2 gives every chunk an `_ENV` upvalue; Luau keeps a
+		// closure's environment beside the upvalue array instead, so a main
+		// chunk closes over nothing and reports nothing. The same variable read
+		// from an enclosing function *is* an upvalue there — which is what makes
+		// the two lists disagree usefully, and `engine.script.debugger` pins
+		// both halves.
+		//
+		// @since v0.12
+		std::vector<DebugLocal> Upvalues;
 	};
 
 	// What was true when a breakpoint was reached.
