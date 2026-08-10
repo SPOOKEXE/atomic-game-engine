@@ -54,6 +54,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/Lifecycle.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <array>
@@ -4002,7 +4003,18 @@ namespace studio {
 		// and long enough that an author who walked away from one subarea to
 		// build in another does not come back to a stopped clock. Set from
 		// `Options::IdleCloseSeconds`.
+		//
+		// **Capped at `world::MAXIMUM_IDLE_LIMIT_SECONDS`**, which the decision
+		// clamps to anyway — so the slider stops where the policy does rather
+		// than offering a number that would be quietly ignored.
 		float IdleCloseSeconds = 300.0f;
+
+		// Whether an empty world waits, closes at once, or never closes.
+		//
+		// **`Never` is what an author building a world full of NPCs wants**, and
+		// it is a separate answer from a very long timeout on purpose — see
+		// `world::IdleSleep`.
+		engine::world::IdleSleep IdleSleepMode = engine::world::IdleSleep::Timeout;
 
 		// Which world the studio's player token is in.
 		//

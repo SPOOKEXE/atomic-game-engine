@@ -1,5 +1,6 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/scene/Awake.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Lifecycle.hpp>
 #include <engine/world/Enums.hpp>
@@ -439,8 +440,15 @@ namespace studio {
 			// twice, and the copy nobody compares is the one that drifts.
 			engine::world::LifecycleInputs inputs;
 			inputs.State = Universe->StateOf(world);
+			inputs.Sleep = IdleSleepMode;
 			inputs.IdleLimit = static_cast<double>(IdleCloseSeconds);
-			inputs.LastWorld = Universe->Count() <= 1;
+
+			// **Worlds still ticking, not worlds that exist.** `Count()`
+			// includes suspended ones, so deriving this from it suspended a
+			// whole universe one world at a time — each the "last" only after
+			// the rest had already gone, which is exactly what this refusal is
+			// named to prevent. `CountInState` is the fact it is about.
+			inputs.LastWorld = Universe->CountInState(engine::world::WorldState::Active) <= 1;
 
 			// **A suspended world's inbox is the one queue nothing drains**,
 			// which is exactly what makes this reliable rather than a poll that
@@ -474,6 +482,18 @@ namespace studio {
 				}
 			}
 			inputs.Occupied = world == PlayerWorld || world == Active || watched;
+
+			// **And whatever the game says is still happening.** The three
+			// answers above are all "somebody is here"; a world of NPCs on a
+			// route has nobody here and plenty going on. `scene::AwakeWorld` is
+			// how a script says so, and the server asks the same question in
+			// `Server::UpdateWorldLifecycle` — one component, two hosts, so a
+			// world that stays up in Play stays up when it is hosted.
+			if (!inputs.Occupied) {
+				Universe->Enter(world, [&inputs](Store &store) {
+					inputs.Occupied = engine::scene::WorldIsHeldAwake(store);
+				});
+			}
 
 			// **Only a running world has an idle clock, and only it needs one.**
 			// Doing this for a suspended world would make waking it wait for a
