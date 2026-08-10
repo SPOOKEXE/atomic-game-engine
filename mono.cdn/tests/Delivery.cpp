@@ -422,6 +422,49 @@ TEST_CASE("a cache means the second run costs no network", "[cdn][delivery][e2e]
 	CHECK(again->Counters().Bundles == 0);
 }
 
+TEST_CASE("a failed request still says what it was for", "[cdn][delivery][e2e]") {
+	// **The half `D00107` warned about.** A request that succeeds carries its
+	// name in the `Asset`; one that fails answers nothing at all, so a caller
+	// undoing something it did at request time — marking a texture as expected,
+	// most of all — had no way to know which name to undo it for. Without this
+	// a misspelled sheet stays "on its way" for ever and never wears the marker
+	// that exists for exactly that case.
+	World world;
+	std::unique_ptr<AssetClient> client = MakeAssetClient(world.Over());
+	REQUIRE(client != nullptr);
+
+	// No grant, so this one fails rather than arriving.
+	const RequestId failing = client->Request("textures/there-is-no-such-sheet.png");
+	REQUIRE(world.Settle(*client, failing) == RequestState::Failed);
+	CHECK(client->NameOf(failing) == "textures/there-is-no-such-sheet.png");
+
+	// And it keeps saying so: a failure is not consumed by asking about it, so
+	// a caller that reads the name and then decides what to do has not lost it.
+	CHECK(client->NameOf(failing) == "textures/there-is-no-such-sheet.png");
+
+	// A handle this client never issued names nothing, rather than naming the
+	// first request in the list.
+	CHECK(client->NameOf(RequestId{}).empty());
+}
+
+TEST_CASE("a taken request no longer names anything", "[cdn][delivery][e2e]") {
+	// **A take is what destroys the record**, which is why the two hosts read
+	// the name *before* taking rather than after. Asserted rather than left to
+	// the comment, because the failure it would cause is silent: the unmark
+	// would run against an empty name and the texture would stay expected.
+	World world;
+	std::unique_ptr<AssetClient> client = MakeAssetClient(world.Over());
+	REQUIRE(client != nullptr);
+	client->UseGrant(world.Token());
+
+	const RequestId id = client->Request("meshes/rock.mesh");
+	REQUIRE(world.Settle(*client, id) == RequestState::Ready);
+	CHECK(client->NameOf(id) == "meshes/rock.mesh");
+
+	REQUIRE(client->Take(id).has_value());
+	CHECK(client->NameOf(id).empty());
+}
+
 TEST_CASE("a client with no grant gets nothing from an http origin", "[cdn][delivery][e2e]") {
 	// The origin admits against a grant and nothing else. A client that was
 	// never issued one is refused, and the request fails rather than hanging.

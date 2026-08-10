@@ -235,6 +235,28 @@ namespace engine::delivery {
 		// @return The asset, or nothing when it is not `Ready`.
 		virtual std::optional<Asset> Take(RequestId id) = 0;
 
+		// What a request asked for, by name.
+		//
+		// **Because a failure does not carry one and a caller needs it.**
+		// `Take` answers with an `Asset` and an `Asset` has a `Name`, so a
+		// request that succeeded tells you what it was; one that failed answers
+		// nothing at all. A caller that has to undo something it did at request
+		// time — mark a texture as expected, count a fetch, show a row — could
+		// only do it by keeping its own handle-to-name map, which is bookkeeping
+		// duplicated in every host and wrong in the one that forgets.
+		//
+		// Empty for a request by content address, which named nothing, and for
+		// one that has been taken or cancelled.
+		//
+		// **A view into the client**, valid until the next call that changes its
+		// request list — `Pump`, `Take`, `Cancel` or another `Request`. A caller
+		// keeping it across one of those is keeping a dangling view.
+		//
+		// @param id The request.
+		// @return The name it was asked for by, or empty.
+		// @since v0.13
+		virtual std::string_view NameOf(RequestId id) const = 0;
+
 		// Abandons a request.
 		//
 		// @param id The request to abandon.

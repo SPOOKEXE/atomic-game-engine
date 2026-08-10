@@ -208,6 +208,19 @@ namespace engine::delivery {
 				return std::nullopt;
 			}
 
+			std::string_view NameOf(RequestId id) const override {
+				for (const auto &entry : Requests) {
+					if (entry.first == id.Value) {
+						// Empty for a request by content address, which is what
+						// `ByName` distinguishes: `Name` is not filled for one,
+						// and answering the empty string is the honest form of
+						// "it was not asked for by name".
+						return entry.second.Name;
+					}
+				}
+				return {};
+			}
+
 			bool Cancel(RequestId id) override {
 				for (auto entry = Requests.begin(); entry != Requests.end(); ++entry) {
 					if (entry->first != id.Value) {
