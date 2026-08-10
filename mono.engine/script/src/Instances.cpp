@@ -231,11 +231,16 @@ namespace engine::script {
 		// `SetNetworkOwner(nil)` means there and what a script that has just seen
 		// a player leave will reach for.
 		//
-		// The bad-owner case raises rather than answering `false`, which departs
-		// from `AddTag` above and for the reason that one gives: a full tag table
-		// is a *scene* running out of room, where handing a body to a `Folder` is
-		// a script naming the wrong variable. A silent `false` there is a body
+		// The refusal raises rather than answering `false`, which departs from
+		// `AddTag` above and for the reason that one gives: a full tag table is a
+		// *scene* running out of room, where handing a body to a `Folder` is a
+		// script naming the wrong variable. A silent `false` there is a body
 		// nothing simulates and no line of output.
+		//
+		// **Two things are refused and the message names both**, because a
+		// script that gets this wrong is far more likely to have passed a good
+		// player and an anchored part than a bad player: ownership decides who
+		// runs the physics, and an anchored part has none to run.
 		int InstanceSetNetworkOwner(lua_State *state) {
 			Store &store = StoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
@@ -246,7 +251,9 @@ namespace engine::script {
 			}
 
 			if (!scene::SetNetworkOwner(store, instance, player)) {
-				luaL_error(state, "SetNetworkOwner expects a Player or nil");
+				luaL_error(
+					state, "SetNetworkOwner needs a Player or nil, and an unanchored part to hand over"
+				);
 			}
 			return 0;
 		}

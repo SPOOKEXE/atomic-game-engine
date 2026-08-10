@@ -94,6 +94,54 @@ TEST_CASE("a null owner gives the body back rather than storing a hole", "[scene
 	CHECK(NetworkOwnerOf(store, part) == NULL_ENTITY);
 }
 
+TEST_CASE("an anchored part is the server's and cannot be handed over", "[scene][ownership]") {
+	// **Ownership is about physics, so a part with no physics has nothing to
+	// hand over.** Anchoring removes the `RigidBody` — anchored decides
+	// presence rather than setting a flag — and an owner of a body that does
+	// not exist is a field that reads as live and moves nothing.
+	ownership_test::Ready();
+
+	Store store("ownership.anchored");
+	InstallServices(store);
+
+	PartDesc anchored;
+	anchored.Anchored = true;
+	const Entity fixed = MakePart(store, anchored);
+	REQUIRE(store.Get<engine::scene::RigidBody>(fixed) == nullptr);
+
+	const Entity player = AddPlayer(store, "Ada");
+
+	CHECK_FALSE(SetNetworkOwner(store, fixed, player));
+	CHECK(NetworkOwnerOf(store, fixed) == NULL_ENTITY);
+
+	// Giving it back is still legal, because that is always a legal thing to
+	// ask for — a script that anchored a part and then tidied up should not be
+	// told off for the order it did them in.
+	CHECK(SetNetworkOwner(store, fixed, NULL_ENTITY));
+}
+
+TEST_CASE("anchoring an owned body returns it to the server", "[scene][ownership]") {
+	// The other end of the same sentence. A script that anchors a part it
+	// handed out does not have to remember to take it back — and leaving the
+	// row on would keep a client authorised to write the transform of something
+	// the world has just declared immovable.
+	ownership_test::Ready();
+
+	Store store("ownership.reanchored");
+	InstallServices(store);
+
+	const Entity part = MakePart(store, PartDesc{});
+	const Entity player = AddPlayer(store, "Ada");
+	REQUIRE(SetNetworkOwner(store, part, player));
+
+	// Anchoring, as the property does it: the body goes.
+	store.Remove<engine::scene::RigidBody>(part);
+	store.Remove<engine::scene::Motion>(part);
+
+	ReclaimAbandonedOwnership(store);
+	CHECK(NetworkOwnerOf(store, part) == NULL_ENTITY);
+}
+
 TEST_CASE("a non-player is refused and writes nothing", "[scene][ownership]") {
 	ownership_test::Ready();
 

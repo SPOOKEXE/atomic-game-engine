@@ -33,13 +33,25 @@ namespace engine::scene {
 	// Absent and "owned by nobody" would be two spellings of the same state, and
 	// the first thing to go wrong with two spellings is a query that checks one.
 	//
+	// **An anchored part cannot be handed over, and that is what ownership is
+	// for.** Ownership answers who runs the physics; an anchored part carries
+	// no `RigidBody` at all — `scene::MakePart` says anchored decides presence
+	// rather than setting a flag — so there is no simulation to hand anybody.
+	// Accepting it would be a field that reads as live and moves nothing, and
+	// the owner would have no way to tell.
+	//
+	// The test is therefore the presence of a `RigidBody` rather than a class
+	// check, which also refuses the other cases with nothing to simulate: a
+	// `Folder`, a service, a `Model`.
+	//
 	// @param store    The world.
 	// @param instance What to hand over.
 	// @param player   The `Player` instance that will simulate it, or
 	//                 `ecs::NULL_ENTITY` to give it back to the server.
-	// @return `false` when `player` is neither null nor a live `Player`, in
-	//         which case nothing was written. A caller with a script behind it
-	//         should raise; a caller without one should not pretend it worked.
+	// @return `false` when `player` is neither null nor a live `Player`, or
+	//         when `instance` has no body to simulate — in which case nothing
+	//         was written. A caller with a script behind it should raise; a
+	//         caller without one should not pretend it worked.
 	bool SetNetworkOwner(ecs::Store &store, ecs::Entity instance, ecs::Entity player);
 
 	// Who simulates `instance`.
@@ -50,13 +62,22 @@ namespace engine::scene {
 	//         is also the answer for an instance that has never been assigned.
 	ecs::Entity NetworkOwnerOf(const ecs::Store &store, ecs::Entity instance);
 
-	// Gives back everything owned by a player who is no longer here.
+	// Gives back everything nobody can simulate any more.
+	//
+	// Two cases, and they are the same sentence from either end.
 	//
 	// **A player leaving must not leave bodies owned by a hole.** An `Entity`
 	// carries a generation, so a destroyed player's handle does not silently
 	// become whoever is created next — but it does stop being alive, and an
 	// owner that is not alive is an entity nothing will ever simulate. Reverting
 	// to the server is the only answer that leaves the world running.
+	//
+	// **And a body that has been anchored is the server's again.** Anchoring
+	// removes the `RigidBody`, so the owner has nothing left to run; leaving the
+	// component on would keep a client authorised to write the transform of
+	// something the world has just declared immovable, which is the one thing
+	// anchoring it was for. A script that anchors a part it handed out does not
+	// have to remember to take it back.
 	//
 	// Cheap on the shape every game actually has: it visits `NetworkOwner` rows,
 	// and a game that hands nothing to anybody has none.

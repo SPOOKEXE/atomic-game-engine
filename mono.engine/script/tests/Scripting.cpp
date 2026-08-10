@@ -3944,6 +3944,13 @@ TEST_CASE("a script hands a body to a player and back to the server", "[scriptin
 		local part = Instance.new('Part')
 		part.Parent = workspace
 
+		-- **Unanchored first, and this engine's default is not Roblox's.**
+		-- `Instance.new('Part')` here carries neither `RigidBody` nor `Motion`
+		-- — the class sets deliberately leave them out, so whether a part is a
+		-- body is a decision rather than a flag — and ownership is about who
+		-- runs the physics, so an anchored part is refused.
+		part.Anchored = false
+
 		-- Absent reads as the server rather than as an error, which is the
 		-- state every body in every world this engine ships is in.
 		assert(part:GetNetworkOwner() == nil, 'a fresh part should be the server\'s')
@@ -3961,6 +3968,27 @@ TEST_CASE("a script hands a body to a player and back to the server", "[scriptin
 	)");
 }
 
+TEST_CASE("a script cannot hand over an anchored part", "[scripting]") {
+	// **The case a game will actually hit.** Ownership decides who runs the
+	// physics, and an anchored part has none to run — so this is a script
+	// mistake with a visible symptom rather than a silent no-op, and the
+	// message names the anchoring because that is the likelier of the two
+	// things to have gone wrong.
+	RegisterClasses();
+	Store store("script_test");
+	engine::scene::InstallServices(store);
+	engine::scene::AddPlayer(store, "Ada");
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	CHECK_FALSE(runtime->Run(R"(
+		local part = Instance.new('Part')
+		part.Anchored = true
+		part:SetNetworkOwner(game:GetService('Players'):FindFirstChild('Ada'))
+	)"));
+	CHECK(runtime->LastError().find("SetNetworkOwner") != std::string::npos);
+}
+
 TEST_CASE("a script cannot hand a body to something that is not a player", "[scripting]") {
 	// **Raises rather than answering false**, which is the departure from
 	// `AddTag` the binding documents: a full tag table is a scene running out
@@ -3974,6 +4002,7 @@ TEST_CASE("a script cannot hand a body to something that is not a player", "[scr
 
 	CHECK_FALSE(runtime->Run(R"(
 		local part = Instance.new('Part')
+		part.Anchored = false
 		local folder = Instance.new('Instance')
 		part:SetNetworkOwner(folder)
 	)"));
@@ -3991,6 +4020,8 @@ TEST_CASE("javascript hands a body to a player and back", "[scripting][js]") {
 	MustRun(*runtime, R"(
 		const part = Instance.new('Part');
 		part.Parent = workspace;
+		// Unanchored first, for the Luau half's reason.
+		part.Anchored = false;
 		if (part.GetNetworkOwner() !== null) throw new Error('a fresh part should be the server\'s');
 
 		const ada = game.GetService('Players').FindFirstChild('Ada');

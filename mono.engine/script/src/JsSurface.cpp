@@ -514,11 +514,15 @@ namespace engine::script {
 			const Entity player = toTheServer ? ecs::NULL_ENTITY : JsEntityOf(context, argv[0]);
 
 			if (!toTheServer && player == ecs::NULL_ENTITY) {
-				return JS_ThrowTypeError(context, "SetNetworkOwner expects a Player or null");
+				return JS_ThrowTypeError(
+					context, "SetNetworkOwner needs a Player or null, and an unanchored part to hand over"
+				);
 			}
 
 			if (!scene::SetNetworkOwner(*JsOf(context).World, instance, player)) {
-				return JS_ThrowTypeError(context, "SetNetworkOwner expects a Player or null");
+				return JS_ThrowTypeError(
+					context, "SetNetworkOwner needs a Player or null, and an unanchored part to hand over"
+				);
 			}
 			return JS_UNDEFINED;
 		}

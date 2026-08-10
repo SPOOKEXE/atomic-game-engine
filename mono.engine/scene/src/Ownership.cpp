@@ -17,8 +17,20 @@ namespace engine::scene {
 		if (player == ecs::NULL_ENTITY) {
 			// Removing rather than storing a null. See the header: absent and
 			// "owned by nobody" may not be two spellings of one state.
+			//
+			// **Allowed whatever `instance` is**, including an anchored part
+			// the check below would refuse: giving something back to the server
+			// is always a legal thing to ask for, and a script that anchored a
+			// part and then tidied up should not be told off for it.
 			store.Remove<NetworkOwner>(instance);
 			return true;
+		}
+
+		// **Nothing to simulate, nothing to own.** An anchored part carries no
+		// `RigidBody` — anchored decides presence rather than setting a flag —
+		// and neither does a `Folder` or a service. See the header.
+		if (store.Get<RigidBody>(instance) == nullptr) {
+			return false;
 		}
 
 		// **Checked, because the failure is otherwise silent and permanent.**
@@ -47,7 +59,10 @@ namespace engine::scene {
 		// today.
 		std::vector<ecs::Entity> abandoned;
 		store.Each<const NetworkOwner>([&store, &abandoned](ecs::Entity entity, const NetworkOwner &owner) {
-			if (!store.Alive(owner.Player)) {
+			// The owner has gone, or the body has. Anchoring removes the
+			// `RigidBody`, which leaves an owner authorised to write the
+			// transform of something the world has just declared immovable.
+			if (!store.Alive(owner.Player) || store.Get<RigidBody>(entity) == nullptr) {
 				abandoned.push_back(entity);
 			}
 		});
