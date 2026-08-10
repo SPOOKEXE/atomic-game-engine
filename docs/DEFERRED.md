@@ -1287,3 +1287,44 @@ should file rather than a bullet here.
 - **Correction at v0.6, to the second bullet's reasoning rather than to its verdict.** "`Vector2` was considered and refused because §3.4 gates it on 'the overlay or editor needs it' and neither does" — **`Vector2` shipped at v0.6, and for neither of those reasons.** `UDim2` and `Rect` are made of it, and both arrived with the datatype vocabulary a script surface owes an author. The gate was right and the list of things that could open it was short by one, which is the useful half: a gate phrased as "who needs it" only names the consumers somebody had thought of. The other half of that sentence closed exactly as written — the `AABB` operations got their caller in `graph::Cull`, and `Frustum::Intersects` is the positive-vertex test that wanted an `AABB` rather than eight points.
 
 **Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed — recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. `v02v03v04.md` predicted the v0.4 edit and said it belonged "with the next pass over `docs/DEFERRED.md`, not here".
+
+### [_] D00107
+
+**A streaming texture and a texture that will never arrive look identical to
+the renderer.**
+
+`TextureTable` knows what it holds. It does not know what is in flight, and the
+colour slot resolves a name that is not registered to `MissingTexture` — the
+purple checkerboard — with no way to ask whether something is on its way. So a
+sheet still crossing the network wears the marker for the frames it takes to
+land, which on a scene load is a purple shimmer across every imported model as
+their submesh textures arrive a step behind the geometry they belong to.
+
+The gap is real rather than theoretical: the intake loop requests a mesh's own
+sheets *while decoding the mesh*, so the mesh becomes resident at least one
+frame before any of them can, and `delivery::IntakeBudget` may spread the sheets
+over several more.
+
+**Why it is not fixed with a timer here.** A grace period — "draw the default
+for the first N frames after the name is first asked for" — hides a genuinely
+missing texture for exactly as long as it hides a streaming one, and with a byte
+budget in the path there is no N that is right for both a small scene and a
+large one. It trades a visible wrong picture for an invisible one.
+
+**What closing it takes.** The content pump knows what it has outstanding, and
+that is the fact the renderer is missing. Roughly: the host marks a name as
+expected when it issues a request for it and unmarks it when the asset arrives
+*or the request fails*, and the colour slot draws the default for an expected
+name and the marker for an unexpected one. The marker then means "nothing is
+coming for this", which is the only meaning that is useful.
+
+The cost is the bookkeeping, and the failure half is where it sits: the intake
+loops hold `RequestId`s and a failed `Take` yields no name, so unmarking on
+failure needs a request-to-name map in both the studio and the client. Skipping
+that half is worse than not doing it at all — a misspelled texture name is
+requested, misses, and would stay "expected" for ever, which is precisely the
+case the marker exists for.
+
+Until then: `render/AGENTS.md` records the limitation beside the three-way
+split, and a texture that is briefly purple during a load is not a bug report.
+

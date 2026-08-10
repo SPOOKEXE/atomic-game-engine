@@ -4,6 +4,7 @@
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/MeshTable.hpp>
+#include <engine/render/MissingTexture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -1375,8 +1376,17 @@ namespace engine::render {
 				// white plastic. So the slot always has content and the shader
 				// always samples it; what used to be the "no texture" branch is
 				// now the case where `Material = None` means something.
+				//
+				// **And naming a texture that is not here is a third case, not
+				// the first one again.** A part that asked for a sheet the table
+				// does not hold gets the purple checkerboard, because "nobody
+				// textured this" and "this asked for something that never
+				// arrived" are different facts and only one of them is finished.
+				// The same split `scene::KeepLoaded` makes for geometry.
 				SDL_GPUTexture *const found = Textures.Find(texture);
-				SDL_GPUTexture *const sampled = found != nullptr ? found : Textures.Default();
+				const bool absent = found == nullptr && texture.IsValid();
+				SDL_GPUTexture *const sampled =
+					found != nullptr ? found : (absent ? Textures.Missing() : Textures.Default());
 
 				// **The fallback texel is bound rather than the binding being
 				// skipped** for the other two, because a sampler a pipeline
@@ -1392,7 +1402,17 @@ namespace engine::render {
 				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 3);
 
 				LightingUniforms uniforms = *lighting;
-				uniforms.BaseColour = glm::vec4{colour[0], colour[1], colour[2], colour[3]};
+
+				// **The marker arrives as itself, so the base colour stops
+				// applying to it.** Every other texture here is modulated by the
+				// material's colour, which is what makes one grey sheet serve a
+				// whole palette — but a magenta check multiplied by a dark red
+				// part is a dark pattern that reads as somebody's intent. A
+				// marker that can be tinted into looking deliberate is not a
+				// marker.
+				const std::array<float, 4> tint =
+					absent ? std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f} : colour;
+				uniforms.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
 				uniforms.Surface = glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
 
 				// **The cell is per draw, not per instance**, which is the whole
