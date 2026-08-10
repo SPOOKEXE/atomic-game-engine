@@ -6,6 +6,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Protocol.hpp>
+#include <engine/replication/Submission.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -150,6 +151,79 @@ namespace engine::replication {
 		// @since v0.9
 		void SetIdentityCheck(std::function<bool(ClientId, const Identify &)> check);
 
+		// Decides what a client may *write*, which is the only thing standing
+		// between a delta and the world.
+		//
+		// ## The policy, and it is a decision rather than a default
+		//
+		// **Authorisation is ownership, checked per entity per message.** A
+		// client's delta names entities; every one this predicate refuses is
+		// dropped from it and counted in `Statistics::Unowned`, and a delta
+		// left with nothing is refused whole. There is no partial trust and no
+		// benefit of the doubt: `AGENTS.md` in this directory says every field
+		// of an inbound message is hostile, and an entity id is a field.
+		//
+		// **Plausibility is deliberately not checked here, and that is the
+		// decision.** This module could compare a submitted position against
+		// the last one and refuse a jump — and it would be wrong to, because it
+		// does not know whether this game has teleports, launch pads, vehicles
+		// or a grappling hook. A speed limit invented at this layer is a limit
+		// every game has to work around and none can tune. So the engine
+		// enforces *who*, the host enforces *what*, and a game that needs
+		// movement validation writes it where the movement rules already live.
+		// `Unowned` is the number that says somebody is trying.
+		//
+		// **No predicate means nothing may be written.** An authority that has
+		// not been told who owns what refuses every inbound delta, because the
+		// alternative — accepting them until somebody remembers to restrict it
+		// — makes the insecure state the one you get by forgetting.
+		//
+		// @param predicate Called as `predicate(ClientId, ecs::Entity)`.
+		// @since v0.13
+		void SetOwnership(std::function<bool(ClientId, ecs::Entity)> predicate);
+
+		// State a client sent for entities it owns, awaiting application.
+		//
+		// **Handed back rather than applied**, exactly like `Inputs`: this
+		// module does not know what a component means, and a `replication` that
+		// wrote one into a world would be a `replication` that knows what a
+		// `Transform` is. `WriteComponents` in `Submission.hpp` is the generic
+		// write a host uses, and the host is what decides when in its tick the
+		// write happens.
+		//
+		// @param client The client to ask about.
+		// @return Its accepted deltas, valid until the next `Receive` or
+		//         `ClearSubmitted` for this client.
+		// @since v0.13
+		std::span<const Delta> Submitted(ClientId client) const;
+
+		// Applies what a client submitted, filtered by ownership, and clears it.
+		//
+		// **This is where the policy is enforced**, and it is here rather than
+		// in `Receive` for a mechanical reason worth knowing: a component's
+		// values are one packed stream in entity order, so refusing an entity
+		// means reading its value off the stream and discarding it — and only
+		// the type's descriptor knows how long that value is. `Submission.hpp`
+		// carries the whole of that.
+		//
+		// A value is written when the component is one this authority
+		// replicates *and* the ownership predicate accepts the entity. Both, and
+		// owning an entity does not grant a name.
+		//
+		// @param client The client whose submissions to apply.
+		// @param store  The world to write into.
+		// @return `Ok` for a write that landed whole or in part; `Malformed` or
+		//         `UnknownComponent` for a delta this build cannot read, which
+		//         is a client on a different build or a client making things up.
+		// @since v0.13
+		ApplyStatus ApplySubmitted(ClientId client, ecs::Store &store);
+
+		// Forgets what a client submitted, without applying it.
+		//
+		// @param client The client to clear.
+		// @since v0.13
+		void ClearSubmitted(ClientId client);
+
 		// Admits a client. It will be sent a full snapshot before any delta.
 		//
 		// @return Its handle.
@@ -268,6 +342,22 @@ namespace engine::replication {
 			// Values this module held back because the budget was already spent.
 			size_t Deferred = 0;
 
+			// Entities a client tried to write and did not own.
+			//
+			// **The anti-cheat signal, and the only one this module offers.**
+			// A steady zero is a game where nobody is trying; anything else is
+			// a client submitting state for something it was not handed —
+			// which is either a bug in that client or a person editing one.
+			// See `SetOwnership` for why the plausibility half deliberately
+			// lives in the host instead.
+			//
+			// Cumulative across `Receive` calls rather than per-`Publish`, so
+			// it is a total rather than a rate. Every other figure here is
+			// what the last `Publish` did.
+			//
+			// @since v0.13
+			size_t Unowned = 0;
+
 			// How many ticks the longest-waiting deferred value has waited.
 			//
 			// The number to read when something is not replicating: a rising
@@ -331,6 +421,17 @@ namespace engine::replication {
 			uint64_t StreamedBefore = 0;
 
 			std::vector<Input> Pending;
+
+			// Accepted inbound state, cleared by the host once applied. Same
+			// shape as `Pending` and for the same reason: this module carries
+			// it and does not read it.
+			std::vector<Delta> Submitted;
+
+			// The newest tick this client has submitted for, which is what
+			// makes an out-of-order submission a refusal rather than a
+			// rewind.
+			uint64_t SubmittedTick = 0;
+
 			std::vector<std::vector<std::byte>> Outgoing;
 
 			std::vector<std::unordered_map<uint64_t, Outstanding>> Unconfirmed;
@@ -366,6 +467,10 @@ namespace engine::replication {
 			std::vector<uint64_t> Changed;
 		};
 
+		// Queues an inbound delta, having checked only that somebody has said
+		// who owns what. The filtering is `ApplySubmitted`'s.
+		bool Submit(ClientId client, Client &into, Delta &&delta);
+
 		Client *Reach(ClientId client);
 		const Client *Reach(ClientId client) const;
 		void Survey(ecs::Store &store);
@@ -381,6 +486,10 @@ namespace engine::replication {
 		std::function<bool(ClientId, ecs::Entity)> Interest;
 		std::function<float(ClientId, ecs::Entity)> Priority;
 		std::function<bool(ClientId, const Identify &)> IdentityCheck;
+
+		// Empty refuses everything, which is the safe half of the default. See
+		// `SetOwnership`.
+		std::function<bool(ClientId, ecs::Entity)> Ownership;
 		std::vector<core::Name> Components;
 
 		std::vector<ChangeDetection> Detection;

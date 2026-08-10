@@ -106,6 +106,10 @@ namespace engine::replication {
 		IdentityCheck = std::move(check);
 	}
 
+	void Authority::SetOwnership(std::function<bool(ClientId, ecs::Entity)> predicate) {
+		Ownership = std::move(predicate);
+	}
+
 	void Authority::SetPriority(std::function<float(ClientId, ecs::Entity)> score) {
 		Priority = std::move(score);
 	}
@@ -904,15 +908,108 @@ namespace engine::replication {
 		case MessageKind::Identify:
 			return !IdentityCheck || IdentityCheck(client, read.Identify);
 
-		case MessageKind::SnapshotChunk:
 		case MessageKind::Delta:
+			return Submit(client, *found, std::move(read.Delta));
+
+		case MessageKind::SnapshotChunk:
 		case MessageKind::Structure:
+			// **Still refused, and the asymmetry is the point.** A delta is a
+			// client saying "this is where the thing I own is"; a snapshot or a
+			// structure message is a client saying what exists, which is the
+			// one thing an authority may never be told.
 			Stats_.Refused++;
 			return false;
 		}
 
 		Stats_.Refused++;
 		return false;
+	}
+
+	bool Authority::Submit(ClientId client, Client &into, Delta &&delta) {
+		// **Nothing may be written until somebody has said who owns what.** The
+		// alternative default — accept, and restrict later — makes the insecure
+		// state the one a host gets by forgetting, which is the shape of most of
+		// the bugs this module's `AGENTS.md` is about.
+		//
+		// The gate is here and the *filter* is in `ApplySubmitted`, which is not
+		// an arrangement of convenience: a delta's values are one packed stream
+		// in entity order, so dropping an entity means reading its value off the
+		// stream and discarding it. Only the component's descriptor knows how
+		// long that value is, and that is at the point of the write.
+		if (!Ownership) {
+			Stats_.Refused++;
+			return false;
+		}
+
+		// **Older than what this client has already said is refused.** A
+		// submission is the client's whole answer for the entities it owns, so
+		// an out-of-order one is not a partial update to merge — it is last
+		// tick's position arriving after this tick's, and applying it drags the
+		// entity backwards on every machine that is watching.
+		//
+		// Equal is refused too. Two deltas for one tick is either a duplicate,
+		// which says nothing new, or a client contradicting itself.
+		if (delta.Tick <= into.SubmittedTick) {
+			Stats_.Refused++;
+			return false;
+		}
+
+		// A delta with no components in it says nothing. Counted as refused
+		// rather than accepted as a no-op, because a client sending them is a
+		// client doing something worth seeing in the numbers.
+		if (delta.Components.empty()) {
+			Stats_.Refused++;
+			return false;
+		}
+
+		into.SubmittedTick = delta.Tick;
+		into.Submitted.push_back(std::move(delta));
+		return true;
+	}
+
+	ApplyStatus Authority::ApplySubmitted(ClientId client, ecs::Store &store) {
+		Client *found = Reach(client);
+		if (found == nullptr || found->Submitted.empty()) {
+			return ApplyStatus::Ok;
+		}
+
+		// Refuses everything when nothing has been told who owns what. `Submit`
+		// gates on this too; this is the half that holds if a host clears the
+		// predicate between receiving and applying.
+		const auto allow = [this, client](core::Name component, ecs::Entity entity) {
+			// **The component check is not the ownership check.** A client may
+			// only write something the server was already sending it: a
+			// component this authority does not replicate is one the client has
+			// no business knowing about, let alone setting, and owning an entity
+			// does not grant a name.
+			if (!Replicated(component)) {
+				return false;
+			}
+			return Ownership && Ownership(client, entity);
+		};
+
+		ApplyStatus worst = ApplyStatus::Ok;
+		for (const Delta &delta : found->Submitted) {
+			const WriteOutcome outcome = WriteComponents(store, delta, allow);
+			Stats_.Unowned += outcome.Refused;
+			if (outcome.Status != ApplyStatus::Ok) {
+				worst = outcome.Status;
+			}
+		}
+
+		found->Submitted.clear();
+		return worst;
+	}
+
+	std::span<const Delta> Authority::Submitted(ClientId client) const {
+		const Client *found = Reach(client);
+		return found == nullptr ? std::span<const Delta>{} : found->Submitted;
+	}
+
+	void Authority::ClearSubmitted(ClientId client) {
+		if (Client *found = Reach(client); found != nullptr) {
+			found->Submitted.clear();
+		}
 	}
 
 	std::span<const Input> Authority::Inputs(ClientId client) const {
