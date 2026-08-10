@@ -251,6 +251,16 @@ namespace studio {
 		// Whether it is an error, a warning or ordinary progress. Drawn as a
 		// colour, which is the only thing the panel does with it.
 		engine::core::LogLevel Level = engine::core::LogLevel::Info;
+
+		// A number that only ever goes up, and never repeats.
+		//
+		// **What a selection is made of, because an index is not stable.** The
+		// list is a deque trimmed from the *front* at `OUTPUT_LIMIT`, so the
+		// line at index 40 is a different line a moment later — a selection
+		// held as indices would slide up the log while somebody read it.
+		//
+		// @since v0.13
+		uint64_t Serial = 0;
 	};
 
 	// Everything the command line decides.
@@ -664,6 +674,23 @@ namespace studio {
 		// @param line The 1-based line.
 		void ToggleBreakpoint(engine::core::Name path, int line);
 		void DrawOutput();
+
+		// Whether a line is inside the output's selected span.
+		//
+		// @param serial The line's serial.
+		// @return Whether it is selected.
+		// @since v0.13
+		bool OutputSelected(uint64_t serial) const;
+
+		// Puts the selected lines on the clipboard, oldest first.
+		//
+		// **Only the lines the filter is showing.** A copy that included
+		// hidden lines would hand somebody text they cannot see on screen, and
+		// the reason they filtered was to be rid of it.
+		//
+		// @return How many lines were copied.
+		// @since v0.13
+		size_t CopyOutputSelection();
 
 		// The zoom control a text panel puts beside what it scales.
 		//
@@ -2422,6 +2449,25 @@ namespace studio {
 		//
 		// @since v0.13
 		float OutputZoom = 1.0f;
+
+		// The selected span of the output, as the serials at each end.
+		//
+		// **An anchor and a head rather than a first and a last**, so a drag
+		// that goes upwards selects what it crosses rather than nothing: the
+		// anchor is where the mouse went down and the head is where it is now,
+		// and either may be the larger.
+		//
+		// Equal and zero means nothing is selected, which is safe because a
+		// serial is never zero.
+		//
+		// @since v0.13
+		//@{
+		uint64_t OutputAnchor = 0;
+		uint64_t OutputHead = 0;
+		//@}
+
+		// What the next line's serial will be. Never zero.
+		uint64_t NextOutputSerial = 1;
 
 		// The output panel's lines, oldest first.
 		//

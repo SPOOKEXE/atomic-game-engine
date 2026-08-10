@@ -1728,6 +1728,52 @@ namespace studio {
 		}
 	}
 
+	bool Editor::OutputSelected(uint64_t serial) const {
+		if (OutputAnchor == 0 || OutputHead == 0) {
+			return false;
+		}
+		const uint64_t first = std::min(OutputAnchor, OutputHead);
+		const uint64_t last = std::max(OutputAnchor, OutputHead);
+		return serial >= first && serial <= last;
+	}
+
+	size_t Editor::CopyOutputSelection() {
+		std::string text;
+		size_t copied = 0;
+
+		for (const Message &message : Output) {
+			if (!OutputSelected(message.Serial)) {
+				continue;
+			}
+
+			// **Only what the filter is showing.** A copy that included hidden
+			// lines would hand somebody text they cannot see on screen, and the
+			// reason they filtered was to be rid of it.
+			const bool isError = message.Level == LogLevel::Error;
+			const bool isWarning = message.Level == LogLevel::Warning;
+			if (isError ? !ShowErrors : isWarning ? !ShowWarnings : !ShowInfo) {
+				continue;
+			}
+			if (!OutputFilter.empty()) {
+				int score = 0;
+				if (!FuzzyMatch(OutputFilter, message.Text, score)) {
+					continue;
+				}
+			}
+
+			if (!text.empty()) {
+				text.push_back('\n');
+			}
+			text += message.Text;
+			copied++;
+		}
+
+		if (copied > 0) {
+			ImGui::SetClipboardText(text.c_str());
+		}
+		return copied;
+	}
+
 	void Editor::DrawOutput() {
 		if (!ShowOutput) {
 			return;
@@ -1740,6 +1786,22 @@ namespace studio {
 
 		if (ImGui::SmallButton("Clear")) {
 			Output.clear();
+			OutputAnchor = 0;
+			OutputHead = 0;
+		}
+
+		// **Beside Clear, because a control nobody can find is one that only
+		// exists for people who already knew the shortcut.** Disabled with
+		// nothing picked rather than hidden, so its absence is never the reason
+		// somebody thinks the panel cannot copy.
+		ImGui::SameLine();
+		ImGui::BeginDisabled(OutputAnchor == 0);
+		if (ImGui::SmallButton("Copy")) {
+			CopyOutputSelection();
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Drag to select lines · Ctrl+C copies · Ctrl+A selects all");
 		}
 
 		// **Level toggles rather than a minimum level.** A minimum is the
@@ -1811,7 +1873,37 @@ namespace studio {
 				if (colour != 0u) {
 					ImGui::PushStyleColor(ImGuiCol_Text, colour);
 				}
-				ImGui::TextUnformatted(message.Text.c_str());
+
+				// **A `Selectable` rather than text, so a line can be picked.**
+				// It spans the width of the panel, which is what a log wants
+				// anyway: clicking anywhere on the row selects it rather than
+				// only where the glyphs happen to reach.
+				//
+				// `AllowOverlap` so the drag below sees the row under the
+				// pointer rather than only the one the press started on.
+				ImGui::PushID(static_cast<int>(message.Serial));
+				ImGui::Selectable(
+					message.Text.c_str(),
+					OutputSelected(message.Serial),
+					ImGuiSelectableFlags_AllowOverlap
+				);
+
+				if (ImGui::IsItemClicked()) {
+					// Shift extends from wherever the last press was, which is
+					// what every list in every program does.
+					OutputHead = message.Serial;
+					if (!ImGui::GetIO().KeyShift) {
+						OutputAnchor = message.Serial;
+					}
+				}
+				if (ImGui::IsItemHovered() && ImGui::IsMouseDragging(ImGuiMouseButton_Left) &&
+					OutputAnchor != 0) {
+					// The drag. Moving the head rather than the anchor is what
+					// lets a selection run upwards as readily as down.
+					OutputHead = message.Serial;
+				}
+				ImGui::PopID();
+
 				if (colour != 0u) {
 					ImGui::PopStyleColor();
 				}
@@ -1853,6 +1945,21 @@ namespace studio {
 		// The wheel belongs over the lines rather than over the toolbar, so it
 		// is read against the child that holds them.
 		ApplyZoomWheel(OutputZoom);
+
+		// Ctrl+C and Ctrl+A, while the panel has focus.
+		//
+		// **Not guarded on hovering**, unlike the wheel: somebody who has just
+		// dragged a selection has their hand on the keyboard and their pointer
+		// wherever the drag ended, which may be outside the panel entirely.
+		if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
+			if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C)) {
+				CopyOutputSelection();
+			}
+			if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_A) && !Output.empty()) {
+				OutputAnchor = Output.front().Serial;
+				OutputHead = Output.back().Serial;
+			}
+		}
 
 		ImGui::End();
 	}

@@ -637,6 +637,7 @@ namespace studio {
 		// list is written, which is what keeps the panel free of a lock.
 		if (Sink != nullptr) {
 			for (Message &line : Sink->Take()) {
+				line.Serial = NextOutputSerial++;
 				Output.push_back(std::move(line));
 			}
 			while (Output.size() > OUTPUT_LIMIT) {
