@@ -793,10 +793,54 @@ example, so seeing one is a command rather than a path to look up:
 | `run-magic-tests` | the ported libraries' 183 tests, run here |
 | `run-libraries` | `MagicCore` and `TerrainCore`, loaded and exercised |
 | `run-interface` | a `ScreenGui` built entirely from a script |
-| `run-mirrors` | one room of mirrors — the rendering path |
+| `run-mirrors` | one room of mirrors, each with a different effect — the rendering path |
 | `run-mirrors-4-worlds` | four worlds composited into one frame |
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
+
+### What a mirror can show *(v0.13)*
+
+A `SurfaceCamera` has an `Effect`, and `run-mirrors` gives each of its four walls
+a different one:
+
+| `Enum.SurfaceEffect` | What it looks like |
+|---|---|
+| `None` | the reflection as rendered |
+| `NightVision` | an image intensifier — everything to green, lifted, grained, vignetted |
+| `Thermal` | a heat map, black through blue, magenta, red and yellow to white |
+| `Cctv` | grey, scanlined, with a bright band rolling down it |
+| `Swirl` | the image twisted about its own centre, turning slowly |
+
+```lua
+local reflection = Instance.new("SurfaceCamera")
+reflection.Face = Enum.NormalId.Back
+reflection.Effect = Enum.SurfaceEffect.Thermal
+reflection.Parent = pane
+```
+
+**A grade on the way out, not a second render.** The surface pass draws the world
+exactly as it would have whatever the effect says; the effect is applied in
+`opaque.frag` where the pane samples the texture. So a graded wall costs the same
+as an ungraded one — no extra target, no extra pipeline, no extra bind — and
+switching one at runtime redraws nothing.
+
+That is also why a reflection of a reflection is graded once. The texture holds
+an ungraded picture and only the pane showing it grades, so standing between the
+thermal wall and the swirl gives you a corridor carrying both, each applied by
+the wall it belongs to rather than compounding down the recursion.
+
+**Thermal reads luminance as temperature**, which is a lie an engine with no
+thermal model cannot avoid. It looks right because bright things in a lit scene
+usually are the hot ones, and `scene::SurfaceEffect` says so rather than implying
+otherwise.
+
+**A closed list rather than a shader name**, and that is a deliberate limit. This
+pipeline has one fragment program for opaque geometry; a mirror naming an
+arbitrary program would need a pipeline per program, a compilation path, and an
+answer for what happens when the file is missing on somebody else's machine —
+which is the render graph `ROADMAP.md` puts behind a prototype project, not a
+field. Every effect here is a handful of instructions on the fragment that
+samples an image somebody already rendered.
 
 ```sh
 scripts/demos/run-terrain.sh                 # uncapped, held at 165 fps

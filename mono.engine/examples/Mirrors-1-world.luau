@@ -118,30 +118,50 @@ floor.Parent = workspace
 -- The X walls run the plate's exact depth and the Z walls overrun by a
 -- thickness at each end, so the corners meet flush instead of overlapping into
 -- a z-fighting post.
+--
+-- **One effect per wall, which is the point of putting four here.** A demo that
+-- showed one grade would show what the feature does; four facing each other show
+-- what it *costs*, which is nothing — the surface pass is identical for all of
+-- them and the difference is a handful of instructions where the pane samples.
+--
+-- They also show each other. Stand between the thermal wall and the swirl and
+-- the corridor of reflections carries both grades, each applied once by the pane
+-- it belongs to rather than compounding down the recursion — because the texture
+-- holds an ungraded picture and only the pane that shows it grades.
 local WALLS = {
 	{
 		Name = "MirrorNorth",
 		Position = Vector3.new(0, WALL_HEIGHT / 2, -WALL_OFFSET),
 		Size = Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
 		Face = Enum.NormalId.Back,
+
+		-- The wall the viewer faces on startup, so the first thing anybody sees
+		-- is that these do something.
+		Effect = Enum.SurfaceEffect.NightVision,
 	},
 	{
 		Name = "MirrorEast",
 		Position = Vector3.new(WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		Size = Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
 		Face = Enum.NormalId.Left,
+		Effect = Enum.SurfaceEffect.Thermal,
 	},
 	{
 		Name = "MirrorWest",
 		Position = Vector3.new(-WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		Size = Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
 		Face = Enum.NormalId.Right,
+		Effect = Enum.SurfaceEffect.Cctv,
 	},
 	{
 		Name = "MirrorSouth",
 		Position = Vector3.new(0, WALL_HEIGHT / 2, WALL_OFFSET),
 		Size = Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
 		Face = Enum.NormalId.Front,
+
+		-- Behind the viewer at the start, and the only one that moves texels
+		-- rather than grading them.
+		Effect = Enum.SurfaceEffect.Swirl,
 	},
 }
 
@@ -208,6 +228,13 @@ for _, wall in WALLS do
 	-- can see through still carries a mirror image, which is what glass does and
 	-- what one shared number could never express.
 	reflection.ImageTransparency = 0
+
+	-- **A grade on the way out, not a second render.** The surface pass draws
+	-- the world exactly as it would have whatever this says; the effect is
+	-- applied in `opaque.frag` where the pane samples the texture. So a wall
+	-- costs the same to render graded as ungraded, and switching one at runtime
+	-- redraws nothing.
+	reflection.Effect = wall.Effect
 	reflection.Parent = pane
 end
 
@@ -281,4 +308,12 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	end
 end)
 
-print(`mirrors: {#casters} casters, {#WALLS} mirrored walls, each on a surface of its own`)
+local grades = {}
+for _, wall in WALLS do
+	table.insert(grades, wall.Effect.Name)
+end
+
+print(
+	`mirrors: {#casters} casters, {#WALLS} mirrored walls, each on a surface of its own — `
+		.. table.concat(grades, ", ")
+)

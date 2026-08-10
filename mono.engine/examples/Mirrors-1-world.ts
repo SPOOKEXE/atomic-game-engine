@@ -79,30 +79,41 @@ const WALLS: {
 	position: Vector3;
 	size: Vector3;
 	face: Enum.NormalId;
+	effect: Enum.SurfaceEffect;
 }[] = [
 	{
 		name: "MirrorNorth",
 		position: Vector3.new(0, WALL_HEIGHT / 2, -WALL_OFFSET),
 		size: Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
 		face: Enum.NormalId.Back,
+
+		// The wall the viewer faces on startup, so the first thing anybody sees
+		// is that these do something.
+		effect: Enum.SurfaceEffect.NightVision,
 	},
 	{
 		name: "MirrorEast",
 		position: Vector3.new(WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		size: Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
 		face: Enum.NormalId.Left,
+		effect: Enum.SurfaceEffect.Thermal,
 	},
 	{
 		name: "MirrorWest",
 		position: Vector3.new(-WALL_OFFSET, WALL_HEIGHT / 2, 0),
 		size: Vector3.new(WALL_THICKNESS, WALL_HEIGHT, PLATE),
 		face: Enum.NormalId.Right,
+		effect: Enum.SurfaceEffect.Cctv,
 	},
 	{
 		name: "MirrorSouth",
 		position: Vector3.new(0, WALL_HEIGHT / 2, WALL_OFFSET),
 		size: Vector3.new(PLATE + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS),
 		face: Enum.NormalId.Front,
+
+		// Behind the viewer at the start, and the only one that moves texels
+		// rather than grading them.
+		effect: Enum.SurfaceEffect.Swirl,
 	},
 ];
 
@@ -149,6 +160,12 @@ for (const wall of WALLS) {
 	// The image's own opacity, which is not the pane's: at 0 the reflection is
 	// solid whatever the pane's transparency is.
 	reflection.ImageTransparency = 0;
+
+	// A grade on the way out, not a second render: the surface pass draws the
+	// world exactly as it would have whatever this says, and the effect is
+	// applied where the pane samples the texture. So a wall costs the same to
+	// render graded as ungraded.
+	reflection.Effect = wall.effect;
 	reflection.Parent = pane;
 }
 
@@ -221,4 +238,7 @@ RunService.Heartbeat.Connect((deltaTime: number) => {
 	}
 });
 
-print(`mirrors: ${casters.length} casters, ${WALLS.length} mirrored walls, each on a surface of its own`);
+print(
+	`mirrors: ${casters.length} casters, ${WALLS.length} mirrored walls, each on a surface of its own — ` +
+		WALLS.map((wall) => wall.effect.Name).join(", "),
+);

@@ -21,6 +21,25 @@
 -- and would silently start dropping low bits -- a hash that degrades rather than
 -- one that fails, which is the worst kind. Every product below stays under 2^48.
 
+-- ## What came from Atlas
+--
+-- The simplex kernels, the analytical-derivative algebra and the Worley cell
+-- search below are ported from Atlas (https://github.com/shmeatley/atlas, MIT),
+-- a procedural generation toolkit for Roblox. What was *not* ported is its
+-- lattice hashing: Atlas builds a shuffled 256-entry permutation table per
+-- sampler, which is fast and which repeats every 256 units on every axis --
+-- the artefact this file's header exists to reject. The kernels are hashed with
+-- `hash2`/`hash3` instead, so simplex and Worley inherit the same 2^32 period
+-- as everything else here rather than bringing a grid back in through a side
+-- door.
+--
+-- Atlas is also a Wally package whose samplers are objects (`Simplex.new(seed)`)
+-- and whose visualiser needs an `EditableImage`. Neither survives the trip: this
+-- library is plain functions of `(coordinates, seed)` because `HeightField` has
+-- nowhere to keep a sampler and no Instance to draw into. `NoiseMap` beside this
+-- file is the part of Atlas's visualiser that is engine-independent -- the grid,
+-- not the image.
+
 local band = bit32.band
 local bxor = bit32.bxor
 local rshift = bit32.rshift
@@ -62,6 +81,16 @@ local function fade(t: number): number
 	return t * t * t * (t * (t * 6 - 15) + 10)
 end
 
+-- The fade's derivative, 30t^4 - 60t^3 + 30t^2, factored as 30t^2(t - 1)^2.
+--
+-- It is zero at both ends, which is the whole point of the quintic: the field's
+-- slope matches across a lattice line as well as its value does. That also makes
+-- it the one term in `noise2Deriv` that can be checked by eye -- a derivative
+-- that is non-zero on an integer boundary is a wrong fade, not a wrong dot.
+local function fadeDeriv(t: number): number
+	return 30 * t * t * (t * (t - 2) + 1)
+end
+
 local function lerp(a: number, b: number, t: number): number
 	return a + (b - a) * t
 end
@@ -89,6 +118,34 @@ local function gradient2(corner: number, dx: number, dz: number): number
 		return dz
 	end
 	return -dz
+end
+
+-- The same eight directions as `gradient2`, as components rather than as a dot.
+--
+-- A derivative needs the vector itself, not its projection, and the two have to
+-- be the same eight vectors in the same eight slots or `noise2Deriv` would
+-- return the slope of a different field than `noise2` returns the value of. They
+-- are written out twice rather than `gradient2` being expressed in terms of this
+-- one, because the dot is the hot path: two table-free returns and a multiply
+-- each is measurably worse than one add.
+local function gradientVector2(corner: number): (number, number)
+	local choice = band(corner, 7)
+	if choice == 0 then
+		return 1, 1
+	elseif choice == 1 then
+		return 1, -1
+	elseif choice == 2 then
+		return -1, 1
+	elseif choice == 3 then
+		return -1, -1
+	elseif choice == 4 then
+		return 1, 0
+	elseif choice == 5 then
+		return -1, 0
+	elseif choice == 6 then
+		return 0, 1
+	end
+	return 0, -1
 end
 
 -- 2D gradient noise, roughly in [-1, 1].
