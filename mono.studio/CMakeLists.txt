@@ -25,6 +25,13 @@ mono_add_library(studio
 		Engine::scene
 		Engine::script
 
+		# L6, `shared`. The simulation. **Named here rather than reached
+		# through `Engine::script`**, which is where it was arriving from: since
+		# v0.13 this editor prepares and ticks a `PhysicsWorld` on every world it
+		# makes, so `Editor.cpp` includes `physics/Pipeline.hpp` directly and a
+		# dependency a file includes is one its build file should say out loud.
+		Engine::physics
+
 		# L13, `shared`. The Model Context Protocol surface: the socket, the
 		# handshake and the tools any program with worlds can answer. This
 		# module adds the editor's own on top.

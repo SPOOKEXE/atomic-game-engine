@@ -8,8 +8,10 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -66,6 +68,7 @@ namespace studio {
 		constexpr std::string_view SKYGRID_WORLD = "SkyGrid";
 		constexpr std::string_view MIRROR_WORLD = "Mirrors";
 		constexpr std::string_view MESHGRID_WORLD = "Meshes";
+		constexpr std::string_view SLIDE_WORLD = "Slide";
 	}
 
 	// The engine log, teed into the Output panel.
@@ -266,6 +269,16 @@ namespace studio {
 		engine::scene::RegisterSceneClasses();
 		engine::gui::RegisterGuiClasses();
 		engine::script::ScriptClass();
+
+		// **Before any world is built, which is what the header asks for.** A
+		// resource is keyed by a component id too, so one registered lazily by
+		// the first `SetResource` takes the compiler's spelling of the type and
+		// aborts the process once the table is sealed — at a call site with
+		// nothing to do with physics.
+		//
+		// `PreparePhysicsWorld` calls this itself, and that is exactly why it
+		// cannot be the only caller: by then a world exists.
+		engine::physics::RegisterPhysicsComponents();
 
 		// `Enum.FinishRecordingOperation.Commit` and friends, so a plugin
 		// written against Roblox's `ChangeHistoryService` passes the value it
@@ -1342,6 +1355,52 @@ namespace studio {
 
 	// --- the game ----------------------------------------------------------
 
+	void Editor::PrepareWorld(Store &store, Scheduler &systems) {
+		// The client's half. A world with no draw list renders as an empty
+		// frame, which reads as a broken renderer rather than as a missing
+		// system.
+		client::InstallPresentation(store, systems, 256);
+
+		// **The fixtures, on every world this program makes.** A world with no
+		// `Workspace` is one where `game:GetService` fails and where an author
+		// has nowhere obvious to put a part — and the one place that would be
+		// discovered is a script that already ran.
+		//
+		// Idempotent, which is what lets it run on every file whatever its age:
+		// a game saved before services existed has none and gets them here, one
+		// saved after gets nothing back. Branching on the file's format version
+		// instead would be a version test that has to stay right forever.
+		engine::scene::InstallServices(store);
+
+		// **Physics, which nothing in this repository was running.** `D00039`:
+		// the module was complete, tested, benchmarked and connected to nothing
+		// — `RegisterPhysicsSystems` was called from its own suites and nowhere
+		// else, so integrate, broad phase, narrow phase and solver had never run
+		// against a real scene.
+		//
+		// **It costs an anchored world nothing**, which is why this can be on
+		// for every world rather than a per-world switch nobody would find. An
+		// anchored part carries no rigid body at all — `scene::Part` says so —
+		// so a scene of anchored geometry integrates nothing and solves nothing,
+		// and every example this repository ships is anchored throughout.
+		//
+		// The cell size is measured rather than authored: `PreparePhysicsWorld`
+		// with no size means "measure it", and the register is explicit that
+		// every constant should be re-measured against whichever world gains a
+		// tick rather than tuned now against a synthetic slab.
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+
+		// **And the weight, which is a separate feature and was the other half
+		// of why nothing fell.** `physics` deliberately has no gravity — a
+		// top-down game should not have to switch one off — so wiring the
+		// pipeline alone would have integrated every body at zero acceleration
+		// for ever. `scene::Gravity` is the rule and this is the host applying
+		// it, which is exactly the arrangement the physics suites describe.
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+	}
+
 	void Editor::NewGame() {
 		EndAllRuns();
 		Scripts.clear();
@@ -1389,6 +1448,20 @@ namespace studio {
 		// template that pulled content on open would put back the twenty-nine
 		// second start-up v0.10 spent a version removing.
 		const WorldId meshes = AddWorld(Name(MESHGRID_WORLD));
+
+		// **A fourth, and it is the one that moves.** The other three are
+		// anchored throughout, which is exactly why nothing in this repository
+		// ever ran the physics module: an anchored part carries no rigid body,
+		// so integrate, broad phase, narrow phase and solver had suites,
+		// benchmarks and no consumer at all — `DEFERRED.md` D00039.
+		//
+		// A slide rather than a stack, because a stack tests the solver and
+		// nothing else. Blocks sliding down a curve and launching off the end
+		// ask for all four steps at once, and each one fails visibly: a block
+		// that does not accelerate is not being integrated, one that sinks into
+		// the ramp is a wrong contact normal, and one that tunnels through the
+		// block ahead is the solver. A slide that works looks like a slide.
+		const WorldId slide = AddWorld(Name(SLIDE_WORLD));
 
 		Active = grid;
 		SelectionWorld = Active;
@@ -1439,6 +1512,12 @@ namespace studio {
 			InstallExampleScript(store, "MeshGrid.luau", "MeshGridScene");
 		});
 
+		// The slide lays its own floor and its own ramp, so it needs the same
+		// nothing the other three do.
+		Universe->Enter(slide, [this](Store &store) {
+			InstallExampleScript(store, "Slide.luau", "SlideScene");
+		});
+
 		// **A viewport each, pinned rather than left following the active
 		// world.** An extra viewport with no world of its own draws whatever is
 		// being edited, so two panels would show one scene twice and the
@@ -1455,12 +1534,13 @@ namespace studio {
 		ExpandWorldTree(grid);
 		ExpandWorldTree(mirrors);
 		ExpandWorldTree(meshes);
+		ExpandWorldTree(slide);
 
 		// Enough frames to outlast a first-run layout rebuild. See
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: three worlds — skygrid, mirrors and meshes — ticking in parallel");
+		Say("new game: four worlds — skygrid, mirrors, meshes and slide — ticking in parallel");
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
@@ -1488,17 +1568,7 @@ namespace studio {
 		// draw list renders as an empty frame, which reads as a broken renderer
 		// rather than as a missing system.
 		for (const WorldId id : Universe->Worlds()) {
-			Universe->Enter(id, [](Store &store, Scheduler &systems) {
-				client::InstallPresentation(store, systems, 256);
-
-				// **Idempotent, which is what lets it run on every file
-				// whatever its age.** A game saved before services existed has
-				// none and gets them here; one saved after has them all and
-				// gets nothing back. Branching on the file's format version
-				// instead would be a version test that has to stay right
-				// forever.
-				engine::scene::InstallServices(store);
-			});
+			Universe->Enter(id, PrepareWorld);
 		}
 
 		Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
@@ -1762,10 +1832,7 @@ namespace studio {
 			return false;
 		}
 
-		Universe->Enter(imported, [](Store &store, Scheduler &systems) {
-			client::InstallPresentation(store, systems, 256);
-			engine::scene::InstallServices(store);
-		});
+		Universe->Enter(imported, PrepareWorld);
 
 		Active = imported;
 		SelectionWorld = imported;
@@ -1791,10 +1858,7 @@ namespace studio {
 		// the same two things `OpenGame` does, for the same reasons. A world
 		// with no draw list renders as an empty frame.
 		for (const WorldId id : Universe->Worlds()) {
-			Universe->Enter(id, [](Store &store, Scheduler &systems) {
-				client::InstallPresentation(store, systems, 256);
-				engine::scene::InstallServices(store);
-			});
+			Universe->Enter(id, PrepareWorld);
 		}
 
 		InstanceCounts.clear();
@@ -1837,15 +1901,7 @@ namespace studio {
 			return id;
 		}
 
-		Universe->Enter(id, [](Store &store, Scheduler &systems) {
-			client::InstallPresentation(store, systems, 256);
-
-			// **The fixtures, on every world this program makes.** A world
-			// with no `Workspace` is one where `game:GetService` fails and
-			// where an author has nowhere obvious to put a part — and the one
-			// place that would be discovered is a script that already ran.
-			engine::scene::InstallServices(store);
-		});
+		Universe->Enter(id, PrepareWorld);
 
 		// **`WorldId` is a reused slot**, so a cached count keyed by one can
 		// outlive the world it counted and be shown for the next world to take
@@ -2453,9 +2509,11 @@ namespace studio {
 		// The scheduler went with the world, so the presentation systems have to
 		// be installed again. A restored world with no draw list renders as an
 		// empty frame, which reads as Stop having broken the renderer.
-		Universe->Enter(restored, [](Store &store, Scheduler &systems) {
-			client::InstallPresentation(store, systems, 256);
-		});
+		// **`PrepareWorld` rather than the presentation alone, which is what
+		// this used to do.** A world restored by Stop went back without services
+		// — every other path installs them — so it was the one world in the
+		// program where `game:GetService` could fail.
+		Universe->Enter(restored, PrepareWorld);
 
 		// **Everything that held the old handle, repointed.** `Adopt` normally
 		// hands back the same slot, but nothing promises it — and a viewport

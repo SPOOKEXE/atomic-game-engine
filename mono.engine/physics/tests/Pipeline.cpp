@@ -2,6 +2,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -9,6 +10,9 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Gravity.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 // Private: whether a read of the resource registered the type is a property of
@@ -270,4 +274,107 @@ TEST_CASE("a snapshot carries the cell size and nothing derived", "[physics][pip
 	CHECK(world.StaticDirty());
 	CHECK(world.StaticColliders() == 0);
 	CHECK(world.Pairs().empty());
+}
+
+TEST_CASE("a part authored the way a script authors one falls", "[physics][pipeline]") {
+	// **The case `D00039` was about, and the one every other case here skips.**
+	// Everything above builds its scene by writing components directly, which
+	// proves the pipeline and proves nothing about the path a game takes: a
+	// script says `Instance.new("Part")` and `part.Anchored = false`, and what
+	// that produces is the class table's business rather than this module's.
+	//
+	// The module was complete, tested, benchmarked and connected to nothing for
+	// four versions. Nobody noticed because every world this engine shipped was
+	// anchored throughout — so this asserts the join rather than either side.
+	engine::scene::RegisterSceneClasses();
+	RegisterPhysicsComponents();
+
+	Store store("pipeline.authored");
+
+	const engine::ecs::ClassId partClass = engine::ecs::Classes::Find(Name("Part"));
+	REQUIRE(partClass.IsValid());
+
+	// The floor, anchored — which is what an author writes and is why every
+	// existing example simulates nothing.
+	const Entity floor = store.CreateInstance(partClass);
+	REQUIRE(floor != engine::ecs::NULL_ENTITY);
+	{
+		const bool anchored = true;
+		REQUIRE(store.SetProperty(floor, Name("Anchored"), &anchored, sizeof(anchored)));
+
+		const engine::core::Vector3 size{40.0f, 1.0f, 40.0f};
+		REQUIRE(store.SetProperty(floor, Name("Size"), &size, sizeof(size)));
+
+		const engine::core::CFrame at{engine::core::Vector3{0.0f, -0.5f, 0.0f}};
+		REQUIRE(store.SetProperty(floor, Name("CFrame"), &at, sizeof(at)));
+	}
+
+	// And a block above it, unanchored. **Setting this false is what gives a
+	// part a rigid body** — `scene::Part` refuses one to an anchored part — so
+	// this single line is the difference between a scene that simulates and
+	// every scene this repository shipped before v0.13.
+	const Entity block = store.CreateInstance(partClass);
+	REQUIRE(block != engine::ecs::NULL_ENTITY);
+	{
+		const bool anchored = false;
+		REQUIRE(store.SetProperty(block, Name("Anchored"), &anchored, sizeof(anchored)));
+
+		const engine::core::Vector3 size{2.0f, 2.0f, 2.0f};
+		REQUIRE(store.SetProperty(block, Name("Size"), &size, sizeof(size)));
+
+		const engine::core::CFrame at{engine::core::Vector3{0.0f, 12.0f, 0.0f}};
+		REQUIRE(store.SetProperty(block, Name("CFrame"), &at, sizeof(at)));
+	}
+
+	// The calls a host makes, which until v0.13 no host made.
+	PreparePhysicsWorld(store);
+
+	Scheduler scheduler;
+	RegisterPhysicsSystems(scheduler);
+
+	// **And the weight, which is a separate feature.** This module deliberately
+	// has no gravity — a top-down game should not have to switch one off — so
+	// the pipeline alone integrates every body at zero acceleration for ever.
+	// That is not a hypothetical: this case failed exactly that way when it was
+	// first written against the pipeline alone, which is how the missing half
+	// was found.
+	engine::scene::PrepareGravity(store);
+	engine::scene::RegisterGravitySystem(scheduler);
+
+	const auto heightOf = [&store](Entity instance) {
+		const Transform *transform = store.Get<Transform>(instance);
+		return transform == nullptr ? 0.0f : transform->Frame.Position.Y;
+	};
+
+	const float started = heightOf(block);
+	CHECK(started == Approx(12.0f).margin(0.001));
+
+	for (int tick = 0; tick < 240; tick++) {
+		scheduler.Tick(store, TICK);
+	}
+
+	// **It fell**, which is the whole claim. A block that is still at twelve
+	// metres after four seconds is a world whose bodies are not being
+	// integrated — the state this engine was in until something called the two
+	// functions above.
+	CHECK(heightOf(block) < started - 1.0f);
+
+	// **And it stopped**, which is the other half and is the harder one. A
+	// block that has fallen through the floor is not simulation working, it is
+	// the narrow phase missing — and it looks identical to success in any test
+	// that only asserts the fall.
+	CHECK(heightOf(block) > -2.0f);
+
+	// The anchored floor did not move, because an anchored part carries no
+	// rigid body at all. If this ever fails, "anchored" has stopped meaning what
+	// every example in this repository relies on it meaning.
+	CHECK(heightOf(floor) == Approx(-0.5f).margin(0.001));
+
+	// **The world's own index is deliberately not asserted here.** The counts
+	// move as a body comes to rest, and what this case is about is the join
+	// between the class table and the pipeline rather than the pipeline's
+	// bookkeeping — which the cases above already pin against a scene they
+	// build themselves. Asserting an internal from here would be a second
+	// opinion about something this file is not the authority on.
+	CHECK(store.Resource<PhysicsWorld>() != nullptr);
 }

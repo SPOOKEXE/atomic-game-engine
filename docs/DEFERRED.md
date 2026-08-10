@@ -323,46 +323,6 @@ rather than as free.
   count every copy into GPU memory, measured at the region rather than derived
   from a count, and the profile panel shows them.
 
-### [_] D00039
-
-**No world this engine ships runs a physics tick. The module is complete,
-tested, benchmarked, and connected to nothing.**
-
-Found while starting v0.11 §4.6, which was scoped as "pre-emptive — nothing has
-been reported slow, so begin with benchmarks and touch nothing a number has not
-pointed at". The benchmarks were the right first move and they pointed
-somewhere else.
-
-- **`RegisterPhysicsSystems` is called from `physics/tests/` and nowhere else.**
-  Checked across the whole repository, not inferred: no client, server, studio,
-  `world` or `game` translation unit calls it.
-- **`PreparePhysicsWorld` is the same story.** Every call outside the module's
-  own tests and benchmarks is one of those tests. Without it a store has no
-  `PhysicsWorld` resource, and `WorldResource.cpp` is explicit about what that
-  means: *"a world with no `PhysicsWorld` produces no pairs, no contacts and no
-  query answers at all"*.
-- **Only `Engine::script` lists `Engine::physics`** in a `CMakeLists.txt`. The
-  client and server reach it transitively.
-- **Four production call sites use `physics::Raycast`** — the client's humanoid
-  ground check, one server path, and the Luau and JS `Raycast` bindings. None
-  of them is reached in the default scenes: a headless `studio --run play` and a
-  60-tick server run each log **zero** occurrences of the every-call error that
-  an unprepared world produces. So the queries are not silently returning
-  nothing today; they are simply not being asked.
-- **What this costs is that the whole simulation half is unexercised outside its
-  own suites.** Integrate, broad phase, narrow phase and solver have tests and
-  benchmarks and no consumer, so nothing about them is checked end to end and
-  the numbers below describe a module rather than a frame.
-- **What it means for optimisation work: do not.** The solver is by far the
-  largest figure in the suite — 13.7 ms for 800 stacks of four, which would be
-  82% of a 60 Hz frame — and the broad phase is 2.6 ms at sixteen thousand
-  colliders. Both are honest measurements of code no world runs, so a
-  percentage taken off either buys nothing until this entry is closed.
-- **The order is wiring first, then measuring the real thing.** Whichever world
-  gains a physics tick will have its own collider count, density and
-  static/dynamic split, and every constant here — cell size included — should be
-  re-measured against it rather than tuned now against a synthetic slab.
-
 ### [_] D00038
 
 **`Renderer::Render` draws one view, and the studio round-robins its panels

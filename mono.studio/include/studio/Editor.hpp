@@ -1562,6 +1562,24 @@ namespace studio {
 		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
 		void DrawTeamCreate();
 
+		// Gives one world everything this editor expects every world to have.
+		//
+		// **Five call sites wrote three lines each and one of them wrote two**,
+		// which is how a world restored by Stop ended up without services while
+		// every other path had them. A new place, an opened file, an imported
+		// world, a merged one and a restored one are all the same question —
+		// what does a world need before anybody looks at it — and the answer
+		// belongs in one place.
+		//
+		// Every part of it is idempotent, which is what lets it run on a world
+		// that already has some of it: a game saved before services existed gets
+		// them here and one saved after gets nothing back.
+		//
+		// @param store   The world.
+		// @param systems Its scheduler.
+		// @since v0.13
+		static void PrepareWorld(engine::ecs::Store &store, engine::ecs::Scheduler &systems);
+
 		// The colours a panel was given, by the title imgui identifies it with.
 		//
 		// @param panel The panel's title.
