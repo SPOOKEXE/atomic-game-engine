@@ -194,6 +194,25 @@ namespace engine::replication {
 		// @param nowSeconds The current time.
 		void Advance(double nowSeconds);
 
+		// Sends what is queued and resends what has gone unacknowledged.
+		//
+		// **What a listener that never publishes a world still has to do.**
+		// Until v0.13 the only flush was inside `Publish`, which was true of
+		// every caller: a server publishes every tick. A listener carrying
+		// nothing but user messages does not, and without this its
+		// acknowledgements never leave — so the far side's reliable window
+		// fills, its payloads are resent until the resend limit, and a link
+		// that is working perfectly gives up.
+		//
+		// `Publish` still flushes, so a server that publishes need not call
+		// this and a caller that does is flushing twice into a sender that
+		// sends by due time. That is a no-op rather than a double send.
+		//
+		// @param nowSeconds The current time.
+		// @return How many peers had something to send.
+		// @since v0.13
+		size_t Flush(double nowSeconds);
+
 		// The inputs every client has sent and the game has not consumed.
 		//
 		// @since v0.3

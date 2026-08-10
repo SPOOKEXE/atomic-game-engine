@@ -183,6 +183,16 @@ namespace engine::replication {
 			// **Sealed again under a fresh counter, never replayed verbatim.**
 			// See `Flush`.
 			uint64_t Retransmissions = 0;
+
+			// Packets sent carrying nothing but an acknowledgement.
+			//
+			// **The number that says a quiet link is still a link.** A session
+			// that carries occasional messages — the studio's edit stream —
+			// spends most of its life here, and a zero on a session that has
+			// been idle means acknowledgements are not flowing.
+			//
+			// @since v0.13
+			uint64_t KeepAlives = 0;
 		};
 
 		// What this session has done.
@@ -201,6 +211,14 @@ namespace engine::replication {
 		net::Link Link_;
 		net::ReliableSender Sender;
 		net::ReliableReceiver Receiver;
+
+		// Whether a reliable payload has been accepted and not yet
+		// acknowledged. See `Flush`.
+		//
+		// **A flag rather than a count**, because one packet acknowledges
+		// everything received up to it — the header carries a sequence and a
+		// bitfield, not a list.
+		bool Owed = false;
 
 		// The two halves of this connection's encryption, for its whole life.
 		//

@@ -13,6 +13,7 @@
 #include "Wire.hpp"
 
 #include <engine/ecs/Store.hpp>
+#include <engine/net/Enums.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
@@ -344,4 +345,47 @@ TEST_CASE("a user message round-trips through its own encoding", "[replication][
 	REQUIRE(engine::replication::ReadMessage(back, nothing));
 	CHECK(nothing.Kind == MessageKind::User);
 	CHECK(nothing.User.Bytes.empty());
+}
+
+TEST_CASE("a quiet link still acknowledges, so its window never stalls", "[replication][user]") {
+	// **The gap the studio's edit stream found, and it was invisible until
+	// something went quiet.** An acknowledgement rides on an outgoing packet.
+	// Every caller before v0.13 published a world every tick, so one always
+	// went. A session that carries occasional messages and nothing else sends
+	// nothing between them — and without a keep-alive the far side's reliable
+	// window fills, its payloads are resent to the limit, and a link that is
+	// working perfectly gives up.
+	Pair pair;
+	REQUIRE(pair.Admit());
+
+	size_t heard = 0;
+	pair.Server->OnUserMessage([&](ClientId, std::span<const std::byte>) { heard++; });
+
+	// Nothing published, ever. Only the poll, the flush and the advance a
+	// document session runs.
+	const auto quiet = [&](int ticks) {
+		for (int step = 0; step < ticks; ++step) {
+			pair.Now += 1.0 / 60.0;
+			pair.Client->Poll(pair.Replica, pair.Now);
+			pair.Server->Poll(pair.Now);
+			pair.Server->Flush(pair.Now);
+			pair.Server->Advance(pair.Now);
+			pair.Client->Poll(pair.Replica, pair.Now);
+			pair.Client->Advance(pair.Now);
+		}
+	};
+
+	// Well past the default keep-alive, and past the resend limit that would
+	// have been reached if nothing acknowledged.
+	for (int round = 0; round < 12; ++round) {
+		INFO("round " << round << " state " << engine::net::Describe(pair.Client->Link().State()));
+		REQUIRE(pair.Client->SendUser(Bytes("edit " + std::to_string(round)), pair.Now));
+		quiet(90);
+	}
+
+	CHECK(heard == 12);
+
+	// The link is still up rather than timed out, which is the other half of
+	// what a keep-alive is for.
+	CHECK(pair.Client->Link().State() == engine::net::ConnectionState::Connected);
 }

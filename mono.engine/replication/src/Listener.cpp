@@ -356,6 +356,16 @@ namespace engine::replication {
 		}
 	}
 
+	size_t Listener::Flush(double nowSeconds) {
+		size_t busy = 0;
+		for (Peer &peer : Peers) {
+			if (peer.Wire != nullptr && peer.Wire->Flush(nowSeconds) > 0) {
+				busy++;
+			}
+		}
+		return busy;
+	}
+
 	void Listener::Advance(double nowSeconds) {
 		for (size_t index = Peers.size(); index > 0; index--) {
 			Peer &peer = Peers[index - 1];
