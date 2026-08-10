@@ -1,5 +1,6 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/spatial/HashGrid.hpp>
+#include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
 
 // Private, and deliberately so. The walk, the retained capacity and the bucket
@@ -28,6 +29,8 @@ using engine::spatial::GridInternals;
 using engine::spatial::HashGrid;
 using engine::spatial::LayerMask;
 using engine::spatial::Proxy;
+using engine::spatial::SuggestCellSize;
+namespace core = engine::core;
 
 namespace {
 	// One metre cells, so a cell coordinate and a world coordinate are the same
@@ -389,4 +392,117 @@ TEST_CASE("a visitor that stops is not called again", "[hashgrid]") {
 
 	REQUIRE_FALSE(completed);
 	REQUIRE(calls == 3);
+}
+
+// --- sizing the grid from what goes in it -------------------------------------
+
+TEST_CASE("a suggested cell size is twice the mean extent, quantised", "[spatial][hashgrid]") {
+	// A scene of two-metre colliders wants four-metre cells, which is the rule
+	// of thumb `DEFAULT_CELL_SIZE` records — and is the answer a person would
+	// have picked.
+	std::vector<Proxy> proxies;
+	for (int index = 0; index < 16; index++) {
+		Proxy proxy;
+		proxy.Id = static_cast<uint64_t>(index);
+		proxy.Bounds = core::AABB::FromCentre(
+			core::Vector3{static_cast<float>(index) * 4.0f, 0.0f, 0.0f}, core::Vector3{1.0f, 1.0f, 1.0f}
+		);
+		proxies.push_back(proxy);
+	}
+
+	CHECK(SuggestCellSize(proxies) == 4.0f);
+
+	// **Quantised, which is what makes it stable.** Nudging one collider must
+	// not move the answer, because every move costs a full rebuild of the index.
+	proxies.front().Bounds =
+		core::AABB::FromCentre(core::Vector3{0.0f, 0.0f, 0.0f}, core::Vector3{1.2f, 1.0f, 1.0f});
+	CHECK(SuggestCellSize(proxies) == 4.0f);
+
+	// It takes a real change of scale to move it. Ten-metre colliders want
+	// cells an order of magnitude bigger.
+	for (Proxy &proxy : proxies) {
+		proxy.Bounds = core::AABB::FromCentre(proxy.Bounds.Centre(), core::Vector3{5.0f, 5.0f, 5.0f});
+	}
+	CHECK(SuggestCellSize(proxies) > 4.0f);
+}
+
+TEST_CASE("a suggestion is bounded and survives a degenerate scene", "[spatial][hashgrid]") {
+	// An empty set has nothing to measure.
+	CHECK(SuggestCellSize({}) == HashGrid::DEFAULT_CELL_SIZE);
+
+	// **A world of points would suggest nothing at all**, and a division by a
+	// zero cell size reaches every later query as a NaN.
+	std::vector<Proxy> degenerate(4);
+	for (size_t index = 0; index < degenerate.size(); index++) {
+		degenerate[index].Id = index;
+		degenerate[index].Bounds = core::AABB::FromCentre(core::Vector3{}, core::Vector3{});
+	}
+	CHECK(SuggestCellSize(degenerate) == HashGrid::DEFAULT_CELL_SIZE);
+
+	// A world of one enormous collider is clamped rather than believed: the
+	// measurement is right about a scene that is about to gain a crate.
+	std::vector<Proxy> huge(1);
+	huge[0].Bounds = core::AABB::FromCentre(core::Vector3{}, core::Vector3{100000.0f, 1.0f, 1.0f});
+	CHECK(SuggestCellSize(huge) <= HashGrid::MAXIMUM_CELL_SIZE);
+
+	std::vector<Proxy> tiny(1);
+	tiny[0].Bounds = core::AABB::FromCentre(core::Vector3{}, core::Vector3{0.0001f, 0.0001f, 0.0001f});
+	CHECK(SuggestCellSize(tiny) >= HashGrid::MINIMUM_CELL_SIZE);
+}
+
+TEST_CASE("changing the cell size empties the grid and answers the same", "[spatial][hashgrid]") {
+	std::vector<Proxy> proxies;
+	for (int index = 0; index < 64; index++) {
+		Proxy proxy;
+		proxy.Id = static_cast<uint64_t>(index);
+		proxy.Bounds = core::AABB::FromCentre(
+			core::Vector3{static_cast<float>(index % 8) * 3.0f, 0.0f, static_cast<float>(index / 8) * 3.0f},
+			core::Vector3{1.0f, 1.0f, 1.0f}
+		);
+
+		// A default mask matches nothing, so a proxy with one is invisible to
+		// every query — which is the right default and the wrong fixture.
+		proxy.Layers = LayerMask::All();
+		proxies.push_back(proxy);
+	}
+
+	HashGrid grid(4.0f);
+	grid.Rebuild(proxies);
+
+	const core::AABB volume =
+		core::AABB::FromCentre(core::Vector3{6.0f, 0.0f, 6.0f}, core::Vector3{5.0f, 5.0f, 5.0f});
+
+	std::array<uint64_t, 128> found{};
+	const size_t before = engine::spatial::OverlapBox(grid, volume, LayerMask::All(), found).Written;
+	REQUIRE(before > 0);
+
+	// **Emptied, because every entry records a cell coordinate derived from the
+	// spacing.** A grid that kept them would answer against cells that no longer
+	// exist.
+	grid.SetCellSize(16.0f);
+	CHECK(grid.ProxyCount() == 0);
+	CHECK(grid.CellSize() == 16.0f);
+	CHECK(engine::spatial::OverlapBox(grid, volume, LayerMask::All(), found).Written == 0);
+
+	// **And the same set comes back after the rebuild the caller owes it.** A
+	// cell size is speed and never behaviour: the walk is exhaustive at any
+	// spacing, so a query that changed its answer would be a bug in the index
+	// rather than a tuning decision.
+	grid.Rebuild(proxies);
+	std::array<uint64_t, 128> after{};
+	const size_t coarse = engine::spatial::OverlapBox(grid, volume, LayerMask::All(), after).Written;
+	CHECK(coarse == before);
+
+	std::sort(found.begin(), found.begin() + static_cast<long>(before));
+	std::sort(after.begin(), after.begin() + static_cast<long>(coarse));
+	CHECK(std::equal(found.begin(), found.begin() + static_cast<long>(before), after.begin()));
+
+	// Asking for the size it already has changes nothing, which is what makes
+	// the per-tick call in `SyncBroadphase` free.
+	grid.SetCellSize(16.0f);
+	CHECK(grid.ProxyCount() == proxies.size());
+
+	// A size at or below zero is refused in favour of the default.
+	grid.SetCellSize(-1.0f);
+	CHECK(grid.CellSize() == HashGrid::DEFAULT_CELL_SIZE);
 }

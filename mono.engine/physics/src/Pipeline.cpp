@@ -32,17 +32,33 @@ namespace engine::physics {
 			const auto *worlds = static_cast<const PhysicsWorld *>(source);
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteFloat(PipelineInternals::CellSize(worlds[index]));
+
+				// **Whether the size was chosen or measured, because the number
+				// alone no longer says.** A measured world's cell size is
+				// derived from its colliders exactly as the grids are, so
+				// restoring it as though an author had named it would pin a
+				// world to the scale it happened to have when it was saved —
+				// and it would never measure again.
+				writer.WriteBool(worlds[index].CellSizeMeasured());
 			}
 		}
 
 		void ReadPhysicsWorlds(core::ByteReader &reader, void *destination, size_t count) {
 			auto *worlds = static_cast<PhysicsWorld *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				// A fresh world at the restored cell size, which leaves the
-				// static index marked stale — so the first `SyncBroadphase`
-				// after a load rebuilds it rather than querying a grid that
-				// describes the world the snapshot was taken from.
-				worlds[index] = PhysicsWorld{reader.ReadFloat()};
+				const float cellSize = reader.ReadFloat();
+				const bool measured = reader.ReadBool();
+
+				// A fresh world, which leaves the static index marked stale — so
+				// the first `SyncBroadphase` after a load rebuilds it rather than
+				// querying a grid that describes the world the snapshot was
+				// taken from.
+				//
+				// **A measured world is reconstructed with no size at all**, so
+				// it measures again on that first sync. Passing the saved number
+				// back would make it configured, which is the one reading it
+				// must not have.
+				worlds[index] = PhysicsWorld{measured ? 0.0f : cellSize};
 			}
 		}
 	}

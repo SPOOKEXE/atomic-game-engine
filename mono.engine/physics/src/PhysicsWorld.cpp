@@ -7,7 +7,15 @@
 
 namespace engine::physics {
 
-	PhysicsWorld::PhysicsWorld(float cellSize) : DynamicIndex(cellSize), StaticIndex(cellSize) {}
+	PhysicsWorld::PhysicsWorld(float cellSize)
+		: DynamicIndex(cellSize), StaticIndex(cellSize),
+		  // **A size at or below zero means "measure it"**, which is what
+		  // `PreparePhysicsWorld`'s default already passed and what
+		  // `spatial::HashGrid`'s constructor already treats as "use the
+		  // default". The two readings agree: an unconfigured world starts at
+		  // the default and then sizes itself on its first sync, and a
+		  // configured one keeps what the author named.
+		  MeasureCells(!(cellSize > 0.0f)) {}
 
 	bool PhysicsWorld::Sleeping(ecs::Entity entity) const {
 		// The list is kept sorted by entity so this is a binary search rather
