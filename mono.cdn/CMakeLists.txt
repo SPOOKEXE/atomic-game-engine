@@ -41,6 +41,18 @@ mono_add_library(cdn
 		Engine::delivery
 		Engine::net
 		Engine::parallel
+
+		# `shared`. The distribution streams of ROADMAP.md v0.13: `--advertise`
+		# offers this origin on the subnet, `--stream-key` makes it private, and
+		# `--rendezvous-listen` runs the meeting place other people's sessions
+		# use. All three are off by default, so an origin nobody asked to be
+		# findable opens no socket for any of them.
+		#
+		# It costs the bare build nothing, which is the line to check when this
+		# row is edited: `Mono::network` links `core`, `net` and Crypto++ — a
+		# UDP socket and an HMAC, and no part of it wants a window. `just
+		# check-cdn-is-bare` is the standing proof.
+		Mono::network
 )
 
 # The library above is built whenever the server is, because a server can attach
