@@ -338,10 +338,28 @@ namespace client {
 		// Apply completions between frames, outside render passes.
 		Content->Pump();
 
+		// **How much decoding and uploading one frame will do**, and the same
+		// allowance the studio's own intake uses for the same reason: content
+		// arrives in bursts, and draining every completed request in the frame
+		// that noticed them is a frame that takes a third of a second when
+		// somebody walks into a room full of new models. `IntakeBudget` says why
+		// it is bytes rather than a count and why the first arrival is always
+		// admitted.
+		ContentBudget.Begin();
+
 		size_t kept = 0;
 		for (const engine::delivery::RequestId id : ContentPending) {
 			const engine::delivery::RequestState state = Content->StateOf(id);
 			if (state == engine::delivery::RequestState::Pending) {
+				ContentPending[kept++] = id;
+				continue;
+			}
+
+			// Held rather than dropped: an arrival this frame cannot take is
+			// still an arrival, and putting it back is what makes the budget a
+			// delay instead of a loss.
+			if (!ContentBudget.Admits()) {
+				ContentBudget.Defer();
 				ContentPending[kept++] = id;
 				continue;
 			}
@@ -352,6 +370,8 @@ namespace client {
 				// wait for; `delivery` has already counted it.
 				continue;
 			}
+
+			ContentBudget.Spend(asset->Bytes.size());
 
 			// **The name is published as-is, extension included.** A
 			// `SurfaceAppearance` naming `characters/skin.atex` and a manifest

@@ -1,0 +1,601 @@
+// What the editor offers a plugin, over `script::HostSurface`.
+//
+// **The names are Roblox's where Roblox has one**, because a person who has
+// written a Studio plugin should be able to write one of these without learning
+// a second vocabulary for the same idea. Where the shape differs it is because
+// the seam carries values rather than objects — `plugin.CreateButton(toolbar,
+// ...)` takes the toolbar's id where Roblox's takes the toolbar — and that is
+// stated rather than smoothed over.
+//
+//     local toolbar = plugin.CreateToolbar("My Tools")
+//     local Selection = game:GetService("Selection")
+//
+//     plugin.CreateButton(toolbar, "Align", "Align the selection", function()
+//         for _, part in Selection:Get() do
+//             part.CFrame = CFrame.new(0, part.Position.Y, 0)
+//         end
+//     end)
+//
+//     local panel = plugin.CreateWidget("Align", true)
+//     plugin.SetWidgetRender(panel, function()
+//         plugin.Label("Selected: " .. #Selection:Get())
+//         if plugin.Button("Clear") then Selection:Set({}) end
+//     end)
+//
+// ## Three groups, and the third is the one with a rule
+//
+// **The world half needs no host call at all** and is deliberately absent here:
+// `Instance`, `workspace` and `World` are the engine's own surface, and a plugin
+// gets them because it is a script. What is here is only what an *editor* has.
+//
+// **The widget calls are only legal while a widget is rendering.** They are
+// immediate-mode ImGui underneath, so calling `plugin.Label` from a heartbeat
+// would draw into whatever window the editor happened to be building. `Drawing`
+// is the gate and the refusal names the reason, because the alternative is a
+// plugin that corrupts a panel it has never heard of.
+//
+// ## What a plugin may read of another script, and why that is not a hole
+//
+// `GetScriptSource` hands back the text of a `LuaSourceContainer` in the world
+// being edited. That is the same text the script editor shows and the same text
+// a save file carries — a plugin is a tool running in an editor on a project
+// somebody opened, so it is reading what its user is already looking at.
+//
+// It is *not* a way out of the sandbox: it reads through `script::ReadSource`
+// against this world's own `SourceCache`, so there is no path from a name to a
+// file on disk. A plugin cannot read `/etc/passwd` by calling it, which is the
+// property that matters.
+
+#include <engine/core/Log.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
+#include <imgui.h>
+#include <studio/Editor.hpp>
+#include <studio/Plugins.hpp>
+
+#include <algorithm>
+#include <string>
+#include <vector>
+
+namespace studio {
+
+	using engine::ecs::Entity;
+	using engine::ecs::Store;
+	using engine::script::HostArguments;
+	using engine::script::HostCallback;
+	using engine::script::HostTag;
+	using engine::script::HostValue;
+
+	namespace {
+		// One argument, or nil when the script passed fewer.
+		const HostValue &At(HostArguments arguments, size_t index) {
+			static const HostValue nothing;
+			return index < arguments.size() ? arguments[index] : nothing;
+		}
+
+		// An index into a vector, from a script's number.
+		//
+		// **One-based on the script side**, because that is Luau's own
+		// convention and a plugin author counting from zero in Luau is a plugin
+		// author who will get it wrong once. Zero and out of range both answer
+		// `false`, which the caller turns into a named refusal.
+		bool IndexOf(const HostValue &value, size_t count, size_t &out) {
+			const double number = value.AsNumber(0.0);
+			if (number < 1.0 || number > static_cast<double>(count)) {
+				return false;
+			}
+			out = static_cast<size_t>(number) - 1;
+			return true;
+		}
+	}
+
+	// The editor's half of the seam, one per plugin.
+	//
+	// **Per plugin rather than one shared**, because every call has to know
+	// which plugin made it: a toolbar belongs to the plugin that created it, and
+	// a surface shared between them would need the caller's identity passed in
+	// on every call — which the seam has no way to supply and a plugin could
+	// forge.
+	class PluginSurface final : public engine::script::HostSurface {
+	  public:
+		PluginSurface(Editor &editor, LoadedPlugin &plugin) : Owner(editor), Plugin(plugin) {}
+
+		std::string_view GlobalName() const override {
+			return "plugin";
+		}
+
+		std::vector<std::string> Names() const override {
+			return {
+				// The editor.
+				"Notify",
+				"GetActiveWorld",
+
+				// **`Selection` is a service, which is Roblox's own shape.**
+				// A dotted name becomes a global table of methods — see
+				// `OpenHost` — so `game:GetService("Selection")` finds it for
+				// free, and `Selection:Get()` is what a Roblox plugin author
+				// already types.
+				"Selection.Get",
+				"Selection.Set",
+				"Selection.Add",
+				"Selection.Remove",
+
+				// Scripts in the world being edited.
+				"GetScriptSource",
+				"SetScriptSource",
+				"GetScripts",
+
+				// Toolbars and buttons.
+				"CreateToolbar",
+				"CreateButton",
+				"SetButtonActive",
+
+				// Docked panels, and what may be drawn in one.
+				"CreateWidget",
+				"SetWidgetRender",
+				"SetWidgetOpen",
+				"IsWidgetOpen",
+				"Label",
+				"Button",
+				"Checkbox",
+				"Separator",
+				"InputText",
+			};
+		}
+
+		bool Call(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure)
+			override {
+			// A plain chain rather than a table of member pointers: nineteen
+			// names, each a handful of lines, and a dispatch table would be a
+			// second list to keep in step with `Names`.
+			if (name == "Notify") {
+				Owner.Say("[" + Plugin.Manifest.Name + "] " + std::string(At(arguments, 0).AsText()));
+				return true;
+			}
+			if (name == "GetActiveWorld") {
+				result = HostValue::Of(std::string_view(Owner.ActiveWorldName()));
+				return true;
+			}
+			if (name == "Selection.Get") {
+				std::vector<HostValue> selected;
+				for (const Entity instance : Owner.Selection) {
+					selected.push_back(HostValue::Of(instance));
+				}
+				result = HostValue::List(std::move(selected));
+				return true;
+			}
+			if (name == "Selection.Set" || name == "Selection.Add" || name == "Selection.Remove") {
+				return Selection(name, At(arguments, 0), failure);
+			}
+			if (name == "GetScriptSource") {
+				return GetScriptSource(At(arguments, 0), result, failure);
+			}
+			if (name == "SetScriptSource") {
+				return SetScriptSource(At(arguments, 0), At(arguments, 1), failure);
+			}
+			if (name == "GetScripts") {
+				return GetScripts(result, failure);
+			}
+			if (name == "CreateToolbar") {
+				PluginToolbar toolbar;
+				toolbar.Name = std::string(At(arguments, 0).AsText());
+				if (toolbar.Name.empty()) {
+					failure = "a toolbar needs a name";
+					return false;
+				}
+				Plugin.Toolbars.push_back(std::move(toolbar));
+				result = HostValue::Of(static_cast<double>(Plugin.Toolbars.size()));
+				return true;
+			}
+			if (name == "CreateButton") {
+				return CreateButton(arguments, result, failure);
+			}
+			if (name == "SetButtonActive") {
+				return SetButtonActive(arguments, failure);
+			}
+			if (name == "CreateWidget") {
+				PluginWidget widget;
+				widget.Title = std::string(At(arguments, 0).AsText());
+				if (widget.Title.empty()) {
+					failure = "a widget needs a title";
+					return false;
+				}
+				widget.Open = At(arguments, 1).AsBoolean();
+				Plugin.Widgets.push_back(std::move(widget));
+				result = HostValue::Of(static_cast<double>(Plugin.Widgets.size()));
+				return true;
+			}
+			if (name == "SetWidgetRender" || name == "SetWidgetOpen" || name == "IsWidgetOpen") {
+				return Widget(name, arguments, result, failure);
+			}
+
+			// Everything below draws, and drawing is only legal from inside a
+			// widget's own render call.
+			if (!Drawing) {
+				failure = std::string(name) + " may only be called while a widget is drawing";
+				return false;
+			}
+			return Draw(name, arguments, result, failure);
+		}
+
+		// Whether a widget's render callback is on the stack.
+		//
+		// **Set by the editor around the invoke**, so the gate is a fact about
+		// where the call came from rather than a promise the plugin makes.
+		bool Drawing = false;
+
+	  private:
+		// `Selection:Set`, `:Add` and `:Remove`, which differ only in what they
+		// do to what is already selected.
+		//
+		// **The argument has to be an array and the items do not have to be
+		// good.** Those are two different mistakes and they deserve different
+		// answers: `Selection:Set(part)` without the braces is the call being
+		// wrong, and it is refused; an item that has been destroyed since the
+		// plugin picked it up is the *world* having moved on, which is not the
+		// plugin's fault and is not worth failing a whole call over.
+		//
+		// So a bad item is skipped and warned about, once per call, naming what
+		// it was. A plugin that selects the results of a query it ran three
+		// frames ago should end up selecting the ones that are still there
+		// rather than getting an error it can do nothing about.
+		//
+		// **An empty array is a whole answer**, not a degenerate one:
+		// `Selection:Set({})` is how a plugin deselects everything, and it is
+		// the reason the binding reads an empty Luau table as an array — see
+		// `HostValue::Items`.
+		bool Selection(std::string_view name, const HostValue &value, std::string &failure) {
+			const std::string method(name.substr(name.find('.') + 1));
+
+			if (value.Tag != HostTag::Array) {
+				failure = "Selection:" + method + " expects an array of Instances, and was given " +
+						  engine::script::Describe(value.Tag);
+
+				// **The near-misses are named, because they are what somebody
+				// actually types.** A bare instance is the common one and a nil
+				// is the second; telling them what to write costs a sentence and
+				// saves them the guess.
+				if (value.Tag == HostTag::Instance) {
+					failure += " — write Selection:" + method + "({ instance })";
+				} else if (value.Tag == HostTag::Nil) {
+					failure += " — write Selection:" + method + "({}) to select nothing";
+				}
+				return false;
+			}
+
+			std::vector<Entity> instances;
+			instances.reserve(value.Items.size());
+
+			// What was skipped, in the words the warning uses. Collected rather
+			// than logged per item: a plugin passing a hundred stale handles is
+			// one mistake and should be one line.
+			std::vector<std::string> ignored;
+
+			Owner.WithSelectionWorld([&](Store &store) {
+				for (size_t at = 0; at < value.Items.size(); at++) {
+					const HostValue &item = value.Items[at];
+					const std::string where = "item " + std::to_string(at + 1) + " is ";
+
+					if (item.Tag != HostTag::Instance) {
+						// One-based, because that is how the script counted.
+						ignored.push_back(where + engine::script::Describe(item.Tag));
+						continue;
+					}
+
+					// **A destroyed instance is a different skip from a wrong
+					// type**, and saying which is most of the value of the
+					// warning: one means the plugin's code is wrong and the
+					// other means the world moved under it.
+					if (!store.Alive(item.Instance)) {
+						ignored.push_back(where + "an Instance that no longer exists");
+						continue;
+					}
+
+					instances.push_back(item.Instance);
+				}
+			});
+
+			if (!ignored.empty()) {
+				// **Capped, because a plugin passing a thousand bad items would
+				// otherwise be a line nobody can read.** The count is still
+				// exact, which is the part somebody acts on.
+				constexpr size_t SHOWN = 3;
+
+				std::string message = "Selection:" + method + " ignored " +
+									  std::to_string(ignored.size()) + " item(s): ";
+
+				for (size_t at = 0; at < std::min(ignored.size(), SHOWN); at++) {
+					message += (at > 0 ? ", " : "") + ignored[at];
+				}
+				if (ignored.size() > SHOWN) {
+					message += ", and " + std::to_string(ignored.size() - SHOWN) + " more";
+				}
+
+				// Through the editor's own output, prefixed with the plugin's
+				// name, because the person reading it has several installed and
+				// needs to know whose mistake it is.
+				Owner.Say("[" + Plugin.Manifest.Name + "] " + message, engine::core::LogLevel::Warning);
+			}
+
+			// **The list is edited directly rather than through
+			// `Editor::Select`, and that is not a shortcut.** That function
+			// *toggles* — it is what a ctrl-click calls, so adding something
+			// already selected removes it. `Selection:Add` must not, and a
+			// plugin adding a part twice must not end up with it deselected.
+			std::vector<Entity> &selected = Owner.Selection;
+
+			if (method == "Remove") {
+				for (const Entity instance : instances) {
+					selected.erase(
+						std::remove(selected.begin(), selected.end(), instance), selected.end()
+					);
+				}
+				return true;
+			}
+
+			// **`Set` replaces and `Add` does not**, which is Roblox's split and
+			// the reason both exist: a tool that grows a selection would
+			// otherwise have to read it, append and write it back.
+			//
+			// `Set` with an empty array therefore deselects everything, which is
+			// the whole of what it means and needs no case of its own. **An
+			// array whose every item was skipped clears it too**, which is the
+			// honest reading: the plugin asked for a selection of things that
+			// are not there.
+			if (method == "Set") {
+				Owner.ClearSelection();
+			}
+
+			// The world has to follow the instances, or the selection is a list
+			// of handles into a store nothing is looking at.
+			if (!instances.empty()) {
+				Owner.SelectionWorld = Owner.Active;
+			}
+
+			for (const Entity instance : instances) {
+				if (std::find(selected.begin(), selected.end(), instance) == selected.end()) {
+					selected.push_back(instance);
+				}
+			}
+			return true;
+		}
+
+		// The world a script instance's source lives in.
+		//
+		// **Through `script::ReadSource` rather than off the filesystem**, which
+		// is the property that keeps this from being a hole: a source name is a
+		// key into this world's own `SourceCache`, so there is no path from one
+		// to a file on disk.
+		bool GetScriptSource(const HostValue &value, HostValue &result, std::string &failure) {
+			const Entity instance = value.AsInstance();
+			if (instance == engine::ecs::NULL_ENTITY) {
+				failure = "GetScriptSource takes a script instance";
+				return false;
+			}
+
+			bool found = false;
+			std::string text;
+
+			Owner.WithSelectionWorld([&](Store &store) {
+				const engine::ecs::ClassId container =
+					engine::ecs::Classes::Find(engine::core::Name("LuaSourceContainer"));
+				if (!container.IsValid() || !store.IsA(instance, container)) {
+					return;
+				}
+
+				engine::core::Name path;
+				if (!store.GetProperty(instance, engine::core::Name("Source"), &path, sizeof(path))) {
+					return;
+				}
+
+				std::string error;
+				found = engine::script::ReadSource(store, path, text, error);
+			});
+
+			if (!found) {
+				failure = "that instance carries no readable source";
+				return false;
+			}
+
+			result = HostValue::Of(std::string_view(text));
+			return true;
+		}
+
+		bool SetScriptSource(const HostValue &target, const HostValue &text, std::string &failure) {
+			const Entity instance = target.AsInstance();
+			if (instance == engine::ecs::NULL_ENTITY || text.Tag != HostTag::String) {
+				failure = "SetScriptSource takes a script instance and a string";
+				return false;
+			}
+
+			bool written = false;
+			Owner.WithSelectionWorld([&](Store &store) {
+				engine::core::Name path;
+				if (!store.GetProperty(instance, engine::core::Name("Source"), &path, sizeof(path))) {
+					return;
+				}
+
+				auto *cache = store.ResourceMutable<engine::script::SourceCache>();
+				if (cache == nullptr) {
+					store.SetResource(engine::script::SourceCache{});
+					cache = store.ResourceMutable<engine::script::SourceCache>();
+				}
+				if (cache == nullptr) {
+					return;
+				}
+
+				cache->Set(path, text.Text);
+				written = true;
+			});
+
+			if (!written) {
+				failure = "that instance carries no source to write";
+				return false;
+			}
+
+			// The file on disk is not this editor's to write from here — a
+			// plugin edits the world, and saving the world is what writes it.
+			Owner.MarkModified();
+			return true;
+		}
+
+		bool GetScripts(HostValue &result, std::string &failure) {
+			std::vector<HostValue> scripts;
+
+			Owner.WithSelectionWorld([&](Store &store) {
+				const engine::ecs::ClassId container =
+					engine::ecs::Classes::Find(engine::core::Name("LuaSourceContainer"));
+				if (!container.IsValid()) {
+					return;
+				}
+
+				// Every instance in the world, filtered by class. Deliberately a
+				// walk rather than a query: `IsA` is set inclusion over a class
+				// tree and `Store` has no term for it.
+				store.EachEntity([&](Entity entity) {
+					if (store.IsA(entity, container)) {
+						scripts.push_back(HostValue::Of(entity));
+					}
+				});
+			});
+
+			if (scripts.empty() && !Owner.HasActiveWorld()) {
+				failure = "there is no scene open";
+				return false;
+			}
+
+			result = HostValue::List(std::move(scripts));
+			return true;
+		}
+
+		bool CreateButton(HostArguments arguments, HostValue &result, std::string &failure) {
+			size_t toolbar = 0;
+			if (!IndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+				failure = "no such toolbar — CreateToolbar answers the id to pass here";
+				return false;
+			}
+
+			PluginButton button;
+			button.Name = std::string(At(arguments, 1).AsText());
+			if (button.Name.empty()) {
+				failure = "a button needs a name";
+				return false;
+			}
+
+			button.Tooltip = std::string(At(arguments, 2).AsText());
+
+			const HostValue &handler = At(arguments, 3);
+			if (handler.Tag == HostTag::Callback) {
+				button.OnClick = handler.Callback;
+			} else if (handler.Tag != HostTag::Nil) {
+				failure = "a button's handler has to be a function";
+				return false;
+			}
+
+			Plugin.Toolbars[toolbar].Buttons.push_back(std::move(button));
+			result = HostValue::Of(static_cast<double>(Plugin.Toolbars[toolbar].Buttons.size()));
+			return true;
+		}
+
+		bool SetButtonActive(HostArguments arguments, std::string &failure) {
+			size_t toolbar = 0;
+			size_t button = 0;
+			if (!IndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar) ||
+				!IndexOf(At(arguments, 1), Plugin.Toolbars[toolbar].Buttons.size(), button)) {
+				failure = "no such button";
+				return false;
+			}
+
+			Plugin.Toolbars[toolbar].Buttons[button].Active = At(arguments, 2).AsBoolean();
+			return true;
+		}
+
+		bool Widget(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure) {
+			size_t widget = 0;
+			if (!IndexOf(At(arguments, 0), Plugin.Widgets.size(), widget)) {
+				failure = "no such widget — CreateWidget answers the id to pass here";
+				return false;
+			}
+
+			if (name == "IsWidgetOpen") {
+				result = HostValue::Of(Plugin.Widgets[widget].Open);
+				return true;
+			}
+			if (name == "SetWidgetOpen") {
+				Plugin.Widgets[widget].Open = At(arguments, 1).AsBoolean();
+				return true;
+			}
+
+			const HostValue &handler = At(arguments, 1);
+			if (handler.Tag != HostTag::Callback) {
+				failure = "SetWidgetRender takes a function";
+				return false;
+			}
+
+			// **The previous one is released.** A plugin that reassigns a render
+			// callback every heartbeat would otherwise hold one reference per
+			// frame for the life of the session.
+			if (Plugin.Widgets[widget].Render.Valid() && Plugin.Vm != nullptr) {
+				Plugin.Vm->Release(Plugin.Widgets[widget].Render);
+			}
+
+			Plugin.Widgets[widget].Render = handler.Callback;
+			return true;
+		}
+
+		bool Draw(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure) {
+			const std::string text(At(arguments, 0).AsText());
+
+			if (name == "Label") {
+				ImGui::TextWrapped("%s", text.c_str());
+				return true;
+			}
+			if (name == "Separator") {
+				ImGui::Separator();
+				return true;
+			}
+			if (name == "Button") {
+				result = HostValue::Of(ImGui::Button(text.c_str()));
+				return true;
+			}
+			if (name == "Checkbox") {
+				bool value = At(arguments, 1).AsBoolean();
+				ImGui::Checkbox(text.c_str(), &value);
+				result = HostValue::Of(value);
+				return true;
+			}
+			if (name == "InputText") {
+				// **A fixed buffer, and the length is stated rather than
+				// implied.** A plugin's text field is not where somebody edits a
+				// script — that is the script editor — so a growing buffer per
+				// field per frame would be an allocation nobody needed.
+				char buffer[512] = {};
+				const std::string initial(At(arguments, 1).AsText());
+				const size_t copied = std::min(initial.size(), sizeof(buffer) - 1);
+				std::copy_n(initial.begin(), copied, buffer);
+
+				ImGui::InputText(text.c_str(), buffer, sizeof(buffer));
+				result = HostValue::Of(std::string_view(buffer));
+				return true;
+			}
+
+			failure = "no such widget call";
+			return false;
+		}
+
+		Editor &Owner;
+		LoadedPlugin &Plugin;
+	};
+
+	std::unique_ptr<engine::script::HostSurface> MakePluginSurface(Editor &editor, LoadedPlugin &plugin) {
+		return std::make_unique<PluginSurface>(editor, plugin);
+	}
+
+	void SetPluginDrawing(engine::script::HostSurface &surface, bool drawing) {
+		// A `static_cast` rather than a virtual, because `Drawing` is this
+		// editor's own gate and not part of what a host surface *is* — a second
+		// host would have no use for it.
+		static_cast<PluginSurface &>(surface).Drawing = drawing;
+	}
+}

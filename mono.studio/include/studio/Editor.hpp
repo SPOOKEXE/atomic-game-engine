@@ -29,6 +29,8 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
+#include <studio/Config.hpp>
+#include <studio/Plugins.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -43,6 +45,7 @@
 #include <engine/render/DebugPanels.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/delivery/Client.hpp>
+#include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
@@ -629,6 +632,35 @@ namespace studio {
 		void ResolveFocusedViewport();
 		void DrawProperties();
 		void DrawScripts();
+
+		// The breakpoint column beside a script's text.
+		//
+		// **A sibling of the code rather than part of it**, because
+		// `CodeField` is an `InputTextMultiline` and owns its own scrolling
+		// child — so the column is drawn next to it and told where that child
+		// has scrolled to.
+		//
+		// @param tab The script being edited.
+		// @return How wide the column drew, so the caller can lay out beside it.
+		float DrawScriptGutter(const OpenScript &tab);
+
+		// The breakpoint on a line of a script, or null.
+		//
+		// @param path The script's source path.
+		// @param line The 1-based line.
+		// @return The breakpoint, or null when there is none.
+		const engine::script::Breakpoint *BreakpointAt(engine::core::Name path, int line) const;
+
+		// Adds a breakpoint to a line, or takes the one there away.
+		//
+		// **Writes the editor's list and every live runtime's**, in that order.
+		// The editor's is the one that survives a Stop; a runtime's is a copy it
+		// was handed when the run began, so writing only those would make a
+		// breakpoint disappear the next time somebody pressed Stop.
+		//
+		// @param path The script's source path.
+		// @param line The 1-based line.
+		void ToggleBreakpoint(engine::core::Name path, int line);
 		void DrawOutput();
 
 		// The editor's own settings, in pages.
@@ -1161,6 +1193,31 @@ namespace studio {
 		// Builds a bounded number of queued thumbnails and evicts old ones.
 		void PumpThumbnails();
 
+		// Drives the preview slot for a rendered row nobody is pointing at.
+		//
+		// **The fix for a material that only appeared when hovered.** A mesh and
+		// a material have no bitmap — their picture is a render — and nothing
+		// asked for one until the cursor arrived, so a store full of materials
+		// drew a grid of dashes until somebody swept the mouse over it.
+		//
+		// One at a time, because there is one slot and the round robin gives it
+		// one turn in N. `RenderPreviewSlot` caches what it drew, so a row that
+		// has had its turn keeps its picture and the queue moves on — a list
+		// fills in over the next few frames and then costs nothing.
+		//
+		// **Hover still wins.** This runs before `DrawHoverPreview`, which
+		// overwrites the request with whatever is under the cursor: the row
+		// somebody is looking at is worth more than the one that happened to be
+		// next.
+		void PumpRenderedPreviews();
+
+		// Rows drawn this frame whose picture is a render and is not cached yet.
+		//
+		// Recorded by `PaintPreview` while the list is drawn, so it is exactly
+		// what was on screen — a queue built from the whole store would spend
+		// the editor's frames on rows nobody had scrolled to.
+		std::vector<std::string> PreviewQueue;
+
 		// What one asset's preview is registered under in the texture table.
 		//
 		// **Prefixed, so a preview can never be sampled as content**: the
@@ -1423,6 +1480,100 @@ namespace studio {
 		// `Network.cpp`.
 		void DrawNetwork();
 
+		// The control surface: whether it is listening, and what it offers.
+		//
+		// **A panel rather than a log line, because the interesting facts about
+		// it change.** Whether a client is attached, how many requests have been
+		// answered and which tools this program declares are all things somebody
+		// checks while debugging an agent, and the startup line said the first
+		// two once and the third never.
+		void DrawControl();
+
+		// Starts the control server, or stops it.
+		//
+		// **One button rather than a setting that needs a restart.** The port is
+		// a setting; whether the socket is open is a decision somebody makes
+		// while working, and an editor that had to be relaunched to answer an
+		// agent is one nobody would use that way.
+		void ToggleControl();
+
+		// Discovers, starts and beats the plugins. See `studio/Plugins.hpp`.
+		//@{
+		void LoadPlugins();
+		void PumpPlugins(float delta);
+		void DrawPlugins();
+
+		// Draws every open plugin panel, each in its own window.
+		void DrawPluginWidgets();
+
+		// Calls one of a plugin's handlers, counting a raise as a fault.
+		//
+		// @param plugin   Whose handler.
+		// @param callback What to call.
+		// @param drawing  Whether the widget calls are legal inside it.
+		void InvokePlugin(LoadedPlugin &plugin, engine::script::HostCallback callback, bool drawing);
+		//@}
+
+		// Publishes the selection into the world as `studio.Selected`.
+		//
+		// **The bridge a plugin reads the selection through**, and the reason
+		// there is no selection *API*: a selection is per-entity state about the
+		// world, which is what a component is for. Called once a frame from the
+		// plugin pump, and only when something changed — a tag written every
+		// frame would move `Store::ChangeVersion` every frame and defeat the
+		// gate the physics broad phase reads.
+		void PublishSelection();
+
+		// **The plugin surface is a friend rather than a widening of this
+		// class.** It is the editor's own half of the seam and lives in
+		// `PluginSurface.cpp`; making `Select` public so one file could call it
+		// would offer it to every other file too, which is the opposite of what
+		// a plugin API is for.
+		friend class PluginSurface;
+
+		// The active world's name, for a plugin that wants to say which scene it
+		// is looking at.
+		//
+		// @return The name, or empty when there is none.
+		std::string ActiveWorldName() const;
+
+		// Whether there is a scene to act on.
+		//
+		// @return `true` when a world is active.
+		bool HasActiveWorld() const;
+
+		// Runs `body` against the world the selection belongs to.
+		//
+		// **One entry point, because a plugin call is not allowed to guess.**
+		// Every host call that touches storage goes through this, so a call made
+		// when nothing is open is a no-op rather than a crash — and there is one
+		// place that knows which world "the world" means.
+		//
+		// @param body What to run. Not called when there is no world.
+		void WithSelectionWorld(const std::function<void(engine::ecs::Store &)> &body);
+
+		// What was published last, so the frame that changed nothing does
+		// nothing. Sorted, because it is compared against a sorted selection.
+		std::vector<Entity> PublishedSelection;
+
+		// Reads the config folder, and moves anything found beside the binary.
+		//
+		// **The move is one-way and happens once.** `studio-content.ini` and
+		// `studio-keybinds.ini` lived in `Paths::Base()`, which is the build
+		// directory for anybody working on the engine — so a `just build`
+		// against another preset read as a fresh install and deleting the build
+		// directory threw somebody's keybinds away. Reading the old location
+		// when the new one has nothing is what stops this change from being that
+		// same loss one more time.
+		void LoadConfiguration();
+
+		// Writes the config folder, on the way out.
+		//
+		// **Not on every edit**, which is `Keybinds::Save`'s own rule: the
+		// preferences page changes a value as somebody drags a slider, and a
+		// file rewritten per frame is a file that records a half-finished drag.
+		void SaveConfiguration();
+
 		// Builds the delivery client and the uploader from the current sources.
 		//
 		// Called at start-up and whenever the Content page is edited, because a
@@ -1529,6 +1680,12 @@ namespace studio {
 		// Fetches still in flight.
 		std::vector<engine::delivery::RequestId> ContentPending;
 
+		// How much delivered content this frame will decode and upload.
+		//
+		// Held across frames rather than made in the loop so the allowance is
+		// one object with one meaning; `Begin` is what resets it.
+		engine::delivery::IntakeBudget ContentBudget;
+
 		// Requests made while `ContentPending` was being walked.
 		std::vector<engine::delivery::RequestId> ContentIssued;
 
@@ -1586,8 +1743,42 @@ namespace studio {
 		// @param project The path to `default.project.json`.
 		void SyncRojo(const std::filesystem::path &project);
 
+		// Builds every world a `main.universe.json` names.
+		//
+		// **The universe counterpart of `SyncRojo`, and a separate command
+		// rather than a mode of it.** One project file is one world, which is
+		// what an author editing a scene wants; a universe file is a whole game
+		// laid out as a folder of them, which is what an author opening a
+		// checkout wants. Folding the two into one path would mean guessing
+		// which they meant from the file's contents.
+		//
+		// Every world syncs on its own, so a project file with a typo costs its
+		// own world and nothing else — the report names which.
+		//
+		// @param universe The path to `main.universe.json`.
+		void SyncRojoWorlds(const std::filesystem::path &universe);
+
 		// Breakpoints, the paused stack, and stepping.
 		void DrawDebugger();
+
+		// One frame's locals or upvalues, as a two-column table.
+		//
+		// @param values What to show, or null when no frame is chosen.
+		// @param empty  What to say when there are none, in words that give the
+		//               reason rather than only the absence.
+		void DrawDebugValues(const std::vector<engine::script::DebugLocal> *values, const char *empty);
+
+		// Which capture the debugger panel is showing.
+		//
+		// **An index rather than a pointer, because the hit log is bounded and
+		// rolls.** A pointer into it would dangle the moment a loop pushed the
+		// sixty-fifth capture; an index that has gone past the end reads as
+		// "pick a capture", which is the honest answer.
+		//@{
+		uint32_t SelectedWorld = 0;
+		size_t SelectedHit = 0;
+		size_t SelectedFrame = 0;
+		//@}
 
 		// Reverses the last edit, and tells the author what was reversed.
 		//
@@ -1842,6 +2033,17 @@ namespace studio {
 		// Beside the binary with the layout ini and the keybinds, so a
 		// launcher's working directory cannot move somebody's configuration.
 		std::filesystem::path ContentSourcesPath;
+
+		// What was configured, and what is remembered between sessions.
+		//
+		// **The file is the source and this is the copy the frame reads.** Every
+		// field here is written back on the way out from whatever the interface
+		// left it at, which is why the panel toggles are read off the live flags
+		// rather than out of this — see `SaveConfiguration`.
+		Preferences Prefs;
+
+		// The last five games opened, most recent first. See `Config.hpp`.
+		RecentProjects Recent;
 
 		// The listener and the table. Held by value and started only when asked;
 		// a server that was never started costs a thread that was never spawned.
@@ -2477,6 +2679,80 @@ namespace studio {
 		float SnapDegrees = 15.0f;
 		//@}
 
+		// Whether the handles edit the pivot rather than the placement.
+		//
+		// **A mode over the same handles, which is Roblox's "Edit Pivot" and is
+		// the right shape.** A pivot is a `CFrame` in the part's own space, so
+		// moving one is the same drag arithmetic pointed at `PivotOffset`
+		// instead of at `Transform::Frame` — a second set of gizmos would be a
+		// second set of handles over one object, which the `ToolMode` comment
+		// above already rules out for the same reason.
+		//
+		// **The part does not move while this is on.** That is the whole point:
+		// a door whose hinge is in the wrong place is fixed by moving the hinge,
+		// and an editor that moved the door with it would leave the author
+		// exactly where they started.
+		//
+		// @since v0.12
+		bool PivotEditing = false;
+
+		// Puts every selected instance's pivot back at its centre.
+		//
+		// **A button rather than typing zeroes into three fields**, which is
+		// what it replaced: `PivotOffset` is a `CFrame` and the properties panel
+		// spells it as a position and an orientation, so undoing a pivot edit by
+		// hand is six numbers and a chance to get one wrong.
+		//
+		// Recorded as one command, so it undoes in one press.
+		void ResetSelectionPivot();
+
+		// Sets a boolean property on everything selected.
+		//
+		// **One function for `Anchored` and `Locked`**, because the two toolbar
+		// buttons differ only in the name they write — and a second copy of "walk
+		// the selection, write a bool, record a command" is the duplicate that
+		// drifts the first time one of them learns about mixed selections.
+		//
+		// @param property What to write.
+		// @param value    What to write to it.
+		// @param label    What the undo entry is called.
+		void SetSelectionFlag(const char *property, bool value, const char *label);
+
+		// Whether every selected instance already reads `true` for a property.
+		//
+		// **Used to decide what a toggle button does next.** A mixed selection
+		// answers `false`, so the first press turns everything on rather than
+		// half of it off — which is what a person pressing one button means.
+		//
+		// @param property What to read.
+		// @return `true` when everything selected has it set.
+		bool SelectionFlag(const char *property) const;
+
+		// The tools panel: the manipulators, the steps and the toggles.
+		//
+		// **One strip rather than the menus these came from.** Every one of them
+		// is a thing somebody changes while their other hand is on the mouse,
+		// which is exactly the case a menu is worst at.
+		void DrawTools();
+
+		// One tab each. Split so that each is a list of controls rather than a
+		// list of controls with a `BeginTabItem` between every fourth one.
+		//@{
+		void DrawHomeTools();
+		void DrawModelTools();
+		void DrawScriptTools();
+		void DrawViewTools();
+		//@}
+
+		// A button that runs a registered command, greyed with its reason.
+		//
+		// @param id    Which command.
+		// @param label What the button says.
+		void OperatorButton(Action id, const char *label);
+
+		// Whether the tools panel is open.
+		bool ShowTools = true;
+
 		// A translate gizmo, mid-drag.
 		//
 		// **One command per drag, not one per frame.** A drag that recorded on
@@ -2509,6 +2785,22 @@ namespace studio {
 			// The half-extents before the drag, for a scale. Parallel to
 			// `Instances`; an entry is zero for anything with no `Bounds`.
 			std::vector<engine::core::Vector3> BeforeSize;
+
+			// The pivot offsets before the drag, for a pivot edit. Parallel to
+			// `Instances`; the identity for anything with no `Pivot`.
+			//
+			// **Captured on grab like the frames beside it**, and for the same
+			// reason: a pivot edit applies an absolute delta from where things
+			// were, so accumulating onto the live value would drift by one
+			// frame's rounding every frame.
+			std::vector<engine::core::CFrame> BeforePivot;
+
+			// Whether this drag is editing pivots rather than placements.
+			//
+			// Captured on grab rather than read live, exactly as `Mode` is:
+			// leaving the mode mid-drag must not turn a pivot edit into a move
+			// halfway through it.
+			bool Pivots = false;
 
 			// Which manipulation this drag is. Captured on grab rather than
 			// read live, so changing tool mid-drag cannot turn a move into a
@@ -2701,6 +2993,9 @@ namespace studio {
 
 		// Whether the Rojo project picker is up. See `SyncRojo`.
 		bool AskingRojo = false;
+
+		// Whether the Rojo universe picker is up. See `SyncRojoWorlds`.
+		bool AskingRojoUniverse = false;
 		// Which of the file modals is up. At most one at a time.
 		//@{
 		bool AskingExport = false;
@@ -2977,6 +3272,23 @@ namespace studio {
 
 		// What is moving to and from the origins. See `DrawNetwork`.
 		bool ShowNetwork = false;
+
+		// The control surface's own panel. See `DrawControl`.
+		bool ShowControl = false;
+
+		// The plugins panel. See `DrawPlugins`.
+		bool ShowPlugins = false;
+
+		// What `DiscoverPlugins` found, in folder order.
+		std::vector<LoadedPlugin> Plugins;
+
+		// What the port field holds while somebody is editing it.
+		//
+		// **Separate from `Settings.ControlPort`, which is what the editor
+		// starts with.** A half-typed number must not be the port a restart
+		// would use, and `Settings.ControlPort` is negative for "do not listen"
+		// — a state a text field cannot express while it is being typed in.
+		int ControlPortField = 8720;
 
 		// The editor's own delivery client, built from `Content`.
 		//

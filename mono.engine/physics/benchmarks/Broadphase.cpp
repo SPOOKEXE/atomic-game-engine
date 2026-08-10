@@ -61,10 +61,28 @@
 // pair walk, and no single number is right for both — which is precisely why
 // `PreparePhysicsWorld` takes one.
 //
-// **The number to pass is 8 m, and there is nowhere to pass it from.** See
-// `DEFERRED.md` D00039: nothing outside these suites calls
-// `PreparePhysicsWorld`, so no shipped world runs a broad phase at any cell
-// size. That is the reason this row is a measurement and not a change.
+// ## The world measures itself — v0.12
+//
+// The note that stood here said "the number to pass is 8 m, and there is
+// nowhere to pass it from". There is now: a world prepared with no cell size
+// calls `spatial::SuggestCellSize` on its own colliders, and the `measured`
+// rows are what that picks.
+//
+// | Colliders | 4 m default | 8 m by hand | measured |
+// |---|---|---|---|
+// | 1000 | 15.5 us | 12.7 us | **12.8 us** |
+// | 4000 | 227 us | 185 us | **178 us** |
+// | 16000 | 2.59 ms | 2.46 ms | **2.49 ms** |
+//
+// **It lands on the hand-picked row at every density**, which is the assertion
+// these three exist to make — 22% off the default at four thousand colliders,
+// 17% at a thousand, 4% at sixteen. The heuristic is twice the mean widest axis
+// quantised to a power of two, and this scene's median collider is two metres
+// across, so it chooses 8 m for the reason a person would have.
+//
+// **An author who names a size still gets it.** `PreparePhysicsWorld(store,
+// 4.0f)` is configured and never re-measured — which is what the fixed rows
+// above still are, and why they are still here to be compared against.
 
 #include <engine/core/Random.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -256,6 +274,38 @@ BENCH("Sync with the static index rebuilt too · 4000 colliders", 50) {
 BENCH("Sync + pairs · 4000 colliders, 2m cells", 50) {
 	Store &store = WorldOf(4000, 2.0f);
 	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+// **The row the three above exist to be compared against.** A world prepared
+// with no cell size measures one from its own colliders — `SuggestCellSize` —
+// and this is what that costs against the hand-picked numbers beside it. If it
+// does not land on the 8 m row, the heuristic is wrong for the scene the rest of
+// this file measures, and that is the thing worth failing on.
+BENCH("Sync + pairs · 4000 colliders, measured", 50) {
+	Store &store = WorldOf(4000, 0.0f);
+	for (int pass = 0; pass < 50; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 1000 colliders, measured", 200) {
+	Store &store = WorldOf(1000, 0.0f);
+	for (int pass = 0; pass < 200; pass++) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Sync + pairs · 16000 colliders, measured", 10) {
+	Store &store = WorldOf(16000, 0.0f);
+	for (int pass = 0; pass < 10; pass++) {
 		SyncBroadphase(store);
 		BroadPhase(store);
 		Consume(PairCount(store));

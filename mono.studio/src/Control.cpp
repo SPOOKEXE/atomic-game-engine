@@ -17,6 +17,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <studio/Editor.hpp>
@@ -27,14 +28,28 @@ namespace studio {
 	using engine::control::Tool;
 
 	void Editor::StartControl() {
+		// **The port field is seeded whether or not the server starts**, because
+		// the panel's Start button has to offer something sensible in the case
+		// this function returns early — an editor launched without `--control`
+		// is exactly the one somebody turns the surface on from the panel.
+		if (Settings.ControlPort >= 0) {
+			ControlPortField = Settings.ControlPort;
+		}
+
 		if (Settings.ControlPort < 0) {
 			return;
 		}
 
 		// The shared tools first, then the editor's — so a replacement of one of
 		// them is written after the thing it replaces.
-		ControlSurface.AddUniverseTools(*Universe);
-		RegisterControlTools();
+		//
+		// Guarded, because `ToggleControl` registers them too: the surface is
+		// filled once per process and the socket is opened and closed as often
+		// as somebody likes.
+		if (ControlSurface.Count() == 0) {
+			ControlSurface.AddUniverseTools(*Universe);
+			RegisterControlTools();
+		}
 
 		if (!ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 			Say("control: could not listen — is another program already on that port?",
@@ -224,5 +239,139 @@ namespace studio {
 			failure = "no world called '" + wanted + "' — call world_list";
 		}
 		return found;
+	}
+
+	void Editor::ToggleControl() {
+		if (ControlServer.IsRunning()) {
+			ControlServer.Stop();
+			Say("control: stopped listening");
+			return;
+		}
+
+		// **The tools are registered once, not once per start.** `Surface::Add`
+		// replaces by name, so a second registration would be harmless and a
+		// second `AddUniverseTools` would still be work nobody asked for — and
+		// the count in the log line would go on saying the same number while
+		// doing it twice.
+		if (ControlSurface.Count() == 0) {
+			ControlSurface.AddUniverseTools(*Universe);
+			RegisterControlTools();
+		}
+
+		if (!ControlServer.Start(static_cast<uint16_t>(std::max(0, ControlPortField)))) {
+			Say("control: could not listen on port " + std::to_string(ControlPortField) +
+					" — is another program already there?",
+				engine::core::LogLevel::Error);
+			return;
+		}
+
+		// Read back rather than echoed: a zero asks the operating system to
+		// pick, and the number somebody needs is the one it picked.
+		ControlPortField = ControlServer.Port();
+		Say("control: listening on 127.0.0.1:" + std::to_string(ControlServer.Port()) + " — " +
+			std::to_string(ControlSurface.Count()) + " tools");
+	}
+
+	void Editor::DrawControl() {
+		if (!ShowControl) {
+			return;
+		}
+
+		if (!ImGui::Begin("Control (MCP)", &ShowControl)) {
+			ImGui::End();
+			return;
+		}
+
+		const bool running = ControlServer.IsRunning();
+
+		// **The state before the button**, because the question that brings
+		// somebody here is "is it on", and a button whose label is the *action*
+		// answers the opposite question at a glance.
+		ImGui::TextUnformatted("Status");
+		ImGui::Separator();
+
+		if (running) {
+			ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "listening");
+			ImGui::SameLine();
+			ImGui::Text("on 127.0.0.1:%u", ControlServer.Port());
+
+			ImGui::Text(
+				"client: %s", ControlServer.IsConnected() ? "connected" : "none attached"
+			);
+			ImGui::Text("requests answered: %zu", ControlServer.Served());
+		} else {
+			ImGui::TextDisabled("not listening");
+		}
+
+		ImGui::Spacing();
+
+		// The port is only editable while the socket is closed. Changing it
+		// under a live listener would show a number that is not the one bound,
+		// which is the one fact this panel exists to be right about.
+		ImGui::BeginDisabled(running);
+		ImGui::SetNextItemWidth(120.0f);
+		ImGui::InputInt("Port", &ControlPortField);
+		if (ControlPortField < 0) {
+			ControlPortField = 0;
+		}
+		if (ControlPortField > 65535) {
+			ControlPortField = 65535;
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("(?)");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Zero asks the operating system to pick one.\n"
+				"Loopback only — nothing off this machine can reach it."
+			);
+		}
+
+		if (ImGui::Button(running ? "Stop" : "Start", ImVec2(120.0f, 0.0f))) {
+			ToggleControl();
+		}
+
+		ImGui::Spacing();
+		ImGui::Spacing();
+
+		// **The table this program actually declares, read from the registry.**
+		// A hand-kept list here would be the duplicate `control/Surface.hpp`
+		// exists to prevent, and a panel claiming a tool that is not registered
+		// is worse than no panel — it is the one place somebody would check
+		// before concluding their client was at fault.
+		ImGui::Text("Tools (%zu)", ControlSurface.Count());
+		ImGui::Separator();
+
+		if (ControlSurface.Count() == 0) {
+			ImGui::TextDisabled("nothing registered yet — start the server");
+			ImGui::End();
+			return;
+		}
+
+		if (ImGui::BeginTable(
+				"control-tools", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0.0f, 0.0f)
+			)) {
+			ImGui::TableSetupColumn("Tool", ImGuiTableColumnFlags_WidthFixed, 160.0f);
+			ImGui::TableSetupColumn("What it does", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableHeadersRow();
+
+			for (const engine::control::Tool &tool : ControlSurface.Registered()) {
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(tool.Name.c_str());
+
+				ImGui::TableNextColumn();
+
+				// Wrapped rather than truncated: these descriptions are the only
+				// documentation a client gets, so the panel showing them is the
+				// place to read one in full.
+				ImGui::TextWrapped("%s", tool.Description.c_str());
+			}
+			ImGui::EndTable();
+		}
+
+		ImGui::End();
 	}
 }

@@ -5,6 +5,7 @@
 #include <engine/audio/Device.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/delivery/Client.hpp>
+#include <engine/delivery/IntakeBudget.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
@@ -461,6 +462,12 @@ namespace client {
 		// **A list rather than a count**, because a request that failed has to
 		// be dropped from it and a count could not say which.
 		std::vector<engine::delivery::RequestId> ContentPending;
+
+		// How much delivered content this frame will decode and upload.
+		//
+		// Held across frames rather than made in the loop so the allowance is
+		// one object with one meaning; `Begin` is what resets it.
+		engine::delivery::IntakeBudget ContentBudget;
 
 		// Whether the catalogue has arrived and the requests have been issued.
 		// Once, not per frame — see `PumpContent`.

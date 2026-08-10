@@ -1204,6 +1204,21 @@ namespace engine::scene {
 			surfaceLight.Kind = LightKind::Surface;
 			ecs::Classes::Default(surfaceLightClass, surfaceLight);
 
+			// **The two instances whose whole content is a string**, and the
+			// only members of Roblox's `ValueBase` family this engine has. Rojo
+			// maps `*.txt` onto the first and `*.csv` onto the second, and a
+			// folder sync that could not build either would silently drop files
+			// — see `scene::TextContent` for why the rest of the family is
+			// deliberately absent.
+			//
+			// `ValueBase` is registered as the base so `:IsA("ValueBase")`
+			// answers the question a script would actually ask, exactly as
+			// `LuaSourceContainer` does one module over.
+			const std::array text{ecs::Components::Of<TextContent>()};
+			const ecs::ClassId valueBase = ecs::Classes::Register("ValueBase", instance, text);
+			ecs::Classes::Register("StringValue", valueBase, {});
+			ecs::Classes::Register("LocalizationTable", valueBase, {});
+
 			// --- properties, declared where the component arrives ------------
 			//
 			// Each on the class that first holds what it projects, so a derived
@@ -1315,6 +1330,20 @@ namespace engine::scene {
 			// decides whether it occludes the sun. `Visual::CastShadow` carries
 			// the whole argument for why collapsing any two of them is wrong.
 			ecs::Classes::Property<&Visual::CastShadow>(basePart, "CastShadow");
+
+			// **The one property on a part that only an editor reads.** A
+			// locked part still draws, still collides and is still reachable
+			// from a script — what it refuses is a pointer pick, which is
+			// `Visual::Locked`'s whole surface. Declared here rather than kept
+			// in the editor because it is authoring data that has to survive a
+			// save, which an editor-side set could not.
+			ecs::Classes::Property<&Visual::Locked>(basePart, "Locked");
+
+			// **`Value` on the base, so both classes have it once.** A
+			// `LocalizationTable` holds its CSV here and resolves nothing —
+			// translation lookup is a service with a locale and a fallback
+			// chain, and none of that is a file mapping.
+			ecs::Classes::Property<&TextContent::Value>(valueBase, "Value");
 
 			// Which surface texture this part shows, or -1 for none. An `int32`
 			// rather than a reference to the camera: the renderer indexes a

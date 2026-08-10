@@ -317,10 +317,11 @@ visibly — rather than making the inner loop branch on null.
 
 ## `TextureTable::Find` *does* return null, and the asymmetry is deliberate
 
-A missing mesh has to draw as something or the object vanishes. A missing
-texture has an honest answer already: the submesh's flat base colour, which is
-what an untextured model is meant to look like. Giving textures a fallback would
-turn "this model has no texture" into "this model is white".
+It stays honest about absence because two callers need to tell "not registered"
+from "registered as something": a thumbnail that has not been built and a
+particle run whose sheet has not streamed both want null, and neither wants a
+picture. A caller that wants a picture asks `Default` or `Missing` for one, and
+which of those it asks for is a decision — see the three-way split below.
 
 ## `DrawSlots` splits consecutive runs and must not sort them
 
@@ -354,7 +355,7 @@ was describing what the code assumed rather than what it did.
   every screen-pass call site passes zero, deliberately — a filtered window is a
   game where the player sees a group and cannot tell why.
 
-## The fallback texel and the default texture are two things
+## The fallback texel, the default texture and the marker are three things
 
 `FallbackTexture` is one white texel and exists so a sampler a pipeline declares
 is never unbound — undefined behaviour on some backends, a validation error on
@@ -377,3 +378,34 @@ are genuinely absent features rather than defaulted ones.
 before any content has streamed, on a machine with no content store, and on the
 frame a fetch fails. A default that had to be fetched would be absent in exactly
 the cases it exists for.
+
+`MissingTexture` is the third, and it answers a question the other two do not:
+a drawable that *named* a texture this table does not hold. The colour slot
+therefore resolves three ways, and the distinction between the last two is the
+whole reason the marker exists:
+
+| what the drawable says | what the slot gets |
+| --- | --- |
+| no texture named | `Default` — the plastic. `Material = None` is a finished state. |
+| a name, registered | that texture. |
+| a name, not registered | `Missing` — the purple checkerboard. Not a finished state. |
+
+**Drawing the last two the same way is the bug this closes.** An author's typo
+and a sheet that never published both rendered as the default material, which
+looks exactly like a part somebody deliberately left untextured — so a missing
+texture had no symptom at all until somebody noticed the model was the wrong
+colour. It is the same split `scene::KeepLoaded` makes for geometry: no mesh
+named draws the cube, a mesh named and absent draws nothing.
+
+**The base colour stops applying when the marker is bound**, and that is not an
+optimisation to remove. Every other texture in the slot is modulated by the
+material's colour — one grey sheet serving a whole palette — but a magenta check
+multiplied by a dark red part is a dark pattern that reads as intent. A marker
+that can be tinted into looking deliberate is not a marker.
+
+**"Not here yet" and "never coming" are the same state here, and the renderer
+cannot tell them apart.** It knows what it holds, not what is in flight, so a
+sheet that is still streaming shows the marker for the frames it takes to
+arrive. Closing that needs the content pump to say what it has outstanding —
+`D00107` — and not a timer in this module: a grace period would hide a genuinely
+missing texture for exactly as long as it hid a streaming one.

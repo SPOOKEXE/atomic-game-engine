@@ -18,7 +18,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
+#include <span>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.script.debugger")
 TEST_DEPENDS("engine.scene.part")
@@ -216,4 +219,310 @@ TEST_CASE("adopting twice does not duplicate", "[debugger]") {
 	fresh.Adopt(master);
 
 	CHECK(fresh.Breakpoints().size() == 1);
+}
+
+// --- upvalues ------------------------------------------------------------------
+
+namespace {
+	// A closure over a local, which is what makes an upvalue exist at all.
+	//
+	// `counter` is a local of the *chunk* and an upvalue of `bump`, so the two
+	// lists have to disagree about it — which is the whole property under test.
+	constexpr const char *CLOSURE = R"(
+local counter = 0
+local label = "tally"
+local function bump(step)
+    counter = counter + step
+    return counter
+end
+bump(5)
+return counter
+)";
+}
+
+TEST_CASE("a capture names the upvalues a function closed over", "[debugger]") {
+	Store store("debug_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// Line 6 is `return counter`, inside `bump` — where `step` is a local and
+	// `counter` is an upvalue.
+	runtime->Debug().Add("closure.luau", 6);
+	REQUIRE(runtime->Run(CLOSURE, "closure.luau"));
+
+	const std::span<const engine::script::DebugHit> hits = runtime->Debug().Hits();
+	REQUIRE_FALSE(hits.empty());
+	REQUIRE_FALSE(hits.front().Frames.empty());
+
+	const engine::script::DebugFrame &frame = hits.front().Frames.front();
+
+	const auto find = [](const std::vector<engine::script::DebugLocal> &named,
+						 std::string_view wanted) -> const engine::script::DebugLocal * {
+		for (const engine::script::DebugLocal &value : named) {
+			if (value.Name == wanted) {
+				return &value;
+			}
+		}
+		return nullptr;
+	};
+
+	// **The argument is a local and the captured variable is an upvalue**, and
+	// the two lists must not agree about either. A capture that merged them
+	// would answer "what is in scope" and lose "where did it come from", which
+	// is the question an upvalue is looked at to answer.
+	const engine::script::DebugLocal *step = find(frame.Locals, "step");
+	REQUIRE(step != nullptr);
+	CHECK(step->Value == "5");
+	CHECK(find(frame.Upvalues, "step") == nullptr);
+
+	const engine::script::DebugLocal *counter = find(frame.Upvalues, "counter");
+	REQUIRE(counter != nullptr);
+	CHECK(counter->Value == "5");
+	CHECK(find(frame.Locals, "counter") == nullptr);
+
+	// A variable the function never mentions is neither. `bump` does not read
+	// `label`, so Luau does not capture it — which is worth pinning, because a
+	// capture that listed every enclosing local would be listing the wrong
+	// thing and would look right.
+	CHECK(find(frame.Upvalues, "label") == nullptr);
+}
+
+TEST_CASE("a chunk's own frame has locals and no upvalues", "[debugger]") {
+	Store store("debug_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	// Line 8 is `return counter`, at the chunk's top level — one frame out from
+	// the case above.
+	runtime->Debug().Add("closure.luau", 8);
+	REQUIRE(runtime->Run(CLOSURE, "closure.luau"));
+
+	const std::span<const engine::script::DebugHit> hits = runtime->Debug().Hits();
+	REQUIRE_FALSE(hits.empty());
+
+	const engine::script::DebugFrame &frame = hits.front().Frames.front();
+
+	// At the top level `counter` is a local, not an upvalue — the opposite of
+	// what the inner frame reported for the same name, which is what makes the
+	// distinction observable rather than a claim.
+	bool localCounter = false;
+	for (const engine::script::DebugLocal &value : frame.Locals) {
+		localCounter = localCounter || value.Name == "counter";
+	}
+	CHECK(localCounter);
+
+	// **And it has no upvalues at all, which is Luau rather than a gap.** Lua
+	// 5.2 gives every chunk an `_ENV` upvalue; Luau keeps a closure's
+	// environment beside the upvalue array, so a main chunk closes over nothing.
+	//
+	// Worth a case of its own precisely because it is surprising: somebody
+	// porting this capture from Lua would expect one entry here, and a version
+	// that invented one to match would be reporting a variable the VM does not
+	// have.
+	CHECK(frame.Upvalues.empty());
+}
+
+// --- the service ----------------------------------------------------------------
+
+namespace {
+	// A studio's runtime, which is the only kind that gets the service.
+	std::unique_ptr<engine::script::Runtime> StudioRuntime(Store &store) {
+		engine::script::RuntimeLimits limits;
+		limits.Role.Server = false;
+		limits.Role.Client = false;
+		limits.Role.Studio = true;
+		return MakeRuntime(store, Language::Luau, limits);
+	}
+}
+
+TEST_CASE("BreakpointService is a studio's and nobody else's", "[debugger]") {
+	Store store("debug_test");
+	engine::scene::EnsureClassTree();
+
+	// **Absent rather than refusing.** A service that existed and answered "not
+	// in a game" to everything is a surface somebody writes against and then
+	// finds does nothing where it matters — and arming a breakpoint costs the
+	// whole runtime its speed, which a shipped server must not let a game script
+	// decide.
+	const auto game = MakeRuntime(store, Language::Luau);
+	REQUIRE(game->Run("assert(BreakpointService == nil, 'a game script got the debugger')"));
+	CHECK_FALSE(game->Run("game:GetService('BreakpointService')"));
+
+	const auto studio = StudioRuntime(store);
+	REQUIRE(studio->Run(
+		"assert(type(BreakpointService) == 'table', 'no service')\n"
+		"assert(game:GetService('BreakpointService') == BreakpointService, 'two objects')\n"
+	));
+}
+
+TEST_CASE("the service arms and disarms the same debugger the runtime reads", "[debugger]") {
+	Store store("debug_test");
+	engine::scene::EnsureClassTree();
+
+	const auto runtime = StudioRuntime(store);
+
+	// **One object, reached two ways.** The editor's panel writes
+	// `Runtime::Debug()` and a tool writes the service; a second list would be
+	// two things to keep in step and a breakpoint that fired in one place and
+	// not the other.
+	REQUIRE(runtime->Run(
+		"assert(BreakpointService:IsArmed() == false, 'armed before anything was set')\n"
+		"BreakpointService:SetBreakpoint('probe.luau', 4)\n"
+		"assert(BreakpointService:IsArmed(), 'not armed after setting one')\n"
+	));
+
+	REQUIRE(runtime->Debug().Breakpoints().size() == 1);
+	CHECK(runtime->Debug().Breakpoints().front().Source == "probe.luau");
+	CHECK(runtime->Debug().Breakpoints().front().Line == 4);
+
+	// And it fires, which is the half a list alone would not prove.
+	REQUIRE(runtime->Run(PROGRAM, "probe.luau"));
+	REQUIRE_FALSE(runtime->Debug().Hits().empty());
+	CHECK(runtime->Debug().Hits().front().Line == 4);
+
+	REQUIRE(runtime->Run(
+		"local held = BreakpointService:GetBreakpoints()\n"
+		"assert(#held == 1, 'the list did not come back')\n"
+		"assert(held[1].Source == 'probe.luau' and held[1].Line == 4, 'the wrong entry')\n"
+		"assert(held[1].Enabled and not held[1].Stops, 'the wrong defaults')\n"
+		"assert(held[1].Hits > 0, 'the hit count did not cross')\n"
+		"\n"
+		"local hits = BreakpointService:GetHits()\n"
+		"assert(#hits >= 1, 'no hits came back')\n"
+		"assert(hits[1].Line == 4, 'the wrong line')\n"
+		"assert(#hits[1].Frames >= 1, 'no frames')\n"
+		"assert(type(hits[1].Frames[1].Locals) == 'table', 'no locals')\n"
+		"assert(type(hits[1].Frames[1].Upvalues) == 'table', 'no upvalues')\n"
+		"\n"
+		"BreakpointService:ClearHits()\n"
+		"assert(#BreakpointService:GetHits() == 0, 'the hits survived a clear')\n"
+		"assert(#BreakpointService:GetBreakpoints() == 1, 'clearing hits took a breakpoint')\n"
+		"\n"
+		"assert(BreakpointService:SetEnabled('probe.luau', 4, false), 'nothing to disable')\n"
+		"assert(BreakpointService:IsArmed() == false, 'still armed with the only one off')\n"
+		"\n"
+		"assert(BreakpointService:RemoveBreakpoint('probe.luau', 4), 'nothing to remove')\n"
+		"assert(#BreakpointService:GetBreakpoints() == 0, 'the list survived a remove')\n"
+	));
+}
+
+TEST_CASE("the service takes a script instance as well as a path", "[debugger]") {
+	Store store("debug_test");
+	engine::scene::EnsureClassTree();
+	engine::script::RegisterScriptComponents();
+
+	store.SetResource(engine::script::SourceCache{});
+	store.ResourceMutable<engine::script::SourceCache>()->Set(Name("probe.luau"), PROGRAM);
+
+	const engine::ecs::Entity script = engine::script::MakeScript(store, "probe.luau", "Probe", false);
+	REQUIRE(script != engine::ecs::NULL_ENTITY);
+
+	const auto runtime = StudioRuntime(store);
+
+	// **The high level is the one a tool has in its hand.** It has just walked
+	// the tree and found a `LuaSourceContainer`; resolving the instance's
+	// `Source` itself would be reimplementing the one mapping that has to agree
+	// with what the VM reports.
+	REQUIRE(runtime->Run(
+		"local probe = workspace.Parent and nil or nil\n"
+		"for _, found in World:Query('script.Source') do probe = found end\n"
+		"assert(probe ~= nil, 'the script instance was not found')\n"
+		"BreakpointService:SetBreakpoint(probe, 4)\n"
+	));
+
+	REQUIRE(runtime->Debug().Breakpoints().size() == 1);
+	CHECK(runtime->Debug().Breakpoints().front().Source == "probe.luau");
+
+	// The near-misses a tool hits: a line that starts at zero, and an instance
+	// that carries no source.
+	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint('probe.luau', 0)"));
+	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint(Instance.new('Part'), 1)"));
+	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint(7, 1)"));
+}
+
+// --- what cannot carry one ------------------------------------------------------
+
+TEST_CASE("a chunk this engine cannot break inside is refused", "[debugger]") {
+	using engine::script::BreakpointsRefused;
+
+	// **Only Luau has breakpoints.** A `.js` chunk runs on QuickJS, which
+	// exposes no line hook at all — see `D00106` — so a breakpoint on one would
+	// sit in the list looking armed and never fire.
+	CHECK_FALSE(BreakpointsRefused("plugin.js").empty());
+	CHECK_FALSE(BreakpointsRefused("plugin.mjs").empty());
+	CHECK_FALSE(BreakpointsRefused("plugin.cjs").empty());
+
+	// **`.ts` is refused too, and it is the likelier thing somebody types.**
+	// TypeScript never reaches a runtime — `tsc` turns it into JavaScript first
+	// — so a breakpoint on one is two steps from anything that could fire, and
+	// the message says so rather than only naming JavaScript.
+	CHECK_FALSE(BreakpointsRefused("panel.ts").empty());
+	CHECK_FALSE(BreakpointsRefused("panel.tsx").empty());
+	CHECK(BreakpointsRefused("panel.ts").find("TypeScript") != std::string_view::npos);
+
+	// Luau is fine, and so is a chunk with no extension: `Run(source, "probe")`
+	// names one that way and it is always Luau, so refusing it would refuse the
+	// form every test and every in-editor evaluation uses.
+	CHECK(BreakpointsRefused("enemy.luau").empty());
+	CHECK(BreakpointsRefused("enemy.lua").empty());
+	CHECK(BreakpointsRefused("probe").empty());
+	CHECK(BreakpointsRefused("").empty());
+
+	// **A name merely ending in those letters is not an extension.** The suffix
+	// test has to be on the dot, or a script called `contents.luau` would be
+	// fine and one called `assets` would not.
+	CHECK(BreakpointsRefused("assets").empty());
+	CHECK(BreakpointsRefused("charts").empty());
+}
+
+TEST_CASE("a refused chunk never reaches the breakpoint list", "[debugger]") {
+	Debugger debug;
+
+	// **Refused in `Add` rather than at each caller**, so a dead breakpoint
+	// cannot arrive through any path — the service, the editor's gutter, the
+	// panel and `Adopt` all end up here.
+	CHECK_FALSE(debug.Add("panel.ts", 4));
+	CHECK_FALSE(debug.Add("plugin.js", 4));
+	CHECK(debug.Breakpoints().empty());
+	CHECK_FALSE(debug.Armed());
+
+	CHECK(debug.Add("enemy.luau", 4));
+	CHECK(debug.Breakpoints().size() == 1);
+
+	// **Including through `Adopt`**, which copies a list somebody else built —
+	// a list from an older build, or one hand-edited into a save file.
+	Debugger stale;
+	stale.Add("enemy.luau", 9);
+
+	Debugger fresh;
+	fresh.Adopt(stale);
+	CHECK(fresh.Breakpoints().size() == 1);
+}
+
+TEST_CASE("the service errors rather than arming a dead breakpoint", "[debugger]") {
+	Store store("debug_test");
+	engine::scene::EnsureClassTree();
+
+	const auto runtime = StudioRuntime(store);
+
+	// **An error, not silence.** A tool that armed one on a TypeScript file and
+	// got nothing back would read it as the debugger being broken, which is a
+	// different thing to go and fix from the language not being supported.
+	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint('panel.ts', 4)"));
+	CHECK(runtime->LastError().find("TypeScript") != std::string::npos);
+
+	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint('plugin.js', 4)"));
+	CHECK(runtime->LastError().find("D00106") != std::string::npos);
+
+	CHECK(runtime->Debug().Breakpoints().empty());
+
+	// And a script may catch it like any other error, so a tool arming a list of
+	// scripts can skip the ones it cannot break in rather than stopping.
+	REQUIRE(runtime->Run(
+		"local armed = 0\n"
+		"for _, path in { 'a.luau', 'b.ts', 'c.luau' } do\n"
+		"  local ok = pcall(function() BreakpointService:SetBreakpoint(path, 1) end)\n"
+		"  if ok then armed += 1 end\n"
+		"end\n"
+		"assert(armed == 2, 'expected two of three to arm, got ' .. armed)\n"
+	));
+	CHECK(runtime->Debug().Breakpoints().size() == 2);
 }

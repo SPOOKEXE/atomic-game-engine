@@ -59,6 +59,15 @@ namespace studio {
 		// How much wider than the mesh's bounding sphere the frame is.
 		constexpr float CAMERA_PADDING = 1.25f;
 
+		// How big a preview asked for by nobody in particular is rendered.
+		//
+		// **The size of the picture that gets kept, not of the row.** A row is
+		// thirty-two pixels and a hover panel is a hundred and thirty-two, and
+		// what `RenderPreviewSlot` captures is a thumbnail both of them draw —
+		// so this is sized for the larger of the two rather than for whichever
+		// asked first.
+		constexpr float PREVIEW_AUTOMATIC_SIDE = 128.0f;
+
 		// Where the camera stands, as a direction from the mesh.
 		//
 		// **Three quarters and slightly above**, which is the angle every asset
@@ -111,8 +120,57 @@ namespace studio {
 		}
 
 		const PreviewState state = BuildPreviewMesh(name);
-		PreviewMeshes.emplace(name, state);
+
+		// **`Pending` is not remembered, and that is what makes a fetch work.**
+		// A material whose colour map is not on this machine asks the delivery
+		// client for it and answers `Pending`; caching that would mean the
+		// answer never changed once the sheet landed, which is the same
+		// "unavailable for ever" this was meant to fix. Every other state is
+		// terminal and is cached, so a decode happens once.
+		if (state != PreviewState::Pending) {
+			PreviewMeshes.emplace(name, state);
+		}
 		return state;
+	}
+
+	void Editor::PumpRenderedPreviews() {
+		// Taken rather than read, so a row that scrolls off screen stops being
+		// asked for — the queue is rebuilt from what was drawn every frame.
+		const std::vector<std::string> wanted = std::move(PreviewQueue);
+		PreviewQueue.clear();
+
+		// The cursor owns the slot when there is one. `DrawHoverPreview` would
+		// overwrite the request anyway; returning here saves the decode.
+		if (!HoverShowing.empty() || !PreviewWanted.empty()) {
+			return;
+		}
+
+		// **At most one *build* per frame.** `LoadPreviewMesh` decodes a file
+		// and uploads a mesh the first time it is asked, so walking a screenful
+		// of new rows in one frame is a screenful of decodes in one frame — the
+		// stall `PumpThumbnails` bounds for the bitmap half and this bounds for
+		// the rendered one.
+		bool built = false;
+
+		for (const std::string &name : wanted) {
+			if (PreviewMeshes.find(name) == PreviewMeshes.end()) {
+				if (built) {
+					continue;
+				}
+				built = true;
+			}
+
+			if (LoadPreviewMesh(name) != PreviewState::Ready) {
+				continue;
+			}
+
+			// The first one that can be drawn takes the slot. The rest keep
+			// their place in the list and get their turn on a later frame,
+			// because they will record themselves again while they are visible.
+			if (DrawPreviewViewport(name, PREVIEW_AUTOMATIC_SIDE)) {
+				return;
+			}
+		}
 	}
 
 	PreviewState Editor::BuildPreviewMaterial(const std::string &name, engine::core::Name &texture) {
@@ -153,7 +211,26 @@ namespace studio {
 		const std::filesystem::path sheet =
 			cdn::FindInStore(cdn::DefaultLocalPaths(), material.ColourMap);
 		if (!std::filesystem::is_regular_file(sheet, failure)) {
-			return PreviewState::Unavailable;
+			// **Asked for rather than given up on**, which is the other half of
+			// v0.12's preview fix. A store published from another machine has
+			// the `.amat` and not its pixels, and the editor already knows how
+			// to fetch one — `DownloadAsset` — so answering `Unavailable` here
+			// was refusing to do the one thing that would have made the preview
+			// possible.
+			//
+			// **Once per sheet, not once per frame.** `ContentAsked` is the same
+			// set the content pump uses to avoid re-requesting a texture a world
+			// named, and this is the same question about the same name.
+			const engine::core::Name key(material.ColourMap);
+			if (ContentClient && ContentAsked.insert(key.Id()).second) {
+				DownloadAsset(material.ColourMap);
+			}
+
+			// `Pending` rather than `Unavailable`, so `LoadPreviewMesh` does not
+			// remember the answer and the preview is built when the sheet
+			// arrives. With no delivery configured there is nothing to wait for,
+			// and the honest answer is that it is not here.
+			return ContentClient ? PreviewState::Pending : PreviewState::Unavailable;
 		}
 
 		const std::optional<std::vector<std::byte>> sheetBytes = ReadWholeFile(sheet);

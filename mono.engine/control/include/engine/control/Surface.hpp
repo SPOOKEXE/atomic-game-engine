@@ -27,6 +27,7 @@
 
 #include <functional>
 #include <nlohmann/json_fwd.hpp>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -67,9 +68,16 @@ namespace engine::control {
 		// one with a better-informed version of itself.
 		void Add(Tool tool);
 
-		// Installs the tools any program with worlds can answer: `engine_info`,
-		// `world_list`, `world_tree`, `instance_get`, `instance_set`,
-		// `profile_frame`.
+		// Installs the tools any program with worlds can answer.
+		//
+		// **The class tree and the storage under it, which are two views of one
+		// world.** `engine_info`, `world_list`, `world_tree`, `instance_get` and
+		// `instance_set` are the first; `component_list`, `entity_query`,
+		// `component_get` and `component_set` are the second, added at v0.12
+		// beside the script surface they mirror. `profile_frame` is neither.
+		//
+		// A client that could only see classes could not see anything a game
+		// declared for itself, which is most of what a game is.
 		//
 		// **Takes the universe by reference and keeps it**, so the caller must
 		// outlive the surface. Every program here owns its universe for its
@@ -87,6 +95,21 @@ namespace engine::control {
 
 		// How many tools are registered, for a log line.
 		size_t Count() const;
+
+		// Every registered tool, in the order `tools/list` reports them.
+		//
+		// **So a program can show its own table.** The editor draws one in an
+		// information panel, and building that from a second hand-kept list
+		// would be exactly the duplicate this registry exists to prevent — a
+		// panel that says a tool exists when it does not is worse than no panel.
+		//
+		// Valid until the next `Add`.
+		//
+		// @return The tools.
+		// @since v0.12
+		std::span<const Tool> Registered() const {
+			return Tools;
+		}
 
 		// Whether a client has asked for the frame graph.
 		//

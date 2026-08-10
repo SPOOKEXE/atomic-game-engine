@@ -119,7 +119,29 @@ namespace engine::physics {
 			// fill over cells — so one number covering both says a broadphase is
 			// expensive without saying which half to go and look at.
 			ENGINE_PROFILE_CAT("physics.index-dynamic", core::ProfileCategory::Physics);
-			PipelineInternals::DynamicIndex(*world).Rebuild(dynamicProxies);
+
+			// **The grid is sized from the scene rather than left at the
+			// default**, which is what `HashGrid::DEFAULT_CELL_SIZE` invites in
+			// as many words: that number is twice the median extent of *this
+			// repository's* demo colliders, and a world of bullets or a world of
+			// buildings gets a grid tuned for something else.
+			//
+			// The swing is measured and it is large:
+			// `engine.physics.bench.broadphase` puts four thousand colliders at
+			// 499 us with 2 m cells and 184 us with 8 m, for the same scene and
+			// the same answer. Nothing about the pair list changes — the walk is
+			// exhaustive at any spacing — so this is speed and not behaviour.
+			//
+			// **Free when the answer is the same**, which it is on almost every
+			// tick: `SuggestCellSize` quantises to a power of two and
+			// `SetCellSize` returns without touching anything when the size did
+			// not move. A scene has to change scale by a factor of two before
+			// this costs a rebuild that was not already happening.
+			spatial::HashGrid &index = PipelineInternals::DynamicIndex(*world);
+			if (world->CellSizeMeasured()) {
+				index.SetCellSize(spatial::SuggestCellSize(dynamicProxies));
+			}
+			index.Rebuild(dynamicProxies);
 		}
 		PipelineInternals::DynamicRebuildCount(*world)++;
 
@@ -158,7 +180,18 @@ namespace engine::physics {
 			// makes it worth its own row: a span that is absent from most frames
 			// and 4 ms on one of them is exactly what the RMAX column is for.
 			ENGINE_PROFILE_CAT("physics.index-static", core::ProfileCategory::Physics);
-			PipelineInternals::StaticIndex(*world).Rebuild(staticProxies);
+
+			// **Sized independently of the dynamic half, because the two hold
+			// different things.** A scene's static geometry is walls and floors
+			// and its dynamic set is crates and characters; one spacing chosen
+			// for the union of them is chosen for neither. Both are queried by
+			// the same dynamic proxies, and a query costs what the *index* it
+			// walks costs rather than what the querying box is.
+			spatial::HashGrid &index = PipelineInternals::StaticIndex(*world);
+			if (world->CellSizeMeasured()) {
+				index.SetCellSize(spatial::SuggestCellSize(staticProxies));
+			}
+			index.Rebuild(staticProxies);
 		}
 		PipelineInternals::StaticRebuildCount(*world)++;
 		PipelineInternals::StaticStale(*world) = false;

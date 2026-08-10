@@ -4,6 +4,7 @@
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/MeshTable.hpp>
+#include <engine/render/MissingTexture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -312,6 +313,14 @@ namespace engine::render {
 		// off screen still shadows, and a mirror shows what is behind the
 		// viewer.
 		std::vector<scene::DrawInstance> SceneInstances;
+
+		// The instances whose geometry has arrived, which is what every pass
+		// below works from. See the filter in `Render` for why an instance
+		// naming an absent mesh is dropped rather than drawn as a cube.
+		//
+		// Kept on the state rather than made per frame, so a steady scene stops
+		// allocating after its first one — the rule every buffer here follows.
+		std::vector<scene::DrawInstance> Drawable;
 		std::vector<uint32_t> SceneOrder;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
@@ -1367,8 +1376,17 @@ namespace engine::render {
 				// white plastic. So the slot always has content and the shader
 				// always samples it; what used to be the "no texture" branch is
 				// now the case where `Material = None` means something.
+				//
+				// **And naming a texture that is not here is a third case, not
+				// the first one again.** A part that asked for a sheet the table
+				// does not hold gets the purple checkerboard, because "nobody
+				// textured this" and "this asked for something that never
+				// arrived" are different facts and only one of them is finished.
+				// The same split `scene::KeepLoaded` makes for geometry.
 				SDL_GPUTexture *const found = Textures.Find(texture);
-				SDL_GPUTexture *const sampled = found != nullptr ? found : Textures.Default();
+				const bool absent = found == nullptr && texture.IsValid();
+				SDL_GPUTexture *const sampled =
+					found != nullptr ? found : (absent ? Textures.Missing() : Textures.Default());
 
 				// **The fallback texel is bound rather than the binding being
 				// skipped** for the other two, because a sampler a pipeline
@@ -1384,7 +1402,17 @@ namespace engine::render {
 				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 3);
 
 				LightingUniforms uniforms = *lighting;
-				uniforms.BaseColour = glm::vec4{colour[0], colour[1], colour[2], colour[3]};
+
+				// **The marker arrives as itself, so the base colour stops
+				// applying to it.** Every other texture here is modulated by the
+				// material's colour, which is what makes one grey sheet serve a
+				// whole palette — but a magenta check multiplied by a dark red
+				// part is a dark pattern that reads as somebody's intent. A
+				// marker that can be tinted into looking deliberate is not a
+				// marker.
+				const std::array<float, 4> tint =
+					absent ? std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f} : colour;
+				uniforms.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
 				uniforms.Surface = glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
 
 				// **The cell is per draw, not per instance**, which is the whole
@@ -2971,6 +2999,41 @@ namespace engine::render {
 				return result;
 			}
 		}
+
+		// --- what is ready to be drawn ---------------------------------------
+		//
+		// **An instance naming a mesh this table does not hold is not drawn at
+		// all**, and the distinction from an instance naming *no* mesh is the
+		// whole of it:
+		//
+		//   - no mesh named — an ordinary `Part` — draws the default cube, which
+		//     is what a part is.
+		//   - a mesh named and not resident — a `MeshPart` whose geometry has
+		//     not arrived — draws nothing.
+		//
+		// Without the second, `MeshTable::Resolve` hands back the default and a
+		// scene of mesh parts comes up as a field of cubes that turn into models
+		// one by one as the content lands. That is worse than an empty space: an
+		// empty space reads as "still loading" and a wrong cube reads as the
+		// asset being broken.
+		//
+		// **Filtered once here rather than inside the cull and the scene gather
+		// separately.** Both read this span, and a test written into each would
+		// be two places to keep in step — the exact duplication that made the
+		// mirror pass and the camera pass disagree about `Transparency` before
+		// `OrderScene` was one function.
+		//
+		// A frame where everything named is loaded copies the span and does one
+		// hash lookup per instance, which is nothing beside the hundred and
+		// fifty bytes of traffic per instance the collector already pays.
+		{
+			ENGINE_PROFILE_CAT("filter unloaded", core::ProfileCategory::Render);
+
+			scene::KeepLoaded(
+				instances, [this](const core::Name &mesh) { return State->Meshes.Has(mesh); }, State->Drawable
+			);
+		}
+		instances = State->Drawable;
 
 		// --- uploads --------------------------------------------------------
 

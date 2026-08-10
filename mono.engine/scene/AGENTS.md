@@ -447,3 +447,29 @@ write from inside a read, on every mesh part in the scene, during `PreRender`.
 empty, as `RenderedSignature`'s does. A file carrying last run's counts would
 disagree with the content sitting beside it, and a wrong number is worse than a
 zero that says it does not know.
+
+## An unarrived mesh draws nothing, and no mesh at all draws a cube
+
+`KeepLoaded` is that rule, and the two cases it separates are why it is a
+function rather than an `if` in the renderer:
+
+- **No mesh named** — an ordinary `Part` — is kept. The renderer's default cube
+  is what a part *is*, not a stand-in for something missing.
+- **A mesh named and not resident** — a `MeshPart` whose geometry has not been
+  uploaded — is dropped. `render::MeshTable::Resolve` answers the default for a
+  name it does not hold, so without this a scene of mesh parts comes up as a
+  field of cubes that turn into models one at a time as content lands.
+
+The second is the point: an empty space reads as *still loading* and a wrong
+cube reads as *the asset is broken*, and only one of those is true. It is the
+same fact `TrianglesOf` reports as zero — a `Visual::Mesh` this world has not
+been told about — which is why the section above says a part reading zero and
+drawing a cube is one fact reported twice.
+
+**Here rather than in `render`, for `OrderScene`'s reason.** A renderer is the
+one module a test cannot exercise, so a rule deciding what reaches a draw call
+is the last place it should live. A template rather than a `std::function`, so
+the residency test stays a direct call in the hottest pass of the frame; the
+caller owns the output buffer and it is cleared rather than rebuilt, like every
+other buffer on that path.
+

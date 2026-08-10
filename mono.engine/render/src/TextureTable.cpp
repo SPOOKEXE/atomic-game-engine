@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/render/DefaultTexture.hpp>
+#include <engine/render/MissingTexture.hpp>
 #include <engine/render/TextureTable.hpp>
 
 #include <SDL3/SDL_gpu.h>
@@ -45,6 +46,15 @@ namespace engine::render {
 		if (DefaultHandle == nullptr) {
 			return false;
 		}
+
+		// **And the marker beside it, for the same reason twice over.** It is
+		// wanted at exactly the moment content is failing to arrive, which is
+		// the worst moment to discover the device cannot make a texture.
+		size_t missingBytes = 0;
+		MissingHandle = Upload(MissingTexture(), "missing", missingBytes);
+		if (MissingHandle == nullptr) {
+			return false;
+		}
 		return true;
 	}
 
@@ -56,6 +66,9 @@ namespace engine::render {
 			if (DefaultHandle != nullptr) {
 				SDL_ReleaseGPUTexture(Device, DefaultHandle);
 			}
+			if (MissingHandle != nullptr) {
+				SDL_ReleaseGPUTexture(Device, MissingHandle);
+			}
 			if (SharedSampler != nullptr) {
 				SDL_ReleaseGPUSampler(Device, SharedSampler);
 			}
@@ -63,6 +76,7 @@ namespace engine::render {
 
 		Textures.clear();
 		DefaultHandle = nullptr;
+		MissingHandle = nullptr;
 		SharedSampler = nullptr;
 		UploadedBytes = 0;
 		Device = nullptr;

@@ -602,3 +602,87 @@ TEST_CASE("mixing folds a value in without discarding what came before", "[scene
 		engine::scene::MixSignature(engine::scene::MixSignature(base, 2u), 1u)
 	);
 }
+
+// --- what is ready to be drawn --------------------------------------------------
+//
+// **The rule that decides whether a mesh part appears at all**, and it lives
+// here rather than in the renderer for `OrderScene`'s reason: a renderer is the
+// one module a test cannot exercise, so a rule that decides what reaches a draw
+// call is the last place it should live.
+
+TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstance]") {
+	const engine::core::Name loaded("tree.amesh");
+	const engine::core::Name missing("rock.amesh");
+
+	std::vector<DrawInstance> instances(3);
+	instances[0].Mesh = loaded;
+
+	// **No mesh named at all — an ordinary `Part`.** This one is kept, because
+	// the renderer's default cube is what a part *is* rather than a stand-in for
+	// something that has not arrived.
+	instances[1].Mesh = engine::core::Name{};
+
+	instances[2].Mesh = missing;
+
+	std::vector<DrawInstance> drawable;
+	engine::scene::KeepLoaded(
+		instances, [&loaded](const engine::core::Name &mesh) { return mesh == loaded; }, drawable
+	);
+
+	REQUIRE(drawable.size() == 2);
+	CHECK(drawable[0].Mesh == loaded);
+	CHECK_FALSE(drawable[1].Mesh.IsValid());
+
+	// **The distinction is the whole point.** A version that dropped both — or
+	// kept both — would pass a test that only counted, so this asserts which two
+	// survived and that the absent one is not among them.
+	for (const DrawInstance &instance : drawable) {
+		CHECK(instance.Mesh != missing);
+	}
+}
+
+TEST_CASE("a mesh arriving makes its parts appear without anything else changing", "[scene][drawinstance]") {
+	const engine::core::Name wanted("tree.amesh");
+
+	std::vector<DrawInstance> instances(4);
+	for (DrawInstance &instance : instances) {
+		instance.Mesh = wanted;
+	}
+
+	std::vector<DrawInstance> drawable;
+
+	// Before the content lands, nothing naming it draws — which is what makes a
+	// half-loaded scene read as "still loading" rather than as a field of cubes.
+	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return false; }, drawable);
+	CHECK(drawable.empty());
+
+	// And after, every one of them does, in the order the world produced them.
+	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	CHECK(drawable.size() == instances.size());
+}
+
+TEST_CASE("filtering keeps its buffer across calls", "[scene][drawinstance]") {
+	// **Cleared and refilled rather than rebuilt**, because this runs once a
+	// frame over every drawable in the world — the rule every buffer in the
+	// render path follows.
+	std::vector<DrawInstance> instances(64);
+	for (DrawInstance &instance : instances) {
+		// **Named, because an unnamed one is kept whatever the residency
+		// answer** — the fixture has to be able to empty out for the capacity
+		// check below to mean anything.
+		instance.Mesh = engine::core::Name("tree.amesh");
+	}
+	std::vector<DrawInstance> drawable;
+
+	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	const size_t capacity = drawable.capacity();
+	REQUIRE(capacity >= 64);
+
+	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return false; }, drawable);
+	CHECK(drawable.empty());
+	CHECK(drawable.capacity() == capacity);
+
+	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	CHECK(drawable.size() == 64);
+	CHECK(drawable.capacity() == capacity);
+}

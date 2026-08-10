@@ -141,6 +141,39 @@ namespace engine::ecs {
 			return Slot<T>();
 		}
 
+		// Registers a type the compiler never saw.
+		//
+		// **The one entry point that is not a template, because its caller has
+		// no `T`.** A component a game declares in a script or a data file is
+		// described by its fields rather than by a struct, so `DescribeType<T>`
+		// has nothing to work from and the descriptor is built by hand — see
+		// `Schema.hpp`, which is the only caller and the only one that should
+		// be.
+		//
+		// Everything after registration is unchanged: the id comes from the same
+		// counter, so a described component sorts into an archetype beside a
+		// declared one and no path downstream learns the difference.
+		//
+		// **`slot` is the identity, and the caller owns it.** Its *address* is
+		// what the table compares to tell "this type again" from "a second type
+		// under one name" — the same mechanism `Slot<T>()` provides for a C++
+		// type. It must therefore be a distinct object per described type and
+		// must outlive every use of the component.
+		//
+		// Aborts on a sealed table, exactly as `Of<T>()` does. A caller that can
+		// report a refusal instead should ask `Sealed()` first;
+		// `Schemas::Register` does.
+		//
+		// @param name       The stable name to register under.
+		// @param descriptor Everything the storage needs to handle the type.
+		// @param slot       Where this type's id is remembered, one per type.
+		// @return The dense id.
+		// @since v0.12
+		static ComponentId
+		RegisterDescribed(std::string_view name, const TypeDescriptor &descriptor, ComponentId &slot) {
+			return Adopt(core::Name(name), descriptor, slot, false);
+		}
+
 		// The descriptor behind an id.
 		//
 		// @param id The id to describe.

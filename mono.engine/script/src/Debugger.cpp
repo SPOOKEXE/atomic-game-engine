@@ -1,6 +1,7 @@
 #include <engine/script/Debugger.hpp>
 
 #include <algorithm>
+#include <string_view>
 
 namespace engine::script {
 
@@ -23,14 +24,49 @@ namespace engine::script {
 		}
 	}
 
-	void Debugger::Add(std::string source, int line, BreakAction action) {
+	std::string_view BreakpointsRefused(std::string_view source) {
+		// Longest first, so `.mjs` is not read as a name ending in `s`.
+		static const struct {
+			std::string_view Extension;
+			std::string_view Reason;
+		} REFUSED[] = {
+			{".tsx",
+			 "TypeScript is turned into JavaScript before it runs, and the JavaScript runtime "
+			 "has no debug hook — see D00106"},
+			{".ts",
+			 "TypeScript is turned into JavaScript before it runs, and the JavaScript runtime "
+			 "has no debug hook — see D00106"},
+			{".mjs", "the JavaScript runtime has no debug hook — see D00106"},
+			{".cjs", "the JavaScript runtime has no debug hook — see D00106"},
+			{".js", "the JavaScript runtime has no debug hook — see D00106"},
+		};
+
+		for (const auto &refused : REFUSED) {
+			if (source.size() >= refused.Extension.size() &&
+				source.compare(
+					source.size() - refused.Extension.size(), refused.Extension.size(), refused.Extension
+				) == 0) {
+				return refused.Reason;
+			}
+		}
+		return {};
+	}
+
+	bool Debugger::Add(std::string source, int line, BreakAction action) {
+		if (!BreakpointsRefused(source).empty()) {
+			// **Refused here rather than at every caller**, so a dead breakpoint
+			// cannot reach the list through any path — including `Adopt`, which
+			// copies a list somebody else built.
+			return false;
+		}
+
 		for (Breakpoint &point : Points) {
 			if (point.Line == line && point.Source == source) {
 				// Replaced in place, so the hit count and the position in the
 				// list survive somebody changing what it does.
 				point.Action = action;
 				point.Enabled = true;
-				return;
+				return true;
 			}
 		}
 
@@ -39,6 +75,7 @@ namespace engine::script {
 		point.Line = line;
 		point.Action = action;
 		Points.push_back(std::move(point));
+		return true;
 	}
 
 	bool Debugger::Remove(std::string_view source, int line) {

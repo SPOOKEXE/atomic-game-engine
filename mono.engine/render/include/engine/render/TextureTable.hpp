@@ -116,6 +116,24 @@ namespace engine::render {
 			return DefaultHandle;
 		}
 
+		// What to sample when a drawable names a texture this table does not
+		// hold.
+		//
+		// **Not the same answer as `Default`, and that is the point.** A part
+		// nobody textured is finished and looks like the default material; a
+		// part that names a sheet which is not here is not finished, and drawing
+		// the two the same way makes a typo indistinguishable from a decision.
+		// `MissingTexture.hpp` carries why it is a purple checkerboard.
+		//
+		// **Held apart from the map like the default**, so no `Add` can replace
+		// it and no `Drop` can release it.
+		//
+		// @return The marker. Null only before `Initialise`.
+		// @since v0.12
+		SDL_GPUTexture *Missing() const {
+			return MissingHandle;
+		}
+
 		// How big a registered texture is, in source pixels.
 		//
 		// @param name   The name.
@@ -220,6 +238,10 @@ namespace engine::render {
 		// the engine always holds, and a ceiling that content can spend should
 		// not shrink by a constant nobody can see.
 		SDL_GPUTexture *DefaultHandle = nullptr;
+
+		// The marker, outside `Textures` for the same reason and likewise not
+		// counted against `MAXIMUM_BYTES`.
+		SDL_GPUTexture *MissingHandle = nullptr;
 
 		std::unordered_map<uint32_t, Entry> Textures;
 		size_t UploadedBytes = 0;

@@ -123,6 +123,41 @@ where every part has a `Bounds`.
 Refuse a change back to `Bounds` that does not also explain what happens when
 the two disagree.
 
+## The grids size themselves unless the caller named a size
+
+`spatial::HashGrid::DEFAULT_CELL_SIZE` is four metres because that is twice the
+median extent of *this repository's* demo colliders. A world of bullets or a
+world of buildings gets a grid tuned for something else, and the swing is large:
+`engine.physics.bench.broadphase` puts four thousand colliders at 499 us with
+two-metre cells and 179 us with eight-metre ones, for the same scene and the
+same pair list.
+
+Since v0.12 `SyncBroadphase` calls `spatial::SuggestCellSize` on the proxies it
+is about to hand `Rebuild`, and the measured rows land on the hand-picked
+optimum at every density — 22% off the default at four thousand colliders, 17%
+at a thousand.
+
+Four properties a reviewer should hold to:
+
+- **It is speed and never behaviour.** The grid walk is exhaustive at any
+  spacing, so the pair set is identical; only the number of cells examined
+  changes. A change that made the answer depend on the spacing would be a bug in
+  the index rather than a tuning decision, and `engine.spatial.hashgrid` pins
+  the query answering the same set across a size change.
+- **`PreparePhysicsWorld(store, 4.0f)` still means four metres.** A size at or
+  below zero means "measure it" and a positive one means the author decided;
+  `PhysicsWorld::CellSizeMeasured` is the flag and it is snapshotted, because
+  the number alone no longer says which of the two a restored world holds. A
+  parameter that is silently ignored is worse than one that is not there.
+- **The two indexes are sized separately.** A scene's static geometry is walls
+  and floors and its dynamic set is crates and characters; one spacing chosen
+  for the union of them is chosen for neither.
+- **The quantisation is the hysteresis and is not a rounding convenience.** A
+  size computed exactly would differ every time a body was added and each
+  difference costs a full rebuild; a power of two only moves when the scene's
+  scale genuinely does, and `HashGrid::SetCellSize` returns without touching
+  anything when the answer did not change. Refuse a change that drops either.
+
 ## Two indexes, because the grid is rebuild-only
 
 `spatial::HashGrid` has no `Insert`, no `Move` and no `Remove`, and

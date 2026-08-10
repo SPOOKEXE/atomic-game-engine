@@ -10,6 +10,7 @@
 #include <engine/core/Log.hpp>
 
 #include <cstdio>
+#include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 
 int main(int argc, char **argv) {
@@ -74,7 +75,17 @@ int main(int argc, char **argv) {
 		engine::core::Log::SetLevel(engine::core::LogLevel::Trace);
 	}
 
+	// **The configured values first, then the flags over the top.** Only this
+	// function can tell a flag that was given from one that was left at its
+	// default — `Arguments::GetNumber(name, fallback)` answers the fallback for
+	// an absent flag — so the reconciliation belongs here and nowhere else.
+	// `studio/Config.hpp` states the rule: a flag is for one run and a
+	// preference is a thing somebody set and expects to find again.
+	studio::Preferences preferences;
+	preferences.Load();
+
 	studio::Options options;
+	options.Scale = preferences.Scale;
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
 	options.Scale = static_cast<float>(arguments.GetNumber("scale", options.Scale));
@@ -84,12 +95,21 @@ int main(int argc, char **argv) {
 	// `GetInteger` with a fallback would open the port on every run, because a
 	// fallback is returned when the flag is absent. This way `--mcp-port` alone
 	// takes this program's number and no flag at all leaves it shut.
-	options.ControlPort = arguments.Has("mcp-port") ? static_cast<int>(arguments.GetInteger("mcp-port", 8738)) : -1;
+	// The bare flag takes the configured port rather than a number written
+	// here, so somebody who set one in the panel gets it back from the
+	// command line too. No flag at all still leaves the socket shut.
+	options.ControlPort =
+		arguments.Has("mcp-port")
+			? static_cast<int>(arguments.GetInteger("mcp-port", preferences.ControlPort))
+			: -1;
 	options.Headless = arguments.Has("headless");
 	options.Uncapped = arguments.Has("uncapped");
-	options.ShowStatistics = arguments.Has("stats");
-	options.ShowFrameGraph = arguments.Has("graph");
-	options.ShowAssetsPanel = arguments.Has("assets");
+	// A flag turns a panel on for this run; the file remembers what was left
+	// open. Neither can turn the other's off, which is the honest reading of two
+	// booleans that both mean "show it".
+	options.ShowStatistics = arguments.Has("stats") || preferences.ShowStatistics;
+	options.ShowFrameGraph = arguments.Has("graph") || preferences.ShowFrameGraph;
+	options.ShowAssetsPanel = arguments.Has("assets") || preferences.ShowAssets;
 	options.ShowSecondViewport = arguments.Has("viewport2");
 
 	// A headless run has no window to close, so without a budget it would never

@@ -115,6 +115,26 @@ namespace engine::script {
 
 		// Every local and argument in scope.
 		std::vector<DebugLocal> Locals;
+
+		// Every upvalue the running function closed over.
+		//
+		// **Kept apart from the locals rather than merged into them**, and the
+		// separation is what makes the capture worth reading. A local is a value
+		// this frame made; an upvalue is one it *captured* from an enclosing
+		// scope, so it is shared with whoever else closed over the same
+		// variable — and "why did this change when nothing in this function
+		// touched it" is the question upvalues answer and locals cannot.
+		//
+		// **Empty for a chunk's own top level, and that is Luau rather than a
+		// gap here.** Lua 5.2 gives every chunk an `_ENV` upvalue; Luau keeps a
+		// closure's environment beside the upvalue array instead, so a main
+		// chunk closes over nothing and reports nothing. The same variable read
+		// from an enclosing function *is* an upvalue there — which is what makes
+		// the two lists disagree usefully, and `engine.script.debugger` pins
+		// both halves.
+		//
+		// @since v0.12
+		std::vector<DebugLocal> Upvalues;
 	};
 
 	// What was true when a breakpoint was reached.
@@ -134,6 +154,33 @@ namespace engine::script {
 		std::vector<DebugFrame> Frames;
 	};
 
+	// Why this engine cannot break inside a chunk, or empty when it can.
+	//
+	// **Only Luau has breakpoints, and a chunk that cannot carry one has to say
+	// so where somebody asks for it.** The alternative is a breakpoint that sits
+	// in the list looking armed and never fires, which reads as the debugger
+	// being broken rather than as the language not being supported — and the
+	// person who set it has no way to tell those apart.
+	//
+	// **Decided by the chunk's name, because that is what a caller has.** A
+	// breakpoint is asked for before anything runs, so there is no runtime to
+	// ask which VM will get it; the extension is what the loader itself uses to
+	// choose one — see `LanguageOf` in the studio's plugin host.
+	//
+	// **A name with no extension is allowed.** `Runtime::Run(source, "probe")`
+	// names a chunk that way and it is always Luau, so refusing it would refuse
+	// the one form a test and an in-editor evaluation both use.
+	//
+	// `.ts` is refused as well as `.js`, and it is the likelier thing somebody
+	// types: TypeScript never reaches a runtime at all — `tsc` turns it into
+	// JavaScript first — so a breakpoint on one is two steps from anything that
+	// could fire.
+	//
+	// @param source The chunk name.
+	// @return A sentence naming the reason, or an empty view.
+	// @since v0.12
+	std::string_view BreakpointsRefused(std::string_view source);
+
 	// The breakpoints a runtime honours, and what they caught.
 	//
 	// **One per runtime, reached through `Runtime::Debug`.** Not a global: two
@@ -149,10 +196,16 @@ namespace engine::script {
 		// Replacing rather than appending, because two breakpoints on one line
 		// is two reports of one event and no way to tell which is which.
 		//
+		// **Refused for a chunk this engine cannot break inside**, which is
+		// what stops a dead breakpoint reaching the list through any path at
+		// all — the service, the gutter, the panel and `Adopt` all arrive here.
+		// A caller wanting to say *why* asks `BreakpointsRefused`.
+		//
 		// @param source The chunk name, matched as a suffix.
 		// @param line   The 1-based line.
 		// @param action What to do when it is reached.
-		void Add(std::string source, int line, BreakAction action = BreakAction::Capture);
+		// @return `false` when the chunk cannot carry one.
+		bool Add(std::string source, int line, BreakAction action = BreakAction::Capture);
 
 		// Removes the breakpoint at a place.
 		//

@@ -1070,6 +1070,47 @@ declare ContentService: ContentService
 -- The world this script runs on. `game` is the universe above it.
 declare workspace: Workspace
 
+-- The storage underneath the class tree.
+--
+-- **`workspace` is this world's scene and `World` is this world's storage**, and
+-- the two are the same world seen from either end: `Instance.new("Part")` is an
+-- entity in the archetype the `Part` class names, and `World:Query` is that
+-- archetype asked about directly.
+--
+-- A component a script declares is a real component — the same dense id, the
+-- same column, iterated by a C++ system that never heard of the script. What it
+-- is not is *typed*: the field list is a run-time fact, so every value table
+-- here is `{ [string]: any }` and a definition file cannot do better. See
+-- `script/src/LuauEcs.cpp` for what this refuses and why.
+declare extern type EngineWorld with
+	-- Declares a component, or agrees with one already declared with exactly
+	-- these fields. Returns whether this call created it.
+	--
+	-- The field types are the engine's own spellings — `number`, `boolean`,
+	-- `string`, `float`, `int32`, `Vector3`, `CFrame`, `Color3`, `Instance` and
+	-- the rest — or `Enum.<set>` for a value that must be a registered member.
+	function DefineComponent(self, component: string, fields: { [string]: string }): boolean
+
+	function HasComponentType(self, component: string): boolean
+
+	-- The field list a component was declared with, in a shape
+	-- `DefineComponent` accepts back.
+	function GetComponentSchema(self, component: string): { [string]: string }?
+
+	-- An entity carrying nothing: no class, no place in the tree, nothing drawn.
+	-- Still an `Instance`, because an instance *is* an entity.
+	function CreateEntity(self, name: string?): Instance
+
+	-- Every entity carrying all of the named components, in a deterministic
+	-- order. Naming a component nothing declared is an error rather than an
+	-- empty result.
+	function Query(self, ...: string): { Instance }
+
+	function Count(self, ...: string): number
+end
+
+declare World: EngineWorld
+
 -- The instance this chunk was loaded from, set on the thread after the sandbox.
 declare script: LuaSourceContainer
 
@@ -1264,6 +1305,22 @@ declare task: {
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
 				out << "\tfunction GetAttributeChangedSignal(self, name: string): "
 					   "PropertyChangedSignal\n";
+
+				// **The storage underneath, declared on `Instance` for the
+				// reason every method above it is: the method table is one
+				// table.** An instance is an entity, so the thing a component
+				// attaches to is already in hand — see `script/src/LuauEcs.cpp`.
+				//
+				// The value tables are `{ [string]: any }` and that is honest
+				// rather than lazy: a component's fields are declared at run
+				// time, so there is no static type for one. What a definition
+				// file *can* pin is that the keys are field names and the call
+				// takes a table, which is what stops `SetComponent("Health", 5)`.
+				out << "\tfunction SetComponent(self, component: string, values: { [string]: any }): ()\n";
+				out << "\tfunction GetComponent(self, component: string): { [string]: any }?\n";
+				out << "\tfunction HasComponent(self, component: string): boolean\n";
+				out << "\tfunction RemoveComponent(self, component: string): ()\n";
+				out << "\tfunction GetComponents(self): { string }\n";
 
 				// **The 2D tree's input, declared on `Instance` rather than on
 				// `GuiObject`.** That is what the run time does — `InstanceIndex`
@@ -1854,6 +1911,34 @@ declare const RunService: RunService;
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
 
+// The storage underneath the class tree. See the Luau half for the whole
+// argument; the only difference here is that there is no colon call, so the
+// world object is not an argument.
+interface EngineWorld {
+	// Declares a component, or agrees with one already declared with exactly
+	// these fields. Returns whether this call created it.
+	DefineComponent(component: string, fields: { [field: string]: string }): boolean;
+
+	HasComponentType(component: string): boolean;
+
+	// The field list a component was declared with, in a shape
+	// `DefineComponent` accepts back.
+	GetComponentSchema(component: string): { [field: string]: string } | null;
+
+	// An entity carrying nothing: no class, no place in the tree, nothing drawn.
+	// Still an `Instance`, because an instance is an entity.
+	CreateEntity(name?: string): Instance;
+
+	// Every entity carrying all of the named components, in a deterministic
+	// order. Naming a component nothing declared is an error rather than an
+	// empty result.
+	Query(...components: string[]): Instance[];
+
+	Count(...components: string[]): number;
+}
+
+declare const World: EngineWorld;
+
 // An alias for `null`, because this is a Roblox-shaped API and a Roblox author
 // writes `part.Parent = nil`. A third empty value would be a footgun wearing a
 // familiar name, so it is not one.
@@ -2002,6 +2087,16 @@ declare const task: {
 				out << "\tSetAttribute(name: string, value: EngineAttribute | null): void;\n";
 				out << "\tGetAttributes(): { [name: string]: EngineAttribute };\n";
 				out << "\tGetAttributeChangedSignal(name: string): PropertyChangedSignal;\n";
+
+				// The storage underneath, matching the Luau half and declared in
+				// the same place for the same reason: the method table is one
+				// table, so a declaration on a subclass would type-check
+				// something the run time does not enforce.
+				out << "\tSetComponent(component: string, values: { [field: string]: any }): void;\n";
+				out << "\tGetComponent(component: string): { [field: string]: any } | null;\n";
+				out << "\tHasComponent(component: string): boolean;\n";
+				out << "\tRemoveComponent(component: string): void;\n";
+				out << "\tGetComponents(): string[];\n";
 
 				// The 2D tree's input, on `Instance` for the reason the Luau
 				// half states at length: the run time answers them for any
