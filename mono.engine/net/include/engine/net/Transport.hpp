@@ -191,6 +191,36 @@ namespace engine::net {
 		// producer that outruns its consumer is bounded rather than allowed to
 		// grow until the host dies, which is a crash a long way from its cause.
 		size_t ReceiveQueueBytes = 256u * 1024u;
+
+		// Whether this end may send to `Endpoint::BroadcastIPv4`.
+		//
+		// Off by default and asked for explicitly, because that is what the
+		// operating system does: a socket sending to the broadcast address
+		// without the option set is refused rather than delivered to nobody, so
+		// the refusal is visible on the call that made the mistake.
+		//
+		// **The loopback honours it too, and that is the point.** A datagram
+		// sent to the broadcast address on a loopback network reaches every
+		// other end attached to it — which makes LAN discovery a path a suite
+		// exercises with real encoding and no socket, exactly as §16.6 has
+		// single-player ride the loopback rather than a shortcut. A discovery
+		// protocol that could only be tested against a live subnet is one that
+		// would be tested on somebody's machine and nowhere else.
+		//
+		// @since v0.13
+		bool Broadcast = false;
+
+		// Whether several ends on this machine may bind the same port.
+		//
+		// For the well-known port a discovery listener sits on: two programs on
+		// one machine — a client and the studio, two clients under test — both
+		// have to hear the same announcements, and without this the second one
+		// to start simply fails to bind and silently discovers nothing.
+		//
+		// Ignored by the loopback, which has no ports to contend for.
+		//
+		// @since v0.13
+		bool ReuseAddress = false;
 	};
 
 	// Builds a loopback network with `peerCount` ends attached to it.

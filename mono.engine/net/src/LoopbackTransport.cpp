@@ -101,6 +101,27 @@ namespace engine::net {
 					return TransportStatus::Unreachable;
 				}
 
+				if (IsBroadcast(to)) {
+					// Refused rather than delivered when the end did not ask for
+					// it, because that is what a socket does — and a loopback
+					// that broadcast anyway would let a discovery beacon pass
+					// its suite and then fail to send a single datagram on the
+					// machine it shipped to.
+					if (!Shared->Settings.Broadcast) {
+						return TransportStatus::Unreachable;
+					}
+					for (const std::shared_ptr<Mailbox> &mailbox : Shared->Mailboxes) {
+						if (mailbox != Self) {
+							Deliver(*mailbox, datagram);
+						}
+					}
+					// One status for the whole send. A broadcast that filled one
+					// peer's queue and not another's has no useful answer to
+					// give — the sender cannot resend to just the one — and on a
+					// socket the kernel would report success either way.
+					return TransportStatus::Ok;
+				}
+
 				const std::shared_ptr<Mailbox> target = Find(to);
 				if (!target) {
 					// Nobody is listening there. `Ok` and dropped, because that
@@ -110,17 +131,7 @@ namespace engine::net {
 					return TransportStatus::Ok;
 				}
 
-				std::lock_guard lock(target->Guard);
-				if (!target->Attached) {
-					return TransportStatus::Ok;
-				}
-				if (target->Bytes + datagram.size() > Shared->Settings.ReceiveQueueBytes) {
-					return TransportStatus::Full;
-				}
-
-				target->Inbound.push_back({Self->Address, {datagram.begin(), datagram.end()}});
-				target->Bytes += datagram.size();
-				return TransportStatus::Ok;
+				return Deliver(*target, datagram) ? TransportStatus::Ok : TransportStatus::Full;
 			}
 
 			Inbound Receive(std::vector<std::byte> &datagram) override {
@@ -165,6 +176,40 @@ namespace engine::net {
 			}
 
 		  private:
+			// Whether an address is the limited broadcast one, whatever port it
+			// names. Compared over the four v4 bytes rather than the whole
+			// sixteen, because the rest are the zero padding `FromIPv4` leaves.
+			static bool IsBroadcast(const Endpoint &address) {
+				if (address.Family != AddressFamily::IPv4) {
+					return false;
+				}
+				for (size_t index = 0; index < 4; ++index) {
+					if (address.Address[index] != std::byte{0xFF}) {
+						return false;
+					}
+				}
+				return true;
+			}
+
+			// Puts one datagram in one mailbox.
+			//
+			// @return `false` only when the queue is full. A detached peer is
+			//         `true` and dropped, because a socket is not told that the
+			//         port it sent to has gone away.
+			bool Deliver(Mailbox &target, std::span<const std::byte> datagram) const {
+				std::lock_guard lock(target.Guard);
+				if (!target.Attached) {
+					return true;
+				}
+				if (target.Bytes + datagram.size() > Shared->Settings.ReceiveQueueBytes) {
+					return false;
+				}
+
+				target.Inbound.push_back({Self->Address, {datagram.begin(), datagram.end()}});
+				target.Bytes += datagram.size();
+				return true;
+			}
+
 			std::shared_ptr<Mailbox> Find(const Endpoint &address) const {
 				for (const std::shared_ptr<Mailbox> &mailbox : Shared->Mailboxes) {
 					if (mailbox->Address == address) {
