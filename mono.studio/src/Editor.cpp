@@ -441,6 +441,12 @@ namespace studio {
 			PumpControl();
 			ControlWantsProfile = ControlSurface.WantsProfiling();
 
+			// Beside the control surface, and idle unless somebody has opened
+			// the panel: `TeamCreate` holds no socket until it is asked to look,
+			// so this is a null check on every frame of every editor that never
+			// uses it.
+			Team.Pump(engine::core::Clock::Seconds());
+
 			// **Beside the control surface and for its reason**, which the
 			// comment above already gives: a plugin writing a property is doing
 			// what a hand on the mouse does, so it happens where a click would

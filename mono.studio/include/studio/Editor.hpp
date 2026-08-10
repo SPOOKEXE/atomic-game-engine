@@ -68,6 +68,7 @@
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/TeamCreate.hpp>
 #include <studio/Projection.hpp>
 #include <functional>
 #include <unordered_map>
@@ -1479,6 +1480,9 @@ namespace studio {
 		// them, so a wrong key and a working one looked identical. See
 		// `Network.cpp`.
 		void DrawNetwork();
+
+		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
+		void DrawTeamCreate();
 
 		// The control surface: whether it is listening, and what it offers.
 		//
@@ -3275,6 +3279,25 @@ namespace studio {
 
 		// The control surface's own panel. See `DrawControl`.
 		bool ShowControl = false;
+
+		// Team create's panel. See `DrawTeamCreate`.
+		bool ShowTeamCreate = false;
+
+		// This editor's presence among the others. Idle — and holding no
+		// socket — until somebody opens the panel and asks it to look.
+		TeamCreate Team;
+
+		// What the team-create fields hold while somebody is editing them.
+		// Kept on the editor rather than static inside the draw, for
+		// `ControlPortField`'s reason: a panel that is closed and reopened
+		// should not forget what was half typed into it.
+		//
+		// Character buffers rather than strings, because that is the imgui this
+		// repository vendors — there is no `imgui_stdlib` on the link line and
+		// adding one for three fields would widen what the editor pulls in.
+		char TeamNameField[64] = {};
+		char TeamKeyField[80] = {};
+		char TeamPointField[64] = {};
 
 		// The plugins panel. See `DrawPlugins`.
 		bool ShowPlugins = false;

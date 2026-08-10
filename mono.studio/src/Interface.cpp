@@ -267,6 +267,7 @@ namespace studio {
 			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
 			// and `DrawPipelineProfile()` were drawn here.
 			DrawNetwork();
+			DrawTeamCreate();
 			DrawControl();
 			DrawPlugins();
 			DrawPluginWidgets();
@@ -911,6 +912,7 @@ namespace studio {
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		// TODO(render-pipeline): the three pipeline panels were opened from here.
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
+		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);

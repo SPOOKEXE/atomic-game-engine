@@ -63,6 +63,14 @@ mono_add_library(studio
 		# happens in the programs that can link both.
 		Tool::assetc
 
+		# `shared`. Team create's networking half — this editor announcing
+		# itself at `Purpose::Studio` and seeing the others. The same member the
+		# client browses servers with and the origin offers a distribution
+		# stream with, which is the reason discovery is one thing rather than
+		# three features. `studio/TeamCreate.hpp` says at length what it is and
+		# what it deliberately is not yet.
+		Mono::network
+
 		# L9, `shared`. Image decoding, for the asset previews.
 		#
 		# **A decoder in an editor is not the thing `assets::Texture` argues
