@@ -495,6 +495,7 @@ RunService.Heartbeat:Connect(function()
 	-- full.
 	dressSwatches()
 
+
 	local meshes = everyMesh()
 	if #meshes == known then
 		return

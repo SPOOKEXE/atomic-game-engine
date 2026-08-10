@@ -1762,6 +1762,27 @@ namespace studio {
 		// @param extent Its own half-extent, from the renderer's table.
 		void FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent);
 
+		// Fits every part still waiting to be fitted, whatever brought it here.
+		//
+		// **Because arrival is not the only moment a part meets a mesh, and it
+		// was the only one this handled.** `FitPartsToMesh` runs when geometry
+		// lands, which covers the ordinary case — naming a mesh is what fetches
+		// it — and covers nothing else. Assigning a `MeshId` that is *already*
+		// loaded fetches nothing, so no arrival ever came and the part kept the
+		// cubic box it was created with: a character squashed into a cube, with
+		// the mesh sitting right there in the table. The same hole swallowed a
+		// paste, an undo, a duplicate and a world opened after the content had
+		// landed.
+		//
+		// **`Visual::Fitted` is what makes this a per-frame pass rather than a
+		// per-frame walk of the scene.** A part that has been fitted to the mesh
+		// it names is skipped, so the steady state is one comparison per part
+		// and nothing is written — which is the same guard that already let the
+		// arrival path run on every republish.
+		//
+		// @since v0.13
+		void FitPendingParts();
+
 		// Rebuilds `PublishedMeshNames` from the signed manifest.
 		//
 		// **Names, not content.** It is what makes
