@@ -1394,6 +1394,18 @@ namespace studio {
 			ClearSelection();
 		}
 
+		// **Through the table, like Undo above**, so the key, the ribbon button
+		// and the palette are one answer rather than three. A tool switched
+		// mid-drag changes nothing until the drag ends: `DrawGizmo` reads the
+		// drag's own mode while one is in flight, which is what stops a move
+		// from becoming a rotation halfway through.
+		for (const Action id :
+			 {Action::ToolSelect, Action::ToolMove, Action::ToolRotate, Action::ToolScale}) {
+			if (Keybinds::Fired(id)) {
+				Operators.Run(id);
+			}
+		}
+
 		// **Stop is tested before Play**, because their defaults share a key:
 		// F5 plays and Shift+F5 stops, which is Studio's arrangement. `Fired`
 		// matches modifiers exactly, so the two cannot both fire — but the
