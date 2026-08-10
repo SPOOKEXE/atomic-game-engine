@@ -49,11 +49,13 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.14
 
-- use tools and see what needs fixing
-- use tools and see what to improve
-- blocky character spawning
-- animation handler
-- character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
+- [_] use tools and see what needs fixing
+- [_] use tools and see what to improve
+- [_] blocky character spawning
+- [_] animation handler
+- [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
+- [_] local server (one server multiple clients on same machine)
+- [_] check teleportservice works between worlds and it works in studio natively
 
 ### v0.?? (needs prototype project first)
 
