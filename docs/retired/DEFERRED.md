@@ -1,6 +1,104 @@
 
 # DEFERRED
 
+### [x] D00108
+
+**Closed at v0.13 by `studio::EditStream`.** What follows is the entry as it
+was written, kept because the reasoning is what the answer was built against.
+
+The identity turned out to be an instance path rather than a new field in the
+document format: two logs both issue `1` for their first instance, so an
+`EditId` cannot cross, and a path is the one name two editors already share.
+Ordering comes from the host relaying, which is also what keeps paths resolving
+to the same instance everywhere. What the entry says about locking still holds
+and is why there is none.
+
+**Team create finds people and cannot yet let them edit together.**
+
+`studio::TeamCreate` is the session layer and it is complete: an editor
+announces itself at `Purpose::Studio`, sees the others on the subnet or through
+a rendezvous point, and hands over a session id and a key to invite somebody
+with. What it does not have is anywhere for two editors to put a change.
+
+**Why the obvious answer is the wrong one.** `replication::Authority` already
+orders changes to a world and streams them to clients, and pointing two editors
+at it looks like a morning's work. It is not the same problem. An authority has
+one writer and many readers; a shared document has many writers, and the
+question it has to answer — what happens when two people move the same part in
+the same beat — has no answer in a model built around a server that is right by
+definition. Bolting one on would produce an editor where the last packet wins
+and somebody's work disappears without a message.
+
+**Why it is not fixed by locking.** Per-instance locks are the cheap version and
+they fail in the ordinary case rather than the rare one: two people laying out
+one model touch the same parts constantly, and a lock that has to be waited for
+turns collaboration into taking turns.
+
+**What closing it takes.** A change model with a total order that neither editor
+owns, an undo stack per person that survives somebody else's edit landing in the
+middle of it, and a policy for the conflicts the order does not resolve. That is
+a design, not a patch, and it should be written down before any of it is typed.
+
+Until then: the panel says "sessions only" in the window rather than in a
+comment, because a person looking at a list of editors they cannot collaborate
+with should be told why by the thing they are looking at.
+
+### [CLOSED] D00105
+
+**A plugin can change the world and cannot add a button, and the missing piece
+is a channel rather than a function.**
+
+**Closed at v0.12 by building the channel.** `script::HostSurface` is the seam —
+one virtual taking a name and a `HostValue` list — and `script::HostValue` is a
+value tree rather than `ScriptValue` widened, for the reason this entry
+predicted: an instance handle means something inside one process and nothing on
+a bus, so the two types stay apart. A Luau function passed as an argument
+becomes a `HostCallback`, which is what makes a button's handler possible, and
+`Runtime::Invoke` is the other direction. `mono.studio/src/PluginSurface.cpp` is
+the editor's implementation and `engine.script.host` covers the crossing.
+
+Two things the entry got right and one it did not. The value tree and the
+callback were both needed, as predicted. What it called "the honest options" —
+a polled queue or a registry-ref dispatch — turned out to be one option: the ref
+lives in the module behind `Invoke`, so the host holds an id and polls nothing.
+
+The original text follows.
+
+`studio::PluginHost` runs a plugin as an ordinary `script::Runtime` against the
+world an author is editing, so everything a game script can reach it can reach —
+`Instance`, `workspace`, and since v0.12 `World`, the ECS underneath. The
+selection needed no new surface at all: it is published as `studio.Selected`, a
+described component, so a plugin queries for it and writes it back.
+
+What that model cannot express is anything about the *editor* rather than about
+the world: a toolbar button, a menu item, a docked panel, running a registered
+command.
+
+- **The obstacle is `script/AGENTS.md`'s first rule.** No `lua_State` appears in
+  a public header, so the studio cannot install a global of its own into a
+  plugin's VM the way `LuauEcs.cpp` installs `World` — that file is inside the
+  module and `mono.studio` is not.
+- **The shape that fits is a host-call seam, and the codec is already the hard
+  half.** `script::ScriptValue` is the language-neutral tree both runtimes
+  marshal through, with a deterministic encoding and a sorted map order; a
+  `HostSurface` interface taking a name and a `ScriptValue` and answering one
+  would give a host an arbitrary API without either side naming the other's
+  types. What it costs is making `ScriptValue` public, which is a real widening
+  of `script`'s surface and should be decided rather than slipped in.
+- **A button also needs a callback going the other way**, which is the part the
+  value tree does not answer: a handler lives in the plugin's VM and the press
+  happens in the editor's frame. The honest options are a polled queue — the
+  plugin asks "was I clicked" on its heartbeat — or a registry-ref dispatch
+  inside the module, and the first is buildable today on top of the seam while
+  the second is not.
+- **Until then the absence is stated rather than discovered.**
+  `studio/Plugins.hpp` says there is no toolbar API and why, which is the thing
+  that keeps somebody from looking for one.
+
+**Reopen trigger: the first plugin that wants to be invoked rather than to
+run every frame.** A tool that aligns a selection is one — it should happen when
+somebody asks, not sixty times a second.
+
 ### [CLOSED] D00047
 
 **Readbacks: the viewer node's image, channel histograms, and an overdraw view.**
@@ -636,4 +734,3 @@ should file rather than a bullet here.
 - ~~`render` must not grow a hand-rolled pass list before it does.~~ **It grew one anyway, and that is an overrun rather than a revision.** v0.6's roadmap asked for shadows and a render-to-texture surface, the graph runtime executes nothing, so the passes had nowhere else to live. The part that is not defensible is that the two descriptions of a frame are now unchecked against each other — filed as **D00016**, which is where the argument about what to do belongs.
 - §12.3's remaining additions to F5 — per-stage cache hit/miss, and the undemanded capability of a dead node — **unchanged, and now for the right reason**: they need the cache and the executor, not the directory. The tick rate on F3 and the tick/render split of §14 are done.
 - **Reopen trigger, stated for the first time: v0.8's extended pipeline.** "Handle multiple worlds in parallel" is the first roadmap line that cannot be met by making the function longer — per-world pass sharing is exactly the decision `Stage::PerView` was written to record and that nothing yet reads, and HDR plus a G-buffer change what every later stage reads, which is the change a hand-rolled list makes by editing five call sites and a graph makes by editing a list.
-
