@@ -241,6 +241,11 @@ Both skip `mono.vendor/` by construction: the directory list is explicit rather
 than `find .`, because reformatting a submodule turns every future update into a
 conflict.
 
+**`mono.studio/` is not in that list, and it should be.** It is a first-party
+member that has never been swept, so its files are formatted by whoever last
+edited them. Adding it is a one-line change and a fifty-eight file diff, which
+is why it has not been folded into a feature commit — do it on its own.
+
 ---
 
 # What there is to run
@@ -1008,6 +1013,120 @@ two chances to pin the wrong one.
 **Both ends default to the weaker mode and both say so**, because refusing to
 run without a key would refuse every deployment in this engine today, and
 refusing quietly would be worse than either.
+
+---
+
+## Finding a server without being told an address
+
+Everything below is off by default. A recipe that does not ask for it opens no
+extra socket and broadcasts nothing.
+
+### On the same switch
+
+```sh
+server --listen 0 --advertise --session-name "Declan's game"
+client --browse
+```
+
+The server announces itself once a second to `255.255.255.255:47600` and the
+client listens there. `--listen 0` binds an ephemeral port and the announcement
+carries **the port that was bound**, so nothing has to be agreed in advance.
+
+The address a client dials is the address the announcement *arrived from*, with
+the advertised port. A host binds `0.0.0.0` and cannot know which of its
+addresses a given client can route to; the one a datagram already crossed needs
+no guess.
+
+| Flag | On | What it does |
+|---|---|---|
+| `--advertise` | server, cdn | announce on the subnet |
+| `--session-name NAME` | server | what a browser shows |
+| `--browse` | client | look instead of being told |
+| `--browse-seconds N` | client | how long to look (default 3) |
+| `--session-name NAME` | client | join that one rather than the first |
+
+**The search is the one blocking wait in the client**, and it happens before the
+loop starts, in the same place as binding a socket. A beacon announces once a
+second, so anything under two seconds is a coin flip.
+
+### Invited only
+
+```sh
+server --listen 0 --advertise --session-key "a sentence we agreed on"
+client --browse --session-key "a sentence we agreed on"
+```
+
+A private session's announcement carries a MAC under the key, so a client
+holding it can tell the session it was invited to from somebody else's wearing
+the same name. A key is 64 hex characters or a passphrase, and the same words
+derive the same key on both machines.
+
+**Private authenticates; it does not hide.** A private session on a subnet is
+visible to everybody on that subnet and joinable by nobody without the key. A
+browser shows it as locked, which is deliberate — the person about to be given
+the key has to be able to see it exists.
+
+### Across the internet
+
+```sh
+cdn    --store DIR --rendezvous-listen 47601      # somewhere already reachable
+server --listen 0 --rendezvous ORIGIN:47601 --session-name "mine"
+client --rendezvous ORIGIN:47601 --session-id 036e0c6d109c14220d0d7d2bdae7239a
+```
+
+The point introduces two peers and carries none of their traffic. Both sides
+then poke each other directly until one gets through; the address that results
+is on **the same socket the session uses**, because a router's NAT mapping
+belongs to a port.
+
+The rendezvous point runs inside the content origin rather than as a fifth
+program: it holds an id, an address and a timestamp, and it needs to be
+somewhere an operator has already put on an address.
+
+**A private session is not listed at the point and cannot be.** The point holds
+no key and must not — that would make every operator of one a holder of every
+private session's secret. So reaching a private session needs its id, which the
+host hands over along with the key. `server --advertise` prints both:
+
+```
+announcing session 036e0c6d109c14220d0d7d2bdae7239a (private) on the local subnet
+```
+
+**There is no relay.** When both routers refuse, the attempt fails and says so:
+
+```
+could not reach session 036e... through ORIGIN:47601
+```
+
+That is an honest answer. A hidden fallback would make "peer-to-peer" mean two
+different things depending on the day, and a relay is bandwidth somebody pays
+for.
+
+### Distribution streams
+
+The same three reaches, offered by a content origin instead of a game server:
+
+```sh
+cdn --store DIR --advertise                       # LAN
+cdn --store DIR --advertise --stream-key SECRET   # private, key required
+cdn --store DIR --rendezvous POINT:47601          # listed for anyone off-subnet
+cdn --store DIR --rendezvous-listen 47601         # be the meeting place
+```
+
+A stream is not a second kind of origin — the same six routes are served to
+everybody. What a stream decides is how a client *finds* it and whether it was
+invited, and `--stream-key` gates discovery rather than delivery: a grant is
+still what admits a fetch.
+
+### In the editor
+
+**View → Team Create.** The editor announces itself at the same layer, sees the
+other editors on the subnet or through a point, and hands over a session id and
+a key to invite somebody with.
+
+**Sessions only.** Two editors can find each other; editing one place together
+needs a shared document with an ordering, and that is not built. The panel says
+so rather than implying otherwise.
 
 ---
 

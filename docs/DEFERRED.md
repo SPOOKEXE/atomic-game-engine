@@ -1328,3 +1328,37 @@ case the marker exists for.
 Until then: `render/AGENTS.md` records the limitation beside the three-way
 split, and a texture that is briefly purple during a load is not a bug report.
 
+
+---
+
+### [_] D00108
+
+**Team create finds people and cannot yet let them edit together.**
+
+`studio::TeamCreate` is the session layer and it is complete: an editor
+announces itself at `Purpose::Studio`, sees the others on the subnet or through
+a rendezvous point, and hands over a session id and a key to invite somebody
+with. What it does not have is anywhere for two editors to put a change.
+
+**Why the obvious answer is the wrong one.** `replication::Authority` already
+orders changes to a world and streams them to clients, and pointing two editors
+at it looks like a morning's work. It is not the same problem. An authority has
+one writer and many readers; a shared document has many writers, and the
+question it has to answer — what happens when two people move the same part in
+the same beat — has no answer in a model built around a server that is right by
+definition. Bolting one on would produce an editor where the last packet wins
+and somebody's work disappears without a message.
+
+**Why it is not fixed by locking.** Per-instance locks are the cheap version and
+they fail in the ordinary case rather than the rare one: two people laying out
+one model touch the same parts constantly, and a lock that has to be waited for
+turns collaboration into taking turns.
+
+**What closing it takes.** A change model with a total order that neither editor
+owns, an undo stack per person that survives somebody else's edit landing in the
+middle of it, and a policy for the conflicts the order does not resolve. That is
+a design, not a patch, and it should be written down before any of it is typed.
+
+Until then: the panel says "sessions only" in the window rather than in a
+comment, because a person looking at a list of editors they cannot collaborate
+with should be told why by the thing they are looking at.
