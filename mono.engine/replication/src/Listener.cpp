@@ -106,6 +106,45 @@ namespace engine::replication {
 		Policy = std::move(policy);
 	}
 
+	void Listener::OnUserMessage(std::function<void(ClientId, std::span<const std::byte>)> handler) {
+		UserMessages = std::move(handler);
+	}
+
+	bool Listener::SendTo(ClientId client, std::span<const std::byte> message, double nowSeconds) {
+		for (Peer &peer : Peers) {
+			if (!(peer.Client == client) || peer.Wire == nullptr) {
+				continue;
+			}
+			core::ByteWriter writer;
+			User payload;
+			payload.Bytes.assign(message.begin(), message.end());
+			WriteMessage(writer, payload);
+			return peer.Wire->Send(writer.Bytes(), nowSeconds);
+		}
+		return false;
+	}
+
+	size_t Listener::Broadcast(std::span<const std::byte> message, double nowSeconds, ClientId except) {
+		// Encoded once for everybody. The envelope is the same bytes whoever it
+		// goes to, and re-encoding per client would be the same work done once
+		// per person in the session.
+		core::ByteWriter writer;
+		User payload;
+		payload.Bytes.assign(message.begin(), message.end());
+		WriteMessage(writer, payload);
+
+		size_t taken = 0;
+		for (Peer &peer : Peers) {
+			if (peer.Wire == nullptr || peer.Client == except) {
+				continue;
+			}
+			if (peer.Wire->Send(writer.Bytes(), nowSeconds)) {
+				taken++;
+			}
+		}
+		return taken;
+	}
+
 	void
 	Listener::SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler) {
 		Foreign = std::move(handler);
@@ -296,6 +335,21 @@ namespace engine::replication {
 			peer->Wire->Receive(Datagram, nowSeconds);
 
 			for (const std::vector<std::byte> &message : peer->Wire->Inbound()) {
+				// **Routed before the authority sees it.** A user message is
+				// not this module's, and handing one to `Authority::Receive`
+				// parses fine and then falls off the end of its switch — so the
+				// message would look delivered while a refusal counter an
+				// operator reads climbed.
+				if (PeekMessageKind(message) == MessageKind::User) {
+					if (UserMessages) {
+						core::ByteReader reader(message);
+						Message read;
+						if (ReadMessage(reader, read)) {
+							UserMessages(peer->Client, read.User.Bytes);
+						}
+					}
+					continue;
+				}
 				Authority_.Receive(peer->Client, message);
 			}
 			peer->Wire->ClearInbound();

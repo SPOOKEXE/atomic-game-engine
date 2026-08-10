@@ -17,6 +17,7 @@ namespace engine::replication {
 		case MessageKind::Structure:
 		case MessageKind::Input:
 		case MessageKind::Applied:
+		case MessageKind::User:
 		case MessageKind::Identify:
 			return net::ChannelKind::Reliable;
 		}

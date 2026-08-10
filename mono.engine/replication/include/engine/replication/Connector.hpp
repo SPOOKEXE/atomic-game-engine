@@ -87,6 +87,27 @@ namespace engine::replication {
 			return Phase == Stage::Admitted;
 		}
 
+		// Sends a message this module does not read.
+		//
+		// `Listener::SendTo`'s twin — see the note there on why widening this
+		// pair beats standing up a fourth session type.
+		//
+		// @param message    The payload.
+		// @param nowSeconds The current time.
+		// @return `false` when the link refused it, including before admission:
+		//         there is no session to carry it on until then, and queueing
+		//         one would be an outbox this module deliberately does not keep.
+		// @since v0.13
+		bool SendUser(std::span<const std::byte> message, double nowSeconds);
+
+		// Hears the messages this module does not read.
+		//
+		// Called from `Poll`, on the thread that called it.
+		//
+		// @param handler Called as `handler(payload)`.
+		// @since v0.13
+		void OnUserMessage(std::function<void(std::span<const std::byte>)> handler);
+
 		// Offers every datagram to somebody else before this connector reads it.
 		//
 		// `Listener::SetForeign`'s twin, and it exists for exactly the same
@@ -216,6 +237,9 @@ namespace engine::replication {
 
 		// Whoever else is sharing this socket. See SetForeign.
 		std::function<bool(std::span<const std::byte>, const net::Endpoint &)> Foreign;
+
+		// Whoever is carrying something over this link. See OnUserMessage.
+		std::function<void(std::span<const std::byte>)> UserMessages;
 
 		Statistics Stats_;
 	};

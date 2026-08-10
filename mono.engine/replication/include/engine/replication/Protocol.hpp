@@ -8,6 +8,7 @@
 #include <engine/ecs/Entity.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -29,6 +30,22 @@ namespace engine::replication {
 
 		// @since v0.9
 		Identify,
+
+		// A message this module does not read.
+		//
+		// **The seam that stops the next feature becoming a fourth session
+		// type.** A connected, admitted, encrypted, reliable link between two
+		// processes is expensive to build and this module already has one; a
+		// caller that needs to carry something else between the same two ends —
+		// a game's remote call, the studio's edit stream — should not have to
+		// build a second one beside it.
+		//
+		// The payload is opaque here and must stay opaque. A `replication` that
+		// parsed a user message would be a `replication` that knows what a
+		// studio edit is.
+		//
+		// @since v0.13
+		User,
 	};
 
 	// Returns a stable, human-readable name for a message kind.
@@ -172,6 +189,19 @@ namespace engine::replication {
 		std::vector<std::byte> Bytes;
 	};
 
+	// Something this module carries and does not read.
+	//
+	// @since v0.13
+	struct User {
+		// The payload, whatever it is.
+		//
+		// **Reliable and ordered**, because that is the only promise worth
+		// making about a message nobody here understands: an unreliable one
+		// would be a feature every caller has to re-implement the recovery for,
+		// and this module already has a reliable channel.
+		std::vector<std::byte> Bytes;
+	};
+
 	// The last tick a client applied in full.
 	//
 	// @since v0.3
@@ -226,6 +256,13 @@ namespace engine::replication {
 	// @since v0.3
 	void WriteMessage(core::ByteWriter &writer, const Applied &applied);
 
+	// Writes a message this module does not read.
+	//
+	// @param writer Where the bytes go.
+	// @param user   The payload.
+	// @since v0.13
+	void WriteMessage(core::ByteWriter &writer, const User &user);
+
 	// What a successful read produced.
 	//
 	// @since v0.3
@@ -252,6 +289,7 @@ namespace engine::replication {
 		replication::Input Input;
 		replication::Applied Applied;
 		replication::Identify Identify;
+		replication::User User;
 		//@}
 	};
 
@@ -262,6 +300,19 @@ namespace engine::replication {
 	// @return `false` on anything malformed. Drop it and count it.
 	// @since v0.3
 	bool ReadMessage(core::ByteReader &reader, Message &message);
+
+	// What kind a message is, without parsing the rest of it.
+	//
+	// **`net::Packet::PeekChannel`'s shape, one layer up, and for the same
+	// reason**: a router has to decide where a message goes before whoever
+	// handles it has parsed it, and parsing twice to find out is the cost that
+	// makes routing look expensive.
+	//
+	// @param message The bytes.
+	// @return The kind, or nothing when the bytes are not a message this build
+	//         understands.
+	// @since v0.13
+	std::optional<MessageKind> PeekMessageKind(std::span<const std::byte> message);
 
 	// The most entities or components one message may carry.
 	//

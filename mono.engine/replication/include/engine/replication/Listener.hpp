@@ -74,6 +74,52 @@ namespace engine::replication {
 		//        default above.
 		void SetAdmission(AdmissionPolicy policy);
 
+		// --- carrying somebody else's messages ---------------------------------
+		//
+		// **A connected, admitted, encrypted, reliable link is expensive to
+		// build and this module already has one.** A caller that needs to carry
+		// something else between the same two ends — a game's remote call, the
+		// studio's edit stream — should widen this rather than stand up a
+		// fourth session type beside it, which is the mistake this pair exists
+		// to prevent.
+		//
+		// The payload is opaque and stays opaque. A listener that parsed one
+		// would be a listener that knows what a studio edit is.
+
+		// Sends a message to one client.
+		//
+		// @param client     Who to send it to.
+		// @param message    The payload.
+		// @param nowSeconds The current time.
+		// @return `false` for an unknown client, or when the link refused it —
+		//         over budget, closed, or not yet admitted. A caller that has to
+		//         know whether it landed reads this.
+		// @since v0.13
+		bool SendTo(ClientId client, std::span<const std::byte> message, double nowSeconds);
+
+		// Sends a message to every admitted client except one.
+		//
+		// **The relay a shared document needs, and the exception is the point.**
+		// A host that echoed an edit back to whoever sent it would have them
+		// apply their own change twice.
+		//
+		// @param message    The payload.
+		// @param nowSeconds The current time.
+		// @param except      Who not to send it to. A default `ClientId` is
+		//        nobody, which sends to all.
+		// @return How many clients took it.
+		// @since v0.13
+		size_t Broadcast(std::span<const std::byte> message, double nowSeconds, ClientId except = {});
+
+		// Hears the messages this module does not read.
+		//
+		// Called from `Poll`, on the thread that called it, before anything
+		// else is done with the datagram.
+		//
+		// @param handler Called as `handler(client, payload)`.
+		// @since v0.13
+		void OnUserMessage(std::function<void(ClientId, std::span<const std::byte>)> handler);
+
 		// Offers every datagram to somebody else before this listener reads it.
 		//
 		// **One socket, more than one protocol, and the reason is physical.** A
@@ -266,6 +312,9 @@ namespace engine::replication {
 
 		// Whoever else is sharing this socket. See SetForeign.
 		std::function<bool(std::span<const std::byte>, const net::Endpoint &)> Foreign;
+
+		// Whoever is carrying something over these links. See OnUserMessage.
+		std::function<void(ClientId, std::span<const std::byte>)> UserMessages;
 
 		std::vector<Peer> Peers;
 

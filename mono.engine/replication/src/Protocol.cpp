@@ -67,6 +67,8 @@ namespace engine::replication {
 			return "applied";
 		case MessageKind::Identify:
 			return "identify";
+		case MessageKind::User:
+			return "user";
 		}
 		return "?";
 	}
@@ -115,6 +117,22 @@ namespace engine::replication {
 		WriteBytes(writer, input.Bytes);
 	}
 
+	std::optional<MessageKind> PeekMessageKind(std::span<const std::byte> message) {
+		core::ByteReader reader(message);
+		const uint16_t version = reader.ReadUInt16();
+		const uint8_t kind = reader.ReadUInt8();
+		if (reader.Failed() || version != PROTOCOL_VERSION ||
+			kind > static_cast<uint8_t>(MessageKind::User)) {
+			return std::nullopt;
+		}
+		return static_cast<MessageKind>(kind);
+	}
+
+	void WriteMessage(core::ByteWriter &writer, const User &user) {
+		WriteFront(writer, MessageKind::User);
+		WriteBytes(writer, user.Bytes);
+	}
+
 	void WriteMessage(core::ByteWriter &writer, const Applied &applied) {
 		WriteFront(writer, MessageKind::Applied);
 		writer.WriteUInt64(applied.Tick);
@@ -126,7 +144,7 @@ namespace engine::replication {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Identify)) {
+		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::User)) {
 			return false;
 		}
 
@@ -202,6 +220,12 @@ namespace engine::replication {
 		case MessageKind::Identify:
 			if (!reader.ReadRaw(read.Identify.Key.Value.data(), read.Identify.Key.Value.size()) ||
 				!reader.ReadRaw(read.Identify.Signature.Value.data(), read.Identify.Signature.Value.size())) {
+				return false;
+			}
+			break;
+
+		case MessageKind::User:
+			if (!ReadBytes(reader, read.User.Bytes)) {
 				return false;
 			}
 			break;
