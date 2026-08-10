@@ -46,6 +46,7 @@
 #include <lua.h>
 #include <lualib.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::script {
@@ -127,6 +128,54 @@ namespace engine::script {
 			return PushNames(state, std::move(names));
 		}
 
+		// ContentService:GetMeshTextures(mesh) -> { string }
+		//
+		// **What a model is wearing, which nothing else could answer.** A
+		// `MeshPart` naming no `TextureID` shows whatever each of its submeshes
+		// recorded at bake time, and those names live *inside* the mesh file —
+		// so a script that wants to swap a character's sheet had no way to learn
+		// the current one and no name to put back. `MeshCatalogue::Textures`
+		// records them at intake, where the file is open.
+		//
+		// **In submesh order with duplicates kept**, unlike every other list
+		// here: a character with twenty submeshes sharing four sheets is four
+		// names repeated, and which run wears which is a fact worth not
+		// destroying. So this one is deliberately *not* sorted or deduplicated,
+		// and `PushNames` is not used.
+		//
+		// An empty table for a mesh nothing has recorded and for one whose
+		// submeshes name nothing — every built-in is the second. Those two are
+		// the same answer for the same reason `TrianglesOf` answers zero to
+		// both: this world cannot tell you, and a caller can act on neither.
+		int GetMeshTextures(lua_State *state) {
+			const ecs::Store &store = StoreOfUpvalue(state);
+
+			// Argument 1 is the service when called with a colon, so the mesh is
+			// argument 2 — the shape every method on this table takes.
+			const char *mesh = luaL_checkstring(state, 2);
+
+			std::vector<core::Name> sheets;
+			(void)scene::SheetsOf(store, core::Name(mesh), sheets);
+
+			lua_createtable(state, static_cast<int>(sheets.size()), 0);
+			for (size_t index = 0; index < sheets.size(); index++) {
+				// **An empty string, not a hole and not a null.** A submesh that
+				// names no sheet is an ordinary thing — a model with one
+				// untextured run — and the slot has to stay in the list or the
+				// index stops meaning "submesh number", which is the whole
+				// reason this is in submesh order.
+				//
+				// `Name("")` is invalid and `Name::Text()` on an invalid name is
+				// a view over a null pointer, which `lua_pushlstring` traps on
+				// rather than treating as empty. Found by a crash on the first
+				// model with an untextured submesh, which is most of them.
+				const std::string_view text = sheets[index].IsValid() ? sheets[index].Text() : "";
+				lua_pushlstring(state, text.data(), text.size());
+				lua_rawseti(state, -2, static_cast<int>(index) + 1);
+			}
+			return 1;
+		}
+
 		// ContentService:GetTextures()
 		int GetTextures(lua_State *state) {
 			const ecs::Store &store = StoreOfUpvalue(state);
@@ -192,6 +241,7 @@ namespace engine::script {
 		static const luaL_Reg methods[] = {
 			{"GetMeshes", GetMeshes},
 			{"GetPublishedMeshes", GetPublishedMeshes},
+			{"GetMeshTextures", GetMeshTextures},
 			{"GetTextures", GetTextures},
 			{"GetFlipbook", GetFlipbook},
 			{"GetTriangleCount", GetTriangleCount},

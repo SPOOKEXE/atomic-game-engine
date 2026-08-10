@@ -22,23 +22,23 @@
 // it — which is the same decision `Dashboard`'s minute buckets make, at the
 // resolution an interactive panel is read at.
 
-#include <engine/scene/MeshCatalogue.hpp>
-#include <engine/scene/PublishedCatalogue.hpp>
-#include <engine/assets/Manifest.hpp>
-#include <engine/scene/Materials.hpp>
-#include <engine/core/Bytes.hpp>
-#include <engine/assets/Texture.hpp>
-#include <engine/assets/Mesh.hpp>
-#include <engine/assets/Material.hpp>
 #include <engine/assets/Builtin.hpp>
-#include <client/ContentDemand.hpp>
+#include <engine/assets/Manifest.hpp>
+#include <engine/assets/Material.hpp>
+#include <engine/assets/Mesh.hpp>
+#include <engine/assets/Texture.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/scene/Materials.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <cdn/LocalStore.hpp>
+#include <client/ContentDemand.hpp>
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
@@ -160,9 +160,10 @@ namespace studio {
 			// Said once, here, rather than as a failed fetch later. The two
 			// reasons are worth separating because they are fixed on different
 			// pages: no key is a trust problem and no source is an address one.
-			ContentStatus = Content.PublisherKey.empty()
-								? "no publisher key — nothing can be fetched, because nothing could be verified"
-								: "no usable read source — check the addresses and that a row is enabled";
+			ContentStatus =
+				Content.PublisherKey.empty()
+					? "no publisher key — nothing can be fetched, because nothing could be verified"
+					: "no usable read source — check the addresses and that a row is enabled";
 		}
 
 		// **Built even when delivery is not.** An uploader verifies nothing, so
@@ -329,15 +330,26 @@ namespace studio {
 					// `MeshId` can be set long before the geometry arrives — that
 					// is the ordinary case, since naming it is what fetches it —
 					// so the fit cannot happen at assignment alone.
-					FitPartsToMesh(
-						name, engine::core::Vector3{(mesh.Maximum - mesh.Minimum) * 0.5f}
-					);
+					FitPartsToMesh(name, engine::core::Vector3{(mesh.Maximum - mesh.Minimum) * 0.5f});
 					// **Triangle counts are world data**, so `MeshPart.
 					// TrianglesCount` answers in an edited world too — which is
 					// how somebody checks a mesh actually arrived.
+					// **The sheets its submeshes name, recorded where they are
+					// readable.** They live inside the mesh file, so this is the
+					// one point anything can learn them — and without them a
+					// script that wants to swap a model's texture has no way to
+					// find out what it is wearing or what to put back. Duplicates
+					// and order are kept: which run wears which is a fact, and
+					// collapsing it here would lose it for good.
+					std::vector<engine::core::Name> sheets;
+					sheets.reserve(mesh.Submeshes.size());
+					for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
+						sheets.emplace_back(submesh.Texture);
+					}
+
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
-					EachOpenWorld([&name, triangles](engine::ecs::Store &store) {
-						engine::scene::RecordMesh(store, name, triangles);
+					EachOpenWorld([&name, triangles, &sheets](engine::ecs::Store &store) {
+						engine::scene::RecordMesh(store, name, triangles, sheets);
 					});
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
@@ -431,52 +443,51 @@ namespace studio {
 		}
 
 		EachOpenWorld([&mesh, &extent, longest](engine::ecs::Store &store) {
-			store.Each<engine::scene::Visual, engine::scene::Bounds>(
-				[&](engine::ecs::Entity, engine::scene::Visual &visual, engine::scene::Bounds &bounds) {
-					// **Only when the mesh changed, which is what `Visual::Fitted`
-					// records.** This runs whenever geometry arrives — a republish,
-					// a reopened place, another part pulling the same mesh in — and
-					// without the guard every one of those would reshape a box
-					// somebody had deliberately squashed. A scene that rearranges
-					// itself on load is the worst kind of surprise, because nothing
-					// visibly did it.
-					if (visual.Mesh != mesh || visual.Fitted == mesh) {
-						return;
-					}
-
-					// **The part keeps the size it has along its longest axis and
-					// gets the mesh's shape on the other two.** That is the whole
-					// rule, and both halves are load-bearing:
-					//
-					//   * the shape has to come from the mesh, because `Size` is a
-					//     box the mesh is *stretched* into — a character in a cubic
-					//     box is a character squashed into a cube;
-					//   * the scale has to come from the part, because somebody
-					//     swapping a bad mesh for a fixed one wants the thing to
-					//     stay the size they made it. Taking the mesh's own metres
-					//     would resize their scene every time they corrected an
-					//     asset.
-					//
-					// **Idempotent**, which is what lets this run whenever a mesh
-					// arrives rather than only on assignment: a part whose
-					// proportions already match is written the value it has.
-					const float span =
-						std::max({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
-					if (span <= 1e-6f) {
-						return;
-					}
-
-					const float unit = span / longest;
-					bounds.HalfExtent = engine::core::Vector3{
-						extent.X * unit,
-						extent.Y * unit,
-						extent.Z * unit,
-					};
-
-					// Claimed, so nothing fits this part to this mesh again.
-					visual.Fitted = mesh;
+			store.Each<engine::scene::Visual, engine::scene::Bounds>([&](engine::ecs::Entity,
+																		 engine::scene::Visual &visual,
+																		 engine::scene::Bounds &bounds) {
+				// **Only when the mesh changed, which is what `Visual::Fitted`
+				// records.** This runs whenever geometry arrives — a republish,
+				// a reopened place, another part pulling the same mesh in — and
+				// without the guard every one of those would reshape a box
+				// somebody had deliberately squashed. A scene that rearranges
+				// itself on load is the worst kind of surprise, because nothing
+				// visibly did it.
+				if (visual.Mesh != mesh || visual.Fitted == mesh) {
+					return;
 				}
-			);
+
+				// **The part keeps the size it has along its longest axis and
+				// gets the mesh's shape on the other two.** That is the whole
+				// rule, and both halves are load-bearing:
+				//
+				//   * the shape has to come from the mesh, because `Size` is a
+				//     box the mesh is *stretched* into — a character in a cubic
+				//     box is a character squashed into a cube;
+				//   * the scale has to come from the part, because somebody
+				//     swapping a bad mesh for a fixed one wants the thing to
+				//     stay the size they made it. Taking the mesh's own metres
+				//     would resize their scene every time they corrected an
+				//     asset.
+				//
+				// **Idempotent**, which is what lets this run whenever a mesh
+				// arrives rather than only on assignment: a part whose
+				// proportions already match is written the value it has.
+				const float span = std::max({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
+				if (span <= 1e-6f) {
+					return;
+				}
+
+				const float unit = span / longest;
+				bounds.HalfExtent = engine::core::Vector3{
+					extent.X * unit,
+					extent.Y * unit,
+					extent.Z * unit,
+				};
+
+				// Claimed, so nothing fits this part to this mesh again.
+				visual.Fitted = mesh;
+			});
 		});
 	}
 
@@ -542,9 +553,7 @@ namespace studio {
 		// look like. The collection is idempotent, so what is not issued this
 		// pump is simply issued on the next — there is no queue to keep in step.
 		std::vector<engine::core::Name> wanted;
-		EachOpenWorld([&wanted](engine::ecs::Store &store) {
-			client::CollectWantedContent(store, wanted);
-		});
+		EachOpenWorld([&wanted](engine::ecs::Store &store) { client::CollectWantedContent(store, wanted); });
 
 		size_t issued = 0;
 		for (const engine::core::Name &name : wanted) {
@@ -670,15 +679,16 @@ namespace studio {
 					const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
 					if (cdn::EnsureLocalStore(paths)) {
 						const std::filesystem::path stored =
-							paths.Raw / (asset->Root.ToHex() + std::filesystem::path(asset->Name).extension().string());
+							paths.Raw /
+							(asset->Root.ToHex() + std::filesystem::path(asset->Name).extension().string());
 						std::ofstream out(stored, std::ios::binary | std::ios::trunc);
 						out.write(
 							reinterpret_cast<const char *>(asset->Bytes.data()),
 							static_cast<std::streamsize>(asset->Bytes.size())
 						);
-						ContentStatus = out.good()
-											? pending.Name + " — " + Readable(asset->Bytes.size()) + " into the store"
-											: pending.Name + " — could not be written";
+						ContentStatus = out.good() ? pending.Name + " — " + Readable(asset->Bytes.size()) +
+														 " into the store"
+												   : pending.Name + " — could not be written";
 					}
 				}
 			} else {
@@ -714,7 +724,9 @@ namespace studio {
 			ImGui::TableSetupColumn("##what", ImGuiTableColumnFlags_WidthStretch, 0.45f);
 			ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
-			Row("Down", PerSecond(rates.DownPerSecond), "compressed bytes off the wire, over the last few seconds");
+			Row("Down",
+				PerSecond(rates.DownPerSecond),
+				"compressed bytes off the wire, over the last few seconds");
 			Row("Up", PerSecond(rates.UpPerSecond), "bytes sent to write origins");
 
 			if (ContentClient) {
@@ -747,7 +759,9 @@ namespace studio {
 				ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
 				Row("Manifest", ContentClient->Ready() ? "verified" : "waiting");
-				Row("Cache hits", std::to_string(counters.CacheHits), "assets served without touching a source");
+				Row("Cache hits",
+					std::to_string(counters.CacheHits),
+					"assets served without touching a source");
 				Row("Cache misses", std::to_string(counters.CacheMisses));
 				Row("Bundles", std::to_string(counters.Bundles));
 				Row("Transferred", Readable(counters.TransferredBytes), "as it travelled — compressed");
@@ -768,7 +782,9 @@ namespace studio {
 					Row("Compression", ratio);
 				}
 
-				Row("Source failures", std::to_string(counters.SourceFailures), "times a source was passed over");
+				Row("Source failures",
+					std::to_string(counters.SourceFailures),
+					"times a source was passed over");
 
 				ImGui::EndTable();
 			}
@@ -820,9 +836,13 @@ namespace studio {
 
 				Row("Destinations", std::to_string(ContentUploads->Destinations().size()));
 				Row("Stored", std::to_string(counters.Stored));
-				Row("Already there", std::to_string(counters.Skipped), "the probe that makes a re-upload cheap");
+				Row("Already there",
+					std::to_string(counters.Skipped),
+					"the probe that makes a re-upload cheap");
 				Row("Sent", Readable(counters.SentBytes));
-				Row("Refused", std::to_string(counters.Refused), "wrong key, or an origin that takes no writes");
+				Row("Refused",
+					std::to_string(counters.Refused),
+					"wrong key, or an origin that takes no writes");
 				Row("Failed", std::to_string(counters.Failed));
 				ImGui::EndTable();
 			}
@@ -838,7 +858,9 @@ namespace studio {
 			ImGui::EndDisabled();
 
 			if (ContentUploads->Remaining() > 0 && UploadQueued > 0) {
-				const size_t done = UploadQueued > ContentUploads->Remaining() ? UploadQueued - ContentUploads->Remaining() : 0;
+				const size_t done = UploadQueued > ContentUploads->Remaining()
+										? UploadQueued - ContentUploads->Remaining()
+										: 0;
 				ImGui::SameLine();
 				ImGui::Text("%zu / %zu", done, UploadQueued);
 			}

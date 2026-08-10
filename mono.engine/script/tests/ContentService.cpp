@@ -23,6 +23,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -232,4 +233,53 @@ TEST_CASE("an invalid published name is dropped", "[scripting][content]") {
 	CHECK(engine::scene::PublishedMeshes(store, read) == 1);
 	REQUIRE(read.size() == 1);
 	CHECK(read.front() == Name("real.amesh"));
+}
+
+TEST_CASE("a script can read what a mesh is wearing", "[scripting][content]") {
+	// **The handle an outfit swap needs.** A `MeshPart` naming no `TextureID`
+	// shows whatever each submesh recorded at bake time, and those names live
+	// inside the mesh file — so without this a script has no way to learn the
+	// current sheet and no name to put back.
+	Store store = Fresh("content_mesh_textures");
+
+	const std::array<Name, 3> worn{Name("skins/body.atex"), Name("skins/eyes.atex"), Name("skins/body.atex")};
+	REQUIRE(engine::scene::RecordMesh(store, Name("props/hero.amesh"), 4200, worn));
+
+	// A submesh that names nothing is an ordinary thing — a model with one
+	// untextured run — and it crosses as an empty string rather than as a hole,
+	// so the index keeps meaning "submesh number".
+	const std::array<Name, 2> partly{Name("skins/only.atex"), Name()};
+	REQUIRE(engine::scene::RecordMesh(store, Name("props/half.amesh"), 12, partly));
+
+	// A built-in names none at all.
+	REQUIRE(engine::scene::RecordMesh(store, Name("engine.Cube"), 12));
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	REQUIRE(runtime != nullptr);
+
+	MustRun(*runtime, R"(
+		local worn = ContentService:GetMeshTextures("props/hero.amesh")
+		assert(#worn == 3, "one entry per submesh, got " .. #worn)
+
+		-- **Not sorted and not deduplicated**, unlike every other list this
+		-- service hands out. Which run wears which is a fact, and a character
+		-- with twenty submeshes sharing four sheets is four names repeated.
+		assert(worn[1] == "skins/body.atex", "submesh order, got " .. worn[1])
+		assert(worn[2] == "skins/eyes.atex", "submesh order, got " .. worn[2])
+		assert(worn[3] == "skins/body.atex", "the duplicate survives, got " .. worn[3])
+
+		-- An untextured run is an empty string in its own slot. Reported rather
+		-- than skipped, because skipping it would shift every index after it.
+		local half = ContentService:GetMeshTextures("props/half.amesh")
+		assert(#half == 2, "the untextured run keeps its slot, got " .. #half)
+		assert(half[1] == "skins/only.atex")
+		assert(half[2] == "", "an untextured submesh is empty, got '" .. half[2] .. "'")
+
+		-- A built-in wears nothing, and a mesh nothing has recorded answers the
+		-- same way. Those two are one answer for `TrianglesOf`'s reason: this
+		-- world cannot tell you, and a caller can act on neither.
+		assert(#ContentService:GetMeshTextures("engine.Cube") == 0, "a built-in wears nothing")
+		assert(#ContentService:GetMeshTextures("props/never.amesh") == 0, "an unknown mesh is empty")
+		assert(#ContentService:GetMeshTextures("") == 0, "and so is no mesh at all")
+	)");
 }

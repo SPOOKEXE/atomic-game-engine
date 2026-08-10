@@ -329,12 +329,30 @@ somewhere else.
 
 ### [_] D00038
 
-**`Renderer::Render` takes many views and nothing passes more than one.**
+**`Renderer::Render` draws one view, and the studio round-robins its panels
+through it — so two viewports each update at half the rate.**
 
-- v0.11 replaced the twelve-parameter `Render` with `std::span<const View>`, so a
-  frame of four viewports is one command buffer, one swapchain acquisition and
-  one present. `D00002` is closed by that. **The seam exists and is unexercised**
-  — all three callers pass a span of one.
+- **Correction at v0.13, and it changes what this entry is blocked on.** The
+  first bullet used to read "v0.11 replaced the twelve-parameter `Render` with
+  `std::span<const View>` … the seam exists and is unexercised". **It does not
+  exist.** `render::View` and the span went out with the render-pipeline revert,
+  exactly as `D00103` records for `VulkanTimestamps`, and `Render` is a
+  twelve-parameter call taking one `cameraFrame`, one `camera` and one
+  `targetSlot`. Checked by grepping for the type rather than by remembering.
+  Recorded rather than quietly rewritten, for the reason `D00004`'s drifting
+  figure is: a reader following this entry would have gone looking for a span to
+  loop over and found nothing.
+- **So the cost moved from "convert a loop" to "re-establish the seam".**
+  `Renderer::Render` owns the swapchain acquisition and the present, so one call
+  is one frame and the round-robin is not a choice the studio is making — it is
+  the only shape the API allows. Closing this needs "draw a view into a target"
+  separated from "present the frame", which is the reverted pipeline's shape and
+  is `ROADMAP.md`'s extended rendering pipeline, behind a prototype project.
+- **What v0.13 did fix is the half that was a bug rather than a limitation.**
+  Each viewport owns its surface textures — `Impl::SurfaceBank` per slot — so a
+  panel showing a mirror no longer composites another panel's reflection, and
+  the aim-overwrites-aim failure below is contained to the frame rather than
+  crossing panels. The rate is still halved; the picture is no longer wrong.
 - **The studio is the caller that wants it and cannot have it yet.** It
   round-robins one panel per frame, so with two open each updates at half the
   rate. Converting the loop is not the hard part; the hard part is above it.

@@ -540,6 +540,44 @@ example, so seeing one is a command rather than a path to look up:
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
 
+### Swapping a mesh's texture *(v0.13)*
+
+A `MeshPart` names two things and they are independent:
+
+```lua
+part.MeshId = "characters/hero.amesh"
+part.TextureID = "skins/hero-winter.atex"
+```
+
+**Setting only `MeshId` still works** — the part wears whatever each of its
+submeshes recorded at bake time, which is how a character with six sheets loads
+without a script knowing any of them. What it does not give you is a handle: the
+sheet names live *inside* the mesh file, so there is nothing to read and nothing
+to put back.
+
+`ContentService:GetMeshTextures(mesh)` is that handle:
+
+```lua
+local worn = ContentService:GetMeshTextures("characters/hero.amesh")
+part.TextureID = worn[1]        -- the same picture, said out loud
+part.TextureID = "skins/summer.atex"  -- a different outfit
+```
+
+It answers in **submesh order, unsorted, duplicates kept** — unlike every other
+list that service hands out. Which run wears which is a fact, and a character
+with twenty submeshes sharing four sheets is four names repeated. An untextured
+run is an empty string in its own slot rather than a hole, so the index keeps
+meaning "submesh number". A built-in wears nothing and answers an empty table,
+as does a mesh this world has not been told about.
+
+**`TextureID` overrides every run at once** — Roblox's rule and this one's — so a
+twenty-submesh character given one sheet wears that sheet all over. That is the
+thing to know before reaching for it on an imported model.
+
+`run-mesh-grid` shows both halves: each cell names its own sheet explicitly when
+it has exactly one, and a row of identical cubes below wears the characters'
+sheets, so the only difference between them is a string.
+
 ### What a mirror can show *(v0.13)*
 
 A `SurfaceCamera` has an `Effect`, and `run-mirrors` gives each of its four walls
