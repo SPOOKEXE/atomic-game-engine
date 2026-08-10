@@ -341,6 +341,13 @@ namespace studio {
 		// about is a universe that has its worlds rather than an empty one.
 		StartControl();
 
+		// **After the universe exists and before the first frame**, because a
+		// plugin holds a `Store &` and there has to be one. Reloaded whenever
+		// the active world is replaced — see `OpenGame` — for the same reason:
+		// a runtime outliving the world it was started against is a reference
+		// into a store that has gone.
+		LoadPlugins();
+
 		// TODO(render-pipeline): the Pipeline Profile panel opened here with
 		// `colour` watched, and `Renderer::Inspect` told the renderer to keep a
 		// readable copy of that resource so the panel could show its picture.
@@ -433,6 +440,15 @@ namespace studio {
 			// point in the frame and needs no separate ordering story.
 			PumpControl();
 			ControlWantsProfile = ControlSurface.WantsProfiling();
+
+			// **Beside the control surface and for its reason**, which the
+			// comment above already gives: a plugin writing a property is doing
+			// what a hand on the mouse does, so it happens where a click would
+			// have landed rather than needing an ordering story of its own.
+			//
+			// Before `Simulate`, so a plugin that moved something sees the
+			// physics of the frame it moved it in.
+			PumpPlugins(delta);
 
 			Simulate(delta);
 			Present(delta);
@@ -1476,6 +1492,12 @@ namespace studio {
 		// exists to get somebody back to work, and a row that reproduces an
 		// error is the opposite of that.
 		Recent.Remember(path);
+
+		// **Restarted against the world that just replaced theirs.** Every
+		// plugin holds a `Store &` from the universe this call has just torn
+		// down, so carrying them across would be a reference into storage that
+		// is gone — which is a crash rather than a stale reading.
+		LoadPlugins();
 
 		Say("opened " + path.string() + " — " + std::to_string(info.Worlds.size()) + " world(s)");
 		return true;

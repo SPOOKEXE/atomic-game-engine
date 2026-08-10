@@ -30,6 +30,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <studio/Config.hpp>
+#include <studio/Plugins.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -1465,6 +1466,27 @@ namespace studio {
 		// while working, and an editor that had to be relaunched to answer an
 		// agent is one nobody would use that way.
 		void ToggleControl();
+
+		// Discovers, starts and beats the plugins. See `studio/Plugins.hpp`.
+		//@{
+		void LoadPlugins();
+		void PumpPlugins(float delta);
+		void DrawPlugins();
+		//@}
+
+		// Publishes the selection into the world as `studio.Selected`.
+		//
+		// **The bridge a plugin reads the selection through**, and the reason
+		// there is no selection *API*: a selection is per-entity state about the
+		// world, which is what a component is for. Called once a frame from the
+		// plugin pump, and only when something changed — a tag written every
+		// frame would move `Store::ChangeVersion` every frame and defeat the
+		// gate the physics broad phase reads.
+		void PublishSelection();
+
+		// What was published last, so the frame that changed nothing does
+		// nothing. Sorted, because it is compared against a sorted selection.
+		std::vector<Entity> PublishedSelection;
 
 		// Reads the config folder, and moves anything found beside the binary.
 		//
@@ -3160,6 +3182,12 @@ namespace studio {
 
 		// The control surface's own panel. See `DrawControl`.
 		bool ShowControl = false;
+
+		// The plugins panel. See `DrawPlugins`.
+		bool ShowPlugins = false;
+
+		// What `DiscoverPlugins` found, in folder order.
+		std::vector<LoadedPlugin> Plugins;
 
 		// What the port field holds while somebody is editing it.
 		//

@@ -268,6 +268,7 @@ namespace studio {
 			// and `DrawPipelineProfile()` were drawn here.
 			DrawNetwork();
 			DrawControl();
+			DrawPlugins();
 			DrawBus();
 			DrawFindInstances();
 			DrawScriptProfile();
@@ -910,6 +911,7 @@ namespace studio {
 		// TODO(render-pipeline): the three pipeline panels were opened from here.
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
+		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);

@@ -99,6 +99,46 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00105
+
+**A plugin can change the world and cannot add a button, and the missing piece
+is a channel rather than a function.**
+
+`studio::PluginHost` runs a plugin as an ordinary `script::Runtime` against the
+world an author is editing, so everything a game script can reach it can reach —
+`Instance`, `workspace`, and since v0.12 `World`, the ECS underneath. The
+selection needed no new surface at all: it is published as `studio.Selected`, a
+described component, so a plugin queries for it and writes it back.
+
+What that model cannot express is anything about the *editor* rather than about
+the world: a toolbar button, a menu item, a docked panel, running a registered
+command.
+
+- **The obstacle is `script/AGENTS.md`'s first rule.** No `lua_State` appears in
+  a public header, so the studio cannot install a global of its own into a
+  plugin's VM the way `LuauEcs.cpp` installs `World` — that file is inside the
+  module and `mono.studio` is not.
+- **The shape that fits is a host-call seam, and the codec is already the hard
+  half.** `script::ScriptValue` is the language-neutral tree both runtimes
+  marshal through, with a deterministic encoding and a sorted map order; a
+  `HostSurface` interface taking a name and a `ScriptValue` and answering one
+  would give a host an arbitrary API without either side naming the other's
+  types. What it costs is making `ScriptValue` public, which is a real widening
+  of `script`'s surface and should be decided rather than slipped in.
+- **A button also needs a callback going the other way**, which is the part the
+  value tree does not answer: a handler lives in the plugin's VM and the press
+  happens in the editor's frame. The honest options are a polled queue — the
+  plugin asks "was I clicked" on its heartbeat — or a registry-ref dispatch
+  inside the module, and the first is buildable today on top of the seam while
+  the second is not.
+- **Until then the absence is stated rather than discovered.**
+  `studio/Plugins.hpp` says there is no toolbar API and why, which is the thing
+  that keeps somebody from looking for one.
+
+**Reopen trigger: the first plugin that wants to be invoked rather than to
+run every frame.** A tool that aligns a selection is one — it should happen when
+somebody asks, not sixty times a second.
+
 ### [PARTIAL] D00104
 
 **Rojo's file table: six of the nine landed at v0.12, and the three left each
