@@ -133,11 +133,32 @@ QuickJS as vendored offers no equivalent:
   the program the author wrote.
 - **A second VM for tooling.** Out of proportion to the feature.
 
-**What exists in the meantime is stated rather than implied.**
-`script/Debugger.hpp` says the capture is Luau's; `BreakpointService` is
-installed by the Luau binding alone, so a JavaScript plugin gets `undefined`
-from `game.GetService("BreakpointService")` rather than an object that refuses
-everything.
+**What exists in the meantime is stated rather than implied, and asking for the
+missing thing is refused rather than ignored.** `BreakpointService` is installed
+by the Luau binding alone, so a JavaScript plugin gets `undefined` from
+`game.GetService("BreakpointService")` rather than an object that refuses
+everything — and `Debugger::Add` answers `false` for a `.js`, `.mjs`, `.cjs`,
+`.ts` or `.tsx` chunk whoever asked, naming this entry in the reason.
+
+That refusal is the part worth keeping if the rest of this is ever built
+differently. A breakpoint that sits in a list looking armed and never fires
+reads as the debugger being broken rather than as the language not being
+supported, and a person cannot tell those apart from the outside.
+
+**The instrumentation option was considered and set aside**, and is recorded
+here so it is not rediscovered as a new idea. Prefixing each statement line with
+a hook call — without adding newlines, so every line number survives — would
+give line breakpoints in any VM and needs no vendored change. What it costs is a
+JavaScript lexer good enough to know which line boundaries are safe (not inside
+a template literal, a string, a comment, or a regex, where regex-versus-division
+is the hard case), and it changes what runs. It is the cheapest path that
+touches no submodule, and it is more work than it first looks.
+
+**And TypeScript needs a second thing regardless of the first.** The studio's
+`tsc` invocation emits no `--sourceMap`, so the engine runs transpiled
+JavaScript whose lines do not correspond to the `.ts`. Even a perfect VM
+debugger would put breakpoints in generated code; the mapper is cheap and would
+be conspicuous by its absence.
 
 **Reopen trigger: a vendored QuickJS with a debugger API**, or the first
 TypeScript plugin big enough that its author asks for one.

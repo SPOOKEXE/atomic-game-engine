@@ -62,7 +62,17 @@ return third
 			return nullptr;
 		}
 
+		// Whether the last toggle was refused, as the editor's warning reports.
+		std::string Refused;
+
 		void Toggle(const std::string &source, int line, BreakAction action) {
+			// **The same refusal the gutter and the panel both give**, from the
+			// one function that knows which chunks can carry a breakpoint.
+			Refused = std::string(engine::script::BreakpointsRefused(source));
+			if (!Refused.empty()) {
+				return;
+			}
+
 			if (At(source, line) != nullptr) {
 				Master.Remove(source, line);
 				for (Debugger *live : Live) {
@@ -177,4 +187,26 @@ TEST_CASE("the panel's selection survives the hit log rolling", "[studio][debugg
     // either way it is a comparison rather than a dereference.
 	const size_t selected = Debugger::MAXIMUM_HITS + 4;
 	CHECK(selected >= debug.Hits().size());
+}
+
+TEST_CASE("a gutter click on a TypeScript script says why it cannot", "[studio][debugger]") {
+	Editorish editor;
+
+	// **Nothing added and a reason given.** A dot that appeared and never fired
+	// would read as the debugger being broken rather than as the language not
+	// being supported, and those are not the same thing to go and fix.
+	editor.Toggle("panel.ts", 12, BreakAction::Capture);
+	CHECK(editor.Master.Breakpoints().empty());
+	CHECK_FALSE(editor.Refused.empty());
+	CHECK(editor.Refused.find("TypeScript") != std::string::npos);
+
+	editor.Toggle("plugin.js", 12, BreakAction::Capture);
+	CHECK(editor.Master.Breakpoints().empty());
+	CHECK(editor.Refused.find("D00106") != std::string::npos);
+
+	// A Luau script in the same editor still works, so the refusal is about the
+	// file and not a mode the editor got stuck in.
+	editor.Toggle("enemy.luau", 12, BreakAction::Capture);
+	CHECK(editor.Master.Breakpoints().size() == 1);
+	CHECK(editor.Refused.empty());
 }

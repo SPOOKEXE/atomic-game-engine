@@ -130,6 +130,14 @@ namespace engine::script {
 			const BreakAction action =
 				lua_toboolean(state, 4) != 0 ? BreakAction::Stop : BreakAction::Capture;
 
+			// **An error rather than a breakpoint that never fires.** A tool
+			// that armed one on a TypeScript file and got silence would read it
+			// as the debugger being broken; the refusal names the language and
+			// the entry that says what closing it would take.
+			if (const std::string_view refused = BreakpointsRefused(source); !refused.empty()) {
+				luaL_errorL(state, "cannot break in '%s': %s", source.c_str(), std::string(refused).c_str());
+			}
+
 			breakpoints.Add(source, line, action);
 			return 0;
 		}

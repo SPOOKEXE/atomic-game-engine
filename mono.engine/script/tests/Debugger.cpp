@@ -437,3 +437,92 @@ TEST_CASE("the service takes a script instance as well as a path", "[debugger]")
 	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint(Instance.new('Part'), 1)"));
 	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint(7, 1)"));
 }
+
+// --- what cannot carry one ------------------------------------------------------
+
+TEST_CASE("a chunk this engine cannot break inside is refused", "[debugger]") {
+	using engine::script::BreakpointsRefused;
+
+	// **Only Luau has breakpoints.** A `.js` chunk runs on QuickJS, which
+	// exposes no line hook at all — see `D00106` — so a breakpoint on one would
+	// sit in the list looking armed and never fire.
+	CHECK_FALSE(BreakpointsRefused("plugin.js").empty());
+	CHECK_FALSE(BreakpointsRefused("plugin.mjs").empty());
+	CHECK_FALSE(BreakpointsRefused("plugin.cjs").empty());
+
+	// **`.ts` is refused too, and it is the likelier thing somebody types.**
+	// TypeScript never reaches a runtime — `tsc` turns it into JavaScript first
+	// — so a breakpoint on one is two steps from anything that could fire, and
+	// the message says so rather than only naming JavaScript.
+	CHECK_FALSE(BreakpointsRefused("panel.ts").empty());
+	CHECK_FALSE(BreakpointsRefused("panel.tsx").empty());
+	CHECK(BreakpointsRefused("panel.ts").find("TypeScript") != std::string_view::npos);
+
+	// Luau is fine, and so is a chunk with no extension: `Run(source, "probe")`
+	// names one that way and it is always Luau, so refusing it would refuse the
+	// form every test and every in-editor evaluation uses.
+	CHECK(BreakpointsRefused("enemy.luau").empty());
+	CHECK(BreakpointsRefused("enemy.lua").empty());
+	CHECK(BreakpointsRefused("probe").empty());
+	CHECK(BreakpointsRefused("").empty());
+
+	// **A name merely ending in those letters is not an extension.** The suffix
+	// test has to be on the dot, or a script called `contents.luau` would be
+	// fine and one called `assets` would not.
+	CHECK(BreakpointsRefused("assets").empty());
+	CHECK(BreakpointsRefused("charts").empty());
+}
+
+TEST_CASE("a refused chunk never reaches the breakpoint list", "[debugger]") {
+	Debugger debug;
+
+	// **Refused in `Add` rather than at each caller**, so a dead breakpoint
+	// cannot arrive through any path — the service, the editor's gutter, the
+	// panel and `Adopt` all end up here.
+	CHECK_FALSE(debug.Add("panel.ts", 4));
+	CHECK_FALSE(debug.Add("plugin.js", 4));
+	CHECK(debug.Breakpoints().empty());
+	CHECK_FALSE(debug.Armed());
+
+	CHECK(debug.Add("enemy.luau", 4));
+	CHECK(debug.Breakpoints().size() == 1);
+
+	// **Including through `Adopt`**, which copies a list somebody else built —
+	// a list from an older build, or one hand-edited into a save file.
+	Debugger stale;
+	stale.Add("enemy.luau", 9);
+
+	Debugger fresh;
+	fresh.Adopt(stale);
+	CHECK(fresh.Breakpoints().size() == 1);
+}
+
+TEST_CASE("the service errors rather than arming a dead breakpoint", "[debugger]") {
+	Store store("debug_test");
+	engine::scene::EnsureClassTree();
+
+	const auto runtime = StudioRuntime(store);
+
+	// **An error, not silence.** A tool that armed one on a TypeScript file and
+	// got nothing back would read it as the debugger being broken, which is a
+	// different thing to go and fix from the language not being supported.
+	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint('panel.ts', 4)"));
+	CHECK(runtime->LastError().find("TypeScript") != std::string::npos);
+
+	CHECK_FALSE(runtime->Run("BreakpointService:SetBreakpoint('plugin.js', 4)"));
+	CHECK(runtime->LastError().find("D00106") != std::string::npos);
+
+	CHECK(runtime->Debug().Breakpoints().empty());
+
+	// And a script may catch it like any other error, so a tool arming a list of
+	// scripts can skip the ones it cannot break in rather than stopping.
+	REQUIRE(runtime->Run(
+		"local armed = 0\n"
+		"for _, path in { 'a.luau', 'b.ts', 'c.luau' } do\n"
+		"  local ok = pcall(function() BreakpointService:SetBreakpoint(path, 1) end)\n"
+		"  if ok then armed += 1 end\n"
+		"end\n"
+		"assert(armed == 2, 'expected two of three to arm, got ' .. armed)\n"
+	));
+	CHECK(runtime->Debug().Breakpoints().size() == 2);
+}

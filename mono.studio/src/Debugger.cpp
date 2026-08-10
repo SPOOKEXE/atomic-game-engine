@@ -57,20 +57,40 @@ namespace studio {
 			// the live runtimes would make a breakpoint disappear the next time
 			// somebody pressed Stop, which is the behaviour this arrangement
 			// exists to prevent.
-			const BreakAction action = BreakStops ? BreakAction::Stop : BreakAction::Capture;
-			Breakpoints.Add(BreakSource, BreakLine, action);
+			// **The same refusal the gutter gives, from the same function.** A
+			// panel that accepted what a gutter click refused would be two
+			// answers to one question.
+			const std::string_view refused = engine::script::BreakpointsRefused(BreakSource);
 
-			// Every running world, because a breakpoint is a thing about a
-			// *script* and the same script may be running in several — asking
-			// which one somebody meant would be a question with no answer they
-			// could give.
-			for (WorldRun &run : Runs) {
-				if (run.Runtime != nullptr) {
-					run.Runtime->Debug().Add(BreakSource, BreakLine, action);
+			if (!refused.empty()) {
+				Say("cannot break in " + BreakSource + ": " + std::string(refused),
+					engine::core::LogLevel::Warning);
+			} else {
+				const BreakAction action = BreakStops ? BreakAction::Stop : BreakAction::Capture;
+				Breakpoints.Add(BreakSource, BreakLine, action);
+
+				// Every running world, because a breakpoint is a thing about a
+				// *script* and the same script may be running in several —
+				// asking which one somebody meant would be a question with no
+				// answer they could give.
+				for (WorldRun &run : Runs) {
+					if (run.Runtime != nullptr) {
+						run.Runtime->Debug().Add(BreakSource, BreakLine, action);
+					}
 				}
 			}
 		}
 		ImGui::EndDisabled();
+
+		// **Said before the button is pressed as well as after.** Somebody who
+		// has typed a `.ts` path should be told it cannot carry a breakpoint
+		// while they are looking at the field, not once they have given up.
+		if (const std::string_view refused = engine::script::BreakpointsRefused(BreakSource);
+			!refused.empty()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped("%s", std::string(refused).c_str());
+			ImGui::PopStyleColor();
+		}
 
 		ImGui::SameLine();
 		ImGui::Checkbox("stop", &BreakStops);

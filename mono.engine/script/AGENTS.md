@@ -195,10 +195,22 @@ chunk closes over nothing — Lua 5.2's `_ENV` upvalue is not Luau's model — s
 empty upvalue list is the ordinary state of a top-level frame and the panel says
 so rather than only drawing "none".
 
-**Only Luau has breakpoints.** The vendored QuickJS exposes no line hook and no
-debugger API, so the service is installed by the Luau binding alone and a
-JavaScript plugin gets nothing rather than an object that refuses everything.
-`D00106` carries what closing that would take.
+**Only Luau has breakpoints, and a chunk that cannot carry one is refused where
+somebody asks for it.** `Debugger::Add` answers `false` for a `.js`, `.mjs`,
+`.cjs`, `.ts` or `.tsx` chunk, so a dead breakpoint cannot reach the list
+through any path — the service, the editor's gutter, the panel, or `Adopt`
+copying a list somebody else built. `BreakpointsRefused` is the one function
+that decides, and every caller uses it for the message rather than writing its
+own.
+
+A breakpoint that sits in the list looking armed and never fires reads as the
+debugger being broken rather than as the language not being supported, and those
+are different things to go and fix. `D00106` carries what closing the gap would
+take; the refusal names it.
+
+**A chunk name with no extension is allowed**, because `Runtime::Run(source,
+"probe")` names one that way and it is always Luau — refusing it would refuse
+the form every test and every in-editor evaluation uses.
 
 ## One runtime, one world
 

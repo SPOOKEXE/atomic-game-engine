@@ -334,6 +334,10 @@ namespace studio {
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		ImDrawList *draw = ImGui::GetWindowDrawList();
 
+		// Whether this script could carry one at all. Read once rather than per
+		// row, because it is a property of the file.
+		const bool breakable = engine::script::BreakpointsRefused(tab.Path.Text()).empty();
+
 		// Only the rows on screen. A script of ten thousand lines would
 		// otherwise cost ten thousand hit-tests a frame to draw forty of them.
 		const auto first = static_cast<size_t>(std::max(0.0f, scroll) / rowHeight);
@@ -375,9 +379,11 @@ namespace studio {
 				} else {
 					draw->AddCircle(centre, rowHeight * 0.32f, colour, 0, 1.5f);
 				}
-			} else if (hovered) {
+			} else if (hovered && breakable) {
 				// A hollow mark under the cursor, so the column reads as
-				// clickable before anything has been clicked.
+				// clickable before anything has been clicked — and not offered
+				// at all on a script no breakpoint could fire in, because an
+				// affordance that refuses when used is worse than none.
 				const ImVec2 centre(origin.x + (rowHeight * 0.5f), y + (rowHeight * 0.5f));
 				draw->AddCircle(centre, rowHeight * 0.32f, engine::ui::MutedColour(), 0, 1.0f);
 			}
@@ -420,6 +426,17 @@ namespace studio {
 					run.Runtime->Debug().Remove(source, line);
 				}
 			}
+			return;
+		}
+
+		// **Said once, where they clicked.** A gutter dot that appeared and never
+		// fired would read as the debugger being broken rather than as the
+		// language not being supported, and those are not the same thing to go
+		// and fix.
+		if (const std::string_view refused = engine::script::BreakpointsRefused(source);
+			!refused.empty()) {
+			Say("cannot break in " + source + ": " + std::string(refused),
+				engine::core::LogLevel::Warning);
 			return;
 		}
 
