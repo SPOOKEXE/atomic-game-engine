@@ -36,6 +36,59 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00108
+
+**`replication::Prediction` still has no caller, and ownership was not the one
+it was waiting for.** The plan that produced v0.13's ownership work assumed the
+two would meet — build the upward state path, and prediction gets its consumer
+on the way past. They do not meet, and the reason is worth writing down because
+it looks like they should.
+
+`Prediction.hpp` says what it is for in its first line: "the local player and
+nothing else. Everything else is interpolated authoritative state." An entity a
+client *owns* is neither of those. It is simulated by that client and never
+corrected — there is no authoritative state arriving for it to reconcile
+against, because the client is the authority for it. So ownership does not give
+prediction a caller; it describes a third category that prediction deliberately
+does not cover, which is exactly Roblox's arrangement.
+
+**What is actually unwired is larger than prediction**, and finding it is the
+useful part of this entry:
+
+- **Nothing calls `Connector::Submit`.** No client in this repository has ever
+  sent an input. The only reference is `replication/tests/Admission.cpp`
+  asserting that submitting *before admission* is refused.
+- **So `Prediction` never holds anything.** `Connector::Poll` calls
+  `Reconcile(Replica_.Applied())` every tick, faithfully, against an empty
+  buffer.
+- **And the server's whole input path has no sender.** `Server::ApplyInputs`
+  decodes an `examples::Shot`, rewinds the client's view with
+  `Rewind::TickSeenBy`, hit-tests against the recorded history and recolours
+  what was struck — a complete, careful, server-authoritative feature whose
+  `examples::EncodeShot` has no caller anywhere in the tree.
+
+That is `D00039`'s shape again: two halves, each finished, connected to nothing,
+and neither of them looking unfinished from its own side.
+
+**Replay is the caller's job and that is correct rather than missing.**
+`Prediction::Pending()` hands back what to replay and `Connector` does not
+replay it, because replaying an input means knowing what an input *means* — the
+same line every other opaque payload in this module sits on. A caller has to
+apply them. What that means is that the first consumer writes the whole third
+step of the loop, and a consumer that forgets it gets the rubber-band the header
+warns about with nothing reporting why.
+
+**The natural consumer is the character controller**, which is `ROADMAP.md`
+v0.14's "character controller + humanoid + character states". A local player
+walking is precisely the case prediction is for, and a shot is precisely the
+case `ApplyInputs` is for. Building either one before there is a character to
+control would be inventing a client to exercise a server, which is how the
+harness in D00018 came to disagree with the thing it was checking.
+
+**Reopen trigger: the first client that controls something.** Whichever lands
+first — a character or the shooting demo's other half — brings the input
+encoding, and prediction's caller comes with it.
+
 ### [_] D00102
 
 **The dependency decision is settled and done. What is left is that the panel it
