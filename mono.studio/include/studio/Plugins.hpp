@@ -41,26 +41,41 @@
 // `script::HostSurface` — one seam, a value tree, no `lua_State` crossing a
 // module boundary — as a `plugin` global:
 //
+//     local Selection = game:GetService("Selection")
 //     local bar = plugin.CreateToolbar("My Tools")
+//
 //     plugin.CreateButton(bar, "Align", "Align the selection", function()
-//         for _, part in plugin.GetSelection() do
+//         for _, part in Selection:Get() do
 //             part.CFrame = CFrame.new(0, part.Position.Y, 0)
 //         end
 //     end)
 //
 //     local panel = plugin.CreateWidget("Align", true)
 //     plugin.SetWidgetRender(panel, function()
-//         plugin.Label("Selected: " .. #plugin.GetSelection())
-//         if plugin.Button("Clear") then plugin.SetSelection({}) end
+//         plugin.Label("Selected: " .. #Selection:Get())
+//         if plugin.Button("Clear") then Selection:Set({}) end
 //     end)
 //
 // | Group | Calls |
 // |---|---|
-// | the editor | `Notify`, `GetSelection`, `SetSelection`, `GetActiveWorld` |
-// | scripts in the scene | `GetScripts`, `GetScriptSource`, `SetScriptSource` |
-// | toolbars | `CreateToolbar`, `CreateButton`, `SetButtonActive` |
-// | panels | `CreateWidget`, `SetWidgetRender`, `SetWidgetOpen`, `IsWidgetOpen` |
-// | inside a panel | `Label`, `Button`, `Checkbox`, `Separator`, `InputText` |
+// | the editor | `plugin.Notify`, `plugin.GetActiveWorld` |
+// | the selection | `Selection:Get`, `:Set`, `:Add`, `:Remove` |
+// | scripts in the scene | `plugin.GetScripts`, `.GetScriptSource`, `.SetScriptSource` |
+// | toolbars | `plugin.CreateToolbar`, `.CreateButton`, `.SetButtonActive` |
+// | panels | `plugin.CreateWidget`, `.SetWidgetRender`, `.SetWidgetOpen`, `.IsWidgetOpen` |
+// | inside a panel | `plugin.Label`, `.Button`, `.Checkbox`, `.Separator`, `.InputText` |
+//
+// **`Selection` is a service and the rest is a table**, which is Roblox's own
+// split rather than an inconsistency: a selection is a thing the editor *has*,
+// so it is reached with `game:GetService` like every other service, and the
+// plugin table is what this plugin is doing. A dotted host name is what builds
+// it — `script/Host.hpp` — so `Selection:Get()`, `Selection.Get()` and
+// `game:GetService("Selection")` are one object reached three ways.
+//
+// **`SelectionChanged` is not there.** A signal needs a connection list in the
+// plugin's VM and a fan-out from the editor's frame, which the seam has no
+// shape for yet; a plugin that has to react polls `Selection:Get()` on its
+// heartbeat. Stated rather than left to be discovered.
 //
 // **Ids rather than objects, because the seam carries values.** A `HostValue`
 // has no userdata to hang a toolbar on, so `CreateToolbar` answers a number and

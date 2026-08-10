@@ -8,16 +8,18 @@
 // stated rather than smoothed over.
 //
 //     local toolbar = plugin.CreateToolbar("My Tools")
+//     local Selection = game:GetService("Selection")
+//
 //     plugin.CreateButton(toolbar, "Align", "Align the selection", function()
-//         for _, part in plugin.GetSelection() do
+//         for _, part in Selection:Get() do
 //             part.CFrame = CFrame.new(0, part.Position.Y, 0)
 //         end
 //     end)
 //
 //     local panel = plugin.CreateWidget("Align", true)
 //     plugin.SetWidgetRender(panel, function()
-//         plugin.Label("Selected: " .. #plugin.GetSelection())
-//         if plugin.Button("Clear") then plugin.SetSelection({}) end
+//         plugin.Label("Selected: " .. #Selection:Get())
+//         if plugin.Button("Clear") then Selection:Set({}) end
 //     end)
 //
 // ## Three groups, and the third is the one with a rule
@@ -107,9 +109,17 @@ namespace studio {
 			return {
 				// The editor.
 				"Notify",
-				"GetSelection",
-				"SetSelection",
 				"GetActiveWorld",
+
+				// **`Selection` is a service, which is Roblox's own shape.**
+				// A dotted name becomes a global table of methods — see
+				// `OpenHost` — so `game:GetService("Selection")` finds it for
+				// free, and `Selection:Get()` is what a Roblox plugin author
+				// already types.
+				"Selection.Get",
+				"Selection.Set",
+				"Selection.Add",
+				"Selection.Remove",
 
 				// Scripts in the world being edited.
 				"GetScriptSource",
@@ -147,7 +157,7 @@ namespace studio {
 				result = HostValue::Of(std::string_view(Owner.ActiveWorldName()));
 				return true;
 			}
-			if (name == "GetSelection") {
+			if (name == "Selection.Get") {
 				std::vector<HostValue> selected;
 				for (const Entity instance : Owner.Selection) {
 					selected.push_back(HostValue::Of(instance));
@@ -155,8 +165,8 @@ namespace studio {
 				result = HostValue::List(std::move(selected));
 				return true;
 			}
-			if (name == "SetSelection") {
-				return SetSelection(At(arguments, 0), failure);
+			if (name == "Selection.Set" || name == "Selection.Add" || name == "Selection.Remove") {
+				return Selection(name, At(arguments, 0), failure);
 			}
 			if (name == "GetScriptSource") {
 				return GetScriptSource(At(arguments, 0), result, failure);
@@ -216,20 +226,66 @@ namespace studio {
 		bool Drawing = false;
 
 	  private:
-		bool SetSelection(const HostValue &value, std::string &failure) {
+		// `Selection:Set`, `:Add` and `:Remove`, which differ only in what they
+		// do to what is already selected.
+		//
+		// **Validated before anything is changed**, so a list with a bad entry
+		// half way down leaves the selection as it was rather than partly
+		// applied — a plugin that got one argument wrong should not also have to
+		// undo what the call managed before it noticed.
+		bool Selection(std::string_view name, const HostValue &value, std::string &failure) {
 			if (value.Tag != HostTag::Array && value.Tag != HostTag::Nil) {
-				failure = "SetSelection takes a list of instances";
+				failure = std::string(name) + " takes a list of instances";
 				return false;
 			}
 
-			Owner.ClearSelection();
+			// **Validated before anything is changed**, so a list with a bad
+			// entry half way down leaves the selection as it was rather than
+			// partly applied — a plugin that got one argument wrong should not
+			// also have to undo what the call managed before it noticed.
+			std::vector<Entity> instances;
 			for (const HostValue &item : value.Items) {
 				const Entity instance = item.AsInstance();
 				if (instance == engine::ecs::NULL_ENTITY) {
-					failure = "SetSelection takes a list of instances";
+					failure = std::string(name) + " takes a list of instances";
 					return false;
 				}
-				Owner.Select(Owner.SelectionWorld, instance, true);
+				instances.push_back(instance);
+			}
+
+			// **The list is edited directly rather than through
+			// `Editor::Select`, and that is not a shortcut.** That function
+			// *toggles* — it is what a ctrl-click calls, so adding something
+			// already selected removes it. `Selection:Add` must not, and a
+			// plugin adding a part twice must not end up with it deselected.
+			std::vector<Entity> &selected = Owner.Selection;
+
+			if (name == "Selection.Remove") {
+				for (const Entity instance : instances) {
+					selected.erase(
+						std::remove(selected.begin(), selected.end(), instance), selected.end()
+					);
+				}
+				return true;
+			}
+
+			// **`Set` replaces and `Add` does not**, which is Roblox's split and
+			// the reason both exist: a tool that grows a selection would
+			// otherwise have to read it, append and write it back.
+			if (name == "Selection.Set") {
+				Owner.ClearSelection();
+			}
+
+			// The world has to follow the instances, or the selection is a list
+			// of handles into a store nothing is looking at.
+			if (!instances.empty()) {
+				Owner.SelectionWorld = Owner.Active;
+			}
+
+			for (const Entity instance : instances) {
+				if (std::find(selected.begin(), selected.end(), instance) == selected.end()) {
+					selected.push_back(instance);
+				}
 			}
 			return true;
 		}

@@ -156,6 +156,14 @@ Four rules a reviewer should hold to:
 reason and the script sees an ordinary error, because a host that aborted would
 take the program down with a plugin's typo.
 
+**A dotted host name is a service, and `GetService` needed nothing added to
+it.** `Selection.Get` becomes a global table with a `Get` method, and
+`game:GetService` already resolves a service by looking up a global of the same
+name — the property `RunService` has had since v0.6 and whose comment gives the
+reason: two objects for one service is two things to keep in step. Both call
+forms work, and the binding drops the leading `self` only when it is *that
+service's own* table, so `Selection:Set({part})` does not lose its argument.
+
 ## One runtime, one world
 
 The `Store` is an upvalue on every bound function rather than a global, so two

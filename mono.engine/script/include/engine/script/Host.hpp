@@ -276,6 +276,25 @@ namespace engine::script {
 			return "host";
 		}
 
+		// --- services ---------------------------------------------------------
+		//
+		// **A name with a dot in it is a service**, and the part before the dot
+		// is its global. `Selection.Get` becomes `Selection:Get()`, which
+		// `game:GetService("Selection")` then finds for free — that function
+		// resolves a service by looking up a global of the same name, so a host
+		// offering one needs nothing added to it.
+		//
+		// **Roblox's own split, and the reason to keep it.** A selection is a
+		// thing the editor *has*, so it is reached the way every other service
+		// is; a host's flat table is what the *caller* is doing. A host that put
+		// everything on one table would be readable and would also be teaching a
+		// plugin author a second vocabulary for an idea they already have.
+		//
+		// **Both call forms work.** `Selection:Get()` passes the service table
+		// as the first argument and `Selection.Get()` does not; the binding
+		// drops it only when it is *that service's own* table, so a method whose
+		// first real argument is a table does not lose it.
+
 	  protected:
 		HostSurface() = default;
 	};

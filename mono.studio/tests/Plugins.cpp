@@ -338,7 +338,18 @@ namespace {
 		}
 
 		std::vector<std::string> Names() const override {
-			return {"CreateToolbar", "CreateButton", "CreateWidget", "SetWidgetRender", "Label"};
+			return {
+				"CreateToolbar",
+				"CreateButton",
+				"CreateWidget",
+				"SetWidgetRender",
+				"Label",
+
+				// A dotted name is a service, which is how the editor offers
+				// `Selection` — see `PluginSurface.cpp`.
+				"Selection.Get",
+				"Selection.Set",
+			};
 		}
 
 		bool Call(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure)
@@ -384,6 +395,23 @@ namespace {
 				Plugin.Widgets[at - 1].Render = arguments[1].Callback;
 				return true;
 			}
+			if (name == "Selection.Get") {
+				std::vector<HostValue> held;
+				for (const std::string &selected : Selected) {
+					held.push_back(HostValue::Of(std::string_view(selected)));
+				}
+				result = HostValue::List(std::move(held));
+				return true;
+			}
+			if (name == "Selection.Set") {
+				Selected.clear();
+				if (!arguments.empty()) {
+					for (const HostValue &item : arguments[0].Items) {
+						Selected.emplace_back(item.AsText());
+					}
+				}
+				return true;
+			}
 			if (name == "Label") {
 				if (!Drawing) {
 					failure = "Label may only be called while a widget is drawing";
@@ -398,6 +426,7 @@ namespace {
 		LoadedPlugin &Plugin;
 		bool Drawing = false;
 		std::vector<std::string> Drawn;
+		std::vector<std::string> Selected;
 	};
 }
 
@@ -521,4 +550,43 @@ TEST_CASE("a plugin that misuses the surface is refused, not crashed", "[studio]
 
 	INFO(plugins.front().Error);
 	CHECK(plugins.front().Running);
+}
+
+TEST_CASE("the selection is a service, not a plugin call", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+
+	// **Roblox's shape exactly**, which is the point of moving it: somebody who
+	// has written a Studio plugin already types this.
+	folder.Add(
+		"selection",
+		R"({"name": "Selection user"})",
+		"local Selection = game:GetService('Selection')\n"
+		"assert(Selection == _G_unused or type(Selection) == 'table', 'no Selection service')\n"
+		"assert(type(Selection.Get) == 'function', 'Selection has no Get')\n"
+		"\n"
+		"Selection:Set({ 'a', 'b' })\n"
+		"local held = Selection:Get()\n"
+		"assert(#held == 2, 'the selection did not come back, got ' .. #held)\n"
+		"assert(held[1] == 'a', 'the wrong entry')\n"
+		"\n"
+		"-- And it is not on the plugin table any more.\n"
+		"assert(plugin.GetSelection == nil, 'GetSelection is still a plugin call')\n"
+		"assert(plugin.SetSelection == nil, 'SetSelection is still a plugin call')\n"
+	);
+
+	Store store("plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+
+	Surface *surface = nullptr;
+	StartPlugins(plugins, store, [&surface](LoadedPlugin &plugin) {
+		auto made = std::make_unique<Surface>(plugin);
+		surface = made.get();
+		return made;
+	});
+
+	INFO(plugins.front().Error);
+	REQUIRE(plugins.front().Running);
+	REQUIRE(surface != nullptr);
+	CHECK(surface->Selected.size() == 2);
 }

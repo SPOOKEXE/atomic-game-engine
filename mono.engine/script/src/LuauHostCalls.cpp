@@ -27,9 +27,11 @@
 
 #include <engine/core/Log.hpp>
 
+#include <algorithm>
 #include <lualib.h>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace engine::script {
@@ -259,13 +261,30 @@ namespace engine::script {
 			}
 
 			const int count = lua_gettop(state);
+
+			// **A service method may be called with a colon or a dot, and both
+			// have to work.** `Selection:Get()` is what a Roblox script writes
+			// and it passes the service table as the first argument; a host has
+			// no use for it, and one that saw it would have to skip it in every
+			// method it implements.
+			//
+			// Compared against the table this closure was built for rather than
+			// against "is argument one a table", because a method whose first
+			// real argument *is* a table — `Selection:Set({part})` — must not
+			// lose it.
+			int first = 1;
+			if (count >= 1 && lua_type(state, lua_upvalueindex(3)) == LUA_TTABLE &&
+				lua_rawequal(state, 1, lua_upvalueindex(3)) != 0) {
+				first = 2;
+			}
+
 			std::vector<HostValue> arguments;
 			arguments.reserve(static_cast<size_t>(count));
 
-			for (int at = 1; at <= count; at++) {
+			for (int at = first; at <= count; at++) {
 				HostValue value;
 				if (!ReadHostValue(state, at, value, 0)) {
-					luaL_errorL(state, "argument %d of %s has no host representation", at - 0, name);
+					luaL_errorL(state, "argument %d of %s has no host representation", at - first + 1, name);
 				}
 				arguments.push_back(std::move(value));
 			}
@@ -290,7 +309,7 @@ namespace engine::script {
 
 		if (context.Host == nullptr) {
 			// No host is the ordinary case — a game script has none — and a
-			// world with no `host` global is what says so.
+			// world with no host global is what says so.
 			return;
 		}
 
@@ -300,21 +319,59 @@ namespace engine::script {
 		// which `Runtime::SetHost` is — would otherwise be "attempt to modify a
 		// readonly table" thrown out of a setter.
 		//
-		// Unfrozen for exactly one assignment and frozen again, rather than
-		// leaving the table writable: the sandbox is what stops a plugin
-		// redefining `print` for every chunk after it, and a host is not a
-		// reason to give that up.
+		// Unfrozen for exactly this set of assignments and frozen again, rather
+		// than left writable: the sandbox is what stops a plugin redefining
+		// `print` for every chunk after it, and a host is not a reason to give
+		// that up.
 		lua_pushvalue(state, LUA_GLOBALSINDEX);
 		const bool frozen = lua_getreadonly(state, -1) != 0;
 		if (frozen) {
 			lua_setreadonly(state, -1, 0);
 		}
 
-		lua_newtable(state);
+		// **A dotted name is a service and a bare one is a plain call.**
+		// `Selection.Get` becomes `Selection:Get()`, and `game:GetService`
+		// then finds it for free — that function resolves a service by looking
+		// up a global of the same name, so a service installed here is reachable
+		// both ways without `GetService` learning anything. `RunService` is
+		// already exactly this shape, and the comment there gives the reason:
+		// two objects for one service is two things to keep in step, and a
+		// script comparing them would find them different.
+		//
+		// Collected before anything is installed, because a service's closures
+		// take the service table as an upvalue and the table has to exist first.
+		std::vector<std::string> flat;
+		std::vector<std::pair<std::string, std::vector<std::string>>> services;
+
 		for (const std::string &name : context.Host->Names()) {
+			const size_t dot = name.find('.');
+			if (dot == std::string::npos) {
+				flat.push_back(name);
+				continue;
+			}
+
+			const std::string service = name.substr(0, dot);
+			const auto found = std::find_if(services.begin(), services.end(), [&service](const auto &entry) {
+				return entry.first == service;
+			});
+
+			if (found == services.end()) {
+				services.emplace_back(service, std::vector<std::string>{name});
+			} else {
+				found->second.push_back(name);
+			}
+		}
+
+		// The host's own table, for everything that is not a service.
+		lua_newtable(state);
+		for (const std::string &name : flat) {
 			lua_pushlightuserdata(state, &context);
 			lua_pushstring(state, name.c_str());
-			lua_pushcclosure(state, HostCall, name.c_str(), 2);
+
+			// No service table: a plain call never drops its first argument.
+			lua_pushnil(state);
+
+			lua_pushcclosure(state, HostCall, name.c_str(), 3);
 			lua_setfield(state, -2, name.c_str());
 		}
 
@@ -324,11 +381,30 @@ namespace engine::script {
 		// the first one's replacement.
 		lua_setreadonly(state, -1, 1);
 
-		// The host names its own global — see `HostSurface::GlobalName`. An
-		// editor's is `plugin`, which is what somebody who has written a Roblox
-		// plugin expects to type.
 		const std::string global(context.Host->GlobalName());
 		lua_setfield(state, -2, global.c_str());
+
+		for (const auto &[service, methods] : services) {
+			lua_newtable(state);
+
+			for (const std::string &name : methods) {
+				const std::string method = name.substr(service.size() + 1);
+
+				lua_pushlightuserdata(state, &context);
+				lua_pushstring(state, name.c_str());
+
+				// The service table, so a colon call can be told from a dot
+				// call — see `HostCall`. Three deep, because the two upvalues
+				// above are already on the stack.
+				lua_pushvalue(state, -3);
+
+				lua_pushcclosure(state, HostCall, method.c_str(), 3);
+				lua_setfield(state, -2, method.c_str());
+			}
+
+			lua_setreadonly(state, -1, 1);
+			lua_setfield(state, -2, service.c_str());
+		}
 
 		if (frozen) {
 			lua_setreadonly(state, -1, 1);
