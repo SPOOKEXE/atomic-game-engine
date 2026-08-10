@@ -294,10 +294,29 @@ just run  --game My.agame       # single-player, both roles in one process
 
 ### The window
 
-A menu bar, a toolbar, and three docked panels around a hole in the middle that
-the world is drawn into. The layout is yours after the first run — it is written
-to `studio-layout.ini` beside the binary, and the built-in arrangement is only
-used when that file does not exist.
+A menu bar, a two-row toolbar, and docked panels around the world. The layout is
+yours after the first run — it is written to `studio-layout.ini` beside the
+binary, and the built-in arrangement is only used when that file does not exist.
+
+**The toolbar is a ribbon** *(v0.13)*. The top row never changes: the transport
+(Play, Run, Pause, Stop), which scene it is about, and that scene's state. The
+row under it is whichever tab is selected:
+
+| Tab | What is on it |
+|---|---|
+| Home | Insert Object · Select, Move, Rotate, Scale · Snap and its two steps · Anchor, Lock |
+| Model | Edit Pivot, Reset Pivot · Duplicate, Delete, Deselect · Undo, Redo · how many are selected |
+| Script | Script, LocalScript, ModuleScript · Script Editor, Debugger, Command Bar |
+| View | Grid and the panel toggles · camera speed |
+
+This was a floating **Tools** window until v0.13, and moving it fixed two things
+rather than one: it sat over the viewport it was editing, and it carried its own
+Move/Rotate/Scale beside the toolbar's — the same three buttons twice, free to
+disagree. There is one of each now, on the strip that was already pinned.
+
+Only the manipulators and the panel toggles are duplicated anywhere else, and
+that duplication is deliberate: the **View** menu is the guaranteed way back to
+anything you closed, and the keybinds still work whichever tab is showing.
 
 | Panel | What it is |
 |---|---|

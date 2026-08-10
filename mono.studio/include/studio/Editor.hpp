@@ -2908,15 +2908,13 @@ namespace studio {
 		// @return `true` when everything selected has it set.
 		bool SelectionFlag(const char *property) const;
 
-		// The tools panel: the manipulators, the steps and the toggles.
+		// The ribbon's four strips, one per tab. `Tools.cpp`.
 		//
-		// **One strip rather than the menus these came from.** Every one of them
-		// is a thing somebody changes while their other hand is on the mouse,
-		// which is exactly the case a menu is worst at.
-		void DrawTools();
-
-		// One tab each. Split so that each is a list of controls rather than a
-		// list of controls with a `BeginTabItem` between every fourth one.
+		// **Called by `DrawToolbar`, not by a panel.** Each is one row of the
+		// pinned strip under the menu bar; the tab bar that chooses between them
+		// is on the row above. Split so that each is a list of controls rather
+		// than a list of controls with a `BeginTabItem` between every fourth
+		// one.
 		//@{
 		void DrawHomeTools();
 		void DrawModelTools();
@@ -2929,9 +2927,6 @@ namespace studio {
 		// @param id    Which command.
 		// @param label What the button says.
 		void OperatorButton(Action id, const char *label);
-
-		// Whether the tools panel is open.
-		bool ShowTools = true;
 
 		// A translate gizmo, mid-drag.
 		//

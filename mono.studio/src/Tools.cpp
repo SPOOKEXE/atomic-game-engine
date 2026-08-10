@@ -1,4 +1,4 @@
-// The manipulators, the steps and the two flags — one strip above the viewport.
+// The ribbon's four tabs — the manipulators, the steps and the two flags.
 //
 // **Everything here was already reachable and none of it was reachable while
 // working.** The tool modes were keyboard-only, the snap steps were on the
@@ -7,9 +7,15 @@
 // panels. Roblox puts the same set in one ribbon for that reason, and the
 // screenshots `ROADMAP.md` points at are that ribbon.
 //
-// **A panel rather than a real toolbar**, because this editor's furniture is
-// docked windows and one bespoke always-on strip would be the only thing in the
-// program that could not be moved, closed or saved in a layout.
+// **On the toolbar rather than in a panel of its own, since v0.13.** It was a
+// docked window, on the argument that this editor's furniture is docked windows
+// and one bespoke always-on strip would be the only thing in the program that
+// could not be moved or closed. That argument was wrong about which cost was
+// larger: a floating Tools window sat over the viewport, had to be dragged out
+// of the way of the thing it was editing, and duplicated the manipulators the
+// toolbar already carried — so the same three buttons existed twice and could
+// disagree. There is now one of each, on the strip that was already pinned.
+// See `Editor::DrawToolbar`.
 //
 // ## What each control writes
 //
@@ -30,8 +36,11 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/ui/Metrics.hpp>
+#include <engine/ui/Theme.hpp>
 #include <imgui.h>
 #include <studio/Editor.hpp>
+#include <studio/Widgets.hpp>
 
 namespace studio {
 
@@ -41,18 +50,17 @@ namespace studio {
 	using engine::ecs::Store;
 
 	namespace {
-		// One tool button, drawn as held when it is the current mode.
+		// The gap between two groups on the strip.
 		//
-		// **`ImGui::Selectable` rather than a coloured `Button`**, because a
-		// mode has a held state and a button does not — and pushing a style
-		// colour to fake one is what makes a theme change break an editor's
-		// affordances a release later.
-		bool ToolButton(const char *label, bool active, const char *tip) {
-			const bool pressed = ImGui::Selectable(label, active, 0, ImVec2(58.0f, 0.0f));
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", tip);
-			}
-			return pressed;
+		// **A dim pipe rather than `ImGui::SeparatorEx`.** A vertical separator
+		// sizes itself to the tallest item submitted so far, which on a row
+		// holding buttons, checkboxes and drag fields is a line that changes
+		// height as the contents change — and the strip already used this
+		// spelling before the ribbon existed.
+		void Divider() {
+			ImGui::SameLine();
+			ImGui::TextDisabled("|");
+			ImGui::SameLine();
 		}
 	}
 
@@ -201,77 +209,62 @@ namespace studio {
 		}
 	}
 
-	void Editor::DrawTools() {
-		if (!ShowTools) {
-			return;
-		}
-
-		if (!ImGui::Begin("Tools", &ShowTools)) {
-			ImGui::End();
-			return;
-		}
-
-		ENGINE_PROFILE_CAT("tools-panel", engine::core::ProfileCategory::Render);
-
-		// **Tabs, because one strip of everything is a strip nobody can scan.**
-		// The reference `ROADMAP.md` points at is Studio's ribbon and it is
-		// tabbed for the same reason: what somebody needs while placing geometry
-		// and what they need while writing a script are different sets, and
-		// putting both on screen at once means neither is findable.
-		//
-		// **Grouped by what somebody is doing, not by what the code is.**
-		// "Home" is the loop somebody is in most of the day — pick a tool, set a
-		// step, anchor the thing. "Model" is the operations on what is already
-		// selected. "Script" is the programs. "View" is the furniture.
-		if (!ImGui::BeginTabBar("tooling", ImGuiTabBarFlags_None)) {
-			ImGui::End();
-			return;
-		}
-
-		if (ImGui::BeginTabItem("Home")) {
-			DrawHomeTools();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem("Model")) {
-			DrawModelTools();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem("Script")) {
-			DrawScriptTools();
-			ImGui::EndTabItem();
-		}
-		if (ImGui::BeginTabItem("View")) {
-			DrawViewTools();
-			ImGui::EndTabItem();
-		}
-
-		ImGui::EndTabBar();
-		ImGui::End();
-	}
-
 	void Editor::DrawHomeTools() {
+		// **One strip, and the dividers are what make it scannable.** A ribbon
+		// row is read left to right in groups — what to insert, which handle,
+		// how far it steps, what the selection is — and a run of twelve
+		// evenly-spaced buttons is a row nobody can find anything in.
+
+		ImGui::BeginDisabled(!Active.IsValid());
+		if (ImGui::Button("Insert Object")) {
+			ImGui::OpenPopup("insert-object");
+		}
+		ImGui::EndDisabled();
+
+		if (ImGui::BeginPopup("insert-object")) {
+			if (const engine::ecs::ClassId chosen = DrawClassPicker("insert-toolbar"); chosen.IsValid()) {
+				InsertInstance(
+					Active, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
+				);
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
+		Divider();
+
 		// --- the manipulators ------------------------------------------------
 		//
 		// One mode at a time, which the `ToolMode` declaration argues for: three
 		// sets of handles over one object is a target nobody can hit.
-
-		if (ToolButton("Select", CurrentTool == ToolMode::Select, "Click to select. No handles.")) {
+		//
+		// **Select is a button of its own as well as what the others toggle back
+		// to.** Clicking the held mode puts the handles away without reaching
+		// across the strip, and somebody who wants no handles and has not
+		// learned that has an obvious thing to press.
+		if (RunButton("Select", CurrentTool == ToolMode::Select, engine::ui::AccentColour())) {
 			CurrentTool = ToolMode::Select;
 		}
-		ImGui::SameLine();
-		if (ToolButton("Move", CurrentTool == ToolMode::Move, "Drag an axis to move along it.")) {
-			CurrentTool = ToolMode::Move;
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("click to select — no handles");
 		}
 		ImGui::SameLine();
-		if (ToolButton("Rotate", CurrentTool == ToolMode::Rotate, "Drag a ring to turn about its axis.")) {
-			CurrentTool = ToolMode::Rotate;
-		}
-		ImGui::SameLine();
-		if (ToolButton("Scale", CurrentTool == ToolMode::Scale, "Drag an axis to grow along it.")) {
-			CurrentTool = ToolMode::Scale;
-		}
 
-		ImGui::Separator();
+		const auto tool = [this](ToolMode mode, const char *label, const char *tip) {
+			if (RunButton(label, CurrentTool == mode, engine::ui::AccentColour())) {
+				CurrentTool = CurrentTool == mode ? ToolMode::Select : mode;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", tip);
+			}
+			ImGui::SameLine();
+		};
+
+		tool(ToolMode::Move, "Move", "drag an axis to move the selection along it");
+		tool(ToolMode::Rotate, "Rotate", "drag a ring to turn the selection about its axis");
+		tool(ToolMode::Scale, "Scale", "drag an axis to grow the selection along it");
+
+		Divider();
 
 		// --- the steps -------------------------------------------------------
 
@@ -288,39 +281,33 @@ namespace studio {
 		// vanishes takes its value with it as far as a reader is concerned, and
 		// the number is exactly what somebody wants to check before switching
 		// the checkbox back on.
-		ImGui::BeginDisabled(!SnapEnabled);
-
-		ImGui::SetNextItemWidth(90.0f);
-		if (ImGui::InputFloat("Studs", &SnapDistance, 0.05f, 1.0f, "%.3f")) {
-			// Clamped above zero rather than at it: a step of nothing would
-			// round every drag onto one point, and "no snapping" is the
-			// checkbox above rather than a zero in the box.
-			SnapDistance = std::max(0.001f, SnapDistance);
-		}
-
 		ImGui::SameLine();
-		ImGui::SetNextItemWidth(90.0f);
-		if (ImGui::InputFloat("Degrees", &SnapDegrees, 1.0f, 15.0f, "%.2f")) {
-			SnapDegrees = std::max(0.001f, SnapDegrees);
-		}
-
+		ImGui::BeginDisabled(!SnapEnabled);
+		ImGui::SetNextItemWidth(engine::ui::Scaled(70.0f));
+		ImGui::DragFloat(
+			"##snap-distance", &SnapDistance, 0.1f, 0.05f, 100.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp
+		);
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(70.0f));
+		ImGui::DragFloat(
+			"##snap-degrees", &SnapDegrees, 1.0f, 1.0f, 90.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp
+		);
 		ImGui::EndDisabled();
 
-		ImGui::Separator();
+		Divider();
 
 		// --- what is selected ------------------------------------------------
 
-		const bool nothing = Selection.empty();
-		ImGui::BeginDisabled(nothing);
+		ImGui::BeginDisabled(Selection.empty());
 
 		// **A press turns the whole selection on when any of it is off**, which
 		// is what one button means to a person. `SelectionFlag` answers `false`
 		// for a mixed selection for exactly this reason.
 		const bool anchored = SelectionFlag("Anchored");
-		if (ImGui::Button(anchored ? "Unanchor" : "Anchor", ImVec2(84.0f, 0.0f))) {
+		if (ImGui::Button(anchored ? "Unanchor" : "Anchor", ImVec2(engine::ui::Scaled(84.0f), 0.0f))) {
 			SetSelectionFlag("Anchored", !anchored, anchored ? "Unanchor" : "Anchor");
 		}
-		if (ImGui::IsItemHovered()) {
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 			ImGui::SetTooltip(
 				"Whether physics moves it. An anchored part carries no rigid body\n"
 				"at all, so this moves the row to another archetype."
@@ -330,10 +317,10 @@ namespace studio {
 		ImGui::SameLine();
 
 		const bool locked = SelectionFlag("Locked");
-		if (ImGui::Button(locked ? "Unlock" : "Lock", ImVec2(84.0f, 0.0f))) {
+		if (ImGui::Button(locked ? "Unlock" : "Lock", ImVec2(engine::ui::Scaled(84.0f), 0.0f))) {
 			SetSelectionFlag("Locked", !locked, locked ? "Unlock" : "Lock");
 		}
-		if (ImGui::IsItemHovered()) {
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 			ImGui::SetTooltip(
 				"Whether a click in the viewport can select it. A locked part\n"
 				"still draws, still collides and is still reachable from the\n"
@@ -342,7 +329,6 @@ namespace studio {
 		}
 
 		ImGui::EndDisabled();
-
 	}
 
 	void Editor::DrawModelTools() {
@@ -361,7 +347,7 @@ namespace studio {
 
 		ImGui::SameLine();
 		ImGui::BeginDisabled(nothing);
-		if (ImGui::Button("Reset Pivot", ImVec2(96.0f, 0.0f))) {
+		if (ImGui::Button("Reset Pivot", ImVec2(engine::ui::Scaled(96.0f), 0.0f))) {
 			ResetSelectionPivot();
 		}
 		ImGui::EndDisabled();
@@ -370,10 +356,11 @@ namespace studio {
 			// **Said rather than left to be discovered.** A pivot has no size,
 			// so the scale handles go on resizing the part while the mode claims
 			// to be editing pivots — which reads as the mode being broken.
+			ImGui::SameLine();
 			ImGui::TextDisabled("Scale still resizes the part.");
 		}
 
-		ImGui::Separator();
+		Divider();
 
 		// --- what is on the selection ----------------------------------------
 		//
@@ -390,12 +377,14 @@ namespace studio {
 		ImGui::SameLine();
 		OperatorButton(Action::SelectNone, "Deselect");
 
-		ImGui::Spacing();
+		Divider();
+
 		OperatorButton(Action::Undo, "Undo");
 		ImGui::SameLine();
 		OperatorButton(Action::Redo, "Redo");
 
-		ImGui::Spacing();
+		Divider();
+
 		ImGui::BeginDisabled(nothing);
 		ImGui::Text("%zu selected", Selection.size());
 		ImGui::EndDisabled();
@@ -425,7 +414,7 @@ namespace studio {
 			const engine::ecs::ClassId klass = engine::ecs::Classes::Find(Name(program.Class));
 
 			ImGui::BeginDisabled(!klass.IsValid());
-			if (ImGui::Button(program.Class, ImVec2(110.0f, 0.0f))) {
+			if (ImGui::Button(program.Class, ImVec2(engine::ui::Scaled(110.0f), 0.0f))) {
 				// Queued for the same reason the explorer's own menu queues it:
 				// `InsertInstance` enters the world, and entering twice is what
 				// the affinity check exists to catch.
@@ -435,24 +424,28 @@ namespace studio {
 			}
 			ImGui::EndDisabled();
 
-			if (ImGui::IsItemHovered()) {
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 				ImGui::SetTooltip("%s", program.Tip);
 			}
 			ImGui::SameLine();
 		}
-		ImGui::NewLine();
 
-		ImGui::Spacing();
+		Divider();
+
 		ImGui::TextDisabled(
 			Selection.empty() ? "Goes under the scene." : "Goes under what is selected."
 		);
 
-		ImGui::Separator();
-		OperatorButton(Action::Play, "Play");
+		Divider();
+
+		// **The script panels, here rather than under View.** Somebody on this
+		// tab is writing a program, and the editor and the debugger are the two
+		// windows that job needs open.
+		ImGui::Checkbox("Script Editor", &ShowScripts);
 		ImGui::SameLine();
-		OperatorButton(Action::RunServer, "Run");
+		ImGui::Checkbox("Debugger", &ShowDebugger);
 		ImGui::SameLine();
-		OperatorButton(Action::Stop, "Stop");
+		ImGui::Checkbox("Command Bar", &ShowCommandBar);
 	}
 
 	void Editor::DrawViewTools() {
@@ -460,13 +453,32 @@ namespace studio {
 		// View menu rather than a copy of it: a menu is where you go to find
 		// something once, and this is where you go to toggle the same three
 		// things all afternoon.
-		ImGui::Checkbox("Ground Grid", &ShowGrid);
-		ImGui::Checkbox("Statistics", &ShowStatistics);
-		ImGui::Checkbox("Frame Graph", &ShowFrameGraph);
+		ImGui::Checkbox("Grid", &ShowGrid);
+		ImGui::SameLine();
 		ImGui::Checkbox("Explorer", &ShowExplorer);
+		ImGui::SameLine();
 		ImGui::Checkbox("Properties", &ShowProperties);
+		ImGui::SameLine();
 		ImGui::Checkbox("Output", &ShowOutput);
+		ImGui::SameLine();
 		ImGui::Checkbox("Assets", &ShowAssets);
-		ImGui::Checkbox("Control (MCP)", &ShowControl);
+		ImGui::SameLine();
+		ImGui::Checkbox("Statistics", &ShowStatistics);
+		ImGui::SameLine();
+		ImGui::Checkbox("Frame Graph", &ShowFrameGraph);
+
+		Divider();
+
+		// **Camera speed is a control, so it lives on the ribbon rather than in
+		// the status bar.** The status bar reported it and could not change it,
+		// which is the wrong half of the pair to have. It still reads it out;
+		// this sets it.
+		ImGui::TextDisabled("Camera");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(140.0f));
+		ImGui::SliderFloat("##camera-speed", &CameraSpeed, 1.0f, 200.0f, "%.0f u/s");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("how fast the viewport camera flies");
+		}
 	}
 }

@@ -82,7 +82,6 @@ namespace studio {
 			SETTINGS,
 			STATISTICS,
 			FRAMEGRAPH,
-			"Tools",
 			"History",
 			"Assets",
 			"Network",
@@ -311,7 +310,6 @@ namespace studio {
 		// the next step rather than the current one.
 		{
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
-			Skinned("Tools", [&] { DrawTools(); });
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
 			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
@@ -956,7 +954,6 @@ namespace studio {
 		// a thing somebody turns on by accident and cannot turn off. No
 		// shortcuts of their own — the Keybinds page is where keys are decided
 		// now, and two places to bind a key is one too many.
-		ImGui::MenuItem("Tools", nullptr, &ShowTools);
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
@@ -1506,7 +1503,23 @@ namespace studio {
 		//
 		// Pinned rather than dockable, because a toolbar you can accidentally
 		// drag into a corner is a toolbar somebody loses.
-		const float height = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+		//
+		// **Two rows since v0.13, which is what makes it a ribbon.** The first
+		// is the transport and which scene it is about — facts that are true
+		// whatever somebody is doing, so they never move. The second is the
+		// selected tab's controls, because what is wanted while placing geometry
+		// and what is wanted while writing a script are different sets and
+		// putting both on screen at once means neither is findable. Studio's
+		// arrangement, and this is the reference `ROADMAP.md` points at.
+		//
+		// **Two item spacings rather than the one between the rows.** The tab
+		// bar draws a border under itself and reserves a little of its own, and
+		// the window is `NoScrollbar` — so a height that is a few pixels short
+		// clips the bottom of the second row silently rather than growing a
+		// scrollbar. One spacing of slack is cheaper than that.
+		const ImGuiStyle &style = ImGui::GetStyle();
+		const float height =
+			ImGui::GetFrameHeight() * 2.0f + style.ItemSpacing.y * 2.0f + style.WindowPadding.y * 2.0f;
 
 		constexpr ImGuiWindowFlags FLAGS = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
 										   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
@@ -1624,86 +1637,66 @@ namespace studio {
 		ImGui::TextDisabled("|");
 		ImGui::SameLine();
 
-		ImGui::BeginDisabled(!Active.IsValid());
-		if (ImGui::Button("Insert Object")) {
-			ImGui::OpenPopup("insert-object");
+		// --- the second row --------------------------------------------------
+		//
+		// **The tab strip sits on the first row and its contents on the second**,
+		// which is the arrangement of every ribbon and of the reference in
+		// `ROADMAP.md`. Naming the tabs beside the transport keeps the row that
+		// never changes short and gives the row that does the full width.
+		//
+		// **The tab bar owns which one is selected.** A member holding it would
+		// be a second answer to a question imgui already answers, and the two
+		// would disagree the first time anything else opened a tab.
+		if (!ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_FittingPolicyScroll)) {
+			ImGui::End();
+			return;
 		}
-		ImGui::EndDisabled();
 
-		if (ImGui::BeginPopup("insert-object")) {
-			if (const engine::ecs::ClassId chosen = DrawClassPicker("insert-toolbar"); chosen.IsValid()) {
-				InsertInstance(
-					Active, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
-				);
-				ImGui::CloseCurrentPopup();
+		// **Grouped by what somebody is doing, not by what the code is.** "Home"
+		// is the loop somebody is in most of the day — pick a tool, set a step,
+		// anchor the thing. "Model" is the operations on what is already
+		// selected. "Script" is the programs. "View" is the furniture.
+		//
+		// Each strip is drawn *after* `EndTabBar` rather than inside its tab
+		// item, because a tab item's contents go under the bar at the bar's own
+		// width — and this row is the whole toolbar's width. So the tab item is
+		// a label that answers "was I clicked", and `tab` carries the answer
+		// down to the row below.
+		int tab = -1;
+		const auto item = [&tab](const char *label, int which) {
+			if (ImGui::BeginTabItem(label)) {
+				tab = which;
+				ImGui::EndTabItem();
 			}
-			ImGui::EndPopup();
-		}
-
-		ImGui::SameLine();
-		ImGui::TextDisabled("|");
-		ImGui::SameLine();
-
-		// **One mode at a time, not three gizmos at once.** See
-		// `Editor::ToolMode`: three sets of handles over one object is a target
-		// nobody can hit, because the ones you are not using are in front of the
-		// one you are.
-		const auto toolButton = [this](ToolMode mode, const char *label, const char *tip) {
-			if (RunButton(label, CurrentTool == mode, engine::ui::AccentColour())) {
-				// Clicking the active mode returns to Select, so the handles can
-				// be put away without reaching for another button.
-				CurrentTool = CurrentTool == mode ? ToolMode::Select : mode;
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", tip);
-			}
-			ImGui::SameLine();
 		};
 
-		toolButton(ToolMode::Move, "Move", "drag an axis to move the selection along it");
-		toolButton(ToolMode::Rotate, "Rotate", "drag a ring to turn the selection about its axis");
-		toolButton(ToolMode::Scale, "Scale", "drag an axis to grow the selection along it");
+		item("Home", 0);
+		item("Model", 1);
+		item("Script", 2);
+		item("View", 3);
 
-		// Snap, beside the modes it constrains rather than in a settings page:
-		// it is turned on and off for a job, not configured once.
-		ImGui::Checkbox("Snap", &SnapEnabled);
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("round a drag to a fixed step");
+		ImGui::EndTabBar();
+
+		switch (tab) {
+		case 0:
+			DrawHomeTools();
+			break;
+		case 1:
+			DrawModelTools();
+			break;
+		case 2:
+			DrawScriptTools();
+			break;
+		case 3:
+			DrawViewTools();
+			break;
+		default:
+			// No tab is open only on the frame the bar is first submitted, and
+			// a row that briefly drew nothing would be a toolbar that flickers
+			// its height on startup.
+			DrawHomeTools();
+			break;
 		}
-
-		ImGui::SameLine();
-		ImGui::BeginDisabled(!SnapEnabled);
-		ImGui::SetNextItemWidth(70.0f * Settings.Scale);
-		ImGui::DragFloat(
-			"##snap-distance", &SnapDistance, 0.1f, 0.05f, 100.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp
-		);
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(70.0f * Settings.Scale);
-		ImGui::DragFloat(
-			"##snap-degrees", &SnapDegrees, 1.0f, 1.0f, 90.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp
-		);
-		ImGui::EndDisabled();
-
-		ImGui::SameLine();
-		ImGui::TextDisabled("|");
-		ImGui::SameLine();
-
-		// **Camera speed is a control, so it lives here rather than in the
-		// status bar.** The status bar reported it and could not change it,
-		// which is the wrong half of the pair to have — and until v0.7 the
-		// status bar could not be seen at all, so the number was reported to
-		// nobody. It still reads it out; this sets it.
-		ImGui::SetNextItemWidth(140.0f * Settings.Scale);
-		ImGui::SliderFloat("##camera-speed", &CameraSpeed, 1.0f, 200.0f, "%.0f u/s");
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("how fast the viewport camera flies");
-		}
-
-		ImGui::SameLine();
-
-		// The grid, reachable without opening a menu. Also in `DrawViewMenu`,
-		// which is the rule: anything closable needs one guaranteed way back.
-		ImGui::Checkbox("Grid", &ShowGrid);
 
 		ImGui::End();
 	}

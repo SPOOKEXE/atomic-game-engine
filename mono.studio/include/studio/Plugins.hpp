@@ -234,7 +234,7 @@ namespace studio {
 	// **Immediate mode, which is how the rest of this editor works.** The
 	// contents are not a retained tree the plugin builds and the editor walks —
 	// the editor calls `Render` while its window is open and the plugin issues
-	// widget calls from inside it, exactly as `DrawTools` and every other panel
+	// widget calls from inside it, exactly as `DrawExplorer` and every other panel
 	// here does. A retained tree would be a second widget model beside ImGui,
 	// and the engine already has one of those in `gui` for the *game's* UI.
 	//
