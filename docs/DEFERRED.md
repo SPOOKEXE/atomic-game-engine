@@ -36,7 +36,15 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
-### [_] D00108
+### [_] D00109
+
+**Filed as `D00108` and renumbered, because that number was already taken.**
+`docs/retired/DEFERRED.md` carries a `D00108` closed at v0.13 by
+`studio::EditStream` — team create's shared-document model — and the counter is
+supposed to increment past retired entries rather than reuse them. The number
+was picked by reading the front of the live file, which is exactly the half of
+the register that does not contain the used numbers. `ROADMAP.md`'s ownership
+entry cited the wrong one for a version and now cites this.
 
 **`replication::Prediction` still has no caller, and ownership was not the one
 it was waiting for.** The plan that produced v0.13's ownership work assumed the
