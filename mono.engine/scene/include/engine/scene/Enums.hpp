@@ -32,6 +32,7 @@
 
 #include <engine/core/types/Vector3.hpp>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::scene {
@@ -185,6 +186,59 @@ namespace engine::scene {
 		// client copies rather than content a server simulates.
 		Client,
 	};
+
+	// What a surface camera's image is put through before it is shown.
+	//
+	// **A closed list rather than a shader name**, and that is a deliberate
+	// limit rather than a stub. This pipeline has one fragment program for
+	// opaque geometry; a mirror naming an arbitrary program would need a
+	// pipeline per program, a compilation path, and an answer to what happens
+	// when the file is missing on somebody else's machine — which is the render
+	// graph `ROADMAP.md` puts behind a prototype project, not a field.
+	//
+	// What a closed list *does* buy is exactly what a mirror wants: a camera
+	// feed, a scope, a scanner. Each is a grade over an image that is already
+	// rendered, so each is a handful of lines in `opaque.frag` and costs nothing
+	// for the surfaces that do not ask.
+	//
+	// **The ordinals are on the wire**, so an entry may be appended and never
+	// reordered — `AlphaMode`'s rule, and for the same reason.
+	//
+	// @since v0.13
+	enum class SurfaceEffect : uint8_t {
+		// The reflection as rendered. What every mirror was before this existed.
+		None,
+
+		// An image intensifier: everything to green, lifted, grained and
+		// vignetted.
+		NightVision,
+
+		// A heat map. Luminance stands in for temperature, which is a lie an
+		// engine with no thermal model cannot avoid and should say out loud —
+		// it looks right because bright things in a lit scene usually are the
+		// hot ones.
+		Thermal,
+
+		// A security camera: grey, scanlined, and with a bright band rolling
+		// down it.
+		Cctv,
+
+		// The image twisted about its own centre, turning slowly. The one entry
+		// here that moves texels rather than grading them.
+		Swirl,
+	};
+
+	// How many there are, for a settings list and for the shader's bound.
+	inline constexpr size_t SURFACE_EFFECT_COUNT = 5;
+
+	// Returns the effect's name.
+	//
+	// Round-trips like `Describe(NormalId)` below, and for the same reason: this
+	// is the name `ecs::EnumTable` registers and a script assigns.
+	//
+	// @param effect The effect to name.
+	// @return A view valid for the lifetime of the process.
+	const char *Describe(SurfaceEffect effect);
 
 	// Returns the face's name.
 	//

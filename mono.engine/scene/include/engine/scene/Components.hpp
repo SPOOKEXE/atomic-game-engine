@@ -691,6 +691,17 @@ namespace engine::scene {
 		// other, once, wherever the camera is authored.
 		uint32_t TagFilter = 0;
 
+		// What the image is put through before a pane shows it.
+		//
+		// **A grade on the way out, not a second render.** The surface pass is
+		// unchanged whatever this says — the texture holds an ordinary picture
+		// of the world — and the effect is applied where the pane samples it, in
+		// `opaque.frag`. So it costs nothing to render and nothing to bind, and
+		// two panes sampling one surface could in principle show it two ways.
+		//
+		// @since v0.13
+		SurfaceEffect Effect = SurfaceEffect::None;
+
 		// Which surface index this camera writes.
 		//
 		// One today, and the field exists because the pipeline that replaces
@@ -719,7 +730,14 @@ namespace engine::scene {
 		NormalId Face = NormalId::Front;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		//
+		// **One byte where there were two, because `Effect` took the other.**
+		// That is what a named reserve is for: a byte-wide addition to a
+		// component every mirror in a world carries costs nothing rather than
+		// widening the row by four. `tests/Components.cpp` is what holds the
+		// sum, so the day the reserve runs out is a failing case rather than a
+		// hole full of uninitialised bytes in a snapshot.
+		uint8_t Reserved[1] = {};
 	};
 
 	// A point on a part, carried with it.

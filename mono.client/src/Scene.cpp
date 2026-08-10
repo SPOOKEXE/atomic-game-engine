@@ -473,6 +473,10 @@ namespace client {
 				// a future widening of the range has to find all of them.
 				view.ImageOpacity = 1.0f - target.ImageTransparency;
 
+				// Copied straight across: the renderer applies it and nothing
+				// between here and there has an opinion about it.
+				view.Effect = target.Effect;
+
 				// **Copied rather than resolved.** The filter is already a mask
 				// on the component, because a name would be a lookup per
 				// instance per pass; whatever authored the camera did the

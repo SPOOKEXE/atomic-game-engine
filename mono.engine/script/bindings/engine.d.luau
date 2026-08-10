@@ -257,6 +257,9 @@ end
 declare extern type Enum_StartCorner extends EnumItem with
 end
 
+declare extern type Enum_SurfaceEffect extends EnumItem with
+end
+
 declare extern type Enum_SurfaceSizingMode extends EnumItem with
 end
 
@@ -489,6 +492,13 @@ declare Enum: {
 		TopRight: Enum_StartCorner,
 		BottomLeft: Enum_StartCorner,
 		BottomRight: Enum_StartCorner,
+	},
+	SurfaceEffect: {
+		None: Enum_SurfaceEffect,
+		NightVision: Enum_SurfaceEffect,
+		Thermal: Enum_SurfaceEffect,
+		Cctv: Enum_SurfaceEffect,
+		Swirl: Enum_SurfaceEffect,
 	},
 	SurfaceSizingMode: {
 		FixedSize: Enum_SurfaceSizingMode,
@@ -805,6 +815,7 @@ declare extern type Camera extends PVInstance with
 end
 
 declare extern type SurfaceCamera extends Camera with
+	Effect: Enum_SurfaceEffect
 	Face: Enum_NormalId
 	ImageTransparency: number
 	TagFilter: string

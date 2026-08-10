@@ -222,6 +222,7 @@ declare namespace Enum {
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
+	interface SurfaceEffect extends EnumItem { readonly __enum: "SurfaceEffect"; }
 	interface SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
 	interface TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
 	interface TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
@@ -438,6 +439,13 @@ declare namespace Enum {
 		readonly TopRight: StartCorner;
 		readonly BottomLeft: StartCorner;
 		readonly BottomRight: StartCorner;
+	};
+	const SurfaceEffect: {
+		readonly None: SurfaceEffect;
+		readonly NightVision: SurfaceEffect;
+		readonly Thermal: SurfaceEffect;
+		readonly Cctv: SurfaceEffect;
+		readonly Swirl: SurfaceEffect;
 	};
 	const SurfaceSizingMode: {
 		readonly FixedSize: SurfaceSizingMode;
@@ -731,6 +739,7 @@ declare interface Camera extends PVInstance {
 }
 
 declare interface SurfaceCamera extends Camera {
+	Effect: Enum.SurfaceEffect;
 	Face: Enum.NormalId;
 	ImageTransparency: number;
 	TagFilter: string;
