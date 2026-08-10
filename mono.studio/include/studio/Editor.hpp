@@ -45,6 +45,7 @@
 #include <engine/render/DebugPanels.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/delivery/Client.hpp>
+#include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
@@ -1678,6 +1679,12 @@ namespace studio {
 
 		// Fetches still in flight.
 		std::vector<engine::delivery::RequestId> ContentPending;
+
+		// How much delivered content this frame will decode and upload.
+		//
+		// Held across frames rather than made in the loop so the allowance is
+		// one object with one meaning; `Begin` is what resets it.
+		engine::delivery::IntakeBudget ContentBudget;
 
 		// Requests made while `ContentPending` was being walked.
 		std::vector<engine::delivery::RequestId> ContentIssued;

@@ -254,9 +254,30 @@ namespace studio {
 			RequestShownContent();
 		}
 
+		// **How much decoding and uploading one frame will do**, and the same
+		// allowance the client's own intake uses. Content arrives in bursts — a
+		// scene names forty meshes at once and the origin answers them together
+		// — and this loop used to drain every completed request in the frame
+		// that noticed them, which is a third of a second in one frame and an
+		// editor that stops responding while somebody's model set lands.
+		//
+		// `IntakeBudget` says why it is bytes rather than a count, why what does
+		// not fit is deferred rather than dropped, and why the first arrival of
+		// a frame is admitted however large it is.
+		ContentBudget.Begin();
+
 		size_t kept = 0;
 		for (const engine::delivery::RequestId id : ContentPending) {
 			if (ContentClient->StateOf(id) == engine::delivery::RequestState::Pending) {
+				ContentPending[kept++] = id;
+				continue;
+			}
+
+			// **Held rather than dropped.** An arrival this frame cannot take is
+			// still an arrival; putting it back in the pending list is what
+			// makes the budget a delay instead of a loss.
+			if (!ContentBudget.Admits()) {
+				ContentBudget.Defer();
 				ContentPending[kept++] = id;
 				continue;
 			}
@@ -265,6 +286,8 @@ namespace studio {
 			if (!asset) {
 				continue;
 			}
+
+			ContentBudget.Spend(asset->Bytes.size());
 
 			const engine::core::Name name(asset->Name);
 			engine::core::ByteReader reader(asset->Bytes);
