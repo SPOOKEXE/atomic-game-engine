@@ -72,6 +72,23 @@
 // it — `script/Host.hpp` — so `Selection:Get()`, `Selection.Get()` and
 // `game:GetService("Selection")` are one object reached three ways.
 //
+// **`:Set`, `:Add` and `:Remove` take an array of `Instance` and nothing
+// else.** Not a bare instance, not nil, not a table of named keys. Every one of
+// those is a near-miss somebody types before reading anything, and accepting one
+// would make their mistake read as "nothing happened" — so each is refused with
+// a message naming what was given and, for the two common ones, what to write
+// instead. An item of the wrong kind is named by its position, and a handle
+// whose instance no longer exists is a different mistake with its own line.
+//
+// **The list is validated whole before anything changes**, so a call that is
+// refused leaves the selection exactly as it was.
+//
+// **`Selection:Set({})` deselects everything**, which is the whole of what an
+// empty array means and needs no case of its own. It is also why the binding
+// reads an empty Luau table as an array rather than as a map — `{}` is one
+// value and the reader has to pick, and this is the call that would otherwise
+// have been refused.
+//
 // **`SelectionChanged` is not there.** A signal needs a connection list in the
 // plugin's VM and a fan-out from the editor's frame, which the seam has no
 // shape for yet; a plugin that has to react polls `Selection:Get()` on its

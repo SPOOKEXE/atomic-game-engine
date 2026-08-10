@@ -137,6 +137,11 @@ namespace engine::script {
 		std::string Text;
 
 		// Set for `Array`, in order.
+		//
+		// **An empty Luau table arrives here rather than as a `Map`.** `{}` is
+		// the same value either way and the binding has to pick one; a host
+		// expecting a map finds no entries under either tag, where a host
+		// expecting a list would get a tag it refuses. See `LuauHostCalls.cpp`.
 		std::vector<HostValue> Items;
 
 		// Set for `Map`, in the order the script's table was walked.
@@ -214,6 +219,18 @@ namespace engine::script {
 		static HostValue List(std::vector<HostValue> items);
 		//@}
 	};
+
+	// A stable, human-readable name for a tag.
+	//
+	// **So a host's refusal can say what it was given.** "expects an array of
+	// Instances, and item 2 is a string" is a message somebody can act on where
+	// "bad argument" is not, and every host would otherwise write this switch
+	// itself.
+	//
+	// @param tag The tag to name.
+	// @return A view valid for the lifetime of the process.
+	// @since v0.12
+	const char *Describe(HostTag tag);
 
 	// One argument list, as a host receives it.
 	using HostArguments = std::span<const HostValue>;

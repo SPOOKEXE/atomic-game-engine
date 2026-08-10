@@ -233,24 +233,79 @@ namespace studio {
 		// half way down leaves the selection as it was rather than partly
 		// applied — a plugin that got one argument wrong should not also have to
 		// undo what the call managed before it noticed.
+		// `Selection:Set`, `:Add` and `:Remove`, which differ only in what they
+		// do to what is already selected.
+		//
+		// **An array of `Instance` and nothing else.** Not nil, not a table of
+		// named keys, not a bare instance — Roblox's own signature is a list and
+		// accepting the near-misses would mean a plugin author's mistake reads
+		// as "nothing happened" rather than as a message. `Selection:Set(part)`
+		// without the braces is the one somebody writes first.
+		//
+		// **An empty array is a whole answer**, not a degenerate one:
+		// `Selection:Set({})` is how a plugin deselects everything, and it is
+		// the reason the binding reads an empty Luau table as an array — see
+		// `HostValue::Items`.
 		bool Selection(std::string_view name, const HostValue &value, std::string &failure) {
-			if (value.Tag != HostTag::Array && value.Tag != HostTag::Nil) {
-				failure = std::string(name) + " takes a list of instances";
+			const std::string method(name.substr(name.find('.') + 1));
+
+			if (value.Tag != HostTag::Array) {
+				failure = "Selection:" + method + " expects an array of Instances, and was given " +
+						  engine::script::Describe(value.Tag);
+
+				// **The near-misses are named, because they are what somebody
+				// actually types.** A bare instance is the common one and a nil
+				// is the second; telling them what to write costs a sentence and
+				// saves them the guess.
+				if (value.Tag == HostTag::Instance) {
+					failure += " — write Selection:" + method + "({ instance })";
+				} else if (value.Tag == HostTag::Nil) {
+					failure += " — write Selection:" + method + "({}) to select nothing";
+				}
 				return false;
 			}
 
-			// **Validated before anything is changed**, so a list with a bad
+			// **Validated whole before anything changes**, so a list with a bad
 			// entry half way down leaves the selection as it was rather than
-			// partly applied — a plugin that got one argument wrong should not
-			// also have to undo what the call managed before it noticed.
+			// partly applied — a plugin that got one item wrong should not also
+			// have to undo what the call managed before it noticed.
 			std::vector<Entity> instances;
-			for (const HostValue &item : value.Items) {
-				const Entity instance = item.AsInstance();
-				if (instance == engine::ecs::NULL_ENTITY) {
-					failure = std::string(name) + " takes a list of instances";
+			instances.reserve(value.Items.size());
+
+			for (size_t at = 0; at < value.Items.size(); at++) {
+				const HostValue &item = value.Items[at];
+
+				if (item.Tag != HostTag::Instance) {
+					// One-based, because that is how the script counted them.
+					failure = "Selection:" + method + " expects an array of Instances, and item " +
+							  std::to_string(at + 1) + " is " + engine::script::Describe(item.Tag);
 					return false;
 				}
-				instances.push_back(instance);
+				instances.push_back(item.Instance);
+			}
+
+			// **A handle that names nothing is refused too**, and it is a
+			// different mistake from the one above: a plugin holding an instance
+			// it destroyed is passing a real `Instance` that is no longer there,
+			// and selecting it would put a dead entity in a list the editor
+			// walks every frame.
+			bool alive = true;
+			size_t dead = 0;
+
+			Owner.WithSelectionWorld([&](Store &store) {
+				for (size_t at = 0; at < instances.size(); at++) {
+					if (!store.Alive(instances[at])) {
+						alive = false;
+						dead = at + 1;
+						return;
+					}
+				}
+			});
+
+			if (!alive) {
+				failure = "Selection:" + method + ": item " + std::to_string(dead) +
+						  " is an Instance that no longer exists";
+				return false;
 			}
 
 			// **The list is edited directly rather than through
@@ -260,7 +315,7 @@ namespace studio {
 			// plugin adding a part twice must not end up with it deselected.
 			std::vector<Entity> &selected = Owner.Selection;
 
-			if (name == "Selection.Remove") {
+			if (method == "Remove") {
 				for (const Entity instance : instances) {
 					selected.erase(
 						std::remove(selected.begin(), selected.end(), instance), selected.end()
@@ -272,7 +327,10 @@ namespace studio {
 			// **`Set` replaces and `Add` does not**, which is Roblox's split and
 			// the reason both exist: a tool that grows a selection would
 			// otherwise have to read it, append and write it back.
-			if (name == "Selection.Set") {
+			//
+			// `Set` with an empty array therefore deselects everything, which is
+			// the whole of what it means and needs no case of its own.
+			if (method == "Set") {
 				Owner.ClearSelection();
 			}
 

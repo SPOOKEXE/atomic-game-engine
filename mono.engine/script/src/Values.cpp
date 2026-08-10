@@ -603,6 +603,34 @@ namespace engine::script {
 		SetVectorConstant(state, "Vector3", "one", core::Vector3::One);
 	}
 
+	const char *Describe(HostTag tag) {
+		switch (tag) {
+		case HostTag::Nil:
+			return "nil";
+		case HostTag::Boolean:
+			return "a boolean";
+		case HostTag::Number:
+			return "a number";
+		case HostTag::String:
+			return "a string";
+		case HostTag::Array:
+			return "an array";
+		case HostTag::Map:
+			return "a table";
+		case HostTag::Instance:
+			return "an Instance";
+		case HostTag::Callback:
+			return "a function";
+		case HostTag::Vector3:
+			return "a Vector3";
+		case HostTag::Color3:
+			return "a Color3";
+		case HostTag::CFrame:
+			return "a CFrame";
+		}
+		return "a value";
+	}
+
 	// --- the host seam's builders ---------------------------------------------
 	//
 	// Here rather than in the header, so `Host.hpp` stays a description of what

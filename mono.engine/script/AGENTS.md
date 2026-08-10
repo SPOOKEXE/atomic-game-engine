@@ -156,6 +156,12 @@ Four rules a reviewer should hold to:
 reason and the script sees an ordinary error, because a host that aborted would
 take the program down with a plugin's typo.
 
+**An empty Luau table crosses as an `Array`, not a `Map`.** `{}` is one value
+and the reader has to pick a tag; a host expecting a map finds no entries under
+either, where a host expecting a *list* gets a tag it refuses. The ambiguity is
+harmless in one direction and not in the other, and `Selection:Set({})` — how a
+plugin deselects everything — is the call that was refused before.
+
 **A dotted host name is a service, and `GetService` needed nothing added to
 it.** `Selection.Get` becomes a global table with a `Get` method, and
 `game:GetService` already resolves a service by looking up a global of the same

@@ -50,6 +50,22 @@ namespace engine::script {
 		// than the recursion it guards.
 		constexpr int HOST_MAX_DEPTH = 16;
 
+		// Whether a table has no entries at all.
+		//
+		// **`lua_objlen` cannot answer this**: it reports the array part's
+		// length, which is zero for an empty table and also zero for a table of
+		// nothing but named keys. One `lua_next` is the whole test.
+		bool IsEmptyTable(lua_State *state, int index) {
+			lua_pushnil(state);
+			if (lua_next(state, index) == 0) {
+				return true;
+			}
+
+			// `lua_next` left a key and a value behind.
+			lua_pop(state, 2);
+			return false;
+		}
+
 		// One argument, read off the stack.
 		//
 		// Returns false for a value with no host representation, which the
@@ -142,9 +158,18 @@ namespace engine::script {
 				// is Luau's own ambiguity and the same reading `Codec.cpp`
 				// makes: there is one table type and two shapes, and the length
 				// operator is what tells them apart.
+				//
+				// **An empty table is an array, and that is a decision rather
+				// than a fallthrough.** `{}` is the same value either way and the
+				// reader has to pick one; a host expecting a map finds no entries
+				// under either tag, where a host expecting a *list* gets a tag it
+				// refuses. So the ambiguity is harmless in one direction and not
+				// in the other — and `Selection:Set({})`, which is how a plugin
+				// deselects everything, is exactly the call that would have been
+				// refused.
 				const int absolute = lua_absindex(state, index);
 
-				if (lua_objlen(state, absolute) > 0) {
+				if (lua_objlen(state, absolute) > 0 || IsEmptyTable(state, absolute)) {
 					out = HostValue(HostTag::Array);
 					const int count = static_cast<int>(lua_objlen(state, absolute));
 

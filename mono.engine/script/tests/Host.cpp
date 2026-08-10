@@ -349,3 +349,34 @@ TEST_CASE("a service method takes a colon or a dot", "[script][host]") {
 	REQUIRE(runtime->Run("Thing.Set(Other)"));
 	CHECK(host.Received == 1);
 }
+
+TEST_CASE("an empty table crosses as an array", "[script][host]") {
+	engine::scene::EnsureClassTree();
+	Store store("host");
+
+	Recorder host;
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	runtime->SetHost(&host);
+
+	// **`{}` is the same Luau value whichever way it is read**, and the binding
+	// has to pick one. A host expecting a map finds no entries under either tag;
+	// a host expecting a *list* gets a tag it refuses — so the ambiguity is
+	// harmless in one direction and not in the other.
+	//
+	// `Selection:Set({})` is the call this exists for: it is how a plugin
+	// deselects everything, and it was refused before.
+	REQUIRE(runtime->Run("test.Echo({})"));
+	CHECK(host.Seen.Tag == HostTag::Array);
+	CHECK(host.Seen.Items.empty());
+
+	// A table with named keys is still a map, and one with a first element is
+	// still an array — the empty case is the only one that moved.
+	REQUIRE(runtime->Run("test.Echo({ a = 1 })"));
+	CHECK(host.Seen.Tag == HostTag::Map);
+
+	REQUIRE(runtime->Run("test.Echo({ 1 })"));
+	CHECK(host.Seen.Tag == HostTag::Array);
+
+	// And it comes back as a table either way, so a script cannot tell.
+	REQUIRE(runtime->Run("local back = test.Echo({}) assert(type(back) == 'table' and #back == 0)"));
+}

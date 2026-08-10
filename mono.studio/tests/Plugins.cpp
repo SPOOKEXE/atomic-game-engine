@@ -404,12 +404,27 @@ namespace {
 				return true;
 			}
 			if (name == "Selection.Set") {
-				Selected.clear();
-				if (!arguments.empty()) {
-					for (const HostValue &item : arguments[0].Items) {
-						Selected.emplace_back(item.AsText());
-					}
+				// The same rule `PluginSurface` applies: an array of the right
+				// kind of thing, validated whole before anything changes.
+				const HostValue &value = arguments.empty() ? HostValue{} : arguments[0];
+
+				if (value.Tag != HostTag::Array) {
+					failure = std::string("Selection:Set expects an array, and was given ") +
+							  engine::script::Describe(value.Tag);
+					return false;
 				}
+
+				std::vector<std::string> wanted;
+				for (size_t at = 0; at < value.Items.size(); at++) {
+					if (value.Items[at].Tag != HostTag::String) {
+						failure = "Selection:Set: item " + std::to_string(at + 1) + " is " +
+								  engine::script::Describe(value.Items[at].Tag);
+						return false;
+					}
+					wanted.emplace_back(value.Items[at].AsText());
+				}
+
+				Selected = std::move(wanted);
 				return true;
 			}
 			if (name == "Label") {
@@ -570,6 +585,11 @@ TEST_CASE("the selection is a service, not a plugin call", "[studio][plugins]") 
 		"assert(#held == 2, 'the selection did not come back, got ' .. #held)\n"
 		"assert(held[1] == 'a', 'the wrong entry')\n"
 		"\n"
+		"-- **An empty array deselects everything**, which is the whole of what\n"
+		"-- it means. It was refused before an empty table read as an array.\n"
+		"Selection:Set({})\n"
+		"assert(#Selection:Get() == 0, 'an empty array did not deselect')\n"
+		"\n"
 		"-- And it is not on the plugin table any more.\n"
 		"assert(plugin.GetSelection == nil, 'GetSelection is still a plugin call')\n"
 		"assert(plugin.SetSelection == nil, 'SetSelection is still a plugin call')\n"
@@ -588,5 +608,63 @@ TEST_CASE("the selection is a service, not a plugin call", "[studio][plugins]") 
 	INFO(plugins.front().Error);
 	REQUIRE(plugins.front().Running);
 	REQUIRE(surface != nullptr);
-	CHECK(surface->Selected.size() == 2);
+	CHECK(surface->Selected.empty());
+}
+
+TEST_CASE("Selection takes an array of instances and nothing else", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+
+	// **Every one of these is what somebody types before they read the
+	// docs.** A bare value instead of a list is the first, and `nil` is the
+	// second — both have to arrive as a message rather than as "nothing
+	// happened", which is what an accepted near-miss looks like from a plugin.
+	folder.Add(
+		"strict",
+		R"({"name": "Strict"})",
+		"local Selection = game:GetService('Selection')\n"
+		"\n"
+		"local function refused(body)\n"
+		"  local ok, message = pcall(body)\n"
+		"  assert(not ok, 'that was accepted and should not have been')\n"
+		"  return message\n"
+		"end\n"
+		"\n"
+		"-- Not a list at all.\n"
+		"local bare = refused(function() Selection:Set('a') end)\n"
+		"assert(string.find(bare, 'array') ~= nil, 'the reason was lost: ' .. bare)\n"
+		"assert(string.find(bare, 'string') ~= nil, 'it did not say what it got: ' .. bare)\n"
+		"\n"
+		"refused(function() Selection:Set(nil) end)\n"
+		"refused(function() Selection:Set() end)\n"
+		"refused(function() Selection:Set(7) end)\n"
+		"refused(function() Selection:Set({ a = 1 }) end)\n"
+		"\n"
+		"-- A list with one bad item in it, named by its position.\n"
+		"local item = refused(function() Selection:Set({ 'a', 7, 'c' }) end)\n"
+		"assert(string.find(item, 'item 2') ~= nil, 'the position was lost: ' .. item)\n"
+		"\n"
+		"-- **And nothing changed**, which is why the list is validated whole\n"
+		"-- before it is applied: a plugin that got one item wrong should not\n"
+		"-- also have to undo what the call managed before it noticed.\n"
+		"Selection:Set({ 'kept' })\n"
+		"refused(function() Selection:Set({ 'a', false }) end)\n"
+		"local held = Selection:Get()\n"
+		"assert(#held == 1 and held[1] == 'kept', 'a refused call changed the selection')\n"
+	);
+
+	Store store("plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+
+	Surface *surface = nullptr;
+	StartPlugins(plugins, store, [&surface](LoadedPlugin &plugin) {
+		auto made = std::make_unique<Surface>(plugin);
+		surface = made.get();
+		return made;
+	});
+
+	INFO(plugins.front().Error);
+	REQUIRE(plugins.front().Running);
+	REQUIRE(surface != nullptr);
+	CHECK(surface->Selected.size() == 1);
 }
