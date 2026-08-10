@@ -29,6 +29,7 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
+#include <studio/Config.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -1161,6 +1162,31 @@ namespace studio {
 		// Builds a bounded number of queued thumbnails and evicts old ones.
 		void PumpThumbnails();
 
+		// Drives the preview slot for a rendered row nobody is pointing at.
+		//
+		// **The fix for a material that only appeared when hovered.** A mesh and
+		// a material have no bitmap — their picture is a render — and nothing
+		// asked for one until the cursor arrived, so a store full of materials
+		// drew a grid of dashes until somebody swept the mouse over it.
+		//
+		// One at a time, because there is one slot and the round robin gives it
+		// one turn in N. `RenderPreviewSlot` caches what it drew, so a row that
+		// has had its turn keeps its picture and the queue moves on — a list
+		// fills in over the next few frames and then costs nothing.
+		//
+		// **Hover still wins.** This runs before `DrawHoverPreview`, which
+		// overwrites the request with whatever is under the cursor: the row
+		// somebody is looking at is worth more than the one that happened to be
+		// next.
+		void PumpRenderedPreviews();
+
+		// Rows drawn this frame whose picture is a render and is not cached yet.
+		//
+		// Recorded by `PaintPreview` while the list is drawn, so it is exactly
+		// what was on screen — a queue built from the whole store would spend
+		// the editor's frames on rows nobody had scrolled to.
+		std::vector<std::string> PreviewQueue;
+
 		// What one asset's preview is registered under in the texture table.
 		//
 		// **Prefixed, so a preview can never be sampled as content**: the
@@ -1439,6 +1465,24 @@ namespace studio {
 		// while working, and an editor that had to be relaunched to answer an
 		// agent is one nobody would use that way.
 		void ToggleControl();
+
+		// Reads the config folder, and moves anything found beside the binary.
+		//
+		// **The move is one-way and happens once.** `studio-content.ini` and
+		// `studio-keybinds.ini` lived in `Paths::Base()`, which is the build
+		// directory for anybody working on the engine — so a `just build`
+		// against another preset read as a fresh install and deleting the build
+		// directory threw somebody's keybinds away. Reading the old location
+		// when the new one has nothing is what stops this change from being that
+		// same loss one more time.
+		void LoadConfiguration();
+
+		// Writes the config folder, on the way out.
+		//
+		// **Not on every edit**, which is `Keybinds::Save`'s own rule: the
+		// preferences page changes a value as somebody drags a slider, and a
+		// file rewritten per frame is a file that records a half-finished drag.
+		void SaveConfiguration();
 
 		// Builds the delivery client and the uploader from the current sources.
 		//
@@ -1874,6 +1918,17 @@ namespace studio {
 		// Beside the binary with the layout ini and the keybinds, so a
 		// launcher's working directory cannot move somebody's configuration.
 		std::filesystem::path ContentSourcesPath;
+
+		// What was configured, and what is remembered between sessions.
+		//
+		// **The file is the source and this is the copy the frame reads.** Every
+		// field here is written back on the way out from whatever the interface
+		// left it at, which is why the panel toggles are read off the live flags
+		// rather than out of this — see `SaveConfiguration`.
+		Preferences Prefs;
+
+		// The last five games opened, most recent first. See `Config.hpp`.
+		RecentProjects Recent;
 
 		// The listener and the table. Held by value and started only when asked;
 		// a server that was never started costs a thread that was never spawned.
@@ -2641,6 +2696,25 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+
+		// How far a dragged handle steps, in studs. Zero is continuous.
+		//
+		// **On the editor rather than on the tool**, because it is one setting
+		// for every handle: an author who set a one-stud grid means it for a
+		// move whichever axis they drag. `Preferences` keeps it between
+		// sessions.
+		float GridStep = 1.0f;
+
+		// How far a rotation handle steps, in degrees. Zero is continuous.
+		float RotationStep = 15.0f;
+
+		// Whether a handle moves an instance about its pivot or its centre.
+		//
+		// **The pivot is the default and it is the useful one.** A door turns on
+		// its hinge and a lid sits on its rim — `scene::PivotOf` is what says
+		// where the handle is, and an editor that always used the centre would
+		// make every one of those a subtraction the author has to do.
+		bool PivotAnchored = true;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//

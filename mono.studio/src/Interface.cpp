@@ -279,6 +279,12 @@ namespace studio {
 		// `DrawHoverPreview` puts the panel on top of everything — which is why
 		// neither belongs inside a list's own loop.
 		EndHoverPreview(static_cast<double>(ImGui::GetIO().DeltaTime));
+
+		// **Before the hover panel, so hover wins.** This asks for a picture
+		// of whichever rendered row still has none; `DrawHoverPreview`
+		// overwrites the request with the row under the cursor, which is the
+		// one somebody is actually looking at.
+		PumpRenderedPreviews();
 		DrawHoverPreview();
 
 		{
@@ -943,6 +949,61 @@ namespace studio {
 			if (ImGui::MenuItem("Open Game...", Keybinds::Of(Action::OpenGame).Text().c_str())) {
 				AskingOpen = true;
 				PathBuffer = GamePath.string();
+			}
+
+			// **The last five, most recent first**, which is the shape a menu
+			// wants: a list somebody scans rather than searches. Kept in
+			// `~/Documents/atomic-game-engine/studio/recent.json` with the rest
+			// of the configuration — see `studio/Config.hpp`.
+			if (ImGui::BeginMenu("Open Recent", !Recent.Paths.empty())) {
+				// A copy, because opening a game calls `Recent.Remember` and
+				// reorders the very list this loop is walking.
+				const std::vector<std::filesystem::path> listed = Recent.Paths;
+
+				std::filesystem::path chosen;
+				std::filesystem::path forget;
+
+				for (const std::filesystem::path &path : listed) {
+					std::error_code missing;
+					const bool there = std::filesystem::is_regular_file(path, missing);
+
+					// **A file that is not there is shown and disabled, not
+					// hidden.** A project on a drive that is not plugged in
+					// right now is still a project somebody wants to see, and a
+					// menu that silently forgot it would be worse than a row
+					// that says why it cannot be opened.
+					ImGui::BeginDisabled(!there);
+					if (ImGui::MenuItem(path.filename().string().c_str())) {
+						chosen = path;
+					}
+					ImGui::EndDisabled();
+
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+						ImGui::SetTooltip("%s%s", path.string().c_str(), there ? "" : "\n(not found)");
+					}
+
+					// The one thing a missing row is still good for.
+					if (!there && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+						forget = path;
+					}
+				}
+
+				ImGui::Separator();
+				if (ImGui::MenuItem("Clear List")) {
+					Recent.Paths.clear();
+				}
+
+				ImGui::EndMenu();
+
+				// **After `EndMenu`, because opening a game tears down every
+				// world** — and doing that while ImGui is inside the menu it is
+				// drawing is rearranging the tree being walked.
+				if (!forget.empty()) {
+					Recent.Forget(forget);
+				}
+				if (!chosen.empty()) {
+					OpenGame(chosen);
+				}
 			}
 
 			// **Rojo's layout, because it is the one the ecosystem already

@@ -308,6 +308,17 @@ namespace studio {
 			return;
 		}
 
+		// **Nothing to draw and its picture is a render: ask for one.** Until
+		// v0.12 only the cursor asked, so a store full of materials drew a grid
+		// of dashes until somebody swept the mouse across it. Recorded here
+		// rather than requested here because there is one slot and this runs
+		// per row — `PumpRenderedPreviews` takes one of these after the whole
+		// list has been drawn.
+		if (PreviewIsRendered(kind) && !name.empty() &&
+			std::find(PreviewQueue.begin(), PreviewQueue.end(), name) == PreviewQueue.end()) {
+			PreviewQueue.push_back(name);
+		}
+
 		// **A box of the same size rather than nothing**, so a row does not
 		// change height when its picture arrives — a list that reflows while it
 		// loads is one nobody can click in.

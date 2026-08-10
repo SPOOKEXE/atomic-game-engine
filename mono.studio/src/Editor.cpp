@@ -231,12 +231,7 @@ namespace studio {
 		// action ships unbound, so a fresh install reads nothing and the menus
 		// are the whole interface until somebody says otherwise. See
 		// `Keybinds::Load`.
-		ContentSourcesPath = engine::core::Paths::Base() / "studio-content.ini";
-		if (!Content.Load(ContentSourcesPath)) {
-			// A fresh install gets one origin on this machine, which is what
-			// works with nothing else running — `DeliverySettings::Default`.
-			Content = ContentSources::Default();
-		}
+		LoadConfiguration();
 
 		// **Built here rather than lazily on the first fetch**, so a
 		// misconfigured source says so at start-up in the log rather than as a
@@ -244,10 +239,6 @@ namespace studio {
 		// rule, which every other resolver in this stack already follows.
 		RebuildContentClients();
 
-		KeybindPath = engine::core::Paths::Base() / "studio-keybinds.ini";
-		if (Keybinds::Load(KeybindPath)) {
-			ENGINE_INFO("keybinds from {}", KeybindPath.string());
-		}
 
 		// **The interface runs headless, and that is the point.** Its backends
 		// need a window and are not started without one — but the context is, so
@@ -376,12 +367,7 @@ namespace studio {
 			}
 		}
 
-		// **Written on the way out rather than on every edit.** The page changes
-		// a binding as somebody types it, and a file rewritten per keystroke is
-		// a file that records half a chord. See `Keybinds::Save`.
-		if (!KeybindPath.empty() && !Keybinds::Save(KeybindPath)) {
-			ENGINE_WARN("could not write {}", KeybindPath.string());
-		}
+		SaveConfiguration();
 
 		// Runtimes hold a `Store &`, and the stores are the universe's. Let go
 		// of every one of them before it goes away.
@@ -1485,6 +1471,12 @@ namespace studio {
 		Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
 		SelectionWorld = Active;
 
+		// **Remembered on a successful open rather than on the attempt.** A path
+		// that failed to load is not one to offer again from a menu — the list
+		// exists to get somebody back to work, and a row that reproduces an
+		// error is the opposite of that.
+		Recent.Remember(path);
+
 		Say("opened " + path.string() + " — " + std::to_string(info.Worlds.size()) + " world(s)");
 		return true;
 	}
@@ -1650,6 +1642,12 @@ namespace studio {
 
 		GamePath = path;
 		Modified = false;
+
+		// A Save As is how a game gets its real name, so the list has to follow
+		// it — otherwise the menu would go on offering the scratch file it was
+		// saved from.
+		Recent.Remember(path);
+
 		Say("saved " + path.string());
 		return true;
 	}
