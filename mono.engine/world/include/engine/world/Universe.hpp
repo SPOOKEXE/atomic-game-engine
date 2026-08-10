@@ -219,6 +219,21 @@ namespace engine::world {
 		// @return The world count, including suspended and faulted ones.
 		size_t Count() const;
 
+		// The number of worlds in one state.
+		//
+		// **Exists because `Count` answers the wrong question for a lifecycle
+		// decision.** `world::DecideLifecycle` refuses to suspend the last
+		// world, and a host feeding that refusal a total — which includes the
+		// worlds already suspended — suspends a whole universe one world at a
+		// time, each of them the last only after the rest had gone. Counting
+		// what is still `Active` is the fact that refusal is about, and it lives
+		// here so both hosts cannot answer it differently.
+		//
+		// @param state The state to count.
+		// @return How many worlds are in it.
+		// @since v0.13
+		size_t CountInState(WorldState state) const;
+
 		// Every world's handle, in creation order.
 		//
 		// @return The handles, copied.
