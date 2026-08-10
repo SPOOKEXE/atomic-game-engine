@@ -25,10 +25,13 @@
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Debugger.hpp>
+#include <engine/script/Host.hpp>
 #include <engine/script/Runtime.hpp>
 
+#include <algorithm>
 #include <lua.h>
 #include <span>
 #include <string>
@@ -253,6 +256,23 @@ namespace engine::script {
 		// thread's stack, so the resume passes them on.
 		std::unordered_map<lua_State *, int> PendingArguments;
 
+		// What this program offers beyond the world, or null.
+		//
+		// **Null for a game script and set for a tool**, which is the whole of
+		// the distinction: a game's vocabulary is the scene and an editor tool's
+		// is the program running it. See `script/Host.hpp`.
+		HostSurface *Host = nullptr;
+
+		// Which registry ref holds each function a host was handed.
+		//
+		// **Keyed by a counter rather than by an address**, because an address
+		// is not stable between runs and this module refuses one in an id
+		// anywhere. Starting at one leaves zero meaning "no callback".
+		//@{
+		std::unordered_map<uint64_t, int> HostCallbacks;
+		uint64_t NextHostCallback = 0;
+		//@}
+
 		// Which thread is suspended on which `world::Ticket`.
 		//
 		// **The first of `docs/retired/SCRIPT_CONCURRENCY.md` §1's three legal resume
@@ -288,6 +308,57 @@ namespace engine::script {
 	LuauContext &UpvalueContext(lua_State *state);
 
 	// --- values ---------------------------------------------------------------
+
+	// How wide one marshalled value can be, and therefore how big the stack
+	// buffers that carry one are.
+	//
+	// **This was `sizeof(core::CFrame)` until v0.10 added the sequences.** A
+	// `core::ColorSequence` is twenty keypoints and does not fit in twenty-eight
+	// bytes, and every guard is `size > sizeof(bytes)` — so an emitter's `Color`
+	// failed its read with "could not read 'Color'", naming a property that is
+	// declared and readable and whose only problem was a buffer one file away.
+	//
+	// A named constant rather than a `sizeof` at each buffer, because there are
+	// several and a getter's being narrower than the setter's is a bug with no
+	// symptom on the setter.
+	constexpr size_t WIDEST_PROPERTY = std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
+
+	// Pushes a value of one `PropertyType`, read into a buffer of its size.
+	//
+	// **The type and the enum name, never a descriptor**, because the second
+	// caller has no descriptor to give: an ECS component field carries exactly
+	// these values and is not a property. One switch rather than two that agree
+	// until somebody edits one.
+	//
+	// `PropertyType::String` is refused rather than handled, and the refusal is
+	// the design: `bytes` is uninitialised storage and a `std::string` cannot be
+	// assigned into that, so every caller takes strings down a path of its own.
+	// Failing loudly is what catches a future caller that forgot the branch.
+	//
+	// @param state    The VM.
+	// @param type     What the bytes mean.
+	// @param enumName Which set an `Enum` value belongs to. Ignored otherwise.
+	// @param bytes    The value.
+	// @return `false` when the type has no script representation.
+	// @since v0.12
+	bool PushPropertyValue(lua_State *state, ecs::PropertyType type, core::Name enumName, const void *bytes);
+
+	// Reads a Luau value into a buffer of that type's size.
+	//
+	// Raises a Luau type error for a value of the wrong shape, exactly as the
+	// `Check*` helpers below do — so a caller checks the return for "this type
+	// cannot cross" and never for "the script passed the wrong thing".
+	//
+	// @param state    The VM.
+	// @param index    The stack index to read.
+	// @param type     What to read it as.
+	// @param enumName Which set an `Enum` value must belong to.
+	// @param out      Where to write it. At least `Schemas::SizeOf(type)` bytes.
+	// @return `false` when the type has no script representation, or when an
+	//         `Enum` value belongs to a different set.
+	// @since v0.12
+	bool
+	ReadPropertyValue(lua_State *state, int index, ecs::PropertyType type, core::Name enumName, void *out);
 
 	// Installs `Vector3`, `Color3` and `CFrame` as globals.
 	void OpenValues(lua_State *state);
@@ -457,6 +528,60 @@ namespace engine::script {
 	//
 	// Called after `OpenWorkspace`, because it adds to the world's method table.
 	void OpenQueries(lua_State *state);
+
+	// Installs `World`, and the component methods every instance gains.
+	//
+	// **The storage named directly, underneath the Roblox vocabulary the rest of
+	// this file installs.** A game's own data — a health, a cooldown, an
+	// inventory slot — has been an attribute or a C++ component until now, and
+	// neither is a component a query can reach without a rebuild.
+	//
+	// Called after `OpenInstances`, because the instance half of the surface adds
+	// to the method table that function creates.
+	//
+	// @param state The VM.
+	// @since v0.12
+	void OpenEcs(lua_State *state);
+
+	// Installs `BreakpointService`, when this runtime is a studio's.
+	//
+	// **Absent outside a studio**, so `game:GetService("BreakpointService")`
+	// fails the way it does for any service this engine does not provide. Arming
+	// a breakpoint switches Luau's step mode on and costs the whole runtime its
+	// speed, which a shipped server has no business letting a game script do.
+	//
+	// @param state The VM.
+	// @since v0.12
+	void OpenBreakpointService(lua_State *state);
+
+	// Installs `host`, when the runtime has one.
+	//
+	// **One closure per `HostSurface::Names` entry**, so a name the host does
+	// not list is not a member — which turns a typo into "attempt to call a nil
+	// value" at the call site rather than a refusal from inside a program the
+	// author cannot see.
+	//
+	// Does nothing when there is no host, which is every game script.
+	//
+	// @param state The VM.
+	// @since v0.12
+	void OpenHost(lua_State *state);
+
+	// Calls a function a script handed the host.
+	//
+	// @param state     The VM.
+	// @param callback  What to call.
+	// @param arguments What to pass.
+	// @return `false` when the callback is unknown or the handler raised.
+	// @since v0.12
+	bool CallHostCallback(lua_State *state, HostCallback callback, HostArguments arguments);
+
+	// Lets go of one, so its closure can be collected.
+	//
+	// @param state    The VM.
+	// @param callback What to release.
+	// @since v0.12
+	void ReleaseHostCallback(lua_State *state, HostCallback callback);
 
 	// Installs `Enum`, over the sets `ecs::EnumTable` holds.
 	void OpenEnums(lua_State *state);

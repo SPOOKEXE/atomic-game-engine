@@ -38,6 +38,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/script/Debugger.hpp>
+#include <engine/script/Host.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -297,6 +298,66 @@ namespace engine::script {
 		// @return The store passed at construction.
 		ecs::Store &World() const {
 			return Store;
+		}
+
+		// --- the host seam ---------------------------------------------------
+		//
+		// What a *program* offers this script beyond the world. See `Host.hpp`
+		// for why it is one method over a value tree rather than a growing
+		// interface, and for the two things a host call can carry that a bus
+		// message cannot.
+
+		// Installs the host, replacing any previous one.
+		//
+		// **Before the first `Run`, because the global is built from
+		// `HostSurface::Names`.** A host installed afterwards is a `host` table
+		// a chunk already captured, and `luaL_sandbox` makes that capture
+		// permanent — see `D00030`, which is the same mechanism biting a
+		// different surface.
+		//
+		// The surface must outlive this runtime. A null one removes the global.
+		//
+		// @param host What answers a script's calls, or null.
+		// @since v0.12
+		virtual void SetHost(HostSurface *host) {
+			(void)host;
+		}
+
+		// Calls a function a script handed the host.
+		//
+		// **The other direction of the seam.** A button's handler lives in the
+		// script's VM and the press happens in the host's frame, so this is what
+		// joins the two — and it is a method here rather than a callable the
+		// host holds, because the reference behind a `HostCallback` is a VM
+		// concept that does not leave this module.
+		//
+		// Runs the handler immediately rather than at a barrier, which is the
+		// one place this differs from every signal in the engine and is
+		// deliberate: a host calls this from its own frame in response to a
+		// person, not from inside a tick over a world somebody is iterating.
+		//
+		// @param callback  What to call.
+		// @param arguments What to pass, in order.
+		// @return `false` when the handler raised or the callback is unknown;
+		//         `LastError` says which.
+		// @since v0.12
+		virtual bool Invoke(HostCallback callback, HostArguments arguments) {
+			(void)callback;
+			(void)arguments;
+			return false;
+		}
+
+		// Lets go of a function a script handed the host.
+		//
+		// **Called when whatever held it goes away** — a button removed, a panel
+		// closed. A host that never releases holds a closure for the life of the
+		// runtime, which is survivable and still wrong for a panel somebody
+		// opens and closes a hundred times.
+		//
+		// @param callback What to release. An invalid one is ignored.
+		// @since v0.12
+		virtual void Release(HostCallback callback) {
+			(void)callback;
 		}
 
 		// How many VM steps this runtime has spent since it was made.

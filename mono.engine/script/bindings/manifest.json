@@ -54,6 +54,7 @@
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
@@ -78,6 +79,7 @@
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
@@ -102,6 +104,7 @@
 				{"name": "CastShadow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "CollisionGroup", "type": "Name", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Collider"], "writes": ["scene.Collider"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
+				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "MeshId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -277,6 +280,39 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
+			]
+		},
+		{
+			"name": "ValueBase",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.TextContent"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+			]
+		},
+		{
+			"name": "StringValue",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.TextContent"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+			]
+		},
+		{
+			"name": "LocalizationTable",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.TextContent"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
 			]
 		},
 		{

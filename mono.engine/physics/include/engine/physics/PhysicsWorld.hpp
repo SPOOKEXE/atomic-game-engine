@@ -348,11 +348,32 @@ namespace engine::physics {
 		//                 zero in favour of its own default.
 		explicit PhysicsWorld(float cellSize = spatial::HashGrid::DEFAULT_CELL_SIZE);
 
-		// Cell edge length of both indexes, in metres, as the grids resolved it.
+		// Cell edge length of the dynamic index, in metres.
+		//
+		// **The two indexes may differ, and since v0.12 they usually do.** A
+		// scene's static geometry is walls and floors and its dynamic set is
+		// crates and characters; one spacing chosen for the union of them is
+		// chosen for neither. This reports the dynamic one because that is the
+		// index rebuilt every tick and therefore the one a profile is asking
+		// about.
 		//
 		// @return The cell size in metres.
 		float CellSize() const {
 			return DynamicIndex.CellSize();
+		}
+
+		// Whether the grids size themselves from what they hold.
+		//
+		// **True unless the caller named a size**, which is the whole of the
+		// rule: `PreparePhysicsWorld` with no cell size means "measure it" and
+		// with one means "the author decided". A world that overrode a chosen
+		// size every tick would make the parameter a suggestion, and a parameter
+		// that is silently ignored is worse than one that is not there.
+		//
+		// @return `true` when `SyncBroadphase` calls `spatial::SuggestCellSize`.
+		// @since v0.12
+		bool CellSizeMeasured() const {
+			return MeasureCells;
 		}
 
 		// The candidate pairs the last `BroadPhase` produced, sorted.
@@ -531,6 +552,13 @@ namespace engine::physics {
 		std::vector<uint64_t> CandidateBuffer;
 
 		bool StaticStale = true;
+
+		// Whether the grids size themselves. See `CellSizeMeasured`.
+		//
+		// **Snapshotted with the cell size**, because it decides what the
+		// restored size means: a measured world re-derives one on its first sync
+		// and a configured world keeps the author's.
+		bool MeasureCells = true;
 
 		// `Store::ChangeVersion()` as of the last time the static set was
 		// examined. The counter only moves for a write through `Set` to an

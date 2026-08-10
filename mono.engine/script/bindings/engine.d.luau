@@ -754,6 +754,11 @@ declare extern type Instance with
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
 	function GetAttributes(self): { [string]: EngineAttribute }
 	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
+	function SetComponent(self, component: string, values: { [string]: any }): ()
+	function GetComponent(self, component: string): { [string]: any }?
+	function HasComponent(self, component: string): boolean
+	function RemoveComponent(self, component: string): ()
+	function GetComponents(self): { string }
 	Activated: GuiSignal
 	InputBegan: GuiSignal
 	InputEnded: GuiSignal
@@ -777,6 +782,7 @@ declare extern type BasePart extends PVInstance with
 	CastShadow: boolean
 	CollisionGroup: string
 	Color: Color3
+	Locked: boolean
 	Size: Vector3
 	Transparency: number
 	Visible: boolean
@@ -850,6 +856,16 @@ declare extern type SpotLight extends Light with
 end
 
 declare extern type SurfaceLight extends Light with
+end
+
+declare extern type ValueBase extends Instance with
+	Value: string
+end
+
+declare extern type StringValue extends ValueBase with
+end
+
+declare extern type LocalizationTable extends ValueBase with
 end
 
 declare extern type LuaSourceContainer extends Instance with
@@ -1371,6 +1387,47 @@ declare ContentService: ContentService
 -- The world this script runs on. `game` is the universe above it.
 declare workspace: Workspace
 
+-- The storage underneath the class tree.
+--
+-- **`workspace` is this world's scene and `World` is this world's storage**, and
+-- the two are the same world seen from either end: `Instance.new("Part")` is an
+-- entity in the archetype the `Part` class names, and `World:Query` is that
+-- archetype asked about directly.
+--
+-- A component a script declares is a real component — the same dense id, the
+-- same column, iterated by a C++ system that never heard of the script. What it
+-- is not is *typed*: the field list is a run-time fact, so every value table
+-- here is `{ [string]: any }` and a definition file cannot do better. See
+-- `script/src/LuauEcs.cpp` for what this refuses and why.
+declare extern type EngineWorld with
+	-- Declares a component, or agrees with one already declared with exactly
+	-- these fields. Returns whether this call created it.
+	--
+	-- The field types are the engine's own spellings — `number`, `boolean`,
+	-- `string`, `float`, `int32`, `Vector3`, `CFrame`, `Color3`, `Instance` and
+	-- the rest — or `Enum.<set>` for a value that must be a registered member.
+	function DefineComponent(self, component: string, fields: { [string]: string }): boolean
+
+	function HasComponentType(self, component: string): boolean
+
+	-- The field list a component was declared with, in a shape
+	-- `DefineComponent` accepts back.
+	function GetComponentSchema(self, component: string): { [string]: string }?
+
+	-- An entity carrying nothing: no class, no place in the tree, nothing drawn.
+	-- Still an `Instance`, because an instance *is* an entity.
+	function CreateEntity(self, name: string?): Instance
+
+	-- Every entity carrying all of the named components, in a deterministic
+	-- order. Naming a component nothing declared is an error rather than an
+	-- empty result.
+	function Query(self, ...: string): { Instance }
+
+	function Count(self, ...: string): number
+end
+
+declare World: EngineWorld
+
 -- The instance this chunk was loaded from, set on the thread after the sandbox.
 declare script: LuaSourceContainer
 
@@ -1442,6 +1499,9 @@ type CreatableInstances = {
 	PointLight: PointLight,
 	SpotLight: SpotLight,
 	SurfaceLight: SurfaceLight,
+	ValueBase: ValueBase,
+	StringValue: StringValue,
+	LocalizationTable: LocalizationTable,
 	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,

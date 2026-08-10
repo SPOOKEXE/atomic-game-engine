@@ -261,11 +261,15 @@ namespace studio {
 		// the next step rather than the current one.
 		{
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
+			DrawTools();
 			DrawHistory();
 			DrawAssets();
 			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
 			// and `DrawPipelineProfile()` were drawn here.
 			DrawNetwork();
+			DrawControl();
+			DrawPlugins();
+			DrawPluginWidgets();
 			DrawBus();
 			DrawFindInstances();
 			DrawScriptProfile();
@@ -278,6 +282,12 @@ namespace studio {
 		// `DrawHoverPreview` puts the panel on top of everything — which is why
 		// neither belongs inside a list's own loop.
 		EndHoverPreview(static_cast<double>(ImGui::GetIO().DeltaTime));
+
+		// **Before the hover panel, so hover wins.** This asks for a picture
+		// of whichever rendered row still has none; `DrawHoverPreview`
+		// overwrites the request with the row under the cursor, which is the
+		// one somebody is actually looking at.
+		PumpRenderedPreviews();
 		DrawHoverPreview();
 
 		{
@@ -887,6 +897,7 @@ namespace studio {
 		// a thing somebody turns on by accident and cannot turn off. No
 		// shortcuts of their own — the Keybinds page is where keys are decided
 		// now, and two places to bind a key is one too many.
+		ImGui::MenuItem("Tools", nullptr, &ShowTools);
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
@@ -900,6 +911,8 @@ namespace studio {
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		// TODO(render-pipeline): the three pipeline panels were opened from here.
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
+		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
+		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
@@ -943,6 +956,61 @@ namespace studio {
 				PathBuffer = GamePath.string();
 			}
 
+			// **The last five, most recent first**, which is the shape a menu
+			// wants: a list somebody scans rather than searches. Kept in
+			// `~/Documents/atomic-game-engine/studio/recent.json` with the rest
+			// of the configuration — see `studio/Config.hpp`.
+			if (ImGui::BeginMenu("Open Recent", !Recent.Paths.empty())) {
+				// A copy, because opening a game calls `Recent.Remember` and
+				// reorders the very list this loop is walking.
+				const std::vector<std::filesystem::path> listed = Recent.Paths;
+
+				std::filesystem::path chosen;
+				std::filesystem::path forget;
+
+				for (const std::filesystem::path &path : listed) {
+					std::error_code missing;
+					const bool there = std::filesystem::is_regular_file(path, missing);
+
+					// **A file that is not there is shown and disabled, not
+					// hidden.** A project on a drive that is not plugged in
+					// right now is still a project somebody wants to see, and a
+					// menu that silently forgot it would be worse than a row
+					// that says why it cannot be opened.
+					ImGui::BeginDisabled(!there);
+					if (ImGui::MenuItem(path.filename().string().c_str())) {
+						chosen = path;
+					}
+					ImGui::EndDisabled();
+
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+						ImGui::SetTooltip("%s%s", path.string().c_str(), there ? "" : "\n(not found)");
+					}
+
+					// The one thing a missing row is still good for.
+					if (!there && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+						forget = path;
+					}
+				}
+
+				ImGui::Separator();
+				if (ImGui::MenuItem("Clear List")) {
+					Recent.Paths.clear();
+				}
+
+				ImGui::EndMenu();
+
+				// **After `EndMenu`, because opening a game tears down every
+				// world** — and doing that while ImGui is inside the menu it is
+				// drawing is rearranging the tree being walked.
+				if (!forget.empty()) {
+					Recent.Forget(forget);
+				}
+				if (!chosen.empty()) {
+					OpenGame(chosen);
+				}
+			}
+
 			// **Rojo's layout, because it is the one the ecosystem already
 			// writes.** A game laid out for Rojo has its scripts in folders that
 			// mean something, its tooling assumes it, and every author who has
@@ -953,6 +1021,19 @@ namespace studio {
 				AskingRojo = true;
 				PathBuffer = GamePath.empty() ? std::string("default.project.json")
 											  : (GamePath.parent_path() / "default.project.json").string();
+			}
+
+			// **A second command rather than a mode of the first.** One project
+			// file is one world, which is what an author editing a scene wants;
+			// a universe file is a whole game laid out as a folder of them,
+			// which is what an author opening a checkout wants. Deciding which
+			// they meant by looking inside the file would be a guess, and the
+			// wrong guess builds a game into one world.
+			if (ImGui::MenuItem("Sync Rojo Universe...")) {
+				AskingRojoUniverse = true;
+				PathBuffer = GamePath.empty()
+								 ? std::string("main.universe.json")
+								 : (GamePath.parent_path() / "main.universe.json").string();
 			}
 
 			ImGui::Separator();
@@ -1773,6 +1854,9 @@ namespace studio {
 		if (AskingOpen) {
 			ImGui::OpenPopup("Open Game");
 		}
+		if (AskingRojoUniverse) {
+			ImGui::OpenPopup("Sync Rojo Universe");
+		}
 		if (AskingRojo) {
 			ImGui::OpenPopup("Sync Rojo Project");
 		}
@@ -1814,6 +1898,13 @@ namespace studio {
 			AskingRojo = false;
 		} else if (!ImGui::IsPopupOpen("Sync Rojo Project")) {
 			AskingRojo = false;
+		}
+
+		if (FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
+			SyncRojoWorlds(std::filesystem::path(PathBuffer));
+			AskingRojoUniverse = false;
+		} else if (!ImGui::IsPopupOpen("Sync Rojo Universe")) {
+			AskingRojoUniverse = false;
 		}
 
 		if (FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {

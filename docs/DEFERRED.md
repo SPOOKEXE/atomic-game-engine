@@ -99,6 +99,178 @@ and for deleted marked items;
 
 ## Deferred Items
 
+### [_] D00106
+
+**JavaScript and TypeScript have no breakpoints, and the obstacle is the VM
+rather than this engine.**
+
+The Luau half of `script::Debugger` works through `lua_callbacks(L)->debugstep`,
+which Luau calls after every instruction while single-step mode is on — so a
+breakpoint is a line comparison in a hook that only exists while one is armed.
+QuickJS as vendored offers no equivalent:
+
+- **`JS_SetInterruptHandler` is the whole of it**, and its callback takes a
+  runtime and an opaque pointer. No line, no file, no frame — it exists to let a
+  host abort a long-running script, which is what `RuntimeLimits::StepBudget`
+  already uses it for.
+- **There is no debugger API at all.** `js_debugger` appears zero times in
+  `mono.vendor/quickjs`. Some quickjs forks carry one — the Ladybird and
+  quickjs-debugger trees both add `js_debugger_*` with breakpoint and stack
+  support — and this vendored quickjs-ng does not.
+- **`JS_GetScriptOrModuleName` is not a substitute.** It answers which module a
+  frame belongs to and nothing about where in it, so it cannot tell a line from
+  the next one.
+
+**Three ways out, and none is a small change.**
+
+- **A vendor bump or a fork.** `mono.vendor/AGENTS.md` says a patch goes
+  upstream or into a fork whose remote is recorded in `.gitmodules`, never into
+  a file in this tree — so this is a submodule decision with a maintenance cost
+  against a moving target, which is the same trade `D00019` records for Luau.
+- **Source instrumentation.** Rewriting a plugin's JavaScript to call a hook at
+  each statement would work in any VM and changes what runs, which makes every
+  line number in a stack trace a translation and every measurement a lie about
+  the program the author wrote.
+- **A second VM for tooling.** Out of proportion to the feature.
+
+**What exists in the meantime is stated rather than implied, and asking for the
+missing thing is refused rather than ignored.** `BreakpointService` is installed
+by the Luau binding alone, so a JavaScript plugin gets `undefined` from
+`game.GetService("BreakpointService")` rather than an object that refuses
+everything — and `Debugger::Add` answers `false` for a `.js`, `.mjs`, `.cjs`,
+`.ts` or `.tsx` chunk whoever asked, naming this entry in the reason.
+
+That refusal is the part worth keeping if the rest of this is ever built
+differently. A breakpoint that sits in a list looking armed and never fires
+reads as the debugger being broken rather than as the language not being
+supported, and a person cannot tell those apart from the outside.
+
+**The instrumentation option was considered and set aside**, and is recorded
+here so it is not rediscovered as a new idea. Prefixing each statement line with
+a hook call — without adding newlines, so every line number survives — would
+give line breakpoints in any VM and needs no vendored change. What it costs is a
+JavaScript lexer good enough to know which line boundaries are safe (not inside
+a template literal, a string, a comment, or a regex, where regex-versus-division
+is the hard case), and it changes what runs. It is the cheapest path that
+touches no submodule, and it is more work than it first looks.
+
+**And TypeScript needs a second thing regardless of the first.** The studio's
+`tsc` invocation emits no `--sourceMap`, so the engine runs transpiled
+JavaScript whose lines do not correspond to the `.ts`. Even a perfect VM
+debugger would put breakpoints in generated code; the mapper is cheap and would
+be conspicuous by its absence.
+
+**Reopen trigger: a vendored QuickJS with a debugger API**, or the first
+TypeScript plugin big enough that its author asks for one.
+
+### [CLOSED] D00105
+
+**A plugin can change the world and cannot add a button, and the missing piece
+is a channel rather than a function.**
+
+**Closed at v0.12 by building the channel.** `script::HostSurface` is the seam —
+one virtual taking a name and a `HostValue` list — and `script::HostValue` is a
+value tree rather than `ScriptValue` widened, for the reason this entry
+predicted: an instance handle means something inside one process and nothing on
+a bus, so the two types stay apart. A Luau function passed as an argument
+becomes a `HostCallback`, which is what makes a button's handler possible, and
+`Runtime::Invoke` is the other direction. `mono.studio/src/PluginSurface.cpp` is
+the editor's implementation and `engine.script.host` covers the crossing.
+
+Two things the entry got right and one it did not. The value tree and the
+callback were both needed, as predicted. What it called "the honest options" —
+a polled queue or a registry-ref dispatch — turned out to be one option: the ref
+lives in the module behind `Invoke`, so the host holds an id and polls nothing.
+
+The original text follows.
+
+`studio::PluginHost` runs a plugin as an ordinary `script::Runtime` against the
+world an author is editing, so everything a game script can reach it can reach —
+`Instance`, `workspace`, and since v0.12 `World`, the ECS underneath. The
+selection needed no new surface at all: it is published as `studio.Selected`, a
+described component, so a plugin queries for it and writes it back.
+
+What that model cannot express is anything about the *editor* rather than about
+the world: a toolbar button, a menu item, a docked panel, running a registered
+command.
+
+- **The obstacle is `script/AGENTS.md`'s first rule.** No `lua_State` appears in
+  a public header, so the studio cannot install a global of its own into a
+  plugin's VM the way `LuauEcs.cpp` installs `World` — that file is inside the
+  module and `mono.studio` is not.
+- **The shape that fits is a host-call seam, and the codec is already the hard
+  half.** `script::ScriptValue` is the language-neutral tree both runtimes
+  marshal through, with a deterministic encoding and a sorted map order; a
+  `HostSurface` interface taking a name and a `ScriptValue` and answering one
+  would give a host an arbitrary API without either side naming the other's
+  types. What it costs is making `ScriptValue` public, which is a real widening
+  of `script`'s surface and should be decided rather than slipped in.
+- **A button also needs a callback going the other way**, which is the part the
+  value tree does not answer: a handler lives in the plugin's VM and the press
+  happens in the editor's frame. The honest options are a polled queue — the
+  plugin asks "was I clicked" on its heartbeat — or a registry-ref dispatch
+  inside the module, and the first is buildable today on top of the seam while
+  the second is not.
+- **Until then the absence is stated rather than discovered.**
+  `studio/Plugins.hpp` says there is no toolbar API and why, which is the thing
+  that keeps somebody from looking for one.
+
+**Reopen trigger: the first plugin that wants to be invoked rather than to
+run every frame.** A tool that aligns a selection is one — it should happen when
+somebody asks, not sixty times a second.
+
+### [PARTIAL] D00104
+
+**Rojo's file table: six of the nine landed at v0.12, and the three left each
+need a dependency this repository does not vendor.**
+
+`studio::SyncRojoProject` builds `rojo.space/docs/v7/sync-details` except for
+three rows. What it builds now, beyond the scripts it always did:
+
+- **`.meta.json` and `init.meta.json`** — properties patched onto whatever the
+  file of that stem produced, including a script. `game::WriteProperty` does the
+  write and `ReadPropertyJson` accepts both spellings Rojo has used, the bare
+  value and the named-part object. **A class change is the one part not
+  honoured**: a class is the archetype an entity was created in, and `Store`
+  offers no way to move a live row between class trees, so `className` in an
+  `init.meta.json` is reported as a property the instance does not have.
+- **`.model.json`** — the class, its properties and its children, sharing the
+  patch above because Rojo documents one property syntax for both.
+- **`.json`** — a `ModuleScript` whose source is generated rather than parsed at
+  run time. Every key is bracketed, because a JSON key may be anything and
+  `{ foo-bar = 1 }` is a syntax error; numbers go through
+  `game::FormatNumber`, because `std::to_string` is `%f` and writes 1e-8 as
+  "0.000000".
+- **`.txt` and `.csv`** — a `StringValue` and a `LocalizationTable`, both over
+  the new `scene::TextContent` and both under a `ValueBase` so `:IsA` answers
+  the question a script would ask. **A `LocalizationTable` holds its CSV and
+  resolves nothing**: translation lookup is a service with a locale and a
+  fallback chain, and none of that is a file mapping.
+- **`.project.json` under a `$path`** — followed, with a cycle check that is the
+  part which had to exist before the recursion did.
+
+**What is left, and why each is a vendor decision before it is a feature:**
+
+- **`.rbxmx` needs an XML parser and `mono.vendor` has none.** The engine
+  vendors JSON and nothing else that reads a markup tree. Roblox's XML model
+  format is also not simply "XML" — it is `Item`/`Properties` elements with typed
+  children and a referent table, so the parser is the smaller half.
+- **`.toml` needs a TOML parser, and `mono.vendor` has none.** This one is
+  otherwise free: the JSON path already emits the Luau, so a TOML document
+  parsed into the same tree would reuse `LuauModuleFor` unchanged.
+- **`.rbxm` is Roblox's binary model** — LZ4-framed chunks, interned strings and
+  a referent table. That is a format reader and it belongs beside the other model
+  decoders in `bake` rather than in an editor, which is also where `.rbxmx`
+  would go once something could parse it.
+
+Each of the three is reported by name and by what Rojo says it is, so a gap
+reads as a gap rather than as an unrecognised file — `studio.rojosync` asserts
+both halves, that the three are named and that the six are silent.
+
+**Reopen trigger: a project that carries one of the three.** `.toml` is the
+cheapest by a distance and the only one whose cost is a submodule rather than a
+format reader.
+
 ### [_] D00103
 
 **Per-pass GPU time is not measured. The Vulkan path that measured it was
@@ -1115,3 +1287,44 @@ should file rather than a bullet here.
 - **Correction at v0.6, to the second bullet's reasoning rather than to its verdict.** "`Vector2` was considered and refused because §3.4 gates it on 'the overlay or editor needs it' and neither does" — **`Vector2` shipped at v0.6, and for neither of those reasons.** `UDim2` and `Rect` are made of it, and both arrived with the datatype vocabulary a script surface owes an author. The gate was right and the list of things that could open it was short by one, which is the useful half: a gate phrased as "who needs it" only names the consumers somebody had thought of. The other half of that sentence closed exactly as written — the `AABB` operations got their caller in `graph::Cull`, and `Frustum::Intersects` is the positive-vertex test that wanted an `AABB` rather than eight points.
 
 **Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed — recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. `v02v03v04.md` predicted the v0.4 edit and said it belonged "with the next pass over `docs/DEFERRED.md`, not here".
+
+### [_] D00107
+
+**A streaming texture and a texture that will never arrive look identical to
+the renderer.**
+
+`TextureTable` knows what it holds. It does not know what is in flight, and the
+colour slot resolves a name that is not registered to `MissingTexture` — the
+purple checkerboard — with no way to ask whether something is on its way. So a
+sheet still crossing the network wears the marker for the frames it takes to
+land, which on a scene load is a purple shimmer across every imported model as
+their submesh textures arrive a step behind the geometry they belong to.
+
+The gap is real rather than theoretical: the intake loop requests a mesh's own
+sheets *while decoding the mesh*, so the mesh becomes resident at least one
+frame before any of them can, and `delivery::IntakeBudget` may spread the sheets
+over several more.
+
+**Why it is not fixed with a timer here.** A grace period — "draw the default
+for the first N frames after the name is first asked for" — hides a genuinely
+missing texture for exactly as long as it hides a streaming one, and with a byte
+budget in the path there is no N that is right for both a small scene and a
+large one. It trades a visible wrong picture for an invisible one.
+
+**What closing it takes.** The content pump knows what it has outstanding, and
+that is the fact the renderer is missing. Roughly: the host marks a name as
+expected when it issues a request for it and unmarks it when the asset arrives
+*or the request fails*, and the colour slot draws the default for an expected
+name and the marker for an unexpected one. The marker then means "nothing is
+coming for this", which is the only meaning that is useful.
+
+The cost is the bookkeeping, and the failure half is where it sits: the intake
+loops hold `RequestId`s and a failed `Take` yields no name, so unmarking on
+failure needs a request-to-name map in both the studio and the client. Skipping
+that half is worse than not doing it at all — a misspelled texture name is
+requested, misses, and would stay "expected" for ever, which is precisely the
+case the marker exists for.
+
+Until then: `render/AGENTS.md` records the limitation beside the three-way
+split, and a texture that is briefly purple during a load is not a bug report.
+

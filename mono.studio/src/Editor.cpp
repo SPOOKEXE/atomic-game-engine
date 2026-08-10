@@ -231,12 +231,7 @@ namespace studio {
 		// action ships unbound, so a fresh install reads nothing and the menus
 		// are the whole interface until somebody says otherwise. See
 		// `Keybinds::Load`.
-		ContentSourcesPath = engine::core::Paths::Base() / "studio-content.ini";
-		if (!Content.Load(ContentSourcesPath)) {
-			// A fresh install gets one origin on this machine, which is what
-			// works with nothing else running — `DeliverySettings::Default`.
-			Content = ContentSources::Default();
-		}
+		LoadConfiguration();
 
 		// **Built here rather than lazily on the first fetch**, so a
 		// misconfigured source says so at start-up in the log rather than as a
@@ -244,10 +239,6 @@ namespace studio {
 		// rule, which every other resolver in this stack already follows.
 		RebuildContentClients();
 
-		KeybindPath = engine::core::Paths::Base() / "studio-keybinds.ini";
-		if (Keybinds::Load(KeybindPath)) {
-			ENGINE_INFO("keybinds from {}", KeybindPath.string());
-		}
 
 		// **The interface runs headless, and that is the point.** Its backends
 		// need a window and are not started without one — but the context is, so
@@ -350,6 +341,13 @@ namespace studio {
 		// about is a universe that has its worlds rather than an empty one.
 		StartControl();
 
+		// **After the universe exists and before the first frame**, because a
+		// plugin holds a `Store &` and there has to be one. Reloaded whenever
+		// the active world is replaced — see `OpenGame` — for the same reason:
+		// a runtime outliving the world it was started against is a reference
+		// into a store that has gone.
+		LoadPlugins();
+
 		// TODO(render-pipeline): the Pipeline Profile panel opened here with
 		// `colour` watched, and `Renderer::Inspect` told the renderer to keep a
 		// readable copy of that resource so the panel could show its picture.
@@ -376,12 +374,7 @@ namespace studio {
 			}
 		}
 
-		// **Written on the way out rather than on every edit.** The page changes
-		// a binding as somebody types it, and a file rewritten per keystroke is
-		// a file that records half a chord. See `Keybinds::Save`.
-		if (!KeybindPath.empty() && !Keybinds::Save(KeybindPath)) {
-			ENGINE_WARN("could not write {}", KeybindPath.string());
-		}
+		SaveConfiguration();
 
 		// Runtimes hold a `Store &`, and the stores are the universe's. Let go
 		// of every one of them before it goes away.
@@ -447,6 +440,15 @@ namespace studio {
 			// point in the frame and needs no separate ordering story.
 			PumpControl();
 			ControlWantsProfile = ControlSurface.WantsProfiling();
+
+			// **Beside the control surface and for its reason**, which the
+			// comment above already gives: a plugin writing a property is doing
+			// what a hand on the mouse does, so it happens where a click would
+			// have landed rather than needing an ordering story of its own.
+			//
+			// Before `Simulate`, so a plugin that moved something sees the
+			// physics of the frame it moved it in.
+			PumpPlugins(delta);
 
 			Simulate(delta);
 			Present(delta);
@@ -1485,6 +1487,18 @@ namespace studio {
 		Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
 		SelectionWorld = Active;
 
+		// **Remembered on a successful open rather than on the attempt.** A path
+		// that failed to load is not one to offer again from a menu — the list
+		// exists to get somebody back to work, and a row that reproduces an
+		// error is the opposite of that.
+		Recent.Remember(path);
+
+		// **Restarted against the world that just replaced theirs.** Every
+		// plugin holds a `Store &` from the universe this call has just torn
+		// down, so carrying them across would be a reference into storage that
+		// is gone — which is a crash rather than a stale reading.
+		LoadPlugins();
+
 		Say("opened " + path.string() + " — " + std::to_string(info.Worlds.size()) + " world(s)");
 		return true;
 	}
@@ -1550,6 +1564,88 @@ namespace studio {
 		Touch(Active);
 	}
 
+	void Editor::SyncRojoWorlds(const std::filesystem::path &universe) {
+		if (Universe == nullptr) {
+			Say("no universe to sync into", engine::core::LogLevel::Warning);
+			return;
+		}
+
+		std::ifstream in(universe, std::ios::binary);
+		if (!in) {
+			Say("could not read " + universe.string(), engine::core::LogLevel::Error);
+			return;
+		}
+
+		std::ostringstream buffer;
+		buffer << in.rdbuf();
+
+		RojoUniverse parsed;
+		std::string error;
+		if (!ParseRojoUniverse(buffer.str(), parsed, error)) {
+			Say("not a Rojo universe: " + error, engine::core::LogLevel::Error);
+			return;
+		}
+
+		// Relative to the universe file, for the reason a project's `$path` is
+		// relative to its own: a launcher's cwd must not decide which tree gets
+		// read.
+		const std::filesystem::path root = universe.parent_path();
+
+		RojoUniverseReport report;
+		const bool built = SyncRojoUniverse(parsed, root, *Universe, report, error);
+
+		// **Every world is reported, including the ones that worked, and the
+		// failures are not fatal to the run.** That is the whole reason the
+		// worlds sync separately — an author with five folders and one typo has
+		// to be told which folder, and a single "sync failed" would tell them
+		// nothing they could act on.
+		for (const RojoWorldSync &world : report.Worlds) {
+			if (!world.Synced) {
+				Say("  " + world.World + ": " + world.Error, engine::core::LogLevel::Error);
+				continue;
+			}
+
+			Say("  " + world.World + ": " + std::to_string(world.Report.Instances) + " instances, " +
+				std::to_string(world.Report.Scripts) + " scripts");
+
+			for (const std::string &missing : world.Report.Missing) {
+				Say("    no such path: " + missing, engine::core::LogLevel::Warning);
+			}
+
+			// Capped per world for the reason the project sync caps its own: a
+			// project with a thousand unrecognised files is a thousand lines
+			// nobody reads, and the count still says how many there were.
+			size_t shown = 0;
+			for (const std::string &note : world.Report.Notes) {
+				if (shown++ >= 4) {
+					Say("    ... and " + std::to_string(world.Report.Notes.size() - 4) + " more notes");
+					break;
+				}
+				Say("    " + note);
+			}
+		}
+
+		if (!built) {
+			Say("sync failed: " + error, engine::core::LogLevel::Error);
+			return;
+		}
+
+		Say("synced " + std::to_string(report.Synced()) + " of " +
+			std::to_string(report.Worlds.size()) + " world(s) from " + universe.filename().string());
+
+		// The active world may have been the only one, or there may not have
+		// been one at all before this ran.
+		if (!Active.IsValid() && !Universe->Worlds().empty()) {
+			Active = Universe->Worlds().front();
+			SelectionWorld = Active;
+		}
+
+		Modified = true;
+		for (const WorldId id : Universe->Worlds()) {
+			Touch(id);
+		}
+	}
+
 	bool Editor::SaveGame(const std::filesystem::path &path) {
 		// **Unsaved script buffers are flushed into their worlds first.**
 		// Otherwise the file on disk is the game minus whatever is currently
@@ -1568,6 +1664,12 @@ namespace studio {
 
 		GamePath = path;
 		Modified = false;
+
+		// A Save As is how a game gets its real name, so the list has to follow
+		// it — otherwise the menu would go on offering the scratch file it was
+		// saved from.
+		Recent.Remember(path);
+
 		Say("saved " + path.string());
 		return true;
 	}

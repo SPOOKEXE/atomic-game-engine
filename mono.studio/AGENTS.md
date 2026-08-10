@@ -290,3 +290,76 @@ that provokes the fault on purpose with imgui's assert switched off, so the
 detector is known to work rather than merely known to pass. **Reach for that
 harness before extracting a free function**: a panel's imgui behaviour is now
 testable, and moving logic out to avoid testing it is no longer the only option.
+
+## Configuration lives in the person's folder, not beside the binary
+
+`studio-layout.ini`, `studio-content.ini` and `studio-keybinds.ini` used to sit
+in `Paths::Base()`, which is `.cache/build/<preset>/` for anybody working on the
+engine. Every `just build` against another preset therefore read as a fresh
+install, and deleting the build directory threw away somebody's keybinds and
+their origin list.
+
+`studio/Config.hpp` is the one place that decides where these go —
+`~/Documents/atomic-game-engine/studio`, beside the content store that already
+lives there. Three conventions the build cannot check:
+
+- **Every document goes through `ReadConfigDocument`/`WriteConfigDocument`.** A
+  second path that spelled its own filename would be a second place to change
+  when the folder moves, and the first one to be forgotten.
+- **A flag beats a preference and is never written back.** `Options` is what
+  somebody asked for on one run and `Preferences` is what they configured;
+  `app/main.cpp` reconciles the two because it is the only code that can tell a
+  flag that was given from one left at its default. `--headless` once must not
+  make an editor headless for ever.
+- **A missing file is not an error.** Every `Load` answers `false` and leaves
+  the caller's defaults alone, so nothing has to tell "not configured yet" from
+  "configured to the default".
+
+## A locked part is left out of the pick, not filtered out of the hit
+
+`scene::Visual::Locked` is authoring data — it survives a save, which an
+editor-side set of "instances I am ignoring" could not. What the editor does
+with it is the part that is easy to get subtly wrong: `PickInViewport` omits a
+locked entity from the proxy list **before** the raycast.
+
+Filtering the *hit* afterwards passes every simple test and is wrong: the locked
+proxy still swallows the ray, so a locked wall makes everything behind it
+unclickable too — which is the opposite of what locking a wall is for.
+`studio.tools` has the case, and it is the one that needs something *behind* the
+locked thing to fail at all.
+
+## A plugin is a script, and the editor is not in its vocabulary
+
+`studio::PluginHost` runs a plugin as an ordinary `script::Runtime` against the
+world an author is editing. That is the whole design: the engine already has a
+sandbox, a step budget, a memory ceiling and two languages, and a second
+scripting model for tools would be two of each to keep safe.
+
+Four rules the build cannot check:
+
+- **One runtime each.** Two plugins sharing one would share a global table, a
+  step budget and a memory ceiling — a plugin that looped would stop the others
+  and a plugin that set a global would be read by them. `studio.plugins` asserts
+  the second by putting the check inside the plugin that runs second.
+- **One failure each.** A plugin that will not start, or that raises on
+  `PLUGIN_FAULT_LIMIT` consecutive beats, is switched off with its reason kept
+  and the rest keep running. The limit exists because the failure is per frame:
+  a plugin whose heartbeat raises does it again next frame and every frame
+  after.
+- **The selection is a component, not a call.** `studio.Selected` is published
+  into the world, so a plugin, a C++ system and the properties panel are three
+  readers of one fact — `ecs/AGENTS.md` rule 2, applied to the editor's own
+  state. `PublishSelection` writes **only when the selection changed**, and that
+  is load-bearing rather than tidy: a tag written every frame moves
+  `Store::ChangeVersion` every frame, and `physics::SyncBroadphase` reads that
+  counter to decide whether static geometry moved. Publishing unconditionally
+  rebuilds the static index every tick, forever.
+- **Plugins are reloaded whenever the active world is replaced.** Every plugin
+  holds a `Store &` from the universe, so carrying them across an `OpenGame` is
+  a reference into storage that has gone.
+
+There is deliberately **no toolbar or editor-command API**, and the absence is
+stated in `studio/Plugins.hpp` rather than left to be discovered. `D00105`
+carries what adding one would take, and the obstacle is `script/AGENTS.md`'s
+first rule rather than an opinion.
+

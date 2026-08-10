@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <imgui.h>
 #include <string>
+#include <imgui_internal.h>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 
@@ -222,9 +223,23 @@ namespace studio {
 						// nothing and why it goes soft a long way from 1.
 						ImGui::SetWindowFontScale(ScriptZoom);
 
+						// **The gutter, and it is a sibling of the code rather
+						// than part of it.** `CodeField` is an
+						// `InputTextMultiline`, which owns its own scrolling
+						// child — so a breakpoint column has to be drawn beside
+						// it and told where that child has scrolled to.
+						//
+						// See `DrawScriptGutter` for why reading one window's
+						// scroll is a different kind of reach into imgui from
+						// the one this file refuses two hundred lines up.
+						const float gutter = DrawScriptGutter(tab);
+
+						ImGui::SameLine(0.0f, 0.0f);
+
 						if (CodeField("##text", tab.Text, -1.0f, -1.0f)) {
 							tab.Modified = true;
 						}
+						(void)gutter;
 
 						// **Restored before the panel ends.** The scale is a
 						// property of the window rather than of the widget, so
@@ -273,6 +288,167 @@ namespace studio {
 				SaveScriptTab(Scripts[closing]);
 			}
 			CloseScriptTab(closing);
+		}
+	}
+
+	float Editor::DrawScriptGutter(const OpenScript &tab) {
+		// **One column of line numbers, and a click on one toggles a
+		// breakpoint.** That is where every editor puts it, and it is the
+		// difference between a debugger somebody uses and one they read about:
+		// typing a path and a line number into a panel is a thing you do once to
+		// see if it works.
+		const ImVec2 area = ImGui::GetContentRegionAvail();
+		const float rowHeight = ImGui::GetTextLineHeight();
+
+		// Wide enough for the largest line number this file has, plus room for
+		// the dot. Measured rather than guessed, so a four-thousand-line script
+		// does not push its numbers into the code.
+		size_t lines = 1;
+		for (const char character : tab.Text) {
+			lines += character == '\n' ? 1 : 0;
+		}
+
+		const std::string widest = std::to_string(lines);
+		const float width = ImGui::CalcTextSize(widest.c_str()).x + rowHeight + 8.0f;
+
+		ImGui::BeginChild("##gutter", ImVec2(width, area.y), false, ImGuiWindowFlags_NoScrollbar);
+
+		// **The code field's own scroll, read from the window it made.**
+		//
+		// This is `imgui_internal.h`, and it is worth saying why it is allowed
+		// here when this file refuses `ImGuiInputTextState` a couple of hundred
+		// lines up. That struct is a private *layout* — its fields move between
+		// releases and reading one is reading whatever happens to be at an
+		// offset. A window's `Scroll` is the same value `GetScrollY` returns for
+		// the current window in public API; what is internal is only *looking
+		// one up by name*, and a name imgui derives from a label it was given.
+		//
+		// The failure mode is also benign in a way the other is not: a lookup
+		// that stops working answers null, and the gutter draws from the top
+		// rather than misreading memory.
+		float scroll = 0.0f;
+		if (const ImGuiWindow *code = ImGui::FindWindowByName("##text"); code != nullptr) {
+			scroll = code->Scroll.y;
+		}
+
+		const ImVec2 origin = ImGui::GetCursorScreenPos();
+		ImDrawList *draw = ImGui::GetWindowDrawList();
+
+		// Whether this script could carry one at all. Read once rather than per
+		// row, because it is a property of the file.
+		const bool breakable = engine::script::BreakpointsRefused(tab.Path.Text()).empty();
+
+		// Only the rows on screen. A script of ten thousand lines would
+		// otherwise cost ten thousand hit-tests a frame to draw forty of them.
+		const auto first = static_cast<size_t>(std::max(0.0f, scroll) / rowHeight);
+		const auto visible = static_cast<size_t>(area.y / rowHeight) + 2;
+
+		for (size_t row = first; row < std::min(lines, first + visible); row++) {
+			const auto line = static_cast<int>(row) + 1;
+			const float y = origin.y + (static_cast<float>(row) * rowHeight) - scroll;
+
+			// **An invisible button per row rather than one hit-test over the
+			// column**, so imgui owns the hover and the click and this does not
+			// have to reimplement either.
+			ImGui::SetCursorScreenPos(ImVec2(origin.x, y));
+			ImGui::PushID(line);
+
+			const bool pressed = ImGui::InvisibleButton("##row", ImVec2(width, rowHeight));
+			const bool hovered = ImGui::IsItemHovered();
+
+			ImGui::PopID();
+
+			const engine::script::Breakpoint *point = BreakpointAt(tab.Path, line);
+
+			if (pressed) {
+				ToggleBreakpoint(tab.Path, line);
+			}
+
+			if (point != nullptr) {
+				// Filled when it is armed and hollow when it is not, which is
+				// what every editor draws and what makes "switched off" visible
+				// rather than absent.
+				const ImVec2 centre(origin.x + (rowHeight * 0.5f), y + (rowHeight * 0.5f));
+				const ImU32 colour =
+					point->Action == engine::script::BreakAction::Stop
+						? IM_COL32(220, 90, 90, 255)
+						: IM_COL32(220, 160, 60, 255);
+
+				if (point->Enabled) {
+					draw->AddCircleFilled(centre, rowHeight * 0.32f, colour);
+				} else {
+					draw->AddCircle(centre, rowHeight * 0.32f, colour, 0, 1.5f);
+				}
+			} else if (hovered && breakable) {
+				// A hollow mark under the cursor, so the column reads as
+				// clickable before anything has been clicked — and not offered
+				// at all on a script no breakpoint could fire in, because an
+				// affordance that refuses when used is worse than none.
+				const ImVec2 centre(origin.x + (rowHeight * 0.5f), y + (rowHeight * 0.5f));
+				draw->AddCircle(centre, rowHeight * 0.32f, engine::ui::MutedColour(), 0, 1.0f);
+			}
+
+			const std::string label = std::to_string(line);
+			const float text = ImGui::CalcTextSize(label.c_str()).x;
+
+			draw->AddText(
+				ImVec2(origin.x + width - text - 4.0f, y),
+				engine::ui::MutedColour(),
+				label.c_str()
+			);
+		}
+
+		ImGui::EndChild();
+		return width;
+	}
+
+	const engine::script::Breakpoint *Editor::BreakpointAt(engine::core::Name path, int line) const {
+		for (const engine::script::Breakpoint &point : Breakpoints.Breakpoints()) {
+			if (point.Line == line && point.Source == path.Text()) {
+				return &point;
+			}
+		}
+		return nullptr;
+	}
+
+	void Editor::ToggleBreakpoint(engine::core::Name path, int line) {
+		const std::string source(path.Text());
+
+		// **The editor's list is the one that survives a Stop**, and a runtime's
+		// is a copy it was handed at `BeginRun` — so both are written, in that
+		// order. Writing only the live ones would make a breakpoint disappear
+		// the next time somebody pressed Stop.
+		if (BreakpointAt(path, line) != nullptr) {
+			Breakpoints.Remove(source, line);
+
+			for (WorldRun &run : Runs) {
+				if (run.Runtime != nullptr) {
+					run.Runtime->Debug().Remove(source, line);
+				}
+			}
+			return;
+		}
+
+		// **Said once, where they clicked.** A gutter dot that appeared and never
+		// fired would read as the debugger being broken rather than as the
+		// language not being supported, and those are not the same thing to go
+		// and fix.
+		if (const std::string_view refused = engine::script::BreakpointsRefused(source);
+			!refused.empty()) {
+			Say("cannot break in " + source + ": " + std::string(refused),
+				engine::core::LogLevel::Warning);
+			return;
+		}
+
+		const engine::script::BreakAction action =
+			BreakStops ? engine::script::BreakAction::Stop : engine::script::BreakAction::Capture;
+
+		Breakpoints.Add(source, line, action);
+
+		for (WorldRun &run : Runs) {
+			if (run.Runtime != nullptr) {
+				run.Runtime->Debug().Add(source, line, action);
+			}
 		}
 	}
 }

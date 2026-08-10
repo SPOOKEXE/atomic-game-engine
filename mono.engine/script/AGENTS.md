@@ -100,6 +100,118 @@ Do not make this "work" by resuming on the next tick. That is the design
 decision v0.6 has to take deliberately, and a convenient default taken here is
 how it would get taken by accident.
 
+## The ECS surface names the storage, and refuses to name it twice
+
+`World` and the component methods on every instance are the same store the class
+tree sits on, reached without a class. Two refusals in it are the design rather
+than gaps to fill in later:
+
+- **A component the engine declared is not readable or writable through
+  `GetComponent`/`SetComponent`.** A C++ struct has no field list at run time,
+  so there is nothing to marshal a table from — and it already has a property
+  surface. Adding a byte-level path to `scene::Visual` would be two ways to
+  write one component, which the root `AGENTS.md` calls the most expensive kind
+  of debt. `HasComponent` answers for any component, because asking is not
+  reaching.
+- **A query naming a component nothing declared is an error, not an empty
+  result.** A typo would otherwise be a loop that never runs, and a loop that
+  never runs reads exactly like a world with nothing in it.
+
+`World:CreateEntity` makes a **bare** entity: no class, no place in the tree,
+nothing drawn. It is still an `Instance` on the script side because an instance
+*is* an entity, and reading `.Name` on one fails the way any missing member
+does. That is not a wart to smooth over — it is the model stated in the section
+above, and a handle that pretended to have a class would be the scripting-only
+view this module does not have.
+
+## A host adds names, and it does it through one seam
+
+`script::HostSurface` is how a *program* offers a script something the engine
+does not — a toolbar, a docked panel, the source of another script. The editor
+adds `CreateDockWidget` and nothing in this module changes, which is the whole
+point of the shape.
+
+Four rules a reviewer should hold to:
+
+- **`HostValue` is not `ScriptValue` widened, and merging them is the change to
+  refuse.** `ScriptValue` is what crosses a *world boundary*, where rule 3 says
+  everything is a copy and a handle means nothing; `HostValue` carries an
+  `Instance` precisely because a host call is inside one process against one
+  store. Adding an instance tag to the first would make the wrong thing
+  expressible on a bus.
+- **The global is built from `Names()`, not answered by an `__index`.** A name
+  the host does not list is not a member, so a typo is "attempt to call a nil
+  value" at the call site rather than a refusal from inside a program the author
+  cannot see.
+- **The globals are unfrozen for exactly one assignment.** `SetHost` runs after
+  `luaL_sandbox`, so the table is readonly and a plain `lua_setglobal` throws.
+  The host table is frozen too — a plugin replacing one of its own host
+  functions would be replacing it for every later chunk in that VM.
+- **`ReadHostValue` grows the stack before it recurses.** A C function is
+  guaranteed `LUA_MINSTACK` slots and a map traversal holds a key and a value
+  per level; overrunning it is a `LUAU_ASSERT`, so the symptom was an illegal
+  instruction from a script that merely nested a table.
+
+**A refusal is a message and never an abort.** `Call` answers `false` with a
+reason and the script sees an ordinary error, because a host that aborted would
+take the program down with a plugin's typo.
+
+**An empty Luau table crosses as an `Array`, not a `Map`.** `{}` is one value
+and the reader has to pick a tag; a host expecting a map finds no entries under
+either, where a host expecting a *list* gets a tag it refuses. The ambiguity is
+harmless in one direction and not in the other, and `Selection:Set({})` — how a
+plugin deselects everything — is the call that was refused before.
+
+**A dotted host name is a service, and `GetService` needed nothing added to
+it.** `Selection.Get` becomes a global table with a `Get` method, and
+`game:GetService` already resolves a service by looking up a global of the same
+name — the property `RunService` has had since v0.6 and whose comment gives the
+reason: two objects for one service is two things to keep in step. Both call
+forms work, and the binding drops the leading `self` only when it is *that
+service's own* table, so `Selection:Set({part})` does not lose its argument.
+
+## The debugger captures, and `BreakpointService` is the same object
+
+`Debugger.hpp` carries the argument for why a breakpoint records rather than
+pauses; two rules about the surface around it are this file's:
+
+- **`BreakpointService` writes the runtime's own `Debugger` and never a second
+  list.** The editor's panel writes `Runtime::Debug()` directly and a script
+  writes the service; a service that kept breakpoints of its own would be two
+  things to keep in step and a breakpoint that fired in one place and not the
+  other.
+- **It is installed only when `RuntimeLimits::Role::Studio` is set, and it is
+  absent rather than refusing.** Arming a breakpoint switches Luau's step mode
+  on and costs the whole runtime its speed, which a shipped server has no
+  business letting a game script decide — and a service that existed and
+  answered "not in a game" to everything is a surface somebody writes against
+  and then finds does nothing where it matters.
+
+**Locals and upvalues are captured as two lists and must stay two.** A local is
+a value the frame made and an upvalue is one it captured from an enclosing
+scope; merging them answers "what is in scope" and loses "where did it come
+from", which is the question an upvalue is looked at to answer. A Luau main
+chunk closes over nothing — Lua 5.2's `_ENV` upvalue is not Luau's model — so an
+empty upvalue list is the ordinary state of a top-level frame and the panel says
+so rather than only drawing "none".
+
+**Only Luau has breakpoints, and a chunk that cannot carry one is refused where
+somebody asks for it.** `Debugger::Add` answers `false` for a `.js`, `.mjs`,
+`.cjs`, `.ts` or `.tsx` chunk, so a dead breakpoint cannot reach the list
+through any path — the service, the editor's gutter, the panel, or `Adopt`
+copying a list somebody else built. `BreakpointsRefused` is the one function
+that decides, and every caller uses it for the message rather than writing its
+own.
+
+A breakpoint that sits in the list looking armed and never fires reads as the
+debugger being broken rather than as the language not being supported, and those
+are different things to go and fix. `D00106` carries what closing the gap would
+take; the refusal names it.
+
+**A chunk name with no extension is allowed**, because `Runtime::Run(source,
+"probe")` names one that way and it is always Luau — refusing it would refuse
+the form every test and every in-editor evaluation uses.
+
 ## One runtime, one world
 
 The `Store` is an upvalue on every bound function rather than a global, so two

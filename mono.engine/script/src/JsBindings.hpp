@@ -43,6 +43,7 @@
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 
 #include <quickjs.h>
@@ -154,6 +155,31 @@ namespace engine::script {
 	core::NumberRange *AsNumberRange(JSContext *context, JSValueConst value);
 	core::NumberSequence *AsNumberSequence(JSContext *context, JSValueConst value);
 	core::ColorSequence *AsColorSequence(JSContext *context, JSValueConst value);
+
+	// Marshalling one value of one `PropertyType`, both ways.
+	//
+	// **The type and the enum name, never a descriptor**, because the second
+	// caller has none: an ECS component field carries exactly these values and is
+	// not a property. One switch per language rather than two per language that
+	// agree until somebody edits one.
+	//
+	// `PropertyType::String` is refused by both, and the refusal is the design —
+	// `bytes` is uninitialised storage and a `std::string` cannot be assigned into
+	// it, so every caller takes strings down a path of its own.
+	//
+	// @since v0.12
+	JSValue ToJsValue(JSContext *context, ecs::PropertyType type, core::Name enumName, const void *bytes);
+	bool FromJsValue(
+		JSContext *context, JSValueConst value, ecs::PropertyType type, core::Name enumName, void *out
+	);
+
+	// Installs `World`, and the component methods every instance object gains.
+	//
+	// The JavaScript twin of `OpenEcs`. Called after `InstallJsInstanceMethods`,
+	// whose `__instanceMethods` object this adds to.
+	//
+	// @since v0.12
+	void InstallJsEcs(JSContext *context, JSValueConst global);
 
 	// One instance object for an entity, prototype and all.
 	JSValue MakeJsInstance(JSContext *context, ecs::Entity instance);

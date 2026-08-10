@@ -680,6 +680,11 @@ declare interface Instance {
 	SetAttribute(name: string, value: EngineAttribute | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };
 	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
+	SetComponent(component: string, values: { [field: string]: any }): void;
+	GetComponent(component: string): { [field: string]: any } | null;
+	HasComponent(component: string): boolean;
+	RemoveComponent(component: string): void;
+	GetComponents(): string[];
 	readonly Activated: GuiSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
@@ -703,6 +708,7 @@ declare interface BasePart extends PVInstance {
 	CastShadow: boolean;
 	CollisionGroup: string;
 	Color: Color3;
+	Locked: boolean;
 	Size: Vector3;
 	Transparency: number;
 	Visible: boolean;
@@ -776,6 +782,16 @@ declare interface SpotLight extends Light {
 }
 
 declare interface SurfaceLight extends Light {
+}
+
+declare interface ValueBase extends Instance {
+	Value: string;
+}
+
+declare interface StringValue extends ValueBase {
+}
+
+declare interface LocalizationTable extends ValueBase {
 }
 
 declare interface LuaSourceContainer extends Instance {
@@ -1259,6 +1275,34 @@ declare const RunService: RunService;
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
 
+// The storage underneath the class tree. See the Luau half for the whole
+// argument; the only difference here is that there is no colon call, so the
+// world object is not an argument.
+interface EngineWorld {
+	// Declares a component, or agrees with one already declared with exactly
+	// these fields. Returns whether this call created it.
+	DefineComponent(component: string, fields: { [field: string]: string }): boolean;
+
+	HasComponentType(component: string): boolean;
+
+	// The field list a component was declared with, in a shape
+	// `DefineComponent` accepts back.
+	GetComponentSchema(component: string): { [field: string]: string } | null;
+
+	// An entity carrying nothing: no class, no place in the tree, nothing drawn.
+	// Still an `Instance`, because an instance is an entity.
+	CreateEntity(name?: string): Instance;
+
+	// Every entity carrying all of the named components, in a deterministic
+	// order. Naming a component nothing declared is an error rather than an
+	// empty result.
+	Query(...components: string[]): Instance[];
+
+	Count(...components: string[]): number;
+}
+
+declare const World: EngineWorld;
+
 // An alias for `null`, because this is a Roblox-shaped API and a Roblox author
 // writes `part.Parent = nil`. A third empty value would be a footgun wearing a
 // familiar name, so it is not one.
@@ -1315,6 +1359,9 @@ declare const Instance: {
 		(className: "PointLight", parent?: Instance): PointLight;
 		(className: "SpotLight", parent?: Instance): SpotLight;
 		(className: "SurfaceLight", parent?: Instance): SurfaceLight;
+		(className: "ValueBase", parent?: Instance): ValueBase;
+		(className: "StringValue", parent?: Instance): StringValue;
+		(className: "LocalizationTable", parent?: Instance): LocalizationTable;
 		(className: "LuaSourceContainer", parent?: Instance): LuaSourceContainer;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;

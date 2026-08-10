@@ -2,6 +2,8 @@
 
 #include <engine/spatial/HashGrid.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 namespace engine::spatial {
@@ -173,5 +175,63 @@ namespace engine::spatial {
 				}
 			);
 		}
+	}
+
+	void HashGrid::SetCellSize(float cellSize) {
+		const float resolved = cellSize > 0.0f ? cellSize : DEFAULT_CELL_SIZE;
+		if (resolved == Spacing) {
+			// **Nothing dropped when nothing changed.** The caller asks every
+			// time the set changes and the answer is usually the same one, so a
+			// version that cleared unconditionally would throw away an index
+			// that was about to be rebuilt identically.
+			return;
+		}
+
+		Spacing = resolved;
+		InverseSpacing = 1.0f / resolved;
+
+		// Every entry records the cell a proxy was binned into, and those
+		// coordinates are a function of the spacing. Keeping them would answer
+		// queries against cells that no longer exist.
+		Clear();
+	}
+
+	float SuggestCellSize(std::span<const Proxy> proxies) {
+		if (proxies.empty()) {
+			return HashGrid::DEFAULT_CELL_SIZE;
+		}
+
+		// **The mean of the widest axis, not of the volume.** A cell has to hold
+		// a proxy along whichever direction it is longest, so a long thin wall
+		// is a wall-sized object for this purpose even though its volume is
+		// small.
+		//
+		// In `double`, because the sum is over every collider in the world and a
+		// float accumulator loses the small ones once the running total is large
+		// — which is the case a world of debris around one baseplate produces.
+		double total = 0.0;
+		for (const Proxy &proxy : proxies) {
+			const core::Vector3 size = proxy.Bounds.Size();
+			total += static_cast<double>(std::max({size.X, size.Y, size.Z}));
+		}
+
+		const auto mean = static_cast<float>(total / static_cast<double>(proxies.size()));
+
+		// A world of degenerate boxes, or one whose bounds are not finite. The
+		// default is the honest answer rather than a number derived from a NaN.
+		if (!(mean > 0.0f)) {
+			return HashGrid::DEFAULT_CELL_SIZE;
+		}
+
+		// Twice the mean is the rule of thumb `DEFAULT_CELL_SIZE` records, then
+		// rounded to a power of two — see the header for why the rounding is the
+		// hysteresis rather than a tidiness measure.
+		const float wanted =
+			std::clamp(mean * 2.0f, HashGrid::MINIMUM_CELL_SIZE, HashGrid::MAXIMUM_CELL_SIZE);
+
+		// `exp2(round(log2(x)))` rather than a loop, so a world of buildings
+		// costs the same as a world of pebbles.
+		const float quantised = std::exp2(std::round(std::log2(wanted)));
+		return std::clamp(quantised, HashGrid::MINIMUM_CELL_SIZE, HashGrid::MAXIMUM_CELL_SIZE);
 	}
 }

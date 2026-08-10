@@ -57,20 +57,40 @@ namespace studio {
 			// the live runtimes would make a breakpoint disappear the next time
 			// somebody pressed Stop, which is the behaviour this arrangement
 			// exists to prevent.
-			const BreakAction action = BreakStops ? BreakAction::Stop : BreakAction::Capture;
-			Breakpoints.Add(BreakSource, BreakLine, action);
+			// **The same refusal the gutter gives, from the same function.** A
+			// panel that accepted what a gutter click refused would be two
+			// answers to one question.
+			const std::string_view refused = engine::script::BreakpointsRefused(BreakSource);
 
-			// Every running world, because a breakpoint is a thing about a
-			// *script* and the same script may be running in several — asking
-			// which one somebody meant would be a question with no answer they
-			// could give.
-			for (WorldRun &run : Runs) {
-				if (run.Runtime != nullptr) {
-					run.Runtime->Debug().Add(BreakSource, BreakLine, action);
+			if (!refused.empty()) {
+				Say("cannot break in " + BreakSource + ": " + std::string(refused),
+					engine::core::LogLevel::Warning);
+			} else {
+				const BreakAction action = BreakStops ? BreakAction::Stop : BreakAction::Capture;
+				Breakpoints.Add(BreakSource, BreakLine, action);
+
+				// Every running world, because a breakpoint is a thing about a
+				// *script* and the same script may be running in several —
+				// asking which one somebody meant would be a question with no
+				// answer they could give.
+				for (WorldRun &run : Runs) {
+					if (run.Runtime != nullptr) {
+						run.Runtime->Debug().Add(BreakSource, BreakLine, action);
+					}
 				}
 			}
 		}
 		ImGui::EndDisabled();
+
+		// **Said before the button is pressed as well as after.** Somebody who
+		// has typed a `.ts` path should be told it cannot carry a breakpoint
+		// while they are looking at the field, not once they have given up.
+		if (const std::string_view refused = engine::script::BreakpointsRefused(BreakSource);
+			!refused.empty()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped("%s", std::string(refused).c_str());
+			ImGui::PopStyleColor();
+		}
 
 		ImGui::SameLine();
 		ImGui::Checkbox("stop", &BreakStops);
@@ -206,13 +226,25 @@ namespace studio {
 			} else {
 				if (ImGui::SmallButton("Clear caught")) {
 					debug.ClearHits();
+					SelectedHit = 0;
+					SelectedFrame = 0;
 				}
+
+				const std::span<const DebugHit> hits = debug.Hits();
+
+				// **A list beside a detail view rather than a tree of trees.**
+				// The old shape put every frame of every hit inside nested
+				// nodes, so reading one local meant opening three things and
+				// the panel was mostly disclosure triangles. A capture has two
+				// axes — which hit, and which frame of it — and two lists is
+				// what that is.
+				const float side = 220.0f * Settings.Scale;
+				ImGui::BeginChild("##hits", ImVec2(side, 180.0f * Settings.Scale), true);
 
 				// **Newest first.** The log keeps the most recent hits and drops
 				// the oldest, so somebody watching a loop is reading the end of
 				// it — and making them scroll there every time would be an
 				// interface arguing with its own data.
-				const std::span<const DebugHit> hits = debug.Hits();
 				for (size_t index = hits.size(); index-- > 0;) {
 					const DebugHit &hit = hits[index];
 
@@ -221,38 +253,128 @@ namespace studio {
 						label, sizeof(label), "%s:%d###hit%zu", hit.Source.c_str(), hit.Line, index
 					);
 
-					if (!ImGui::TreeNode(label)) {
-						continue;
+					const bool chosen = SelectedWorld == run.World.Index && SelectedHit == index;
+					if (ImGui::Selectable(label, chosen)) {
+						SelectedWorld = run.World.Index;
+						SelectedHit = index;
+
+						// **The innermost frame, which is where the breakpoint
+						// was.** Keeping the previous frame index would point
+						// somewhere arbitrary in a stack of a different depth.
+						SelectedFrame = 0;
 					}
-
-					for (const DebugFrame &frame : hit.Frames) {
-						ImGui::TextDisabled(
-							"%s:%d %s",
-							frame.Source.c_str(),
-							frame.Line,
-							frame.Function.empty() ? "(chunk)" : frame.Function.c_str()
-						);
-
-						if (frame.Locals.empty()) {
-							continue;
-						}
-
-						ImGui::Indent();
-						for (const DebugLocal &local : frame.Locals) {
-							ImGui::Text("%s", local.Name.c_str());
-							ImGui::SameLine();
-							ImGui::TextDisabled("= %s", local.Value.c_str());
-						}
-						ImGui::Unindent();
-					}
-
-					ImGui::TreePop();
 				}
+				ImGui::EndChild();
+
+				ImGui::SameLine();
+				ImGui::BeginChild("##frames", ImVec2(0.0f, 180.0f * Settings.Scale), true);
+
+				const bool showing = SelectedWorld == run.World.Index && SelectedHit < hits.size();
+				if (!showing) {
+					ImGui::TextDisabled("pick a capture");
+				} else {
+					const DebugHit &hit = hits[SelectedHit];
+
+					if (hit.Instance != engine::ecs::NULL_ENTITY) {
+						// Which script was running, when the runtime knew — a
+						// path alone does not say which of two instances
+						// sharing a module was the one that got here.
+						ImGui::TextDisabled("script #%llu", static_cast<unsigned long long>(hit.Instance.Id));
+					}
+
+					if (ImGui::BeginTabBar("##capture")) {
+						if (ImGui::BeginTabItem("Call Stack")) {
+							// Innermost first, which is the order a stack is
+							// read in and the order the capture walked it.
+							for (size_t at = 0; at < hit.Frames.size(); at++) {
+								const DebugFrame &frame = hit.Frames[at];
+
+								char row[224];
+								std::snprintf(
+									row,
+									sizeof(row),
+									"%zu  %s  %s:%d###frame%zu",
+									at,
+									frame.Function.empty() ? "(chunk)" : frame.Function.c_str(),
+									frame.Source.c_str(),
+									frame.Line,
+									at
+								);
+
+								if (ImGui::Selectable(row, SelectedFrame == at)) {
+									SelectedFrame = at;
+								}
+							}
+							ImGui::EndTabItem();
+						}
+
+						const DebugFrame *frame =
+							SelectedFrame < hit.Frames.size() ? &hit.Frames[SelectedFrame] : nullptr;
+
+						// **Locals and upvalues are two tabs, not one list.** A
+						// local is a value this frame made and an upvalue is one
+						// it captured from an enclosing scope — so "why did this
+						// change when nothing here touched it" is a question
+						// only the second answers, and merging them loses it.
+						if (ImGui::BeginTabItem("Locals")) {
+							DrawDebugValues(frame == nullptr ? nullptr : &frame->Locals, "no locals");
+							ImGui::EndTabItem();
+						}
+						if (ImGui::BeginTabItem("Upvalues")) {
+							DrawDebugValues(
+								frame == nullptr ? nullptr : &frame->Upvalues,
+								"nothing captured — a chunk's own frame closes over nothing in Luau"
+							);
+							ImGui::EndTabItem();
+						}
+
+						ImGui::EndTabBar();
+					}
+				}
+				ImGui::EndChild();
 			}
 
 			ImGui::PopID();
 		}
 
 		ImGui::End();
+	}
+
+	void Editor::DrawDebugValues(const std::vector<DebugLocal> *values, const char *empty) {
+		if (values == nullptr) {
+			ImGui::TextDisabled("pick a frame");
+			return;
+		}
+		if (values->empty()) {
+			// **The reason, not just the absence.** An empty upvalue list is the
+			// ordinary state of a chunk's own frame in Luau, and a panel that
+			// only said "none" would read as the capture having failed.
+			ImGui::TextDisabled("%s", empty);
+			return;
+		}
+
+		if (!ImGui::BeginTable("##values", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+			return;
+		}
+
+		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 140.0f * Settings.Scale);
+		ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupScrollFreeze(0, 1);
+		ImGui::TableHeadersRow();
+
+		for (const DebugLocal &value : *values) {
+			ImGui::TableNextRow();
+
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(value.Name.c_str());
+
+			ImGui::TableNextColumn();
+
+			// Wrapped rather than truncated: a rendered table or a long string
+			// is exactly the value somebody opened this panel to read.
+			ImGui::TextWrapped("%s", value.Value.c_str());
+		}
+
+		ImGui::EndTable();
 	}
 }

@@ -278,6 +278,45 @@ highest generation it ever issued — for as long as the directory exists, and a
 recreated page starts every slot there. Do not remove it to save four bytes a
 page: it makes the revival impossible by construction rather than by care.
 
+## A described component is a component, and the layout is not the caller's
+
+`Schemas::Register` builds a `TypeDescriptor` from a field list instead of from
+a `T`, so a game can declare `Health` in a script and have it be a real
+component — the same dense id, the same column, iterated by a C++ system that
+never heard of the script. Three things about it are conventions the build
+cannot check:
+
+- **The layout is derived, and it has to stay derived.** Fields are sorted by
+  alignment descending and then by name, so two processes handed the same field
+  set lay it out identically. The caller is usually a script and a Luau table
+  iterates in hash order — a layout that followed declaration order would differ
+  between two runs of one file, and a snapshot written by one would not load in
+  the other. Do not add a "keep my order" option.
+- **Serialisation is field by field and must never become raw.** A `Name` field
+  holds a process-local id, which `core/Name.hpp` says never to serialize, so
+  the object representation `DescribeType` would have installed is exactly the
+  bug that header warns about. Padding is zeroed at construction instead, which
+  is the promise a derived layout can make in place of "there is no padding".
+- **`Schemas::Clear` must not run while a world holds rows.** A column reaches
+  its schema to destroy its own values, and clearing the table unpublishes the
+  pointer the generated hooks read. It exists for tests and for a host tearing
+  one universe down before building another.
+
+The number of described components is **capped**, because the six lifetime
+hooks are bare function pointers with nowhere to put a schema — one hook set is
+generated per slot at compile time. `Schema.cpp` carries the number, the
+measurements behind it and the argument for it; the refusal is
+`Status::Exhausted` rather than silence.
+
+**The hook bodies must stay out of line, and the macro that holds them there is
+load-bearing rather than tidy.** `Thunks<N>` is meant to be a trampoline — load
+the index, jump — and with the bodies inlinable the compiler put a copy of each
+`PropertyType` switch into every one of them: the same file compiled to 113 MB
+of object at 4096 slots. With `SCHEMA_OUT_OF_LINE` the table costs about 192
+bytes of `.text` a slot, which is what makes the cap a number somebody picked
+rather than a constraint. Removing the attribute would not fail a test; it
+would make the build slow and the binary large, so it is written down here.
+
 ## Not here yet
 
 `ComponentSet` and `ChangeChannel` were named in `repo_layout.md` §5.2 as things

@@ -16,6 +16,7 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Schema.hpp>
 
 #include <algorithm>
 #include <new>
@@ -77,32 +78,25 @@ namespace engine::control {
 		constexpr size_t WIDEST_PROPERTY =
 			std::max(sizeof(core::ColorSequence), sizeof(core::NumberSequence));
 
-		// One property, converted for a reader rather than for a wire.
+		// One value, converted for a reader rather than for a wire.
 		//
 		// A `Vector3` becomes three named numbers and not an array: the whole
 		// point of this surface is that somebody who has never seen the engine
 		// can read the reply, and `{"X":0,"Y":5,"Z":0}` needs no schema.
-		json ReadProperty(Store &store, ecs::Entity instance, const PropertyDescriptor &property) {
-			// **Before the shared buffer**, because a `PropertyType::String`
-			// getter assigns into its destination rather than filling bytes —
-			// and assigning a `std::string` into uninitialised storage is
-			// undefined behaviour. Both script bindings take the same exception
-			// in the same shape.
-			if (property.Type == PropertyType::String) {
-				std::string text;
-				if (!store.GetProperty(instance, property, &text, sizeof(text))) {
-					return nullptr;
-				}
-				return text;
-			}
+		//
+		// **The type and the bytes, never a descriptor**, which is what v0.12
+		// changed and why: an ECS component *field* carries exactly these values
+		// and is not a property, so a second switch for fields would be two
+		// tables that agree until somebody edits one. Both script bindings took
+		// the same split for the same reason.
+		//
+		// `PropertyType::String` is refused rather than handled, because the
+		// bytes it would read are a live `std::string` and the callers that have
+		// one take it down a path of their own.
+		json ValueToJson(PropertyType type, const void *raw) {
+			const auto *bytes = static_cast<const unsigned char *>(raw);
 
-			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
-			if (property.Size > sizeof(bytes) ||
-				!store.GetProperty(instance, property, bytes, property.Size)) {
-				return nullptr;
-			}
-
-			switch (property.Type) {
+			switch (type) {
 			case PropertyType::Bool:
 				return *reinterpret_cast<const bool *>(bytes);
 			case PropertyType::Int32:
@@ -203,6 +197,29 @@ namespace engine::control {
 			return nullptr;
 		}
 
+		// One property of one instance, read through its conversion.
+		json ReadProperty(Store &store, ecs::Entity instance, const PropertyDescriptor &property) {
+			// **Before the shared buffer**, because a `PropertyType::String`
+			// getter assigns into its destination rather than filling bytes —
+			// and assigning a `std::string` into uninitialised storage is
+			// undefined behaviour. Both script bindings take the same exception
+			// in the same shape.
+			if (property.Type == PropertyType::String) {
+				std::string text;
+				if (!store.GetProperty(instance, property, &text, sizeof(text))) {
+					return nullptr;
+				}
+				return text;
+			}
+
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
+			if (property.Size > sizeof(bytes) ||
+				!store.GetProperty(instance, property, bytes, property.Size)) {
+				return nullptr;
+			}
+			return ValueToJson(property.Type, bytes);
+		}
+
 		// Every property a class declares, its own and its bases'.
 		json ReadProperties(Store &store, ecs::Entity instance) {
 			json out = json::object();
@@ -264,6 +281,86 @@ namespace engine::control {
 			return node;
 		}
 
+		// --- the storage underneath ------------------------------------------
+		//
+		// **The class tree is one view of a world and the components are the
+		// other**, and a client that can only see the first cannot see anything
+		// a game declared for itself. v0.12 gave a script `World:DefineComponent`
+		// and a query over it; these are the same three questions asked over the
+		// wire — what components exist, who carries them, and what is in one.
+		//
+		// **Only described components are readable**, exactly as they are from a
+		// script. A C++ component has no field list at run time, so there is
+		// nothing to build an object from — and it already has a property
+		// surface, which `instance_get` answers.
+
+		// One described component's fields, as a name-to-type object.
+		json ReadSchema(const ecs::Schema &schema) {
+			json fields = json::object();
+			for (const ecs::FieldDescriptor &field : schema.Fields()) {
+				fields[std::string(field.Spelling)] = field.Type == PropertyType::Enum
+														  ? "Enum." + std::string(field.Enum.Text())
+														  : std::string(ecs::Describe(field.Type));
+			}
+			return fields;
+		}
+
+		// The described component a `component` argument names.
+		const ecs::Schema *SchemaArgument(const json &arguments, ecs::ComponentId &id, std::string &failure) {
+			if (!arguments.contains("component") || !arguments["component"].is_string()) {
+				failure = "which component? — call component_list";
+				return nullptr;
+			}
+
+			const std::string wanted = arguments["component"].get<std::string>();
+			id = ecs::Components::Find(core::Name(wanted.c_str()));
+
+			if (!id.IsValid()) {
+				failure = "no component called '" + wanted + "' — call component_list";
+				return nullptr;
+			}
+
+			const ecs::Schema *schema = ecs::Schemas::Of(id);
+			if (schema == nullptr) {
+				// Two different mistakes, told apart. "There is no such
+				// component" sends a reader looking for a typo, where the real
+				// answer is often "that one is reached through its properties".
+				failure = "'" + wanted +
+						  "' is a component the engine declares, so it has no readable fields — use "
+						  "instance_get on the instance that carries it";
+			}
+			return schema;
+		}
+
+		// The component ids a `components` array names.
+		bool
+		ComponentArgument(const json &arguments, std::vector<ecs::ComponentId> &out, std::string &failure) {
+			if (!arguments.contains("components") || !arguments["components"].is_array() ||
+				arguments["components"].empty()) {
+				failure = "name at least one component — call component_list";
+				return false;
+			}
+
+			for (const json &named : arguments["components"]) {
+				if (!named.is_string()) {
+					failure = "every component has to be named as a string";
+					return false;
+				}
+
+				const std::string wanted = named.get<std::string>();
+				const ecs::ComponentId id = ecs::Components::Find(core::Name(wanted.c_str()));
+				if (!id.IsValid()) {
+					// **Refused rather than answered with nothing.** A typo would
+					// otherwise be an empty result, which reads exactly like a
+					// world with nothing in it.
+					failure = "no component called '" + wanted + "'";
+					return false;
+				}
+				out.push_back(id);
+			}
+			return true;
+		}
+
 		// The `world` argument every tool shares.
 		//
 		// **Missing means the first one**, which is what a program with a single
@@ -295,42 +392,25 @@ namespace engine::control {
 			};
 		}
 
-		// Converts one JSON value into a property's storage and writes it.
-		bool WriteProperty(
-			Store &store,
-			ecs::Entity instance,
-			const PropertyDescriptor &property,
-			const json &value,
-			std::string &failure
-		) {
-			// The write half of the read path's exception — see `ReadProperty`.
-			if (property.Type == PropertyType::String) {
-				if (!value.is_string()) {
-					failure = "that property takes a string";
-					return false;
-				}
-
-				const std::string text = value.get<std::string>();
-				if (!store.SetProperty(instance, property, &text, sizeof(text))) {
-					failure = "the world refused the write — it may be running or a replica";
-					return false;
-				}
-				return true;
-			}
-
-			// Sized from the descriptor, exactly as the script bindings are, so
-			// this cannot be the place a size mismatch is introduced.
-			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
-			if (property.Size > sizeof(bytes)) {
-				failure = "property too large to write";
-				return false;
-			}
+		// Converts one JSON value into storage of that type.
+		//
+		// The write half of `ValueToJson`, split for the same reason and
+		// refusing `PropertyType::String` for the same one: its destination is a
+		// live `std::string` rather than bytes.
+		//
+		// @param type    What to read the value as.
+		// @param value   The JSON.
+		// @param raw     At least `Schemas::SizeOf(type)` bytes, zeroed.
+		// @param failure Filled when the value cannot be read as that type.
+		// @return `false` when it could not.
+		bool ValueFromJson(PropertyType type, const json &value, void *raw, std::string &failure) {
+			auto *bytes = static_cast<unsigned char *>(raw);
 
 			const auto number = [](const json &from, float fallback) {
 				return from.is_number() ? from.get<float>() : fallback;
 			};
 
-			switch (property.Type) {
+			switch (type) {
 			case PropertyType::Bool:
 				*reinterpret_cast<bool *>(bytes) = value.is_boolean() && value.get<bool>();
 				break;
@@ -488,7 +568,44 @@ namespace engine::control {
 			}
 			case PropertyType::Reference:
 			case PropertyType::Opaque:
-				failure = "that property cannot be written through this surface yet";
+				failure = "that value cannot be written through this surface yet";
+				return false;
+			}
+			return true;
+		}
+
+		// Converts one JSON value into a property's storage and writes it.
+		bool WriteProperty(
+			Store &store,
+			ecs::Entity instance,
+			const PropertyDescriptor &property,
+			const json &value,
+			std::string &failure
+		) {
+			// The write half of the read path's exception — see `ReadProperty`.
+			if (property.Type == PropertyType::String) {
+				if (!value.is_string()) {
+					failure = "that property takes a string";
+					return false;
+				}
+
+				const std::string text = value.get<std::string>();
+				if (!store.SetProperty(instance, property, &text, sizeof(text))) {
+					failure = "the world refused the write — it may be running or a replica";
+					return false;
+				}
+				return true;
+			}
+
+			// Sized from the descriptor, exactly as the script bindings are, so
+			// this cannot be the place a size mismatch is introduced.
+			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
+			if (property.Size > sizeof(bytes)) {
+				failure = "property too large to write";
+				return false;
+			}
+
+			if (!ValueFromJson(property.Type, value, bytes, failure)) {
 				return false;
 			}
 
@@ -705,6 +822,254 @@ namespace engine::control {
 						return nullptr;
 					}
 					return json{{"ok", true}};
+				},
+			});
+		}
+
+		// --- the storage underneath ------------------------------------------
+
+		Add(Tool{
+			"component_list",
+			"Every component a game declared for itself, with its fields and how many entities in a "
+			"scene carry it. A component is the storage under the class tree: an instance is an "
+			"entity and a class is a set of these. Components the engine declares are not listed "
+			"here — those are reached as properties, through instance_get.",
+			[] { return WorldSchema(); },
+			[worlds](const json &arguments, std::string &failure) -> json {
+				const WorldId world = WorldArgument(*worlds, arguments, failure);
+				if (!failure.empty()) {
+					return nullptr;
+				}
+
+				json out = json::array();
+				worlds->Enter(world, [&](Store &store) {
+					for (const ecs::ComponentId id : ecs::Schemas::All()) {
+						const ecs::Schema *schema = ecs::Schemas::Of(id);
+						if (schema == nullptr) {
+							continue;
+						}
+
+						const ecs::ComponentId terms[] = {id};
+						out.push_back(
+							json{
+								{"name", std::string(schema->Name().Text())},
+								{"fields", ReadSchema(*schema)},
+								{"entities", store.CountMatching(terms)},
+							}
+						);
+					}
+				});
+
+				return json{{"components", std::move(out)}};
+			},
+		});
+
+		Add(Tool{
+			"entity_query",
+			"Every entity in a scene carrying all of the named components. This is the query a "
+			"system runs, asked from outside: name the components and get the ids back, then read "
+			"one with component_get or instance_get.",
+			[] {
+				json schema = WorldSchema();
+				schema["properties"]["components"] = json{
+					{"type", "array"},
+					{"items", json{{"type", "string"}}},
+					{"description", "Every one an entity must carry. Call component_list first."},
+				};
+				schema["properties"]["limit"] =
+					json{{"type", "integer"}, {"description", "Ids at most. Default 200."}};
+				schema["required"] = json::array({"components"});
+				return schema;
+			},
+			[worlds](const json &arguments, std::string &failure) -> json {
+				const WorldId world = WorldArgument(*worlds, arguments, failure);
+				if (!failure.empty()) {
+					return nullptr;
+				}
+
+				std::vector<ecs::ComponentId> terms;
+				if (!ComponentArgument(arguments, terms, failure)) {
+					return nullptr;
+				}
+
+				// Bounded for the reason `world_tree` is: a tool holds up the
+				// loop it runs in, and fifty thousand ids is a reply nothing can
+				// read and a frame nothing can draw.
+				const auto limit = static_cast<size_t>(std::max(1, arguments.value("limit", 200)));
+
+				json ids = json::array();
+				size_t total = 0;
+
+				worlds->Enter(world, [&](Store &store) {
+					total = store.CountMatching(terms);
+					store.EachMatching(terms, [&](ecs::Entity entity) {
+						if (ids.size() < limit) {
+							ids.push_back(entity.Id);
+						}
+					});
+				});
+
+				json out{{"entities", std::move(ids)}, {"total", total}};
+				if (total > limit) {
+					// Said rather than implied, exactly as `world_tree` says it.
+					out["truncated"] = true;
+				}
+				return out;
+			},
+		});
+
+		Add(Tool{
+			"component_get",
+			"The values one entity holds for one component, field by field. Null when the entity "
+			"does not carry it — which is a different answer from carrying it with every field at "
+			"zero.",
+			[] {
+				json schema = WorldSchema();
+				schema["properties"]["id"] = json{{"type", "integer"}, {"description", "The entity id."}};
+				schema["properties"]["component"] = json{{"type", "string"}};
+				schema["required"] = json::array({"id", "component"});
+				return schema;
+			},
+			[worlds](const json &arguments, std::string &failure) -> json {
+				const WorldId world = WorldArgument(*worlds, arguments, failure);
+				if (!failure.empty()) {
+					return nullptr;
+				}
+				if (!arguments.contains("id") || !arguments["id"].is_number()) {
+					failure = "which entity? — call entity_query or world_tree";
+					return nullptr;
+				}
+
+				ecs::ComponentId id;
+				const ecs::Schema *schema = SchemaArgument(arguments, id, failure);
+				if (schema == nullptr) {
+					return nullptr;
+				}
+
+				const ecs::Entity entity(arguments["id"].get<uint64_t>());
+				json out = nullptr;
+
+				worlds->Enter(world, [&](Store &store) {
+					if (!store.HasComponent(entity, id)) {
+						return;
+					}
+
+					const auto *bytes = static_cast<const unsigned char *>(store.GetComponent(entity, id));
+					json fields = json::object();
+
+					for (const ecs::FieldDescriptor &field : schema->Fields()) {
+						fields[std::string(field.Spelling)] =
+							field.Type == PropertyType::String
+								? json(*reinterpret_cast<const std::string *>(bytes + field.Offset))
+								: ValueToJson(field.Type, bytes + field.Offset);
+					}
+					out = json{
+						{"id", entity.Id},
+						{"component", std::string(schema->Name().Text())},
+						{"fields", std::move(fields)}
+					};
+				});
+
+				return out;
+			},
+		});
+
+		if (writable) {
+			Add(Tool{
+				"component_set",
+				"Writes fields of one component on one entity, adding it when the entity does not "
+				"carry it yet. Fields left out keep what they had; a fresh component starts at "
+				"zero. Vector3 and Color3 take an object of named components, as instance_set does.",
+				[] {
+					json schema = WorldSchema();
+					schema["properties"]["id"] = json{{"type", "integer"}};
+					schema["properties"]["component"] = json{{"type", "string"}};
+					schema["properties"]["fields"] = json::object();
+					schema["required"] = json::array({"id", "component", "fields"});
+					return schema;
+				},
+				[worlds](const json &arguments, std::string &failure) -> json {
+					const WorldId world = WorldArgument(*worlds, arguments, failure);
+					if (!failure.empty()) {
+						return nullptr;
+					}
+					if (!arguments.contains("id") || !arguments["id"].is_number()) {
+						failure = "which entity? — call entity_query or world_tree";
+						return nullptr;
+					}
+					if (!arguments.contains("fields") || !arguments["fields"].is_object()) {
+						failure = "fields has to be an object of field names to values";
+						return nullptr;
+					}
+
+					ecs::ComponentId id;
+					const ecs::Schema *schema = SchemaArgument(arguments, id, failure);
+					if (schema == nullptr) {
+						return nullptr;
+					}
+
+					const ecs::Entity entity(arguments["id"].get<uint64_t>());
+					json written = json::array();
+
+					worlds->Enter(world, [&](Store &store) {
+						if (!store.Alive(entity)) {
+							failure = "no such entity in that scene";
+							return;
+						}
+
+						// The component's own lifetime hooks, because a schema
+						// holding a string field owns an allocation — the same
+						// holder both script bindings carry, for the same
+						// reason.
+						const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
+						std::vector<unsigned char> value(schema->Size());
+						descriptor.DefaultConstruct(value.data(), 1);
+
+						// The current value first, so a field the caller left
+						// out keeps it.
+						if (const void *held = store.GetComponent(entity, id); held != nullptr) {
+							descriptor.Destruct(value.data(), 1);
+							descriptor.CopyConstruct(value.data(), held, 1);
+						}
+
+						for (const auto &field : arguments["fields"].items()) {
+							const ecs::FieldDescriptor *found = schema->Find(std::string_view(field.key()));
+							if (found == nullptr) {
+								failure = "'" + std::string(schema->Name().Text()) + "' has no field '" +
+										  field.key() + "'";
+								break;
+							}
+
+							if (found->Type == PropertyType::String) {
+								if (!field.value().is_string()) {
+									failure = "'" + field.key() + "' takes a string";
+									break;
+								}
+								*reinterpret_cast<std::string *>(value.data() + found->Offset) =
+									field.value().get<std::string>();
+							} else if (!ValueFromJson(
+										   found->Type, field.value(), value.data() + found->Offset, failure
+									   )) {
+								failure = "'" + field.key() + "': " + failure;
+								break;
+							}
+							written.push_back(field.key());
+						}
+
+						if (failure.empty()) {
+							store.SetComponent(entity, id, value.data());
+						}
+						descriptor.Destruct(value.data(), 1);
+					});
+
+					if (!failure.empty()) {
+						return nullptr;
+					}
+					return json{
+						{"id", entity.Id},
+						{"component", std::string(schema->Name().Text())},
+						{"fields", std::move(written)},
+					};
 				},
 			});
 		}

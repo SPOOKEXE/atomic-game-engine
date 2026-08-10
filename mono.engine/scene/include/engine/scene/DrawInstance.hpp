@@ -260,6 +260,47 @@ namespace engine::scene {
 	// Moves the instances that show a surface to the back of an order, in place.
 	//
 	// **The twin of `PartitionCasters`, and it exists because there were four
+	// Keeps the instances whose geometry has arrived.
+	//
+	// **An instance naming no mesh is kept and one naming an absent mesh is
+	// not**, and that distinction is the whole function:
+	//
+	//   - no mesh named — an ordinary `Part` — draws the renderer's default
+	//     cube, which is what a part *is*.
+	//   - a mesh named and not loaded — a `MeshPart` whose geometry has not
+	//     arrived — draws nothing until it has.
+	//
+	// Without the second, a mesh table hands back its default for a name it does
+	// not hold, and a scene of mesh parts comes up as a field of cubes that turn
+	// into models one at a time as content lands. That is worse than empty
+	// space: empty space reads as "still loading" and a wrong cube reads as the
+	// asset being broken.
+	//
+	// **Here rather than in the renderer, for `OrderScene`'s reason.** A
+	// renderer is the one module a test cannot exercise, so a rule that decides
+	// what reaches a draw call is the last place it should live. A template so
+	// the residency test is a direct call rather than a `std::function` per
+	// instance in the hottest pass of the frame.
+	//
+	// @param instances What the world produced.
+	// @param resident  Called as `resident(const core::Name &)` for each named
+	//                  mesh. `true` when the renderer holds it.
+	// @param out       Cleared, then filled with what may be drawn.
+	// @since v0.12
+	template <class Resident>
+	void
+	KeepLoaded(std::span<const DrawInstance> instances, Resident resident, std::vector<DrawInstance> &out) {
+		out.clear();
+		out.reserve(instances.size());
+
+		for (const DrawInstance &instance : instances) {
+			if (instance.Mesh.IsValid() && !resident(instance.Mesh)) {
+				continue;
+			}
+			out.push_back(instance);
+		}
+	}
+
 	// copies of it.** The same `stable_partition` on `Surface < 0` was written
 	// inline in `OrderScene` twice and in the renderer twice, and the copies had
 	// already drifted: two spelled the out-of-range guard `index >= size() ||

@@ -95,8 +95,21 @@ namespace engine::spatial {
 		// This lands where the design note guessed — about twice the median
 		// collider extent — which is worth knowing for a scene whose colliders
 		// are a different size. It is a default and not a law: construct with
-		// the size your own world measured.
+		// the size your own world measured, or call `SuggestCellSize` and let
+		// the world measure itself.
 		static constexpr float DEFAULT_CELL_SIZE = 4.0f;
+
+		// The narrowest and widest a suggested cell may be.
+		//
+		// **Bounds rather than trust, because the input is a scene.** A world
+		// holding one particle suggests centimetres and would bin a later
+		// baseplate into a hundred million cells; a world holding one baseplate
+		// suggests kilometres and puts everything in one bucket. Both are the
+		// measurement being right about a scene that is about to change.
+		//@{
+		static constexpr float MINIMUM_CELL_SIZE = 0.25f;
+		static constexpr float MAXIMUM_CELL_SIZE = 256.0f;
+		//@}
 
 		// How many cells one proxy may occupy before it stops using cells.
 		//
@@ -133,6 +146,23 @@ namespace engine::spatial {
 
 		// Empties the grid, keeping every allocation for the next rebuild.
 		void Clear();
+
+		// Changes the cell size, emptying the grid.
+		//
+		// **Emptying is not a convenience, it is the only correct answer.**
+		// Every entry records the cell a proxy was binned into, and those
+		// coordinates are a function of the spacing — so a grid that kept its
+		// entries across a size change would answer queries against cells that
+		// no longer exist. The caller rebuilds; that is what a rebuild-only
+		// index means.
+		//
+		// **A size at or below zero is refused in favour of the default**, for
+		// the constructor's reason: the alternative is a division by zero that
+		// reaches every subsequent query as a NaN.
+		//
+		// @param cellSize Cell edge length in metres.
+		// @since v0.12
+		void SetCellSize(float cellSize);
 
 		// Cell edge length in metres, as resolved by the constructor.
 		float CellSize() const {
@@ -193,4 +223,38 @@ namespace engine::spatial {
 		// directory is for.
 		friend struct GridInternals;
 	};
+
+	// A cell size measured from the proxies that will go in the grid.
+	//
+	// **The rule of thumb `HashGrid::DEFAULT_CELL_SIZE` records, applied to the
+	// scene instead of to the one that was benchmarked.** That default is twice
+	// the median extent of *this repository's* demo colliders; a world of
+	// bullets or a world of buildings gets a grid tuned for something else, and
+	// `engine.physics.bench.broadphase` measures the swing at 2.7x between the
+	// worst and best spacing for one scene of four thousand.
+	//
+	// **The mean, not the median, and the difference is a sort.** A median needs
+	// the extents ordered, which is `O(n log n)` over every collider every time
+	// the set changes; the mean is one pass. What a median buys is resistance to
+	// outliers — and the quantisation below already flattens those, because an
+	// outlier has to move the mean by a factor of two before it moves the
+	// answer at all.
+	//
+	// **Quantised to a power of two, which is the hysteresis.** A size computed
+	// exactly would differ every time a body was added, and each difference
+	// costs a full rebuild of the index; rounding to a power of two means the
+	// answer only changes when the scene's scale genuinely does. It is also
+	// where the cost curve is flat — the benchmark's 8 m and 16 m rows are
+	// within nine per cent of each other.
+	//
+	// **Deterministic, which it has to be.** One pass in the caller's order over
+	// values that are already in the store, no clock and no address. Two runs of
+	// one scene choose one size, and `just determinism` is what would report it
+	// if they did not.
+	//
+	// @param proxies What the grid is about to hold.
+	// @return A cell size in `[MINIMUM_CELL_SIZE, MAXIMUM_CELL_SIZE]`, or
+	//         `HashGrid::DEFAULT_CELL_SIZE` for an empty set.
+	// @since v0.12
+	float SuggestCellSize(std::span<const Proxy> proxies);
 }

@@ -137,6 +137,32 @@ manifest** rather than transmitted, so an origin cannot move an asset's boundary
 without breaking the signature. `Manifest::SliceOf` is the one definition of it
 and `ChunkStore::ReadBundle` is the one producer.
 
+## How much a frame absorbs is a decision, and it is one decision
+
+`Pump` answers in bursts — a scene naming forty meshes gets forty completions in
+the frame the origin catches up — and the expensive part is not taking them. It
+is what a caller does next: decoding an `.amesh` and uploading it to the GPU.
+A loop that drains every completed request the moment it notices them spends a
+third of a second in one frame, and an editor stops responding while somebody's
+model set lands.
+
+`IntakeBudget` is that allowance, and three properties are load-bearing:
+
+- **Bytes, not a count.** The cost is the geometry. Forty icons and one
+  character model are not the same frame, and any count is wrong for one of
+  them.
+- **Refused is deferred, never dropped.** The caller puts the arrival back in
+  its pending list, which is already where a request that has not finished
+  waits — so nothing had to learn a new state.
+- **The first arrival of a frame is always admitted.** An asset larger than the
+  whole allowance would otherwise be checked and deferred for ever while the
+  thing it belongs to stays invisible. One long frame beats never.
+
+**It lives here rather than in the two loops that use it.** The studio's intake
+and the client's are both inside a frame loop no test can reach; the same rule
+written twice in two untestable places is a rule the build does not check, which
+rule 6 has a name for.
+
 ## Not here
 
 - **What is inside an asset.** This module delivers and verifies; a mesh format,
