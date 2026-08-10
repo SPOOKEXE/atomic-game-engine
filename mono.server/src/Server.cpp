@@ -15,6 +15,8 @@
 #include <engine/replication/Priority.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Ownership.hpp>
+#include <engine/scene/Services.hpp>
 
 #include <algorithm>
 #include <array>
@@ -606,6 +608,80 @@ namespace server {
 			Replication->Authority().SetPriority(score);
 		}
 
+		// **A `Player` per connection, which nothing in this engine was
+		// making.** `scene::AddPlayer` had no production caller at all — every
+		// world that ever ran had a `Players` service with nobody in it — and
+		// the consequence was not cosmetic: ownership is assigned to a player,
+		// so a server with no players had nobody to assign it to and
+		// `SetNetworkOwner` had no argument a script could obtain.
+		//
+		Replication->OnAdmitted([this](engine::replication::ClientId client) {
+			Worlds().Enter(PrimaryWorld, [this, client](engine::ecs::Store &store) {
+				// **A world with no `Players` service gets no player, quietly.**
+				// That is not a misconfiguration to warn about — it is the
+				// placeholder world, which is furnished by nobody and is what
+				// `--entities` builds. A game file has services and gets one.
+				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
+					return;
+				}
+
+				// Named for the slot rather than for anything the client said.
+				// A name a client chose is a field of an inbound message, and
+				// this one ends up in the world tree where scripts index by it.
+				const std::string name = "Player" + std::to_string(client.Index + 1);
+				const engine::ecs::Entity player = engine::scene::AddPlayer(store, name);
+				if (player == engine::ecs::NULL_ENTITY) {
+					return;
+				}
+
+				Players[client.Index] = Occupant{player, client.Generation};
+				ENGINE_INFO("server: {} joined as '{}'", name, Worlds().NameOf(PrimaryWorld).Text());
+			});
+		});
+
+		// **And destroyed when they leave, which is what makes the reclaim
+		// fire.** `scene.ownership` gives back every body owned by an entity
+		// that is no longer alive; destroying the player is what makes that
+		// entity not alive. Leaving it behind would be a body owned for ever by
+		// somebody who has gone.
+		Replication->OnDropped([this](engine::replication::ClientId client) {
+			const auto found = Players.find(client.Index);
+			if (found == Players.end() || found->second.Generation != client.Generation) {
+				return;
+			}
+
+			const engine::ecs::Entity player = found->second.Instance;
+			Players.erase(found);
+
+			Worlds().Enter(PrimaryWorld, [player](engine::ecs::Store &store) {
+				store.DestroyInstance(player);
+			});
+		});
+
+		// **Who may write what, and it is the only thing between a client's
+		// delta and this world.** The predicate is the division
+		// `SetOwnership` asks for: that module carries entity handles and has
+		// no idea what a player is, and this is the part that knows a
+		// `NetworkOwner` names one.
+		//
+		// Absent means the server owns it, so an unowned entity refuses — which
+		// is every entity in every world this repository ships until a script
+		// hands one over.
+		Replication->Authority().SetOwnership([this](
+												  engine::replication::ClientId client,
+												  engine::ecs::Entity entity,
+												  const engine::ecs::Store &store
+											  ) {
+			const auto found = Players.find(client.Index);
+			if (found == Players.end() || found->second.Generation != client.Generation) {
+				return false;
+			}
+
+			// The world it was handed, not one this looks up: `ApplySubmitted`
+			// runs inside a world the host has already entered.
+			return engine::scene::NetworkOwnerOf(store, entity) == found->second.Instance;
+		});
+
 		// A delta is the third reader of the dirty bits, so the components that
 		// travel *and change every tick* have to be observed or nothing ever
 		// looks changed. The two above are signed instead — a hash of a value
@@ -883,6 +959,17 @@ namespace server {
 		Replication->Poll(nowSeconds);
 
 		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
+			// **What the clients that own something said, applied before this
+			// tick is published.** Applying after would publish a delta built
+			// from last tick's value and send the owner's own state back to it
+			// one tick stale, which is a client fighting its own echo.
+			//
+			// What gets through is `Authority::SetOwnership`'s business — see
+			// the predicate in `BeginListening`. A world where nothing has been
+			// handed over, which is every world this repository ships, sees an
+			// empty loop.
+			Replication->ApplyOwnedState(store);
+
 			// **The rewind history, recorded beside the delta and from the same
 			// state.** Both answer questions about this tick, so taking them at
 			// two different moments is how a hit test starts disagreeing with

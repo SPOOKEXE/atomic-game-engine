@@ -644,6 +644,25 @@ namespace server {
 			uint32_t Generation = 0;
 		};
 
+		// Which `Player` instance one client is.
+		struct Occupant {
+			engine::ecs::Entity Instance;
+
+			// Checked on every read, for the reason `Viewpoint` carries one: a
+			// slot is reused the moment a client leaves, and an entry keyed on
+			// the index alone would hand the new client the old one's player —
+			// and with it everything that player owned.
+			uint32_t Generation = 0;
+		};
+
+		// Who is in this game, keyed by client slot.
+		//
+		// **The map ownership is decided through.** A client's delta is checked
+		// against `scene::NetworkOwner` on the entity and the player found here;
+		// a client with no entry owns nothing, which is where every connection
+		// starts.
+		std::unordered_map<uint32_t, Occupant> Players;
+
 		// Where each client is looking from, for `DistancePriority`.
 		//
 		// **Keyed by the slot rather than by the whole handle**, so the map is

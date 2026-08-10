@@ -178,9 +178,15 @@ namespace engine::replication {
 		// alternative — accepting them until somebody remembers to restrict it
 		// — makes the insecure state the one you get by forgetting.
 		//
-		// @param predicate Called as `predicate(ClientId, ecs::Entity)`.
+		// **It is handed the world rather than reaching for one**, unlike
+		// `SetInterest`, and the difference is not stylistic: this runs inside
+		// `ApplySubmitted`, which a host calls with a world it has already
+		// entered. A predicate that went and found the world itself would be
+		// entering it a second time from inside itself.
+		//
+		// @param predicate Called as `predicate(ClientId, ecs::Entity, store)`.
 		// @since v0.13
-		void SetOwnership(std::function<bool(ClientId, ecs::Entity)> predicate);
+		void SetOwnership(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate);
 
 		// State a client sent for entities it owns, awaiting application.
 		//
@@ -489,7 +495,7 @@ namespace engine::replication {
 
 		// Empty refuses everything, which is the safe half of the default. See
 		// `SetOwnership`.
-		std::function<bool(ClientId, ecs::Entity)> Ownership;
+		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Ownership;
 		std::vector<core::Name> Components;
 
 		std::vector<ChangeDetection> Detection;

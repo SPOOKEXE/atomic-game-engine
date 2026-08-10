@@ -106,7 +106,7 @@ namespace engine::replication {
 		IdentityCheck = std::move(check);
 	}
 
-	void Authority::SetOwnership(std::function<bool(ClientId, ecs::Entity)> predicate) {
+	void Authority::SetOwnership(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate) {
 		Ownership = std::move(predicate);
 	}
 
@@ -976,7 +976,7 @@ namespace engine::replication {
 		// Refuses everything when nothing has been told who owns what. `Submit`
 		// gates on this too; this is the half that holds if a host clears the
 		// predicate between receiving and applying.
-		const auto allow = [this, client](core::Name component, ecs::Entity entity) {
+		const auto allow = [this, client, &store](core::Name component, ecs::Entity entity) {
 			// **The component check is not the ownership check.** A client may
 			// only write something the server was already sending it: a
 			// component this authority does not replicate is one the client has
@@ -985,7 +985,7 @@ namespace engine::replication {
 			if (!Replicated(component)) {
 				return false;
 			}
-			return Ownership && Ownership(client, entity);
+			return Ownership && Ownership(client, entity, store);
 		};
 
 		ApplyStatus worst = ApplyStatus::Ok;

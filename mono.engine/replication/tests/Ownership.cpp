@@ -70,7 +70,9 @@ namespace ownership_test {
 
 		// Hands `entity` to the client, and nothing else.
 		void Owns(Entity entity) {
-			Authority_.SetOwnership([entity](ClientId, Entity subject) { return subject == entity; });
+			Authority_.SetOwnership([entity](ClientId, Entity subject, const Store &) {
+				return subject == entity;
+			});
 		}
 
 		bool Receive(const Delta &delta) {

@@ -282,10 +282,17 @@ namespace engine::replication {
 
 		Transport_->Send(from, peer.Welcome);
 
+		const ClientId admitted = peer.Client;
 		Peers.push_back(std::move(peer));
 		Stats_.Admitted++;
 
 		ENGINE_INFO("replication: admitted {} ({} connected)", from.Text(), Peers.size());
+
+		// After the peer is in the list, so a handler that asks this listener
+		// about the client it was just handed gets an answer.
+		if (Admitted_) {
+			Admitted_(admitted);
+		}
 	}
 
 	void Listener::Repeat(Peer &peer, const Admission &message) {
@@ -298,6 +305,13 @@ namespace engine::replication {
 	}
 
 	void Listener::Drop(size_t index) {
+		// **Before the handle is retired**, so a host can still use it to find
+		// whatever it hung off this client — the `Player` instance, most
+		// obviously, which has to be destroyed rather than leaked.
+		if (Dropped_) {
+			Dropped_(Peers[index].Client);
+		}
+
 		Authority_.Remove(Peers[index].Client);
 
 		ENGINE_INFO("replication: dropped {} ({} connected)", Peers[index].Where.Text(), Peers.size() - 1);
@@ -305,6 +319,20 @@ namespace engine::replication {
 		Peers[index] = std::move(Peers.back());
 		Peers.pop_back();
 		Stats_.Dropped++;
+	}
+
+	void Listener::OnAdmitted(std::function<void(ClientId)> handler) {
+		Admitted_ = std::move(handler);
+	}
+
+	void Listener::OnDropped(std::function<void(ClientId)> handler) {
+		Dropped_ = std::move(handler);
+	}
+
+	void Listener::ApplyOwnedState(ecs::Store &store) {
+		for (const Peer &peer : Peers) {
+			Authority_.ApplySubmitted(peer.Client, store);
+		}
 	}
 
 	void Listener::Poll(double nowSeconds) {

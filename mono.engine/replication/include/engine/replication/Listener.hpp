@@ -236,6 +236,40 @@ namespace engine::replication {
 		// Drops what a game has applied.
 		void ClearInputs();
 
+		// Applies the state every client sent for the entities it owns.
+		//
+		// **A host calls this once per tick, before its simulation runs.** What
+		// gets through is `Authority::SetOwnership`'s business; this is only the
+		// loop over connected clients, which a host cannot write for itself
+		// because the peer list is private.
+		//
+		// @param store The world to write into.
+		// @since v0.13
+		void ApplyOwnedState(ecs::Store &store);
+
+		// Hears about a client that has just been let in.
+		//
+		// **The hook a host needs in order to have players at all.** Who is in a
+		// game is the host's business — `scene::AddPlayer` says so in as many
+		// words — so this module admits a connection and says who it was rather
+		// than inventing an occupant for a world it cannot see.
+		//
+		// Called from `Poll`, on the thread that called it, after the welcome
+		// has gone out.
+		//
+		// @param handler Called as `handler(ClientId)`.
+		// @since v0.13
+		void OnAdmitted(std::function<void(ClientId)> handler);
+
+		// Hears about a client that has gone.
+		//
+		// Called before the handle is retired, so a host may still use it to
+		// find whatever it hung off that client.
+		//
+		// @param handler Called as `handler(ClientId)`.
+		// @since v0.13
+		void OnDropped(std::function<void(ClientId)> handler);
+
 		// One client's link round-trip estimate, in milliseconds.
 		//
 		// @param client The client.
@@ -336,6 +370,9 @@ namespace engine::replication {
 		std::function<void(ClientId, std::span<const std::byte>)> UserMessages;
 
 		std::vector<Peer> Peers;
+
+		std::function<void(ClientId)> Admitted_;
+		std::function<void(ClientId)> Dropped_;
 
 		std::vector<std::byte> Datagram;
 
