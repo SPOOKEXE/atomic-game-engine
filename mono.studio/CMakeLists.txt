@@ -98,6 +98,12 @@ mono_add_library(studio
 		# renderer, and the two would diverge the first time one was optimised.
 		Mono::client
 
+		# L12, `shared`. The link team create's edit stream rides — one
+		# waypoint at a time, over `Listener::SendTo` and `Broadcast`. Named
+		# here rather than taken transitively through `Mono::server`, because
+		# `src/EditStream.cpp` includes it directly.
+		Engine::replication
+
 		# Hosting a server in this process is what "Play" means. The escape
 		# below.
 		Mono::server

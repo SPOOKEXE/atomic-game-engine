@@ -274,6 +274,18 @@ namespace studio {
 		// @return Its id, or the null id when the entity is null.
 		EditId Track(engine::world::WorldId world, engine::ecs::Entity instance);
 
+		// Issues an id that names nothing yet.
+		//
+		// **What an arriving `Create` needs.** A foreign create rebuilds a
+		// subtree that does not exist here, so there is no entity to `Track` —
+		// the id has to exist first and `ApplyForeign` binds it to whatever the
+		// rebuild produced. Minting one for a command that is then dropped
+		// costs a number, and the numbers are 64 bits wide.
+		//
+		// @return A fresh id, bound to nothing.
+		// @since v0.13
+		EditId Mint();
+
 		// Finds what an id currently names.
 		//
 		// **May return a handle that is no longer live**, and callers ask

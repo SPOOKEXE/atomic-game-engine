@@ -326,6 +326,10 @@ namespace studio {
 		}
 	}
 
+	EditId CommandLog::Mint() {
+		return EditId{NextId++};
+	}
+
 	void CommandLog::Adopt(EditId id, WorldId world, Entity instance) {
 		if (!id) {
 			return;
