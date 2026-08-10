@@ -229,18 +229,17 @@ namespace studio {
 		// `Selection:Set`, `:Add` and `:Remove`, which differ only in what they
 		// do to what is already selected.
 		//
-		// **Validated before anything is changed**, so a list with a bad entry
-		// half way down leaves the selection as it was rather than partly
-		// applied — a plugin that got one argument wrong should not also have to
-		// undo what the call managed before it noticed.
-		// `Selection:Set`, `:Add` and `:Remove`, which differ only in what they
-		// do to what is already selected.
+		// **The argument has to be an array and the items do not have to be
+		// good.** Those are two different mistakes and they deserve different
+		// answers: `Selection:Set(part)` without the braces is the call being
+		// wrong, and it is refused; an item that has been destroyed since the
+		// plugin picked it up is the *world* having moved on, which is not the
+		// plugin's fault and is not worth failing a whole call over.
 		//
-		// **An array of `Instance` and nothing else.** Not nil, not a table of
-		// named keys, not a bare instance — Roblox's own signature is a list and
-		// accepting the near-misses would mean a plugin author's mistake reads
-		// as "nothing happened" rather than as a message. `Selection:Set(part)`
-		// without the braces is the one somebody writes first.
+		// So a bad item is skipped and warned about, once per call, naming what
+		// it was. A plugin that selects the results of a query it ran three
+		// frames ago should end up selecting the ones that are still there
+		// rather than getting an error it can do nothing about.
 		//
 		// **An empty array is a whole answer**, not a degenerate one:
 		// `Selection:Set({})` is how a plugin deselects everything, and it is
@@ -265,47 +264,58 @@ namespace studio {
 				return false;
 			}
 
-			// **Validated whole before anything changes**, so a list with a bad
-			// entry half way down leaves the selection as it was rather than
-			// partly applied — a plugin that got one item wrong should not also
-			// have to undo what the call managed before it noticed.
 			std::vector<Entity> instances;
 			instances.reserve(value.Items.size());
 
-			for (size_t at = 0; at < value.Items.size(); at++) {
-				const HostValue &item = value.Items[at];
-
-				if (item.Tag != HostTag::Instance) {
-					// One-based, because that is how the script counted them.
-					failure = "Selection:" + method + " expects an array of Instances, and item " +
-							  std::to_string(at + 1) + " is " + engine::script::Describe(item.Tag);
-					return false;
-				}
-				instances.push_back(item.Instance);
-			}
-
-			// **A handle that names nothing is refused too**, and it is a
-			// different mistake from the one above: a plugin holding an instance
-			// it destroyed is passing a real `Instance` that is no longer there,
-			// and selecting it would put a dead entity in a list the editor
-			// walks every frame.
-			bool alive = true;
-			size_t dead = 0;
+			// What was skipped, in the words the warning uses. Collected rather
+			// than logged per item: a plugin passing a hundred stale handles is
+			// one mistake and should be one line.
+			std::vector<std::string> ignored;
 
 			Owner.WithSelectionWorld([&](Store &store) {
-				for (size_t at = 0; at < instances.size(); at++) {
-					if (!store.Alive(instances[at])) {
-						alive = false;
-						dead = at + 1;
-						return;
+				for (size_t at = 0; at < value.Items.size(); at++) {
+					const HostValue &item = value.Items[at];
+					const std::string where = "item " + std::to_string(at + 1) + " is ";
+
+					if (item.Tag != HostTag::Instance) {
+						// One-based, because that is how the script counted.
+						ignored.push_back(where + engine::script::Describe(item.Tag));
+						continue;
 					}
+
+					// **A destroyed instance is a different skip from a wrong
+					// type**, and saying which is most of the value of the
+					// warning: one means the plugin's code is wrong and the
+					// other means the world moved under it.
+					if (!store.Alive(item.Instance)) {
+						ignored.push_back(where + "an Instance that no longer exists");
+						continue;
+					}
+
+					instances.push_back(item.Instance);
 				}
 			});
 
-			if (!alive) {
-				failure = "Selection:" + method + ": item " + std::to_string(dead) +
-						  " is an Instance that no longer exists";
-				return false;
+			if (!ignored.empty()) {
+				// **Capped, because a plugin passing a thousand bad items would
+				// otherwise be a line nobody can read.** The count is still
+				// exact, which is the part somebody acts on.
+				constexpr size_t SHOWN = 3;
+
+				std::string message = "Selection:" + method + " ignored " +
+									  std::to_string(ignored.size()) + " item(s): ";
+
+				for (size_t at = 0; at < std::min(ignored.size(), SHOWN); at++) {
+					message += (at > 0 ? ", " : "") + ignored[at];
+				}
+				if (ignored.size() > SHOWN) {
+					message += ", and " + std::to_string(ignored.size() - SHOWN) + " more";
+				}
+
+				// Through the editor's own output, prefixed with the plugin's
+				// name, because the person reading it has several installed and
+				// needs to know whose mistake it is.
+				Owner.Say("[" + Plugin.Manifest.Name + "] " + message, engine::core::LogLevel::Warning);
 			}
 
 			// **The list is edited directly rather than through
@@ -329,7 +339,10 @@ namespace studio {
 			// otherwise have to read it, append and write it back.
 			//
 			// `Set` with an empty array therefore deselects everything, which is
-			// the whole of what it means and needs no case of its own.
+			// the whole of what it means and needs no case of its own. **An
+			// array whose every item was skipped clears it too**, which is the
+			// honest reading: the plugin asked for a selection of things that
+			// are not there.
 			if (method == "Set") {
 				Owner.ClearSelection();
 			}

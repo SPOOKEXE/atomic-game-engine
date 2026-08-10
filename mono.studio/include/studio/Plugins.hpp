@@ -72,19 +72,31 @@
 // it — `script/Host.hpp` — so `Selection:Get()`, `Selection.Get()` and
 // `game:GetService("Selection")` are one object reached three ways.
 //
-// **`:Set`, `:Add` and `:Remove` take an array of `Instance` and nothing
-// else.** Not a bare instance, not nil, not a table of named keys. Every one of
-// those is a near-miss somebody types before reading anything, and accepting one
-// would make their mistake read as "nothing happened" — so each is refused with
-// a message naming what was given and, for the two common ones, what to write
-// instead. An item of the wrong kind is named by its position, and a handle
-// whose instance no longer exists is a different mistake with its own line.
+// **`:Set`, `:Add` and `:Remove` take an array of `Instance`**, and the two ways
+// that can go wrong get two different answers.
 //
-// **The list is validated whole before anything changes**, so a call that is
-// refused leaves the selection exactly as it was.
+// **The argument being the wrong shape is refused.** Not a bare instance, not
+// nil, not a table of named keys — each is a near-miss somebody types before
+// reading anything, and accepting one would make their mistake read as "nothing
+// happened". The refusal names what was given and, for the two common ones, what
+// to write instead.
+//
+// **An item that is not selectable is skipped, with one warning per call.** A
+// value of the wrong type is one case and an `Instance` that has been destroyed
+// is the other, and the warning says which — the first means the plugin's code
+// is wrong and the second means the world moved under it. Neither fails the
+// call: a plugin selecting the results of a query it ran three frames ago should
+// end up with the ones that are still there rather than an error it can do
+// nothing about.
+//
+// The warning is capped at three named items with an exact count beside it,
+// because a plugin passing a hundred stale handles is one mistake and should be
+// one line.
 //
 // **`Selection:Set({})` deselects everything**, which is the whole of what an
-// empty array means and needs no case of its own. It is also why the binding
+// empty array means and needs no case of its own — as does a `Set` whose every
+// item was skipped, which is the honest reading: the plugin asked for a
+// selection of things that are not there. It is also why the binding
 // reads an empty Luau table as an array rather than as a map — `{}` is one
 // value and the reader has to pick, and this is the call that would otherwise
 // have been refused.

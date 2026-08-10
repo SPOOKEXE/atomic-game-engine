@@ -414,14 +414,16 @@ namespace {
 					return false;
 				}
 
+				// **Skipped rather than refused**, which is the editor's rule:
+				// the argument being the wrong shape is the call being wrong,
+				// and an item that has gone is the world having moved on.
 				std::vector<std::string> wanted;
-				for (size_t at = 0; at < value.Items.size(); at++) {
-					if (value.Items[at].Tag != HostTag::String) {
-						failure = "Selection:Set: item " + std::to_string(at + 1) + " is " +
-								  engine::script::Describe(value.Items[at].Tag);
-						return false;
+				for (const HostValue &item : value.Items) {
+					if (item.Tag != HostTag::String) {
+						Ignored++;
+						continue;
 					}
-					wanted.emplace_back(value.Items[at].AsText());
+					wanted.emplace_back(item.AsText());
 				}
 
 				Selected = std::move(wanted);
@@ -442,6 +444,7 @@ namespace {
 		bool Drawing = false;
 		std::vector<std::string> Drawn;
 		std::vector<std::string> Selected;
+		size_t Ignored = 0;
 	};
 }
 
@@ -611,14 +614,15 @@ TEST_CASE("the selection is a service, not a plugin call", "[studio][plugins]") 
 	CHECK(surface->Selected.empty());
 }
 
-TEST_CASE("Selection takes an array of instances and nothing else", "[studio][plugins]") {
+TEST_CASE("Selection refuses the wrong shape and skips the wrong items", "[studio][plugins]") {
 	engine::scene::EnsureClassTree();
 	Folder folder;
 
-	// **Every one of these is what somebody types before they read the
-	// docs.** A bare value instead of a list is the first, and `nil` is the
-	// second — both have to arrive as a message rather than as "nothing
-	// happened", which is what an accepted near-miss looks like from a plugin.
+	// **Two mistakes, two answers.** The argument being the wrong shape is the
+	// call being wrong and is refused; an item that is not selectable is the
+	// world having moved on and is skipped with a warning, so a plugin
+	// selecting the results of a query it ran three frames ago ends up with the
+	// ones that are still there.
 	folder.Add(
 		"strict",
 		R"({"name": "Strict"})",
@@ -630,7 +634,8 @@ TEST_CASE("Selection takes an array of instances and nothing else", "[studio][pl
 		"  return message\n"
 		"end\n"
 		"\n"
-		"-- Not a list at all.\n"
+		"-- The shape. Every one of these is what somebody types before they\n"
+		"-- read anything, and each has to arrive as a message.\n"
 		"local bare = refused(function() Selection:Set('a') end)\n"
 		"assert(string.find(bare, 'array') ~= nil, 'the reason was lost: ' .. bare)\n"
 		"assert(string.find(bare, 'string') ~= nil, 'it did not say what it got: ' .. bare)\n"
@@ -640,17 +645,17 @@ TEST_CASE("Selection takes an array of instances and nothing else", "[studio][pl
 		"refused(function() Selection:Set(7) end)\n"
 		"refused(function() Selection:Set({ a = 1 }) end)\n"
 		"\n"
-		"-- A list with one bad item in it, named by its position.\n"
-		"local item = refused(function() Selection:Set({ 'a', 7, 'c' }) end)\n"
-		"assert(string.find(item, 'item 2') ~= nil, 'the position was lost: ' .. item)\n"
-		"\n"
-		"-- **And nothing changed**, which is why the list is validated whole\n"
-		"-- before it is applied: a plugin that got one item wrong should not\n"
-		"-- also have to undo what the call managed before it noticed.\n"
-		"Selection:Set({ 'kept' })\n"
-		"refused(function() Selection:Set({ 'a', false }) end)\n"
+		"-- The items. A bad one does not fail the call; the good ones land.\n"
+		"Selection:Set({ 'a', 7, 'c', false })\n"
 		"local held = Selection:Get()\n"
-		"assert(#held == 1 and held[1] == 'kept', 'a refused call changed the selection')\n"
+		"assert(#held == 2, 'the good items did not land, got ' .. #held)\n"
+		"assert(held[1] == 'a' and held[2] == 'c', 'the wrong ones landed')\n"
+		"\n"
+		"-- **An array whose every item was skipped clears it**, which is the\n"
+		"-- honest reading: the plugin asked for a selection of things that are\n"
+		"-- not there.\n"
+		"Selection:Set({ 1, 2, 3 })\n"
+		"assert(#Selection:Get() == 0, 'a wholly bad list left the old selection')\n"
 	);
 
 	Store store("plugins");
@@ -666,5 +671,9 @@ TEST_CASE("Selection takes an array of instances and nothing else", "[studio][pl
 	INFO(plugins.front().Error);
 	REQUIRE(plugins.front().Running);
 	REQUIRE(surface != nullptr);
-	CHECK(surface->Selected.size() == 1);
+	CHECK(surface->Selected.empty());
+
+	// Five items were skipped across the two calls, which is what the warning
+	// counts.
+	CHECK(surface->Ignored == 5);
 }
