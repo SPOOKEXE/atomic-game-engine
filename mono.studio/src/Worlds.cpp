@@ -2,13 +2,13 @@
 #include <engine/game/Game.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/ui/Theme.hpp>
-#include <engine/world/Lifecycle.hpp>
 #include <engine/world/Enums.hpp>
+#include <engine/world/Lifecycle.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
-#include <cstdio>
 #include <client/Scene.hpp>
+#include <cstdio>
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
@@ -98,6 +98,18 @@ namespace studio {
 		ENGINE_PROFILE("world rows");
 
 		for (const WorldId world : Universe->Worlds()) {
+			// **A client view is not a scene, so it is not listed among them.**
+			// It exists only between Play and Stop, it is never written to a
+			// game file, and every authoring action this panel offers is one the
+			// editor should not make about somebody's screen. It was listed here
+			// anyway — greyed, with a tooltip — which made the Worlds panel the
+			// only way back to a client's viewport and, by omission, said there
+			// was no way back to the *server's*. Both are rows in Live Instances
+			// now. See `src/Instances.cpp`.
+			if (IsReplicaWorld(world)) {
+				continue;
+			}
+
 			const Name name = Universe->NameOf(world);
 			const bool active = world == Active;
 
@@ -132,56 +144,6 @@ namespace studio {
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 				ImGui::Text("(on %s)", Label(Universe->HostOf(world)));
 				ImGui::PopStyleColor();
-			}
-
-			// **What a client would be holding, and how far behind it is.**
-			// A client view drawn beside the server's is a comparison somebody
-			// makes with their eyes, which is the right tool for "the box is in
-			// the wrong place" and no use at all for "nothing has arrived since
-			// tick 400". These are the two numbers that say which of those it is
-			// — how much world each side holds, and what the last complete tick
-			// was — and they belong on the row rather than in a panel of their
-			// own, because the question is always about *this* world.
-			if (const WorldRun *owner = RunForReplica(world); owner != nullptr) {
-				// Which client's row this is. A run may have several and each
-				// keeps its own report — the counts on one client say nothing
-				// about another, which is the whole reason for admitting more
-				// than one.
-				const PlayLink *mine = nullptr;
-				for (const std::unique_ptr<PlayLink> &link : owner->Links) {
-					if (link != nullptr && link->ReplicaWorld() == world) {
-						mine = link.get();
-						break;
-					}
-				}
-				if (mine == nullptr) {
-					continue;
-				}
-
-				const LinkReport &report = mine->Report();
-
-				ImGui::SameLine();
-				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-				ImGui::TextUnformatted("(client view)");
-				ImGui::PopStyleColor();
-
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip(
-						"a replica of '%s', served in this process\n"
-						"tick %llu, applied %llu\n"
-						"%zu of %zu entities\n"
-						"%zu message(s) last step, largest %zu bytes\n"
-						"%llu total",
-						Label(Universe->NameOf(owner->World)),
-						static_cast<unsigned long long>(report.Tick),
-						static_cast<unsigned long long>(report.Applied),
-						report.ClientEntities,
-						report.ServerEntities,
-						report.Messages,
-						report.LargestMessage,
-						static_cast<unsigned long long>(report.TotalBytes)
-					);
-				}
 			}
 
 			// Where the player is, which is the fact that decides whether this
@@ -302,14 +264,18 @@ namespace studio {
 		// the player: it opens the destination if it is closed, and starts the
 		// clock on the world being left. One is where you are looking; the
 		// other is where somebody is standing.
-		if (ImGui::MenuItem("Teleport Player Here", nullptr, world == PlayerWorld, local && world != PlayerWorld)) {
+		if (ImGui::MenuItem(
+				"Teleport Player Here", nullptr, world == PlayerWorld, local && world != PlayerWorld
+			)) {
 			PendingTeleport = world;
 		}
 
 		ImGui::Separator();
 
 		if (ImGui::MenuItem(
-				"Close", nullptr, false,
+				"Close",
+				nullptr,
+				false,
 				local && Universe->StateOf(world) != engine::world::WorldState::Suspended &&
 					world != PlayerWorld && Universe->Count() > 1
 			)) {
@@ -318,7 +284,9 @@ namespace studio {
 		}
 
 		if (ImGui::MenuItem(
-				"Open", nullptr, false,
+				"Open",
+				nullptr,
+				false,
 				local && Universe->StateOf(world) == engine::world::WorldState::Suspended
 			)) {
 			PendingWorldState = world;
@@ -500,10 +468,9 @@ namespace studio {
 			// `Lives` entry it has no use for — one frame of delay on a teleport,
 			// on the first pass after the world was seen.
 			if (inputs.State == engine::world::WorldState::Active) {
-				const auto found =
-					std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
-						return life.World == world;
-					});
+				const auto found = std::find_if(Lives.begin(), Lives.end(), [world](const WorldLife &life) {
+					return life.World == world;
+				});
 
 				if (found == Lives.end()) {
 					// First seen. Its clock starts now rather than at zero, so a
@@ -678,8 +645,7 @@ namespace studio {
 		}
 
 		if (!wanted.IsValid()) {
-			Say("could not find a free name to copy '" + base + "' under",
-				engine::core::LogLevel::Warning);
+			Say("could not find a free name to copy '" + base + "' under", engine::core::LogLevel::Warning);
 			return false;
 		}
 

@@ -704,6 +704,22 @@ namespace studio {
 		void DrawExplorer();
 		void DrawWorlds();
 
+		// What is running in this process: the server, and each client admitted
+		// to it. See `src/Instances.cpp` for why a run is listed apart from the
+		// scenes it runs.
+		void DrawLiveInstances();
+
+		// Puts a world on screen and brings that panel forward.
+		//
+		// **The way back to a view, which is what this is for.** A panel already
+		// showing the world is focused rather than duplicated; the main one is
+		// reopened when it is the panel that would show it; otherwise a free
+		// extra is pinned to it and a new one is made if there is none.
+		//
+		// @param world The scene or client view to show.
+		// @return The panel index, or `NO_VIEWPORT` when there is no such world.
+		size_t ShowWorldInViewport(WorldId world);
+
 		// Decides which viewport the toolbar reports on, once per frame.
 		//
 		// **Called after every viewport has drawn, from `DrawInterface`.** Focus
@@ -898,8 +914,17 @@ namespace studio {
 		// Called from inside the imgui frame rather than beside it, because
 		// whether a click belongs to the world or to a panel is a question only
 		// imgui can answer and only while a frame is open.
+		//
+		// **Public for `DrivePlayer`'s reason**, and it is the same reason: this
+		// is where "which panel does the keyboard belong to" is decided, and
+		// deciding it wrong is invisible to every other test in the tree. It
+		// reads viewport flags and an imgui context, so a case can set the flags
+		// a panel would have had and ask what happened, with no window and no
+		// device in the way.
+	  public:
 		void DriveCamera();
 
+	  private:
 		// Feeds a viewport's keys and mouse to the client world it is playing.
 		//
 		// **A viewport showing a replica with a character in it is a viewport
@@ -932,7 +957,6 @@ namespace studio {
 		bool DrivePlayer(WorldId world, bool hovered, bool active, bool focused);
 
 	  private:
-
 		// Adds a client to whatever run the given world belongs to.
 		//
 		// **What turns Run into Play one player at a time.** A `RunMode::Server`
@@ -3961,6 +3985,19 @@ namespace studio {
 
 		// Closed by default: it is a panel somebody opens to change one thing.
 		bool ShowSettings = false;
+
+		// The live instances, closed until something is live.
+		//
+		// **Opened by `BeginRun` rather than left to the person**, because it is
+		// the only way back to a client's view and to the server's — and a panel
+		// somebody has to know about before they lose a view is not a way back.
+		// It stays open afterwards, like every other panel: what closes it is
+		// somebody closing it.
+		bool ShowLiveInstances = false;
+
+		// Frames left to keep pulling the instances panel in front. See
+		// `FocusWorlds`, which is the same mechanism and the same reason.
+		int FocusInstances = 0;
 
 		// --- v0.10's panels ----------------------------------------------------
 		//

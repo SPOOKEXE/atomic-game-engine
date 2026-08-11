@@ -48,13 +48,17 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v7";
+		// **v8 because Live Instances is a panel the saved layout has never
+		// heard of**, and a panel a layout does not know about opens floating in
+		// a corner — which is exactly the failure it exists to fix.
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v8";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";
 		constexpr const char *WORLDS = "Worlds";
+		constexpr const char *INSTANCES = "Live Instances";
 		constexpr const char *SCRIPTS = "Script Editor";
 		constexpr const char *OUTPUT = "Output";
 		// **The title reads "Preferences" and the id stays "Studio Settings".**
@@ -73,10 +77,10 @@ namespace studio {
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,		  VIEWPORT2,		EXPLORER,	   WORLDS,			PROPERTIES, SCRIPTS,
-			OUTPUT,			  "Command Bar",	SETTINGS,	   STATISTICS,		FRAMEGRAPH, "History",
-			"Assets",		  "Network",		"Team Create", "Control (MCP)", "Plugins",	"Bus",
-			"Find Instances", "Script Profile", "Changes",	   "Debugger",
+			VIEWPORT,  VIEWPORT2,		 EXPLORER,		   WORLDS,		  INSTANCES,	   PROPERTIES,
+			SCRIPTS,   OUTPUT,			 "Command Bar",	   SETTINGS,	  STATISTICS,	   FRAMEGRAPH,
+			"History", "Assets",		 "Network",		   "Team Create", "Control (MCP)", "Plugins",
+			"Bus",	   "Find Instances", "Script Profile", "Changes",	  "Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -134,6 +138,10 @@ namespace studio {
 			}
 			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
 			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
+
+			// Beside the Worlds panel, because they answer the two halves of one
+			// question: what this game *has*, and what of it is *running*.
+			ImGui::DockBuilderDockWindow(INSTANCES, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
 			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
@@ -293,6 +301,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("worlds", engine::core::ProfileCategory::Render);
 			Skinned(WORLDS, [&] { DrawWorlds(); });
+			Skinned(INSTANCES, [&] { DrawLiveInstances(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("properties", engine::core::ProfileCategory::Render);
@@ -494,15 +503,6 @@ namespace studio {
 			}
 		}
 
-		if (target == NONE) {
-			return;
-		}
-
-		// `ExtraAt` returns null for index 0, which is the main viewport's own
-		// fields — the one place the extras array does not hold the state.
-		ViewportState *view = ExtraAt(target);
-		const bool focused = FocusedIsViewport && FocusedViewport == target;
-
 		// **A viewport showing a client with a body in it is played, not
 		// flown.** Both readings of WASD are legitimate and only one can have
 		// the frame; the presence of a character settles it, which is
@@ -512,12 +512,77 @@ namespace studio {
 		//
 		// The free camera is skipped entirely rather than driven as well: two
 		// things moving on one key is the state where neither works.
-		{
-			const bool hovered = view != nullptr ? view->Hovered : ViewportHovered;
-			const bool active = view != nullptr ? view->Active : ViewportActive;
-			if (DrivePlayer(ViewportWorld(target), hovered, active, focused)) {
-				return;
+		//
+		// **Every client viewport is visited, and at most one of them is
+		// driven.** This used to call `DrivePlayer` for the target panel alone,
+		// which was wrong twice over.
+		//
+		// The first is what it did to the *other* panels: `scene::InputState` is
+		// a resource on each client world and it has to be maintained every
+		// frame the way a real client maintains its own. A panel nobody visited
+		// kept the last keys it was given, so a second client view walked for
+		// ever on a key released in the first, and alt-tabbing out of the editor
+		// left whoever was moving still moving.
+		//
+		// The second is what it did to the target: the search above accepts a
+		// panel that is `Panning`, and the call passed only `hovered` and
+		// `active` on. So a panel selected *because* it was panning arrived here
+		// looking like a panel nobody was touching — it took the frame, decided
+		// it was not being driven, and cleared the keys it had just been given.
+		// `Panning` stays set when a middle-drag is released off the picture, so
+		// from then on that client viewport erased its own keyboard every frame:
+		// the character had a move direction on a fraction of the ticks, and
+		// since `scene::StepCharacters` *replaces* horizontal velocity rather
+		// than accumulating it, that reads as a character that does not move at
+		// all. Which is exactly how it was reported.
+		//
+		// Passing `false` for every panel but the target is what keeps the "at
+		// most one walks" rule that made a single call site look right: the
+		// others are not skipped, they are told they have nothing.
+		const WorldId driven = target == NONE ? WorldId{} : ViewportWorld(target);
+
+		size_t played = NONE;
+		for (size_t index = 0; index <= Extras.size(); index++) {
+			const ViewportState *panel = ExtraAt(index);
+			if (panel == nullptr ? !ShowViewport : !panel->Open) {
+				continue;
 			}
+
+			// **Two panels showing one world is one world, and the one being
+			// driven wins.** A second view of the same client — which the `+` on
+			// a tab strip makes in one click, and which the main panel becomes
+			// for free whenever the active scene *is* a client — would otherwise
+			// arrive here as "not the target" and clear the very keys the target
+			// had just been given. `scene::InputState` is per world and not per
+			// panel; releasing it has to be a statement about the world.
+			const bool mine = index == target;
+			if (!mine && ViewportWorld(index) == driven) {
+				continue;
+			}
+			const bool pointer =
+				panel != nullptr ? panel->Hovered || panel->Panning : ViewportHovered || ViewportPanning;
+
+			if (DrivePlayer(
+					ViewportWorld(index),
+					mine && pointer,
+					mine && (panel != nullptr ? panel->Active : ViewportActive),
+					mine && FocusedIsViewport && FocusedViewport == index
+				)) {
+				played = index;
+			}
+		}
+
+		if (target == NONE) {
+			return;
+		}
+
+		// `ExtraAt` returns null for index 0, which is the main viewport's own
+		// fields — the one place the extras array does not hold the state.
+		ViewportState *view = ExtraAt(target);
+		const bool focused = FocusedIsViewport && FocusedViewport == target;
+
+		if (played == target) {
+			return;
 		}
 
 		if (view == nullptr) {
@@ -1031,6 +1096,12 @@ namespace studio {
 		}
 		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
+
+		// **Beside Worlds, and it is the way back to a view rather than to a
+		// panel.** A viewport pinned to a client and then closed used to be
+		// recoverable only because the replica had a row among the scenes; the
+		// server's view had nothing at all. Both are rows here now.
+		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
 		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
@@ -1633,7 +1704,18 @@ namespace studio {
 		// switching viewports genuinely swaps the transport rather than
 		// relabelling it. A universe is a collection of scenes and each of them
 		// runs, pauses and stops on its own — see `Editor::WorldRun`.
-		const WorldId scope = ViewportWorld(FocusedViewport);
+		const WorldId focused = ViewportWorld(FocusedViewport);
+
+		// **A client view belongs to a run and is not one, so the transport asks
+		// the run it is part of.** A replica carries no run record — `ModeOf`
+		// answers `Edit` for it — so every button here read "nothing is running"
+		// while looking at a live client, and Play would have started a *second*
+		// run inside the replica world: a snapshot of somebody else's view, with
+		// its scripts started, ticking beside the server it is a copy of.
+		const WorldRun *owner = RunOwning(focused);
+		const bool client = IsReplicaWorld(focused);
+		const WorldId scope = client && owner != nullptr ? owner->World : focused;
+
 		const RunMode mode = ModeOf(scope);
 		const bool running = mode != RunMode::Edit;
 		const bool paused = IsPaused(scope);
@@ -1661,8 +1743,20 @@ namespace studio {
 		}
 		ImGui::SameLine();
 
-		if (ImGui::Button("Stop")) {
-			SetRunMode(scope, RunMode::Edit);
+		// **Stop means "this client leaves" while a client view is focused.**
+		// Stopping the whole run from a panel showing one player's screen is the
+		// larger of the two things somebody could mean and the one they cannot
+		// undo — the server's own view is a click away and still stops
+		// everything. The label says which of the two this press is.
+		if (ImGui::Button(client ? "Stop Client" : "Stop")) {
+			if (client) {
+				(void)RemovePlayer(focused);
+			} else {
+				SetRunMode(scope, RunMode::Edit);
+			}
+		}
+		if (client && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("removes this client and its player\nstop the scene from the server's view");
 		}
 		ImGui::EndDisabled();
 
@@ -1683,16 +1777,15 @@ namespace studio {
 		// removes that one, which is the only reading somebody would expect.
 		ImGui::BeginDisabled(!running);
 		if (ImGui::Button("Spawn Player")) {
-			(void)SpawnPlayer(ViewportWorld(FocusedViewport));
+			(void)SpawnPlayer(focused);
 		}
 		ImGui::SameLine();
 
-		const WorldRun *record = RunOwning(ViewportWorld(FocusedViewport));
-		const size_t players = record == nullptr ? 0 : record->Links.size();
+		const size_t players = owner == nullptr ? 0 : owner->Links.size();
 
 		ImGui::BeginDisabled(players == 0);
 		if (ImGui::Button("Remove Player")) {
-			(void)RemovePlayer(ViewportWorld(FocusedViewport));
+			(void)RemovePlayer(focused);
 		}
 		ImGui::EndDisabled();
 		ImGui::EndDisabled();

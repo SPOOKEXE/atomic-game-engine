@@ -2576,6 +2576,14 @@ namespace studio {
 			Lives.clear();
 		}
 
+		// **The panel that lists what is running, opened when something starts
+		// running.** It is the only way back to a view that has been closed —
+		// the server's especially, which is not a world of its own and therefore
+		// appears in no other list — and a way back nobody has found is not one.
+		// Enough frames to outlast a first-run layout rebuild, as `FocusWorlds`.
+		ShowLiveInstances = true;
+		FocusInstances = 4;
+
 		SyncWorldStates();
 		return true;
 	}

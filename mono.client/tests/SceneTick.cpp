@@ -416,9 +416,8 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// and record-trails in `Simulation`, and build-ribbons in `PreRender`.
 	// `InstallControls` adds character-control in `PreSimulation` and
 	// camera-control in `PreRender`, and `physics::RegisterCharacterSystems`
-	// adds character.ground in `PreSimulation` and character.step in
-	// `Simulation` — those two moved out of this file's installer at v0.14, so
-	// that a dedicated server grounds its characters too.
+	// adds character.control in `PreSimulation` — that moved out of this file's
+	// installer at v0.14, so that a dedicated server grounds its characters too.
 	//
 	// Only two of the nine are presentation; the rest are simulation and are here
 	// because this count is over every phase rather than over one.
@@ -464,7 +463,15 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// **Nineteen since `character.link`**, which rebuilds a rig a client
 	// received over the wire. `PreSimulation`, so a suspended scene does not run
 	// it — and a scene nobody is playing has no client to have received one.
-	REQUIRE(timings.size() == 19);
+	//
+	// **And eighteen again once the wake, the ground query and the step became
+	// one `character.control`.** They were two systems in two phases and the
+	// second shared `Simulation` with `physics.simulation`, which the scheduler
+	// leaves unordered — so the velocity a key press produced was written after
+	// the integrator that would have moved it, and thrown away with the
+	// `scene::Motion` when the resting body lost it. Composed, the way
+	// `physics.contacts` composes its four steps and for the same reason.
+	REQUIRE(timings.size() == 18);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

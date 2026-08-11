@@ -699,6 +699,15 @@ a time, and two clients is what turns "the replica disagrees with the server"
 into "these two clients disagree". A new game opens with a **Playground** and an
 **Arena**, and a pad in each that teleports you to the other.
 
+**Live Instances** is where those two halves are listed, and it opens itself when
+a run starts. A row per server and a row per client, each with the counts that
+say whether a client is keeping up, and a `View` on each that is the way back to
+that instance's viewport — closing a view no longer loses it. `Stop` on a client
+row removes that client, which is also what the ribbon's Stop does while you are
+looking at one, and `+ Player` on a server row admits another. A client view is
+listed here rather than among the scenes in the Worlds panel: it exists only
+between Play and Stop and there is nothing about it to author.
+
 ### Things fall *(v0.13)*
 
 A new game gained a fourth world at v0.13, and it is **Slide** — a curved

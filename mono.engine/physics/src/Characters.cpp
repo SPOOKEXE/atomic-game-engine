@@ -8,6 +8,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+
+#include <vector>
 #include <engine/spatial/LayerMask.hpp>
 
 namespace engine::physics {
@@ -65,6 +67,7 @@ namespace engine::physics {
 		}
 
 		size_t woken = 0;
+		std::vector<ecs::Entity> pending;
 
 		store.Each<const scene::Humanoid>([&](ecs::Entity row, const scene::Humanoid &humanoid) {
 			if (!humanoid.Enabled) {
@@ -106,12 +109,26 @@ namespace engine::physics {
 			// ECS.** `physics::Publish` takes `scene::Motion` away when a body
 			// sleeps — the archetype move is the mechanism, not a flag — so a
 			// body without one is a body `IntegrateMotion` never visits and
-			// `scene::StepCharacters` has nothing to write into. `Set` and not
-			// `GetMutable` for the same reason `Publish` uses it on the way back.
+			// `scene::StepCharacters` has nothing to write into.
+			//
+			// **Gathered here and written below**, for the reason
+			// `scene::LinkPlayerCharacters` gives about its own list: adding a
+			// component is an archetype move, and an archetype move under an
+			// `Each` is the iteration invalidating itself. A rig keeps its
+			// humanoid and its body on different rows so the two archetypes are
+			// usually different and it usually got away with it — usually is not
+			// a guarantee, and a scripted character carries both on one row,
+			// where they are the same archetype and it never was.
 			if (!store.Has<scene::Motion>(body)) {
-				store.Set(body, scene::Motion{});
+				pending.push_back(body);
 			}
 		});
+
+		// One `Set` per body that had none, outside the walk. Empty on every
+		// tick where nothing woke, which is nearly all of them.
+		for (const ecs::Entity body : pending) {
+			store.Set(body, scene::Motion{});
+		}
 
 		return woken;
 	}
@@ -129,19 +146,42 @@ namespace engine::physics {
 			(void)scene::LinkPlayerCharacters(store);
 		});
 
-		scheduler.Add("character.ground", ecs::Phase::PreSimulation, [](ecs::Store &store) {
-			// **Waking before grounding, and both before the step.** The order
-			// is a chain: a body with no `scene::Motion` cannot be given a
-			// velocity, and a character that cannot be given one cannot be shown
-			// to be standing on anything worth knowing about.
+		// **Wake, ground and step are one system, and that is the whole fix.**
+		// They were two — the first two here and `character.step` in
+		// `Phase::Simulation` — and `RegisterPhysicsSystems` says in as many
+		// words why that could not work: *"`ecs::Scheduler` gives no ordering
+		// between two systems in one phase"*. `physics.simulation` is in
+		// `Simulation` too and is registered first by every host, so
+		// `IntegrateMotion` ran *before* `StepCharacters` on every tick. The
+		// velocity a key press produced was therefore written immediately after
+		// the only thing that would have moved it.
+		//
+		// On its own that is a tick of lag nobody would notice. What made it a
+		// character that does not move at all is the other end: a character
+		// standing still is a body the solver rests, `physics::Publish` takes
+		// `scene::Motion` away from a resting body, and it did so at the end of
+		// the same tick — before anything had integrated the velocity. The next
+		// tick `WakeMovingCharacters` handed back a *zero* `Motion`,
+		// `StepCharacters` wrote the walk speed into it again, and the cycle
+		// repeated for as long as the key was held: `scene::Motion` appearing
+		// and vanishing every frame, `Humanoid::MoveDirection` reading as the
+		// commanded direction on some ticks and zero on others, and a body that
+		// never went anywhere.
+		//
+		// Composed rather than ordered by registration, which is the same
+		// decision `physics.contacts` makes for the same reason — the contract
+		// supports composition and does not support registration order. The
+		// chain is: link the rig, wake the body so it *has* a `Motion`, ask what
+		// is under it, then write the velocity. `Simulation` then integrates
+		// what this left, in the tick that produced it.
+		scheduler.Add("character.control", ecs::Phase::PreSimulation, [](ecs::Store &store) {
 			(void)WakeMovingCharacters(store);
 			(void)GroundCharacters(store);
-		});
 
-		// **In the simulation and against the fixed tick**, because it writes a
-		// `Motion` the physics step integrates — `scene::StepCharacters` says
-		// why that must not be a frame-rate system.
-		scheduler.Add("character.step", ecs::Phase::Simulation, [](ecs::Store &store) {
+			// **Still against the fixed tick**, which is all
+			// `scene::StepCharacters` ever asked for — `PreSimulation` runs once
+			// per tick exactly as `Simulation` does, so moving it here costs the
+			// determinism nothing and buys the ordering everything.
 			(void)scene::StepCharacters(store, static_cast<float>(store.Time().Delta));
 		});
 

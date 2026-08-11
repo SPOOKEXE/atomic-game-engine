@@ -38,6 +38,7 @@
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <optional>
+#include <utility>
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
@@ -745,30 +746,64 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 		input->Down.Set(engine::scene::KeyCode::Space, true);
 	});
 
-	float apex = 0.0f;
-	for (int beat = 0; beat < 400; beat++) {
-		fixture.Step(link);
-		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
-			const auto *p2 = store.Get<Transform>(root);
-			const auto *m2 = store.Get<engine::scene::Motion>(root);
-			if (beat % 20 == 0 || beat > 390) {
-				std::printf("DBG b=%d y=%f vel=%s\n", beat, p2?p2->Frame.Position.Y:-99.0f,
-					m2 ? std::to_string(m2->Linear.Y).c_str() : "no-motion");
-			}
-		});
-	}
-	for (int beat = 0; beat < 20; beat++) {
+	// **The whole arc, not the first half.** A jump is up *and* down, and the
+	// two halves fail apart: the rise is `Humanoid::JumpSpeed` and `Grounded`,
+	// and the return is gravity still reaching a body that is touching nothing.
+	// Sampled every tick because the apex is between two of them.
+	//
+	// Two seconds is the budget, and it is a statement about the numbers rather
+	// than a guess. `JumpSpeed` is chosen against `CHARACTER_HEIGHT` and
+	// `scene::Gravity` so that the whole arc takes well under a second and a
+	// half — a jump that has not landed by now is one whose speed and gravity
+	// disagree about what units they are in, which is exactly the state that
+	// reads as a character frozen in the air.
+	// **Released after one frame, and forgetting to was worth catching.** The
+	// replica's `InputState` is written by `Editor::DrivePlayer` every frame in
+	// a real editor; a test that sets it once and walks away leaves `Down`
+	// holding space and `Previous` not, so `WasKeyPressed` answers yes for ever
+	// and the character jumps again the tick it lands. Which looks a great deal
+	// like a bug in the jump and is a bug in the harness.
+	fixture.Step(link);
+	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		auto *input = store.ResourceMutable<engine::scene::InputState>();
+		input->Previous = input->Down;
+		input->Down = {};
+	});
+
+	float apex = before.Y;
+	float landed = before.Y;
+	for (int beat = 0; beat < 120; beat++) {
 		fixture.Step(link);
 		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
 			if (const auto *placement = store.Get<Transform>(root)) {
 				apex = std::max(apex, placement->Frame.Position.Y);
+				landed = placement->Frame.Position.Y;
 			}
 		});
 	}
 
-	// Well clear of where it stood, rather than merely different: a character
-	// bobbing on a contact would pass anything tighter.
-	CHECK(apex > before.Y + 2.0f);
+	// Clear of where it stood, rather than merely different: a character bobbing
+	// on a contact would pass anything tighter. And under a storey, because a
+	// jump measured in tens of metres is the units mistake this bounds.
+	CHECK(apex > before.Y + 1.0f);
+	CHECK(apex < before.Y + 10.0f);
+
+	// **And it is back on the floor**, which is the half that catches the hang.
+	CHECK_THAT(landed, Catch::Matchers::WithinAbs(before.Y, 0.5));
+
+	// **The client watched the whole arc, and this is the case somebody
+	// actually reported.** A jumping character touches nothing, and
+	// `physics::Publish` used to mark `scene::Transform` changed only for the
+	// bodies the solver had a manifold for — so the moment it left the ground it
+	// stopped replicating. The client saw it rise for the two or three ticks the
+	// floor contact survived take-off, and then hang at that height until it
+	// landed and a contact put it back on the wire. Which reads exactly as "it
+	// jumps, then freezes in mid-air and never comes down".
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		const auto *seen = store.Get<Transform>(root);
+		REQUIRE(seen != nullptr);
+		CHECK_THAT(seen->Frame.Position.Y, Catch::Matchers::WithinAbs(landed, 0.5));
+	});
 
 	link.Stop(fixture.Worlds);
 }
@@ -931,6 +966,136 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 	// A world that is not a client's is never played, whatever is held over it:
 	// the authority's own panel is the server's view and WASD flies its camera.
 	CHECK_FALSE(editor.DrivePlayer(authority, true, false, true));
+
+	editor.Runs.clear();
+	editor.Universe.reset();
+	engine::parallel::Jobs::Stop();
+}
+
+TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]") {
+	// **The bug this exists for did not stop the keyboard reaching the client —
+	// it stopped it staying there.** `Editor::DriveCamera` picks the panel a
+	// gesture means from `Hovered || Active || Panning` and used to hand only
+	// the first two on, so a panel chosen *because* it was panning arrived at
+	// `DrivePlayer` looking untouched: it took the frame, decided it was not
+	// being driven, and wiped the keys. `Panning` survives a middle-drag
+	// released off the picture, so the state is sticky — the character got a
+	// move direction on a fraction of the ticks and, because
+	// `scene::StepCharacters` replaces horizontal velocity rather than adding
+	// to it, went nowhere at all.
+	//
+	// The other half is the panels nobody visited. One `DrivePlayer` call a
+	// frame left every other client world holding the last keys it was given,
+	// which is a second character walking for ever on a released key.
+	Frame frame;
+
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+
+	engine::parallel::Jobs::Start(1);
+	engine::scene::RegisterSceneComponents();
+
+	WorldSettings settings;
+	settings.Name = Name("Scene");
+	settings.TickRate = TICK_RATE;
+	const WorldId authority = editor.Universe->Create(settings);
+
+	editor.Universe->Enter(authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+		engine::scene::RegisterOwnershipSystem(systems);
+		engine::physics::RegisterCharacterSystems(systems);
+
+		engine::scene::PartDesc floor;
+		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
+		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
+		floor.Anchored = true;
+
+		const Entity ground = engine::scene::MakePart(store, floor);
+		store.SetInstanceName(ground, "SpawnLocation");
+		store.SetParent(ground, engine::scene::WorkspaceOf(store));
+	});
+
+	// Two clients, because one cannot show either half of this.
+	studio::Editor::WorldRun run;
+	run.World = authority;
+	run.Mode = studio::RunMode::Play;
+	for (int client = 0; client < 2; client++) {
+		auto link = std::make_unique<PlayLink>();
+		std::string error;
+		REQUIRE(link->Start(
+			*editor.Universe, authority, TICK_RATE, error, "client " + std::to_string(client + 1)
+		));
+		run.Links.push_back(std::move(link));
+	}
+	editor.Runs.push_back(std::move(run));
+
+	const WorldId first = editor.Runs.front().Links[0]->ReplicaWorld();
+	const WorldId second = editor.Runs.front().Links[1]->ReplicaWorld();
+
+	for (int beat = 0; beat < 8; beat++) {
+		for (const std::unique_ptr<PlayLink> &link : editor.Runs.front().Links) {
+			link->Step(*editor.Universe);
+		}
+		editor.Universe->Tick(FRAME_SECONDS);
+	}
+
+	// Two panels, one per client, laid out the way `Editor::SpawnPlayer` lays
+	// them out.
+	REQUIRE(editor.Extras.size() >= 2);
+	editor.Extras[0].Open = true;
+	editor.Extras[0].World = first;
+	editor.Extras[1].Open = true;
+	editor.Extras[1].World = second;
+
+	// **The pointer is in the first panel and the second is stuck panning**,
+	// which is the state a middle-drag released outside the picture leaves. The
+	// search below must still choose the panel under the pointer, and the stuck
+	// one must be told it has nothing rather than being handed the frame.
+	editor.Extras[0].Hovered = true;
+	editor.Extras[1].Panning = true;
+
+	const auto intentIn = [&editor](WorldId world) {
+		float magnitude = 0.0f;
+		bool focused = false;
+		editor.Universe->Enter(world, [&](Store &store) {
+			magnitude = engine::scene::ReadMoveIntent(store).Direction.Magnitude();
+			focused = store.Resource<engine::scene::InputState>()->Focused;
+		});
+		return std::pair<float, bool>{magnitude, focused};
+	};
+
+	frame.HoldKey(ImGuiKey_W, true);
+	editor.DriveCamera();
+
+	const auto [walking, hasKeyboard] = intentIn(first);
+	CHECK(hasKeyboard);
+	CHECK(walking > 0.5f);
+
+	const auto [idle, stuck] = intentIn(second);
+	CHECK_FALSE(stuck);
+	CHECK(idle < 0.01f);
+
+	// **And the pointer moving to the stuck panel hands it over rather than
+	// finding it already holding the frame.** `Panning` counts as the pointer
+	// being there, which is what the target search has always meant by it.
+	editor.Extras[0].Hovered = false;
+	editor.DriveCamera();
+
+	CHECK(intentIn(second).first > 0.5f);
+	CHECK(intentIn(first).first < 0.01f);
+
+	// Nothing under the pointer and no viewport focused: everybody lets go.
+	// Alt-tabbing away while holding W must not leave a character walking.
+	editor.Extras[1].Panning = false;
+	editor.DriveCamera();
+
+	CHECK(intentIn(first).first < 0.01f);
+	CHECK(intentIn(second).first < 0.01f);
 
 	editor.Runs.clear();
 	editor.Universe.reset();

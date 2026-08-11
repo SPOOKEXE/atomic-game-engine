@@ -158,10 +158,34 @@ namespace engine::scene {
 		core::Vector3 MoveDirection;
 
 		// How fast it walks, in metres per second.
+		//
+		// **Roblox's number is 16 and it is 16 *studs*.** A stud is about 0.28 m,
+		// so the same feel in this engine's units is nearer 4.5 — see `JumpSpeed`
+		// below for why the two are stated together and why the figure here is
+		// not simply converted. Left where a run of the examples put it, because
+		// what a character *feels* like is an authoring decision and not a units
+		// bug the way the jump was.
 		float WalkSpeed = 16.0f;
 
-		// How fast it leaves the ground when it jumps.
-		float JumpSpeed = 50.0f;
+		// How fast it leaves the ground when it jumps, in metres per second.
+		//
+		// **50 was Roblox's `JumpPower`, and Roblox's gravity is 196.2.** That
+		// pairing gives a jump about 6 studs high. `scene::Gravity` deliberately
+		// does *not* copy 196.2 — this engine measures a part sized `2` as two
+		// metres, so it uses Earth's 9.81 and says so at length — and 50 m/s
+		// against 9.81 m/s² is an apex of a hundred and thirty metres, reached
+		// five seconds after take-off.
+		//
+		// That is the bug somebody reports as "jump freezes in mid-air": the
+		// character is not stuck, it is coasting through the top of an arc so
+		// slow and so tall that a second of it looks like a hang, and the ground
+		// it left is off the bottom of the screen. Nothing in the solver, the
+		// sleep heuristic or the ground query is involved.
+		//
+		// The figure is chosen against the height rather than converted: half of
+		// `CHARACTER_HEIGHT` is a jump you can read, and `v = sqrt(2 g h)` with
+		// h = 2.5 m gives 7.
+		float JumpSpeed = 7.0f;
 
 		// How tall the capsule is, in metres.
 		float Height = 5.0f;
