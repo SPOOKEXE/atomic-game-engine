@@ -67,6 +67,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] local server (one server multiple clients on same machine)
 - [_] check teleportservice works between worlds and it works in studio natively
 - [_] check character works with non-euclidean
+- [_] immersive portals (add a new ImmersivePortal of which does cross-world teleportation in real-time, can enter the next world immediately and shows the other world's side through a cross-world texture rendering). Also supports custom logic like "OnPlayerEnterNearby, OnPlayerLeavingNearby, OnPlayerEnterImage, OnPlayerLeftImage", etc. Also custom properties like the rate of which the image updates. Need a bus system for this.
 
 ### v0.15
 
