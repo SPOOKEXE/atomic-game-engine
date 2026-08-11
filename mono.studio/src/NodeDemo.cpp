@@ -324,6 +324,21 @@ namespace studio {
 				return text;
 			}
 
+			// A field read as elevation, for the 3-D view.
+			//
+			// **The raw numbers, not the thumbnail.** `PreviewOfField` has
+			// already lit its picture, and reading that back as height would put
+			// the shading into the geometry.
+			bool HeightsOfField(const std::any &payload, Surface &out) {
+				const Field *field = std::any_cast<Field>(&payload);
+				if (field == nullptr || field->Empty() || field->Side < 2) {
+					return false;
+				}
+				out.Side = static_cast<uint32_t>(field->Side);
+				out.Heights.assign(field->Data.begin(), field->Data.end());
+				return true;
+			}
+
 			std::string DescribeImage(const std::any &payload) {
 				const Image *image = std::any_cast<Image>(&payload);
 				if (image == nullptr || image->Empty()) {
@@ -376,6 +391,7 @@ namespace studio {
 			field.Description = "A square grid of heights, 0..1";
 			field.Preview = PreviewOfField;
 			field.Describe = DescribeField;
+			field.Heights = HeightsOfField;
 			DataTypes::Register(field);
 
 			DataType picture;
@@ -1068,6 +1084,12 @@ namespace studio {
 		// GPU rather than a missing picture.
 		constexpr size_t PREVIEW_CEILING = 64;
 
+		// The orbit view's displaced texture, now that no draw list names it.
+		if (NodeDemoOrbitStale.IsValid()) {
+			Renderer.DropTexture(NodeDemoOrbitStale);
+			NodeDemoOrbitStale = engine::core::Name{};
+		}
+
 		if (NodeDemoTextures.size() <= PREVIEW_CEILING) {
 			return;
 		}
@@ -1113,12 +1135,68 @@ namespace studio {
 		return handle;
 	}
 
+	void *Editor::NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make) {
+		// Already showing it. An orbit that came to rest costs a comparison a
+		// frame and nothing else.
+		if (key == NodeDemoOrbitKey && NodeDemoOrbitName.IsValid()) {
+			return NodeDemoOrbitHandle;
+		}
+
+		nodes::PreviewImage image;
+		if (!make(image) || !image.Valid()) {
+			NodeDemoOrbitKey = key;
+			NodeDemoOrbitHandle = nullptr;
+			return nullptr;
+		}
+
+		engine::assets::TextureData texture;
+		texture.Width = image.Side;
+		texture.Height = image.Side;
+		texture.Format = engine::assets::TextureFormat::RGBA8;
+		texture.Pixels.resize(image.Rgba.size());
+		std::memcpy(texture.Pixels.data(), image.Rgba.data(), image.Rgba.size());
+
+		// **A fresh name, and the old one is only marked.** Replacing under one
+		// name would release a texture this frame's draw list already points at.
+		const engine::core::Name name("studio.nodeorbit/" + std::to_string(NodeDemoOrbitSerial++));
+		if (!Renderer.AddTexture(name, texture)) {
+			NodeDemoOrbitKey = key;
+			NodeDemoOrbitHandle = nullptr;
+			return nullptr;
+		}
+
+		if (NodeDemoOrbitName.IsValid()) {
+			// Only ever one waiting: the previous frame's has already been
+			// released by the pump between then and now.
+			if (NodeDemoOrbitStale.IsValid()) {
+				Renderer.DropTexture(NodeDemoOrbitStale);
+			}
+			NodeDemoOrbitStale = NodeDemoOrbitName;
+		}
+
+		NodeDemoOrbitName = name;
+		NodeDemoOrbitHandle = Renderer.TextureHandle(name);
+		NodeDemoOrbitKey = key;
+		return NodeDemoOrbitHandle;
+	}
+
 	void Editor::DropNodeDemoImages() {
 		for (const auto &[key, name] : NodeDemoTextureNames) {
 			Renderer.DropTexture(name);
 		}
 		NodeDemoTextureNames.clear();
 		NodeDemoTextures.clear();
+
+		if (NodeDemoOrbitStale.IsValid()) {
+			Renderer.DropTexture(NodeDemoOrbitStale);
+			NodeDemoOrbitStale = engine::core::Name{};
+		}
+		if (NodeDemoOrbitName.IsValid()) {
+			Renderer.DropTexture(NodeDemoOrbitName);
+			NodeDemoOrbitName = engine::core::Name{};
+		}
+		NodeDemoOrbitHandle = nullptr;
+		NodeDemoOrbitKey = 0;
 	}
 	// --- the history ----------------------------------------------------------
 
@@ -1203,38 +1281,16 @@ namespace studio {
 			return "that node has produced no picture";
 		}
 
-		const std::string path = std::string(NodeDemoPath) + ".tga";
+		const std::string path = std::string(NodeDemoPath) + ".png";
 		std::ofstream out(path, std::ios::binary | std::ios::trunc);
 		if (!out) {
 			return "could not write " + path;
 		}
 
-		const auto side = static_cast<uint16_t>(image.Side);
-		unsigned char header[18] = {};
-		header[2] = 2;
-		header[12] = static_cast<unsigned char>(side & 0xFF);
-		header[13] = static_cast<unsigned char>((side >> 8) & 0xFF);
-		header[14] = static_cast<unsigned char>(side & 0xFF);
-		header[15] = static_cast<unsigned char>((side >> 8) & 0xFF);
-		header[16] = 32;
-		out.write(reinterpret_cast<const char *>(header), sizeof(header));
-
-		// Targa is blue first and bottom row first; `PreviewImage` is red first
-		// and top row first, so both are turned round here rather than anywhere
-		// the rest of the program can see.
-		std::vector<unsigned char> row(static_cast<size_t>(side) * 4);
-		for (int y = side - 1; y >= 0; y--) {
-			for (uint32_t x = 0; x < image.Side; x++) {
-				const size_t from = (static_cast<size_t>(y) * image.Side + x) * 4;
-				const size_t to = static_cast<size_t>(x) * 4;
-				row[to] = image.Rgba[from + 2];
-				row[to + 1] = image.Rgba[from + 1];
-				row[to + 2] = image.Rgba[from];
-				row[to + 3] = image.Rgba[from + 3];
-			}
-			out.write(reinterpret_cast<const char *>(row.data()), static_cast<std::streamsize>(row.size()));
-		}
-
+		const std::vector<uint8_t> encoded = nodes::EncodePng(image);
+		out.write(
+			reinterpret_cast<const char *>(encoded.data()), static_cast<std::streamsize>(encoded.size())
+		);
 		return "exported " + path;
 	}
 
@@ -1411,10 +1467,8 @@ namespace studio {
 
 			ImGui::Separator();
 
-			// **Written as a Targa and not a PNG**, because nothing in this
-			// engine encodes one and a picture nobody can open is worse than a
-			// larger file everything opens. Twelve bytes of header and the
-			// pixels, bottom row first.
+			// A real PNG, written by `EncodePng` — stored deflate blocks, so
+			// nothing new is linked for it.
 			const std::vector<nodes::NodeId> &chosen = NodeDemoCanvas.Selection();
 			if (ImGui::MenuItem("Export the selected node's picture", nullptr, false, chosen.size() == 1)) {
 				NodeDemoSaid = ExportNodeDemoImage(chosen.front());
@@ -1631,6 +1685,20 @@ namespace studio {
 		ImGui::InputTextWithHint("##filter", "filter nodes", NodeDemoFilter, sizeof(NodeDemoFilter));
 
 		const std::string wanted = NodeDemoFilter;
+		const auto matchesName = [&wanted](const std::string &name) {
+			if (wanted.empty()) {
+				return true;
+			}
+			std::string haystack = name;
+			std::string needle = wanted;
+			for (char &letter : haystack) {
+				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+			}
+			for (char &letter : needle) {
+				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+			}
+			return haystack.find(needle) != std::string::npos;
+		};
 		const auto matches = [&wanted](const nodes::NodeType &type) {
 			if (wanted.empty()) {
 				return true;
@@ -1645,6 +1713,40 @@ namespace studio {
 			}
 			return haystack.find(needle) != std::string::npos;
 		};
+
+		// **The custom types first**, because they are the ones this graph is
+		// about — a library of eight built-in categories with one entry
+		// somebody made is a list whose useful row is at the bottom.
+		if (!NodeDemoGraph.Templates().empty()) {
+			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+			if (ImGui::CollapsingHeader("Custom")) {
+				std::string dropped;
+				for (const nodes::Graph::Template &held : NodeDemoGraph.Templates()) {
+					if (!matchesName(held.Name)) {
+						continue;
+					}
+					ImGui::PushID(held.Name.c_str());
+					if (ImGui::SmallButton("x")) {
+						dropped = held.Name;
+					}
+					ImGui::SameLine();
+					if (ImGui::Selectable(held.Name.c_str())) {
+						NodeDemoCanvas.Place(NodeDemoGraph, held.Document);
+						CommitNodeDemo();
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip(
+							"place a copy — each one is independent of the fold it was made from"
+						);
+					}
+					ImGui::PopID();
+				}
+				if (!dropped.empty()) {
+					NodeDemoGraph.Forget(dropped);
+					CommitNodeDemo();
+				}
+			}
+		}
 
 		for (const std::string &category : nodes::NodeTypes::Categories()) {
 			size_t survived = 0;
@@ -1802,6 +1904,9 @@ namespace studio {
 		what.Images = [this](uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make) {
 			return NodeDemoImage(key, make);
 		};
+		what.Orbit = [this](uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make) {
+			return NodeDemoOrbitImage(key, make);
+		};
 
 		if (const nodes::InspectorFn *draw = nodes::Inspectors::For(what); draw != nullptr) {
 			(*draw)(what);
@@ -1825,6 +1930,22 @@ namespace studio {
 				CommitNodeDemo();
 				return;
 			}
+
+			// **Filed under a name, into the document.** A library type carried
+			// by the process would make a saved graph unopenable anywhere else;
+			// carried by the graph, one file is the whole thing.
+			ImGui::SetNextItemWidth(-1.0f);
+			ImGui::InputTextWithHint(
+				"##typename", "name it to save as a type", NodeDemoTypeName, sizeof(NodeDemoTypeName)
+			);
+			ImGui::BeginDisabled(NodeDemoTypeName[0] == '\0');
+			if (ImGui::Button("save as type")) {
+				NodeDemoGraph.Remember(NodeDemoTypeName, nodes::SaveSubtree(NodeDemoGraph, node->Id));
+				NodeDemoSaid = std::string("filed \"") + NodeDemoTypeName + "\" under Custom";
+				NodeDemoTypeName[0] = '\0';
+				CommitNodeDemo();
+			}
+			ImGui::EndDisabled();
 
 			// **Which promoted knobs are shown.** A thirty-widget selection
 			// folds into a node that should present the three that matter; this

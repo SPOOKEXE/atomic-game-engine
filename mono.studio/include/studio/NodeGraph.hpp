@@ -57,6 +57,15 @@
 // cost of getting this wrong the other way: it hashed evaluation status by
 // accident and the cache never settled.
 //
+// ## Pieces moving between graphs
+//
+// `Absorb` is the only thing that copies nodes in. Paste, duplicate and placing
+// a saved library type are all it, because the part that is easy to get wrong —
+// remapping ids through `Node::Owner`, `Proxy::Inner` and `Promotion::Inner`,
+// and re-keying the promotions — must exist once. `SaveSubtree` is its
+// counterpart and writes through `Save`, so a template is a whole document that
+// opens, diffs and hand-edits like any other.
+//
 // @tier client
 
 #include <any>
@@ -108,6 +117,30 @@ namespace studio::nodes {
 		}
 	};
 
+	// A payload read as a square grid of heights.
+	//
+	// **The one thing a 3-D view needs and a picture cannot give it.** A
+	// thumbnail of a height field is already shaded, so re-reading the shading
+	// as elevation would put the lighting into the geometry. This is the
+	// unshaded numbers.
+	struct Surface {
+		uint32_t Side = 0;
+
+		// `Side * Side`, row major, top row first. Expected in 0..1; anything
+		// else still draws, just taller.
+		std::vector<float> Heights;
+
+		bool Valid() const {
+			return Side > 1 && Heights.size() == static_cast<size_t>(Side) * Side;
+		}
+
+		float At(uint32_t x, uint32_t y) const {
+			const uint32_t cx = x < Side ? x : Side - 1;
+			const uint32_t cy = y < Side ? y : Side - 1;
+			return Heights[static_cast<size_t>(cy) * Side + cx];
+		}
+	};
+
 	// One kind of thing an edge may carry.
 	struct DataType {
 		// What a link compares. A **string** and not an ordinal, for AGENTS.md
@@ -136,6 +169,11 @@ namespace studio::nodes {
 		// rows. Empty for a type nobody taught, and the inspector then says the
 		// only true thing left — that something is there.
 		std::function<std::string(const std::any &)> Describe;
+
+		// Reads a payload as elevation, for the 3-D view. Empty for a wire that
+		// is not carrying a landscape, which is most of them — and the inspector
+		// then offers no 3-D button rather than a flat plane.
+		std::function<bool(const std::any &, Surface &)> Heights;
 	};
 
 	// The wildcard, spelled once.
@@ -563,6 +601,60 @@ namespace studio::nodes {
 		// What is inside a compressed node, in placement order.
 		std::vector<NodeId> Contents(NodeId node) const;
 
+		// --- moving pieces between graphs -------------------------------------
+
+		// Takes a node exactly as it is, id and all.
+		//
+		// **For rebuilding something already valid** — a clipboard, a saved
+		// template — and nothing else. It skips every check `Add` makes because
+		// what is being rebuilt was checked when it was first made, and because
+		// a subtree is adopted in an order where half its references do not
+		// exist yet.
+		//@{
+		NodeId Adopt(const Node &node);
+		void Attach(const Link &link);
+		//@}
+
+		// Copies another graph in, with fresh ids.
+		//
+		// **One merge, used by paste and by the custom library.** Both have to
+		// remap ids through `Node::Owner`, `Proxy::Inner` and `Promotion::Inner`
+		// and re-key the promotions; two implementations of that is two places
+		// for a pasted fold to end up pointing at the original's insides.
+		//
+		// Links go back through `Connect`, so a document that lies about a type
+		// or would close a loop loses the link rather than the graph.
+		//
+		// @param owner Which depth the roots land at.
+		// @return The nodes that landed at `owner` — the copies of what was
+		//         top-level in `other`.
+		std::vector<NodeId> Absorb(const Graph &other, float dx, float dy, NodeId owner = NO_NODE);
+
+		// --- the custom library -----------------------------------------------
+
+		// A folded node, kept as a document so it can be placed again.
+		//
+		// **Carried by the graph rather than by the process.** The reference
+		// implementation keeps its custom types in browser storage, which makes
+		// a saved graph unopenable anywhere else; a document that carries its own
+		// types is one file that is the whole thing.
+		struct Template {
+			std::string Name;
+
+			// What `SaveSubtree` produced. Held as text and not as a `Graph`,
+			// because a `Graph` inside a `Graph` is a copy that has to be kept
+			// in step with a format that already exists.
+			std::string Document;
+		};
+
+		const std::vector<Template> &Templates() const {
+			return Library;
+		}
+
+		// Adds one, replacing any of the same name.
+		void Remember(std::string name, std::string document);
+		bool Forget(const std::string &name);
+
 		// Nodes in dependency order — every node after everything it reads.
 		//
 		// Kahn's algorithm, seeded in placement order rather than from a hash
@@ -586,6 +678,7 @@ namespace studio::nodes {
 		std::vector<Node> Stored;
 		std::vector<Link> Wires;
 		std::vector<nodes::Group> Frames;
+		std::vector<Template> Library;
 		NodeId Next = 1;
 		GroupId NextGroup = 1;
 
@@ -880,6 +973,13 @@ namespace studio::nodes {
 	// format with no nesting needs no parser and diffs line by line.
 	std::string Save(const Graph &graph);
 
+	// The same, for one node and everything inside it.
+	//
+	// **A whole document and not a fragment**, so filing a fold as a library
+	// type and saving a graph produce the same thing — and so a template can be
+	// opened, read and hand-edited like anything else here.
+	std::string SaveSubtree(const Graph &graph, NodeId root);
+
 	// Reads what `Save` wrote, replacing whatever `graph` held.
 	//
 	// A node of an unregistered type is kept; a link that cannot be made is
@@ -991,8 +1091,11 @@ namespace studio::nodes {
 		void UngroupSelection(Graph &graph);
 		void Collapse(Graph &graph, bool collapsed);
 		bool CanPaste() const {
-			return !ClipNodes.empty();
+			return !Clip.Nodes().empty();
 		}
+
+		// Places a saved subtree — a library type — in the middle of the view.
+		void Place(Graph &graph, const std::string &document);
 
 		// Folds the selection into one node, and the inverse.
 		void CompressSelection(Graph &graph);
@@ -1174,8 +1277,10 @@ namespace studio::nodes {
 		GroupId MenuGroup = NO_GROUP;
 		//@}
 
-		std::vector<Node> ClipNodes;
-		std::vector<Link> ClipLinks;
+		// **A whole graph rather than two loose vectors**, so pasting is the
+		// same `Absorb` that places a library type — the remap that pasting a
+		// fold needs is not a thing to write twice.
+		Graph Clip;
 
 		const Evaluator *Watching = nullptr;
 		ImageSink Sink;
@@ -1196,6 +1301,16 @@ namespace studio::nodes {
 
 		// Where a picture comes from, on the same terms as `Canvas::Images`.
 		ImageSink Images;
+
+		// Where a picture that changes while somebody drags comes from.
+		//
+		// **Separate from `Images` because it is not content-addressed.**
+		// `Images` holds every result for ever under the hash it was computed
+		// at, which is right for a thumbnail and ruinous for a view re-rendered
+		// sixty times a second: one second of orbiting would evict every node's
+		// picture. A host answering this is expected to keep *one* texture and
+		// replace what is in it.
+		ImageSink Orbit;
 	};
 
 	// Draws one node's visualisation. Everything else in the panel — the title,
@@ -1242,6 +1357,45 @@ namespace studio::nodes {
 	// What a payload is, in one line. `DataType::Describe` where there is one,
 	// and otherwise the only true thing left.
 	std::string DescribeValue(const std::string &portType, const std::any &payload);
+
+	// Reads a payload as elevation, through its wire's `DataType::Heights`.
+	bool SurfaceOf(const std::string &portType, const std::any &payload, Surface &out);
+
+	// Draws a lit surface into a square picture.
+	//
+	// **A software rasteriser, and deliberately.** The alternative is a render
+	// target, a camera and a mesh upload inside a panel — a device dependency
+	// for a 190-pixel square, and a second path for a picture that already has
+	// one. This produces a `PreviewImage` like everything else here, so the
+	// texture, the caching and the drawing are the code that was already there,
+	// and it can be checked with no window.
+	//
+	// @param colour Optional albedo, sampled across the surface — the same
+	//               square the 2-D view shows. Grey ramp without one.
+	// @param yaw    Rotation about the vertical, radians.
+	// @param pitch  Tilt towards the viewer, radians, clamped to a sane range.
+	// @param relief How tall the height range stands, in units of the surface's
+	//               width. 0 is flat.
+	bool RenderSurface(
+		const Surface &surface,
+		const PreviewImage *colour,
+		float yaw,
+		float pitch,
+		float relief,
+		uint32_t side,
+		PreviewImage &out
+	);
+
+	// Writes a picture as a PNG.
+	//
+	// **Stored deflate blocks, so nothing has to be linked.** A real PNG is what
+	// somebody expects an exported picture to be, and `mono.engine/bake` only
+	// *reads* one — its decoder is a publishing-pipeline concern behind
+	// `Engine::bake`, which this program's editor half does not link and should
+	// not start linking for a file dialog. The cost is a file about a third
+	// larger than a compressed one, for a picture somebody asked to look at
+	// rather than ship; `assetc` is where a compressed one belongs.
+	std::vector<uint8_t> EncodePng(const PreviewImage &image);
 
 	// The key a picture is held under: the hash its payload was computed at, and
 	// which port it left by.

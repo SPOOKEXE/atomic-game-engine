@@ -261,8 +261,7 @@ namespace studio::nodes {
 	}
 
 	void Canvas::Copy(const Graph &graph) {
-		ClipNodes.clear();
-		ClipLinks.clear();
+		Clip.Clear();
 
 		// **A fold is copied with everything inside it.** Its ports are proxies
 		// naming inner nodes, so a copy without them would be a node whose every
@@ -278,7 +277,7 @@ namespace studio::nodes {
 				return;
 			}
 			taken.push_back(id);
-			ClipNodes.push_back(*node);
+			Clip.Adopt(*node);
 			for (const NodeId child : graph.Contents(id)) {
 				self(self, child);
 			}
@@ -295,92 +294,57 @@ namespace studio::nodes {
 			const bool from = std::find(taken.begin(), taken.end(), link.From) != taken.end();
 			const bool to = std::find(taken.begin(), taken.end(), link.To) != taken.end();
 			if (from && to) {
-				ClipLinks.push_back(link);
+				Clip.Attach(link);
 			}
 		}
 	}
 
 	void Canvas::Paste(Graph &graph) {
-		if (ClipNodes.empty()) {
+		if (Clip.Nodes().empty()) {
 			return;
 		}
 
-		// Old id to new. The clipboard's ids are the graph's from whenever it
-		// was filled, and pasting twice must not make two nodes claiming one.
-		std::unordered_map<NodeId, NodeId> made;
-		std::vector<NodeId> landed;
-
-		for (const Node &node : ClipNodes) {
-			const NodeId id = graph.Add(node.Type, node.X + 40.0f, node.Y + 40.0f);
-			if (id == NO_NODE) {
-				continue;
-			}
-			Node *placed = graph.Find(id);
-			placed->Widgets = node.Widgets;
-			placed->Label = node.Label;
-			placed->Collapsed = node.Collapsed;
-			placed->Proxies = node.Proxies;
-			placed->Promoted = node.Promoted;
-			made.emplace(node.Id, id);
-		}
-
-		// **Depth and the proxies are remapped in a second pass**, because a
-		// fold's members may be placed after it — a proxy left naming the
-		// original's inner node would make the copy a second view of the first
-		// rather than a copy of it.
-		for (const Node &node : ClipNodes) {
-			const auto self = made.find(node.Id);
-			if (self == made.end()) {
-				continue;
-			}
-			Node *placed = graph.Find(self->second);
-
-			const auto owner = made.find(node.Owner);
-			placed->Owner = owner == made.end() ? Inside() : owner->second;
-			if (placed->Owner == Inside()) {
-				landed.push_back(placed->Id);
-			}
-
-			for (Proxy &proxy : placed->Proxies) {
-				const auto inner = made.find(proxy.Inner);
-				proxy.Inner = inner == made.end() ? NO_NODE : inner->second;
-			}
-			for (Promotion &promotion : placed->Promoted) {
-				const auto inner = made.find(promotion.Inner);
-				promotion.Inner = inner == made.end() ? NO_NODE : inner->second;
-
-				// **Re-keyed to the copy's own member.** The key is
-				// `<inner id>/<inner key>` and is what a saved document names;
-				// leaving the original's id in it would be a key that reads as a
-				// reference to a node the copy does not contain.
-				promotion.Key = std::to_string(promotion.Inner) + "/" + promotion.InnerKey;
-				promotion.Spec.Key = promotion.Key;
-			}
-		}
-
-		for (const Link &link : ClipLinks) {
-			const auto from = made.find(link.From);
-			const auto to = made.find(link.To);
-			if (from != made.end() && to != made.end()) {
-				(void)graph.Connect(from->second, link.FromPort, to->second, link.ToPort);
-			}
-		}
-
-		Select(std::move(landed));
+		// **`Absorb` and not a second copy of the remap.** Pasting and placing a
+		// library type are the same operation over a different source, and the
+		// part that is easy to get wrong — remapping `Owner`, the proxies and
+		// the promotion keys — is the part that must exist once.
+		Select(graph.Absorb(Clip, 40.0f, 40.0f, Inside()));
 	}
 
 	void Canvas::Duplicate(Graph &graph) {
 		// **Through the clipboard, so one code path makes both.** A duplicate
 		// that copied nodes by hand would be a second place for the "only links
-		// with both ends inside" rule to be got wrong.
-		std::vector<Node> heldNodes = std::move(ClipNodes);
-		std::vector<Link> heldLinks = std::move(ClipLinks);
+		// with both ends inside" rule to be got wrong — and what was on the
+		// clipboard is put back, because duplicating is not copying.
+		Graph held = std::move(Clip);
 
 		Copy(graph);
 		Paste(graph);
 
-		ClipNodes = std::move(heldNodes);
-		ClipLinks = std::move(heldLinks);
+		Clip = std::move(held);
+	}
+
+	void Canvas::Place(Graph &graph, const std::string &document) {
+		Graph held;
+		std::string error;
+		if (!Load(document, held, error)) {
+			LastRefusal = error;
+			return;
+		}
+
+		// Into the middle of the view, so a type picked out of a list lands
+		// where somebody is looking rather than at the origin.
+		float x = 0.0f;
+		float y = 0.0f;
+		ToGraph(OriginX + ViewWidth * 0.5f, OriginY + ViewHeight * 0.4f, x, y);
+
+		const std::vector<NodeId> landed = graph.Absorb(held, x, y, Inside());
+		if (landed.empty()) {
+			LastRefusal = "that type placed nothing";
+			return;
+		}
+		LastRefusal.clear();
+		Select(landed);
 	}
 
 	void Canvas::GroupSelection(Graph &graph) {

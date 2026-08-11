@@ -1818,9 +1818,11 @@ namespace studio {
 		// @return Whether anything was changed.
 		bool DrawNodeDemoWidgets(nodes::Node &node);
 
-		// Writes one node's picture beside the graph file, as an uncompressed
-		// Targa — nothing in this engine encodes a PNG, and a picture nobody can
-		// open would be worse than a larger file everything opens.
+		// Writes one node's picture beside the graph file, as a PNG.
+		//
+		// **Encoded here rather than through `Engine::bake`**, which only reads
+		// one: its decoder is a publishing-pipeline concern this editor does not
+		// link, and a stored-block encoder needs nothing linked at all.
 		//
 		// @return What to say about it, either way.
 		std::string ExportNodeDemoImage(nodes::NodeId node);
@@ -1845,6 +1847,18 @@ namespace studio {
 		// share a texture and an edit makes a new key instead of overwriting a
 		// live one.
 		void *NodeDemoImage(uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make);
+
+		// The 3-D view's picture, which is one texture rather than a table of
+		// them.
+		//
+		// **Not held under a hash like the rest.** A picture that changes on
+		// every frame of an orbit has an unbounded number of keys, and putting
+		// them in `NodeDemoTextures` would blow through its ceiling in a second
+		// and take every node's thumbnail with it. Two slots are alive at once:
+		// the one being drawn, and the one it replaced — which is released
+		// between frames, because a texture dropped while a draw list still
+		// names it is a use-after-free on the GPU.
+		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make);
 
 		// Releases every preview texture. Called when the cache is dropped and
 		// when the graph is replaced — a texture per result would otherwise be a
@@ -4109,6 +4123,16 @@ namespace studio {
 		std::unordered_map<uint64_t, engine::core::Name> NodeDemoTextureNames;
 		//@}
 
+		// The 3-D view's one texture: what it currently shows, what it is
+		// published as, and the name it displaced — released at the next pump.
+		//@{
+		uint64_t NodeDemoOrbitKey = 0;
+		void *NodeDemoOrbitHandle = nullptr;
+		engine::core::Name NodeDemoOrbitName;
+		engine::core::Name NodeDemoOrbitStale;
+		uint32_t NodeDemoOrbitSerial = 0;
+		//@}
+
 		// The undo stacks, as whole documents. `NodeDemoLast` is what the graph
 		// currently reads as, so a commit that changed nothing pushes nothing.
 		//@{
@@ -4123,6 +4147,7 @@ namespace studio {
 		int NodeDemoTab = 0;
 		char NodeDemoPath[256] = "demo.nodegraph";
 		char NodeDemoFilter[64] = {};
+		char NodeDemoTypeName[64] = {};
 		std::string NodeDemoSaid;
 		//@}
 

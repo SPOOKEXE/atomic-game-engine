@@ -164,14 +164,18 @@ namespace studio::nodes {
 			return Picture(what, sample) != nullptr;
 		}
 
-		// Which sample the big view is showing.
+		// Which sample the big view is showing, how it is showing it, and from
+		// where.
 		//
 		// **In ImGui's per-window storage rather than a static**, so two panels
-		// over one graph do not fight over one pinned port — and so it resets
-		// with the window rather than living for the process.
+		// over one graph do not fight over one pinned port or one camera — and
+		// so it resets with the window rather than living for the process.
 		struct Pin {
 			int Index = 0;
 			NodeId Node = NO_NODE;
+			bool Three = false;
+			float Yaw = 0.6f;
+			float Pitch = 0.62f;
 		};
 
 		Pin ReadPin() {
@@ -179,6 +183,9 @@ namespace studio::nodes {
 			Pin pin;
 			pin.Index = store->GetInt(ImGui::GetID("nodegraph.pin.index"), 0);
 			pin.Node = static_cast<NodeId>(store->GetInt(ImGui::GetID("nodegraph.pin.node"), 0));
+			pin.Three = store->GetBool(ImGui::GetID("nodegraph.pin.three"), false);
+			pin.Yaw = store->GetFloat(ImGui::GetID("nodegraph.pin.yaw"), 0.6f);
+			pin.Pitch = store->GetFloat(ImGui::GetID("nodegraph.pin.pitch"), 0.62f);
 			return pin;
 		}
 
@@ -186,6 +193,41 @@ namespace studio::nodes {
 			ImGuiStorage *store = ImGui::GetStateStorage();
 			store->SetInt(ImGui::GetID("nodegraph.pin.index"), pin.Index);
 			store->SetInt(ImGui::GetID("nodegraph.pin.node"), static_cast<int>(pin.Node));
+			store->SetBool(ImGui::GetID("nodegraph.pin.three"), pin.Three);
+			store->SetFloat(ImGui::GetID("nodegraph.pin.yaw"), pin.Yaw);
+			store->SetFloat(ImGui::GetID("nodegraph.pin.pitch"), pin.Pitch);
+		}
+
+		// The elevation behind a sample, or false when that wire is not carrying
+		// a landscape.
+		bool HeightsOf(const Sampled &sample, Surface &out) {
+			return sample.Payload != nullptr && SurfaceOf(sample.Type, *sample.Payload, out);
+		}
+
+		// The colour to drape over a surface: the first output on the node that
+		// draws as a picture and is *not* the surface itself.
+		//
+		// **Taken from a sibling port rather than from the height field.** A
+		// thumbnail of a height field is already lit, so draping it would put the
+		// shading into the geometry twice — which is exactly why `Colourise` is a
+		// node rather than a setting on the viewer.
+		const PreviewImage *Drape(
+			const Inspection &what, const std::vector<Sampled> &all, const Sampled &shown, PreviewImage &held
+		) {
+			for (const Sampled &sample : all) {
+				if (&sample == &shown || sample.Payload == nullptr) {
+					continue;
+				}
+				Surface ignored;
+				if (SurfaceOf(sample.Type, *sample.Payload, ignored)) {
+					continue;
+				}
+				if (PictureOf(sample.Maker, sample.Type, *sample.Payload, held) && held.Valid()) {
+					return &held;
+				}
+			}
+			(void)what;
+			return nullptr;
 		}
 
 		// A section heading, in the panel's quietest voice. Every handler opens
@@ -311,8 +353,78 @@ namespace studio::nodes {
 
 			Heading("visualisation");
 
+			// The 3-D button appears only where the wire can be read as
+			// elevation, so a node carrying a picture is not offered a view it
+			// would draw as a flat plane.
+			Surface surface;
+			const bool landscape = HeightsOf(shown, surface);
+			if (!landscape) {
+				pin.Three = false;
+			}
+
+			if (landscape) {
+				if (ImGui::RadioButton("2D map", !pin.Three)) {
+					pin.Three = false;
+					WritePin(pin);
+				}
+				ImGui::SameLine();
+				if (ImGui::RadioButton("3D mesh", pin.Three)) {
+					pin.Three = true;
+					WritePin(pin);
+				}
+			}
+
 			const float side = ImGui::GetContentRegionAvail().x;
-			if (void *handle = Picture(what, shown); handle != nullptr) {
+
+			if (pin.Three && what.Orbit) {
+				// **Rendered on the CPU into the same kind of picture as
+				// everything else here**, so the texture, the drawing and the
+				// caching are the code that was already there — see
+				// `RenderSurface`.
+				PreviewImage held;
+				const PreviewImage *drape = Drape(what, all, shown, held);
+
+				// The key is what the picture is *of*: the payload's hash, the
+				// camera, and whether anything is draped over it. Quantised, so
+				// a drag that moved a thousandth of a radian does not re-render.
+				const auto quantised = [](float radians) {
+					return static_cast<int64_t>(std::lround(radians * 256.0));
+				};
+				uint64_t key = shown.Key;
+				key = key * 1099511628211ull + static_cast<uint64_t>(quantised(pin.Yaw));
+				key = key * 1099511628211ull + static_cast<uint64_t>(quantised(pin.Pitch));
+				key = key * 1099511628211ull + (drape != nullptr ? 1u : 0u);
+
+				const auto pixels = static_cast<uint32_t>(
+					std::clamp(side * ImGui::GetIO().DisplayFramebufferScale.x, 64.0f, 512.0f)
+				);
+				const float yaw = pin.Yaw;
+				const float pitch = pin.Pitch;
+
+				void *handle = what.Orbit(key, [&](PreviewImage &image) {
+					return RenderSurface(surface, drape, yaw, pitch, 0.42f, pixels, image);
+				});
+
+				if (handle != nullptr) {
+					ImGui::Image(reinterpret_cast<ImTextureID>(handle), ImVec2(side, side));
+				} else {
+					ImGui::Dummy(ImVec2(side, side));
+				}
+
+				// Drag anywhere over it to orbit. **On the image rather than on
+				// a pair of sliders**, because the question a 3-D view answers is
+				// "what does that ridge look like from there", and reaching it
+				// through two numbers is not the same gesture.
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+				}
+				if (ImGui::IsItemHovered() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+					const ImVec2 moved = ImGui::GetIO().MouseDelta;
+					pin.Yaw += moved.x * 0.010f;
+					pin.Pitch = std::clamp(pin.Pitch + moved.y * 0.008f, -1.30f, 1.30f);
+					WritePin(pin);
+				}
+			} else if (void *handle = Picture(what, shown); handle != nullptr) {
 				ImGui::Image(reinterpret_cast<ImTextureID>(handle), ImVec2(side, side));
 			} else {
 				ImGui::Dummy(ImVec2(side, side));

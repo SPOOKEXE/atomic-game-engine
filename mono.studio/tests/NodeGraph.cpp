@@ -553,6 +553,245 @@ TEST_CASE("compression derives an interface and moves nothing", "[studio][nodegr
 	CHECK(graph.Alive(noise));
 }
 
+TEST_CASE("a fold files as a library type and places independent copies", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
+	const NodeId warp = graph.Add("field.warp", 300.0f, 0.0f);
+	const NodeId terrace = graph.Add("field.terrace", 600.0f, 0.0f);
+	REQUIRE(graph.Connect(noise, "Out", warp, "In") == LinkResult::Made);
+	REQUIRE(graph.Connect(warp, "Out", terrace, "In") == LinkResult::Made);
+
+	const NodeId folded = graph.Compress({warp, terrace}, 450.0f, 0.0f);
+	REQUIRE(folded != NO_NODE);
+	graph.Find(warp)->Widgets["amount"].Number = 0.33;
+
+	graph.Remember("Erosion Stack", SaveSubtree(graph, folded));
+	REQUIRE(graph.Templates().size() == 1);
+
+	// **The template is a whole document**, so it opens on its own — which is
+	// what makes it hand-editable and what makes placing it one `Load`.
+	Graph opened;
+	std::string error;
+	REQUIRE(Load(graph.Templates().front().Document, opened, error));
+	CHECK(opened.Nodes().size() == 3);
+
+	// The subtree comes out at the origin, so placing it is an offset rather
+	// than a subtraction every caller has to remember.
+	const Node *root = nullptr;
+	for (const Node &one : opened.Nodes()) {
+		if (one.Compressed()) {
+			root = &one;
+		}
+	}
+	REQUIRE(root != nullptr);
+	CHECK(root->X == 0.0f);
+	CHECK(root->Y == 0.0f);
+
+	// Two placements, each independent of the original and of each other.
+	const std::vector<NodeId> first = graph.Absorb(opened, 1000.0f, 0.0f);
+	const std::vector<NodeId> second = graph.Absorb(opened, 1000.0f, 400.0f);
+	REQUIRE(first.size() == 1);
+	REQUIRE(second.size() == 1);
+	CHECK(first.front() != second.front());
+
+	const std::vector<WidgetSpec> knobs = WidgetsOf(*graph.Find(first.front()));
+	const auto amount = std::find_if(knobs.begin(), knobs.end(), [](const WidgetSpec &spec) {
+		return spec.Label.find("Amount") != std::string::npos;
+	});
+	REQUIRE(amount != knobs.end());
+
+	// The copy carried the value it was filed with, and moving it moves nothing
+	// else.
+	CHECK(ValueOf(graph, first.front(), *amount).Number == 0.33);
+	Value moved = ValueOf(graph, first.front(), *amount);
+	moved.Number = 0.11;
+	SetValue(graph, first.front(), amount->Key, moved);
+	CHECK(graph.Find(warp)->Widgets["amount"].Number == 0.33);
+	CHECK(ValueOf(graph, second.front(), *knobs.begin()).Kind == knobs.begin()->Kind);
+
+	// **The library rides in the document**, so a saved graph is the whole
+	// thing — the failure the reference implementation has by keeping its custom
+	// types in browser storage.
+	const std::string text = Save(graph);
+	Graph reloaded;
+	REQUIRE(Load(text, reloaded, error));
+	REQUIRE(reloaded.Templates().size() == 1);
+	CHECK(reloaded.Templates().front().Name == "Erosion Stack");
+	CHECK(Save(reloaded) == text);
+
+	CHECK(graph.Forget("Erosion Stack"));
+	CHECK(graph.Templates().empty());
+	CHECK_FALSE(graph.Forget("Erosion Stack"));
+}
+
+TEST_CASE("a height field draws as a lit surface", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
+	graph.Find(noise)->Widgets["resolution"].Text = "64";
+
+	Evaluator runner;
+	runner.Run(graph);
+	const std::any *payload = runner.Output(noise, "Out");
+	REQUIRE(payload != nullptr);
+
+	// **The wire says how to be read as elevation**, the same way it says how to
+	// be drawn — so a 3-D view needs nothing from the node type.
+	Surface surface;
+	REQUIRE(SurfaceOf("data.FIELD", *payload, surface));
+	CHECK(surface.Side == 64);
+	CHECK_FALSE(SurfaceOf("data.NUMBER", std::any(0.5), surface));
+
+	PreviewImage picture;
+	REQUIRE(RenderSurface(surface, nullptr, 0.6f, 0.62f, 0.42f, 96, picture));
+	REQUIRE(picture.Valid());
+	CHECK(picture.Side == 96);
+
+	// Something was drawn: a picture that is all background is a rasteriser that
+	// projected everything off screen, which is the failure this catches.
+	size_t painted = 0;
+	for (size_t at = 0; at + 3 < picture.Rgba.size(); at += 4) {
+		painted += picture.Rgba[at] > 20 || picture.Rgba[at + 1] > 20 ? 1 : 0;
+	}
+	CHECK(painted > picture.Side * 4);
+
+	// Turning the camera changes the picture, and turning it back gives the same
+	// one — which is what lets the view be cached on its angle.
+	PreviewImage turned;
+	REQUIRE(RenderSurface(surface, nullptr, 1.9f, 0.62f, 0.42f, 96, turned));
+	CHECK(turned.Rgba != picture.Rgba);
+
+	PreviewImage again;
+	REQUIRE(RenderSurface(surface, nullptr, 0.6f, 0.62f, 0.42f, 96, again));
+	CHECK(again.Rgba == picture.Rgba);
+
+	// A flat surface still draws, and a degenerate one is refused rather than
+	// rasterised into a divide by zero.
+	Surface flat;
+	flat.Side = 4;
+	flat.Heights.assign(16, 0.5f);
+	CHECK(RenderSurface(flat, nullptr, 0.0f, 0.6f, 0.42f, 64, picture));
+	CHECK_FALSE(RenderSurface(Surface{}, nullptr, 0.0f, 0.6f, 0.42f, 64, picture));
+}
+
+TEST_CASE("an exported picture is a PNG a decoder would accept", "[studio][nodegraph]") {
+	// A gradient, so a bug that wrote one row everywhere still fails.
+	PreviewImage image;
+	image.Side = 37;
+	image.Rgba.assign(static_cast<size_t>(image.Side) * image.Side * 4, 0);
+	for (uint32_t y = 0; y < image.Side; y++) {
+		for (uint32_t x = 0; x < image.Side; x++) {
+			const size_t at = (static_cast<size_t>(y) * image.Side + x) * 4;
+			image.Rgba[at] = static_cast<uint8_t>(x * 7);
+			image.Rgba[at + 1] = static_cast<uint8_t>(y * 5);
+			image.Rgba[at + 2] = static_cast<uint8_t>(x + y);
+			image.Rgba[at + 3] = 255;
+		}
+	}
+
+	const std::vector<uint8_t> file = EncodePng(image);
+	REQUIRE(file.size() > 8);
+
+	const std::vector<uint8_t> signature{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+	CHECK(std::equal(signature.begin(), signature.end(), file.begin()));
+
+	// **Every chunk's CRC is checked**, because a wrong one is the failure mode
+	// here: the file opens in nothing and says nothing about why. The CRC covers
+	// the type and the payload and *not* the length, which is the part that is
+	// easy to get wrong and impossible to notice without a reader.
+	const auto crc = [](const uint8_t *bytes, size_t count) {
+		uint32_t running = 0xFFFFFFFFu;
+		for (size_t at = 0; at < count; at++) {
+			running ^= bytes[at];
+			for (int bit = 0; bit < 8; bit++) {
+				running = (running & 1u) != 0u ? 0xEDB88320u ^ (running >> 1) : running >> 1;
+			}
+		}
+		return running ^ 0xFFFFFFFFu;
+	};
+	const auto read32 = [&file](size_t at) {
+		return (static_cast<uint32_t>(file[at]) << 24) | (static_cast<uint32_t>(file[at + 1]) << 16) |
+			   (static_cast<uint32_t>(file[at + 2]) << 8) | static_cast<uint32_t>(file[at + 3]);
+	};
+
+	std::vector<uint8_t> stream;
+	std::string order;
+	size_t at = 8;
+	while (at + 12 <= file.size()) {
+		const uint32_t length = read32(at);
+		REQUIRE(at + 12 + length <= file.size());
+
+		const std::string type(reinterpret_cast<const char *>(&file[at + 4]), 4);
+		order += type + " ";
+		CHECK(crc(&file[at + 4], length + 4) == read32(at + 8 + length));
+
+		if (type == "IHDR") {
+			CHECK(read32(at + 8) == image.Side);
+			CHECK(read32(at + 12) == image.Side);
+			CHECK(file[at + 16] == 8); // eight bits a channel
+			CHECK(file[at + 17] == 6); // truecolour with alpha
+		}
+		if (type == "IDAT") {
+			stream.insert(
+				stream.end(),
+				file.begin() + static_cast<long>(at + 8),
+				file.begin() + static_cast<long>(at + 8 + length)
+			);
+		}
+		at += 12 + length;
+	}
+	CHECK(at == file.size());
+	CHECK(order == "IHDR IDAT IEND ");
+
+	// The zlib stream: a header, stored blocks, and an Adler-32 that has to
+	// match the bytes it claims to carry.
+	REQUIRE(stream.size() > 6);
+	CHECK(stream[0] == 0x78);
+
+	std::vector<uint8_t> raw;
+	size_t walk = 2;
+	bool last = false;
+	while (!last && walk + 5 <= stream.size()) {
+		last = (stream[walk] & 1u) != 0u;
+		const size_t count =
+			static_cast<size_t>(stream[walk + 1]) | (static_cast<size_t>(stream[walk + 2]) << 8);
+		REQUIRE(walk + 5 + count <= stream.size());
+		raw.insert(
+			raw.end(),
+			stream.begin() + static_cast<long>(walk + 5),
+			stream.begin() + static_cast<long>(walk + 5 + count)
+		);
+		walk += 5 + count;
+	}
+	CHECK(last);
+
+	// One filter byte plus one row of pixels, per row.
+	CHECK(raw.size() == (static_cast<size_t>(image.Side) * 4 + 1) * image.Side);
+
+	uint32_t low = 1;
+	uint32_t high = 0;
+	for (const uint8_t byte : raw) {
+		low = (low + byte) % 65521u;
+		high = (high + low) % 65521u;
+	}
+	const size_t tail = stream.size() - 4;
+	CHECK(
+		((high << 16) | low) ==
+		((static_cast<uint32_t>(stream[tail]) << 24) | (static_cast<uint32_t>(stream[tail + 1]) << 16) |
+		 (static_cast<uint32_t>(stream[tail + 2]) << 8) | static_cast<uint32_t>(stream[tail + 3]))
+	);
+
+	// And the pixels are the ones that went in, in the order a reader expects.
+	for (uint32_t y = 0; y < image.Side; y++) {
+		const size_t row = y * (static_cast<size_t>(image.Side) * 4 + 1);
+		CHECK(raw[row] == 0);
+		CHECK(raw[row + 1] == image.Rgba[static_cast<size_t>(y) * image.Side * 4]);
+	}
+}
+
 TEST_CASE("an inspector is picked from what a node produced", "[studio][nodegraph]") {
 	Types();
 	RegisterInspectors();
