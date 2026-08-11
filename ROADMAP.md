@@ -72,6 +72,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] deferred `D00115`: a character's limbs pay wire for transforms the receiver overwrites, because replication filters by component and not by entity
 - [_] deferred `D00116`: a client cannot ask its server to teleport it — the binding refuses on a replica and there is no request channel
 - [_] immersive portals (add a new ImmersivePortal of which does cross-world teleportation in real-time, can enter the next world immediately and shows the other world's side through a cross-world texture rendering). Also supports custom logic like "OnPlayerEnterNearby, OnPlayerLeavingNearby, OnPlayerEnterImage, OnPlayerLeftImage", etc. Also custom properties like the rate of which the image updates, range for nearby event, etc. Need a bus system for this.
+- [_] i also realised that i don't have a way to control whether changes are client-sided or server-sided when i edit in the explorer/properties. how could i do this considering multiple clients + server support - with run-mode only and play-mode.
 
 ### v0.15
 
