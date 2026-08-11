@@ -122,6 +122,13 @@ namespace engine::replication {
 
 		Counting = Parts{};
 
+		// **A snapshot is the whole world, so nothing in it is half-built.**
+		// Anything that was being held is either in these bytes with its parent
+		// or is not in them at all, and either way the hold has nothing left to
+		// say — keeping it would re-parent an entity the snapshot may have put
+		// somewhere else.
+		Arriving_.clear();
+
 		Applied_ = SnapshotTick;
 		Joined_ = true;
 		Stats_.Snapshots++;
@@ -156,6 +163,32 @@ namespace engine::replication {
 
 		Stats_.Deltas++;
 
+		// **Straight after the write and before anything can draw.** The rows
+		// this delta carried may have put an arriving entity into the tree; the
+		// hold takes it back out until the rest of its tick is here.
+		if (!Arriving_.empty()) {
+			HoldArrivals(store);
+
+			// The bound. An entity held past `HOLD_DELTAS` is shown wherever it
+			// has got to, because content that is simply missing is worse than
+			// content that arrived in two steps — `HOLD_DELTAS` carries why.
+			const uint64_t seen = Stats_.Deltas;
+			std::vector<Arrival> overdue;
+			std::erase_if(Arriving_, [&](const Arrival &arriving) {
+				if (seen - arriving.Since < HOLD_DELTAS) {
+					return false;
+				}
+				overdue.push_back(arriving);
+				return true;
+			});
+
+			for (const Arrival &arriving : overdue) {
+				if (arriving.Parent != ecs::NULL_ENTITY) {
+					(void)store.SetParent(arriving.Entity, arriving.Parent);
+				}
+			}
+		}
+
 		if (!whole) {
 			Stats_.Partial++;
 		}
@@ -163,8 +196,50 @@ namespace engine::replication {
 			return ApplyStatus::Ok;
 		}
 
+		// **The tick is whole: everything the sender emitted for it is applied.**
+		// That is the moment "all the properties are set", so it is the moment
+		// the parents go back on.
+		ReleaseArrivals(store);
+
 		Applied_ = delta.Tick;
 		return ApplyStatus::Ok;
+	}
+
+	void Replica::HoldArrivals(ecs::Store &store) {
+		for (Arrival &arriving : Arriving_) {
+			if (arriving.Parent != ecs::NULL_ENTITY) {
+				// Already held. The server goes on sending this entity's rows
+				// while it works through the tick, and re-reading the parent
+				// here would read the null this put there.
+				continue;
+			}
+
+			const ecs::Entity parent = store.ParentOf(arriving.Entity);
+			if (parent == ecs::NULL_ENTITY) {
+				continue;
+			}
+
+			arriving.Parent = parent;
+			store.SetParent(arriving.Entity, ecs::NULL_ENTITY);
+		}
+	}
+
+	void Replica::ReleaseArrivals(ecs::Store &store) {
+		for (const Arrival &arriving : Arriving_) {
+			if (arriving.Parent == ecs::NULL_ENTITY) {
+				// It never had one. A replicated root is an ordinary thing —
+				// `Instance.new` with no parent is exactly this — and putting it
+				// somewhere would be inventing a tree the server did not send.
+				continue;
+			}
+
+			// **Destroyed while it was held is not a fault.** The entity can be
+			// gone by now: a projectile that lived two ticks, or a spawn the
+			// server took back. `SetParent` answering false is the honest
+			// outcome and there is nothing to do about it.
+			(void)store.SetParent(arriving.Entity, arriving.Parent);
+		}
+		Arriving_.clear();
 	}
 
 	ApplyStatus Replica::Apply(ecs::Store &store, const replication::Structure &structure) {
@@ -177,10 +252,23 @@ namespace engine::replication {
 
 		for (const ecs::Entity entity : structure.Created) {
 			store.CreateAt(entity);
+
+			// **Recorded before a single component of it has arrived.** The
+			// hold is what stops a half-built entity being drawn — see
+			// `HoldArrivals` — and the moment to start holding is the moment the
+			// entity exists, because the delta that parents it may be the very
+			// next message.
+			Arriving_.push_back(Arrival{entity, ecs::NULL_ENTITY, Stats_.Deltas});
 		}
 		for (const ecs::Entity entity : structure.Destroyed) {
 			store.SetParent(entity, ecs::NULL_ENTITY);
 			store.Destroy(entity);
+
+			// Nothing to give a parent back to. Left in the list it would be a
+			// `SetParent` on a dead handle every time a tick completed.
+			std::erase_if(Arriving_, [entity](const Arrival &arriving) {
+				return arriving.Entity == entity;
+			});
 		}
 		Forgotten_.insert(Forgotten_.end(), structure.Forgotten.begin(), structure.Forgotten.end());
 

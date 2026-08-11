@@ -226,6 +226,54 @@ namespace engine::replication {
 			bool Whole = false;
 		};
 
+		// Withholds an arriving entity's parent, and gives it back.
+		//
+		// **An entity is not in the world until the tick that made it is
+		// whole.** A spawn crosses as a `Structure` naming the entity and a
+		// delta carrying its components, and a delta is split by the bandwidth
+		// budget — so the row that puts it in `Workspace` can arrive a tick
+		// before the row that says where it is. Between the two, the walk in
+		// `scene::SyncRendered` reaches it, and it draws at the identity: a part
+		// at the origin for a tick, then a jump to its real place.
+		//
+		// So a created entity is unparented as soon as it is linked, its parent
+		// is kept here, and it is put back when the tick completes — which is
+		// this module's version of the rule every Roblox script already follows:
+		// set the properties, then set `Parent`.
+		//
+		// **Unparenting through `Store::SetParent` rather than by writing the
+		// component**, because the link is two rows: the child names its parent
+		// and the parent names its first child. Writing one of them would leave
+		// a parent claiming a child that does not claim it back, and the walk
+		// descends from the parent — so the object would still draw and this
+		// would fix nothing.
+		//@{
+		void HoldArrivals(ecs::Store &store);
+		void ReleaseArrivals(ecs::Store &store);
+		//@}
+
+		// One entity waiting for the rest of its tick.
+		struct Arrival {
+			ecs::Entity Entity;
+
+			// Where it goes once the tick is whole, or null while the delta
+			// that says so has not arrived.
+			ecs::Entity Parent;
+
+			// Which delta this arrived on, so a stream that never completes
+			// cannot hide an object for ever. See `HOLD_DELTAS`.
+			uint64_t Since = 0;
+		};
+
+		// How many deltas an entity may be held for before it is shown anyway.
+		//
+		// **A bound rather than a promise.** The release is meant to happen when
+		// a tick completes; if partial deltas keep arriving and none ever does,
+		// holding for ever would turn a bandwidth problem into content that is
+		// simply missing — which is the worse of the two failures, because
+		// nothing says it happened.
+		static constexpr uint64_t HOLD_DELTAS = 8;
+
 		// Notes one part's arrival and says whether its tick is now held whole.
 		//
 		// @param delta The part that has just been applied.
@@ -242,6 +290,10 @@ namespace engine::replication {
 		bool Assembling = false;
 
 		std::vector<ecs::Entity> Forgotten_;
+
+		// Entities created and not yet shown. A vector rather than a map: a
+		// tick's spawns are a handful, and this is walked whole or not at all.
+		std::vector<Arrival> Arriving_;
 		Parts Counting;
 		uint64_t Applied_ = 0;
 		bool Joined_ = false;
