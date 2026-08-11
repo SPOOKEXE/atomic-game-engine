@@ -83,13 +83,13 @@ meantime is the thing §2 was written against.
 
 ## Two shader compilers, and they are not interchangeable
 
-`glslc` compiles this module's `shaders/` during the build. `libshaderc`, behind
-`ShaderCompiler`, compiles shaders that do not exist until the engine is
+`glslc` compiles `Engine::resources`' `shaders/` during the build. `libshaderc`,
+behind `ShaderCompiler`, compiles shaders that do not exist until the engine is
 running. Both are the same upstream project and neither replaces the other:
 
 - **A built-in shader failing is a build failure.** That is where it belongs —
-  nobody should discover it in a frame. Do not move `shaders/` to runtime
-  compilation to save build time.
+  nobody should discover it in a frame. Do not move the built-in `shaders/` to
+  runtime compilation to save build time.
 - **A user shader failing is a diagnostic string.** It goes back to whoever
   authored it, with the shader's name and a line number, and the engine keeps
   running. Do not make it fatal.
@@ -110,13 +110,21 @@ the whole reason the wrapper exists — `render`'s consumers must not have to
 acquire a compiler API to include a header, any more than they should have to
 acquire SDL.
 
-## Shaders belong to this module
+## The built-in shaders belong to `Engine::resources`, and are reached by name
 
-They live in `shaders/`, they compile into `shaderstage/render/`, and they stage
-into `<program>/shaders/render/`. Do not add a shared shader directory. `vfx`
-must not reach into `render/shaders/` any more than it may include this module's
-headers, and a per-module directory is what makes that structural rather than a
-rule.
+They live in `mono.engine/resources/shaders/`, compile into
+`shaderstage/resources/` and stage into `<program>/shaders/resources/`. This
+module *binds* them; it does not own them. `resources::Shader("opaque.vert")` is
+the only way to name one — the staged directory is spelled once, in that module,
+so nothing here carries a path that a rename could leave behind.
+
+**The per-module directory is still what keeps two shader sets apart.** A module
+that grows GLSL of its own compiles it under its own name, and reaching sideways
+into another module's `shaders/` is as wrong as including its private headers.
+What changed in v0.14 is which module the engine's defaults sit in, not that
+each set has one owner: `resources` is linked for its files exactly as a library
+is linked for its symbols, and a program that does not link it does not stage
+them.
 
 Shaders a *game* author writes are a different thing entirely and none of them
 are in this repository.

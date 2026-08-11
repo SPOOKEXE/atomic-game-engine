@@ -1,5 +1,4 @@
 #include <engine/core/Log.hpp>
-#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
@@ -7,6 +6,7 @@
 #include <engine/render/MissingTexture.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
+#include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Tagging.hpp>
 
@@ -975,8 +975,9 @@ namespace engine::render {
 		std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
 	) const {
 		// Staged under the owning module's name, so that two modules cannot
-		// collide on a common file name like fullscreen.vert.
-		const auto path = core::Paths::Shaders("render") / (std::string(name) + ".spv");
+		// collide on a common file name like fullscreen.vert. The built-in GLSL
+		// is `Engine::resources`, which is what that name is.
+		const auto path = resources::Shader(name);
 
 		const auto code = ReadFile(path);
 		if (code.empty()) {
