@@ -496,8 +496,9 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// **Watched by a camera, because a player is a body and an eye.** The yaw is
 	// where a player's view direction actually lives, so a pair that turns a
 	// corner has to turn it — a body that comes out walking north under a camera
-	// still pointing west is the view snapping to a wall on the frame you cross.
-	// West is a yaw of a quarter turn under `PlaceCamera`'s convention.
+	// still pointing west is the view snapping to a wall on the frame you cross,
+	// and W walking you sideways from then on. West is a yaw of a quarter turn
+	// under `PlaceCamera`'s convention.
 	engine::scene::CameraController watching;
 	watching.Subject = walker;
 	watching.Angles = engine::core::Vector2{0.0f, std::numbers::pi_v<float> / 2.0f};
@@ -531,8 +532,21 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	CHECK(speed.X == Approx(0.0f).margin(1e-3f));
 	CHECK(speed.Z == Approx(-16.0f).margin(1e-3f));
 
-	// And the eye turned with the body: a yaw of zero is north, which is the
-	// way the walk carries on.
+	// **And the eye turns with it — on the machine the eye is on.** The
+	// crossing writes `scene::PortalTransit` on the body rather than reaching
+	// for a camera, because the host that moves a character and the host that
+	// draws for its player are two different worlds the moment a server is
+	// involved. `FollowPortalTransit` is the other end, and running it here is
+	// what a client's camera pass does every frame.
+	CHECK(store.Get<engine::scene::PortalTransit>(walker)->Serial == 1u);
+	CHECK(engine::scene::FollowPortalTransit(store));
+
+	// A yaw of zero is north, which is the way the walk carries on.
+	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+
+	// **Once, however many times it is asked.** A camera that turned again on
+	// the next frame would spin a quarter turn per frame for ever.
+	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
 	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
 }
 

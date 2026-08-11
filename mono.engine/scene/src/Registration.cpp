@@ -617,6 +617,14 @@ namespace engine::scene {
 		ecs::Components::Register<Character>("scene.Character");
 		ecs::Components::Register<CharacterLimb>("scene.CharacterLimb");
 		ecs::Components::Register<PlayerCharacter>("scene.PlayerCharacter");
+
+		// **It crosses, and it exists in order to cross.** A body goes through a
+		// portal on the authority and the eye that follows it belongs to a
+		// client, so this is the one fact about a crossing that has to reach the
+		// other machine — see `scene::PortalTransit`. Appended for the ordering
+		// reason this list keeps repeating, and the generated form: two scalars
+		// with no name and no handle in them.
+		ecs::Components::Register<PortalTransit>("scene.PortalTransit");
 	}
 
 	void RegisterSceneClasses() {

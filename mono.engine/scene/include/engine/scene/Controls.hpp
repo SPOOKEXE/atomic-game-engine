@@ -110,6 +110,20 @@ namespace engine::scene {
 		// How far to the side a shift-locked camera sits, in metres.
 		float ShoulderOffset = 2.0f;
 
+		// Which of the subject's portal crossings this camera has already
+		// turned for.
+		//
+		// **The consumer's half of `scene::PortalTransit`**, and it is on the
+		// controller rather than beside the counter because it is a fact about
+		// this *viewer*: two clients watching the same character each have to
+		// turn their own eye once, and a flag on the body would let the first
+		// one to read it clear the news for everybody else. Zero is "seen
+		// nothing", which is what a camera holds before its subject has been
+		// anywhere.
+		//
+		// @since v0.15
+		uint32_t SeenTransit = 0;
+
 		// How it is driven.
 		CameraMode Mode = CameraMode::Classic;
 
@@ -229,9 +243,46 @@ namespace engine::scene {
 	//
 	// Does nothing when the controller is disabled or `Scriptable`.
 	//
+	// **Except for the portal turn, which happens first and happens anyway.**
+	// See `FollowPortalTransit`: a disabled camera still belongs to a body that
+	// may have gone through a hole, and a scripted one still hands its yaw to
+	// `ReadMoveIntent`. Skipping it for either would leave the yaw pointing at
+	// the room the player came from.
+	//
 	// @param store The world.
 	// @return `true` when the angles or the distance moved.
 	bool UpdateCameraControl(ecs::Store &store);
+
+	// Turns the camera by however far a portal turned the body it follows.
+	//
+	// **The client end of `scene::PortalTransit`, and it is a separate function
+	// because it is a separate machine.** `CrossPortals` maps a crossing body
+	// and its velocity on whichever host simulates it; the yaw a player steers
+	// by lives in `CameraController::Angles`, which is a resource on whichever
+	// host is *looking*. In a studio Play or against a real server those are two
+	// worlds. So the crossing is recorded on the body, replication carries it
+	// across with everything else the body owns, and this reads it where the eye
+	// actually is.
+	//
+	// What it fixes is unmistakable when it is missing: you walk forward through
+	// a hole whose pair turns a corner, and on the far side the view is still
+	// pointing the way you came in — ninety degrees off your own body, facing a
+	// wall, with W walking you sideways because `ReadMoveIntent` is relative to
+	// this yaw.
+	//
+	// **Once per crossing per viewer.** `CameraController::SeenTransit` is the
+	// counter this has already acted on, so a client that misses the frame a
+	// delta lands still turns on the next one, and one that runs twice in a
+	// frame does not turn twice.
+	//
+	// Called by `UpdateCameraControl` before anything else it does, so every
+	// host that installs the camera pass gets it without a second entry in the
+	// schedule.
+	//
+	// @param store The world.
+	// @return `true` when the yaw was turned.
+	// @since v0.15
+	bool FollowPortalTransit(ecs::Store &store);
 
 	// Places the live camera from the controller's angles.
 	//

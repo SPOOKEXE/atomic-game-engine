@@ -100,6 +100,43 @@ namespace engine::scene {
 		core::CFrame Frame;
 	};
 
+	// That this body went through a portal, and how far the portal turned it.
+	//
+	// **A record rather than a movement, and the difference is which machine
+	// needs it.** `scene::CrossPortals` maps a crossing body's placement and its
+	// velocity, and that is the whole of the simulation — but a player's view
+	// direction is not in either. It lives in `CameraController::Angles`, which
+	// is a *resource on whichever host is looking*: a client's own, never the
+	// authority's. So the host that moves the body cannot turn the camera, and
+	// the host that owns the camera never sees the crossing — it receives a
+	// transform that has already arrived somewhere else.
+	//
+	// This is the fact that crosses between them. It hangs off the body, so
+	// replication carries it with everything else that body owns, and the eye
+	// following it is a client reading its own subject's row.
+	//
+	// **The serial is what makes it an event.** A `Turn` on its own is a value
+	// that happens to be the same after two identical crossings, so a delta
+	// carrying only the angle would deliver the first and swallow the second —
+	// a portal that works once. A counter changes on every crossing whatever the
+	// angle was, and a consumer that has seen a number knows it has acted.
+	//
+	// @since v0.15
+	struct PortalTransit {
+		// How many times this body has been through a hole. Starts at one:
+		// zero is "never", which is what a consumer that has seen nothing holds.
+		uint32_t Serial = 0;
+
+		// The yaw the last crossing turned it by, in radians, and only the yaw.
+		//
+		// **Only the yaw, because only the yaw is the player's to keep.** Pitch
+		// is theirs and a portal that rolled a camera would be one nobody could
+		// walk through twice. Measured off the map itself rather than off the
+		// body, so it is the same number for anything that goes through and does
+		// not depend on which way the crosser happened to be facing.
+		float Turn = 0.0f;
+	};
+
 	// How far a thing reaches from its own origin, on each local axis.
 	//
 	// **The single source a world AABB is derived from**, by both the broad

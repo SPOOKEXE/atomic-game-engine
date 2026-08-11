@@ -32,21 +32,53 @@ namespace engine::scene {
 		constexpr float PITCH_LIMIT = std::numbers::pi_v<float> * 0.5f - 0.01f;
 	}
 
+	bool FollowPortalTransit(ecs::Store &store) {
+		auto *controller = store.ResourceMutable<CameraController>();
+		if (controller == nullptr || controller->Subject == ecs::NULL_ENTITY) {
+			return false;
+		}
+
+		const PortalTransit *went = store.Get<PortalTransit>(controller->Subject);
+		if (went == nullptr || went->Serial == controller->SeenTransit) {
+			return false;
+		}
+
+		// **The counter is taken whether or not the angle is used**, so a
+		// crossing is never applied twice and a viewer that arrives late does
+		// not owe a turn for every crossing since the world began.
+		controller->SeenTransit = went->Serial;
+
+		// **Added, not assigned.** A portal turns the world under the player
+		// rather than deciding where they are looking: whatever they were
+		// aiming at, they are now aiming at the same thing through the hole. Two
+		// rotations about the same axis add, so for the pairs a floor and a
+		// ceiling allow this is exact.
+		controller->Angles.Y += went->Turn;
+		return true;
+	}
+
 	bool UpdateCameraControl(ecs::Store &store) {
+		// **Before the guards below, and that is deliberate.** A camera that is
+		// disabled or scriptable still belongs to a body that may have just gone
+		// through a hole, and its yaw is still what `ReadMoveIntent` steers by.
+		// Turning it is not "camera control" in the sense the guards are about —
+		// it is keeping the eye pointing at the thing it was already pointing at.
+		const bool turned = FollowPortalTransit(store);
+
 		auto *controller = store.ResourceMutable<CameraController>();
 		const auto *input = store.Resource<InputState>();
 		if (controller == nullptr || input == nullptr) {
-			return false;
+			return turned;
 		}
 
 		// **`Scriptable` is checked before `Enabled`**, because they mean
 		// different things and a script that took the camera should keep it even
 		// if something re-enables player control.
 		if (controller->Mode == CameraMode::Scriptable || !controller->Enabled) {
-			return false;
+			return turned;
 		}
 
-		bool moved = false;
+		bool moved = turned;
 
 		// **Turning needs the right button held, unless the pointer is locked.**
 		// That is Roblox's rule and it is what makes a mouse usable for anything

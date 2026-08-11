@@ -1084,40 +1084,41 @@ namespace engine::scene {
 					placement.Frame = through * placement.Frame;
 					motion.Linear = through.VectorToWorldSpace(motion.Linear);
 
-					// **And the eye, when the body is the one the camera is
-					// following.** This is the same bug as the velocity one
-					// wearing a different coat: a player walks west through a
-					// hole whose pair turns a corner, the body comes out
-					// walking north, and the camera — whose yaw lives in
-					// `CameraController::Angles` and not in any transform this
-					// pass touched — keeps pointing west. What that looks like
-					// is the view snapping to a wall on the frame you cross,
-					// and then W walking you sideways, because
+					// **And the turn is written down, because the eye that has
+					// to follow it is on another machine.** This is the same
+					// bug as the velocity one wearing a different coat: a
+					// player walks west through a hole whose pair turns a
+					// corner, the body comes out walking north, and the view
+					// keeps pointing west — so the character reads as spinning
+					// on the spot and W stops meaning forward, because
 					// `ReadMoveIntent` is relative to the camera's yaw.
 					//
-					// **The angles are turned rather than recomputed**, and
-					// only the yaw: pitch is the player's, the map is rigid, and
-					// a portal that rolled the camera would be a portal nobody
-					// could walk through twice. The horizontal facing is put
-					// through the same matrix everything else went through and
-					// read back as an angle, which is exact for a pair that
-					// turns about the up axis — every pair a floor and a
-					// ceiling allow — and the nearest sane answer for one that
-					// does not.
+					// It cannot be fixed here by reaching for the camera.
+					// `CameraController` is a resource on whichever host is
+					// *looking*, and the host running this is whichever one is
+					// *simulating* — in a studio Play or against a real server
+					// those are two different worlds, and the authority's
+					// controller is not the one the player sees through.
+					// `scene::PortalTransit` is the fact; `FollowPortalTransit`
+					// is the client end of it.
 					//
-					// **Nothing happens on a headless host**, where there is no
-					// `CameraController` resource at all, and nothing happens
-					// for a body nobody is watching.
-					if (auto *controller = store.ResourceMutable<CameraController>();
-						controller != nullptr && controller->Subject == entity) {
-						const Vector3 facing{
-							-std::sin(controller->Angles.Y), 0.0f, -std::cos(controller->Angles.Y)
-						};
-						const Vector3 turned = through.VectorToWorldSpace(facing);
+					// **Measured off the map and not off the crosser**, so it
+					// is the same number for everything that goes through this
+					// hole this tick and does not depend on which way any of
+					// them happened to be facing. North is the reference for no
+					// reason but that a yaw of zero is north.
+					const Vector3 north{0.0f, 0.0f, -1.0f};
+					const Vector3 turned = through.VectorToWorldSpace(north);
 
-						if (std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) {
-							controller->Angles.Y = std::atan2(-turned.X, -turned.Z);
+					if (std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) {
+						PortalTransit went;
+						if (const PortalTransit *before_ = store.Get<PortalTransit>(entity)) {
+							went = *before_;
 						}
+
+						went.Serial++;
+						went.Turn = std::atan2(-turned.X, -turned.Z);
+						store.Set(entity, went);
 					}
 
 					crossed++;
