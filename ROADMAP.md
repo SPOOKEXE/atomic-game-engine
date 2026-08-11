@@ -42,7 +42,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] `PhysicsProperties` on BasePart: density, friction and elasticity as an override of the material, drag through `RigidBody`'s damping, `Mass` derived and read-only, all of it in the properties panel
 - [x] `LuaSourceContainer` and `JavaScriptSourceContainer` as two components, with `CodeSourceContainerSelector` choosing which runs — the selector is scriptable and neither container is, which needed `ecs::PropertyDescriptor::Scriptable`
 - [x] the full demo: fBm and ridged noise, warp, terrace, slope, threshold and combine; a colouriser and thumbnails on the nodes; erosion and staged tasks that run off the frame with progress, stages and concurrent branches
-- [_] deferred `D00113`: one node graph implementation rather than two
+- [x] the Demo Nodes panel built out to the reference implementation: a picture and a description on the *data type* rather than the node, so an inspector can draw a node's inputs beside its output; per-type inspector handlers picked by name and otherwise inferred from what a node produced; Library, Inspector and Types tabs with live parameters and a port table; snapshot undo, copy/paste, save/load and image export; frames, collapsing, a context menu, insert-on-link and a filtered palette; and compression — a selection folds into one node whose ports are derived from how it was wired, with the fold as a *view over one graph* rather than a nested one, so the evaluator, the cycle guard and the content hash never learn it happened
+- [x] deferred `D00113`: one node graph implementation rather than two
 - [x] default engine assets: the six shape meshes and a pink/grey checkerboard, under an "engine" tab, with a tab per cdn source and an "all" tab
 - [_] deferred `D00111`: listing an HTTP origin's contents — its tab names the address and says why it cannot enumerate
 - [x] raw folders bake on demand into the editor, memory-only by default, with a tab of their own
@@ -57,10 +58,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add custom physical properties for BasePart but as a separate PhysicsProperties component. need things like friction, drag, density, etc. Make them visible in properties too.
 - [x] create a shared script based but separate LuaSourceContainer and JavaScriptSourceContainer as two separate components.
 - [x] add a way to select between luau and javascript for the code as properties for the Script/LocalScript/ModuleScript. Make it a separate component so we can keep both code containers but swap between them. Maybe CodeSourceContainerSelector? This way we can make CodeSourceContainerSelector scriptable but do not allow editing scripts from other scripts by LuaSourceContainer and JavaScriptSourceContainer.
+- [x] **autocomplete for luau and js scripting, in the studio's own editor** — pulled forward from v0.15 because the external half was already done: `luau-lsp` and the generated `.d.luau`/`.d.ts` have completed in VS Code since v0.5, and the only place the engine's vocabulary could not be reached was the editor this repository ships. Ctrl+Space, or automatically after a `.`, a `:` or two characters; Enter accepts and Tab still indents, because `imgui_widgets.cpp` asserts that `AllowTabInput` and `CallbackCompletion` are never both set. **Nothing about the surface is written down**: classes, properties and enums come from `ecs::Classes` and `ecs::EnumTable`, and the globals and instance methods from a new `Runtime::Surface` that *walks a freshly built VM* — `_G` in Luau, `globalThis` and `__instanceMethods` in QuickJS. So a global added anywhere in `mono.engine/script` is offered with nothing else changing. That shape was chosen because this module has shipped the other one twice: `Values.cpp` records `Magnitude` and `Unit` promised by `engine.d.luau` for two versions while the run time answered "no member", and `JsSurface.cpp` records a hand-written `10` on a list of sixteen methods. The one surface a walk cannot reach is the fourteen instance signals, which are a branch chain — those are listed beside the chain and `engine.script.vocabulary` checks every offered member against a live VM in both languages. Also offers the tree beside the script, which is the one thing an external language server cannot know. `studio/Complete.hpp`, `script/Vocabulary.hpp`
+- [_] deferred `D00114`: no type inference — a local from `Instance.new("Part")` resolves because the class is on the line, one from `FindFirstChild` falls back to the union of every scriptable property
 
 ### v0.15
 
-- [_] autocomplete for luau and js scripting
 - [_] blocky character spawning
 - [_] animation handler
 - [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
@@ -78,7 +80,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.?? (needs prototype project first)
 
-- [_] ~/Documents/GitHub/node-graph-template
+- [x] ~/Documents/GitHub/node-graph-template
 - [_] extended rendering pipeline (handle multiple worlds in parallel, handling gpu traffic)
 - [_] rendering pipeline is a node system with a studio editor
 - [_] surfaceapperance actually integrated with new pipeline

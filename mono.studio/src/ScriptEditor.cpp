@@ -219,10 +219,45 @@ namespace studio {
 
 						ImGui::SameLine(0.0f, 0.0f);
 
-						if (CodeField("##text", tab.Text, -1.0f, -1.0f)) {
+						// **The navigation keys are claimed before the field is
+						// submitted, not after.** The text widget polls them
+						// during its own submission, so an owner set afterwards
+						// would arrive a frame late — Down would move the caret
+						// a line *and* the highlighted row, and Enter would
+						// insert a newline before accepting. `LockThisFrame` is
+						// what makes the widget's owner-agnostic poll fail
+						// rather than win.
+						const ImGuiID popupId = ImGui::GetID("##completion");
+						if (ScriptPopupOpen) {
+							for (const ImGuiKey key :
+								 {ImGuiKey_UpArrow,
+								  ImGuiKey_DownArrow,
+								  ImGuiKey_Enter,
+								  ImGuiKey_KeypadEnter,
+								  ImGuiKey_Escape}) {
+								ImGui::SetKeyOwner(key, popupId, ImGuiInputFlags_LockThisFrame);
+							}
+						}
+
+						const ImVec2 fieldMin = ImGui::GetCursorScreenPos();
+
+						const bool changed = CodeField("##text", tab.Text, &tab.Edit, -1.0f, -1.0f);
+						if (changed) {
 							tab.Modified = true;
 						}
 						(void)gutter;
+
+						// Ctrl+Space asks for the list whatever is under the
+						// caret, which is the binding every editor has and the
+						// way through when the automatic rules decline.
+						const bool asked =
+							tab.Edit.Active && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Space);
+
+						UpdateScriptCompletion(tab, changed, asked);
+
+						if (ScriptPopupOpen) {
+							DrawScriptCompletion(tab, fieldMin, popupId);
+						}
 
 						// **Restored before the panel ends.** The scale is a
 						// property of the window rather than of the widget, so
@@ -266,6 +301,263 @@ namespace studio {
 			}
 			CloseScriptTab(closing);
 		}
+	}
+
+	namespace {
+
+		// What a VM of one language installs, walked once.
+		//
+		// **Built from a throwaway runtime rather than written down.** A list of
+		// globals kept in the editor would be a copy of a surface that lives in
+		// fifteen source files, and `script/Vocabulary.hpp` records the two
+		// times this engine has shipped exactly that copy out of step. Making a
+		// VM costs a few milliseconds and answers correctly forever after.
+		//
+		// **On first use rather than at start-up.** Somebody who never opens a
+		// script never pays for it, which is the same rule the editor learned
+		// the expensive way when fetching every asset by kind put half a minute
+		// in front of the first frame.
+		const engine::script::ScriptSurface &SurfaceFor(const engine::script::Language language) {
+			const auto walk = [](const engine::script::Language which) {
+				// The store is local: nothing is created in it and it is gone
+				// before this returns. `ScriptSurface` is plain strings.
+				engine::ecs::Store store("completion");
+				const std::unique_ptr<engine::script::Runtime> runtime =
+					engine::script::MakeRuntime(store, which);
+
+				return runtime != nullptr ? runtime->Surface() : engine::script::ScriptSurface{};
+			};
+
+			static const engine::script::ScriptSurface luau = walk(engine::script::Language::Luau);
+			static const engine::script::ScriptSurface javascript =
+				walk(engine::script::Language::JavaScript);
+
+			return language == engine::script::Language::Luau ? luau : javascript;
+		}
+
+	}
+
+	std::vector<std::string> Editor::ScriptSiblings(const OpenScript &tab) {
+		std::vector<std::string> names;
+
+		if (!tab.World.IsValid()) {
+			return names;
+		}
+
+		Universe->Enter(tab.World, [&](Store &store) {
+			if (!store.Alive(tab.Instance)) {
+				return;
+			}
+
+			const auto record = [&](const engine::ecs::Entity child) {
+				if (const Name name = store.InstanceNameOf(child); name.IsValid()) {
+					names.emplace_back(Label(name));
+				}
+			};
+
+			// The script's own siblings, which is what `script.Parent.` reaches.
+			if (const engine::ecs::Entity parent = store.ParentOf(tab.Instance);
+				parent != engine::ecs::NULL_ENTITY) {
+				store.EachChild(parent, record);
+			} else {
+				store.EachRoot(record);
+			}
+
+			// The world's roots as well, because `workspace.` is the other
+			// spelling somebody reaches for and it is the same list.
+			store.EachRoot(record);
+		});
+
+		std::sort(names.begin(), names.end());
+		names.erase(std::unique(names.begin(), names.end()), names.end());
+		return names;
+	}
+
+	void Editor::UpdateScriptCompletion(OpenScript &tab, const bool textChanged, const bool asked) {
+		// A field nobody is typing in has no caret worth reading, and a popup
+		// left up over an unfocused editor is a panel that looks stuck.
+		if (!tab.Edit.Active) {
+			ScriptPopupOpen = false;
+			ScriptCompletions.clear();
+			return;
+		}
+
+		const bool moved = tab.Edit.Caret != ScriptPopupCaret;
+		if (!moved && !textChanged && !asked) {
+			return;
+		}
+
+		ScriptPopupCaret = tab.Edit.Caret;
+
+		const auto caret = static_cast<size_t>(std::max(0, tab.Edit.Caret));
+		const CompletionQuery query = ScanBackwards(tab.Text, caret);
+
+		// **Opened on a separator, on two characters, or on being asked.** One
+		// character is every identifier in the file at once, which is a popup
+		// that appears the instant anybody types and covers the line they are
+		// writing. A separator is unambiguous — nobody types `part.` meaning to
+		// stop there.
+		const bool worthOpening =
+			asked || ScriptPopupOpen || query.Separator != '\0' || query.Prefix.size() >= 2;
+
+		if (!worthOpening) {
+			ScriptPopupOpen = false;
+			ScriptCompletions.clear();
+			return;
+		}
+
+		// **The language the script will actually run as**, which is the
+		// selector's answer and not the file extension's — a tab whose
+		// `CodeSourceContainerSelector` says JavaScript must be offered
+		// JavaScript's globals however the path is spelled.
+		engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
+		if (tab.World.IsValid()) {
+			Universe->Enter(tab.World, [&](Store &store) {
+				if (store.Alive(tab.Instance)) {
+					language = engine::script::ActiveLanguageOf(store, tab.Instance);
+				}
+			});
+		}
+
+		const std::vector<std::string> children = ScriptSiblings(tab);
+
+		CompletionSources sources;
+		sources.Language = language;
+		sources.Surface = &SurfaceFor(language);
+		sources.Children = children;
+
+		ScriptCompletions = CompleteAt(tab.Text, caret, sources);
+
+		// Nothing to say is a closed popup rather than an empty box.
+		ScriptPopupOpen = !ScriptCompletions.empty();
+		ScriptPopupAnchor = static_cast<int>(caret - query.Prefix.size());
+		ScriptPopupChoice = std::clamp(ScriptPopupChoice, 0, static_cast<int>(ScriptCompletions.size()) - 1);
+	}
+
+	void Editor::DrawScriptCompletion(OpenScript &tab, const ImVec2 fieldMin, const unsigned int popupId) {
+		const auto count = static_cast<int>(ScriptCompletions.size());
+		if (count == 0) {
+			ScriptPopupOpen = false;
+			return;
+		}
+
+		// **Read with the popup's own id**, because the keys were locked to it
+		// before the field ran. Polling them the ordinary way would be polling
+		// as "anybody", which `LockThisFrame` is precisely what refuses.
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape, ImGuiInputFlags_None, popupId)) {
+			ScriptPopupOpen = false;
+			return;
+		}
+		if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, ImGuiInputFlags_Repeat, popupId)) {
+			ScriptPopupChoice = (ScriptPopupChoice + 1) % count;
+		}
+		if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, ImGuiInputFlags_Repeat, popupId)) {
+			ScriptPopupChoice = (ScriptPopupChoice + count - 1) % count;
+		}
+
+		bool accept = ImGui::IsKeyPressed(ImGuiKey_Enter, ImGuiInputFlags_None, popupId) ||
+					  ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, ImGuiInputFlags_None, popupId);
+
+		// **Where the caret is, computed rather than asked for, and exact
+		// because the face is monospace.** Every glyph is one advance wide, so a
+		// column is a multiplication — `ScriptEditor` pushes
+		// `Typeface::Monospace` a few lines above this and that is what makes it
+		// true. A proportional face would need the run measured, which is the
+		// sort of thing that is nearly right and drifts a character per line.
+		const auto caret = static_cast<size_t>(std::max(0, tab.Edit.Caret));
+		const std::string_view before =
+			std::string_view(tab.Text).substr(0, std::min(caret, tab.Text.size()));
+
+		const auto line = static_cast<float>(std::count(before.begin(), before.end(), '\n'));
+		const size_t lineStart = before.rfind('\n');
+		const auto column =
+			static_cast<float>(before.size() - (lineStart == std::string_view::npos ? 0 : lineStart + 1));
+
+		const float rowHeight = ImGui::GetTextLineHeight();
+		const float glyph = ImGui::CalcTextSize("0").x;
+
+		// The field's own scroll, from the window it made — the same lookup and
+		// the same justification `DrawScriptGutter` gives above.
+		ImVec2 scroll(0.0f, 0.0f);
+		if (const ImGuiWindow *code = ImGui::FindWindowByName("##text"); code != nullptr) {
+			scroll = ImVec2(code->Scroll.x, code->Scroll.y);
+		}
+
+		const ImVec2 padding = ImGui::GetStyle().FramePadding;
+		ImVec2 position(
+			fieldMin.x + padding.x + (column * glyph) - scroll.x,
+			fieldMin.y + padding.y + ((line + 1.0f) * rowHeight) - scroll.y
+		);
+
+		const int rows = std::min(count, 10);
+		const ImVec2 size(
+			320.0f * Settings.Scale,
+			(static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing()) + (padding.y * 2.0f)
+		);
+
+		// Kept on screen. A popup near the right edge or the last line would
+		// otherwise open where nobody can read it, which is the state an author
+		// hits on the longest line in the file.
+		const ImGuiViewport *viewport = ImGui::GetMainViewport();
+		position.x = std::min(position.x, viewport->Pos.x + viewport->Size.x - size.x);
+		if (position.y + size.y > viewport->Pos.y + viewport->Size.y) {
+			position.y -= size.y + rowHeight;
+		}
+
+		ImGui::SetNextWindowPos(position);
+		ImGui::SetNextWindowSize(size);
+
+		// **`NoFocusOnAppearing` and no `Begin` flags that take input.** The
+		// text field must keep the keyboard: a window that focused itself would
+		// stop the typing that opened it, which is the whole reason this is not
+		// `BeginPopup`.
+		constexpr ImGuiWindowFlags FLAGS = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+										   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+										   ImGuiWindowFlags_NoFocusOnAppearing |
+										   ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_AlwaysAutoResize;
+
+		if (ImGui::Begin("##completion", nullptr, FLAGS)) {
+			for (int index = 0; index < count; index++) {
+				const Completion &entry = ScriptCompletions[static_cast<size_t>(index)];
+
+				ImGui::PushID(index);
+				if (ImGui::Selectable(entry.Text.c_str(), index == ScriptPopupChoice)) {
+					ScriptPopupChoice = index;
+					accept = true;
+				}
+
+				// Scrolled to rather than merely highlighted, so arrowing past
+				// the tenth row still shows what is chosen.
+				if (index == ScriptPopupChoice && (ImGui::IsWindowAppearing() || !ImGui::IsItemVisible())) {
+					ImGui::SetScrollHereY(0.5f);
+				}
+
+				if (!entry.Detail.empty()) {
+					ImGui::SameLine();
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+					ImGui::TextUnformatted(entry.Detail.c_str());
+					ImGui::PopStyleColor();
+				}
+				ImGui::PopID();
+			}
+		}
+		ImGui::End();
+
+		if (!accept) {
+			return;
+		}
+
+		// **Requested rather than written.** `CodeEdit::Insert` is applied
+		// inside the field's own callback next frame, which keeps imgui's undo
+		// stack describing text that is actually there — see `Widgets.hpp`.
+		const Completion &chosen = ScriptCompletions[static_cast<size_t>(ScriptPopupChoice)];
+		tab.Edit.Insert = chosen.Text;
+		tab.Edit.ReplaceFrom = ScriptPopupAnchor;
+		tab.Modified = true;
+
+		ScriptPopupOpen = false;
+		ScriptPopupChoice = 0;
+		ScriptCompletions.clear();
 	}
 
 	float Editor::DrawScriptGutter(const OpenScript &tab) {

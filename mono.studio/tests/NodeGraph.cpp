@@ -19,9 +19,9 @@
 
 #include <chrono>
 #include <imgui.h>
-#include <thread>
 #include <string>
 #include <studio/NodeGraph.hpp>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("studio.nodegraph")
@@ -80,8 +80,8 @@ namespace {
 		if (ImGui::Begin(
 				"canvas",
 				nullptr,
-				ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-					ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar
+				ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+					ImGuiWindowFlags_NoScrollbar
 			)) {
 			canvas.Draw(graph);
 		}
@@ -341,6 +341,274 @@ TEST_CASE("a graph survives a save and a load", "[studio][nodegraph]") {
 	CHECK(Save(loaded) == text);
 }
 
+TEST_CASE("frames hold members, and neither they nor collapsing change a hash", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	const NodeId noise = graph.Add("field.perlin", 40.0f, 60.0f);
+	const NodeId ridge = graph.Add("field.ridged", 40.0f, 340.0f);
+	const NodeId blend = graph.Add("field.combine", 300.0f, 60.0f);
+	REQUIRE(graph.Connect(noise, "Out", blend, "A") == LinkResult::Made);
+	REQUIRE(graph.Connect(ridge, "Out", blend, "B") == LinkResult::Made);
+
+	const uint64_t settled = graph.Signature();
+
+	// **Neither is a parameter.** A frame is where somebody put a rectangle and
+	// collapsing is a node somebody has finished reading; if either reached the
+	// hash, tidying a graph would recompute it.
+	const GroupId frame = graph.Group({noise, ridge}, "Sources", Colour::Hex(0x4ADE80));
+	REQUIRE(frame != NO_GROUP);
+	graph.Find(blend)->Collapsed = true;
+	CHECK(graph.Signature() == settled);
+
+	CHECK(graph.GroupOf(noise) == frame);
+	CHECK(graph.GroupOf(blend) == NO_GROUP);
+
+	// A collapsed node keeps every port and loses its body, because a graph that
+	// stopped being readable when it was tidied would be the opposite of tidy.
+	const NodeLayout shut = LayoutOf(*graph.Find(blend));
+	const NodeLayout open = LayoutOf(*graph.Find(noise));
+	CHECK(shut.Ports.size() == 5);
+	CHECK(shut.Widgets.empty());
+	CHECK(shut.PreviewSide == 0.0f);
+	CHECK(shut.Height < open.Height);
+
+	// A node joining a second frame leaves the first, so one drag never moves it
+	// twice.
+	const GroupId second = graph.Group({ridge, blend}, "Rest", Colour::Hex(0x38BDF8));
+	CHECK(graph.GroupOf(ridge) == second);
+	CHECK(graph.FindGroup(frame)->Members.size() == 1);
+
+	const std::string text = Save(graph);
+	Graph loaded;
+	std::string error;
+	REQUIRE(Load(text, loaded, error));
+	CHECK(loaded.Groups().size() == 2);
+	CHECK(loaded.Signature() == settled);
+	CHECK(Save(loaded) == text);
+
+	// Removing a node takes it out of its frame, so no member id ever names
+	// something that is not there.
+	REQUIRE(loaded.Remove(loaded.Nodes().front().Id));
+	for (const Group &held : loaded.Groups()) {
+		for (const NodeId member : held.Members) {
+			CHECK(loaded.Alive(member));
+		}
+	}
+}
+
+TEST_CASE("compression derives an interface and moves nothing", "[studio][nodegraph]") {
+	Types();
+	Graph graph;
+
+	//   noise ──▶ warp ──▶ terrace ──▶ readout
+	//   ridged ─▶ warp(By)
+	// Folding warp and terrace should take one input from each side of the pair
+	// and give one output, with every wire exactly where it was.
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
+	const NodeId ridged = graph.Add("field.ridged", 0.0f, 300.0f);
+	const NodeId warp = graph.Add("field.warp", 300.0f, 0.0f);
+	const NodeId terrace = graph.Add("field.terrace", 600.0f, 0.0f);
+	const NodeId average = graph.Add("field.readout", 900.0f, 0.0f);
+	graph.Find(noise)->Widgets["resolution"].Text = "32";
+	graph.Find(ridged)->Widgets["resolution"].Text = "32";
+
+	REQUIRE(graph.Connect(noise, "Out", warp, "In") == LinkResult::Made);
+	REQUIRE(graph.Connect(ridged, "Out", warp, "By") == LinkResult::Made);
+	REQUIRE(graph.Connect(warp, "Out", terrace, "In") == LinkResult::Made);
+	REQUIRE(graph.Connect(terrace, "Out", average, "In") == LinkResult::Made);
+
+	const size_t wires = graph.Links().size();
+	std::vector<std::pair<NodeId, uint64_t>> hashes;
+	for (const Node &one : graph.Nodes()) {
+		hashes.emplace_back(one.Id, graph.Hash(one.Id));
+	}
+
+	const NodeId folded = graph.Compress({warp, terrace}, 450.0f, 0.0f);
+	REQUIRE(folded != NO_NODE);
+
+	// **No link was re-pointed and no content hash moved.** That is the whole
+	// design: the evaluator, the cycle guard and the cache never learn that
+	// compression happened, so none of them can be wrong about it — and folding
+	// a chain therefore recomputes nothing.
+	CHECK(graph.Links().size() == wires);
+	for (const auto &[id, was] : hashes) {
+		CHECK(graph.Hash(id) == was);
+	}
+	CHECK(graph.Contents(folded).size() == 2);
+	CHECK(graph.Find(warp)->Owner == folded);
+	CHECK(graph.Find(noise)->Owner == NO_NODE);
+
+	// Two inbound target ports, one outbound source port. Types are inherited
+	// from the inner ports, so typing survives the fold.
+	const Node &node = *graph.Find(folded);
+	CHECK(InputsOf(node).size() == 2);
+	REQUIRE(OutputsOf(node).size() == 1);
+	CHECK(OutputsOf(node).front().Type == "data.FIELD");
+
+	// Every inner knob is promoted, keeping its schema — a slider stays a
+	// slider rather than becoming a number box holding the same value.
+	const std::vector<WidgetSpec> promoted = WidgetsOf(node);
+	CHECK(promoted.size() == 3);
+	const auto amount = std::find_if(promoted.begin(), promoted.end(), [](const WidgetSpec &spec) {
+		return spec.Label.find("Amount") != std::string::npos;
+	});
+	REQUIRE(amount != promoted.end());
+	CHECK(amount->Kind == WidgetKind::Slider);
+	CHECK(amount->Maximum == 0.5);
+
+	// **A write to a promoted knob is a write to the node inside**, which is
+	// what makes a compressed node a live view of its contents rather than a
+	// copy that drifts from them.
+	Value moved = ValueOf(graph, folded, *amount);
+	moved.Number = 0.4;
+	SetValue(graph, folded, amount->Key, moved);
+	CHECK(graph.Find(warp)->Widgets["amount"].Number == 0.4);
+	CHECK(graph.Hash(warp) != hashes[2].second);
+
+	// A wire crossing into the fold is drawn to its proxy port; one wholly
+	// inside it is not drawn at the root at all.
+	NodeId shown = NO_NODE;
+	std::string shownPort;
+	REQUIRE(Standing(graph, warp, "In", true, NO_NODE, shown, shownPort));
+	CHECK(shown == folded);
+	NodeId inner = NO_NODE;
+	std::string innerPort;
+	REQUIRE(Actual(graph, folded, shownPort, true, inner, innerPort));
+	CHECK(inner == warp);
+	CHECK(innerPort == "In");
+
+	// Seen from inside, the members are themselves again.
+	REQUIRE(Standing(graph, warp, "In", true, folded, shown, shownPort));
+	CHECK(shown == warp);
+
+	// Save, load, and it is all still true — including the promoted schema,
+	// which is re-derived from the inner type rather than written out.
+	const std::string text = Save(graph);
+	Graph loaded;
+	std::string error;
+	REQUIRE(Load(text, loaded, error));
+	CHECK(Save(loaded) == text);
+
+	const auto sameShape = [&](const Graph &other) {
+		for (const Node &one : other.Nodes()) {
+			if (one.Compressed()) {
+				return InputsOf(one).size() == 2 && OutputsOf(one).size() == 1 && WidgetsOf(one).size() == 3;
+			}
+		}
+		return false;
+	};
+	CHECK(sameShape(loaded));
+
+	// **A fold copies with everything inside it.** A copy whose proxies still
+	// named the original's members would read as a duplicate and behave as a
+	// second view of the first, which is the worst of both.
+	{
+		Canvas canvas;
+		canvas.Select(folded);
+		canvas.Copy(graph);
+		canvas.Paste(graph);
+
+		REQUIRE(canvas.Selection().size() == 1);
+		const NodeId copy = canvas.Selection().front();
+		CHECK(copy != folded);
+
+		const std::vector<NodeId> inside = graph.Contents(copy);
+		CHECK(inside.size() == 2);
+		for (const Proxy &proxy : graph.Find(copy)->Proxies) {
+			CHECK(std::find(inside.begin(), inside.end(), proxy.Inner) != inside.end());
+		}
+
+		// And its promoted knobs write into its own contents rather than the
+		// original's — with keys naming the copy's members, not the original's.
+		const std::vector<WidgetSpec> knobs = WidgetsOf(*graph.Find(copy));
+		REQUIRE(knobs.size() == 3);
+		const auto mine = std::find_if(knobs.begin(), knobs.end(), [&](const WidgetSpec &spec) {
+			return spec.Label.find("Amount") != std::string::npos;
+		});
+		REQUIRE(mine != knobs.end());
+
+		Value nudged = ValueOf(graph, copy, *mine);
+		nudged.Number = 0.123;
+		SetValue(graph, copy, mine->Key, nudged);
+		CHECK(graph.Find(warp)->Widgets["amount"].Number == 0.4);
+		CHECK(mine->Key.rfind(std::to_string(inside.front()) + "/", 0) == 0);
+
+		REQUIRE(graph.Remove(copy));
+	}
+
+	// Expanding is the exact inverse.
+	REQUIRE(graph.Expand(folded));
+	CHECK(graph.Find(warp)->Owner == NO_NODE);
+	CHECK(graph.Links().size() == wires);
+	CHECK_FALSE(graph.Alive(folded));
+
+	// And deleting a fold takes its contents, so nothing is left that no view
+	// can reach.
+	const NodeId again = graph.Compress({warp, terrace}, 450.0f, 0.0f);
+	REQUIRE(again != NO_NODE);
+	REQUIRE(graph.Remove(again));
+	CHECK_FALSE(graph.Alive(warp));
+	CHECK_FALSE(graph.Alive(terrace));
+	CHECK(graph.Alive(noise));
+}
+
+TEST_CASE("an inspector is picked from what a node produced", "[studio][nodegraph]") {
+	Types();
+	RegisterInspectors();
+
+	Graph graph;
+	const NodeId noise = graph.Add("field.perlin", 0.0f, 0.0f);
+	const NodeId average = graph.Add("field.readout", 300.0f, 0.0f);
+	const NodeId sum = graph.Add("number.arithmetic", 600.0f, 0.0f);
+	const NodeId note = graph.Add("graph.note", 900.0f, 0.0f);
+	const NodeId staged = graph.Add("task.staged", 0.0f, 400.0f);
+	graph.Find(noise)->Widgets["resolution"].Text = "64";
+	REQUIRE(graph.Connect(noise, "Out", average, "In") == LinkResult::Made);
+	REQUIRE(graph.Connect(average, "Value", sum, "A") == LinkResult::Made);
+
+	const auto pick = [&graph](const Evaluator &runner, NodeId id) {
+		Inspection what;
+		what.Node = graph.Find(id);
+		what.Type = NodeTypes::Find(what.Node->Type);
+		what.Graph = &graph;
+		what.Runner = &runner;
+		return Inspectors::For(what);
+	};
+
+	Evaluator runner;
+
+	// **Before anything has run, everything is empty** — which is the honest
+	// answer and not an empty picture frame that reads as a broken preview.
+	CHECK(pick(runner, noise) == Inspectors::Find("empty"));
+
+	runner.Run(graph);
+
+	// A node whose payload draws gets the picture panel; one where nothing at
+	// either end draws gets the readout; a staged one is about its run whether
+	// or not it finished; and a node with no evaluation was never going to say
+	// anything.
+	CHECK(pick(runner, noise) == Inspectors::Find("field"));
+	CHECK(pick(runner, sum) == Inspectors::Find("value"));
+	CHECK(pick(runner, staged) == Inspectors::Find("run"));
+	CHECK(pick(runner, note) == Inspectors::Find("empty"));
+
+	// **An input counts, and that is deliberate.** A readout produces one
+	// number, but the thing worth looking at when it is selected is the field it
+	// was handed — so it gets the picture panel, whose input strip is what shows
+	// it.
+	CHECK(pick(runner, average) == Inspectors::Find("field"));
+
+	// The type's own choice wins over the inference.
+	NodeType said = *NodeTypes::Find("field.perlin");
+	said.Id = "field.perlin.said";
+	said.Inspector = "value";
+	NodeTypes::Register(said);
+
+	const NodeId told = graph.Add("field.perlin.said", 0.0f, 800.0f);
+	CHECK(pick(runner, told) == Inspectors::Find("value"));
+}
+
 TEST_CASE("a bad document is refused and a bad line is not fatal", "[studio][nodegraph]") {
 	Types();
 	Graph graph;
@@ -393,6 +661,41 @@ TEST_CASE("the canvas draws a graph without tripping imgui", "[studio][nodegraph
 	CHECK(graph.Nodes().size() == 11);
 	CHECK(graph.Links().size() == 11);
 	CHECK(canvas.Selection().empty());
+
+	// **And again with a frame and a fold in it**, which are the two things that
+	// change what the canvas walks: a group is drawn behind everything from
+	// bounds computed on the spot, and a fold hides its members and re-routes
+	// every wire crossing it. Both are new draw paths that push and pop, and an
+	// imbalance there is an assertion frames later in an unrelated panel.
+	std::vector<NodeId> some;
+	for (const Node &node : graph.Nodes()) {
+		if (some.size() < 3) {
+			some.push_back(node.Id);
+		}
+	}
+	REQUIRE(graph.Group({some[0], some[1]}, "Sources", Colour::Hex(0x4ADE80)) != NO_GROUP);
+
+	const NodeId folded = graph.Compress({some[1], some[2]}, 400.0f, 200.0f);
+	REQUIRE(folded != NO_NODE);
+	runner.Run(graph);
+
+	for (int frame = 0; frame < 3; frame++) {
+		Frame(canvas, graph, 500.0f, 400.0f, false);
+	}
+
+	// Inside the fold, only its members are drawn — and drawing at depth is
+	// still just drawing.
+	canvas.Enter(graph, folded);
+	CHECK(canvas.Inside() == folded);
+	CHECK(canvas.Path().size() == 1);
+	for (int frame = 0; frame < 3; frame++) {
+		Frame(canvas, graph, 500.0f, 400.0f, false);
+	}
+
+	canvas.Leave(graph);
+	CHECK(canvas.Inside() == NO_NODE);
+	CHECK(graph.Nodes().size() == 12);
+	CHECK(graph.Links().size() == 11);
 }
 
 TEST_CASE("a drag from an output to an input makes the link", "[studio][nodegraph]") {
@@ -654,13 +957,17 @@ TEST_CASE("erosion changes the field it is given, and caches the result", "[stud
 	const std::any &before = *runner.Output(noise, "Out");
 	const std::any &after = *runner.Output(eroded, "Out");
 
+	// **Drawn through `PictureOf`, which is what the canvas and the inspector
+	// both call.** The picture comes from the *wire* rather than from the node
+	// type — that is what lets a panel draw a node's inputs, whose payloads were
+	// made upstream by a type it never heard of.
 	PreviewImage first;
 	PreviewImage second;
 	const NodeType *type = NodeTypes::Find("field.erode");
 	REQUIRE(type != nullptr);
-	REQUIRE(type->Preview);
-	REQUIRE(type->Preview(before, first));
-	REQUIRE(type->Preview(after, second));
+	REQUIRE(HasPicture(*type));
+	REQUIRE(PictureOf(type, "data.FIELD", before, first));
+	REQUIRE(PictureOf(type, "data.FIELD", after, second));
 
 	CHECK(first.Valid());
 	CHECK(second.Valid());
@@ -670,8 +977,12 @@ TEST_CASE("erosion changes the field it is given, and caches the result", "[stud
 	// Deterministic: the same hash is the same picture, which is what lets the
 	// canvas key a texture on it.
 	PreviewImage third;
-	REQUIRE(type->Preview(after, third));
+	REQUIRE(PictureOf(type, "data.FIELD", after, third));
 	CHECK(third.Rgba == second.Rgba);
+
+	// And a node that declared no preview of its own still has one, because the
+	// wire it produces on does.
+	CHECK_FALSE(static_cast<bool>(type->Preview));
 }
 
 TEST_CASE("a colourised field is a picture and a height field is a grey one", "[studio][nodegraph]") {
@@ -692,7 +1003,7 @@ TEST_CASE("a colourised field is a picture and a height field is a grey one", "[
 	REQUIRE(colour != nullptr);
 
 	PreviewImage grey;
-	REQUIRE(field->Preview(*runner.Output(noise, "Out"), grey));
+	REQUIRE(PictureOf(field, "data.FIELD", *runner.Output(noise, "Out"), grey));
 	REQUIRE(grey.Valid());
 
 	// A height field previews as light: every pixel has one value in three
@@ -705,7 +1016,7 @@ TEST_CASE("a colourised field is a picture and a height field is a grey one", "[
 	CHECK_FALSE(coloured);
 
 	PreviewImage painted;
-	REQUIRE(colour->Preview(*runner.Output(picture, "Out"), painted));
+	REQUIRE(PictureOf(colour, "data.IMAGE", *runner.Output(picture, "Out"), painted));
 	REQUIRE(painted.Valid());
 
 	for (size_t at = 0; at + 3 < painted.Rgba.size(); at += 4) {
@@ -717,8 +1028,13 @@ TEST_CASE("a colourised field is a picture and a height field is a grey one", "[
 	// A preview of something that is not what the node makes answers no rather
 	// than reinterpreting the bytes.
 	PreviewImage refused;
-	CHECK_FALSE(colour->Preview(std::any(42.0), refused));
-	CHECK_FALSE(field->Preview(std::any(std::string("not a field")), refused));
+	CHECK_FALSE(PictureOf(colour, "data.IMAGE", std::any(42.0), refused));
+	CHECK_FALSE(PictureOf(field, "data.FIELD", std::any(std::string("not a field")), refused));
+
+	// And a wire nobody taught to draw itself says so rather than guessing —
+	// which is what keeps a number out of a grey square.
+	CHECK_FALSE(PictureOf(nullptr, "data.NUMBER", std::any(0.5), refused));
+	CHECK(DescribeValue("data.NUMBER", std::any(0.5)) == "0.5000");
 }
 
 TEST_CASE("the demo graph is wired, and settles", "[studio][nodegraph]") {

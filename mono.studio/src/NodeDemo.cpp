@@ -30,17 +30,41 @@
 // would produce a picture the cache then refuses to recompute — a stale frame
 // that looks like a broken graph. The staged task sleeps rather than reading
 // wall-clock time *into* its result for the same reason.
+//
+// ## The panel
+//
+// A canvas, a breadcrumb bar when the view is inside a fold, and three tabs
+// answering three different questions about one selection: **Library** — what
+// can I add; **Inspector** — what is this and what did it make; **Types** —
+// what will connect to what. They are tabs and not three panels because only
+// one of the three is being asked at a time.
+//
+// The inspector's middle is the only part that varies by node type, and it is
+// dispatched through `nodes::Inspectors` rather than switched on here. Around it
+// the panel draws what every type has: a name, how long it took, its knobs and
+// its ports — drawn from `WidgetsOf`/`InputsOf`/`OutputsOf` so a compressed node
+// shows the interface it derived rather than the empty declaration it was placed
+// from.
+//
+// **Undo is whole documents rather than a command log.** `studio/Commands.hpp`
+// takes the other side of that trade for the scene, and for its reason: a scene
+// is large and an edit is small. This graph serialises to a few hundred bytes,
+// and a snapshot cannot be wrong about what it reverses.
+
+#include <engine/assets/Texture.hpp>
+#include <engine/ui/Metrics.hpp>
+#include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <engine/assets/Texture.hpp>
-#include <engine/ui/Metrics.hpp>
-#include <engine/ui/Theme.hpp>
+#include <fstream>
 #include <imgui.h>
+#include <sstream>
 #include <string>
 #include <studio/Editor.hpp>
 #include <studio/NodeGraph.hpp>
@@ -66,13 +90,12 @@ namespace studio {
 				float At(int x, int y) const {
 					const int cx = std::clamp(x, 0, Side - 1);
 					const int cy = std::clamp(y, 0, Side - 1);
-					return Data[static_cast<size_t>(cy) * static_cast<size_t>(Side) +
-								static_cast<size_t>(cx)];
+					return Data
+						[static_cast<size_t>(cy) * static_cast<size_t>(Side) + static_cast<size_t>(cx)];
 				}
 
 				float &At(int x, int y) {
-					return Data[static_cast<size_t>(y) * static_cast<size_t>(Side) +
-								static_cast<size_t>(x)];
+					return Data[static_cast<size_t>(y) * static_cast<size_t>(Side) + static_cast<size_t>(x)];
 				}
 			};
 
@@ -132,7 +155,13 @@ namespace studio {
 			// octave loop is where two generators start disagreeing about what
 			// `frequency` means.
 			float Fractal(
-				float x, float y, int seed, int octaves, float frequency, float lacunarity, float gain,
+				float x,
+				float y,
+				int seed,
+				int octaves,
+				float frequency,
+				float lacunarity,
+				float gain,
 				bool ridge
 			) {
 				float total = 0.0f;
@@ -250,10 +279,9 @@ namespace studio {
 						const int sy = static_cast<int>(
 							static_cast<float>(y) / PREVIEW_SIDE * static_cast<float>(source->Side)
 						);
-						const size_t from =
-							(static_cast<size_t>(sy) * static_cast<size_t>(source->Side) +
-							 static_cast<size_t>(sx)) *
-							4;
+						const size_t from = (static_cast<size_t>(sy) * static_cast<size_t>(source->Side) +
+											 static_cast<size_t>(sx)) *
+											4;
 						const size_t at = (static_cast<size_t>(y) * PREVIEW_SIDE + x) * 4;
 						for (size_t channel = 0; channel < 4; channel++) {
 							image.Rgba[at + channel] = source->Rgba[from + channel];
@@ -261,6 +289,59 @@ namespace studio {
 					}
 				}
 				return true;
+			}
+
+			// --- what a wire says about itself ----------------------------------
+			//
+			// **On the data type rather than on each node**, which is the whole
+			// point of `DataType::Preview`: eight filters carry a field and one
+			// function draws every one of them — and, more usefully, an
+			// inspector can draw a node's *inputs*, whose payloads were made
+			// upstream by a type it has never heard of.
+
+			std::string DescribeField(const std::any &payload) {
+				const Field *field = std::any_cast<Field>(&payload);
+				if (field == nullptr || field->Empty()) {
+					return "an empty field";
+				}
+
+				float low = field->Data.front();
+				float high = low;
+				for (const float sample : field->Data) {
+					low = std::min(low, sample);
+					high = std::max(high, sample);
+				}
+
+				char text[64];
+				std::snprintf(
+					text,
+					sizeof(text),
+					"scalar %d\xC2\xB2  %.3f - %.3f",
+					field->Side,
+					static_cast<double>(low),
+					static_cast<double>(high)
+				);
+				return text;
+			}
+
+			std::string DescribeImage(const std::any &payload) {
+				const Image *image = std::any_cast<Image>(&payload);
+				if (image == nullptr || image->Empty()) {
+					return "an empty picture";
+				}
+				char text[32];
+				std::snprintf(text, sizeof(text), "rgb %d\xC2\xB2", image->Side);
+				return text;
+			}
+
+			std::string DescribeNumber(const std::any &payload) {
+				const double *number = std::any_cast<double>(&payload);
+				if (number == nullptr) {
+					return "not a number";
+				}
+				char text[32];
+				std::snprintf(text, sizeof(text), "%.4f", *number);
+				return text;
 			}
 
 			bool Registered = false;
@@ -276,13 +357,35 @@ namespace studio {
 			}
 			Registered = true;
 
-			DataTypes::Register(DataType{"data.NUMBER", "Number", Colour::Hex(0xF2C14E), "One scalar"});
-			DataTypes::Register(
-				DataType{"data.FIELD", "Field", Colour::Hex(0x4CA6FF), "A square grid of heights, 0..1"}
-			);
-			DataTypes::Register(
-				DataType{"data.IMAGE", "Image", Colour::Hex(0xE06C9F), "A square grid of colours"}
-			);
+			// **Each type is registered with how to draw and how to read it**,
+			// which is what every preview in this panel goes through. A number
+			// gets no picture on purpose: a grey square standing for `0.4213` is
+			// worse than the number itself.
+			DataType number;
+			number.Id = "data.NUMBER";
+			number.Label = "Number";
+			number.Tint = Colour::Hex(0xF2C14E);
+			number.Description = "One scalar";
+			number.Describe = DescribeNumber;
+			DataTypes::Register(number);
+
+			DataType field;
+			field.Id = "data.FIELD";
+			field.Label = "Field";
+			field.Tint = Colour::Hex(0x4CA6FF);
+			field.Description = "A square grid of heights, 0..1";
+			field.Preview = PreviewOfField;
+			field.Describe = DescribeField;
+			DataTypes::Register(field);
+
+			DataType picture;
+			picture.Id = "data.IMAGE";
+			picture.Label = "Image";
+			picture.Tint = Colour::Hex(0xE06C9F);
+			picture.Description = "A square grid of colours";
+			picture.Preview = PreviewOfImage;
+			picture.Describe = DescribeImage;
+			DataTypes::Register(picture);
 
 			// --- numbers --------------------------------------------------------
 
@@ -293,9 +396,7 @@ namespace studio {
 			constant.Accent = Colour::Hex(0xF2C14E);
 			constant.Outputs = {Port("Out", "data.NUMBER")};
 			constant.Widgets = {Number("value", "Value", 1.0)};
-			constant.Evaluate = [](const Inputs &in) {
-				return Outputs{{"Out", in.Real("value")}};
-			};
+			constant.Evaluate = [](const Inputs &in) { return Outputs{{"Out", in.Real("value")}}; };
 			NodeTypes::Register(constant);
 
 			NodeType arithmetic;
@@ -349,7 +450,6 @@ namespace studio {
 				Slider("gain", "Gain", 0.2, 0.8, 0.5),
 				Number("seed", "Seed", 1.0),
 			};
-			perlin.Preview = PreviewOfField;
 			perlin.Evaluate = [](const Inputs &in) {
 				const int side = SideOf(in, "resolution");
 				const auto seed = static_cast<int>(in.Real("seed"));
@@ -410,7 +510,6 @@ namespace studio {
 			warp.Inputs = {Port("In", "data.FIELD"), Port("By", "data.FIELD")};
 			warp.Outputs = {Port("Out", "data.FIELD")};
 			warp.Widgets = {Slider("amount", "Amount", 0.0, 0.5, 0.15)};
-			warp.Preview = PreviewOfField;
 			warp.Evaluate = [](const Inputs &in) {
 				const Field source = in.In<Field>("In");
 				const Field by = in.In<Field>("By");
@@ -427,13 +526,10 @@ namespace studio {
 						// with no second field would otherwise be an expensive
 						// copy, and the node would look broken rather than
 						// unconnected.
-						const float offset = by.Empty()
-												 ? Noise(
-													   static_cast<float>(x) * 0.05f,
-													   static_cast<float>(y) * 0.05f,
-													   99
-												   )
-												 : by.At(x, y);
+						const float offset =
+							by.Empty()
+								? Noise(static_cast<float>(x) * 0.05f, static_cast<float>(y) * 0.05f, 99)
+								: by.At(x, y);
 						const auto shift = static_cast<int>((offset - 0.5f) * amount);
 						out.At(x, y) = source.At(x + shift, y + shift);
 					}
@@ -453,7 +549,6 @@ namespace studio {
 				Slider("steps", "Steps", 2.0, 24.0, 8.0),
 				Slider("sharpness", "Sharpness", 0.0, 1.0, 0.6),
 			};
-			terrace.Preview = PreviewOfField;
 			terrace.Evaluate = [](const Inputs &in) {
 				Field field = in.In<Field>("In");
 				if (field.Empty()) {
@@ -487,7 +582,6 @@ namespace studio {
 			slope.Subtitle = "steepness, 0..1";
 			slope.Inputs = {Port("In", "data.FIELD")};
 			slope.Outputs = {Port("Out", "data.FIELD")};
-			slope.Preview = PreviewOfField;
 			slope.Evaluate = [](const Inputs &in) {
 				const Field source = in.In<Field>("In");
 				if (source.Empty()) {
@@ -519,7 +613,6 @@ namespace studio {
 				Slider("softness", "Softness", 0.0, 0.5, 0.08),
 				Toggle("invert", "Invert", false),
 			};
-			mask.Preview = PreviewOfField;
 			mask.Evaluate = [](const Inputs &in) {
 				Field field = in.In<Field>("In");
 				if (field.Empty()) {
@@ -555,7 +648,6 @@ namespace studio {
 				Select("mode", "Mode", {"blend", "add", "multiply", "minimum", "maximum"}, 0),
 				Slider("amount", "Amount", 0.0, 1.0, 0.5),
 			};
-			combine.Preview = PreviewOfField;
 			combine.Evaluate = [](const Inputs &in) {
 				const Field a = in.In<Field>("A");
 				const Field b = in.In<Field>("B");
@@ -618,7 +710,6 @@ namespace studio {
 				Slider("sea", "Sea level", 0.0, 0.8, 0.32),
 				Toggle("relief", "Relief", true),
 			};
-			colourise.Preview = PreviewOfImage;
 			colourise.Evaluate = [](const Inputs &in) {
 				const Field field = in.In<Field>("In");
 				if (field.Empty()) {
@@ -644,17 +735,33 @@ namespace studio {
 
 				std::vector<Band> bands;
 				if (palette == "desert") {
-					bands = {{0.36f, 0.76f, 0.66f, 0.42f}, {0.55f, 0.84f, 0.71f, 0.45f},
-							 {0.78f, 0.66f, 0.50f, 0.34f}, {1.01f, 0.94f, 0.90f, 0.84f}};
+					bands = {
+						{0.36f, 0.76f, 0.66f, 0.42f},
+						{0.55f, 0.84f, 0.71f, 0.45f},
+						{0.78f, 0.66f, 0.50f, 0.34f},
+						{1.01f, 0.94f, 0.90f, 0.84f}
+					};
 				} else if (palette == "volcanic") {
-					bands = {{0.34f, 0.12f, 0.10f, 0.12f}, {0.58f, 0.28f, 0.20f, 0.20f},
-							 {0.80f, 0.62f, 0.20f, 0.12f}, {1.01f, 0.98f, 0.82f, 0.36f}};
+					bands = {
+						{0.34f, 0.12f, 0.10f, 0.12f},
+						{0.58f, 0.28f, 0.20f, 0.20f},
+						{0.80f, 0.62f, 0.20f, 0.12f},
+						{1.01f, 0.98f, 0.82f, 0.36f}
+					};
 				} else if (palette == "depth") {
-					bands = {{0.30f, 0.02f, 0.10f, 0.28f}, {0.55f, 0.06f, 0.32f, 0.56f},
-							 {0.80f, 0.24f, 0.62f, 0.78f}, {1.01f, 0.86f, 0.96f, 1.00f}};
+					bands = {
+						{0.30f, 0.02f, 0.10f, 0.28f},
+						{0.55f, 0.06f, 0.32f, 0.56f},
+						{0.80f, 0.24f, 0.62f, 0.78f},
+						{1.01f, 0.86f, 0.96f, 1.00f}
+					};
 				} else {
-					bands = {{0.38f, 0.36f, 0.52f, 0.30f}, {0.62f, 0.28f, 0.44f, 0.24f},
-							 {0.82f, 0.48f, 0.44f, 0.40f}, {1.01f, 0.96f, 0.96f, 0.98f}};
+					bands = {
+						{0.38f, 0.36f, 0.52f, 0.30f},
+						{0.62f, 0.28f, 0.44f, 0.24f},
+						{0.82f, 0.48f, 0.44f, 0.40f},
+						{1.01f, 0.96f, 0.96f, 0.98f}
+					};
 				}
 
 				Image image;
@@ -695,10 +802,9 @@ namespace studio {
 							lit *= 1.0f - cliffs.At(x, y) * 0.55f;
 						}
 
-						const size_t at =
-							(static_cast<size_t>(y) * static_cast<size_t>(field.Side) +
-							 static_cast<size_t>(x)) *
-							4;
+						const size_t at = (static_cast<size_t>(y) * static_cast<size_t>(field.Side) +
+										   static_cast<size_t>(x)) *
+										  4;
 						image.Rgba[at] = static_cast<uint8_t>(std::clamp(r * lit, 0.0f, 1.0f) * 255.0f);
 						image.Rgba[at + 1] = static_cast<uint8_t>(std::clamp(g * lit, 0.0f, 1.0f) * 255.0f);
 						image.Rgba[at + 2] = static_cast<uint8_t>(std::clamp(b * lit, 0.0f, 1.0f) * 255.0f);
@@ -724,7 +830,6 @@ namespace studio {
 				Slider("talus", "Talus", 0.001, 0.05, 0.008),
 				Slider("hydraulic", "Rain passes", 0.0, 60.0, 20.0),
 			};
-			erode.Preview = PreviewOfField;
 
 			// **Async, because it is genuinely slow.** Forty thermal passes over
 			// a 256² field is tens of millions of samples; running it inside the
@@ -813,9 +918,7 @@ namespace studio {
 					}
 
 					if (in.Report) {
-						in.Report(
-							2, static_cast<float>(thermal + pass + 1) / total, "rain"
-						);
+						in.Report(2, static_cast<float>(thermal + pass + 1) / total, "rain");
 					}
 				}
 
@@ -862,9 +965,7 @@ namespace studio {
 						std::this_thread::sleep_for(perStep / 10);
 						if (in.Report) {
 							const float within = static_cast<float>(slice + 1) / 10.0f;
-							in.Report(
-								step, (static_cast<float>(step) + within) / 5.0f, names[step]
-							);
+							in.Report(step, (static_cast<float>(step) + within) / 5.0f, names[step]);
 						}
 					}
 				}
@@ -1019,6 +1120,125 @@ namespace studio {
 		NodeDemoTextureNames.clear();
 		NodeDemoTextures.clear();
 	}
+	// --- the history ----------------------------------------------------------
+
+	void Editor::CommitNodeDemo() {
+		// **Compared against what the graph already read as.** A commit is
+		// called from every gesture that might have changed something, and most
+		// of them did not — a drag that moved a node one pixel and back is not
+		// an undo step.
+		std::string now = nodes::Save(NodeDemoGraph);
+		if (now == NodeDemoLast) {
+			return;
+		}
+
+		if (!NodeDemoLast.empty()) {
+			NodeDemoPast.push_back(std::move(NodeDemoLast));
+		}
+		NodeDemoLast = std::move(now);
+		NodeDemoFuture.clear();
+
+		// A ceiling, because every entry is a whole document and somebody
+		// dragging sliders for an hour should not be holding all of it.
+		constexpr size_t DEPTH = 100;
+		if (NodeDemoPast.size() > DEPTH) {
+			NodeDemoPast.erase(NodeDemoPast.begin());
+		}
+	}
+
+	void Editor::RestoreNodeDemo(const std::string &document) {
+		std::string error;
+		if (!nodes::Load(document, NodeDemoGraph, error)) {
+			NodeDemoSaid = error;
+			return;
+		}
+
+		// **The selection is dropped rather than repointed.** `Load` hands out
+		// new ids, so a held one names a different node — which is worse than
+		// nothing selected, because it looks like it worked.
+		NodeDemoCanvas.Select(nodes::NO_NODE);
+		NodeDemoSignature = 0;
+	}
+
+	void Editor::UndoNodeDemo() {
+		if (NodeDemoPast.empty()) {
+			NodeDemoSaid = "nothing to undo";
+			return;
+		}
+		NodeDemoFuture.push_back(NodeDemoLast);
+		NodeDemoLast = NodeDemoPast.back();
+		NodeDemoPast.pop_back();
+		RestoreNodeDemo(NodeDemoLast);
+	}
+
+	void Editor::RedoNodeDemo() {
+		if (NodeDemoFuture.empty()) {
+			NodeDemoSaid = "nothing to redo";
+			return;
+		}
+		NodeDemoPast.push_back(NodeDemoLast);
+		NodeDemoLast = NodeDemoFuture.back();
+		NodeDemoFuture.pop_back();
+		RestoreNodeDemo(NodeDemoLast);
+	}
+
+	std::string Editor::ExportNodeDemoImage(nodes::NodeId id) {
+		const nodes::Node *node = NodeDemoGraph.Find(id);
+		const nodes::NodeType *type = node == nullptr ? nullptr : nodes::NodeTypes::Find(node->Type);
+		if (type == nullptr) {
+			return "nothing selected";
+		}
+
+		// The first output that makes a picture. A node with several is asking
+		// for a port picker, which is a dialog for a thing nobody does twice.
+		nodes::PreviewImage image;
+		for (const nodes::PortSpec &port : type->Outputs) {
+			const std::any *payload = NodeDemoRunner.Output(id, port.Name);
+			if (payload != nullptr && nodes::PictureOf(type, port.Type, *payload, image) && image.Valid()) {
+				break;
+			}
+			image = nodes::PreviewImage{};
+		}
+		if (!image.Valid()) {
+			return "that node has produced no picture";
+		}
+
+		const std::string path = std::string(NodeDemoPath) + ".tga";
+		std::ofstream out(path, std::ios::binary | std::ios::trunc);
+		if (!out) {
+			return "could not write " + path;
+		}
+
+		const auto side = static_cast<uint16_t>(image.Side);
+		unsigned char header[18] = {};
+		header[2] = 2;
+		header[12] = static_cast<unsigned char>(side & 0xFF);
+		header[13] = static_cast<unsigned char>((side >> 8) & 0xFF);
+		header[14] = static_cast<unsigned char>(side & 0xFF);
+		header[15] = static_cast<unsigned char>((side >> 8) & 0xFF);
+		header[16] = 32;
+		out.write(reinterpret_cast<const char *>(header), sizeof(header));
+
+		// Targa is blue first and bottom row first; `PreviewImage` is red first
+		// and top row first, so both are turned round here rather than anywhere
+		// the rest of the program can see.
+		std::vector<unsigned char> row(static_cast<size_t>(side) * 4);
+		for (int y = side - 1; y >= 0; y--) {
+			for (uint32_t x = 0; x < image.Side; x++) {
+				const size_t from = (static_cast<size_t>(y) * image.Side + x) * 4;
+				const size_t to = static_cast<size_t>(x) * 4;
+				row[to] = image.Rgba[from + 2];
+				row[to + 1] = image.Rgba[from + 1];
+				row[to + 2] = image.Rgba[from];
+				row[to + 3] = image.Rgba[from + 3];
+			}
+			out.write(reinterpret_cast<const char *>(row.data()), static_cast<std::streamsize>(row.size()));
+		}
+
+		return "exported " + path;
+	}
+
+	// --- the panel ------------------------------------------------------------
 
 	void Editor::DrawNodeDemo() {
 		if (!ShowNodeDemo) {
@@ -1034,96 +1254,71 @@ namespace studio {
 		// opens must cost nothing, which is this program's rule for every panel
 		// that answers a question occasionally — and a graph built before the
 		// node types were registered would be an empty one.
-		if (NodeDemoGraph.Nodes().empty()) {
+		if (NodeDemoGraph.Nodes().empty() && NodeDemoLast.empty()) {
 			nodes::BuildDemoGraph(NodeDemoGraph);
 			NodeDemoCanvas.Observe(&NodeDemoRunner);
-			NodeDemoCanvas.Images([this](uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make) {
-				return NodeDemoImage(key, make);
-			});
+			NodeDemoCanvas.Images([this](
+									  uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make
+								  ) { return NodeDemoImage(key, make); });
+
+			// What the canvas cannot decide for itself: when an edit becomes an
+			// undo step, and what "run this one again" means.
+			NodeDemoCanvas.Signals.Changed = [this] { CommitNodeDemo(); };
+			NodeDemoCanvas.Signals.Rerun = [this](nodes::NodeId) {
+				// **The whole cache and not one entry.** A result is keyed by a
+				// hash of the node *and everything above it*, so "recompute this
+				// one" would have to invalidate every hash that folded it in —
+				// and the graph is small enough that starting over is cheaper
+				// than the bookkeeping to do it precisely.
+				NodeDemoRunner.Forget();
+				DropNodeDemoImages();
+				NodeDemoSignature = 0;
+			};
+
 			NodeDemoSignature = 0;
+			NodeDemoLast = nodes::Save(NodeDemoGraph);
 		}
 
-		if (ImGui::BeginMenuBar()) {
-			ImGui::Text(
-				"%zu evaluated  %zu cached  %zu skipped",
-				NodeDemoReport.Evaluated,
-				NodeDemoReport.Cached,
-				NodeDemoReport.Skipped
-			);
+		DrawNodeDemoBar();
+		DrawNodeDemoCrumbs();
 
-			if (NodeDemoReport.Running > 0 || NodeDemoReport.Waiting > 0) {
-				ImGui::SameLine();
-				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
-				ImGui::Text(
-					"%zu running  %zu waiting", NodeDemoReport.Running, NodeDemoReport.Waiting
-				);
-				ImGui::PopStyleColor();
-			}
-
-			ImGui::SameLine();
-			ImGui::TextDisabled("|");
-
-			// **Live is the default and Build is the escape.** A graph of cheap
-			// filters wants to follow the slider; one with a six-second task in
-			// it does not want to start over on every twitch, and this is the
-			// switch between those.
-			ImGui::SameLine();
-			ImGui::Checkbox("Live", &NodeDemoLive);
-			ImGui::SameLine();
-			ImGui::BeginDisabled(NodeDemoLive);
-			if (ImGui::SmallButton("Build")) {
-				NodeDemoSignature = 0;
-			}
-			ImGui::EndDisabled();
-
-			ImGui::SameLine();
-			ImGui::TextDisabled("|");
-			ImGui::SameLine();
-			ImGui::TextDisabled("%.0f%%", static_cast<double>(NodeDemoCanvas.Zoom() * 100.0f));
-			ImGui::SameLine();
-			if (ImGui::SmallButton("Fit")) {
-				NodeDemoCanvas.Fit(NodeDemoGraph);
-			}
-			ImGui::SameLine();
-			if (ImGui::SmallButton("Forget cache")) {
-				NodeDemoRunner.Forget();
-				DropNodeDemoImages();
-				NodeDemoSignature = 0;
-			}
-			ImGui::SameLine();
-			if (ImGui::SmallButton("Reset graph")) {
-				nodes::BuildDemoGraph(NodeDemoGraph);
-				NodeDemoRunner.Forget();
-				DropNodeDemoImages();
-				NodeDemoSignature = 0;
-			}
-
-			if (!NodeDemoCanvas.LastRefusal.empty()) {
-				ImGui::SameLine();
-				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-				ImGui::TextUnformatted(NodeDemoCanvas.LastRefusal.c_str());
-				ImGui::PopStyleColor();
-			}
-			ImGui::EndMenuBar();
-		}
-
-		// The inspector, down the right-hand side: the selected node's picture
-		// large, what it is doing, and what it produced. The canvas says how the
-		// graph is wired; this says what came out of it.
-		const float inspector = engine::ui::Scaled(210.0f);
+		// The canvas on the left, the three tabs down the right. The canvas says
+		// how the graph is wired; the panel says what came out of it, what can be
+		// added to it, and what will connect to what.
+		const float inspector = engine::ui::Scaled(250.0f);
+		const float bar = ImGui::GetTextLineHeightWithSpacing();
 		const ImVec2 room = ImGui::GetContentRegionAvail();
 
-		if (ImGui::BeginChild("##nodes", ImVec2(room.x - inspector, 0.0f), ImGuiChildFlags_None)) {
+		if (ImGui::BeginChild("##nodes", ImVec2(room.x - inspector, room.y - bar), ImGuiChildFlags_None)) {
 			NodeDemoCanvas.Draw(NodeDemoGraph);
 		}
 		ImGui::EndChild();
 
 		ImGui::SameLine();
 
-		if (ImGui::BeginChild("##inspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
-			DrawNodeDemoInspector();
+		if (ImGui::BeginChild("##panel", ImVec2(0.0f, room.y - bar), ImGuiChildFlags_Borders)) {
+			if (ImGui::BeginTabBar("##tabs")) {
+				if (ImGui::BeginTabItem("Library")) {
+					NodeDemoTab = 0;
+					DrawNodeDemoLibrary();
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Inspector")) {
+					NodeDemoTab = 1;
+					DrawNodeDemoInspector();
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Types")) {
+					NodeDemoTab = 2;
+					DrawNodeDemoTypes();
+					ImGui::EndTabItem();
+				}
+				ImGui::EndTabBar();
+			}
 		}
 		ImGui::EndChild();
+
+		DrawNodeDemoStatus();
 
 		// **Re-run when the graph moved, and every frame while anything is
 		// working.** The signature covers parameters and topology and
@@ -1135,25 +1330,415 @@ namespace studio {
 
 		if (NodeDemoRunner.Busy() || (changed && NodeDemoLive) || (changed && NodeDemoSignature == 0)) {
 			NodeDemoSignature = now;
+
+			const auto began = std::chrono::steady_clock::now();
 			NodeDemoReport = NodeDemoRunner.Run(NodeDemoGraph);
+			NodeDemoRunMs =
+				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+
+			// **Accumulated rather than taken from the last run.** A hit rate
+			// over one frame of a settled graph is always 100%, which is a
+			// number that tells nobody anything.
+			NodeDemoHits += NodeDemoReport.Cached;
+			NodeDemoMisses += NodeDemoReport.Evaluated + NodeDemoReport.Started;
 		}
 
 		ImGui::End();
 	}
 
+	void Editor::DrawNodeDemoBar() {
+		if (!ImGui::BeginMenuBar()) {
+			return;
+		}
+
+		if (ImGui::BeginMenu("File")) {
+			if (ImGui::MenuItem("New graph")) {
+				NodeDemoGraph.Clear();
+				NodeDemoRunner.Forget();
+				DropNodeDemoImages();
+				NodeDemoCanvas.Select(nodes::NO_NODE);
+				NodeDemoSignature = 0;
+				CommitNodeDemo();
+			}
+			if (ImGui::MenuItem("Reset to the demo graph")) {
+				nodes::BuildDemoGraph(NodeDemoGraph);
+				NodeDemoRunner.Forget();
+				DropNodeDemoImages();
+				NodeDemoCanvas.Select(nodes::NO_NODE);
+				NodeDemoSignature = 0;
+				CommitNodeDemo();
+			}
+
+			ImGui::Separator();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(220.0f));
+			ImGui::InputText("##path", NodeDemoPath, sizeof(NodeDemoPath));
+
+			if (ImGui::MenuItem("Save")) {
+				// **Written as the text `nodes::Save` produces**, which is three
+				// flat lists and no parser — a graph anybody can read in a diff
+				// and hand-edit without a schema.
+				std::ofstream out(NodeDemoPath, std::ios::binary | std::ios::trunc);
+				if (out) {
+					out << nodes::Save(NodeDemoGraph);
+					NodeDemoSaid = std::string("saved ") + NodeDemoPath;
+				} else {
+					NodeDemoSaid = std::string("could not write ") + NodeDemoPath;
+				}
+			}
+			if (ImGui::MenuItem("Load")) {
+				std::ifstream in(NodeDemoPath, std::ios::binary);
+				if (in) {
+					std::ostringstream held;
+					held << in.rdbuf();
+
+					std::string error;
+					if (nodes::Load(held.str(), NodeDemoGraph, error)) {
+						NodeDemoRunner.Forget();
+						DropNodeDemoImages();
+						NodeDemoCanvas.Select(nodes::NO_NODE);
+						NodeDemoSignature = 0;
+						NodeDemoPast.clear();
+						NodeDemoFuture.clear();
+						NodeDemoLast = nodes::Save(NodeDemoGraph);
+						NodeDemoSaid = std::string("loaded ") + NodeDemoPath;
+					} else {
+						NodeDemoSaid = error;
+					}
+				} else {
+					NodeDemoSaid = std::string("no such file: ") + NodeDemoPath;
+				}
+			}
+
+			ImGui::Separator();
+
+			// **Written as a Targa and not a PNG**, because nothing in this
+			// engine encodes one and a picture nobody can open is worse than a
+			// larger file everything opens. Twelve bytes of header and the
+			// pixels, bottom row first.
+			const std::vector<nodes::NodeId> &chosen = NodeDemoCanvas.Selection();
+			if (ImGui::MenuItem("Export the selected node's picture", nullptr, false, chosen.size() == 1)) {
+				NodeDemoSaid = ExportNodeDemoImage(chosen.front());
+			}
+			ImGui::EndMenu();
+		}
+
+		ImGui::BeginDisabled(NodeDemoPast.empty());
+		if (ImGui::SmallButton("undo")) {
+			UndoNodeDemo();
+		}
+		ImGui::EndDisabled();
+		ImGui::BeginDisabled(NodeDemoFuture.empty());
+		ImGui::SameLine();
+		if (ImGui::SmallButton("redo")) {
+			RedoNodeDemo();
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(NodeDemoCanvas.Selection().size() < 2);
+		if (ImGui::SmallButton("group")) {
+			NodeDemoCanvas.GroupSelection(NodeDemoGraph);
+			CommitNodeDemo();
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::SmallButton("ungroup")) {
+			NodeDemoCanvas.UngroupSelection(NodeDemoGraph);
+			CommitNodeDemo();
+		}
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(NodeDemoCanvas.Selection().size() < 2);
+		if (ImGui::SmallButton("compress")) {
+			NodeDemoCanvas.CompressSelection(NodeDemoGraph);
+			CommitNodeDemo();
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Fold the selection into one node whose ports are derived from how it was wired "
+				"(Ctrl+Shift+C)"
+			);
+		}
+
+		ImGui::SameLine();
+		if (ImGui::SmallButton("expand")) {
+			NodeDemoCanvas.ExpandSelection(NodeDemoGraph);
+			CommitNodeDemo();
+		}
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+
+		ImGui::SameLine();
+		if (ImGui::SmallButton("collapse")) {
+			NodeDemoCanvas.Collapse(NodeDemoGraph, true);
+			CommitNodeDemo();
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("uncollapse")) {
+			NodeDemoCanvas.Collapse(NodeDemoGraph, false);
+			CommitNodeDemo();
+		}
+
+		ImGui::SameLine();
+		ImGui::Checkbox("snap", &NodeDemoCanvas.Snap);
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+
+		// **Live is the default and Build is the escape.** A graph of cheap
+		// filters wants to follow the slider; one with a six-second task in it
+		// does not want to start over on every twitch, and this is the switch
+		// between those.
+		ImGui::SameLine();
+		ImGui::Checkbox("live", &NodeDemoLive);
+		ImGui::SameLine();
+		ImGui::BeginDisabled(NodeDemoLive);
+		if (ImGui::SmallButton("build")) {
+			NodeDemoSignature = 0;
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::SmallButton("fit")) {
+			NodeDemoCanvas.Fit(NodeDemoGraph);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("forget cache")) {
+			NodeDemoRunner.Forget();
+			DropNodeDemoImages();
+			NodeDemoHits = 0;
+			NodeDemoMisses = 0;
+			NodeDemoSignature = 0;
+		}
+
+		// Whichever the last thing to say something was. The canvas refuses
+		// links and the file menu reports; both are one line and neither is
+		// worth a dialog.
+		const std::string &said =
+			!NodeDemoCanvas.LastRefusal.empty() ? NodeDemoCanvas.LastRefusal : NodeDemoSaid;
+		if (!said.empty()) {
+			ImGui::SameLine();
+			ImGui::PushStyleColor(
+				ImGuiCol_Text,
+				NodeDemoCanvas.LastRefusal.empty() ? engine::ui::MutedColour() : engine::ui::WarningColour()
+			);
+			ImGui::TextUnformatted(said.c_str());
+			ImGui::PopStyleColor();
+		}
+
+		ImGui::EndMenuBar();
+	}
+
+	void Editor::DrawNodeDemoCrumbs() {
+		const std::vector<nodes::NodeId> &path = NodeDemoCanvas.Path();
+		if (path.empty()) {
+			// **Nothing at the root, rather than a bar reading "Root".** A row
+			// that is always there and only ever says one thing is a row of
+			// height nobody gets back.
+			return;
+		}
+
+		if (ImGui::SmallButton("Root")) {
+			NodeDemoCanvas.Ascend(NodeDemoGraph, 0);
+		}
+
+		for (size_t depth = 0; depth < path.size(); depth++) {
+			const nodes::Node *node = NodeDemoGraph.Find(path[depth]);
+			ImGui::SameLine();
+			ImGui::TextDisabled("/");
+			ImGui::SameLine();
+
+			const std::string label =
+				node == nullptr || node->Label.empty() ? std::string("Subgraph") : node->Label;
+			ImGui::PushID(static_cast<int>(depth));
+
+			// The last one is where we are, so it is not a way to go anywhere.
+			if (depth + 1 == path.size()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+				ImGui::TextUnformatted(label.c_str());
+				ImGui::PopStyleColor();
+			} else if (ImGui::SmallButton(label.c_str())) {
+				NodeDemoCanvas.Ascend(NodeDemoGraph, depth + 1);
+			}
+			ImGui::PopID();
+		}
+
+		ImGui::Separator();
+	}
+
+	void Editor::DrawNodeDemoStatus() {
+		const auto say = [](const char *label, const std::string &value) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted(label);
+			ImGui::PopStyleColor();
+			ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 0.5f);
+			ImGui::TextUnformatted(value.c_str());
+			ImGui::SameLine();
+			ImGui::TextDisabled("·");
+			ImGui::SameLine();
+		};
+
+		char text[64];
+
+		std::snprintf(text, sizeof(text), "%.0f%%", static_cast<double>(NodeDemoCanvas.Zoom() * 100.0f));
+		say("zoom", text);
+
+		std::snprintf(text, sizeof(text), "%zu", NodeDemoGraph.Nodes().size());
+		say("nodes", text);
+
+		std::snprintf(text, sizeof(text), "%zu", NodeDemoGraph.Links().size());
+		say("links", text);
+
+		if (!NodeDemoCanvas.Selection().empty()) {
+			std::snprintf(text, sizeof(text), "%zu", NodeDemoCanvas.Selection().size());
+			say("selected", text);
+		}
+
+		// **The hit rate, because it is the one number that says the cache
+		// works.** A graph whose hashes never settle recomputes for ever, and
+		// that shows up here as a rate falling towards zero long before anybody
+		// notices the frame rate.
+		const size_t asked = NodeDemoHits + NodeDemoMisses;
+		std::snprintf(text, sizeof(text), "%zu/%zu", NodeDemoHits, asked);
+		say("cache", text);
+
+		std::snprintf(text, sizeof(text), "%.1f ms", NodeDemoRunMs);
+		say("run", text);
+
+		if (NodeDemoReport.Running > 0 || NodeDemoReport.Waiting > 0) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::AccentColour());
+			ImGui::Text("%zu running  %zu waiting", NodeDemoReport.Running, NodeDemoReport.Waiting);
+			ImGui::PopStyleColor();
+		} else {
+			ImGui::PushStyleColor(
+				ImGuiCol_Text, NodeDemoLive ? engine::ui::AccentColour() : engine::ui::MutedColour()
+			);
+			ImGui::TextUnformatted(NodeDemoLive ? "live" : "manual");
+			ImGui::PopStyleColor();
+		}
+	}
+
+	// --- the tabs -------------------------------------------------------------
+
+	void Editor::DrawNodeDemoLibrary() {
+		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::InputTextWithHint("##filter", "filter nodes", NodeDemoFilter, sizeof(NodeDemoFilter));
+
+		const std::string wanted = NodeDemoFilter;
+		const auto matches = [&wanted](const nodes::NodeType &type) {
+			if (wanted.empty()) {
+				return true;
+			}
+			std::string haystack = type.Title + " " + type.Category + " " + type.Id;
+			std::string needle = wanted;
+			for (char &letter : haystack) {
+				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+			}
+			for (char &letter : needle) {
+				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+			}
+			return haystack.find(needle) != std::string::npos;
+		};
+
+		for (const std::string &category : nodes::NodeTypes::Categories()) {
+			size_t survived = 0;
+			for (const nodes::NodeType &type : nodes::NodeTypes::All()) {
+				survived += !type.Hidden && type.Category == category && matches(type) ? 1 : 0;
+			}
+			if (survived == 0) {
+				continue;
+			}
+
+			// Open by default, and a filter forces it open — a search that left
+			// its answers behind a closed heading would be a search that failed.
+			ImGui::SetNextItemOpen(true, wanted.empty() ? ImGuiCond_Once : ImGuiCond_Always);
+			if (!ImGui::CollapsingHeader(category.c_str())) {
+				continue;
+			}
+
+			for (const nodes::NodeType &type : nodes::NodeTypes::All()) {
+				if (type.Hidden || type.Category != category || !matches(type)) {
+					continue;
+				}
+
+				// The accent bar, so the row reads as the node it makes.
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				const float mark = ImGui::GetTextLineHeight();
+				ImGui::GetWindowDrawList()->AddRectFilled(
+					ImVec2(at.x, at.y + mark * 0.15f),
+					ImVec2(at.x + mark * 0.28f, at.y + mark * 0.85f),
+					ImGui::ColorConvertFloat4ToU32(ImVec4(type.Accent.R, type.Accent.G, type.Accent.B, 1.0f)),
+					1.0f
+				);
+				ImGui::Dummy(ImVec2(mark * 0.28f, mark));
+				ImGui::SameLine();
+
+				ImGui::PushID(type.Id.c_str());
+				if (ImGui::Selectable(type.Title.c_str())) {
+					// **Placed in the middle of the view rather than at the
+					// origin**, so adding a node while panned somewhere else does
+					// not put it off screen with no clue where it went.
+					const nodes::NodeId made = NodeDemoGraph.Add(type.Id, 0.0f, 0.0f);
+					if (made != nodes::NO_NODE) {
+						NodeDemoGraph.Find(made)->Owner = NodeDemoCanvas.Inside();
+						NodeDemoCanvas.Select(made);
+						NodeDemoCanvas.Centre(NodeDemoGraph, made);
+						CommitNodeDemo();
+					}
+				}
+				if (ImGui::IsItemHovered() && !type.Subtitle.empty()) {
+					ImGui::SetTooltip("%s", type.Subtitle.c_str());
+				}
+				ImGui::PopID();
+			}
+		}
+	}
+
 	void Editor::DrawNodeDemoInspector() {
+		if (const nodes::GroupId frame = NodeDemoCanvas.SelectedGroup(); frame != nodes::NO_GROUP) {
+			const nodes::Group *group = NodeDemoGraph.FindGroup(frame);
+			if (group != nullptr) {
+				ImGui::TextUnformatted(group->Title.c_str());
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::Text("a frame around %zu nodes", group->Members.size());
+				ImGui::PopStyleColor();
+
+				ImGui::Separator();
+				if (ImGui::Button("ungroup")) {
+					NodeDemoCanvas.UngroupSelection(NodeDemoGraph);
+					CommitNodeDemo();
+				}
+				return;
+			}
+		}
+
 		const std::vector<nodes::NodeId> &chosen = NodeDemoCanvas.Selection();
 		if (chosen.empty()) {
 			ImGui::TextDisabled("select a node");
 			ImGui::Spacing();
 			ImGui::TextWrapped(
-				"Drag a port to a port to connect. Drop a wire in empty space for a palette. "
-				"Right click for one anywhere. Del removes, F fits."
+				"Drag a port to a port to connect. Drop a wire in empty space for a palette of what "
+				"could go there. Right click for a menu, Tab for the palette, double click a node to "
+				"collapse it. Del removes, F fits, Ctrl+D duplicates, Ctrl+G frames a selection."
 			);
 			return;
 		}
 
-		const nodes::Node *node = NodeDemoGraph.Find(chosen.front());
+		if (chosen.size() > 1) {
+			ImGui::Text("%zu nodes selected", chosen.size());
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped("Ctrl+G frames them, Ctrl+D duplicates them, Del removes them.");
+			ImGui::PopStyleColor();
+			return;
+		}
+
+		nodes::Node *node = NodeDemoGraph.Find(chosen.front());
 		if (node == nullptr) {
 			return;
 		}
@@ -1164,101 +1749,365 @@ namespace studio {
 			return;
 		}
 
-		ImGui::TextUnformatted(type->Title.c_str());
+		// --- what it is -------------------------------------------------------
+
+		char title[128];
+		std::snprintf(
+			title, sizeof(title), "%s", node->Label.empty() ? type->Title.c_str() : node->Label.c_str()
+		);
+		ImGui::SetNextItemWidth(-1.0f);
+		if (ImGui::InputText("##title", title, sizeof(title))) {
+			// **Empty means "use the type's name" rather than an empty header.**
+			// Clearing the box is how somebody undoes a rename.
+			node->Label = title == type->Title ? std::string() : title;
+		}
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			CommitNodeDemo();
+		}
+
+		const nodes::NodeStatus status = NodeDemoRunner.Status(node->Id);
+
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		if (status.Cached) {
+			ImGui::Text("%s  ·  cache hit", node->Type.c_str());
+		} else if (status.State == nodes::NodeState::Done) {
+			ImGui::Text("%s  ·  %.1f ms", node->Type.c_str(), status.Milliseconds);
+		} else {
+			ImGui::TextUnformatted(node->Type.c_str());
+		}
+		ImGui::PopStyleColor();
+
 		if (!type->Subtitle.empty()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::TextWrapped("%s", type->Subtitle.c_str());
 			ImGui::PopStyleColor();
 		}
-		ImGui::Separator();
-
-		// The same texture the node draws, at whatever size the panel has. One
-		// conversion, two sizes — which is why the preview is made larger than a
-		// thumbnail needs.
-		if (type->Preview) {
-			const std::string port = type->PreviewPort.empty()
-										 ? (type->Outputs.empty() ? std::string()
-																  : type->Outputs.front().Name)
-										 : type->PreviewPort;
-
-			const std::any *payload =
-				port.empty() ? nullptr : NodeDemoRunner.Output(node->Id, port);
-
-			void *handle = nullptr;
-			if (payload != nullptr) {
-				const std::any &held = *payload;
-				const auto &convert = type->Preview;
-				handle = NodeDemoImage(
-					NodeDemoRunner.RanAt(node->Id),
-					[&held, &convert](nodes::PreviewImage &image) { return convert(held, image); }
-				);
-			}
-
-			const float side = ImGui::GetContentRegionAvail().x;
-			if (handle != nullptr) {
-				ImGui::Image(reinterpret_cast<ImTextureID>(handle), ImVec2(side, side));
-			} else {
-				ImGui::Dummy(ImVec2(side, side));
-				ImGui::TextDisabled("no picture yet");
-			}
-		}
-
-		const nodes::NodeStatus status = NodeDemoRunner.Status(node->Id);
-
-		ImGui::Separator();
-		switch (status.State) {
-		case nodes::NodeState::Running:
-			ImGui::ProgressBar(status.Progress, ImVec2(-1.0f, 0.0f));
-			break;
-		case nodes::NodeState::Failed:
+		if (status.State == nodes::NodeState::Failed) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 			ImGui::TextUnformatted("it raised");
 			ImGui::PopStyleColor();
-			break;
-		case nodes::NodeState::Done:
-			ImGui::Text(status.Cached ? "cached" : "%.1f ms", status.Milliseconds);
-			break;
-		case nodes::NodeState::Idle:
-			ImGui::TextDisabled("%s", status.Note.empty() ? "idle" : status.Note.c_str());
-			break;
 		}
 
-		// The stages, with the one it is on marked. A progress bar says how far;
-		// this says through what — which is the half a percentage cannot carry.
-		if (!type->Steps.empty()) {
-			for (size_t index = 0; index < type->Steps.size(); index++) {
-				const bool current = status.State == nodes::NodeState::Running && index == status.Step;
-				const bool passed = status.State == nodes::NodeState::Done || index < status.Step;
+		// --- what it made -----------------------------------------------------
+		//
+		// **Dispatched rather than switched on.** A field node gets its picture
+		// with its inputs beside it, an async one gets its stages, and a readout
+		// gets its number — and a node type added tomorrow gets whichever of
+		// those fits what it produced, with nothing here changing.
+		nodes::Inspection what;
+		what.Node = node;
+		what.Type = type;
+		what.Graph = &NodeDemoGraph;
+		what.Runner = &NodeDemoRunner;
+		what.Images = [this](uint64_t key, const std::function<bool(nodes::PreviewImage &)> &make) {
+			return NodeDemoImage(key, make);
+		};
 
-				// **One type through the ternary.** The theme hands back packed
-				// colours and `GetStyleColorVec4` hands back a vector; mixing
-				// them in one expression is a conversion the compiler refuses,
-				// which is the good version of that mistake.
-				ImGui::PushStyleColor(
-					ImGuiCol_Text,
-					current	 ? engine::ui::AccentColour()
-					: passed ? ImGui::GetColorU32(ImGuiCol_Text)
-							 : engine::ui::MutedColour()
+		if (const nodes::InspectorFn *draw = nodes::Inspectors::For(what); draw != nullptr) {
+			(*draw)(what);
+		}
+
+		// --- what it holds ----------------------------------------------------
+
+		if (node->Compressed()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::SeparatorText("folded");
+			ImGui::PopStyleColor();
+
+			ImGui::Text("%zu nodes inside", NodeDemoGraph.Contents(node->Id).size());
+
+			if (ImGui::Button("enter")) {
+				NodeDemoCanvas.Enter(NodeDemoGraph, node->Id);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("expand in place")) {
+				NodeDemoCanvas.ExpandSelection(NodeDemoGraph);
+				CommitNodeDemo();
+				return;
+			}
+
+			// **Which promoted knobs are shown.** A thirty-widget selection
+			// folds into a node that should present the three that matter; this
+			// is how the other twenty-seven are put away without losing them,
+			// and it is why `Promotion::Exposed` is a flag rather than a delete.
+			if (ImGui::TreeNode("exposed parameters")) {
+				bool changed = false;
+				for (nodes::Promotion &promotion : node->Promoted) {
+					ImGui::PushID(promotion.Key.c_str());
+					if (ImGui::Checkbox(promotion.Label.c_str(), &promotion.Exposed)) {
+						changed = true;
+					}
+					ImGui::PopID();
+				}
+				ImGui::TreePop();
+				if (changed) {
+					CommitNodeDemo();
+				}
+			}
+		}
+
+		// --- its knobs --------------------------------------------------------
+
+		if (!nodes::WidgetsOf(*node).empty()) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::SeparatorText(node->Compressed() ? "promoted parameters" : "parameters");
+			ImGui::PopStyleColor();
+
+			if (DrawNodeDemoWidgets(*node)) {
+				CommitNodeDemo();
+			}
+		}
+
+		// --- its ports --------------------------------------------------------
+
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::SeparatorText("ports");
+		ImGui::PopStyleColor();
+
+		if (nodes::InputsOf(*node).empty() && nodes::OutputsOf(*node).empty()) {
+			ImGui::TextDisabled("none — this node is a note");
+		}
+
+		for (int side = 0; side < 2; side++) {
+			const std::vector<nodes::PortSpec> ports =
+				side == 0 ? nodes::InputsOf(*node) : nodes::OutputsOf(*node);
+			for (const nodes::PortSpec &port : ports) {
+				const nodes::DataType *carried = nodes::DataTypes::Find(port.Type);
+				const ImVec4 tint = carried != nullptr
+										? ImVec4(carried->Tint.R, carried->Tint.G, carried->Tint.B, 1.0f)
+										: ImVec4(0.62f, 0.64f, 0.70f, 1.0f);
+
+				const float mark = ImGui::GetTextLineHeight();
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				ImGui::GetWindowDrawList()->AddCircleFilled(
+					ImVec2(at.x + mark * 0.35f, at.y + mark * 0.5f),
+					mark * 0.24f,
+					ImGui::ColorConvertFloat4ToU32(tint)
 				);
-				ImGui::Text("%s %s", passed && !current ? "done" : current ? " >  " : "    ",
-							type->Steps[index].c_str());
-				ImGui::PopStyleColor();
-			}
-		}
+				ImGui::Dummy(ImVec2(mark * 0.8f, mark));
+				ImGui::SameLine();
 
-		// What it produced, when that is one number rather than a picture.
-		for (const nodes::PortSpec &port : type->Outputs) {
-			const std::any *value = NodeDemoRunner.Output(node->Id, port.Name);
-			if (value == nullptr) {
-				continue;
-			}
-			if (const double *number = std::any_cast<double>(value); number != nullptr) {
-				ImGui::Separator();
-				ImGui::Text("%s = %.4f", port.Name.c_str(), *number);
+				ImGui::Text("%s %s", side == 0 ? "in " : "out", port.Name.c_str());
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::TextUnformatted(carried != nullptr ? carried->Label.c_str() : port.Type.c_str());
+				ImGui::PopStyleColor();
+
+				// Whether anything is on it, which is the question a port table
+				// is usually being read to answer.
+				if (side == 0) {
+					nodes::NodeId held = nodes::NO_NODE;
+					std::string heldPort;
+					const bool real = nodes::Actual(NodeDemoGraph, node->Id, port.Name, true, held, heldPort);
+					if (!real || NodeDemoGraph.LinkInto(held, heldPort) == nullptr) {
+						ImGui::SameLine();
+						ImGui::TextDisabled("unconnected");
+					}
+				}
 			}
 		}
 	}
 
+	bool Editor::DrawNodeDemoWidgets(nodes::Node &node) {
+		bool touched = false;
+
+		// **The node's interface and not its type's.** A compressed node's knobs
+		// are the ones it promoted out of its contents, and every read and write
+		// here goes through `ValueOf`/`SetValue` so it lands on the node inside
+		// rather than on the fold's own empty map.
+		for (const nodes::WidgetSpec &spec : nodes::WidgetsOf(node)) {
+			nodes::Value value = nodes::ValueOf(NodeDemoGraph, node.Id, spec);
+			if (value.Kind != spec.Kind) {
+				value = spec.Default;
+			}
+			const nodes::Value before = value;
+
+			ImGui::PushID(spec.Key.c_str());
+			ImGui::SetNextItemWidth(-1.0f);
+
+			switch (spec.Kind) {
+			case nodes::WidgetKind::Slider: {
+				auto shown = static_cast<float>(value.Number);
+				if (ImGui::SliderFloat(
+						spec.Label.c_str(),
+						&shown,
+						static_cast<float>(spec.Minimum),
+						static_cast<float>(spec.Maximum),
+						"%.3f"
+					)) {
+					value.Number = static_cast<double>(shown);
+					touched = true;
+				}
+				break;
+			}
+			case nodes::WidgetKind::Number: {
+				auto shown = static_cast<float>(value.Number);
+				if (ImGui::DragFloat(spec.Label.c_str(), &shown, static_cast<float>(spec.Step))) {
+					value.Number = static_cast<double>(shown);
+					touched = true;
+				}
+				break;
+			}
+			case nodes::WidgetKind::Toggle: {
+				bool shown = value.Flag;
+				if (ImGui::Checkbox(spec.Label.c_str(), &shown)) {
+					value.Flag = shown;
+					touched = true;
+				}
+				break;
+			}
+			case nodes::WidgetKind::Select: {
+				// **A combo over the schema's options**, which is the same list
+				// the canvas cycles through on a click. A second copy here is
+				// how the two would come to disagree about what "volcanic" is.
+				if (ImGui::BeginCombo(spec.Label.c_str(), value.Text.c_str())) {
+					for (const std::string &option : spec.Options) {
+						if (ImGui::Selectable(option.c_str(), option == value.Text)) {
+							value.Text = option;
+							touched = true;
+						}
+					}
+					ImGui::EndCombo();
+				}
+				break;
+			}
+			case nodes::WidgetKind::Text: {
+				char held[128];
+				std::snprintf(held, sizeof(held), "%s", value.Text.c_str());
+				if (ImGui::InputText(spec.Label.c_str(), held, sizeof(held))) {
+					value.Text = held;
+					touched = true;
+				}
+				break;
+			}
+			case nodes::WidgetKind::Colour: {
+				float rgb[3] = {value.Tint.R, value.Tint.G, value.Tint.B};
+				if (ImGui::ColorEdit3(spec.Label.c_str(), rgb)) {
+					value.Tint.R = rgb[0];
+					value.Tint.G = rgb[1];
+					value.Tint.B = rgb[2];
+					touched = true;
+				}
+				break;
+			}
+			}
+
+			if (!(value == before)) {
+				nodes::SetValue(NodeDemoGraph, node.Id, spec.Key, value);
+			}
+			ImGui::PopID();
+		}
+
+		// **Remembered until the widget is let go.** A slider drag is one undo
+		// step, so it cannot be committed while the value is still moving — and
+		// it cannot be committed on the frame the value last changed either,
+		// because that frame is mid-drag. What is left is a flag that survives
+		// to the frame nothing is being held.
+		NodeDemoDirty = NodeDemoDirty || touched;
+		if (NodeDemoDirty && !ImGui::IsAnyItemActive()) {
+			NodeDemoDirty = false;
+			return true;
+		}
+		return false;
+	}
+
+	void Editor::DrawNodeDemoTypes() {
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextWrapped(
+			"A port carries a string identifier. A link is legal only where both ends share one, or "
+			"one of them is the wildcard. Nothing here converts. Point at a row to pick it out on the "
+			"canvas."
+		);
+		ImGui::PopStyleColor();
+
+		ImGui::Spacing();
+
+		// **Cleared every frame and set by whichever row is hovered**, so the
+		// canvas never keeps a highlight for a panel nobody is looking at — and
+		// so leaving the tab needs no notification.
+		NodeDemoCanvas.Highlight.clear();
+
+		for (const nodes::DataType &type : nodes::DataTypes::All()) {
+			// Who uses it, which is what turns the table from a list of names
+			// into something worth opening: a type nothing carries is a type
+			// somebody registered and forgot.
+			std::vector<nodes::NodeId> users;
+			for (const nodes::Node &node : NodeDemoGraph.Nodes()) {
+				const nodes::NodeType *declared = nodes::NodeTypes::Find(node.Type);
+				if (declared == nullptr) {
+					continue;
+				}
+				const auto carries = [&type](const std::vector<nodes::PortSpec> &ports) {
+					for (const nodes::PortSpec &port : ports) {
+						if (port.Type == type.Id) {
+							return true;
+						}
+					}
+					return false;
+				};
+				if (carries(declared->Inputs) || carries(declared->Outputs)) {
+					users.push_back(node.Id);
+				}
+			}
+
+			const float mark = ImGui::GetTextLineHeight();
+			const ImVec2 at = ImGui::GetCursorScreenPos();
+			ImGui::GetWindowDrawList()->AddCircleFilled(
+				ImVec2(at.x + mark * 0.35f, at.y + mark * 0.7f),
+				mark * 0.24f,
+				ImGui::ColorConvertFloat4ToU32(ImVec4(type.Tint.R, type.Tint.G, type.Tint.B, 1.0f))
+			);
+			ImGui::Dummy(ImVec2(mark * 0.8f, 1.0f));
+			ImGui::SameLine();
+
+			char heading[128];
+			std::snprintf(
+				heading,
+				sizeof(heading),
+				"%s  ·  %zu node%s##%s",
+				type.Label.c_str(),
+				users.size(),
+				users.size() == 1 ? "" : "s",
+				type.Id.c_str()
+			);
+
+			const bool opened = ImGui::CollapsingHeader(heading);
+			if (ImGui::IsItemHovered()) {
+				NodeDemoCanvas.Highlight = type.Id;
+			}
+			if (!opened) {
+				continue;
+			}
+
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped("%s", type.Id.c_str());
+			ImGui::TextWrapped("%s", type.Description.c_str());
+			if (!type.Preview) {
+				ImGui::TextWrapped("no picture — this wire's payloads are read rather than looked at");
+			}
+			ImGui::PopStyleColor();
+
+			for (const nodes::NodeId id : users) {
+				const nodes::Node *node = NodeDemoGraph.Find(id);
+				const nodes::NodeType *declared =
+					node == nullptr ? nullptr : nodes::NodeTypes::Find(node->Type);
+				if (declared == nullptr) {
+					continue;
+				}
+
+				ImGui::PushID(static_cast<int>(id));
+				if (ImGui::Selectable(node->Label.empty() ? declared->Title.c_str() : node->Label.c_str())) {
+					// **Selects and centres**, which is what a row in a table of
+					// who-uses-what is for: the question is where, and scrolling
+					// a canvas by hand to find out is the thing this replaces.
+					NodeDemoCanvas.Select(id);
+					NodeDemoCanvas.Centre(NodeDemoGraph, id);
+					NodeDemoTab = 1;
+				}
+				ImGui::PopID();
+			}
+		}
+	}
 	void Editor::DrawDemoTools() {
 		// One demo today, and the row is the list of them. A tab whose contents
 		// are a single button is what a second demo turns into a strip with no

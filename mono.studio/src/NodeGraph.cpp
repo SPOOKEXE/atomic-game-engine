@@ -9,13 +9,12 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <sstream>
 #include <studio/NodeGraph.hpp>
 #include <unordered_set>
 
 namespace studio::nodes {
-
-
 
 	namespace {
 		// One vocabulary per process. A function-local static, so it exists
@@ -162,8 +161,6 @@ namespace studio::nodes {
 		return spec;
 	}
 
-
-
 	namespace {
 		struct NodeTable {
 			std::vector<NodeType> Order;
@@ -235,9 +232,6 @@ namespace studio::nodes {
 		return found;
 	}
 
-
-
-
 	namespace {
 		// FNV-1a over bytes. A hash and not a checksum: it decides whether a
 		// cached result may be reused, so what matters is that equal inputs give
@@ -284,7 +278,6 @@ namespace studio::nodes {
 		}
 	}
 
-
 	const char *Describe(LinkResult result) {
 		switch (result) {
 		case LinkResult::Made:
@@ -326,9 +319,27 @@ namespace studio::nodes {
 	}
 
 	bool Graph::Remove(NodeId id) {
-		const auto found = std::find_if(Stored.begin(), Stored.end(), [&](const Node &node) {
-			return node.Id == id;
-		});
+		{
+			const auto found =
+				std::find_if(Stored.begin(), Stored.end(), [&](const Node &node) { return node.Id == id; });
+			if (found == Stored.end()) {
+				return false;
+			}
+		}
+
+		// **A compressed node takes its contents with it.** They are only
+		// reachable through it, so leaving them behind would be a set of nodes
+		// no view draws and nothing can select — which is a leak that looks like
+		// a graph that got smaller. `Expand` is the way to keep them, and it
+		// re-parents them before it calls this.
+		//
+		// Collected first, because removing rewrites the vector this walks.
+		for (const NodeId child : Contents(id)) {
+			Remove(child);
+		}
+
+		const auto found =
+			std::find_if(Stored.begin(), Stored.end(), [&](const Node &node) { return node.Id == id; });
 		if (found == Stored.end()) {
 			return false;
 		}
@@ -337,11 +348,23 @@ namespace studio::nodes {
 		// whose endpoint does not exist, which every later walk has to guard.
 		Wires.erase(
 			std::remove_if(
-				Wires.begin(),
-				Wires.end(),
-				[&](const Link &link) { return link.From == id || link.To == id; }
+				Wires.begin(), Wires.end(), [&](const Link &link) { return link.From == id || link.To == id; }
 			),
 			Wires.end()
+		);
+
+		// And out of whatever frame held it, for the same reason: a member id
+		// that names nothing is a bound computed from a null.
+		for (nodes::Group &frame : Frames) {
+			frame.Members.erase(
+				std::remove(frame.Members.begin(), frame.Members.end(), id), frame.Members.end()
+			);
+		}
+		Frames.erase(
+			std::remove_if(
+				Frames.begin(), Frames.end(), [](const nodes::Group &frame) { return frame.Members.empty(); }
+			),
+			Frames.end()
 		);
 
 		Stored.erase(found);
@@ -353,9 +376,8 @@ namespace studio::nodes {
 	}
 
 	Node *Graph::Find(NodeId id) {
-		const auto found = std::find_if(Stored.begin(), Stored.end(), [&](const Node &node) {
-			return node.Id == id;
-		});
+		const auto found =
+			std::find_if(Stored.begin(), Stored.end(), [&](const Node &node) { return node.Id == id; });
 		return found == Stored.end() ? nullptr : &*found;
 	}
 
@@ -363,9 +385,8 @@ namespace studio::nodes {
 		return const_cast<Graph *>(this)->Find(id);
 	}
 
-	LinkResult Graph::CanConnect(
-		NodeId from, const std::string &fromPort, NodeId to, const std::string &toPort
-	) const {
+	LinkResult
+	Graph::CanConnect(NodeId from, const std::string &fromPort, NodeId to, const std::string &toPort) const {
 		if (from == to) {
 			return LinkResult::SameNode;
 		}
@@ -401,9 +422,8 @@ namespace studio::nodes {
 		return LinkResult::Made;
 	}
 
-	LinkResult Graph::Connect(
-		NodeId from, const std::string &fromPort, NodeId to, const std::string &toPort
-	) {
+	LinkResult
+	Graph::Connect(NodeId from, const std::string &fromPort, NodeId to, const std::string &toPort) {
 		const LinkResult can = CanConnect(from, fromPort, to, toPort);
 		if (can != LinkResult::Made) {
 			return can;
@@ -435,6 +455,152 @@ namespace studio::nodes {
 		return found == Wires.end() ? nullptr : &*found;
 	}
 
+	std::vector<Link> Graph::LinksOf(NodeId node) const {
+		std::vector<Link> found;
+		for (const Link &link : Wires) {
+			if (link.From == node || link.To == node) {
+				found.push_back(link);
+			}
+		}
+		return found;
+	}
+
+	GroupId Graph::Group(std::vector<NodeId> members, std::string title, Colour tint) {
+		// Only nodes that exist, and each at most once. A frame naming something
+		// that is not there is a drag that moves nothing and a bound that reads
+		// a null.
+		std::vector<NodeId> kept;
+		for (const NodeId id : members) {
+			if (Alive(id) && std::find(kept.begin(), kept.end(), id) == kept.end()) {
+				kept.push_back(id);
+			}
+		}
+		if (kept.empty()) {
+			return NO_GROUP;
+		}
+
+		// **A node belongs to one frame**, so a member joining this one leaves
+		// whichever it was in. Two frames owning one node is two drags moving it
+		// twice, which is a node that outruns the pointer.
+		for (nodes::Group &frame : Frames) {
+			frame.Members.erase(
+				std::remove_if(
+					frame.Members.begin(),
+					frame.Members.end(),
+					[&](NodeId id) { return std::find(kept.begin(), kept.end(), id) != kept.end(); }
+				),
+				frame.Members.end()
+			);
+		}
+		Frames.erase(
+			std::remove_if(
+				Frames.begin(), Frames.end(), [](const nodes::Group &frame) { return frame.Members.empty(); }
+			),
+			Frames.end()
+		);
+
+		nodes::Group made;
+		made.Id = NextGroup++;
+		made.Title = std::move(title);
+		made.Tint = tint;
+		made.Members = std::move(kept);
+		Frames.push_back(std::move(made));
+		return Frames.back().Id;
+	}
+
+	bool Graph::Ungroup(GroupId group, bool withNodes) {
+		const auto found = std::find_if(Frames.begin(), Frames.end(), [&](const nodes::Group &frame) {
+			return frame.Id == group;
+		});
+		if (found == Frames.end()) {
+			return false;
+		}
+
+		// **Copied before the frame is erased.** `Remove` walks the frames to
+		// keep their membership honest, so deleting through a reference into the
+		// vector it is about to rewrite is exactly the aliasing bug that reads
+		// as "one node survived the delete".
+		const std::vector<NodeId> members = found->Members;
+		Frames.erase(found);
+
+		if (withNodes) {
+			for (const NodeId id : members) {
+				Remove(id);
+			}
+		}
+		return true;
+	}
+
+	nodes::Group *Graph::FindGroup(GroupId group) {
+		const auto found = std::find_if(Frames.begin(), Frames.end(), [&](const nodes::Group &frame) {
+			return frame.Id == group;
+		});
+		return found == Frames.end() ? nullptr : &*found;
+	}
+
+	const nodes::Group *Graph::FindGroup(GroupId group) const {
+		return const_cast<Graph *>(this)->FindGroup(group);
+	}
+
+	namespace {
+		// The compressed node's type, registered on first use.
+		//
+		// **Not at static-initialisation time**, for `RegisterDemoNodes`'
+		// reason: a registry filled before `main` is one whose order depends on
+		// link order. Its ports and knobs are empty because a compressed node
+		// derives its own; what the type carries is the width and the accent.
+		void EnsureCustomType() {
+			if (NodeTypes::Find(CUSTOM_TYPE) != nullptr) {
+				return;
+			}
+			NodeType custom;
+			custom.Id = CUSTOM_TYPE;
+			custom.Title = "Custom Node";
+			custom.Category = "Custom";
+			custom.Accent = Colour::Hex(0xA78BFA);
+			custom.Subtitle = "folded from a selection";
+			custom.Width = 240.0f;
+			custom.Hidden = true;
+			NodeTypes::Register(custom);
+		}
+
+		// A name nothing in `taken` already uses, by adding a number.
+		std::string Unique(std::string wanted, const std::vector<PortSpec> &taken) {
+			const auto used = [&taken](const std::string &name) {
+				return std::any_of(taken.begin(), taken.end(), [&name](const PortSpec &port) {
+					return port.Name == name;
+				});
+			};
+			if (!used(wanted)) {
+				return wanted;
+			}
+			for (int suffix = 2; suffix < 1000; suffix++) {
+				std::string tried = wanted + " " + std::to_string(suffix);
+				if (!used(tried)) {
+					return tried;
+				}
+			}
+			return wanted;
+		}
+
+		// What to call a node in a derived port's name.
+		std::string ShortName(const Node &node) {
+			if (!node.Label.empty()) {
+				return node.Label;
+			}
+			const NodeType *type = NodeTypes::Find(node.Type);
+			return type != nullptr ? type->Title : node.Type;
+		}
+	}
+
+	GroupId Graph::GroupOf(NodeId node) const {
+		for (const nodes::Group &frame : Frames) {
+			if (std::find(frame.Members.begin(), frame.Members.end(), node) != frame.Members.end()) {
+				return frame.Id;
+			}
+		}
+		return NO_GROUP;
+	}
 
 	bool Graph::Reaches(NodeId from, NodeId to) const {
 		if (from == to) {
@@ -512,6 +678,185 @@ namespace studio::nodes {
 		return order;
 	}
 
+	std::vector<NodeId> Graph::Contents(NodeId id) const {
+		std::vector<NodeId> inside;
+		for (const Node &node : Stored) {
+			if (node.Owner == id) {
+				inside.push_back(node.Id);
+			}
+		}
+		return inside;
+	}
+
+	NodeId Graph::Compress(const std::vector<NodeId> &members, float x, float y) {
+		EnsureCustomType();
+
+		// Alive, distinct, and all at one depth. Folding two nodes from
+		// different views would make a node whose contents are somewhere else.
+		std::vector<NodeId> kept;
+		NodeId depth = NO_NODE;
+		for (const NodeId id : members) {
+			const Node *node = Find(id);
+			if (node == nullptr || std::find(kept.begin(), kept.end(), id) != kept.end()) {
+				continue;
+			}
+			if (kept.empty()) {
+				depth = node->Owner;
+			} else if (node->Owner != depth) {
+				return NO_NODE;
+			}
+			kept.push_back(id);
+		}
+		if (kept.size() < 2) {
+			return NO_NODE;
+		}
+
+		const auto inside = [&kept](NodeId id) {
+			return std::find(kept.begin(), kept.end(), id) != kept.end();
+		};
+
+		const NodeId made = Add(CUSTOM_TYPE, x, y);
+		if (made == NO_NODE) {
+			return NO_NODE;
+		}
+
+		std::vector<Proxy> proxies;
+		std::vector<PortSpec> names;
+
+		// **Every distinct inbound target port becomes an input, every distinct
+		// outbound source port becomes an output.** Type and label are inherited
+		// from the inner port, so typing survives compression — which is the
+		// whole reason the derived interface is derived from the wiring rather
+		// than declared.
+		// **Both ends are resolved to where they stand at this depth first.** A
+		// link into a node that is itself inside a fold in the selection arrives
+		// at that fold's proxy port, not at the leaf — so a compressed node made
+		// of compressed nodes derives an interface that names things this view
+		// can actually see.
+		const auto derive = [&](bool inputs) {
+			for (const Link &link : Wires) {
+				NodeId fromNode = NO_NODE;
+				NodeId toNode = NO_NODE;
+				std::string fromPort;
+				std::string toPort;
+
+				if (!Standing(*this, link.From, link.FromPort, false, depth, fromNode, fromPort) ||
+					!Standing(*this, link.To, link.ToPort, true, depth, toNode, toPort)) {
+					continue;
+				}
+
+				const bool fromInside = inside(fromNode);
+				const bool toInside = inside(toNode);
+				if (inputs ? !(toInside && !fromInside) : !(fromInside && !toInside)) {
+					continue;
+				}
+
+				const NodeId inner = inputs ? toNode : fromNode;
+				const std::string &port = inputs ? toPort : fromPort;
+
+				const bool already = std::any_of(proxies.begin(), proxies.end(), [&](const Proxy &had) {
+					return had.Input == inputs && had.Inner == inner && had.InnerPort == port;
+				});
+				if (already) {
+					continue;
+				}
+
+				const Node *node = Find(inner);
+				if (node == nullptr) {
+					continue;
+				}
+
+				// The type is taken from the node's real interface, so a proxy
+				// of a proxy still carries what the wire carries.
+				std::string carried;
+				for (const PortSpec &spec : inputs ? InputsOf(*node) : OutputsOf(*node)) {
+					if (spec.Name == port) {
+						carried = spec.Type;
+						break;
+					}
+				}
+
+				Proxy proxy;
+				proxy.Name = Unique(ShortName(*node) + " " + port, names);
+				proxy.Type = carried;
+				proxy.Input = inputs;
+				proxy.Inner = inner;
+				proxy.InnerPort = port;
+				names.push_back(PortSpec{proxy.Name, proxy.Type});
+				proxies.push_back(std::move(proxy));
+			}
+		};
+
+		derive(true);
+		derive(false);
+
+		// Every knob of everything inside, keeping its full schema so a slider
+		// stays a slider. Exposed by default: hiding them all would make a
+		// compressed node a black box on the first fold.
+		std::vector<Promotion> promoted;
+		for (const NodeId id : kept) {
+			const Node *node = Find(id);
+			if (node == nullptr) {
+				continue;
+			}
+			// **The member's real interface**, so folding a fold promotes its
+			// already-promoted knobs rather than nothing — `ActualWidget`
+			// recurses, so a write still lands on the leaf.
+			for (const WidgetSpec &widget : WidgetsOf(*node)) {
+				Promotion one;
+				one.Key = std::to_string(id) + "/" + widget.Key;
+				one.Label = ShortName(*node) + " " + widget.Label;
+				one.Inner = id;
+				one.InnerKey = widget.Key;
+				one.Spec = widget;
+				one.Spec.Key = one.Key;
+				one.Spec.Label = one.Label;
+				promoted.push_back(std::move(one));
+			}
+		}
+
+		Node *folded = Find(made);
+		folded->Owner = depth;
+		folded->Label = "Custom Node";
+		folded->Proxies = std::move(proxies);
+		folded->Promoted = std::move(promoted);
+
+		for (const NodeId id : kept) {
+			Find(id)->Owner = made;
+		}
+
+		// A frame around nodes that are now inside something is a rectangle
+		// around nothing visible, so it goes with them.
+		for (const NodeId id : kept) {
+			if (const GroupId frame = GroupOf(id); frame != NO_GROUP) {
+				Ungroup(frame, false);
+			}
+		}
+
+		return made;
+	}
+
+	bool Graph::Expand(NodeId id) {
+		Node *folded = Find(id);
+		if (folded == nullptr || !folded->Compressed()) {
+			return false;
+		}
+
+		// **The members come back to the compressed node's own depth**, not to
+		// the root — expanding one inside another must leave its contents inside
+		// that one.
+		const NodeId depth = folded->Owner;
+		for (Node &node : Stored) {
+			if (node.Owner == id) {
+				node.Owner = depth;
+			}
+		}
+
+		// `Remove` deletes contents, and there are none left by now — which is
+		// the whole reason this loop runs first.
+		return Remove(id);
+	}
+
 	uint64_t Graph::Hash(NodeId id) const {
 		const Node *node = Find(id);
 		if (node == nullptr) {
@@ -561,10 +906,221 @@ namespace studio::nodes {
 	void Graph::Clear() {
 		Stored.clear();
 		Wires.clear();
+		Frames.clear();
 		Next = 1;
+		NextGroup = 1;
 	}
 
+	namespace {
+		// Which output port a thumbnail reads. Empty when there is nothing to
+		// draw one from.
+		std::string PreviewPortOf(const NodeType &type) {
+			if (!type.PreviewPort.empty()) {
+				return type.PreviewPort;
+			}
+			return type.Outputs.empty() ? std::string() : type.Outputs.front().Name;
+		}
+	}
 
+	std::vector<PortSpec> InputsOf(const Node &node) {
+		if (node.Compressed()) {
+			std::vector<PortSpec> derived;
+			for (const Proxy &proxy : node.Proxies) {
+				if (proxy.Input) {
+					derived.push_back(PortSpec{proxy.Name, proxy.Type});
+				}
+			}
+			return derived;
+		}
+		const NodeType *type = NodeTypes::Find(node.Type);
+		return type != nullptr ? type->Inputs : std::vector<PortSpec>{};
+	}
+
+	std::vector<PortSpec> OutputsOf(const Node &node) {
+		if (node.Compressed()) {
+			std::vector<PortSpec> derived;
+			for (const Proxy &proxy : node.Proxies) {
+				if (!proxy.Input) {
+					derived.push_back(PortSpec{proxy.Name, proxy.Type});
+				}
+			}
+			return derived;
+		}
+		const NodeType *type = NodeTypes::Find(node.Type);
+		return type != nullptr ? type->Outputs : std::vector<PortSpec>{};
+	}
+
+	std::vector<WidgetSpec> WidgetsOf(const Node &node) {
+		if (!node.Compressed()) {
+			const NodeType *type = NodeTypes::Find(node.Type);
+			return type != nullptr ? type->Widgets : std::vector<WidgetSpec>{};
+		}
+
+		// **The inner type's schema, re-keyed and re-labelled.** Keeping the
+		// range, the step and the option list is what makes a promoted slider
+		// still a slider rather than a number box that happens to hold the same
+		// value.
+		std::vector<WidgetSpec> lifted;
+		for (const Promotion &promotion : node.Promoted) {
+			if (promotion.Exposed) {
+				lifted.push_back(promotion.Spec);
+			}
+		}
+		return lifted;
+	}
+
+	Value ValueOf(const Graph &graph, NodeId id, const WidgetSpec &spec) {
+		NodeId holder = NO_NODE;
+		std::string key;
+		if (!ActualWidget(graph, id, spec.Key, holder, key)) {
+			return spec.Default;
+		}
+
+		const Node *node = graph.Find(holder);
+		if (node == nullptr) {
+			return spec.Default;
+		}
+		const auto found = node->Widgets.find(key);
+
+		// **The declared default on a miss, not a zero.** A type that grew a
+		// widget after this graph was saved has no value for it, and reading the
+		// default is what makes that graph still open with the knob in the right
+		// place.
+		return found == node->Widgets.end() ? spec.Default : found->second;
+	}
+
+	void SetValue(Graph &graph, NodeId id, const std::string &key, const Value &value) {
+		NodeId holder = NO_NODE;
+		std::string inner;
+		if (!ActualWidget(graph, id, key, holder, inner)) {
+			return;
+		}
+		if (Node *node = graph.Find(holder); node != nullptr) {
+			node->Widgets[inner] = value;
+		}
+	}
+
+	bool Actual(
+		const Graph &graph,
+		NodeId id,
+		const std::string &port,
+		bool input,
+		NodeId &outNode,
+		std::string &outPort
+	) {
+		const Node *node = graph.Find(id);
+		if (node == nullptr) {
+			return false;
+		}
+
+		outNode = id;
+		outPort = port;
+		if (!node->Compressed()) {
+			return true;
+		}
+
+		for (const Proxy &proxy : node->Proxies) {
+			if (proxy.Input == input && proxy.Name == port) {
+				// One hop is enough: a proxy always names a port on a node
+				// inside this one, and a compressed node nested inside another
+				// is itself resolved when *its* proxy is asked about.
+				return Actual(graph, proxy.Inner, proxy.InnerPort, input, outNode, outPort);
+			}
+		}
+		return false;
+	}
+
+	bool Standing(
+		const Graph &graph,
+		NodeId id,
+		const std::string &port,
+		bool input,
+		NodeId depth,
+		NodeId &outNode,
+		std::string &outPort
+	) {
+		NodeId walk = id;
+		std::string carried = port;
+
+		// Up one fold at a time. The loop is bounded by the nesting, and the
+		// counter is the guard against a document whose `inside` lines form a
+		// ring — a hand-edited file can, and a hang is the worst way to find out.
+		for (int depthGuard = 0; depthGuard < 64; depthGuard++) {
+			const Node *node = graph.Find(walk);
+			if (node == nullptr) {
+				return false;
+			}
+			if (node->Owner == depth) {
+				outNode = walk;
+				outPort = carried;
+				return true;
+			}
+
+			const Node *owner = graph.Find(node->Owner);
+			if (owner == nullptr) {
+				return false;
+			}
+
+			const auto found =
+				std::find_if(owner->Proxies.begin(), owner->Proxies.end(), [&](const Proxy &proxy) {
+					return proxy.Input == input && proxy.Inner == walk && proxy.InnerPort == carried;
+				});
+			if (found == owner->Proxies.end()) {
+				// Inside a fold that does not expose this port. It is genuinely
+				// invisible from here, which is what a compressed node is for.
+				return false;
+			}
+
+			walk = owner->Id;
+			carried = found->Name;
+		}
+		return false;
+	}
+
+	bool ActualWidget(
+		const Graph &graph, NodeId id, const std::string &key, NodeId &outNode, std::string &outKey
+	) {
+		const Node *node = graph.Find(id);
+		if (node == nullptr) {
+			return false;
+		}
+
+		outNode = id;
+		outKey = key;
+		if (!node->Compressed()) {
+			return true;
+		}
+
+		for (const Promotion &promotion : node->Promoted) {
+			if (promotion.Key == key) {
+				return ActualWidget(graph, promotion.Inner, promotion.InnerKey, outNode, outKey);
+			}
+		}
+		return false;
+	}
+
+	bool HasPicture(const NodeType &type) {
+		if (type.Preview) {
+			return true;
+		}
+
+		// **Or the wire's, which is the ordinary case now.** A type that never
+		// declared a preview still gets a thumbnail when the thing it produces
+		// travels on a wire that knows how to draw itself — which is what stops
+		// twelve terrain filters each carrying a copy of one function.
+		const std::string port = PreviewPortOf(type);
+		if (port.empty()) {
+			return false;
+		}
+		for (const PortSpec &declared : type.Outputs) {
+			if (declared.Name != port) {
+				continue;
+			}
+			const DataType *carried = DataTypes::Find(declared.Type);
+			return carried != nullptr && static_cast<bool>(carried->Preview);
+		}
+		return false;
+	}
 
 	NodeLayout LayoutOf(const Node &node, const Metrics &metrics) {
 		NodeLayout layout;
@@ -580,6 +1136,54 @@ namespace studio::nodes {
 			return layout;
 		}
 
+		// **Read from the node, so a compressed one lays out from its derived
+		// interface.** Reading the type here is what would make a compressed
+		// node draw as an empty box with knobs nobody could click.
+		const std::vector<PortSpec> inputs = InputsOf(node);
+		const std::vector<PortSpec> outputs = OutputsOf(node);
+		const std::vector<WidgetSpec> widgets = WidgetsOf(node);
+
+		// **Collapsed keeps the ports and drops everything else.** A node whose
+		// wires vanished with its body would be a graph that stopped being
+		// readable at the moment somebody tidied it — which is the opposite of
+		// what collapsing is for. They stack tighter than a full row, unlabelled,
+		// because a collapsed node is one nobody is currently reading.
+		if (node.Collapsed) {
+			constexpr float STACK = 12.0f;
+			const size_t stacked = std::max(inputs.size(), outputs.size());
+
+			for (size_t row = 0; row < stacked; row++) {
+				const float centre = y + STACK * (static_cast<float>(row) + 0.5f);
+				if (row < inputs.size()) {
+					layout.Ports.push_back(
+						PlacedPort{
+							inputs[row].Name,
+							inputs[row].Type,
+							true,
+							0.0f,
+							centre,
+						}
+					);
+				}
+				if (row < outputs.size()) {
+					layout.Ports.push_back(
+						PlacedPort{
+							outputs[row].Name,
+							outputs[row].Type,
+							false,
+							layout.Width,
+							centre,
+						}
+					);
+				}
+			}
+
+			y += STACK * static_cast<float>(stacked);
+			layout.WidgetsTop = y;
+			layout.Height = y + metrics.Padding * 0.5f;
+			return layout;
+		}
+
 		if (!type->Subtitle.empty()) {
 			y += metrics.RowHeight * 0.8f;
 		}
@@ -589,19 +1193,31 @@ namespace studio::nodes {
 		// **Ports are paired into rows**, input on the left and output on the
 		// right, which is what makes a node with three of each six rows tall
 		// instead of twelve. The tail of the longer side gets rows of its own.
-		const size_t rows = std::max(type->Inputs.size(), type->Outputs.size());
+		const size_t rows = std::max(inputs.size(), outputs.size());
 		for (size_t row = 0; row < rows; row++) {
 			const float centre = y + metrics.RowHeight * 0.5f;
 
-			if (row < type->Inputs.size()) {
-				layout.Ports.push_back(PlacedPort{
-					type->Inputs[row].Name, type->Inputs[row].Type, true, 0.0f, centre,
-				});
+			if (row < inputs.size()) {
+				layout.Ports.push_back(
+					PlacedPort{
+						inputs[row].Name,
+						inputs[row].Type,
+						true,
+						0.0f,
+						centre,
+					}
+				);
 			}
-			if (row < type->Outputs.size()) {
-				layout.Ports.push_back(PlacedPort{
-					type->Outputs[row].Name, type->Outputs[row].Type, false, layout.Width, centre,
-				});
+			if (row < outputs.size()) {
+				layout.Ports.push_back(
+					PlacedPort{
+						outputs[row].Name,
+						outputs[row].Type,
+						false,
+						layout.Width,
+						centre,
+					}
+				);
 			}
 			y += metrics.RowHeight;
 		}
@@ -609,7 +1225,22 @@ namespace studio::nodes {
 		// **The thumbnail above the widgets and below the ports.** A picture is
 		// what the node produced from what is wired into it, so it reads in the
 		// same order as the node is thought about — inputs, result, knobs.
-		if (type->Preview) {
+		// A compressed node's picture comes from whatever its first drawable
+		// output proxy carries — the same rule, asked of the derived interface.
+		const auto drawable = [&outputs, type, &node] {
+			if (!node.Compressed()) {
+				return HasPicture(*type);
+			}
+			for (const PortSpec &port : outputs) {
+				const DataType *carried = DataTypes::Find(port.Type);
+				if (carried != nullptr && carried->Preview) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		if (drawable()) {
 			y += metrics.Padding * 0.5f;
 			layout.PreviewTop = y;
 			layout.PreviewSide = layout.Width - metrics.Padding * 2.0f;
@@ -628,17 +1259,19 @@ namespace studio::nodes {
 
 		layout.WidgetsTop = y;
 
-		if (!type->Widgets.empty()) {
+		if (!widgets.empty()) {
 			y += metrics.Padding * 0.5f;
-			for (size_t index = 0; index < type->Widgets.size(); index++) {
-				layout.Widgets.push_back(PlacedWidget{
-					type->Widgets[index].Key,
-					index,
-					metrics.Padding,
-					y,
-					layout.Width - metrics.Padding * 2.0f,
-					metrics.WidgetHeight - 4.0f,
-				});
+			for (size_t index = 0; index < widgets.size(); index++) {
+				layout.Widgets.push_back(
+					PlacedWidget{
+						widgets[index].Key,
+						index,
+						metrics.Padding,
+						y,
+						layout.Width - metrics.Padding * 2.0f,
+						metrics.WidgetHeight - 4.0f,
+					}
+				);
 				y += metrics.WidgetHeight;
 			}
 		}
@@ -648,13 +1281,12 @@ namespace studio::nodes {
 	}
 
 	const PlacedPort *PortIn(const NodeLayout &layout, const std::string &name, bool input) {
-		const auto found = std::find_if(layout.Ports.begin(), layout.Ports.end(), [&](const PlacedPort &port) {
-			return port.Input == input && port.Name == name;
-		});
+		const auto found =
+			std::find_if(layout.Ports.begin(), layout.Ports.end(), [&](const PlacedPort &port) {
+				return port.Input == input && port.Name == name;
+			});
 		return found == layout.Ports.end() ? nullptr : &*found;
 	}
-
-
 
 	Evaluator::Evaluator() = default;
 
@@ -844,9 +1476,7 @@ namespace studio::nodes {
 			live->Node = id;
 
 			auto widgets = std::make_shared<std::unordered_map<std::string, Value>>(node->Widgets);
-			auto ports = std::make_shared<std::unordered_map<std::string, std::any>>(
-				std::move(inputs.Ports)
-			);
+			auto ports = std::make_shared<std::unordered_map<std::string, std::any>>(std::move(inputs.Ports));
 			auto work = type->Evaluate;
 			const std::atomic<bool> *stopping = &Stopping;
 
@@ -883,9 +1513,7 @@ namespace studio::nodes {
 					}
 
 					live->Milliseconds.store(
-						std::chrono::duration<double, std::milli>(
-							std::chrono::steady_clock::now() - began
-						)
+						std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began)
 							.count(),
 						std::memory_order_relaxed
 					);
@@ -1016,8 +1644,6 @@ namespace studio::nodes {
 		States.clear();
 	}
 
-
-
 	namespace {
 		constexpr const char *HEADER = "nodegraph 1";
 
@@ -1025,8 +1651,7 @@ namespace studio::nodes {
 			while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
 				text.remove_prefix(1);
 			}
-			while (!text.empty() &&
-				   (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) {
+			while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) {
 				text.remove_suffix(1);
 			}
 			return text;
@@ -1103,8 +1728,12 @@ namespace studio::nodes {
 		out << HEADER << "\n";
 
 		for (const Node &node : graph.Nodes()) {
-			out << "node | " << node.Id << " | " << node.Type << " | " << node.X << " | " << node.Y
-				<< " | " << node.Label << "\n";
+			// **The collapsed flag is a seventh field and not a seventh line**,
+			// because it is a property of the node rather than a thing the node
+			// has — and a reader that stops at six fields still gets a whole
+			// node, which is what makes adding one safe.
+			out << "node | " << node.Id << " | " << node.Type << " | " << node.X << " | " << node.Y << " | "
+				<< node.Label << " | " << (node.Collapsed ? "collapsed" : "open") << "\n";
 
 			// **In the type's order where there is a type**, so two saves of one
 			// graph produce one file — an unordered map's order is not a promise
@@ -1143,6 +1772,39 @@ namespace studio::nodes {
 				<< link.ToPort << "\n";
 		}
 
+		// A compressed node's depth and its derived interface. **The interface
+		// is written out rather than recomputed on load**, because it is a
+		// record of how the graph was wired at the moment it was folded — and
+		// re-deriving it would silently rename a port the first time somebody
+		// added a wire into the selection.
+		for (const Node &node : graph.Nodes()) {
+			if (node.Owner != NO_NODE) {
+				out << "inside | " << node.Id << " | " << node.Owner << "\n";
+			}
+			for (const Proxy &proxy : node.Proxies) {
+				out << "proxy | " << node.Id << " | " << (proxy.Input ? "in" : "out") << " | " << proxy.Name
+					<< " | " << proxy.Type << " | " << proxy.Inner << " | " << proxy.InnerPort << "\n";
+			}
+			for (const Promotion &promotion : node.Promoted) {
+				// The schema is not written: it is re-derived from the inner
+				// node's type on load, which is the only copy that cannot drift
+				// from the declaration.
+				out << "promote | " << node.Id << " | " << promotion.Inner << " | " << promotion.InnerKey
+					<< " | " << promotion.Label << " | " << (promotion.Exposed ? "shown" : "hidden") << "\n";
+			}
+		}
+
+		// A frame is its title, its colour and the ids it holds. Written last,
+		// so a reader has already placed every node one could name.
+		for (const Group &frame : graph.Groups()) {
+			out << "group | " << frame.Id << " | " << frame.Title << " | " << frame.Tint.R << " "
+				<< frame.Tint.G << " " << frame.Tint.B << " |";
+			for (const NodeId member : frame.Members) {
+				out << " " << member;
+			}
+			out << "\n";
+		}
+
 		return out.str();
 	}
 
@@ -1154,10 +1816,33 @@ namespace studio::nodes {
 
 		graph.Clear();
 
+		// **Registered before anything is placed**, so a document containing a
+		// compressed node opens in a process that has not folded one this run.
+		EnsureCustomType();
+
 		// The file's ids are not the graph's: `Add` hands out its own, so a
 		// document with any numbering loads. This maps one to the other.
 		std::unordered_map<uint32_t, NodeId> placed;
 		std::vector<Link> pending;
+		std::vector<Group> groups;
+
+		// Held until every node has been placed, for the same reason the links
+		// are: these all name node ids, and the file's ids are not the graph's.
+		//@{
+		std::vector<std::pair<uint32_t, uint32_t>> nesting;
+
+		struct Held {
+			uint32_t Owner = 0;
+			Proxy Port;
+		};
+		std::vector<Held> proxies;
+
+		struct Lifted {
+			uint32_t Owner = 0;
+			Promotion Knob;
+		};
+		std::vector<Lifted> promotions;
+		//@}
 
 		size_t start = text.find('\n');
 		start = start == std::string_view::npos ? text.size() : start + 1;
@@ -1194,6 +1879,9 @@ namespace studio::nodes {
 					if (fields.size() >= 6) {
 						broken.Label = std::string(fields[5]);
 					}
+					if (fields.size() >= 7) {
+						broken.Collapsed = fields[6] == "collapsed";
+					}
 					placed.emplace(Whole(fields[1]), broken.Id);
 					graph.Nodes().push_back(std::move(broken));
 					continue;
@@ -1202,6 +1890,9 @@ namespace studio::nodes {
 				placed.emplace(Whole(fields[1]), id);
 				if (fields.size() >= 6 && !fields[5].empty()) {
 					graph.Find(id)->Label = std::string(fields[5]);
+				}
+				if (fields.size() >= 7) {
+					graph.Find(id)->Collapsed = fields[6] == "collapsed";
 				}
 				continue;
 			}
@@ -1244,9 +1935,59 @@ namespace studio::nodes {
 				// first, but a hand-edited one need not be, and a link read
 				// before its endpoints would be dropped for a reason that is not
 				// its fault.
-				pending.push_back(Link{
-					Whole(fields[1]), std::string(fields[2]), Whole(fields[3]), std::string(fields[4]),
-				});
+				pending.push_back(
+					Link{
+						Whole(fields[1]),
+						std::string(fields[2]),
+						Whole(fields[3]),
+						std::string(fields[4]),
+					}
+				);
+				continue;
+			}
+
+			if (fields[0] == "inside" && fields.size() >= 3) {
+				nesting.emplace_back(Whole(fields[1]), Whole(fields[2]));
+				continue;
+			}
+
+			if (fields[0] == "proxy" && fields.size() >= 7) {
+				Held one;
+				one.Owner = Whole(fields[1]);
+				one.Port.Input = fields[2] == "in";
+				one.Port.Name = std::string(fields[3]);
+				one.Port.Type = std::string(fields[4]);
+				one.Port.Inner = Whole(fields[5]);
+				one.Port.InnerPort = std::string(fields[6]);
+				proxies.push_back(std::move(one));
+				continue;
+			}
+
+			if (fields[0] == "promote" && fields.size() >= 6) {
+				Lifted one;
+				one.Owner = Whole(fields[1]);
+				one.Knob.Inner = Whole(fields[2]);
+				one.Knob.InnerKey = std::string(fields[3]);
+				one.Knob.Label = std::string(fields[4]);
+				one.Knob.Exposed = fields[5] != "hidden";
+				promotions.push_back(std::move(one));
+				continue;
+			}
+
+			if (fields[0] == "group" && fields.size() >= 5) {
+				Group frame;
+				frame.Title = std::string(fields[2]);
+				{
+					std::istringstream channels{std::string(fields[3])};
+					channels >> frame.Tint.R >> frame.Tint.G >> frame.Tint.B;
+				}
+
+				std::istringstream members{std::string(fields[4])};
+				uint32_t member = 0;
+				while (members >> member) {
+					frame.Members.push_back(member);
+				}
+				groups.push_back(std::move(frame));
 			}
 		}
 
@@ -1259,7 +2000,198 @@ namespace studio::nodes {
 			(void)graph.Connect(from->second, link.FromPort, to->second, link.ToPort);
 		}
 
+		const auto real = [&placed](uint32_t id) {
+			const auto found = placed.find(id);
+			return found == placed.end() ? NO_NODE : found->second;
+		};
+
+		for (const auto &[child, owner] : nesting) {
+			Node *node = graph.Find(real(child));
+			if (node != nullptr) {
+				// An owner that did not load leaves the node at the root rather
+				// than hidden inside something that is not there.
+				node->Owner = real(owner);
+			}
+		}
+
+		for (const Held &held : proxies) {
+			Node *node = graph.Find(real(held.Owner));
+			const NodeId inner = real(held.Port.Inner);
+			if (node == nullptr || inner == NO_NODE) {
+				continue;
+			}
+			Proxy proxy = held.Port;
+			proxy.Inner = inner;
+			node->Proxies.push_back(std::move(proxy));
+		}
+
+		for (const Lifted &lifted : promotions) {
+			Node *node = graph.Find(real(lifted.Owner));
+			const NodeId inner = real(lifted.Knob.Inner);
+			const Node *source = graph.Find(inner);
+			const NodeType *type = source == nullptr ? nullptr : NodeTypes::Find(source->Type);
+			if (node == nullptr || type == nullptr) {
+				continue;
+			}
+
+			// **The schema is re-derived rather than read.** A promotion whose
+			// inner widget no longer exists is dropped: keeping it would put a
+			// knob on a node that writes nowhere.
+			const auto found =
+				std::find_if(type->Widgets.begin(), type->Widgets.end(), [&](const WidgetSpec &widget) {
+					return widget.Key == lifted.Knob.InnerKey;
+				});
+			if (found == type->Widgets.end()) {
+				continue;
+			}
+
+			Promotion knob = lifted.Knob;
+			knob.Inner = inner;
+			knob.Key = std::to_string(inner) + "/" + knob.InnerKey;
+			knob.Spec = *found;
+			knob.Spec.Key = knob.Key;
+			knob.Spec.Label = knob.Label;
+			node->Promoted.push_back(std::move(knob));
+		}
+
+		for (const Group &frame : groups) {
+			std::vector<NodeId> members;
+			for (const NodeId member : frame.Members) {
+				if (const auto found = placed.find(member); found != placed.end()) {
+					members.push_back(found->second);
+				}
+			}
+			// A frame whose members all went missing is dropped rather than kept
+			// empty — an empty frame is a rectangle around nothing.
+			(void)graph.Group(std::move(members), frame.Title, frame.Tint);
+		}
+
 		return true;
+	}
+
+	bool PictureOf(
+		const NodeType *type, const std::string &portType, const std::any &payload, PreviewImage &image
+	) {
+		// **The node's own first, the wire's second.** A type that wants a
+		// different picture from everything else on its wire says so, and
+		// everything that does not gets the wire's — which is one function
+		// serving every node that carries the same thing.
+		if (type != nullptr && type->Preview && type->Preview(payload, image)) {
+			return true;
+		}
+		const DataType *carried = DataTypes::Find(portType);
+		if (carried != nullptr && carried->Preview) {
+			return carried->Preview(payload, image);
+		}
+		return false;
+	}
+
+	uint64_t PictureKey(uint64_t ran, const std::string &port) {
+		return MixText(Mix(SEED, &ran, sizeof(ran)), port);
+	}
+
+	std::string DescribeValue(const std::string &portType, const std::any &payload) {
+		if (!payload.has_value()) {
+			return "not evaluated";
+		}
+		const DataType *carried = DataTypes::Find(portType);
+		if (carried != nullptr && carried->Describe) {
+			return carried->Describe(payload);
+		}
+
+		// Nobody taught this type. A number is worth reading out anyway — it is
+		// what most unlabelled payloads turn out to be — and everything else gets
+		// the only true thing left, which is that something is there.
+		if (const double *number = std::any_cast<double>(&payload); number != nullptr) {
+			char text[32];
+			std::snprintf(text, sizeof(text), "%.4f", *number);
+			return text;
+		}
+		return "a value";
+	}
+
+	namespace {
+		std::unordered_map<std::string, InspectorFn> &Handlers() {
+			static std::unordered_map<std::string, InspectorFn> table;
+			return table;
+		}
+	}
+
+	void Inspectors::Register(const std::string &id, InspectorFn draw) {
+		Handlers()[id] = std::move(draw);
+	}
+
+	const InspectorFn *Inspectors::Find(const std::string &id) {
+		const auto found = Handlers().find(id);
+		return found == Handlers().end() ? nullptr : &found->second;
+	}
+
+	const InspectorFn *Inspectors::For(const Inspection &what) {
+		RegisterInspectors();
+
+		if (what.Type == nullptr) {
+			return Find("empty");
+		}
+		if (!what.Type->Inspector.empty()) {
+			if (const InspectorFn *asked = Find(what.Type->Inspector); asked != nullptr) {
+				return asked;
+			}
+		}
+
+		// A staged type is about its run whether or not it produced anything —
+		// the stages are the interesting part and they exist before the result
+		// does.
+		if (!what.Type->Steps.empty()) {
+			return Find("run");
+		}
+
+		// **Inferred from the payload and not from the declaration.** A node
+		// that has not run yet has nothing to draw, and saying so is better than
+		// an empty picture frame that looks like a broken preview.
+		if (what.Runner != nullptr && what.Node != nullptr && what.Graph != nullptr) {
+			// **Asked of the node's own interface, resolved to where the payload
+			// is.** A compressed node's ports are proxies, and reading them off
+			// its type would find none at all.
+			const auto payloadOn = [&](const PortSpec &port, bool inputs) -> const std::any * {
+				NodeId held = NO_NODE;
+				std::string heldPort;
+				if (!Actual(*what.Graph, what.Node->Id, port.Name, inputs, held, heldPort)) {
+					return nullptr;
+				}
+				if (!inputs) {
+					return what.Runner->Output(held, heldPort);
+				}
+				const Link *link = what.Graph->LinkInto(held, heldPort);
+				return link == nullptr ? nullptr : what.Runner->Output(link->From, link->FromPort);
+			};
+
+			const auto drawable = [&](const std::vector<PortSpec> &ports, bool inputs) {
+				for (const PortSpec &port : ports) {
+					const std::any *payload = payloadOn(port, inputs);
+					if (payload == nullptr) {
+						continue;
+					}
+					PreviewImage image;
+					if (PictureOf(what.Type, port.Type, *payload, image) && image.Valid()) {
+						return true;
+					}
+				}
+				return false;
+			};
+
+			const std::vector<PortSpec> outputs = OutputsOf(*what.Node);
+			if (drawable(outputs, false) || drawable(InputsOf(*what.Node), true)) {
+				return Find("field");
+			}
+
+			for (const PortSpec &port : outputs) {
+				if (payloadOn(port, false) != nullptr) {
+					return Find("value");
+				}
+			}
+		}
+
+		return Find("empty");
 	}
 
 }

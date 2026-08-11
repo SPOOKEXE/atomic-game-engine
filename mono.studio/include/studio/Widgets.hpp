@@ -50,14 +50,60 @@ namespace studio {
 	// @return `true` on a frame the text changed.
 	bool TextField(const char *label, std::string &text, const char *hint = nullptr, bool secret = false);
 
+	// The caret of a code field, and a change to apply to it.
+	//
+	// **The seam a completion popup needs, and it is public imgui.** A popup has
+	// to know where the caret is to draw beside it and has to be able to replace
+	// the word under it to accept. `ScriptEditor.cpp` refuses
+	// `ImGuiInputTextState` for exactly this and the refusal stands — that
+	// struct is a private *layout* whose fields move between releases, which is
+	// why the script editor has Replace All and no Find Next.
+	// `ImGuiInputTextCallbackData` is neither private nor a layout: `CursorPos`,
+	// `InsertChars` and `DeleteChars` are documented members, and
+	// `ImGuiInputTextFlags_CallbackAlways` is how a widget is asked for them.
+	//
+	// The owner keeps one of these across frames, beside the buffer.
+	//
+	// @since v0.14
+	struct CodeEdit {
+		// Where the caret sits, as a byte offset into the text. Only meaningful
+		// while `Active`.
+		int Caret = 0;
+
+		// Whether the field had keyboard focus this frame. Cleared before the
+		// field is submitted and set from inside its callback, so it describes
+		// this frame rather than the last one it was true.
+		bool Active = false;
+
+		// Text to put in place of the bytes from `ReplaceFrom` up to the caret.
+		//
+		// **Requested rather than done, because the field owns the edit.**
+		// Rewriting the buffer directly would leave imgui's undo stack
+		// describing text that is no longer there, so the first Ctrl+Z after
+		// accepting a completion would do something nobody asked for. Applied on
+		// the next frame and cleared.
+		std::string Insert;
+
+		// Where the replacement starts, or -1 for nothing to apply.
+		int ReplaceFrom = -1;
+	};
+
 	// A multi-line text field bound to a `std::string`.
 	//
 	// @param label  The imgui label.
 	// @param text   The string to edit, in place.
+	// @param edit   The caret to report into and the insertion to apply, or null
+	//        to have neither. Passing one costs a callback per frame.
 	// @param width  Width in pixels, or 0 to fill.
 	// @param height Height in pixels, or 0 to fill.
 	// @return `true` on a frame the text changed.
-	bool CodeField(const char *label, std::string &text, float width = 0.0f, float height = 0.0f);
+	bool CodeField(
+		const char *label,
+		std::string &text,
+		CodeEdit *edit = nullptr,
+		float width = 0.0f,
+		float height = 0.0f
+	);
 
 	// A toolbar button that reads as pressed while a mode is active.
 	//

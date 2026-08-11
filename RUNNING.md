@@ -581,6 +581,41 @@ two VMs differ. `game:GetService("Workspace")` and `RunService:IsServer()` are
 Luau's, and each file says what its own VM installs rather than what the other
 one has.
 
+### Autocomplete in the studio's own editor
+
+The above is for the editor you already use. The Script Editor in the studio has
+its own, and it needs no language server and no configuration:
+
+| key | what it does |
+| --- | --- |
+| `Ctrl+Space` | offer a list, whatever is under the caret |
+| `.` or `:`, or two characters | offer one automatically |
+| `Up` / `Down` | move through it |
+| `Enter`, or a click | accept |
+| `Escape` | dismiss |
+| `Tab` | still indents — it is never the accept key |
+
+It offers classes inside `Instance.new("`, properties after a `.`, methods and
+signals after a `:`, enum sets and their members, the globals of whichever
+language the script's `CodeSourceContainerSelector` selected, that language's
+keywords, the identifiers already in the file, and **the names of the instances
+beside the script in the tree** — which is the one thing luau-lsp cannot know,
+because it reads files and not a world.
+
+**None of that list is written down anywhere.** Classes, properties and enums
+come from `ecs::Classes` and `ecs::EnumTable`; the globals and instance methods
+come from `script::Runtime::Surface`, which walks the global table of a VM built
+for the purpose. A global added anywhere in `mono.engine/script` is offered with
+nothing else changing, and one removed stops being offered in the same commit.
+The reason it is built that way rather than from a list is in
+`script/Vocabulary.hpp`, and it is two bugs this engine has already shipped.
+
+It does **not** infer types. A local from `Instance.new("Part")` resolves,
+because the class is written on the line; one from `FindFirstChild` gets the
+union of every scriptable property instead — a longer list, never a wrong one.
+`D00114` carries what narrowing it would take and why the obvious answer only
+helps one of the two languages.
+
 ### What happens today
 
 The Luau runtime, QuickJS runtime, bindings and game-file reader are active.

@@ -35,8 +35,10 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 
+#include <studio/Complete.hpp>
 #include <studio/Config.hpp>
 #include <studio/Plugins.hpp>
+#include <studio/Widgets.hpp>
 // TODO(render-pipeline): `<engine/nodeview/Editor.hpp>` and `State.hpp` were
 // included here. `Engine::nodeview` was the node-canvas module the Render and
 // Assets Pipeline panels were built on; it is removed. See the member and
@@ -67,11 +69,11 @@
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
-#include <studio/Commands.hpp>
 #include <studio/AssetCatalogue.hpp>
+#include <studio/Commands.hpp>
 #include <studio/ContentSources.hpp>
-#include <studio/NodeGraph.hpp>
 #include <studio/Hierarchy.hpp>
+#include <studio/NodeGraph.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Preview.hpp>
@@ -499,6 +501,15 @@ namespace studio {
 
 		// Whether the buffer differs from what the world holds.
 		bool Modified = false;
+
+		// The caret, and the completion this tab has been asked to apply.
+		//
+		// **Per tab rather than per panel**, because the caret is a property of
+		// the text: one shared between tabs would jump every time somebody
+		// switched file, and the popup would open beside the wrong line.
+		//
+		// @since v0.14
+		CodeEdit Edit;
 	};
 
 	// What the Find panel was asked for.
@@ -714,6 +725,42 @@ namespace studio {
 		// @param tab The script being edited.
 		// @return How wide the column drew, so the caller can lay out beside it.
 		float DrawScriptGutter(const OpenScript &tab);
+
+		// Rebuilds the completion list when there is a reason to.
+		//
+		// **Only when the caret moved, the text changed, or somebody asked.**
+		// Completing against a class table of eighty classes is a few thousand
+		// comparisons; doing it every frame would spend them to produce the
+		// list that is already on screen.
+		//
+		// @param tab         The script being edited.
+		// @param textChanged Whether the field reported an edit this frame.
+		// @param asked       Whether Ctrl+Space was pressed.
+		// @since v0.14
+		void UpdateScriptCompletion(OpenScript &tab, bool textChanged, bool asked);
+
+		// The popup itself, drawn beside the caret.
+		//
+		// **A child window rather than `BeginPopup`.** A popup takes keyboard
+		// focus when it opens, which would stop the text field being typed in —
+		// so this draws over the panel and never becomes the active item.
+		//
+		// @param tab      The script being edited.
+		// @param fieldMin The code field's top-left, in screen space.
+		// @param popupId  The id the navigation keys are owned by.
+		// @since v0.14
+		void DrawScriptCompletion(OpenScript &tab, ImVec2 fieldMin, unsigned int popupId);
+
+		// The names of the instances beside a script in its tree.
+		//
+		// The one thing an external language server cannot know, which is why it
+		// is worth the walk: `script.Parent.` in the editor can name what is
+		// actually there.
+		//
+		// @param tab The script being edited.
+		// @return The sibling names, plus the world's roots.
+		// @since v0.14
+		std::vector<std::string> ScriptSiblings(const OpenScript &tab);
 
 		// The breakpoint on a line of a script, or null.
 		//
@@ -1672,8 +1719,7 @@ namespace studio {
 		// @param panel The panel's title, as the settings panel lists it.
 		// @param body  The draw call.
 		// @since v0.13
-		template <typename Body>
-		void Skinned(const char *panel, Body &&body) {
+		template <typename Body> void Skinned(const char *panel, Body &&body) {
 			const engine::ui::ScopedColours skin(PanelColoursFor(panel));
 			body();
 		}
@@ -1738,9 +1784,59 @@ namespace studio {
 		void DrawDemoTools();
 		void DrawNodeDemo();
 
-		// The panel's right-hand side: the selected node's picture, what it is
-		// doing, and what it produced.
+		// The panel's menu bar: the file menu, the history, the selection tools
+		// and the build switch.
+		void DrawNodeDemoBar();
+
+		// The breadcrumb bar, when the view is inside a compressed node. Absent
+		// at the root, where it would be a row that only ever says one thing.
+		void DrawNodeDemoCrumbs();
+
+		// The one line under the canvas: zoom, counts, cache hit rate and
+		// whether the graph follows edits.
+		void DrawNodeDemoStatus();
+
+		// The right-hand side's three tabs.
+		//
+		// **Three tabs and not three panels**, which is the reference
+		// implementation's arrangement and the right one: they answer three
+		// questions about one selection — what can I add, what is this, and what
+		// can connect to what — and only one is being asked at a time.
+		//@{
+		void DrawNodeDemoLibrary();
 		void DrawNodeDemoInspector();
+		void DrawNodeDemoTypes();
+		//@}
+
+		// The selected node's knobs, as real widgets.
+		//
+		// **The same `WidgetSpec` the canvas paints and hit-tests from**, which
+		// is the third consumer `NodeGraph.hpp` promises: a knob that existed
+		// here and not on the node, or took a different range, would be two
+		// declarations of one thing.
+		//
+		// @return Whether anything was changed.
+		bool DrawNodeDemoWidgets(nodes::Node &node);
+
+		// Writes one node's picture beside the graph file, as an uncompressed
+		// Targa — nothing in this engine encodes a PNG, and a picture nobody can
+		// open would be worse than a larger file everything opens.
+		//
+		// @return What to say about it, either way.
+		std::string ExportNodeDemoImage(nodes::NodeId node);
+
+		// Snapshot undo over the demo graph.
+		//
+		// **Snapshots and not a command log.** The editor's own history is a log
+		// because a scene is large and an edit is small; this graph serialises to
+		// a few hundred bytes, and a snapshot cannot be wrong about what it
+		// reverses. `studio/Commands.hpp` carries the other side of that trade.
+		//@{
+		void CommitNodeDemo();
+		void UndoNodeDemo();
+		void RedoNodeDemo();
+		void RestoreNodeDemo(const std::string &document);
+		//@}
 
 		// Turns a node's preview into a texture the interface can draw.
 		//
@@ -2696,6 +2792,27 @@ namespace studio {
 		int ActiveScript = -1;
 		//@}
 
+		// The completion popup: whether it is up, which row is chosen, and what
+		// is in it.
+		//
+		// **One set for the panel rather than one per tab**, because only the
+		// tab in front can be typed in — and a popup remembered against a tab
+		// nobody is looking at would reopen on a caret that had moved.
+		//
+		// `Anchor` is where the word under the caret began, so accepting
+		// replaces the prefix rather than appending to it. `Caret` is the
+		// position the list was built for, which is how this tells "somebody
+		// moved" from "nothing happened" without recomputing every frame.
+		//
+		// @since v0.14
+		//@{
+		bool ScriptPopupOpen = false;
+		int ScriptPopupChoice = 0;
+		int ScriptPopupAnchor = -1;
+		int ScriptPopupCaret = -1;
+		std::vector<Completion> ScriptCompletions;
+		//@}
+
 		// How much bigger the code is drawn than the interface around it.
 		//
 		// **One zoom for the panel rather than one per tab.** Somebody who
@@ -3334,9 +3451,9 @@ namespace studio {
 		//        its own ray would rest on itself and never reach the floor.
 		// @return The hit, or nothing.
 		// @since v0.13
-		std::optional<engine::core::RayHit>
-		RaycastWorld(engine::world::WorldId world, const engine::core::Ray &ray,
-					 std::span<const Entity> ignore);
+		std::optional<engine::core::RayHit> RaycastWorld(
+			engine::world::WorldId world, const engine::core::Ray &ray, std::span<const Entity> ignore
+		);
 
 		// Draws the translate gizmo and runs a drag. Called from the overlay.
 		//
@@ -3439,8 +3556,7 @@ namespace studio {
 		// @return A string valid until the panels are resized, or "Viewport" for
 		//         an index that is not a panel.
 		const char *ViewportTitle(size_t index) const {
-			return index == 0 || index > Extras.size() ? "Viewport"
-													   : Extras[index - 1].Title.c_str();
+			return index == 0 || index > Extras.size() ? "Viewport" : Extras[index - 1].Title.c_str();
 		}
 
 		// Makes the editor hold `extras` panels beyond the main one.
@@ -3991,6 +4107,36 @@ namespace studio {
 		//@{
 		std::unordered_map<uint64_t, void *> NodeDemoTextures;
 		std::unordered_map<uint64_t, engine::core::Name> NodeDemoTextureNames;
+		//@}
+
+		// The undo stacks, as whole documents. `NodeDemoLast` is what the graph
+		// currently reads as, so a commit that changed nothing pushes nothing.
+		//@{
+		std::vector<std::string> NodeDemoPast;
+		std::vector<std::string> NodeDemoFuture;
+		std::string NodeDemoLast;
+		//@}
+
+		// Which of the right-hand tabs is open, and where the file menu reads
+		// and writes.
+		//@{
+		int NodeDemoTab = 0;
+		char NodeDemoPath[256] = "demo.nodegraph";
+		char NodeDemoFilter[64] = {};
+		std::string NodeDemoSaid;
+		//@}
+
+		// The counters the status line reads. Accumulated across runs rather
+		// than taken from the last one, because a hit rate over one frame of a
+		// settled graph is always 100%.
+		//@{
+		// Whether an inspector widget has been changed since the last commit.
+		// Survives the frames of a drag, so one drag is one undo step.
+		bool NodeDemoDirty = false;
+
+		size_t NodeDemoHits = 0;
+		size_t NodeDemoMisses = 0;
+		double NodeDemoRunMs = 0.0;
 		//@}
 		//@}
 

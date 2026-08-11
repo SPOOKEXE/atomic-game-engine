@@ -39,6 +39,42 @@ namespace engine::script {
 			return 0;
 		}
 
+		// The own, string-keyed property names of `value`, for
+		// `Runtime::Surface`.
+		//
+		// **Own rather than inherited**, so walking `globalThis` does not drag
+		// in `Object.prototype` and offer `hasOwnProperty` beside `workspace`.
+		//
+		// **Enumerable and not**, which is `JS_GPN_STRING_MASK` without
+		// `JS_GPN_ENUM_ONLY` and is load-bearing rather than lax: most of this
+		// engine's globals arrive through `JS_SetPropertyFunctionList`, which
+		// marks what it writes non-enumerable, so asking for the enumerable
+		// ones alone would find almost none of the surface this exists to
+		// report.
+		std::vector<std::string> OwnPropertyNames(JSContext *context, JSValueConst value) {
+			std::vector<std::string> names;
+			if (!JS_IsObject(value)) {
+				return names;
+			}
+
+			JSPropertyEnum *properties = nullptr;
+			uint32_t count = 0;
+			if (JS_GetOwnPropertyNames(context, &properties, &count, value, JS_GPN_STRING_MASK) != 0) {
+				return names;
+			}
+
+			names.reserve(count);
+			for (uint32_t index = 0; index < count; index++) {
+				if (const char *text = JS_AtomToCString(context, properties[index].atom); text != nullptr) {
+					names.emplace_back(text);
+					JS_FreeCString(context, text);
+				}
+			}
+
+			JS_FreePropertyEnum(context, properties, count);
+			return names;
+		}
+
 		// The exception, with its stack when it has one.
 		std::string ExceptionText(JSContext *context) {
 			JSValue thrown = JS_GetException(context);
@@ -318,5 +354,48 @@ namespace engine::script {
 			return false;
 		}
 		return Error.empty();
+	}
+
+	ScriptSurface JavaScriptRuntime::Surface() const {
+		ScriptSurface surface;
+		if (Context == nullptr) {
+			return surface;
+		}
+
+		JSValue global = JS_GetGlobalObject(Context);
+
+		for (std::string &name : OwnPropertyNames(Context, global)) {
+			JSValue value = JS_GetPropertyStr(Context, global, name.c_str());
+
+			VocabularyEntry entry;
+			entry.Name = std::move(name);
+
+			if (JS_IsFunction(Context, value)) {
+				// **A constructor is a function and is still worth its
+				// members.** `Vector3` is callable *and* carries `zero` and
+				// `one`, and a walk that stopped at the first fact would offer
+				// neither.
+				entry.Kind = NameKind::Function;
+				entry.Members = OwnPropertyNames(Context, value);
+			} else if (JS_IsObject(value)) {
+				entry.Kind = NameKind::Container;
+				entry.Members = OwnPropertyNames(Context, value);
+			} else {
+				entry.Kind = NameKind::Value;
+			}
+
+			surface.Globals.push_back(std::move(entry));
+			JS_FreeValue(Context, value);
+		}
+
+		// **The object `InstallJsInstanceMethods` built**, which already holds
+		// the signals as accessors — so unlike Luau there is no second list to
+		// keep, and the five `JsEcs` appends arrive with the rest.
+		JSValue methods = JS_GetPropertyStr(Context, global, "__instanceMethods");
+		surface.InstanceMembers = OwnPropertyNames(Context, methods);
+		JS_FreeValue(Context, methods);
+
+		JS_FreeValue(Context, global);
+		return surface;
 	}
 }

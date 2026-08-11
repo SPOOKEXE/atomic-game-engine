@@ -15,8 +15,20 @@ namespace studio {
 	}
 
 	namespace {
-		// imgui's resize callback, which is how a text field grows a
-		// `std::string` instead of truncating into a fixed buffer.
+		// What a field's callback is given.
+		//
+		// **A carrier rather than the string itself**, because the code field
+		// needs a second thing out of the same callback — where the caret is —
+		// and imgui offers exactly one `UserData` pointer. `Edit` is null for
+		// every field that only wants to grow.
+		struct FieldCallback {
+			std::string *Text = nullptr;
+			CodeEdit *Edit = nullptr;
+		};
+
+		// imgui's callback, which is how a text field grows a `std::string`
+		// instead of truncating into a fixed buffer — and, for the code field,
+		// how the caret gets out and an insertion gets in.
 		//
 		// **`resize` and then `data()` and not the other way round.** The
 		// callback hands back a pointer imgui goes on writing into, so it has
@@ -24,13 +36,43 @@ namespace studio {
 		// it first hands imgui memory that has just been freed, and the
 		// corruption shows up in whatever allocated next.
 		int Grow(ImGuiInputTextCallbackData *data) {
-			if (data->EventFlag != ImGuiInputTextFlags_CallbackResize) {
+			auto *carrier = static_cast<FieldCallback *>(data->UserData);
+
+			if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+				carrier->Text->resize(static_cast<size_t>(data->BufTextLen));
+				data->Buf = carrier->Text->data();
 				return 0;
 			}
 
-			auto *text = static_cast<std::string *>(data->UserData);
-			text->resize(static_cast<size_t>(data->BufTextLen));
-			data->Buf = text->data();
+			// **`CallbackAlways` is the whole of the completion seam, and it is
+			// public API.** `ScriptEditor.cpp` refuses `ImGuiInputTextState` to
+			// move the caret, and that refusal stands — that struct is a private
+			// *layout* whose fields shift between releases. This is the
+			// supported way to the same fact: `CursorPos`, `InsertChars` and
+			// `DeleteChars` are documented members of
+			// `ImGuiInputTextCallbackData`, and a popup cannot be placed or
+			// applied without them.
+			if (data->EventFlag != ImGuiInputTextFlags_CallbackAlways || carrier->Edit == nullptr) {
+				return 0;
+			}
+
+			CodeEdit &edit = *carrier->Edit;
+			edit.Active = true;
+
+			// **Applied here rather than by rewriting the string.** Editing the
+			// buffer behind imgui's back leaves its undo stack describing text
+			// that is no longer there, so accepting a completion would make the
+			// next Ctrl+Z do something nobody asked for.
+			if (edit.ReplaceFrom >= 0 && edit.ReplaceFrom <= data->CursorPos) {
+				data->DeleteChars(edit.ReplaceFrom, data->CursorPos - edit.ReplaceFrom);
+				if (!edit.Insert.empty()) {
+					data->InsertChars(edit.ReplaceFrom, edit.Insert.c_str());
+				}
+				edit.Insert.clear();
+				edit.ReplaceFrom = -1;
+			}
+
+			edit.Caret = data->CursorPos;
 			return 0;
 		}
 
@@ -49,15 +91,17 @@ namespace studio {
 		const auto flags = secret ? (ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_Password)
 								  : ImGuiInputTextFlags_CallbackResize;
 
+		FieldCallback carrier{&text, nullptr};
+
 		if (hint != nullptr) {
 			return ImGui::InputTextWithHint(
-				label, hint, text.data(), text.capacity() + 1, flags, Grow, &text
+				label, hint, text.data(), text.capacity() + 1, flags, Grow, &carrier
 			);
 		}
-		return ImGui::InputText(label, text.data(), text.capacity() + 1, flags, Grow, &text);
+		return ImGui::InputText(label, text.data(), text.capacity() + 1, flags, Grow, &carrier);
 	}
 
-	bool CodeField(const char *label, std::string &text, float width, float height) {
+	bool CodeField(const char *label, std::string &text, CodeEdit *edit, float width, float height) {
 		if (text.capacity() < 1024) {
 			text.reserve(1024);
 		}
@@ -65,10 +109,21 @@ namespace studio {
 		// `AllowTabInput`, because this is where code is written and Tab moving
 		// focus to the next widget would make the editor unusable for the one
 		// thing it is for.
-		const auto flags = ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_AllowTabInput;
+		//
+		// **`AllowTabInput` is also why Tab cannot accept a completion.**
+		// `imgui_widgets.cpp` asserts that it and `CallbackCompletion` are never
+		// both set, because both want the key — so the popup takes Enter, and
+		// claims it with `SetKeyOwner` while it is open.
+		auto flags = ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_AllowTabInput;
+		if (edit != nullptr) {
+			flags |= ImGuiInputTextFlags_CallbackAlways;
+			edit->Active = false;
+		}
+
+		FieldCallback carrier{&text, edit};
 
 		return ImGui::InputTextMultiline(
-			label, text.data(), text.capacity() + 1, ImVec2(width, height), flags, Grow, &text
+			label, text.data(), text.capacity() + 1, ImVec2(width, height), flags, Grow, &carrier
 		);
 	}
 
@@ -151,20 +206,19 @@ namespace studio {
 		// One fixed number breaks the cycle: the field decides the width and
 		// the window follows it, rather than each following the other.
 		ImGui::SetNextItemWidth(engine::ui::Scaled(engine::ui::Size::Prompt));
+
+		// **`Grow` rather than a lambda repeating it.** This was a second copy
+		// of the resize callback, which meant a change to how a field grows had
+		// two places to land and one of them would have been forgotten.
+		FieldCallback promptCarrier{&buffer, nullptr};
+
 		const bool entered = ImGui::InputText(
 			"##value",
 			buffer.data(),
 			buffer.capacity() + 1,
 			ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_EnterReturnsTrue,
-			[](ImGuiInputTextCallbackData *data) {
-				if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
-					auto *text = static_cast<std::string *>(data->UserData);
-					text->resize(static_cast<size_t>(data->BufTextLen));
-					data->Buf = text->data();
-				}
-				return 0;
-			},
-			&buffer
+			Grow,
+			&promptCarrier
 		);
 
 		ImGui::Separator();

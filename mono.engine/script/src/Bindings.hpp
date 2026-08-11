@@ -728,6 +728,17 @@ namespace engine::script {
 	// @param state The VM.
 	void OpenInstances(lua_State *state);
 
+	// The signals `InstanceIndex` answers from its branch chain.
+	//
+	// **Here because a branch cannot be walked.** Everything else the editor
+	// offers is read back out of a live VM — the globals from its global table,
+	// the instance methods from the registry table `OpenInstances` fills — and a
+	// signal is the one member that exists only as a string comparison. See
+	// `script::InstanceSignals`, which is the public face of this.
+	//
+	// @return The signal names, in the order the chain tests them.
+	std::vector<std::string_view> LuauInstanceSignalNames();
+
 	// Installs the world clock under names that do not lie about it.
 	//
 	// `time`, `elapsedTime`, `tick` and `DateTime`, all reading `store.Time()`.

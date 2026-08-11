@@ -40,6 +40,7 @@
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Language.hpp>
+#include <engine/script/Vocabulary.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -255,6 +256,31 @@ namespace engine::script {
 		//
 		// @return The language.
 		virtual Language Which() const = 0;
+
+		// What a script running here may name.
+		//
+		// **Asked of the runtime rather than kept in a table**, because there is
+		// no table: a global is one of about fifty `lua_setglobal` and
+		// `JS_SetPropertyStr` calls spread across fifteen files, and a list of
+		// them written anywhere else is a copy that goes stale silently. The
+		// editor's completion is built from this, so a global added anywhere in
+		// this module is offered without a second edit. `Vocabulary.hpp` carries
+		// the argument and the two bugs that paid for it.
+		//
+		// **Call it on a runtime that has not run anything.** JavaScript's
+		// chunks share one global object — `JavaScriptRuntime` says why — so a
+		// script that had assigned a global would appear in the answer as though
+		// the engine installed it.
+		//
+		// The default is empty rather than pure virtual: a runtime that cannot
+		// describe itself is a completion list with no engine names in it, which
+		// is a degraded editor and not a broken one.
+		//
+		// @return The globals and the instance members.
+		// @since v0.14
+		virtual ScriptSurface Surface() const {
+			return {};
+		}
 
 		// The error from the last `Run` or `RunFile` that returned false.
 		//

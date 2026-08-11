@@ -36,6 +36,42 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00114
+
+**The script editor's completion does not infer types, and the one shape it does
+resolve is the one written on the line.** `studio/Complete.hpp` walks left from
+the caret over identifier characters, dots and colons; it is not a parser and
+does not pretend to be. `local p = Instance.new("Part")` then `p.` offers
+`BasePart`'s properties, because the class name is *there in the text*. `local p
+= part:FindFirstChild("Hit")` then `p.` offers the union of every scriptable
+property in the class table instead — a longer list, never a wrong one, and
+never `f().` at all.
+
+**Worth carrying, because the union degrades honestly.** Everything offered is a
+name some class really has, so nothing in the list fails at run time; what is
+missing is narrowing, and the cost is scrolling. That is a different class of
+problem from the one the completion was built to end, where a name came from a
+description of the surface rather than the surface.
+
+Closing it means one of:
+
+- **Link the vendored language server.** `mono.vendor/luau-lsp` builds
+  `Luau.LanguageServer` as a static library and already type-checks against
+  `engine.d.luau`, so the inference exists and is correct. It buys **Luau only**
+  — JavaScript would need an entirely separate implementation, and this feature
+  was asked for in both languages — and it puts `Luau::Frontend` behind a studio
+  header, which `script/AGENTS.md`'s first rule exists to prevent for the VM and
+  which deserves the same argument here before it is done.
+- **Follow assignments within the buffer.** Cheaper and worse: resolve
+  `FindFirstChild` and `:Clone()` to the declared class of their receiver, and
+  stop. It covers most real scripts and is wrong in ways nobody can predict,
+  which is the property that makes a wrong completion worse than a broad one.
+
+**What must not happen is a guess presented as a fact.** The union is a
+completion list that says "one of these classes has this"; a narrowed list that
+narrowed incorrectly says "this class has this", and an author has no way to tell
+the second from the truth.
+
 ### [_] D00113
 
 **There are two node graph implementations and there should be one.**
