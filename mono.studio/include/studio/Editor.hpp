@@ -2858,6 +2858,14 @@ namespace studio {
 			// Whether the panel exists at all.
 			bool Open = false;
 
+			// A dock node this panel should join on its next `Begin`, or zero.
+			//
+			// **Applied once and cleared**, because `SetNextWindowDockID` with
+			// `Always` every frame is a panel nobody can drag out of its node.
+			// It exists so a viewport opened from another's tab strip arrives as
+			// a tab beside it rather than as a floating window over the scene.
+			unsigned DockInto = 0;
+
 			// A `Camera` instance this view looks through, or null for the free
 			// camera. See `Editor::FollowCamera`.
 			Entity Follow;
@@ -3450,6 +3458,35 @@ namespace studio {
 		// @return The panel's index, for a caller that wants to pin a world to
 		//         it.
 		size_t AddViewport();
+
+		// Which panel's `+` was pressed this frame, plus one, or zero.
+		//
+		// **Recorded while drawing and acted on after**, because the button is
+		// inside an amended dock tab bar and inside that panel's own `Begin`:
+		// opening a viewport from in there would nest a window inside a window.
+		size_t PendingViewport = 0;
+
+		// The dock node the new panel should join.
+		unsigned PendingViewportDock = 0;
+
+		// The dock nodes that already grew a `+` this frame, so panels sharing
+		// one do not each add their own. Cleared before the viewports draw.
+		std::vector<unsigned> TabbedNodes;
+
+		// Reopens a closed extra panel, or mints one. Never the main viewport.
+		size_t AddExtraViewport();
+
+		// The same, showing whatever a panel already open is showing.
+		//
+		// **What the `+` on a viewport's tab strip does.** It sits on one
+		// panel's tabs, so it means "another view of this" — the world, the eye
+		// and the angles are taken from the panel it was pressed on, and the new
+		// panel is docked into the same node so it lands as a sibling tab rather
+		// than floating over the scene.
+		//
+		// @param index The panel it was opened from.
+		// @return The new panel's index.
+		size_t AddViewportBeside(size_t index);
 
 		// Which viewport the toolbar is reporting on.
 		//

@@ -267,6 +267,11 @@ namespace studio {
 		// question you already know the answer to by the time you have opened
 		// the graph. A closed panel returns immediately and costs a span of
 		// almost nothing, which is the correct reading rather than an absence.
+		// The `+` on a tab strip is added by whichever panel draws first in each
+		// node — see `DrawViewport` — so the record of which nodes have one is a
+		// within-frame fact, like `ViewportClaimed` above it.
+		TabbedNodes.clear();
+
 		{
 			ENGINE_PROFILE_CAT("viewports", engine::core::ProfileCategory::Render);
 
@@ -284,6 +289,19 @@ namespace studio {
 		// **After every viewport, never inside one.** See the note in
 		// `DrawViewport` for why asking per panel could not work.
 		ResolveFocusedViewport();
+
+		// The `+` somebody pressed on a tab strip, applied out here for the
+		// reason the button records rather than acts.
+		if (PendingViewport > 0) {
+			const size_t from = PendingViewport - 1;
+			PendingViewport = 0;
+
+			const size_t made = AddViewportBeside(from);
+			if (ViewportState *view = ExtraAt(made); view != nullptr) {
+				view->DockInto = PendingViewportDock;
+			}
+			PendingViewportDock = 0;
+		}
 
 		{
 			ENGINE_PROFILE_CAT("explorer", engine::core::ProfileCategory::Render);
@@ -716,12 +734,59 @@ namespace studio {
 			return;
 		}
 
+		// A panel opened from another's tab strip joins that strip, once. See
+		// `ViewportState::DockInto`.
+		if (extra != nullptr && extra->DockInto != 0) {
+			ImGui::SetNextWindowDockID(extra->DockInto, ImGuiCond_Always);
+			extra->DockInto = 0;
+		}
+
 		// No padding, so the image is the panel rather than a picture inside it.
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 		const bool shown = ImGui::Begin(
 			title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
 		);
 		ImGui::PopStyleVar();
+
+		// **A `+` at the end of the tabs this panel is docked in.** Another view
+		// of what you are looking at is the commonest thing to want and was two
+		// clicks through a menu; here it is one, in the place a browser has put
+		// it for twenty years.
+		//
+		// `DockNodeBeginAmendTabBar` is imgui's own supported way to put an item
+		// on a dock node's tab bar — the alternative is a strip of our own above
+		// the image, which would sit *under* the tabs and read as belonging to
+		// the wrong thing.
+		//
+		// **Once per node per frame.** Every viewport sharing a node would
+		// otherwise each add one, and the strip would grow a `+` per tab.
+		if (shown) {
+			if (ImGuiDockNode *node = ImGui::GetWindowDockNode(); node != nullptr) {
+				const bool first =
+					std::find(TabbedNodes.begin(), TabbedNodes.end(), node->ID) == TabbedNodes.end();
+
+				if (first && ImGui::DockNodeBeginAmendTabBar(node)) {
+					TabbedNodes.push_back(node->ID);
+
+					if (ImGui::TabItemButton(
+							"+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip
+						)) {
+						// **Recorded, not done here.** This is inside an amended
+						// tab bar and inside this panel's `Begin`; opening a
+						// window from in here would nest one window inside
+						// another. `ApplyPendingActions`' rule, applied to
+						// imgui's stack rather than to the store's.
+						PendingViewport = index + 1;
+						PendingViewportDock = node->ID;
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Another view of this scene");
+					}
+
+					ImGui::DockNodeEndAmendTabBar();
+				}
+			}
+		}
 
 		if (!shown) {
 			// Collapsed or behind another tab. The target is dropped rather than
@@ -949,22 +1014,20 @@ namespace studio {
 	}
 
 	void Editor::DrawViewMenu() {
-		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
-
-		// **The extra views, and they are what "server beside client" is made
-		// of.** All off by default: N open viewports each refresh at a Nth of
-		// the frame rate, so they are a thing somebody opens when they want them
-		// rather than a cost everybody pays. See `DrawingViewport`.
-		for (ViewportState &view : Extras) {
-			ImGui::MenuItem(view.Title.c_str(), nullptr, &view.Open);
-		}
-
-		// **As many as somebody wants, made here rather than declared in a
-		// header.** There is no number of viewports that is right for every
-		// session — a person comparing six subareas needs six — so the editor
-		// mints one on request instead of shipping a ceiling. `AddViewport`
-		// hands back a closed panel before it makes a new one, so opening and
-		// shutting one does not grow the list.
+		// **One entry for every viewport there is or could be.** A row per panel
+		// was right while there were four of them and is not now they are minted
+		// on demand: the list grew as somebody worked, most of it was off, and
+		// the one thing anybody came to this menu for — another view — was at
+		// the bottom of it.
+		//
+		// **It is still the way back**, which is this menu's whole job.
+		// `AddViewport` reopens a closed panel before it makes a new one and
+		// reopens the main one first of all, so a viewport somebody shut from
+		// its title bar comes back from here rather than being lost.
+		//
+		// N open viewports each refresh at a Nth of the frame rate, which is why
+		// there is no ceiling and no default beyond the first — see
+		// `DrawingViewport`.
 		if (ImGui::MenuItem("New Viewport")) {
 			AddViewport();
 		}

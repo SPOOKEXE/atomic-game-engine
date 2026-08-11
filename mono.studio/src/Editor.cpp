@@ -182,6 +182,21 @@ namespace studio {
 	}
 
 	size_t Editor::AddViewport() {
+		// **The main panel first, because the View menu no longer names it.**
+		// Every panel in this program is closable and the menu is the only way
+		// back — `mono.studio/AGENTS.md` — and with one entry standing for every
+		// viewport, that entry has to be the way back to the first one too. A
+		// person who shut Viewport from its title bar presses New Viewport and
+		// gets it, rather than a second panel beside a hole.
+		if (!ShowViewport) {
+			ShowViewport = true;
+			return 0;
+		}
+
+		return AddExtraViewport();
+	}
+
+	size_t Editor::AddExtraViewport() {
 		for (size_t index = 0; index < Extras.size(); index++) {
 			if (!Extras[index].Open) {
 				Extras[index].Open = true;
@@ -192,6 +207,42 @@ namespace studio {
 		ResizeViewports(Extras.size() + 1);
 		Extras.back().Open = true;
 		return Extras.size();
+	}
+
+	size_t Editor::AddViewportBeside(size_t index) {
+		const WorldId showing = ViewportWorld(index);
+
+		// **An extra, never the main one.** `AddViewport` hands the main panel
+		// back first because the menu has to be able to reopen it — but the main
+		// panel follows the active world by construction, so a `+` that returned
+		// it would open a view of a different scene from the one it was pressed
+		// on.
+		const size_t made = AddExtraViewport();
+
+		// **Pinned to the world the panel it came from is showing, rather than
+		// left following the active one.** The button is on that panel's tab
+		// strip, so "another view of this" is what pressing it means — a new
+		// panel that jumped to whatever scene happened to be active would be a
+		// second view of something else.
+		if (ViewportState *view = ExtraAt(made); view != nullptr) {
+			view->World = showing;
+
+			// Where the panel it was opened from is looking, so the two start
+			// as one picture and diverge as somebody moves. Opening at the
+			// identity looks past the world and reads as a panel that does not
+			// work — `Initialise` gives the same reason.
+			if (const ViewportState *from = ExtraAt(index); from != nullptr) {
+				view->Frame = from->Frame;
+				view->Yaw = from->Yaw;
+				view->Pitch = from->Pitch;
+			} else {
+				view->Frame = CameraFrame;
+				view->Yaw = CameraYaw;
+				view->Pitch = CameraPitch;
+			}
+		}
+
+		return made;
 	}
 
 	bool Editor::Initialise(const Options &options) {
