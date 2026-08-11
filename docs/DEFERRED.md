@@ -36,6 +36,33 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00113
+
+**There are two node graph implementations and there should be one.**
+`studio/NodeGraph.hpp` is the editor's, added at v0.14 for the Demo Nodes panel;
+`~/Documents/GitHub/node-graph-template/cpp` is the standalone library the same
+design came from. They are one design in two repositories, which is the debt
+`AGENTS.md` calls the most expensive kind — both will accumulate callers and the
+neglected one is the one that goes wrong.
+
+It is worth carrying **while this is a demo panel and nothing depends on it**.
+The moment something does — and `ROADMAP.md` has two candidates, the render
+pipeline as a node editor and `Engine::bakegraph`'s pipeline documents — the two
+become one, by one of:
+
+- **Vendor the template as a submodule** under `mono.vendor/`, which is how every
+  other outside dependency arrives here. It needs the template repository to have
+  a remote whose commits this repository can name, which today it does not.
+- **Promote the studio's copy to an engine module.** Right if the engine
+  evaluates graphs at runtime rather than only editing them — a bake pipeline
+  does — and it needs a tier, an `expected_graph.json` entry and a decision about
+  where `std::any` payloads sit relative to `Engine::bakegraph`'s own node
+  vocabulary, which already describes nodes without carrying decoders.
+
+**What must not happen is a third one.** A render-pipeline editor that started
+its own registry and its own canvas would make this three, and the first
+divergence would be in the part nobody tests: the cycle guard or the hash.
+
 ### [_] D00112
 
 **Portals, and the non-Euclidean spaces they buy.** `docs/NON-EUCLIDEAN.md` is

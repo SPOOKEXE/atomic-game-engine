@@ -38,6 +38,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [x] rojo: `--rojo`/`$ATOMIC_ROJO_PROJECT` syncs any project at startup; checked against raceapet, which found and fixed two build bugs (a package's `default.project.json` was joined to its folder instead of replacing it, and a nested project's root `$path` was ignored)
 - [x] the topbar is tab-based, and the plugins toolbars are a tab of their own rather than a panel
+- [x] a Demo tab on the ribbon, and a Demo Nodes panel: a typed node graph with a cycle guard, cached evaluation, save/load and an imgui canvas — `studio/NodeGraph.hpp`
+- [_] deferred `D00113`: one node graph implementation rather than two
 - [x] default engine assets: the six shape meshes and a pink/grey checkerboard, under an "engine" tab, with a tab per cdn source and an "all" tab
 - [_] deferred `D00111`: listing an HTTP origin's contents — its tab names the address and says why it cannot enumerate
 - [x] raw folders bake on demand into the editor, memory-only by default, with a tab of their own

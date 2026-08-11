@@ -46,7 +46,7 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v6";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v7";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -318,6 +318,7 @@ namespace studio {
 			Skinned("Team Create", [&] { DrawTeamCreate(); });
 			Skinned("Control (MCP)", [&] { DrawControl(); });
 			Skinned("Plugins", [&] { DrawPlugins(); });
+			Skinned("Demo Nodes", [&] { DrawNodeDemo(); });
 
 			// **Not `Skinned`, and that is the difference between the two
 			// halves of this feature.** Every panel above is the editor's and
@@ -970,6 +971,7 @@ namespace studio {
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
+		ImGui::MenuItem("Demo Nodes", nullptr, &ShowNodeDemo);
 		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
@@ -1693,6 +1695,12 @@ namespace studio {
 		// which of the two empty states it is.
 		item("Plugins", 4);
 
+		// **Demos, last, because they are the tab nobody needs while working.**
+		// What is on it is a thing to look at rather than a tool to use, and
+		// putting it before Plugins would push a row somebody uses every day one
+		// place further along.
+		item("Demo", 5);
+
 		ImGui::EndTabBar();
 
 		switch (tab) {
@@ -1710,6 +1718,9 @@ namespace studio {
 			break;
 		case 4:
 			DrawPluginTools();
+			break;
+		case 5:
+			DrawDemoTools();
 			break;
 		default:
 			// No tab is open only on the frame the bar is first submitted, and

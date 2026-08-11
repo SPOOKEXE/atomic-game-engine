@@ -70,6 +70,7 @@
 #include <studio/Commands.hpp>
 #include <studio/AssetCatalogue.hpp>
 #include <studio/ContentSources.hpp>
+#include <studio/NodeGraph.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
@@ -1711,6 +1712,16 @@ namespace studio {
 		void LoadPlugins();
 		void PumpPlugins(float delta);
 		void DrawPlugins();
+
+		// The ribbon's Demo row, and the panel it opens.
+		//
+		// **A demo is a panel like any other**, so it closes and comes back from
+		// the View menu, and it costs nothing while it is shut: the graph is
+		// built on the first open rather than at start-up.
+		//@{
+		void DrawDemoTools();
+		void DrawNodeDemo();
+		//@}
 
 		// The ribbon's Plugins row: every running plugin's toolbars.
 		//
@@ -3799,6 +3810,28 @@ namespace studio {
 
 		// The plugins panel. See `DrawPlugins`.
 		bool ShowPlugins = false;
+
+		// The Demo Nodes panel, and everything it holds.
+		//
+		// **On the editor rather than static inside the panel**, for the reason
+		// every other panel's state is: a static would be one graph shared by
+		// two editors in one process, which the tests and a future second window
+		// both produce.
+		//
+		// The graph is empty until the panel is first opened — see
+		// `DrawNodeDemo` — so an editor nobody opens it in carries three empty
+		// containers and nothing else.
+		//@{
+		bool ShowNodeDemo = false;
+		nodes::Graph NodeDemoGraph;
+		nodes::Canvas NodeDemoCanvas;
+		nodes::Evaluator NodeDemoRunner;
+		nodes::RunReport NodeDemoReport;
+
+		// The signature the demo last evaluated at, so dragging a node does not
+		// recompute a graph that has not changed.
+		uint64_t NodeDemoSignature = 0;
+		//@}
 
 		// What `DiscoverPlugins` found, in folder order.
 		std::vector<LoadedPlugin> Plugins;
