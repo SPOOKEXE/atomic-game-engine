@@ -2,9 +2,10 @@
 #
 # Holes in walls that lead somewhere the wall does not.
 #
-# Three rooms three hundred units apart and six portals between them: one pair
-# that describes an ordinary adjacency, and two that put the same room through
-# opposite walls of the one you are standing in.
+# A square building with four quarters and three rooms in it. Hall, library and
+# garden clockwise round the middle, one door in the west wall, and a pair of
+# holes where the fourth room would have been — so the lap closes after three
+# right turns instead of four.
 #
 #   scripts/demos/run-portals.sh                  # uncapped, held at 165 fps
 #   scripts/demos/run-portals.sh --graph          # extra flags reach the client

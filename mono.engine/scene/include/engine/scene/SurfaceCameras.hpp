@@ -215,6 +215,16 @@ namespace engine::scene {
 	// of the destination sideways, or backwards through the hole it just came
 	// out of, which reads as the portal spitting people back.
 	//
+	// **So is the camera's yaw, when the body crossing is the one it follows**,
+	// and that is the same bug a third time. A player's view direction is
+	// `CameraController::Angles` rather than any transform this pass moves, so
+	// a pair of panes that turns a corner used to leave the eye pointing the way
+	// it came in while the body walked the other way — the view snapping to a
+	// wall on the frame you cross, and W walking you sideways afterwards,
+	// because `ReadMoveIntent` is relative to that same yaw. Only the yaw is
+	// turned, and only for `CameraController::Subject`; a headless host has no
+	// controller and does nothing.
+	//
 	// **Runs in `PostSimulation`, after the solver has moved the body**, so what
 	// is tested is where the tick actually ended rather than where it was
 	// heading. `physics::RegisterCharacterSystems` installs it.

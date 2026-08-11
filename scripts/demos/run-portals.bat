@@ -2,9 +2,10 @@
 REM
 REM Holes in walls that lead somewhere the wall does not.
 REM
-REM Three rooms three hundred units apart and six portals between them: one pair
-REM that describes an ordinary adjacency, and two that put the same room through
-REM opposite walls of the one you are standing in.
+REM A square building with four quarters and three rooms in it. Hall, library and
+REM garden clockwise round the middle, one door in the west wall, and a pair of
+REM holes where the fourth room would have been — so the lap closes after three
+REM right turns instead of four.
 REM
 REM   scripts\demos\run-portals.bat                  uncapped, held at 165 fps
 REM   scripts\demos\run-portals.bat --graph          extra flags reach the client

@@ -661,7 +661,7 @@ example, so seeing one is a command rather than a path to look up:
 | `run-interface` | a `ScreenGui` built entirely from a script |
 | `run-mirrors` | one room of mirrors, each with a different effect — the rendering path |
 | `run-mirrors-4-worlds` | four worlds composited into one frame |
-| `run-portals` | three rooms, six holes, and a space that cannot exist |
+| `run-portals` | a square building with three rooms in it, and a lap that closes early |
 | `run-non-euclidean` | six exhibits, each a room that lies about its own size |
 | `run-meshes` | imported meshes and textures. Wants `--cdn` |
 | `run-mesh-grid` | bakes and publishes art, then draws it |
@@ -850,10 +850,14 @@ same one-frame-old texture — so a hole costs a mirror and nothing else.
 **Nothing constrains the two panes to describe one space**, and that is the
 non-Euclidean part. A destination turned, moved, or placed three hundred units
 away is still a legal pair, so a room can be bigger on the inside and a corridor
-can turn through more than four right angles. `run-portals` has three rooms far
-apart in world coordinates with six holes between them: one pair that an ordinary
-adjacency explains, and two that put the same room through opposite walls of the
-room you are standing in. `docs/NON-EUCLIDEAN.md` is the investigation behind it.
+can turn through more than four right angles. `run-portals` is a square building
+with four quarters and three rooms in it: hall, library and garden clockwise
+round the middle, and one pair of holes joining the garden's west wall to the
+hall's south wall, where the fourth room would have been. The two panes are
+perpendicular, so the pair carries a quarter turn — walk the loop and you make
+three right turns and arrive where you started, facing the way you set off. The
+middle of that building is a cone point with ninety degrees missing.
+`docs/NON-EUCLIDEAN.md` is the investigation behind it.
 
 **`Face` is resolved on the destination too, and it is the one rule to know.**
 The far frame is built by applying the *portal's own* `Face` to the destination's
@@ -867,10 +871,22 @@ room; rotating the destination is the general answer.
 rather than to a blank pane. A surface that stopped reflecting reads as something
 to fix; a pane that vanished reads as a broken renderer.
 
-**You can look through these and not walk through them.** Traversal needs a body
-to move and the character controller is v0.15; the seam a walker would see on the
-frame they cross needs the portal chain rendered inside the frame, deepest first.
-Both are `docs/DEFERRED.md` D00112, and neither is promised until it is there.
+**You can walk through these.** `scene::CrossPortals` maps a body — and its
+velocity, and the camera's yaw when the body is the one the camera follows —
+through the same product the picture goes through, and `scene::OpenPortals`
+takes the pane's collider out of the solver's way so a walker reaches it at all.
+Press Play in the studio on `run-portals`' scene, or host it with
+`scripts/demos/run-local-server.sh`; the standalone client has no character and
+walks the lap on rails instead. What is left of `docs/DEFERRED.md` D00112 is the
+seam on the frame you cross, which needs the portal chain rendered inside the
+frame, deepest first.
+
+**A pane must be one part and it should be white.** One part because the
+rectangle a surface camera is fitted to and the rectangle `CrossPortals` tests
+against is that part's face — a hole built out of several is several holes
+against a budget of sixteen. White because `opaque.frag` tints the projected
+image by the pane's own colour, so a grey pane shows the far room dimmed, which
+reads as a lighting bug in a room that is lit correctly.
 
 **`run-non-euclidean` is the catalogue rather than the mechanism.** Six exhibits
 in a row, twelve holes, and the camera sweeps past them: a tunnel shorter inside

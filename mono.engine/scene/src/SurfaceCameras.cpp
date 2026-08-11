@@ -3,6 +3,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -984,7 +985,7 @@ namespace engine::scene {
 		// scenery carries no `Motion` and is therefore never a candidate, which
 		// is the archetype doing the filtering rather than a branch.
 		store.Each<Transform, Motion, const PreviousTransform>(
-			[&](ecs::Entity, Transform &placement, Motion &motion, const PreviousTransform &before) {
+			[&](ecs::Entity entity, Transform &placement, Motion &motion, const PreviousTransform &before) {
 				const Vector3 was = before.Frame.Position;
 				const Vector3 now = placement.Frame.Position;
 
@@ -1042,6 +1043,42 @@ namespace engine::scene {
 					// left, so it walks out of the destination sideways.
 					placement.Frame = through * placement.Frame;
 					motion.Linear = through.VectorToWorldSpace(motion.Linear);
+
+					// **And the eye, when the body is the one the camera is
+					// following.** This is the same bug as the velocity one
+					// wearing a different coat: a player walks west through a
+					// hole whose pair turns a corner, the body comes out
+					// walking north, and the camera — whose yaw lives in
+					// `CameraController::Angles` and not in any transform this
+					// pass touched — keeps pointing west. What that looks like
+					// is the view snapping to a wall on the frame you cross,
+					// and then W walking you sideways, because
+					// `ReadMoveIntent` is relative to the camera's yaw.
+					//
+					// **The angles are turned rather than recomputed**, and
+					// only the yaw: pitch is the player's, the map is rigid, and
+					// a portal that rolled the camera would be a portal nobody
+					// could walk through twice. The horizontal facing is put
+					// through the same matrix everything else went through and
+					// read back as an angle, which is exact for a pair that
+					// turns about the up axis — every pair a floor and a
+					// ceiling allow — and the nearest sane answer for one that
+					// does not.
+					//
+					// **Nothing happens on a headless host**, where there is no
+					// `CameraController` resource at all, and nothing happens
+					// for a body nobody is watching.
+					if (auto *controller = store.ResourceMutable<CameraController>();
+						controller != nullptr && controller->Subject == entity) {
+						const Vector3 facing{
+							-std::sin(controller->Angles.Y), 0.0f, -std::cos(controller->Angles.Y)
+						};
+						const Vector3 turned = through.VectorToWorldSpace(facing);
+
+						if (std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) {
+							controller->Angles.Y = std::atan2(-turned.X, -turned.Z);
+						}
+					}
 
 					crossed++;
 

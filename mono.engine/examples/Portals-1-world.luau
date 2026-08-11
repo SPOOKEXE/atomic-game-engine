@@ -125,7 +125,12 @@ local SURFACE_SIZE = Vector3.new(1024, 384)
 type Checker = { A: Color3, B: Color3 }
 
 local GRASS: Checker = { A = Color3.fromRGB(104, 176, 72), B = Color3.fromRGB(142, 204, 96) }
-local STONE: Checker = { A = Color3.fromRGB(214, 214, 218), B = Color3.fromRGB(148, 148, 154) }
+-- **Near white, because a wall in this engine is as bright as its albedo lets
+-- it be.** The renderer's ambient term is a constant 0.26 and the sun is a
+-- fixed direction, so an interior face turned away from it is lit by ambient
+-- alone — a mid-grey wall comes out at a quarter of mid-grey, which is black
+-- with a hint. The checker is what keeps it readable at that brightness.
+local STONE: Checker = { A = Color3.fromRGB(242, 242, 246), B = Color3.fromRGB(178, 178, 186) }
 local ROOF: Checker = { A = Color3.fromRGB(26, 26, 26), B = Color3.fromRGB(52, 52, 52) }
 
 -- **A floor colour per room, and that is how you tell where you are.** Through
@@ -135,7 +140,12 @@ local BLUE: Checker = { A = Color3.fromRGB(0, 132, 214), B = Color3.fromRGB(122,
 local RED: Checker = { A = Color3.fromRGB(196, 20, 30), B = Color3.fromRGB(140, 14, 22) }
 local LIME: Checker = { A = Color3.fromRGB(150, 220, 40), B = Color3.fromRGB(96, 184, 32) }
 
-local PANE = Color3.fromRGB(120, 120, 128)
+-- **White, and it is not a colour choice.** `opaque.frag` multiplies the
+-- projected image by the pane's own colour — "tinted rather than replaced, so a
+-- coloured mirror is possible and a white one is unchanged" — so a pane painted
+-- wall-grey shows the far room at half brightness. It reads as the far room
+-- being dimly lit, which is a scene bug that looks like a lighting bug.
+local PANE = Color3.new(1, 1, 1)
 local PAD = Color3.fromRGB(38, 114, 216)
 
 type Room = {
@@ -278,18 +288,19 @@ for _, room in ROOMS do
 		ROOF
 	)
 
-	-- **A lamp per room, because the renderer's ambient is a constant and the
-	-- sun only reaches faces turned towards it.** A world's `Lighting` service
-	-- round-trips and nothing reads it — `scene::LightingServiceComponent` says
-	-- so in as many words — so a room with a lid over it is lit by the ambient
-	-- term alone and its walls come out near black. A `PointLight` is what the
-	-- renderer does read, and it is the better answer anyway: what a hole shows
-	-- is read by comparing two rooms, and rooms lit from inside differ in the
-	-- way the picture is meant to show them differing.
+	-- **A lamp per room, and it is a pool of light rather than room lighting.**
+	-- A world's `Lighting` service round-trips and nothing reads it —
+	-- `scene::LightingServiceComponent` says so in as many words — so the only
+	-- light a scene can actually add is a `PointLight`, and `opaque.frag`'s
+	-- falloff is a windowed inverse square. Over a forty-metre room that cannot
+	-- be flat: whatever brightness lights the far corner blows out the ceiling
+	-- it hangs from. So this is authored as what it can be — a fitting with
+	-- light under it, brightest at the middle of the room the walk turns in.
 	--
-	-- `Range` is clamped at sixty and a room's diagonal is fifty-seven, so one
-	-- fitting in the middle reaches every corner of its own room and none of
-	-- anybody else's.
+	-- **A hundred and twenty is not a typo.** `Brightness = 1` against
+	-- `1 / (1 + d²)` is invisible at any distance a room has; the number that
+	-- reads as "a lamp" at ten metres is two orders up, and `Range` is only the
+	-- cutoff the window closes at.
 	local fitting = block(
 		room.Name .. "Lamp",
 		Vector3.new(TILE / 2, 0.5, TILE / 2),
@@ -301,7 +312,7 @@ for _, room in ROOMS do
 	local bulb = Instance.new("PointLight")
 	bulb.Name = "Bulb"
 	bulb.Color = Color3.fromRGB(255, 248, 232)
-	bulb.Brightness = 1.6
+	bulb.Brightness = 120
 	bulb.Range = 60
 	bulb.Parent = fitting
 end

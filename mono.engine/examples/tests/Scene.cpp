@@ -16,6 +16,7 @@
 #include <engine/gui/Layout.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -29,6 +30,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <numbers>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -490,6 +492,17 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// It is also what pins the rails camera in the scene file: those legs are
 	// this arithmetic, written out by hand because a script has no `Inverse`.
 	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
+
+	// **Watched by a camera, because a player is a body and an eye.** The yaw is
+	// where a player's view direction actually lives, so a pair that turns a
+	// corner has to turn it — a body that comes out walking north under a camera
+	// still pointing west is the view snapping to a wall on the frame you cross.
+	// West is a yaw of a quarter turn under `PlaceCamera`'s convention.
+	engine::scene::CameraController watching;
+	watching.Subject = walker;
+	watching.Angles = engine::core::Vector2{0.0f, std::numbers::pi_v<float> / 2.0f};
+	store.SetResource(watching);
+
 	store.Set<engine::scene::Transform>(
 		walker, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.5f, 6.0f, 20.0f})}
 	);
@@ -517,6 +530,10 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	const engine::core::Vector3 speed = store.Get<engine::scene::Motion>(walker)->Linear;
 	CHECK(speed.X == Approx(0.0f).margin(1e-3f));
 	CHECK(speed.Z == Approx(-16.0f).margin(1e-3f));
+
+	// And the eye turned with the body: a yaw of zero is north, which is the
+	// way the walk carries on.
+	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
 }
 
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
