@@ -505,7 +505,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	store.SetResource(watching);
 
 	store.Set<engine::scene::Transform>(
-		walker, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.5f, 6.0f, 20.0f})}
+		walker, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 6.0f, 20.0f})}
 	);
 	store.Set<engine::scene::PreviousTransform>(
 		walker,
@@ -517,13 +517,16 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 
 	REQUIRE(engine::scene::CrossPortals(store) == 1);
 
-	// Half a metre past the hall's south face, at the height it left at — the
-	// pane is forty long and the crossing was at its middle, so the arrival is
-	// at the middle of the hall's south wall.
+	// **As far past the hall's face as it went past the garden's**, at the
+	// height it left at, and at the middle of the wall because that is where it
+	// crossed. The panes are a quarter of a metre thick, so a body that stepped
+	// to the middle of one steps out an eighth past the other — the thinness is
+	// the scene's, and it is what stops "inside the pane" being somewhere a
+	// character can stand.
 	const engine::core::Vector3 landed = store.Get<engine::scene::Transform>(walker)->Frame.Position;
 	CHECK(landed.X == Approx(-20.0f).margin(1e-3f));
 	CHECK(landed.Y == Approx(6.0f).margin(1e-3f));
-	CHECK(landed.Z == Approx(-1.5f).margin(1e-3f));
+	CHECK(landed.Z == Approx(-0.25f).margin(1e-3f));
 
 	// **Turned with it, at the speed it had.** West became north, which is the
 	// quarter turn the building is missing. A pair glued the other way round

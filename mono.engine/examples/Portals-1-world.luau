@@ -95,9 +95,10 @@ local RunService = game:GetService("RunService")
 
 -- ## One grid, and everything measured off it
 --
--- Every number below is a multiple of `TILE`, so no wall ends mid-tile and no
--- doorway is a tile and a half wide. A scene laid out this way cannot drift out
--- of agreement with itself the way one with independent constants can.
+-- Every distance the layout is measured in is a multiple of `TILE`, so no wall
+-- ends mid-tile and no doorway is a tile and a half wide. A scene laid out this
+-- way cannot drift out of agreement with itself the way one with independent
+-- constants can. The two thicknesses below are the exception and say why.
 local TILE = 5
 local ROOM = TILE * 8
 local HALF = ROOM / 2
@@ -108,6 +109,20 @@ local OUTER = ROOM
 
 local WALL_HEIGHT = TILE * 3
 local WALL_THICKNESS = 2
+
+-- **A hole is thinner than a wall, and this is not a detail.** A pane's
+-- rectangle is its *face*, and `scene::CrossPortals` fires when a body's step
+-- changes side of that plane — so a two-metre pane has two metres of slab
+-- between its faces that a body can stand in, with the near half of itself in
+-- one room and the far half in another. That is what "standing in the middle of
+-- the mirror" is, and no amount of arithmetic fixes it: there is simply room in
+-- there.
+--
+-- A quarter of a metre is thinner than one tick of walking, so the state exists
+-- and cannot be occupied. It also lines the two floors up at the seam — with a
+-- thick pane the imaged floor starts a metre late, which is a step the eye
+-- catches even when nothing else is wrong.
+local PANE_THICKNESS = 0.25
 
 -- Two tiles wide and two high, which leaves a lintel row above every opening.
 local DOOR_HALF = TILE
@@ -364,7 +379,7 @@ tileWall("LibrarySouth", Vector3.new(HALF, 0, 0), ALONG_X, WALL_X, STONE, true)
 -- anchored keeps it a wall rather than something the solver drops through the
 -- floor once it stops colliding.
 local function pane(name: string, at: Vector3): Part
-	local part = block(name, Vector3.new(WALL_THICKNESS, WALL_HEIGHT, ROOM), at, PANE)
+	local part = block(name, Vector3.new(PANE_THICKNESS, WALL_HEIGHT, ROOM), at, PANE)
 	part.CanCollide = false
 	return part
 end
@@ -519,13 +534,13 @@ local LEGS: { Leg } = {
 	{ Start = LIBRARY.Centre, Heading = SOUTH, Length = ROOM, Turn = true },
 
 	-- Into the garden's west pane, stopping on its face.
-	{ Start = GARDEN.Centre, Heading = WEST, Length = HALF - WALL_THICKNESS / 2, Turn = false },
+	{ Start = GARDEN.Centre, Heading = WEST, Length = HALF - PANE_THICKNESS / 2, Turn = false },
 
 	-- And out of the hall's south pane, still walking straight ahead.
 	{
-		Start = Vector3.new(-HALF, 0, -WALL_THICKNESS / 2),
+		Start = Vector3.new(-HALF, 0, -PANE_THICKNESS / 2),
 		Heading = NORTH,
-		Length = HALF - WALL_THICKNESS / 2,
+		Length = HALF - PANE_THICKNESS / 2,
 		Turn = true,
 	},
 }
